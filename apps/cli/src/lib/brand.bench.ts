@@ -11,13 +11,12 @@
  *
  *   B) The eager MODULE-IMPORT cost of `import { resolveBrandName,
  *      disabledCommandsForActiveBrand } from './lib/brand.js'` at index.ts:514.
- *      brand.ts's own body is tiny, but its import pulls in agents.js:
- *      brand.ts:20 does `import { ALL_AGENT_IDS, AGENTS } from './agents.js'`
- *      (used only by reservedBrandNames()/validateBrandName(), brand.ts:52-67 —
- *      NEITHER of which is on the startup path). A grep of index.ts's own static
- *      imports shows brand.js (index.ts:514) is the SOLE eager edge that names
- *      agents.js — no other top-level `import` in index.ts references it. This is
- *      measured with real cold `node -e "await import(...)"` subprocesses, since
+ *      After RUSH-2331 brand.ts no longer imports agents.js — reservedBrandNames
+ *      reads the zero-dep AGENT_CLI_COMMANDS leaf (agent-cli-commands.ts) instead.
+ *      brand.js's remaining static imports are state.js + the leaf list (types is
+ *      type-only, erased). The agents.js/versions.js rows below stay as historical
+ *      baselines so a regression that re-introduces the agents edge is visible.
+ *      Measured with real cold `node -e "await import(...)"` subprocesses, since
  *      Node caches an ESM module for the life of a process, so an in-process
  *      second import cannot see cold cost (same method as index.bench.ts's
  *      startup-graph group on the sibling perf branches).
@@ -167,7 +166,7 @@ describe('cold module import — isolate what the brand.js edge costs (real node
     coldImport([]);
   }, COLD);
 
-  bench('import dist/lib/brand.js — brand.js + its full transitive (state.js + agents.js + types.js) into a fresh process', () => {
+  bench('import dist/lib/brand.js — brand.js + its full transitive (state.js + agent-cli-commands.js; no agents.js after RUSH-2331) into a fresh process', () => {
     coldImport([distUrl('brand.js')]);
   }, COLD);
 
@@ -175,7 +174,7 @@ describe('cold module import — isolate what the brand.js edge costs (real node
     coldImport([distUrl('state.js')]);
   }, COLD);
 
-  bench('import dist/lib/agents.js alone — the 138KB module brand.js:20 drags into every process', () => {
+  bench('import dist/lib/agents.js alone — REGRESSION BASELINE; brand no longer imports this after RUSH-2331', () => {
     coldImport([distUrl('agents.js')]);
   }, COLD);
 

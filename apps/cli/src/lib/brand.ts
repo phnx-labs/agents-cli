@@ -17,7 +17,13 @@
  * where the active profile is resolved brand-first.
  */
 import { readMeta, updateMeta } from './state.js';
-import { ALL_AGENT_IDS, AGENTS } from './agents.js';
+// Leaf list only — do NOT import agents.js here. index.ts imports brand on
+// every invocation (resolveBrandName / disabledCommandsForActiveBrand); a
+// static agents import pulls the full agents.ts → versions.ts graph (~90ms)
+// into --version/--help and the secrets-broker hot path (RUSH-2331).
+// reservedBrandNames is only called when minting a brand; AGENT_CLI_COMMANDS
+// is pinned equal to AGENTS[*].cliCommand by agent-cli-commands.test.ts.
+import { AGENT_CLI_COMMANDS } from './agent-cli-commands.js';
 import type { BrandConfig } from './types.js';
 
 /** The default (unbranded) program name. */
@@ -51,7 +57,7 @@ export function isBranded(): boolean {
 /** Names that would clobber an agent CLI shim or the `agents`/`ag` binary. */
 export function reservedBrandNames(): Set<string> {
   const reserved = new Set<string>([DEFAULT_CLI_NAME, 'ag']);
-  for (const id of ALL_AGENT_IDS) reserved.add(AGENTS[id].cliCommand);
+  for (const cmd of AGENT_CLI_COMMANDS) reserved.add(cmd);
   return reserved;
 }
 

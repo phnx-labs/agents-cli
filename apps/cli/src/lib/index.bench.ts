@@ -1190,36 +1190,13 @@ describe('installMenubarLaunchAgentOnUpgrade() — warm in-process call on THIS 
  * pulls in at load time is paid before `resolveBrandName()` can tell you which
  * case you are in.
  *
- * brand.ts:20 imports `{ ALL_AGENT_IDS, AGENTS }` from `./agents.js` (3290
- * lines, verified: `wc -l src/lib/agents.ts`) for exactly two functions,
- * `reservedBrandNames()` (brand.ts:52-56) and `validateBrandName()`
- * (brand.ts:59-67) — both reachable only from `agents mine init <name>` /
- * `agents setup mine`, never from `resolveBrandName()` or
- * `disabledCommandsForActiveBrand()`. Grepping the earlier eager imports in
- * index.ts (commander, chalk, fs/os/path/url, dev-build.js, secrets/sync-
- * commands.js, self-update.js, startup/command-registry.js, help.js, whats-
- * new.js, types.js, platform/index.js, cli-entry.js, events.js, event-
- * provenance.js, format.js, state.js — everything above index.ts:514) for
- * `from '../agents.js'` / `from './agents.js'` and their own static import
- * lists turns up none of them importing agents.js, so brand.js is genuinely
- * the FIRST thing on the eager path that drags it in — nothing upstream of
- * index.ts:514 already paid this cost.
- *
- * agents.ts:26 in turn imports `{ resolveVersion, getVersionHomePath,
- * getBinaryPath }` from `./versions.js` — a 3738-line file (`wc -l
- * src/lib/versions.ts`) that is itself the single largest static-import
- * fan-out in this package: resources.ts, resource-profiles.ts, permissions.ts,
- * mcp.ts, convert.ts, import.ts, subagents.ts, workflows.ts, hooks.ts,
- * capabilities.ts, plugins.ts, rules/compose.ts, staleness/index.ts,
- * staleness/registry.ts, memory.ts, project-resources.ts, and
- * `@inquirer/prompts` (versions.ts:17-68) — AND versions.ts:35 imports back
- * from `./agents.js`, so agents.ts <-> versions.ts is a circular pair; Node's
- * ESM loader still evaluates the whole reachable graph once, cycle or not.
- * The three rows below decompose exactly how much of brand.js's real cost is
- * "load brand.ts's own 134 lines" versus "drag in agents.js" versus "drag in
- * versions.js and everything under it" — each row's (row - FLOOR) isolates
- * one layer, since FLOOR cancels identically in every row (same coldEval
- * spawn shape, see the coldEval docblock above).
+ * RUSH-2331 cut the brand → agents → versions edge: brand.ts now imports the
+ * zero-dep `agent-cli-commands.js` leaf for reservedBrandNames(), so a cold
+ * `import('./lib/brand.js')` no longer evaluates agents.js or versions.js.
+ * The agents.js / versions.js rows below remain as regression baselines (and
+ * as isolated costs for callers that still import those modules on demand).
+ * brand.js's remaining real imports are state.js (already eager at index.ts
+ * near brand) and the leaf command-name list.
  *
  * No mocking: every row spawns a real cold `node --input-type=module`
  * process and imports the real built dist/lib/*.js artifact — the same files
@@ -1234,7 +1211,7 @@ describe('brand.js eager import (index.ts:514) — cold module import, the graph
     coldEval([BRAND_SPEC]);
   }, COLD_OPTS);
 
-  bench('lib/agents.js alone — the graph brand.ts:20 imports `{ ALL_AGENT_IDS, AGENTS }` from, for reservedBrandNames()/validateBrandName() (brand.ts:52-67), functions the unbranded fast path never calls. agents.ts is 3290 lines and itself imports versions.ts, capabilities.ts, fs-walk.ts, fuzzy.ts (agents.ts:12-27)', () => {
+  bench('lib/agents.js alone — REGRESSION BASELINE (RUSH-2331): brand.ts no longer imports this; was the sole eager edge into agents/versions. agents.ts still imports versions.ts for on-demand callers', () => {
     coldEval([AGENTS_REGISTRY_SPEC]);
   }, COLD_OPTS);
 
