@@ -29,9 +29,25 @@ export interface PublishEndpoint {
 
 export interface PublishOptions {
   slug?: string;
-  /** e.g. `30d`, `12h`, or an absolute date like `2026-08-01`. */
+  /**
+   * Auto-expire window. Relative (`30d`, `12h`), absolute (`2026-08-01`), or
+   * `never` / `none` / `permanent` for no expiry. When omitted, publishes default
+   * to {@link DEFAULT_SHARE_EXPIRE} so an accidental share decays instead of
+   * living forever (RUSH-2443).
+   */
   expire?: string;
   contentType?: string;
+  /**
+   * Hide this page from the public `/<user>` gallery and `agents share list`
+   * (metadata `visibility=unlisted`). The direct URL is still world-readable —
+   * unlisted, not secret (RUSH-2443). Alias of `--private` on the CLI.
+   */
+  unlisted?: boolean;
+  /**
+   * Bypass the pre-publish sensitive-content scan (emails / credential-shaped
+   * strings). Required when the page intentionally carries those patterns.
+   */
+  force?: boolean;
   /** Generate + attach an OG cover for HTML pages (default true). */
   cover?: boolean;
   /** Inject the Cloudflare Web Analytics beacon (default true for HTML). */
@@ -54,7 +70,12 @@ export interface PublishResult {
   url: string;
   expiresAt?: string;
   coverUrl?: string;
+  /** True when the page was published with `visibility=unlisted`. */
+  unlisted?: boolean;
 }
+
+/** Default auto-expire for unflagged publishes — accidental links decay (RUSH-2443). */
+export const DEFAULT_SHARE_EXPIRE = '30d';
 
 const UNIT_MS: Record<string, number> = { s: 1e3, m: 6e4, h: 36e5, d: 864e5, w: 6048e5 };
 
@@ -67,7 +88,112 @@ export function parseExpire(spec: string | undefined): string | undefined {
   }
   const d = new Date(spec);
   if (!Number.isNaN(d.getTime())) return d.toISOString();
-  throw new Error(`Bad --expire '${spec}'. Use e.g. 30d, 12h, or an absolute date like 2026-08-01.`);
+  throw new Error(
+    `Bad --expire '${spec}'. Use e.g. 30d, 12h, an absolute date like 2026-08-01, or 'never' for no expiry.`,
+  );
+}
+
+/**
+ * Resolve the publish expiry. Omitted → {@link DEFAULT_SHARE_EXPIRE}. Explicit
+ * `never` / `none` / `permanent` → no expiry. Anything else → {@link parseExpire}.
+ */
+export function resolveExpire(spec: string | undefined): string | undefined {
+  if (spec === undefined) return parseExpire(DEFAULT_SHARE_EXPIRE);
+  const trimmed = spec.trim().toLowerCase();
+  if (trimmed === 'never' || trimmed === 'none' || trimmed === 'permanent') return undefined;
+  return parseExpire(spec);
+}
+
+export type SensitiveHitKind = 'email' | 'credential';
+
+export interface SensitiveHit {
+  kind: SensitiveHitKind;
+  /** Short redacted sample so the error names *what* was found without dumping it. */
+  sample: string;
+}
+
+/** Email addresses — the RUSH-2428 incident page carried seven of these. */
+const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+
+/**
+ * Credential-shaped strings that an agent routinely dumps into reports: GitHub
+ * PATs, OpenAI/Anthropic/etc. API keys, AWS access keys, Slack tokens, and a
+ * generic long `sk-…` / `Bearer …` form. Keep the set tight — false positives
+ * force `--force` and train agents to bypass the gate.
+ */
+const CREDENTIAL_PATTERNS: Array<{ re: RegExp; label: string }> = [
+  { re: /\bghp_[A-Za-z0-9_]{20,}\b/g, label: 'ghp_…' },
+  { re: /\bgho_[A-Za-z0-9_]{20,}\b/g, label: 'gho_…' },
+  { re: /\bghu_[A-Za-z0-9_]{20,}\b/g, label: 'ghu_…' },
+  { re: /\bghs_[A-Za-z0-9_]{20,}\b/g, label: 'ghs_…' },
+  { re: /\bghr_[A-Za-z0-9_]{20,}\b/g, label: 'ghr_…' },
+  { re: /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, label: 'github_pat_…' },
+  { re: /\bsk-(?:ant|proj|live|test)?[_-]?[A-Za-z0-9]{16,}\b/g, label: 'sk-…' },
+  { re: /\bAKIA[0-9A-Z]{16}\b/g, label: 'AKIA…' },
+  { re: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, label: 'xox…' },
+  { re: /\bBearer\s+[A-Za-z0-9._\-+/=]{20,}\b/gi, label: 'Bearer …' },
+];
+
+function redactSample(raw: string, max = 12): string {
+  if (raw.length <= max) return raw.slice(0, 4) + '…';
+  return raw.slice(0, Math.min(6, max)) + '…';
+}
+
+/**
+ * Scan a text body for email addresses and credential-shaped strings. Returns
+ * the first few hits (deduped by kind+sample). Binary / non-text bodies yield
+ * nothing — the gate is for HTML/text reports, not screenshots.
+ */
+export function scanShareContent(body: string | Buffer): SensitiveHit[] {
+  // Skip clearly-binary content (null bytes in the first 1KB) so a PNG/MP4
+  // publish never false-positives on binary noise.
+  if (Buffer.isBuffer(body)) {
+    const head = body.subarray(0, Math.min(body.length, 1024));
+    if (head.includes(0)) return [];
+  }
+  const text = typeof body === 'string' ? body : body.toString('utf8');
+  const hits: SensitiveHit[] = [];
+  const seen = new Set<string>();
+
+  for (const m of text.matchAll(EMAIL_RE)) {
+    const sample = redactSample(m[0]);
+    const key = `email:${sample}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    hits.push({ kind: 'email', sample });
+    if (hits.length >= 5) return hits;
+  }
+
+  for (const { re, label } of CREDENTIAL_PATTERNS) {
+    re.lastIndex = 0;
+    const m = re.exec(text);
+    if (!m) continue;
+    const sample = label;
+    const key = `credential:${sample}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    hits.push({ kind: 'credential', sample });
+    if (hits.length >= 5) return hits;
+  }
+
+  return hits;
+}
+
+/** Build the refuse message when the pre-publish scan finds sensitive content. */
+export function formatSensitiveContentError(hits: SensitiveHit[]): string {
+  const kinds = Array.from(new Set(hits.map((h) => h.kind)));
+  const samples = hits.map((h) => h.sample).join(', ');
+  const what =
+    kinds.length === 2
+      ? 'email addresses and credential-shaped strings'
+      : kinds[0] === 'email'
+        ? 'email addresses'
+        : 'credential-shaped strings';
+  return (
+    `Refusing to publish: the file contains ${what} (${samples}). ` +
+    `Shares are world-readable by URL — pass --force to publish anyway, ` +
+    `or --unlisted --expire 12h to bound the blast radius.`
+  );
 }
 
 /** Derive a URL-safe slug from a filename (or pass one through). */
@@ -227,7 +353,8 @@ export async function publishToEndpoint(
   const username = await resolveShareUsername(opts);
   const slugPart = (opts.slug ?? defaultSlug(filePath)).replace(/^\/+/, '');
   const key = buildShareKey(username, slugPart);
-  const expiresAt = parseExpire(opts.expire);
+  const expiresAt = resolveExpire(opts.expire);
+  const unlisted = opts.unlisted === true;
   const pageUrl = `${endpoint.baseUrl.replace(/\/+$/, '')}/${key}`;
 
   const put =
@@ -239,6 +366,7 @@ export async function publishToEndpoint(
   const authHeaders = (contentType: string): Record<string, string> => {
     const h: Record<string, string> = { authorization: `Bearer ${endpoint.token}`, 'content-type': contentType };
     if (expiresAt) h['x-share-expires-at'] = expiresAt;
+    if (unlisted) h['x-share-visibility'] = 'unlisted';
     return h;
   };
 
@@ -246,12 +374,24 @@ export async function publishToEndpoint(
   let coverUrl: string | undefined;
   const isHtml = /\.html?$/i.test(filePath);
 
+  // Pre-publish scan (RUSH-2443): refuse emails / credential-shaped strings
+  // unless --force. Runs on the raw file before analytics/cover mutation so a
+  // beacon injection never triggers a false positive. Binary media is a no-op.
+  if (opts.force !== true) {
+    const hits = scanShareContent(body);
+    if (hits.length > 0) {
+      throw new Error(formatSensitiveContentError(hits));
+    }
+  }
+
   // Analytics: cookieless CF Web Analytics beacon, injected for HTML by default.
   if (isHtml && opts.analytics !== false && opts.analyticsToken) {
     body = Buffer.from(injectAnalyticsBeacon(body.toString('utf8'), opts.analyticsToken), 'utf8');
   }
 
   // Cover: screenshot the page's hero → upload <slug>.png → inject og:image meta.
+  // Unlisted pages still get a cover (the direct URL is the capability), but the
+  // cover inherits visibility=unlisted so it is also omitted from the gallery.
   if (isHtml && opts.cover !== false) {
     const res = await attachOgCover(filePath, body, {
       pngUrl: `${pageUrl}.png`,
@@ -270,5 +410,10 @@ export async function publishToEndpoint(
       `Publish failed (${r.status}) for ${pageUrl}. Check the write token, or that 'agents share setup' completed.`,
     );
   }
-  return { url: r.url ?? pageUrl, expiresAt, coverUrl };
+  return {
+    url: r.url ?? pageUrl,
+    expiresAt,
+    coverUrl,
+    ...(unlisted ? { unlisted: true } : {}),
+  };
 }

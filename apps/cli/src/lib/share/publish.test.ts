@@ -5,6 +5,10 @@ import { join, basename } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   parseExpire,
+  resolveExpire,
+  DEFAULT_SHARE_EXPIRE,
+  scanShareContent,
+  formatSensitiveContentError,
   slugify,
   detectProject,
   defaultSlug,
@@ -268,6 +272,115 @@ describe('publishToEndpoint', () => {
       ),
     ).rejects.toThrow('Publish failed (403) for https://share.example.test/octocat/denied');
   });
+
+  it('defaults an omitted --expire to 30d and sends x-share-expires-at (RUSH-2443)', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-def-exp-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    let expiresHeader = '';
+    const result = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'def-exp',
+        githubUser: 'octocat',
+        cover: false,
+        uploader: async (_u, _b, headers) => {
+          expiresHeader = headers['x-share-expires-at'] ?? '';
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    expect(expiresHeader).toBeTruthy();
+    expect(result.expiresAt).toBe(expiresHeader);
+    const ms = Date.parse(expiresHeader) - Date.now();
+    expect(ms).toBeGreaterThan(29.9 * 864e5);
+    expect(ms).toBeLessThan(30.1 * 864e5);
+  });
+
+  it("--expire never omits the expiry header (permanent share)", async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-never-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    let headersSeen: Record<string, string> = {};
+    const result = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'forever',
+        githubUser: 'octocat',
+        expire: 'never',
+        cover: false,
+        uploader: async (_u, _b, headers) => {
+          headersSeen = headers;
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    expect(headersSeen['x-share-expires-at']).toBeUndefined();
+    expect(result.expiresAt).toBeUndefined();
+  });
+
+  it('sends x-share-visibility: unlisted when --unlisted is set', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-unlisted-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    let visibility = '';
+    const result = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'hidden',
+        githubUser: 'octocat',
+        expire: 'never',
+        unlisted: true,
+        cover: false,
+        uploader: async (_u, _b, headers) => {
+          visibility = headers['x-share-visibility'] ?? '';
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    expect(visibility).toBe('unlisted');
+    expect(result.unlisted).toBe(true);
+  });
+
+  it('refuses a page with emails unless --force (RUSH-2443 / RUSH-2428)', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-scan-')), 'report.html');
+    writeFileSync(htmlPath, '<h1>Spend</h1><p>alice@example.com spent $12</p>');
+    let uploads = 0;
+    await expect(
+      publishToEndpoint(
+        htmlPath,
+        { baseUrl: 'https://share.example', token: 'tok' },
+        {
+          slug: 'spend',
+          githubUser: 'octocat',
+          cover: false,
+          uploader: async () => {
+            uploads++;
+            return { ok: true, status: 200 };
+          },
+        },
+      ),
+    ).rejects.toThrow(/Refusing to publish.*email/);
+    expect(uploads).toBe(0);
+
+    // --force bypasses the gate.
+    const ok = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'spend',
+        githubUser: 'octocat',
+        cover: false,
+        force: true,
+        uploader: async () => {
+          uploads++;
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    expect(ok.url).toContain('/spend');
+    expect(uploads).toBe(1);
+  });
 });
 
 function expectedProject(dir: string): string {
@@ -333,6 +446,65 @@ describe('parseExpire', () => {
   it('is undefined when unset, throws on garbage', () => {
     expect(parseExpire(undefined)).toBeUndefined();
     expect(() => parseExpire('soon-ish')).toThrow(/Bad --expire/);
+  });
+});
+
+describe('resolveExpire (RUSH-2443 default + never)', () => {
+  it(`defaults omitted --expire to ${DEFAULT_SHARE_EXPIRE}`, () => {
+    const iso = resolveExpire(undefined)!;
+    const ms = Date.parse(iso) - Date.now();
+    expect(ms).toBeGreaterThan(29.9 * 864e5);
+    expect(ms).toBeLessThan(30.1 * 864e5);
+  });
+
+  it("treats 'never' / 'none' / 'permanent' as no expiry", () => {
+    expect(resolveExpire('never')).toBeUndefined();
+    expect(resolveExpire('none')).toBeUndefined();
+    expect(resolveExpire('permanent')).toBeUndefined();
+    expect(resolveExpire('  NEVER  ')).toBeUndefined();
+  });
+
+  it('still parses relative and absolute specs', () => {
+    expect(Date.parse(resolveExpire('12h')!) - Date.now()).toBeGreaterThan(11.9 * 36e5);
+    expect(resolveExpire('2030-01-01')).toBe(new Date('2030-01-01').toISOString());
+  });
+});
+
+describe('scanShareContent (RUSH-2443 pre-publish gate)', () => {
+  it('flags email addresses', () => {
+    const hits = scanShareContent('Contact alice@example.com and bob@corp.io');
+    expect(hits.some((h) => h.kind === 'email')).toBe(true);
+  });
+
+  it('flags credential-shaped strings (ghp_, sk-, AKIA, Bearer)', () => {
+    const hits = scanShareContent(
+      [
+        'token ghp_abcdefghijklmnopqrstuvwxyz012345',
+        'key sk-ant-api03-abcdefghijklmnopqrst',
+        'aws AKIAIOSFODNN7EXAMPLE',
+        'auth Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9xx',
+      ].join('\n'),
+    );
+    expect(hits.some((h) => h.kind === 'credential')).toBe(true);
+  });
+
+  it('returns nothing for a clean HTML page', () => {
+    expect(scanShareContent('<!doctype html><title>Plan</title><main>ok</main>')).toEqual([]);
+  });
+
+  it('skips binary bodies (null bytes in the head)', () => {
+    const pngish = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x0d, 0x0a]);
+    expect(scanShareContent(pngish)).toEqual([]);
+  });
+
+  it('formatSensitiveContentError names the kinds and points at --force / --unlisted', () => {
+    const msg = formatSensitiveContentError([
+      { kind: 'email', sample: 'alice…' },
+      { kind: 'credential', sample: 'ghp_…' },
+    ]);
+    expect(msg).toMatch(/email addresses and credential-shaped strings/);
+    expect(msg).toMatch(/--force/);
+    expect(msg).toMatch(/--unlisted/);
   });
 });
 

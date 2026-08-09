@@ -44,6 +44,8 @@ export function formatSharePublishResult(result: PublishResult, json = false): s
   const lines = [chalk.green(result.url)];
   if (result.coverUrl) lines.push(chalk.dim(`  cover ${result.coverUrl}`));
   if (result.expiresAt) lines.push(chalk.dim(`  expires ${new Date(result.expiresAt).toLocaleString()}`));
+  else lines.push(chalk.dim('  expires never'));
+  if (result.unlisted) lines.push(chalk.dim('  unlisted (hidden from gallery / share list)'));
   return lines.join('\n');
 }
 
@@ -305,11 +307,24 @@ export function registerShareCommands(program: Command): void {
     .argument('[file]', 'file to publish (HTML or any static asset)')
     .option('--slug <slug>', 'custom URL slug under your namespace (default: <project>-<feature>-<hash>)')
     .option('--github-user <user>', 'GitHub username for the share namespace (default: resolved from gh/git config)')
-    .option('--expire <spec>', 'auto-expire, e.g. 30d, 12h, or 2026-08-01')
+    .option('--expire <spec>', "auto-expire (default 30d). e.g. 12h, 30d, 2026-08-01, or 'never'")
+    .option('--unlisted', 'hide from the public gallery and `agents share list` (direct URL still works)')
+    .option('--private', 'alias of --unlisted')
+    .option('--force', 'publish even when the file contains emails or credential-shaped strings')
     .option('--no-cover', 'skip the OG preview image (HTML pages get one by default)')
     .option('--no-analytics', 'skip injecting the Cloudflare Web Analytics beacon')
     .option('--json', 'emit machine-readable publish result for plan-render hooks and scripts')
-    .action(async (file: string | undefined, opts: { slug?: string; githubUser?: string; expire?: string; cover?: boolean; analytics?: boolean; json?: boolean }) => {
+    .action(async (file: string | undefined, opts: {
+      slug?: string;
+      githubUser?: string;
+      expire?: string;
+      unlisted?: boolean;
+      private?: boolean;
+      force?: boolean;
+      cover?: boolean;
+      analytics?: boolean;
+      json?: boolean;
+    }) => {
       if (!file) {
         shareCmd.help();
         return;
@@ -320,14 +335,16 @@ export function registerShareCommands(program: Command): void {
         return;
       }
       try {
-        const { url, expiresAt, coverUrl } = await publishFile(file, {
+        const result = await publishFile(file, {
           slug: opts.slug,
           githubUser: opts.githubUser,
           expire: opts.expire,
+          unlisted: opts.unlisted === true || opts.private === true,
+          force: opts.force,
           cover: opts.cover,
           analytics: opts.analytics,
         });
-        console.log(formatSharePublishResult({ url, expiresAt, coverUrl }, Boolean(opts.json)));
+        console.log(formatSharePublishResult(result, Boolean(opts.json)));
       } catch (e) {
         console.error(chalk.red((e as Error).message));
         process.exitCode = 1;
@@ -336,11 +353,17 @@ export function registerShareCommands(program: Command): void {
 
   setHelpSections(shareCmd, {
     examples: `
-      # Publish an HTML file — gets an auto OG cover + a shareable link
+      # Publish an HTML file — auto OG cover, default 30d expiry, shareable link
       agents share ./out/plan.html
 
-      # Custom slug, expiring in 30 days
-      agents share ./out/report.html --slug q3-report --expire 30d
+      # Hide from the public gallery (direct URL still works) and expire sooner
+      agents share ./out/report.html --unlisted --expire 12h
+
+      # Permanent public page (opt out of the default 30d expiry)
+      agents share ./out/landing.html --slug landing --expire never
+
+      # Custom slug, expiring in 7 days
+      agents share ./out/report.html --slug q3-report --expire 7d
 ${SHARE_DELETE_EXAMPLES}
       # One-time setup (or join an existing endpoint)
       agents share setup
@@ -349,7 +372,14 @@ ${SHARE_DELETE_EXAMPLES}
       # Push a worker-template.ts change out to an already-provisioned endpoint
       agents share update
     `,
-    notes: SHARE_DELETE_NOTES,
+    notes: `
+  Default expiry is 30d so an accidental publish decays. Pass --expire never for
+  a permanent link. --unlisted / --private hides the page from the public gallery
+  and agents share list; the direct URL is still world-readable (unlisted, not
+  secret). A pre-publish scan refuses emails and credential-shaped strings
+  unless --force is passed.
+${SHARE_DELETE_NOTES}
+    `,
   });
 
   const shareDeleteCmd = registerShareDeleteOptions(

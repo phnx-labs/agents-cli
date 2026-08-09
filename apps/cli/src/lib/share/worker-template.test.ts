@@ -189,4 +189,30 @@ describe('worker JSON listing route (GET /<user>?format=json)', () => {
     expect(gallery.headers.get('content-type')).toMatch(/text\/html/);
     expect(await gallery.text()).toContain('@octocat');
   });
+
+  it('omits unlisted pages from the JSON listing and HTML gallery, but still serves the direct URL (RUSH-2443)', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+
+    await put(worker, env, 'octocat/public-page', '<h1>public</h1>');
+    await put(worker, env, 'octocat/secret-report', '<h1>secret</h1>', {
+      'x-share-visibility': 'unlisted',
+    });
+
+    // Direct URL still works — unlisted, not secret.
+    const direct = await worker.default.fetch(new Request('https://share.test/octocat/secret-report'), env);
+    expect(direct.status).toBe(200);
+    expect(await direct.text()).toContain('secret');
+
+    // Listing and gallery hide it.
+    const listing = await worker.default.fetch(new Request('https://share.test/octocat?format=json'), env);
+    const payload = await listing.json();
+    expect(payload.objects.map((o: any) => o.slug)).toEqual(['public-page']);
+    expect(payload.count).toBe(1);
+
+    const gallery = await worker.default.fetch(new Request('https://share.test/octocat'), env);
+    const html = await gallery.text();
+    expect(html).toContain('public-page');
+    expect(html).not.toContain('secret-report');
+  });
 });

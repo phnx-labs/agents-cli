@@ -41,12 +41,18 @@ export default {
         return json({ error: 'unauthorized' }, 401);
       }
       const expiresAt = request.headers.get('x-share-expires-at') || '';
+      // 'unlisted' hides the page from the public gallery + JSON listing while
+      // keeping the direct URL world-readable (capability URL, not secret).
+      const visibility = (request.headers.get('x-share-visibility') || '').toLowerCase();
       const contentType = request.headers.get('content-type') || 'text/html; charset=utf-8';
+      const customMetadata = {};
+      if (expiresAt) customMetadata['expires-at'] = expiresAt;
+      if (visibility === 'unlisted') customMetadata['visibility'] = 'unlisted';
       await env.BUCKET.put(path, request.body, {
         httpMetadata: { contentType },
-        customMetadata: expiresAt ? { 'expires-at': expiresAt } : {},
+        customMetadata,
       });
-      return json({ ok: true, url: url.origin + '/' + path, expiresAt: expiresAt || null }, 200);
+      return json({ ok: true, url: url.origin + '/' + path, expiresAt: expiresAt || null, unlisted: visibility === 'unlisted' }, 200);
     }
 
     if (request.method === 'GET' || request.method === 'HEAD') {
@@ -109,6 +115,8 @@ async function renderGallery(bucket, origin, user, method) {
 
   const activeObjects = objects.filter(o => {
     if (o.key.endsWith('.png')) return false;
+    // Unlisted pages are reachable by direct URL only — never on the gallery.
+    if (o.customMetadata && o.customMetadata.visibility === 'unlisted') return false;
     const expiresAt = o.customMetadata && o.customMetadata['expires-at'];
     return !(expiresAt && Date.now() > Date.parse(expiresAt));
   });
@@ -155,9 +163,10 @@ async function renderListing(bucket, origin, user, method) {
   const now = Date.now();
   const items = objects
     .filter(o => {
-      // Mirror the gallery: hide the sibling .png OG covers and any expired page,
-      // so the listing shows exactly what is actively public under this namespace.
+      // Mirror the gallery: hide sibling .png OG covers, expired pages, and
+      // unlisted pages — the listing is the machine-readable public surface.
       if (o.key.endsWith('.png')) return false;
+      if (o.customMetadata && o.customMetadata.visibility === 'unlisted') return false;
       const expiresAt = o.customMetadata && o.customMetadata['expires-at'];
       return !(expiresAt && now > Date.parse(expiresAt));
     })

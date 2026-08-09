@@ -9,7 +9,9 @@ and you open the link to see if it worked.
 
 ```bash
 agents share setup --analytics-token <cf-token>   # once: provision on your Cloudflare
-agents share plan.html --slug fleet --expire 30d  # → https://<base>/<user>/fleet
+agents share plan.html                            # → public link, default 30d expiry
+agents share plan.html --unlisted --expire 12h    # hidden from gallery; still world-readable by URL
+agents share plan.html --slug fleet --expire never  # permanent public slug
 agents share plan.html --json                     # machine-readable URL for hooks
 agents share status                               # show endpoint, namespace, analytics, template
 agents share analytics                            # link to the Web Analytics dashboard
@@ -56,10 +58,19 @@ agent makes plan.html
   Cloudflare. `agents share join` uses synced `share:` config plus an injected
   `SHARE_WRITE_TOKEN`, and `agents share join <baseUrl>` still joins an explicit
   endpoint without provisioning.
-- **Expiry.** `--expire 30d|12h|2026-08-01` writes `expires-at` into the object's metadata;
-  the Worker `410`s and lazily deletes past that instant. `setup` also installs an R2
-  lifecycle rule so old share objects are removed automatically even if nobody opens
-  the expired link again.
+- **Expiry.** Publishes default to **30 days** (`--expire 30d`) so an accidental share
+  decays instead of living forever (RUSH-2443). Pass `--expire 12h`, an absolute date
+  (`2026-08-01`), or `--expire never` for a permanent link. Expiry writes `expires-at`
+  into the object's metadata; the Worker `410`s and lazily deletes past that instant.
+  `setup` also installs an R2 lifecycle rule so old share objects are removed
+  automatically even if nobody opens the expired link again.
+- **Unlisted / private.** `--unlisted` (alias `--private`) stores `visibility=unlisted`
+  on the object. The public `/<user>` gallery and `agents share list` omit it; the
+  direct URL is still world-readable (capability URL — unlisted, not secret). Use with
+  a short `--expire` when bounding blast radius after an accidental sensitive publish.
+- **Pre-publish scan.** Before upload, the CLI refuses files that contain email addresses
+  or credential-shaped strings (`ghp_…`, `sk-…`, `AKIA…`, `Bearer …`, …) — the exact
+  failure mode behind RUSH-2428. Pass `--force` to publish anyway.
 - **Usage analytics.** `setup --analytics-token <cf-token>` enables Cloudflare Web Analytics:
   a cookieless, privacy-first beacon is injected into every published HTML page, so you get
   per-path pageviews without GA4-style tracking. Opt out per publish with `--no-analytics`.
@@ -131,7 +142,7 @@ synced config exists and the token is already available.
 
 | Command | What it does |
 |---|---|
-| `agents share <file> [--slug s] [--github-user u] [--expire spec] [--no-cover] [--no-analytics] [--json]` | Publish `<file>` under your GitHub-username namespace; print the link, or emit `{ url, coverUrl, expiresAt }` for plan-render hooks with `--json`. HTML pages get an auto OG cover unless `--no-cover` and a CF Web Analytics beacon unless `--no-analytics`. |
+| `agents share <file> [--slug s] [--github-user u] [--expire spec] [--unlisted\|--private] [--force] [--no-cover] [--no-analytics] [--json]` | Publish `<file>` under your GitHub-username namespace (default expiry **30d**); print the link, or emit `{ url, coverUrl, expiresAt, unlisted? }` for plan-render hooks with `--json`. `--unlisted`/`--private` hides from the gallery; `--force` bypasses the email/credential scan. HTML pages get an auto OG cover unless `--no-cover` and a CF Web Analytics beacon unless `--no-analytics`. |
 | `agents share list [--github-user u] [--json]` | List the ACTIVE pages in your namespace — human table, or the raw listing with `--json` (see [Listing your shares](#listing-your-shares) below). |
 | `agents share delete <targets...>` / `agents unshare <targets...>` | Take a published page down (see [Deleting a share](#deleting-a-share) below). |
 | `agents share setup [--token t] [--account id] [--bundle b] [--worker w] [--bucket b] [--domain h] [--analytics-token token]` | Provision an R2 bucket + Worker on your Cloudflare, map `share.agents-cli.sh` when visible (or `--domain h`), optionally configure a CF Web Analytics token, and save the config. |
@@ -219,14 +230,21 @@ the link can read the content, and the Worker serves it to them.
   brute-force. (It was a 24-bit / 6-hex tail before RUSH-1821, only `~1.7e7` — small
   enough to enumerate; that's now fixed.) The `<project>-<feature>-` prefix is predictable,
   so the nonce is doing all the work — which is exactly why it needs the full 64 bits.
-- **Use `--expire` for sensitive content.** There is no default expiry. `--expire 30d`
-  (or `12h`, or an absolute `2026-08-01`) bounds the window in which a leaked link is
-  live; the Worker `410`s and lazily deletes past that instant. Shorter is safer.
-- **A page can be taken down manually with `agents unshare`.** For anything published
-  without `--expire` that needs to come down before then (or immediately, on an
-  accidental publish of sensitive content), `agents unshare <link>` deletes the page and
-  its OG cover and verifies both 404 before reporting success — see
-  [Deleting a share](#deleting-a-share).
+- **Default expiry is 30 days.** Unflagged publishes auto-expire so an accidental link
+  decays. Pass `--expire 12h` (or shorter) for sensitive content, or `--expire never`
+  only when the page is intentionally permanent. The Worker `410`s and lazily deletes
+  past the expiry instant.
+- **`--unlisted` / `--private` hides from the gallery, not from the URL.** An unlisted
+  page is omitted from `/<user>` and `agents share list`, but anyone with the link can
+  still read it. Prefer unlisted + short expiry over "hope nobody finds the gallery".
+- **Pre-publish scan refuses emails and credential-shaped strings.** The CLI scans the
+  file before upload and exits non-zero when it finds them — pass `--force` only when
+  you have audited the page. This is the mechanical backstop for the RUSH-2428 incident
+  (a report with account emails published world-readable by routine).
+- **A page can be taken down manually with `agents unshare`.** For anything that needs
+  to come down before expiry (or immediately, on an accidental publish of sensitive
+  content), `agents unshare <link>` deletes the page and its OG cover and verifies both
+  404 before reporting success — see [Deleting a share](#deleting-a-share).
 - **A true auth-gated read is a future option, not shipped.** For content that must be
   genuinely private rather than merely unlisted, the intended path is an opt-in,
   auth-gated read — a bearer token or a signed, short-lived link required to _view_ (not
