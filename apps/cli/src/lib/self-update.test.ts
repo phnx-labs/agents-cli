@@ -9,19 +9,26 @@ import { needsWindowsShell, toPosix } from './platform/index.js';
 import {
   bunGlobalDir,
   buildMultiInstallInventory,
+  classifyRemovableAgentsCliInstalls,
   deriveGlobalPrefix,
   detectPackageManager,
   dismissUpdateVersion,
   downloadVerifiedTarball,
   findAgentsCliInstalls,
   installPackageIntoPrefix,
+  isNpxCacheInstall,
+  isTouchIdStormFixedVersion,
+  purgeRemovableAgentsCliInstalls,
   readInstalledVersion,
   readUpdateCache,
+  remediateStaleAgentsCliInstalls,
   resolveRunningPackageRoot,
   saveUpdateCheck,
   shouldPromptUpgrade,
+  TOUCH_ID_STORM_FIXED_SINCE,
   verifyInstalledVersion,
   verifyTarballIntegrity,
+  type AgentsCliInstall,
 } from './self-update.js';
 
 const tempDirs: string[] = [];
@@ -554,5 +561,185 @@ describe('buildMultiInstallInventory', () => {
       version: '1.20.88',
       note: 'running; unsafe legacy helper installer — remove this copy',
     }]);
+  });
+});
+
+describe('classifyRemovableAgentsCliInstalls / purge (RUSH-2415)', () => {
+  it('isTouchIdStormFixedVersion treats 1.22.30+, later releases, and dev builds as fixed', () => {
+    expect(TOUCH_ID_STORM_FIXED_SINCE).toBe('1.22.30');
+    expect(isTouchIdStormFixedVersion('1.22.30')).toBe(true);
+    expect(isTouchIdStormFixedVersion('1.22.33')).toBe(true);
+    expect(isTouchIdStormFixedVersion('0.0.0-dev.abc')).toBe(true);
+    expect(isTouchIdStormFixedVersion('1.22.29')).toBe(false);
+    expect(isTouchIdStormFixedVersion('1.20.88')).toBe(false);
+    expect(isTouchIdStormFixedVersion('not-a-version')).toBe(false);
+  });
+
+  it('detects npx-cache roots by path segment', () => {
+    expect(isNpxCacheInstall('/home/u/.npm/_npx/run-1/node_modules/@phnx-labs/agents-cli')).toBe(true);
+    expect(isNpxCacheInstall('/opt/homebrew/lib/node_modules/@phnx-labs/agents-cli')).toBe(false);
+  });
+
+  it('never classifies the running root as removable', () => {
+    const running = '/opt/homebrew/lib/node_modules/@phnx-labs/agents-cli';
+    const installs: AgentsCliInstall[] = [
+      { packageRoot: running, version: '1.22.33', atomicHelperInstall: true },
+      {
+        packageRoot: '/home/u/.npm/_npx/x/node_modules/@phnx-labs/agents-cli',
+        version: '1.20.65',
+        atomicHelperInstall: false,
+      },
+    ];
+    const removable = classifyRemovableAgentsCliInstalls(running, installs);
+    expect(removable.every((r) => r.packageRoot !== running)).toBe(true);
+    expect(removable).toHaveLength(1);
+    expect(removable[0].reasons).toEqual(
+      expect.arrayContaining(['npx-cache', 'unsafe-legacy-helper', 'pre-fixed-version']),
+    );
+  });
+
+  it('does not mark a lone pre-fixed install as pre-fixed-version (would strand the box)', () => {
+    const running = '/opt/a/lib/node_modules/@phnx-labs/agents-cli';
+    const stale = '/opt/b/lib/node_modules/@phnx-labs/agents-cli';
+    const installs: AgentsCliInstall[] = [
+      { packageRoot: running, version: '1.22.25', atomicHelperInstall: true },
+      { packageRoot: stale, version: '1.22.18', atomicHelperInstall: true },
+    ];
+    const removable = classifyRemovableAgentsCliInstalls(running, installs);
+    // No fixed peer → no pre-fixed-version reason. Neither is legacy/npx.
+    expect(removable).toEqual([]);
+  });
+
+  it('marks pre-fixed peers removable once a fixed copy exists', () => {
+    const running = '/opt/homebrew/lib/node_modules/@phnx-labs/agents-cli';
+    const staleNvm = '/home/u/.nvm/versions/node/v24/lib/node_modules/@phnx-labs/agents-cli';
+    const installs: AgentsCliInstall[] = [
+      { packageRoot: running, version: '1.22.33', atomicHelperInstall: true },
+      { packageRoot: staleNvm, version: '1.22.25', atomicHelperInstall: true },
+    ];
+    const removable = classifyRemovableAgentsCliInstalls(running, installs);
+    expect(removable).toEqual([{
+      packageRoot: staleNvm,
+      version: '1.22.25',
+      reasons: ['pre-fixed-version'],
+    }]);
+  });
+
+  it('marks unsafe-legacy even when the version string is modern', () => {
+    const running = '/opt/a/lib/node_modules/@phnx-labs/agents-cli';
+    const legacy = '/opt/b/lib/node_modules/@phnx-labs/agents-cli';
+    const installs: AgentsCliInstall[] = [
+      { packageRoot: running, version: '1.22.33', atomicHelperInstall: true },
+      { packageRoot: legacy, version: '1.22.33', atomicHelperInstall: false },
+    ];
+    const removable = classifyRemovableAgentsCliInstalls(running, installs);
+    expect(removable).toEqual([{
+      packageRoot: legacy,
+      version: '1.22.33',
+      reasons: ['unsafe-legacy-helper'],
+    }]);
+  });
+
+  it('purge deletes a real package tree and refuses a non-agents-cli path', () => {
+    const base = makeTempDir('purge');
+    const goodRoot = path.join(base, 'good', 'node_modules', '@phnx-labs', 'agents-cli');
+    fs.mkdirSync(goodRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(goodRoot, 'package.json'),
+      JSON.stringify({ name: '@phnx-labs/agents-cli', version: '1.20.88' }),
+    );
+    fs.writeFileSync(path.join(goodRoot, 'marker.txt'), 'bye');
+
+    const foreignRoot = path.join(base, 'foreign');
+    fs.mkdirSync(foreignRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(foreignRoot, 'package.json'),
+      JSON.stringify({ name: '@other/tool', version: '1.0.0' }),
+    );
+
+    const goodCanonical = fs.realpathSync(goodRoot);
+    const foreignCanonical = fs.realpathSync(foreignRoot);
+    const result = purgeRemovableAgentsCliInstalls([
+      { packageRoot: goodRoot, version: '1.20.88', reasons: ['npx-cache'] },
+      { packageRoot: foreignRoot, version: '1.0.0', reasons: ['npx-cache'] },
+    ]);
+
+    expect(result.removed).toHaveLength(1);
+    expect(result.removed[0].packageRoot).toBe(goodCanonical);
+    expect(fs.existsSync(goodRoot)).toBe(false);
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0].packageRoot).toBe(foreignCanonical);
+    expect(result.failed[0].error).toMatch(/not @phnx-labs\/agents-cli/);
+    expect(fs.existsSync(foreignRoot)).toBe(true);
+  });
+
+  it('purge dryRun leaves trees on disk', () => {
+    const base = makeTempDir('purge-dry');
+    const root = path.join(base, 'node_modules', '@phnx-labs', 'agents-cli');
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(
+      path.join(root, 'package.json'),
+      JSON.stringify({ name: '@phnx-labs/agents-cli', version: '1.20.1' }),
+    );
+    const result = purgeRemovableAgentsCliInstalls(
+      [{ packageRoot: root, version: '1.20.1', reasons: ['pre-fixed-version'] }],
+      { dryRun: true },
+    );
+    expect(result.removed).toHaveLength(1);
+    expect(fs.existsSync(root)).toBe(true);
+  });
+
+  it('purge never removes the runningRoot even if listed', () => {
+    const base = makeTempDir('purge-running');
+    const root = path.join(base, 'node_modules', '@phnx-labs', 'agents-cli');
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(
+      path.join(root, 'package.json'),
+      JSON.stringify({ name: '@phnx-labs/agents-cli', version: '1.20.1' }),
+    );
+    const result = purgeRemovableAgentsCliInstalls(
+      [{ packageRoot: root, version: '1.20.1', reasons: ['pre-fixed-version'] }],
+      { runningRoot: root },
+    );
+    expect(result.removed).toHaveLength(0);
+    expect(result.skippedRunning).toBe(1);
+    expect(fs.existsSync(root)).toBe(true);
+  });
+
+  it('remediateStaleAgentsCliInstalls end-to-end: fixed peer + npx stale → purged', () => {
+    const homeDir = makeTempDir('remediate');
+    const fixedRoot = path.join(homeDir, 'fixed', 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
+    fs.mkdirSync(path.join(fixedRoot, 'dist', 'lib'), { recursive: true });
+    fs.writeFileSync(
+      path.join(fixedRoot, 'package.json'),
+      JSON.stringify({ name: '@phnx-labs/agents-cli', version: '1.22.33' }),
+    );
+    fs.writeFileSync(path.join(fixedRoot, 'dist', 'lib', 'app-bundle-install.js'), '// atomic\n');
+
+    const npmCacheDir = path.join(homeDir, 'npm-cache');
+    const npxRoot = path.join(npmCacheDir, '_npx', 'run-9', 'node_modules', '@phnx-labs', 'agents-cli');
+    fs.mkdirSync(npxRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(npxRoot, 'package.json'),
+      JSON.stringify({ name: '@phnx-labs/agents-cli', version: '1.20.65' }),
+    );
+
+    const npxCanonical = fs.realpathSync(npxRoot);
+    const result = remediateStaleAgentsCliInstalls({
+      runningRoot: fixedRoot,
+      runningVersion: '1.22.33',
+      pathEnv: '',
+      findOpts: {
+        homeDir,
+        npmCacheDir,
+        globalNodeModulesDirs: [],
+        fnmDir: path.join(homeDir, 'empty-fnm'),
+      },
+    });
+
+    expect(result.candidates.length).toBeGreaterThanOrEqual(1);
+    expect(result.removed.some((r) => r.packageRoot === npxCanonical)).toBe(true);
+    expect(fs.existsSync(npxRoot)).toBe(false);
+    expect(fs.existsSync(fixedRoot)).toBe(true);
   });
 });

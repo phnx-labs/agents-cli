@@ -557,6 +557,7 @@ import {
   shouldPromptUpgrade,
   buildMultiInstallInventory,
   findAgentsCliInstalls,
+  remediateStaleAgentsCliInstalls,
   resolveRunningPackageRoot,
   type UpdateCheckCache,
 } from './lib/self-update.js';
@@ -604,7 +605,9 @@ function maybeWarnMultiInstall(): void {
   for (const info of inventory) {
     console.error(chalk.gray(`  ${info.packageRoot}  ${info.version}  (${info.note})`));
   }
-  console.error(chalk.gray('Upgrades apply to the running copy. Remove a stale copy with: npm uninstall -g --prefix <prefix> @phnx-labs/agents-cli'));
+  console.error(chalk.gray(
+    'Upgrades apply to the running copy. Purge npx-cache / legacy / pre-1.22.30 copies with: agents doctor --fix',
+  ));
 
   try {
     fs.mkdirSync(path.dirname(sentinel), { recursive: true });
@@ -1025,6 +1028,27 @@ async function runUpgrade(version: string | undefined, options: UpgradeOptions):
         spinner = ora(`${direction === 'Downgrade' ? 'Downgrading' : 'Upgrading'} ${VERSION} -> ${resolvedVersion}...`).start();
         await installResolvedPackage(metadata);
         spinner.succeed(`${direction}d to ${resolvedVersion}`);
+        // After a successful upgrade, drop latent pre-fix / npx-cache /
+        // unsafe-legacy copies so the new binary is not shadowed (RUSH-2415).
+        try {
+          const runningRoot = resolveRunningPackageRoot(__dirname);
+          const purge = remediateStaleAgentsCliInstalls({
+            runningRoot,
+            runningVersion: resolvedVersion,
+          });
+          if (purge.removed.length > 0) {
+            console.log(chalk.gray(
+              `Purged ${purge.removed.length} stale agents-cli install${purge.removed.length === 1 ? '' : 's'} (npx-cache / legacy / pre-1.22.30).`,
+            ));
+          }
+          if (purge.failed.length > 0) {
+            console.log(chalk.yellow(
+              `Could not purge ${purge.failed.length} stale install${purge.failed.length === 1 ? '' : 's'}; re-run agents doctor --fix.`,
+            ));
+          }
+        } catch {
+          /* best-effort; upgrade already succeeded */
+        }
         // Only show the changelog for a genuine upgrade range.
         if (compareVersions(resolvedVersion, VERSION) > 0) {
           await showWhatsNew(VERSION, resolvedVersion);

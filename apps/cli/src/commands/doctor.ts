@@ -82,7 +82,16 @@ import { auditWindowsSshEnrollment, diagnoseWindowsSshFailure } from '../lib/dev
 import { scanUserRcFiles, masterPassphraseInEnv } from '../lib/secrets/rc-hygiene.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 import { readRepoBehindMarkers, type FetchStatusMarker } from '../lib/auto-pull.js';
+import {
+  remediateStaleAgentsCliInstalls,
+  resolveRunningPackageRoot,
+  type PurgeRemovableInstallsResult,
+} from '../lib/self-update.js';
 import * as fs from 'fs';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+
+const __doctorDirname = path.dirname(fileURLToPath(import.meta.url));
 
 const AGENT_NAMES: Record<string, string> = Object.fromEntries(
   ALL_AGENT_IDS.map((id) => [id, AGENTS[id].name]),
@@ -1360,6 +1369,44 @@ function renderHookRuntimeRepairText(repair: HookRuntimeRepairReport): void {
   }
 }
 
+/**
+ * RUSH-2415: delete npx-cache / unsafe-legacy / pre-1.22.30 agents-cli copies
+ * when a fixed peer already exists. Bare `doctor --fix` is the remediation
+ * surface the multi-install warning points at; a targeted
+ * `doctor <agent>@<version> --fix` only heals that version home and must not
+ * touch other CLI installs on the box.
+ */
+function purgeStaleAgentsCliCopies(_opts: DoctorOptions): PurgeRemovableInstallsResult | null {
+  let runningRoot: string;
+  try {
+    // dist/commands/doctor.js (or src/commands/doctor.ts under vitest) —
+    // resolveRunningPackageRoot walks up until package.json names this package.
+    runningRoot = resolveRunningPackageRoot(__doctorDirname);
+  } catch {
+    return null;
+  }
+  return remediateStaleAgentsCliInstalls({
+    runningRoot,
+    runningVersion: getCliVersion(),
+  });
+}
+
+function renderStaleInstallPurgeText(purge: PurgeRemovableInstallsResult): void {
+  if (purge.removed.length === 0 && purge.failed.length === 0) return;
+  console.log(chalk.bold('\nStale agents-cli installs'));
+  for (const r of purge.removed) {
+    const why = r.reasons.join(', ');
+    console.log(
+      `  ${chalk.green('purged')} ${chalk.gray(`${r.packageRoot}  ${r.version}  (${why})`)}`,
+    );
+  }
+  for (const f of purge.failed) {
+    console.log(
+      `  ${chalk.red('hold  ')} ${chalk.gray(`${f.packageRoot}  ${f.version}  — ${f.error}`)}`,
+    );
+  }
+}
+
 async function runFix(parsed: ResolvedTarget | null, opts: DoctorOptions): Promise<void> {
   // Heal targets the global install — project layer is irrelevant, so cwd is
   // left to heal's neutral default rather than process.cwd().
@@ -1379,23 +1426,46 @@ async function runFix(parsed: ResolvedTarget | null, opts: DoctorOptions): Promi
   // repair have settled. This routine never calls sync/register and never
   // retries; unresolved wrappers remain an explicit non-zero doctor outcome.
   const hookRuntimeRepair = repairManagedHookRuntimeArtifacts({ filter: runtimeRepairFilter(parsed) });
+  // Bare doctor --fix also purges latent pre-fix / legacy agents-cli copies
+  // that only warn today (RUSH-2415). A scoped agent@version fix leaves them
+  // alone — the multi-install surface is machine-wide, not per-agent.
+  const staleInstallPurge = parsed === null ? purgeStaleAgentsCliCopies(opts) : null;
   const rewireFailed = rewired.some((entry) => entry.failure !== undefined);
   if (
     healChangedAnything(result) ||
     rewired.some((entry) => entry.rewired > 0 || entry.remaining > 0 || entry.failure !== undefined) ||
-    hookRuntimeRepair.attempts.length > 0
+    hookRuntimeRepair.attempts.length > 0 ||
+    (staleInstallPurge !== null && (staleInstallPurge.removed.length > 0 || staleInstallPurge.failed.length > 0))
   ) {
     invalidateDoctorOverviewCache();
   }
   if (opts.json) {
-    console.log(JSON.stringify({ ...result, hookRewire: rewired, hookRuntimeRepair }, null, 2));
-    if (rewireFailed || hookRuntimeRepair.needsAttention.length > 0) process.exitCode = 1;
+    console.log(JSON.stringify({
+      ...result,
+      hookRewire: rewired,
+      hookRuntimeRepair,
+      ...(staleInstallPurge ? { staleInstallPurge } : {}),
+    }, null, 2));
+    if (
+      rewireFailed
+      || hookRuntimeRepair.needsAttention.length > 0
+      || (staleInstallPurge !== null && staleInstallPurge.failed.length > 0)
+    ) {
+      process.exitCode = 1;
+    }
     return;
   }
   renderHealText(result);
   renderHookRewireText(rewired);
   renderHookRuntimeRepairText(hookRuntimeRepair);
-  if (rewireFailed || hookRuntimeRepair.needsAttention.length > 0) process.exitCode = 1;
+  if (staleInstallPurge) renderStaleInstallPurgeText(staleInstallPurge);
+  if (
+    rewireFailed
+    || hookRuntimeRepair.needsAttention.length > 0
+    || (staleInstallPurge !== null && staleInstallPurge.failed.length > 0)
+  ) {
+    process.exitCode = 1;
+  }
 }
 
 // ─── CI drift gate (doctor --check) ──────────────────────────────────────────
@@ -1608,7 +1678,7 @@ export function registerDoctorCommand(program: Command): void {
     .description('Diagnose CLI availability, sync status, and resource divergence (optionally for a specific agent[@version]).')
     .option('--json', 'Output machine-readable JSON')
     .option('--diff', 'In target mode, include unified diffs for divergent files')
-    .option('--fix', 'Heal gaps: install missing resources, repair invalid plugin manifests, refresh stale plugins, and reconcile drift (all installed versions, or just the target)')
+    .option('--fix', 'Heal gaps: install missing resources, repair invalid plugin manifests, refresh stale plugins, reconcile drift, and purge stale/legacy agents-cli installs (npx-cache, pre-1.22.30, unsafe helper installer) when a fixed peer exists')
     .option('--kind <kinds>', 'Restrict to comma-separated resource kinds (commands,skills,hooks,rules,mcp,permissions,subagents,plugins,promptcuts)')
     .option('--cwd <path>', 'Resolution cwd for project layer detection (default: process.cwd())')
     .option('--adopt <agent>', "Take over the agent's native launcher that shadows the shim (symlink it to the version-managed shim; reversible with --release)")

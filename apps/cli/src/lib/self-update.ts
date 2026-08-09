@@ -17,10 +17,21 @@ import * as os from 'os';
 import * as path from 'path';
 import { createHash, timingSafeEqual } from 'crypto';
 import { spawnSync } from 'child_process';
-import { compareVersions } from './versions.js';
+// Leaf comparator only — do not pull the full versions.ts graph into every
+// bootstrap that imports self-update (RUSH-2331).
+import { compareVersions } from './agent-spec/primitives.js';
 import { needsWindowsShell } from './platform/index.js';
 
 export const NPM_PACKAGE_NAME = '@phnx-labs/agents-cli';
+
+/**
+ * First published release that stopped the usage/auth-health probe from reading
+ * Claude Code's interactive login (commit 3f3554c51). Pre-this versions on a
+ * macOS box re-introduce the Touch ID storm + fleet-wide revocation class
+ * (RUSH-2415 / RUSH-1822). Anything older is a latent regression while a fixed
+ * copy sits next to it.
+ */
+export const TOUCH_ID_STORM_FIXED_SINCE = '1.22.30';
 
 export type PackageManager = 'npm' | 'bun';
 
@@ -419,6 +430,230 @@ export function buildMultiInstallInventory(
     });
   }
   return [...byRoot.values()];
+}
+
+/** Why a discovered install is safe to delete without an interactive confirm. */
+export type RemovableInstallReason =
+  | 'npx-cache'
+  | 'unsafe-legacy-helper'
+  | 'pre-fixed-version';
+
+export interface RemovableAgentsCliInstall {
+  packageRoot: string;
+  version: string;
+  reasons: RemovableInstallReason[];
+}
+
+export interface PurgeRemovableInstallsResult {
+  removed: RemovableAgentsCliInstall[];
+  failed: Array<RemovableAgentsCliInstall & { error: string }>;
+  skippedRunning: number;
+}
+
+/** True when the package root lives under npm's `_npx` cache (ephemeral runs). */
+export function isNpxCacheInstall(packageRoot: string): boolean {
+  const parts = packageRoot.split(path.sep);
+  return parts.includes('_npx');
+}
+
+/**
+ * A release string that is at least TOUCH_ID_STORM_FIXED_SINCE, or a side-by-side
+ * dev build (`0.0.0-dev.*`) which tracks main and therefore carries the fix.
+ * Non-semver junk never qualifies as "fixed" — better to leave a weird copy
+ * alone than delete the only working install.
+ */
+export function isTouchIdStormFixedVersion(version: string): boolean {
+  if (version.startsWith('0.0.0-dev.') || version === '0.0.0-dev') return true;
+  // compareVersions is numeric-segment only; refuse anything that does not
+  // look like a release before treating it as "older than fixed".
+  if (!/^\d+(\.\d+)*/.test(version)) return false;
+  return compareVersions(version, TOUCH_ID_STORM_FIXED_SINCE) >= 0;
+}
+
+/**
+ * Classify discovered installs that doctor --fix / upgrade may delete.
+ *
+ * Never marks the running package root. Auto-purge is limited to copies that
+ * cannot be the intended primary install:
+ *   - npx-cache trees (ephemeral)
+ *   - pre-atomic-helper-installer trees ("unsafe legacy helper installer")
+ *   - pre-TOUCH_ID_STORM_FIXED_SINCE trees, but only when at least one fixed
+ *     copy already exists on the box (so we never strand the machine)
+ *
+ * A pre-fixed copy that is also the only install stays — the user must upgrade
+ * it in place rather than delete it.
+ */
+export function classifyRemovableAgentsCliInstalls(
+  runningRoot: string,
+  installs: AgentsCliInstall[],
+  opts: { fixedSince?: string } = {},
+): RemovableAgentsCliInstall[] {
+  const fixedSince = opts.fixedSince ?? TOUCH_ID_STORM_FIXED_SINCE;
+  let runningCanonical = runningRoot;
+  try {
+    runningCanonical = fs.realpathSync(runningRoot);
+  } catch {
+    /* keep as given */
+  }
+
+  // A fixed peer is any install (including the running copy) that carries the
+  // Touch-ID-storm fix. Pre-fixed trees are only deleted when such a peer
+  // exists, so a lone stale install is never purged out from under the user.
+  const hasFixedPeer = installs.some((install) => isTouchIdStormFixedVersion(install.version));
+
+  const out: RemovableAgentsCliInstall[] = [];
+  for (const install of installs) {
+    let root = install.packageRoot;
+    try {
+      root = fs.realpathSync(install.packageRoot);
+    } catch {
+      /* keep */
+    }
+    if (root === runningCanonical) continue;
+
+    const reasons: RemovableInstallReason[] = [];
+    if (isNpxCacheInstall(root) || isNpxCacheInstall(install.packageRoot)) {
+      reasons.push('npx-cache');
+    }
+    if (!install.atomicHelperInstall) {
+      reasons.push('unsafe-legacy-helper');
+    }
+    if (
+      hasFixedPeer
+      && /^\d+(\.\d+)*/.test(install.version)
+      && compareVersions(install.version, fixedSince) < 0
+    ) {
+      reasons.push('pre-fixed-version');
+    }
+    if (reasons.length === 0) continue;
+    out.push({ packageRoot: root, version: install.version, reasons });
+  }
+  return out;
+}
+
+/**
+ * Delete classified removable package roots from disk. Re-reads package.json
+ * immediately before the unlink so a path that is no longer @phnx-labs/agents-cli
+ * is never removed. Best-effort: one failure does not stop the rest.
+ */
+export function purgeRemovableAgentsCliInstalls(
+  candidates: RemovableAgentsCliInstall[],
+  opts: { dryRun?: boolean; runningRoot?: string } = {},
+): PurgeRemovableInstallsResult {
+  const result: PurgeRemovableInstallsResult = {
+    removed: [],
+    failed: [],
+    skippedRunning: 0,
+  };
+  let runningCanonical: string | undefined;
+  if (opts.runningRoot) {
+    try {
+      runningCanonical = fs.realpathSync(opts.runningRoot);
+    } catch {
+      runningCanonical = opts.runningRoot;
+    }
+  }
+
+  for (const candidate of candidates) {
+    let root = candidate.packageRoot;
+    try {
+      root = fs.realpathSync(candidate.packageRoot);
+    } catch {
+      /* keep */
+    }
+    if (runningCanonical && root === runningCanonical) {
+      result.skippedRunning += 1;
+      continue;
+    }
+    // Refuse anything that no longer looks like our package.
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8')) as {
+        name?: unknown;
+      };
+      if (pkg.name !== NPM_PACKAGE_NAME) {
+        result.failed.push({
+          ...candidate,
+          packageRoot: root,
+          error: `package.json name is ${String(pkg.name)}, not ${NPM_PACKAGE_NAME}`,
+        });
+        continue;
+      }
+    } catch (err) {
+      result.failed.push({
+        ...candidate,
+        packageRoot: root,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      continue;
+    }
+    if (opts.dryRun) {
+      result.removed.push({ ...candidate, packageRoot: root });
+      continue;
+    }
+    try {
+      fs.rmSync(root, { recursive: true, force: true });
+      result.removed.push({ ...candidate, packageRoot: root });
+    } catch (err) {
+      result.failed.push({
+        ...candidate,
+        packageRoot: root,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return result;
+}
+
+/**
+ * Scan + classify + purge in one call. Used by `agents doctor --fix` and
+ * `agents upgrade` so both paths remediate the same set of latent copies.
+ */
+export function remediateStaleAgentsCliInstalls(opts: {
+  runningRoot: string;
+  runningVersion?: string;
+  pathEnv?: string;
+  findOpts?: FindAgentsCliInstallsOptions;
+  dryRun?: boolean;
+}): PurgeRemovableInstallsResult & {
+  inventory: MultiInstallInventoryEntry[];
+  candidates: RemovableAgentsCliInstall[];
+} {
+  const pathEnv = opts.pathEnv ?? (process.env.PATH || '');
+  const installs = findAgentsCliInstalls(pathEnv, opts.findOpts);
+  // Ensure the running root participates in "has a fixed peer" even when the
+  // PATH scan missed it (source tree, unusual layout).
+  if (opts.runningVersion) {
+    const already = installs.some((i) => {
+      try {
+        return fs.realpathSync(i.packageRoot) === fs.realpathSync(opts.runningRoot);
+      } catch {
+        return i.packageRoot === opts.runningRoot;
+      }
+    });
+    if (!already) {
+      installs.push({
+        packageRoot: opts.runningRoot,
+        version: opts.runningVersion,
+        // Unknown for a synthetic entry — classify only uses version for the
+        // fixed-peer check; the running root is never deleted regardless.
+        atomicHelperInstall: true,
+      });
+    }
+  }
+  const candidates = classifyRemovableAgentsCliInstalls(opts.runningRoot, installs);
+  const purge = purgeRemovableAgentsCliInstalls(candidates, {
+    dryRun: opts.dryRun,
+    runningRoot: opts.runningRoot,
+  });
+  return {
+    ...purge,
+    candidates,
+    inventory: buildMultiInstallInventory(
+      opts.runningRoot,
+      opts.runningVersion ?? 'unknown',
+      installs,
+    ),
+  };
 }
 
 function childDirectories(parent: string): string[] {
