@@ -1079,7 +1079,7 @@ describe('the real per-invocation audit tax — `program.parseAsync` through com
 });
 
 describe('whole-invocation anchor — real cold `node dist/index.js --version` (the denominator for every row above)', () => {
-  bench('`agents --version` — pays the full eager module graph (index.ts:10-218), detectDevBuild (index.ts:113), the program chain + audit hooks (index.ts:262-371), AND the two migration hops that carry no help/version guard: foldLegacySystemRepo (index.ts:1406-1411, called at 1409) and runMigration (index.ts:1429-1445, called at 1445), both gated only by AGENTS_SKIP_MIGRATION, so `await import("./lib/migrate.js")` is inside this number. It skips only checkForUpdates + spawnDetachedSync (guarded by !helpOrVersionRequested at index.ts:1362) and ensureInitialized (index.ts:1413-1421, called at 1420)', () => {
+  bench('`agents --version` — pays the full eager module graph (index.ts:10-218), detectDevBuild (index.ts:113), the program chain + audit hooks (index.ts:262-371), It skips checkForUpdates + spawnDetachedSync, ensureInitialized, the menu-bar self-heal, AND the migration hops (foldLegacySystemRepo via migrate-fold.js + runMigration via migrate.js) — all gated by !helpOrVersionRequested (RUSH-2454). A real command with a current v19 sentinel still pays only the leaf fold import, not the full migrate.js graph', () => {
     expectExit(runCli(['--version']), [0], '--version');
   }, { time: 4000, iterations: 15 });
 

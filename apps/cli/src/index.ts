@@ -1265,9 +1265,14 @@ const SETUP_EXEMPT_COMMANDS = new Set(['setup', 'help', 'uninstall']);
 // sentinel guard below because the sentinel was set by pre-fold releases and
 // would otherwise skip this step on every existing install. Idempotent —
 // no-ops when legacy is missing or already a symlink.
-if (process.env.AGENTS_SKIP_MIGRATION !== '1') {
+//
+// Skipped for --help/--version (RUSH-2454): pure documentation paths must not
+// load any migration graph. Loaded from migrate-fold.js (leaf: fs + createLink),
+// not migrate.js, so a real command pays only the fold hop unless the v19
+// sentinel is missing and runMigration() is required below.
+if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !helpOrVersionRequested) {
   try {
-    const { foldLegacySystemRepo } = await import('./lib/migrate.js');
+    const { foldLegacySystemRepo } = await import('./lib/migrate-fold.js');
     foldLegacySystemRepo();
   } catch { /* must never block CLI startup */ }
 }
@@ -1288,9 +1293,14 @@ if (
 // scan once a migration version has run, so the hot path stays cheap.
 // AGENTS_SKIP_MIGRATION=1 disables the bootstrap-time run for tests and
 // scripted invocations that prepare their own legacy fixtures.
-if (process.env.AGENTS_SKIP_MIGRATION !== '1') {
+//
+// Skipped for --help/--version (RUSH-2454): same pure-docs gate as fold, the
+// update check, background sync, ensureInitialized, and the menu-bar self-heal.
+// The sentinel check itself is pure fs and does not load migrate.js — only a
+// missing/stale sentinel pays for `await import('./lib/migrate.js')` (which
+// pulls the hosts/routine/teams/daemon/menubar graph).
+if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !helpOrVersionRequested) {
   try {
-    const { runMigration } = await import('./lib/migrate.js');
     const sentinel = getMigratedSentinelPath();
     // Sentinel is keyed to the migration SCHEMA version, not the binary version.
     // Bumping the suffix re-runs migrations for every user; binary releases that
@@ -1304,6 +1314,7 @@ if (process.env.AGENTS_SKIP_MIGRATION !== '1') {
       }
     } catch { /* best-effort — fall through to run */ }
     if (needRun) {
+      const { runMigration } = await import('./lib/migrate.js');
       await runMigration();
       try {
         fs.mkdirSync(path.dirname(sentinel), { recursive: true });
