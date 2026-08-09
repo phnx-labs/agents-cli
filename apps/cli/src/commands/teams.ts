@@ -2230,6 +2230,24 @@ export function registerTeamsCommands(program: Command): void {
         team = picked;
       }
 
+      // RUSH-2450: a disbanded team must not be re-startable. Orphan PENDING
+      // records can no longer resurrect after purge + saveMeta guard, but if a
+      // caller still points start at a gone team name, fail loud with a reason
+      // instead of launching nothing and looking successful.
+      if (!(await teamExists(team))) {
+        const orphanCount = (await mgr.listByTask(team)).length;
+        const msg = orphanCount > 0
+          ? `Team '${team}' is not registered (disbanded?). ${orphanCount} orphan teammate record(s) remain on disk — re-create the team or purge them before starting.`
+          : `Team '${team}' is not registered (disbanded or never created). Nothing to start.`;
+        if (isJsonMode(opts)) {
+          console.log(JSON.stringify({ team, error: 'team-not-found', message: msg, orphan_teammates: orphanCount }));
+        } else {
+          dieFriction('teams', 'team-not-found', msg, 2);
+        }
+        process.exitCode = 1;
+        return;
+      }
+
       if (!opts.force && !isJsonMode(opts)) {
         await warnUnsignedTeammates(mgr, team);
         await warnThrottledTeammates(mgr, team);
@@ -2716,12 +2734,15 @@ export function registerTeamsCommands(program: Command): void {
       const stopRes = await handleStop(mgr, team);
       if ('error' in stopRes) dieFriction('teams', 'stop-failed', stopRes.error);
 
+      // Snapshot the roster once for worktree cleanup + messaging. Purge below
+      // is the terminal removal of teammate records (RUSH-2450).
       const status = await handleStatus(mgr, team, 'all');
+      const rosterBefore = status.agents;
 
       // Clean up worktrees for all teammates
       const baseCwd = process.cwd();
       const keptWorktrees: string[] = [];
-      for (const a of status.agents) {
+      for (const a of rosterBefore) {
         const agent = await mgr.get(a.agent_id);
         if (agent?.worktreeName && agent?.worktreePath) {
           try {
@@ -2745,29 +2766,36 @@ export function registerTeamsCommands(program: Command): void {
         }
       }
 
-      const removedIds: string[] = [];
-      if (!opts.keepLogs) {
-        const base = await getAgentsDir();
-        for (const a of status.agents) {
-          try {
-            await fs.rm(path.join(base, a.agent_id), { recursive: true, force: true });
-            removedIds.push(a.agent_id);
-          } catch { /* best-effort */ }
-        }
-      }
-
+      // Drop the registry entry FIRST so any concurrent supervisor's saveMeta
+      // (RUSH-2450) refuses to re-persist teammates for this team, then purge
+      // the durable teammate records + in-memory cache. Order matters: purge
+      // after removeTeam closes the race where a supervisor re-writes meta
+      // between the two steps.
       const existed = await removeTeam(team);
+      const removedIds = await mgr.purgeByTask(team, { keepLogs: Boolean(opts.keepLogs) });
 
       if (isJsonMode(opts)) {
-        console.log(JSON.stringify({ team, existed, stopped: stopRes.stopped, removed_members: removedIds }, null, 2));
+        console.log(JSON.stringify({
+          team,
+          existed,
+          stopped: stopRes.stopped,
+          removed_members: removedIds,
+          already_gone: !existed && rosterBefore.length === 0 && removedIds.length === 0,
+        }, null, 2));
         return;
       }
-      if (!existed && stopRes.stopped.length === 0 && status.agents.length === 0) {
-        dieFriction('teams', 'team-not-found', `No team called '${team}'`, 2);
+      if (!existed && stopRes.stopped.length === 0 && rosterBefore.length === 0 && removedIds.length === 0) {
+        // Second disband on a fully-gone team: clean no-op, not a false success
+        // that claims N logs were cleared again.
+        dieFriction('teams', 'team-not-found', `No team called '${team}' (already disbanded or never created)`, 2);
       }
       console.log(chalk.green(`Team ${chalk.cyan(team)} disbanded.`));
       if (stopRes.stopped.length) console.log(chalk.gray(`  Stopped ${stopRes.stopped.length} working teammate(s).`));
-      if (removedIds.length) console.log(chalk.gray(`  Cleared ${removedIds.length} teammate log(s).`));
+      if (removedIds.length && !opts.keepLogs) {
+        console.log(chalk.gray(`  Cleared ${removedIds.length} teammate record(s).`));
+      } else if (removedIds.length && opts.keepLogs) {
+        console.log(chalk.gray(`  Removed ${removedIds.length} teammate record(s); logs kept.`));
+      }
       if (keptWorktrees.length) {
         console.log(chalk.yellow(`  Kept ${keptWorktrees.length} worktree(s) with uncommitted changes: ${keptWorktrees.join(', ')}`));
       }

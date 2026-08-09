@@ -153,6 +153,9 @@ export async function createTeam(name: string, options?: CreateTeamOptions): Pro
     await saveTeams(reg);
     return m;
   });
+  // A re-created name is a fresh team — drop any prior disband tombstone so
+  // saveMeta will persist new teammates again (RUSH-2450).
+  await clearTeamDisbanded(name);
   // Audit the lifecycle boundary, not the CLI shell — captures every creation
   // path (create + ensure) with team metadata the generic command log lacks.
   emit('teams.create', { module: 'teams', team: name, worktrees: Boolean(options?.enableWorktrees || options?.useWorktree) });
@@ -174,8 +177,57 @@ export async function ensureTeam(name: string): Promise<TeamMeta> {
   });
   // `teams add` auto-creates the team on first teammate — audit that creation
   // too, but only when it actually happened (not the get-existing path).
-  if (created) emit('teams.create', { module: 'teams', team: name, worktrees: false });
+  if (created) {
+    await clearTeamDisbanded(name);
+    emit('teams.create', { module: 'teams', team: name, worktrees: false });
+  }
   return meta;
+}
+
+/**
+ * Tombstone dir for disbanded teams (RUSH-2450). Lives next to the registry so
+ * a long-lived supervisor can see that a team was deliberately removed and
+ * refuse to re-persist its in-memory AgentProcess objects via saveMeta.
+ * Cleared on create/ensure so a re-used name is a fresh team.
+ */
+function disbandedDir(): string {
+  return path.join(path.dirname(getTeamsRegistryPath()), 'disbanded');
+}
+
+function disbandedPath(name: string): string {
+  // Encode the name so a team called `../x` cannot escape the dir.
+  const safe = Buffer.from(name, 'utf8').toString('base64url');
+  return path.join(disbandedDir(), `${safe}.json`);
+}
+
+/** Mark a team as disbanded so saveMeta will not resurrect its teammates. */
+export async function markTeamDisbanded(name: string): Promise<void> {
+  const dir = disbandedDir();
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(
+    disbandedPath(name),
+    JSON.stringify({ team: name, disbanded_at: new Date().toISOString() }),
+    'utf-8',
+  );
+}
+
+/** Clear a disband tombstone — called when the name is re-created. */
+export async function clearTeamDisbanded(name: string): Promise<void> {
+  try {
+    await fs.unlink(disbandedPath(name));
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
+  }
+}
+
+/** True when the team was disbanded and has not been re-created since. */
+export async function isTeamDisbanded(name: string): Promise<boolean> {
+  try {
+    await fs.access(disbandedPath(name));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Remove a team from the registry. Returns false if the team did not exist. */
@@ -188,6 +240,10 @@ export async function removeTeam(name: string): Promise<boolean> {
     await saveTeams(reg);
     return true;
   });
+  // Always stamp the tombstone when removeTeam is invoked from disband — even
+  // if the registry entry was already gone, so a concurrent supervisor still
+  // sees the disband. Idempotent.
+  await markTeamDisbanded(name);
   // "Disband" — only fires when a real team was removed, not a no-op.
   if (existed) emit('teams.disband', { module: 'teams', team: name });
   return existed;

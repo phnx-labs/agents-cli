@@ -34,7 +34,7 @@ import { remoteShellFor } from '../hosts/remote-cmd.js';
 import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { pullRemoteLogDelta, REMOTE_MIRROR_MAX_BYTES } from '../hosts/progress.js';
 import { createRemoteWorktree, ensureRemoteRepo } from './remoteWorktree.js';
-import { getTeam } from './registry.js';
+import { getTeam, isTeamDisbanded } from './registry.js';
 import { resolvePlacement, classifyExclusions, NoViableDeviceError } from './scheduler.js';
 import { probePoolSignals } from './placement-probe.js';
 import { readMaxConcurrentCaps } from '../device-config.js';
@@ -1096,6 +1096,20 @@ export class AgentProcess {
   }
 
   async saveMeta(): Promise<void> {
+    // RUSH-2450: a long-lived supervisor (teams start --watch) holds AgentProcess
+    // objects in memory. After another process disbands the team and deletes
+    // every meta.json, the supervisor's next status refresh would re-write those
+    // files via saveMeta — resurrecting PENDING teammates the operator just
+    // disbanded, and making `teams start` re-launch already-merged work. Refuse
+    // when a disband tombstone is present (set by removeTeam / markTeamDisbanded).
+    // Not gated on "team not in registry" alone: tests and mid-add paths write
+    // meta before/without a registry entry, and those must keep working.
+    if (this.taskName && (await isTeamDisbanded(this.taskName))) {
+      debug(
+        `saveMeta: refusing to re-persist ${this.agentId} — team '${this.taskName}' was disbanded`,
+      );
+      return;
+    }
     const agentDir = await this.getAgentDir();
     await fs.mkdir(agentDir, { recursive: true });
     const meta = {
@@ -2862,6 +2876,50 @@ export class AgentManager {
   async listByTask(taskName: string): Promise<AgentProcess[]> {
     const all = await this.listAll();
     return all.filter(a => a.taskName === taskName);
+  }
+
+  /**
+   * Terminal removal of every teammate record for a team (RUSH-2450).
+   *
+   * `teams disband` used to delete log dirs and the registry entry, but left
+   * the in-memory AgentProcess cache intact. A concurrent `teams start --watch`
+   * supervisor then re-persisted those records via saveMeta, so a second
+   * disband still found N logs to clear and `teams start` could re-launch
+   * PENDING work that had already merged.
+   *
+   * This drops every matching record from the manager map AND removes its
+   * durable state. With `keepLogs`, only `meta.json` is removed so the
+   * teammate is no longer discoverable/startable while stdout/stderr logs
+   * remain for postmortem.
+   *
+   * Returns the agent_ids that were purged.
+   */
+  async purgeByTask(taskName: string, opts?: { keepLogs?: boolean }): Promise<string[]> {
+    await this.initialize();
+    const roster = await this.listByTask(taskName);
+    const purged: string[] = [];
+    const base = this.agentsDir || (await getAgentsDir());
+
+    for (const agent of roster) {
+      this.agents.delete(agent.agentId);
+      const agentDir = path.join(base, agent.agentId);
+      try {
+        if (opts?.keepLogs) {
+          // Keep log files; remove only the record that makes the teammate
+          // reappear in list/status/start.
+          await fs.rm(path.join(agentDir, 'meta.json'), { force: true });
+        } else {
+          await fs.rm(agentDir, { recursive: true, force: true });
+        }
+        purged.push(agent.agentId);
+      } catch (err) {
+        debug(`purgeByTask: failed to remove ${agent.agentId}: ${err}`);
+        // Still count as purged from the roster — the in-memory drop above is
+        // the load-bearing half against same-process resurrection.
+        purged.push(agent.agentId);
+      }
+    }
+    return purged;
   }
 
   async listByParentSession(parentSessionId: string): Promise<AgentProcess[]> {
