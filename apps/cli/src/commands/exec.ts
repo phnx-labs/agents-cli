@@ -24,6 +24,7 @@ import { AGENTS, resolveAgentName, isAgentHardDeprecated, hardDeprecationError }
 import { recordDispatchedRun } from '../lib/audit/log.js';
 import { maybeShowStarNudge } from '../lib/star-nudge.js';
 import { warnUnpushedWork, shouldWarnUnpushed } from '../lib/warn-unpushed.js';
+import { warnOrphanedOpenPr } from '../lib/pr-land-detach.js';
 import { isHostPinned, pinHostKey, managedKnownHostsPath } from '../lib/devices/known-hosts.js';
 import { sshResolve, type SshGResult } from '../lib/hosts/ssh-config.js';
 import * as fs from 'fs';
@@ -2155,8 +2156,13 @@ export function registerRunCommand(program: Command): void {
           cwd: resumeExec.cwd ?? process.cwd(),
           exitCode: resumeExit,
         });
-        // A resumed loop is always headless; surface any commits it left unpushed.
-        if (shouldWarnUnpushed(resumeExec.mode ?? 'auto', false)) await warnUnpushedWork(resumeExec.cwd ?? process.cwd());
+        // A resumed loop is always headless; surface any commits it left unpushed
+        // and any open PR it left without a durable lander (RUSH-2394).
+        if (shouldWarnUnpushed(resumeExec.mode ?? 'auto', false)) {
+          const resumeCwd = resumeExec.cwd ?? process.cwd();
+          await warnUnpushedWork(resumeCwd);
+          await warnOrphanedOpenPr(resumeCwd);
+        }
         process.exit(resumeExit);
       }
 
@@ -3256,8 +3262,12 @@ export function registerRunCommand(program: Command): void {
           // Governance chokepoint (#347): the --acp path exits here, bypassing
           // the normal finalize below — record its one audit entry.
           recordDispatchedRun({ agent, version: defaultVersion ?? 'unknown', mode, cwd, exitCode });
-          // ACP headless run always has a prompt; surface any unpushed commits.
-          if (shouldWarnUnpushed(mode, false)) await warnUnpushedWork(cwd);
+          // ACP headless run always has a prompt; surface any unpushed commits
+          // and any open PR left without a durable lander (RUSH-2394).
+          if (shouldWarnUnpushed(mode, false)) {
+            await warnUnpushedWork(cwd);
+            await warnOrphanedOpenPr(cwd);
+          }
           process.exit(exitCode);
         } catch (err) {
           console.error(chalk.red(`ACP run failed for ${agent}: ${(err as Error).message}`));
@@ -3414,8 +3424,12 @@ export function registerRunCommand(program: Command): void {
           // the normal finalize below — record its one audit entry.
           const loopExit = loopExitCode(result.stoppedBy);
           recordDispatchedRun({ agent, version: defaultVersion ?? 'unknown', mode, cwd, exitCode: loopExit });
-          // A loop is always headless; surface any commits it left unpushed.
-          if (shouldWarnUnpushed(mode, false)) await warnUnpushedWork(cwd);
+          // A loop is always headless; surface any commits it left unpushed
+          // and any open PR left without a durable lander (RUSH-2394).
+          if (shouldWarnUnpushed(mode, false)) {
+            await warnUnpushedWork(cwd);
+            await warnOrphanedOpenPr(cwd);
+          }
           process.exit(loopExit);
         } catch (err) {
           cleanupWorkflowMcpConfig();
@@ -3460,11 +3474,14 @@ export function registerRunCommand(program: Command): void {
         cleanupWorkflowMcpConfig();
         cleanupWorkflowSubagents();
         // Surface committed-but-unpushed work a headless writable run left
-        // behind, so it isn't silently stranded in a worktree. Advisory only,
+        // behind, so it isn't silently stranded in a worktree. Also warn when
+        // the branch has an OPEN PR with no durable lander (RUSH-2394) — a
+        // background `gh pr checks --watch` dies with the agent. Advisory only,
         // never throws; skipped for interactive runs (the human sees the shell)
         // and read-only plan mode (can't commit).
         if (shouldWarnUnpushed(mode, resolveInteractive(execOptions))) {
           await warnUnpushedWork(cwd);
+          await warnOrphanedOpenPr(cwd);
         }
         // Governance chokepoint (#347): every dispatched run finalizes here.
         // ONE tamper-evident audit record per run — non-fatal by contract.
@@ -3480,6 +3497,7 @@ export function registerRunCommand(program: Command): void {
         // matters most — warn before exiting the error path too.
         if (shouldWarnUnpushed(mode, resolveInteractive(execOptions))) {
           await warnUnpushedWork(cwd);
+          await warnOrphanedOpenPr(cwd);
         }
         console.error(chalk.red(`Failed to execute ${agent}: ${(err as Error).message}`));
         process.exit(1);

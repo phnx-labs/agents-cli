@@ -5,6 +5,10 @@
  * review, then rebase-merges on green. Built on top of the pr-watch primitives
  * (`pollPrSnapshot`, `isFailedCheck`) to reuse check-state logic without
  * duplicating the polling, review parsing, or merge policy.
+ *
+ * `--detach` (RUSH-2394) spawns the lander in its own process group so it
+ * outlives a headless agent. Background `gh pr checks --watch` is NOT a valid
+ * substitute — that child dies when the agent exits and strands the PR.
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -17,6 +21,10 @@ import {
   isFailedCheck,
   type PrCheck,
 } from '../lib/teams/pr-watch.js';
+import {
+  spawnDetachedPrLand,
+  formatDetachResult,
+} from '../lib/pr-land-detach.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -187,6 +195,10 @@ export function registerPrCommands(program: Command): void {
       # Watch PR #1234 and merge when CI is green + review approved
       agents pr land 1234
 
+      # Detach so the lander outlives a headless agent (RUSH-2394 — prefer this
+      # over background \`gh pr checks --watch\`, which dies with the agent)
+      agents pr land 1234 --detach
+
       # Poll every 60 s instead of the default 30 s
       agents pr land 1234 --interval 60
 
@@ -201,7 +213,9 @@ export function registerPrCommands(program: Command): void {
       • Merges with --rebase only — no squash, no merge commit.
       • Non-author approval check uses the GitHub Reviews REST endpoint (REST, not GraphQL).
       • Fails loud on red CI or any merge conflict; never uses --admin or bypasses branch protection.
-      • One waiter per PR: do not run two \`pr land\` calls against the same PR concurrently.
+      • One waiter per PR: a second \`pr land --detach\` for the same PR reuses the live lander.
+      • --detach is the durable handoff for headless agents. A background \`gh pr checks --watch\`
+        is a child of the agent process and dies when the agent exits, stranding the PR (RUSH-2394).
     `,
   });
 
@@ -211,12 +225,18 @@ export function registerPrCommands(program: Command): void {
   pr.command('land <pr>')
     .description(
       'Watch a PR through CI and a non-author review, then rebase-merge on green. ' +
-      'Fails loud on red CI or conflict; never uses --admin.'
+      'Fails loud on red CI or conflict; never uses --admin. ' +
+      'Pass --detach to outlive a headless agent (RUSH-2394).'
     )
     .option('--interval <seconds>', 'Seconds between polls (default 30)', '30')
     .option('--max-polls <n>', 'Stop after this many polls without merging (0 = unlimited)', '0')
     .option('--no-delete-branch', 'Keep the PR branch after merge (default: delete)')
     .option('--skip-review', 'Merge as soon as CI is green, skipping the non-author review check')
+    .option(
+      '--detach',
+      'Spawn the lander in its own process group and return immediately. ' +
+      'Survives a headless agent exit — use this instead of background `gh pr checks --watch`.',
+    )
     .option('--json', 'Emit one JSON line per status event')
     .action(async (
       prArg: string,
@@ -225,14 +245,57 @@ export function registerPrCommands(program: Command): void {
         maxPolls: string;
         deleteBranch: boolean;
         skipReview?: boolean;
+        detach?: boolean;
         json?: boolean;
       }
     ) => {
-      const intervalMs = Math.max(5000, (Number.parseInt(opts.interval, 10) || 30) * 1000);
+      const intervalSec = Math.max(5, Number.parseInt(opts.interval, 10) || 30);
+      const intervalMs = intervalSec * 1000;
       const maxPolls = Math.max(0, Number.parseInt(opts.maxPolls, 10) || 0);
       const deleteBranch = opts.deleteBranch !== false;
       const skipReview = !!opts.skipReview;
       const json = !!opts.json;
+
+      // Durable handoff path (RUSH-2394): spawn a detached lander and exit.
+      // The child re-enters this command without --detach and runs the loop.
+      if (opts.detach) {
+        if (json) {
+          // Detach + --json is for machine callers that only need the pid/log.
+          try {
+            const result = spawnDetachedPrLand({
+              pr: prArg,
+              cwd: process.cwd(),
+              interval: intervalSec,
+              skipReview,
+              deleteBranch,
+            });
+            console.log(JSON.stringify({
+              type: result.reused ? 'already-running' : 'detached',
+              pr: prArg,
+              pid: result.pid,
+              logPath: result.logPath,
+              statePath: result.statePath,
+              timestamp: new Date().toISOString(),
+            }));
+            return;
+          } catch (err) {
+            die((err as Error).message);
+          }
+        }
+        try {
+          const result = spawnDetachedPrLand({
+            pr: prArg,
+            cwd: process.cwd(),
+            interval: intervalSec,
+            skipReview,
+            deleteBranch,
+          });
+          console.log(formatDetachResult(result, prArg));
+          return;
+        } catch (err) {
+          die((err as Error).message);
+        }
+      }
 
       const ts = () => new Date().toISOString().slice(11, 19);
 

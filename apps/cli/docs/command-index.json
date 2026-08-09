@@ -13950,14 +13950,14 @@
           "negate": false
         }
       ],
-      "examples": "# Watch PR #1234 and merge when CI is green + review approved\n      agents pr land 1234\n\n      # Poll every 60 s instead of the default 30 s\n      agents pr land 1234 --interval 60\n\n      # Merge as soon as CI is green (skip review check)\n      agents pr land 1234 --skip-review\n\n      # Keep the branch after merge\n      agents pr land 1234 --no-delete-branch",
-      "notes": "• Requires `gh` (GitHub CLI) authenticated for the target repo.\n      • Merges with --rebase only — no squash, no merge commit.\n      • Non-author approval check uses the GitHub Reviews REST endpoint (REST, not GraphQL).\n      • Fails loud on red CI or any merge conflict; never uses --admin or bypasses branch protection.\n      • One waiter per PR: do not run two `pr land` calls against the same PR concurrently.",
+      "examples": "# Watch PR #1234 and merge when CI is green + review approved\n      agents pr land 1234\n\n      # Detach so the lander outlives a headless agent (RUSH-2394 — prefer this\n      # over background `gh pr checks --watch`, which dies with the agent)\n      agents pr land 1234 --detach\n\n      # Poll every 60 s instead of the default 30 s\n      agents pr land 1234 --interval 60\n\n      # Merge as soon as CI is green (skip review check)\n      agents pr land 1234 --skip-review\n\n      # Keep the branch after merge\n      agents pr land 1234 --no-delete-branch",
+      "notes": "• Requires `gh` (GitHub CLI) authenticated for the target repo.\n      • Merges with --rebase only — no squash, no merge commit.\n      • Non-author approval check uses the GitHub Reviews REST endpoint (REST, not GraphQL).\n      • Fails loud on red CI or any merge conflict; never uses --admin or bypasses branch protection.\n      • One waiter per PR: a second `pr land --detach` for the same PR reuses the live lander.\n      • --detach is the durable handoff for headless agents. A background `gh pr checks --watch`\n        is a child of the agent process and dies when the agent exits, stranding the PR (RUSH-2394).",
       "subcommands": [
         {
           "name": "land",
           "path": "pr land",
           "aliases": [],
-          "description": "Watch a PR through CI and a non-author review, then rebase-merge on green. Fails loud on red CI or conflict; never uses --admin.",
+          "description": "Watch a PR through CI and a non-author review, then rebase-merge on green. Fails loud on red CI or conflict; never uses --admin. Pass --detach to outlive a headless agent (RUSH-2394).",
           "args": [
             {
               "name": "pr",
@@ -14000,6 +14000,15 @@
               "flags": "--skip-review",
               "description": "Merge as soon as CI is green, skipping the non-author review check",
               "long": "--skip-review",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--detach",
+              "description": "Spawn the lander in its own process group and return immediately. Survives a headless agent exit — use this instead of background `gh pr checks --watch`.",
+              "long": "--detach",
               "required": false,
               "optional": false,
               "variadic": false,

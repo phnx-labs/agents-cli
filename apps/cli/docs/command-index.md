@@ -579,7 +579,7 @@ agents plugins update [name]                  Re-pull a plugin from its original
 
 ```
 agents pr            Standalone PR lifecycle commands (land, …).
-agents pr land <pr>  Watch a PR through CI and a non-author review, then rebase-merge on green. Fails loud on red CI or conflict; never uses --admin.
+agents pr land <pr>  Watch a PR through CI and a non-author review, then rebase-merge on green. Fails loud on red CI or conflict; never uses --admin. Pass --detach to outlive a headless agent (RUSH-2394).
 ```
 
 ## profile — Activate top-level resource profiles across commands, skills, hooks, rules, MCP, permissions, and secrets.
