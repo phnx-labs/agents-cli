@@ -7389,7 +7389,7 @@
         },
         {
           "flags": "--fix",
-          "description": "Heal gaps: install missing resources, repair invalid plugin manifests, refresh stale plugins, and reconcile drift (all installed versions, or just the target)",
+          "description": "Heal gaps: install missing resources, repair invalid plugin manifests, refresh stale plugins, reconcile drift, and purge stale/legacy agents-cli installs (npx-cache, pre-1.22.30, unsafe helper installer) when a fixed peer exists",
           "long": "--fix",
           "required": false,
           "optional": false,
