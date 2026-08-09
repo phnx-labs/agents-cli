@@ -356,4 +356,30 @@ describe('updateWorker', () => {
     expect(result).toEqual({ templateHash: currentHash, skipped: false });
     expect(seen).toHaveLength(2);
   });
+
+  it('when the secret re-apply fails after a successful deploy, fails loud with a re-run hint (RUSH-2453)', async () => {
+    // Script upload succeeds; Secrets API then throws (network blip, expired API
+    // token, rate limit). The live Worker now has no WRITE_TOKEN, so every
+    // publish/delete 401s until a re-run of `agents share update` completes both
+    // steps. The error must say that — not just the raw Cloudflare body.
+    const seen: CloudflareRequest[] = [];
+    await expect(
+      updateWorker('cf-token', 'acct_1', 'worker-one', 'bucket-one', script, 'tok', undefined, {
+        request: async (req) => {
+          seen.push(req);
+          if (req.pathname.endsWith('/secrets')) {
+            throw new Error('Cloudflare API 429: rate limited');
+          }
+          return {};
+        },
+      }),
+    ).rejects.toThrow(
+      /Worker deployed but the write token failed to re-apply — re-run `agents share update`/,
+    );
+    // Both calls still ran: the deploy landed, then the secret attempt failed.
+    expect(seen.map((r) => r.pathname)).toEqual([
+      '/accounts/acct_1/workers/scripts/worker-one',
+      '/accounts/acct_1/workers/scripts/worker-one/secrets',
+    ]);
+  });
 });

@@ -285,6 +285,40 @@ describe('runShareUpdate', () => {
     expect(result.updated).toBe(false);
     expect(second).toEqual([]);
   });
+
+  it('does not persist templateHash when the secret re-apply fails mid-update (RUSH-2453 self-heal pin)', async () => {
+    // writeShareConfig runs only after updateWorker returns successfully. If the
+    // second call (setWorkerSecret) throws after the deploy already landed, the
+    // on-disk hash must stay stale so a plain re-run of `agents share update`
+    // does not short-circuit on a matching hash and leaves the broken endpoint
+    // unfixed. This is the recovery property the error message above depends on.
+    const { share, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.test',
+      accountId: 'acct_1',
+      workerName: 'worker-one',
+      bucketName: 'bucket-one',
+      templateHash: 'pre-update-stale-hash',
+    });
+    config.storeWriteToken('tok');
+
+    await expect(
+      share.runShareUpdate({
+        token: 'cf-token',
+        request: async (req) => {
+          if (req.pathname.endsWith('/secrets')) {
+            throw new Error('Cloudflare API 503: secrets unavailable');
+          }
+          return {};
+        },
+      }),
+    ).rejects.toThrow(/Worker deployed but the write token failed to re-apply/);
+
+    // Config must NOT have been rewritten with the new template hash — the stale
+    // hash is what makes the next `agents share update` re-deploy instead of
+    // no-op'ing as "already matches".
+    expect(config.readShareConfig()?.templateHash).toBe('pre-update-stale-hash');
+  });
 });
 
 describe('shareTemplateStatus', () => {

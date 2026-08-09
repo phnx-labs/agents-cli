@@ -113,6 +113,13 @@ every upload; `update` re-applies the existing `WRITE_TOKEN` via the Secrets API
 immediately after the script upload so it survives (see `updateWorker` in
 `lib/share/provision.ts` for the full reasoning and links to Cloudflare's docs).
 
+If the script upload succeeds but the secret re-apply then fails (network blip, expired
+API token, rate limit), the live Worker has **no write token** — every publish and
+delete 401s until the failure is healed. The error names that state and tells you to
+re-run `agents share update`. Config is only rewritten after *both* steps succeed, so
+a plain re-run does not short-circuit on a matching hash and will re-deploy + re-set
+the secret.
+
 ## Where things live
 
 ```

@@ -229,7 +229,18 @@ export async function updateWorker(
     return { templateHash, skipped: true };
   }
   await deployWorker(apiToken, accountId, workerName, script, bucketName, opts);
-  await setWorkerSecret(apiToken, accountId, workerName, writeToken, opts);
+  // Script upload clears bindings/secrets (see JSDoc above). If re-applying
+  // WRITE_TOKEN fails here, the live Worker has no write token — every
+  // `agents share` publish/delete 401s until a re-run of `agents share update`
+  // completes both steps. Surface that explicitly instead of the raw CF error.
+  try {
+    await setWorkerSecret(apiToken, accountId, workerName, writeToken, opts);
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `Worker deployed but the write token failed to re-apply — re-run \`agents share update\` to fix this before publishing/deleting anything. (${detail})`,
+    );
+  }
   return { templateHash, skipped: false };
 }
 
