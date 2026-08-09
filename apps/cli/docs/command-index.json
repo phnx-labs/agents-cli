@@ -25152,9 +25152,36 @@
         },
         {
           "flags": "--expire <spec>",
-          "description": "auto-expire, e.g. 30d, 12h, or 2026-08-01",
+          "description": "auto-expire (default 30d). e.g. 12h, 30d, 2026-08-01, or 'never'",
           "long": "--expire",
           "required": true,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--unlisted",
+          "description": "hide from the public gallery and `agents share list` (direct URL still works)",
+          "long": "--unlisted",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--private",
+          "description": "alias of --unlisted",
+          "long": "--private",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--force",
+          "description": "publish even when the file contains emails or credential-shaped strings",
+          "long": "--force",
+          "required": false,
           "optional": false,
           "variadic": false,
           "negate": false
@@ -25197,8 +25224,8 @@
           "negate": false
         }
       ],
-      "examples": "# Publish an HTML file — gets an auto OG cover + a shareable link\n      agents share ./out/plan.html\n\n      # Custom slug, expiring in 30 days\n      agents share ./out/report.html --slug q3-report --expire 30d\n\n      # Delete by full URL — also takes down the sibling OG cover\n      agents share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists\n\n      # One-time setup (or join an existing endpoint)\n      agents share setup\n      agents share join https://share.agents-cli.sh\n\n      # Push a worker-template.ts change out to an already-provisioned endpoint\n      agents share update",
-      "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  agents share delete === agents unshare (same command, different name).",
+      "examples": "# Publish an HTML file — auto OG cover, default 30d expiry, shareable link\n      agents share ./out/plan.html\n\n      # Hide from the public gallery (direct URL still works) and expire sooner\n      agents share ./out/report.html --unlisted --expire 12h\n\n      # Permanent public page (opt out of the default 30d expiry)\n      agents share ./out/landing.html --slug landing --expire never\n\n      # Custom slug, expiring in 7 days\n      agents share ./out/report.html --slug q3-report --expire 7d\n\n      # Delete by full URL — also takes down the sibling OG cover\n      agents share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists\n\n      # One-time setup (or join an existing endpoint)\n      agents share setup\n      agents share join https://share.agents-cli.sh\n\n      # Push a worker-template.ts change out to an already-provisioned endpoint\n      agents share update",
+      "notes": "Default expiry is 30d so an accidental publish decays. Pass --expire never for\n  a permanent link. --unlisted / --private hides the page from the public gallery\n  and agents share list; the direct URL is still world-readable (unlisted, not\n  secret). A pre-publish scan refuses emails and credential-shaped strings\n  unless --force is passed.\n\n  A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  agents share delete === agents unshare (same command, different name).",
       "subcommands": [
         {
           "name": "analytics",
