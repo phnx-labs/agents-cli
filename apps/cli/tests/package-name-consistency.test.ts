@@ -36,18 +36,20 @@ describe('package-name consistency (@phnx-labs canonical)', () => {
     expect(pkg.bugs?.url ?? '').not.toContain('github.com/companion');
   });
 
-  it('src/index.ts never references the old @companion npm scope', () => {
-    const src = read('src/index.ts');
-    expect(src).not.toContain('@companion/agents-cli');
+  it('slim index.ts and bootstrap never reference the old @companion npm scope', () => {
+    // RUSH-2335: index.ts is the leaf shell; bootstrap.ts holds upgrade/version URLs.
+    expect(read('src/index.ts')).not.toContain('@companion/agents-cli');
+    expect(read('src/bootstrap.ts')).not.toContain('@companion/agents-cli');
   });
 
   it('upgrade installs are built from the canonical package constant', () => {
-    // The npm install itself lives in src/lib/self-update.ts; index.ts resolves
-    // the package to install from the shared NPM_PACKAGE_NAME constant.
+    // The npm install itself lives in src/lib/self-update.ts; bootstrap.ts
+    // (loaded after the argv fast paths) resolves the package to install from
+    // the shared NPM_PACKAGE_NAME constant.
     const selfUpdate = read('src/lib/self-update.ts');
     expect(selfUpdate).toContain(`export const NPM_PACKAGE_NAME = '${NPM_PACKAGE}';`);
     expect(selfUpdate).not.toContain('@companion');
-    const src = read('src/index.ts');
+    const src = read('src/bootstrap.ts');
     // The upgrade resolves the canonical package's registry metadata (version +
     // integrity + tarball) from the shared constant, then downloads and
     // integrity-verifies that tarball before installing the local .tgz.
@@ -56,8 +58,9 @@ describe('package-name consistency (@phnx-labs canonical)', () => {
     expect(src).toContain('downloadVerifiedTarball(metadata.tarball, metadata.integrity)');
   });
 
-  it('src/index.ts version-check URLs target the canonical package', () => {
-    const src = read('src/index.ts');
+  it('bootstrap.ts version-check URLs target the canonical package', () => {
+    // RUSH-2335 moved the update-check body out of the slim index shell.
+    const src = read('src/bootstrap.ts');
     expect(src).toContain(`unpkg.com/${NPM_PACKAGE}`);
     expect(src).toContain(`registry.npmjs.org/${NPM_PACKAGE}/latest`);
     expect(src).not.toContain('unpkg.com/@companion/agents-cli');

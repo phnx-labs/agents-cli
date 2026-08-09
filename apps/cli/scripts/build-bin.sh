@@ -35,18 +35,21 @@ const buildDir = process.env.BUILD_DIR;
 const version = process.env.VERSION;
 if (!buildDir || !version) throw new Error('BUILD_DIR and VERSION are required');
 
-const indexPath = path.join(buildDir, 'src', 'index.ts');
-let index = fs.readFileSync(indexPath, 'utf8');
+// VERSION lives in bootstrap.ts (RUSH-2335 split-entry). The slim index.ts
+// shell never reads package.json; stamp the constant into the bootstrap body
+// so the compiled binary does not need a package.json next to it.
+const bootstrapPath = path.join(buildDir, 'src', 'bootstrap.ts');
+let bootstrap = fs.readFileSync(bootstrapPath, 'utf8');
 const versionBlock = [
   "const packageJsonPath = path.join(__dirname, '..', 'package.json');",
   "const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));",
   "const VERSION = packageJson.version;",
 ].join('\n');
-if (!index.includes(versionBlock)) {
-  throw new Error('src/index.ts version block changed; update scripts/build-bin.sh');
+if (!bootstrap.includes(versionBlock)) {
+  throw new Error('src/bootstrap.ts version block changed; update scripts/build-bin.sh');
 }
-index = index.replace(versionBlock, `const VERSION = ${JSON.stringify(version)};`);
-fs.writeFileSync(indexPath, index);
+bootstrap = bootstrap.replace(versionBlock, `const VERSION = ${JSON.stringify(version)};`);
+fs.writeFileSync(bootstrapPath, bootstrap);
 
 NODE
 
