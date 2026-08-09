@@ -217,6 +217,51 @@ agents computer type-text --bundle <id> --text "..." --require-frontmost
 | `trust` | `granted` or `denied` from a live `trust_status` RPC call |
 | `pid` | Helper process PID (when trust is probed successfully) |
 
+### History and discovery
+
+| Command | Description |
+|---------|-------------|
+| `agents computer sessions` | Browse computer-driving history, grouped by run. `agents sessions --computer` is the same view. |
+
+`agents computer sessions` flags: `--machine <name>` (only rows on/driving a
+matching hostname, machineId, or `--host` device), `--limit <n>` (cap the flat
+table at this many rows — default 50; the interactive picker and `--json` are
+unbounded), `--json`, `--no-interactive`.
+
+There is no capture directory the way `agents browser sessions` has one per
+task — a computer action drives a live GUI in place and leaves no file behind.
+The durable source is the `computer.action` event every verb already writes
+(`~/.agents/.history/events/`, 7-day/50 MiB default retention, same as any
+other audit event), and each row is every action sharing one CLI process's
+pid: a single explicit verb (e.g. `agents computer click ...`) is a one-action
+row, and a whole `agents computer run --task "..."` loop collapses to one row
+holding every verb the model drove, labeled with the (truncated) task text.
+
+On a real terminal (no `--json`/`--no-interactive`), `sessions` opens an
+interactive, **task-first** browser: one row per run, newest first, showing
+machine, target app/window bundle when known, action counts by verb, and —
+when the run's session identity resolves — the owning agent session. A run
+whose CLI process carried a real `AGENT_SESSION_ID`/`AGENT_LAUNCH_ID` links
+directly to that session's canonical digest (prompt, changes, tests, last
+response); one that carried an identity nothing on this machine can index
+shows **unresolved**; a bare terminal invocation with no agent session env at
+all shows **unlinked** — its actions are still listed, there's just no session
+to attribute them to. Search matches task text, machine, target bundle, the
+linked session's agent/topic, or a driven verb; `enter` prints the
+highlighted run's full action list (there's nothing to open — no artifact
+exists per action) and the picker keeps browsing. `--no-interactive` prints
+the flat per-run table instead — the stable, scriptable surface `--json` also
+uses.
+
+**Retention and privacy.** Nothing here adds a second retention policy —
+`agents computer sessions` reads the same bounded, auto-pruned event ledger
+every other `agents <cmd>` audit event already lands in. Nothing sensitive is
+persisted: `type`/`type-text` actions already record only the typed length,
+never the text; a `run --task` description is the agent's own instruction
+(the same class of content `agents sessions` already stores as a session
+prompt), kept but bounded to 200 characters before it is ever written — never
+the full text.
+
 ## Remote Windows (`--host`)
 
 Every verb takes `--host <device>` to drive a Windows machine registered with

@@ -35,6 +35,9 @@ import { registerActionCommands, withClient, unwrap, pickTarget, emitComputerAct
 import { runComputerLoop, type LoopEvent } from '../lib/computer/loop.js';
 import { makeVerbDispatcher } from '../lib/computer/dispatch.js';
 import { makeClaudeResponder, resolveApiKey, DEFAULT_CLAUDE_MODEL, DEFAULT_CLAUDE_BASE_URL } from '../lib/computer/model.js';
+import { TASK_PREVIEW_MAX_CHARS } from '../lib/computer/sessions-list.js';
+import { runComputerSessionsCommand } from './computer-sessions-picker.js';
+import { truncate } from '../lib/events.js';
 
 // Help groups — mirror `agents browser` so the mental model carries over.
 const COMPUTER_HELP_GROUPS = [
@@ -43,6 +46,7 @@ const COMPUTER_HELP_GROUPS = [
   { title: 'Autonomous', names: ['run'] },
   { title: 'Observe', names: ['apps', 'describe', 'screenshot', 'get-text'] },
   { title: 'Interact', names: ['launch', 'raise', 'click', 'right-click', 'type', 'type-text', 'key', 'drag', 'scroll', 'ax-action', 'focus', 'wait'] },
+  { title: 'History and discovery', names: ['sessions'] },
 ] as const;
 
 // Subcommands that manage the `--host` remote path themselves (provisioning /
@@ -138,6 +142,7 @@ export function registerComputerSubcommands(program: Command): void {
   registerRunCommand(program);
   registerScreenshotCommand(program);
   registerActionCommands(program);
+  registerSessionsCommand(program);
   registerCommandGroups(program, COMPUTER_HELP_GROUPS);
 }
 
@@ -347,6 +352,8 @@ function registerRunCommand(program: Command): void {
         maxTokens: opts.maxTokens,
       });
 
+      emitComputerRunTaskMarker({ task: opts.task, bundle: opts.bundle, host: opts.host });
+
       await withClient(async (client) => {
         const dispatch = makeVerbDispatcher(client, { host: opts.host });
         const targetInput = opts.bundle ? { bundle: opts.bundle } : {};
@@ -371,6 +378,39 @@ function registerRunCommand(program: Command): void {
         }
       });
     });
+}
+
+// sessions — task-first history over the computer.action event ledger (RUSH-2432),
+// the computer counterpart of `agents browser sessions` (RUSH-2407). `agents
+// sessions --computer` (sessions.ts) routes to the same runComputerSessionsCommand.
+function registerSessionsCommand(program: Command): void {
+  program
+    .command('sessions')
+    .description('Browse computer-driving history, grouped by run — one row per `agents computer` invocation')
+    .option('--machine <name>', 'Only rows invoked from/driving this machine (hostname, machineId, or --host device)')
+    .option('--limit <n>', 'Cap the flat/--no-interactive table at this many rows (default 50; --json is unbounded)', (v) => parseInt(v, 10))
+    .option('--json', 'Emit machine-readable JSON')
+    .option('--no-interactive', 'Print the flat listing instead of opening the interactive run browser')
+    .action(async (opts: { machine?: string; limit?: number; json?: boolean; interactive?: boolean }) => {
+      await runComputerSessionsCommand({ machine: opts.machine, limit: opts.limit, json: opts.json, interactive: opts.interactive });
+    });
+}
+
+/**
+ * Emit a `computer.action` marker for `computer run`'s whole loop process, so
+ * `agents computer sessions` groups every verb the loop drives under one
+ * task-labeled row instead of a bare pid with no task text (see
+ * lib/computer/sessions-list.ts's "Grouping key" docblock note). The task
+ * text is bounded to `TASK_PREVIEW_MAX_CHARS` — never the full unbounded
+ * `--task` string — matching that module's retention/privacy note. Exported
+ * so the truncation behavior is directly unit-testable against the real
+ * event ledger, the same seam `computer-actions.test.ts` already uses for
+ * `emitComputerAction`.
+ */
+export function emitComputerRunTaskMarker(opts: { task: string; bundle?: string; host?: string }): void {
+  emitComputerAction('run', undefined, { bundle: opts.bundle, host: opts.host }, {
+    task: truncate(opts.task, TASK_PREVIEW_MAX_CHARS),
+  });
 }
 
 // Fold the target bundle into the task text so the model biases toward it.

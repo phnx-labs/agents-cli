@@ -44,6 +44,7 @@ import {
   planFeedBroadcast,
   runFeedBroadcast,
   effectiveBroadcastConfig,
+  withDesktopNotify,
   blockBroadcastContext,
   blockDeliveryFailure,
   type FeedPostLevel,
@@ -95,6 +96,7 @@ interface PostCliOpts {
   blocked?: boolean;
   option?: string[];
   default?: string;
+  notify?: boolean;
   json?: boolean;
 }
 
@@ -108,6 +110,10 @@ Examples:
 
   # Worth interrupting someone over - reaches sinks gated on minLevel: important:
   agents feed post --title "npm token expired" "Cannot publish the release" --level important
+
+  # Also raise a local desktop banner on THIS machine (same notifier as run
+  # --notify), on top of any configured broadcast - useful when you are at the box:
+  agents feed post --title "Build green" "all checks passed" --notify
 
   # Stuck: opens a needs-you block and always broadcasts at important:
   agents feed post --title "Force-push denied" "git-guard blocked PR #1749" --blocked
@@ -447,6 +453,7 @@ export function registerFeedCommand(program: Command): void {
     .option('--blocked', 'You are STUCK and need the user. Opens an answerable block and always broadcasts at important - do not also pass --level.')
     .option('--option <label...>', 'With --blocked: an answer the user can pick; repeatable')
     .option('--default <answer>', 'With --blocked: a safe default policy may apply if nobody answers in time')
+    .option('--notify', 'Also raise a local desktop banner on THIS machine (the same notifier as `run --notify`), on top of any configured broadcast. Fires at any level.')
     .option('--json', 'Emit the written event as JSON')
     .addHelpText('after', FEED_POST_HELP)
     .action(async (
@@ -465,6 +472,7 @@ export function registerFeedCommand(program: Command): void {
         blocked: Boolean(opts?.blocked ?? cmd?.opts?.()?.blocked),
         option: opts?.option ?? cmd?.opts?.()?.option,
         default: opts?.default ?? cmd?.opts?.()?.default,
+        notify: Boolean(opts?.notify ?? cmd?.opts?.()?.notify),
         json: Boolean(opts?.json ?? cmd?.opts?.()?.json ?? cmd?.parent?.opts?.()?.json),
       };
       try {
@@ -521,9 +529,9 @@ export function registerFeedCommand(program: Command): void {
             agent: event.agent,
             title: event.title,
             body: event.detail,
-          }, meta);
+          }, meta, flags.notify);
         } else {
-          outcomes = await broadcastPostedEvent(event, level, meta);
+          outcomes = await broadcastPostedEvent(event, level, meta, flags.notify);
         }
 
         // Fail loud when a block reached nobody. This is computed BEFORE the
@@ -849,8 +857,15 @@ function registerFeedObserveAliases(program: Command): void {
  * and the delivery are pinned to one config snapshot, and so this is testable
  * against a real in-memory `Meta` without touching `~/.agents/agents.yaml`.
  */
-async function broadcastPostedEvent(event: ActivityEvent, level: FeedPostLevel, meta: Meta): Promise<SinkOutcome[]> {
-  const config = effectiveBroadcastConfig(meta.feed?.broadcast, level, meta);
+async function broadcastPostedEvent(
+  event: ActivityEvent,
+  level: FeedPostLevel,
+  meta: Meta,
+  notify = false,
+): Promise<SinkOutcome[]> {
+  // `--notify` adds a local desktop banner on top of the configured sinks; it
+  // fires even for a milestone post that no configured sink would broadcast.
+  const config = withDesktopNotify(effectiveBroadcastConfig(meta.feed?.broadcast, level, meta), notify);
   if (!config) return [];
   const ticket = getSessionById(event.sessionId)?.ticketId;
   const planned = planFeedBroadcast(config, {
@@ -882,8 +897,9 @@ async function broadcastBlock(
   block: OpenBlock,
   extras: { project?: string; agent?: string; title?: string; body?: string },
   meta: Meta,
+  notify = false,
 ): Promise<SinkOutcome[]> {
-  const config = effectiveBroadcastConfig(meta.feed?.broadcast, 'important', meta);
+  const config = withDesktopNotify(effectiveBroadcastConfig(meta.feed?.broadcast, 'important', meta), notify);
   if (!config) return [];
   const ticket = getSessionById(block.sessionId)?.ticketId;
   const ctx = blockBroadcastContext({ ...block, ticket: block.ticket ?? ticket }, extras);

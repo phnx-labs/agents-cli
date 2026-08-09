@@ -36,6 +36,12 @@ export interface ImportableSecret {
   itemTitle: string;
   fieldLabel: string;
   value: string;
+  /**
+   * The item's free-form notes (1Password's `notesPlain` / any NOTES-purpose
+   * field), carried as descriptive metadata for the imported secret. Never the
+   * secret value — omitted when the item has no notes.
+   */
+  description?: string;
 }
 
 export interface SkippedField {
@@ -129,6 +135,7 @@ const IMPORTABLE_FIELD_TYPES = new Set([
   'URL', 'url',
 ]);
 const SKIP_FIELD_LABELS = new Set(['username', 'notesPlain', 'notes']);
+const NOTES_FIELD_LABELS = new Set(['notesplain', 'notes']);
 
 function pickBestField(fields: OpField[]): OpField | null {
   const dominated = fields.filter(
@@ -152,6 +159,62 @@ function pickBestField(fields: OpField[]): OpField | null {
   return dominated[0];
 }
 
+/**
+ * The item's notes, if any — a NOTES-purpose field (1Password's `notesPlain`)
+ * or a field labelled notes/notesPlain, whichever carries a non-empty value.
+ * Returns undefined when the item has no notes. This is descriptive metadata
+ * only; it is deliberately independent of value selection and is never picked
+ * as the secret value (see SKIP_FIELD_LABELS / pickBestField).
+ */
+function pickNotes(fields: OpField[]): string | undefined {
+  const notes = fields.find(
+    (f) =>
+      f.value != null &&
+      f.value.trim() !== '' &&
+      (f.purpose?.toUpperCase() === 'NOTES' ||
+        NOTES_FIELD_LABELS.has(f.label?.toLowerCase() || ''))
+  );
+  const value = notes?.value?.trim();
+  return value ? value : undefined;
+}
+
+/**
+ * Pure transform from a fetched 1Password item to an importable secret (or the
+ * reason it was skipped). Split out of extractSecrets so the field-selection
+ * and notes-extraction logic is exercised directly by tests without shelling
+ * out to `op`.
+ */
+export function itemToSecret(
+  item: OpItem
+): { secret: ImportableSecret } | { skipped: SkippedField } {
+  const field = pickBestField(item.fields || []);
+
+  if (!field) {
+    return { skipped: { itemTitle: item.title, fieldLabel: '*', reason: 'no importable fields' } };
+  }
+
+  if (field.value!.includes('\n')) {
+    return {
+      skipped: {
+        itemTitle: item.title,
+        fieldLabel: field.label,
+        reason: 'contains newlines (keychain limitation)',
+      },
+    };
+  }
+
+  const secret: ImportableSecret = {
+    envKey: toEnvKey(item.title),
+    itemTitle: item.title,
+    fieldLabel: field.label,
+    value: field.value!,
+  };
+  const description = pickNotes(item.fields || []);
+  if (description) secret.description = description;
+
+  return { secret };
+}
+
 export function extractSecrets(
   items: OpItemSummary[],
   vaultName: string
@@ -172,33 +235,12 @@ export function extractSecrets(
       continue;
     }
 
-    const field = pickBestField(item.fields || []);
-
-    if (!field) {
-      skipped.push({
-        itemTitle: item.title,
-        fieldLabel: '*',
-        reason: 'no importable fields',
-      });
-      continue;
+    const result = itemToSecret(item);
+    if ('skipped' in result) {
+      skipped.push(result.skipped);
+    } else {
+      secrets.push(result.secret);
     }
-
-    if (field.value!.includes('\n')) {
-      skipped.push({
-        itemTitle: item.title,
-        fieldLabel: field.label,
-        reason: 'contains newlines (keychain limitation)',
-      });
-      continue;
-    }
-
-    const envKey = toEnvKey(item.title);
-    secrets.push({
-      envKey,
-      itemTitle: item.title,
-      fieldLabel: field.label,
-      value: field.value!,
-    });
   }
 
   return { secrets, skipped };

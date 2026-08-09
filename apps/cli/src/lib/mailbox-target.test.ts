@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { resolveMessageTarget, mailboxIdForActiveSession } from './mailbox-target.js';
+import { resolveMessageTarget, mailboxIdForActiveSession, decideHostTaskRoute } from './mailbox-target.js';
 import type { ActiveSession } from './session/active.js';
+import type { HostTask } from './hosts/tasks.js';
 
 /** Minimal live-session builder (only the fields the resolver reads). */
 function mk(over: Partial<ActiveSession>): ActiveSession {
@@ -8,6 +9,22 @@ function mk(over: Partial<ActiveSession>): ActiveSession {
 }
 
 const noCloud = () => false;
+
+/** Minimal HostTask builder (only the fields decideHostTaskRoute reads). */
+function mkTask(over: Partial<HostTask>): HostTask {
+  return {
+    id: 'task-1',
+    host: 'yosemite-s0',
+    target: 'yosemite-s0.tail1a85a1.ts.net',
+    agent: 'claude',
+    prompt: 'do a thing',
+    remoteLog: '$HOME/.agents/.cache/hosts/aaaa.log',
+    remoteExit: '$HOME/.agents/.cache/hosts/aaaa.exit',
+    status: 'running',
+    createdAt: new Date().toISOString(),
+    ...over,
+  };
+}
 
 describe('resolveMessageTarget', () => {
   it('routes a cloud task id to the cloud path (checked first)', () => {
@@ -85,5 +102,62 @@ describe('resolveMessageTarget', () => {
     const sessions = [mk({ sessionId: 'aaaa' }), mk({ sessionId: 'aaaa-longer' })];
     // 'aaaa' is an exact id of the first AND a prefix of the second — exact wins.
     expect(resolveMessageTarget('aaaa', sessions, noCloud)).toEqual({ kind: 'local', id: 'aaaa' });
+  });
+});
+
+// RUSH-2366 follow-up: `agents message` could not reach a detached
+// `agents run --device <host> --no-follow` dispatch — resolveMessageTarget
+// returns 'none' because getActiveSessions() has no visibility into it, even
+// though `agents hosts ps` shows the same dispatch running with a live pid.
+describe('decideHostTaskRoute', () => {
+  it('returns not-found when no host task matches the target', () => {
+    expect(decideHostTaskRoute(null, 'nope')).toEqual({ kind: 'not-found' });
+  });
+
+  it('reroutes to the owning host, preferring the remote session id over the typed target', () => {
+    const task = mkTask({ status: 'running', host: 'yosemite-s0', sessionId: 'claude-session-uuid' });
+    expect(decideHostTaskRoute(task, 'my-dispatch-name')).toEqual({
+      kind: 'reroute',
+      remoteRef: 'claude-session-uuid',
+      host: 'yosemite-s0',
+    });
+  });
+
+  it('falls back to the --name handle when no session id was captured yet', () => {
+    const task = mkTask({ status: 'running', host: 'yosemite-s0', sessionId: undefined, name: 'nightly-audit' });
+    expect(decideHostTaskRoute(task, 'nightly-audit')).toEqual({
+      kind: 'reroute',
+      remoteRef: 'nightly-audit',
+      host: 'yosemite-s0',
+    });
+  });
+
+  it('falls back to the typed target itself when neither a session id nor a name exist', () => {
+    const task = mkTask({ status: 'running', host: 'yosemite-s0', sessionId: undefined, name: undefined });
+    expect(decideHostTaskRoute(task, 'raw-dispatch-id')).toEqual({
+      kind: 'reroute',
+      remoteRef: 'raw-dispatch-id',
+      host: 'yosemite-s0',
+    });
+  });
+
+  it('reports a finished task rather than silently rerouting to a dead dispatch', () => {
+    const task = mkTask({ status: 'completed', host: 'yosemite-s0', exitCode: 0 });
+    expect(decideHostTaskRoute(task, 'x')).toEqual({
+      kind: 'finished',
+      host: 'yosemite-s0',
+      status: 'completed',
+      exitCode: 0,
+    });
+  });
+
+  it('reports a failed task with its exit code', () => {
+    const task = mkTask({ status: 'failed', host: 'yosemite-s0', exitCode: 1 });
+    expect(decideHostTaskRoute(task, 'x')).toEqual({
+      kind: 'finished',
+      host: 'yosemite-s0',
+      status: 'failed',
+      exitCode: 1,
+    });
   });
 });

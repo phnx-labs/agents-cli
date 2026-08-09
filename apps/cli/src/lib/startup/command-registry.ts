@@ -19,6 +19,9 @@
  * `cleanup` subcommand to it), in that order — see commands/prune.ts.
  */
 import { Command } from 'commander';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { configureRootCommand } from './root-command.js';
 
 /** A function that registers one or more commands onto the root program. */
 export type Registrar = (program: Command) => void;
@@ -105,6 +108,7 @@ export const loadPush: ModuleLoader = async () => (await import('../../commands/
 export const loadRepo: ModuleLoader = async () => (await import('../../commands/repo.js')).registerRepoCommands;
 export const loadSetup: ModuleLoader = async () => (await import('../../commands/setup.js')).registerSetupCommand;
 export const loadUninstall: ModuleLoader = async () => (await import('../../commands/uninstall.js')).registerUninstallCommands;
+export const loadUpgrade: ModuleLoader = async () => (await import('../../commands/upgrade.js')).registerUpgradeCommand;
 export const loadSessions: ModuleLoader = async () => (await import('../../commands/sessions.js')).registerSessionsCommands;
 export const loadTeams: ModuleLoader = async () => (await import('../../commands/teams.js')).registerTeamsCommands;
 export const loadCloud: ModuleLoader = async () => (await import('../../commands/cloud.js')).registerCloudCommands;
@@ -120,6 +124,7 @@ export const loadFunnel: ModuleLoader = async () => (await import('../../command
 export const loadHumans: ModuleLoader = async () => (await import('../../commands/humans.js')).registerHumansCommands;
 export const loadAccounts: ModuleLoader = async () => (await import('../../commands/accounts.js')).registerAccountsCommand;
 export const loadDaemon: ModuleLoader = async () => (await import('../../commands/daemon.js')).registerDaemonCommand;
+export const loadPr: ModuleLoader = async () => (await import('../../commands/pr.js')).registerPrCommands;
 
 /**
  * Commands whose modules pull in the SQLite-backed session/cloud stack. They are
@@ -256,6 +261,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   repo: [loadRepo],
   setup: [loadSetup],
   uninstall: [loadUninstall],
+  upgrade: [loadUpgrade],
   sessions: [loadSessions],
   // Observe-umbrella alias of sessions --active (same lazy module).
   roster: [loadSessions],
@@ -272,17 +278,21 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   mailbox: [loadMailboxes],
   serve: [loadServe],
   share: [loadShare],
+  // `unshare` is a top-level convenience alias of `share delete` (see
+  // commands/share.ts) — same module, registered as its own program.command().
+  unshare: [loadShare],
   audit: [loadAudit],
   webhook: [loadWebhook],
   funnel: [loadFunnel],
   humans: [loadHumans],
   daemon: [loadDaemon],
+  pr: [loadPr],
 };
 
 /**
  * Top-level names that {@link COMMAND_LOADERS} does not carry because they are
  * registered inline in src/index.ts — closures over entry-point state (the
- * deprecated aliases and tombstones) plus the internal/upgrade commands. They are
+ * deprecated aliases and tombstones) plus the internal command. They are
  * real commands, so anything that asks "does this command exist?" must count them.
  */
 const INLINE_COMMAND_NAMES = [
@@ -294,7 +304,6 @@ const INLINE_COMMAND_NAMES = [
   'resources', // tombstone -> view --merged
   'hq', // tombstone
   '_internal',
-  'upgrade',
 ] as const;
 
 /**
@@ -331,7 +340,8 @@ export function isKnownTopLevelCommand(name: string): boolean {
  * are closures over entry-point state that src/index.ts registers directly.
  */
 export async function buildFullCommandTree(): Promise<Command> {
-  const program = new Command();
+  const packageJson = JSON.parse(readFileSync(fileURLToPath(new URL('../../../package.json', import.meta.url)), 'utf8')) as { version: string };
+  const program = configureRootCommand(new Command(), 'agents', packageJson.version);
   const done = new Set<ModuleLoader>();
   for (const loaders of Object.values(COMMAND_LOADERS)) {
     for (const loader of loaders) {

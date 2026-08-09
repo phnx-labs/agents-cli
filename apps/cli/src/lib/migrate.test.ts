@@ -5,7 +5,7 @@ import { spawnSync, spawn } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'url';
 
-import { migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateRoutineDeviceToDevices, migrateRoutineRemoteCwdToCwd, migrateWatchdogSentinelToRoutine, repairSelfReferentialBinShims } from './migrate.js';
+import { migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateKimiSubagentsToMarkdown, migrateRoutineDeviceToDevices, migrateRoutineRemoteCwdToCwd, migrateWatchdogSentinelToRoutine, repairSelfReferentialBinShims, seedActiveCursorLoginPerVersion } from './migrate.js';
 import { toPosix } from './platform/index.js';
 import * as yaml from 'yaml';
 
@@ -791,5 +791,115 @@ describe('migrateCliDirToClis', () => {
     expect(fs.existsSync(path.join(dir1, 'clis'))).toBe(true);
     expect(fs.existsSync(path.join(dir1, 'cli'))).toBe(false);
     expect(fs.existsSync(path.join(dir2, 'clis'))).toBe(false);
+  });
+});
+
+describe('seedActiveCursorLoginPerVersion', () => {
+  const cleanup: string[] = [];
+  afterEach(() => {
+    for (const d of cleanup) fs.rmSync(d, { recursive: true, force: true });
+    cleanup.length = 0;
+    delete process.env.AGENTS_REAL_HOME;
+  });
+
+  function fakeHome(): string {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-cursor-seed-'));
+    cleanup.push(home);
+    return home;
+  }
+
+  it('copies the global Cursor token into the active version home, and is idempotent', () => {
+    const home = fakeHome();
+    // Legacy global token, shared across homes.
+    fs.mkdirSync(path.join(home, '.config', 'cursor'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.config', 'cursor', 'auth.json'), JSON.stringify({ accessToken: 'global-tok' }));
+    // Active account's version home + the ~/.cursor symlink that points at it.
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'cursor', '2026.08.04', 'home');
+    fs.mkdirSync(path.join(versionHome, '.cursor'), { recursive: true });
+    fs.symlinkSync(path.join(versionHome, '.cursor'), path.join(home, '.cursor'));
+    process.env.AGENTS_REAL_HOME = home;
+
+    seedActiveCursorLoginPerVersion();
+    const seeded = path.join(versionHome, '.config', 'cursor', 'auth.json');
+    expect(fs.existsSync(seeded)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(seeded, 'utf-8')).accessToken).toBe('global-tok');
+
+    // Idempotent: a home that already has its own token is never overwritten.
+    fs.writeFileSync(seeded, JSON.stringify({ accessToken: 'own-tok' }));
+    seedActiveCursorLoginPerVersion();
+    expect(JSON.parse(fs.readFileSync(seeded, 'utf-8')).accessToken).toBe('own-tok');
+  });
+
+  it('is a no-op when ~/.cursor is a real dir (unmanaged install), not a symlink', () => {
+    const home = fakeHome();
+    fs.mkdirSync(path.join(home, '.config', 'cursor'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.config', 'cursor', 'auth.json'), JSON.stringify({ accessToken: 'tok' }));
+    fs.mkdirSync(path.join(home, '.cursor'), { recursive: true }); // real dir, not a symlink
+    process.env.AGENTS_REAL_HOME = home;
+    expect(() => seedActiveCursorLoginPerVersion()).not.toThrow();
+  });
+
+  it('is a no-op when there is no global token to seed', () => {
+    const home = fakeHome();
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'cursor', '2026.08.04', 'home');
+    fs.mkdirSync(path.join(versionHome, '.cursor'), { recursive: true });
+    fs.symlinkSync(path.join(versionHome, '.cursor'), path.join(home, '.cursor'));
+    process.env.AGENTS_REAL_HOME = home;
+    seedActiveCursorLoginPerVersion();
+    expect(fs.existsSync(path.join(versionHome, '.config', 'cursor', 'auth.json'))).toBe(false);
+  });
+});
+
+describe('migrateKimiSubagentsToMarkdown', () => {
+  /**
+   * Seed a kimi version home's agents dir with `files` and return its path.
+   */
+  function seedKimiHome(versionsDir: string, version: string, files: Record<string, string>): string {
+    const dir = path.join(versionsDir, 'kimi', version, 'home', '.kimi-code', 'agents');
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [name, body] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), body);
+    return dir;
+  }
+
+  it('removes the legacy pair and the managed index, across every version home', () => {
+    const versions = makeTempHistoryDir();
+    const a = seedKimiHome(versions, '0.29.0', {
+      'code-reviewer.yaml': 'version: 1\n',
+      'code-reviewer.system.md': 'legacy prompt body',
+      '_agents-cli.yaml': 'version: 1\n',
+      'code-reviewer.md': '---\nname: code-reviewer\ndescription: x\n---\n\nbody',
+    });
+    const b = seedKimiHome(versions, '0.34.0', {
+      'planner.yaml': 'version: 1\n',
+      'planner.system.md': 'legacy prompt body',
+    });
+
+    migrateKimiSubagentsToMarkdown(versions);
+
+    expect(fs.readdirSync(a)).toEqual(['code-reviewer.md']);
+    expect(fs.readdirSync(b)).toEqual([]);
+  });
+
+  it('leaves a subagent legitimately named <x>.system alone (no sibling .yaml)', () => {
+    const versions = makeTempHistoryDir();
+    const dir = seedKimiHome(versions, '0.29.0', {
+      'foo.system.md': '---\nname: foo.system\ndescription: mine\n---\n\nbody',
+      'keeper.yaml': 'version: 1\n',
+    });
+
+    migrateKimiSubagentsToMarkdown(versions);
+
+    // `foo.system.md` has no `foo.yaml` beside it, so it is not a legacy pair;
+    // `keeper.yaml` has no sibling prompt, so it is not ours to delete either.
+    expect(fs.readdirSync(dir).sort()).toEqual(['foo.system.md', 'keeper.yaml']);
+  });
+
+  it('is idempotent and a no-op with no kimi installed', () => {
+    const versions = makeTempHistoryDir();
+    expect(() => migrateKimiSubagentsToMarkdown(versions)).not.toThrow();
+    const dir = seedKimiHome(versions, '0.29.0', { 'x.yaml': 'v: 1\n', 'x.system.md': 'p' });
+    migrateKimiSubagentsToMarkdown(versions);
+    migrateKimiSubagentsToMarkdown(versions);
+    expect(fs.readdirSync(dir)).toEqual([]);
   });
 });

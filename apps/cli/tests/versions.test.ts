@@ -128,9 +128,6 @@ vi.mock('../src/lib/subagents.js', () => ({
   transformSubagentForKiro: () => '',
   transformSubagentForOpenCode: () => '',
   transformSubagentForAntigravity: () => '',
-  writeKimiSubagentFiles: () => {},
-  buildKimiSubagentsParentYaml: () => '',
-  KIMI_SUBAGENTS_PARENT_FILE: '_agents-cli.yaml',
   syncSubagentToOpenclaw: () => ({ success: false }),
 }));
 

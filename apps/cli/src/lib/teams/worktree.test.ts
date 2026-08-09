@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createWorktree, localDefaultBranch, removeWorktree } from './worktree.js';
+import { createWorktree, localDefaultBranch, removeWorktree, worktreeCheckoutExists, worktreeExists } from './worktree.js';
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', ['-c', 'user.email=t@t.dev', '-c', 'user.name=t', ...args], {
@@ -25,7 +25,12 @@ describe('createWorktree base freshness', () => {
   let clone: string;
 
   beforeEach(() => {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-wt-'));
+    // realpath the temp root: on Windows `os.tmpdir()` yields the 8.3 SHORT form
+    // (`C:\Users\RUNNER~1\...`) while git — and therefore every path createWorktree
+    // returns via `rev-parse --git-common-dir` — yields the LONG form
+    // (`C:\Users\runneradmin\...`). Comparing the two spellings of one directory
+    // fails on the Windows runner only. No-op on POSIX.
+    tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-wt-')));
     bare = path.join(tmp, 'remote.git');
     clone = path.join(tmp, 'clone');
 
@@ -111,5 +116,90 @@ describe('createWorktree base freshness', () => {
 
   it('rejects invalid worktree names', async () => {
     await expect(createWorktree(clone, '../evil')).rejects.toThrow(/Invalid worktree name/);
+  });
+
+  // RUSH-2366 follow-up: a real incident nested a teammate's worktree inside a
+  // SIBLING teammate's own worktree — `.../worktrees/opencode-parity/.agents/
+  // worktrees/teams-reliability` — because the caller's ambient cwd was already
+  // inside worktree A when it created worktree B. `git rev-parse --show-toplevel`
+  // from inside a linked worktree returns THAT worktree's own root, not the main
+  // checkout's, so passing it straight through as the placement root nests B
+  // under A. createWorktree must resolve the MAIN repo root regardless of which
+  // worktree the caller is standing in.
+  it('never nests a new worktree inside another worktree, even when cwd is already inside one', async () => {
+    const wtA = await createWorktree(clone, 'teammate-a');
+    try {
+      // Simulate a caller (e.g. an orchestrator agent) whose own cwd is teammate
+      // A's worktree — exactly the observed incident path — creating a SECOND,
+      // sibling teammate worktree from there.
+      const wtB = await createWorktree(wtA, 'teammate-b');
+      try {
+        // Must land as a sibling under the MAIN repo's .agents/worktrees/, never
+        // nested under A's own .agents/worktrees/.
+        expect(wtB).toBe(path.join(clone, '.agents', 'worktrees', 'teammate-b'));
+        expect(wtB.startsWith(wtA)).toBe(false);
+        expect(fs.existsSync(path.join(wtA, '.agents', 'worktrees', 'teammate-b'))).toBe(false);
+      } finally {
+        await removeWorktree(clone, 'teammate-b');
+      }
+    } finally {
+      await removeWorktree(clone, 'teammate-a');
+    }
+  });
+
+  // RUSH-2356: `teams add` cleans up a worktree it half-created when the create
+  // fails, but must NEVER remove one that was already there — the usual reason
+  // a create fails is `fatal: a branch named 'agents/<name>' already exists`,
+  // and `teams stop` deliberately keeps a worktree holding uncommitted changes.
+  // This is the pre-flight that tells the two apart.
+  describe('worktreeExists', () => {
+    it('false before anything is created, true once it is', async () => {
+      expect(await worktreeExists(clone, 'probe-a')).toBe(false);
+      await createWorktree(clone, 'probe-a');
+      try {
+        expect(await worktreeExists(clone, 'probe-a')).toBe(true);
+      } finally {
+        await removeWorktree(clone, 'probe-a');
+      }
+      expect(await worktreeExists(clone, 'probe-a')).toBe(false);
+    });
+
+    it('true for a branch with no checkout — the half-created state it exists to catch', async () => {
+      // `git worktree add -b` creating the ref and then failing the checkout
+      // leaves exactly this: the branch, no directory.
+      git(clone, ['branch', 'agents/probe-b']);
+      expect(fs.existsSync(path.join(clone, '.agents', 'worktrees', 'probe-b'))).toBe(false);
+      expect(await worktreeExists(clone, 'probe-b')).toBe(true);
+      // ...and the narrower probe says NO checkout, which is what licenses the
+      // failed-create cleanup to drop that dangling ref without deleting files.
+      expect(await worktreeCheckoutExists(clone, 'probe-b')).toBe(false);
+    });
+
+    it('worktreeCheckoutExists tracks only the directory, never the branch', async () => {
+      expect(await worktreeCheckoutExists(clone, 'probe-d')).toBe(false);
+      await createWorktree(clone, 'probe-d');
+      try {
+        expect(await worktreeCheckoutExists(clone, 'probe-d')).toBe(true);
+      } finally {
+        await removeWorktree(clone, 'probe-d');
+      }
+      expect(await worktreeCheckoutExists(clone, 'probe-d')).toBe(false);
+    });
+
+    it('answers for the MAIN repo from inside another worktree', async () => {
+      const wt = await createWorktree(clone, 'probe-c');
+      try {
+        // Same getMainRepoRoot resolution as createWorktree/removeWorktree, so a
+        // caller standing in a sibling worktree gets the main checkout's answer.
+        expect(await worktreeExists(wt, 'probe-c')).toBe(true);
+        expect(await worktreeExists(wt, 'probe-none')).toBe(false);
+      } finally {
+        await removeWorktree(clone, 'probe-c');
+      }
+    });
+
+    it('rejects invalid worktree names', async () => {
+      await expect(worktreeExists(clone, '../evil')).rejects.toThrow(/Invalid worktree name/);
+    });
   });
 });

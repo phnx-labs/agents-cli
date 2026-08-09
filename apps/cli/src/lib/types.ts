@@ -653,6 +653,13 @@ export interface PluginManifest {
   description: string;
   version: string;
   agents?: AgentId[];
+  /**
+   * Who published the plugin, per the official plugin format. Every plugin.json
+   * in this repo already carries one; it was missing from this interface, so
+   * `loadPluginManifest`'s cast passed it through un-typed and no surface read it.
+   * Accepts the shorthand string form as well as the object form.
+   */
+  author?: string | { name: string; email?: string; url?: string };
   /** Interactive config fields prompted at install time. Values stored in .user-config.json. */
   userConfig?: PluginUserConfigField[];
   /** Other plugin names this plugin depends on. Missing deps produce a warning. */
@@ -1047,6 +1054,10 @@ export interface Meta {
     domain?: string;
     /** Cloudflare Web Analytics token injected into published HTML pages. */
     analyticsToken?: string;
+    /** sha256 of the Worker script deployed at the last provision/update, so
+     * `agents share status` can tell current vs outdated vs unknown (a config
+     * from before this field existed has no hash — always "unknown"). */
+    templateHash?: string;
   };
   /**
    * Owner/channel notification config for `agents send` / `agents notify`.

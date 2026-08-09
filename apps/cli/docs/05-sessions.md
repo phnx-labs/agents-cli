@@ -191,6 +191,23 @@ location is the one canonical store, not a per-install dotfile, so there is no
 "unmanaged own copy" to hide. Both behaviors key off the composite FORM, never a harness
 name, so any future single-shared-DB harness inherits them.
 
+**A file-gone session is archived, not lost — the DB is authoritative for its user turns (RUSH-2436).**
+`findMissingFilePaths` still detects when a transcript file has vanished (an `agents remove`
+trash move, a manual `rm`, a `.history` version-home rotation, a box reimage), but what
+happens next changed. The session's user-turn text is already stored durably in the
+`session_text` FTS `content` column at scan time (for every harness, keyed by
+`session_id`), so a file-gone row whose content survives is now **kept and flagged
+`archived`** instead of being dropped: it still appears in `agents sessions` listings,
+`agents sessions <id> --include user` renders its user turns from the DB (with an
+`archived — transcript file removed; user turns served from the local DB` banner) rather
+than a bare "file no longer exists" note, and the picker preview does the same. Session
+history depth is therefore bounded by DB retention, not transcript-file lifetime. A
+file-gone row with **empty** content is a phantom (a stale/moved `file_path`) and stays
+suppressed. Two safety changes ride with this: merely *listing* a file-gone session no
+longer PURGES its redacted tool-call evidence (that destructive purge-on-read is removed;
+only `purgeMissingToolCallsInDirectory` prunes evidence), and a persisted `archived_at`
+column (schema v38) records the first confirmation that a scanned file went missing.
+
 **OpenCode field coverage (RUSH-2358).** The scan reads what OpenCode's own DB records,
 so an OpenCode row carries the same burn/usage fields as any other harness:
 
@@ -757,14 +774,26 @@ agents sessions --teams   # --team is an alias
 # In the browser, `t` cycles the same filter over the teams in view.
 agents sessions --in-team redesign --teams
 
-# Show routine-run sessions, then open one by routine run id
-agents sessions --routine --all
-agents sessions --routine nightly-review --all
-agents sessions --routines --all      # alias; pick a routine interactively on a TTY
+# Drill into a routine: its canonical run history first, each run linked to the
+# indexed agent session(s) it produced. Global across every working directory.
+agents sessions --routine
+agents sessions --routine nightly-review
+agents sessions --routines            # alias; pick a routine interactively on a TTY
 agents sessions 2026-07-21T10-30-00-000Z
 
-# The picker shows last-run/run-count/session-count context. After selection,
-# sessions are grouped by routine run id and timestamp.
+# The picker shows last-run/run-count/session-count context. After selection the
+# drilldown lists RUN RECORDS newest-first — run id, trigger, status
+# (completed/failed/blocked/skipped/missed), start/duration, exit/error, execution
+# type (agent/command/workflow), and placement (local/host/cloud) with the run's
+# log + report paths — and under each run its linked session's agent/version/
+# account/model/token/cost/duration/tool metadata. A command-only routine (e.g.
+# auto-dispatch) shows its runs and states plainly that no agent session is
+# produced; blocked/skipped/missed attempts appear with no fabricated session row.
+# Counts distinguish run records from linked sessions. The canonical source is the
+# run history under ~/.agents/.history/runs/<routine>/, not the session index.
+# The drilldown is the default routine view; an explicit --flat/--tree or a
+# session id/query keeps the scoped session listing/picker instead
+# (e.g. `agents sessions --routine nightly-review --flat`).
 
 # Sort the list by cost or duration (default: recent)
 agents sessions --sort cost --limit 10
@@ -832,6 +861,27 @@ selected ids, harnesses, redaction/reasoning settings, and Markdown strings for
 machine consumers.
 
 ## Live sessions (`--active`) and the interactive browser
+
+**`--browser` switches to a different pool entirely.** `agents sessions --browser`
+(alias `agents browser sessions`) lists a browser profile's captured screenshots,
+PDFs, recordings, and downloads (`agents browser start` / `screenshot` / `pdf` /
+`record`) instead of agent transcripts. On a TTY it opens its own task-first
+interactive view (RUSH-2407) — one row per browser task, newest first, linking to
+the agent session that ran it when the task's `launchId` still resolves. See
+[`browser.md` §History and discovery](browser.md) for the full picker behavior;
+`--no-interactive`/`--json` print the flat per-artifact table this section's
+`--no-interactive` convention otherwise governs for the transcript pool below.
+
+**`--computer` is the same switch for the native-desktop pool.** `agents
+sessions --computer` (alias `agents computer sessions`) lists computer-driving
+history — `agents computer <verb>` / `run --task` invocations — grouped by
+run (one CLI process = one row) instead of agent transcripts. On a TTY it
+opens the analogous task-first interactive view (RUSH-2432): one row per run,
+newest first, linking to the agent session that ran it when the run's
+`sessionId`/`launchId` still resolves; a run with no agent-session identity at
+all shows unlinked, one with an identity nothing here can index shows
+unresolved. See [`computer.md` §History and discovery](computer.md) for the
+full picker behavior and the retention/privacy note.
 
 `agents sessions --active` answers "what is running right now, everywhere". It sweeps
 the local machine (`getActiveSessions`) and, unless `--local`, every registered online
@@ -1311,6 +1361,37 @@ disk is skipped; a file that differs is a conflict, kept local unless `--overwri
 `--from-host` reuses the exact SSH transport as the cross-machine listing
 (`resolveExplicitTargets` + `ssh-exec`) — no second transport, no daemon.
 Source: `src/lib/session/bundle.ts`, `src/lib/session/remote-bundle.ts`,
+`src/commands/sessions-export.ts`, `src/commands/sessions-import.ts`.
+
+### Off-box backup to Cloudflare R2 (`--to-r2` / `--from-r2`)
+
+Export/import above protect against losing a transcript *file*; the R2 backup target
+protects against losing the *whole box*. It is an **optional, on-demand** off-box net
+— not the retired multi-writer sync, and not a daemon cycle.
+
+```bash
+# Back the last month up off-box (one encrypted object per transcript)
+agents sessions export --since 30d --to-r2
+
+# Restore everything backed up — e.g. on a freshly reimaged box
+agents sessions import --from-r2
+```
+
+`--to-r2` writes each selected session to the `r2.backups` bucket as its own
+self-describing one-record bundle, keyed by the surviving object layout
+(`sessions/<machine>/<agent>/<sessionId>.jsonl`, or `.../<sessionId>/<relKey>` for
+dir-shaped agents like Kimi). Bodies are sealed client-side with AES-256-GCM under the
+shared `R2_SYNC_ENC_KEY` — Cloudflare only ever stores ciphertext (zero-knowledge). If
+the bundle carries no shared key the objects go up with a loud warning, relying on R2's
+server-side encryption only; an ephemeral key is never used here because a fresh box
+could not recover it. `--from-r2` lists the bucket, fetches each object, and restores it
+through the **same** placement + decrypt path as a local bundle (deduped, local always
+wins); the shared key decrypts, or pass `--decrypt <key>`.
+
+Credentials come from the `r2.backups` secrets bundle only (keychain, never env or
+disk — SES-27). A missing or locked bundle **fails loud** with an actionable
+`agents secrets add r2.backups …` message rather than silently doing nothing.
+Source: `src/lib/session/sync/r2.ts`, `src/lib/session/sync/config.ts`,
 `src/commands/sessions-export.ts`, `src/commands/sessions-import.ts`.
 
 ## Migration (relocate a live session)

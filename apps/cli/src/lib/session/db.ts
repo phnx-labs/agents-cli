@@ -18,7 +18,7 @@ import { query as queryEvents, queryToolUsageForSessions } from '../events.js';
 import { machineForSessionFile } from './origin-machine.js';
 import { loadSessionActorIndex, readSessionActorRecord } from './actor-sidecar.js';
 import { toolCallsFromEvents, type IndexedToolCall } from './tool-calls.js';
-import { persistToolCalls, purgeToolCalls, toolEvidenceSourcePath } from './tool-store.js';
+import { persistToolCalls, toolEvidenceSourcePath } from './tool-store.js';
 import { buildClaudeAccountIndex, resolveClaudeAccount } from './claude-accounts.js';
 import { extractSkills, extractSlashCommands } from './highlights.js';
 import { resolveResource } from '../resources.js';
@@ -31,7 +31,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/05-sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 37;
+export const SCHEMA_VERSION = 38;
 
 /**
  * Bump to force `agents sessions backfill resources` to re-derive every
@@ -115,7 +115,14 @@ CREATE TABLE IF NOT EXISTS sessions (
   actor TEXT,
   initiated_by TEXT,
   used_browser INTEGER,
-  used_computer INTEGER
+  used_computer INTEGER,
+  -- Epoch ms of the first time a previously-scanned transcript was confirmed
+  -- gone from disk while its user-turn content still lives in session_text
+  -- (RUSH-2436). Non-NULL means "archived": the row is served/rendered from the
+  -- DB and flagged, instead of being dropped when the file vanishes. A row whose
+  -- file is missing but which has NO cached content is a phantom (a stale/moved
+  -- file_path), never stamped, still suppressed — see querySessions.
+  archived_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd);
@@ -388,6 +395,13 @@ export interface SessionRow {
   /** NULL means "not yet computed" (a row scanned before this field existed) — see rowToMeta. */
   used_browser: number | null;
   used_computer: number | null;
+  /**
+   * Epoch ms the transcript file was first confirmed gone while content survived
+   * (RUSH-2436); NULL = live/never archived. Optional because the scanner upsert
+   * write-payload never sets it — the INSERT column list omits it, so a rescan
+   * preserves the sticky stamp; it is written only by querySessions.
+   */
+  archived_at?: number | null;
 }
 
 /** File stat snapshot used to detect changes between scan runs. */
@@ -1028,6 +1042,16 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!cols.has('cache_read_tokens')) db.exec(`ALTER TABLE sessions ADD COLUMN cache_read_tokens INTEGER`);
     if (!cols.has('cache_write_tokens')) db.exec(`ALTER TABLE sessions ADD COLUMN cache_write_tokens INTEGER`);
     if (!cols.has('cost_usd_nocache')) db.exec(`ALTER TABLE sessions ADD COLUMN cost_usd_nocache REAL`);
+  }
+
+  if (fromVersion < 38) {
+    // v37 -> v38: archived_at (RUSH-2436). Makes the local DB authoritative for
+    // content: a session whose transcript file is gone but whose user turns still
+    // live in session_text is kept (flagged archived) instead of dropped from
+    // listings. New nullable column, so no ledger flush — it is populated lazily
+    // by querySessions the first time it confirms a scanned file is gone.
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'archived_at')) db.exec(`ALTER TABLE sessions ADD COLUMN archived_at INTEGER`);
   }
 }
 
@@ -2395,6 +2419,11 @@ function rowToMeta(row: SessionRow): SessionMeta {
     // instead of trusting a false "never used browser/computer".
     usedBrowser: row.used_browser === null ? undefined : row.used_browser === 1,
     usedComputer: row.used_computer === null ? undefined : row.used_computer === 1,
+    // A stamped archived_at means the transcript file is gone but the session's
+    // user turns still live in session_text — the row is served from the DB and
+    // flagged, never dropped (RUSH-2436). NULL leaves both undefined (live row).
+    archivedAt: row.archived_at ?? undefined,
+    archived: row.archived_at != null ? true : undefined,
   };
 }
 
@@ -2691,22 +2720,60 @@ export function querySessions(options: QueryOptions = {}): SessionMeta[] {
     const trimmed = options.limit ? rows.slice(0, options.limit) : rows;
     return trimmed.map(rowToMeta);
   }
-  // Belt-and-suspenders: drop rows whose JSONL no longer exists on disk. The
-  // authoritative fix is to keep file_path in sync (see updateSessionFilePaths
-  // callers), but skipping vanished rows here prevents phantom sessions from
-  // surfacing in the Factory UI if any code path forgets to rewrite (#136).
-  // Synthetic rows (OpenClaw channels/cron — see scanOpenClawIncremental) carry
-  // an empty file_path and are exempt; they're keyed by CLI output, not files.
+  // A row whose transcript file is gone from disk is one of two things, and the
+  // local DB is now authoritative for telling them apart (RUSH-2436):
+  //   - ARCHIVED — its user turns still live in session_text. The session is
+  //     real; the file was just removed (agents remove trash, a manual rm, a
+  //     .history rotation, a box reimage). Keep it, stamped `archived`, so it
+  //     still lists and renders from the DB instead of silently vanishing.
+  //   - PHANTOM — a stale/moved file_path with NO cached content (#136), e.g. a
+  //     path a scan forgot to rewrite. There is nothing durable to serve, so it
+  //     stays suppressed exactly as before.
+  // We NO LONGER purge tool-call evidence here: merely listing a file-gone
+  // session used to DELETE its redacted tool calls (purgeToolCalls), destroying
+  // durable data on a read. Synthetic rows (OpenClaw channels/cron — see
+  // scanOpenClawIncremental) carry an empty file_path and are exempt.
   const missingPaths = findMissingFilePaths(rows.map(r => r.file_path).filter((p): p is string => !!p));
   const missing = rows.filter(r => r.file_path && missingPaths.has(r.file_path));
+  const missingIds = new Set(missing.map(r => r.id));
+  const phantomIds = new Set<string>();
   if (missing.length > 0) {
-    const purge = db.transaction(() => {
-      for (const row of missing) purgeToolCalls(db, row.id);
+    const readContent = db.prepare(`SELECT content FROM session_text WHERE session_id = ?`);
+    const markArchived = db.prepare(`UPDATE sessions SET archived_at = ? WHERE id = ? AND archived_at IS NULL`);
+    const now = Date.now();
+    const classify = db.transaction(() => {
+      for (const row of missing) {
+        const content = (readContent.get(row.id) as { content: string } | undefined)?.content;
+        if (content && content.trim() !== '') {
+          // Genuine archived session: stamp archived_at the first time we confirm
+          // the file is gone, and reflect it on the in-memory row we return.
+          if (row.archived_at == null) {
+            markArchived.run(now, row.id);
+            row.archived_at = now;
+          }
+        } else {
+          phantomIds.add(row.id);
+        }
+      }
     });
-    purge();
+    classify();
   }
-  const missingIds = new Set(missing.map((row) => row.id));
-  const live = rows.filter(r => !r.file_path || !missingIds.has(r.id));
+  // Un-archive a row whose file came back (a recoverable-trash restore, a re-sync):
+  // it is present on disk now, so it must not keep reporting `archived` to a
+  // machine consumer reading the --json listing. Rare, so the write only fires when
+  // such a row actually exists (RUSH-2436).
+  const resurrected = rows.filter(r => r.archived_at != null && !missingIds.has(r.id));
+  if (resurrected.length > 0) {
+    const clearArchived = db.prepare(`UPDATE sessions SET archived_at = NULL WHERE id = ?`);
+    const clear = db.transaction(() => {
+      for (const row of resurrected) {
+        clearArchived.run(row.id);
+        row.archived_at = null;
+      }
+    });
+    clear();
+  }
+  const live = rows.filter(r => !phantomIds.has(r.id));
   const trimmed = options.limit ? live.slice(0, options.limit) : live;
   return trimmed.map(rowToMeta);
 }
@@ -2879,6 +2946,49 @@ export function writeSessionPreviewCache<T>(entry: {
     Date.now(),
     JSON.stringify(entry.preview),
   );
+}
+
+/**
+ * The session's durable user-turn text, as stored in the `session_text` FTS
+ * `content` column at scan time (all harnesses, keyed by session_id). This is
+ * the content that survives the transcript file being deleted (RUSH-2436): the
+ * render path reads it so a file-gone session still shows its user prompts, and
+ * querySessions uses its presence to tell a genuine archived session (has
+ * content) from a phantom (a stale/moved file_path with none). Returns undefined
+ * when no row exists; an empty string when a row exists but carried no content.
+ */
+export function readSessionContent(id: string): string | undefined {
+  const row = getDB().prepare(
+    `SELECT content FROM session_text WHERE session_id = ?`,
+  ).get(id) as { content: string } | undefined;
+  return row?.content;
+}
+
+/**
+ * Read the last-computed preview digest for a session by id, validated against
+ * the session row's OWN stored file stamp rather than a live `fs.stat` — the
+ * transcript file is gone, so there is nothing on disk to stat, but the preview
+ * cache was written with the same `file_mtime_ms`/`file_size` the sessions row
+ * still records, so the join re-establishes that stamp. Backs the file-gone
+ * render/preview path (RUSH-2436). Returns undefined when no cached digest
+ * survives for this session.
+ */
+export function readArchivedSessionPreview<T>(id: string): T | undefined {
+  const row = getDB().prepare(`
+    SELECT pc.preview_json AS previewJson
+    FROM session_preview_cache pc
+    JOIN sessions s ON s.id = pc.session_id
+    WHERE pc.session_id = ?
+      AND pc.extractor_version = ?
+      AND pc.file_mtime_ms IS s.file_mtime_ms
+      AND pc.file_size IS s.file_size
+  `).get(id, PREVIEW_EXTRACTOR_VERSION) as { previewJson: string } | undefined;
+  if (!row) return undefined;
+  try {
+    return JSON.parse(row.previewJson) as T;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Plugin provenance already indexed for resources used by one session. */
@@ -3324,7 +3434,30 @@ export function topSessionsByCost(
   // Over-fetch a small buffer to survive the on-disk liveness filter below.
   const sql = `SELECT * FROM sessions ${whereCost} ORDER BY cost_usd DESC, timestamp DESC LIMIT ${limit + 16}`;
   const rows = db.prepare(sql).all(...params) as SessionRow[];
-  const live = rows.filter(r => !r.file_path || fs.existsSync(sessionFilePathContainer(r.file_path)));
+  // Keep a row whose file is present OR whose transcript is already archived
+  // (file gone but user turns still in session_text) — an expensive, real
+  // session must not drop out of the cost rollup just because its file was
+  // removed (RUSH-2436). A file-gone row with no durable content (a phantom) is
+  // still excluded. archived_at is the persisted signal; stamp it here too (once)
+  // so a session first surfaced through the cost rollup reports `archived`
+  // consistently with the listing path.
+  const readContent = db.prepare(`SELECT content FROM session_text WHERE session_id = ?`);
+  const markArchived = db.prepare(`UPDATE sessions SET archived_at = ? WHERE id = ? AND archived_at IS NULL`);
+  const now = Date.now();
+  const toStamp: SessionRow[] = [];
+  const live = rows.filter(r => {
+    if (!r.file_path || fs.existsSync(sessionFilePathContainer(r.file_path))) return true;
+    if (r.archived_at != null) return true;
+    const content = (readContent.get(r.id) as { content: string } | undefined)?.content;
+    if (!!content && content.trim() !== '') { toStamp.push(r); return true; }
+    return false;
+  });
+  if (toStamp.length > 0) {
+    const stamp = db.transaction(() => {
+      for (const r of toStamp) { markArchived.run(now, r.id); r.archived_at = now; }
+    });
+    stamp();
+  }
   return live.slice(0, limit).map(r => ({
     meta: rowToMeta(r),
     costUsd: r.cost_usd ?? 0,
@@ -3346,6 +3479,12 @@ export function getSessionById(id: string): SessionMeta | null {
  * short id. An exact hit short-circuits so a complete id never also drags in its
  * prefix siblings. `scope` narrows by agent / version / project (cwd) so an
  * ambiguous prefix disambiguates against the caller's context.
+ *
+ * Routes through the full querySessions existence check (NOT skipExistenceCheck)
+ * on purpose (RUSH-2436): that check now KEEPS a file-gone session whose user
+ * turns still live in session_text (flagged archived) and only suppresses a
+ * contentless phantom — so `agents sessions <id>` resolves an archived session
+ * instead of failing with "No session found", while a phantom id still misses.
  */
 export function findSessionsById(
   idQuery: string,

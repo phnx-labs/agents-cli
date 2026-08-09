@@ -176,21 +176,25 @@ describe('querySessions batched existence check', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('purges tool-call evidence for a row it drops as missing', () => {
+  it('drops a contentless phantom but does NOT purge its tool-call evidence on listing (RUSH-2436)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-qhp-purge-'));
     const file = path.join(dir, 'purge-me.jsonl');
     const db = getDB();
+    // Empty content => a phantom (stale/moved file_path), still suppressed from
+    // listings. But listing must no longer DELETE data: the destructive
+    // purge-on-read is gone; only directory-scoped cleanup purges.
     upsertSession(meta('exist-purge', { filePath: file }), '');
     db.prepare(
       `INSERT INTO tool_calls (call_key, session_id, ordinal, timestamp, tool, input, outcome, evidence_bytes)
        VALUES ('purge-call-1', 'exist-purge', 0, ?, 'exec', '{}', 'ok', 2)`,
     ).run(new Date().toISOString());
 
-    querySessions({ idExact: 'exist-purge' });
+    const listed = querySessions({ idExact: 'exist-purge' });
+    expect(listed.map(r => r.id), 'contentless phantom stays suppressed').toEqual([]);
 
     const remaining = db.prepare(`SELECT COUNT(*) AS c FROM tool_calls WHERE session_id = 'exist-purge'`)
       .get() as { c: number };
-    expect(remaining.c).toBe(0);
+    expect(remaining.c, 'listing must not purge tool-call evidence').toBe(1);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });

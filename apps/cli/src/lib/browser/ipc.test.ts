@@ -20,7 +20,12 @@ const HELPER_DIR = `/tmp/agents-cli-browser-ipc-${process.pid}`;
 // const declarations. Keep everything the factories reference inline so the
 // hoist is safe, then retrieve the vi.fn() back through the mocked module
 // (`startDaemon`) for assertions.
-vi.mock('../state.js', () => ({
+// Redirect ONLY the helpers dir, into a per-pid temp dir; everything else in
+// state.js stays real. A whole-module replacement broke any collaborator that
+// reaches state.js transitively (BrowserService -> version.ts ->
+// getCliVersionCachePath), which the stop() test below constructs for real.
+vi.mock('../state.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../state.js')>()),
   getHelpersDir: vi.fn(() => `/tmp/agents-cli-browser-ipc-${process.pid}`),
 }));
 
@@ -50,6 +55,69 @@ describe('sendIPCRequest', () => {
     ).rejects.toThrow(formatBrowserDaemonNotRunningError());
     expect(startDaemon).not.toHaveBeenCalled();
   });
+});
+
+// RUSH-2421: `stop()` called `server.close()` and moved on. `close()` is
+// asynchronous — it stops accepting at once, but the binding is not released
+// until the 'close' event fires, after existing connections end. So `stop()`
+// resolved while the socket was still held, and the daemon's `handleShutdown`
+// awaits `stop()` before exiting, which is exactly the proof a successor's
+// `claimDaemonInstance` relies on ("the incumbent is dead, so its resources are
+// free", SING-11). Resolving early made that proof false.
+//
+// An open connection is what makes the difference observable: with one held,
+// `close()` cannot complete, so a correct `stop()` must still be pending.
+describe('BrowserIPCServer.stop (releases the binding, promptly)', () => {
+  it('ends held connections and resolves with the socket genuinely released', async () => {
+    const { BrowserIPCServer } = await import('./ipc.js');
+    const { BrowserService } = await import('./service.js');
+    const server = new BrowserIPCServer(new BrowserService());
+    await server.start();
+
+    // A warm client connection — the normal case, not an edge case: clients
+    // hold one open between actions on purpose.
+    const held = net.createConnection(ipcEndpoint(getSocketPath()));
+    await new Promise<void>((resolve, reject) => {
+      held.on('connect', () => resolve());
+      held.on('error', reject);
+    });
+    let clientSawClose = false;
+    held.on('close', () => { clientSawClose = true; });
+
+    // `net.Server.close()` does not complete while a connection is open, so a
+    // stop that WAITS for the client sits there until its timeout. That is what
+    // made every graceful daemon stop escalate to killTree: handleShutdown
+    // awaits this, and the timeout equalled the daemon's SIGTERM grace window.
+    // stop() must therefore END the connection, not wait for it.
+    const started = Date.now();
+    await server.stop();
+    const elapsed = Date.now() - started;
+
+    expect(elapsed).toBeLessThan(1_000);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(clientSawClose).toBe(true);
+    // The binding is gone: a fresh connect finds nothing accepting.
+    await expect(new Promise((resolve, reject) => {
+      const probe = net.createConnection(ipcEndpoint(getSocketPath()));
+      probe.on('connect', () => { probe.destroy(); resolve('connected'); });
+      probe.on('error', reject);
+    })).rejects.toThrow();
+  }, 20_000);
+
+  it('is idempotent — a second stop awaits the same close instead of skipping it', async () => {
+    const { BrowserIPCServer } = await import('./ipc.js');
+    const { BrowserService } = await import('./service.js');
+    const server = new BrowserIPCServer(new BrowserService());
+    await server.start();
+    // A second SIGTERM must not race past the release because `this.server` was
+    // already nulled by the first.
+    await Promise.all([server.stop(), server.stop()]);
+    await expect(new Promise((resolve, reject) => {
+      const probe = net.createConnection(ipcEndpoint(getSocketPath()));
+      probe.on('connect', () => { probe.destroy(); resolve('connected'); });
+      probe.on('error', reject);
+    })).rejects.toThrow();
+  }, 20_000);
 });
 
 // #556: the daemon binds its browser IPC socket, then a crash / immediate

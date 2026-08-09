@@ -692,7 +692,7 @@ describe('remediationFor', () => {
       .toBe('agents run kimi@0.19.2');
   });
 
-  it.each(['gemini', 'antigravity', 'droid', 'cursor'] as const)(
+  it.each(['gemini', 'antigravity', 'droid'] as const)(
     '%s has NO per-version isolation → shared login (no fake per-version fix)',
     (agent) => {
       const r = remediationFor({ ...base, kind: 'logged-out', agent, version: '9.9.9' });
@@ -700,6 +700,15 @@ describe('remediationFor', () => {
       expect(r).toContain('shared across all');
     },
   );
+
+  it('cursor now isolates its token per version home → version-targeted run (RUSH-2400)', () => {
+    // Cursor's login used to be shared; it now pins XDG_CONFIG_HOME per version
+    // home (buildExecEnv), so each account authenticates from its own token and
+    // the remediation must target the specific version, not claim a shared login.
+    const r = remediationFor({ ...base, kind: 'logged-out', agent: 'cursor', version: '9.9.9' });
+    expect(r).toBe('agents run cursor@9.9.9');
+    expect(r).not.toContain('shared across all');
+  });
 
   it('opencode uses `auth login`, forwarded into the version home', () => {
     const r = remediationFor({ ...base, kind: 'logged-out', agent: 'opencode', version: '1.0.0' });

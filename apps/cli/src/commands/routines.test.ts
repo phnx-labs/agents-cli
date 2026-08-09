@@ -1497,10 +1497,12 @@ describeRoutines('routines run --json', () => {
       jobs: [{
         name: 'overlap-job',
         schedule: '0 3 * * *',
-        // Source-mode CLI startup under CI can take several seconds. Keep the
-        // first process alive long enough for a second independent source-mode
-        // invocation to reach the claim while it is genuinely active.
-        command: 'sleep 10',
+        // Source-mode CLI startup under CI can take 10-15s on a loaded shard.
+        // The sleep must outlast two such startups: we observe the claim written
+        // by the first process (readiness signal), then the second process must
+        // also finish its own startup and read the claim before the sleep ends.
+        // 30s provides ~2x margin over the observed worst-case startup time.
+        command: 'sleep 30',
         mode: 'auto',
         effort: 'auto',
         timeout: '10m',
@@ -1529,8 +1531,11 @@ describeRoutines('routines run --json', () => {
       first.stdout.on('data', (chunk) => { firstStdout += chunk; });
       first.stderr.on('data', (chunk) => { firstStderr += chunk; });
 
+      // Wait until the first process writes meta.json with status 'running' —
+      // this is the readiness signal that the claim is held and the sleep has
+      // started. 30s gives the first source-mode boot plenty of headroom.
       const runsDir = path.join(home, '.agents', '.history', 'runs', 'overlap-job');
-      const deadline = Date.now() + 10_000;
+      const deadline = Date.now() + 30_000;
       let observedRunning = false;
       while (Date.now() < deadline) {
         const runIds = fs.existsSync(runsDir) ? fs.readdirSync(runsDir).filter((entry) => !entry.startsWith('.')) : [];
@@ -1545,8 +1550,16 @@ describeRoutines('routines run --json', () => {
       }
       expect(observedRunning).toBe(true);
 
+      // The sleep just started when we observed 'running'. The second process
+      // has the full sleep duration to start up, observe the claim, and exit.
       const second = run(home, ['run', 'overlap-job', '--json']);
       expect(second.status, second.stderr).toBe(1);
+      // Assert on raw stdout before parsing so a startup failure (empty/partial
+      // output) surfaces as the actual stdout+stderr rather than a bare SyntaxError.
+      expect(
+        second.stdout.trim(),
+        `second process stdout was not valid JSON — stdout: ${JSON.stringify(second.stdout)} stderr: ${JSON.stringify(second.stderr)}`,
+      ).toMatch(/^\{/);
       expect(JSON.parse(second.stdout.trim())).toMatchObject({
         jobName: 'overlap-job',
         status: 'skipped',
@@ -1554,6 +1567,10 @@ describeRoutines('routines run --json', () => {
 
       const firstExit = await new Promise<number | null>((resolve) => first.once('close', resolve));
       expect(firstExit, firstStderr).toBe(0);
+      expect(
+        firstStdout.trim(),
+        `first process stdout was not valid JSON — stdout: ${JSON.stringify(firstStdout)} stderr: ${JSON.stringify(firstStderr)}`,
+      ).toMatch(/^\{/);
       expect(JSON.parse(firstStdout.trim())).toMatchObject({
         jobName: 'overlap-job',
         status: 'completed',
@@ -1561,7 +1578,7 @@ describeRoutines('routines run --json', () => {
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
-  }, 20_000);
+  }, 90_000);
 });
 
 describeRoutines('buildRunsJson', () => {

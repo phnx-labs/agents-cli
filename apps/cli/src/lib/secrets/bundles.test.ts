@@ -397,6 +397,48 @@ describe('bundles under hashed service names (#316)', () => {
     expect(env).toEqual({ API_KEY: 'sk-1', DB_URL: 'postgres://x' });
   });
 
+  it('agent-only bundle reads do not enumerate and resolve aliased keychain refs (RUSH-2440)', () => {
+    // RUSH-2440: store.list() on the Keychain was doing a broad agents-cli. scan
+    // that triggered Touch ID on every run. The fix: read metadata first, derive
+    // declared keys from it, compute the exact storage item names — no enumeration.
+    // This test verifies that store.list() is never called during the read.
+    let listCallCount = 0;
+    const origList = mem.list.bind(mem);
+    mem.list = (prefix: string) => {
+      listCallCount++;
+      return origList(prefix);
+    };
+
+    createBundle('prod', { API_KEY: 'sk-1', DB_URL: 'postgres://x' });
+    setKeychainToken(secretsKeychainItem('prod', 'stored-token'), 'aliased');
+    const bundle = readBundle('prod');
+    bundle.policy = 'never';
+    bundle.vars.ALIAS = 'keychain:stored-token';
+    writeBundle(bundle);
+    const { env } = readAndResolveBundleEnv('prod', { caller: 'test', agentOnly: true });
+
+    // The fix must NOT call store.list() at all
+    expect(listCallCount).toBe(0);
+    // But the values must still resolve correctly
+    expect(env).toEqual({ API_KEY: 'sk-1', DB_URL: 'postgres://x', ALIAS: 'aliased' });
+
+    mem.list = origList;
+  });
+
+  it('interactive bundle reads retain the enumeration side of the read union', () => {
+    let listCallCount = 0;
+    const origList = mem.list.bind(mem);
+    mem.list = (prefix: string) => {
+      listCallCount++;
+      return origList(prefix);
+    };
+    createBundle('prod', { API_KEY: 'sk-1' });
+
+    expect(readAndResolveBundleEnv('prod', { caller: 'test' }).env).toEqual({ API_KEY: 'sk-1' });
+    expect(listCallCount).toBe(1);
+    mem.list = origList;
+  });
+
   it('listBundles recovers display names from the persisted metadata JSON', () => {
     createBundle('prod', { API_KEY: 'sk-1' });
     createBundle('hetzner.com', { HCLOUD_TOKEN: 'hc-1' });

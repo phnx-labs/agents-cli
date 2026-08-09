@@ -337,6 +337,15 @@ export interface SessionMeta {
    * `parseRemoteList`; transient (never persisted, stripped from --json).
    */
   _remote?: boolean;
+  /**
+   * True when the transcript file is gone from disk but the session's user turns
+   * still live in the local DB (session_text), so the row is served and rendered
+   * from the DB instead of vanishing (RUSH-2436). Absent for a live session whose
+   * file is present. Backed by the persisted `archived_at` column.
+   */
+  archived?: boolean;
+  /** Epoch ms the transcript file was first confirmed gone (pairs with {@link archived}). */
+  archivedAt?: number;
   /** Terms that matched the current search query */
   _matchedTerms?: string[];
   /** BM25 relevance score from the most recent content-index search */

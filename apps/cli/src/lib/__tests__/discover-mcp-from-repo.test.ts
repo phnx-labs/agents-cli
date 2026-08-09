@@ -91,6 +91,30 @@ describe('discoverMcpConfigsFromRepo', () => {
     expect(figma.config.url).toBe('https://api.figma.com/mcp');
   });
 
+  it('skips a config whose validation THROWS, without losing its valid siblings', async () => {
+    const { discoverMcpConfigsFromRepo } = await loadLib();
+
+    // validateMcpYamlConfig returns null for some malformed shapes but THROWS
+    // for these three. The throw escaped the scan loop, so one bad file under
+    // <repo>/mcp/ took down all of `agents inspect <repo>` with an unhandled
+    // stack trace — and the valid configs beside it never rendered.
+    writeYaml(path.join(REPO_DIR, 'mcp', 'ok.yaml'), [
+      'name: ok', 'transport: stdio', 'command: uvx',
+    ].join('\n'));
+    writeYaml(path.join(REPO_DIR, 'mcp', 'bad-args.yaml'), [
+      'name: badargs', 'transport: stdio', 'command: uvx', 'args: 5',
+    ].join('\n'));
+    writeYaml(path.join(REPO_DIR, 'mcp', 'bad-command.yaml'), [
+      'name: badcmd', 'transport: stdio', 'command: 42',
+    ].join('\n'));
+    writeYaml(path.join(REPO_DIR, 'mcp', 'bad-env.yaml'), [
+      'name: badenv', 'transport: stdio', 'command: uvx', 'env: notamap',
+    ].join('\n'));
+
+    const discovered = discoverMcpConfigsFromRepo(REPO_DIR);
+    expect(discovered.map((d) => d.name)).toEqual(['ok']);
+  });
+
   it('installMcpConfigCentrally copies a discovered config into ~/.agents/mcp/', async () => {
     const { discoverMcpConfigsFromRepo, installMcpConfigCentrally } = await loadLib();
 

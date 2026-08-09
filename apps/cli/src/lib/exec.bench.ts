@@ -14,7 +14,7 @@
  *
  * The dominant, measured cost driver in buildExecEnv turned out to be neither
  * of the two caches below on their own -- it's claude-account-token.ts:51
- * resolveClaudeSetupToken(), called from exec.ts:424 for EVERY resolved claude
+ * resolveClaudeSetupToken(), called from exec.ts:425 for EVERY resolved claude
  * version (pinned or auto-resolved) whose version home has a signed-in
  * account. Before RUSH-2317 it was uncached: each call re-derived an AES key via
  * `scryptSync` (secrets/filestore.ts:208-210, invoked from

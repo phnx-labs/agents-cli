@@ -50,7 +50,7 @@ import type { RulesSelection } from './writers/rules.js';
 
 export type { ResourceKind } from './writers/kinds.js';
 export { kindToCapability, ALL_RESOURCE_KINDS } from './writers/kinds.js';
-export type { ResourceWriter, WriteArgs, WriteResult } from './writers/types.js';
+export type { ResourceWriter, WriteArgs, WriteResult, RemoveArgs, RemoveResult } from './writers/types.js';
 export type { ResourceDetector, DetectArgs } from './detectors/types.js';
 export type { RulesSelection } from './writers/rules.js';
 

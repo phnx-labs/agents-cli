@@ -208,7 +208,7 @@ describe('persistToolCalls', () => {
     expect(fs.statSync(sourcePath).size).toBeGreaterThan(parsedStamp.size);
   });
 
-  it('purges tool rows and their ledger when the source transcript disappears', () => {
+  it('archives (does NOT purge) a content-bearing session when its transcript disappears (RUSH-2436)', () => {
     const db = getDB();
     const filePath = path.join(TEST_HOME, 'deleted-session.jsonl');
     fs.writeFileSync(filePath, '{}\n');
@@ -225,9 +225,14 @@ describe('persistToolCalls', () => {
     }], { fileMtimeMs: stat.mtimeMs, fileSize: stat.size });
     fs.unlinkSync(filePath);
 
-    expect(querySessions({ idExact: session.id })).toEqual([]);
-    expect(db.prepare(`SELECT count(*) AS n FROM tool_calls WHERE session_id = ?`).get(session.id)).toEqual({ n: 0 });
-    expect(db.prepare(`SELECT count(*) AS n FROM tool_scan_ledger WHERE file_path = ?`).get(filePath)).toEqual({ n: 0 });
+    // The session has durable content ('deleted'), so it is now SERVED (flagged
+    // archived) instead of dropped, and merely listing it must NOT destroy its
+    // redacted tool-call evidence — that destructive purge-on-read is gone.
+    const listed = querySessions({ idExact: session.id });
+    expect(listed.map(s => s.id)).toEqual([session.id]);
+    expect(listed[0].archived).toBe(true);
+    expect(db.prepare(`SELECT count(*) AS n FROM tool_calls WHERE session_id = ?`).get(session.id)).toEqual({ n: 1 });
+    expect(db.prepare(`SELECT count(*) AS n FROM tool_scan_ledger WHERE session_id = ?`).get(session.id)).toEqual({ n: 1 });
   });
 
   it('purges a deleted child from a changed transcript directory without statting every session', () => {

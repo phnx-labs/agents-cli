@@ -58,6 +58,20 @@ describe('generateShimScript', () => {
     expect(script).toContain('default_permissions=\"agents-edit\"');
     expect(script).toContain('approval_policy=\"on-request\"');
   });
+
+  it('resolves the repo .agents from $PWD at runtime and passes --add-dir (codex sandbox hardcodes .agents read-only)', () => {
+    const script = generateShimScript('codex');
+    // worktree-aware resolution mirroring repoAgentsDirForCwd, then --add-dir
+    expect(script).toContain('*/.agents/worktrees/*)');
+    expect(script).toContain('_repo_agents');
+    expect(script).toContain('--add-dir "$_repo_agents"');
+  });
+
+  it('adds no --add-dir resolution to a non-codex shim', () => {
+    const claude = generateShimScript('claude');
+    expect(claude).not.toContain('--add-dir');
+    expect(claude).not.toContain('_repo_agents');
+  });
 });
 
 describe('generateVersionedAliasScript', () => {

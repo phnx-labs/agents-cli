@@ -201,6 +201,141 @@ describe('agents inspect', () => {
     expect(demo?.path).toMatch(/skills[\\/]demo-skill$/);
   });
 
+  it('piped list output stays a plain table — never the interactive picker', () => {
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-piped-' + crypto.randomBytes(4).toString('hex') + '-'));
+    for (const n of ['alpha', 'bravo', 'charlie']) {
+      // Quoted: the description itself contains a colon ("Triggers on:"), which
+      // unquoted would make the frontmatter ambiguous YAML and silently fall
+      // back to the first body line.
+      writeFile(path.join(proj, '.agents', 'skills', n, 'SKILL.md'),
+        `---\nname: ${n}\ndescription: "Does the ${n} thing. Triggers on: ${n}, ${n}-alt."\n---\n\nBody.\n`);
+    }
+
+    // spawnSync gives the child a pipe, not a TTY — the branch every script and
+    // CI job takes. A picker here would hang the caller forever.
+    const r = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', proj, '--skills'], {
+      cwd: proj, env: { ...process.env, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1', COLUMNS: '120' }, encoding: 'utf-8',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/Name\s+Size\s+Description/);
+    for (const n of ['alpha', 'bravo', 'charlie']) expect(r.stdout).toContain(n);
+    // The row shows the purpose, not the trigger keywords.
+    expect(r.stdout).toContain('Does the alpha thing.');
+    expect(r.stdout).not.toContain('Triggers on:');
+    // Picker chrome must never reach a pipe.
+    expect(r.stdout).not.toContain('Search skills');
+    expect(r.stdout).not.toContain('navigate');
+  });
+
+  it('keeps each plugin\'s bundled resources on the piped path', () => {
+    // The pre-picker output printed these lines under every row with no TTY
+    // check. A table alone would silently drop what a plugin actually ships
+    // from `agents inspect . --plugins | grep`, while --json still carried it.
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-groups-' + crypto.randomBytes(4).toString('hex') + '-'));
+    const p = path.join(proj, '.agents', 'plugins', 'toolkit');
+    writeFile(path.join(p, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'toolkit', version: '1.0.0', description: 'A toolkit.' }));
+    for (const n of ['alpha', 'bravo', 'charlie']) {
+      writeFile(path.join(p, 'commands', `${n}.md`), `---\ndescription: ${n}\n---\n\nBody.\n`);
+    }
+
+    const r = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', proj, '--plugins'], {
+      cwd: proj, env: { ...process.env, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1', COLUMNS: '140' }, encoding: 'utf-8',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/Name\s+Size\s+Description/);
+    // Every bundled command, not a truncated prefix of them.
+    for (const n of ['alpha', 'bravo', 'charlie']) expect(r.stdout).toContain(`/toolkit:${n}`);
+    expect(r.stdout).toContain('commands');
+  });
+
+  it('shows a hook what fires it, never a line of its own shell', () => {
+    // The AGENT path specifically. The repo path already hardcodes an empty
+    // description ("hooks are shell scripts with no human description"), so a
+    // repo fixture cannot reproduce this — the two paths disagreed, which is
+    // the whole bug: every one of the 53 hooks under an agent home rendered
+    // "!/usr/bin/env bash" as its description.
+    const hooksDir = path.join(fixtureHome, '.agents', '.history', 'versions', 'claude', '9.9.9', 'home', '.claude', 'hooks');
+    writeFile(path.join(hooksDir, 'guard.sh'), '#!/usr/bin/env bash\nset -euo pipefail\necho ok\n');
+    writeFile(path.join(hooksDir, 'guard_test.sh'), '#!/usr/bin/env bash\nset -euo pipefail\n');
+
+    const r = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', 'claude', '--hooks'], {
+      env: { ...process.env, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1', COLUMNS: '140' }, encoding: 'utf-8',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    // "First prose line" is a Markdown heuristic; on a script it returned the
+    // shebang with its leading '#' eaten. Skipping '#!' only promoted the next
+    // line, so the fallback is restricted to Markdown instead.
+    expect(r.stdout).not.toContain('!/usr/bin/env bash');
+    expect(r.stdout).not.toContain('set -euo pipefail');
+    // Both names present and distinguishable from each other.
+    expect(r.stdout).toContain('guard');
+    expect(r.stdout).toContain('guard_test');
+  });
+
+  it('renders every item of a long detail row, and survives a malformed manifest', () => {
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-rows-' + crypto.randomBytes(4).toString('hex') + '-'));
+    const names = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet'];
+    const many = path.join(proj, '.agents', 'plugins', 'many');
+    writeFile(path.join(many, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'many', description: 'Many commands.', version: '1.0.0' }));
+    for (const n of names) writeFile(path.join(many, 'commands', `${n}.md`), `---\ndescription: ${n}.\n---\n\nb\n`);
+    // Types that contradict the declared PluginManifest — loadPluginManifest
+    // validates only name/version, so these reach the renderer as-is.
+    // Every field the view reads, each with a type the interface forbids. The
+    // first cut of this test only had version/dependencies and only exercised
+    // `--plugins`, which is exactly how a non-string `description` (crashing
+    // BOTH list and detail mode) survived a review.
+    const bad = path.join(proj, '.agents', 'plugins', 'wrongtypes');
+    writeFile(path.join(bad, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'wrongtypes', description: 42, version: 2, dependencies: 'some-plugin', author: ['a'] }));
+
+    // Narrow terminal: this is where the truncating renderer dropped items.
+    const narrow = { ...process.env, COLUMNS: '60' };
+    const r = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', proj, '--plugin', 'many'], {
+      cwd: proj, env: { ...narrow, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1' }, encoding: 'utf-8',
+    });
+    expect(r.status).toBe(0);
+    // Every command must appear. A width-truncating row renderer showed 4 of 10.
+    for (const n of names) expect(r.stdout).toContain(`/many:${n}`);
+
+    // A malformed sibling must not take down the list — pluginToItem runs while
+    // BUILDING it, so one bad manifest used to break every plugin query.
+    const list = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', proj, '--plugins'], {
+      cwd: proj, env: { ...narrow, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1' }, encoding: 'utf-8',
+    });
+    expect(list.status).toBe(0);
+    expect(list.stdout).toContain('many');
+    expect(list.stdout).toContain('wrongtypes');
+
+    // Detail mode on the malformed plugin itself, and the JSON path. Detail mode
+    // reaches renderers list mode does not (description .split), so asserting
+    // only the list leaves half the surface untested.
+    for (const args of [['--plugin', 'wrongtypes'], ['--plugin', 'wrongtypes', '--json'], ['--plugins', '--json']]) {
+      const r2 = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', proj, ...args], {
+        cwd: proj, env: { ...narrow, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1' }, encoding: 'utf-8',
+      });
+      expect(r2.status, `inspect ${args.join(' ')} exited ${r2.status}: ${r2.stderr}`).toBe(0);
+    }
+  });
+
+  it('bare `inspect <repo>` survives an agents.yaml whose hook field types are wrong', () => {
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-hookfx-' + crypto.randomBytes(4).toString('hex') + '-'));
+    writeFile(path.join(proj, '.agents', 'hooks', '10-demo.sh'), '#!/usr/bin/env bash\nexit 0\n');
+    // `events` as a scalar and numeric predicates: both threw in summarizeHook,
+    // which only the DEFAULT render path reaches. --json and --hooks stayed
+    // green, which is exactly how this class kept surviving review.
+    writeFile(path.join(proj, '.agents', 'agents.yaml'),
+      'hooks:\n  demo:\n    script: 10-demo.sh\n    events: PreToolUse\n    matches:\n      prompt_contains: 12345\n      cwd_includes: 99\n');
+
+    for (const args of [[], ['--json'], ['--hooks'], ['--brief']]) {
+      const r = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', proj, ...args], {
+        cwd: proj, env: { ...process.env, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1' }, encoding: 'utf-8',
+      });
+      expect(r.status, `inspect ${args.join(' ')} exited ${r.status}: ${r.stderr}`).toBe(0);
+    }
+  });
+
   it('--skills <typo> resolves via fuzzy match; bogus query exits 1 with suggestions', () => {
     // Substring match still wins for "rele" → "release".
     const ok = run(fixtureHome, ['inspect', 'claude', '--skills', 'rele', '--json']);

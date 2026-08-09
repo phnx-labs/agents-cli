@@ -5,6 +5,7 @@
  * NEVER guessed; the caller reports it. Pure (no I/O) so it is unit-testable.
  */
 import type { ActiveSession } from './session/active.js';
+import type { HostTask } from './hosts/tasks.js';
 
 export type MessageResolution =
   | { kind: 'cloud'; id: string }
@@ -63,4 +64,30 @@ export function resolveMessageTarget(
     kind: 'ambiguous',
     candidates: [...byId.entries()].map(([id, s]) => ({ id, label: labelFor(s) })),
   };
+}
+
+export type HostTaskRoute =
+  | { kind: 'reroute'; remoteRef: string; host: string }
+  | { kind: 'finished'; host: string; status: string; exitCode?: number }
+  | { kind: 'not-found' };
+
+/**
+ * Decide how `agents message <target>` should handle a target that matched no
+ * local/cloud session (RUSH-2366 follow-up): `getActiveSessions()` has no
+ * visibility into a detached `agents run --device <host> --no-follow`
+ * dispatch, whose only local record is the `~/.agents/.cache/hosts/<id>.json`
+ * sidecar `agents hosts ps` reads. Pure — the caller does the actual lookup
+ * (`resolveTaskRef`) and I/O (the ssh reroute).
+ *
+ * `remoteRef` prefers the remote agent's OWN identity (its captured session id
+ * or `--name` handle) over the LOCAL dispatch-record id the user typed here —
+ * the live process on the host registers itself under the former, never the
+ * latter.
+ */
+export function decideHostTaskRoute(task: HostTask | null, target: string): HostTaskRoute {
+  if (!task) return { kind: 'not-found' };
+  if (task.status === 'running') {
+    return { kind: 'reroute', remoteRef: task.sessionId ?? task.name ?? target, host: task.host };
+  }
+  return { kind: 'finished', host: task.host, status: task.status, exitCode: task.exitCode };
 }

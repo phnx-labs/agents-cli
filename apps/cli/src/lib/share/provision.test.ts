@@ -6,11 +6,13 @@ import {
   deployWorker,
   enableWorkersDev,
   findZoneId,
+  hashWorkerScript,
   SHARE_LIFECYCLE_RETENTION_DAYS,
   SHARE_LIFECYCLE_RULE_ID,
   buildShareLifecycleRule,
   mergeShareLifecycleRule,
   setWorkerSecret,
+  updateWorker,
   type CloudflareRequest,
   type CloudflareRequester,
 } from './provision.js';
@@ -253,5 +255,105 @@ describe('share Cloudflare provisioning request shape', () => {
         },
       },
     ]);
+  });
+});
+
+describe('hashWorkerScript', () => {
+  it('is deterministic and changes when the script changes', () => {
+    const a = hashWorkerScript('export default { fetch() {} }');
+    const b = hashWorkerScript('export default { fetch() {} }');
+    const c = hashWorkerScript('export default { fetch() { /* changed */ } }');
+    expect(a).toBe(b);
+    expect(a).not.toBe(c);
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('updateWorker', () => {
+  const script = 'export default { fetch() { return new Response("ok"); } }';
+
+  it('reuses the caller-supplied identity — no bucket creation, same account/worker/bucket', async () => {
+    const seen: CloudflareRequest[] = [];
+    await updateWorker(
+      'cf-token',
+      'acct_existing',
+      'worker-existing',
+      'bucket-existing',
+      script,
+      'existing-write-token',
+      undefined,
+      { request: async (req) => { seen.push(req); return {}; } },
+    );
+
+    // Only the two calls updateWorker itself makes — never r2/buckets (createBucket),
+    // subdomain, or custom-domain endpoints, which would mean it re-provisioned.
+    expect(seen.map((r) => r.pathname)).toEqual([
+      '/accounts/acct_existing/workers/scripts/worker-existing',
+      '/accounts/acct_existing/workers/scripts/worker-existing/secrets',
+    ]);
+    for (const req of seen) {
+      expect(req.apiToken).toBe('cf-token');
+      expect(req.pathname).toContain('acct_existing');
+      expect(req.pathname).toContain('worker-existing');
+    }
+  });
+
+  it('does not regenerate the write token — the secret request carries the exact caller-supplied value', async () => {
+    const seen: CloudflareRequest[] = [];
+    await updateWorker('cf-token', 'acct_1', 'worker-one', 'bucket-one', script, 'the-existing-token-value', undefined, {
+      request: async (req) => { seen.push(req); return {}; },
+    });
+
+    const secretReq = seen.find((r) => r.pathname.endsWith('/secrets'));
+    expect(secretReq?.body).toEqual({ name: 'WRITE_TOKEN', text: 'the-existing-token-value', type: 'secret_text' });
+  });
+
+  it('re-applies the secret immediately after the script upload — the preservation mechanism, since Cloudflare\'s script-upload endpoint replaces bindings/secrets wholesale', async () => {
+    const seen: CloudflareRequest[] = [];
+    await updateWorker('cf-token', 'acct_1', 'worker-one', 'bucket-one', script, 'tok', undefined, {
+      request: async (req) => { seen.push(req); return {}; },
+    });
+
+    expect(seen).toHaveLength(2);
+    expect(seen[0].pathname).toBe('/accounts/acct_1/workers/scripts/worker-one');
+    expect(seen[0].method).toBe('PUT');
+    expect(seen[1].pathname).toBe('/accounts/acct_1/workers/scripts/worker-one/secrets');
+    expect(seen[1].method).toBe('PUT');
+    expect(seen[1].body).toEqual({ name: 'WRITE_TOKEN', text: 'tok', type: 'secret_text' });
+  });
+
+  it('is idempotent — makes no request and reports skipped when the hash already matches', async () => {
+    const seen: CloudflareRequest[] = [];
+    const currentHash = hashWorkerScript(script);
+
+    const result = await updateWorker('cf-token', 'acct_1', 'worker-one', 'bucket-one', script, 'tok', currentHash, {
+      request: async (req) => { seen.push(req); return {}; },
+    });
+
+    expect(result).toEqual({ templateHash: currentHash, skipped: true });
+    expect(seen).toEqual([]);
+  });
+
+  it('re-deploys when the hash differs, and reports the new hash', async () => {
+    const seen: CloudflareRequest[] = [];
+    const result = await updateWorker('cf-token', 'acct_1', 'worker-one', 'bucket-one', script, 'tok', 'stale-hash', {
+      request: async (req) => { seen.push(req); return {}; },
+    });
+
+    expect(result).toEqual({ templateHash: hashWorkerScript(script), skipped: false });
+    expect(seen).toHaveLength(2);
+  });
+
+  it('--force re-deploys even when the hash already matches', async () => {
+    const seen: CloudflareRequest[] = [];
+    const currentHash = hashWorkerScript(script);
+
+    const result = await updateWorker('cf-token', 'acct_1', 'worker-one', 'bucket-one', script, 'tok', currentHash, {
+      request: async (req) => { seen.push(req); return {}; },
+      force: true,
+    });
+
+    expect(result).toEqual({ templateHash: currentHash, skipped: false });
+    expect(seen).toHaveLength(2);
   });
 });

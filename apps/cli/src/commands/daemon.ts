@@ -30,17 +30,19 @@ import {
   stopDaemon,
   signalDaemonReload,
   findSurvivingStateDirDaemons,
+  getDaemonLogPath,
+  isDaemonAutostartCircuitOpen,
 } from '../lib/daemon.js';
 import { getConfigValue, setConfigValue, isDaemonEnabled } from '../lib/device-config.js';
 import {
   readSubsystemHealth,
   SUBSYSTEM_SECRETS_BROKER,
   SUBSYSTEM_BROWSER_IPC,
+  SUBSYSTEM_DAEMON_START,
   type SubsystemHealth,
 } from '../lib/daemon-health.js';
 import { listJobs, getLatestRun } from '../lib/routines.js';
 import { JobScheduler } from '../lib/scheduler.js';
-import { getDaemonDir } from '../lib/state.js';
 import { followFile } from '../lib/log-follow.js';
 import { parseDuration } from '../lib/hooks/cache.js';
 
@@ -431,7 +433,7 @@ async function runLogs(opts: { lines?: string; follow?: boolean; level?: string;
   const lineCount = opts.lines ? parseInt(opts.lines, 10) : 50;
 
   if (opts.follow) {
-    const logPath = path.join(getDaemonDir(), 'logs.jsonl');
+    const logPath = getDaemonLogPath();
     for (const entry of parseLogLines(readDaemonLog(lineCount)).filter((e) => passesFilters(e, opts.level, sinceMs))) {
       if (opts.json) console.log(JSON.stringify(entry));
       else printLogEntry(entry);
@@ -468,6 +470,26 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
 
   if (!status.running && enabled) problems.push('Daemon is not running. Start it: agents daemon start');
   if (status.running && isDaemonWedged()) problems.push('Daemon is wedged (heartbeat stale). Restart: agents daemon restart');
+
+  // RUSH-2418: an open auto-start circuit breaker is the FIRST thing to report
+  // for a stopped daemon — otherwise the only advice is "agents daemon start",
+  // which is the exact action the breaker just refused, with no hint that a
+  // breaker exists or what the underlying failure was. This is where the
+  // breaker's own message sends the operator, so it has to answer them.
+  const startHealth = readSubsystemHealth(SUBSYSTEM_DAEMON_START);
+  if (isDaemonAutostartCircuitOpen()) {
+    problems.push(
+      `Daemon auto-start is disabled after ${startHealth?.consecutiveFailures ?? 0} consecutive starts that never reported healthy: ` +
+      `${startHealth?.lastError ?? 'no reason recorded'}. Fix the cause, then retry with: agents daemon start`,
+    );
+  } else if (!status.running && startHealth && startHealth.consecutiveFailures > 0) {
+    // Only while the daemon is DOWN. A start is marked as failed the moment it
+    // is issued and cleared once the daemon finishes booting, so a running
+    // daemon with a non-zero streak is just the boot window (or a daemon
+    // launched outside startDaemon) — reporting it there is a false alarm that
+    // clears itself a second later.
+    problems.push(`Daemon start has ${startHealth.consecutiveFailures} consecutive failure(s): ${startHealth.lastError}`);
+  }
 
   const duplicates = registryScopedDuplicates(scanDaemonProcesses(), status.pid);
   if (duplicates.length > 0) {

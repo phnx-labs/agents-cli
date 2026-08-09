@@ -32,8 +32,42 @@ export interface WriteResult {
   synced: string[];
 }
 
+/**
+ * Inverse of a write: locate and delete the materialized artifact for one
+ * resource `name` from a version home. Used only by the manifest-bounded prune
+ * pass (RUSH-2438), which supplies names it has already proven were
+ * agents-installed and are gone from source — the writer just owns the layout
+ * knowledge (native file vs command-skill dir vs recipe) so prune never
+ * re-derives it.
+ */
+export interface RemoveArgs {
+  /** Agent version (e.g. "1.2.3"). */
+  version: string;
+  /** Absolute path to the version's home dir. */
+  versionHome: string;
+  /** Resource name to remove (no extension). */
+  name: string;
+  /** Current working directory — used by writers that consult project-layer state. */
+  cwd: string;
+}
+
+export interface RemoveResult {
+  /** True when an artifact owned by this writer was found and deleted. */
+  removed: boolean;
+}
+
 export interface ResourceWriter<Sel = string[]> {
   readonly kind: ResourceKind;
   readonly agent: AgentId;
   write(args: WriteArgs<Sel>): WriteResult;
+  /**
+   * Optional inverse of `write` for the prune pass. Only the name-keyed
+   * file/dir kinds implement it (commands, skills, hooks); kinds whose sync is
+   * a wholesale rewrite (rules, permissions) or that carry their own
+   * reconciliation (plugins via cleanOrphanedPluginSkills) leave it undefined.
+   * Absence is not a silent skip: `pruneRemovedResources` only iterates
+   * `PRUNABLE_KINDS`, and a registry completeness test asserts every writer for
+   * those kinds implements `remove`.
+   */
+  remove?(args: RemoveArgs): RemoveResult;
 }

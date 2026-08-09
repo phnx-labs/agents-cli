@@ -4,7 +4,7 @@ import * as path from 'path';
 import { buildRoutineListJson } from '../../commands/routines.js';
 import { backfillActiveRowsFromIndex, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson } from '../../commands/sessions.js';
 import { getConfigValue } from '../device-config.js';
-import { loadDevices } from '../devices/registry.js';
+import { loadAutoLaunchPreferences, loadDevices } from '../devices/registry.js';
 import { machineId } from '../machine-id.js';
 import { querySessions } from '../session/db.js';
 import { readActiveSessionsCache } from '../session/session-cache.js';
@@ -14,8 +14,8 @@ import type { WatchdogTickResult } from '../watchdog/runner.js';
 /**
  * One registered fleet device, for the menu-bar's collapsible DEVICES section.
  * Sourced from the local registry read (`loadDevices`) — no network probe — so
- * it carries only what the registry knows for sure (name, platform, whether it
- * is the interactive host, whether it is this machine). Live load% is merged in
+ * it carries only local persisted state (name, platform, preferred status,
+ * whether it is the interactive host, whether it is this machine). Live load% is merged in
  * on the Swift side from the daemon-warmed `.fleet-stats.json`; online/offline
  * is deliberately NOT claimed here (the registry's cached tailscale flag is
  * documented as stale in both directions — registry.ts isLikelyOnline).
@@ -25,6 +25,7 @@ export interface MenubarDevice {
   platform: string;
   interactive: boolean;
   isLocal: boolean;
+  preferred: boolean;
 }
 
 export interface MenubarSnapshot {
@@ -46,7 +47,10 @@ export interface MenubarSnapshot {
  * it rides the same 3-minute snapshot poll instead of a second timer.
  */
 async function buildMenubarDevices(): Promise<MenubarDevice[]> {
-  const reg = await loadDevices();
+  const [reg, prefs] = await Promise.all([
+    loadDevices(),
+    loadAutoLaunchPreferences(),
+  ]);
   const interactiveHost = getConfigValue('interactive.host').value as string | undefined;
   const self = machineId();
   return Object.keys(reg)
@@ -56,6 +60,7 @@ async function buildMenubarDevices(): Promise<MenubarDevice[]> {
       platform: reg[name].platform,
       interactive: name === interactiveHost,
       isLocal: name === self,
+      preferred: prefs[name]?.preferred === true,
     }));
 }
 

@@ -184,29 +184,39 @@ describe('dir_ledger short-circuit (A-2)', () => {
     expect(ids.has('new-b')).toBe(true);
   });
 
-  it('T6: deleting a file drops the session (no crash)', async () => {
+  it('T6: deleting a file ARCHIVES the session — its user turns survive in the DB (RUSH-2436, no crash)', async () => {
     const dir = path.join(LIVE_PROJECTS, '-delete');
     const fp = writeSession(dir, 'del-a', '2026-07-05T00:00:00Z', '/proj/del', 'to be deleted');
-    let ids = await discoverIds();
-    expect(ids.has('del-a')).toBe(true);
+    let all = await discoverAll();
+    expect(all.find(s => s.id === 'del-a')?.archived).toBeUndefined();
 
     fs.rmSync(fp);
-    ids = await discoverIds();
-    expect(ids.has('del-a')).toBe(false);
+    all = await discoverAll();
+    // Pre-RUSH-2436 the row was dropped and vanished. Now a file-gone session
+    // whose user turns still live in session_text is kept, flagged archived, so
+    // `agents sessions` still lists it instead of losing it.
+    const archived = all.find(s => s.id === 'del-a');
+    expect(archived, 'deleted-file session must still list, flagged archived').toBeDefined();
+    expect(archived!.archived).toBe(true);
   });
 
-  it('T7: renaming a file within a dir drops the old id and surfaces the new one', async () => {
+  it('T7: renaming a file surfaces the new id and ARCHIVES the old one (RUSH-2436)', async () => {
     const dir = path.join(LIVE_PROJECTS, '-rename');
     const oldFp = writeSession(dir, 'ren-old', '2026-07-06T00:00:00Z', '/proj/ren', 'renamed');
     let ids = await discoverIds();
     expect(ids.has('ren-old')).toBe(true);
 
-    // Rename the transcript file. The session id comes from the filename, so a
-    // rename = old id drops, new id surfaces.
+    // This synthetic test derives the session id from the filename, so a rename
+    // produces a genuinely new id (ren-new) while ren-old's row keeps a now-missing
+    // file_path. Since ren-old has durable content, it is archived (kept), not
+    // dropped. (Real harnesses derive the id from transcript content, so a rename
+    // rewrites file_path on the SAME row and no such pair arises in production.)
     fs.renameSync(oldFp, path.join(dir, 'ren-new.jsonl'));
-    ids = await discoverIds();
-    expect(ids.has('ren-old')).toBe(false);
-    expect(ids.has('ren-new')).toBe(true);
+    const all = await discoverAll();
+    expect(all.find(s => s.id === 'ren-new'), 'renamed file surfaces under its new id').toBeDefined();
+    const old = all.find(s => s.id === 'ren-old');
+    expect(old, 'the old id is archived (content survives), not dropped').toBeDefined();
+    expect(old!.archived).toBe(true);
   });
 
   it('T8: a cold/wiped ledger yields the identical session set', async () => {

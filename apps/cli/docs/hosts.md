@@ -382,6 +382,13 @@ agents run <agent> ["<task>"] --host <host>
 > local follower dies. `agents hosts stop <id>` (alias `kill`) terminates the
 > remote process group from this machine, writes exit `143`, and keeps the log
 > for `agents hosts logs <id>`.
+>
+> **Steering a detached dispatch.** `agents message <id|name> "<text>"` resolves a
+> `--no-follow` dispatch the same way `agents hosts ps`/`logs` do (dispatch id,
+> `--name` handle, or the remote agent's own session id) and reroutes the message
+> over `--host` to the box that actually owns the live process — no need to know
+> which host it landed on. A task that already finished fails loud naming its
+> status instead of silently doing nothing.
 
 ### Host sources — owned (registered) + leased on demand (crabbox)
 

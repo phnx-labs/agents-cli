@@ -32,6 +32,43 @@ describe('menubar snapshot', () => {
     dirs.push(dir);
     expect(readLastWatchdogTick(dir)).toBeNull();
   });
+
+  it('emits preferred state from the device auto-launch preference file', async () => {
+    const devicesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-snapshot-devices-'));
+    dirs.push(devicesDir);
+    const previousDevicesDir = process.env.AGENTS_DEVICES_DIR;
+    process.env.AGENTS_DEVICES_DIR = devicesDir;
+
+    const now = new Date().toISOString();
+    const device = (name: string) => ({
+      name,
+      platform: 'macos',
+      shell: 'posix',
+      address: { via: 'tailscale', dnsName: `${name}.example.ts.net` },
+      auth: { method: 'key' },
+      createdAt: now,
+      updatedAt: now,
+    });
+    fs.writeFileSync(
+      path.join(devicesDir, 'registry.json'),
+      JSON.stringify({ alpha: device('alpha'), zion: device('zion') }),
+    );
+    fs.writeFileSync(
+      path.join(devicesDir, 'auto-launch.json'),
+      JSON.stringify({ devices: { zion: { preferred: true } }, updatedAt: now }),
+    );
+
+    try {
+      const snapshot = await computeMenubarSnapshot();
+      expect(snapshot.devices.map(({ name, preferred }) => ({ name, preferred }))).toEqual([
+        { name: 'alpha', preferred: false },
+        { name: 'zion', preferred: true },
+      ]);
+    } finally {
+      if (previousDevicesDir === undefined) delete process.env.AGENTS_DEVICES_DIR;
+      else process.env.AGENTS_DEVICES_DIR = previousDevicesDir;
+    }
+  });
 });
 
 /**

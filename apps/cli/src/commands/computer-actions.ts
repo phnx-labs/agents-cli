@@ -11,6 +11,7 @@ import { Command } from 'commander';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { randomUUID } from 'node:crypto';
 import {
   openComputerClient,
   describeTransport,
@@ -446,6 +447,8 @@ function emit(result: Record<string, unknown>, json: boolean, human: () => strin
 // NOTE: the field is `targetPid`, never `pid` — `pid` is a reserved envelope
 // key (the emitting process's OWN pid, events.ts RESERVED_META_KEYS) that
 // sanitizePayload() silently strips from the payload before it can collide.
+const COMPUTER_INVOCATION_ID = randomUUID();
+
 export function emitComputerAction(
   verb: string,
   targetPid: number | undefined,
@@ -454,6 +457,7 @@ export function emitComputerAction(
 ): void {
   emitEvent('computer.action', {
     command: verb,
+    invocationId: COMPUTER_INVOCATION_ID,
     targetPid,
     bundle: opts.bundle,
     host: opts.host,

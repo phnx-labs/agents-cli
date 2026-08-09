@@ -28,11 +28,17 @@ import { markdownToToml } from '../../convert.js';
 import { commandAppliesTo, parseCommandMetadata } from '../../commands.js';
 import {
   installCommandSkillToVersion,
+  listCommandSkillsInVersion,
+  removeCommandSkillFromVersion,
   shouldAlsoInstallCommandAsSkill,
   shouldInstallCommandAsSkill,
 } from '../../command-skills.js';
-import { installGooseCommandToVersion } from '../../goose-commands.js';
-import type { ResourceWriter, WriteArgs, WriteResult } from './types.js';
+import {
+  installGooseCommandToVersion,
+  listGooseCommandsInVersion,
+  removeGooseCommandFromVersion,
+} from '../../goose-commands.js';
+import type { ResourceWriter, WriteArgs, WriteResult, RemoveArgs, RemoveResult } from './types.js';
 import { resolveCommandSource, trustedSkillRoots } from './sources.js';
 import { lazyAgentMap } from './lazy-map.js';
 
@@ -88,6 +94,39 @@ function buildCommandsWriter(agent: AgentId): ResourceWriter<string[]> {
         synced.push(cmd);
       }
       return { synced };
+    },
+    remove({ versionHome, name }: RemoveArgs): RemoveResult {
+      const agentConfig = AGENTS[agent];
+      const agentDir = path.join(versionHome, agentConfigDirName(agent));
+      let removed = false;
+
+      // Native command file (Claude, Codex <0.117, Grok, Cursor, …). The
+      // extension follows the agent's format, mirroring the write path above.
+      if (agentConfig.commandsSubdir) {
+        const ext = agentConfig.format === 'toml' ? '.toml' : '.md';
+        const nativeFile = safeJoin(path.join(agentDir, agentConfig.commandsSubdir), `${name}${ext}`);
+        try {
+          if (fs.existsSync(nativeFile) && fs.lstatSync(nativeFile).isFile()) {
+            fs.unlinkSync(nativeFile);
+            removed = true;
+          }
+        } catch { /* already gone / inaccessible */ }
+      }
+
+      // Command-as-skill dir (Codex >=0.117, Kimi; Cursor dual-write). Gated on
+      // it currently being a command-skill, and removeCommandSkillFromVersion
+      // re-checks the `agents_command` marker before deleting — so a real skill
+      // of the same name is never destroyed by a command prune.
+      if (listCommandSkillsInVersion(agentDir).includes(name)) {
+        if (removeCommandSkillFromVersion(agentDir, name).success) removed = true;
+      }
+
+      // Goose recipe YAML + its slash_commands registry entry.
+      if (agent === 'goose' && listGooseCommandsInVersion(versionHome).includes(name)) {
+        if (removeGooseCommandFromVersion(versionHome, name).success) removed = true;
+      }
+
+      return { removed };
     },
   };
 }

@@ -21,7 +21,7 @@ import { itemPicker } from '../lib/picker.js';
 import { createMemoryCache } from '../lib/memory-cache.js';
 import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult } from '../lib/session/digest.js';
 import { extractArtifacts, extractHooks, extractLinks, extractRepos, extractSkills } from '../lib/session/highlights.js';
-import { getSessionPlugins, readSessionPreviewCache, writeSessionPreviewCache } from '../lib/session/db.js';
+import { getSessionPlugins, readSessionPreviewCache, writeSessionPreviewCache, readSessionContent, readArchivedSessionPreview } from '../lib/session/db.js';
 /** A session whose transcript FILE is on another machine (folded in over the
  * live cross-machine fan-out): its `filePath` is on that peer's disk, so the
  * preview can't parse it locally — it shows metadata + a "resume there" note
@@ -159,7 +159,17 @@ export function loadSessionPreviewDigest(session: SessionMeta): {
   events: SessionEvent[];
   error?: string;
 } {
-  if (!session.filePath || !fs.existsSync(session.filePath)) return { events: [] };
+  if (!session.filePath || !fs.existsSync(session.filePath)) {
+    // File gone, but an archived session (RUSH-2436) keeps its last-computed
+    // digest in the DB — serve that so the picker preview still shows its turns
+    // instead of a bare "not indexed here" note. No events to replay.
+    const archived = readArchivedSessionPreview<SessionPreviewDigest>(session.id);
+    if (archived) {
+      archived.plugins = getSessionPlugins(session.id);
+      return { digest: archived, events: [] };
+    }
+    return { events: [] };
+  }
   const safe = sanitizeMeta(session);
   let events: SessionEvent[] = [];
   let sourceStamp: fs.Stats;
@@ -211,9 +221,19 @@ export function buildPreview(session: SessionMeta): string {
     return output;
   }
 
-  // No transcript on disk — a live session not indexed locally, or a synthesized
-  // entry (e.g. `sessions go`). Show the header + a clean note, not a parse error.
+  // No transcript on disk — either an archived session (file gone, user turns
+  // still in the DB — RUSH-2436), a live session not indexed locally, or a
+  // synthesized entry (e.g. `sessions go`). Show the header + a clean note.
   if (!session.filePath || !fs.existsSync(session.filePath)) {
+    const archivedContent = readSessionContent(session.id);
+    if (archivedContent && archivedContent.trim() !== '') {
+      const note = '  ' + chalk.yellow('archived — transcript file removed; served from the local DB');
+      const { digest } = loadSessionPreviewDigest(session);
+      const body = digest ? formatCompactPreview(digest, safe) : formatMetaOnlyBody(safe);
+      const output = [formatHeader(safe, []), '', note, body].filter(Boolean).join('\n');
+      previewCache.set(cacheKey, output);
+      return output;
+    }
     const note = '  ' + chalk.gray('Live session — full transcript not indexed here.');
     const metaBody = formatMetaOnlyBody(safe);
     const output = [formatHeader(safe, []), '', note, metaBody].filter(Boolean).join('\n');

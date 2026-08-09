@@ -5,6 +5,7 @@ import * as path from 'path';
 import {
   recordSubsystemOk,
   recordSubsystemError,
+  recordSubsystemErrorReason,
   readSubsystemHealth,
   readAllSubsystemHealth,
 } from './daemon-health.js';
@@ -25,6 +26,37 @@ describe('daemon-health', () => {
     if (originalEnv === undefined) delete process.env.AGENTS_DAEMON_DIR;
     else process.env.AGENTS_DAEMON_DIR = originalEnv;
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  // RUSH-2418: a daemon start is COUNTED when it is issued, before its outcome
+  // is known, then refined if it fails outright. That refinement must not count
+  // the same start twice — the whole circuit breaker is a comparison against a
+  // threshold, so a double-count halves the limit it enforces.
+  describe('recordSubsystemErrorReason', () => {
+    it('replaces the reason without bumping the streak', () => {
+      recordSubsystemError('daemon-start', 'start issued', '2026-01-01T00:00:00.000Z');
+      recordSubsystemErrorReason('daemon-start', 'start failed: no PID', '2026-01-01T00:00:01.000Z');
+
+      const rec = readSubsystemHealth('daemon-start');
+      expect(rec?.consecutiveFailures).toBe(1); // one start, one failure
+      expect(rec?.lastError).toBe('start failed: no PID');
+      expect(rec?.lastErrorAt).toBe('2026-01-01T00:00:01.000Z');
+    });
+
+    it('leaves a subsystem that never reported untouched', () => {
+      // Writing here would mint a record with a lastError and a zero streak —
+      // a failure described but never counted.
+      recordSubsystemErrorReason('daemon-start', 'orphan reason');
+      expect(readSubsystemHealth('daemon-start')).toBeNull();
+    });
+
+    it('does not clear a success', () => {
+      recordSubsystemOk('daemon-start', '2026-01-01T00:00:00.000Z');
+      recordSubsystemErrorReason('daemon-start', 'late detail', '2026-01-01T00:00:02.000Z');
+      const rec = readSubsystemHealth('daemon-start');
+      expect(rec?.consecutiveFailures).toBe(0);
+      expect(rec?.lastOkAt).toBe('2026-01-01T00:00:00.000Z');
+    });
   });
 
   it('reports no record for a subsystem that has never checked in', () => {
