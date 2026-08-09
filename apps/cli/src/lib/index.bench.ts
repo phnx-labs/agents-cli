@@ -596,12 +596,12 @@ const PING_EXIT_CODES = [0, 3] as const;
   expectExit(runCli(['--version']), [0], '--version preflight');
 })();
 
-describe('the secrets-broker intercept (index.ts:36, 71-84) — what the leaf module buys, measured on both sides', () => {
+describe('the secrets-broker intercept (index.ts slim shell + sync-commands leaf) — what the leaf module buys, measured on both sides', () => {
   bench('FLOOR: bare `node --input-type=module -e ""` — the spawn cost every row below also pays; subtract it', () => {
     coldEval([]);
   }, COLD_OPTS);
 
-  bench('lib/secrets/sync-commands.js — the leaf actually imported at index.ts:36. Three exported string constants, zero imports (sync-commands.ts:19-21)', () => {
+  bench('lib/secrets/sync-commands.js — the leaf actually imported by the slim index.ts shell. Three exported string constants, zero imports (sync-commands.ts:19-21)', () => {
     coldEval([SYNC_COMMANDS_SPEC]);
   }, COLD_OPTS);
 
@@ -609,7 +609,7 @@ describe('the secrets-broker intercept (index.ts:36, 71-84) — what the leaf mo
     coldEval([SECRETS_AGENT_SPEC]);
   }, COLD_OPTS);
 
-  bench('the dispatch itself: real cold `node dist/index.js __secrets-ping` (index.ts:71-84). index.ts:44-47 calls this "the hot read path" — readAndResolveBundleEnv is synchronous all the way down, so it cannot await a socket and spawns one of these per read instead, reading the exit code. What this row measures is MACHINE-DEPENDENT past the bootstrap: runAgentPingSync (agent.ts:1094-1097) has no darwin gate (the onDarwin check at agent.ts:937-939 is a different function), it just connects — so with no broker listening the connect fails ENOENT, request() resolves null (agent.ts:906-911) and it exits 3 having done no broker work, which is the pure-bootstrap case reported here; on darwin with a live broker the same row exits 0 and additionally carries a real socket round-trip, bounded by SOCKET_PING_TIMEOUT_MS = 700 (agent.ts:113)', () => {
+  bench('the dispatch itself: real cold `node dist/index.js __secrets-ping` (index.ts secrets intercept, pre-bootstrap). index.ts:44-47 calls this "the hot read path" — readAndResolveBundleEnv is synchronous all the way down, so it cannot await a socket and spawns one of these per read instead, reading the exit code. What this row measures is MACHINE-DEPENDENT past the bootstrap: runAgentPingSync (agent.ts:1094-1097) has no darwin gate (the onDarwin check at agent.ts:937-939 is a different function), it just connects — so with no broker listening the connect fails ENOENT, request() resolves null (agent.ts:906-911) and it exits 3 having done no broker work, which is the pure-bootstrap case reported here; on darwin with a live broker the same row exits 0 and additionally carries a real socket round-trip, bounded by SOCKET_PING_TIMEOUT_MS = 700 (agent.ts:113)', () => {
     expectExit(runCli([SYNC_PING_CMD]), PING_EXIT_CODES, '__secrets-ping');
   }, { time: 4000, iterations: 15 });
 });
@@ -617,9 +617,9 @@ describe('the secrets-broker intercept (index.ts:36, 71-84) — what the leaf mo
 /**
  * `import { Command } from 'commander'` (index.ts:10) — the module load itself,
  * before a single `new Command()` is constructed. Unconditional and eager: there
- * is no argv fast path above it (the two intercepts at index.ts:38 and
- * index.ts:71 sit BELOW the import block, which ESM hoists and evaluates first),
- * so `--version`, `--help`, `__secrets-ping` and every real command pay it.
+ * is no argv fast path above it inside bootstrap.js (loaded after the slim
+ * index.ts shell). `--version` / `--help` / every real command still pay it;
+ * `__secrets-ping` no longer does (RUSH-2335).
  *
  * commander 15.0.0 is pure ESM. Its index.js imports five lib modules directly
  * (index.js:1-5: argument.js, command.js, error.js, help.js, option.js) and
@@ -628,7 +628,7 @@ describe('the secrets-broker intercept (index.ts:36, 71-84) — what the leaf mo
  * suggestSimilar.js 2735, error.js 1089 — so this row prices ~126 KB of
  * third-party JS parsed + evaluated per invocation.
  */
-describe('commander module load (index.ts:10) — the third-party eager edge no first-party spec list covers', () => {
+describe('commander module load (bootstrap.ts) — the third-party eager edge no first-party spec list covers', () => {
   bench('FLOOR: bare `node --input-type=module -e ""` — the spawn cost the row below also pays; subtract it', () => {
     coldEval([]);
   }, COLD_OPTS);

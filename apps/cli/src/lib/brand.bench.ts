@@ -5,7 +5,7 @@
  *
  *   A) The RUNTIME compute at index.ts:1244 (`const brandDisabled =
  *      disabledCommandsForActiveBrand()`), plus the two sibling calls at
- *      index.ts:241 (`const BRAND = resolveBrandName()`) and index.ts:367
+ *      bootstrap.ts (`const BRAND = resolveBrandName()`) and the brand-disabled path
  *      (`disabledCommandsForActiveBrand()` inside the help re-brander). This is
  *      measured in-process below.
  *
@@ -84,7 +84,7 @@ const BENCH_BRAND = 'benchbrand';
 const setBranded = () => { process.env.AGENTS_BRAND = BENCH_BRAND; };
 const clearBranded = () => { delete process.env.AGENTS_BRAND; };
 
-describe('brand runtime compute — index.ts:241 / index.ts:367 / index.ts:1244 (unbranded fast path)', () => {
+describe('brand runtime compute — bootstrap.ts brand path (unbranded fast path) (unbranded fast path)', () => {
   bench('resolveBrandName() — env read + regex test, AGENTS_BRAND unset (brand.ts:34-38)', () => {
     resolveBrandName();
   });

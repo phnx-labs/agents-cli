@@ -921,29 +921,47 @@ describe('lastLine', () => {
 });
 
 /**
- * Position guard for the index.ts intercept.
+ * Position guard for the index.ts intercept (RUSH-2335 split-entry).
  *
  * The seam test above proves the tokens are routed; it does NOT notice if the
- * intercept block slides below the startup statements — that variant still
- * answers correctly, just after running checkForUpdates() and forking a
- * detached sync on every cache hit (measured ~165ms vs ~96ms, plus a fork per
- * read). A timing assertion would be flaky in CI, so assert the source ordering
- * directly: deterministic, and it fails loudly the moment the block moves.
+ * intercept slides into bootstrap.js (which runs checkForUpdates() and forks a
+ * detached sync on every non-help path — measured ~165ms vs ~96ms, plus a fork
+ * per read). A timing assertion would be flaky in CI, so assert the source
+ * shape directly: intercept lives in the slim index shell, startup statements
+ * live only in bootstrap, and index has no heavy static imports that ESM would
+ * hoist above the intercept.
  */
 describe('index.ts intercepts __secrets-* before the startup statements', () => {
-  it('places the intercept above checkForUpdates() and spawnDetachedSync()', () => {
-    const src = fs.readFileSync(new URL('../../index.ts', import.meta.url), 'utf-8');
+  const indexSrc = fs.readFileSync(new URL('../../index.ts', import.meta.url), 'utf-8');
+  const bootstrapSrc = fs.readFileSync(new URL('../../bootstrap.ts', import.meta.url), 'utf-8');
+
+  it('places the intercept in index.ts and keeps checkForUpdates/spawnDetachedSync in bootstrap only', () => {
     // Match the STATEMENTS, not prose: the comment above the intercept names
     // both functions, so a bare indexOf would find the comment and invert the
     // comparison. Anchor on indentation + the call's trailing semicolon.
-    const intercept = src.indexOf('  process.argv[2] === SYNC_GET_CMD ||');
-    const updateCheck = src.indexOf('\n  await checkForUpdates();');
-    const detachedSync = src.indexOf('\n  spawnDetachedSync();');
+    const intercept = indexSrc.indexOf('  process.argv[2] === SYNC_GET_CMD ||');
     expect(intercept).toBeGreaterThan(-1);
-    expect(updateCheck).toBeGreaterThan(-1);
-    expect(detachedSync).toBeGreaterThan(-1);
-    expect(intercept).toBeLessThan(updateCheck);
-    expect(intercept).toBeLessThan(detachedSync);
+    // Startup statements must NOT live in the slim shell — that is the whole
+    // split. They run only after `await import('./bootstrap.js')`.
+    expect(indexSrc).not.toMatch(/\n  await checkForUpdates\(\);/);
+    expect(indexSrc).not.toMatch(/\n  spawnDetachedSync\(\);/);
+    expect(bootstrapSrc.indexOf('\n  await checkForUpdates();')).toBeGreaterThan(-1);
+    expect(bootstrapSrc.indexOf('\n  spawnDetachedSync();')).toBeGreaterThan(-1);
+    // Bootstrap must not re-host the secrets intercept (duplicate dispatch is
+    // dead weight and would confuse the "above the line" invariant).
+    expect(bootstrapSrc).not.toContain('  process.argv[2] === SYNC_GET_CMD ||');
+  });
+
+  it('statically imports only the sync-commands leaf (no commander / self-update / registry)', () => {
+    const staticImports = indexSrc
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith('import ') && !l.startsWith('import type '));
+    expect(staticImports).toEqual([
+      "import { SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD } from './lib/secrets/sync-commands.js';",
+    ]);
+    // Dynamic bootstrap load is the only path to the heavy graph.
+    expect(indexSrc).toContain("await import('./bootstrap.js')");
   });
 });
 
