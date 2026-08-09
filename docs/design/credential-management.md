@@ -50,9 +50,14 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
    bundle name (the `auth` bundle), and synced across the fleet by the existing
    file-based secrets sync. No Touch ID, because no keychain ACL.
 
-5. **Usage and account views read the setup-token**, not the interactive login. `ag
-   view`'s usage bars are drawn from the file-based setup-token. Cold/absent → show
-   "usage pending", never a prompting keychain read.
+5. **Usage and account views read the setup-token**, not the interactive login —
+   and never a prompting keychain read. Caveat (RUSH-2392): Anthropic's
+   `claude setup-token` is scoped `user:inference` only; the usage endpoint
+   requires `user:profile`. A setup-token therefore **cannot** populate usage
+   bars — `agents view` renders `usage unavailable (headless)` (not
+   `unverified` / `revoked`) so the gap is not mistaken for a re-mint need.
+   Interactive login (device role `personal`, RUSH-2395) is the only path to
+   live bars today. Cold/absent setup-token → "usage pending".
 
 6. **Zero Touch ID** — `ag view`, agent launch, usage, any op — across **every
    harness**, including the hard ones (Droid, Kimi). Solution decided per credential
@@ -82,6 +87,9 @@ setup-tokens the user deliberately placed). Nothing rotating is ever copied.
 - **`ag view` / usage** (`usage.ts`) reads the setup-token from the file-based `auth`
   bundle. It never reads the harness's ACL-bound keychain login. No no-ACL cache of
   the interactive token is needed because the interactive token is never read.
+  When Anthropic returns 403 `user:profile` on that token, the probe sets
+  `reason: 'usage_scope'` so auth-health stays `unverified` (not `revoked`) and
+  the row shows `usage unavailable (headless)` (RUSH-2392).
 - **Routines / `agents run`** authenticate via the box's own login (interactive) or
   the setup-token the user placed; the daemon injects nothing.
 

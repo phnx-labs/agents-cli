@@ -33,6 +33,7 @@ import {
   getUsageInfoForIdentity,
   getUsageInfoByIdentity,
   getUsageLookupKey,
+  isUsageHeadlessScopeError,
 } from '../lib/usage.js';
 import { viewAction } from './view.js';
 import { resolveConfiguredModel, formatAgentIdentity } from '../lib/models.js';
@@ -103,7 +104,12 @@ function fixSessionFilePaths(agent: AgentId, version: string, oldVersionDir: str
   updateSessionFilePaths(oldVersionDir, trashPath);
 }
 
-function formatAccountHint(info: AccountInfo, usage: UsageSnapshot | null, unverified = false): string {
+function formatAccountHint(
+  info: AccountInfo,
+  usage: UsageSnapshot | null,
+  unverified = false,
+  headless = false,
+): string {
   const parts: string[] = [];
   if (info.email) {
     // Same-email accounts can live in different orgs (personal Max vs a Team
@@ -111,7 +117,10 @@ function formatAccountHint(info: AccountInfo, usage: UsageSnapshot | null, unver
     const badge = accountOrgBadge(info);
     parts.push(badge ? `${info.email} (${badge})` : info.email);
   }
-  const usageSummary = formatUsageSummary(info.plan, usage, 3, { unverified });
+  const usageSummary = formatUsageSummary(info.plan, usage, 3, {
+    unverified: unverified && !headless,
+    headless,
+  });
   if (usageSummary) parts.push(usageSummary);
   if (parts.length === 0) return '';
   return chalk.gray(` [${parts.join(', ')}]`);
@@ -651,7 +660,13 @@ export function registerVersionsCommands(program: Command): void {
                   // This hint sits in a "switch your default to this version?"
                   // confirm — the one place a stale reading directly steers a
                   // choice, so it must not present an unconfirmed bar as fact.
-                  const accountHint = formatAccountHint(info, usage.snapshot, !!usage.snapshot && !!usage.error);
+                  const headless = isUsageHeadlessScopeError(usage.error);
+                  const accountHint = formatAccountHint(
+                    info,
+                    usage.snapshot,
+                    !headless && !!usage.snapshot && !!usage.error,
+                    headless,
+                  );
 
                   const message = `Switch default from ${agentLabel(agentConfig.id)}@${currentDefault} to ${agentLabel(agentConfig.id)}@${installedVersion}${accountHint}?`;
 
@@ -843,9 +858,11 @@ export function registerVersionsCommands(program: Command): void {
               const email = accountInfo?.email || '';
               const usageKey = getUsageLookupKey(accountInfo);
               const versionUsage = usageKey ? usageByKey.get(usageKey) : undefined;
+              const headless = isUsageHeadlessScopeError(versionUsage?.error);
               const usageSummary = usageKey
                 ? formatUsageSummary(null, versionUsage?.snapshot || null, 3, {
-                    unverified: !!versionUsage?.snapshot && !!versionUsage.error,
+                    unverified: !headless && !!versionUsage?.snapshot && !!versionUsage.error,
+                    headless,
                   })
                 : '';
 

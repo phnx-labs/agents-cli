@@ -76,6 +76,46 @@ export function usageRejectedError(agent: string, status: number): string {
     ? `${agent} is rate-limiting the usage endpoint for this machine (HTTP 429).`
     : `${agent} rejected the usage read (HTTP ${status}).`;
 }
+
+/**
+ * Canonical phrase for the Anthropic setup-token scope gap (RUSH-2392).
+ * `claude setup-token` mints `user:inference` only; the usage endpoint requires
+ * `user:profile`. The account can still run; usage bars cannot populate via
+ * that token. Callers detect this string with {@link isUsageHeadlessScopeError}
+ * so the UI can render it distinctly from a generic "unverified" failure.
+ */
+export const USAGE_HEADLESS_SCOPE_MARKER = 'usage unavailable (headless)';
+
+/**
+ * Distinct error when Claude's usage API returns 403 because the setup-token
+ * lacks `user:profile` (RUSH-2392). Not a revocation, not a missing mint —
+ * a permanent tradeoff of the headless credential.
+ */
+export function usageHeadlessScopeError(agent = 'Claude'): string {
+  return `${agent} ${USAGE_HEADLESS_SCOPE_MARKER} — setup-token lacks user:profile; account can still run.`;
+}
+
+/** True when an error string is the setup-token scope gap (RUSH-2392). */
+export function isUsageHeadlessScopeError(error: string | null | undefined): boolean {
+  return typeof error === 'string' && error.includes(USAGE_HEADLESS_SCOPE_MARKER);
+}
+
+/**
+ * Detect Anthropic's usage-endpoint scope denial: HTTP 403 whose body names
+ * `user:profile` (or "scope requirement"). A bare 403 without that body stays
+ * classified as a real rejection — only the known setup-token shape is special
+ * (RUSH-2392).
+ */
+export function isClaudeUsageScopeDenied(
+  status: number,
+  bodyText: string | null | undefined,
+): boolean {
+  if (status !== 403) return false;
+  if (!bodyText) return false;
+  const lower = bodyText.toLowerCase();
+  return lower.includes('user:profile') || lower.includes('scope requirement');
+}
+
 /**
  * The read threw rather than answering — a timeout, DNS/TLS failure, a payload
  * that would not parse, a credential that would not decrypt. Every provider
@@ -677,6 +717,12 @@ export interface FormatUsageSummaryOpts {
   unavailable?: boolean;
   unverified?: boolean;
   /**
+   * Setup-token lacks `user:profile` so usage cannot be read headlessly
+   * (RUSH-2392). Distinct from generic `unverified` (cache unconfirmed) —
+   * minting again will not help; the account still runs.
+   */
+  headless?: boolean;
+  /**
    * Cap how many usage windows render on one line. Overview (`agents view`
    * with no agent filter) passes 2 so multi-window agents cannot blow out
    * column width; single-agent and detail views leave this unset.
@@ -728,9 +774,17 @@ export function formatUsageSummary(
     // The bars came from the cache and the live read that should have confirmed
     // them failed, so they are the last thing we saw — not the current state.
     // Drawing them unmarked is what let a 26h-old "48% used" read as fact.
-    if (opts?.unverified) {
+    // Headless-scope (RUSH-2392) is a known permanent gap, not a flaky cache:
+    // prefer that label over the generic "unverified" so operators do not re-mint.
+    if (opts?.headless) {
+      parts.push(chalk.dim(USAGE_HEADLESS_SCOPE_MARKER));
+    } else if (opts?.unverified) {
       parts.push(chalk.yellow('unverified'));
     }
+  } else if (opts?.headless) {
+    // No bars at all: still name the scope gap so "usage pending" is not
+    // mistaken for a missing setup-token or seeding failure (RUSH-2392).
+    parts.push(chalk.dim(USAGE_HEADLESS_SCOPE_MARKER));
   } else if (opts?.unavailable) {
     // Signed-in account we could NOT fetch usage for (no live token in a reachable
     // home / org mismatch / fetch error). Say so explicitly instead of drawing a
@@ -1023,6 +1077,20 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     if (!response.ok) {
       if (response.status === 429) {
         noteUsageRateLimited('claude', response.headers.get('retry-after'));
+      }
+      // Setup-token is user:inference only; usage needs user:profile → 403
+      // with a scope-requirement body. Distinct from a real rejection so the
+      // UI does not say "unverified" / re-mint (RUSH-2392).
+      if (response.status === 403) {
+        let bodyText = '';
+        try {
+          bodyText = await response.text();
+        } catch {
+          // ignore — fall through to generic rejection
+        }
+        if (isClaudeUsageScopeDenied(response.status, bodyText)) {
+          return { snapshot: null, error: usageHeadlessScopeError('Claude') };
+        }
       }
       return { snapshot: null, error: usageRejectedError('Claude', response.status) };
     }
@@ -1349,6 +1417,13 @@ export interface ProviderProbe {
   token: 'present' | 'missing' | 'expired';
   /** Network/parse error message when status is null but a token was present. */
   error?: string;
+  /**
+   * Known non-revocation cause for a non-2xx status.
+   * `usage_scope` — Anthropic returned 403 because the setup-token lacks
+   * `user:profile` (RUSH-2392). Token is valid for inference; usage is unreadable.
+   * Auth-health MUST NOT map this to `revoked`.
+   */
+  reason?: 'usage_scope';
 }
 
 /** Probe Claude's OAuth token against the usage endpoint. Never refreshes — reports `expired` for a near-expiry token; see the comment below (RUSH-1822). */
@@ -1390,6 +1465,24 @@ export async function probeClaudeStatus(home?: string, cliVersion?: string | nul
     });
     if (response.status === 429) {
       noteUsageRateLimited('claude', response.headers.get('retry-after'));
+    }
+    // Setup-token is user:inference only; usage needs user:profile → 403.
+    // That is NOT a revocation — the account still runs (RUSH-2392).
+    if (response.status === 403) {
+      let bodyText = '';
+      try {
+        bodyText = await response.text();
+      } catch {
+        // Body unreadable: fall through to a bare 403 (classified as revoked).
+      }
+      if (isClaudeUsageScopeDenied(response.status, bodyText)) {
+        return {
+          status: 403,
+          token: 'present',
+          reason: 'usage_scope',
+          error: USAGE_HEADLESS_SCOPE_MARKER,
+        };
+      }
     }
     return { status: response.status, token: 'present' };
   } catch (err) {

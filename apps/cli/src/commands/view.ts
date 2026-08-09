@@ -41,6 +41,7 @@ import {
   getUsageInfoForIdentity,
   getUsageInfoByIdentity,
   getUsageLookupKey,
+  isUsageHeadlessScopeError,
 } from '../lib/usage.js';
 import { readManifest } from '../lib/manifest.js';
 import {
@@ -634,11 +635,13 @@ async function showInstalledVersions(
         const info = rawInfo ? mergeCanonical(rawInfo) : undefined;
         const usageKey = getUsageLookupKey(info);
         const usageInfo = usageKey ? usageByKey.get(usageKey) : undefined;
-        const usageUnavailable = agentReportsUsage(agentId) && !!info?.signedIn && !usageInfo?.snapshot;
-        const usageUnverified = !!usageInfo?.snapshot && !!usageInfo.error;
+        const headless = isUsageHeadlessScopeError(usageInfo?.error);
+        const usageUnavailable = agentReportsUsage(agentId) && !!info?.signedIn && !usageInfo?.snapshot && !headless;
+        const usageUnverified = !headless && !!usageInfo?.snapshot && !!usageInfo.error;
         const usageStr = formatUsageSummary(info?.plan || null, usageInfo?.snapshot || null, maxPlanWidth, {
           unavailable: usageUnavailable,
           unverified: usageUnverified,
+          headless,
           maxWindows: usageWindowCap,
         });
         maxUsageWidth = Math.max(maxUsageWidth, stringWidth(usageStr));
@@ -705,11 +708,13 @@ async function showInstalledVersions(
         }
         const hasEmail = !!vInfo?.email;
         const signedIn = !!vInfo?.signedIn;
-        const usageUnavailable = agentReportsUsage(agentId) && signedIn && !usageInfo?.snapshot;
-        const usageUnverified = !!usageInfo?.snapshot && !!usageInfo.error;
+        const headless = isUsageHeadlessScopeError(usageInfo?.error);
+        const usageUnavailable = agentReportsUsage(agentId) && signedIn && !usageInfo?.snapshot && !headless;
+        const usageUnverified = !headless && !!usageInfo?.snapshot && !!usageInfo.error;
         const usageStr = formatUsageSummary(vInfo?.plan || null, usageInfo?.snapshot || null, maxPlanWidth, {
           unavailable: usageUnavailable,
           unverified: usageUnverified,
+          headless,
           maxWindows: usageWindowCap,
         });
         const hasUsage = usageStr.length > 0;
@@ -829,8 +834,10 @@ async function showInstalledVersions(
       gMaxStatusWidth = Math.max(gMaxStatusWidth, stringWidth(formatUsageStatusBadge(gInfo?.usageStatus)));
       const gUsageKey = getUsageLookupKey(gInfo);
       const gUsage = gUsageKey ? usageByKey.get(gUsageKey) : undefined;
+      const gHeadless = isUsageHeadlessScopeError(gUsage?.error);
       const gUsageStr = formatUsageSummary(gInfo?.plan || null, gUsage?.snapshot || null, 3, {
-        unverified: !!gUsage?.snapshot && !!gUsage.error,
+        unverified: !gHeadless && !!gUsage?.snapshot && !!gUsage.error,
+        headless: gHeadless,
         maxWindows: usageWindowCap,
       });
       gMaxUsageWidth = Math.max(gMaxUsageWidth, stringWidth(gUsageStr));
@@ -851,8 +858,10 @@ async function showInstalledVersions(
       const parts = [`    ${verLabel}${padding}`];
       const gUsageKey = getUsageLookupKey(gInfo);
       const gUsage = gUsageKey ? usageByKey.get(gUsageKey) : undefined;
+      const gHeadless = isUsageHeadlessScopeError(gUsage?.error);
       const gUsageStr = formatUsageSummary(gInfo?.plan || null, gUsage?.snapshot || null, 3, {
-        unverified: !!gUsage?.snapshot && !!gUsage.error,
+        unverified: !gHeadless && !!gUsage?.snapshot && !!gUsage.error,
+        headless: gHeadless,
         maxWindows: usageWindowCap,
       });
       const gActiveStr = gInfo ? formatLastActive(gInfo.lastActive) : '';

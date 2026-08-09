@@ -3,7 +3,29 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, getClaudeKeychainService, swrWindowMsFor, getUsageInfo, getUsageInfoForIdentity, writeClaudeUsageCache, setClaudeUsageCachePathForTest, deriveUsageHeadroom, formatUsageSummary, usageNoCredentialError, usageExpiredCredentialError, usageRejectedError, probeClaudeStatus, probeKimiStatus, type UsageSnapshot } from './usage.js';
+import {
+  claudeAccessTokenNeedsRefresh,
+  claudeUsageAccessTokenNoRefresh,
+  loadClaudeOauth,
+  getClaudeKeychainService,
+  swrWindowMsFor,
+  getUsageInfo,
+  getUsageInfoForIdentity,
+  writeClaudeUsageCache,
+  setClaudeUsageCachePathForTest,
+  deriveUsageHeadroom,
+  formatUsageSummary,
+  usageNoCredentialError,
+  usageExpiredCredentialError,
+  usageRejectedError,
+  usageHeadlessScopeError,
+  isUsageHeadlessScopeError,
+  isClaudeUsageScopeDenied,
+  USAGE_HEADLESS_SCOPE_MARKER,
+  probeClaudeStatus,
+  probeKimiStatus,
+  type UsageSnapshot,
+} from './usage.js';
 import type { AccountInfo } from './agents.js';
 import { noteUsageRateLimited, setUsageBackoffDirForTest } from './usage-backoff.js';
 import { setKeychainToken, setKeychainBackendForTest, secretsKeychainItem, type KeychainBackend } from './secrets/index.js';
@@ -470,6 +492,51 @@ describe('formatUsageSummary marks bars the live read could not confirm', () => 
 
     expect(out).toContain('48%');
     expect(out).not.toContain('unverified');
+  });
+
+  it('names the headless scope gap instead of unverified (RUSH-2392)', () => {
+    // Setup-token accounts used to read as "unverified" — the worst-looking
+    // state for the best-provisioned headless credentials. Prefer the scope
+    // phrase so operators do not re-mint.
+    const out = formatUsageSummary(null, snapshot, 3, { headless: true, unverified: true });
+
+    expect(out).toContain('48%');
+    expect(out).toContain(USAGE_HEADLESS_SCOPE_MARKER);
+    expect(out).not.toContain('unverified');
+  });
+
+  it('shows the headless marker with no bars when usage cannot populate', () => {
+    const out = formatUsageSummary(null, null, 3, { headless: true, unavailable: true });
+
+    expect(out).toContain(USAGE_HEADLESS_SCOPE_MARKER);
+    // Prefer the headless phrase over the bare generic "usage unavailable".
+    expect(out).toContain('(headless)');
+    expect(out).not.toMatch(/usage unavailable(?! \(headless\))/);
+  });
+});
+
+describe('Claude setup-token usage-scope detection (RUSH-2392)', () => {
+  it('detects Anthropic user:profile scope denials on 403', () => {
+    const body =
+      '{"type":"error","error":{"type":"permission_error","message":"OAuth token does not meet scope requirement user:profile"}}';
+    expect(isClaudeUsageScopeDenied(403, body)).toBe(true);
+    expect(isClaudeUsageScopeDenied(403, 'scope requirement missing')).toBe(true);
+  });
+
+  it('does not treat bare 403 or other statuses as the scope gap', () => {
+    expect(isClaudeUsageScopeDenied(403, '')).toBe(false);
+    expect(isClaudeUsageScopeDenied(403, null)).toBe(false);
+    expect(isClaudeUsageScopeDenied(401, 'user:profile')).toBe(false);
+    expect(isClaudeUsageScopeDenied(200, 'user:profile')).toBe(false);
+    expect(isClaudeUsageScopeDenied(403, 'forbidden')).toBe(false);
+  });
+
+  it('builds a detectable headless-scope error string', () => {
+    const err = usageHeadlessScopeError('Claude');
+    expect(isUsageHeadlessScopeError(err)).toBe(true);
+    expect(err).toContain(USAGE_HEADLESS_SCOPE_MARKER);
+    expect(err).toContain('user:profile');
+    expect(isUsageHeadlessScopeError(usageRejectedError('Claude', 403))).toBe(false);
   });
 });
 

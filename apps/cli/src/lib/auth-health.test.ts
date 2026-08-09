@@ -54,6 +54,19 @@ describe('verdictFromProbe', () => {
   it('present token + 200 -> live', () => {
     expect(verdictFromProbe({ status: 200, token: 'present' })).toBe('live');
   });
+  it('setup-token usage-scope 403 -> unverified, never revoked (RUSH-2392)', () => {
+    // Bare 403 is still revoked (unknown denial). The reason field is the
+    // only signal that this is the known headless scope gap.
+    expect(verdictFromProbe({ status: 403, token: 'present' })).toBe('revoked');
+    expect(
+      verdictFromProbe({
+        status: 403,
+        token: 'present',
+        reason: 'usage_scope',
+        error: 'usage unavailable (headless)',
+      }),
+    ).toBe('unverified');
+  });
 });
 
 describe('probeDetail', () => {
@@ -65,6 +78,16 @@ describe('probeDetail', () => {
   });
   it('is undefined for a clean 200', () => {
     expect(probeDetail({ status: 200, token: 'present' })).toBeUndefined();
+  });
+  it('names the headless scope gap for usage_scope (RUSH-2392)', () => {
+    expect(
+      probeDetail({
+        status: 403,
+        token: 'present',
+        reason: 'usage_scope',
+        error: 'usage unavailable (headless)',
+      }),
+    ).toBe('usage unavailable (headless)');
   });
 });
 

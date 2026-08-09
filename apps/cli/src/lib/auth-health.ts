@@ -26,16 +26,22 @@ import {
   probeClaudeStatus,
   probeDroidStatus,
   probeKimiStatus,
+  USAGE_HEADLESS_SCOPE_MARKER,
   type ProviderProbe,
 } from './usage.js';
 import { getVersionHomePath, listInstalledVersions } from './versions.js';
 
 /**
  * - `live`        — completed an authenticated request (200).
- * - `revoked`     — the server rejected the token (401/403).
+ * - `revoked`     — the server rejected the token (401/403), except Claude
+ *                   setup-token `user:profile` scope denials (those are
+ *                   `unverified` via `reason: 'usage_scope'` — RUSH-2392).
  * - `expired`     — locally-detected expiry; not network-verified (no refresh on the read path).
  * - `rate_limited`— token works but is throttled right now (429).
- * - `unverified`  — credential present, not locally expired, but this agent has no in-repo probe endpoint (codex/grok).
+ * - `unverified`  — credential present, not locally expired, but this agent has
+ *                   no in-repo probe endpoint (codex/grok), OR the probe
+ *                   endpoint cannot prove live for a known non-revocation
+ *                   reason (Claude setup-token usage-scope gap — RUSH-2392).
  * - `unconfigured`— no usable credential on disk.
  * - `error`       — network/other failure; verdict indeterminate (keep the last known one).
  */
@@ -77,12 +83,19 @@ export function classifyHttpStatus(status: number): AuthVerdict {
 export function verdictFromProbe(probe: ProviderProbe): AuthVerdict {
   if (probe.token === 'missing') return 'unconfigured';
   if (probe.token === 'expired') return 'expired';
+  // Setup-token can run inference but cannot read usage (RUSH-2392). That 403
+  // is NOT a revocation — classifying it as revoked made the best-provisioned
+  // headless accounts look the least healthy on `agents view` / fleet ping.
+  if (probe.reason === 'usage_scope') return 'unverified';
   if (probe.status == null) return 'error';
   return classifyHttpStatus(probe.status);
 }
 
 /** A short human detail line for a probe result (rendered under --verbose). */
 export function probeDetail(probe: ProviderProbe): string | undefined {
+  if (probe.reason === 'usage_scope') {
+    return probe.error ?? USAGE_HEADLESS_SCOPE_MARKER;
+  }
   if (probe.status != null && (probe.status < 200 || probe.status >= 300)) return `HTTP ${probe.status}`;
   if (probe.error) return probe.error;
   return undefined;
