@@ -91,6 +91,9 @@ import { getCliLaunch } from './lib/cli-entry.js';
 import { emit, emitFriction, redactArgs } from './lib/events.js';
 import { stampProvenance } from './lib/event-provenance.js';
 import { die } from './lib/format.js';
+// Leaf (zero imports). Gates the dynamic passthrough import so the ~187ms
+// hosts graph is never loaded when no routing flag is present (RUSH-2374).
+import { hasHostRoutingFlag } from './lib/hosts/routing-flag.js';
 
 // White-label: the shim for a brand (e.g. `jack`) exports AGENTS_BRAND, so the
 // CLI presents its own name/help/errors as the brand. Unbranded (AGENTS_BRAND
@@ -968,9 +971,13 @@ program.on('command:*', (operands) => {
       } else {
         await registerEagerForRequest(closest);
       }
-      const { maybeRunOnHost } = await import('./lib/hosts/passthrough.js');
-      if (await maybeRunOnHost(closest, args)) {
-        process.exit(process.exitCode ?? 0);
+      // Same RUSH-2374 gate as the main router: typo corrections with no routing
+      // flag must not load the hosts graph just to no-op.
+      if (hasHostRoutingFlag(args)) {
+        const { maybeRunOnHost } = await import('./lib/hosts/passthrough.js');
+        if (await maybeRunOnHost(closest, args)) {
+          process.exit(process.exitCode ?? 0);
+        }
       }
       program.parse(['node', 'agents', ...args]);
     })();
@@ -1025,7 +1032,18 @@ const requestedIsDisabled = requestedCommand !== undefined && brandDisabled.has(
 // read-only + config + teams commands route here; `run`/`sessions` are absent
 // from the table and fall through to their own richer `--host` handling below.
 // `--help`/`--version` stay local (docs must work without a reachable host).
-if (requestedCommand !== undefined && !helpOrVersionRequested && !requestedIsDisabled) {
+//
+// RUSH-2374: gate the dynamic import on a routing flag actually being present.
+// Without this, every named invocation paid ~187ms to load passthrough.js only
+// for maybeRunOnHost to return false after four flagValue scans. The presence
+// scan itself is the same work those four scans do, at ~0.001ms on an 11-token
+// argv — free next to the module graph it avoids on the majority path.
+if (
+  requestedCommand !== undefined &&
+  !helpOrVersionRequested &&
+  !requestedIsDisabled &&
+  hasHostRoutingFlag(passedArgs)
+) {
   const { maybeRunOnHost } = await import('./lib/hosts/passthrough.js');
   if (await maybeRunOnHost(requestedCommand, passedArgs)) {
     process.exit(process.exitCode ?? 0);
@@ -1085,7 +1103,7 @@ if (isLazyRequest && !requestedIsDisabled) {
       await registerEagerForRequest(closest);
     }
 
-    if (!helpOrVersionRequested) {
+    if (!helpOrVersionRequested && hasHostRoutingFlag(passedArgs)) {
       const { maybeRunOnHost } = await import('./lib/hosts/passthrough.js');
       if (await maybeRunOnHost(closest, passedArgs)) {
         process.exit(process.exitCode ?? 0);

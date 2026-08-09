@@ -30,8 +30,12 @@ import {
   type StripSpec,
 } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
-import { machineId } from '../session/sync/config.js';
+// Leaf import: `session/sync/config.js` re-exports machineId from machine-id.js
+// but pulling the re-export path drags secrets/bundles (~140ms cold). Same value,
+// 6–7× cheaper graph (RUSH-2374 proposal 2).
+import { machineId } from '../machine-id.js';
 import { isDeviceAuto, resolveDeviceAffinity } from '../smart-launch.js';
+import { flagValue, hasHostRoutingFlag } from './routing-flag.js';
 import { loadDevices, type DeviceProfile, type DeviceRegistry } from '../devices/registry.js';
 import { isSelfHost } from '../devices/self-host.js';
 import {
@@ -44,6 +48,9 @@ import {
 } from '../devices/fleet.js';
 import { platformGroupLabel } from '../devices/health-report.js';
 import { isKnownTopLevelCommand } from '../startup/command-registry.js';
+
+/** Re-export for callers that historically imported flagValue from this module. */
+export { flagValue, hasHostRoutingFlag } from './routing-flag.js';
 
 /** Per-command remote behaviour. Absence from this map = not host-routable here. */
 interface RemoteSpec {
@@ -158,18 +165,6 @@ const STRIP_SPECS: StripSpec[] = [
   { long: 'hosts', takesValue: true },
   { long: 'devices', takesValue: true },
 ];
-
-/** Pull the value of `--host`/`-H`/`--remote-cwd` (any form) out of an argv. */
-export function flagValue(args: string[], long: string, short?: string): string | undefined {
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === `--${long}` || (short && a === `-${short}`)) return args[i + 1];
-    if (a.startsWith(`--${long}=`)) return a.slice(long.length + 3);
-    if (short && a.startsWith(`-${short}=`)) return a.slice(short.length + 2);
-    if (short && new RegExp(`^-${short}(.+)`).test(a)) return a.slice(2);
-  }
-  return undefined;
-}
 
 /** Synthesize a `Host` for a raw `user@host` / bare-alias target (not enrolled). */
 function syntheticHost(target: string): Host {
@@ -664,14 +659,9 @@ export async function maybeRunStandaloneOnHost(
   opts?: FleetPassthroughOptions,
 ): Promise<boolean> {
   const rawArgs = process.argv.slice(2);
-  const hasRoutingFlag =
-    flagValue(rawArgs, 'host', 'H') !== undefined ||
-    flagValue(rawArgs, 'device') !== undefined ||
-    flagValue(rawArgs, 'hosts') !== undefined ||
-    flagValue(rawArgs, 'devices') !== undefined;
   // No routing flag → nothing to route or strip. Leave argv alone so a purely
   // local run keeps every flag it passed.
-  if (!hasRoutingFlag) return false;
+  if (!hasHostRoutingFlag(rawArgs)) return false;
 
   // Keep --help/--version local (docs must work without a reachable host), mirroring
   // index.ts's `helpOrVersionRequested` guard, but still strip the routing flags
