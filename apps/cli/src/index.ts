@@ -123,93 +123,18 @@ if (IS_DEV_BUILD) {
 // module on each invocation (which loaded the whole ~50-module tree before the
 // first byte of output), the registry maps a command name to a thunk that
 // imports only what that command needs. See src/lib/startup/command-registry.ts.
+// Individual load* registrars are not imported here — registerEagerForRequest
+// and the lazy path pull them via COMMAND_LOADERS. The full-tree
+// registerAllEagerCommands path was removed (RUSH-2329): unknown/typo commands
+// spellcheck against KNOWN_TOP_LEVEL_COMMANDS and register only the corrected
+// name.
 import {
   COMMAND_LOADERS,
   LAZY_COMMAND_NAMES,
-  loadView,
-  loadInspect,
-  loadFeedback,
-  loadCommands,
-  loadHooks,
-  loadSkills,
-  loadRules,
-  loadMemory,
-  loadPermissions,
-  loadMcp,
-  loadCli,
-  loadSubagents,
-  loadPlugins,
-  loadWorkflows,
-  loadWorktree,
-  loadVersions,
-  loadUpdate,
-  loadImport,
-  loadExport,
-  loadPackages,
-  loadRoutines,
-  loadDaemon,
-  loadMonitors,
-  loadProjects,
-  loadRun,
-  loadFork,
-  loadDefaults,
-  loadSet,
-  loadModels,
-  loadModes,
-  loadPrune,
-  loadTrash,
-  loadRestore,
-  loadDoctor,
-  loadApply,
-  loadStatus,
-  loadSnapshot,
-  loadProfiles,
-  loadHarness,
-  loadSecrets,
-  loadLogin,
-  loadWallet,
-  loadHelper,
-  loadMenubar,
-  loadBeta,
-  loadSync,
-  loadLock,
-  loadRefreshRules,
-  loadFactory,
-  loadUsage,
-  loadCost,
-  loadInsights,
-  loadPerf,
-  loadTrends,
-  loadOutput,
-  loadBudget,
-  loadAlias,
-  loadMine,
-  loadPty,
-  loadTmux,
-  loadWatchdog,
-  loadBrowser,
-  loadComputer,
-  loadHosts,
-  loadLogs,
-  loadEvents,
-  loadAudit,
-  loadWebhook,
-  loadFunnel,
-  loadHumans,
-  loadAccounts,
-  loadSsh,
-  loadPull,
-  loadPush,
-  loadRepo,
-  loadSetup,
-  loadUninstall,
-  loadBench,
-  loadShare,
-  loadSend,
-  loadFeed,
-  loadMailboxes,
+  KNOWN_TOP_LEVEL_COMMANDS,
   type ModuleLoader,
 } from './lib/startup/command-registry.js';
+import { closestTopLevelCommand } from './lib/startup/spellcheck.js';
 import { applyGlobalHelpConventions } from './lib/help.js';
 import { renderWhatsNew } from './lib/whats-new.js';
 import type { AgentId } from './lib/types.js';
@@ -1073,37 +998,37 @@ async function reg(loader: ModuleLoader): Promise<void> {
 
 /**
  * Register exactly the command(s) the requested top-level name needs.
- * Returns false when the name maps to no known command (typo / unknown) so the
- * caller can fall back to registering everything for spellcheck.
+ * Returns false when the name maps to no known command (typo / unknown).
  *
  * Lazy commands (sessions/teams/cloud) are intentionally NOT handled here — they
  * must register after applyGlobalHelpConventions to match main's ordering.
+ * Inline aliases/tombstones load their target module via COMMAND_LOADERS.
  */
 async function registerEagerForRequest(name: string): Promise<boolean> {
   switch (name) {
     case 'perms':
       // The action re-parses as `permissions`, so that target must exist too.
       registerPermsAliasCommand(program);
-      await reg(loadPermissions);
+      for (const loader of COMMAND_LOADERS['permissions'] ?? []) await reg(loader);
       return true;
     case 'exec':
       registerExecAliasCommand(program);
-      await reg(loadRun);
+      for (const loader of COMMAND_LOADERS['run'] ?? []) await reg(loader);
       return true;
     case 'jobs':
     case 'cron':
       registerJobsCronAliasCommand(program, name);
-      await reg(loadRoutines);
+      for (const loader of COMMAND_LOADERS['routines'] ?? []) await reg(loader);
       return true;
     case 'check':
       // The action re-parses as `doctor --check`, so doctor must exist too.
       registerCheckTombstoneCommand(program);
-      await reg(loadDoctor);
+      for (const loader of COMMAND_LOADERS['doctor'] ?? []) await reg(loader);
       return true;
     case 'resources':
       // The action re-parses as `view --merged`, so view must exist too.
       registerResourcesTombstoneCommand(program);
-      await reg(loadView);
+      for (const loader of COMMAND_LOADERS['view'] ?? []) await reg(loader);
       return true;
     case 'hq':
       registerHqTombstoneCommand(program);
@@ -1122,141 +1047,13 @@ async function registerEagerForRequest(name: string): Promise<boolean> {
   return true;
 }
 
-/**
- * Register every command in the EXACT order main does (old src/index.ts lines
- * 691-844), including the inline deprecated aliases. Used only on the slow paths
- * (unknown command spellcheck, "did you mean" auto-correct) where the full set
- * of names — and their registration order, which breaks ties in the suggestion
- * picker — must match main byte-for-byte.
- */
-async function registerAllEagerCommands(): Promise<void> {
-  await reg(loadView);
-  registerResourcesTombstoneCommand(program);
-  await reg(loadShare);
-  await reg(loadSend);
-  await reg(loadInspect);
-  await reg(loadFeedback);
-  await reg(loadCommands);
-  await reg(loadHooks);
-  await reg(loadSkills);
-  await reg(loadRules);
-  await reg(loadMemory);
-  await reg(loadPermissions);
-  registerPermsAliasCommand(program);
-  await reg(loadMcp);
-  await reg(loadCli);
-  await reg(loadSubagents);
-  await reg(loadPlugins);
-  await reg(loadWorkflows);
-  await reg(loadWorktree);
-  await reg(loadVersions);
-  await reg(loadUpdate);
-  await reg(loadImport);
-  await reg(loadExport);
-  await reg(loadPackages);
-  await reg(loadRoutines);
-  await reg(loadDaemon);
-  await reg(loadMonitors);
-  await reg(loadProjects);
-  await reg(loadRun);
-  await reg(loadFork);
-  await reg(loadDefaults);
-  await reg(loadSet);
-  await reg(loadModels);
-  await reg(loadModes);
-  await reg(loadPrune);
-  await reg(loadTrash);
-  await reg(loadRestore);
-  await reg(loadDoctor);
-  registerCheckTombstoneCommand(program);
-  await reg(loadApply);
-  await reg(loadStatus);
-  await reg(loadSnapshot);
-  registerExecAliasCommand(program);
-  await reg(loadProfiles);
-  await reg(loadHarness);
-  await reg(loadSecrets);
-  await reg(loadLogin);
-  await reg(loadWallet);
-  await reg(loadHelper);
-  await reg(loadMenubar);
-  await reg(loadBeta);
-  await reg(loadSync);
-  await reg(loadLock);
-  await reg(loadRefreshRules);
-  await reg(loadFactory);
-  await reg(loadUsage);
-  await reg(loadCost);
-  await reg(loadInsights);
-  await reg(loadPerf);
-  await reg(loadBench);
-  await reg(loadTrends);
-  await reg(loadOutput);
-  await reg(loadBudget);
-  await reg(loadAlias);
-  await reg(loadMine);
-  await reg(loadPty);
-  await reg(loadTmux);
-  await reg(loadWatchdog);
-  await reg(loadBrowser);
-  await reg(loadComputer);
-  await reg(loadHosts);
-  await reg(loadLogs);
-  await reg(loadEvents);
-  await reg(loadAudit);
-  await reg(loadWebhook);
-  await reg(loadFunnel);
-  await reg(loadHumans);
-  await reg(loadAccounts);
-  registerHqTombstoneCommand(program);
-  await reg(loadFeed);
-  await reg(loadMailboxes);
-  await reg(loadSsh);
-  registerJobsCronAliasCommand(program, 'jobs');
-  registerJobsCronAliasCommand(program, 'cron');
-  registerInternalCommand(program);
-  registerUpgradeRuntimeCommand(program);
-  await reg(loadPull);
-  await reg(loadPush);
-  await reg(loadRepo);
-  await reg(loadSetup);
-  await reg(loadUninstall);
-}
-
-/** Calculate the Levenshtein edit distance between two strings. */
-function levenshtein(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  const dp: number[][] = Array(m + 1)
-    .fill(null)
-    .map(() => Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] =
-        a[i - 1] === b[j - 1]
-          ? dp[i - 1][j - 1]
-          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-    }
-  }
-  return dp[m][n];
-}
-
-// Auto-correct typos with edit distance 1
+// Safety-net for unknown commands that still reach commander (should be rare
+// after the pre-parse spellcheck below). Candidates come from the plain-string
+// KNOWN_TOP_LEVEL_COMMANDS set so this path never depends on every module
+// having been registered (RUSH-2329).
 program.on('command:*', (operands) => {
   const unknown = operands[0];
-  const allCommands = program.commands.map((c) => c.name());
-
-  let closest: string | null = null;
-  let minDist = Infinity;
-  for (const cmd of allCommands) {
-    const dist = levenshtein(unknown, cmd);
-    if (dist < minDist) {
-      minDist = dist;
-      closest = cmd;
-    }
-  }
+  const { closest, minDist } = closestTopLevelCommand(unknown, KNOWN_TOP_LEVEL_COMMANDS);
 
   if (minDist === 1 && closest) {
     const args = process.argv.slice(2);
@@ -1272,6 +1069,12 @@ program.on('command:*', (operands) => {
     // router with the CORRECTED name before falling through to local parse;
     // it already no-ops when no routing flag is present. RUSH-2022 review r2.
     void (async () => {
+      // Register only the corrected command — never the full tree (RUSH-2329).
+      if (LAZY_COMMAND_NAMES.has(closest)) {
+        for (const loader of COMMAND_LOADERS[closest] ?? []) await reg(loader);
+      } else {
+        await registerEagerForRequest(closest);
+      }
       const { maybeRunOnHost } = await import('./lib/hosts/passthrough.js');
       if (await maybeRunOnHost(closest, args)) {
         process.exit(process.exitCode ?? 0);
@@ -1339,21 +1142,16 @@ if (requestedCommand !== undefined && !helpOrVersionRequested && !requestedIsDis
 // Register only the command(s) this invocation actually uses. Lazy commands
 // (sessions/teams/cloud) are handled after applyGlobalHelpConventions below.
 const isLazyRequest = requestedCommand !== undefined && LAZY_COMMAND_NAMES.has(requestedCommand);
-// Set when the requested name maps to no command: the lazy tree is then also
-// registered below so the spellcheck can suggest `sessions`/`teams`/`cloud`.
+// Set when the requested name maps to no command. Spellcheck uses the plain
+// KNOWN_TOP_LEVEL_COMMANDS string set — never registerAllEagerCommands just to
+// build the candidate list (RUSH-2329; was 250-330ms of module evaluation).
 let requestedIsUnknown = false;
 if (requestedIsDisabled) {
-  // The brand turned this command off: register the full tree so the "did you
-  // mean" picker still works, then strip the disabled commands below so the
-  // request resolves as unknown.
-  await registerAllEagerCommands();
+  // Brand hid this command: resolve as unknown without loading the full tree.
+  requestedIsUnknown = true;
 } else if (requestedCommand !== undefined && !isLazyRequest) {
   const known = await registerEagerForRequest(requestedCommand);
   if (!known) {
-    // Unknown top-level command: register the full tree so the "did you mean"
-    // spellcheck and edit-distance-1 auto-correct (the command:* handler above)
-    // see the same candidate set — and ordering — as main.
-    await registerAllEagerCommands();
     requestedIsUnknown = true;
   }
 }
@@ -1370,24 +1168,49 @@ applyGlobalHelpConventions(program);
 // only when explicitly requested, keeping lightweight commands off that path.
 if (isLazyRequest && !requestedIsDisabled) {
   for (const loader of COMMAND_LOADERS[requestedCommand!]) await reg(loader);
-} else if (requestedIsUnknown) {
-  // Unknown command: the lazy names must be candidates too, or `agents session`
-  // (a typo for the very much lazy `sessions`) gets no "did you mean" at all —
-  // the miss the RUSH-2022 report walked into. Registration order still mirrors
-  // main: lazy commands come after applyGlobalHelpConventions.
-  const seen = new Set<ModuleLoader>();
-  for (const name of LAZY_COMMAND_NAMES) {
-    for (const loader of COMMAND_LOADERS[name] ?? []) {
-      if (seen.has(loader)) continue;
-      seen.add(loader);
-      await reg(loader);
+} else if (requestedIsUnknown && requestedCommand) {
+  // Spellcheck from the plain-string name set. KNOWN_TOP_LEVEL_COMMANDS already
+  // includes lazy names (sessions/teams/cloud/…) and inline aliases/tombstones,
+  // so `agents session` still suggests `sessions` without loading either module.
+  // Insertion order matches COMMAND_LOADERS key order + INLINE_COMMAND_NAMES,
+  // preserving the historical first-seen tie-break of registerAllEagerCommands.
+  const candidates = [...KNOWN_TOP_LEVEL_COMMANDS].filter((name) => !brandDisabled.has(name));
+  const { closest, minDist } = closestTopLevelCommand(requestedCommand, candidates);
+
+  if (minDist === 1 && closest && !requestedIsDisabled) {
+    // Auto-correct: register ONLY the corrected command, then re-route --host
+    // and reparse under the real name (RUSH-2329 + RUSH-2022 review r2).
+    passedArgs[0] = closest;
+    // Keep process.argv in sync for the command:* safety-net and any code that
+    // re-reads argv after this point.
+    const argvCmdIndex = process.argv.findIndex((a, i) => i >= 2 && !a.startsWith('-'));
+    if (argvCmdIndex >= 0) process.argv[argvCmdIndex] = closest;
+
+    if (LAZY_COMMAND_NAMES.has(closest)) {
+      for (const loader of COMMAND_LOADERS[closest] ?? []) await reg(loader);
+    } else {
+      await registerEagerForRequest(closest);
     }
+
+    if (!helpOrVersionRequested) {
+      const { maybeRunOnHost } = await import('./lib/hosts/passthrough.js');
+      if (await maybeRunOnHost(closest, passedArgs)) {
+        process.exit(process.exitCode ?? 0);
+      }
+    }
+  } else {
+    // No auto-correct: print the suggestion and exit without loading modules.
+    console.error(`error: unknown command '${requestedCommand}'`);
+    if (closest && minDist <= 3) {
+      console.error(`(Did you mean ${closest}?)`);
+    }
+    process.exit(1);
   }
 }
 
 // White-label: remove any commands this brand disabled so they resolve as
-// unknown (the command:* handler then reports "unknown command"). Unbranded or
-// nothing-disabled → no-op. Done after all registration paths above.
+// unknown. Unbranded or nothing-disabled → no-op. After auto-correct we may
+// have registered a non-disabled command; strip only if it is still listed.
 if (brandDisabled.size > 0) {
   const kept = program.commands.filter((c) => !brandDisabled.has(c.name()));
   if (kept.length !== program.commands.length) {
