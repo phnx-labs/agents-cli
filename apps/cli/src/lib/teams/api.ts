@@ -10,6 +10,7 @@ import { AgentType } from './parsers.js';
 import { getDelta } from './summarizer.js';
 import { debug } from './debug.js';
 import { buildClaudeLabelMap } from '../session/discover.js';
+import { resolveTeammateDelivery } from './delivery.js';
 
 /**
  * Truncate a bash command for status output.
@@ -110,6 +111,12 @@ export interface AgentStatusDetail {
   cloud_session_id?: string | null;
   cloud_provider?: string | null;
   pr_url?: string | null;
+  /**
+   * Delivery postcondition (RUSH-2380), distinct from process `status`.
+   * `pr_open` when the process completed but left an unmerged PR — orchestrators
+   * must not treat that as "work landed on main".
+   */
+  delivery?: string;
   version?: string | null;
   remote_session_id?: string | null;
   session_label?: string | null;
@@ -144,6 +151,8 @@ export interface AgentStatusSummary {
   name: string | null;
   agent_type: string;
   status: string;
+  /** Delivery postcondition — see {@link AgentStatusDetail.delivery}. */
+  delivery?: string;
   duration: string | null;
   tool_count: number;
   has_errors: boolean;
@@ -227,6 +236,9 @@ export function toAgentStatusSummary(detail: AgentStatusDetail): AgentStatusSumm
     name: detail.name ?? null,
     agent_type: detail.agent_type,
     status: detail.status,
+    delivery:
+      detail.delivery ??
+      resolveTeammateDelivery({ status: detail.status, prUrl: detail.pr_url }),
     duration: detail.duration,
     tool_count: detail.tool_count,
     has_errors: detail.has_errors,
@@ -478,6 +490,10 @@ export async function handleStatus(
       cloud_session_id: agent.cloudSessionId,
       cloud_provider: agent.cloudProvider,
       pr_url: agent.prUrl,
+      delivery: resolveTeammateDelivery({
+        status: agent.status,
+        prUrl: agent.prUrl,
+      }),
       files_created: delta.new_files_created,
       files_modified: delta.new_files_modified,
       files_read: delta.new_files_read,

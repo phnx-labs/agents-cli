@@ -101,6 +101,16 @@ describe('toAgentStatusSummary', () => {
     expect(summary.tool_count).toBe(42);
     expect(summary.has_errors).toBe(false);
     expect(summary.pr_url).toBe('https://github.com/example/repo/pull/1');
+    // Running + PR URL is still in_progress delivery (RUSH-2380).
+    expect(summary.delivery).toBe('in_progress');
+  });
+
+  it('marks completed+pr_url as delivery pr_open (RUSH-2380)', () => {
+    const summary = toAgentStatusSummary(
+      fakeDetail({ status: 'completed', completed_at: '2026-06-08T00:05:00.000Z' }),
+    );
+    expect(summary.status).toBe('completed');
+    expect(summary.delivery).toBe('pr_open');
   });
 
   it('cuts at least 5x compared to the verbose detail it was projected from', () => {

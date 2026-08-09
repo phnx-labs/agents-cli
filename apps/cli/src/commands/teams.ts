@@ -48,6 +48,12 @@ import {
   type TaskInfo,
 } from '../lib/teams/api.js';
 import {
+  resolveTeammateDelivery,
+  deliveryDisplayLabel,
+  deliveryColorKey,
+  type TeammateDelivery,
+} from '../lib/teams/delivery.js';
+import {
   createTeam,
   ensureTeam,
   getTeam,
@@ -143,6 +149,7 @@ function statusColor(status: string): (s: string) => string {
     case 'pending': return chalk.blue;
     case 'running': return chalk.yellow;
     case 'completed': return chalk.green;
+    case 'pr_open': return chalk.magenta; // RUSH-2380: process done, PR not merged
     case 'failed': return chalk.red;
     case 'stopped': return chalk.gray;
     default: return chalk.white;
@@ -806,7 +813,12 @@ async function resolveTeammateAcrossTeams(
 //     ! reported an error             (if flagged)
 //     PR: <url>                       (if set)
 function printAgentDetail(a: AgentStatusDetail, session: SessionMeta | null): void {
-  const label = statusColor(a.status)(a.status.toUpperCase());
+  // RUSH-2380: process COMPLETED + open PR → show PR OPEN, not COMPLETED.
+  const delivery: TeammateDelivery =
+    (a.delivery as TeammateDelivery | undefined) ??
+    resolveTeammateDelivery({ status: a.status, prUrl: a.pr_url });
+  const colorKey = deliveryColorKey(delivery, a.status);
+  const label = statusColor(colorKey)(deliveryDisplayLabel(delivery, a.status));
   const who = fullName(a.agent_type as AgentType, a.version);
   const h = displayHandle(a);
   const secondary = a.name ? chalk.gray(`(${shortId(a.agent_id)})`) : '';
@@ -906,7 +918,11 @@ async function resolveTeammateSessions(
 // last." Caller passes the projected AgentStatusSummary; for the full
 // verbose layout use printAgentDetail above.
 function printAgentSummary(s: AgentStatusSummary): void {
-  const label = statusColor(s.status)(s.status.toUpperCase());
+  const delivery: TeammateDelivery =
+    (s.delivery as TeammateDelivery | undefined) ??
+    resolveTeammateDelivery({ status: s.status, prUrl: s.pr_url });
+  const colorKey = deliveryColorKey(delivery, s.status);
+  const label = statusColor(colorKey)(deliveryDisplayLabel(delivery, s.status));
   const handle = s.name ?? shortId(s.agent_id);
   const ident = s.name ? chalk.gray(`(${shortId(s.agent_id)})`) : '';
   const duration = s.duration ? `${chalk.gray(' · ')}${chalk.white(s.duration)}` : '';
