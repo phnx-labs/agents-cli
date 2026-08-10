@@ -41,6 +41,7 @@ import {
 import { listPresets, getPreset } from '../lib/profiles-presets.js';
 import { AGENTS, ALL_AGENT_IDS, resolveAgentName } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
+import { findAccount } from '../lib/account-registry.js';
 import {
   runWizardSteps,
   createSteps,
@@ -70,6 +71,7 @@ export function renderHarnessDetail(name: string): void {
   if (p.fallback_model) console.log(`Fallback: ${p.fallback_model}`);
   console.log(`Provider: ${profileProviderLabel(p)}`);
   console.log(`Auth:     ${profileAuthLabel(p)}`);
+  if (p.account) console.log(`Account:  ${findAccount(p.account)?.name ?? p.account}`);
   if (p.forkedFrom) console.log(`Forked:   from ${p.forkedFrom}`);
   console.log(chalk.gray(getProfilePath(p.name)));
   console.log('');
@@ -81,6 +83,7 @@ export interface ForkOptions {
   model?: string;
   baseUrl?: string;
   authProvider?: string;
+  account?: string;
   version?: string;
   description?: string;
   /** `<bundle>` or `<bundle>:<key>` — see {@link applyFromSecrets} in ./profiles.js. */
@@ -94,6 +97,7 @@ export interface EditOptions {
   model?: string;
   baseUrl?: string;
   authProvider?: string;
+  account?: string;
   /** Empty string ('') unpins the host CLI version. */
   version?: string;
   description?: string;
@@ -113,14 +117,22 @@ export interface EditOptions {
  * copy a model from.
  */
 export function buildFork(source: string, name: string, opts: ForkOptions): Profile {
+  if (opts.authProvider || opts.fromSecrets) throw new Error("Harnesses no longer own credentials. Add one with 'agents accounts add <name> --provider <provider> --auth <type>', then pass --account <name>.");
   if (profileExists(source)) {
-    return forkProfile(readProfile(source), name, {
+    const profile = forkProfile(readProfile(source), name, {
       model: opts.model,
       baseUrl: opts.baseUrl,
       provider: opts.authProvider,
       version: opts.version,
       description: opts.description,
     });
+    if (opts.account) {
+      const account = findAccount(opts.account);
+      if (!account) throw new Error(`Unknown account '${opts.account}'.`);
+      profile.account = account.id;
+      profile.provider = account.provider;
+    }
+    return profile;
   }
 
   const host = resolveAgentName(source);
@@ -133,13 +145,20 @@ export function buildFork(source: string, name: string, opts: ForkOptions): Prof
   if (!opts.model) {
     throw new Error(`--model <id> is required when forking the native '${host}' harness (there is no model to inherit).`);
   }
-  return profileFromHostModel(name, host, opts.model, {
+  const profile = profileFromHostModel(name, host, opts.model, {
     version: opts.version,
     baseUrl: opts.baseUrl,
     provider: opts.authProvider,
     authEnvVar: opts.authProvider ? authEnvKeyForHostOrThrow(host) : undefined,
     description: opts.description ?? `Forked from ${host}: ${opts.model}`,
   });
+  if (opts.account) {
+    const account = findAccount(opts.account);
+    if (!account) throw new Error(`Unknown account '${opts.account}'.`);
+    profile.account = account.id;
+    profile.provider = account.provider;
+  }
+  return profile;
 }
 
 /** Auth env var for a host, as a hard error when the host declares none. */
@@ -172,6 +191,7 @@ export function hasEditFlags(opts: EditOptions): boolean {
     opts.model !== undefined ||
     opts.baseUrl !== undefined ||
     opts.authProvider !== undefined ||
+    opts.account !== undefined ||
     opts.version !== undefined ||
     opts.description !== undefined ||
     opts.fallbackModel !== undefined ||
@@ -197,6 +217,13 @@ export function buildEdit(name: string, opts: EditOptions): Profile {
   }
   const source = readProfile(name);
   const edited = editProfile(source, buildEditOverrides(opts));
+  if (opts.authProvider || opts.fromSecrets) throw new Error("Harnesses no longer own credentials. Add one with 'agents accounts add <name> --provider <provider> --auth <type>', then pass --account <name>.");
+  if (opts.account !== undefined) {
+    const account = findAccount(opts.account);
+    if (!account) throw new Error(`Unknown account '${opts.account}'.`);
+    edited.account = account.id;
+    edited.provider = account.provider;
+  }
   if (opts.version === '') delete edited.host.version;
   if (opts.fallbackModel !== undefined) {
     if (opts.fallbackModel === '') delete edited.fallback_model;
@@ -269,8 +296,7 @@ async function runCreateWizard(): Promise<{ source: string; name: string; opts: 
     opts: {
       model: draft.model,
       baseUrl: draft.baseUrl,
-      authProvider: draft.authProvider,
-      fromSecrets: draft.fromSecrets,
+      account: draft.account,
     },
   };
 }
@@ -297,8 +323,7 @@ export function draftToEditOptions(draft: HarnessDraft, original: Profile): Edit
   const opts: EditOptions = {};
   if (draft.model !== undefined && draft.model !== curModel) opts.model = draft.model;
   if (draft.baseUrl && draft.baseUrl !== curBaseUrl) opts.baseUrl = draft.baseUrl;
-  if (draft.authProvider !== undefined) opts.authProvider = draft.authProvider;
-  if (draft.fromSecrets !== undefined) opts.fromSecrets = draft.fromSecrets;
+  if (draft.account !== undefined) opts.account = draft.account;
   if (draft.version !== undefined && draft.version !== curVersion) opts.version = draft.version;
   if (draft.fallbackModel !== undefined && draft.fallbackModel !== curFallback) opts.fallbackModel = draft.fallbackModel;
   if (draft.description !== undefined && draft.description !== curDescription) opts.description = draft.description;
@@ -361,7 +386,7 @@ Examples:
   agents run spark "refactor api/handlers/checkout.py"
 
   # Fork a native harness, or copy one of your own and swap the model
-  agents harness fork opencode deepseek --model deepseek/deepseek-v4-flash-0731 --auth-provider openrouter
+  agents harness fork opencode deepseek --model deepseek/deepseek-v4-flash-0731 --account openrouter-work
   agents harness fork deepseek deepseek-chat --model deepseek/deepseek-chat-v3
 
   # Per-run model override still wins
@@ -371,14 +396,14 @@ Examples:
   agents harness edit deepseek --fallback-model deepseek/deepseek-chat-v3
   agents harness rename deepseek deepseek-classic
 
-  # No args, in an interactive terminal: a wizard walks you through host, model, provider, key
+  # No args, in an interactive terminal: a wizard walks you through host, model, and account
   agents harness add
 
   # See custom harnesses, addable presets, and native harnesses
   agents harness list
 
-  # Private OpenAI/Anthropic-compatible endpoint (stores a keychain key)
-  agents harness add corp --host claude --model gpt-x --base-url https://gw.corp/v1 --auth-provider corp
+  # Private OpenAI/Anthropic-compatible endpoint using an existing account
+  agents harness add corp --host claude --model gpt-x --base-url https://gw.corp/v1 --account corp
 
   # Custom harnesses are just profiles — this also works via 'agents profiles'
 `,
@@ -390,14 +415,16 @@ Examples:
     .option('--host <agent>', 'Host CLI to run under (opencode, claude, codex, grok, antigravity, ...) — pair with --model')
     .option('--model <id>', 'Model id to pin on the host (e.g., meta/muse-spark-1.1) — pair with --host')
     .option('--base-url <url>', 'Custom endpoint base URL (claude/codex hosts)')
-    .option('--auth-provider <provider>', 'Attach a keychain-backed API key under this provider (for private endpoints)')
+    .option('--account <name>', 'Default durable credential account')
+    .option('--auth-provider <provider>', 'Removed: use agents accounts add, then --account')
     .option('--preset <preset>', 'Apply a built-in preset instead of --host/--model')
     .option('--version <version>', 'Pin the host CLI version (e.g., 1.16.0)')
-    .option('--from-secrets <bundle>[:<key>]', "Copy a value from an agents secrets bundle into this harness's own keychain item, once (not a live link)")
+    .option('--from-secrets <bundle>[:<key>]', 'Removed: import the value with agents accounts add, then use --account')
     .option('--key-stdin', 'Read API key from stdin instead of prompting (for scripts/CI)')
     .option('--force', 'Overwrite an existing harness with the same name')
     .action(async (name: string | undefined, opts: AddProfileOptions & ForkOptions) => {
       try {
+        if (opts.authProvider || opts.fromSecrets) throw new Error("Harnesses no longer own credentials. Add one with 'agents accounts add <name> --provider <provider> --auth <type>', then pass --account <name>.");
         if (addNeedsWizard(name, opts)) {
           if (!isInteractiveTerminal()) {
             throw new Error(
@@ -409,6 +436,14 @@ Examples:
           return;
         }
         await addProfile(name!, opts, 'Harness');
+        if (opts.account) {
+          const profile = readProfile(name!);
+          const account = findAccount(opts.account);
+          if (!account) throw new Error(`Unknown account '${opts.account}'.`);
+          profile.account = account.id;
+          profile.provider = account.provider;
+          writeProfile(profile);
+        }
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exit(1);
@@ -420,10 +455,11 @@ Examples:
     .description('Fork a native harness (claude, opencode, ...) or an existing custom one into a new named harness. Omit args in a terminal for the interactive wizard.')
     .option('--model <id>', 'Model to pin on the fork (required when forking a native harness)')
     .option('--base-url <url>', 'Custom endpoint base URL (claude/codex hosts)')
-    .option('--auth-provider <provider>', 'Attach a keychain-backed API key under this provider')
+    .option('--account <name>', 'Default durable credential account')
+    .option('--auth-provider <provider>', 'Removed: use agents accounts add, then --account')
     .option('--version <version>', 'Pin the host CLI version (e.g., 1.16.0)')
     .option('--description <text>', 'One-line description')
-    .option('--from-secrets <bundle>[:<key>]', "Copy a value from an agents secrets bundle into this harness's own keychain item, once (not a live link)")
+    .option('--from-secrets <bundle>[:<key>]', 'Removed: import the value with agents accounts add, then use --account')
     .option('--key-stdin', 'Read the API key from stdin instead of prompting (for scripts/CI)')
     .option('--force', 'Overwrite an existing harness with the same name')
     .addHelpText(
@@ -431,16 +467,16 @@ Examples:
       `
 Examples:
   # Fork OpenCode into a harness pinned to a DeepSeek model on OpenRouter
-  agents harness fork opencode deepseek --model deepseek/deepseek-v4-flash-0731 --auth-provider openrouter
+  agents harness fork opencode deepseek --model deepseek/deepseek-v4-flash-0731 --account openrouter-work
 
   # Fork Claude Code onto a private gateway
-  agents harness fork claude corp --model gpt-x --base-url https://gw.corp/v1 --auth-provider corp
+  agents harness fork claude corp --model gpt-x --base-url https://gw.corp/v1 --account corp
 
   # Copy an existing harness and swap only the model
   agents harness fork deepseek deepseek-chat --model deepseek/deepseek-chat-v3
 
-  # Copy a key out of an existing secrets bundle instead of typing it
-  agents harness fork claude corp --model gpt-x --auth-provider corp --from-secrets prod:OPENROUTER_KEY
+  # Attach an account whose credential came from agents secrets
+  agents harness fork claude corp --model gpt-x --account corp
 
   # No args, in an interactive terminal: walks through source, preset/model, name, key
   agents harness fork
@@ -468,11 +504,12 @@ Examples:
     .description('Edit an existing custom harness in place — model, endpoint, auth, version, description, fallback. Omit flags in a terminal for the interactive wizard.')
     .option('--model <id>', 'Swap the pinned model')
     .option('--base-url <url>', 'Swap the custom endpoint base URL')
-    .option('--auth-provider <provider>', 'Repoint auth at a different provider (keychain-backed)')
+    .option('--account <name>', 'Change the default durable credential account')
+    .option('--auth-provider <provider>', 'Removed: use agents accounts add, then --account')
     .option('--version <version>', 'Re-pin the host CLI version (pass an empty string to unpin)')
     .option('--description <text>', 'Update the one-line description')
     .option('--fallback-model <id>', 'Secondary model retried on the same host on a rate limit (pass an empty string to clear it)')
-    .option('--from-secrets <bundle>[:<key>]', "Copy a value from an agents secrets bundle into this harness's own keychain item, once (not a live link)")
+    .option('--from-secrets <bundle>[:<key>]', 'Removed: import the value with agents accounts add, then use --account')
     .option('--key-stdin', 'Read the API key from stdin instead of prompting (for scripts/CI)')
     .addHelpText(
       'after',
@@ -481,8 +518,8 @@ Examples:
   # Swap the pinned model
   agents harness edit deepseek --model deepseek/deepseek-v3.2
 
-  # Repoint auth at a different provider and re-enter the key
-  agents harness edit corp --auth-provider corp2
+  # Repoint auth at a different durable account
+  agents harness edit corp --account corp2
 
   # Unpin the host CLI version
   agents harness edit spark --version ""
@@ -490,8 +527,8 @@ Examples:
   # Add a same-host fallback model for rate-limit retries
   agents harness edit deepseek --fallback-model deepseek/deepseek-chat-v3
 
-  # Copy a key out of an existing secrets bundle instead of typing it
-  agents harness edit corp --from-secrets prod:OPENROUTER_KEY
+  # Rotate the attached credential without editing the harness
+  agents accounts set-key corp2 --from-secrets prod:OPENROUTER_KEY
 
   # No flags, in an interactive terminal: a wizard walks each field pre-filled
   agents harness edit deepseek

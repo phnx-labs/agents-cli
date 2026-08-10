@@ -9,6 +9,7 @@ import { readProfile, writeProfile, type Profile } from '../lib/profiles.js';
 import { setKeychainBackendForTest, secretsKeychainItem, getKeychainToken, type KeychainBackend } from '../lib/secrets/index.js';
 import { keychainItemName } from '../lib/secrets/profiles.js';
 import { writeBundleWithItems, keychainRef } from '../lib/secrets/bundles.js';
+import { addAccount, findAccount } from '../lib/account-registry.js';
 
 let TEST_ROOT: string;
 let USER_DIR: string;
@@ -22,6 +23,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setKeychainBackendForTest(null);
   vi.restoreAllMocks();
   fs.rmSync(TEST_ROOT, { recursive: true, force: true });
 });
@@ -87,14 +89,19 @@ describe('buildFork — one verb over two kinds of source', () => {
     expect(() => buildFork('nosuch', 'x', { model: 'm' })).toThrow(/no harness or agent named 'nosuch'/i);
   });
 
-  it('rejects --auth-provider on a host with no auth env var', () => {
-    expect(() => buildFork('goose', 'x', { model: 'm', authProvider: 'corp' })).toThrow(/no known auth env var/i);
+  it('rejects legacy harness-owned credentials with the replacement command', () => {
+    expect(() => buildFork('goose', 'x', { model: 'm', authProvider: 'corp' })).toThrow(/agents accounts add/);
   });
 
-  it('attaches keychain-backed auth for a provider on a host that reads a token', () => {
-    const forked = buildFork('claude', 'corp', { model: 'gpt-x', baseUrl: 'https://gw.corp/v1', authProvider: 'corp' });
+  it('attaches a durable account reference without copying credentials into the harness', () => {
+    const values = new Map<string, string>();
+    setKeychainBackendForTest({ has: key => values.has(key), get: key => values.get(key)!, set: (key, value) => { values.set(key, value); }, delete: key => values.delete(key), list: prefix => [...values.keys()].filter(key => key.startsWith(prefix)) });
+    addAccount('corp-key', 'openrouter', 'api-key', 'test-key', USER_DIR);
+    const forked = buildFork('claude', 'corp', { model: 'gpt-x', baseUrl: 'https://gw.corp/v1', account: 'corp-key' });
     expect(forked.env.ANTHROPIC_BASE_URL).toBe('https://gw.corp/v1');
-    expect(forked.auth).toEqual({ envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.corp.token' });
+    expect(findAccount('corp-key')?.id).toBe(forked.account);
+    expect(forked.auth).toBeUndefined();
+    setKeychainBackendForTest(null);
   });
 });
 
