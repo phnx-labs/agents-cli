@@ -21,16 +21,16 @@ export type { ProjectRule } from '../shared/project';
 
 /**
  * Build the command that opens/attaches a session living on a REMOTE device.
- * We `ssh -t` into the peer and let its own `agents sessions focus <id> --local`
+ * We `ssh -t` into the peer and let its own `agents sessions resume <id> --local`
  * resolve the session in-place — attach its live tmux pane, or resume it in the
  * ssh TTY when it's headless. `--local` is correct because the caller already
  * knows the session is on `host`, so a cross-host sweep from the peer is wasted
  * work. The local (this-mac) path does NOT use this — it spawns
- * `agents sessions focus` detached so it opens a native terminal tab.
+ * `agents sessions resume` detached so it opens a native terminal tab.
  */
 export function buildRemoteFocusCommand(sessionId: string, host: string): string {
   const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-  const remote = `agents sessions focus ${shq(sessionId)} --local`;
+  const remote = `agents sessions resume ${shq(sessionId)} --local`;
   return `ssh -t ${shq(host)} ${shq(remote)}`;
 }
 

@@ -36,6 +36,34 @@ describe('buildSessionLifecycleArgs', () => {
       'sessions', 'focus', 'ag-codex-c1f3d813', '--host', 'yosemite-s0',
     ]);
   });
+
+  // `resume` is the one entry point for "put me back in that session", so the
+  // attach-only vs attach-or-recover distinction has to be reachable FROM it —
+  // otherwise collapsing the verbs would quietly drop a behaviour focus.test.ts
+  // pins (selectFallback: --attach-only picks refuseFallback, never forks).
+  it('forwards --attach-only so the no-fork behaviour survives the collapse', () => {
+    expect(buildSessionLifecycleArgs('019fd114', [], true)).toEqual([
+      'sessions', 'focus', '019fd114', '--attach-only',
+    ]);
+  });
+
+  it('omits the flag by default — the default stays attach-or-recover', () => {
+    expect(buildSessionLifecycleArgs('019fd114')).toEqual(['sessions', 'focus', '019fd114']);
+  });
+
+  // apps/ext's remote path shells `agents sessions resume <id> --local` on the
+  // peer; without the flag that call dies on an unknown option.
+  it('forwards --local so the extension remote path keeps working', () => {
+    expect(buildSessionLifecycleArgs('019fd114', [], false, true)).toEqual([
+      'sessions', 'focus', '019fd114', '--local',
+    ]);
+  });
+
+  it('keeps both the host scope and the flag together', () => {
+    expect(buildSessionLifecycleArgs('019fd114', ['zion'], true)).toEqual([
+      'sessions', 'focus', '019fd114', '--host', 'zion', '--attach-only',
+    ]);
+  });
 });
 
 describe('resumeHostMismatch', () => {

@@ -811,7 +811,7 @@ describe('buildRemoteFocusCommand — attach a remote session over SSH', () => {
     const cmd = buildRemoteFocusCommand('abc12345', 'yosemite-s0');
     expect(cmd.startsWith('ssh -t ')).toBe(true);
     expect(cmd).toContain(`'yosemite-s0'`); // host is quoted, not dropped
-    expect(cmd).toContain('agents sessions focus');
+    expect(cmd).toContain('agents sessions resume');
     expect(cmd).toContain('abc12345');
     expect(cmd).toContain('--local');
   });

@@ -39,7 +39,7 @@ export interface AgentsUrlError {
  */
 const HEX_ID = /^[0-9a-f-]{6,}$/i;
 const SES_ULID = /^ses_[0-9a-hjkmnp-tv-z]{26}$/i;
-const AG_ALIAS = /^ag-[a-z][a-z0-9-]*-[0-9a-f]{8}$/i;
+import { AG_TMUX_NAME_RE as AG_ALIAS } from '../session/types.js';
 const HOST_HINT = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 
 export function isDeepLinkSessionId(raw: string): boolean {

@@ -14,11 +14,17 @@ import { resolveSessionMetadataValue, resumeSessionInPlace } from './sessions.js
 import { readDetachRecord, clearDetachRecord, isHeadlessAlive } from '../lib/session/detached.js';
 
 export function registerAttachCommand(program: Command): void {
+  // Deprecated: superseded by `agents sessions resume`, which detects the state
+  // (live pane / headless / ended) instead of making the caller pick a verb.
+  // Hidden from help; kept as a warned, functional alias for one release so old
+  // muscle-memory and scripts don't break.
   program
-    .command('attach')
+    .command('attach', { hidden: true })
     .argument('<id>', 'Short or full id of the backgrounded/parked session to resume interactively')
-    .description('Bring a backgrounded agent to the foreground — resume it interactively here')
+    .description('Deprecated — use `agents sessions resume <id>` instead.')
     .action(async (id: string) => {
+      console.warn(chalk.yellow('`agents sessions attach` is deprecated — use `agents sessions resume` instead:'));
+      console.warn(chalk.gray(`  agents sessions resume ${id}`));
       await attachAction(id);
     });
 }

@@ -165,7 +165,7 @@ export const RUN_OPTION_REJECT_MESSAGES: Record<string, string> = {
   terminal:
     '--terminal opens a tab on THIS machine; it cannot be combined with --host. ' +
     'Drop --terminal to dispatch to the host, or drop --host to open the tab here. ' +
-    'To watch a remote run in a terminal, dispatch it and follow with `agents sessions focus <id>`.',
+    'To watch a remote run in a terminal, dispatch it and follow with `agents sessions resume <id>`.',
   secrets:
     '--secrets cannot cross the SSH boundary — Keychain values are never sent to a host implicitly. ' +
     'Provision the bundle on the host first (agents secrets export --host <name>), then run without --secrets; ' +

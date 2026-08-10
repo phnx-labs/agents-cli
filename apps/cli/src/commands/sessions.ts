@@ -92,7 +92,6 @@ import { registerSessionsRenderCommand } from './sessions-render.js';
 import { registerSessionsImportCommand } from './sessions-import.js';
 import { registerSessionsMigrateCommand, registerSessionsMigrationsCommand } from './sessions-migrate.js';
 import { registerSessionsBackfillCommand } from './sessions-backfill.js';
-import { registerSessionsReapCommand } from './sessions-reap.js';
 import { registerSessionsStatsCommand } from './sessions-stats.js';
 import { registerSessionsInsightsCommand } from './insights.js';
 import { registerSessionsOptimizeCommand } from './sessions-optimize.js';
@@ -5692,17 +5691,17 @@ export function registerSessionsCommands(program: Command): void {
       agents sessions --orphan
       agents sessions --crashed
 
-      # --- Session lifecycle (one verb per intent) ---
-      # Focus a session (attach its living terminal, or recover an ended one)
-      agents sessions focus a1b2c3d4
-      # Attach only — never fork a copy (old: sessions go)
-      agents sessions focus a1b2c3d4 --attach-only
-      # Interactive → headless (keep working unattended)
-      agents sessions detach a1b2c3d4
-      # Headless → interactive in this terminal
-      agents sessions attach a1b2c3d4
+      # --- Session lifecycle ---
+      # Get back into a session — attaches a live pane, or recovers an ended one
+      agents sessions resume a1b2c3d4
+      # Same, by the tmux name shown in: agents tmux ls
+      agents sessions resume ag-claude-a1b2c3d4
+      # Attach only — never fork a copy
+      agents sessions resume a1b2c3d4 --attach-only
       # Multi-select history and open each in a tab
       agents sessions resume
+      # The other direction: interactive → headless (keep working unattended)
+      agents sessions detach a1b2c3d4
 
       # The interactive list folds in other online machines automatically,
       # labelled by host with this machine first. Stay local with --local:
@@ -5754,12 +5753,12 @@ export function registerSessionsCommands(program: Command): void {
       agents sessions --all "deploy script" --host box-a --host box-b
     `,
     notes: `
-      Session lifecycle (pick one verb — they are not synonyms):
-        focus [selector]        attach a living pane, or recover on the origin device
-        focus [id] --attach-only  attach only; never fork (replaces sessions go)
-        detach <id>             interactive → headless continuation
-        attach <id>             headless → interactive in this terminal
-        resume [query]          multi-select history → open tabs (or run --resume <id>)
+      Session lifecycle — ONE verb gets you back in, it detects the state:
+        resume <id|alias>       live pane -> attach; headless -> foreground; ended -> recover
+        resume <id> --attach-only  attach only; never fork a copy
+        resume                  multi-select history -> open tabs
+        detach <id>             the other direction: interactive -> headless
+        (retired, still working for one release: sessions attach, sessions go, reconnect)
       - The interactive listing and every live-status flag fold in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; single-id lookups stay local.
       - --all is not a device flag: it widens historical directory and time filters. Fleet collection is already the default. A status flag (--working/--idle/--waiting/--orphan/--crashed/--closed/--abandoned/--queued/--unknown) implies --active; combine status flags for a union.
       - --version <version> requires --agent and is equivalent to --agent <agent@version>.
@@ -5875,7 +5874,6 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsMigrateCommand(sessionsCmd);
   registerSessionsMigrationsCommand(sessionsCmd);
   registerSessionsBackfillCommand(sessionsCmd);
-  registerSessionsReapCommand(sessionsCmd);
   registerSessionsStatsCommand(sessionsCmd);
   registerSessionsInsightsCommand(sessionsCmd);
   registerSessionsOptimizeCommand(sessionsCmd);

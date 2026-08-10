@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_91 command groups · 548 commands._
+_90 command groups · 542 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -602,12 +602,6 @@ agents pty stop <id>             Stop a PTY session and clean up. The session ID
 agents pty write <id> <input>    Send keystrokes to the PTY (like typing into the terminal). Processes escape sequences by default.
 ```
 
-## reconnect — Re-enter a dropped agent terminal: attach the live pane if it survived, else resume the session
-
-```
-agents reconnect [session-id]  Re-enter a dropped agent terminal: attach the live pane if it survived, else resume the session
-```
-
 ## registry — Manage package registries
 
 ```
@@ -762,16 +756,13 @@ agents serve  Read-only local web companion: team diffs, routines, and cloud sta
 
 ```
 agents sessions [query]                     Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active` (alias: `agents roster`).
-agents sessions attach <id>                 Bring a backgrounded agent to the foreground — resume it interactively here
 agents sessions backfill                    Populate derived session data explicitly.
 agents sessions backfill resources          Derive historical skill/slash-command usage once into the local SQLite index.
 agents sessions backfill tools              Parse historical tool calls once into the local SQLite index.
 agents sessions bookmark [ids...]           Bookmark sessions so they are easy to find again — list them with --bookmarks, or `b` in the browser.
 agents sessions detach <id>                 Send a live agent to the background — stop its terminal, keep it working headless
 agents sessions export [selectors...]       Bundle sessions (by id, query, or the parent selection flags like --since/-a) into a portable archive.
-agents sessions focus [selector]            Focus sessions by id, harness/version, topic, device, or live state; attach living panes and recover ended ones
 agents sessions fork <session>              Branch a session into a new, independent copy you can continue separately. The original is untouched.
-agents sessions go [id]                     Deprecated alias for `sessions focus --attach-only`
 agents sessions import [bundle]             Restore an export bundle (file, - for stdin, or --from-host <h>) into the local session store, deduping against what you already have.
 agents sessions inject <sessionId> <text>   Deliver text (+ Enter) into the terminal a running session lives in — nudge a stalled agent.
 agents sessions insights                    How work looks — behavioural report (default) or counter mix (`mix`, recipes)
@@ -790,8 +781,6 @@ agents sessions migrate [session-id]        Relocate a running session onto anot
 agents sessions migrations                  Show the migration ledger — sessions handed off to/from other machines.
 agents sessions optimize                    Compact the session search index (FTS5), reclaiming bloat from repeated re-indexing
 agents sessions preview <id>                Show one rich session card without rendering the full transcript
-agents sessions reap                        Kill tmux sessions whose panes are all dead, and the helper processes their agents left behind.
-agents sessions reconnect [session-id]      Re-enter a dropped agent terminal: attach the live pane if it survived, else resume the session
 agents sessions render <selectors...>       Render one or more sessions as readable, redacted Markdown for review or sharing.
 agents sessions resume [query]              Reopen one session by canonical identity, or multi-select history into terminal tabs/splits.
 agents sessions stats                       Which skills/commands you actually invoke, and which installed ones are dead weight.

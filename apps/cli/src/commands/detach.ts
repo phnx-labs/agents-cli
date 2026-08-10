@@ -171,7 +171,7 @@ export async function detachAction(id: string, opts: { local?: boolean } = {}): 
 
   console.log(
     chalk.green(`◒ Backgrounded ${agent} ${short}`) +
-      chalk.gray(` — running headless (pid ${pid}). Bring it back: agents sessions attach ${short}`),
+      chalk.gray(` — running headless (pid ${pid}). Bring it back: agents sessions resume ${short}`),
   );
   console.log(chalk.gray(`  logs: ${logFile}`));
 }

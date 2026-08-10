@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 91,
-  "commands": 548,
+  "groups": 90,
+  "commands": 542,
   "root": {
     "name": "agents",
     "path": "",
@@ -15251,35 +15251,6 @@
       ]
     },
     {
-      "name": "reconnect",
-      "path": "reconnect",
-      "aliases": [],
-      "description": "Re-enter a dropped agent terminal: attach the live pane if it survived, else resume the session",
-      "args": [
-        {
-          "name": "session-id",
-          "required": false,
-          "variadic": false,
-          "description": "Session id/prefix to reconnect (default: the most recent session started here)"
-        }
-      ],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "# Reconnect the session that just dropped in this shell (most recent here)\n      agents reconnect\n\n      # Reconnect one specific agent terminal by id/prefix\n      agents reconnect 74b13b0b\n\n      # Same, spelled under the sessions group\n      agents sessions reconnect 74b13b0b",
-      "notes": "- Best-effort recovery: a living remote tmux pane is JOINED (a second client, no fork); a dropped one is RESUMED on its origin device (a copy if it was mid-run, a /continue if idle).\n      - With no id, targets the most recent session started from this directory (the terminal that most likely just dropped), not the full fleet picker. Falls back to the most recent session anywhere when this directory has none.\n      - This is the manual companion to the automatic reconnect that runs during a live 'agents run --device <box>' when the network blinks; use it after that gave up or the terminal tab closed.\n      - Related: 'agents sessions focus' (attach/recover with a picker) and 'agents sessions resume' (multi-select history -> tabs).",
-      "subcommands": []
-    },
-    {
       "name": "registry",
       "path": "registry",
       "aliases": [],
@@ -21842,36 +21813,9 @@
           "negate": false
         }
       ],
-      "examples": "# Search prior sessions in this project by topic, file path, or command\n      agents sessions \"add auth middleware\"\n\n      # Read a session as markdown (user + assistant + thinking + tools)\n      agents sessions a1b2c3d4 --markdown\n\n      # Just the user turns — useful for recalling intent\n      agents sessions a1b2c3d4 --include user\n\n      # Show only what's running right now (terminals, teams, cloud, headless)\n      agents sessions --active\n\n      # Filter the live fleet by the status word shown in the roster\n      agents sessions --working\n      agents sessions --idle\n      agents sessions --orphan\n      agents sessions --crashed\n\n      # --- Session lifecycle (one verb per intent) ---\n      # Focus a session (attach its living terminal, or recover an ended one)\n      agents sessions focus a1b2c3d4\n      # Attach only — never fork a copy (old: sessions go)\n      agents sessions focus a1b2c3d4 --attach-only\n      # Interactive → headless (keep working unattended)\n      agents sessions detach a1b2c3d4\n      # Headless → interactive in this terminal\n      agents sessions attach a1b2c3d4\n      # Multi-select history and open each in a tab\n      agents sessions resume\n\n      # The interactive list folds in other online machines automatically,\n      # labelled by host with this machine first. Stay local with --local:\n      agents sessions --local\n\n      # Search across every directory, not just this project\n      agents sessions \"topic\" --all\n\n      # Filter one installed harness version (equivalent forms)\n      agents sessions claude@2.1.181\n      agents sessions --agent claude --version 2.1.181\n\n      # Team-spawned sessions, grouped by team (spawner + spawn time per team,\n      # teammate mode/handle per row; team-flagged spawns with no team record\n      # in a trailing (no team) bucket)\n      agents sessions --teams\n\n      # Who spawned which team: an orchestrator row carries team:<name>, and a\n      # teammate row [<team>/<handle>]. --in-team narrows to one team's lineage.\n      agents sessions --in-team redesign --teams\n\n      # Pick a routine across every directory, then open one of its run sessions\n      agents sessions --routine\n      agents sessions --routine nightly-review\n      agents sessions 2026-07-21T10-30-00-000Z\n\n      # Export for analysis\n      agents sessions --since 30d --limit 200 --json > sessions.json\n\n      # List indexed tool calls in recent Codex sessions on one device\n      agents sessions --include tools --agent codex --device mac-mini --since 7d\n\n      # Each repeated clause must match a different call in the same session\n      agents sessions --include tools --query 'program:git input:merge' --query 'program:gh output:CONFLICT' --fleet --json\n\n      # Count every pre-indexed static git site without reparsing transcripts\n      agents sessions --include tools --query 'program:git' --count --fleet --json\n\n      # Explicitly populate historical tool rows once on every device\n      agents sessions backfill tools --fleet\n\n      # Resolve one historical selector to metadata only, across the fleet\n      agents sessions --resolve d3470b57 --json\n\n      # Search another machine's sessions live over SSH (no sync needed)\n      agents sessions \"auth bug\" --last 3 --host yosemite-s1\n\n      # Fan the same query out across several machines\n      agents sessions --all \"deploy script\" --host box-a --host box-b",
-      "notes": "Session lifecycle (pick one verb — they are not synonyms):\n        focus [selector]        attach a living pane, or recover on the origin device\n        focus [id] --attach-only  attach only; never fork (replaces sessions go)\n        detach <id>             interactive → headless continuation\n        attach <id>             headless → interactive in this terminal\n        resume [query]          multi-select history → open tabs (or run --resume <id>)\n      - The interactive listing and every live-status flag fold in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; single-id lookups stay local.\n      - --all is not a device flag: it widens historical directory and time filters. Fleet collection is already the default. A status flag (--working/--idle/--waiting/--orphan/--crashed/--closed/--abandoned/--queued/--unknown) implies --active; combine status flags for a union.\n      - --version <version> requires --agent and is equivalent to --agent <agent@version>.\n      - --host runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.\n      - --in-team matches both ends of the lineage: the session that ran 'agents teams create/add', and (with --teams) that team's teammates. In the interactive list, 't' cycles the same filter over the teams in view.\n      - --include and --exclude are mutually exclusive.\n      - With --include tools, repeat --query for same-session AND across distinct calls. Fields: tool, program, input, output, status, exit, error.\n      - --count accepts exactly one program:<name> clause and reports static source occurrences, containing tool calls, and sessions.\n      - Tool queries read SQLite only. Run 'agents sessions backfill tools' once for historical transcripts; normal scans index new and changed sessions.\n      - Tool evidence is redacted and bounded before it reaches SQLite. --markdown and --no-redact conflict with --include tools.\n      - Tool queries accept 32 clauses (4 KiB each), --limit 1–1,000, and at most 8 MiB of materialized evidence.\n      - --first and --last are mutually exclusive.\n      - A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.\n      - --cloud sources from Rush Cloud captured runs instead of local disk.\n      - --routine [name] spans every directory and shows transcripts archived from routine runs. On a TTY, omit the name to pick a routine; a name accepts exact, substring, or unambiguous typo matches. --routines is an alias. Routine rows also resolve by run id.\n      - Without --teams, team-spawned sessions are hidden by default.",
+      "examples": "# Search prior sessions in this project by topic, file path, or command\n      agents sessions \"add auth middleware\"\n\n      # Read a session as markdown (user + assistant + thinking + tools)\n      agents sessions a1b2c3d4 --markdown\n\n      # Just the user turns — useful for recalling intent\n      agents sessions a1b2c3d4 --include user\n\n      # Show only what's running right now (terminals, teams, cloud, headless)\n      agents sessions --active\n\n      # Filter the live fleet by the status word shown in the roster\n      agents sessions --working\n      agents sessions --idle\n      agents sessions --orphan\n      agents sessions --crashed\n\n      # --- Session lifecycle ---\n      # Get back into a session — attaches a live pane, or recovers an ended one\n      agents sessions resume a1b2c3d4\n      # Same, by the tmux name shown in: agents tmux ls\n      agents sessions resume ag-claude-a1b2c3d4\n      # Attach only — never fork a copy\n      agents sessions resume a1b2c3d4 --attach-only\n      # Multi-select history and open each in a tab\n      agents sessions resume\n      # The other direction: interactive → headless (keep working unattended)\n      agents sessions detach a1b2c3d4\n\n      # The interactive list folds in other online machines automatically,\n      # labelled by host with this machine first. Stay local with --local:\n      agents sessions --local\n\n      # Search across every directory, not just this project\n      agents sessions \"topic\" --all\n\n      # Filter one installed harness version (equivalent forms)\n      agents sessions claude@2.1.181\n      agents sessions --agent claude --version 2.1.181\n\n      # Team-spawned sessions, grouped by team (spawner + spawn time per team,\n      # teammate mode/handle per row; team-flagged spawns with no team record\n      # in a trailing (no team) bucket)\n      agents sessions --teams\n\n      # Who spawned which team: an orchestrator row carries team:<name>, and a\n      # teammate row [<team>/<handle>]. --in-team narrows to one team's lineage.\n      agents sessions --in-team redesign --teams\n\n      # Pick a routine across every directory, then open one of its run sessions\n      agents sessions --routine\n      agents sessions --routine nightly-review\n      agents sessions 2026-07-21T10-30-00-000Z\n\n      # Export for analysis\n      agents sessions --since 30d --limit 200 --json > sessions.json\n\n      # List indexed tool calls in recent Codex sessions on one device\n      agents sessions --include tools --agent codex --device mac-mini --since 7d\n\n      # Each repeated clause must match a different call in the same session\n      agents sessions --include tools --query 'program:git input:merge' --query 'program:gh output:CONFLICT' --fleet --json\n\n      # Count every pre-indexed static git site without reparsing transcripts\n      agents sessions --include tools --query 'program:git' --count --fleet --json\n\n      # Explicitly populate historical tool rows once on every device\n      agents sessions backfill tools --fleet\n\n      # Resolve one historical selector to metadata only, across the fleet\n      agents sessions --resolve d3470b57 --json\n\n      # Search another machine's sessions live over SSH (no sync needed)\n      agents sessions \"auth bug\" --last 3 --host yosemite-s1\n\n      # Fan the same query out across several machines\n      agents sessions --all \"deploy script\" --host box-a --host box-b",
+      "notes": "Session lifecycle — ONE verb gets you back in, it detects the state:\n        resume <id|alias>       live pane -> attach; headless -> foreground; ended -> recover\n        resume <id> --attach-only  attach only; never fork a copy\n        resume                  multi-select history -> open tabs\n        detach <id>             the other direction: interactive -> headless\n        (retired, still working for one release: sessions attach, sessions go, reconnect)\n      - The interactive listing and every live-status flag fold in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; single-id lookups stay local.\n      - --all is not a device flag: it widens historical directory and time filters. Fleet collection is already the default. A status flag (--working/--idle/--waiting/--orphan/--crashed/--closed/--abandoned/--queued/--unknown) implies --active; combine status flags for a union.\n      - --version <version> requires --agent and is equivalent to --agent <agent@version>.\n      - --host runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.\n      - --in-team matches both ends of the lineage: the session that ran 'agents teams create/add', and (with --teams) that team's teammates. In the interactive list, 't' cycles the same filter over the teams in view.\n      - --include and --exclude are mutually exclusive.\n      - With --include tools, repeat --query for same-session AND across distinct calls. Fields: tool, program, input, output, status, exit, error.\n      - --count accepts exactly one program:<name> clause and reports static source occurrences, containing tool calls, and sessions.\n      - Tool queries read SQLite only. Run 'agents sessions backfill tools' once for historical transcripts; normal scans index new and changed sessions.\n      - Tool evidence is redacted and bounded before it reaches SQLite. --markdown and --no-redact conflict with --include tools.\n      - Tool queries accept 32 clauses (4 KiB each), --limit 1–1,000, and at most 8 MiB of materialized evidence.\n      - --first and --last are mutually exclusive.\n      - A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.\n      - --cloud sources from Rush Cloud captured runs instead of local disk.\n      - --routine [name] spans every directory and shows transcripts archived from routine runs. On a TTY, omit the name to pick a routine; a name accepts exact, substring, or unambiguous typo matches. --routines is an alias. Routine rows also resolve by run id.\n      - Without --teams, team-spawned sessions are hidden by default.",
       "subcommands": [
-        {
-          "name": "attach",
-          "path": "sessions attach",
-          "aliases": [],
-          "description": "Bring a backgrounded agent to the foreground — resume it interactively here",
-          "args": [
-            {
-              "name": "id",
-              "required": true,
-              "variadic": false,
-              "description": "Short or full id of the backgrounded/parked session to resume interactively"
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
         {
           "name": "backfill",
           "path": "sessions backfill",
@@ -22096,356 +22040,6 @@
           "subcommands": []
         },
         {
-          "name": "focus",
-          "path": "sessions focus",
-          "aliases": [],
-          "description": "Focus sessions by id, harness/version, topic, device, or live state; attach living panes and recover ended ones",
-          "args": [
-            {
-              "name": "selector",
-              "required": false,
-              "variadic": false,
-              "description": "Session id/prefix, agent@version, or topic/path search"
-            }
-          ],
-          "options": [
-            {
-              "flags": "--local",
-              "description": "Only this machine (skip the cross-host sweep)",
-              "long": "--local",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--attach-only",
-              "description": "Attach only — never open a new tab / resume a copy (the old `go` behavior)",
-              "long": "--attach-only",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-H, --host <target...>",
-              "description": "Scope the picker to live sessions on these devices (host alias or user@host; repeatable)",
-              "short": "-H",
-              "long": "--host",
-              "required": true,
-              "optional": false,
-              "variadic": true,
-              "negate": false
-            },
-            {
-              "flags": "--device <target...>",
-              "description": "Alias for --host (device alias from `agents devices`; repeatable)",
-              "long": "--device",
-              "required": true,
-              "optional": false,
-              "variadic": true,
-              "negate": false
-            },
-            {
-              "flags": "--active",
-              "description": "Only sessions present in the live roster",
-              "long": "--active",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-a, --agent <agent>",
-              "description": "Filter by harness and recorded version (for example claude@latest)",
-              "short": "-a",
-              "long": "--agent",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--claude",
-              "description": "Shorthand for --agent claude",
-              "long": "--claude",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--codex",
-              "description": "Shorthand for --agent codex",
-              "long": "--codex",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--kimi",
-              "description": "Shorthand for --agent kimi",
-              "long": "--kimi",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--antigravity",
-              "description": "Shorthand for --agent antigravity",
-              "long": "--antigravity",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--grok",
-              "description": "Shorthand for --agent grok",
-              "long": "--grok",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--opencode",
-              "description": "Shorthand for --agent opencode",
-              "long": "--opencode",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--all",
-              "description": "Include every directory and all time",
-              "long": "--all",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--teams",
-              "description": "Include team-spawned sessions",
-              "long": "--teams",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--in-team <name>",
-              "description": "Only one team lineage",
-              "long": "--in-team",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--routine",
-              "description": "Only routine-run sessions",
-              "long": "--routine",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-p, --project <name>",
-              "description": "Only a named project",
-              "short": "-p",
-              "long": "--project",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--skill <name>",
-              "description": "Only sessions that invoked this skill",
-              "long": "--skill",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--plugin <name>",
-              "description": "Only sessions that used this plugin",
-              "long": "--plugin",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--since <time>",
-              "description": "Only sessions newer than this (for example 7d)",
-              "long": "--since",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--until <time>",
-              "description": "Only sessions older than this timestamp",
-              "long": "--until",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-n, --limit <n>",
-              "description": "Maximum candidates to load",
-              "short": "-n",
-              "long": "--limit",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "500"
-            },
-            {
-              "flags": "--bookmarks",
-              "description": "Only bookmarked sessions",
-              "long": "--bookmarks",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--unmanaged",
-              "description": "Also include native-home sessions outside managed versions",
-              "long": "--unmanaged",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--sort <field>",
-              "description": "Order candidates by recent, cost, or duration",
-              "long": "--sort",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "recent"
-            },
-            {
-              "flags": "--working",
-              "description": "Only live sessions currently doing work",
-              "long": "--working",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--idle",
-              "description": "Only live sessions that have stopped between turns",
-              "long": "--idle",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--waiting",
-              "description": "Only live sessions waiting on your input",
-              "long": "--waiting",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--orphan",
-              "description": "Only sessions whose process outlived its terminal client",
-              "long": "--orphan",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--orphaned",
-              "description": "Alias for --orphan",
-              "long": "--orphaned",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--crashed",
-              "description": "Only sessions whose terminal disappeared with the process",
-              "long": "--crashed",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--closed",
-              "description": "Only recently observed sessions whose process exited normally",
-              "long": "--closed",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--abandoned",
-              "description": "Only sessions with no transcript progress for the abandonment window",
-              "long": "--abandoned",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--queued",
-              "description": "Only queued sessions that have not started running",
-              "long": "--queued",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--unknown",
-              "description": "Only sessions whose live state cannot be determined",
-              "long": "--unknown",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# Focus a session directly (attach a living pane, otherwise recover it)\n      agents sessions focus a1b2c3d4\n\n      # Multi-select live sessions; each opens as a tab in this terminal\n      agents sessions focus\n\n      # Scope the picker to one device's orphaned sessions\n      agents sessions focus --orphan --device yosemite-s0\n\n      # Resolve latest on yosemite-s0, then pick from that version's sessions\n      agents sessions focus claude@latest --device yosemite-s0\n\n      # Attach only — refuse if nothing is joinable (old sessions go)\n      agents sessions focus a1b2c3d4 --attach-only\n\n      # Pick from live sessions on this machine only\n      agents sessions focus --local",
-          "notes": "- space toggles a session, enter opens the selected set; a single check + enter opens just one.\n      - With no selector/filter, the picker shows the live fleet. An id focuses directly; agent@version and text selectors always show the preview picker.\n      - A living tmux pane is JOINED (a second client, no fork). Dead/missing panes recover on the origin device: exact healthy origin uses native resume; otherwise a healthy version of the same harness receives /continue <id>.\n      - An id/identity selector resolves across the whole reachable fleet on its own — you do NOT need --device to focus a session that lives on another box (same as resume/preview). --device only narrows the browsable picker and the agent/version resolution.\n      - --host/--device and the sessions-browser filters compose. latest/oldest resolve against each selected device's installed versions.\n      Lifecycle siblings (not synonyms):\n        focus              attach if alive, otherwise recover (default \"take me there\")\n        focus --attach-only  attach only; never fork (replaces go)\n        detach / attach    interactive ↔ headless presence\n        resume             multi-select history → tabs\n        run --resume       single scripted continue",
-          "subcommands": []
-        },
-        {
           "name": "fork",
           "path": "sessions fork",
           "aliases": [],
@@ -22481,42 +22075,6 @@
           ],
           "examples": "# Fork a session by (partial) id, then continue the fork\n    agents sessions fork 4f3a9c21\n    agents sessions resume <new-id>\n\n    # Give the fork a name\n    agents sessions fork 4f3a9c21 --name \"try redis instead\"",
           "notes": "- 'resume' continues the SAME conversation; 'fork' copies it under a new id so the two diverge.\n    - The fork is a full copy of the conversation so far; continuing it never touches the original.\n    - Resolve the session the same way as resume: an exact or prefix id fragment.\n    - Native copy currently supports: claude. For other harnesses, branch by\n      starting a fresh agent and seeding it with '/continue <id>' — the source stays put.",
-          "subcommands": []
-        },
-        {
-          "name": "go",
-          "path": "sessions go",
-          "aliases": [],
-          "description": "Deprecated alias for `sessions focus --attach-only`",
-          "args": [
-            {
-              "name": "id",
-              "required": false,
-              "variadic": false,
-              "description": "Short/full session id to jump to; omit for an interactive picker"
-            }
-          ],
-          "options": [
-            {
-              "flags": "--local",
-              "description": "Only this machine (skip the cross-host sweep)",
-              "long": "--local",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
           "subcommands": []
         },
         {
@@ -23542,84 +23100,6 @@
           "subcommands": []
         },
         {
-          "name": "reap",
-          "path": "sessions reap",
-          "aliases": [],
-          "description": "Kill tmux sessions whose panes are all dead, and the helper processes their agents left behind.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Emit a JSON result object instead of human output.",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--dry-run",
-              "description": "List what would be reaped without killing anything.",
-              "long": "--dry-run",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--socket <path>",
-              "description": "Path to the tmux server socket (default: agents helper socket).",
-              "long": "--socket",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# Reap dead sessions and orphaned helper processes\nagents sessions reap\n\n# See what would be reaped, without killing anything\nagents sessions reap --dry-run\n\n# JSON output (for scripts)\nagents sessions reap --json",
-          "notes": "Sessions stay open after their process exits because `remain-on-exit on` is set\nso the harness can inspect exit status. Killing the pane only SIGHUPs its\nforeground process group, so MCP servers and harness background daemons that\nmoved out of that group outlive the agent. This command collects both.\n\nSafety: sessions with at least one live pane are never touched, and a helper\nprocess is killed only when its owning tmux session is gone, or that session\nhas no attached client AND its agent process has exited.\n\nThe routines daemon runs the same sweep every 5 minutes.",
-          "subcommands": []
-        },
-        {
-          "name": "reconnect",
-          "path": "sessions reconnect",
-          "aliases": [],
-          "description": "Re-enter a dropped agent terminal: attach the live pane if it survived, else resume the session",
-          "args": [
-            {
-              "name": "session-id",
-              "required": false,
-              "variadic": false,
-              "description": "Session id/prefix to reconnect (default: the most recent session started here)"
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# Reconnect the session that just dropped in this shell (most recent here)\n      agents reconnect\n\n      # Reconnect one specific agent terminal by id/prefix\n      agents reconnect 74b13b0b\n\n      # Same, spelled under the sessions group\n      agents sessions reconnect 74b13b0b",
-          "notes": "- Best-effort recovery: a living remote tmux pane is JOINED (a second client, no fork); a dropped one is RESUMED on its origin device (a copy if it was mid-run, a /continue if idle).\n      - With no id, targets the most recent session started from this directory (the terminal that most likely just dropped), not the full fleet picker. Falls back to the most recent session anywhere when this directory has none.\n      - This is the manual companion to the automatic reconnect that runs during a live 'agents run --device <box>' when the network blinks; use it after that gave up or the terminal tab closed.\n      - Related: 'agents sessions focus' (attach/recover with a picker) and 'agents sessions resume' (multi-select history -> tabs).",
-          "subcommands": []
-        },
-        {
           "name": "render",
           "path": "sessions render",
           "aliases": [],
@@ -23795,6 +23275,24 @@
               "negate": false
             },
             {
+              "flags": "--local",
+              "description": "Only this machine (skip the cross-host sweep)",
+              "long": "--local",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--attach-only",
+              "description": "With an id/alias: attach a living pane only — never resume a copy",
+              "long": "--attach-only",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--splits",
               "description": "Pack two sessions side by side per tab (default: one tab per session)",
               "long": "--splits",
@@ -23814,8 +23312,8 @@
               "negate": false
             }
           ],
-          "examples": "# Pick several sessions; each opens in its own tab\n      agents sessions resume\n\n      # Pre-filter the pool before selecting (space in the filter → use [query])\n      agents sessions resume \"auth middleware\"\n\n      # Reopen one session from any device by UUID prefix or tmux alias\n      agents sessions resume 019fd114\n      agents sessions resume ag-codex-c1f3d813\n\n      # Force a backend / side-by-side splits / a remote host\n      agents sessions resume --ghostty\n      agents sessions resume --vscodium\n      agents sessions resume --splits\n      agents sessions resume --host zion --tmux",
-          "notes": "- A UUID/prefix or ag-<agent>-<suffix> alias bypasses the picker: a live pane is attached; an inactive session resumes on its owning device.\n      - With no identity selector, space toggles a session, enter confirms, and tab toggles the preview pane.\n      - Layout: one tab per session by default. --splits packs session pairs side by side in each tab.\n      - Backend: auto-detected from the terminal you're in (iTerm / Ghostty / tmux); override with --iterm/--ghostty/--tmux/--vscodium.\n      - --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --host too).\n      - --host <alias> opens the terminal surface on that host only when it is the selected sessions' origin; recovery never migrates a session to another device.\n      - Recovery runs on the session's origin device: exact healthy origin uses native resume; otherwise a healthy version of the same harness receives /continue <id>.",
+          "examples": "# Pick several sessions; each opens in its own tab\n      agents sessions resume\n\n      # Pre-filter the pool before selecting (space in the filter → use [query])\n      agents sessions resume \"auth middleware\"\n\n      # Reopen one session from any device by UUID prefix or tmux alias\n      agents sessions resume 019fd114\n      agents sessions resume ag-codex-c1f3d813\n\n      # Attach a living pane only — never resume a copy (the old go)\n      agents sessions resume 019fd114 --attach-only\n\n      # Force a backend / side-by-side splits / a remote host\n      agents sessions resume --ghostty\n      agents sessions resume --vscodium\n      agents sessions resume --splits\n      agents sessions resume --host zion --tmux",
+          "notes": "- This is the ONE verb for getting back in. It detects the state: a live tmux pane is attached, a headless session comes to the foreground, an ended one recovers on its owning device.\n      - A UUID/prefix or ag-<agent>-<suffix> alias bypasses the picker. A live alias attaches by name even when the session index cannot attribute it.\n      - Retired spellings still work for one release and print the replacement: sessions attach, sessions go, reconnect.\n      - Going the other way (foreground -> background) is 'agents sessions detach <id>'.\n      - With no identity selector, space toggles a session, enter confirms, and tab toggles the preview pane.\n      - Layout: one tab per session by default. --splits packs session pairs side by side in each tab.\n      - Backend: auto-detected from the terminal you're in (iTerm / Ghostty / tmux); override with --iterm/--ghostty/--tmux/--vscodium.\n      - --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --host too).\n      - --host <alias> opens the terminal surface on that host only when it is the selected sessions' origin; recovery never migrates a session to another device.\n      - Recovery runs on the session's origin device: exact healthy origin uses native resume; otherwise a healthy version of the same harness receives /continue <id>.",
           "subcommands": []
         },
         {

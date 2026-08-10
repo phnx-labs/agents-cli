@@ -1,4 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+
 import { Command } from 'commander';
 import {
   metaFromActive,
@@ -11,11 +15,18 @@ import {
   isAttachableLiveSession,
   inheritFocusOptions,
   focusTargetForResolved,
+  looksLikeTmuxAlias,
+  resolveTmuxAliasState,
+  dedupeSessionsByLogicalId,
 } from './focus.js';
 import { refuseFallback } from './go.js';
 import type { ActiveSession } from '../lib/session/active.js';
 import type { SessionMeta } from '../lib/session/types.js';
 import type { SurfaceItem, LaunchResult } from '../lib/terminal/index.js';
+
+function hasTmux(): boolean {
+  try { execFileSync('tmux', ['-V'], { stdio: 'ignore' }); return true; } catch { return false; }
+}
 
 describe('focusTargetForResolved — an id resolves fleet-wide, no --device needed', () => {
   const resolved: SessionMeta = {
@@ -319,5 +330,90 @@ describe('openFocusTabs — N selected sessions → N tab requests through the e
     expect(calls).toHaveLength(0);
     expect(log.mock.calls.flat().join('\n')).toContain('Nothing to open');
     log.mockRestore();
+  });
+});
+
+describe('resolveTmuxAliasState — a tmux alias is classified against the REAL server', () => {
+  // RUSH-2498: `sessions focus ag-kimi-632c1fbc` used to fall through to the
+  // metadata resolver, which treats an unmatched alias as a keyword query and
+  // returned 13 unrelated text hits while that pane was alive and attachable.
+  // The alias's hex is the LAUNCH id, not the harness session id, so for a
+  // harness that writes no state/sessions/<pid>.json there is no mapping back
+  // to a SessionMeta at all — the pane name is the only handle that works.
+  it('rejects selectors that are not alias-shaped', () => {
+    expect(looksLikeTmuxAlias('87e2bc83')).toBe(false);
+    expect(looksLikeTmuxAlias('87e2bc83-d1e8-499b-9f54-d8cf98abe51b')).toBe(false);
+    expect(looksLikeTmuxAlias('some topic')).toBe(false);
+    expect(looksLikeTmuxAlias('ag-kimi-632c1fbc')).toBe(true);
+    expect(looksLikeTmuxAlias('ag-claude-87e2bc83')).toBe(true);
+  });
+
+  it('reports not-an-alias without touching tmux', async () => {
+    expect(await resolveTmuxAliasState('87e2bc83')).toBe('not-an-alias');
+  });
+
+  it('reports absent for an alias with no such session on the server', async () => {
+    const sock = path.join(os.tmpdir(), `agents-alias-${process.pid}-${Date.now()}.sock`);
+    // No server was ever started on this socket.
+    expect(await resolveTmuxAliasState('ag-claude-deadbeef', sock)).toBe('no-server');
+  });
+
+  it.skipIf(!hasTmux())('distinguishes a live pane from a dead one on a real server', async () => {
+    const sock = path.join(os.tmpdir(), `agents-alias-live-${process.pid}-${Date.now()}.sock`);
+    const live = 'ag-claude-aa11bb22';
+    const dead = 'ag-claude-cc33dd44';
+    try {
+      // A long-lived pane, and one whose command exits immediately. remain-on-exit
+      // keeps the corpse, which is exactly the state the fleet accumulates.
+      execFileSync('tmux', ['-S', sock, 'set-option', '-g', 'remain-on-exit', 'on', ';',
+        'new-session', '-d', '-s', live, 'sleep 300']);
+      execFileSync('tmux', ['-S', sock, 'new-session', '-d', '-s', dead, 'true']);
+      // Let the short-lived one exit and be marked dead.
+      await new Promise(r => setTimeout(r, 700));
+
+      expect(await resolveTmuxAliasState(live, sock)).toBe('live');
+      expect(await resolveTmuxAliasState(dead, sock)).toBe('dead');
+      expect(await resolveTmuxAliasState('ag-claude-99999999', sock)).toBe('absent');
+    } finally {
+      try { execFileSync('tmux', ['-S', sock, 'kill-server']); } catch { /* already gone */ }
+    }
+  });
+});
+
+describe('dedupeSessionsByLogicalId — synced copies are ONE session (SES-IF-2a)', () => {
+  const base = {
+    shortId: '87e2bc83', agent: 'claude' as const, version: '2.1.207', mode: 'edit',
+    timestamp: '2026-08-10T00:00:00Z',
+  };
+  const id = '87e2bc83-d1e8-499b-9f54-d8cf98abe51b';
+
+  // RUSH-2498: `focus <full-uuid>` answered "is ambiguous (2 sessions). Use more
+  // of the id." — with no longer id to give. The duplicate was the same session
+  // indexed on a second machine, one copy of which had no transcript left.
+  it('collapses the same full id seen on two machines', () => {
+    const rows = [
+      { ...base, id, machine: 'yosemite-s0', filePath: '/s/a.jsonl' },
+      { ...base, id, machine: 'zion', filePath: '/s/a.jsonl', _remote: true },
+    ] as SessionMeta[];
+    expect(dedupeSessionsByLogicalId(rows, 'yosemite-s0')).toHaveLength(1);
+  });
+
+  it('prefers a real transcript over a phantom index entry with no file', () => {
+    const phantom = { ...base, id, machine: 'zion', filePath: '' } as SessionMeta;
+    const real = { ...base, id, machine: 'yosemite-s0', filePath: '/s/a.jsonl' } as SessionMeta;
+    expect(dedupeSessionsByLogicalId([phantom, real], undefined)[0]).toBe(real);
+    expect(dedupeSessionsByLogicalId([real, phantom], undefined)[0]).toBe(real);
+  });
+
+  it('prefers this machine over a peer mirror — resuming is machine-bound', () => {
+    const peer = { ...base, id, machine: 'zion', filePath: '/s/a.jsonl', _remote: true } as SessionMeta;
+    const here = { ...base, id, machine: 'yosemite-s0', filePath: '/s/a.jsonl' } as SessionMeta;
+    expect(dedupeSessionsByLogicalId([peer, here], 'yosemite-s0')[0]).toBe(here);
+  });
+
+  it('keeps genuinely distinct sessions apart — a real prefix collision still reports both', () => {
+    const other = { ...base, id: '87e2bc83-aaaa-4bbb-8ccc-dddddddddddd', machine: 'zion', filePath: '/s/b.jsonl' } as SessionMeta;
+    const here = { ...base, id, machine: 'yosemite-s0', filePath: '/s/a.jsonl' } as SessionMeta;
+    expect(dedupeSessionsByLogicalId([here, other], 'yosemite-s0')).toHaveLength(2);
   });
 });

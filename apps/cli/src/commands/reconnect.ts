@@ -90,11 +90,17 @@ export async function reconnectAction(id: string | undefined): Promise<void> {
 }
 
 export function registerReconnectCommand(program: Command): void {
+  // Deprecated: superseded by `agents sessions resume`, which does the same
+  // attach-else-recover and additionally takes a tmux alias. Hidden + warned +
+  // functional for one release. Bare `reconnect` targeted the most recent
+  // session in this directory; that default now lives on `resume`'s picker.
   const cmd = program
-    .command('reconnect')
+    .command('reconnect', { hidden: true })
     .argument('[session-id]', 'Session id/prefix to reconnect (default: the most recent session started here)')
-    .description('Re-enter a dropped agent terminal: attach the live pane if it survived, else resume the session')
+    .description('Deprecated — use `agents sessions resume` instead.')
     .action(async (id: string | undefined) => {
+      console.warn(chalk.yellow('`agents reconnect` is deprecated — use `agents sessions resume` instead:'));
+      console.warn(chalk.gray(`  agents sessions resume${id ? ` ${id}` : ''}`));
       await reconnectAction(id);
     });
 
@@ -113,7 +119,7 @@ export function registerReconnectCommand(program: Command): void {
       - Best-effort recovery: a living remote tmux pane is JOINED (a second client, no fork); a dropped one is RESUMED on its origin device (a copy if it was mid-run, a /continue if idle).
       - With no id, targets the most recent session started from this directory (the terminal that most likely just dropped), not the full fleet picker. Falls back to the most recent session anywhere when this directory has none.
       - This is the manual companion to the automatic reconnect that runs during a live 'agents run --device <box>' when the network blinks; use it after that gave up or the terminal tab closed.
-      - Related: 'agents sessions focus' (attach/recover with a picker) and 'agents sessions resume' (multi-select history -> tabs).
+      - Deprecated: use 'agents sessions resume' — it attaches a live pane, foregrounds a headless session, or recovers an ended one.
     `,
   });
 }

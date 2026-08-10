@@ -17,7 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getHistoryDir } from '../state.js';
-import type { SessionRunMode } from './types.js';
+import { isAgentTmuxAlias, type SessionRunMode } from './types.js';
 
 export interface SessionActorRecord {
   sessionId: string;
@@ -52,7 +52,7 @@ function recordPath(sessionId: string): string {
 }
 
 function isSafeAlias(alias: string): boolean {
-  return /^ag-[a-z][a-z0-9-]*-[0-9a-f]{8}$/i.test(alias);
+  return isAgentTmuxAlias(alias);
 }
 
 function hasRecordData(record: SessionActorRecord): boolean {

@@ -43,7 +43,7 @@ import { readSessionTailWithRaw } from './tail.js';
 import { parseSession } from './parse.js';
 import { computeTokPerSec } from './throughput.js';
 import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type TodoProgress, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
-import { isSessionTrackedAgent, SESSION_AGENTS, type SessionAgentId, type SessionAttachment, type SessionEvent } from './types.js';
+import { isSessionTrackedAgent, SESSION_AGENTS, AG_TMUX_NAME_RE, type SessionAgentId, type SessionAttachment, type SessionEvent } from './types.js';
 import { AGENTS } from '../agents.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
 import { loadDevices, type DeviceRegistry } from '../devices/registry.js';
@@ -592,7 +592,7 @@ export function agentKindFromComm(commRaw: string): string | undefined {
  * and validating there would silently drop grok/kimi/antigravity — the exact
  * harness-parity gap we are fixing.
  */
-const AG_NAME_RE = /^ag-([a-z][a-z0-9-]*?)-([0-9a-f]{8})$/i;
+const AG_NAME_RE = AG_TMUX_NAME_RE;
 
 /** Agent kind from an `ag-<agent>-<shortid>` tmux session name, else undefined. */
 export function agentKindFromName(sessName: string): string | undefined {

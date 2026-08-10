@@ -49,12 +49,13 @@ const execFileAsync = promisify(execFile);
 
 export function registerGoCommand(program: Command): void {
   program
-    .command('go')
+    .command('go', { hidden: true })
     .argument('[id]', 'Short/full session id to jump to; omit for an interactive picker')
     .option('--local', 'Only this machine (skip the cross-host sweep)')
-    .description('Deprecated alias for `sessions focus --attach-only`')
+    .description('Deprecated — use `agents sessions resume --attach-only` instead.')
     .action(async (id: string | undefined, opts: { local?: boolean }) => {
-      console.error(chalk.yellow('`sessions go` is deprecated — use `sessions focus --attach-only`'));
+      console.warn(chalk.yellow('`agents sessions go` is deprecated — use `agents sessions resume --attach-only` instead:'));
+      console.warn(chalk.gray(`  agents sessions resume ${id ?? '<id>'} --attach-only`));
       await focusAction(id, { local: opts.local, attachOnly: true });
     });
 }

@@ -21,6 +21,23 @@ export const SESSION_AGENTS: SessionAgentId[] = ['claude', 'codex', 'gemini', 'a
  * of {@link SESSION_AGENTS}). The single predicate every session-index writer
  * gates on, so "is this a trackable agent?" is decided in exactly one place.
  */
+/**
+ * The tmux session name the CLI mints for an agent run: `ag-<agent>-<shortid>`.
+ *
+ * ONE definition. This shape was independently re-written as a regex literal in
+ * five places (focus's selector test, sessions-resume's direct-selector test,
+ * active's name parsers, actor-sidecar, and the deeplink parser); they drifted —
+ * focus accepted a 6+ hex suffix while the others required exactly 8 — which is
+ * how the same alias could be an "identity" to one code path and a keyword query
+ * to the next.
+ */
+export const AG_TMUX_NAME_RE = /^ag-([a-z][a-z0-9-]*?)-([0-9a-f]{8})$/i;
+
+/** Whether `name` is an `ag-<agent>-<shortid>` tmux session name. */
+export function isAgentTmuxAlias(name: string): boolean {
+  return AG_TMUX_NAME_RE.test(name);
+}
+
 export function isSessionTrackedAgent(agent: string): agent is SessionAgentId {
   return (SESSION_AGENTS as string[]).includes(agent);
 }

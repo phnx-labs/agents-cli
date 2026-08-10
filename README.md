@@ -331,8 +331,8 @@ agents sessions --working           # actively producing work (fleet-wide)
 agents sessions --idle              # stopped between turns (fleet-wide)
 agents sessions --orphan            # agent outlived its terminal client
 agents sessions --crashed           # terminal and agent disappeared uncleanly
-agents sessions focus a1b2c3d4      # jump back into one — attach in place, or resume
-agents sessions focus claude@latest --device yosemite-s0  # pick latest there
+agents sessions resume a1b2c3d4     # jump back into one — attach in place, or recover
+agents sessions resume ag-claude-a1b2c3d4  # or by its tmux alias
 ```
 
 On a terminal, `agents sessions --active` (and a bare `agents sessions`) open the **interactive session browser** — one filter you drive with single keys, re-pulled live across the fleet:
@@ -343,7 +343,7 @@ On a terminal, `agents sessions --active` (and a bare `agents sessions`) open th
 | `r` | running only | `--active` |
 | `b` | bookmarks only | `--bookmarks` |
 | `*` | bookmark / unbookmark the highlighted session | `agents sessions bookmark <id>` |
-| `f` | focus the highlighted session | `agents sessions focus <id>` |
+| `f` | focus the highlighted session | `agents sessions resume <id>` |
 | `c` | team sessions | `--team` (alias: `--teams`) |
 | `a` | agent (cycles) | `-a` |
 | `d` | device (cycles) | `--device` |
@@ -353,7 +353,7 @@ On a terminal, `agents sessions --active` (and a bare `agents sessions`) open th
 | `⏎` | resume / attach | `resume` / `focus` |
 | `y` | copy the equivalent command | `--print-cmd` |
 
-**Bookmark the sessions you keep coming back to.** `*` marks the highlighted row (a `★` shows in the listing), `b` narrows to bookmarks, and `agents sessions bookmark <id>` / `--bookmarks` do the same outside a TTY. Press `f` to focus the highlighted row through the same attach-or-recover flow as `agents sessions focus <id>`; Enter keeps its existing resume behavior. Bookmarks live in `~/.agents/.history/bookmarks.json` keyed by session id, so they survive a reindex of the session cache. They're per-machine — session sync carries transcripts, not this file.
+**Bookmark the sessions you keep coming back to.** `*` marks the highlighted row (a `★` shows in the listing), `b` narrows to bookmarks, and `agents sessions bookmark <id>` / `--bookmarks` do the same outside a TTY. Press `f` to focus the highlighted row through the same attach-or-recover flow as `agents sessions resume <id>`; Enter keeps its existing resume behavior. Bookmarks live in `~/.agents/.history/bookmarks.json` keyed by session id, so they survive a reindex of the session cache. They're per-machine — session sync carries transcripts, not this file.
 
 **A session that lost its host says so.** When an editor window or an SSH connection goes down hard, the agent it owned used to simply disappear from `--active`; when an agent outlived its window in tmux, it reported a plain `idle`. Both now carry their own status: `✗ crashed` (the host went down and took the agent with it) and `◍ orphan` (still alive, but no client is attached — nothing is showing it). Read from tmux's attached-client count and the editor window's registry heartbeat, so a deliberate `agents sessions detach` is never mistaken for one, and a session that is still *working* headlessly is left alone.
 
@@ -363,7 +363,7 @@ Filters **stack** (they AND together), the active set shows in the header, and t
 | --- | --- |
 | ![sessions browser, preview hidden](assets/demos/sessions-preview-before.png) | ![sessions browser, preview open with a links line](assets/demos/sessions-preview-after.png) |
 
-Each live session resolves to `working`, `waiting_input` (with why -- a question, a plan review, or a permission prompt), `idle`, or a lifecycle state such as `orphaned`, `crashed`, `closed`, `abandoned`, `queued`, or `unknown`. Pass the matching flag (`--working`, `--idle`, `--waiting`, `--orphan`, `--crashed`, `--closed`, `--abandoned`, `--queued`, `--unknown`) directly; each implies `--active`, and several flags form a union. The fleet fan-out is already the default; `--local` opts out. `--all` instead widens historical directory and time scope. Rows also carry badges for the PR, worktree, and ticket. `agents sessions focus [selector]` accepts the same agent/version, device, time, team, project, skill/plugin, bookmark, and live-state filters as the session browser. A unique id focuses directly; an agent/version or text selector always opens the preview picker. Immediately before attach it checks the tmux pane process: a living pane is joined in place, while a dead/missing pane enters recovery instead of showing tmux's `Pane is dead` screen.
+Each live session resolves to `working`, `waiting_input` (with why -- a question, a plan review, or a permission prompt), `idle`, or a lifecycle state such as `orphaned`, `crashed`, `closed`, `abandoned`, `queued`, or `unknown`. Pass the matching flag (`--working`, `--idle`, `--waiting`, `--orphan`, `--crashed`, `--closed`, `--abandoned`, `--queued`, `--unknown`) directly; each implies `--active`, and several flags form a union. The fleet fan-out is already the default; `--local` opts out. `--all` instead widens historical directory and time scope. Rows also carry badges for the PR, worktree, and ticket. `agents sessions resume [selector]` accepts the same agent/version, device, time, team, project, skill/plugin, bookmark, and live-state filters as the session browser. A unique id or `ag-<agent>-<shortid>` tmux alias resolves directly; an agent/version or text selector always opens the preview picker. Immediately before attach it checks the tmux pane process: a living pane is joined in place, while a dead/missing pane enters recovery instead of showing tmux's `Pane is dead` screen.
 
 Landing on a session cold? `agents sessions <id>` prints a catch-up digest: an inferred title, files changed grouped by directory (created / modified / deleted), a histogram of which tools did the work (including parsed Bash commands -- `git`, `npm`, `ffmpeg`, `ssh`, and so on), and the last test verdict -- the signals to reload a task in seconds.
 
@@ -386,11 +386,11 @@ agents run auto --resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # adapt if its ac
 
 ### Send an agent to the background — and bring it back
 
-Running 30 agents and drowning in terminal tabs? `agents sessions detach <id>` stops a session's interactive process and keeps it working **headless** in the background -- it drives its task to done unattended, no tab, lower cost. `agents sessions attach <id>` brings it back through the same origin-device recovery decision: native resume in the exact healthy origin home, or same-harness `/continue` when that home is unavailable, with the full indexed history (including whatever it did while backgrounded).
+Running 30 agents and drowning in terminal tabs? `agents sessions detach <id>` stops a session's interactive process and keeps it working **headless** in the background -- it drives its task to done unattended, no tab, lower cost. `agents sessions resume <id>` brings it back through the same origin-device recovery decision: native resume in the exact healthy origin home, or same-harness `/continue` when that home is unavailable, with the full indexed history (including whatever it did while backgrounded).
 
 ```
 agents sessions detach a1b2c3d4     # go headless in the background, keep working
-agents sessions attach a1b2c3d4     # resume it interactively, right here
+agents sessions resume a1b2c3d4     # bring it back interactively, right here
 ```
 
 Both are agent-agnostic -- they route through the same `agents run --resume` path (native resume for Claude/Codex, `/continue` replay for the rest). `agents sessions --active` shows each session's **owner** (the human who launched it, resolved from the tailnet identity, or `-` for an unresolved local run) and its `presence` -- `attached` (you're watching it), `background` (running headless), or `parked` (its background run finished) -- so the menu bar and AGI EXT show who is running what, and where. In AGI EXT, **Agents: Detach** (`Cmd/Ctrl+K B`) and **Agents: Attach** (`Cmd/Ctrl+K A`) do the same over the focused terminal.

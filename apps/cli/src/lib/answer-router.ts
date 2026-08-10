@@ -178,7 +178,7 @@ export function resolveAnswerRoute(input: AnswerRouterInput): AnswerRoute {
       kind: 'refuse',
       reason:
         'Agent is parked on a question but has no addressable terminal (no tmux/iterm/pty rail). ' +
-        'Open its terminal and answer there, or run `agents sessions focus <id>` first.',
+        'Open its terminal and answer there, or run `agents sessions resume <id>` first.',
     };
   }
 
