@@ -40,6 +40,16 @@ export function logForwardedArgs(kind: string, agent: string, version: string | 
   if (safeArgs[0] === 'run' && safeArgs[2] && !safeArgs[2].startsWith('--')) {
     safeArgs[2] = '<prompt>';
   }
+  for (let i = 0; i < safeArgs.length; i++) {
+    if (safeArgs[i] === '--env' && safeArgs[i + 1]) {
+      const key = safeArgs[i + 1].split('=', 1)[0];
+      safeArgs[i + 1] = `${key}=<redacted>`;
+      i++;
+    } else if (safeArgs[i] === '--') {
+      safeArgs.splice(i + 1, safeArgs.length - i - 1, '<passthrough redacted>');
+      break;
+    }
+  }
   process.stderr.write(
     `[dispatch:${kind}] agent=${agent}${version ? `@${version}` : ''} args=${JSON.stringify(safeArgs)}\n`,
   );

@@ -32,7 +32,8 @@ function runDispatchDiagnostic(debug: boolean): ReturnType<typeof spawnSync> {
   return spawnSync('bun', [
     '-e',
     "import { buildRunForwardedArgs } from './apps/cli/src/lib/hosts/dispatch.ts'; " +
-      "buildRunForwardedArgs({ agent: 'grok', prompt: 'rotate sk-live-secret', mode: 'auto' });",
+      "buildRunForwardedArgs({ agent: 'grok', prompt: 'rotate sk-live-prompt', mode: 'auto', " +
+      "env: ['API_TOKEN=sk-live-env'], passthroughArgs: ['--api-key', 'sk-live-arg'] });",
   ], { cwd: REPO_ROOT, env, encoding: 'utf8' });
 }
 
@@ -41,8 +42,13 @@ describe('dispatch diagnostics', () => {
     const result = runDispatchDiagnostic(true);
     expect(result.status).toBe(0);
     expect(result.stderr).toContain('[dispatch:headless] agent=grok');
-    expect(result.stderr).toContain('["run","grok","<prompt>","--quiet","--mode","auto"]');
-    expect(result.stderr).not.toContain('sk-live-secret');
+    expect(result.stderr).toContain(
+      '["run","grok","<prompt>","--quiet","--mode","auto","--env","API_TOKEN=<redacted>",' +
+        '"--","<passthrough redacted>"]',
+    );
+    expect(result.stderr).not.toContain('sk-live-prompt');
+    expect(result.stderr).not.toContain('sk-live-env');
+    expect(result.stderr).not.toContain('sk-live-arg');
   });
 
   it('emits no diagnostic when AGENTS_DISPATCH_DEBUG is unset', () => {
