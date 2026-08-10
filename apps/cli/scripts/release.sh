@@ -12,11 +12,12 @@
 #   - CI / tests: a crabbox (dynamic Hetzner Linux VM) via scripts/sandbox.sh --
 #     never a hardcoded instance. Covers the Linux suite; the GH Actions matrix
 #     still covers the cross-platform (macOS/Windows) legs on the release PR.
-#   - Build + sign + notarize + npm publish + computer-helper: the mac-mini home
-#     base (the one hardcoded name -- it holds the Developer ID cert + npm publish
-#     rights). If you invoke from mac-mini it runs locally; otherwise the script
-#     ssh's to mac-mini, checks out the merged tag, and runs the privileged phase
-#     there in mac-mini's headless secrets context (no Touch ID, no token borrow).
+#   - Build + sign + notarize + npm publish + computer-helper: a Mac home base --
+#     mac-mini by default, overridable with `--device <name>` (it holds the
+#     Developer ID cert + npm publish rights). If you invoke from that box it runs
+#     locally; otherwise the script ssh's to it, checks out the merged tag, and
+#     runs the privileged phase there in its headless secrets context (no Touch
+#     ID, no token borrow). Use `--device zion` when mac-mini is down.
 #
 # Flow (--apply): run the Linux suite on a crabbox; open the release as a
 # chore(release) PR on a release/v<version> branch -- which fires the full
@@ -27,7 +28,10 @@
 # merge, a retry rebuilds from that merged PR's exact CI-tested tree even when
 # newer commits have since landed on main.
 #
-# Usage: scripts/release.sh <version> [--apply]
+# Usage: scripts/release.sh <version> [--apply] [--device <name>]
+#
+# --device <name> (alias --host) picks the Mac that builds/signs/publishes;
+# defaults to mac-mini. Everything else is unchanged and zero-config.
 #
 # Default mode is DRY-RUN: every local check runs (type-check, build, tarball
 # preview) and the detected release state is reported, but nothing is pushed,
@@ -57,25 +61,25 @@ bold()   { printf '\033[1m%s\033[0m\n'  "$*"; }
 
 die() { red "error: $*"; exit 1; }
 
-# ----- Home base: the one hardcoded machine name (owner-endorsed) -----
-# The build/sign/notarize/publish/computer-helper phase MUST run here: it is the
-# only box that holds the Developer ID cert + npm publish rights + the headless
-# signing/secrets context. This is a constant, NOT an env var -- nobody sets
-# anything to release. Everything else self-selects (crabbox for tests; the
+# ----- Home base: which machine runs build + sign + notarize + npm publish -----
+# This phase needs macOS (codesign/notarytool) + the Developer ID cert + the npm
+# publish token + the headless signing/secrets context. It defaults to mac-mini,
+# the stable box that holds those, and is overridable with `--device <name>`
+# (parsed below, alias `--host`) so a release can be driven to any capable Mac
+# when mac-mini is down. Not an env var -- the target is a flag with a default,
+# never ambient config. Everything else self-selects (crabbox for tests; the
 # invoking box for git+gh orchestration).
-readonly RELEASE_HOME_BASE="mac-mini"
+readonly RELEASE_HOME_BASE_DEFAULT="mac-mini"
 
-# Detect the short hostname of the box we are on, portably (macOS + Linux), and
-# compute whether we are already on the home base. `scutil --get LocalHostName`
-# is the macOS name that matches the ssh/Tailscale name; `hostname -s` is the
-# Linux short name.
+# Detect the short hostname of the box we are on, portably (macOS + Linux).
+# `scutil --get LocalHostName` is the macOS name that matches the ssh/Tailscale
+# name; `hostname -s` is the Linux short name. ON_HOME_BASE is computed after arg
+# parse, once --device has resolved the effective RELEASE_HOME_BASE.
 if [[ "$(uname)" == "Darwin" ]]; then
   THIS_HOST="$(scutil --get LocalHostName 2>/dev/null || hostname -s)"
 else
   THIS_HOST="$(hostname -s 2>/dev/null || hostname)"
 fi
-ON_HOME_BASE=false
-[[ "$THIS_HOST" == "$RELEASE_HOME_BASE" ]] && ON_HOME_BASE=true
 
 # ----- Phase tracker -----
 # A running [n/N] progress line the operator can follow: each phase names the box
@@ -109,14 +113,23 @@ HOME_BASE_PHASE=false
 # It prevents the release-owned checkout from recursively creating another one.
 ORCHESTRATION_PHASE=false
 TARGET=""
+# --device <name> (alias --host) selects the Mac that runs the privileged
+# build + sign + notarize + npm publish phase; defaults to mac-mini. A for-loop
+# with a pending flag (not `shift`) preserves "$@" intact, so the release-worktree
+# re-exec (RELEASE_ARGS=("$@")) forwards every arg including --device.
+DEVICE=""
+expect_device=false
 for arg in "$@"; do
+  if $expect_device; then DEVICE="$arg"; expect_device=false; continue; fi
   case "$arg" in
     --apply) APPLY=true ;;
     --skip-tests) SKIP_TESTS=true ;;
     --yes|-y) YES=true ;;
     --home-base-phase) HOME_BASE_PHASE=true ;;
     --orchestration-phase) ORCHESTRATION_PHASE=true ;;
-    -h|--help) printf '%s\n' "usage: scripts/release.sh <version> [--apply] [--skip-tests] [--yes]"; exit 0 ;;
+    --device|--host) expect_device=true ;;
+    --device=*|--host=*) DEVICE="${arg#*=}" ;;
+    -h|--help) printf '%s\n' "usage: scripts/release.sh <version> [--apply] [--device <name>] [--skip-tests] [--yes]"; exit 0 ;;
     --*) die "unknown flag: $arg" ;;
     *)
       [[ -z "$TARGET" ]] || die "unexpected argument: $arg"
@@ -124,8 +137,15 @@ for arg in "$@"; do
       ;;
   esac
 done
+$expect_device && die "--device needs a machine name (e.g. --device zion)"
 [[ -n "$TARGET" ]] || die "usage: scripts/release.sh <version> [--apply]  (e.g. 1.14.2 --apply)"
 [[ "$TARGET" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "version must be MAJOR.MINOR.PATCH (no pre-release tags)"
+
+# Resolve the privileged-phase target: --device if given, else the mac-mini
+# default. ON_HOME_BASE says whether THIS box is that target (run inline vs ssh).
+readonly RELEASE_HOME_BASE="${DEVICE:-$RELEASE_HOME_BASE_DEFAULT}"
+ON_HOME_BASE=false
+[[ "$THIS_HOST" == "$RELEASE_HOME_BASE" ]] && ON_HOME_BASE=true
 
 # The caller's checkout is never the orchestration workspace. It may be a dirty
 # shared main checkout or an agent's feature worktree; either way, release-owned
@@ -429,7 +449,7 @@ else
   echo "warning: \$REPO_ROOT/apps/cli/bin/embedded.provisionprofile absent on the home base; the signed helper build will fail" >&2
 fi
 cd "\$WT/apps/cli"
-scripts/release.sh $1 --home-base-phase
+scripts/release.sh $1 --home-base-phase --device "$RELEASE_HOME_BASE"
 SNIPPET
 }
 route_home_base_phase() {
