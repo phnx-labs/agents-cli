@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Monitors: definition vs running state, and one trigger per work item</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:5px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-awaiting-go">awaiting-go</span></div>
+<h1>Monitors: definition vs running state, and one trigger per work item</h1>
+<p class="summary">Monitor definitions are gitignored, so every box has a different invisible set of watchers. Track the definitions, keep runtime local, and resolve ownership first — because syncing definitions without ownership multiplies double-fires instead of fixing them.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">zion 0 monitors, yosemite-s0 6, yosemite-s1 2 — same fleet, same day<span class="meta-sep" aria-hidden="true">·</span>No enable/disable verb exists; the docs name one that never shipped<span class="meta-sep" aria-hidden="true">·</span>monitorRunsOnThisDevice returns true for every box when device is unset<span class="meta-sep" aria-hidden="true">·</span>Syncing definitions is unsafe until ownership is resolved</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">monitors-duplicate-guard</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">RUSH-2476 (gates visibility) · RUSH-2485 (sibling defect) · agents-cli#2517</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">6b09b0da</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a href="#intent"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Intent</a><a href="#purpose"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#current-architecture"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Current architecture</a><a href="#proposed-changes"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#plan"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Plan</a><a href="#validation"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Tracking</a><a href="#resolved-while-planning"><span class="toc-index">11&nbsp;&middot;&nbsp;</span>Resolved while planning</a></nav><article class="artifact-body"><h2 id="focus-for-review">Focus for review</h2>
+<ul>
+<li><strong>The ordering claim.</strong> Syncing definitions <em>requires</em> ownership first. If you
+disagree with that dependency, the whole sequence changes.</li>
+<li><strong><code>device: auto</code>.</strong> Deterministic election over the device registry — the one
+genuinely new mechanism here.</li>
+<li><strong>The held branch.</strong> <code>muqsitnawaz/.agents</code> already has the gitignore fix pushed.
+It stays unmerged until ownership lands.</li>
+<li><strong><code>pause</code>/<code>resume</code> must move to a per-device list</strong> (step 4). Once definitions
+sync, pausing on one box would otherwise pause on all of them.</li>
+</ul>
+<h2 id="intent">Intent</h2>
+<blockquote>
+<p>"the definition can be checked into the repo but when it's running that
+shouldn't be checked into the repo. And if the same monitor is already running
+with the same exact arguments then if the agent tries to rerun it then he should
+be warned. So we can prevent double-trigger bugs."</p>
+</blockquote>
+<p>Plus, earlier: no <code>enable</code>/<code>disable</code> verb — a shipped monitor should just show up.</p>
+<h2 id="purpose">Purpose</h2>
+<p><code>agents monitors list</code> on zion printed <strong>"No monitors configured"</strong> while
+<code>~/.agents/.system/monitors/pr-merge-on-green.yml</code> sat on that same disk — the
+built-in that would have merged PR #2485 without a human.</p>
+<table>
+<thead>
+<tr>
+<th>Claim</th>
+<th>Verified</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>enable</code>/<code>disable</code> verbs exist</td>
+<td><strong>No</strong> — 12 commands registered, neither among them; docs instruct a command that never shipped</td>
+</tr>
+<tr>
+<td>Built-ins are visible</td>
+<td><strong>No</strong> — <code>config.ts:436</code> forces system scope to <code>enabled: false</code></td>
+</tr>
+<tr>
+<td>Installed CLI reads the system layer</td>
+<td><strong>No</strong> — <code>getSystemMonitorsDir</code> absent from 1.22.35; merged to <code>main</code> 01:50 today</td>
+</tr>
+<tr>
+<td>Definitions are checked in</td>
+<td><strong>No</strong> — <code>~/.agents/.gitignore</code> groups <code>monitors/</code> with <code>commands/</code>, <code>factory/</code>, <code>scripts/</code>; 0 tracked</td>
+</tr>
+<tr>
+<td>Running state is checked in</td>
+<td><strong>Correctly no</strong> — <code>.history/monitors/</code> already excluded</td>
+</tr>
+<tr>
+<td>Adding a duplicate warns</td>
+<td><strong>No</strong> — <code>writeMonitor</code> overwrites by name, nothing compares arguments</td>
+</tr>
+</tbody></table>
+<p>Result on the fleet: <strong>zion 0, yosemite-s0 6, yosemite-s1 2</strong> — and on one box,
+<code>open-pr-watch</code>, <code>pr-ci-fail</code>, three stale <code>pr2222-*</code> watchers and an agent-added
+lander all polling the same PR queue.</p>
+<div class="artifact-callout">
+<strong>Nothing gets removed.</strong> No <code>enable</code>/<code>disable</code>
+verb exists to delete. <code>pause</code>/<code>resume</code> already route through
+<code>setMonitorEnabled</code> to <code>writeMonitor</code>, which writes the
+<em>user dir only</em> — so pausing a built-in materializes a user copy and never
+touches the pull-only system mirror (hardened in <code>158d79eb8</code>).
+</div><h2 id="current-architecture">Current architecture</h2>
+<p>The subsystem already separates definition from running state. What it lacks is
+ownership — and that is what makes syncing dangerous.</p>
+<figure class="artifact-figure">
+<svg viewBox="0 0 920 430" role="img" aria-label="Sync without ownership multiplies triggers; with ownership exactly one box fires">
+  <rect x="0" y="0" width="920" height="430" fill="#0a0a0a"></rect>
+
+  <text x="24" y="28" fill="#a3e635" font-family="monospace" font-size="13">DEFINITION (syncs)</text>
+  <rect x="24" y="42" width="200" height="46" rx="6" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="38" y="62" fill="#d6d6d6" font-family="monospace" font-size="12">monitors/&lt;name&gt;.yml</text>
+  <text x="38" y="79" fill="#6b6b6b" font-family="monospace" font-size="10">what · when · action</text>
+
+  <text x="256" y="28" fill="#6b6b6b" font-family="monospace" font-size="13">RUNNING STATE (local)</text>
+  <rect x="256" y="42" width="220" height="46" rx="6" fill="#111" stroke="#404040" stroke-width="1.5"></rect>
+  <text x="270" y="62" fill="#d6d6d6" font-family="monospace" font-size="11">.history/monitors/&lt;n&gt;/</text>
+  <text x="270" y="79" fill="#6b6b6b" font-family="monospace" font-size="10">last-seen · fires · rate limit</text>
+
+  <line x1="24" y1="108" x2="896" y2="108" stroke="#262626" stroke-width="1"></line>
+
+  <text x="24" y="136" fill="#f87171" font-family="monospace" font-size="13">SYNC WITHOUT OWNERSHIP — the trap</text>
+  <rect x="24" y="150" width="150" height="40" rx="6" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="38" y="175" fill="#d6d6d6" font-family="monospace" font-size="11">definition syncs</text>
+
+  <line x1="174" y1="170" x2="250" y2="170" stroke="#a3e635" stroke-width="1.5"></line>
+  <text x="256" y="166" fill="#6b6b6b" font-family="monospace" font-size="10">device: unset</text>
+  <text x="256" y="180" fill="#6b6b6b" font-family="monospace" font-size="10">config.ts:200 -&gt; true</text>
+
+  <rect x="410" y="146" width="140" height="48" rx="6" fill="#111" stroke="#f87171" stroke-width="1.5"></rect>
+  <text x="424" y="166" fill="#d6d6d6" font-family="monospace" font-size="11">zion daemon</text>
+  <text x="424" y="184" fill="#f87171" font-family="monospace" font-size="10">fires</text>
+
+  <rect x="566" y="146" width="150" height="48" rx="6" fill="#111" stroke="#f87171" stroke-width="1.5"></rect>
+  <text x="580" y="166" fill="#d6d6d6" font-family="monospace" font-size="11">yosemite-s0</text>
+  <text x="580" y="184" fill="#f87171" font-family="monospace" font-size="10">fires</text>
+
+  <rect x="732" y="146" width="140" height="48" rx="6" fill="#111" stroke="#f87171" stroke-width="1.5"></rect>
+  <text x="746" y="166" fill="#d6d6d6" font-family="monospace" font-size="11">mac-mini</text>
+  <text x="746" y="184" fill="#f87171" font-family="monospace" font-size="10">fires</text>
+
+  <circle cx="890" cy="170" r="6" fill="#f87171"><animate attributeName="opacity" values="1;0.2;1" dur="1.5s" repeatCount="indefinite"></animate></circle>
+
+  <text x="24" y="248" fill="#a3e635" font-family="monospace" font-size="13">SYNC AFTER OWNERSHIP — the plan</text>
+  <rect x="24" y="262" width="150" height="40" rx="6" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="38" y="287" fill="#d6d6d6" font-family="monospace" font-size="11">definition syncs</text>
+
+  <line x1="174" y1="282" x2="250" y2="282" stroke="#a3e635" stroke-width="1.5"></line>
+  <text x="256" y="278" fill="#6b6b6b" font-family="monospace" font-size="10">device: auto</text>
+  <text x="256" y="292" fill="#6b6b6b" font-family="monospace" font-size="10">elect over registry</text>
+
+  <rect x="410" y="258" width="140" height="48" rx="6" fill="#111" stroke="#404040" stroke-width="1.5"></rect>
+  <text x="424" y="278" fill="#6b6b6b" font-family="monospace" font-size="11">zion daemon</text>
+  <text x="424" y="296" fill="#6b6b6b" font-family="monospace" font-size="10">inert</text>
+
+  <rect x="566" y="258" width="150" height="48" rx="6" fill="#0f160a" stroke="#a3e635" stroke-width="2"></rect>
+  <text x="580" y="278" fill="#d6d6d6" font-family="monospace" font-size="11">yosemite-s0</text>
+  <text x="580" y="296" fill="#a3e635" font-family="monospace" font-size="10">OWNER — fires once</text>
+
+  <rect x="732" y="258" width="140" height="48" rx="6" fill="#111" stroke="#404040" stroke-width="1.5"></rect>
+  <text x="746" y="278" fill="#6b6b6b" font-family="monospace" font-size="11">mac-mini</text>
+  <text x="746" y="296" fill="#6b6b6b" font-family="monospace" font-size="10">inert</text>
+
+  <line x1="24" y1="340" x2="896" y2="340" stroke="#262626" stroke-width="1"></line>
+  <text x="24" y="364" fill="#6b6b6b" font-family="monospace" font-size="11">Legend:</text>
+  <rect x="86" y="354" width="12" height="12" fill="#111" stroke="#f87171"></rect>
+  <text x="104" y="364" fill="#6b6b6b" font-family="monospace" font-size="11">duplicate fire</text>
+  <rect x="212" y="354" width="12" height="12" fill="#0f160a" stroke="#a3e635"></rect>
+  <text x="230" y="364" fill="#6b6b6b" font-family="monospace" font-size="11">single owner</text>
+  <text x="24" y="392" fill="#6b6b6b" font-family="monospace" font-size="11">Election reads the device REGISTRY, never liveness — online-ness differs per box, so any</text>
+  <text x="24" y="408" fill="#6b6b6b" font-family="monospace" font-size="11">liveness input would make daemons disagree and reintroduce the race.</text>
+</svg>
+<figcaption>Ownership is a prerequisite of syncing, not a companion to it.</figcaption>
+</figure><h2 id="proposed-changes">Proposed Changes</h2>
+<h3>Behavior</h3>
+<div class="artifact-grid">
+<div class="artifact-panel">
+<strong>Current — captured on zion</strong>
+<pre><code>$ agents monitors list
+No monitors configured
+
+$ agents monitors add dup --poll '&lt;same cmd&gt;' 2m --notify
+Monitor 'dup' added        # silently, beside 3 identical watchers</code></pre>
+</div>
+<div class="artifact-panel">
+<strong>Proposed — mockup</strong>
+<pre><code>$ agents monitors list
+  pr-merge-on-green  on  (built-in)  owner: yosemite-s0
+
+$ agents monitors add dup --poll '&lt;same cmd&gt;' 2m --notify
+Monitor 'open-pr-watch' already watches this exact source
+and fires the same action.  (--force to add anyway)</code></pre>
+</div>
+</div><h3>1. Ownership — <code>device: auto</code> (prerequisite)</h3>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  const self = machineId();</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  // Registry, not liveness: online-ness differs per box, so any liveness input</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  // makes daemons disagree and reintroduces the race.</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  if (config.device === 'auto') return electAutoOwner() === self;</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  if (config.device) return normalizeHost(config.device) === self;</span></span></pre></div><p>Routines' <code>claimRunSlot</code> (<code>routines.ts:1807-1827</code>, <code>mkdir</code> EEXIST) is a <strong>local</strong>
+claim — it stops double-fire within one box, not across the fleet — so it is the
+wrong tool. Deterministic election is.</p>
+<h3>2. Built-ins default to enabled — <code>config.ts:436</code></h3>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">      enabled: hasEnabled ? parsed.enabled !== false : scope === 'system' ? false : (MONITOR_DEFAULTS.enabled ?? true),</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      enabled: hasEnabled ? parsed.enabled !== false : (MONITOR_DEFAULTS.enabled ?? true),</span></span></pre></div><p>Matches the house pattern: <code>builtin-routines.ts:93,95</code> sets <code>enabled: true</code>, and
+<code>routines.ts:807-810</code> says a built-in "fires for every install unless the user
+overrides or disables it by name". Also tag <code>(built-in)</code> in <code>list</code>/<code>--json</code>,
+mirroring <code>routines.ts:387,532</code>.</p>
+<h3>3. Land the add-time duplicate guard (#2517 — written, needs rebase)</h3>
+<p>Fingerprint over source + condition + action; excludes name, description,
+<code>enabled</code>, and placement — hashing placement would let the same watcher be re-added
+by varying only the owner.</p>
+<h3>4. Per-device activation — <code>deviceMonitors</code> (second prerequisite)</h3>
+<p>Verified against the sync path, and it turns my earlier open question into a
+required step: <strong><code>pause</code>/<code>resume</code> become fleet-wide the moment definitions sync.</strong>
+<code>setMonitorEnabled</code> (<code>config.ts:540-543</code>) mutates <code>enabled:</code> in the monitor's own
+yml — local today, shared once synced. So <code>agents monitors pause X</code> on zion would
+pause X on every box, and every box would write the same file.</p>
+<p>Routines keep activation <em>out</em> of the definition, precisely for this:</p>
+<pre><code>state.ts:830-834  devices/&lt;machine&gt;/agents.yaml — "each machine only ever writes
+                  its OWN folder, so pulls never conflict"
+state.ts:917-923  META_KEY_SCOPE marks deviceRoutines 'device' — never central
+</code></pre>
+<p>Mirror it: add <code>deviceMonitors</code> as <code>'device'</code> scope and point <code>pause</code>/<code>resume</code> at
+that list. <code>enabled:</code> in the definition stays the fleet-wide switch; the device
+list answers "does THIS box run it". No new verb; reuses <code>routine-activation.ts</code>.</p>
+<h3>5. Sync definitions — only after 1, 2 and 4</h3>
+<p>Drop <code>monitors/</code> from the machine-specific group in <code>~/.agents/.gitignore</code>.
+Runtime stays excluded by the existing <code>.history/*</code> rule. Also add <code>monitors</code> to
+<code>RESOURCE_DIRS</code> (<code>repo.ts:122-125</code>), which omits it — so <code>repo push</code>/<code>pull</code> would
+report monitor changes as generic <code>other</code> rather than "N new monitors".</p>
+<p>Sync is <strong>manual</strong> (<code>commitAndPush</code>/<code>pullRepo</code> are user-invoked; no daemon
+auto-syncs), which lowers blast radius. But a pull <strong>SIGHUPs the daemon</strong>
+(<code>repo.ts:1204-1215</code>) and <code>daemon.ts:1136-1140</code> reloads the monitor engine — so a
+synced unpinned monitor starts firing on the pulling box immediately. That is the
+confirmed mechanism behind the ordering rule.</p>
+<h3>6. Companion — <code>.agents-system</code></h3>
+<p><code>pr-merge-on-green.yml</code>: add <code>device: auto</code>, delete the "Opt-in built-in … until
+<code>agents monitors enable</code>" comment, rewrite the README section naming that verb.</p>
+<h2 id="public-interface">Public Interface</h2>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>agents monitors list</code></td>
+<td>Built-ins appear, on, tagged <code>(built-in)</code>, with owner</td>
+</tr>
+<tr>
+<td><code>agents monitors add</code></td>
+<td>Refuses name and behavior collisions; <code>--force</code> overrides</td>
+</tr>
+<tr>
+<td><code>device:</code></td>
+<td>Accepts symbolic <code>auto</code></td>
+</tr>
+<tr>
+<td><code>enable</code> / <code>disable</code></td>
+<td><strong>Not added</strong> — <code>pause</code>/<code>resume</code> remain</td>
+</tr>
+</tbody></table>
+<h2 id="plan">Plan</h2>
+<div class="checklist"><div class="checklist-head">0 / 6 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>device: auto</code> election + owner shown in <code>list</code>/<code>view</code></span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Flip <code>config.ts:436</code>; tag built-ins; fix the two stale docblocks</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Rebase #2517 onto <code>main</code> (doc renamed <code>10-monitors.md</code> → <code>monitors.md</code>)</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>deviceMonitors</code> per-device activation; repoint <code>pause</code>/<code>resume</code></span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Un-ignore <code>monitors/</code> in <code>~/.agents</code> + add <code>monitors</code> to <code>RESOURCE_DIRS</code>; open the held PR</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>.agents-system</code> companion PR, linked</span></li></ul></div>
+<h2 id="validation">Validation</h2>
+<pre><code>npx vitest run src/lib/monitors src/commands/monitors.test.ts
+agents monitors list                      # on, (built-in), owner
+agents monitors add dup --poll '&lt;same&gt;' 2m --notify   # refused
+agents monitors pause pr-merge-on-green   # writes a USER copy only
+</code></pre>
+<p>The assertion that would have caught the original race: open a throwaway PR, get a
+non-author approval, let CI go green, then check
+<code>~/.agents/.history/monitors/pr-merge-on-green/fires/</code> on <strong>every</strong> box — exactly
+one may have fired.</p>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Syncing multiplies triggers</td>
+<td>Strict order: ownership before sync; the <code>.agents</code> branch is held</td>
+</tr>
+<tr>
+<td>Default flip turns on a merge bot fleet-wide</td>
+<td>Ships together with ownership, never alone</td>
+</tr>
+<tr>
+<td>Elected owner offline → monitor down</td>
+<td>Already the accepted tradeoff for an explicit pin</td>
+</tr>
+<tr>
+<td>Daemons disagree on the owner</td>
+<td>Election reads the registry, never liveness; test asserts one owner across machine ids</td>
+</tr>
+</tbody></table>
+<h2 id="tracking">Tracking</h2>
+<ul>
+<li><strong>agents-cli#2517</strong> — duplicate guard, open, CONFLICTING (needs rebase).</li>
+<li><strong>muqsitnawaz/.agents</strong> <code>monitors-track-definitions</code> — pushed, PR held until ownership lands.</li>
+<li><strong>RUSH-2476</strong> — release train disabled; gates all visibility.</li>
+<li><strong>RUSH-2485</strong> — monitor reported healthy, never polled; teammate active.</li>
+</ul>
+<h2 id="resolved-while-planning">Resolved while planning</h2>
+<p>I had this as a maybe-follow-up. Reading the sync path settled it as a
+<strong>prerequisite</strong> — see step 4 — because <code>pause</code>/<code>resume</code> would silently become
+fleet-wide operations on a shared file.</p>
+<p>Still open and deliberately out of scope: whether a hand-pinned <code>device: &lt;name&gt;</code>
+should also move to the per-device list. <code>auto</code> makes the common case moot, and an
+explicit pin is a deliberate fleet-wide statement. Revisit if churn appears.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4Kc3VyZmFjZTogaW50ZXJuYWwKdGl0bGU6ICJNb25pdG9yczogZGVmaW5pdGlvbiB2cyBydW5uaW5nIHN0YXRlLCBhbmQgb25lIHRyaWdnZXIgcGVyIHdvcmsgaXRlbSIKc3VtbWFyeTogPi0KICBNb25pdG9yIGRlZmluaXRpb25zIGFyZSBnaXRpZ25vcmVkLCBzbyBldmVyeSBib3ggaGFzIGEgZGlmZmVyZW50IGludmlzaWJsZSBzZXQKICBvZiB3YXRjaGVycy4gVHJhY2sgdGhlIGRlZmluaXRpb25zLCBrZWVwIHJ1bnRpbWUgbG9jYWwsIGFuZCByZXNvbHZlIG93bmVyc2hpcAogIGZpcnN0IOKAlCBiZWNhdXNlIHN5bmNpbmcgZGVmaW5pdGlvbnMgd2l0aG91dCBvd25lcnNoaXAgbXVsdGlwbGllcyBkb3VibGUtZmlyZXMKICBpbnN0ZWFkIG9mIGZpeGluZyB0aGVtLgpzdGF0dXM6IGF3YWl0aW5nLWdvCnRyYWNraW5nOiAiUlVTSC0yNDc2IChnYXRlcyB2aXNpYmlsaXR5KSDCtyBSVVNILTI0ODUgKHNpYmxpbmcgZGVmZWN0KSDCtyBhZ2VudHMtY2xpIzI1MTciCmZhY3RzOgogIC0gemlvbiAwIG1vbml0b3JzLCB5b3NlbWl0ZS1zMCA2LCB5b3NlbWl0ZS1zMSAyIOKAlCBzYW1lIGZsZWV0LCBzYW1lIGRheQogIC0gTm8gZW5hYmxlL2Rpc2FibGUgdmVyYiBleGlzdHM7IHRoZSBkb2NzIG5hbWUgb25lIHRoYXQgbmV2ZXIgc2hpcHBlZAogIC0gbW9uaXRvclJ1bnNPblRoaXNEZXZpY2UgcmV0dXJucyB0cnVlIGZvciBldmVyeSBib3ggd2hlbiBkZXZpY2UgaXMgdW5zZXQKICAtIFN5bmNpbmcgZGVmaW5pdGlvbnMgaXMgdW5zYWZlIHVudGlsIG93bmVyc2hpcCBpcyByZXNvbHZlZAotLS0KCiMjIEZvY3VzIGZvciByZXZpZXcKCi0gKipUaGUgb3JkZXJpbmcgY2xhaW0uKiogU3luY2luZyBkZWZpbml0aW9ucyAqcmVxdWlyZXMqIG93bmVyc2hpcCBmaXJzdC4gSWYgeW91CiAgZGlzYWdyZWUgd2l0aCB0aGF0IGRlcGVuZGVuY3ksIHRoZSB3aG9sZSBzZXF1ZW5jZSBjaGFuZ2VzLgotICoqYGRldmljZTogYXV0b2AuKiogRGV0ZXJtaW5pc3RpYyBlbGVjdGlvbiBvdmVyIHRoZSBkZXZpY2UgcmVnaXN0cnkg4oCUIHRoZSBvbmUKICBnZW51aW5lbHkgbmV3IG1lY2hhbmlzbSBoZXJlLgotICoqVGhlIGhlbGQgYnJhbmNoLioqIGBtdXFzaXRuYXdhei8uYWdlbnRzYCBhbHJlYWR5IGhhcyB0aGUgZ2l0aWdub3JlIGZpeCBwdXNoZWQuCiAgSXQgc3RheXMgdW5tZXJnZWQgdW50aWwgb3duZXJzaGlwIGxhbmRzLgotICoqYHBhdXNlYC9gcmVzdW1lYCBtdXN0IG1vdmUgdG8gYSBwZXItZGV2aWNlIGxpc3QqKiAoc3RlcCA0KS4gT25jZSBkZWZpbml0aW9ucwogIHN5bmMsIHBhdXNpbmcgb24gb25lIGJveCB3b3VsZCBvdGhlcndpc2UgcGF1c2Ugb24gYWxsIG9mIHRoZW0uCgojIyBJbnRlbnQKCj4gInRoZSBkZWZpbml0aW9uIGNhbiBiZSBjaGVja2VkIGludG8gdGhlIHJlcG8gYnV0IHdoZW4gaXQncyBydW5uaW5nIHRoYXQKPiBzaG91bGRuJ3QgYmUgY2hlY2tlZCBpbnRvIHRoZSByZXBvLiBBbmQgaWYgdGhlIHNhbWUgbW9uaXRvciBpcyBhbHJlYWR5IHJ1bm5pbmcKPiB3aXRoIHRoZSBzYW1lIGV4YWN0IGFyZ3VtZW50cyB0aGVuIGlmIHRoZSBhZ2VudCB0cmllcyB0byByZXJ1biBpdCB0aGVuIGhlIHNob3VsZAo+IGJlIHdhcm5lZC4gU28gd2UgY2FuIHByZXZlbnQgZG91YmxlLXRyaWdnZXIgYnVncy4iCgpQbHVzLCBlYXJsaWVyOiBubyBgZW5hYmxlYC9gZGlzYWJsZWAgdmVyYiDigJQgYSBzaGlwcGVkIG1vbml0b3Igc2hvdWxkIGp1c3Qgc2hvdyB1cC4KCiMjIFB1cnBvc2UKCmBhZ2VudHMgbW9uaXRvcnMgbGlzdGAgb24gemlvbiBwcmludGVkICoqIk5vIG1vbml0b3JzIGNvbmZpZ3VyZWQiKiogd2hpbGUKYH4vLmFnZW50cy8uc3lzdGVtL21vbml0b3JzL3ByLW1lcmdlLW9uLWdyZWVuLnltbGAgc2F0IG9uIHRoYXQgc2FtZSBkaXNrIOKAlCB0aGUKYnVpbHQtaW4gdGhhdCB3b3VsZCBoYXZlIG1lcmdlZCBQUiAjMjQ4NSB3aXRob3V0IGEgaHVtYW4uCgp8IENsYWltIHwgVmVyaWZpZWQgfAp8LS0tfC0tLXwKfCBgZW5hYmxlYC9gZGlzYWJsZWAgdmVyYnMgZXhpc3QgfCAqKk5vKiog4oCUIDEyIGNvbW1hbmRzIHJlZ2lzdGVyZWQsIG5laXRoZXIgYW1vbmcgdGhlbTsgZG9jcyBpbnN0cnVjdCBhIGNvbW1hbmQgdGhhdCBuZXZlciBzaGlwcGVkIHwKfCBCdWlsdC1pbnMgYXJlIHZpc2libGUgfCAqKk5vKiog4oCUIGBjb25maWcudHM6NDM2YCBmb3JjZXMgc3lzdGVtIHNjb3BlIHRvIGBlbmFibGVkOiBmYWxzZWAgfAp8IEluc3RhbGxlZCBDTEkgcmVhZHMgdGhlIHN5c3RlbSBsYXllciB8ICoqTm8qKiDigJQgYGdldFN5c3RlbU1vbml0b3JzRGlyYCBhYnNlbnQgZnJvbSAxLjIyLjM1OyBtZXJnZWQgdG8gYG1haW5gIDAxOjUwIHRvZGF5IHwKfCBEZWZpbml0aW9ucyBhcmUgY2hlY2tlZCBpbiB8ICoqTm8qKiDigJQgYH4vLmFnZW50cy8uZ2l0aWdub3JlYCBncm91cHMgYG1vbml0b3JzL2Agd2l0aCBgY29tbWFuZHMvYCwgYGZhY3RvcnkvYCwgYHNjcmlwdHMvYDsgMCB0cmFja2VkIHwKfCBSdW5uaW5nIHN0YXRlIGlzIGNoZWNrZWQgaW4gfCAqKkNvcnJlY3RseSBubyoqIOKAlCBgLmhpc3RvcnkvbW9uaXRvcnMvYCBhbHJlYWR5IGV4Y2x1ZGVkIHwKfCBBZGRpbmcgYSBkdXBsaWNhdGUgd2FybnMgfCAqKk5vKiog4oCUIGB3cml0ZU1vbml0b3JgIG92ZXJ3cml0ZXMgYnkgbmFtZSwgbm90aGluZyBjb21wYXJlcyBhcmd1bWVudHMgfAoKUmVzdWx0IG9uIHRoZSBmbGVldDogKip6aW9uIDAsIHlvc2VtaXRlLXMwIDYsIHlvc2VtaXRlLXMxIDIqKiDigJQgYW5kIG9uIG9uZSBib3gsCmBvcGVuLXByLXdhdGNoYCwgYHByLWNpLWZhaWxgLCB0aHJlZSBzdGFsZSBgcHIyMjIyLSpgIHdhdGNoZXJzIGFuZCBhbiBhZ2VudC1hZGRlZApsYW5kZXIgYWxsIHBvbGxpbmcgdGhlIHNhbWUgUFIgcXVldWUuCgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1jYWxsb3V0Ij4KPHN0cm9uZz5Ob3RoaW5nIGdldHMgcmVtb3ZlZC48L3N0cm9uZz4gTm8gPGNvZGU+ZW5hYmxlPC9jb2RlPi88Y29kZT5kaXNhYmxlPC9jb2RlPgp2ZXJiIGV4aXN0cyB0byBkZWxldGUuIDxjb2RlPnBhdXNlPC9jb2RlPi88Y29kZT5yZXN1bWU8L2NvZGU+IGFscmVhZHkgcm91dGUgdGhyb3VnaAo8Y29kZT5zZXRNb25pdG9yRW5hYmxlZDwvY29kZT4gdG8gPGNvZGU+d3JpdGVNb25pdG9yPC9jb2RlPiwgd2hpY2ggd3JpdGVzIHRoZQo8ZW0+dXNlciBkaXIgb25seTwvZW0+IOKAlCBzbyBwYXVzaW5nIGEgYnVpbHQtaW4gbWF0ZXJpYWxpemVzIGEgdXNlciBjb3B5IGFuZCBuZXZlcgp0b3VjaGVzIHRoZSBwdWxsLW9ubHkgc3lzdGVtIG1pcnJvciAoaGFyZGVuZWQgaW4gPGNvZGU+MTU4ZDc5ZWI4PC9jb2RlPikuCjwvZGl2PgoKIyMgQ3VycmVudCBhcmNoaXRlY3R1cmUKClRoZSBzdWJzeXN0ZW0gYWxyZWFkeSBzZXBhcmF0ZXMgZGVmaW5pdGlvbiBmcm9tIHJ1bm5pbmcgc3RhdGUuIFdoYXQgaXQgbGFja3MgaXMKb3duZXJzaGlwIOKAlCBhbmQgdGhhdCBpcyB3aGF0IG1ha2VzIHN5bmNpbmcgZGFuZ2Vyb3VzLgoKPGZpZ3VyZSBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlIj4KPHN2ZyB2aWV3Qm94PSIwIDAgOTIwIDQzMCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJTeW5jIHdpdGhvdXQgb3duZXJzaGlwIG11bHRpcGxpZXMgdHJpZ2dlcnM7IHdpdGggb3duZXJzaGlwIGV4YWN0bHkgb25lIGJveCBmaXJlcyI+CiAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjkyMCIgaGVpZ2h0PSI0MzAiIGZpbGw9IiMwYTBhMGEiLz4KCiAgPHRleHQgeD0iMjQiIHk9IjI4IiBmaWxsPSIjYTNlNjM1IiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEzIj5ERUZJTklUSU9OIChzeW5jcyk8L3RleHQ+CiAgPHJlY3QgeD0iMjQiIHk9IjQyIiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjQ2IiByeD0iNiIgZmlsbD0iIzBmMTYwYSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjM4IiB5PSI2MiIgZmlsbD0iI2Q2ZDZkNiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiI+bW9uaXRvcnMvJmx0O25hbWUmZ3Q7LnltbDwvdGV4dD4KICA8dGV4dCB4PSIzOCIgeT0iNzkiIGZpbGw9IiM2YjZiNmIiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiPndoYXQgwrcgd2hlbiDCtyBhY3Rpb248L3RleHQ+CgogIDx0ZXh0IHg9IjI1NiIgeT0iMjgiIGZpbGw9IiM2YjZiNmIiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiPlJVTk5JTkcgU1RBVEUgKGxvY2FsKTwvdGV4dD4KICA8cmVjdCB4PSIyNTYiIHk9IjQyIiB3aWR0aD0iMjIwIiBoZWlnaHQ9IjQ2IiByeD0iNiIgZmlsbD0iIzExMSIgc3Ryb2tlPSIjNDA0MDQwIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjI3MCIgeT0iNjIiIGZpbGw9IiNkNmQ2ZDYiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPi5oaXN0b3J5L21vbml0b3JzLyZsdDtuJmd0Oy88L3RleHQ+CiAgPHRleHQgeD0iMjcwIiB5PSI3OSIgZmlsbD0iIzZiNmI2YiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCI+bGFzdC1zZWVuIMK3IGZpcmVzIMK3IHJhdGUgbGltaXQ8L3RleHQ+CgogIDxsaW5lIHgxPSIyNCIgeTE9IjEwOCIgeDI9Ijg5NiIgeTI9IjEwOCIgc3Ryb2tlPSIjMjYyNjI2IiBzdHJva2Utd2lkdGg9IjEiLz4KCiAgPHRleHQgeD0iMjQiIHk9IjEzNiIgZmlsbD0iI2Y4NzE3MSIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyI+U1lOQyBXSVRIT1VUIE9XTkVSU0hJUCDigJQgdGhlIHRyYXA8L3RleHQ+CiAgPHJlY3QgeD0iMjQiIHk9IjE1MCIgd2lkdGg9IjE1MCIgaGVpZ2h0PSI0MCIgcng9IjYiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIzOCIgeT0iMTc1IiBmaWxsPSIjZDZkNmQ2IiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjExIj5kZWZpbml0aW9uIHN5bmNzPC90ZXh0PgoKICA8bGluZSB4MT0iMTc0IiB5MT0iMTcwIiB4Mj0iMjUwIiB5Mj0iMTcwIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iMjU2IiB5PSIxNjYiIGZpbGw9IiM2YjZiNmIiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiPmRldmljZTogdW5zZXQ8L3RleHQ+CiAgPHRleHQgeD0iMjU2IiB5PSIxODAiIGZpbGw9IiM2YjZiNmIiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiPmNvbmZpZy50czoyMDAgLSZndDsgdHJ1ZTwvdGV4dD4KCiAgPHJlY3QgeD0iNDEwIiB5PSIxNDYiIHdpZHRoPSIxNDAiIGhlaWdodD0iNDgiIHJ4PSI2IiBmaWxsPSIjMTExIiBzdHJva2U9IiNmODcxNzEiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNDI0IiB5PSIxNjYiIGZpbGw9IiNkNmQ2ZDYiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPnppb24gZGFlbW9uPC90ZXh0PgogIDx0ZXh0IHg9IjQyNCIgeT0iMTg0IiBmaWxsPSIjZjg3MTcxIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5maXJlczwvdGV4dD4KCiAgPHJlY3QgeD0iNTY2IiB5PSIxNDYiIHdpZHRoPSIxNTAiIGhlaWdodD0iNDgiIHJ4PSI2IiBmaWxsPSIjMTExIiBzdHJva2U9IiNmODcxNzEiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNTgwIiB5PSIxNjYiIGZpbGw9IiNkNmQ2ZDYiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPnlvc2VtaXRlLXMwPC90ZXh0PgogIDx0ZXh0IHg9IjU4MCIgeT0iMTg0IiBmaWxsPSIjZjg3MTcxIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5maXJlczwvdGV4dD4KCiAgPHJlY3QgeD0iNzMyIiB5PSIxNDYiIHdpZHRoPSIxNDAiIGhlaWdodD0iNDgiIHJ4PSI2IiBmaWxsPSIjMTExIiBzdHJva2U9IiNmODcxNzEiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNzQ2IiB5PSIxNjYiIGZpbGw9IiNkNmQ2ZDYiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPm1hYy1taW5pPC90ZXh0PgogIDx0ZXh0IHg9Ijc0NiIgeT0iMTg0IiBmaWxsPSIjZjg3MTcxIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5maXJlczwvdGV4dD4KCiAgPGNpcmNsZSBjeD0iODkwIiBjeT0iMTcwIiByPSI2IiBmaWxsPSIjZjg3MTcxIj48YW5pbWF0ZSBhdHRyaWJ1dGVOYW1lPSJvcGFjaXR5IiB2YWx1ZXM9IjE7MC4yOzEiIGR1cj0iMS41cyIgcmVwZWF0Q291bnQ9ImluZGVmaW5pdGUiLz48L2NpcmNsZT4KCiAgPHRleHQgeD0iMjQiIHk9IjI0OCIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyI+U1lOQyBBRlRFUiBPV05FUlNISVAg4oCUIHRoZSBwbGFuPC90ZXh0PgogIDxyZWN0IHg9IjI0IiB5PSIyNjIiIHdpZHRoPSIxNTAiIGhlaWdodD0iNDAiIHJ4PSI2IiBmaWxsPSIjMGYxNjBhIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iMzgiIHk9IjI4NyIgZmlsbD0iI2Q2ZDZkNiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+ZGVmaW5pdGlvbiBzeW5jczwvdGV4dD4KCiAgPGxpbmUgeDE9IjE3NCIgeTE9IjI4MiIgeDI9IjI1MCIgeTI9IjI4MiIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjI1NiIgeT0iMjc4IiBmaWxsPSIjNmI2YjZiIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5kZXZpY2U6IGF1dG88L3RleHQ+CiAgPHRleHQgeD0iMjU2IiB5PSIyOTIiIGZpbGw9IiM2YjZiNmIiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiPmVsZWN0IG92ZXIgcmVnaXN0cnk8L3RleHQ+CgogIDxyZWN0IHg9IjQxMCIgeT0iMjU4IiB3aWR0aD0iMTQwIiBoZWlnaHQ9IjQ4IiByeD0iNiIgZmlsbD0iIzExMSIgc3Ryb2tlPSIjNDA0MDQwIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjQyNCIgeT0iMjc4IiBmaWxsPSIjNmI2YjZiIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjExIj56aW9uIGRhZW1vbjwvdGV4dD4KICA8dGV4dCB4PSI0MjQiIHk9IjI5NiIgZmlsbD0iIzZiNmI2YiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCI+aW5lcnQ8L3RleHQ+CgogIDxyZWN0IHg9IjU2NiIgeT0iMjU4IiB3aWR0aD0iMTUwIiBoZWlnaHQ9IjQ4IiByeD0iNiIgZmlsbD0iIzBmMTYwYSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI1ODAiIHk9IjI3OCIgZmlsbD0iI2Q2ZDZkNiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+eW9zZW1pdGUtczA8L3RleHQ+CiAgPHRleHQgeD0iNTgwIiB5PSIyOTYiIGZpbGw9IiNhM2U2MzUiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiPk9XTkVSIOKAlCBmaXJlcyBvbmNlPC90ZXh0PgoKICA8cmVjdCB4PSI3MzIiIHk9IjI1OCIgd2lkdGg9IjE0MCIgaGVpZ2h0PSI0OCIgcng9IjYiIGZpbGw9IiMxMTEiIHN0cm9rZT0iIzQwNDA0MCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI3NDYiIHk9IjI3OCIgZmlsbD0iIzZiNmI2YiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+bWFjLW1pbmk8L3RleHQ+CiAgPHRleHQgeD0iNzQ2IiB5PSIyOTYiIGZpbGw9IiM2YjZiNmIiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiPmluZXJ0PC90ZXh0PgoKICA8bGluZSB4MT0iMjQiIHkxPSIzNDAiIHgyPSI4OTYiIHkyPSIzNDAiIHN0cm9rZT0iIzI2MjYyNiIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgPHRleHQgeD0iMjQiIHk9IjM2NCIgZmlsbD0iIzZiNmI2YiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+TGVnZW5kOjwvdGV4dD4KICA8cmVjdCB4PSI4NiIgeT0iMzU0IiB3aWR0aD0iMTIiIGhlaWdodD0iMTIiIGZpbGw9IiMxMTEiIHN0cm9rZT0iI2Y4NzE3MSIvPgogIDx0ZXh0IHg9IjEwNCIgeT0iMzY0IiBmaWxsPSIjNmI2YjZiIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjExIj5kdXBsaWNhdGUgZmlyZTwvdGV4dD4KICA8cmVjdCB4PSIyMTIiIHk9IjM1NCIgd2lkdGg9IjEyIiBoZWlnaHQ9IjEyIiBmaWxsPSIjMGYxNjBhIiBzdHJva2U9IiNhM2U2MzUiLz4KICA8dGV4dCB4PSIyMzAiIHk9IjM2NCIgZmlsbD0iIzZiNmI2YiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+c2luZ2xlIG93bmVyPC90ZXh0PgogIDx0ZXh0IHg9IjI0IiB5PSIzOTIiIGZpbGw9IiM2YjZiNmIiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPkVsZWN0aW9uIHJlYWRzIHRoZSBkZXZpY2UgUkVHSVNUUlksIG5ldmVyIGxpdmVuZXNzIOKAlCBvbmxpbmUtbmVzcyBkaWZmZXJzIHBlciBib3gsIHNvIGFueTwvdGV4dD4KICA8dGV4dCB4PSIyNCIgeT0iNDA4IiBmaWxsPSIjNmI2YjZiIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjExIj5saXZlbmVzcyBpbnB1dCB3b3VsZCBtYWtlIGRhZW1vbnMgZGlzYWdyZWUgYW5kIHJlaW50cm9kdWNlIHRoZSByYWNlLjwvdGV4dD4KPC9zdmc+CjxmaWdjYXB0aW9uPk93bmVyc2hpcCBpcyBhIHByZXJlcXVpc2l0ZSBvZiBzeW5jaW5nLCBub3QgYSBjb21wYW5pb24gdG8gaXQuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCiMjIFByb3Bvc2VkIENoYW5nZXMKCiMjIyBCZWhhdmlvcgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtZ3JpZCI+CjxkaXYgY2xhc3M9ImFydGlmYWN0LXBhbmVsIj4KPHN0cm9uZz5DdXJyZW50IOKAlCBjYXB0dXJlZCBvbiB6aW9uPC9zdHJvbmc+CjxwcmU+PGNvZGU+JCBhZ2VudHMgbW9uaXRvcnMgbGlzdApObyBtb25pdG9ycyBjb25maWd1cmVkCgokIGFnZW50cyBtb25pdG9ycyBhZGQgZHVwIC0tcG9sbCAnJmx0O3NhbWUgY21kJmd0OycgMm0gLS1ub3RpZnkKTW9uaXRvciAnZHVwJyBhZGRlZCAgICAgICAgIyBzaWxlbnRseSwgYmVzaWRlIDMgaWRlbnRpY2FsIHdhdGNoZXJzPC9jb2RlPjwvcHJlPgo8L2Rpdj4KPGRpdiBjbGFzcz0iYXJ0aWZhY3QtcGFuZWwiPgo8c3Ryb25nPlByb3Bvc2VkIOKAlCBtb2NrdXA8L3N0cm9uZz4KPHByZT48Y29kZT4kIGFnZW50cyBtb25pdG9ycyBsaXN0CiAgcHItbWVyZ2Utb24tZ3JlZW4gIG9uICAoYnVpbHQtaW4pICBvd25lcjogeW9zZW1pdGUtczAKCiQgYWdlbnRzIG1vbml0b3JzIGFkZCBkdXAgLS1wb2xsICcmbHQ7c2FtZSBjbWQmZ3Q7JyAybSAtLW5vdGlmeQpNb25pdG9yICdvcGVuLXByLXdhdGNoJyBhbHJlYWR5IHdhdGNoZXMgdGhpcyBleGFjdCBzb3VyY2UKYW5kIGZpcmVzIHRoZSBzYW1lIGFjdGlvbi4gICgtLWZvcmNlIHRvIGFkZCBhbnl3YXkpPC9jb2RlPjwvcHJlPgo8L2Rpdj4KPC9kaXY+CgojIyMgMS4gT3duZXJzaGlwIOKAlCBgZGV2aWNlOiBhdXRvYCAocHJlcmVxdWlzaXRlKQoKYGBgZGlmZgogICBjb25zdCBzZWxmID0gbWFjaGluZUlkKCk7CisgIC8vIFJlZ2lzdHJ5LCBub3QgbGl2ZW5lc3M6IG9ubGluZS1uZXNzIGRpZmZlcnMgcGVyIGJveCwgc28gYW55IGxpdmVuZXNzIGlucHV0CisgIC8vIG1ha2VzIGRhZW1vbnMgZGlzYWdyZWUgYW5kIHJlaW50cm9kdWNlcyB0aGUgcmFjZS4KKyAgaWYgKGNvbmZpZy5kZXZpY2UgPT09ICdhdXRvJykgcmV0dXJuIGVsZWN0QXV0b093bmVyKCkgPT09IHNlbGY7CiAgIGlmIChjb25maWcuZGV2aWNlKSByZXR1cm4gbm9ybWFsaXplSG9zdChjb25maWcuZGV2aWNlKSA9PT0gc2VsZjsKYGBgCgpSb3V0aW5lcycgYGNsYWltUnVuU2xvdGAgKGByb3V0aW5lcy50czoxODA3LTE4MjdgLCBgbWtkaXJgIEVFWElTVCkgaXMgYSAqKmxvY2FsKioKY2xhaW0g4oCUIGl0IHN0b3BzIGRvdWJsZS1maXJlIHdpdGhpbiBvbmUgYm94LCBub3QgYWNyb3NzIHRoZSBmbGVldCDigJQgc28gaXQgaXMgdGhlCndyb25nIHRvb2wuIERldGVybWluaXN0aWMgZWxlY3Rpb24gaXMuCgojIyMgMi4gQnVpbHQtaW5zIGRlZmF1bHQgdG8gZW5hYmxlZCDigJQgYGNvbmZpZy50czo0MzZgCgpgYGBkaWZmCi0gICAgICBlbmFibGVkOiBoYXNFbmFibGVkID8gcGFyc2VkLmVuYWJsZWQgIT09IGZhbHNlIDogc2NvcGUgPT09ICdzeXN0ZW0nID8gZmFsc2UgOiAoTU9OSVRPUl9ERUZBVUxUUy5lbmFibGVkID8/IHRydWUpLAorICAgICAgZW5hYmxlZDogaGFzRW5hYmxlZCA/IHBhcnNlZC5lbmFibGVkICE9PSBmYWxzZSA6IChNT05JVE9SX0RFRkFVTFRTLmVuYWJsZWQgPz8gdHJ1ZSksCmBgYAoKTWF0Y2hlcyB0aGUgaG91c2UgcGF0dGVybjogYGJ1aWx0aW4tcm91dGluZXMudHM6OTMsOTVgIHNldHMgYGVuYWJsZWQ6IHRydWVgLCBhbmQKYHJvdXRpbmVzLnRzOjgwNy04MTBgIHNheXMgYSBidWlsdC1pbiAiZmlyZXMgZm9yIGV2ZXJ5IGluc3RhbGwgdW5sZXNzIHRoZSB1c2VyCm92ZXJyaWRlcyBvciBkaXNhYmxlcyBpdCBieSBuYW1lIi4gQWxzbyB0YWcgYChidWlsdC1pbilgIGluIGBsaXN0YC9gLS1qc29uYCwKbWlycm9yaW5nIGByb3V0aW5lcy50czozODcsNTMyYC4KCiMjIyAzLiBMYW5kIHRoZSBhZGQtdGltZSBkdXBsaWNhdGUgZ3VhcmQgKCMyNTE3IOKAlCB3cml0dGVuLCBuZWVkcyByZWJhc2UpCgpGaW5nZXJwcmludCBvdmVyIHNvdXJjZSArIGNvbmRpdGlvbiArIGFjdGlvbjsgZXhjbHVkZXMgbmFtZSwgZGVzY3JpcHRpb24sCmBlbmFibGVkYCwgYW5kIHBsYWNlbWVudCDigJQgaGFzaGluZyBwbGFjZW1lbnQgd291bGQgbGV0IHRoZSBzYW1lIHdhdGNoZXIgYmUgcmUtYWRkZWQKYnkgdmFyeWluZyBvbmx5IHRoZSBvd25lci4KCiMjIyA0LiBQZXItZGV2aWNlIGFjdGl2YXRpb24g4oCUIGBkZXZpY2VNb25pdG9yc2AgKHNlY29uZCBwcmVyZXF1aXNpdGUpCgpWZXJpZmllZCBhZ2FpbnN0IHRoZSBzeW5jIHBhdGgsIGFuZCBpdCB0dXJucyBteSBlYXJsaWVyIG9wZW4gcXVlc3Rpb24gaW50byBhCnJlcXVpcmVkIHN0ZXA6ICoqYHBhdXNlYC9gcmVzdW1lYCBiZWNvbWUgZmxlZXQtd2lkZSB0aGUgbW9tZW50IGRlZmluaXRpb25zIHN5bmMuKioKYHNldE1vbml0b3JFbmFibGVkYCAoYGNvbmZpZy50czo1NDAtNTQzYCkgbXV0YXRlcyBgZW5hYmxlZDpgIGluIHRoZSBtb25pdG9yJ3Mgb3duCnltbCDigJQgbG9jYWwgdG9kYXksIHNoYXJlZCBvbmNlIHN5bmNlZC4gU28gYGFnZW50cyBtb25pdG9ycyBwYXVzZSBYYCBvbiB6aW9uIHdvdWxkCnBhdXNlIFggb24gZXZlcnkgYm94LCBhbmQgZXZlcnkgYm94IHdvdWxkIHdyaXRlIHRoZSBzYW1lIGZpbGUuCgpSb3V0aW5lcyBrZWVwIGFjdGl2YXRpb24gKm91dCogb2YgdGhlIGRlZmluaXRpb24sIHByZWNpc2VseSBmb3IgdGhpczoKCmBgYHRleHQKc3RhdGUudHM6ODMwLTgzNCAgZGV2aWNlcy88bWFjaGluZT4vYWdlbnRzLnlhbWwg4oCUICJlYWNoIG1hY2hpbmUgb25seSBldmVyIHdyaXRlcwogICAgICAgICAgICAgICAgICBpdHMgT1dOIGZvbGRlciwgc28gcHVsbHMgbmV2ZXIgY29uZmxpY3QiCnN0YXRlLnRzOjkxNy05MjMgIE1FVEFfS0VZX1NDT1BFIG1hcmtzIGRldmljZVJvdXRpbmVzICdkZXZpY2UnIOKAlCBuZXZlciBjZW50cmFsCmBgYAoKTWlycm9yIGl0OiBhZGQgYGRldmljZU1vbml0b3JzYCBhcyBgJ2RldmljZSdgIHNjb3BlIGFuZCBwb2ludCBgcGF1c2VgL2ByZXN1bWVgIGF0CnRoYXQgbGlzdC4gYGVuYWJsZWQ6YCBpbiB0aGUgZGVmaW5pdGlvbiBzdGF5cyB0aGUgZmxlZXQtd2lkZSBzd2l0Y2g7IHRoZSBkZXZpY2UKbGlzdCBhbnN3ZXJzICJkb2VzIFRISVMgYm94IHJ1biBpdCIuIE5vIG5ldyB2ZXJiOyByZXVzZXMgYHJvdXRpbmUtYWN0aXZhdGlvbi50c2AuCgojIyMgNS4gU3luYyBkZWZpbml0aW9ucyDigJQgb25seSBhZnRlciAxLCAyIGFuZCA0CgpEcm9wIGBtb25pdG9ycy9gIGZyb20gdGhlIG1hY2hpbmUtc3BlY2lmaWMgZ3JvdXAgaW4gYH4vLmFnZW50cy8uZ2l0aWdub3JlYC4KUnVudGltZSBzdGF5cyBleGNsdWRlZCBieSB0aGUgZXhpc3RpbmcgYC5oaXN0b3J5LypgIHJ1bGUuIEFsc28gYWRkIGBtb25pdG9yc2AgdG8KYFJFU09VUkNFX0RJUlNgIChgcmVwby50czoxMjItMTI1YCksIHdoaWNoIG9taXRzIGl0IOKAlCBzbyBgcmVwbyBwdXNoYC9gcHVsbGAgd291bGQKcmVwb3J0IG1vbml0b3IgY2hhbmdlcyBhcyBnZW5lcmljIGBvdGhlcmAgcmF0aGVyIHRoYW4gIk4gbmV3IG1vbml0b3JzIi4KClN5bmMgaXMgKiptYW51YWwqKiAoYGNvbW1pdEFuZFB1c2hgL2BwdWxsUmVwb2AgYXJlIHVzZXItaW52b2tlZDsgbm8gZGFlbW9uCmF1dG8tc3luY3MpLCB3aGljaCBsb3dlcnMgYmxhc3QgcmFkaXVzLiBCdXQgYSBwdWxsICoqU0lHSFVQcyB0aGUgZGFlbW9uKioKKGByZXBvLnRzOjEyMDQtMTIxNWApIGFuZCBgZGFlbW9uLnRzOjExMzYtMTE0MGAgcmVsb2FkcyB0aGUgbW9uaXRvciBlbmdpbmUg4oCUIHNvIGEKc3luY2VkIHVucGlubmVkIG1vbml0b3Igc3RhcnRzIGZpcmluZyBvbiB0aGUgcHVsbGluZyBib3ggaW1tZWRpYXRlbHkuIFRoYXQgaXMgdGhlCmNvbmZpcm1lZCBtZWNoYW5pc20gYmVoaW5kIHRoZSBvcmRlcmluZyBydWxlLgoKIyMjIDYuIENvbXBhbmlvbiDigJQgYC5hZ2VudHMtc3lzdGVtYAoKYHByLW1lcmdlLW9uLWdyZWVuLnltbGA6IGFkZCBgZGV2aWNlOiBhdXRvYCwgZGVsZXRlIHRoZSAiT3B0LWluIGJ1aWx0LWluIOKApiB1bnRpbApgYWdlbnRzIG1vbml0b3JzIGVuYWJsZWAiIGNvbW1lbnQsIHJld3JpdGUgdGhlIFJFQURNRSBzZWN0aW9uIG5hbWluZyB0aGF0IHZlcmIuCgojIyBQdWJsaWMgSW50ZXJmYWNlCgp8IFN1cmZhY2UgfCBDaGFuZ2UgfAp8LS0tfC0tLXwKfCBgYWdlbnRzIG1vbml0b3JzIGxpc3RgIHwgQnVpbHQtaW5zIGFwcGVhciwgb24sIHRhZ2dlZCBgKGJ1aWx0LWluKWAsIHdpdGggb3duZXIgfAp8IGBhZ2VudHMgbW9uaXRvcnMgYWRkYCB8IFJlZnVzZXMgbmFtZSBhbmQgYmVoYXZpb3IgY29sbGlzaW9uczsgYC0tZm9yY2VgIG92ZXJyaWRlcyB8CnwgYGRldmljZTpgIHwgQWNjZXB0cyBzeW1ib2xpYyBgYXV0b2AgfAp8IGBlbmFibGVgIC8gYGRpc2FibGVgIHwgKipOb3QgYWRkZWQqKiDigJQgYHBhdXNlYC9gcmVzdW1lYCByZW1haW4gfAoKIyMgUGxhbgoKLSBbIF0gYGRldmljZTogYXV0b2AgZWxlY3Rpb24gKyBvd25lciBzaG93biBpbiBgbGlzdGAvYHZpZXdgCi0gWyBdIEZsaXAgYGNvbmZpZy50czo0MzZgOyB0YWcgYnVpbHQtaW5zOyBmaXggdGhlIHR3byBzdGFsZSBkb2NibG9ja3MKLSBbIF0gUmViYXNlICMyNTE3IG9udG8gYG1haW5gIChkb2MgcmVuYW1lZCBgMTAtbW9uaXRvcnMubWRgIOKGkiBgbW9uaXRvcnMubWRgKQotIFsgXSBgZGV2aWNlTW9uaXRvcnNgIHBlci1kZXZpY2UgYWN0aXZhdGlvbjsgcmVwb2ludCBgcGF1c2VgL2ByZXN1bWVgCi0gWyBdIFVuLWlnbm9yZSBgbW9uaXRvcnMvYCBpbiBgfi8uYWdlbnRzYCArIGFkZCBgbW9uaXRvcnNgIHRvIGBSRVNPVVJDRV9ESVJTYDsgb3BlbiB0aGUgaGVsZCBQUgotIFsgXSBgLmFnZW50cy1zeXN0ZW1gIGNvbXBhbmlvbiBQUiwgbGlua2VkCgojIyBWYWxpZGF0aW9uCgpgYGBiYXNoCm5weCB2aXRlc3QgcnVuIHNyYy9saWIvbW9uaXRvcnMgc3JjL2NvbW1hbmRzL21vbml0b3JzLnRlc3QudHMKYWdlbnRzIG1vbml0b3JzIGxpc3QgICAgICAgICAgICAgICAgICAgICAgIyBvbiwgKGJ1aWx0LWluKSwgb3duZXIKYWdlbnRzIG1vbml0b3JzIGFkZCBkdXAgLS1wb2xsICc8c2FtZT4nIDJtIC0tbm90aWZ5ICAgIyByZWZ1c2VkCmFnZW50cyBtb25pdG9ycyBwYXVzZSBwci1tZXJnZS1vbi1ncmVlbiAgICMgd3JpdGVzIGEgVVNFUiBjb3B5IG9ubHkKYGBgCgpUaGUgYXNzZXJ0aW9uIHRoYXQgd291bGQgaGF2ZSBjYXVnaHQgdGhlIG9yaWdpbmFsIHJhY2U6IG9wZW4gYSB0aHJvd2F3YXkgUFIsIGdldCBhCm5vbi1hdXRob3IgYXBwcm92YWwsIGxldCBDSSBnbyBncmVlbiwgdGhlbiBjaGVjawpgfi8uYWdlbnRzLy5oaXN0b3J5L21vbml0b3JzL3ByLW1lcmdlLW9uLWdyZWVuL2ZpcmVzL2Agb24gKipldmVyeSoqIGJveCDigJQgZXhhY3RseQpvbmUgbWF5IGhhdmUgZmlyZWQuCgojIyBSaXNrcwoKfCBSaXNrIHwgTWl0aWdhdGlvbiB8CnwtLS18LS0tfAp8IFN5bmNpbmcgbXVsdGlwbGllcyB0cmlnZ2VycyB8IFN0cmljdCBvcmRlcjogb3duZXJzaGlwIGJlZm9yZSBzeW5jOyB0aGUgYC5hZ2VudHNgIGJyYW5jaCBpcyBoZWxkIHwKfCBEZWZhdWx0IGZsaXAgdHVybnMgb24gYSBtZXJnZSBib3QgZmxlZXQtd2lkZSB8IFNoaXBzIHRvZ2V0aGVyIHdpdGggb3duZXJzaGlwLCBuZXZlciBhbG9uZSB8CnwgRWxlY3RlZCBvd25lciBvZmZsaW5lIOKGkiBtb25pdG9yIGRvd24gfCBBbHJlYWR5IHRoZSBhY2NlcHRlZCB0cmFkZW9mZiBmb3IgYW4gZXhwbGljaXQgcGluIHwKfCBEYWVtb25zIGRpc2FncmVlIG9uIHRoZSBvd25lciB8IEVsZWN0aW9uIHJlYWRzIHRoZSByZWdpc3RyeSwgbmV2ZXIgbGl2ZW5lc3M7IHRlc3QgYXNzZXJ0cyBvbmUgb3duZXIgYWNyb3NzIG1hY2hpbmUgaWRzIHwKCiMjIFRyYWNraW5nCgotICoqYWdlbnRzLWNsaSMyNTE3Kiog4oCUIGR1cGxpY2F0ZSBndWFyZCwgb3BlbiwgQ09ORkxJQ1RJTkcgKG5lZWRzIHJlYmFzZSkuCi0gKiptdXFzaXRuYXdhei8uYWdlbnRzKiogYG1vbml0b3JzLXRyYWNrLWRlZmluaXRpb25zYCDigJQgcHVzaGVkLCBQUiBoZWxkIHVudGlsIG93bmVyc2hpcCBsYW5kcy4KLSAqKlJVU0gtMjQ3NioqIOKAlCByZWxlYXNlIHRyYWluIGRpc2FibGVkOyBnYXRlcyBhbGwgdmlzaWJpbGl0eS4KLSAqKlJVU0gtMjQ4NSoqIOKAlCBtb25pdG9yIHJlcG9ydGVkIGhlYWx0aHksIG5ldmVyIHBvbGxlZDsgdGVhbW1hdGUgYWN0aXZlLgoKIyMgUmVzb2x2ZWQgd2hpbGUgcGxhbm5pbmcKCkkgaGFkIHRoaXMgYXMgYSBtYXliZS1mb2xsb3ctdXAuIFJlYWRpbmcgdGhlIHN5bmMgcGF0aCBzZXR0bGVkIGl0IGFzIGEKKipwcmVyZXF1aXNpdGUqKiDigJQgc2VlIHN0ZXAgNCDigJQgYmVjYXVzZSBgcGF1c2VgL2ByZXN1bWVgIHdvdWxkIHNpbGVudGx5IGJlY29tZQpmbGVldC13aWRlIG9wZXJhdGlvbnMgb24gYSBzaGFyZWQgZmlsZS4KClN0aWxsIG9wZW4gYW5kIGRlbGliZXJhdGVseSBvdXQgb2Ygc2NvcGU6IHdoZXRoZXIgYSBoYW5kLXBpbm5lZCBgZGV2aWNlOiA8bmFtZT5gCnNob3VsZCBhbHNvIG1vdmUgdG8gdGhlIHBlci1kZXZpY2UgbGlzdC4gYGF1dG9gIG1ha2VzIHRoZSBjb21tb24gY2FzZSBtb290LCBhbmQgYW4KZXhwbGljaXQgcGluIGlzIGEgZGVsaWJlcmF0ZSBmbGVldC13aWRlIHN0YXRlbWVudC4gUmV2aXNpdCBpZiBjaHVybiBhcHBlYXJzLgo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
