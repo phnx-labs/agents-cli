@@ -23,7 +23,7 @@ import type { SessionAgentId, SessionMeta, ViewMode } from '../lib/session/types
 import { SESSION_AGENTS } from '../lib/session/types.js';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session/artifacts.js';
 import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
-import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
+import { getActiveSessions, sessionProcessIsLocal, type ActiveSession } from '../lib/session/active.js';
 import { enumerateGhosttyTabs, assignGhosttyTabs, type GhosttySurface } from '../lib/session/ghostty-tabs.js';
 import { mapPanesToTargets, listClients } from '../lib/tmux/session.js';
 import { resolveViewingIn, viewingInLabel } from '../lib/session/viewing-in.js';
@@ -1171,16 +1171,45 @@ export function groupSessionsByMachine(sessions: ActiveSession[], localMachine: 
  * correlated, so they're all kept.
  */
 export function dedupeByMachineSession(sessions: ActiveSession[]): ActiveSession[] {
-  const seen = new Set<string>();
+  const seen = new Map<string, number>();
   const out: ActiveSession[] = [];
   for (const s of sessions) {
     if (!s.sessionId) { out.push(s); continue; }
     const key = `${s.machine ?? ''}:${s.sessionId}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(s);
+    const at = seen.get(key);
+    if (at === undefined) {
+      seen.set(key, out.length);
+      out.push(s);
+      continue;
+    }
+    // Both rows now describe the same session on the same machine, so the tie is
+    // between the EXECUTING box's own row and the dispatcher's shim row for a
+    // host-dispatched run (they only started colliding once foldExecutionMachine
+    // attributed both to the executing host — RUSH-2479). The shim carries no
+    // transcript and a `[host/<peer>]` placeholder label, so keeping it first
+    // would strip a real preview off the merged fleet view. Prefer the row that
+    // is not an offload shim; otherwise the first one still wins.
+    if (out[at].offloadedFrom && !s.offloadedFrom) out[at] = s;
   }
   return out;
+}
+
+/**
+ * Narrow a gathered live set to the machines an explicit `--host`/`--device`
+ * scope named. The gather picks which boxes to ASK; this asserts what the answer
+ * may contain, and the two are not the same question: a host-dispatched run is
+ * reported by the box that dispatched it while executing somewhere else, so
+ * `--device <dispatcher>` used to list sessions that were not running there at
+ * all (RUSH-2479). No scope → unchanged. Pure; exported for unit testing.
+ */
+export function filterActiveSessionsByHostScope(
+  sessions: ActiveSession[],
+  hosts: string[] | undefined,
+  self: string,
+): ActiveSession[] {
+  if (!hosts || hosts.length === 0) return sessions;
+  const wanted = new Set(hosts.map(hostToken));
+  return sessions.filter((s) => wanted.has(s.machine ?? self));
 }
 
 /**
@@ -1567,7 +1596,15 @@ async function gatherActiveSessionsLive(
       merged = dedupeByMachineSession([...local, ...remote.sessions]);
     }
   }
-  return { sessions: merged, remoteDeviceCount };
+  // Asking a box is not the same as a session running there: a host-dispatched
+  // run is reported by its dispatcher while executing on the peer. Scope on the
+  // machine the session runs on so `--device X` never lists someone else's work
+  // (RUSH-2479). Applied here, in the single gather, so the interactive browser
+  // gets the same answer as `--active --json`.
+  return {
+    sessions: filterActiveSessionsByHostScope(merged, opts.hosts, self),
+    remoteDeviceCount,
+  };
 }
 
 /**
@@ -1616,7 +1653,7 @@ async function renderActiveSessions(
     // is how a consumer distinguishes a session someone is looking at from one
     // running orphaned after its terminal died. tmux-only (no osascript) so the
     // scriptable path stays cheap — see enrichTmuxLocators.
-    await enrichTmuxLocators(sessions.filter(s => !s.machine || s.machine === self));
+    await enrichTmuxLocators(sessions.filter(s => sessionProcessIsLocal(s, self)));
     process.stdout.write(JSON.stringify(serializeActiveSessionsForJson(sessions), null, 2) + '\n');
     if (waitingOnly && sessions.some(isAwaitingUser)) process.exitCode = 1;
     return;
@@ -1631,7 +1668,7 @@ async function renderActiveSessions(
   // Enrich LOCAL sessions with jump locators (display-only, after the --json /
   // --waiting gates so scriptable output stays osascript-free). Remote sessions
   // keep their raw pane id — their tmux/Ghostty live on the other machine.
-  await enrichLocalLocators(sessions.filter(s => !s.machine || s.machine === self));
+  await enrichLocalLocators(sessions.filter(s => sessionProcessIsLocal(s, self)));
 
   const grouped = groupSessionsByMachine(sessions, self);
   let firstMachine = true;
@@ -2236,7 +2273,7 @@ export async function renderSessionPreview(
   }
   if (outcome.kind === 'partial') {
     console.error(chalk.red(`Partial session resolution: ${outcome.failedPeers.join(', ')} did not answer.`));
-    console.error(chalk.gray('No preview was rendered because the short ID may be ambiguous on an unreachable peer.'));
+    console.error(chalk.gray('Nothing matched on the reachable fleet, so the session may live on a peer that did not answer.'));
     process.exitCode = 2;
     return;
   }
@@ -5147,6 +5184,11 @@ const FULL_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
  * the wrong session (whichever peer replied first). Labels therefore stay
  * all-settle so a cross-machine label conflict surfaces as an ambiguity, and a
  * short-id PREFIX stays all-settle for the same reason (RUSH-2203).
+ *
+ * This is about cancelling a sweep that is still IN FLIGHT, where a peer that
+ * has not answered yet is still expected to. It is deliberately stricter than
+ * `isUniqueEnoughSelector`, which decides what to do once the sweep is OVER and
+ * a peer has definitively not answered — see SES-9a.
  */
 export function isDefinitiveMatch(session: SessionMeta, selector: string): boolean {
   return FULL_SESSION_ID_RE.test(selector) && session.id.toLowerCase() === selector.trim().toLowerCase();
@@ -5243,9 +5285,31 @@ export function toolSearchForwardedArgs(argv: string[], hosts: string[]): string
   return args;
 }
 
-/** Resolution fails closed for prefixes/keywords when a peer did not answer.
- * A full UUID is globally unique, so one exact hit is sufficient even when an
- * unrelated registered device is offline. */
+/** Width of the short id the CLI prints everywhere (`SessionMeta.shortId`):
+ * 8 hex chars / 32 bits. A selector shorter than this is treated as a keyword,
+ * not an identifier. */
+const SHORT_SESSION_ID_WIDTH = 8;
+
+/**
+ * Whether a selector names ONE session precisely enough to resolve from the
+ * reachable fleet alone when some peer did not answer (SES-9a).
+ *
+ * Deliberately stricter than `looksLikeSessionId`, which accepts any 6+ char
+ * `[0-9a-f-]` run and so matches ordinary words (`facade`, `decade`, `beaded`).
+ * Those are keywords a user typed as a search, not identifiers, and they must
+ * keep waiting for every peer.
+ */
+export function isUniqueEnoughSelector(selector: string): boolean {
+  const trimmed = selector.trim();
+  if (isCompleteSessionId(trimmed)) return true;
+  return /^[0-9a-f-]+$/i.test(trimmed)
+    && trimmed.replace(/-/g, '').length >= SHORT_SESSION_ID_WIDTH;
+}
+
+/** Resolution fails closed for keywords and labels when a peer did not answer.
+ * An id-shaped selector at least `SHORT_SESSION_ID_WIDTH` hex chars wide (or a
+ * complete id) resolves from a single reachable hit even when an unrelated
+ * registered device is offline — see SES-9a for the accepted collision risk. */
 export function metadataResolveOutcome(
   localMatches: SessionMeta[],
   remote: { sessions: SessionMeta[]; unreachable: string[] },
@@ -5256,14 +5320,24 @@ export function metadataResolveOutcome(
   // selector would discard alias suffixes such as c1f3d813 because the native
   // UUID intentionally has a different prefix.
   const candidates = fleetCandidatesByQuery([...localMatches, ...remote.sessions], selector, true);
-  // A full UUID is globally unique, so one exact hit resolves even when an
-  // unrelated registered device is offline. A label is NOT globally unique — a
-  // distinct session may carry the same label on an unreachable peer — so it
-  // stays fail-closed: a unique label auto-resumes only once every peer has
-  // answered (candidates.length === 1 below), and an unreachable peer forces
-  // `partial` rather than guessing. (RUSH-2203: early-exit is UUID-only for the
-  // same reason — see isDefinitiveMatch.)
-  if (FULL_SESSION_ID_RE.test(selector) && candidates.length === 1 && candidates[0].id.toLowerCase() === selector.toLowerCase()) {
+  // One hit on the REACHABLE fleet resolves a precise-enough id selector even
+  // when a peer is offline (SES-9a). This is a deliberate, bounded trade, not a
+  // claim that prefixes cannot collide — they can, which is why the `ambiguous`
+  // branch below still exists for peers that DID answer:
+  //   - refusing costs 100% of lookups on any fleet with a permanently offline
+  //     device (9 of them here), to avoid a prefix collision that ALSO has to
+  //     land on the one box that did not answer. Rate depends on the id type:
+  //     a UUIDv4 short id is unique in practice, while a time-ordered
+  //     UUIDv7/ULID prefix is largely a timestamp and collides much more
+  //     readily (see deriveShortId in session/db.ts);
+  //   - `isUniqueEnoughSelector` keeps this off keyword-shaped queries, so a
+  //     6-char word like `facade` or `decade` is not treated as an identifier.
+  // A label stays fail-closed at any length: labels are free-form and collide by
+  // design, so one hit there really is a guess.
+  // (RUSH-2203's early-exit stays UUID-only — see isDefinitiveMatch — because
+  // that cancels the sweep mid-flight, where a peer that has not answered YET is
+  // still expected to answer. Here the sweep is already over.)
+  if (isUniqueEnoughSelector(selector) && candidates.length === 1) {
     return { kind: 'resolved', session: candidates[0].hits[0].session };
   }
   if (remote.unreachable.length > 0) return { kind: 'partial', failedPeers: remote.unreachable };

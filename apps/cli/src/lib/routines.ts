@@ -898,30 +898,61 @@ function readJobFromDir(dir: string, name: string): JobConfig | null {
   return null;
 }
 
-function readJobFile(filePath: string): JobConfig | null {
+/**
+ * The outcome of reading one routine file: a config, or the reason it is inert.
+ * Every `problem` here means the daemon will not run the routine.
+ */
+export type RoutineReadResult =
+  | { config: JobConfig; problem: null }
+  | { config: null; problem: string };
+
+/**
+ * Read one routine file, preserving WHY it failed.
+ *
+ * `readJobFile` collapses all four fail-closed paths to `null`, which is right
+ * for the loaders (an inert routine must not run) but leaves a broken routine
+ * invisible in every view — the one routine an operator most needs to see. Same
+ * reading, reason kept, for diagnostic surfaces like `agents inspect --routines`.
+ */
+export function readJobFileResult(filePath: string): RoutineReadResult {
+  let content: string;
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const parsed = yaml.parse(content);
-    if (!parsed || typeof parsed !== 'object') return null;
+    content = fs.readFileSync(filePath, 'utf-8');
+  } catch (err) {
+    return { config: null, problem: `unreadable: ${(err as Error).message}` };
+  }
 
-    // Fail closed on the legacy singular `device` key. A routine that still
-    // carries it after v12 startup migration is unmigrated state and must be
-    // treated as unavailable/inert rather than unrestricted.
-    if (Object.prototype.hasOwnProperty.call(parsed, 'device')) return null;
+  let parsed: { [key: string]: unknown } | null;
+  try {
+    parsed = yaml.parse(content);
+  } catch (err) {
+    return { config: null, problem: `invalid YAML: ${(err as Error).message.split('\n')[0]}` };
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    return { config: null, problem: 'not a YAML map' };
+  }
 
-    // Fail closed on a malformed `devices` too. Ownership treats a non-array as
-    // "no pin", and the daemon's load path never calls validateJob — so a YAML
-    // typo (`devices: yosemite-s0` instead of a list) would silently promote the
-    // routine to fleet-wide and fire it on EVERY box. Inert-and-loud beats
-    // unrestricted-and-silent.
-    if (Object.prototype.hasOwnProperty.call(parsed, 'devices')
-        && parsed.devices !== undefined
-        && parsed.devices !== null
-        && !Array.isArray(parsed.devices)) {
-      return null;
-    }
+  // Fail closed on the legacy singular `device` key. A routine that still
+  // carries it after v12 startup migration is unmigrated state and must be
+  // treated as unavailable/inert rather than unrestricted.
+  if (Object.prototype.hasOwnProperty.call(parsed, 'device')) {
+    return { config: null, problem: 'legacy `device:` key — inert until migrated to `devices:`' };
+  }
 
-    return {
+  // Fail closed on a malformed `devices` too. Ownership treats a non-array as
+  // "no pin", and the daemon's load path never calls validateJob — so a YAML
+  // typo (`devices: yosemite-s0` instead of a list) would silently promote the
+  // routine to fleet-wide and fire it on EVERY box. Inert-and-loud beats
+  // unrestricted-and-silent.
+  if (Object.prototype.hasOwnProperty.call(parsed, 'devices')
+      && parsed.devices !== undefined
+      && parsed.devices !== null
+      && !Array.isArray(parsed.devices)) {
+    return { config: null, problem: '`devices:` must be a list — routine is inert' };
+  }
+
+  return {
+    config: {
       ...JOB_DEFAULTS,
       ...parsed,
       name: parsed.name || path.basename(filePath).replace(/\.ya?ml$/, ''),
@@ -929,10 +960,13 @@ function readJobFile(filePath: string): JobConfig | null {
       // A new built-in definition with no `enabled:` field stays opt-in until
       // setup materializes this host's routines list.
       enabled: Object.prototype.hasOwnProperty.call(parsed, 'enabled') ? parsed.enabled !== false : false,
-    } as JobConfig;
-  } catch {
-    return null;
-  }
+    } as JobConfig,
+    problem: null,
+  };
+}
+
+function readJobFile(filePath: string): JobConfig | null {
+  return readJobFileResult(filePath).config;
 }
 
 /** Write a job config to disk, omitting fields that match defaults.

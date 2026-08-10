@@ -10,8 +10,14 @@
 
 import type { Profile } from './profiles.js';
 import { hasKeychainToken, getKeychainToken } from './secrets/profiles.js';
-import { renderBar, getUsageColor, USAGE_CACHE_FRESH_MS, USAGE_CACHE_SWR_MS } from './usage.js';
+import { renderBar, getUsageColor } from './usage.js';
 import chalk from 'chalk';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { createHash } from 'node:crypto';
+import { getCacheDir } from './state.js';
+import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
+import { withRefreshLease } from './refresh-coordinator.js';
 
 export interface ByokBudgetInfo {
   limitUsd: number | null;
@@ -34,17 +40,48 @@ export function setByokFetchForTest(fn: typeof globalThis.fetch): void {
   _fetch = fn;
 }
 
-// ─── SWR cache ───────────────────────────────────────────────────────────────
+// ─── Shared device cache ────────────────────────────────────────────────────
 
 interface CacheEntry {
   result: ByokUsageResult;
   fetchedAt: number;
 }
 
-const _cache = new Map<string, CacheEntry>();
+let cachePathOverride: string | null = null;
+
+function cachePath(): string {
+  return cachePathOverride ?? path.join(getCacheDir(), 'byok-usage.json');
+}
+
+function readCache(): Record<string, CacheEntry> {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(cachePath(), 'utf-8')) as { version: 1; entries: Record<string, CacheEntry> };
+    return parsed?.version === 1 && parsed.entries ? parsed.entries : {};
+  } catch { return {}; }
+}
+
+function writeCacheEntry(key: string, entry: CacheEntry): void {
+  const target = cachePath();
+  ensureLockTarget(target, JSON.stringify({ version: 1, entries: {} }));
+  withFileLock(target, () => {
+    atomicWriteFileSync(target, JSON.stringify({ version: 1, entries: { ...readCache(), [key]: entry } }));
+  });
+}
+
+function byokCacheKey(profile: Profile): string {
+  return createHash('sha256').update(`${profile.provider}\0${profile.auth?.keychainItem ?? ''}`).digest('hex');
+}
+
+export const BYOK_REFRESH_INTERVAL_MS = 5 * 60_000;
+
+export function setByokCachePathForTest(value: string | null): string | null {
+  const previous = cachePathOverride;
+  cachePathOverride = value;
+  return previous;
+}
 
 export function resetByokCacheForTest(): void {
-  _cache.clear();
+  try { fs.unlinkSync(cachePath()); } catch { /* absent */ }
 }
 
 // ─── Provider registry ───────────────────────────────────────────────────────
@@ -126,8 +163,8 @@ export function renderByokBar(result: ByokUsageResult): string {
  * Returns a `ByokUsageResult` with `budget: null` when the token is absent
  * from the keychain (so the caller can skip rendering a bar without error).
  *
- * Results are SWR-cached per `keychainItem` so harnesses sharing one API key
- * deduplicate to a single network request.
+ * Ordinary reads are cache-only. Explicit refreshes are serialized per provider
+ * credential across every agents-cli process on the device.
  */
 export async function getByokUsageForHarness(
   profile: Profile,
@@ -136,23 +173,47 @@ export async function getByokUsageForHarness(
   if (!profile.provider || !hasByokProvider(profile.provider) || !profile.auth) return null;
   const keychainItem = profile.auth.keychainItem;
   const provider = BYOK_REGISTRY[profile.provider];
-  const now = Date.now();
-  const cached = _cache.get(keychainItem);
+  const cacheKey = byokCacheKey(profile);
+  const cached = readCache()[cacheKey];
+  if (!opts?.forceRefresh) return cached?.result ?? { budget: null, error: 'stale' };
 
-  if (!opts?.forceRefresh && cached) {
-    const age = now - cached.fetchedAt;
-    if (age < USAGE_CACHE_FRESH_MS) {
-      return cached.result;
-    }
-    if (age < USAGE_CACHE_SWR_MS) {
-      void provider.fetch(keychainItem).then((result) => {
-        _cache.set(keychainItem, { result, fetchedAt: Date.now() });
-      });
-      return cached.result;
-    }
+  const previousFetchedAt = cached?.fetchedAt ?? 0;
+  return withRefreshLease({
+    scope: 'byok-usage',
+    key: cacheKey,
+    readCompleted: () => readCache()[cacheKey] ?? null,
+    isCompleted: (entry) => entry.fetchedAt > previousFetchedAt,
+    refresh: async () => {
+      const result = await provider.fetch(keychainItem);
+      const entry = { result, fetchedAt: Math.max(Date.now(), previousFetchedAt + 1) };
+      writeCacheEntry(cacheKey, entry);
+      return entry;
+    },
+  }).then((entry) => entry.result);
+}
+
+/** Refresh each configured BYOK credential when its daemon-owned snapshot is due. */
+export async function refreshDueByokUsage(
+  profiles: Profile[],
+  now = Date.now(),
+): Promise<{ refreshed: number; skipped: number }> {
+  const due = new Map<string, Profile>();
+  for (const profile of profiles) {
+    if (!profile.provider || !profile.auth || !hasByokProvider(profile.provider)) continue;
+    due.set(byokCacheKey(profile), profile);
   }
 
-  const result = await provider.fetch(keychainItem);
-  _cache.set(keychainItem, { result, fetchedAt: now });
-  return result;
+  let refreshed = 0;
+  let skipped = 0;
+  const cache = readCache();
+  for (const [key, profile] of due) {
+    const entry = cache[key];
+    if (entry && now - entry.fetchedAt < BYOK_REFRESH_INTERVAL_MS) {
+      skipped += 1;
+      continue;
+    }
+    await getByokUsageForHarness(profile, { forceRefresh: true });
+    refreshed += 1;
+  }
+  return { refreshed, skipped };
 }

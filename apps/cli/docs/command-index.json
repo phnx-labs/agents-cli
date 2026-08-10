@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 105,
-  "commands": 583,
+  "groups": 104,
+  "commands": 581,
   "root": {
     "name": "agents",
     "path": "",
@@ -10223,6 +10223,15 @@
           "negate": false
         },
         {
+          "flags": "--routines [query]",
+          "description": "list routines; pass a name (fuzzy) to show detail",
+          "long": "--routines",
+          "required": false,
+          "optional": true,
+          "variadic": false,
+          "negate": false
+        },
+        {
           "flags": "--command <query>",
           "description": "show detail for one command by name (fuzzy)",
           "long": "--command",
@@ -10280,6 +10289,15 @@
           "flags": "--subagent <query>",
           "description": "show detail for one subagent by name (fuzzy)",
           "long": "--subagent",
+          "required": true,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--routine <query>",
+          "description": "show detail for one routine by name (fuzzy)",
+          "long": "--routine",
           "required": true,
           "optional": false,
           "variadic": false,
@@ -14026,112 +14044,6 @@
               "flags": "--allow-exec-surfaces",
               "description": "Consent to an update that introduces new executable surfaces (hooks/, bin/, scripts/, .mcp.json, settings.json, permissions/)",
               "long": "--allow-exec-surfaces",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
-    },
-    {
-      "name": "pr",
-      "path": "pr",
-      "aliases": [],
-      "description": "Standalone PR lifecycle commands (land, …).",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "# Watch PR #1234 and merge when CI is green + review approved\n      agents pr land 1234\n\n      # Detach so the lander outlives a headless agent (RUSH-2394 — prefer this\n      # over background `gh pr checks --watch`, which dies with the agent)\n      agents pr land 1234 --detach\n\n      # Poll every 60 s instead of the default 30 s\n      agents pr land 1234 --interval 60\n\n      # Merge as soon as CI is green (skip review check)\n      agents pr land 1234 --skip-review\n\n      # Keep the branch after merge\n      agents pr land 1234 --no-delete-branch",
-      "notes": "• Requires `gh` (GitHub CLI) authenticated for the target repo.\n      • Merges with --rebase only — no squash, no merge commit.\n      • Non-author approval check uses the GitHub Reviews REST endpoint (REST, not GraphQL).\n      • Fails loud on red CI or any merge conflict; never uses --admin or bypasses branch protection.\n      • One waiter per PR: a second `pr land --detach` for the same PR reuses the live lander.\n      • --detach is the durable handoff for headless agents. A background `gh pr checks --watch`\n        is a child of the agent process and dies when the agent exits, stranding the PR (RUSH-2394).",
-      "subcommands": [
-        {
-          "name": "land",
-          "path": "pr land",
-          "aliases": [],
-          "description": "Watch a PR through CI and a non-author review, then rebase-merge on green. Fails loud on red CI or conflict; never uses --admin. Pass --detach to outlive a headless agent (RUSH-2394).",
-          "args": [
-            {
-              "name": "pr",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--interval <seconds>",
-              "description": "Seconds between polls (default 30)",
-              "long": "--interval",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "30"
-            },
-            {
-              "flags": "--max-polls <n>",
-              "description": "Stop after this many polls without merging (0 = unlimited)",
-              "long": "--max-polls",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "0"
-            },
-            {
-              "flags": "--no-delete-branch",
-              "description": "Keep the PR branch after merge (default: delete)",
-              "long": "--no-delete-branch",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
-              "flags": "--skip-review",
-              "description": "Merge as soon as CI is green, skipping the non-author review check",
-              "long": "--skip-review",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--detach",
-              "description": "Spawn the lander in its own process group and return immediately. Survives a headless agent exit — use this instead of background `gh pr checks --watch`.",
-              "long": "--detach",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit one JSON line per status event",
-              "long": "--json",
               "required": false,
               "optional": false,
               "variadic": false,
@@ -29353,6 +29265,16 @@
           "flags": "--json",
           "description": "Emit machine-readable JSON (per-agent usage snapshot) instead of the table",
           "long": "--json",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "-r, --refresh",
+          "description": "Collect fresh usage through the shared device coordinator before rendering",
+          "short": "-r",
+          "long": "--refresh",
           "required": false,
           "optional": false,
           "variadic": false,

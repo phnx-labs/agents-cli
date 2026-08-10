@@ -136,7 +136,10 @@ agents sessions preview <uuid-or-8-char-id> [--json] [--local|--device <name>]
 
 `sessions preview` performs an indexed ID lookup instead of scanning recent
 history. Full UUIDs may stop on an exact local/remote hit; short prefixes wait
-for every selected peer so collisions are reported. The owning peer renders a
+for every selected peer, so a collision between peers that answered is reported
+as an ambiguity. Once the sweep is over, a selector that is a complete id or at
+least 8 hex characters wide still resolves from a single reachable match even if
+a peer never answered (SES-9a); a keyword or label does not. The owning peer renders a
 remote card. Transcript-derived details are stored as normalized JSON in
 `session_preview_cache`, keyed by the source file's mtime and size; live status
 is fetched separately with a 15-second maximum age, so the durable cache cannot
@@ -889,6 +892,21 @@ device over SSH, through one shared gather — `gatherActiveSessions` in
 `src/commands/sessions.ts`. `--host`/`--device` **scopes** that sweep to the named
 machines rather than adding to it.
 
+The scope is enforced against the machine a session **executes** on, not the box
+that reported it — the two differ for a host-dispatched run. `agents run --device
+<peer>` leaves a live shim process on the *dispatching* box carrying the remote
+run's session id, so `foldExecutionMachine` re-tags that row with the execution
+host recorded at dispatch (`lib/hosts/session-index.ts`) and marks it
+`offloadedFrom: <dispatcher>`. Such a session therefore appears under
+`--device <peer>`, **not** under `--device <dispatcher>` (RUSH-2479, contract
+SES-23a).
+
+`machine` answers "where does the agent execute" — which is what the scope,
+preview routing, and resume ownership need. It is not "where is the process I
+would attach to": for an offloaded run the shim's pid, tmux pane, and terminal
+window are all still on the dispatcher. Anything reaching for a local pane or
+window asks `sessionProcessIsLocal(s, self)` instead of comparing `machine`.
+
 **Cross-surface cache (RUSH-2062).** The default path is cache-first against a
 daemon-warmed snapshot (`src/lib/session/session-cache.ts`, ~15s freshness). The
 daemon publishes this host's local active set on a short tick; menubar, the ext,
@@ -1060,8 +1078,10 @@ owning machine. A missing/empty selector or ambiguous ID prefix/keyword query ex
 Fleet peers receive a versioned, metadata-only `--resolve-safe-v1` request, so a peer
 carrying an older unsafe resolver rejects the request before serializing a row. If any
 selected peer is unreachable, returns malformed JSON, cannot list devices, times out, or rejects the protocol because it runs
-an older CLI, the command emits no JSON, names the peer(s), and exits 2; it never makes
-a unique/no-match decision from partial fleet state.
+an older CLI, the command emits no JSON, names the peer(s), and exits 2 — unless the
+selector is a complete id or at least 8 hex characters wide and exactly one session on
+the reachable fleet matches it, which resolves (SES-9a). A keyword or label is still
+never decided from partial fleet state.
 `--local` keeps the metadata lookup on this machine.
 `--agent <agent[@version]>` and `--project <name>` narrow the lookup on every peer;
 `--all` is implicit because historical resolution must not inherit the SSH login

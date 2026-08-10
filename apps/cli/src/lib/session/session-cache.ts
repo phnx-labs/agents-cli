@@ -27,7 +27,7 @@ import * as path from 'path';
 
 import { createMemoryCache } from '../memory-cache.js';
 import { getCacheDir } from '../state.js';
-import type { ActiveSession } from './active.js';
+import { sessionProcessIsLocal, type ActiveSession } from './active.js';
 
 /** Snapshot file under `getCacheDir()` (regenerable, gitignored). */
 const SNAPSHOT_FILE = '.active-sessions.json';
@@ -521,9 +521,14 @@ export async function loadFleetActiveSessions(
   // with ghost rows would make watchdog / `--local` report sessions that are
   // gone (review on RUSH-2062 / PR #2116).
   if (self !== undefined) {
-    const localOnly = live.sessions.filter(
-      (s) => !s.machine || s.machine === self,
-    );
+    // "Local" here means the PROCESS is on this box, which is not `machine ===
+    // self` for an offloaded run: its shim runs here while the agent executes on
+    // the peer (RUSH-2479). The other writer of this same key,
+    // `loadLocalActiveSessions`, seeds from `getActiveSessions({localOnly:true})`
+    // and keeps that shim — so comparing `machine` here would make the two
+    // disagree and leave `--local` showing or hiding the row depending on which
+    // surface last warmed the 15s cache.
+    const localOnly = live.sessions.filter((s) => sessionProcessIsLocal(s, self));
     writeCache('local', localOnly, { capturedAt: now });
   }
   return {

@@ -85,6 +85,11 @@ describe('classifyCiScope', () => {
     'apps/cli/src/lib/hooks/loader.ts',
     'apps/cli/src/lib/platform/paths.ts',
     'apps/cli/src/lib/shims-windows.ts',
+    // binary-shadow compares paths case-insensitively and resolves agents.exe /
+    // agents.cmd only on win32, so a change there must run the Windows job — it
+    // did not, which is how a Windows-only assertion failure reached main.
+    'apps/cli/src/lib/binary-shadow.ts',
+    'apps/cli/src/lib/binary-shadow.test.ts',
     'apps/cli/hooks/session-start.sh',
     'apps/cli/src/lib/hosts/dispatch.ts',
   ])('marks %s as Windows-sensitive', (file) => {

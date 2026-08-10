@@ -57,6 +57,23 @@ import { countSessionsInScope } from '../lib/session/discover.js';
 import { isSessionTrackedAgent } from '../lib/session/types.js';
 import { damerauLevenshtein } from '../lib/fuzzy.js';
 import { terminalWidth, truncateToWidth, stringWidth, stripAnsi } from '../lib/session/width.js';
+import {
+  readJobFileResult,
+  getJobRunsDir,
+  readRunMeta,
+  isOneShotRoutine,
+  isPastOneShotRoutine,
+  listJobs,
+  type JobConfig,
+  type RunMeta,
+} from '../lib/routines.js';
+import {
+  routineDeviceIndex,
+  currentRoutineDevice,
+  routineEnabledOnThisDevice,
+  type RoutineDeviceIndex,
+} from '../lib/routine-activation.js';
+import { humanizeCron } from '../lib/routines-format.js';
 
 /** Resource kinds the inspect command can drill into. */
 const DRILLABLE_KINDS = [
@@ -68,17 +85,30 @@ const DRILLABLE_KINDS = [
   'plugins',
   'workflows',
   'subagents',
+  'routines',
 ] as const;
 type DrillableKind = typeof DRILLABLE_KINDS[number];
 
 /**
  * Summary-view partition. SIMPLE kinds render as a one-line count + name preview;
- * RICH kinds (hooks/plugins/mcp) get their own expanded section showing each
- * item's key detail (events/predicates, bundle contents, transport/url). Together
- * they cover every DrillableKind.
+ * RICH kinds (hooks/plugins/mcp/routines) get their own expanded section showing
+ * each item's key detail (events/predicates, bundle contents, transport/url,
+ * schedule + where a routine actually fires). Together they cover every
+ * DrillableKind — the type below makes that claim load-bearing.
  */
 const SIMPLE_KINDS = ['commands', 'skills', 'rules', 'subagents', 'workflows'] as const;
-const RICH_KINDS = ['hooks', 'plugins', 'mcp'] as const;
+const RICH_KINDS = ['hooks', 'plugins', 'mcp', 'routines'] as const;
+
+/**
+ * A kind added to DRILLABLE_KINDS but to neither list would silently vanish from
+ * both summary views rather than failing the build. This makes it a type error.
+ */
+type _KindsPartitioned =
+  Exclude<DrillableKind, typeof SIMPLE_KINDS[number] | typeof RICH_KINDS[number]> extends never
+    ? true
+    : never;
+const _kindsPartitioned: _KindsPartitioned = true;
+void _kindsPartitioned;
 
 /**
  * Singular aliases for the plural drill-down flags. `--plugin code` reads as
@@ -94,6 +124,7 @@ const SINGULAR_DRILL_ALIASES: Record<string, DrillableKind> = {
   plugin: 'plugins',
   workflow: 'workflows',
   subagent: 'subagents',
+  routine: 'routines',
 };
 
 const CAPABILITY_NAMES: readonly CapabilityName[] = [
@@ -151,6 +182,11 @@ interface ResourceItem {
   extra?: Array<[string, string]>;
   /** For plugins: the resource categories (skills, commands, …) the bundle packages. */
   groups?: PluginResourceGroup[];
+  /**
+   * Machine-shaped fields for `--json`, when the display strings in `extra` would
+   * lose information a script needs (a routine's raw cron, its device arrays).
+   */
+  json?: Record<string, unknown>;
 }
 
 export interface InspectOptions {
@@ -166,6 +202,7 @@ export interface InspectOptions {
   plugins?: boolean | string;
   workflows?: boolean | string;
   subagents?: boolean | string;
+  routines?: boolean | string;
   // Singular aliases — required value, always detail mode (see SINGULAR_DRILL_ALIASES).
   command?: string;
   skill?: string;
@@ -174,6 +211,7 @@ export interface InspectOptions {
   plugin?: string;
   workflow?: string;
   subagent?: string;
+  routine?: string;
 }
 
 // ─── Command registration ────────────────────────────────────────────────────
@@ -343,6 +381,12 @@ function isDotAgentsRoot(dir: string): boolean {
     if (fs.existsSync(path.join(dir, marker))) return true;
   }
   for (const kind of DRILLABLE_KINDS) {
+    // `routines/` alone is NOT a marker. Shipping example routine YAML for
+    // `agents routines add` is a documented pattern (this repo's own
+    // apps/cli/routines/), and that directory is the ONLY kind dir there — so
+    // counting it would make `agents inspect apps/cli` resolve a source tree as
+    // a DotAgents repo. Same reasoning as the nested-`.agents/` case above.
+    if (kind === 'routines') continue;
     if (safeStat(path.join(dir, kind))?.isDirectory()) return true;
   }
   return false;
@@ -353,7 +397,21 @@ export async function inspectRepo(repo: RepoTarget, options: InspectOptions): Pr
   const jsonHead = { repo: repo.label, root: repo.root };
 
   if (drill) {
-    const items = collectRepoKind(repo, drill.kind);
+    // Routines carry live state, and an unreadable device document silently
+    // removes that device from every `devices` cell — say so on this path too,
+    // not only in the overview.
+    let items: ResourceItem[];
+    if (drill.kind === 'routines') {
+      const provider = defaultRoutineLive();
+      items = collectRepoRoutines(repo, provider.live);
+      if (!options.json) {
+        for (const err of provider.errors) {
+          console.error(chalk.yellow(`device config unreadable — ${err}`));
+        }
+      }
+    } else {
+      items = collectRepoKind(repo, drill.kind);
+    }
     if (drill.query === true || drill.query === undefined) {
       // A repo's hooks are wired by its OWN agents.yaml, not by whatever this
       // machine has installed centrally — the same manifest the repo overview
@@ -404,7 +462,337 @@ export function collectRepoKind(repo: RepoTarget, kind: DrillableKind): Resource
     if (fs.existsSync(subrulesDir)) return readResourceDir(subrulesDir, kind, repo.label);
   }
 
+  // Routines are YAML job definitions whose real state (does it fire, where, how
+  // did it last run) lives outside the file. Their directory also holds
+  // `<name>/home/` sandbox overlays, which a flat readdir would count as
+  // routines — on this author's box that turned 24 routines into 49.
+  if (kind === 'routines') return collectRepoRoutines(repo);
+
   return readResourceDir(path.join(repo.root, kind), kind, repo.label);
+}
+
+// ─── Routines ────────────────────────────────────────────────────────────────
+
+/** The live answers about one routine — what the YAML alone cannot say. */
+export interface RoutineLiveState {
+  /** Devices whose `routines:` allowlist names it. Empty means it fires nowhere. */
+  devices: string[];
+  /** False until some device has materialized an allowlist at all. */
+  materialized: boolean;
+  /** This machine's name, for reporting whether the routine is enabled here. */
+  thisDevice: string;
+  /**
+   * THIS machine's activation answer, from `routineEnabledOnThisDevice` — the
+   * same call `applyDeviceActivation` makes. `null` means this device has not
+   * materialized its own allowlist, so the file's `enabled:` still governs.
+   *
+   * Deliberately separate from `materialized`, which is fleet-wide: a box whose
+   * own device doc has no `routines:` key while a synced peer's does is the
+   * normal state of a freshly-joined machine, and conflating the two reported
+   * `enabled: no` for routines the daemon was actively firing.
+   */
+  enabledHere: boolean | null;
+  /** Last run's status, or null if it has never run on a device we can see. */
+  lastStatus: RunMeta['status'] | null;
+  /** ISO timestamp of that run's start. */
+  lastAt: string | null;
+}
+
+const NO_LIVE_STATE: RoutineLiveState = {
+  devices: [], materialized: false, thisDevice: '', enabledHere: null, lastStatus: null, lastAt: null,
+};
+
+/**
+ * Whether the routine actually runs on this machine.
+ *
+ * Exactly `applyDeviceActivation` (`lib/routines.ts`): this device's own
+ * allowlist answer wins when it exists, and the file's `enabled:` governs only
+ * while that answer is `null`. Measured at the same scope as the daemon's, so
+ * `agents inspect --routines` and `agents routines list` cannot disagree.
+ */
+function routineEnabledHere(config: JobConfig, live: RoutineLiveState): boolean {
+  return live.enabledHere === null ? config.enabled : live.enabledHere;
+}
+
+/**
+ * The last run we can read, without paying for the whole history.
+ *
+ * `getLatestRun` goes through `listRuns`, which parses EVERY meta.json under the
+ * routine — one firing every 3 minutes accumulates hundreds. Run ids are ISO-ish
+ * and sort lexicographically, so walking from the newest and stopping at the
+ * first readable record gives the same answer for a bounded number of reads.
+ */
+function latestRunOf(name: string, maxProbes = 20): RunMeta | null {
+  let runIds: string[];
+  try {
+    runIds = fs.readdirSync(getJobRunsDir(name), { withFileTypes: true })
+      .filter(e => e.isDirectory())
+      .map(e => e.name)
+      .sort()
+      .reverse();
+  } catch { return null; }
+
+  for (const runId of runIds.slice(0, maxProbes)) {
+    const meta = readRunMeta(name, runId);
+    if (meta) return meta;
+  }
+  return null;
+}
+
+/**
+ * Default live provider: one fleet index per collect, one bounded run read per
+ * routine, and this device's own activation answer per routine.
+ *
+ * Returns the collected `errors` alongside so the caller can surface an
+ * unreadable device document instead of letting the affected device silently
+ * vanish from every `devices` cell.
+ */
+function defaultRoutineLive(): { live: (name: string) => RoutineLiveState; errors: string[] } {
+  let index: RoutineDeviceIndex;
+  try {
+    index = routineDeviceIndex();
+  } catch (err) {
+    return { live: () => NO_LIVE_STATE, errors: [(err as Error).message] };
+  }
+  const thisDevice = (() => { try { return currentRoutineDevice(); } catch { return ''; } })();
+  const errors = [...index.errors];
+
+  // This device's own doc is read through readMeta, which THROWS on a corrupt
+  // one. Falling back to the file's `enabled:` silently would be the same
+  // silent-failure class the index's error collection just removed, so record it
+  // once — the answer is identical for every routine on this machine.
+  let ownDocError: string | null = null;
+  const enabledOnThisDevice = (name: string): boolean | null => {
+    try {
+      return routineEnabledOnThisDevice(name);
+    } catch (err) {
+      if (!ownDocError) {
+        ownDocError = `this device's own config is unreadable — ${(err as Error).message}`;
+        errors.push(ownDocError);
+      }
+      return null;
+    }
+  };
+
+  const live = (name: string): RoutineLiveState => {
+    const run = latestRunOf(name);
+    return {
+      devices: index.byRoutine.get(name) ?? [],
+      materialized: index.materialized,
+      thisDevice,
+      // The same call applyDeviceActivation makes — per-machine, not fleet-wide.
+      enabledHere: enabledOnThisDevice(name),
+      lastStatus: run?.status ?? null,
+      lastAt: run?.startedAt ?? null,
+    };
+  };
+  return { live, errors };
+}
+
+/** `2h` / `3d` / `just now` — compact enough for a 10-column cell. */
+export function compactAge(iso: string | null, now: Date = new Date()): string {
+  if (!iso) return '';
+  const then = Date.parse(iso);
+  if (!Number.isFinite(then)) return '';
+  const mins = Math.floor((now.getTime() - then) / 60000);
+  if (mins < 1) return 'now';
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 365) return `${days}d`;
+  return `${Math.floor(days / 365)}y`;
+}
+
+/** What makes this routine fire: a humanized cron, an event trigger, or nothing. */
+export function routineFireLabel(job: JobConfig, now: Date = new Date()): string {
+  const parts: string[] = [];
+  if (job.schedule) parts.push(humanizeCron(job.schedule, job.timezone));
+  if (job.trigger) {
+    const t = job.trigger as { type?: unknown; event?: unknown; action?: unknown; label?: unknown };
+    const event = manifestText(t.event) || manifestText(t.type) || 'event';
+    const qualifier = [manifestText(t.action), manifestText(t.label)].filter(Boolean).join(' ');
+    parts.push(qualifier ? `on ${event} (${qualifier})` : `on ${event}`);
+  }
+  if (parts.length === 0) return 'no schedule or trigger';
+  if (isOneShotRoutine(job)) {
+    parts.push(isPastOneShotRoutine(job, now) ? '(one-shot, expired)' : '(one-shot)');
+  }
+  return parts.join(' · ');
+}
+
+/** What the routine actually executes. Exactly one of agent/workflow/command is set. */
+export function routineTargetLabel(job: JobConfig): string {
+  const agent = manifestText(job.agent);
+  if (agent) return `agent ${agent}`;
+  const workflow = manifestText(job.workflow);
+  if (workflow) return `workflow ${workflow}`;
+  if (manifestText(job.command)) return 'command (shell)';
+  return 'nothing configured';
+}
+
+/**
+ * A routine's one-line intent.
+ *
+ * Routine YAML has no `description:` key, so the generic first-prose-line reader
+ * returns `name: growth-metrics` for one file and a real sentence for the next.
+ * Prefer the prompt's first sentence, then the file's leading comment block, then
+ * the first meaningful line of a shell command.
+ */
+export function routineDescription(job: JobConfig | null, raw: string): string {
+  const prompt = job ? manifestText(job.prompt).trim() : '';
+  if (prompt) return summaryLine(truncate(prompt.replace(/\s+/g, ' '), 400));
+
+  const lines = raw.split('\n');
+  for (const line of lines) {
+    const comment = line.match(/^\s*#\s?(.+)$/);
+    if (!comment) { if (line.trim()) break; else continue; }
+    const text = comment[1].trim().replace(/^Routine:\s*/i, '');
+    // Skip the shebang-ish and install-instruction noise that opens many files.
+    if (!text || /^(yaml-language-server|Install:|Usage:)/i.test(text)) continue;
+    return summaryLine(text);
+  }
+
+  const command = job ? manifestText(job.command) : '';
+  for (const line of command.split('\n')) {
+    const text = line.trim();
+    if (!text || text.startsWith('#') || /^set\s+-/.test(text)) continue;
+    return truncate(text, 120);
+  }
+  return '';
+}
+
+/**
+ * Read every routine one DotAgents repo declares.
+ *
+ * Reads exactly `<root>/routines/`, never the layered `listJobs` — `collectRepoKind`
+ * is a single-root view, and returning `~/.agents` routines while inspecting a
+ * project repo would be a lie. `live` is injectable because `getUserAgentsDir()`
+ * and `getRunsDir()` have no env override, so tests cannot otherwise keep this
+ * off the developer's real fleet state.
+ */
+export function collectRepoRoutines(
+  repo: RepoTarget,
+  live: (name: string) => RoutineLiveState = defaultRoutineLive().live,
+  now: Date = new Date(),
+): ResourceItem[] {
+  const dir = path.join(repo.root, 'routines');
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch { return []; }
+
+  const items: ResourceItem[] = [];
+  const seen = new Map<string, ResourceItem>();
+
+  // Files only: `routines/<name>/home/` is a sandbox overlay HOME, not a routine.
+  //
+  // `.yml` before `.yaml` for the same basename, because that is the order
+  // `readJobFromDir` tries — so when both exist we describe the file the daemon
+  // actually loads. A plain alphabetical sort put `.yaml` first and reported the
+  // wrong schedule and command for a routine that fires from its sibling.
+  const files = entries
+    .filter(e => e.isFile() && /\.ya?ml$/.test(e.name) && !e.name.startsWith('.'))
+    .map(e => e.name)
+    .sort((a, b) => {
+      const an = a.replace(/\.ya?ml$/, ''), bn = b.replace(/\.ya?ml$/, '');
+      if (an !== bn) return an.localeCompare(bn);
+      return (a.endsWith('.yml') ? 0 : 1) - (b.endsWith('.yml') ? 0 : 1);
+    });
+
+  for (const file of files) {
+    const filePath = path.join(dir, file);
+    const { config, problem } = readJobFileResult(filePath);
+    const basename = file.replace(/\.ya?ml$/, '');
+    const name = config?.name || basename;
+
+    const existing = seen.get(name);
+    if (existing) {
+      // `writeJob` refuses to edit a routine with both extensions. Keep the item
+      // built from the file that loads, and flag the ambiguity on it — in `extra`
+      // for the panes AND in `json` so a --json consumer sees it too.
+      const collision = `both .yml and .yaml exist — ${file} is ignored; resolve before editing`;
+      existing.extra = [...(existing.extra ?? []), ['problem', collision]];
+      if (existing.json) existing.json.problem = collision;
+      continue;
+    }
+
+    const raw = (() => { try { return fs.readFileSync(filePath, 'utf-8'); } catch { return ''; } })();
+    const state = config ? live(name) : NO_LIVE_STATE;
+    const extra: Array<[string, string]> = [];
+
+    if (config) {
+      extra.push(['fires', routineFireLabel(config, now)]);
+      extra.push(['runs', routineTargetLabel(config)]);
+      extra.push(['devices', state.devices.length > 0
+        ? state.devices.join(', ')
+        : state.materialized ? 'no device — will not fire' : 'no device allowlist yet']);
+      extra.push(['last', state.lastStatus
+        ? `${state.lastStatus}${state.lastAt ? ` · ${compactAge(state.lastAt, now)} ago` : ''}`
+        : 'never run']);
+      extra.push(['enabled', routineEnabledHere(config, state)
+        ? `yes${state.thisDevice ? ` (on ${state.thisDevice})` : ''}`
+        : `no${state.thisDevice ? ` (on ${state.thisDevice})` : ''}`]);
+      const repoRef = manifestText(config.repo);
+      if (repoRef) extra.push(['repo', repoRef]);
+      const tz = manifestText(config.timezone);
+      if (tz) extra.push(['timezone', tz]);
+      if (config.catchup === false) extra.push(['catchup', 'off — a missed fire is lost']);
+      const host = manifestText(config.host);
+      if (host) extra.push(['host', host]);
+      const pinned = manifestList(config.devices);
+      if (pinned.length > 0) extra.push(['pinned', pinned.join(', ')]);
+      if (name !== basename) extra.push(['file', file]);
+    } else if (problem) {
+      extra.push(['problem', problem]);
+    }
+
+    const item: ResourceItem = {
+      name,
+      source: repo.label,
+      path: filePath,
+      linkTarget: filePath,
+      description: routineDescription(config, raw),
+      extra,
+      // Field names match `agents routines list --json` where they overlap, so
+      // one script can consume both. `devices` is what the YAML pins;
+      // `enabledDevices` is what the fleet actually allows — the diagnostic pair.
+      json: {
+        path: filePath,
+        schedule: config?.schedule ?? null,
+        scheduleHuman: config ? routineFireLabel(config, now) : null,
+        trigger: config?.trigger ?? null,
+        runs: config ? routineTargetLabel(config) : null,
+        agent: config?.agent ?? null,
+        workflow: config?.workflow ?? null,
+        command: config?.command ?? null,
+        timezone: config?.timezone ?? null,
+        repo: config?.repo ?? null,
+        // Effective on THIS machine, matching `agents routines list`.
+        enabled: config ? routineEnabledHere(config, state) : false,
+        // What the file itself declares, before device activation overrides it.
+        enabledInFile: config?.enabled ?? false,
+        catchup: config ? config.catchup !== false : null,
+        devices: config ? manifestList(config.devices) : [],
+        enabledDevices: state.devices,
+        activationMaterialized: state.materialized,
+        oneShot: config ? isOneShotRoutine(config) : false,
+        expired: config ? isPastOneShotRoutine(config, now) : false,
+        lastStatus: state.lastStatus,
+        lastRunAt: state.lastAt,
+        problem,
+      },
+    };
+    seen.set(name, item);
+    items.push(item);
+  }
+
+  return items.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Read one `extra` row back out — the renderers' only accessor. */
+function extraOf(item: ResourceItem, key: string): string {
+  return item.extra?.find(([k]) => k === key)?.[1] ?? '';
 }
 
 /**
@@ -412,7 +800,7 @@ export function collectRepoKind(repo: RepoTarget, kind: DrillableKind): Resource
  * and directory docs. Shared so the rules `subrules/` branch and the default
  * `<repo>/<kind>/` branch cannot drift apart.
  */
-function readResourceDir(dir: string, kind: Exclude<DrillableKind, 'plugins'>, source: string): ResourceItem[] {
+function readResourceDir(dir: string, kind: Exclude<DrillableKind, 'plugins' | 'routines'>, source: string): ResourceItem[] {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -460,6 +848,19 @@ export function pathSize(p: string): { bytes: number; files: number } {
   let bytes = 0, files = 0;
   for (const e of entries) {
     const sub = pathSize(path.join(p, e.name));
+    bytes += sub.bytes; files += sub.files;
+  }
+  return { bytes, files };
+}
+
+/**
+ * Weigh only the entries actually listed, for a kind whose directory holds more
+ * than its resources (routines share theirs with sandbox overlay HOMEs).
+ */
+function itemsSize(items: ResourceItem[]): { bytes: number; files: number } {
+  let bytes = 0, files = 0;
+  for (const item of items) {
+    const sub = pathSize(item.path);
     bytes += sub.bytes; files += sub.files;
   }
   return { bytes, files };
@@ -518,10 +919,23 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
   let totalBytes = 0, totalFiles = 0;
   let repoHookByScript: Map<string, ManifestHook> = new Map();
   let repoMcpConfigs: Map<string, McpYamlConfig> = new Map();
+  let routineActivationErrors: string[] = [];
   if (!options.brief) {
     for (const kind of DRILLABLE_KINDS) {
-      const items = collectRepoKind(repo, kind);
-      const size = pathSize(path.join(repo.root, kind));
+      // Routines share one live provider across the collect so the fleet index is
+      // read once, and so its errors survive to be reported below.
+      let items: ResourceItem[];
+      if (kind === 'routines') {
+        const provider = defaultRoutineLive();
+        routineActivationErrors = provider.errors;
+        items = collectRepoRoutines(repo, provider.live);
+      } else {
+        items = collectRepoKind(repo, kind);
+      }
+      // `routines/` also holds `<name>/home/` sandbox overlays — often far larger
+      // than the definitions and not resources at all, so weigh the files listed
+      // rather than the directory tree.
+      const size = kind === 'routines' ? itemsSize(items) : pathSize(path.join(repo.root, kind));
       kindData[kind] = { items, size };
       totalBytes += size.bytes; totalFiles += size.files;
     }
@@ -559,6 +973,11 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
             name: i.name,
             version: i.extra?.find(([k]) => k === 'version')?.[1],
             groups: Object.fromEntries((i.groups ?? []).map(g => [g.label, g.items.length])),
+          })) }];
+          if (kind === 'routines') return [kind, { ...base, items: items.map(i => ({
+            name: i.name,
+            description: i.description,
+            ...(i.json ?? {}),
           })) }];
           return [kind, base];
         }),
@@ -629,6 +1048,18 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
     printExpandedSection('Hooks', hookRows(kindData.hooks.items, repoHookByScript));
     printExpandedSection('Plugins', pluginRows(kindData.plugins.items));
     printExpandedSection('MCP', mcpRows(kindData.mcp.items, repoMcpConfigs));
+    printExpandedSection('Routines', routineRows(kindData.routines.items));
+    const dark = routineDarkWarning(kindData.routines.items);
+    if (dark) {
+      console.log('');
+      console.log(`  ${chalk.yellow('⚠')}  ${dark}`);
+      console.log(chalk.gray(`     Fix:  agents routines devices <name> --set <device>`));
+    }
+    // An unreadable device document silently removes that device from every
+    // `devices` cell, which reads as "not enabled there" — say so instead.
+    for (const err of routineActivationErrors) {
+      console.log(chalk.gray(`  device config unreadable — ${err}`));
+    }
   }
 
   console.log('');
@@ -790,6 +1221,7 @@ async function renderSummary(agent: AgentId, version: string, versionHome: strin
     printExpandedSection('Hook files', hookRows(itemsByKind.hooks, hookByScript!));
     printExpandedSection('Plugins', pluginRows(itemsByKind.plugins));
     printExpandedSection('MCP', mcpRows(itemsByKind.mcp, mcpConfigs!));
+    printExpandedSection('Routines', agentRoutineRows(itemsByKind.routines));
   }
 
   if (sessions) {
@@ -816,7 +1248,14 @@ async function renderItemList(header: string, jsonHead: Record<string, unknown>,
       ...jsonHead,
       kind,
       count: items.length,
-      items: items.map(i => ({ name: i.name, source: i.source, path: i.path, description: i.description, ...(i.groups ? { groups: i.groups } : {}) })),
+      items: items.map(i => ({
+        name: i.name,
+        source: i.source,
+        path: i.path,
+        description: i.description,
+        ...(i.groups ? { groups: i.groups } : {}),
+        ...(i.json ?? {}),
+      })),
     }, null, 2));
     return;
   }
@@ -842,13 +1281,19 @@ async function renderItemList(header: string, jsonHead: Record<string, unknown>,
   // is honest but useless, so it carries what the Hooks view is actually for:
   // the events that fire it. Same string the overview prints.
   const hookEvents = kind !== 'hooks' ? null : (hookManifest ?? hookManifestByScript(loadCentralHookManifest()));
+  // A routine's byte size says nothing; whether it last ran, and where it is
+  // allowed to run, is the whole question. Devices needs the room, so it only
+  // takes a column on a wide terminal — below that it folds into the description
+  // rather than being dropped.
+  const isRoutines = kind === 'routines';
+  const routineDevicesColumn = isRoutines && terminalWidth() >= 100;
   await showResourceList({
     resourcePlural: kind,
     resourceSingular: kind.replace(/s$/, ''),
-    extraLabel: 'Size',
+    extraLabel: isRoutines ? 'Last' : 'Size',
     // Only carry a source column when the rows actually differ; a uniform
     // `[.system]` on every row is 13 columns spent on one bit of information.
-    extra2Label: sources.size > 1 ? 'Source' : undefined,
+    extra2Label: routineDevicesColumn ? 'Devices' : (isRoutines ? undefined : (sources.size > 1 ? 'Source' : undefined)),
     showSync: false,
     // inspect's names run long — hook scripts (`00-agent-verify-work-complete`
     // and its `_test` sibling) and namespaced plugin entries (`/swarm:orchestrate`)
@@ -868,10 +1313,23 @@ async function renderItemList(header: string, jsonHead: Record<string, unknown>,
       description: (() => {
         const hook = hookEvents?.get(item.name);
         if (hook) return summarizeHook(hook);
+        if (isRoutines) {
+          const problem = extraOf(item, 'problem');
+          if (problem) return problem;
+          // Compose at the row, leaving item.description pure prose for JSON.
+          // Also makes "daily" and "zion" searchable in the picker's filter.
+          return [
+            extraOf(item, 'fires'),
+            routineDevicesColumn ? '' : compactDeviceCell(extraOf(item, 'devices')),
+            summaryLine(item.description),
+          ].filter(Boolean).join(' · ');
+        }
         return summaryLine(item.description);
       })(),
-      extra: itemSizeLabel(item.path),
-      extra2: sources.size > 1 ? item.source : undefined,
+      extra: isRoutines ? routineLastCell(item) : itemSizeLabel(item.path),
+      extra2: routineDevicesColumn
+        ? compactDeviceCell(extraOf(item, 'devices')) || 'none'
+        : (isRoutines ? undefined : (sources.size > 1 ? item.source : undefined)),
       targets: [],
       // Pass the resolved manifest: the picker rebuilds this on every arrow
       // key, so re-reading ~11 KB of YAML per keystroke is wasted work on top
@@ -1070,6 +1528,12 @@ function summaryResourcesJson(
         version: i.extra?.find(([k]) => k === 'version')?.[1],
         groups: Object.fromEntries((i.groups ?? []).map(g => [g.label, g.items.length])),
       })) };
+    } else if (kind === 'routines') {
+      out[kind] = { ...base, items: items.map(i => ({
+        name: i.name,
+        source: i.source,
+        ...Object.fromEntries(i.extra ?? []),
+      })) };
     } else {
       out[kind] = { ...base, names: items.map(i => i.name) };
     }
@@ -1104,7 +1568,50 @@ function collectKind(agent: AgentId, versionHome: string, kind: DrillableKind): 
       }));
     case 'plugins':
       return pluginItems();
+    case 'routines':
+      return agentRoutineItems(agent);
   }
+}
+
+/**
+ * The routines that dispatch this agent.
+ *
+ * Version-invariant, like the `rules`/`subagents` cases above which also ignore
+ * `versionHome`: a routine names an agent, never an agent@version. `listJobs()`
+ * with no cwd is deliberate — it is the daemon's own view (user + system), so an
+ * unsynced project routine that can never fire is not listed as if it could.
+ */
+function agentRoutineItems(agent: AgentId): ResourceItem[] {
+  const { live } = defaultRoutineLive();
+  const now = new Date();
+  let jobs: JobConfig[];
+  try { jobs = listJobs(); } catch { return []; }
+
+  return jobs
+    .filter(job => job.agent === agent)
+    .map(job => {
+      const state = live(job.name);
+      return {
+        name: job.name,
+        source: 'user',
+        path: '',
+        linkTarget: '',
+        description: routineDescription(job, ''),
+        extra: [
+          ['fires', routineFireLabel(job, now)],
+          // listJobs already applied device activation, so job.enabled is the
+          // effective answer here — no need to re-derive it.
+          ['enabled', job.enabled ? 'yes' : 'no'],
+          ['devices', state.devices.length > 0
+            ? state.devices.join(', ')
+            : state.materialized ? 'no device — will not fire' : 'no device allowlist yet'],
+          ['last', state.lastStatus
+            ? `${state.lastStatus}${state.lastAt ? ` · ${compactAge(state.lastAt, now)} ago` : ''}`
+            : 'never run'],
+        ] as Array<[string, string]>,
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function pluginItems(): ResourceItem[] {
@@ -1359,8 +1866,12 @@ function buildDetailRows(item: ResourceItem, kind: DrillableKind): Array<[string
   // scalar rows (version).
   if (kind === 'plugins') {
     if (item.groups) for (const g of item.groups) rows.push([g.label, g.items.join(', ')]);
-    if (item.extra) rows.push(...item.extra);
   }
+  // Every kind's scalar rows. previewFor already renders `extra` unconditionally,
+  // so gating it on plugins here made the detail view and its own preview pane
+  // disagree about the same item — and dropped a routine's schedule/status from
+  // `--routine <name> --json` entirely.
+  if (item.extra) rows.push(...item.extra);
   return rows;
 }
 
@@ -1523,6 +2034,148 @@ function pluginRows(items: ResourceItem[]): RichRow[] {
     const detail = [version ? `v${version}` : '', counts].filter(Boolean).join('  ');
     return { source: item.source, name: item.name, detail, linkTarget: item.linkTarget };
   });
+}
+
+/** Statuses that mean the last run did not do its job. */
+const UNHEALTHY_RUN = new Set(['failed', 'timeout', 'missed', 'blocked']);
+
+/**
+ * Health tier for the section ordering. Lower sorts first.
+ *
+ * `printExpandedSection` shows only the first handful before a `…(+N)` tail, so
+ * for a repo with 24 routines the sort IS the section. Same reasoning as
+ * `hookRows` putting wired hooks first: a routine that fires nowhere is exactly
+ * what the reader opened this for, and must never hide behind the tail.
+ */
+export function routineHealthTier(item: ResourceItem): number {
+  if (extraOf(item, 'problem')) return 0;
+  const fires = extraOf(item, 'fires');
+  if (fires.includes('expired')) return 5;
+  const devices = extraOf(item, 'devices');
+  if (devices.startsWith('no device —')) return 1;
+  if (extraOf(item, 'enabled').startsWith('no')) return 2;
+  const last = extraOf(item, 'last').split(' ')[0];
+  if (UNHEALTHY_RUN.has(last)) return 3;
+  return 4;
+}
+
+/** Build routine rows: `daily at 9:00 AM   zion   completed · 2h ago`. Broken first. */
+function routineRows(items: ResourceItem[]): RichRow[] {
+  const ordered = [...items].sort((a, b) => {
+    const at = routineHealthTier(a), bt = routineHealthTier(b);
+    return at !== bt ? at - bt : a.name.localeCompare(b.name);
+  });
+  const nameW = ordered.length > 0 ? Math.max(...ordered.slice(0, 6).map(r => r.name.length)) : 0;
+  // Budget the three cells against what printExpandedSection leaves after the
+  // `[source]` tag and the name column, so the status never truncates to `fai…`.
+  const budget = Math.max(30, terminalWidth() - nameW - 14);
+  const firesW = Math.min(21, Math.max(12, Math.floor(budget * 0.42)));
+  const devicesW = Math.min(14, Math.max(7, Math.floor(budget * 0.22)));
+
+  return ordered.map(item => {
+    const problem = extraOf(item, 'problem');
+    const fires = extraOf(item, 'fires');
+    // A routine with no `fires` never parsed — the problem IS the whole row. One
+    // that parsed but carries a problem (a duplicate-extension sibling) keeps its
+    // schedule and status, with the problem appended rather than replacing them.
+    if (problem && !fires) {
+      return { source: item.source, name: item.name, linkTarget: item.linkTarget, detail: chalk.red(problem) };
+    }
+    const devices = compactDeviceCell(extraOf(item, 'devices'));
+    const last = extraOf(item, 'last');
+    // Pad the PLAIN strings, then colour. Padding a chalk-wrapped string counts
+    // the escape codes as width and silently steals columns from the next cell.
+    // The trailing problem gets what the three sized cells leave, or it would
+    // blow the row past the terminal and break the alignment this budget exists
+    // to hold — a 147-column row at COLUMNS=100 in testing.
+    const problemW = Math.max(12, budget - firesW - devicesW - stringWidth(last) - 8);
+    const detail = [
+      chalk.gray(truncateToWidth(fires, firesW).padEnd(firesW)),
+      (devices === 'none ⚠' ? chalk.yellow : chalk.gray)(truncateToWidth(devices, devicesW).padEnd(devicesW)),
+      colorLast(last),
+      problem ? chalk.red(truncateToWidth(`  ⚠ ${problem}`, problemW)) : '',
+    ].join('  ').trimEnd();
+    return {
+      source: item.source,
+      name: item.name,
+      linkTarget: item.linkTarget,
+      detail,
+    };
+  });
+}
+
+/**
+ * Routine rows for an agent target: `daily at 9:00 AM   completed · 2h ago`.
+ * No devices column — an agent view is inherently about this machine.
+ */
+function agentRoutineRows(items: ResourceItem[]): RichRow[] {
+  const ordered = [...items].sort((a, b) => {
+    const at = routineHealthTier(a), bt = routineHealthTier(b);
+    return at !== bt ? at - bt : a.name.localeCompare(b.name);
+  });
+  return ordered.map(item => ({
+    source: item.source,
+    name: item.name,
+    detail: `${extraOf(item, 'fires').padEnd(20)}  ${colorLast(extraOf(item, 'last'))}`,
+  }));
+}
+
+/**
+ * `ok 2h` / `fail 3d` / `never` — the Last column, clamped to the 10-wide cell.
+ *
+ * The picker path pads without truncating, so an 11-char `blocked 3d` would push
+ * the next column; the abbreviations cover only the two commonest statuses, so
+ * the clamp is what actually holds the invariant.
+ */
+function routineLastCell(item: ResourceItem, width = 10): string {
+  const last = extraOf(item, 'last');
+  if (!last || last === 'never run') return 'never';
+  const [status, , age] = last.split(' ');
+  const word = status === 'completed' ? 'ok' : status === 'failed' ? 'fail' : status;
+  return truncateToWidth(age ? `${word} ${age}` : word, width);
+}
+
+/**
+ * Trim the long-form `devices` phrasing down to a cell.
+ *
+ * The extra row is written for the detail pane ("no device — will not fire");
+ * a 16-column cell needs the same fact in two words.
+ */
+function compactDeviceCell(devices: string): string {
+  if (devices.startsWith('no device —')) return 'none ⚠';
+  if (devices.startsWith('no device allowlist yet')) return 'unset';
+  const list = devices.split(', ').filter(Boolean);
+  return list.length > 1 ? `${list[0]} +${list.length - 1}` : (list[0] ?? '');
+}
+
+function colorLast(last: string): string {
+  if (!last || last === 'never run') return chalk.gray('never run');
+  const word = last.split(' ')[0];
+  if (word === 'completed') return chalk.green(last);
+  if (UNHEALTHY_RUN.has(word)) return chalk.red(last);
+  return chalk.gray(last);
+}
+
+/**
+ * The one-line warning under the Routines section, or null when it would mislead.
+ *
+ * Silent until some device has materialized a `routines:` list — before that,
+ * every routine is legitimately unpinned and "will not fire" would be noise.
+ */
+export function routineDarkWarning(items: ResourceItem[]): string | null {
+  const materialized = items.some(i => {
+    const d = extraOf(i, 'devices');
+    return d !== '' && !d.startsWith('no device allowlist yet');
+  });
+  if (!materialized) return null;
+  const dark = items.filter(i => extraOf(i, 'devices').startsWith('no device —')).length;
+  if (dark === 0) return null;
+  // The noun pluralizes on the total ("1 of 2 routines"), the verb on the count
+  // that is actually dark ("... is on no device's allowlist").
+  const noun = items.length === 1 ? 'routine' : 'routines';
+  const verb = dark === 1 ? 'is' : 'are';
+  const pronoun = dark === 1 ? 'it' : 'they';
+  return `${dark} of ${items.length} ${noun} ${verb} on no device's allowlist — ${pronoun} will not fire.`;
 }
 
 /** Build MCP rows by joining the installed mcp items with their full configs (transport/url/command). */

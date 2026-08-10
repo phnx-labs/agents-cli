@@ -28,6 +28,17 @@
  */
 
 import { getConfigValue } from './device-config.js';
+import type { FleetStatusRow } from './fleet-status.js';
+import type { AuthProbeRow } from './auth-health.js';
+
+export function isFreshFleetAuthSnapshot(
+  value: { row: FleetStatusRow; authRows: AuthProbeRow[] },
+  minimumCapturedAt: number,
+): boolean {
+  return value.row.capturedAt >= minimumCapturedAt
+    && value.authRows.length > 0
+    && value.authRows.every(authRow => authRow.health.checkedAt >= minimumCapturedAt);
+}
 
 /** ~every 3 min. Mirrors the old WATCHDOG_TICK_MS. */
 export async function runWatchdogTick(): Promise<void> {
@@ -103,17 +114,43 @@ export async function runLaunchHealthTick(): Promise<void> {
  * status` / `agents devices list` read (PUBLISH-OWN / READ-UNION, RUSH-2061).
  * ~every 3 min.
  */
-export async function runFleetCacheWarmTick(): Promise<void> {
+export async function refreshLocalFleetAuthState(): Promise<{ row: FleetStatusRow; authRows: import('./auth-health.js').AuthProbeRow[] }> {
   const { machineId } = await import('./machine-id.js');
-  const self = machineId();
-  const { probeLocalFleetAuth, writeFleetAuthRows } = await import('./auth-health.js');
+  const { probeLocalFleetAuth, readFleetAuthRows, writeFleetAuthRows } = await import('./auth-health.js');
   const { getCliVersion } = await import('./version.js');
-  const authRows = await probeLocalFleetAuth({ cliVersion: getCliVersion() });
-  writeFleetAuthRows(self, authRows);
+  const self = machineId();
+  const requestedAt = Date.now();
+  const minimumCapturedAt = requestedAt - 2 * 60_000;
+  const { withRefreshLease } = await import('./refresh-coordinator.js');
+  const { readFleetStatus, publishLocalFleetStatus } = await import('./fleet-status.js');
+  return withRefreshLease({
+    scope: 'auth',
+    key: self,
+    readCompleted: () => {
+      const row = readFleetStatus()[self];
+      if (!row) return null;
+      return { row, authRows: readFleetAuthRows(self) };
+    },
+    // During mixed-version rollout the former system routine may still fire.
+    // A recent daemon publication is the completed result, not a reason to
+    // probe every provider a second time.
+    isCompleted: (value) => isFreshFleetAuthSnapshot(value, minimumCapturedAt),
+    refresh: async () => {
+      const authRows = await probeLocalFleetAuth({ cliVersion: getCliVersion() });
+      writeFleetAuthRows(self, authRows);
+      const row = await publishLocalFleetStatus(self);
+      return { row, authRows };
+    },
+  });
+}
 
-  const { publishLocalFleetStatus } = await import('./fleet-status.js');
-  const row = await publishLocalFleetStatus(self);
-  console.log(`fleet cache warm: ${authRows.length} auth row(s), ${row.agents.running} running agent(s) on ${self}`);
+export async function runFleetCacheWarmTick(): Promise<void> {
+  const result = await refreshLocalFleetAuthState();
+  // A waiter receives the already-published fleet row. The auth-row count is
+  // available only to the process that performed the provider probes.
+  const row = result.row;
+  const authCount = result.authRows.length;
+  console.log(`fleet cache warm: ${authCount} auth row(s) refreshed, ${row.agents.running} running agent(s) on ${row.host}`);
 }
 
 /**
@@ -142,8 +179,11 @@ export async function runUsageRefreshTick(): Promise<void> {
     writeUsageCache: writeClaudeUsageCache,
     backoffUntil: usageRateLimitedUntil,
   });
+  const { listProfiles } = await import('./profiles.js');
+  const { refreshDueByokUsage } = await import('./byok-usage.js');
+  const byok = await refreshDueByokUsage(listProfiles());
   console.log(
-    `usage refresh: ${r.refreshed} refreshed, ${r.failed} failed, ${r.skippedNotDue} not-due, ${r.skippedBackoff} backed-off, ${r.skippedCap} capped`,
+    `usage refresh: ${r.refreshed} refreshed, ${r.failed} failed, ${r.skippedNotDue} not-due, ${r.skippedBackoff} backed-off, ${r.skippedCap} capped; BYOK ${byok.refreshed} refreshed, ${byok.skipped} not-due`,
   );
 }
 

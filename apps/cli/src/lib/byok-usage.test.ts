@@ -1,12 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {
   getByokUsageForHarness,
   setByokFetchForTest,
   resetByokCacheForTest,
+  setByokCachePathForTest,
+  refreshDueByokUsage,
+  BYOK_REFRESH_INTERVAL_MS,
 } from './byok-usage.js';
 import { setKeychainBackendForTest, type KeychainBackend } from './secrets/index.js';
 import type { Profile } from './profiles.js';
-import { USAGE_CACHE_FRESH_MS, USAGE_CACHE_SWR_MS } from './usage.js';
 
 // Keychain item for 'openrouter' provider: agents-cli.openrouter.token
 const KEYCHAIN_ITEM = 'agents-cli.openrouter.token';
@@ -45,6 +50,18 @@ class EmptyKeychain implements KeychainBackend {
 
 let keychain: EmptyKeychain;
 let prevBackend: KeychainBackend | null;
+let cacheDir: string;
+let previousCachePath: string | null;
+
+beforeAll(() => {
+  cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-byok-usage-'));
+  previousCachePath = setByokCachePathForTest(path.join(cacheDir, 'cache.json'));
+});
+
+afterAll(() => {
+  setByokCachePathForTest(previousCachePath);
+  fs.rmSync(cacheDir, { recursive: true, force: true });
+});
 
 beforeEach(() => {
   keychain = new EmptyKeychain();
@@ -83,14 +100,14 @@ describe('getByokUsageForHarness', () => {
   });
 
   it('returns budget:null error:null when the token is not in the keychain', async () => {
-    const result = await getByokUsageForHarness(makeProfile());
+    const result = await getByokUsageForHarness(makeProfile(), { forceRefresh: true });
     expect(result).toEqual({ budget: null, error: null });
   });
 
   it('maps a successful OpenRouter response to ByokBudgetInfo fields', async () => {
     keychain.set(KEYCHAIN_ITEM, 'sk-or-test');
     setByokFetchForTest(makeFetch(OR_SUCCESS));
-    const result = await getByokUsageForHarness(makeProfile());
+    const result = await getByokUsageForHarness(makeProfile(), { forceRefresh: true });
     expect(result?.error).toBeNull();
     expect(result?.budget).toMatchObject({
       limitUsd: 10,
@@ -104,7 +121,7 @@ describe('getByokUsageForHarness', () => {
   it('treats limit:null as an unlimited key', async () => {
     keychain.set(KEYCHAIN_ITEM, 'sk-or-test');
     setByokFetchForTest(makeFetch({ data: { limit: null, limit_remaining: null, usage: 1.23 } }));
-    const result = await getByokUsageForHarness(makeProfile());
+    const result = await getByokUsageForHarness(makeProfile(), { forceRefresh: true });
     expect(result?.budget?.limitUsd).toBeNull();
     expect(result?.budget?.remainingUsd).toBeNull();
     expect(result?.budget?.usedPercent).toBeNull();
@@ -114,7 +131,7 @@ describe('getByokUsageForHarness', () => {
   it('returns error when the response is non-200', async () => {
     keychain.set(KEYCHAIN_ITEM, 'sk-or-test');
     setByokFetchForTest(makeFetch({ error: 'unauthorized' }, 401));
-    const result = await getByokUsageForHarness(makeProfile());
+    const result = await getByokUsageForHarness(makeProfile(), { forceRefresh: true });
     expect(result?.error).toMatch(/401/);
     expect(result?.budget).toBeNull();
   });
@@ -122,33 +139,31 @@ describe('getByokUsageForHarness', () => {
   it('does not divide by zero when limit is 0', async () => {
     keychain.set(KEYCHAIN_ITEM, 'sk-or-test');
     setByokFetchForTest(makeFetch({ data: { limit: 0, limit_remaining: 0, usage: 0 } }));
-    const result = await getByokUsageForHarness(makeProfile());
+    const result = await getByokUsageForHarness(makeProfile(), { forceRefresh: true });
     expect(result?.budget?.usedPercent).toBeNull();
   });
 
-  it('returns the cached result within the fresh window without a second fetch', async () => {
+  it('ordinary reads are cache-only and never fetch', async () => {
     keychain.set(KEYCHAIN_ITEM, 'sk-or-test');
     let calls = 0;
     setByokFetchForTest(async () => {
       calls++;
       return { ok: true, status: 200, json: async () => OR_SUCCESS } as Response;
     });
-    await getByokUsageForHarness(makeProfile());
+    const cold = await getByokUsageForHarness(makeProfile());
+    expect(cold).toEqual({ budget: null, error: 'stale' });
+    await getByokUsageForHarness(makeProfile(), { forceRefresh: true });
     await getByokUsageForHarness(makeProfile());
     expect(calls).toBe(1);
   });
 
-  it('revalidates in the background when the cache is stale (SWR window)', async () => {
+  it('serves a shared snapshot after an explicit refresh', async () => {
     keychain.set(KEYCHAIN_ITEM, 'sk-or-test');
     let calls = 0;
     setByokFetchForTest(async () => {
       calls++;
       return { ok: true, status: 200, json: async () => OR_SUCCESS } as Response;
     });
-    // Prime the cache with a manually back-dated entry by calling once then
-    // manipulating the cache age via the module's reset+re-seed trick.
-    // Because we can't directly mutate the private _cache, we test the
-    // forceRefresh path as a proxy for "first call always fetches".
     await getByokUsageForHarness(makeProfile(), { forceRefresh: true });
     expect(calls).toBe(1);
     // Second call (fresh): still 1.
@@ -163,18 +178,22 @@ describe('getByokUsageForHarness', () => {
       calls++;
       return { ok: true, status: 200, json: async () => OR_SUCCESS } as Response;
     });
-    await getByokUsageForHarness(makeProfile());
+    await getByokUsageForHarness(makeProfile(), { forceRefresh: true });
     await getByokUsageForHarness(makeProfile(), { forceRefresh: true });
     expect(calls).toBe(2);
   });
-});
 
-// Ensure these constants are exported correctly (would fail at import if not).
-describe('usage.ts re-exports used in byok-usage', () => {
-  it('USAGE_CACHE_FRESH_MS is a positive number', () => {
-    expect(USAGE_CACHE_FRESH_MS).toBeGreaterThan(0);
-  });
-  it('USAGE_CACHE_SWR_MS is greater than USAGE_CACHE_FRESH_MS', () => {
-    expect(USAGE_CACHE_SWR_MS).toBeGreaterThan(USAGE_CACHE_FRESH_MS);
+  it('lets the daemon refresh due BYOK snapshots while ordinary reads stay cache-only', async () => {
+    keychain.set(KEYCHAIN_ITEM, 'sk-or-test');
+    let calls = 0;
+    setByokFetchForTest(async () => {
+      calls++;
+      return { ok: true, status: 200, json: async () => OR_SUCCESS } as Response;
+    });
+    const now = Date.now();
+    expect(await refreshDueByokUsage([makeProfile()], now)).toEqual({ refreshed: 1, skipped: 0 });
+    expect((await getByokUsageForHarness(makeProfile()))?.budget?.usedUsd).toBe(2.5);
+    expect(await refreshDueByokUsage([makeProfile()], now + BYOK_REFRESH_INTERVAL_MS - 1)).toEqual({ refreshed: 0, skipped: 1 });
+    expect(calls).toBe(1);
   });
 });

@@ -557,18 +557,22 @@ device manifest.
 
 ### Built-in daemon routines
 
-Eight routines are **daemon-owned built-ins** — their definitions live in the CLI
+Six routines are **daemon-owned built-ins** — their definitions live in the CLI
 itself (`lib/builtin-routines.ts`), not in a `~/.agents/routines/` file:
-`usage-refresh`, `fleet-cache-warm`, `session-cache-warm`, `device-probe`,
-`auto-dispatch`, `watchdog`, `tmux-reconcile`, and `launch-health`. They are the
+`session-cache-warm`, `device-probe`, `auto-dispatch`, `watchdog`,
+`tmux-reconcile`, and `launch-health`. They are the
 daemon's own housekeeping (cache warming, the watchdog, self-heal), fired by the
 same scheduler via `agents __daemon-tick <name>`. `agents routines list` shows them
 with a `(built-in)` tag, and `--json` carries `builtin: true`.
 
+Usage and authentication health are first-party account state rather than
+schedulable work. One in-process daemon service owns those refresh timers, so
+they cannot drift from the running daemon or be duplicated by routine catch-up.
+
 They behave like any other routine — enable/disable and pin them by name:
 
 ```bash
-agents routines list                          # shows the 8, tagged (built-in)
+agents routines list                          # shows the 6, tagged (built-in)
 agents routines pause watchdog                # device-activation manifest, by name
 agents routines devices auto-dispatch --set yosemite-s0   # owner-pin a shared-input job
 ```

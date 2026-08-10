@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import chalk from 'chalk';
 import { confirm } from '@inquirer/prompts';
 import { gatherLiveTargets, pickLiveTarget, pickLiveTargets, jumpTo, probeAttachRail, refuseFallback, type AttachRailLiveness, type UnreachableFallback } from './go.js';
-import type { ActiveSession } from '../lib/session/active.js';
+import { sessionProcessIsLocal, sessionProcessHost, type ActiveSession } from '../lib/session/active.js';
 import { SESSION_AGENTS, type SessionMeta, type SessionAgentId } from '../lib/session/types.js';
 import {
   buildSessionRecoveryCommand,
@@ -464,7 +464,7 @@ async function focusResolvedSession(
     process.exitCode = 1;
     return;
   }
-  const remote = meta.machine && meta.machine !== self ? meta.machine : undefined;
+  const remote = sessionProcessHost(meta, self);
   if (remote) {
     console.log(chalk.gray(`Recovering ${meta.shortId} on ${remote}…`));
     const rc = await runOnPeer(sessionRecoveryRunArgs(meta), remote, { tty: true });
@@ -561,7 +561,7 @@ export function planFocusSurface(
   resumeCommandFor: (s: ActiveSession) => string[] | null,
   rail: AttachRailLiveness = { state: 'alive' },
 ): FocusSurfacePlan {
-  const remote = s.machine && s.machine !== self ? s.machine : undefined;
+  const remote = sessionProcessHost(s, self);
   const mux = s.provenance?.mux;
   const sid = shortId(s);
 
@@ -636,7 +636,7 @@ export async function openFocusTabs(
   const metaFor = (s: ActiveSession): SessionMeta => byId.get(s.sessionId ?? '') ?? metaFromActive(s);
   const resumeCommandFor = (s: ActiveSession): string[] | null => {
     if (deps.attachOnly) return null;
-    const remote = !!s.machine && s.machine !== self;
+    const remote = !sessionProcessIsLocal(s, self);
     return buildSessionRecoveryCommand(metaFor(s), remote);
   };
 

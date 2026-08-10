@@ -91,6 +91,81 @@ export function devicesWithRoutineEnabled(name: string): string[] {
   return devices.sort();
 }
 
+/** Which devices enable which routines, read in one pass. */
+export interface RoutineDeviceIndex {
+  /** Routine name → the devices whose allowlist names it, sorted. */
+  byRoutine: Map<string, string[]>;
+  /**
+   * True when at least one device document declares a `routines:` list. Until
+   * then no routine is "dark" — the fleet simply has not materialized its
+   * activation state yet, and saying "will not fire" would be wrong.
+   */
+  materialized: boolean;
+  /** Device files that could not be read, reported instead of thrown. */
+  errors: string[];
+}
+
+/**
+ * Build the whole fleet's activation map in one pass over `devices/`.
+ *
+ * `devicesWithRoutineEnabled` answers this for a single routine and throws on a
+ * corrupt peer file — the right contract for a command acting on one routine,
+ * the wrong one for a listing, where a single unreadable device document would
+ * blank out every row (and re-walking `devices/` per routine is quadratic).
+ */
+export function routineDeviceIndex(): RoutineDeviceIndex {
+  const byRoutine = new Map<string, string[]>();
+  const errors: string[] = [];
+  let materialized = false;
+
+  const devicesDir = path.join(getUserAgentsDir(), 'devices');
+  if (!fs.existsSync(devicesDir)) return { byRoutine, materialized, errors };
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(devicesDir, { withFileTypes: true });
+  } catch (err) {
+    return { byRoutine, materialized, errors: [`${devicesDir}: ${(err as Error).message}`] };
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const file = path.join(devicesDir, entry.name, 'agents.yaml');
+    if (!fs.existsSync(file)) continue;
+
+    let parsed: unknown;
+    try {
+      parsed = yaml.parse(fs.readFileSync(file, 'utf-8'));
+    } catch (err) {
+      errors.push(`${file}: ${(err as Error).message.split('\n')[0]}`);
+      continue;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      errors.push(`${file}: expected a YAML map`);
+      continue;
+    }
+    const routines = (parsed as { routines?: unknown }).routines;
+    if (routines === undefined) continue;
+    if (!Array.isArray(routines) || routines.some((routine) => typeof routine !== 'string')) {
+      errors.push(`${file}: routines must be a string list`);
+      continue;
+    }
+
+    materialized = true;
+    // Same normalization the writers use (`replaceEnabledRoutines`), so a device
+    // that lists a routine twice, or with stray whitespace, cannot make the index
+    // disagree with `enabledRoutineNames` about what that device enables.
+    for (const name of normalizeRoutineNames(routines as string[])) {
+      const devices = byRoutine.get(name);
+      if (devices) devices.push(entry.name);
+      else byRoutine.set(name, [entry.name]);
+    }
+  }
+
+  for (const devices of byRoutine.values()) devices.sort();
+  return { byRoutine, materialized, errors };
+}
+
 export function currentRoutineDevice(): string {
   return machineId();
 }

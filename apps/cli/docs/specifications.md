@@ -218,10 +218,31 @@ SSH access (§7); rendering sessions that no harness produced.
 
 - **SES-9a (MUST).** `sessions preview <id-or-prefix>` MUST resolve ID-shaped
   selectors through the SQLite ID index across the selected fleet. A full UUID
-  MAY return on its first exact hit; a short prefix MUST wait for all selected
-  peers and fail closed when any peer is unavailable. Durable preview data MUST
-  be invalidated by the transcript's actual mtime + size. Live status MUST NOT
-  be stored in that durable digest and MUST expire within 15 seconds.
+  MAY return on its first exact hit. When the sweep has completed and some peer
+  did not answer, a selector that is a complete id, or at least 8 hex characters
+  wide (`SHORT_SESSION_ID_WIDTH`, the printed `shortId` width), MUST resolve if
+  exactly one session on the reachable fleet matches it; a shorter or
+  non-ID-shaped selector, and any label, MUST fail closed. Durable preview data
+  MUST be invalidated by the transcript's actual mtime + size. Live status MUST
+  NOT be stored in that durable digest and MUST expire within 15 seconds.
+
+  *Accepted risk, amended 2026-08-10.* This requirement previously made every
+  short prefix fail closed whenever any peer was unavailable. On a fleet with a
+  permanently offline registered device that voids 100% of short-id lookups —
+  measured at 9 offline devices — to guard a collision that must ALSO land
+  specifically on a peer that did not answer. The collision rate is **not**
+  uniform across id types, and the difference matters: a random UUIDv4 short id
+  is unique in practice, but the first 48 bits of a **time-ordered** id
+  (UUIDv7/ULID) are a millisecond timestamp, so sessions minted in one tight
+  window — a `teams` fan-out, a swarm — share an 8-hex prefix far more readily.
+  `session/db.ts` (`deriveShortId`, "only time-ordered ids ever collide") already
+  treats that as expected and resolves it by most-recently-active. Collisions
+  among peers that DID answer are still reported: they produce two candidates and
+  surface through the `ambiguous` outcome, which is unchanged, so the residual
+  risk is confined to a time-ordered collision hiding on the unanswered peer.
+  RUSH-2203's early-exit rule is also unchanged and stays full-UUID-only
+  (`isDefinitiveMatch`), because that cancels a sweep still in flight, where a
+  silent peer is still expected to answer.
 - **SES-10 (MUST).** A preview string MUST be cleaned of terminal/harness noise
   (OSC titles, CSI/SGR, harness tags, collapsed whitespace) before display
   (`cleanPreview`, `commands/sessions.ts:329-337`), and truncated width-aware
@@ -425,6 +446,45 @@ SSH access (§7); rendering sessions that no harness produced.
     this machine leaves nothing remote to dial; the fan-out MUST be skipped rather
     than passing an empty list to `gatherRemoteList`, which reads `[]` as "no hosts
     given" and sweeps every online device.
+- **SES-23a (MUST).** A `--host`/`--device` scope on `--active` names **where the
+  session runs**, not which box reported it. Every returned row MUST satisfy
+  `machine ∈ scope` (`filterActiveSessionsByHostScope`,
+  `commands/sessions.ts`), applied inside the single gather so the interactive
+  browser and `--active --json` cannot disagree.
+  - **The executing machine owns the row.** A host-dispatched run
+    (`agents run --device <peer>`) leaves a live shim process on the DISPATCHING
+    box carrying the remote run's session id, so choosing whom to ASK is not the
+    same as deciding who OWNS the session. `machine` MUST be the execution host:
+    `foldExecutionMachine` (`lib/session/active.ts`) folds the machine the
+    dispatch recorded in the index (`lib/hosts/session-index.ts:55,134`) back
+    onto the live row before it leaves the box, and the cross-machine fan-out
+    MUST NOT overwrite a peer-reported `machine` that names a third box
+    (`lib/session/remote-active.ts`).
+  - **A peer's self-report outranks a local index copy.** A row the fan-out
+    already attributed to a peer MUST be left alone. Enforced on the fan-out
+    boundary (`lib/session/remote-active.ts`), where an `offloadedFrom` row keeps
+    its own `machine` and every other row takes the dialed device name; the guard
+    in `foldExecutionMachine` is the same rule stated locally.
+  - Consequence for SES-8: an offloaded row is then `_remote`, so
+    `liveSessionToMeta` → `buildPreview` renders the "on `<peer>`" affordance
+    instead of the empty "full transcript not indexed here" branch.
+  - **`machine` is not "where the process is".** For an offloaded run the shim
+    process, its tmux pane, and its terminal window remain on the dispatcher.
+    Any caller reaching for a LOCAL pid/pane/window MUST ask
+    `sessionProcessIsLocal(s, self)` (`lib/session/active.ts`) rather than
+    comparing `machine` to this box — a local pane id (`%N`) sent to a peer's
+    tmux server can resolve against an unrelated pane and attach the wrong
+    session. The predicate MUST compare `offloadedFrom` to this machine, not
+    merely test it: these rows travel (`--active --json` spreads them, the
+    fan-out preserves their foreign `machine`), so a THIRD box sees a shim that
+    is not its own. The box to reach for the process is `sessionProcessHost`
+    (`offloadedFrom ?? machine`), never `machine` alone.
+  - **Scope: host-dispatched runs only.** The correction is driven by the index
+    row `agents run --host/--device` writes (`lib/hosts/session-index.ts`).
+    Remote **teams teammates** are not covered — `listTeamsActive` sets no
+    `machine` and nothing registers an index row for them — so a
+    `--device`-pinned teammate is still attributed to the orchestrator. Named as
+    SES-GAP-10 rather than silently claimed.
 - **SES-24 (MUST).** `agents sessions export --encrypt` MUST seal each
   transcript body client-side with AES-256-GCM (fresh IV) before it leaves the
   machine, and `agents sessions import` MUST decrypt before writing it to the
@@ -742,7 +802,10 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `sync`, `resume
   peer sweep (including malformed successful output, device-registry failure, or an
   older peer rejecting that protocol) MUST emit no JSON, MUST NOT decide
   unique/no-match from partial rows, and MUST exit 2 with the failed source(s) on
-  stderr
+  stderr — **except** for the SES-9a case, where a selector that is a complete id
+  or at least 8 hex characters wide and matches exactly one session on the
+  reachable fleet MUST resolve and emit its row; a keyword, a shorter selector, or
+  a label still MUST NOT be decided from partial rows
   (`commands/sessions.ts` `serializeResolvedSessionsJson`, `resolveSessionMetadata`,
   `metadataResolveOutcome`, `fleetCandidatesByQuery`,
   `metadataResolveForwardedArgs`; tests
@@ -890,6 +953,12 @@ normative — a change that widens/narrows a cell is a spec change.
   local↔remote seam; a session surfacing both locally and via a peer's self-report
   is not provably collapsed and is untested
   (`lib/session/active.ts:1324` vs `remote-active.ts:43-47`).
+  - **Narrowed (RUSH-2479).** The one case that is now provably collapsed is the
+    offloaded run, whose dispatcher shim and executing machine's own row share a
+    `machine:sessionId` key once SES-23a attributes both to the execution host.
+    `dedupeByMachineSession` MUST keep the row that is not an offload shim
+    (`offloadedFrom` unset), so the merged fleet view never trades a real
+    transcript for a `[host/<peer>]` placeholder. The general seam is still open.
 - **SES-GAP-6.** Whole-**file** JSON parse failure is inconsistent: Gemini throws
   (and `parseSession` has no outer catch), while Hermes/Antigravity degrade to
   `[]` (`lib/session/parse.ts:143-169,691-696`). Standardize on degrade-to-empty.
@@ -915,6 +984,15 @@ normative — a change that widens/narrows a cell is a spec change.
   evidence when its source file is gone mid-backfill (`tool-index.ts`
   `ensureToolIndex` on a `statSync` throw, reached via `agents sessions backfill`);
   SES-40 removed the purge only from the `querySessions` read path.
+- **SES-GAP-10.** SES-23a's execution-host attribution covers only
+  **host-dispatched runs** (`agents run --host/--device`), because it is driven by
+  the index row `registerHostSession` / `registerInteractiveHostSession` write
+  (`lib/hosts/session-index.ts:55,134`). A **remote teams teammate**
+  (`agents teams add … --device <peer>`) gets no such row and `listTeamsActive`
+  (`lib/session/active.ts`) never sets `machine`, so the orchestrator's
+  self-stamp claims it: `--device <orchestrator>` still lists a teammate
+  executing on the peer. Closing it means folding `AgentProcess`'s host
+  placement in `listTeamsActive` the same way.
 ---
 
 ### 8. Given/When/Then scenarios
@@ -2413,9 +2491,12 @@ nothing but its own view cache.
   (`lib/watchdog/rotate.ts`). `agents daemon` is the user-facing runtime
   surface for this singular process (`start`/`stop`/`restart`/`reload`/
   `status`/`services`/`logs`/`doctor`, `commands/daemon.ts`) — it observes and
-  controls the one daemon SING-1 requires, never a second one. The watchdog,
-  device-probe, tmux-reconcile, launch-health, fleet-cache-warm,
-  session-cache-warm, usage-refresh, and auto-dispatch ticks (RUSH-2353) were
+  controls the one daemon SING-1 requires, never a second one. Usage and
+  authentication health are first-party account state and run as one in-process
+  daemon service (`lib/account-state-service.ts`); explicit CLI refreshes enter
+  the same cross-process per-account lease (`lib/refresh-coordinator.ts`). The
+  watchdog, device-probe, tmux-reconcile, launch-health, session-cache-warm, and
+  auto-dispatch ticks (RUSH-2353) were
   formerly hardcoded `setInterval`s inside `runDaemon()` — a second, unowned
   scheduling path duplicating what routines already provide (declaration, run
   history, pause, device pin). They are now **daemon-owned built-in routines**
@@ -2428,6 +2509,17 @@ nothing but its own view cache.
   run-tracked/pausable/device-pinnable, but no longer shipped from the
   `gh:phnx-labs/.agents-system` config repo every install pulls (only
   `check-updates` remains a system routine there).
+- **SING-1a (MUST).** Ordinary usage/auth consumers MUST be cache-only. This
+  includes routing (`agents run` and teams), `view`, `versions`, `usage`, device
+  inventory, and UI consumers. A missing snapshot MUST render as stale or
+  unavailable and MUST NOT trigger provider HTTP, credential refresh, or a local
+  transcript scan. The daemon and an explicit user refresh are the only
+  collectors, and both MUST use the same device-wide account lease.
+- **SING-1b (MUST NOT).** OAuth credential files and refresh tokens MUST NOT be
+  copied between devices. Each device uses the harness-native login flow;
+  cross-device state is limited to safe account labels, auth verdicts, and usage
+  snapshots. Named API-key/setup-token/bearer accounts retain device-local secret
+  material and synchronized metadata.
 - **SING-2 (MUST NOT).** A UI surface (apps/ext, the menubar app, the iOS app)
   MUST NOT own a timer, watcher, or loop that detects a condition and performs a
   fleet-affecting action. Detection and decision MUST live in the CLI, which holds

@@ -7,7 +7,7 @@ import {
   listInstalledVersions,
 } from './versions.js';
 import {
-  getUsageInfoByIdentity,
+  buildCanonicalUsageContext,
   getUsageLookupKey,
 } from './usage.js';
 
@@ -69,7 +69,7 @@ export async function getNewerDuplicateVersions(
     })
   );
 
-  const { canonicalByUsageKey } = await getUsageInfoByIdentity(
+  const { canonicalByUsageKey } = buildCanonicalUsageContext(
     rows.map(({ version, home, info }) => ({
       agentId,
       home,

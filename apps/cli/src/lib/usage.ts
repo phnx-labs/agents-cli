@@ -36,6 +36,7 @@ import { getCacheDir } from './state.js';
 import type { AgentId } from './types.js';
 import { mapBounded } from './concurrency.js';
 import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
+import { withRefreshLease } from './refresh-coordinator.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -412,9 +413,9 @@ export function agentReportsUsage(agentId: AgentId): boolean {
 
 /**
  * Whether an agent's usage source makes a live NETWORK call (Claude/Kimi/Droid/
- * Cursor/Antigravity) versus reading local session logs (Codex/Grok). Only the
- * networked ones go through the on-disk cache, and only they need the daemon's
- * background refresher to keep that cache warm for the routing hot path.
+ * Cursor/Antigravity) versus reading local session logs (Codex/Grok). Both
+ * kinds publish through the shared cache; callers use this only to distinguish
+ * provider I/O from local collection.
  */
 export function agentUsesNetworkUsage(agentId: AgentId): boolean {
   return getUsageSource(agentId)?.network === true;
@@ -429,32 +430,18 @@ export function agentUsesNetworkUsage(agentId: AgentId): boolean {
 export const USAGE_FETCH_CONCURRENCY = 3;
 
 /**
- * Concurrent background SWR refreshes. Kept below the blocking concurrency so
- * a display path that returns cached data immediately does not still flood the
- * network with N silent refreshes that finish long after the command exits and
- * pile onto the next invocation.
- */
-const USAGE_BG_REFRESH_CONCURRENCY = 2;
-
-/**
- * How long a cached snapshot is treated as fresh enough that we skip the network
- * entirely. Five minutes balances "still accurate enough to glance at" against
- * "don't re-hit every account on every `agents view` in a tight loop". Was 2
- * minutes; that re-fired too often when delayed responses stacked.
- */
-export const USAGE_CACHE_FRESH_MS = 5 * 60 * 1000;
-
-export const USAGE_CACHE_SWR_MS = 24 * 60 * 60 * 1000; // 24 hours — beyond this, block on live fetch.
-
-/**
  * Unified entry for every multi-account usage lookup (`agents view`, rotation,
- * JSON export). Deduplicates by usage identity, then fans out through the
- * shared SWR + timeout path with a hard concurrency cap so delayed calls
- * cannot pile up.
+ * JSON export). Deduplicates by usage identity and reads the shared snapshot.
+ * Only an explicit `forceRefresh` call may collect provider or local-log state.
  */
+export interface UsageLookupOptions {
+  forceRefresh?: boolean;
+  fileOnly?: boolean;
+}
+
 export async function getUsageInfoByIdentity(
   inputs: UsageIdentityInput[],
-  opts?: { forceRefresh?: boolean; maxAgeMs?: number; readOnly?: boolean }
+  opts?: UsageLookupOptions,
 ): Promise<{
   canonicalByUsageKey: Map<string, AccountInfo>;
   usageByKey: Map<string, UsageInfo>;
@@ -482,70 +469,41 @@ export async function getUsageInfoByIdentity(
 }
 
 /**
- * How stale a cached snapshot may be before the read stops serving it and blocks
- * on the network. Defaults to the full 24h stale-while-revalidate window; a
- * caller that is about to ROUTE on the number passes a shorter `maxAgeMs` and
- * gets a live read instead of a day-old one. Never widens past 24h — a caller
- * cannot opt into more staleness than the cache policy allows.
- */
-export function swrWindowMsFor(maxAgeMs?: number): number {
-  if (maxAgeMs === undefined || !Number.isFinite(maxAgeMs)) return USAGE_CACHE_SWR_MS;
-  return Math.min(USAGE_CACHE_SWR_MS, Math.max(0, maxAgeMs));
-}
-
-/**
- * In-process dedup for live + background usage work on the same identity.
- * Covers both the blocking cold-cache path and SWR background refreshes so a
- * delayed HTTP response cannot be stacked under a second request for the same
- * key (the pile-up that made consecutive `agents view` runs peg CPU/network).
+ * In-process dedup complements the device-wide lease. It avoids lock contention
+ * when several callers in one process explicitly request the same refresh.
  */
 const inFlightLiveFetches = new Map<string, Promise<UsageInfo>>();
-const inFlightBgKeys = new Set<string>();
-const bgRefreshQueue: Array<() => Promise<void>> = [];
-let bgRefreshActive = 0;
 
 /**
- * Fetch usage for a single identity using stale-while-revalidate.
- *
- * - Cache fresh (< 5 min): return cached snapshot, NO network.
- * - Cache stale but < 24h: return cached snapshot instantly, enqueue a
- *   concurrency-capped background refresh.
- * - Cache too stale or absent: block on live fetch (shared in-flight promise),
- *   fall back to cache on error.
- *
- * This keeps `agents run` / `agents view` off the network on the hot path. The
- * first invocation after a cold install or 24h gap still blocks once to seed
- * the cache; every run after that returns instantly while the cache silently
- * refreshes in the background — never more than {@link USAGE_BG_REFRESH_CONCURRENCY}
- * at a time.
+ * Fetch usage for one identity. Ordinary callers always read the shared cache;
+ * the daemon and explicit `--refresh` calls collect through one device lease.
  */
 export async function getUsageInfoForIdentity(
   input: UsageIdentityInput,
-  opts?: { forceRefresh?: boolean; maxAgeMs?: number; readOnly?: boolean }
+  opts?: UsageLookupOptions,
 ): Promise<UsageInfo> {
   const usageKey = getUsageLookupKey(input.info);
   const forceRefresh = opts?.forceRefresh === true;
-  const readOnly = opts?.readOnly === true;
+  // Reading is the default. Only an explicit forceRefresh is authorized to
+  // collect provider/local-log state; callers cannot accidentally turn a
+  // display or routing path into a collector by omitting an option.
+  const readOnly = !forceRefresh;
 
-  // Agents whose registered usage source makes a live network call go
-  // through the stale-while-revalidate cache below so `agents run`/`agents view`
-  // stay off the network on the hot path. Everything else (Codex reads local
-  // session logs) takes the legacy blocking path. The on-disk cache is shared and
+  // The on-disk cache is shared for both provider and local-log sources and is
   // keyed by usageKey, which is namespaced per agent (`claude:org=…`,
   // `kimi:user=…`, `droid:org=…`, `cursor:user=…`, `antigravity:sub=…`), so one
   // cache file holds every account without collision.
-  const usesNetworkUsage = getUsageSource(input.agentId)?.network === true;
-  if (!usesNetworkUsage || !usageKey) {
+  if (!usageKey) {
+    if (readOnly) return { snapshot: null, error: 'stale' };
     return getUsageInfo(input.agentId, {
       home: input.home,
       cliVersion: input.cliVersion,
       organizationId: input.info.organizationId,
+      fileOnly: opts?.fileOnly,
     });
   }
 
   const cached = readClaudeUsageCache(usageKey);
-  const ageMs = cached?.capturedAt ? Date.now() - cached.capturedAt.getTime() : Infinity;
-
   // `readOnly` (the `agents run` routing hot path): serve the cache and NEVER
   // touch the network — not even a background refresh. `collectRunCandidates`
   // used to pass a 5-minute `maxAgeMs`, which made a snapshot older than that
@@ -562,34 +520,8 @@ export async function getUsageInfoForIdentity(
     return { snapshot: null, error: 'stale' };
   }
 
-  // `--refresh` (forceRefresh) skips both cache short-circuits and blocks on a
-  // live fetch below, so `agents view --refresh` repopulates every account we can
-  // actually reach a token for.
-  if (!forceRefresh) {
-    // Fresh: cache is recent enough, skip network entirely.
-    if (cached && ageMs < USAGE_CACHE_FRESH_MS) {
-      return { snapshot: cached, error: null };
-    }
-
-    // Stale-while-revalidate: cache exists and isn't ancient, return it now and
-    // refresh in the background so the next invocation has fresh data.
-    //
-    // `maxAgeMs` shortens that window for callers that are about to make a
-    // DECISION on the number rather than display it. Serving a day-old snapshot
-    // to the account router is how a launch lands on an already-exhausted
-    // account: the box picks from its own cache, the background refresh lands
-    // after the choice is made, and nothing reconciles. Display callers keep the
-    // full 24h window and stay off the hot path.
-    const swrWindowMs = swrWindowMsFor(opts?.maxAgeMs);
-    if (cached && ageMs < swrWindowMs) {
-      enqueueBackgroundUsageRefresh(input, usageKey);
-      return { snapshot: cached, error: null };
-    }
-  }
-
-  // Cold cache or > 24h old (or forceRefresh): block on a shared live fetch so
-  // concurrent callers for the same identity share one in-flight HTTP call.
-  return fetchLiveUsageDeduped(input, usageKey, cached);
+  // Explicit refresh: block on the shared device collector.
+  return fetchLiveUsageDeduped(input, usageKey, cached, opts?.fileOnly === true);
 }
 
 /**
@@ -601,74 +533,48 @@ async function fetchLiveUsageDeduped(
   input: UsageIdentityInput,
   usageKey: string,
   cached: UsageSnapshot | null,
+  fileOnly: boolean,
 ): Promise<UsageInfo> {
   const existing = inFlightLiveFetches.get(usageKey);
   if (existing) return existing;
 
-  const promise = (async (): Promise<UsageInfo> => {
-    const usage = await getUsageInfo(input.agentId, {
-      home: input.home,
-      cliVersion: input.cliVersion,
-      organizationId: input.info.organizationId,
-    });
+  const previousCapturedAt = cached?.capturedAt?.getTime() ?? 0;
+  const promise = withRefreshLease<UsageInfo>({
+    scope: 'usage',
+    key: usageKey,
+    readCompleted: () => {
+      const snapshot = readClaudeUsageCache(usageKey);
+      return snapshot ? { snapshot, error: null } : null;
+    },
+    isCompleted: (value) => (value.snapshot?.capturedAt?.getTime() ?? 0) > previousCapturedAt,
+    refresh: async (): Promise<UsageInfo> => {
+      const latestCached = readClaudeUsageCache(usageKey) ?? cached;
+      const usage = await getUsageInfo(input.agentId, {
+        home: input.home,
+        cliVersion: input.cliVersion,
+        organizationId: input.info.organizationId,
+        fileOnly,
+      });
 
-    if (usage.snapshot?.source === 'live') {
-      writeClaudeUsageCache(usageKey, usage.snapshot);
+      if (usage.snapshot) {
+        if (!usage.snapshot.capturedAt || usage.snapshot.capturedAt.getTime() <= previousCapturedAt) {
+          usage.snapshot.capturedAt = new Date(previousCapturedAt + 1);
+        }
+        writeClaudeUsageCache(usageKey, usage.snapshot);
+        return usage;
+      }
+
+      // Live fetch failed — last-resort fallback to whatever cache we had.
+      if (latestCached) return { snapshot: latestCached, error: usage.error };
       return usage;
-    }
-
-    // Live fetch failed — last-resort fallback to whatever cache we had.
-    if (cached) {
-      return { snapshot: cached, error: usage.error };
-    }
-    return usage;
-  })();
+    },
+  });
 
   inFlightLiveFetches.set(usageKey, promise);
   try {
     return await promise;
   } finally {
     inFlightLiveFetches.delete(usageKey);
-  }
-}
-
-/**
- * Enqueue a background refresh of the usage cache. Errors are swallowed — a
- * failed refresh leaves the existing cache in place. Work is deferred via
- * `setImmediate` (keychain reads do sync I/O) and drained with a hard
- * concurrency cap so N stale accounts do not open N HTTP calls at once.
- */
-function enqueueBackgroundUsageRefresh(input: UsageIdentityInput, usageKey: string): void {
-  if (inFlightBgKeys.has(usageKey) || inFlightLiveFetches.has(usageKey)) return;
-  inFlightBgKeys.add(usageKey);
-
-  bgRefreshQueue.push(async () => {
-    try {
-      // Reuse the single-flight live path so a blocking caller that arrives
-      // mid-refresh shares the same HTTP call instead of racing it.
-      const cached = readClaudeUsageCache(usageKey);
-      await fetchLiveUsageDeduped(input, usageKey, cached);
-    } catch {
-      /* background refresh failed — leave existing cache in place */
-    } finally {
-      inFlightBgKeys.delete(usageKey);
-    }
-  });
-  pumpBackgroundUsageRefreshes();
-}
-
-function pumpBackgroundUsageRefreshes(): void {
-  while (bgRefreshActive < USAGE_BG_REFRESH_CONCURRENCY && bgRefreshQueue.length > 0) {
-    const work = bgRefreshQueue.shift()!;
-    bgRefreshActive++;
-    // setImmediate so the SWR caller returns the cached snapshot before any
-    // keychain/network work starts on this tick.
-    setImmediate(() => {
-      work().finally(() => {
-        bgRefreshActive--;
-        pumpBackgroundUsageRefreshes();
-      });
-    });
   }
 }
 

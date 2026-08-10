@@ -8,7 +8,6 @@ import {
   claudeUsageAccessTokenNoRefresh,
   loadClaudeOauth,
   getClaudeKeychainService,
-  swrWindowMsFor,
   getUsageInfo,
   getUsageInfoForIdentity,
   writeClaudeUsageCache,
@@ -255,37 +254,6 @@ describe('loadClaudeOauth — file-based `auth` setup-token (Touch-ID-free usage
   });
 });
 
-describe('swrWindowMsFor — a routing decision does not get day-old data', () => {
-  const DAY = 24 * 60 * 60 * 1000;
-
-  it('defaults to the full stale-while-revalidate window for display callers', () => {
-    // `agents view` rendering a slightly old bar costs nothing, so it stays off
-    // the network exactly as before.
-    expect(swrWindowMsFor(undefined)).toBe(DAY);
-  });
-
-  it('shortens the window for a caller that is about to route on the number', () => {
-    // The measured failure: a 26h-old snapshot read as "48% used" while the
-    // account was at its weekly cap. Five minutes is inside the window; a day
-    // is not, so the read blocks on a live fetch instead of serving the cache.
-    expect(swrWindowMsFor(5 * 60 * 1000)).toBe(5 * 60 * 1000);
-    expect(swrWindowMsFor(5 * 60 * 1000)).toBeLessThan(26 * 60 * 60 * 1000);
-  });
-
-  it('never lets a caller opt into MORE staleness than the cache policy allows', () => {
-    expect(swrWindowMsFor(7 * DAY)).toBe(DAY);
-  });
-
-  it('treats an unusable age as no opinion — the caller simply did not ask', () => {
-    expect(swrWindowMsFor(Number.NaN)).toBe(DAY);
-    expect(swrWindowMsFor(Number.POSITIVE_INFINITY)).toBe(DAY);
-  });
-
-  it('clamps a negative age to zero — that IS an opinion: never serve the cache', () => {
-    expect(swrWindowMsFor(-1)).toBe(0);
-  });
-});
-
 describe('deriveUsageHeadroom — projects minutes-to-cap from the session burn rate', () => {
   const sessionSnap = (usedPercent: number, capturedAtMs: number): UsageSnapshot => ({
     source: 'live',
@@ -385,7 +353,7 @@ describe('readOnly — the `agents run` routing hot path never blocks on the net
   it('serves a STALE cached snapshot without a live fetch', async () => {
     writeClaudeUsageCache(usageKey, staleButUnexpired());
 
-    const usage = await getUsageInfoForIdentity(claudeInput(), { readOnly: true });
+    const usage = await getUsageInfoForIdentity(claudeInput());
 
     // The cache is returned verbatim (no network refetch, no error), even though
     // it is well past the routing freshness bar — routing around it is
@@ -395,10 +363,60 @@ describe('readOnly — the `agents run` routing hot path never blocks on the net
   });
 
   it('reports "stale" for an absent snapshot instead of dialing the provider', async () => {
-    const usage = await getUsageInfoForIdentity(claudeInput(), { readOnly: true });
+    const usage = await getUsageInfoForIdentity(claudeInput());
 
     expect(usage.snapshot).toBeNull();
     expect(usage.error).toBe('stale');
+  });
+});
+
+describe('explicit refresh publication', () => {
+  let cacheDir: string;
+  let home: string;
+  let prevPath: string | null;
+
+  beforeEach(() => {
+    cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-usage-publish-'));
+    home = path.join(cacheDir, 'home');
+    fs.mkdirSync(path.join(home, '.grok', 'logs'), { recursive: true });
+    prevPath = setClaudeUsageCachePathForTest(path.join(cacheDir, 'usage.json'));
+  });
+
+  afterEach(() => {
+    setClaudeUsageCachePathForTest(prevPath);
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+  });
+
+  it('publishes a local-log snapshot for the next cache-only reader', async () => {
+    const now = Date.now();
+    fs.writeFileSync(path.join(home, '.grok', 'logs', 'unified.jsonl'), JSON.stringify({
+      ts: new Date(now - 60 * 60_000).toISOString(),
+      msg: 'billing: fetched credits config',
+      ctx: {
+        config: {
+          creditUsagePercent: 37,
+          currentPeriod: {
+            type: 'USAGE_PERIOD_TYPE_WEEKLY',
+            start: new Date(now - 24 * 60 * 60_000).toISOString(),
+            end: new Date(now + 6 * 24 * 60 * 60_000).toISOString(),
+          },
+        },
+        subscriptionTier: 'SuperGrok Heavy',
+      },
+    }) + '\n');
+
+    const input = {
+      agentId: 'grok' as const,
+      home,
+      cliVersion: null,
+      info: { usageKey: 'grok:user=publication-test' } as AccountInfo,
+    };
+    const refreshed = await getUsageInfoForIdentity(input, { forceRefresh: true });
+    const cached = await getUsageInfoForIdentity(input);
+
+    expect(refreshed.snapshot?.source).toBe('last_seen');
+    expect(cached.snapshot?.windows.find((window) => window.key === 'week')?.usedPercent).toBe(37);
+    expect(cached.error).toBeNull();
   });
 });
 

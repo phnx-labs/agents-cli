@@ -115,7 +115,6 @@ import {
   authCellColor,
   formatCheckedAge,
   isDeadVerdict,
-  probeLocalFleetAuth,
   readAuthHealthCache,
   summarizeHostAuth,
   summarizeVerdicts,
@@ -737,12 +736,11 @@ export async function raceFleetPingDeadline<T, Target extends FanOutDeviceTarget
 
 async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: boolean; strict?: boolean }): Promise<void> {
   const self = machineId();
-  const cliVersion = getCliVersion();
+  const { refreshLocalFleetAuthState } = await import('../lib/daemon-ticks.js');
 
   // --local: probe just this host. Used both directly and as the fan-out worker.
   if (opts.local) {
-    const rows = await probeLocalFleetAuth({ cliVersion });
-    writeFleetAuthRows(self, rows);
+    const { authRows: rows } = await refreshLocalFleetAuthState();
     if (opts.json) {
       console.log(JSON.stringify({ host: self, rows }));
     } else {
@@ -759,8 +757,7 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
   const planned = planFleetTargets(reg);
   const results: FleetPingHostResult[] = [];
 
-  const localRows = await probeLocalFleetAuth({ cliVersion });
-  writeFleetAuthRows(self, localRows);
+  const { authRows: localRows } = await refreshLocalFleetAuthState();
   results.push({ host: self, rows: localRows });
 
   const remoteTargets: FleetStatusTarget[] = remoteFleetTargets(planned, self).map((t) => ({

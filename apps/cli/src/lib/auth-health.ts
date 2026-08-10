@@ -30,6 +30,7 @@ import {
   type ProviderProbe,
 } from './usage.js';
 import { getVersionHomePath, listInstalledVersions } from './versions.js';
+import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
 
 /**
  * - `live`        — completed an authenticated request (200).
@@ -327,6 +328,27 @@ export function readAuthHealth(host: string, agent: AgentId | string, version: s
   return readAuthHealthCache()[authCacheKey(host, agent, version)] ?? null;
 }
 
+/** Reconstruct one host's published probe rows for a lease waiter/CLI reader. */
+export function readFleetAuthRows(host: string): AuthProbeRow[] {
+  const prefix = `${host}:`;
+  const rows: AuthProbeRow[] = [];
+  for (const [key, health] of Object.entries(readAuthHealthCache())) {
+    if (!key.startsWith(prefix)) continue;
+    const identity = key.slice(prefix.length);
+    const separator = identity.indexOf(':');
+    if (separator <= 0) continue;
+    const agent = identity.slice(0, separator);
+    if (!ALL_AGENT_IDS.includes(agent as AgentId)) continue;
+    rows.push({
+      agent: agent as AgentId,
+      version: identity.slice(separator + 1),
+      account: health.account,
+      health,
+    });
+  }
+  return rows;
+}
+
 /**
  * Merge entries into the cache. An incoming `error` verdict (a network blip,
  * not a server rejection) is indeterminate, so it must NOT clobber a prior
@@ -349,13 +371,15 @@ export function mergeAuthHealthEntries(
 /** Merge one or more entries into the cache (best-effort write). */
 export function writeAuthHealthEntries(entries: Record<string, AuthHealth>): void {
   try {
-    const dir = getCacheDir();
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const merged: AuthHealthCacheFile = {
-      version: 1,
-      entries: mergeAuthHealthEntries(readAuthHealthCache(), entries),
-    };
-    fs.writeFileSync(cacheFilePath(), JSON.stringify(merged, null, 2));
+    const target = cacheFilePath();
+    ensureLockTarget(target, JSON.stringify({ version: 1, entries: {} }));
+    withFileLock(target, () => {
+      const merged: AuthHealthCacheFile = {
+        version: 1,
+        entries: mergeAuthHealthEntries(readAuthHealthCache(), entries),
+      };
+      atomicWriteFileSync(target, JSON.stringify(merged, null, 2));
+    });
   } catch {
     // best-effort; a failed write just means the next reader falls back to heuristics
   }

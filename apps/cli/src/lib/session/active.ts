@@ -37,7 +37,7 @@ import { readSessionActorRecord, writeSessionAliasRecord } from './actor-sidecar
 import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
 import { buildClaudeLabelMap, getAgentSessionDirs } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
-import { latestSessionFileForCwd, findSessionsByShortIds } from './db.js';
+import { latestSessionFileForCwd, findSessionsByShortIds, findSessionMachinesByIds } from './db.js';
 import { extractSessionTopic } from './prompt.js';
 import { readSessionTailWithRaw } from './tail.js';
 import { parseSession } from './parse.js';
@@ -47,6 +47,7 @@ import { isSessionTrackedAgent, SESSION_AGENTS, type SessionAgentId, type Sessio
 import { AGENTS } from '../agents.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
 import { loadDevices, type DeviceRegistry } from '../devices/registry.js';
+import { machineId } from '../machine-id.js';
 import { presenceFromStore, type Presence } from './detached.js';
 import { classifyHostLink, HOST_HEARTBEAT_STALE_MS, type HostLink } from './host-link.js';
 import { mapBounded } from '../concurrency.js';
@@ -344,8 +345,19 @@ export interface ActiveSession {
    * form). Set when merging cross-machine results so the grouped `--active`
    * view can bucket by computer. Absent for a purely local query (the renderer
    * falls back to provenance.host, then the local machine).
+   *
+   * For a host-dispatched run this is the EXECUTION host, not the box holding
+   * the live shim process — see {@link foldExecutionMachine}.
    */
   machine?: string;
+  /**
+   * Set only on the dispatching box's own row for a host-dispatched run
+   * (`agents run --device <peer>`): the live process here is the ssh/TTY shim,
+   * while the agent itself runs on {@link machine}. Names the box the dispatch
+   * was issued from, so a merged fleet view can prefer the executing machine's
+   * own richer row over this shim (see `dedupeByMachineSession`).
+   */
+  offloadedFrom?: string;
   teamName?: string;
   /**
    * For a teams teammate: the session id of the ORCHESTRATOR that spawned the
@@ -2045,6 +2057,10 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
   foldPresence(merged);
   await foldTmuxClients(merged);
   foldHostLink(merged);
+  // Runs before the row leaves this box so every consumer — local render, the
+  // `--json` a peer answers a fan-out with, the browser's device filter — sees
+  // the EXECUTION host rather than the dispatcher (RUSH-2479).
+  foldExecutionMachine(merged, recordedMachineLookup(merged), machineId());
   annotateOrchestratorLabels(merged);
   return merged;
 }
@@ -2143,6 +2159,103 @@ export async function foldTmuxClients(rows: ActiveSession[]): Promise<void> {
  *     bury the real signal. A session sitting idle — or worse, waiting on a
  *     question — with no client attached is the stranded case: nobody is coming.
  */
+/**
+ * Attribute each live row to the machine the session actually EXECUTES on.
+ *
+ * A host-dispatched run (`agents run --device <peer>`) leaves a live process on
+ * the DISPATCHING box — the ssh/TTY shim — carrying the remote run's session id.
+ * Nothing about that local process knows the agent is on the peer, so the row
+ * was tagged with THIS machine: `--device <dispatcher>` then claimed a session
+ * that is not running here, and its preview dead-ended at "full transcript not
+ * indexed here" because the transcript lives on the peer (RUSH-2479).
+ *
+ * The dispatch already recorded the truth. `registerHostSession` /
+ * `registerInteractiveHostSession` write the index row with
+ * `machine: normalizeHost(task.host)` (`lib/hosts/session-index.ts:55,134`), so
+ * this folds that recorded machine back onto the live row. Every consumer then
+ * agrees on one owner: the `--host`/`--device` scope, the browser's device
+ * filter, `_remote`/preview routing (`liveSessionToMeta`), and the id resolver.
+ *
+ * Two rows are deliberately left alone:
+ *   - one the cross-machine fan-out already attributed to a peer — that is the
+ *     peer's own self-report, which outranks this box's index copy;
+ *   - one whose indexed machine IS this box — nothing was offloaded.
+ *
+ * Pure over the array; `machineOf` is injected so the join is unit-tested
+ * without a SQLite index.
+ */
+export function foldExecutionMachine(
+  rows: ActiveSession[],
+  machineOf: (sessionId: string) => string | undefined,
+  self: string,
+): void {
+  for (const s of rows) {
+    if (!s.sessionId) continue;
+    if (s.machine && s.machine !== self) continue;
+    const recorded = machineOf(s.sessionId);
+    if (!recorded || recorded === self) continue;
+    s.machine = recorded;
+    s.offloadedFrom = self;
+  }
+}
+
+/**
+ * Is the PROCESS behind this row running on this machine?
+ *
+ * `machine` answers a different question — "where does the agent execute" —
+ * which is what a `--device` scope, preview routing, and resume ownership need.
+ * For an offloaded run the two answers diverge: {@link foldExecutionMachine}
+ * points `machine` at the peer, while the shim process, its tmux pane, and its
+ * terminal window are all still HERE. `offloadedFrom` marks exactly that row.
+ *
+ * Any caller reaching for a LOCAL pid, pane, or window must ask this rather
+ * than `machine === self`. A local tmux pane id (`%N`) handed to a peer's tmux
+ * server does not fail — pane ids are small per-server integers, so it can
+ * resolve against an unrelated pane and attach the user to someone else's
+ * session. That is why this predicate exists instead of ten copies of the
+ * comparison.
+ */
+export function sessionProcessIsLocal(s: Pick<ActiveSession, 'machine' | 'offloadedFrom'>, self: string): boolean {
+  // `offloadedFrom` names WHICH box holds the shim, so it must be compared, not
+  // merely tested. These rows travel: `--active --json` spreads them verbatim
+  // and the fan-out preserves their foreign `machine`, so a THIRD box sees
+  // `{machine: B, offloadedFrom: A}` — a shim that is emphatically not its own.
+  // Answering "local" there sends the caller down the local-tmux path with
+  // A's pane id, attaching an unrelated pane on C: the same hazard this
+  // predicate exists to prevent, one machine over.
+  if (s.offloadedFrom) return s.offloadedFrom === self;
+  return !s.machine || s.machine === self;
+}
+
+/**
+ * The machine to reach for this session's PROCESS — its pid, tmux pane, and
+ * window — or `undefined` when that process is right here.
+ *
+ * Not the same as `machine`, which is where the AGENT executes. For an offloaded
+ * run the process lives on the dispatcher (`offloadedFrom`) while the agent runs
+ * on the peer, so a caller that ssh'd to `machine` would carry the dispatcher's
+ * pane id to a box that never had it.
+ */
+export function sessionProcessHost(
+  s: Pick<ActiveSession, 'machine' | 'offloadedFrom'>,
+  self: string,
+): string | undefined {
+  if (sessionProcessIsLocal(s, self)) return undefined;
+  return s.offloadedFrom ?? s.machine;
+}
+
+/**
+ * The index lookup behind {@link foldExecutionMachine}. One batched query for
+ * every live row (`findSessionMachinesByIds`), not a per-row `SELECT *` —
+ * `getActiveSessions` is a hot path the daemon, menubar, and watchdog all poll.
+ * Best-effort: an unavailable DB yields an empty map, leaving rows attributed
+ * to this box rather than failing the whole live view.
+ */
+function recordedMachineLookup(rows: ActiveSession[]): (sessionId: string) => string | undefined {
+  const byId = findSessionMachinesByIds(rows.map((s) => s.sessionId).filter((id): id is string => !!id));
+  return (id) => byId.get(id);
+}
+
 export function foldHostLink(rows: ActiveSession[]): void {
   for (const s of rows) {
     // Cloud tasks have no local pid, window, or tmux server; there is no host

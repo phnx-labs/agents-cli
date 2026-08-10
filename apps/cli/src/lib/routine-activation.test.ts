@@ -104,3 +104,73 @@ describe('device routine activation', () => {
     expect(fs.readFileSync(peerFile, 'utf-8')).toBe(before);
   });
 });
+
+describe('routineDeviceIndex', () => {
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-routine-index-'));
+    process.env.HOME = home;
+  });
+
+  afterEach(() => {
+    delete process.env.HOME;
+    fs.rmSync(home, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  function writeDevice(name: string, body: string): void {
+    const dir = path.join(home, '.agents', 'devices', name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'agents.yaml'), body);
+  }
+
+  it('is unmaterialized when no device declares a routines list', async () => {
+    vi.doMock('./machine-id.js', () => ({ machineId: () => 'test-host' }));
+    writeDevice('test-host', 'agents: {}\n');
+    const { routineDeviceIndex } = await load();
+
+    const index = routineDeviceIndex();
+    expect(index.materialized).toBe(false);
+    expect(index.byRoutine.size).toBe(0);
+    expect(index.errors).toEqual([]);
+  });
+
+  it('maps each routine to the sorted devices that enable it', async () => {
+    vi.doMock('./machine-id.js', () => ({ machineId: () => 'test-host' }));
+    writeDevice('zion', 'routines:\n  - watchdog\n  - git-review\n');
+    writeDevice('mac-mini', 'routines:\n  - watchdog\n');
+    const { routineDeviceIndex } = await load();
+
+    const index = routineDeviceIndex();
+    expect(index.materialized).toBe(true);
+    expect(index.byRoutine.get('watchdog')).toEqual(['mac-mini', 'zion']);
+    expect(index.byRoutine.get('git-review')).toEqual(['zion']);
+    expect(index.byRoutine.get('absent')).toBeUndefined();
+  });
+
+  it('reports a corrupt device document instead of throwing, and keeps the rest', async () => {
+    // devicesWithRoutineEnabled throws here. For a listing that would blank every
+    // row over one unreadable peer file, so the index collects and continues.
+    vi.doMock('./machine-id.js', () => ({ machineId: () => 'test-host' }));
+    writeDevice('zion', 'routines:\n  - watchdog\n');
+    writeDevice('broken', 'routines: not-a-list\n');
+    writeDevice('unparseable', 'routines: [\n');
+    const { routineDeviceIndex } = await load();
+
+    const index = routineDeviceIndex();
+    expect(index.byRoutine.get('watchdog')).toEqual(['zion']);
+    expect(index.errors).toHaveLength(2);
+    expect(index.errors.join('\n')).toMatch(/broken/);
+    expect(index.errors.join('\n')).toMatch(/unparseable/);
+  });
+
+  it('normalizes exactly like the writers, so a duplicate cannot double-count', async () => {
+    vi.doMock('./machine-id.js', () => ({ machineId: () => 'test-host' }));
+    // Written to THIS device so both readers describe the same document.
+    writeDevice('test-host', 'routines:\n  - watchdog\n  - watchdog\n  - "  watchdog  "\n');
+    const { routineDeviceIndex, enabledRoutineNames } = await load();
+
+    expect(routineDeviceIndex().byRoutine.get('watchdog')).toEqual(['test-host']);
+    // The fleet index and this device's own view must not disagree.
+    expect(enabledRoutineNames()).toEqual(['watchdog']);
+  });
+});

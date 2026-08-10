@@ -7,13 +7,18 @@ import {
 } from './builtin-routines.js';
 import { DAEMON_TICK_ROUTINE_NAMES } from './daemon-ticks.js';
 
+const ACCOUNT_STATE_TICKS = ['usage-refresh', 'fleet-cache-warm'];
+
 describe('builtin daemon-owned routines (RUSH-2465)', () => {
-  it('registry names set-equal the daemon tick registry — the two never drift', () => {
-    // Every built-in routine must have a tick body, and every tick body must
-    // have a built-in routine to schedule it. A drift either way would leave a
-    // routine that fires `agents __daemon-tick <name>` with no body (loud
-    // failure) or a tick body no clock ever fires (silent dead code).
-    expect([...BUILTIN_ROUTINE_NAMES].sort()).toEqual([...DAEMON_TICK_ROUTINE_NAMES].sort());
+  it('registry covers every daemon tick except direct account-state services', () => {
+    // Every built-in routine must have a tick body. The two account-state tick
+    // entrypoints remain explicit compatibility commands, but their clocks are
+    // owned directly by account-state-service rather than the scheduler.
+    expect([...BUILTIN_ROUTINE_NAMES, ...ACCOUNT_STATE_TICKS].sort()).toEqual(
+      [...DAEMON_TICK_ROUTINE_NAMES].sort(),
+    );
+    expect(BUILTIN_ROUTINE_NAMES).not.toContain('usage-refresh');
+    expect(BUILTIN_ROUTINE_NAMES).not.toContain('fleet-cache-warm');
   });
 
   it('does NOT include check-updates — that stays a user-facing system routine', () => {
@@ -45,8 +50,6 @@ describe('builtin daemon-owned routines (RUSH-2465)', () => {
   it('schedules mirror the .agents-system YAML they replace', () => {
     const byName = Object.fromEntries(builtinRoutineJobs().map((j) => [j.name, j]));
     // These clocks are copied verbatim from routines/*.yml (RUSH-2353/2451).
-    expect(byName['usage-refresh'].schedule).toBe('*/5 * * * *');
-    expect(byName['fleet-cache-warm'].schedule).toBe('*/3 * * * *');
     expect(byName['session-cache-warm'].schedule).toBe('*/3 * * * *');
     expect(byName['device-probe'].schedule).toBe('*/3 * * * *');
     expect(byName['auto-dispatch'].schedule).toBe('*/3 * * * *');
