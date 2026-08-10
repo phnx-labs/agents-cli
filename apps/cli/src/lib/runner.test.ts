@@ -12,6 +12,7 @@ import type { RotateCandidate, RotateResult } from './rotate.js';
 import { saveTask, hostsCacheDir } from './hosts/tasks.js';
 import { _resetPerfDbForTest, aggregateSamples } from './perf/db.js';
 import * as activation from './routine-activation.js';
+import { query, _resetForTest } from './events.js';
 
 // RUSH-2215: only process-group / real-spawn holder suites are POSIX-oriented.
 // Pure command construction and path helpers must still run on Windows.
@@ -210,6 +211,8 @@ describeSpawn('runner host placement', () => {
     const taskId = 'ffff0001';
     const jobName = 'host-monitor-test';
     const runId = 'run-hm-1';
+    const eventsPath = path.join(os.tmpdir(), `agents-events-host-${process.pid}-${Date.now()}.jsonl`);
+    _resetForTest(eventsPath);
     saveTask({
       id: taskId,
       host: 'gpu-box',
@@ -245,9 +248,20 @@ describeSpawn('runner host placement', () => {
       expect(healed.status).toBe('completed');
       expect(healed.exitCode).toBe(0);
       expect(healed.completedAt).not.toBeNull();
+      const ends = query({ module: 'routine', eventTypes: ['routine.end'] });
+      expect(ends).toHaveLength(1);
+      expect(ends[0]).toMatchObject({
+        event: 'routine.end',
+        name: jobName,
+        runId,
+        status: 'completed',
+        exitCode: 0,
+      });
     } finally {
       fs.rmSync(path.dirname(runDir), { recursive: true, force: true });
       fs.rmSync(path.join(hostsCacheDir(), `${taskId}.json`), { force: true });
+      fs.rmSync(eventsPath, { force: true });
+      _resetForTest();
     }
   });
 });

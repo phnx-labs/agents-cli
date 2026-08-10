@@ -886,6 +886,42 @@ describeExec('buildExecCommand', () => {
       const cmd = buildExecCommand(opts({ agent: 'gemini', addDirs: ['/a'] }));
       expect(cmd).not.toContain('--add-dir');
     });
+
+    it('kimi addDirs adds --add-dir for each directory', () => {
+      const cmd = buildExecCommand(opts({ agent: 'kimi', addDirs: ['/a', '/b'] }));
+      const indices = cmd.reduce<number[]>((acc, v, i) => (v === '--add-dir' ? [...acc, i] : acc), []);
+      expect(indices).toHaveLength(2);
+      expect(cmd[indices[0] + 1]).toBe('/a');
+      expect(cmd[indices[1] + 1]).toBe('/b');
+    });
+
+    it('cursor addDirs adds --add-dir for each directory', () => {
+      const cmd = buildExecCommand(opts({ agent: 'cursor', addDirs: ['/shared'] }));
+      const i = cmd.indexOf('--add-dir');
+      expect(i).toBeGreaterThan(-1);
+      expect(cmd[i + 1]).toBe('/shared');
+    });
+
+    it('expands a ~ grant for kimi too', () => {
+      const home = process.env.HOME ?? os.homedir();
+      const cmd = buildExecCommand(opts({ agent: 'kimi', addDirs: ['~/.agents/.system'] }));
+      const i = cmd.indexOf('--add-dir');
+      expect(i).toBeGreaterThan(-1);
+      expect(cmd[i + 1]).toBe(path.join(home, '.agents/.system'));
+    });
+
+    it('grok addDirs injects --rules (sandbox off by default)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'grok', addDirs: ['/sib'] }));
+      expect(cmd).not.toContain('--add-dir');
+      const i = cmd.indexOf('--rules');
+      expect(i).toBeGreaterThan(-1);
+      expect(cmd[i + 1]).toContain('/sib');
+    });
+
+    it('opencode ignores addDirs (no multi-root surface)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'opencode', addDirs: ['/a'] }));
+      expect(cmd).not.toContain('--add-dir');
+    });
   });
 
   // --- Codex sandbox: implicit ~/.agents writable root ---

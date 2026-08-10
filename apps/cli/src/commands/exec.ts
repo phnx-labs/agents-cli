@@ -591,8 +591,10 @@ export async function runWorkflowForEach(
  *
  * A project that binds several directories also contributes the ones it is not
  * landing in as `--add-dir` grants, so an agent on a multi-repo project can
- * actually reach the sibling checkouts. Only Claude and Codex consume those
- * grants; other harnesses ignore them.
+ * actually reach the sibling checkouts. Claude / Cursor / Kimi take the native
+ * flag; Codex folds them into workspace_roots; Grok widens its sandbox profile
+ * (and always injects a rules note). Other harnesses have no multi-root surface
+ * and ignore the grants (cwd only).
  */
 async function resolveRunCwd(
   options: Pick<ExecCommandActionOptions, 'cwd' | 'project' | 'remoteCwd' | 'addDir'>,
@@ -765,7 +767,7 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--add-dir <dir>',
-      'Grant access to an additional directory outside the project (Claude and Codex, repeatable)',
+      'Grant access to an additional directory outside the project (Claude, Codex, Cursor, Kimi, Grok; repeatable)',
       (val: string, prev: string[]) => [...prev, val],
       []
     )

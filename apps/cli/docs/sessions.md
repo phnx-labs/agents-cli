@@ -1311,8 +1311,14 @@ on the owner it declares in its own argv instead (tier 2) — Claude Code's
 one entry per harness, and are anchored on the process's REAL executable (argv[0]'s
 basename) rather than a substring match anywhere in its command line — a `grep`,
 `cat`, or pager viewing this rule's own source, or an agent whose prompt happens to
-quote it, must never become a kill seed. A process still owned by a live or
-attached pane is excluded from seeding tier 2 too, whatever its own argv says.
+quote it, must never become a kill seed. A process is excluded from seeding
+tier 2, whatever its own argv says, when EITHER of two independent signals
+says it is still owned: tmux's own `#{pane_pid}` says the pid itself is a
+live pane leaf right now — no environment marker needed, so this holds even
+where tier 1's attribution is dead (macOS, or a `claude` invocation started
+outside an agents-cli pane) — or the process carries a marker whose session
+is live/attached. Leaning on the marker alone left exactly that macOS/bare-
+invocation case open even after the executable anchor above.
 
 Note that this collects **everything** a session's agent spawned, not only MCP
 servers — a server the agent deliberately backgrounded inside its pane is torn down

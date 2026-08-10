@@ -553,7 +553,7 @@ export function registerProjectsCommands(program: Command): void {
       A project may bind several directories ('--dir' / '--add-dir'). The cwd an
       agent lands in is 'defaultPath' (else 'root') — set it with --root/--path,
       not with --dir. Every bound directory other than that cwd rides along as
-      an --add-dir grant, which only Claude and Codex consume.
+      an --add-dir grant (Claude, Codex, Cursor, Kimi, Grok consume it; others ignore).
     `,
   });
 

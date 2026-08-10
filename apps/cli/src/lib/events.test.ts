@@ -710,6 +710,16 @@ describeEvents('event-kind table (the drift guard for out-of-process producers)'
     expect(isEventType('Factory.Command')).toBe(false);
   });
 
+  it('registers routine.start/end and watchdog.action as info (daemon scheduler coverage)', () => {
+    for (const kind of ['routine.start', 'routine.end', 'watchdog.action'] as const) {
+      expect(EVENT_TYPES).toContain(kind);
+      expect(isEventType(kind)).toBe(true);
+      expect(levelFor(kind)).toBe('info');
+    }
+    expect(levelFor('daemon.start')).toBe('audit');
+    expect(levelFor('daemon.info')).toBe('info');
+  });
+
   it('classifies factory.uri as audit and the other factory kinds as info', () => {
     // An external process driving the user's editor is a "who reached in" fact.
     expect(levelFor('factory.uri')).toBe('audit');
@@ -717,6 +727,32 @@ describeEvents('event-kind table (the drift guard for out-of-process producers)'
     expect(levelFor('factory.command')).toBe('info');
     expect(levelFor('factory.action')).toBe('info');
     expect(levelFor('factory.launch')).toBe('info');
+  });
+
+  it('writes routine and watchdog events onto the unified stream with filterable modules', () => {
+    setupLogsDir();
+    emit('routine.start', { module: 'routine', name: 'check-updates', kind: 'command' });
+    emit('routine.end', { module: 'routine', name: 'check-updates', status: 'completed', durationMs: 12 });
+    emit('watchdog.action', { module: 'watchdog', total: 3, stalled: 1, nudged: 1 });
+
+    const records = query({});
+    expect(records.map((r) => r.event)).toEqual([
+      'watchdog.action',
+      'routine.end',
+      'routine.start',
+    ]);
+    expect(records.every((r) => r.level === 'info')).toBe(true);
+    expect(query({ module: 'routine' }).map((r) => r.event)).toEqual([
+      'routine.end',
+      'routine.start',
+    ]);
+    expect(query({ module: 'watchdog' })).toHaveLength(1);
+    expect(query({ module: 'watchdog' })[0]).toMatchObject({
+      event: 'watchdog.action',
+      total: 3,
+      stalled: 1,
+      nudged: 1,
+    });
   });
 });
 

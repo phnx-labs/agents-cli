@@ -22,6 +22,7 @@ import {
   descendantsOf,
   isProtectedAgentsService,
   parsePaneOwners,
+  parsePanePids,
   parseProcessRows,
   parseTmuxSessionMarker,
   readPaneOwners,
@@ -85,6 +86,17 @@ describe('parsePaneOwners', () => {
   it('marks a session attached when any pane reports a client', () => {
     const map = parsePaneOwners(['ag-claude-bbbb\t200\t1'].join('\n'), () => false);
     expect(map.get('ag-claude-bbbb')).toEqual({ agentAlive: false, attached: true });
+  });
+});
+
+describe('parsePanePids', () => {
+  it('collects every pane_pid regardless of session or attached state', () => {
+    const pids = parsePanePids(['ag-claude-aaaa\t100\t0', 'ag-claude-bbbb\t200\t1', 'ag-claude-aaaa\t101\t0'].join('\n'));
+    expect([...pids].sort((a, b) => a - b)).toEqual([100, 101, 200]);
+  });
+
+  it('is empty for empty input', () => {
+    expect(parsePanePids('').size).toBe(0);
   });
 });
 
@@ -212,6 +224,45 @@ describe('selectOrphanProcesses', () => {
     expect(picked).toEqual([]);
   });
 
+  // Round-2 finding from non-author review of PR #2596: the marker-based
+  // ownedByLivePane check above only protects a process whose environment WAS
+  // readable — but tier 1's own env-marker attribution is dead on macOS by
+  // design (see the docblock), and a bare `claude` invocation started outside
+  // an agents-cli-managed pane never carries the marker on any platform. So a
+  // LIVE interactive claude process with NO marker, whose own argv happens to
+  // match the tier-2 pattern, was still selectable as a kill seed.
+  it('REGRESSION (round 2): a live claude pane leaf with NO env marker still seeds a kill without the pane-pid check', () => {
+    // Reproduces the exact gap: no tmuxSession (macOS, or launched outside
+    // agents-cli), argv quotes the daemon-run + dead-pid shape.
+    const daemonShapedPrompt = 'claude --print "please fix daemon run --spawned-by {\"label\":\"claude\",\"pid\":99999999} handling"';
+    const table = [proc(55555, 1, daemonShapedPrompt)]; // tmuxSession intentionally undefined
+    const picked = selectOrphanProcesses(table, owners([]), { ...noneProtected, isAlive: pid => pid !== 99999999 });
+    // Without livePanePids, this is the vulnerability: the live process gets killed.
+    expect(picked.map(c => c.pid)).toEqual([55555]);
+  });
+
+  it('NEVER seeds tier 2 from a LIVE pane leaf pid, even with no env marker at all (the round-2 fix)', () => {
+    const daemonShapedPrompt = 'claude --print "please fix daemon run --spawned-by {\"label\":\"claude\",\"pid\":99999999} handling"';
+    const table = [proc(55555, 1, daemonShapedPrompt)]; // tmuxSession intentionally undefined
+    const picked = selectOrphanProcesses(table, owners([]), {
+      ...noneProtected,
+      isAlive: pid => pid !== 99999999,
+      livePanePids: new Set([55555]), // tmux itself says this IS a pane's live leaf pid
+    });
+    expect(picked).toEqual([]);
+  });
+
+  it('livePanePids does not protect an unrelated pid that merely shares no session data', () => {
+    const daemonArgs = 'claude.exe daemon run --origin transient --spawned-by {"label":"claude","pid":3834601}';
+    const table = [proc(3868250, 1, daemonArgs)];
+    const picked = selectOrphanProcesses(table, owners([]), {
+      ...noneProtected,
+      isAlive: () => false,
+      livePanePids: new Set([424242]), // some OTHER pane's leaf pid — irrelevant here
+    });
+    expect(picked.map(c => c.pid)).toEqual([3868250]);
+  });
+
   it('argv0Basename anchor: a real claude daemon nested deep in a quoting process is still reaped', () => {
     // Sanity check the anchor doesn't over-correct: the ACTUAL daemon (argv[0]
     // really is claude/claude.exe) is unaffected.
@@ -240,7 +291,7 @@ describe('readPaneOwners', () => {
     try {
       const neverCreated = path.join(tempDir, 'never-existed.sock');
       const read = await readPaneOwners(neverCreated);
-      expect(read).toEqual({ ok: true, owners: new Map() });
+      expect(read).toEqual({ ok: true, owners: new Map(), panePids: new Set() });
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -258,6 +309,7 @@ describe('readPaneOwners', () => {
       const read = await readPaneOwners(garbage);
       expect(read.ok).toBe(true);
       expect(read.owners.size).toBe(0);
+      expect(read.panePids.size).toBe(0);
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }

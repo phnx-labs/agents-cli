@@ -66,10 +66,16 @@
  *   answer, a rejected promise is not one at all.
  * - tier 2 is anchored on the actual claude EXECUTABLE (argv[0]'s basename),
  *   never a substring match anywhere in the command line, and excludes any
- *   process that still carries a LIVE or attached pane marker — a live
+ *   process that is a LIVE pane leaf (tmux's own `#{pane_pid}`, independent of
+ *   whether that process's environment marker was ever readable) or that
+ *   still carries a marker whose session is live/attached — a live
  *   interactive agent whose own argv happens to quote this file's docblock (it
  *   contains the exact `daemon run --spawned-by {"pid":...}` shape) must never
- *   become a kill seed.
+ *   become a kill seed, and that has to hold even where tier 1's marker is
+ *   dead (macOS, or any `claude` invocation started outside an agents-cli
+ *   pane) — a review round found the marker-only exclusion left exactly that
+ *   gap open, which is why the pane-pid check exists as an independent signal
+ *   rather than tier 2 leaning on tier 1's own attribution mechanism.
  *
  * ## Known platform gap — tier 1 is Linux-only today
  *
@@ -258,14 +264,37 @@ function livePid(pid: number): boolean {
 export function selectOrphanProcesses(
   procs: AgentProcess[],
   owners: Map<string, PaneOwner>,
-  opts: { protectedPids: Set<number>; isAlive?: (pid: number) => boolean; ownersReliable?: boolean },
+  opts: {
+    protectedPids: Set<number>;
+    isAlive?: (pid: number) => boolean;
+    ownersReliable?: boolean;
+    /**
+     * Every pane leaf pid tmux itself currently reports (see
+     * {@link parsePanePids}) — marker-independent, so it protects a live pane
+     * leaf process even when {@link TMUX_SESSION_ENV} was never readable for
+     * it (tier 1 is dead on macOS by design; a bare `claude` invocation
+     * outside an agents-cli-managed pane never carries the marker either).
+     * Without this, a live interactive agent whose OWN argv happened to
+     * quote {@link DETACHED_HELPER_RULES}'s match pattern (this file's own
+     * docblock does) could seed tier 2 the moment its marker was unreadable
+     * — the exact residual gap the executable anchor alone did not close
+     * (RUSH-2521 review, round 2).
+     */
+    livePanePids?: Set<number>;
+  },
 ): OrphanCandidate[] {
   const isAlive = opts.isAlive ?? livePid;
   const ownersReliable = opts.ownersReliable ?? true;
   const eligible = (p: AgentProcess): boolean =>
     p.pid > 1 && !opts.protectedPids.has(p.pid) && !isProtectedAgentsService(p.args);
-  /** A process still owned by a live/attached pane can never seed a kill, whatever its own argv says. */
+  /**
+   * A process still owned by a live/attached pane can never seed a kill,
+   * whatever its own argv says. Two independent signals, either sufficient:
+   * the process IS a pane's own leaf pid right now (tmux's own data, no
+   * marker needed), or it carries a marker whose session is live/attached.
+   */
   const ownedByLivePane = (p: AgentProcess): boolean => {
+    if (opts.livePanePids?.has(p.pid)) return true;
     if (!p.tmuxSession) return false;
     const owner = owners.get(p.tmuxSession);
     return !!owner && (owner.agentAlive || owner.attached);
@@ -393,6 +422,28 @@ export function parsePaneOwners(stdout: string, isAlive: (pid: number) => boolea
 }
 
 /**
+ * Pure. Every `#{pane_pid}` tmux reports in the same `list-panes -a` output
+ * {@link parsePaneOwners} reads — a pid tmux itself says is a pane's leaf
+ * process, independent of whether that process's OWN environment is readable.
+ *
+ * This is the marker-independent half of pane ownership: {@link parsePaneOwners}
+ * answers "is SESSION X owned" by aggregating over every pane a session has;
+ * this answers "is PID N itself a pane leaf tmux currently tracks" for exactly
+ * one candidate pid, with no dependency on {@link TMUX_SESSION_ENV} ever having
+ * been readable for it.
+ */
+export function parsePanePids(stdout: string): Set<number> {
+  const pids = new Set<number>();
+  for (const line of stdout.split('\n')) {
+    const parts = line.trim().split('\t');
+    if (parts.length < 2) continue;
+    const pid = parseInt(parts[1], 10);
+    if (Number.isFinite(pid)) pids.add(pid);
+  }
+  return pids;
+}
+
+/**
  * Snapshot the process table with each process's pane marker.
  *
  * Two readers because no single command works on both platforms: Linux exposes
@@ -451,6 +502,8 @@ export interface PaneOwnersRead {
    */
   ok: boolean;
   owners: Map<string, PaneOwner>;
+  /** Every pane leaf pid tmux reported, marker-independent (see {@link parsePanePids}). */
+  panePids: Set<number>;
 }
 
 /**
@@ -468,7 +521,7 @@ export async function readPaneOwners(socket: string): Promise<PaneOwnersRead> {
   // No socket file at all means no server was ever started here — for the
   // shared agents socket this is reliable (tmux unlinks its own socket on
   // exit), so this is a confident, reliable EMPTY read, not an unknown one.
-  if (!fs.existsSync(socket)) return { ok: true, owners: new Map() };
+  if (!fs.existsSync(socket)) return { ok: true, owners: new Map(), panePids: new Set() };
   const { runTmux } = await import('./binary.js');
   try {
     const res = await runTmux({
@@ -479,11 +532,12 @@ export async function readPaneOwners(socket: string): Promise<PaneOwnersRead> {
     });
     // A completed run answered, whatever its exit code — tmux itself is
     // telling us there's no server/no sessions on a nonzero exit here.
-    return { ok: true, owners: res.code === 0 ? parsePaneOwners(res.stdout) : new Map() };
+    if (res.code !== 0) return { ok: true, owners: new Map(), panePids: new Set() };
+    return { ok: true, owners: parsePaneOwners(res.stdout), panePids: parsePanePids(res.stdout) };
   } catch {
     // Threw: tmux missing/unsupported version (assertTmuxAvailable), a spawn
     // failure, or the query timed out. We genuinely do not know.
-    return { ok: false, owners: new Map() };
+    return { ok: false, owners: new Map(), panePids: new Set() };
   }
 }
 
@@ -499,13 +553,17 @@ export async function readPaneOwners(socket: string): Promise<PaneOwnersRead> {
  * or a test's temp socket) would otherwise see every real agent's marker with no
  * matching session and classify a whole box's live helpers as orphans.
  */
-async function readAllPaneOwners(socket: string): Promise<{ owners: Map<string, PaneOwner>; reliable: boolean }> {
+async function readAllPaneOwners(
+  socket: string,
+): Promise<{ owners: Map<string, PaneOwner>; panePids: Set<number>; reliable: boolean }> {
   const { getDefaultSocketPath } = await import('./paths.js');
   const merged = new Map<string, PaneOwner>();
+  const panePids = new Set<number>();
   let reliable = true;
   for (const sock of new Set([socket, getDefaultSocketPath()].filter(Boolean))) {
     const read = await readPaneOwners(sock);
     reliable = reliable && read.ok;
+    for (const pid of read.panePids) panePids.add(pid);
     for (const [name, owner] of read.owners) {
       const prev = merged.get(name);
       merged.set(name, {
@@ -514,7 +572,7 @@ async function readAllPaneOwners(socket: string): Promise<{ owners: Map<string, 
       });
     }
   }
-  return { owners: merged, reliable };
+  return { owners: merged, panePids, reliable };
 }
 
 /** Pids the reaper must never signal: itself and its whole ancestor chain. */
@@ -569,7 +627,7 @@ export async function reapOrphanAgentProcesses(
   const result: OrphanReapResult = { killed: 0, details: [], candidates: [], warnings: [] };
   if (process.platform === 'win32') return result;
 
-  const { owners, reliable } = await readAllPaneOwners(opts.socket);
+  const { owners, panePids, reliable } = await readAllPaneOwners(opts.socket);
   if (!reliable) {
     result.warnings.push('tier 1 (pane-marker) sweep skipped this tick: a tmux session query failed to answer');
   }
@@ -579,6 +637,7 @@ export async function reapOrphanAgentProcesses(
   const candidates = selectOrphanProcesses(procs, owners, {
     protectedPids: selfProtectedPids(procs),
     ownersReliable: reliable,
+    livePanePids: panePids,
   });
   result.candidates = candidates;
   if (candidates.length === 0) return result;

@@ -4,15 +4,17 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import * as state from '../state.js';
+import * as projects from '../projects.js';
 import {
-  enableProjectRoutines,
-  disableProjectRoutines,
+  materialiseProjectRoutine,
+  findProjectRoutine,
+  discoverProjectRoutines,
   syncProjectRoutines,
-  listEnabledProjectRoots,
-  isProjectRoutinesEnabled,
+  syncAllProjectRoutines,
+  materialisedProjectRoots,
   expandProjectPath,
 } from '../routines-project.js';
-import { listJobs, readJob, resolveHostStrategy, parseHostStrategy, placementRequiresFiringPin } from '../routines.js';
+import { listJobs, readJob, setJobEnabled, resolveHostStrategy, parseHostStrategy, placementRequiresFiringPin } from '../routines.js';
 import { resolvePlacementTarget, pickFleetDevice } from '../routines-placement.js';
 import type { JobConfig } from '../routines.js';
 
@@ -109,103 +111,134 @@ describe('hostStrategy helpers', () => {
   });
 });
 
-describe('project opt-in + source tracking', () => {
-  it('enableProjectRoutines records the project root and isProjectRoutinesEnabled reflects it', () => {
-    expect(isProjectRoutinesEnabled(projectDir)).toBe(false);
-    const added = enableProjectRoutines(projectDir);
-    expect(added).toBe(true);
-    expect(isProjectRoutinesEnabled(projectDir)).toBe(true);
-    expect(listEnabledProjectRoots()).toContain(expandProjectPath(projectDir));
-    // Idempotent
-    expect(enableProjectRoutines(projectDir)).toBe(false);
-  });
-
-  it('sync materialises project YAML into the user layer with source provenance', () => {
+describe('enable = materialise + device flag (one flag, no allowlist)', () => {
+  it('materialiseProjectRoutine writes a user copy with source provenance but does NOT enable it', () => {
     writeRoutine(projectRoutinesDir, 'daily', {
       schedule: '0 9 * * *',
       agent: 'claude',
       prompt: 'review the project',
+      enabled: true, // attacker/author-declared — must be ignored for firing
     });
-    enableProjectRoutines(projectDir);
-    const result = syncProjectRoutines(projectDir);
-    expect(result.synced).toEqual(['daily']);
-    expect(result.errors).toEqual([]);
+    const res = materialiseProjectRoutine(projectDir, 'daily');
+    expect('job' in res).toBe(true);
 
     const job = readJob('daily');
     expect(job).not.toBeNull();
     expect(job!.prompt).toBe('review the project');
     expect(job!.source?.kind).toBe('project');
     expect(job!.source?.projectPath).toBe(expandProjectPath(projectDir));
+    // The project YAML said enabled:true, but materialise never turns firing on.
+    expect(job!.enabled).toBe(false);
   });
 
-  it('sync refreshes an existing project-sourced user copy when YAML changes', () => {
+  it('a materialised-but-not-enabled routine is inert on the daemon path', () => {
     writeRoutine(projectRoutinesDir, 'daily', {
-      schedule: '0 9 * * *',
-      agent: 'claude',
-      prompt: 'v1',
+      schedule: '0 9 * * *', agent: 'claude', prompt: 'p', enabled: true,
     });
-    enableProjectRoutines(projectDir);
-    syncProjectRoutines(projectDir);
+    materialiseProjectRoutine(projectDir, 'daily');
+    // Daemon path (listJobs, no cwd) sees the materialised copy but as disabled.
+    const job = listJobs().find((j) => j.name === 'daily');
+    expect(job).toBeDefined();
+    expect(job!.enabled).toBe(false);
+  });
+
+  it('setJobEnabled true after materialise is the one thing that turns firing on', () => {
+    writeRoutine(projectRoutinesDir, 'daily', {
+      schedule: '0 9 * * *', agent: 'claude', prompt: 'p',
+    });
+    materialiseProjectRoutine(projectDir, 'daily');
+    expect(readJob('daily')!.enabled).toBe(false);
+    setJobEnabled('daily', true);
+    expect(readJob('daily')!.enabled).toBe(true);
+    setJobEnabled('daily', false);
+    expect(readJob('daily')!.enabled).toBe(false);
+  });
+
+  it('findProjectRoutine resolves a name via the current project', () => {
+    writeRoutine(projectRoutinesDir, 'daily', {
+      schedule: '0 9 * * *', agent: 'claude', prompt: 'p',
+    });
+    const found = findProjectRoutine('daily', projectDir);
+    expect(found && 'file' in found).toBe(true);
+    expect((found as { projectRoot: string }).projectRoot).toBe(expandProjectPath(projectDir));
+    expect(findProjectRoutine('nope', projectDir)).toBeNull();
+  });
+
+  it('materialiseProjectRoutine refuses to clobber a hand-authored routine of the same name', () => {
+    writeRoutine(userRoutinesDir, 'daily', {
+      schedule: '0 8 * * *', agent: 'claude', prompt: 'user-owned',
+    });
+    writeRoutine(projectRoutinesDir, 'daily', {
+      schedule: '0 9 * * *', agent: 'claude', prompt: 'project-owned',
+    });
+    const res = materialiseProjectRoutine(projectDir, 'daily');
+    expect('error' in res).toBe(true);
+    expect(readJob('daily')!.prompt).toBe('user-owned');
+  });
+});
+
+describe('sync = definition-only refresh (never changes enablement)', () => {
+  it('refreshes an already-materialised copy when project YAML changes', () => {
+    writeRoutine(projectRoutinesDir, 'daily', {
+      schedule: '0 9 * * *', agent: 'claude', prompt: 'v1',
+    });
+    materialiseProjectRoutine(projectDir, 'daily');
     expect(readJob('daily')!.prompt).toBe('v1');
 
     writeRoutine(projectRoutinesDir, 'daily', {
-      schedule: '0 9 * * *',
-      agent: 'claude',
-      prompt: 'v2',
+      schedule: '0 9 * * *', agent: 'claude', prompt: 'v2',
     });
-    syncProjectRoutines(projectDir);
+    const result = syncProjectRoutines(projectDir);
+    expect(result.synced).toEqual(['daily']);
     expect(readJob('daily')!.prompt).toBe('v2');
   });
 
-  // A sync rebuilds the user copy from the PROJECT yaml, which never carries
-  // createdAt. Without carrying it across, every sync re-stamps it to now,
-  // walking the overdue floor forward and hiding real missed fires.
-  it('sync preserves the original createdAt stamp across refreshes', () => {
-    writeRoutine(projectRoutinesDir, 'daily', {
-      schedule: '0 9 * * *',
-      agent: 'claude',
-      prompt: 'v1',
+  it('does NOT materialise a project file that was never enabled', () => {
+    writeRoutine(projectRoutinesDir, 'available', {
+      schedule: '0 9 * * *', agent: 'claude', prompt: 'not chosen',
     });
-    enableProjectRoutines(projectDir);
+    const result = syncProjectRoutines(projectDir);
+    expect(result.synced).toEqual([]);
+    expect(readJob('available')).toBeNull();
+  });
+
+  it('a refresh never enables — an enabled routine stays enabled, a disabled one stays disabled', () => {
+    writeRoutine(projectRoutinesDir, 'daily', {
+      schedule: '0 9 * * *', agent: 'claude', prompt: 'v1', enabled: true,
+    });
+    materialiseProjectRoutine(projectDir, 'daily');
+    // Never enabled -> disabled, even though the YAML says enabled: true.
+    expect(readJob('daily')!.enabled).toBe(false);
     syncProjectRoutines(projectDir);
+    expect(readJob('daily')!.enabled).toBe(false);
+
+    // Now enable it, then refresh: enablement is preserved by the device flag.
+    setJobEnabled('daily', true);
+    syncProjectRoutines(projectDir);
+    expect(readJob('daily')!.enabled).toBe(true);
+  });
+
+  it('preserves the original createdAt stamp across refreshes', () => {
+    writeRoutine(projectRoutinesDir, 'daily', {
+      schedule: '0 9 * * *', agent: 'claude', prompt: 'v1',
+    });
+    materialiseProjectRoutine(projectDir, 'daily');
     const first = readJob('daily')!.createdAt;
     expect(first).toBeTruthy();
 
     writeRoutine(projectRoutinesDir, 'daily', {
-      schedule: '0 9 * * *',
-      agent: 'claude',
-      prompt: 'v2',
+      schedule: '0 9 * * *', agent: 'claude', prompt: 'v2',
     });
     syncProjectRoutines(projectDir);
     expect(readJob('daily')!.prompt).toBe('v2');
     expect(readJob('daily')!.createdAt).toBe(first);
   });
 
-  it('sync does not overwrite a hand-authored user routine of the same name', () => {
-    writeRoutine(userRoutinesDir, 'daily', {
-      schedule: '0 8 * * *',
-      agent: 'claude',
-      prompt: 'user-owned',
-    });
+  it('removes a materialised copy when its project YAML disappears', () => {
     writeRoutine(projectRoutinesDir, 'daily', {
-      schedule: '0 9 * * *',
-      agent: 'claude',
-      prompt: 'project-owned',
+      schedule: '0 9 * * *', agent: 'claude', prompt: 'gone soon',
     });
-    enableProjectRoutines(projectDir);
-    const result = syncProjectRoutines(projectDir);
-    expect(result.skipped.map((s) => s.name)).toContain('daily');
-    expect(readJob('daily')!.prompt).toBe('user-owned');
-  });
-
-  it('sync removes user copies when project YAML disappears', () => {
-    writeRoutine(projectRoutinesDir, 'daily', {
-      schedule: '0 9 * * *',
-      agent: 'claude',
-      prompt: 'gone soon',
-    });
-    enableProjectRoutines(projectDir);
-    syncProjectRoutines(projectDir);
+    materialiseProjectRoutine(projectDir, 'daily');
     expect(readJob('daily')).not.toBeNull();
 
     fs.unlinkSync(path.join(projectRoutinesDir, 'daily.yml'));
@@ -214,34 +247,36 @@ describe('project opt-in + source tracking', () => {
     expect(readJob('daily')).toBeNull();
   });
 
-  it('disableProjectRoutines drops the allowlist entry and optionally removes synced jobs', () => {
+  it('syncAllProjectRoutines derives roots from materialised routines, not an allowlist', () => {
     writeRoutine(projectRoutinesDir, 'daily', {
-      schedule: '0 9 * * *',
-      agent: 'claude',
-      prompt: 'x',
+      schedule: '0 9 * * *', agent: 'claude', prompt: 'p',
     });
-    enableProjectRoutines(projectDir);
-    syncProjectRoutines(projectDir);
-    const result = disableProjectRoutines(projectDir, { removeSynced: true });
-    expect(result.removed).toBe(true);
-    expect(result.deletedJobs).toContain('daily');
-    expect(isProjectRoutinesEnabled(projectDir)).toBe(false);
-    expect(readJob('daily')).toBeNull();
-  });
+    // Nothing materialised yet -> no roots.
+    expect(materialisedProjectRoots()).toEqual([]);
+    expect(syncAllProjectRoutines().projects).toEqual([]);
 
-  it('sync activates the routine on this device without changing its definition', () => {
-    writeRoutine(projectRoutinesDir, 'fleet-job', {
-      schedule: '0 9 * * *',
-      agent: 'claude',
-      prompt: 'pick a box',
-      hostStrategy: 'fleet',
+    materialiseProjectRoutine(projectDir, 'daily');
+    expect(materialisedProjectRoots()).toContain(expandProjectPath(projectDir));
+    const all = syncAllProjectRoutines();
+    expect(all.projects.map((p) => p.projectRoot)).toContain(expandProjectPath(projectDir));
+  });
+});
+
+describe('discoverProjectRoutines (from registered projects)', () => {
+  it('surfaces not-yet-materialised project routines as disabled, and drops them once materialised', () => {
+    writeRoutine(projectRoutinesDir, 'available', {
+      schedule: '0 9 * * *', agent: 'claude', prompt: 'p',
     });
-    enableProjectRoutines(projectDir);
-    syncProjectRoutines(projectDir);
-    const job = readJob('fleet-job')!;
-    expect(job.devices).toBeUndefined();
-    expect(job.enabled).toBe(true);
-    expect(job.hostStrategy).toBe('fleet');
+    vi.spyOn(projects, 'listProjectDefs').mockReturnValue([{ name: 'proj' } as projects.ProjectDef]);
+    vi.spyOn(projects, 'projectDirsAbs').mockReturnValue([projectDir]);
+
+    const discovered = discoverProjectRoutines();
+    expect(discovered.map((d) => d.name)).toContain('available');
+    expect(discovered.find((d) => d.name === 'available')!.config.enabled).toBe(false);
+
+    // Once materialised, it is no longer "discoverable" (the user copy is live).
+    materialiseProjectRoutine(projectDir, 'available');
+    expect(discoverProjectRoutines().map((d) => d.name)).not.toContain('available');
   });
 });
 
@@ -309,26 +344,25 @@ describe('placement resolution', () => {
   });
 });
 
-describe('listJobs still excludes unsynced project routines from daemon path', () => {
+describe('listJobs still excludes un-materialised project routines from daemon path', () => {
   it('listJobs() without cwd does not see project-only YAML', () => {
     writeRoutine(projectRoutinesDir, 'project-only', {
       schedule: '0 10 * * *',
       agent: 'claude',
       prompt: 'project',
     });
-    // Not enabled / not synced — daemon path must not load it.
+    // Not materialised — daemon path must not load it.
     const names = listJobs().map((j) => j.name);
     expect(names).not.toContain('project-only');
   });
 
-  it('after sync, listJobs() (daemon path) sees the materialised copy', () => {
+  it('after enable materialises it, listJobs() (daemon path) sees the copy', () => {
     writeRoutine(projectRoutinesDir, 'project-only', {
       schedule: '0 10 * * *',
       agent: 'claude',
       prompt: 'project',
     });
-    enableProjectRoutines(projectDir);
-    syncProjectRoutines(projectDir);
+    materialiseProjectRoutine(projectDir, 'project-only');
     const names = listJobs().map((j) => j.name);
     expect(names).toContain('project-only');
   });
