@@ -370,11 +370,13 @@ const AUTO_HOST_AGENT_KEYS = new Set(
   BUILT_IN_AGENTS.filter((agent) => agent.key !== 'shell' && agent.key !== 'droid').map((agent) => agent.key),
 );
 
-// Cap concurrent per-device probes in the launch-health sweep. Each online device
-// fires 3 shell-outs (stats + running + one batched `view --host`), so a fleet of
-// N devices ran up to N*3 concurrent node+SSH processes at once — an unbounded
-// fan-out that pinned CPU to a runaway load (phnx-labs/agents-cli#2469). A small
-// pool keeps the sweep's peak process count flat regardless of fleet size.
+// Cap concurrent per-device probes in the launch-health sweep. Before this fix
+// each online device fired 2 + one-per-agent shell-outs (stats + running + one
+// `view <agent> --host` per AUTO_HOST_AGENT_KEYS), so a ~12-device fleet ran ~120
+// concurrent node+SSH processes at once — the unbounded fan-out that pinned CPU
+// (phnx-labs/agents-cli#2469). Batching (below) drops each device to 3 shell-outs,
+// and this pool caps how many devices probe at once, so the sweep's peak process
+// count stays flat regardless of fleet size.
 const LAUNCH_HEALTH_PROBE_CONCURRENCY = 4;
 
 // Fetch EVERY installed agent's version health from a host in ONE
@@ -383,7 +385,11 @@ const LAUNCH_HEALTH_PROBE_CONCURRENCY = 4;
 // local batching: the launch-health sweep needs the usable-version flag for all
 // AUTO_HOST_AGENT_KEYS on each host, and one call answers for every agent instead
 // of spawning one `view <agent> --host` subprocess per agent — the per-(agent,host)
-// fan-out that pinned CPU (phnx-labs/agents-cli#2469).
+// fan-out that pinned CPU (phnx-labs/agents-cli#2469). Tradeoff of the single call:
+// a failed/timed-out probe marks EVERY agent on that host unusable for the tick
+// (vs the old per-agent isolation), but that self-heals — a host with a stale/empty
+// read just drops out of the auto-pick pool until the next successful sweep
+// (LAUNCH_HEALTH_MAX_AGE_MS), never a stuck state.
 async function fetchHostAgentVersions(host: string): Promise<Record<string, VersionHealth[]>> {
   const { runAgents } = await import('../core/agentsBin');
   try {
@@ -438,9 +444,9 @@ async function refreshLaunchHealthCache(context: vscode.ExtensionContext): Promi
 }
 
 // Singleflight guard: only one fleet sweep may run at a time. The 60s timer,
-// startup warm-up, and post-launch refresh all call this; without the guard an
-// overdue sweep (slow SSH on an already-loaded box) got a fresh full sweep piled
-// on top every tick, compounding to runaway load (phnx-labs/agents-cli#2469).
+// startup warm-up, and the cold-cache pre-launch warm all call this; without the
+// guard an overdue sweep (slow SSH on an already-loaded box) got a fresh full sweep
+// piled on top every tick, compounding to runaway load (phnx-labs/agents-cli#2469).
 // Overlapping callers are dropped — the in-flight sweep updates the cache shortly.
 let launchHealthInflight: Promise<void> | null = null;
 function refreshLaunchHealthCacheInBackground(context: vscode.ExtensionContext): void {
