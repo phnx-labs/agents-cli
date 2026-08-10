@@ -687,20 +687,6 @@ Team state is observable via `agents teams list --json` / `agents teams status -
 
 ---
 
-### Land a pull request
-
-`agents pr land <number>` watches one pull request until CI passes and a
-non-author approval exists, then rebase-merges it without bypassing branch
-protection. It exits on red CI or a merge conflict; `--skip-review` is an
-explicit opt-out for repositories that do not require independent review.
-
-```bash
-agents pr land 1234
-agents pr land 1234 --interval 60
-```
-
----
-
 ## Cloud
 
 Some work shouldn't tie up your laptop. `agents cloud run` hands a task to a managed provider that clones the repo, plans, implements, tests, and opens a PR -- while your terminal stays free. The `host` provider dispatches the same way onto machines you own: `agents cloud run "…" --host gpu-box` (tasks track in `agents cloud ps` and `agents hosts ps` alike).
