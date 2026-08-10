@@ -155,12 +155,48 @@ one-off command in a PR.
 | Task | Script | Contract |
 |---|---|---|
 | CLI build | [`apps/cli/scripts/build.sh`](apps/cli/scripts/build.sh) `[<version>] [--clean]` | builds into `apps/cli/dist` |
-| CLI dev install | [`apps/cli/scripts/install.sh`](apps/cli/scripts/install.sh) | side-by-side dev build at `~/.local/agents-cli-dev`, exposed via `~/.local/bin/agents`; does not touch the registry install |
+| CLI dev install | [`apps/cli/scripts/install.sh`](apps/cli/scripts/install.sh) `[--bounce-daemon]` | side-by-side dev build at `~/.local/agents-cli-dev`, invoked as **`agents-dev`** (and `ag-dev`); never creates or touches `~/.local/bin/{agents,ag,browser}` |
 | CLI tests | `bun run test:remote` (in `apps/cli`) | full vitest suite offloaded to a remote crabbox via [`sandbox.sh`](apps/cli/scripts/sandbox.sh) — the laptop-safe path |
 | CLI release | [`apps/cli/scripts/release.sh`](apps/cli/scripts/release.sh) `<version> [--apply]` | zero-config self-routing publish of `@phnx-labs/agents-cli` to npm: runnable from any fleet box with an empty environment — tests on a dynamic crabbox, PR + CI, then build/sign/notarize/publish on the `mac-mini` home base (the one hardcoded name); prints a `[n/6]` phase tracker. Legacy `@swarmify` shim built for reference, not published |
 | Factory build / release | [`apps/factory/scripts/build.sh`](apps/factory/scripts/build.sh) `<version>` · [`release.sh`](apps/factory/scripts/release.sh) `<x.y.z> [--confirm] [--host <name>] [--here]` | ships `swarmify.swarm-ext` to VS Code Marketplace + Open VSX (dry-run without `--confirm`). Self-routing like the CLI release: the marketplace PATs live in the `vs-marketplace` secrets bundle on one machine, and tokens never move between hosts, so invoking from a box without the bundle probes `zion` then `mac-mini` and re-runs the publish there against a clean clone of the same commit. `--host` pins the publish box, `--here` refuses to route |
 | agents-dbg app release | [`scripts/release.sh`](scripts/release.sh) `<version> [--confirm]` | root — builds/signs/notarizes the debug Mac app, uploads the GitHub release, updates the Homebrew tap |
 | computer-mac build | [`native/computer-mac/scripts/build.sh`](native/computer-mac/scripts/build.sh) | Swift daemon |
+
+### Never install a dev build over the user's `agents`
+
+**This repo builds the `agents` command itself, so the usual "install it globally
+and run it" advice is exactly wrong here — it overwrites the CLI the user (and
+every other agent on the fleet) depends on.** The general rule *"no locally built
+CLIs — install globally with `npm i -g`"* does **not** apply to `apps/cli`; this
+paragraph overrides it for this repo.
+
+To run your changes:
+
+```bash
+cd apps/cli
+bun run test                      # the suite, locally
+bun run test:remote               # the suite, offloaded to a crabbox
+
+scripts/install.sh --skip-tests   # build + install this working tree
+agents-dev sessions --active      # drive YOUR build
+agents     sessions --active      # the installed CLI, unaffected
+```
+
+Hard rules:
+
+- **Never `npm i -g` / `npm link` from the working tree.** That writes over the
+  registry install at `$(npm root -g)/@phnx-labs/agents-cli`.
+- **Never create `~/.local/bin/{agents,ag,browser}`.** Those names belong to the
+  registry install. A dev build answering to `agents` makes PATH order decide
+  which code runs, and a cleaned dev prefix leaves the production command
+  dangling. `install.sh` publishes `agents-dev` / `ag-dev` instead, and removes
+  any such shadow link an older revision of it left behind.
+- **The daemon is shared.** `install.sh` leaves it on production code; pass
+  `--bounce-daemon` only when you specifically need the secrets broker, browser
+  IPC, and routines scheduler running your build — that affects the user's
+  everyday `agents`, not just `agents-dev`.
+- `agents doctor` reports a `binary-shadow` warning when something has taken the
+  name; `agents fleet update` reports a dev-shadowed box as **not upgraded**.
 
 ## The `.agents/` workspace
 

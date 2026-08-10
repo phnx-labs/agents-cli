@@ -580,9 +580,22 @@ at the commit already gated on the release branch). CI runs from `apps/cli` via
 remote browser launch/stop). Gated on `AGENTS_TEST_WIN_HOST=<registered device>`;
 both suites skip cleanly when the var is unset, so CI needs no Windows runner.
 
-**Local dev build:** `scripts/install.sh --skip-tests` builds the working tree and
-installs at `$HOME/.local/agents-cli-dev/`, symlinked into `$HOME/.local/bin/agents`.
-The npm-installed global is never touched. Version stamps as `0.0.0-dev.<sha>[-dirty]`.
+**Local dev build:** `scripts/install.sh --skip-tests` builds the working tree,
+installs it at `$HOME/.local/agents-cli-dev/`, and exposes it as
+`$HOME/.local/bin/agents-dev` (plus `ag-dev`). Drive it by name — `agents-dev
+sessions --active`. Version stamps as `0.0.0-dev.<sha>[-dirty]`.
+
+The production command is never created or overwritten: the script must not write
+`$HOME/.local/bin/{agents,ag,browser}`, and it deletes any such link an older
+revision of itself left pointing into the dev prefix (including a dangling one,
+which is what a cleaned dev prefix leaves behind). A dev build that answered to
+`agents` made PATH order decide which code ran — see the root
+[AGENTS.md](../../AGENTS.md) §Never install a dev build over the user's `agents`.
+
+The routines daemon is **shared** (secrets broker, browser IPC, scheduler), so
+the install leaves it on production code. `--bounce-daemon` restarts it onto the
+dev build when you need that, and says plainly that it changes what the user's
+everyday `agents` talks to.
 
 **Bin entrypoints need `chmod 755`.** [`scripts/build.sh`](scripts/build.sh) chmods
 every `package.json#bin` entry after `tsc` emits. Newer npm preserves tarball file
