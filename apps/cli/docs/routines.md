@@ -1380,7 +1380,7 @@ agents routines report <name>         # Show report from latest run
 agents routines report <name> --run <id>  # Show specific run report
 agents sessions <run-id>              # Show the archived agent transcript summary
 
-# Scheduler (auto-starts on first `routines add`; these are manual controls)
+# Scheduler (install/upgrade/setup start the daemon; these are manual controls)
 agents routines start                 # Start the background scheduler
 agents routines stop                  # Stop the scheduler
 agents routines status                # Show scheduler status + upcoming runs
@@ -1416,13 +1416,18 @@ agents routines report morning-briefing
 A background scheduler (historically called "the daemon" internally) watches for cron-triggered jobs. It persists across CLI invocations and auto-reloads when job configs change.
 
 ```bash
-agents routines start     # Start manually (usually unnecessary)
+agents routines start     # Start manually (usually unnecessary after install)
 agents routines stop      # Stop
 agents routines status    # Check health, PID, binary, heartbeat, and upcoming runs
 ```
 
-The scheduler **auto-starts on the first `agents routines add`**, so in most cases you never invoke `start` manually. When you `add`, `remove`, `pause`, or `resume` a job, it auto-reloads -- no manual restart needed.
-
+The daemon **starts at install/upgrade** (`postinstall` on darwin/linux) and on
+`agents setup`, so launchd/systemd KeepAlive keep it up. `agents routines add`
+still ensures the scheduler is running and reloads it — you rarely need
+`routines start` manually. When you `add`, `remove`, `pause`, or `resume` a job,
+it auto-reloads. `daemon.enabled=false` still suppresses background auto-starts
+(`ensureDaemonStarted`); deliberate `agents daemon start` / install-time
+`startDaemon` remain the operator override.
 Scheduled fires use two independent guards. An atomic slot claim keyed by routine
 name and the intended UTC schedule time ensures a delivered slot launches once,
 including across daemon reloads. A separate active-run claim prevents a routine

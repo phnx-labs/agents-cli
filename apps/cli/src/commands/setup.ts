@@ -161,6 +161,18 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
     }
   }
 
+  // Install-time always-on: write launchd/systemd and start the daemon so
+  // KeepAlive/Restart=always take over. Deliberate startDaemon (not
+  // ensureDaemonStarted) so setup is not blocked by the auto-start circuit
+  // breaker. Best-effort — never block setup.
+  try {
+    const { startDaemon } = await import('../lib/daemon.js');
+    const started = startDaemon();
+    if (started.method !== 'already-running' && started.pid) {
+      console.log(chalk.gray(`Started the always-on agents daemon (pid ${started.pid}).`));
+    }
+  } catch { /* best effort */ }
+
   // Populate the device registry from the tailnet on first setup. Soft mode is
   // guaranteed non-throwing (no tailscale / corrupt file / lock contention all
   // resolve to ok:false), so this can never block setup.

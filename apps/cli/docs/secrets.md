@@ -725,7 +725,7 @@ Because those audit events record every read, `agents secrets status` closes the
 
 A long-running daemon or broker keeps running the code it started with; an in-place `npm i -g` swaps the files but not the running process, so a fix can silently fail to take effect (e.g. a pre-fix daemon keeps reading the keychain). The agent self-heals onto new code with no per-read cost:
 
-- **Heal-on-upgrade:** `postinstall` bounces the routines daemon and kickstarts the broker onto the just-installed code (best-effort; skip with `AGENTS_NO_HEAL=1`).
+- **Heal-on-upgrade:** `postinstall` always (re)starts the routines daemon on darwin/linux onto the just-installed code and retires any legacy secrets-agent service (best-effort; skip with `AGENTS_NO_HEAL=1`).
 - **Version-skew detection:** the broker's `ping` reports the version of the code it's running; `ensureAgentRunning` restarts a stale broker, and a persistent broker self-exits on detecting an in-place upgrade so launchd relaunches it fresh.
 
 ### Prompt policy and auto-cache
