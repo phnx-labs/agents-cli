@@ -230,3 +230,139 @@ describe('resource resolution', () => {
     expect(parsed.resolved.snapshotSha).toBeUndefined();
   });
 });
+
+/** Write a skill directory with a SKILL.md carrying the given frontmatter. */
+function writeSkill(root: string, name: string, frontmatter: Record<string, unknown>): void {
+  const dir = path.join(root, '.agents', 'skills', name);
+  fs.mkdirSync(dir, { recursive: true });
+  const yamlLines = Object.entries({ name, ...frontmatter })
+    .map(([k, v]) => (Array.isArray(v) ? `${k}: [${v.join(', ')}]` : `${k}: ${v}`))
+    .join('\n');
+  fs.writeFileSync(path.join(dir, 'SKILL.md'), `---\n${yamlLines}\n---\nbody\n`);
+}
+
+describe('resource aliases (RUSH-2504)', () => {
+  it('resolves a skill by a declared alias, returning the canonical resource', () => {
+    const home = makeHome();
+    const project = makeProject();
+    writeSkill(home, 'browser', { description: 'drive a browser', aliases: ['agi-browser', 'web'] });
+
+    const result = runProbe(home, project, `
+      const { resolveResource } = await import('./src/lib/resources.ts');
+      console.log(JSON.stringify({
+        byAlias: resolveResource('skills', 'agi-browser', ${JSON.stringify(project)}),
+        byAlias2: resolveResource('skills', 'web', ${JSON.stringify(project)}),
+        byCanonical: resolveResource('skills', 'browser', ${JSON.stringify(project)}),
+        unknown: resolveResource('skills', 'nope', ${JSON.stringify(project)}),
+      }));
+    `);
+
+    expect(result.status, result.stderr).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    // Both aliases resolve to the canonical skill (its real name, not the alias).
+    expect(parsed.byAlias).toMatchObject({ name: 'browser', source: 'user' });
+    expect(parsed.byAlias2).toMatchObject({ name: 'browser', source: 'user' });
+    expect(parsed.byCanonical).toMatchObject({ name: 'browser', source: 'user' });
+    expect(parsed.byAlias.aliases.sort()).toEqual(['agi-browser', 'web']);
+    expect(parsed.unknown).toBeNull();
+  });
+
+  it('resolves a command by a declared alias', () => {
+    const home = makeHome();
+    const project = makeProject();
+    const dir = path.join(home, '.agents', 'commands');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'deploy.md'), '---\nname: deploy\ndescription: ship it\naliases: [ship, release]\n---\nbody\n');
+
+    const result = runProbe(home, project, `
+      const { resolveResource } = await import('./src/lib/resources.ts');
+      console.log(JSON.stringify({
+        byAlias: resolveResource('commands', 'ship', ${JSON.stringify(project)}),
+        byCanonical: resolveResource('commands', 'deploy', ${JSON.stringify(project)}),
+      }));
+    `);
+
+    expect(result.status, result.stderr).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.byAlias).toMatchObject({ name: 'deploy', source: 'user' });
+    expect(parsed.byCanonical).toMatchObject({ name: 'deploy', source: 'user' });
+    expect(parsed.byAlias.aliases.sort()).toEqual(['release', 'ship']);
+  });
+
+  it('canonical name always wins a collision with another resource that aliases it', () => {
+    const home = makeHome();
+    const project = makeProject();
+    // A real skill named `browser`, and a DIFFERENT skill that tries to alias `browser`.
+    writeSkill(home, 'browser', { description: 'the real browser skill' });
+    writeSkill(home, 'agi-browser', { description: 'imposter', aliases: ['browser'] });
+
+    const result = runProbe(home, project, `
+      const { resolveResource } = await import('./src/lib/resources.ts');
+      const r = resolveResource('skills', 'browser', ${JSON.stringify(project)});
+      console.log(JSON.stringify({ name: r?.name, path: r?.path }));
+    `);
+
+    expect(result.status, result.stderr).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    // The canonical `browser` skill wins, not the `agi-browser` skill that aliases it.
+    expect(parsed.name).toBe('browser');
+    expect(parsed.path.endsWith(path.join('skills', 'browser'))).toBe(true);
+  });
+
+  it('canonical in a lower layer still beats an alias in a higher layer', () => {
+    const home = makeHome();
+    const project = makeProject();
+    // Project layer: a skill that ALIASES `deploy`. User layer: the canonical `deploy`.
+    writeSkill(project, 'shipper', { description: 'aliaser', aliases: ['deploy'] });
+    writeSkill(home, 'deploy', { description: 'the real deploy skill' });
+
+    const result = runProbe(home, project, `
+      const { resolveResource } = await import('./src/lib/resources.ts');
+      const r = resolveResource('skills', 'deploy', ${JSON.stringify(project)});
+      console.log(JSON.stringify({ name: r?.name, source: r?.source }));
+    `);
+
+    expect(result.status, result.stderr).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    // Canonical `deploy` (user) wins over the project-layer alias — canonical always wins.
+    expect(parsed).toMatchObject({ name: 'deploy', source: 'user' });
+  });
+
+  it('a higher layer wins when two resources alias the same name (no canonical)', () => {
+    const home = makeHome();
+    const project = makeProject();
+    writeSkill(project, 'proj-skill', { description: 'project', aliases: ['shared'] });
+    writeSkill(home, 'user-skill', { description: 'user', aliases: ['shared'] });
+
+    const result = runProbe(home, project, `
+      const { resolveResource } = await import('./src/lib/resources.ts');
+      const r = resolveResource('skills', 'shared', ${JSON.stringify(project)});
+      console.log(JSON.stringify({ name: r?.name, source: r?.source }));
+    `);
+
+    expect(result.status, result.stderr).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    // Project layer is searched before user, so the project aliaser wins.
+    expect(parsed).toMatchObject({ name: 'proj-skill', source: 'project' });
+  });
+
+  it('listResources exposes the declared aliases on each resource', () => {
+    const home = makeHome();
+    const project = makeProject();
+    writeSkill(home, 'browser', { description: 'd', aliases: ['web'] });
+    writeSkill(home, 'plain', { description: 'd' });
+
+    const result = runProbe(home, project, `
+      const { listResources } = await import('./src/lib/resources.ts');
+      const listed = listResources('skills', ${JSON.stringify(project)});
+      console.log(JSON.stringify(listed.map((r) => ({ name: r.name, aliases: r.aliases }))));
+    `);
+
+    expect(result.status, result.stderr).toBe(0);
+    const parsed = JSON.parse(result.stdout).sort((a, b) => a.name.localeCompare(b.name));
+    expect(parsed).toEqual([
+      { name: 'browser', aliases: ['web'] },
+      { name: 'plain', aliases: [] },
+    ]);
+  });
+});

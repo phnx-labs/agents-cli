@@ -78,6 +78,20 @@ This means:
 
 The resolution logic lives in `src/lib/resources.ts` — `resolveResource(kind, name)` for a single winner and `listResources(kind)` for the full union with `source` annotations.
 
+### Aliases
+
+A **skill** (its `SKILL.md`) or a **command** can declare alternate names in its frontmatter, and `resolveResource(kind, name)` matches those too:
+
+```yaml
+---
+name: browser
+description: Drive a browser to automate websites
+aliases: [agi-browser, web]   # `browser` also resolves under these names
+---
+```
+
+`aliases:` accepts a YAML list or a comma/space-separated string. Resolution tries the canonical file/dir name across every layer first; only if that misses does it match `name` against declared aliases (again in layer order). So **the canonical name always wins a collision** — a real resource named `browser` beats any resource that merely aliases `browser`, in any layer. `listResources(kind)` surfaces each resource's aliases on its `aliases` field (lazily read, so listing never pays for it unless inspected). Only `skills` and `commands` support aliases today. This is what lets a future `agi` plugin house `agi:browser` while a bare `browser` still resolves via an alias.
+
 ---
 
 ## Version homes
@@ -380,6 +394,7 @@ description: Required one-line summary
 agents: [claude, cursor, codex]   # omit = all compatible agents; Cursor receives both formats
 since: "0.116.0"                  # minimum agent CLI version (inclusive)
 until: "0.117.0"                  # exclusive upper bound
+aliases: [deploy, ship]           # alternate names this command also resolves under
 ---
 ```
 

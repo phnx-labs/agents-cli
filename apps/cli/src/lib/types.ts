@@ -405,6 +405,8 @@ export interface SkillMetadata {
   version?: string;
   license?: string;
   keywords?: string[];
+  /** Alternate names this skill also resolves under (frontmatter `aliases:`). */
+  aliases?: string[];
 }
 
 /** Record of how a skill was installed into an agent version. */

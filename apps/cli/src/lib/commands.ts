@@ -13,6 +13,7 @@ import * as yaml from 'yaml';
 import { AGENTS, ensureCommandsDir, agentConfigDirName, resolveAgentName } from './agents.js';
 import { capableAgents, isCapable, supports } from './capabilities.js';
 import { isDirectoryDoc } from './resources.js';
+import { normalizeAliases } from './resource-aliases.js';
 import { markdownToToml } from './convert.js';
 import { getCommandsDir, getUserCommandsDir, getEnabledExtraRepos, getProjectAgentsDir, getSkillsDir, getTrashCommandsDir } from './state.js';
 import { getEffectiveHome, getVersionHomePath, listInstalledVersions, resolveVersion } from './versions.js';
@@ -46,6 +47,8 @@ export interface CommandMetadata {
   since?: string;
   /** Exclusive upper bound on agent CLI version for this command. */
   until?: string;
+  /** Alternate names this command also resolves under (frontmatter `aliases:`). */
+  aliases?: string[];
 }
 
 export type CommandApplyFailReason = 'unsupported' | 'agent_excluded' | 'too_old' | 'too_new';
@@ -177,6 +180,7 @@ export function parseCommandMetadata(filePath: string): CommandMetadata | null {
           agents: parseAgentsField(parsed.agents),
           since: typeof parsed.since === 'string' ? parsed.since : undefined,
           until: typeof parsed.until === 'string' ? parsed.until : undefined,
+          aliases: normalizeAliases(parsed.aliases),
         };
       }
     }
