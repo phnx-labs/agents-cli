@@ -792,7 +792,7 @@ export function registerMonitorsCommands(program: Command): void {
         }
       } else if (readMonitor(name)) {
         // Resolvable but not in the user dir: a pull-only system built-in.
-        stderrLine(chalk.red(`Monitor '${name}' is a built-in and can't be removed; disable it with: agents monitors disable ${name}`));
+        stderrLine(chalk.red(`Monitor '${name}' is a built-in and can't be removed; pause it with: agents monitors pause ${name}`));
         process.exit(1);
       } else {
         stderrLine(chalk.red(`Monitor '${name}' not found`));
