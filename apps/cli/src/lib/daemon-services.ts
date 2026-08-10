@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { getDaemonConfigDir } from './state.js';
+import { atomicWriteFileSync } from './fs-atomic.js';
 
 /** Every service the daemon can host. IDs are kebab-case and stable. */
 export type DaemonServiceId =
@@ -148,7 +149,7 @@ export function writeDaemonServicesConfig(cfg: DaemonServicesConfig): void {
   for (const id of DAEMON_SERVICE_IDS) services[id] = cfg.services[id] ?? true;
 
   const out = yaml.stringify({ ...preserved, services }, { sortMapEntries: false });
-  fs.writeFileSync(filePath, out, 'utf-8');
+  atomicWriteFileSync(filePath, out, 'utf-8');
 }
 
 /**
