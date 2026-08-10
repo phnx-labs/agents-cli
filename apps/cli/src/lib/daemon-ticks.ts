@@ -28,6 +28,7 @@
  */
 
 import { getConfigValue } from './device-config.js';
+import type { FleetStatusRow } from './fleet-status.js';
 
 /** ~every 3 min. Mirrors the old WATCHDOG_TICK_MS. */
 export async function runWatchdogTick(): Promise<void> {
@@ -106,14 +107,35 @@ export async function runLaunchHealthTick(): Promise<void> {
 export async function runFleetCacheWarmTick(): Promise<void> {
   const { machineId } = await import('./machine-id.js');
   const self = machineId();
-  const { probeLocalFleetAuth, writeFleetAuthRows } = await import('./auth-health.js');
-  const { getCliVersion } = await import('./version.js');
-  const authRows = await probeLocalFleetAuth({ cliVersion: getCliVersion() });
-  writeFleetAuthRows(self, authRows);
-
-  const { publishLocalFleetStatus } = await import('./fleet-status.js');
-  const row = await publishLocalFleetStatus(self);
-  console.log(`fleet cache warm: ${authRows.length} auth row(s), ${row.agents.running} running agent(s) on ${self}`);
+  const requestedAt = Date.now();
+  const minimumCapturedAt = requestedAt - 2 * 60_000;
+  const { withRefreshLease } = await import('./refresh-coordinator.js');
+  const { readFleetStatus, publishLocalFleetStatus } = await import('./fleet-status.js');
+  const result = await withRefreshLease<{ row: FleetStatusRow; authRows?: unknown[] }>({
+    scope: 'auth',
+    key: self,
+    readCompleted: () => {
+      const row = readFleetStatus()[self];
+      return row ? { row, authRows: undefined } : null;
+    },
+    // During mixed-version rollout the former system routine may still fire.
+    // A recent daemon publication is the completed result, not a reason to
+    // probe every provider a second time.
+    isCompleted: (value) => value.row.capturedAt >= minimumCapturedAt,
+    refresh: async () => {
+      const { probeLocalFleetAuth, writeFleetAuthRows } = await import('./auth-health.js');
+      const { getCliVersion } = await import('./version.js');
+      const authRows = await probeLocalFleetAuth({ cliVersion: getCliVersion() });
+      writeFleetAuthRows(self, authRows);
+      const row = await publishLocalFleetStatus(self);
+      return { row, authRows };
+    },
+  });
+  // A waiter receives the already-published fleet row. The auth-row count is
+  // available only to the process that performed the provider probes.
+  const row = result.row;
+  const authCount = result.authRows?.length ?? 0;
+  console.log(`fleet cache warm: ${authCount} auth row(s) refreshed, ${row.agents.running} running agent(s) on ${self}`);
 }
 
 /**

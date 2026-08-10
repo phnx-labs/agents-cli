@@ -31,6 +31,7 @@ import * as path from 'path';
 import { getCacheDir } from './state.js';
 import { probeLocalStats, type DeviceStats } from './devices/health.js';
 import { getActiveSessions } from './session/active.js';
+import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
 
 /** Live agent workload on a host. */
 export interface FleetAgentCounts {
@@ -128,13 +129,15 @@ export function readFleetStatus(): Record<string, FleetStatusRow> {
 /** Merge rows into the mirror (best-effort; preserves other hosts' rows). */
 export function writeFleetStatusRows(entries: Record<string, FleetStatusRow>): void {
   try {
-    const dir = getCacheDir();
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const merged: FleetStatusCacheFile = {
-      version: 1,
-      entries: { ...readFleetStatus(), ...entries },
-    };
-    fs.writeFileSync(mirrorPath(), JSON.stringify(merged, null, 2));
+    const target = mirrorPath();
+    ensureLockTarget(target, JSON.stringify({ version: 1, entries: {} }));
+    withFileLock(target, () => {
+      const merged: FleetStatusCacheFile = {
+        version: 1,
+        entries: { ...readFleetStatus(), ...entries },
+      };
+      atomicWriteFileSync(target, JSON.stringify(merged, null, 2));
+    });
   } catch {
     // best-effort; a failed write just means the reader sees an older union
   }

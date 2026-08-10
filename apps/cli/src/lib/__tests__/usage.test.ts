@@ -31,7 +31,6 @@ import {
   parseAntigravityOauthPayload,
   pickCompactUsageWindows,
   USAGE_SOURCE_AGENT_IDS,
-  USAGE_CACHE_FRESH_MS,
   USAGE_FETCH_CONCURRENCY,
   type DroidBillingLimitsResponse,
   type KimiUsagesResponse,
@@ -200,11 +199,7 @@ describe('usage formatting', () => {
     expect(picked.map((w) => w.shortLabel)).toEqual(['B', 'C']);
   });
 
-  it('pins the 5-minute fresh window and bounded fetch concurrency', () => {
-    // Correctness: these are the load-bearing knobs for the pile-up fix. If
-    // someone reverts the fresh window to 2 minutes or unbounded Promise.all,
-    // this fails loudly.
-    expect(USAGE_CACHE_FRESH_MS).toBe(5 * 60 * 1000);
+  it('pins bounded fetch concurrency', () => {
     expect(USAGE_FETCH_CONCURRENCY).toBe(3);
   });
 
@@ -379,13 +374,17 @@ describe('usage formatting', () => {
     // No credential file in the temp home, keyring probe disabled -> null, no throw.
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-agy-usage-'));
     const prev = process.env.AGENTS_NO_KEYCHAIN_PROBE;
+    const prevRealHome = process.env.AGENTS_REAL_HOME;
     process.env.AGENTS_NO_KEYCHAIN_PROBE = '1';
+    process.env.AGENTS_REAL_HOME = home;
     try {
       const info = await getUsageInfo('antigravity', { home });
       expect(info).toEqual({ snapshot: null, error: null });
     } finally {
       if (prev === undefined) delete process.env.AGENTS_NO_KEYCHAIN_PROBE;
       else process.env.AGENTS_NO_KEYCHAIN_PROBE = prev;
+      if (prevRealHome === undefined) delete process.env.AGENTS_REAL_HOME;
+      else process.env.AGENTS_REAL_HOME = prevRealHome;
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
@@ -727,7 +726,7 @@ describe('Claude usage cache', () => {
     }
   });
 
-  it('SWR: fresh cache (<2 min) is returned with no network call', async () => {
+  it('returns a recent shared snapshot with no network call', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-usage-swr-'));
     const realFetch = globalThis.fetch;
     let fetchCalls = 0;
@@ -763,7 +762,7 @@ describe('Claude usage cache', () => {
     }
   });
 
-  it('SWR: stale cache (>2 min, <24 h) returns the cached snapshot instantly', async () => {
+  it('returns a stale shared snapshot with no network call', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-usage-swr-'));
     vi.spyOn(state, 'getCacheDir').mockReturnValue(tmpDir);
 
@@ -771,7 +770,7 @@ describe('Claude usage cache', () => {
       const snapshot: UsageSnapshot = {
         source: 'live',
         sourceLabel: 'live account data',
-        capturedAt: new Date(Date.now() - 5 * 60 * 1000), // 5 min old — stale but within SWR.
+        capturedAt: new Date(Date.now() - 5 * 60 * 1000),
         windows: [
           { key: 'session', label: 'S', shortLabel: 'S', usedPercent: 42, resetsAt: null, windowMinutes: 300 },
         ],

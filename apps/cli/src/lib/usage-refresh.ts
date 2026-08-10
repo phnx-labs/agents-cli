@@ -2,7 +2,7 @@
  * Daemon-owned usage refresher (per host).
  *
  * The routing hot path (`agents run` → collectRunCandidates) reads usage
- * CACHE-ONLY (`getUsageInfoForIdentity` `readOnly`, RUSH-2061) and never blocks
+ * CACHE-ONLY (`getUsageInfoForIdentity`, RUSH-2061) and never blocks
  * on a provider fetch. Something still has to keep that cache fresh — this
  * module is that something, running inside the daemon on **each machine**.
  *
@@ -53,7 +53,6 @@ import {
   deriveUsageHeadroom,
   getUsageInfo,
   buildCanonicalUsageContext,
-  agentUsesNetworkUsage,
   USAGE_SOURCE_AGENT_IDS,
   type UsageHeadroom,
   type UsageSnapshot,
@@ -234,7 +233,7 @@ export interface LocalUsageAccount {
 }
 
 /**
- * Enumerate the network-usage accounts whose credentials live on THIS host — one
+ * Enumerate the usage accounts whose credentials live on THIS host — one
  * per unique usage key, deduped to the most-recently-active version (the same
  * canonicalization `getUsageInfoByIdentity` uses). Each carries a closure that
  * live-fetches its usage. This is the daemon's `listAccounts`; because it only
@@ -244,7 +243,6 @@ export interface LocalUsageAccount {
 export async function buildLocalUsageAccounts(): Promise<LocalUsageAccount[]> {
   const accounts: LocalUsageAccount[] = [];
   for (const agentId of USAGE_SOURCE_AGENT_IDS) {
-    if (!agentUsesNetworkUsage(agentId)) continue;
     const versions = listInstalledVersions(agentId);
     if (versions.length === 0) continue;
 
@@ -266,13 +264,15 @@ export async function buildLocalUsageAccounts(): Promise<LocalUsageAccount[]> {
         // that path is the Touch ID storm. Usage reads the file-based setup-token
         // only, never the interactive login (see loadClaudeOauth); no setup-token
         // reads as "usage pending".
-        fetch: () =>
-          getUsageInfo(agentId, {
+        fetch: async () => {
+          const { getUsageInfoForIdentity } = await import('./usage.js');
+          return getUsageInfoForIdentity({
+            agentId,
             home: fetchInput.home,
             cliVersion: fetchInput.cliVersion,
-            organizationId: fetchInput.organizationId,
-            fileOnly: true,
-          }),
+            info: canonical,
+          }, { forceRefresh: true, fileOnly: true });
+        },
       });
     }
   }

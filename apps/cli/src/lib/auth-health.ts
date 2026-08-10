@@ -30,6 +30,7 @@ import {
   type ProviderProbe,
 } from './usage.js';
 import { getVersionHomePath, listInstalledVersions } from './versions.js';
+import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
 
 /**
  * - `live`        — completed an authenticated request (200).
@@ -349,13 +350,15 @@ export function mergeAuthHealthEntries(
 /** Merge one or more entries into the cache (best-effort write). */
 export function writeAuthHealthEntries(entries: Record<string, AuthHealth>): void {
   try {
-    const dir = getCacheDir();
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const merged: AuthHealthCacheFile = {
-      version: 1,
-      entries: mergeAuthHealthEntries(readAuthHealthCache(), entries),
-    };
-    fs.writeFileSync(cacheFilePath(), JSON.stringify(merged, null, 2));
+    const target = cacheFilePath();
+    ensureLockTarget(target, JSON.stringify({ version: 1, entries: {} }));
+    withFileLock(target, () => {
+      const merged: AuthHealthCacheFile = {
+        version: 1,
+        entries: mergeAuthHealthEntries(readAuthHealthCache(), entries),
+      };
+      atomicWriteFileSync(target, JSON.stringify(merged, null, 2));
+    });
   } catch {
     // best-effort; a failed write just means the next reader falls back to heuristics
   }

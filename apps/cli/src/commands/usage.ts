@@ -40,14 +40,16 @@ export function registerUsageCommand(program: Command): void {
   addHostOption(program.command('usage [agent]'))
     .description('Show rate-limit / quota usage per agent')
     .option('--json', 'Emit machine-readable JSON (per-agent usage snapshot) instead of the table')
+    .option('-r, --refresh', 'Collect fresh usage through the shared device coordinator before rendering')
     .addHelpText('after', `
 Examples:
   agents usage              Show usage for all installed agents
   agents usage claude       Show usage for Claude only
   agents usage codex        Show usage for Codex only
+  agents usage claude --refresh  Explicitly refresh Claude once, device-wide
   agents usage --json       Machine-readable snapshot for scripts
 `)
-    .action(async (agentFilter: string | undefined, options: { json?: boolean }) => {
+    .action(async (agentFilter: string | undefined, options: { json?: boolean; refresh?: boolean }) => {
       let filter: AgentId | undefined;
       if (agentFilter) {
         const resolved = resolveAgentName(agentFilter);
@@ -71,7 +73,7 @@ Examples:
       }
 
       const records = await Promise.all(
-        targets.map((agentId) => collectAgentUsage(agentId as AgentId))
+        targets.map((agentId) => collectAgentUsage(agentId as AgentId, options.refresh === true))
       );
 
       if (options.json) {
@@ -84,7 +86,7 @@ Examples:
 }
 
 /** Gather one agent's usage snapshot as structured data (shared by both renderers). */
-async function collectAgentUsage(agentId: AgentId): Promise<AgentUsageRecord> {
+async function collectAgentUsage(agentId: AgentId, forceRefresh = false): Promise<AgentUsageRecord> {
   // Plain name — color is applied only at text-render time (formatAgentUsage), so
   // `--json` never emits ANSI escapes in `label` (e.g. under FORCE_COLOR=1).
   const label = AGENTS[agentId].name;
@@ -105,7 +107,10 @@ async function collectAgentUsage(agentId: AgentId): Promise<AgentUsageRecord> {
     return { agent: agentId, label, status: 'not-signed-in' };
   }
 
-  const usage = await getUsageInfoForIdentity({ agentId, home, info, cliVersion: null });
+  const usage = await getUsageInfoForIdentity(
+    { agentId, home, info, cliVersion: null },
+    forceRefresh ? { forceRefresh: true } : undefined,
+  );
   return { agent: agentId, label, status: 'ok', email: info.email ?? undefined, usage };
 }
 

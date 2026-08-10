@@ -30,6 +30,8 @@ import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from './cli-entry.js
 import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled } from './device-config.js';
 import { reapTerminalRoutineProcesses } from './routine-process-cleanup.js';
 import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC, SUBSYSTEM_DAEMON_START } from './daemon-health.js';
+import { startAccountStateService } from './account-state-service.js';
+import { runFleetCacheWarmTick, runUsageRefreshTick } from './daemon-ticks.js';
 
 const PID_FILE = 'daemon.pid';
 const LIFETIME_FILE = 'daemon.lifetime';
@@ -894,15 +896,20 @@ export async function runDaemon(): Promise<void> {
 
   if (schedulerEnabledAtBoot) bootScheduler();
 
-  // watchdog, device-probe, tmux-reconcile, launch-health, fleet-cache-warm,
-  // session-cache-warm, usage-refresh, and auto-dispatch used to be hardcoded
-  // setInterval ticks here (RUSH-2353). They are now DAEMON-OWNED built-in
-  // routines (`builtin-routines.ts`, RUSH-2465): definitions live in daemon code
-  // and are injected as the lowest layer of `listJobs()`, so the same
-  // pid-claimed JobScheduler above schedules and fires them via
-  // `agents __daemon-tick <name>` (see daemon-ticks.ts) like any other routine —
-  // declared, listed, run-tracked, pausable, and device-pinnable — WITHOUT
-  // shipping them from the `.agents-system` config repo every install pulls.
+  // Usage and authentication are first-party device state, so the daemon owns
+  // their timers directly rather than scheduling them as built-in routines.
+  // Explicit CLI refreshes converge on the same cross-process refresh leases.
+  const accountStateService = startAccountStateService({
+    refreshUsage: runUsageRefreshTick,
+    refreshAuth: runFleetCacheWarmTick,
+    onError: (area, error) => log('WARN', `${area} state refresh failed: ${(error as Error).message}`),
+  });
+
+  // watchdog, device-probe, tmux-reconcile, launch-health,
+  // session-cache-warm, and auto-dispatch used to be hardcoded setInterval
+  // ticks here (RUSH-2353). They are DAEMON-OWNED built-in routines
+  // (`builtin-routines.ts`, RUSH-2465), injected as the lowest layer of
+  // `listJobs()` and fired by the pid-claimed JobScheduler.
 
   // Monitor engine: event-triggered watchers, beside the cron scheduler. Same
   // daemon, same dispatch seam — a monitor is a routine whose trigger is a
@@ -1143,6 +1150,7 @@ export async function runDaemon(): Promise<void> {
   // added later has to re-earn.
   const handleShutdown = singleShot(async () => {
     log('INFO', 'Daemon shutting down');
+    accountStateService.stop();
     stopScheduler();
     monitorEngine.stop();
     await browserIPC.stop();

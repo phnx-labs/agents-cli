@@ -183,10 +183,9 @@ function isAvailableEligible(candidate: RotateCandidate): boolean {
 /**
  * How old a usage snapshot may be and still settle a routing DECISION.
  *
- * Deliberately far tighter than the 24h stale-while-revalidate window the
- * display paths use (`USAGE_CACHE_SWR_MS`): `agents view` rendering a slightly
- * old bar costs nothing, but the router choosing an account from one costs the
- * whole run. Measured case — `yosemite-s1` held snapshots 26h to 2.7 days old
+ * A display may show an older cached bar, but the router choosing an account
+ * from one costs the whole run. Measured case: `yosemite-s1` held snapshots 26
+ * hours to 2.7 days old
  * with a failing refresh, so balanced read `muqsit@getrush.ai` as 48% used and
  * launched into it while the account was actually at its weekly cap.
  */
@@ -763,7 +762,6 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
       cliVersion: version,
       info,
     })),
-    { readOnly: true }
   );
 
   return rows.map(({ home: _home, info, ...candidate }) => {
