@@ -225,6 +225,89 @@ describe('syncRepoGit', () => {
     expect(res.error).toMatch(/local commit/);
   });
 
+  // The collision guard reads status.files, not the per-category arrays. These
+  // pin the dirty states that a hand-rolled union kept missing: a staged
+  // deletion, a staged rename (both ends), and a conflicted path. Each asserts
+  // a REFUSAL, so gutting dirtyPathSet turns them red rather than leaving the
+  // suite green — the failure mode the review caught.
+
+  it('treats a staged deletion as dirty and refuses when it collides', async () => {
+    await commitFile(author, 'doomed.txt', 'v1\n', 'add doomed');
+    await simpleGit(author).push('origin', 'main');
+    await syncRepoGit(local, { push: false });
+    // Upstream edits the same file the local tree has staged for deletion.
+    await commitFile(author, 'doomed.txt', 'v2\n', 'upstream edits doomed');
+    await simpleGit(author).push('origin', 'main');
+    await simpleGit(local).rm('doomed.txt');
+
+    const res = await syncRepoGit(local, { push: false });
+
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/doomed\.txt/);
+  });
+
+  it('treats both ends of a staged rename as dirty', async () => {
+    await commitFile(author, 'before.txt', 'v1\n', 'add before');
+    await simpleGit(author).push('origin', 'main');
+    await syncRepoGit(local, { push: false });
+    await commitFile(author, 'before.txt', 'v2\n', 'upstream edits before');
+    await simpleGit(author).push('origin', 'main');
+    // Rename locally: `from` is the path upstream touches, `to` is not.
+    await simpleGit(local).raw(['mv', 'before.txt', 'after.txt']);
+
+    const res = await syncRepoGit(local, { push: false });
+
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/before\.txt/);
+  });
+
+  it('refuses when a path with a space collides, despite git C-quoting it', async () => {
+    // `git diff --name-only` quotes such paths unless -z is used, so without it
+    // the two sides of the comparison never string-match and the guard misses.
+    await commitFile(author, 'my file.txt', 'v1\n', 'add spaced');
+    await simpleGit(author).push('origin', 'main');
+    await syncRepoGit(local, { push: false });
+    await commitFile(author, 'my file.txt', 'v2\n', 'upstream edits spaced');
+    await simpleGit(author).push('origin', 'main');
+    fs.writeFileSync(path.join(local, 'my file.txt'), 'local edit\n');
+
+    const res = await syncRepoGit(local, { push: false });
+
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/my file\.txt/);
+    expect(fs.readFileSync(path.join(local, 'my file.txt'), 'utf8')).toBe('local edit\n');
+  });
+
+  // pullRepo is the sibling entry point — `agents sync` with no repo argument
+  // reaches it, not syncRepoGit. It shares the same rule via dirtyTreeRefusal;
+  // without these, the umbrella path could regress to refusing on any dirt and
+  // the suite would stay green.
+
+  it('pullRepo also fast-forwards past unrelated dirt', async () => {
+    await commitFile(author, 'README.md', 'v2\n', 'upstream change');
+    await simpleGit(author).push('origin', 'main');
+    fs.writeFileSync(path.join(local, 'dirty.txt'), 'uncommitted\n');
+
+    const res = await pullRepo(local);
+
+    expect(res.success).toBe(true);
+    expect(fs.readFileSync(path.join(local, 'README.md'), 'utf8')).toBe('v2\n');
+    expect(fs.readFileSync(path.join(local, 'dirty.txt'), 'utf8')).toBe('uncommitted\n');
+  });
+
+  it('pullRepo refuses when an incoming change touches an uncommitted path', async () => {
+    await commitFile(author, 'README.md', 'v2\n', 'upstream change');
+    await simpleGit(author).push('origin', 'main');
+    fs.writeFileSync(path.join(local, 'README.md'), 'local edit\n');
+
+    const res = await pullRepo(local);
+
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/Blocked by local changes/);
+    expect(res.error).toMatch(/README\.md/);
+    expect(fs.readFileSync(path.join(local, 'README.md'), 'utf8')).toBe('local edit\n');
+  });
+
   it('rebases local onto new upstream commits (pull-only)', async () => {
     // Author advances the remote.
     await commitFile(author, 'README.md', 'v2\n', 'upstream change');

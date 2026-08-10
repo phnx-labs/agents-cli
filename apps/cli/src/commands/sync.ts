@@ -102,7 +102,7 @@ function emitJson(payload: unknown): void {
 export function registerSyncCommand(program: Command): void {
   addHostOption(program.command('sync [agentSpec] [repo]'))
     .summary('Make this machine current, or sync resources into one agent')
-    .description('With an [agentSpec], syncs resources (commands, skills, hooks, rules, MCPs, plugins, etc.) into that installed agent version — previews changes and lets you pick. e.g. "claude", "claude@2.1.142", a selector: @latest / @oldest / @pinned (= @default), or @all for every installed version.\n\nAppend a [repo] (or pass --repo) to scope the sync to a single DotAgent repo — system / user / project / <alias>. e.g. "agents sync claude@all system" reconciles only the system repo\'s resources into every installed Claude.\n\nGive a DotAgent repo name ALONE — "agents sync system" / "agents sync user" / "agents sync <alias>" — to git-sync that one repo: refuse if the tree is dirty, else git pull --rebase against origin. The user repo and extra aliases also push local commits up; the system repo is a pull-only mirror.\n\nWith NO agent, runs the umbrella verb: fetch the config repos then reconcile them into every installed agent. Secrets are opt-in — add --secrets to pull secret bundles. Session transcripts are queryable live via "agents sessions --host <machine>", or moved with "agents sessions export/import". Also: --cloud (fetch only), --local (reconcile only).')
+    .description('With an [agentSpec], syncs resources (commands, skills, hooks, rules, MCPs, plugins, etc.) into that installed agent version — previews changes and lets you pick. e.g. "claude", "claude@2.1.142", a selector: @latest / @oldest / @pinned (= @default), or @all for every installed version.\n\nAppend a [repo] (or pass --repo) to scope the sync to a single DotAgent repo — system / user / project / <alias>. e.g. "agents sync claude@all system" reconciles only the system repo\'s resources into every installed Claude.\n\nGive a DotAgent repo name ALONE — "agents sync system" / "agents sync user" / "agents sync <alias>" — to git-sync that one repo: git pull --rebase against origin when the tree is clean; when it is dirty, fast-forward anyway if no incoming path is uncommitted, else refuse and name what collided. The user repo and extra aliases also push local commits up; the system repo is a pull-only mirror.\n\nWith NO agent, runs the umbrella verb: fetch the config repos then reconcile them into every installed agent. Secrets are opt-in — add --secrets to pull secret bundles. Session transcripts are queryable live via "agents sessions --host <machine>", or moved with "agents sessions export/import". Also: --cloud (fetch only), --local (reconcile only).')
     .option('--agent <agent>', 'Agent identifier (legacy form; prefer the positional spec)')
     .option('--agent-version <version>', 'Version to sync into (legacy form; prefer "agent@version")')
     .option('--repo <name>', 'Scope the sync to a single DotAgent repo: system / user / project / <alias> (also accepted as a positional)')
@@ -139,9 +139,10 @@ function resolveRepoGitTarget(repo: string): { dir: string; push: boolean } | nu
 }
 
 /**
- * `agents sync <repo>` — git-sync a single DotAgent repo: refuse on a dirty
- * tree, else pull --rebase against origin, pushing local commits for user-owned
- * repos. Delegates the git work to `syncRepoGit`.
+ * `agents sync <repo>` — git-sync a single DotAgent repo: pull --rebase against
+ * origin on a clean tree; on a dirty one, fast-forward anyway when no incoming
+ * path is uncommitted, else refuse naming the collision. Pushes local commits
+ * for user-owned repos. Delegates the git work to `syncRepoGit`.
  */
 async function runRepoGitSync(
   repo: string,
