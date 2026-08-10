@@ -94,12 +94,26 @@ export interface PushBundleResult {
 /**
  * Read and resolve a bundle once, for pushing to one or more hosts.
  *
- * `agentOnly` + `keyMode: 'storage'` match what `export --host` has always
- * passed: storage-shaped values, and the headless guard that fails fast rather
- * than popping Touch ID inside an automated run.
+ * `keyMode: 'storage'` is fixed — a push always sends storage-shaped values.
+ *
+ * `agentOnly` is the caller's to decide, and it is NOT a security level: it
+ * selects the broker-only read (fail fast with the `agents secrets unlock` hint)
+ * over the interactive read (macOS may raise a Touch ID sheet). The headless
+ * guard exists because an AGENT LAUNCH must never enumerate the keychain — a
+ * per-bundle prefix becomes a broad `agents-cli.` scan after service-name
+ * hashing, and macOS evaluates unrelated biometry ACLs during it, one sheet per
+ * installed version (bundles.ts, RUSH-2440). A human at a TTY is not that case:
+ * they can answer one prompt, and every sibling read (`view --reveal`, `get`)
+ * already lets them. It defaults to `true` so an automated caller that says
+ * nothing stays broker-only.
  */
-export function resolveBundleForPush(bundle: string, caller: string): ResolvedBundleForPush {
-  const { env } = readAndResolveBundleEnv(bundle, { caller, keyMode: 'storage', agentOnly: true });
+export function resolveBundleForPush(
+  bundle: string,
+  caller: string,
+  opts: { agentOnly?: boolean } = {},
+): ResolvedBundleForPush {
+  const agentOnly = opts.agentOnly ?? true;
+  const { env } = readAndResolveBundleEnv(bundle, { caller, keyMode: 'storage', agentOnly });
   return { env, dotenv: bundleEnvToDotenv(env), keyCount: Object.keys(env).length };
 }
 

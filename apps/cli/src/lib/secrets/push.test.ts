@@ -27,7 +27,7 @@
  * mock this repo forbids. What IS pinned below is the security-relevant half: a
  * failed transport can never reach the verification step and can never return ok.
  */
-import { describe, expect, it, beforeAll, afterAll } from 'vitest';
+import { describe, expect, it, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -51,7 +51,10 @@ afterAll(() => {
   fs.rmSync(TEST_DEVICES_DIR, { recursive: true, force: true });
 });
 
-const { pushResolvedBundleToHost, planPushTransport, bundleEnvToDotenv } = await import('./push.js');
+const { pushResolvedBundleToHost, planPushTransport, bundleEnvToDotenv, resolveBundleForPush } = await import('./push.js');
+const { writeBundleWithItems } = await import('./bundles.js');
+const { secretsKeychainItem, setKeychainBackendForTest } = await import('./index.js');
+type KeychainBackend = import('./index.js').KeychainBackend;
 
 /** A bundle already read from the store — never resolved here, so nothing prompts. */
 const RESOLVED = {
@@ -258,5 +261,73 @@ describe('bundleEnvToDotenv', () => {
 
   it('rejects a multi-line value rather than silently corrupting it', () => {
     expect(() => bundleEnvToDotenv({ KEY: 'line1\nline2' })).toThrow(/multi-line/);
+  });
+});
+
+/**
+ * `resolveBundleForPush` must FORWARD the caller's `agentOnly`, not hardcode it.
+ *
+ * The bug: it passed `agentOnly: true` unconditionally, so `agents secrets export
+ * --host` refused every keychain-backed bundle with "not unlocked in the secrets
+ * agent" — even for a human at a TTY who could simply answer the Touch ID sheet.
+ * Its sibling reads (`view --reveal`, `get`) already decided this per-invocation
+ * with `isHeadlessSecretsContext() || !isInteractiveTerminal()`, and `view
+ * --reveal` prints plaintext to the screen, so the push path was the strictest
+ * read for no stated reason.
+ *
+ * Real path, no mocking of logic: the production `readAndResolveBundleEnv` runs
+ * unchanged, with only the STORAGE backend swapped for an in-memory one — the
+ * same technique `bundles.test.ts` uses to reach this guard without a live
+ * macOS Keychain, so the assertions hold on Linux CI too.
+ */
+describe('resolveBundleForPush — agentOnly is the caller\'s decision', () => {
+  class MemBackend implements KeychainBackend {
+    store = new Map<string, string>();
+    has(item: string) { return this.store.has(item); }
+    get(item: string) {
+      const v = this.store.get(item);
+      if (v === undefined) throw new Error(`missing ${item}`);
+      return v;
+    }
+    set(item: string, value: string) { this.store.set(item, value); }
+    delete(item: string) { return this.store.delete(item); }
+    list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
+  }
+
+  let prevBackend: KeychainBackend;
+  let prevNoAgent: string | undefined;
+
+  beforeEach(() => {
+    prevBackend = setKeychainBackendForTest(new MemBackend());
+    prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
+    process.env.AGENTS_SECRETS_NO_AGENT = '1'; // no broker fast-path — exercise the guard
+    writeBundleWithItems(
+      { name: 'apple.com', policy: 'hold', vars: { APPLE_TEAM_ID: 'keychain:APPLE_TEAM_ID' } },
+      new Map([[secretsKeychainItem('apple.com', 'APPLE_TEAM_ID'), '2HTP252L87']]),
+    );
+  });
+
+  afterEach(() => {
+    setKeychainBackendForTest(prevBackend);
+    if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
+    else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
+  });
+
+  // The fix. Pre-fix this threw the unlock error no matter what the caller asked for.
+  it('resolves a locked keychain bundle when the caller is interactive (agentOnly: false)', () => {
+    expect(resolveBundleForPush('apple.com', 'ssh export', { agentOnly: false }).env)
+      .toEqual({ APPLE_TEAM_ID: '2HTP252L87' });
+  });
+
+  it('still fails fast with the unlock hint when the caller is headless (agentOnly: true)', () => {
+    expect(() => resolveBundleForPush('apple.com', 'ssh export', { agentOnly: true }))
+      .toThrow("Secrets bundle 'apple.com' is not unlocked in the secrets agent");
+  });
+
+  // The default is load-bearing: `pushBundleToHost` (fleet apply) passes nothing,
+  // and a bulk automated push must not start raising biometric sheets.
+  it('defaults to broker-only when the caller says nothing', () => {
+    expect(() => resolveBundleForPush('apple.com', 'ssh export'))
+      .toThrow("Secrets bundle 'apple.com' is not unlocked in the secrets agent");
   });
 });

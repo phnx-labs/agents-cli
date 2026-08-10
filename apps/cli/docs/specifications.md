@@ -1195,23 +1195,33 @@ access control (that is 1Password/Vault; this tool is device-local first).
   gate (`readWriteTokenFromBundle`, `readCloudflareCreds`).
 - **SEC-13b (MUST).** A **deliberate human reveal/run** at a real interactive
   terminal on a **locked** keychain bundle MUST resolve with **exactly one** Touch
-  ID sheet, then reveal the value / run the command. This covers exactly two
-  commands: `agents secrets view --reveal` and `agents secrets exec` — both gate
-  `agentOnly` on `isHeadlessSecretsContext() || !isInteractiveTerminal()`
-  (`commands/secrets.ts:1384`, `:1500`, `:2463`). Conversely, the **automation
-  primitives** `agents secrets get` and every `agents secrets export` variant
-  (`--plaintext`, `--to-file`, `--host`, `--to-1password`) MUST stay `agentOnly:
-  true` **unconditionally** and MUST NOT prompt even at an interactive terminal
-  (`commands/secrets.ts:1593`, `:2229`, `:2259`, `:2350`, `:2392`) — prompting there
-  would either dump plaintext onto a visible screen (`export`, which prints) or
-  block a `$(…)` capture mid-pipeline (`get`). Under an agent (`AGENTS_RUNTIME`) or
+  ID sheet, then reveal the value / run the command / push the bundle. This covers
+  exactly three commands: `agents secrets view --reveal`, `agents secrets exec`, and
+  `agents secrets export --host` — all three gate `agentOnly` on
+  `isHeadlessSecretsContext() || !isInteractiveTerminal()`
+  (`commands/secrets.ts:1433`, `:1549`, `:2334`, `:2473`), the push forwarding it
+  through `resolveBundleForPush` (`lib/secrets/push.ts:115`, which defaults to
+  `true` so an automated caller that says nothing stays broker-only). Conversely,
+  the **value-emitting automation primitives** `agents secrets get` and the
+  remaining `agents secrets export` variants (`--plaintext`, `--to-file`,
+  `--to-1password`) MUST stay `agentOnly: true` **unconditionally** and MUST NOT
+  prompt even at an interactive terminal (`commands/secrets.ts:1642`, `:2293`,
+  `:2351`, `:2400`) — prompting there would either dump plaintext onto a visible
+  screen (`export --plaintext`, which prints) or block a `$(…)` capture
+  mid-pipeline (`get`). `export --host` is on the human side because neither hazard
+  applies: it prints a key COUNT, never a value, and nothing captures its stdout,
+  so it is strictly less exposed than the `view --reveal` that already prompts.
+  Under an agent (`AGENTS_RUNTIME`) or
   no TTY, **all** of these stay broker-only and fail closed per SEC-13. **Given** a
-  human at a TTY (no `AGENTS_RUNTIME`) runs `agents secrets view --reveal <locked>`
-  or `agents secrets exec <locked> -- <cmd>` **When** the bundle is not
+  human at a TTY (no `AGENTS_RUNTIME`) runs `agents secrets view --reveal <locked>`,
+  `agents secrets exec <locked> -- <cmd>`, or `agents secrets export <locked> --host
+  <target>` **When** the bundle is not
   broker-held **Then** exactly one Touch ID sheet is raised and the value is
-  revealed / command run; whereas the same `get`/`export` on the same locked bundle
+  revealed / command run / bundle pushed; whereas `get` or a value-emitting
+  `export` on the same locked bundle
   fails fast naming `agents secrets unlock <bundle>`, no sheet. This is the
-  reveal-vs-automation split — `view --reveal`/`exec` are the only interactive
+  reveal-vs-automation split — `view --reveal`/`exec`/`export --host` are the only
+  interactive
   biometric surfaces besides `unlock` (SEC-13a governs the separate `agents run
   --secrets` launch-injection path, which is always `agentOnly`).
 - **SEC-14 (MUST).** A broker `get` for a bundle it does not hold MUST return
@@ -1427,14 +1437,14 @@ flags and examples; this spec governs the **guarantees** behind them.
 Two orthogonal axes: **Boundary side** (does a plaintext value cross into the
 agent's process / a child / stdout?) and **Prompts (locked)?** (can this raise a
 Touch ID sheet on a *locked* bundle — see SEC-13b). They are independent: `exec`
-injects yet CAN prompt interactively, while `export --plaintext` materializes yet
-NEVER prompts.
+and `export --host` inject yet CAN prompt interactively, while `export
+--plaintext` materializes yet NEVER prompts.
 
 | Command | Boundary side | Prompts (locked)? | Evidence |
 |---|---|---|---|
 | `secrets exec <b> -- <cmd>` | **Inject** (child env) | **interactive TTY only** (SEC-13b) | `commands/secrets.ts:2454,2463` |
 | `run --secrets <b>` | **Inject** (run child env) | never (SEC-13a) | `commands/exec.ts` secrets injection |
-| `secrets export --host` (SSH push) | **Inject** (over ssh stdin) | never | `commands/secrets.ts:2259` |
+| `secrets export --host` (SSH push) | **Inject** (over ssh stdin) | **interactive TTY only** (SEC-13b) | `commands/secrets.ts:2334`, `lib/secrets/push.ts:115` |
 | `secrets export --to-1password` / `--to-file` | **Neither** (to `op` argv / AES file) | never | `commands/secrets.ts:2350,2229` |
 | `secrets mcp` (`get_secret`) | **JIT, per-request** — never `process.env`, names-only in `tools/list` | never | `lib/secrets/mcp.ts` |
 | `secrets export --plaintext` | **Materialize** | never (automation primitive) | `commands/secrets.ts:2390,2392` |

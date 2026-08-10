@@ -2323,7 +2323,16 @@ Examples:
           const remotePassphrase = remoteBackend === 'file' ? (process.env.AGENTS_SECRETS_PASSPHRASE ?? '') : '';
           // Resolve ONCE for N hosts — reading a bundle can prompt, and doing it
           // per host would prompt per host.
-          const resolvedForPush = resolveBundleForPush(resolvedBundleName, 'ssh export');
+          //
+          // Same predicate as `view --reveal` / `get`: a human at a TTY gets the
+          // Touch ID sheet, an agent launch or a piped/CI run stays broker-only
+          // and fails fast with the `agents secrets unlock` hint. Requiring a
+          // prior unlock for an interactive push was an inconsistency, not a
+          // boundary — this read is strictly less exposed than `view --reveal`,
+          // which already prompts.
+          const resolvedForPush = resolveBundleForPush(resolvedBundleName, 'ssh export', {
+            agentOnly: isHeadlessSecretsContext() || !isInteractiveTerminal(),
+          });
           const keyCount = resolvedForPush.keyCount;
           let failures = 0;
           for (const host of hosts) {

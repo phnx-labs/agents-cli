@@ -15,13 +15,15 @@ biometric assertion never reuses, so one launch used to mean one sheet per bundl
 
 The sheet is raised only by a deliberate human request on a **locked** bundle:
 `agents secrets unlock`, or an `agents secrets view --reveal` / `agents secrets
-exec` you run **at a real interactive terminal** (a TTY, outside any agent
-runtime) — one sheet, then the value is revealed / the command runs. `agents
-secrets get` and every `agents secrets export` variant **never raise the sheet at
-all**, in any shell: they are automation primitives (`$(agents secrets get …)`,
-`eval "$(agents secrets export … --plaintext)"`), so a locked bundle fails fast
-toward `agents secrets unlock <bundle>` instead of blocking a pipeline on Keychain
-UI. Beneath an agent (`AGENTS_RUNTIME` set) or with no TTY, **all** of these
+exec`, or an `agents secrets export --host` you run **at a real interactive
+terminal** (a TTY, outside any agent runtime) — one sheet, then the value is
+revealed / the command runs / the bundle is pushed. `agents secrets get` and the
+value-emitting `agents secrets export` variants (`--plaintext`, `--to-file`,
+`--to-1password`) **never raise the sheet at all**, in any shell: they are
+automation primitives (`$(agents secrets get …)`, `eval "$(agents secrets export …
+--plaintext)"`), so a locked bundle fails fast toward `agents secrets unlock
+<bundle>` instead of blocking a pipeline on Keychain UI. Beneath an agent
+(`AGENTS_RUNTIME` set) or with no TTY, **all** of these
 resolve broker-only — there the agent is the caller, not you. See the
 [Touch-ID contract](#touch-id-contract) below for the full per-command matrix. The
 unlock names the requesting harness, bundle, reason, and duration; approved
@@ -34,16 +36,22 @@ Which `agents secrets` commands can raise a biometric sheet, and when:
 | Command | On a locked keychain bundle |
 |---|---|
 | `list`, `view` (no `--reveal`) | never prompts — metadata / masked values only |
-| `view --reveal`, `exec` | **at an interactive terminal:** one Touch ID, then reveals / runs. Under an agent (`AGENTS_RUNTIME`) or no TTY: broker-only, fail-closed, no sheet |
-| `get`, `export` (`--plaintext` / `--to-file` / `--host` / `--to-1password`) | **never prompts, in any shell** — automation primitives; fail-closed to `agents secrets unlock` |
+| `view --reveal`, `exec`, `export --host` | **at an interactive terminal:** one Touch ID, then reveals / runs / pushes. Under an agent (`AGENTS_RUNTIME`) or no TTY: broker-only, fail-closed, no sheet |
+| `get`, `export` (`--plaintext` / `--to-file` / `--to-1password`) | **never prompts, in any shell** — automation primitives; fail-closed to `agents secrets unlock` |
 | `unlock` | the one deliberate biometric entry point |
 | any command on an already-unlocked bundle | never prompts — the broker fast-path returns before Keychain is touched |
 
-The rule: a **deliberate human reveal/run** (`view --reveal`, `exec`) at a terminal
-gets one sheet; **automation primitives** (`get`, `export`) never do, because
-prompting would either dump plaintext onto a visible screen (`export`) or block a
-`$(…)` capture mid-pipeline (`get`). Everything an **agent** launches stays
-broker-only.
+The rule: a **deliberate human reveal/run/push** (`view --reveal`, `exec`,
+`export --host`) at a terminal gets one sheet; the **value-emitting automation
+primitives** (`get`, `export --plaintext` / `--to-file` / `--to-1password`) never
+do, because prompting would either dump plaintext onto a visible screen or block a
+`$(…)` capture mid-pipeline. Everything an **agent** launches stays broker-only.
+
+`export --host` sits on the human side because neither of those hazards applies to
+it: it prints a key COUNT, never a value, and nothing captures its stdout — it is a
+one-off fleet push a person types, strictly less exposed than the `view --reveal`
+that already prompts. Requiring a prior `agents secrets unlock` for it was an
+inconsistency, not a boundary.
 
 **The same rule covers raw keychain item reads.** A profile's provider token, the
 Claude OAuth item behind `agents view`, and every other `getKeychainToken` caller
