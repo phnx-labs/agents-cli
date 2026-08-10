@@ -1482,6 +1482,34 @@ export function shouldRecapDeadPane(status: number | undefined, interactive: boo
 }
 
 /**
+ * The exit code a tmux-wrapped run resolves with (RUSH-2185 / EXEC-23b).
+ *
+ * Three inputs, one rule: report success ONLY for an outcome tmux actually told
+ * us about. A clean user detach (`knownAlive`) is 0; a dead pane reports the
+ * status tmux read off it; everything else — pane unreadable because the server
+ * or session went away, or dead with no status — is UNKNOWN and resolves to
+ * {@link UNKNOWN_OUTCOME_EXIT_CODE}, never 0.
+ *
+ * Why this is not `status ?? 0`: an interactive run whose tmux server died mid-
+ * work landed on exactly those unknown branches and returned 0, so `agents run`
+ * printed a failure banner while handing its caller a success code. The same
+ * "1 if unknown" rule already governs the `--host` follow path
+ * (`docs/specifications.md` §Agent execution, exit-code table).
+ *
+ * @param pane       What `paneExitStatus` read back for the agent pane.
+ * @param knownAlive Positive proof the pane is still alive (see
+ *                   {@link isPaneKnownAliveFromQueryResult}) — a clean detach.
+ */
+export function tmuxRunExitCode(
+  pane: { dead: boolean; status?: number },
+  knownAlive: boolean,
+): number {
+  if (knownAlive) return 0;
+  if (pane.dead && pane.status !== undefined) return pane.status;
+  return UNKNOWN_OUTCOME_EXIT_CODE;
+}
+
+/**
  * True only when a `display-message #{pane_dead}` tmux query explicitly returned
  * "0" (pane alive). Used to distinguish "pane alive" from "query failed" in
  * situations where `paneExitStatus` conservatively returns `{dead: false}` for
@@ -1776,7 +1804,10 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
       await surfacePaneFailure(before.status, `${options.agent} exited before it could start`);
     }
     await killSession(name, socket).catch(() => {});
-    return { exitCode: before.status ?? 0, stderr: '', stdout: '' };
+    // A dead pane whose status tmux never reported is an UNKNOWN outcome, not a
+    // success — and the banner one line up already printed `exit 1` for it, so
+    // the old `?? 0` also made the message and the returned code disagree.
+    return { exitCode: tmuxRunExitCode(before, false), stderr: '', stdout: '' };
   }
 
   await attachTmux({ socket, args: ['attach-session', '-t', name] });
@@ -1802,18 +1833,34 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
       await surfacePaneFailure(after.status, `${options.agent} exited`);
     }
     await killSession(name, socket).catch(() => {});
-    return { exitCode: after.status ?? 0, stderr: '', stdout: '' };
+    // Same unknown-status rule as the pre-attach branch above (EXEC-23b).
+    return { exitCode: tmuxRunExitCode(after, false), stderr: '', stdout: '' };
   }
   // after.dead===false, but that could be a stale/unreadable-pane result.
   // Require positive proof before keeping the session as "user detached".
   if (pane && await checkPaneKnownAlive(pane)) {
     // Confirmed alive: the user pressed Ctrl-b d; keep the session for `agents focus`.
-    return { exitCode: 0, stderr: '', stdout: '' };
+    return { exitCode: tmuxRunExitCode(after, true), stderr: '', stdout: '' };
   }
-  // Ambiguous or unreadable pane (race between pane-died hook and our query) —
-  // tear down rather than leave an orphan session.
+  // F4 (EXEC-23b): ambiguous or unreadable pane — tmux could not tell us whether
+  // the agent finished or was killed (the server died under the run, the session
+  // vanished, the query raced the pane-died hook). The outcome is UNKNOWN, so it
+  // MUST NOT be reported as success: a caller that scripts `agents run` would
+  // count a run killed mid-work as a clean finish. Tear down so no orphan session
+  // is left, say plainly that the outcome is unknown, and exit non-zero — the same
+  // "1 if unknown" rule the `--host` follow path already uses.
   await killSession(name, socket).catch(() => {});
-  return { exitCode: 0, stderr: '', stdout: '' };
+  // One computation feeds both the banner and the return value — printing a code
+  // the caller does not receive is the same defect in miniature.
+  const exitCode = tmuxRunExitCode(after, false);
+  const RED = '\x1b[31m', GRAY = '\x1b[90m', OFF = '\x1b[0m';
+  process.stderr.write(
+    `\n${RED}agents: ${options.agent} outcome unknown (exit ${exitCode}).${OFF}\n` +
+    `${GRAY}  The tmux session went away before its exit status could be read, so this run` +
+    ` may have been killed mid-work.${OFF}\n` +
+    `${GRAY}  Tip: re-run with --no-tmux to launch the agent directly and see its full output.${OFF}\n\n`,
+  );
+  return { exitCode, stderr: '', stdout: '' };
 }
 
 /**
@@ -2087,6 +2134,14 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
 
 /** Exit code spawnAgent resolves with when a run is killed for crossing a budget cap. */
 export const BUDGET_KILL_EXIT_CODE = 7;
+
+/**
+ * Exit code a tmux-wrapped run resolves with when tmux cannot tell us how the
+ * agent finished — the pane is unreadable, or it is dead with no reported status
+ * (EXEC-23b). Never 0: an unknown outcome reported as success is how a run killed
+ * mid-work gets counted as a clean finish by whatever scripted it.
+ */
+export const UNKNOWN_OUTCOME_EXIT_CODE = 1;
 
 /**
  * Resolve the budget watcher for a run. Returns null (watcher dormant) when no

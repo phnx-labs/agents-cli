@@ -2143,6 +2143,30 @@ schema (`--json` passes through each agent's native stream format).
     `isPaneKnownAliveFromQueryResult(code, stdout)` encodes the positive-proof
     test (`lib/exec.ts: isPaneKnownAliveFromQueryResult`).  An ambiguous
     result MUST `killSession` rather than keep the orphan.
+- **EXEC-23b (MUST).** A tmux-wrapped run MUST resolve exit code `0` only for
+  an outcome tmux actually reported: a pane confirmed alive (a clean user
+  detach) or a dead pane whose `#{pane_dead_status}` tmux read as `0`. Every
+  other case is UNKNOWN — the pane is unreadable because the server or session
+  went away, or it is dead with no reported status — and MUST resolve to
+  `UNKNOWN_OUTCOME_EXIT_CODE` (1), with a stderr banner saying the outcome is
+  unknown. `tmuxRunExitCode(pane, knownAlive)` is the single decision
+  (`lib/exec.ts: tmuxRunExitCode`), used by all three `runInTmux` return
+  paths so the banner and the returned code can never disagree.
+
+  This closes a drift, not a hypothetical: the three paths previously returned
+  `status ?? 0` / a literal `0`, so an interactive run whose tmux server died
+  mid-work (`[server exited unexpectedly]`, the agent stranded at an approval
+  prompt) printed a failure banner reading `exit 1` and handed its caller `0`.
+  The rule matches the `--host` follow path already in the exit-code table
+  below — "the remote's own exit code, or 1 if unknown".
+
+  **GWT-E9 — a tmux server that dies under an interactive run is not success.**
+  Given an `agents run --interactive` wrapped in tmux; When the tmux server or
+  session goes away before `paneExitStatus` can read the agent pane (so it
+  returns `{found: false, dead: false}`); Then the run MUST tear the session
+  down, print the unknown-outcome banner, and resolve `1` — never `0`
+  (`lib/exec.test.ts`: "tmuxRunExitCode — an unknown outcome is never success",
+  "paneExitStatus against a real tmux server that went away").
 - **EXEC-24 (MUST).** A slash-command prompt run headless under the
   implicit default `plan` mode MUST be refused before spawn — it would hang
   forever at `ExitPlanMode` with no TTY to approve it
