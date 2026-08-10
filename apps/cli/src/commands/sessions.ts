@@ -2236,7 +2236,7 @@ export async function renderSessionPreview(
   }
   if (outcome.kind === 'partial') {
     console.error(chalk.red(`Partial session resolution: ${outcome.failedPeers.join(', ')} did not answer.`));
-    console.error(chalk.gray('No preview was rendered because the short ID may be ambiguous on an unreachable peer.'));
+    console.error(chalk.gray('Nothing matched on the reachable fleet, so the session may live on a peer that did not answer.'));
     process.exitCode = 2;
     return;
   }
@@ -5256,14 +5256,15 @@ export function metadataResolveOutcome(
   // selector would discard alias suffixes such as c1f3d813 because the native
   // UUID intentionally has a different prefix.
   const candidates = fleetCandidatesByQuery([...localMatches, ...remote.sessions], selector, true);
-  // A full UUID is globally unique, so one exact hit resolves even when an
-  // unrelated registered device is offline. A label is NOT globally unique — a
-  // distinct session may carry the same label on an unreachable peer — so it
-  // stays fail-closed: a unique label auto-resumes only once every peer has
-  // answered (candidates.length === 1 below), and an unreachable peer forces
-  // `partial` rather than guessing. (RUSH-2203: early-exit is UUID-only for the
-  // same reason — see isDefinitiveMatch.)
-  if (FULL_SESSION_ID_RE.test(selector) && candidates.length === 1 && candidates[0].id.toLowerCase() === selector.toLowerCase()) {
+  // A session id is a UUID, so an id-shaped selector — a full UUID or the short
+  // hex prefix the CLI prints everywhere — is unique by construction: one hit on
+  // the reachable fleet IS the answer, and an offline peer cannot be hiding a
+  // second session with the same prefix. A label is NOT unique — a distinct
+  // session may genuinely carry the same label on an unreachable peer — so only
+  // labels stay fail-closed, forcing `partial` rather than guessing.
+  // (RUSH-2203: early-exit stays UUID-only — see isDefinitiveMatch — because
+  // that decides when to stop dialing peers, not how to read the answers.)
+  if (looksLikeSessionId(selector) && candidates.length === 1) {
     return { kind: 'resolved', session: candidates[0].hits[0].session };
   }
   if (remote.unreachable.length > 0) return { kind: 'partial', failedPeers: remote.unreachable };

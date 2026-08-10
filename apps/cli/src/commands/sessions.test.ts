@@ -1257,7 +1257,7 @@ describe('agents sessions --resolve local-peer critical path', () => {
     }
   });
 
-  it('resolves one exact UUID even when unrelated fleet peers are unavailable', () => {
+  it('resolves an id-shaped selector — full UUID or short prefix — even when unrelated fleet peers are unavailable', () => {
     const id = '019fd0c8-b3e9-77a2-a1a4-444698c4d897';
     const session: SessionMeta = {
       id,
@@ -1269,11 +1269,39 @@ describe('agents sessions --resolve local-peer critical path', () => {
       timestamp: '2026-08-05T09:29:43.616Z',
       filePath: '/sessions/codex.jsonl',
     };
-    expect(metadataResolveOutcome([session], { sessions: [], unreachable: ['offline-box'] }, id)).toEqual({
-      kind: 'resolved',
-      session,
+    const offline = { sessions: [], unreachable: ['offline-box'] };
+    expect(metadataResolveOutcome([session], offline, id)).toEqual({ kind: 'resolved', session });
+    // A short id is a UUID prefix, so an offline peer cannot be hiding a second
+    // session that shares it — one reachable hit is the answer, not a `partial`.
+    expect(metadataResolveOutcome([session], offline, '019fd0c8')).toEqual({ kind: 'resolved', session });
+    expect(metadataResolveOutcome([session], offline, '019fd0c8-b3e9')).toEqual({ kind: 'resolved', session });
+  });
+
+  it('keeps a LABEL selector fail-closed when a peer is unreachable', () => {
+    // Unlike an id, a label is not unique across the fleet: the offline box may
+    // genuinely hold a different session carrying the same label, so resolving
+    // from one reachable hit would be a guess.
+    const session: SessionMeta = {
+      id: '019fd0c8-b3e9-77a2-a1a4-444698c4d897',
+      shortId: '019fd0c8',
+      agent: 'codex',
+      version: '0.146.0',
+      mode: 'edit',
+      machine: 'yosemite-s0',
+      timestamp: '2026-08-05T09:29:43.616Z',
+      filePath: '/sessions/codex.jsonl',
+      label: 'release-train',
+    };
+    expect(metadataResolveOutcome([session], { sessions: [], unreachable: ['offline-box'] }, 'release-train')).toEqual({
+      kind: 'partial',
+      failedPeers: ['offline-box'],
     });
-    expect(metadataResolveOutcome([session], { sessions: [], unreachable: ['offline-box'] }, '019fd0c8')).toEqual({
+  });
+
+  it('still reports partial for an id-shaped selector that matched nothing reachable', () => {
+    // Nothing was found here, so the session may well live on the offline peer —
+    // that is the case where an unreachable box genuinely changes the answer.
+    expect(metadataResolveOutcome([], { sessions: [], unreachable: ['offline-box'] }, 'deadbeef')).toEqual({
       kind: 'partial',
       failedPeers: ['offline-box'],
     });
