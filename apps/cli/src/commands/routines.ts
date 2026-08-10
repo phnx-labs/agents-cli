@@ -647,7 +647,7 @@ async function parseAndValidateDevices(raw: string): Promise<string[]> {
 export function registerRoutinesCommands(program: Command): void {
   const routinesCmd = program
     .command('routines')
-    .description('Schedule agents to run on a cron schedule or at a specific time. The scheduler auto-starts on first add.');
+    .description('Schedule agents to run on a cron schedule or at a specific time. The daemon starts at install/upgrade and on setup; routines add also ensures it is running.');
 
   addHostOption(routinesCmd);
 
@@ -695,7 +695,8 @@ export function registerRoutinesCommands(program: Command): void {
         - what task to give the agent (the prompt)
         - execution constraints (mode, effort, timeout)
 
-      The background scheduler auto-starts the first time you add a routine.
+      The always-on agents daemon starts at install/upgrade and on setup (when
+      daemon.enabled is not false). Adding a routine also ensures it is running.
       Manage it with 'agents routines start|stop|status'.
 
       Version / credit failover (same semantics as 'agents run'):

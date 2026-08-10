@@ -1422,12 +1422,13 @@ agents routines status    # Check health, PID, binary, heartbeat, and upcoming r
 ```
 
 The daemon **starts at install/upgrade** (`postinstall` on darwin/linux) and on
-`agents setup`, so launchd/systemd KeepAlive keep it up. `agents routines add`
+first `agents setup` / `agents setup --force` (when `daemon.enabled` is not
+false), so launchd/systemd KeepAlive keep it up. `agents routines add`
 still ensures the scheduler is running and reloads it — you rarely need
 `routines start` manually. When you `add`, `remove`, `pause`, or `resume` a job,
-it auto-reloads. `daemon.enabled=false` still suppresses background auto-starts
-(`ensureDaemonStarted`); deliberate `agents daemon start` / install-time
-`startDaemon` remain the operator override.
+it auto-reloads. `daemon.enabled=false` suppresses cold starts at install and
+setup, and still gates `ensureDaemonStarted`; deliberate `agents daemon start`
+remains the operator override.
 Scheduled fires use two independent guards. An atomic slot claim keyed by routine
 name and the intended UTC schedule time ensures a delivered slot launches once,
 including across daemon reloads. A separate active-run claim prevents a routine

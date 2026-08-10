@@ -402,18 +402,26 @@ async function healLongRunningProcesses() {
   } catch { /* best effort */ }
 
   // Always (re)start so first install writes the LaunchAgent/systemd unit and
-  // upgrades bounce onto the new binary. Pin AGENTS_BIN so the service
-  // manifest never records scripts/postinstall.js as the daemon command.
+  // upgrades bounce onto the new binary — but honor daemon.enabled for cold
+  // starts (SING-4a). If it was already running under a disable, stop and leave
+  // it down so upgrade does not resurrect a killed switch.
   try {
     const d = await import('../dist/lib/daemon.js');
+    const { isDaemonEnabled } = await import('../dist/lib/device-config.js');
     const wasRunning = Boolean(d.isDaemonRunning?.());
-    if (wasRunning) d.stopDaemon?.();
-    d.startDaemon?.(AGENTS_BIN);
-    console.log(
-      wasRunning
-        ? '  Restarted the routines daemon onto this version.'
-        : '  Started the always-on agents daemon.',
-    );
+    const enabled = typeof isDaemonEnabled === 'function' ? isDaemonEnabled() : true;
+    if (wasRunning) {
+      d.stopDaemon?.();
+      if (enabled) {
+        d.startDaemon?.(AGENTS_BIN);
+        console.log('  Restarted the routines daemon onto this version.');
+      } else {
+        console.log('  Stopped the routines daemon (daemon.enabled=false — not restarted).');
+      }
+    } else if (enabled) {
+      d.startDaemon?.(AGENTS_BIN);
+      console.log('  Started the always-on agents daemon.');
+    }
   } catch { /* best effort */ }
 }
 

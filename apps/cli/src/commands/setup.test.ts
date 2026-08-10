@@ -54,6 +54,57 @@ describe('agents setup command group', () => {
     expect(hubRuns).toBe(1);
   });
 
+  it('starts the daemon on first setup / --force when daemon.enabled', async () => {
+    const systemRepo = path.join(TEST_HOME, '.agents', '.system');
+    fs.mkdirSync(systemRepo, { recursive: true });
+    execFileSync('git', ['init', '--quiet'], { cwd: systemRepo });
+    let starts = 0;
+    await runSetup(new Command(), {
+      force: true,
+      systemRepo: false,
+      suppressFooter: true,
+      isDaemonEnabledFn: () => true,
+      startDaemonFn: () => {
+        starts += 1;
+        return { pid: 99, method: 'detached' };
+      },
+    });
+    expect(starts).toBe(1);
+  });
+
+  it('does not start the daemon on setup when daemon.enabled=false', async () => {
+    const systemRepo = path.join(TEST_HOME, '.agents', '.system');
+    fs.mkdirSync(systemRepo, { recursive: true });
+    execFileSync('git', ['init', '--quiet'], { cwd: systemRepo });
+    let starts = 0;
+    await runSetup(new Command(), {
+      force: true,
+      systemRepo: false,
+      suppressFooter: true,
+      isDaemonEnabledFn: () => false,
+      startDaemonFn: () => {
+        starts += 1;
+        return { pid: 99, method: 'detached' };
+      },
+    });
+    expect(starts).toBe(0);
+  });
+
+  it('does not start the daemon when re-entering the hub without --force', async () => {
+    const systemRepo = path.join(TEST_HOME, '.agents', '.system');
+    fs.mkdirSync(systemRepo, { recursive: true });
+    execFileSync('git', ['init', '--quiet'], { cwd: systemRepo });
+    let starts = 0;
+    await runSetup(new Command(), {
+      runHub: async () => {},
+      startDaemonFn: () => {
+        starts += 1;
+        return { pid: 99, method: 'detached' };
+      },
+    });
+    expect(starts).toBe(0);
+  });
+
   it('re-enters the hub, runs a selected wizard seam, then refreshes status', async () => {
     const selected: string[] = [];
     let promptCount = 0;

@@ -191,7 +191,10 @@ describe('postinstall signed-binary resolution (#315)', () => {
 });
 
 /** Stub dist modules so healLongRunningProcesses can import them under a clean CI=unset. */
-function stageDaemonHealStubs(root: string, opts: { wasRunning?: boolean } = {}): void {
+function stageDaemonHealStubs(
+  root: string,
+  opts: { wasRunning?: boolean; enabled?: boolean } = {},
+): void {
   const lib = path.join(root, 'dist', 'lib');
   fs.mkdirSync(path.join(lib, 'platform'), { recursive: true });
   fs.mkdirSync(path.join(lib, 'secrets'), { recursive: true });
@@ -214,6 +217,14 @@ function stageDaemonHealStubs(root: string, opts: { wasRunning?: boolean } = {})
     ].join('\n'),
   );
   const running = opts.wasRunning ? 'true' : 'false';
+  const enabled = opts.enabled === false ? 'false' : 'true';
+  fs.writeFileSync(
+    path.join(lib, 'device-config.js'),
+    [
+      `export function isDaemonEnabled() { return ${enabled}; }`,
+      '',
+    ].join('\n'),
+  );
   fs.writeFileSync(
     path.join(lib, 'daemon.js'),
     [
@@ -296,6 +307,45 @@ describe('postinstall always-on daemon heal', () => {
       expect(result.status, result.stderr).toBe(0);
       expect(result.stdout).not.toContain('always-on agents daemon');
       expect(fs.existsSync(marker)).toBe(false);
+    },
+  );
+
+  it.runIf(process.platform === 'darwin' || process.platform === 'linux')(
+    'does not cold-start when daemon.enabled=false',
+    () => {
+      const home = makeTempHome();
+      const root = stagePackageTree();
+      stageDaemonHealStubs(root, { wasRunning: false, enabled: false });
+      const marker = path.join(home, 'daemon-marker.txt');
+      const result = runPostinstall(root, home, {
+        CI: undefined,
+        AGENTS_NO_HEAL: undefined,
+        AGENTS_POSTINSTALL_DAEMON_MARKER: marker,
+      });
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).not.toContain('Started the always-on agents daemon');
+      expect(fs.existsSync(marker)).toBe(false);
+    },
+  );
+
+  it.runIf(process.platform === 'darwin' || process.platform === 'linux')(
+    'stops and leaves down when already running under daemon.enabled=false',
+    () => {
+      const home = makeTempHome();
+      const root = stagePackageTree();
+      stageDaemonHealStubs(root, { wasRunning: true, enabled: false });
+      const marker = path.join(home, 'daemon-marker.txt');
+      const result = runPostinstall(root, home, {
+        CI: undefined,
+        AGENTS_NO_HEAL: undefined,
+        AGENTS_POSTINSTALL_DAEMON_MARKER: marker,
+      });
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain('daemon.enabled=false — not restarted');
+      const log = fs.readFileSync(marker, 'utf-8').trim().split('\n');
+      expect(log).toEqual(['stop']);
     },
   );
 });

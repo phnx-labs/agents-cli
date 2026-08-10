@@ -188,7 +188,7 @@ Two things worth knowing exist, without dumping their full docs here:
   (`phnx-labs/.agents-system`) rather than duplicated here.
 - **`agents routines`** — run any agent on a cron schedule or at a specific
   time, with sandboxed permissions and a long-running scheduler daemon that
-  auto-starts on the first `routines add`. See [`routines.md`](routines.md).
+  starts at install/upgrade and on setup. See [`routines.md`](routines.md).
 
 ## 7. Where next
 

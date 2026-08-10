@@ -46,11 +46,12 @@ into the routines daemon.*
 - a 60s monitor interval.
 
 It persists via launchd **or** a detached fallback. Install and upgrade
-(`scripts/postinstall.js` → `healLongRunningProcesses` on darwin/linux) always
-start the supervised daemon so KeepAlive/Restart=always apply without waiting
-for `routines add`. `agents setup` also calls `startDaemon()` after the system
-repo is ready. Background-adjacent callers still use `ensureDaemonStarted()`
-(honoring `daemon.enabled` and the auto-start circuit breaker).
+(`scripts/postinstall.js` → `healLongRunningProcesses` on darwin/linux) start
+the supervised daemon when `daemon.enabled` is not false so KeepAlive/Restart=always
+apply without waiting for `routines add`. First-run / `--force` `agents setup`
+also calls `startDaemon()` after the system repo is ready. Background-adjacent
+callers still use `ensureDaemonStarted()` (honoring `daemon.enabled` and the
+auto-start circuit breaker).
 
 Observed failure modes this cycle: heavy/slow startup, stale pid file
 (`launchctl … PID: null`), duplicate daemon processes, and cold-start

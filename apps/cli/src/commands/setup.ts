@@ -90,6 +90,8 @@ interface RunSetupOptions {
   suppressFooter?: boolean;
   systemRepo?: boolean;
   runHub?: () => Promise<void>;
+  startDaemonFn?: () => { pid: number | null; method: string };
+  isDaemonEnabledFn?: () => boolean;
 }
 
 /** First-run setup. Clones ~/.agents/.system/ from the system repo if needed. */
@@ -162,10 +164,16 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
   }
 
   try {
-    const { startDaemon } = await import('../lib/daemon.js');
-    const started = startDaemon();
-    if (started.method !== 'already-running' && started.pid) {
-      console.log(chalk.gray(`Started the always-on agents daemon (pid ${started.pid}).`));
+    const enabled = options.isDaemonEnabledFn
+      ? options.isDaemonEnabledFn()
+      : (await import('../lib/device-config.js')).isDaemonEnabled();
+    if (enabled) {
+      const start = options.startDaemonFn
+        ?? (await import('../lib/daemon.js')).startDaemon;
+      const started = start();
+      if (started.method !== 'already-running' && started.pid) {
+        console.log(chalk.gray(`Started the always-on agents daemon (pid ${started.pid}).`));
+      }
     }
   } catch { /* best effort */ }
 
