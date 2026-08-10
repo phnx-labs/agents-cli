@@ -10,7 +10,7 @@ status: implementing
 tracking: "extends RUSH-2431 / RUSH-2446"
 facts:
   - "scripts/install.sh links the dev build as ~/.local/bin/{agents,ag,browser}"
-  - "Those three links are dangling on yosemite-s0 right now"
+  - "Those three links are dangling on [worker] right now"
   - "A worktree build is currently serving the shared daemon (pid 4163347)"
   - "postinstall.js, the path real npm users take, is out of scope"
 ---
@@ -238,7 +238,7 @@ The same rename applies at every other site that hardcodes the bin name:
 +done
 ```
 
-This clears the three dangling entries on yosemite-s0 the next time the script
+This clears the three dangling entries on [worker] the next time the script
 runs.
 
 ### Daemon bounce becomes opt-in

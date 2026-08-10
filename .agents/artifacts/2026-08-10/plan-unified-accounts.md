@@ -11,8 +11,8 @@ repository: phnx-labs/agents-cli
 branch: main
 harness: codex
 agent: Codex
-human: Muqsit
-host: yosemite-s0
+human: Owner
+host: [worker]
 session: 019fdef4
 date: '2026-08-10'
 facts:
@@ -46,7 +46,7 @@ $ agents accounts name work --from claude@2.1.220
 Named the claude account 'work'.
 
 $ agents view claude
-2.1.220  default  user@example.com
+2.1.220  default  [account-redacted]
 ```
 </article>
 
@@ -61,8 +61,8 @@ $ agents accounts attach work claude@2.1.225
 Attached work to claude@2.1.225.
 
 $ agents view claude
-2.1.225  opus[1m]  work · user@example.com  Max
-2.1.220  default   work · user@example.com  Max
+2.1.225  opus[1m]  work · [account-redacted]  Max
+2.1.220  default   work · [account-redacted]  Max
 ```
 </article>
 </section>
@@ -107,7 +107,7 @@ The change standardizes the user model without pretending every harness supports
 | Inspect | `agents accounts view work` | Show identity metadata, credential custody, bindings, and availability |
 | Rename | `agents accounts rename work rush-work` | Rename the account while retaining its stable ID and bindings |
 | Remove | `agents accounts remove rush-work` | Refuse while bindings/defaults still reference it; explain how to detach |
-| Copy portable credentials | `agents accounts sync openrouter-work zion` | Explicitly provision the same stable provider account on another device |
+| Copy portable credentials | `agents accounts sync openrouter-work [interactive-host]` | Explicitly provision the same stable provider account on another device |
 
 `--from` and `--to` are removed from the proposed API. Flags remain for optional attributes and behavior, such as `--provider`, `--auth`, `--json`, `--force`, and `--default`.
 
@@ -129,7 +129,7 @@ agents accounts add openrouter-work --provider openrouter --auth api-key
 agents accounts attach openrouter-work codex@0.145.0
 agents accounts attach openrouter-work cursor@latest
 agents accounts attach openrouter-work deepseek
-agents accounts sync openrouter-work zion
+agents accounts sync openrouter-work [interactive-host]
 ```
 
 ### Output contract
@@ -138,7 +138,7 @@ agents accounts sync openrouter-work zion
 $ agents accounts view work
 work
   kind        native login
-  identity    user@example.com
+  identity    [account-redacted]
   provider    Anthropic
   custody     Claude Code (not stored by agents-cli)
   scope       version
@@ -153,7 +153,7 @@ openrouter-work
   provider    OpenRouter
   auth        API key
   custody     agents secrets (no biometric ACL)
-  available   this device, zion
+  available   this device, [interactive-host]
   attached    codex@0.145.0, cursor@latest, deepseek
 ```
 

@@ -13,7 +13,7 @@ tracking: "events/logs/audit consolidation"
 project: agents-cli
 repository: phnx-labs/agents-cli
 branch: main
-host: yosemite-s0
+host: [worker]
 date: '2026-08-10'
 facts:
   - "Decision: one source of truth, one engine"

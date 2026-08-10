@@ -13,7 +13,7 @@ Five things worth your attention before I build this.
 
 1. **The spawn contract.** One cwd (the project's primary directory) plus every other project directory attached as an `--add-dir` grant. Only Claude and Codex consume `--add-dir` today; other harnesses drop it silently.
 2. **The CLI surface.** `--dir` on `projects add`, `--add-dir` / `--rm-dir` on `projects set`. Extending the two commands that already exist rather than adding a `projects repo` subcommand group.
-3. **A slug comes from the directory, never from the path.** Your checkout sits at `~/src/github.com/muqsitnawaz/agents-cli` while the remote is `phnx-labs/agents-cli`. Every slug is read from that directory's own `origin`.
+3. **A slug comes from the directory, never from the path.** Your checkout sits at `~/src/github.com/owner/agents-cli` while the remote is `phnx-labs/agents-cli`. Every slug is read from that directory's own `origin`.
 4. **This lands in agents-cli, not Factory.** The extension gets thinner: it stops computing a cwd and passes `--project <slug>`.
 5. **`agents teams` gains `--project`.** It has no such flag today, so this is genuinely new surface.
 
@@ -28,7 +28,7 @@ Binding the two repos is a one-line YAML edit. The request underneath it is the 
 | When you… | Today | After |
 | --- | --- | --- |
 | `agents run claude --project agents-cli` | Lands in `agents-cli`. The web repo and `.system` are invisible to the agent. | Lands in `agents-cli`, with `agents-cli-web` and `~/.agents/.system` attached as accessible roots. |
-| `agents run … --project agents-cli --host yosemite-s0` | Same, remote. Extra dirs still invisible. | Extra dirs forwarded home-relative, re-rooted at the host's own `$HOME`. |
+| `agents run … --project agents-cli --host [worker]` | Same, remote. Extra dirs still invisible. | Extra dirs forwarded home-relative, re-rooted at the host's own `$HOME`. |
 | `agents teams create X` | No `--project` flag exists at all. | `--project agents-cli` sets each teammate's base cwd and grants the sibling dirs. |
 | Cmd-Shift-A (`Agents: New Agent`) in the agents-cli window | cwd is hardcoded to `workspaceFolders[0]`; projects are never consulted. | Emits `--project agents-cli`; the CLI resolves cwd and grants. |
 | A box that has no `agents-cli-web` checkout | n/a | Definition loads fine; the missing dir is skipped at spawn, not an error. |
@@ -39,16 +39,16 @@ Binding the two repos is a one-line YAML edit. The request underneath it is the 
     <pre><code>agents-cli  ·  1 live
   Agents CLI and Factory
   fleet    7/11 clean · 3 behind · 2 dirty · 1 missing
-           win-mini: ✗ missing  ·  yosemite-m0: ⚠ ↓57 · main  ·  zion: ✓ clean · main
+           [worker]: ✗ missing  ·  [worker]: ⚠ ↓57 · main  ·  [interactive-host]: ✓ clean · main
   repos    phnx-labs/agents-cli
 
-  root     ~/src/github.com/muqsitnawaz/agents-cli
-  path     ~/src/github.com/muqsitnawaz/agents-cli
+  root     ~/src/github.com/owner/agents-cli
+  path     ~/src/github.com/owner/agents-cli
   linear   8eb8f5b1-3870-4590-ba67-36f3811d1435</code></pre>
-    <p>One repo, one root, one probed directory. Captured on zion, 2026-08-10.</p>
+    <p>One repo, one root, one probed directory. Captured on [interactive-host], 2026-08-10.</p>
     <h4>Today — spawning into it</h4>
     <pre><code>$ agents run claude --project agents-cli
-  cwd  ~/src/github.com/muqsitnawaz/agents-cli
+  cwd  ~/src/github.com/owner/agents-cli
   (agents-cli-web and ~/.agents/.system are not reachable by the agent)</code></pre>
   </article>
   <article class="artifact-panel" data-state="proposed" data-evidence="mockup">
@@ -56,24 +56,24 @@ Binding the two repos is a one-line YAML edit. The request underneath it is the 
     <pre><code>agents-cli  ·  1 live
   Agents CLI and Factory
   fleet    21/33 clean · 3 behind · 2 dirty · 1 missing        (3 dirs × 11 hosts)
-           win-mini: ✗ missing  ·  yosemite-m0: ⚠ ↓57 · main  ·  zion: ✓ clean · main
-  repo     phnx-labs/agents-cli       (~/src/github.com/muqsitnawaz/agents-cli)
-  repo     phnx-labs/agents-cli-web   (~/src/github.com/muqsitnawaz/agents-cli-web)
+           [worker]: ✗ missing  ·  [worker]: ⚠ ↓57 · main  ·  [interactive-host]: ✓ clean · main
+  repo     phnx-labs/agents-cli       (~/src/github.com/owner/agents-cli)
+  repo     phnx-labs/agents-cli-web   (~/src/github.com/owner/agents-cli-web)
   repo     phnx-labs/.agents-system   (~/.agents/.system)
 
-  root     ~/src/github.com/muqsitnawaz/agents-cli
-  path     ~/src/github.com/muqsitnawaz/agents-cli
+  root     ~/src/github.com/owner/agents-cli
+  path     ~/src/github.com/owner/agents-cli
   linear   8eb8f5b1-3870-4590-ba67-36f3811d1435</code></pre>
     <p>Three bound directories, each with the remote read from its own <code>origin</code>. The one-line <code>repos</code> summary becomes the per-repo form that <code>projects.ts:631-633</code> already prints.</p>
     <h4>Proposed — spawning into it</h4>
     <pre><code>$ agents run claude --project agents-cli
-  cwd       ~/src/github.com/muqsitnawaz/agents-cli
-  --add-dir ~/src/github.com/muqsitnawaz/agents-cli-web
+  cwd       ~/src/github.com/owner/agents-cli
+  --add-dir ~/src/github.com/owner/agents-cli-web
   --add-dir ~/.agents/.system</code></pre>
   </article>
 </section>
 
-**Figure 1.** The user-visible change: a project stops being one directory that lists extra slugs and becomes a set of directories every spawn path can reach. The current state is captured live on zion; the proposed state is a mockup.
+**Figure 1.** The user-visible change: a project stops being one directory that lists extra slugs and becomes a set of directories every spawn path can reach. The current state is captured live on [interactive-host]; the proposed state is a mockup.
 
 ## Current architecture
 
@@ -144,7 +144,7 @@ export function resolveDefinedProjectPath(def, worktree, forRemote) {
 ```bash
 # you name the directory; the slug is read from ITS origin remote
 agents projects set agents-cli \
-  --add-dir ~/src/github.com/muqsitnawaz/agents-cli-web \
+  --add-dir ~/src/github.com/owner/agents-cli-web \
   --add-dir ~/.agents/.system
 
 # resolution per dir:
@@ -215,26 +215,26 @@ Separately, `defToManaged` (`apps/factory/src/core/managedProjects.ts:53-87`) co
 
 ### 6. Bind the three repos, then push to the fleet
 
-Slugs verified by reading each directory's `origin` on zion:
+Slugs verified by reading each directory's `origin` on [interactive-host]:
 
 | Directory | Remote |
 | --- | --- |
-| `~/src/github.com/muqsitnawaz/agents-cli` | `phnx-labs/agents-cli` |
-| `~/src/github.com/muqsitnawaz/agents-cli-web` | `phnx-labs/agents-cli-web` |
+| `~/src/github.com/owner/agents-cli` | `phnx-labs/agents-cli` |
+| `~/src/github.com/owner/agents-cli-web` | `phnx-labs/agents-cli-web` |
 | `~/.agents/.system` | `phnx-labs/.agents-system` |
 
 ```yaml
 # ~/.agents/projects/agents-cli.yaml
 name: agents-cli
 description: Agents CLI and Factory
-root: ~/src/github.com/muqsitnawaz/agents-cli
-defaultPath: ~/src/github.com/muqsitnawaz/agents-cli
+root: ~/src/github.com/owner/agents-cli
+defaultPath: ~/src/github.com/owner/agents-cli
 repo: phnx-labs/agents-cli
 repos:
   - slug: phnx-labs/agents-cli
-    path: ~/src/github.com/muqsitnawaz/agents-cli
+    path: ~/src/github.com/owner/agents-cli
   - slug: phnx-labs/agents-cli-web
-    path: ~/src/github.com/muqsitnawaz/agents-cli-web
+    path: ~/src/github.com/owner/agents-cli-web
   - slug: phnx-labs/.agents-system
     path: ~/.agents/.system
 linear:
@@ -245,7 +245,7 @@ linear:
 Fleet propagation is not automatic. `~/.agents/projects/` is syncable, not synced — an uncommitted definitions directory has been deleted twice by a reconcile (`projects.ts:10-16`).
 
 ```bash
-agents repo push user                       # on zion
+agents repo push user                       # on [interactive-host]
 agents ssh <host> 'agents repo pull user'   # every reachable device
 agents ssh <host> 'agents projects view agents-cli'
 ```
@@ -255,8 +255,8 @@ agents ssh <host> 'agents projects view agents-cli'
 ```bash
 # Define a project across several directories (slug read from each dir's origin)
 agents projects add agents-cli \
-  --dir ~/src/github.com/muqsitnawaz/agents-cli \
-  --dir ~/src/github.com/muqsitnawaz/agents-cli-web \
+  --dir ~/src/github.com/owner/agents-cli \
+  --dir ~/src/github.com/owner/agents-cli-web \
   --dir ~/.agents/.system
 
 # Amend an existing definition
@@ -266,7 +266,7 @@ agents projects set agents-cli --add-dir ./vendor/thing --slug phnx-labs/thing  
 
 # Spawning: unchanged flags, wider reach
 agents run claude --project agents-cli                  # cwd + sibling grants
-agents run claude --project agents-cli --host yosemite-s0
+agents run claude --project agents-cli --host [worker]
 agents teams create my-feature --project agents-cli     # NEW flag on teams
 ```
 
@@ -293,7 +293,7 @@ Steps 1 through 3 are the spine. Steps 4 and 5 are independent consumers of step
 | `agents projects view agents-cli` | Three `repo` lines, each with its own path |
 | `agents run claude --project agents-cli` | cwd is `agents-cli`; two `--add-dir` flags for the siblings |
 | Grant is real | Inside the spawned agent, read a file under `~/.agents/.system` and edit one under `agents-cli-web` |
-| `--host yosemite-s0` | Forwarded paths are `~/…`, not `/Users/you/…` |
+| `--host [worker]` | Forwarded paths are `~/…`, not `/Users/you/…` |
 | `agents teams create … --project agents-cli` | Teammate lands in the primary dir with sibling grants |
 | Extension Cmd-Shift-A | Terminal shows `agents run <agent> --interactive --project agents-cli` |
 | Fleet | `projects view` matches on one Linux worker and one Mac; a box missing `agents-cli-web` skips it without error |
@@ -302,7 +302,7 @@ Steps 1 through 3 are the spine. Steps 4 and 5 are independent consumers of step
 # the spine, end to end
 agents projects view agents-cli
 agents run claude --project agents-cli --print-command
-agents run claude --project agents-cli --host yosemite-s0 --print-command
+agents run claude --project agents-cli --host [worker] --print-command
 agents teams create dirs-check --project agents-cli
 agents teams add dirs-check claude "list your accessible roots" --name probe
 ```

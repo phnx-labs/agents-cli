@@ -25,14 +25,14 @@
 <div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-draft">draft</span></div>
 <h1>A project is a set of directories, each with its own remote</h1>
 <p class="summary">Bind agents-cli-web and ~/.agents/.system to the agents-cli project, and make every spawn path — agents run, agents teams, and the extension's New Agent — resolve all of a project's directories instead of just one.</p>
-<div class="meta" aria-label="Artifact metadata"><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">zion</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">9ae6ccdf</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
+<div class="meta" aria-label="Artifact metadata"><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Owner</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">[interactive-host]</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">9ae6ccdf</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
 </section>
 <nav class="toc" aria-label="Artifact sections"><a href="#focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a href="#purpose"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#behavior-what-happens-when-you-do-x"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Behavior — what happens when you do X</a><a href="#current-architecture"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Current architecture</a><a href="#proposed-changes"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#to-do"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>To-do</a><a href="#validation"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="focus-for-review">Focus for review</h2>
 <p>Five things worth your attention before I build this.</p>
 <ol>
 <li><strong>The spawn contract.</strong> One cwd (the project's primary directory) plus every other project directory attached as an <code>--add-dir</code> grant. Only Claude and Codex consume <code>--add-dir</code> today; other harnesses drop it silently.</li>
 <li><strong>The CLI surface.</strong> <code>--dir</code> on <code>projects add</code>, <code>--add-dir</code> / <code>--rm-dir</code> on <code>projects set</code>. Extending the two commands that already exist rather than adding a <code>projects repo</code> subcommand group.</li>
-<li><strong>A slug comes from the directory, never from the path.</strong> Your checkout sits at <code>~/src/github.com/muqsitnawaz/agents-cli</code> while the remote is <code>phnx-labs/agents-cli</code>. Every slug is read from that directory's own <code>origin</code>.</li>
+<li><strong>A slug comes from the directory, never from the path.</strong> Your checkout sits at <code>~/src/github.com/owner/agents-cli</code> while the remote is <code>phnx-labs/agents-cli</code>. Every slug is read from that directory's own <code>origin</code>.</li>
 <li><strong>This lands in agents-cli, not Factory.</strong> The extension gets thinner: it stops computing a cwd and passes <code>--project &lt;slug&gt;</code>.</li>
 <li><strong><code>agents teams</code> gains <code>--project</code>.</strong> It has no such flag today, so this is genuinely new surface.</li>
 </ol>
@@ -56,7 +56,7 @@
 <td>Lands in <code>agents-cli</code>, with <code>agents-cli-web</code> and <code>~/.agents/.system</code> attached as accessible roots.</td>
 </tr>
 <tr>
-<td><code>agents run … --project agents-cli --host yosemite-s0</code></td>
+<td><code>agents run … --project agents-cli --host [worker]</code></td>
 <td>Same, remote. Extra dirs still invisible.</td>
 <td>Extra dirs forwarded home-relative, re-rooted at the host's own <code>$HOME</code>.</td>
 </tr>
@@ -82,16 +82,16 @@
     <pre><code>agents-cli  ·  1 live
   Agents CLI and Factory
   fleet    7/11 clean · 3 behind · 2 dirty · 1 missing
-           win-mini: ✗ missing  ·  yosemite-m0: ⚠ ↓57 · main  ·  zion: ✓ clean · main
+           [worker]: ✗ missing  ·  [worker]: ⚠ ↓57 · main  ·  [interactive-host]: ✓ clean · main
   repos    phnx-labs/agents-cli
 
-  root     ~/src/github.com/muqsitnawaz/agents-cli
-  path     ~/src/github.com/muqsitnawaz/agents-cli
+  root     ~/src/github.com/owner/agents-cli
+  path     ~/src/github.com/owner/agents-cli
   linear   8eb8f5b1-3870-4590-ba67-36f3811d1435</code></pre>
-    <p>One repo, one root, one probed directory. Captured on zion, 2026-08-10.</p>
+    <p>One repo, one root, one probed directory. Captured on [interactive-host], 2026-08-10.</p>
     <h4>Today — spawning into it</h4>
     <pre><code>$ agents run claude --project agents-cli
-  cwd  ~/src/github.com/muqsitnawaz/agents-cli
+  cwd  ~/src/github.com/owner/agents-cli
   (agents-cli-web and ~/.agents/.system are not reachable by the agent)</code></pre>
   </article>
   <article class="artifact-panel">
@@ -99,22 +99,22 @@
     <pre><code>agents-cli  ·  1 live
   Agents CLI and Factory
   fleet    21/33 clean · 3 behind · 2 dirty · 1 missing        (3 dirs × 11 hosts)
-           win-mini: ✗ missing  ·  yosemite-m0: ⚠ ↓57 · main  ·  zion: ✓ clean · main
-  repo     phnx-labs/agents-cli       (~/src/github.com/muqsitnawaz/agents-cli)
-  repo     phnx-labs/agents-cli-web   (~/src/github.com/muqsitnawaz/agents-cli-web)
+           [worker]: ✗ missing  ·  [worker]: ⚠ ↓57 · main  ·  [interactive-host]: ✓ clean · main
+  repo     phnx-labs/agents-cli       (~/src/github.com/owner/agents-cli)
+  repo     phnx-labs/agents-cli-web   (~/src/github.com/owner/agents-cli-web)
   repo     phnx-labs/.agents-system   (~/.agents/.system)
 
-  root     ~/src/github.com/muqsitnawaz/agents-cli
-  path     ~/src/github.com/muqsitnawaz/agents-cli
+  root     ~/src/github.com/owner/agents-cli
+  path     ~/src/github.com/owner/agents-cli
   linear   8eb8f5b1-3870-4590-ba67-36f3811d1435</code></pre>
     <p>Three bound directories, each with the remote read from its own <code>origin</code>. The one-line <code>repos</code> summary becomes the per-repo form that <code>projects.ts:631-633</code> already prints.</p>
     <h4>Proposed — spawning into it</h4>
     <pre><code>$ agents run claude --project agents-cli
-  cwd       ~/src/github.com/muqsitnawaz/agents-cli
-  --add-dir ~/src/github.com/muqsitnawaz/agents-cli-web
+  cwd       ~/src/github.com/owner/agents-cli
+  --add-dir ~/src/github.com/owner/agents-cli-web
   --add-dir ~/.agents/.system</code></pre>
   </article>
-</section><p><strong>Figure 1.</strong> The user-visible change: a project stops being one directory that lists extra slugs and becomes a set of directories every spawn path can reach. The current state is captured live on zion; the proposed state is a mockup.</p>
+</section><p><strong>Figure 1.</strong> The user-visible change: a project stops being one directory that lists extra slugs and becomes a set of directories every spawn path can reach. The current state is captured live on [interactive-host]; the proposed state is a mockup.</p>
 <h2 id="current-architecture">Current architecture</h2>
 <p><code>ProjectDef.repos[]</code> already has the exact shape needed — <code>{ slug, subpath?, path? }</code> at <code>apps/cli/src/lib/projects.ts:41-52</code>, with <code>path</code> documented as the opt-in for an additional repo. Two gaps sit on either side of it.</p>
 <p><strong>Nothing writes it.</strong> <code>projects add</code> and <code>projects set</code> each take a singular <code>--repo &lt;owner/repo&gt;</code> that only ever assigns <code>def.repo</code> (<code>projects.ts:557</code>, <code>:868</code>; bodies at <code>:588</code>, <code>:887</code>). <code>repos[]</code> is reachable only by hand-editing YAML or piping a complete <code>ProjectDef</code> into <code>projects save --json</code>.</p>
@@ -171,7 +171,7 @@ export function resolveDefinedProjectPath(def, worktree, forRemote) {
 <p><code>projects add</code> gains a repeatable <code>--dir &lt;path...&gt;</code>; <code>projects set</code> gains repeatable <code>--add-dir &lt;path&gt;</code> and <code>--rm-dir &lt;path&gt;</code>. Each value names a <strong>local directory</strong>, and the slug is derived from it:</p>
 <pre><code># you name the directory; the slug is read from ITS origin remote
 agents projects set agents-cli \
-  --add-dir ~/src/github.com/muqsitnawaz/agents-cli-web \
+  --add-dir ~/src/github.com/owner/agents-cli-web \
   --add-dir ~/.agents/.system
 
 # resolution per dir:
@@ -216,7 +216,7 @@ const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || pr
 <p><code>--project</code> is mutually exclusive with <code>--cwd</code> / <code>--remote-cwd</code> (<code>exec.ts:598</code>), so the two branches must never both fire. <code>resolveProjectRef</code> handles <code>forRemote</code>, so a fleet-host launch works through the same path.</p>
 <p>Separately, <code>defToManaged</code> (<code>apps/factory/src/core/managedProjects.ts:53-87</code>) collapses a multi-directory project into one <code>path</code> plus <code>repos[0].slug</code>. It gains a <code>dirs: { slug, path }[]</code> field so the Projects pane shows all three rather than silently dropping two. No resolution logic moves into the extension; it asks the CLI.</p>
 <h3>6. Bind the three repos, then push to the fleet</h3>
-<p>Slugs verified by reading each directory's <code>origin</code> on zion:</p>
+<p>Slugs verified by reading each directory's <code>origin</code> on [interactive-host]:</p>
 <table>
 <thead>
 <tr>
@@ -225,11 +225,11 @@ const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || pr
 </tr>
 </thead>
 <tbody><tr>
-<td><code>~/src/github.com/muqsitnawaz/agents-cli</code></td>
+<td><code>~/src/github.com/owner/agents-cli</code></td>
 <td><code>phnx-labs/agents-cli</code></td>
 </tr>
 <tr>
-<td><code>~/src/github.com/muqsitnawaz/agents-cli-web</code></td>
+<td><code>~/src/github.com/owner/agents-cli-web</code></td>
 <td><code>phnx-labs/agents-cli-web</code></td>
 </tr>
 <tr>
@@ -240,14 +240,14 @@ const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || pr
 <pre><code># ~/.agents/projects/agents-cli.yaml
 name: agents-cli
 description: Agents CLI and Factory
-root: ~/src/github.com/muqsitnawaz/agents-cli
-defaultPath: ~/src/github.com/muqsitnawaz/agents-cli
+root: ~/src/github.com/owner/agents-cli
+defaultPath: ~/src/github.com/owner/agents-cli
 repo: phnx-labs/agents-cli
 repos:
   - slug: phnx-labs/agents-cli
-    path: ~/src/github.com/muqsitnawaz/agents-cli
+    path: ~/src/github.com/owner/agents-cli
   - slug: phnx-labs/agents-cli-web
-    path: ~/src/github.com/muqsitnawaz/agents-cli-web
+    path: ~/src/github.com/owner/agents-cli-web
   - slug: phnx-labs/.agents-system
     path: ~/.agents/.system
 linear:
@@ -255,15 +255,15 @@ linear:
   name: Agents CLI
 </code></pre>
 <p>Fleet propagation is not automatic. <code>~/.agents/projects/</code> is syncable, not synced — an uncommitted definitions directory has been deleted twice by a reconcile (<code>projects.ts:10-16</code>).</p>
-<pre><code>agents repo push user                       # on zion
+<pre><code>agents repo push user                       # on [interactive-host]
 agents ssh &lt;host&gt; 'agents repo pull user'   # every reachable device
 agents ssh &lt;host&gt; 'agents projects view agents-cli'
 </code></pre>
 <h2 id="public-interface">Public Interface</h2>
 <pre><code># Define a project across several directories (slug read from each dir's origin)
 agents projects add agents-cli \
-  --dir ~/src/github.com/muqsitnawaz/agents-cli \
-  --dir ~/src/github.com/muqsitnawaz/agents-cli-web \
+  --dir ~/src/github.com/owner/agents-cli \
+  --dir ~/src/github.com/owner/agents-cli-web \
   --dir ~/.agents/.system
 
 # Amend an existing definition
@@ -273,7 +273,7 @@ agents projects set agents-cli --add-dir ./vendor/thing --slug phnx-labs/thing  
 
 # Spawning: unchanged flags, wider reach
 agents run claude --project agents-cli                  # cwd + sibling grants
-agents run claude --project agents-cli --host yosemite-s0
+agents run claude --project agents-cli --host [worker]
 agents teams create my-feature --project agents-cli     # NEW flag on teams
 </code></pre>
 <p>Unchanged: <code>--project &lt;slug&gt;[@worktree]</code> syntax, its mutual exclusion with <code>--cwd</code> / <code>--remote-cwd</code>, and the directory it resolves as cwd. Nothing that works today changes meaning.</p>
@@ -309,7 +309,7 @@ agents teams create my-feature --project agents-cli     # NEW flag on teams
 <td>Inside the spawned agent, read a file under <code>~/.agents/.system</code> and edit one under <code>agents-cli-web</code></td>
 </tr>
 <tr>
-<td><code>--host yosemite-s0</code></td>
+<td><code>--host [worker]</code></td>
 <td>Forwarded paths are <code>~/…</code>, not <code>/Users/you/…</code></td>
 </tr>
 <tr>
@@ -328,7 +328,7 @@ agents teams create my-feature --project agents-cli     # NEW flag on teams
 <pre><code># the spine, end to end
 agents projects view agents-cli
 agents run claude --project agents-cli --print-command
-agents run claude --project agents-cli --host yosemite-s0 --print-command
+agents run claude --project agents-cli --host [worker] --print-command
 agents teams create dirs-check --project agents-cli
 agents teams add dirs-check claude "list your accessible roots" --name probe
 </code></pre>

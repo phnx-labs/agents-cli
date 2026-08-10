@@ -25,7 +25,7 @@
 <div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-awaiting-go">awaiting-go</span></div>
 <h1>Unify native logins and provider credentials as named accounts</h1>
 <p class="summary">Give native OAuth identities and portable provider credentials one account catalog, then bind named accounts to native installations and custom harnesses with positional commands. Native OAuth remains owned by each harness and never enters the agents-cli keychain; portable secrets move only through an explicit, verified sync operation.</p>
-<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Provider accounts already use canonical secrets bundles with stable UUIDs and policy never.<span class="meta-sep" aria-hidden="true">·</span>Native identities are currently discovered read-only and labels are not rendered in agents view.<span class="meta-sep" aria-hidden="true">·</span>Direct run, routines, custom harnesses, native installations, and fleet sync do not yet share one account resolver.</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Account unification follow-up</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Codex</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">019fdef4</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Provider accounts already use canonical secrets bundles with stable UUIDs and policy never.<span class="meta-sep" aria-hidden="true">·</span>Native identities are currently discovered read-only and labels are not rendered in agents view.<span class="meta-sep" aria-hidden="true">·</span>Direct run, routines, custom harnesses, native installations, and fleet sync do not yet share one account resolver.</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Account unification follow-up</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Codex</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Owner</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">[worker]</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">019fdef4</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
 </section>
 <nav class="toc" aria-label="Artifact sections"><a href="#focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a href="#intent"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Intent</a><a href="#current-architecture"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Current architecture</a><a href="#purpose"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#public-interface"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#proposed-changes"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#plan"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Plan</a><a href="#validation"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Tracking</a><a href="#delta-spec"><span class="toc-index">11&nbsp;&middot;&nbsp;</span>Delta Spec</a></nav><article class="artifact-body"><h1>Unify native logins and provider credentials as named accounts</h1>
 <h2 id="focus-for-review">Focus for review</h2>
@@ -46,7 +46,7 @@ $ agents accounts name work --from claude@2.1.220
 Named the claude account 'work'.
 
 $ agents view claude
-2.1.220  default  user@example.com
+2.1.220  default  [account-redacted]
 ```
 </article>
 
@@ -61,8 +61,8 @@ $ agents accounts attach work claude@2.1.225
 Attached work to claude@2.1.225.
 
 $ agents view claude
-2.1.225  opus[1m]  work · user@example.com  Max
-2.1.220  default   work · user@example.com  Max
+2.1.225  opus[1m]  work · [account-redacted]  Max
+2.1.220  default   work · [account-redacted]  Max
 ```
 </article>
 </section><figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
@@ -138,7 +138,7 @@ $ agents view claude
 </tr>
 <tr>
 <td>Copy portable credentials</td>
-<td><code>agents accounts sync openrouter-work zion</code></td>
+<td><code>agents accounts sync openrouter-work [interactive-host]</code></td>
 <td>Explicitly provision the same stable provider account on another device</td>
 </tr>
 </tbody></table>
@@ -155,13 +155,13 @@ agents run claude@2.1.225
 agents accounts attach openrouter-work codex@0.145.0
 agents accounts attach openrouter-work cursor@latest
 agents accounts attach openrouter-work deepseek
-agents accounts sync openrouter-work zion
+agents accounts sync openrouter-work [interactive-host]
 </code></pre>
 <h3>Output contract</h3>
 <pre><code>$ agents accounts view work
 work
   kind        native login
-  identity    user@example.com
+  identity    [account-redacted]
   provider    Anthropic
   custody     Claude Code (not stored by agents-cli)
   scope       version
@@ -174,7 +174,7 @@ openrouter-work
   provider    OpenRouter
   auth        API key
   custody     agents secrets (no biometric ACL)
-  available   this device, zion
+  available   this device, [interactive-host]
   attached    codex@0.145.0, cursor@latest, deepseek
 </code></pre>
 <p>Every human-readable account row uses <code>name · identity</code> when both exist. Every command that emits account data supports <code>--json</code> and returns the stable account ID, kind, display name, identity metadata, custody, availability, and bindings.</p>
