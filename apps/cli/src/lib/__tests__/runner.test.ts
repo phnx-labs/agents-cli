@@ -274,21 +274,23 @@ describe('resolveRoutineLaunch (RUSH-1016 — pin + failover chain)', () => {
     expect(plan.pinned).toBe(false);
   });
 
-  it('an explicit version pin wins over an account pin (most specific)', async () => {
+  it('an explicit version pin coexists with a durable account credential', async () => {
     const plan = await resolveRoutineLaunch(
-      baseJob({ name: 'both-pins', version: '2.1.0', account: 'muqsit@trp.so', agent: 'claude' }),
+      baseJob({ name: 'both-pins', version: '2.1.0', account: 'work', agent: 'claude' }),
+      process.cwd(),
+      { resolveCredentialAccount: () => ({ env: { ANTHROPIC_API_KEY: 'test' } }) },
     );
     expect(plan.pinned).toBe(true);
     expect(plan.chain).toEqual([{ agent: 'claude', version: '2.1.0' }]);
   });
 
-  it('an account pin that is not signed in on this box falls through unpinned, not stalled', async () => {
-    // No box has this identity signed in, so account resolution returns null and
-    // the routine still runs (via the configured strategy) rather than refusing.
-    const plan = await resolveRoutineLaunch(
-      baseJob({ name: 'ghost-account', account: 'nobody@nowhere.invalid', agent: 'claude' }),
-    );
-    expect(plan.pinned).toBe(false);
+  it('a missing durable account fails before version selection', async () => {
+    const error = await resolveRoutineLaunch(
+      baseJob({ name: 'ghost-account', account: 'missing', agent: 'claude' }),
+      process.cwd(),
+      { resolveCredentialAccount: () => { throw new Error("Unknown account 'missing'."); } },
+    ).then(() => null, value => value as Error);
+    expect(error?.message).toBe("Unknown account 'missing'.");
   });
 });
 

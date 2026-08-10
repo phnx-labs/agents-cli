@@ -712,19 +712,18 @@ describeSpawn('resolveRoutineLaunch — zero-healthy accounts fail the routine l
     expect(plan.rotation).toBeNull();
   });
 
-  it('fails closed when a routine label names a different harness', async () => {
+  it('fails closed when a routine account cannot authenticate its harness', async () => {
     let strategyCalled = false;
     const err = await resolveRoutineLaunch({ ...baseConfig(), agent: 'codex', account: 'work' }, process.cwd(), {
-      readAccountLabels: () => ({ labels: { work: { agent: 'claude', fingerprint: 'abc' } } }),
-      resolveAccountLabel: async (agent, label) => {
-        throw new Error(`Account label '${label}' names a claude account, not ${agent}.`);
+      resolveCredentialAccount: (name, host) => {
+        throw new Error(`Account '${name}' cannot authenticate the ${host} harness.`);
       },
       resolveRunVersion: async () => {
         strategyCalled = true;
         return { version: '0.1.0', rotation: null };
       },
     }).then(() => null, (error: unknown) => error as Error);
-    expect(err?.message).toBe("Account label 'work' names a claude account, not codex.");
+    expect(err?.message).toBe("Account 'work' cannot authenticate the codex harness.");
     expect(strategyCalled).toBe(false);
   });
 });

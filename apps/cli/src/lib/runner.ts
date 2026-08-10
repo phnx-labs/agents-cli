@@ -456,6 +456,7 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
   // owns model selection. No --timeout flag: the runner enforces its own SIGTERM/SIGKILL.
   if (config.workflow) {
     const cmd = ['agents', 'run', config.workflow, resolvedPrompt, '--mode', config.mode];
+    if (config.account) cmd.push('--account', config.account);
     return cmd;
   }
 
@@ -469,7 +470,9 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
   // so a self-scheduled wake (e.g. /hibernate) is handled by the session that scheduled
   // it, not a fresh, context-less agent that would refuse an "opaque" instruction.
   if (config.resume) {
-    return ['agents', 'run', agent, '--resume', config.resume, resolvedPrompt, '--mode', config.mode];
+    const cmd = ['agents', 'run', agent, '--resume', config.resume, resolvedPrompt, '--mode', config.mode];
+    if (config.account) cmd.push('--account', config.account);
+    return cmd;
   }
 
   const template = AGENT_COMMANDS[agent];
@@ -830,8 +833,7 @@ export async function resolveRoutineLaunch(
   cwd: string = process.cwd(),
   deps: {
     resolveRunVersion?: typeof resolveRunVersion;
-    readAccountLabels?: () => { labels: Record<string, { agent: AgentId; fingerprint: string }> };
-    resolveAccountLabel?: (agent: AgentId, label: string) => Promise<string>;
+    resolveCredentialAccount?: (name: string, host: AgentId) => { env: Record<string, string> };
   } = {},
 ): Promise<RoutineLaunchPlan> {
   if (config.workflow) {
@@ -841,6 +843,10 @@ export async function resolveRoutineLaunch(
   // resolveRoutineLaunch is only called for agent jobs (workflow returns above;
   // command jobs branch out of execute*Job before reaching this).
   const agent = config.agent!;
+  if (config.account) {
+    const { resolveCredentialAccount } = await import('./account-registry.js');
+    (deps.resolveCredentialAccount ?? resolveCredentialAccount)(config.account, agent);
+  }
   if (config.version) {
     const version = config.version;
     if (!isVersionInstalled(agent, version)) {
@@ -853,27 +859,6 @@ export async function resolveRoutineLaunch(
       rotation: null,
       pinned: true,
     };
-  }
-
-  // Account pin: resolve the login identity to the version slot that holds it and
-  // run pinned — no rotation, no failover onto other accounts — so concurrent
-  // unattended routines never share (and mutually revoke) one single-use OAuth
-  // credential (RUSH-1957). Falls through to the strategy only when the account
-  // is not signed in on this box, with a loud warning rather than a silent stall.
-  if (config.account) {
-    const { readAccountLabels, resolveAccountLabel } = await import('./account-labels.js');
-    if ((deps.readAccountLabels ?? readAccountLabels)().labels[config.account]) {
-      const version = await (deps.resolveAccountLabel ?? resolveAccountLabel)(agent, config.account);
-      return { chain: [{ agent, version }], rotation: null, pinned: true };
-    }
-    const version = await resolveAccountVersion(agent, config.account);
-    if (version) {
-      return { chain: [{ agent, version }], rotation: null, pinned: true };
-    }
-    process.stderr.write(
-      `[agents] routine ${config.name}: account '${config.account}' is not signed in for ${agent}; ` +
-        `falling back to strategy — pin a signed-in account to stop OAuth-rotation revocation\n`,
-    );
   }
 
   const strategy = getConfiguredRunStrategy(agent, cwd);
@@ -1230,6 +1215,10 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   // Use 'claude' as the effective agent for report extraction and metadata when workflow is set.
   // (command jobs branched out earlier, so config.agent is set on the non-workflow path.)
   const effectiveAgent: AgentId = config.workflow ? 'claude' : config.agent!;
+  if (config.account && !dispatchesViaAgentsRun(config)) {
+    const { resolveCredentialAccount } = await import('./account-registry.js');
+    Object.assign(baseEnv, resolveCredentialAccount(config.account, effectiveAgent).env);
+  }
 
   const meta: RunMeta = {
     jobName: config.name,
@@ -1821,6 +1810,10 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
       : { ...process.env } as Record<string, string>,
     config,
   );
+  if (config.account && !dispatchesViaAgentsRun(config)) {
+    const { resolveCredentialAccount } = await import('./account-registry.js');
+    Object.assign(baseEnv, resolveCredentialAccount(config.account, config.agent!).env);
+  }
   const spawnEnv = dispatchesViaAgentsRun(config)
     ? (() => {
         const e = { ...baseEnv };
