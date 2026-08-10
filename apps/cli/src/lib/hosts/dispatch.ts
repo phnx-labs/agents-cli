@@ -30,6 +30,17 @@ import { RUN_AUTO_KEYWORD, RUN_AUTO_HOST_RESOLVED_ENV } from '../types.js';
 // here so existing `hosts/dispatch.js` importers and tests keep resolving them.
 export { deriveMirroredCwd, homeRemainder, remoteCdPrefix };
 
+/**
+ * Diagnostic helper for RUSH-2441: log the requested agent and initial remote
+ * `agents run` argv without changing normal command output.
+ */
+function logForwardedArgs(kind: string, agent: string, version: string | undefined, args: string[]): void {
+  if (!process.env.AGENTS_DISPATCH_DEBUG) return;
+  process.stderr.write(
+    `[dispatch:${kind}] agent=${agent}${version ? `@${version}` : ''} args=${JSON.stringify(args)}\n`,
+  );
+}
+
 // Use $HOME (not ~) so the path is correct whether or not it's quoted and
 // regardless of the run's cwd. Task ids are 8 hex chars, so these paths are
 // injection-safe to interpolate unquoted into remote commands.
@@ -461,6 +472,7 @@ export interface DispatchOptions {
 export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
   const agentArg = opts.version ? `${opts.agent}@${opts.version}` : opts.agent;
   const args = ['run', agentArg, opts.prompt, '--quiet'];
+  logForwardedArgs('headless', opts.agent, opts.version, args);
   if (opts.mode) args.push('--mode', opts.mode);
   if (opts.model) args.push('--model', opts.model);
   // 'auto' is the remote default — forwarding it would only add noise.
@@ -544,6 +556,7 @@ export interface InteractiveDispatchOptions {
 export function buildInteractiveRunForwardedArgs(opts: InteractiveDispatchOptions): string[] {
   const agentArg = opts.version ? `${opts.agent}@${opts.version}` : opts.agent;
   const args = ['run', agentArg];
+  logForwardedArgs('interactive', opts.agent, opts.version, args);
   if (opts.prompt && opts.forceInteractive) args.push(opts.prompt);
   if (opts.forceInteractive) args.push('--interactive');
   if (opts.mode) args.push('--mode', opts.mode);

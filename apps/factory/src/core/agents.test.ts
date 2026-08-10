@@ -357,6 +357,14 @@ describe('launch contract — every runner is balanced', () => {
       'claude', null, undefined, undefined, '1.2.3', 'balanced', undefined, { local: true },
     )).toBe('agents run claude@1.2.3 --interactive --mode auto');
   });
+
+  test('grok (Pick Host) never emits cursor-agent', () => {
+    const cmd = buildAgentLaunchCommand(
+      'grok', null, undefined, undefined, undefined, 'balanced', undefined, { host: 'yosemite-s1' },
+    );
+    expect(cmd).toBe("agents run grok --interactive --host 'yosemite-s1' --strategy balanced --mode auto");
+    expect(cmd).not.toContain('cursor-agent');
+  });
 });
 
 describe('buildAgentLaunchCommand', () => {

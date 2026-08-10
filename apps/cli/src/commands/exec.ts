@@ -1925,6 +1925,11 @@ export function registerRunCommand(program: Command): void {
             const isRaw = options.raw || options.tmux === false || options.disableTmux === true;
             const { modeForRemoteDispatch } = await import('../lib/codex-policy.js');
             const forwardedMode = modeForRemoteDispatch(options.mode, command.getOptionValueSource('mode'));
+            if (process.env.AGENTS_DISPATCH_DEBUG || options.verbose) {
+              process.stderr.write(chalk.gray(
+                `[hosts] dispatch interactive ${runAgent}${runVersion ? `@${runVersion}` : ''} -> ${host.name}\n`,
+              ));
+            }
             const exitCode = await runInteractiveOnHost(host, {
               agent: runAgent,
               version: resumeId ? undefined : runVersion,
@@ -2015,6 +2020,11 @@ export function registerRunCommand(program: Command): void {
           // registration all live in the shared helper (lib/hosts/run-target.ts).
           const { modeForRemoteDispatch } = await import('../lib/codex-policy.js');
           const forwardedMode = modeForRemoteDispatch(options.mode, command.getOptionValueSource('mode'));
+          if (process.env.AGENTS_DISPATCH_DEBUG || options.verbose) {
+            process.stderr.write(chalk.gray(
+              `[hosts] dispatch headless ${runAgent}${runVersion ? `@${runVersion}` : ''} -> ${host.name}\n`,
+            ));
+          }
           const { task, exitCode } = await dispatchPromptToHost(host, {
             agent: runAgent,
             version: resumeId ? undefined : runVersion,
