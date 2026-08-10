@@ -16,3 +16,4 @@
   tries `readStateSessionRecord(pid)` after the index lookup finds nothing, so
   non-Claude harnesses that carry no `--session-id` argv can be attributed from the
   deployed hook's state file. Source: `apps/cli/src/lib/session/active.ts`.
+
