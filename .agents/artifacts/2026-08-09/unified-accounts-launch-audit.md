@@ -77,7 +77,7 @@ This screenshot was captured from the rendered report in headless Chrome on zion
 Installed artifact under test:
 
 ```text
-/home/muqsit/.local/bin/agents
+/home/you/.local/bin/agents
 0.0.0-dev.a6ed79873-dirty
 ```
 

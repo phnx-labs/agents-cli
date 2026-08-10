@@ -134,6 +134,6 @@ Five places where the same concept is enforced in more than one location — the
 This document itself was produced with the same render path it describes:
 
 ```bash
-artifacts render .agents/reports/plan-task-enforcement-map.md
+artifacts render .agents/artifacts/2026-08-05/plan-task-enforcement-map.md
 # → plan-task-enforcement-map.html (self-contained, light/dark toggle)
 ```

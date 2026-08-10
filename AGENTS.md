@@ -172,14 +172,15 @@ or the repo root so the tree stays clean. What's committed vs gitignored is deli
 |---|---|---|
 | `.agents/worktrees/<slug>/` | ignored | PR-bound worktrees, one per change (see [§Conventions](#conventions-repo-wide)) |
 | `.agents/scratch/` | ignored | throwaway working files |
-| `.agents/plans/` | ignored | the **only** location for generated implementation plans (not a docs/ subtree, not shipped) |
-| `.agents/artifacts/` | ignored | generated outputs, incl. a scratch rendered HTML plan |
-| `.agents/skills/`, `.agents/commands/` | committed | project skills + slash commands |
-| `.agents/reports/` | committed | durable reports meant to be kept/shared |
+| `.agents/artifacts/<yyyy-mm-dd>/` | committed | every durable output — plans, reports, rendered visuals — filed under the day it was authored |
+| `.agents/commands/` | committed | project slash commands |
 
-Rule of thumb: **ephemeral → the gitignored dirs; durable + shareable → `.agents/reports/`.**
-A rendered HTML plan you want to keep goes in `reports/` (committed); a throwaway render
-goes in `artifacts/`. Never scatter scratch in `/tmp` or the repo root.
+Rule of thumb: **ephemeral → the gitignored dirs; durable → `.agents/artifacts/<yyyy-mm-dd>/`.**
+One dated layout, no kind-based subdirs: a plan, a report, and a rendered visual authored on
+the same day sit side by side in `.agents/artifacts/2026-08-09/`. Name the file for what it
+is (`plan-<slug>.html`, `<topic>-audit.md`) and render HTML next to its Markdown source.
+Everything committed here is public, so anonymize accounts, emails, tailnet addresses, and
+absolute home paths before it lands. Never scatter scratch in `/tmp` or the repo root.
 
 ## Conventions (repo-wide)
 

@@ -7,7 +7,7 @@ orchestrate. This is not OpenSpec/Spec Kit marketing — it is the missing layer
 Related: [Specifications](specifications.md) (normative subsystem contracts) ·
 [Landscape](04-landscape.md) · plan-render skill (HTML plans)
 
-**Browser-friendly examples:** [product-acceptance-user-stories.html](../../../.agents/reports/product-acceptance-user-stories.html)
+**Browser-friendly examples:** [product-acceptance-user-stories.html](../../../.agents/artifacts/2026-08-04/product-acceptance-user-stories.html)
 (bad vs good stories, three full Product cards, regression pack).
 
 ---
@@ -16,7 +16,7 @@ Related: [Specifications](specifications.md) (normative subsystem contracts) ·
 
 ```
 intent (chat / ticket)
-  → HTML implementation plan  (.agents/plans/plan-*.html)
+  → HTML implementation plan  (.agents/artifacts/<yyyy-mm-dd>/plan-*.html)
   → optional mock / technical design
   → agent implements (run / teams / worktree + PR)
   → unit/integration tests + CI

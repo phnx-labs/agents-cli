@@ -53,7 +53,7 @@ Agent prose "?" themes (`agent_q_themes.csv`): `"should I / want me to…"` ×11
 | codex | 233 | 0 | 5 | 0 (not tracked) | 255 | 205 |
 | droid | 2 | 0 | 0 | 0 | 0 | 0 |
 
-`--by account` (default, claude only, 30d): trp.so 180 sess / $2035 / 50 AUQ / **79 interruptions**; gmail 193 / $1030 / 35 AUQ / 19 int; getrush.ai 139 / $1269 / 38 AUQ; dev@getrush.ai 82 / $656 / 4 AUQ; tech@prix.dev 34 / 11 AUQ; social@swarmify 34; icloud 17. (These attributed accounts sum to 679 sessions; the 3-session gap to the 682 by-agent claude total is unattributed-claude sessions, and the two views were separate runs — 913 vs 917 analyzed.) Cross-account overlap: 8230 overlapping pairs, 6105 cross-account, 907 sessions involved.
+`--by account` (default, claude only, 30d): account-1 180 sess / $2035 / 50 AUQ / **79 interruptions**; account-2 193 / $1030 / 35 AUQ / 19 int; account-3 139 / $1269 / 38 AUQ; account-4 82 / $656 / 4 AUQ; account-5 34 / 11 AUQ; account-6 34; account-7 17. (These attributed accounts sum to 679 sessions; the 3-session gap to the 682 by-agent claude total is unattributed-claude sessions, and the two views were separate runs — 913 vs 917 analyzed.) Cross-account overlap: 8230 overlapping pairs, 6105 cross-account, 907 sessions involved.
 
 **The gap this exposes:** insights already counts the *formal* signal per harness (`AskUserQuestion` for claude, `request_user_input` for codex) but does **not** yet mine the *prose* signals the July pack found — permission-asks (×1931), repeated nudges (×455), stall-vs-genuine ask classification (431 stall of the 1803 categorized asks). Those are where 90% of the friction hides, and they're currently invisible to the CLI.
 
@@ -68,8 +68,8 @@ Agent prose "?" themes (`agent_q_themes.csv`): `"should I / want me to…"` ×11
 7. **Cross-harness friction normalization.** Fold each harness's "asks the user" signal (claude `AskUserQuestion`, codex `request_user_input`, droid equivalents) onto one comparable friction axis so the Claude-only blind spot of the July pack stays closed.
 8. **Per-project stall hotspots.** Extend `--by project` with the friction facet → which repo eats the most "check now" / permission-ask time.
 9. **Policy-re-assertion metric.** Count user re-assertions (`continue/don't stop` ×334, `verify e2e` ×315, `don't ask` ×137). A spike = a rule not internalized → guard candidate.
-10. **Long-gap → nudge correlation.** insights already has `responseGapBuckets` (gmail acct: 76 gaps of 15–60m). Flag sessions where a user nudge follows a long idle gap = a self-poll failure the agent should have avoided.
-11. **Interruptions as a first-class friction signal.** insights tracks `interruptions` (claude 165/30d; trp.so 79 alone). Surface top-interrupted sessions — high interruption = agent going the wrong way.
+10. **Long-gap → nudge correlation.** insights already has `responseGapBuckets` (account-2: 76 gaps of 15–60m). Flag sessions where a user nudge follows a long idle gap = a self-poll failure the agent should have avoided.
+11. **Interruptions as a first-class friction signal.** insights tracks `interruptions` (claude 165/30d; account-1 79 alone). Surface top-interrupted sessions — high interruption = agent going the wrong way.
 12. **`--narrative` → ranked action list.** Extend the existing `--narrative` output to emit "top 3 friction sources this window + the guard/rule that targets each," so the audit is self-serve instead of a quarterly manual PDF.
 
 ### 6. How this maps onto extending `agents insights` (NOT a parallel CLI)
