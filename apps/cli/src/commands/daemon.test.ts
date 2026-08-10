@@ -447,30 +447,39 @@ describeDaemon('agents daemon', () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
-  it('never accuses a daemon outside this install\'s registry (RUSH-2368 scope)', async () => {
+  it('shows an unregistered same-uid stale daemon but never makes it actionable', async () => {
     const home = makeHome();
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-foreign-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-unregistered-'));
     const script = path.join(dir, 'index.js');
     fs.writeFileSync(script, 'setInterval(() => {}, 1e9);\n');
     const child = spawn(process.execPath, [script, '__daemon-run'], { stdio: 'ignore' });
     await new Promise((r) => setTimeout(r, 200));
-    // Deliberately NOT registered: this stands for another install's daemon, or
-    // an orphan a SIGKILLed test run left behind. Its entry is genuinely gone,
-    // but naming it would make `daemon doctor` exit 1 for everyone on the box.
+    // Deliberately NOT registered -- this is the INCIDENT shape. The 4h14m ghost
+    // ran from a deleted worktree under an ephemeral /tmp cwd, so it was neither
+    // status.pid nor in this install's registry. Gating the DISPLAY on the
+    // registry would leave this command silent on the case it exists for.
     fs.rmSync(dir, { recursive: true, force: true });
     try {
       const payload = JSON.parse(run(home, ['status', '--json']).stdout);
-      expect(payload.staleBinaries.some((s: { pid: number }) => s.pid === child.pid)).toBe(false);
+      expect(
+        payload.staleBinaries.some((s: { pid: number }) => s.pid === child.pid),
+        'must be VISIBLE',
+      ).toBe(true);
+
+      // ...but never actionable: no doctor problem, so no kill instruction and
+      // no exit 1 for every other user on this box (RUSH-2368's actual harm).
       const health = JSON.parse(run(home, ['doctor', '--json']).stdout);
-      expect(health.problems.some((p: string) => p.includes(String(child.pid)))).toBe(false);
+      expect(
+        health.problems.some((p: string) => p.includes(String(child.pid))),
+        'must NOT be a doctor problem',
+      ).toBe(false);
     } finally {
       try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* gone */ }
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
 
-  // root ignores mode bits, so the EACCES condition cannot be produced there and
-  // the test would pass without exercising anything.
+
   it.skipIf(typeof process.getuid === 'function' && process.getuid() === 0)(
     'does not call an unreadable entry deleted (EACCES is not ENOENT)', async () => {
     const home = makeHome();
