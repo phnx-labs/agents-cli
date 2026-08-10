@@ -92,6 +92,11 @@ const SYSTEM_PLUGINS_DIR = path.join(SYSTEM_AGENTS_DIR, 'plugins');
 // Unioned under user routines by listJobs()/readJob() so a routine shipped here
 // fires for every install, while a user routine of the same name overrides it.
 const SYSTEM_ROUTINES_DIR = path.join(SYSTEM_AGENTS_DIR, 'routines');
+// Built-in monitors shipped in the system repo (gh:phnx-labs/.agents-system).
+// Unioned under user monitors by listMonitors()/readMonitor() so a monitor
+// shipped here is available on every install, while a user monitor of the same
+// name overrides it (a built-in with no `enabled:` field stays opt-in).
+const SYSTEM_MONITORS_DIR = path.join(SYSTEM_AGENTS_DIR, 'monitors');
 const SYSTEM_WEBHOOKS_DIR = path.join(SYSTEM_AGENTS_DIR, 'webhooks');
 const SYSTEM_PROMPTCUTS_FILE = path.join(SYSTEM_AGENTS_DIR, 'hooks', 'promptcuts.yaml');
 const SYSTEM_MCP_CONFIG_FILE = path.join(SYSTEM_AGENTS_DIR, 'mcp.json');
@@ -516,7 +521,18 @@ export function getProjectWebhooksDir(cwd: string = process.cwd()): string | nul
 export function getRunsDir(): string { return RUNS_DIR; }
 
 /** Path to monitor YAML definitions (~/.agents/monitors/). */
-export function getMonitorsDir(): string { return MONITORS_DIR; }
+export function getMonitorsDir(): string { return process.env.AGENTS_MONITORS_DIR ?? MONITORS_DIR; }
+
+/**
+ * Path to built-in monitor definitions shipped in the system repo
+ * (`~/.agents/.system/monitors/`). Unioned under the user monitors dir by
+ * listMonitors()/readMonitor(): a monitor shipped here is available on every
+ * install, and a user monitor of the same name overrides it. A built-in with no
+ * `enabled:` field is opt-in — it stays disabled until the user enables it,
+ * which materializes a user copy (writes never touch this pull-only mirror). The
+ * directory need not exist.
+ */
+export function getSystemMonitorsDir(): string { return process.env.AGENTS_SYSTEM_MONITORS_DIR ?? SYSTEM_MONITORS_DIR; }
 
 /** Path to the durable per-monitor state-diff store + fire history
  * (~/.agents/.history/monitors/). */
