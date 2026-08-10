@@ -305,7 +305,7 @@ function* listDeviceConfigEntries(device: string): Generator<{ key: string; valu
 export function registerConfigCommand(program: Command): void {
   const config = program
     .command('config')
-    .description('Unified config barrel: get, set, list, and unset agent run defaults, tier overrides, and device options.');
+    .description('Get, set, list, and unset run defaults, tier overrides, the projects root, and device options.');
 
   setHelpSections(config, {
     examples: `

@@ -190,10 +190,10 @@ agents computer type-text    Type an arbitrary unicode string into the focused f
 agents computer wait         Wait for a duration (--duration) or for an element (--id / --role/--label) to satisfy --until
 ```
 
-## config — Unified config barrel: get, set, list, and unset agent run defaults, tier overrides, and device options.
+## config — Get, set, list, and unset run defaults, tier overrides, the projects root, and device options.
 
 ```
-agents config                    Unified config barrel: get, set, list, and unset agent run defaults, tier overrides, and device options.
+agents config                    Get, set, list, and unset run defaults, tier overrides, the projects root, and device options.
 agents config get <key>          Get the current value of a config key
 agents config list               List configured config keys and their values
 agents config set <key> <value>  Set a config key
