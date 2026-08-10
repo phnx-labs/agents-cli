@@ -344,6 +344,51 @@ describe('handler config layer', () => {
       expect(dispatched[0].env).toEqual({ DEPLOY_TARGET: 'staging' });
     });
 
+    it('anchors the dispatched agent in a project with cwd and mode', async () => {
+      const handler: import('./handlers.js').WebhookHandler = {
+        name: 'anchored-handler',
+        source: 'linear',
+        project: 'agents-cli',
+        cwd: 'apps/cli',
+        mode: 'skip',
+        run: { agent: 'claude', prompt: 'go' },
+      };
+      const dispatched: JobConfig[] = [];
+      await handlerMod.executeHandler(handler, linearWebhook(), {
+        dispatchAgent: async (config) => {
+          dispatched.push(config);
+          return {
+            jobName: handler.name, runId: 'run-anchored', agent: 'claude', pid: 1,
+            status: 'running', startedAt: new Date().toISOString(),
+            completedAt: null, exitCode: null,
+          };
+        },
+      });
+      expect(dispatched[0].project).toBe('agents-cli');
+      expect(dispatched[0].cwd).toBe('apps/cli');
+      expect(dispatched[0].mode).toBe('skip');
+    });
+
+    it('defaults dispatched mode to auto when unset', async () => {
+      const handler: import('./handlers.js').WebhookHandler = {
+        name: 'default-mode-handler',
+        source: 'linear',
+        run: { agent: 'claude', prompt: 'go' },
+      };
+      const dispatched: JobConfig[] = [];
+      await handlerMod.executeHandler(handler, linearWebhook(), {
+        dispatchAgent: async (config) => {
+          dispatched.push(config);
+          return {
+            jobName: handler.name, runId: 'run-default', agent: 'claude', pid: 1,
+            status: 'running', startedAt: new Date().toISOString(),
+            completedAt: null, exitCode: null,
+          };
+        },
+      });
+      expect(dispatched[0].mode).toBe('auto');
+    });
+
     it.skipIf(process.platform === 'win32')('runs a shell command action with substitution', async () => {
       const handler: import('./handlers.js').WebhookHandler = {
         name: 'cmd-handler',
