@@ -1,0 +1,117 @@
+/**
+ * Tests for the double-trigger guard.
+ *
+ * The bug: a monitor's NAME is not its identity. `writeMonitor` overwrites by
+ * name and nothing compares arguments, so two watchers can poll the same source
+ * and fire the same action under different names — one trigger, fired twice.
+ * Observed on one box: `open-pr-watch`, `pr-ci-fail`, three stale `pr2222-*`
+ * watchers and an agent-added lander, all polling the same PR queue, added
+ * without a single warning.
+ */
+
+import { describe, it, expect } from 'vitest';
+import { monitorFingerprint, findDuplicateMonitor } from './fingerprint.js';
+import type { MonitorConfig } from './config.js';
+
+type Ident = Pick<MonitorConfig, 'name' | 'source' | 'condition' | 'action'>;
+
+function watcher(over: Partial<Ident> = {}): Ident {
+  return {
+    name: 'a',
+    source: { type: 'poll', command: 'gh pr list -R phnx-labs/agents-cli', interval: '2m' },
+    condition: { mode: 'on-change' },
+    action: { type: 'notify' },
+    ...over,
+  } as Ident;
+}
+
+describe('monitorFingerprint', () => {
+  it('ignores the name — a rename is not a different watcher', () => {
+    expect(monitorFingerprint(watcher({ name: 'open-pr-watch' })))
+      .toBe(monitorFingerprint(watcher({ name: 'rush-2479-land' })));
+  });
+
+  it('ignores YAML key order', () => {
+    const a = watcher({ source: { type: 'poll', command: 'x', interval: '2m' } as any });
+    const b = watcher({ source: { interval: '2m', command: 'x', type: 'poll' } as any });
+    expect(monitorFingerprint(a)).toBe(monitorFingerprint(b));
+  });
+
+  it('separates watchers that poll different sources', () => {
+    expect(monitorFingerprint(watcher()))
+      .not.toBe(monitorFingerprint(watcher({ source: { type: 'poll', command: 'gh pr view 2222', interval: '2m' } as any })));
+  });
+
+  it('separates watchers that poll the same source at different intervals', () => {
+    expect(monitorFingerprint(watcher()))
+      .not.toBe(monitorFingerprint(watcher({ source: { type: 'poll', command: 'gh pr list -R phnx-labs/agents-cli', interval: '5m' } as any })));
+  });
+
+  it('separates watchers that fire different actions on the same source', () => {
+    expect(monitorFingerprint(watcher()))
+      .not.toBe(monitorFingerprint(watcher({ action: { type: 'run', agent: 'claude', prompt: 'merge it' } as any })));
+  });
+
+  it('separates watchers whose condition differs', () => {
+    expect(monitorFingerprint(watcher()))
+      .not.toBe(monitorFingerprint(watcher({ condition: { mode: 'match', match: 'fail' } as any })));
+  });
+
+  // Placement is WHO executes, not WHAT runs. If it were hashed, the same
+  // watcher could be re-added N times by varying only --device, which is
+  // precisely the duplication this guards.
+  it('treats placement as not part of identity', () => {
+    const pinned = { ...watcher(), device: 'zion' } as Ident;
+    const unpinned = watcher();
+    expect(monitorFingerprint(pinned)).toBe(monitorFingerprint(unpinned));
+  });
+});
+
+describe('findDuplicateMonitor', () => {
+  it('names the existing watcher a new monitor would duplicate', () => {
+    const existing = [watcher({ name: 'open-pr-watch' })];
+    expect(findDuplicateMonitor(watcher({ name: 'rush-2479-land' }), existing)).toBe('open-pr-watch');
+  });
+
+  it('never reports a monitor as a duplicate of itself (that is a rewrite)', () => {
+    const existing = [watcher({ name: 'open-pr-watch' })];
+    expect(findDuplicateMonitor(watcher({ name: 'open-pr-watch' }), existing)).toBeNull();
+  });
+
+  it('catches a user monitor duplicating a shipped built-in', () => {
+    // listMonitors() unions user over system, so the built-in is in `existing`.
+    const builtIn = watcher({
+      name: 'pr-merge-on-green',
+      source: { type: 'poll', command: 'gh pr list --author @me', interval: '5m' } as any,
+      action: { type: 'run', agent: 'claude', prompt: 'merge' } as any,
+    });
+    const mine = watcher({
+      name: 'my-lander',
+      source: { type: 'poll', command: 'gh pr list --author @me', interval: '5m' } as any,
+      action: { type: 'run', agent: 'claude', prompt: 'merge' } as any,
+    });
+    expect(findDuplicateMonitor(mine, [builtIn])).toBe('pr-merge-on-green');
+  });
+
+  it('allows a genuinely different watcher through', () => {
+    const existing = [watcher({ name: 'open-pr-watch' })];
+    const different = watcher({ name: 'ci-red', source: { type: 'poll', command: 'gh run list', interval: '2m' } as any });
+    expect(findDuplicateMonitor(different, existing)).toBeNull();
+  });
+
+  it('is empty-set safe', () => {
+    expect(findDuplicateMonitor(watcher(), [])).toBeNull();
+  });
+
+  // The real incident, reduced: a lander added beside watchers already polling
+  // the same repo. Pre-fix this returned nothing and the monitor was written.
+  it('reproduces the observed pile-up', () => {
+    const cmd = 'gh pr list -R phnx-labs/agents-cli --state open --json number,statusCheckRollup';
+    const existing = [
+      watcher({ name: 'open-pr-watch', source: { type: 'poll', command: cmd, interval: '2m' } as any }),
+      watcher({ name: 'pr-ci-fail', source: { type: 'poll', command: cmd, interval: '2m' } as any }),
+    ];
+    const lander = watcher({ name: 'rush-2479-land', source: { type: 'poll', command: cmd, interval: '2m' } as any });
+    expect(findDuplicateMonitor(lander, existing)).toBe('open-pr-watch');
+  });
+});

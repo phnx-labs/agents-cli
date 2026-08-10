@@ -19,6 +19,7 @@ import {
   signalDaemonReload,
   startDaemon,
 } from '../lib/daemon.js';
+import { findDuplicateMonitor } from '../lib/monitors/fingerprint.js';
 import {
   listMonitors,
   readMonitor,
@@ -336,6 +337,7 @@ export function registerMonitorsCommands(program: Command): void {
     .option('--run-on <host>', 'BODY placement — execute the ACTION on this machine over SSH (same idea as run --where device:<host>)')
     .option('--rate-limit <spec>', 'Auto-pause if it fires more than N/<interval> (e.g. 5/1m)')
     .option('--disabled', 'Create the monitor paused (enable later with resume)')
+    .option('--force', 'Overwrite a same-named monitor, or add one that duplicates an existing watcher')
     .action(async (nameOrPath: string | undefined, options: Record<string, any>) => {
       // File mode: a single arg pointing at an existing .yml with no source flags.
       const hasSourceFlag = Boolean(
@@ -433,6 +435,30 @@ export function registerMonitorsCommands(program: Command): void {
       // names only a success-shaped token with no failure branch.
       if (condition.mode === 'match' && condition.match && /^(issued|success|ok|pass(ed)?|done|ready)$/i.test(condition.match)) {
         stderrLine(chalk.yellow(`  Note: --match '${condition.match}' only fires on success — it stays silent if the source breaks or never matches.`));
+      }
+
+      // Double-trigger guard. A monitor's NAME is not its identity: two watchers
+      // polling the same source and firing the same action are one trigger fired
+      // twice, whatever they are called. Refuse both collisions rather than
+      // silently overwriting (writeMonitor overwrites by name) or silently
+      // stacking a second copy of an existing watcher.
+      if (!options.force) {
+        const existing = listMonitors();
+        const sameName = existing.find((m) => m.name === nameOrPath);
+        if (sameName) {
+          stderrLine(chalk.red(`Monitor '${nameOrPath}' already exists — adding would overwrite it.`));
+          stderrLine(chalk.gray(`  Inspect it:   agents monitors view ${nameOrPath}`));
+          stderrLine(chalk.gray(`  Replace it:   agents monitors add ${nameOrPath} ... --force`));
+          process.exit(1);
+        }
+        const duplicate = findDuplicateMonitor(config, existing);
+        if (duplicate) {
+          stderrLine(chalk.red(`Monitor '${duplicate}' already watches this exact source and fires the same action.`));
+          stderrLine(chalk.gray('  Adding it again would fire the same trigger twice.'));
+          stderrLine(chalk.gray(`  Inspect it:   agents monitors view ${duplicate}`));
+          stderrLine(chalk.gray(`  Add anyway:   agents monitors add ${nameOrPath} ... --force`));
+          process.exit(1);
+        }
       }
 
       writeMonitor(config);

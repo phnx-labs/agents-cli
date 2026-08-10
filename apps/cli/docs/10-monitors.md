@@ -79,6 +79,44 @@ rateLimit:                   # firehose guard — auto-pause if exceeded
   per: 1m
 ```
 
+## Definition vs. running state
+
+Two different things wear the word "monitor", and they live in different places
+on purpose:
+
+| | Path | Checked in? |
+|---|---|---|
+| **Definition** — what to watch, when, what to do | `~/.agents/monitors/<name>.yml` (user), `~/.agents/.system/monitors/` (built-in) | yes — it should ride the repo to every box |
+| **Running state** — last-seen value, fire history, rate-limit counters | `~/.agents/.history/monitors/<name>/state.json` + `fires/<id>/` | no — it is per-machine and regenerable |
+
+Nothing but the definition is ever written into `monitors/`: the only writers of
+that directory are the monitor file's read, write, and delete. Runtime lives
+under `.history/`, which is excluded, so the split needs no extra rules.
+
+### The double-trigger guard
+
+**A monitor's NAME is not its identity.** Two watchers polling the same source on
+the same interval and firing the same action are one trigger fired twice,
+whatever they are called — and `writeMonitor` overwrites by name, so nothing used
+to notice. One real box accumulated `open-pr-watch`, `pr-ci-fail`, three stale
+`pr2222-*` watchers and an agent-added lander, all polling the same PR queue,
+added without a single warning.
+
+`agents monitors add` now refuses two collisions:
+
+- **Same name** — adding would overwrite an existing monitor.
+- **Same behavior** — an existing monitor (user *or* built-in) already watches
+  that source and fires that action, under any name.
+
+Identity is a fingerprint over the source, condition, and action. Name,
+description, and `enabled` are excluded — a duplicate under a new name is exactly
+the case being caught, and a paused duplicate is still a duplicate. **Placement
+(`device`/`devices`/`runOn`) is excluded too**: placement is who executes, not
+what runs, and hashing it would let the same watcher be re-added N times by
+varying only the owner.
+
+Pass `--force` when the duplication is deliberate.
+
 ## Commands
 
 ```bash
