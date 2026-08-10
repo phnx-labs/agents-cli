@@ -98,9 +98,12 @@ export function linuxDesktopEntry(invocation: string): string {
  * shell argument — the URL is never concatenated unquoted.
  */
 export function macAppleScriptSource(invocation: string): string {
+  // Escape the (already shell-quoted) invocation for an AppleScript double-quoted
+  // string literal, so a `"` or `\` in the install path cannot break osacompile.
+  const literal = invocation.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return [
     'on open location this_URL',
-    `\tdo shell script "${invocation} open " & quoted form of this_URL`,
+    `\tdo shell script "${literal} open " & quoted form of this_URL`,
     'end open location',
   ].join('\n');
 }
@@ -252,7 +255,9 @@ function registerMac(home: string): SchemeStatus {
     fs.rmSync(scriptFile, { force: true });
   }
   const plist = path.join(app, 'Contents', 'Info.plist');
-  for (const cmd of macPlistBuddyCommands(plist)) run(cmd[0], cmd.slice(1), true);
+  // Non-optional: if the URL type is not written, the scheme is never claimed —
+  // registerAgentsUrlScheme must report failure, not a false "registered".
+  for (const cmd of macPlistBuddyCommands(plist)) run(cmd[0], cmd.slice(1), false);
   // Register with LaunchServices so the scheme resolves without a reboot.
   const lsregister = '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister';
   run(lsregister, ['-f', app], true);

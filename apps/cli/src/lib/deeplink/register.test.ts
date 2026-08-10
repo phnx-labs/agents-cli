@@ -31,6 +31,13 @@ describe('content generators', () => {
     expect(src).not.toContain('& this_URL');
   });
 
+  it('macOS AppleScript escapes a quote/backslash in the install path', () => {
+    const src = macAppleScriptSource(`'/weird"path\\bin/agents'`);
+    // The double-quote is escaped so it cannot terminate the AppleScript literal.
+    expect(src).toContain('\\"path');
+    expect(src).toContain('\\\\bin');
+  });
+
   it('macOS plist commands add the agents scheme', () => {
     const cmds = macPlistBuddyCommands('/tmp/x/Info.plist');
     const joined = cmds.map((c) => c.join(' ')).join('\n');
