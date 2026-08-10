@@ -39,9 +39,11 @@ the strongest validation signal in this scan — and the tightest deadline.
   framework to adopt. Everyone hand-rolls policy; the only reusable pieces are
   gateways (LiteLLM/Portkey) at L1 and classifier models (RouteLLM, Arch/plano) for
   prompt→model scoring.
-- **YC shipped a structural competitor to the whole harness layer**, not just the
-  router: QM (MIT, announced 2026-07-31, repo created 2026-07-29) — pluggable agent
-  drivers + scopes + keychains + crons + skills grants. 12,955 stars in 12 days.
+- **YC's QM is an adjacent harness, not a router competitor.** It ships four real
+  harness drivers and an org/scope allowlist of approved harnesses × models, but
+  `src/harness/harness-router.ts` is config dispatch, not selection — no scoring, no
+  quota, no rotation. Its allowlist is the *allowlist half* of a named router with
+  none of the selection half.
 - **Cost-routing skepticism is the loudest counter-argument in public.** The
   best-attended HN thread on router products (216 pts) is mostly developers arguing
   routing *loses* money via cache misses and retry loops.
@@ -91,7 +93,7 @@ one.
 | Tool | Stars | Created | Overlap with the spec |
 |---|---|---|---|
 | **[Claudexor](https://github.com/razzant/claudexor)** | 400 | 2026-06-05 | **Near-total.** Multi-harness control plane (Claude Code, Codex, Cursor, OpenCode); quota-aware rotation across multiple Claude/Codex subscriptions; native-CLI execution; SSH remote hosts; credentials never leave their machine |
-| [QM (Y Combinator)](https://github.com/yc-software/qm) | 12,955 | 2026-07-29 | Harness layer, not router: pluggable drivers (Claude Code, OpenCode, Codex, Pi) + scopes, keychains, crons, skills grants, admin policy. MIT |
+| [QM (Y Combinator)](https://github.com/yc-software/qm) | 12,955 | 2026-07-29 | **Adjacent, not competing** — see below. MIT |
 | OMK | — | 2026 | "Provider-neutral CLI control plane for coding agents" |
 | [vibe-kanban](https://github.com/BloopAI/vibe-kanban) | 27,736 | 2025 | Task board over agents — *placement*, not scored routing. **No push since April** |
 | Superset (YC S26) | — | 2026 | Terminal that coordinates parallel agent sessions |
@@ -101,6 +103,40 @@ Everything else in the ecosystem — and there are **150+ tools** catalogued in
 is a *runner*: worktrees, tmux panes, kanban boards, dashboards. They put agents
 side by side. They do not **choose** between them on task shape, quota headroom,
 and cost.
+
+#### QM is adjacent, not a router competitor
+
+This was checked against the repo, not the launch coverage, because the coverage
+reads like a competitive threat and the code does not.
+
+**What genuinely overlaps.** QM is multi-harness for real: `src/harness/` holds
+four production drivers — `claude-harness.ts` (36KB), `codex-harness.ts` (37KB),
+`opencode-harness.ts` (46KB), `pi-harness.ts` (90KB). Its README says "Pick your own
+harness and model and switch between them — Pi, OpenCode, Codex, and Claude Code all
+drive the same core, so a deployment isn't tied to any single vendor." Admins choose
+"which harnesses and models are available" at the org level. That org/scope
+allowlist is real overlap with the spec's named-router concept, and it is the
+strongest independent validation the surface has.
+
+**Where it stops.** `src/harness/harness-router.ts` is **5KB** against 36–90KB per
+driver, and it is resolution, not selection. It reads the requested
+`{harnessId, modelId}`, falls back to the scope's inherited choice, validates
+against `getApprovedHarnesses()` and `modelSupportedByHarness()`, and either returns
+that pair or throws. Its only fallback is a single hop to the org default when
+nothing was explicitly requested. There is no scoring, no task-shape input, no cost
+input, no usage or quota read, no account rotation, and no cross-harness failover.
+Searching the repo for rotation logic returns only AWS deploy and sandbox secret
+rotation, nothing in the routing path.
+
+**Different product, different buyer.** QM is an org-wide multiplayer work
+assistant — its README pitches scoped memory per person and per room, Slack-like
+channels, inbox triage, and search over internal notes, email, documents, and
+databases. It is sold to a startup as a company, not to a developer managing a
+terminal fleet.
+
+**Net:** QM validates the harness-abstraction and the allowlist; it does not
+compete on selection. Treat it as evidence the surface is right, and as a reminder
+that a well-funded adjacent player could add the selection layer later.
 
 ## 3. Where Claudexor lands vs. the spec
 
@@ -158,14 +194,17 @@ deliberately rejected.
 | Cache-awareness as an explicit non-goal at L3, stated in the spec | Weave Router HN thread | spec §counter-arguments |
 
 **Ship the differentiator first.** The named router as a *resource kind*
-(RUSH-2562/2563) is the one thing no competitor has — Claudexor routes with
-per-invocation flags, claude-code-router routes with a global config. A reusable,
-shareable, task-typed router that layers project > user > system is a genuinely
-new surface, and it is the least-built part of the spec.
+(RUSH-2562/2563) is the one thing no competitor has built end to end. Claudexor
+routes with per-invocation flags, claude-code-router routes with a global config,
+and QM ships the org/scope allowlist without any selection behind it. A reusable,
+shareable, task-typed router that layers project > user > system is a genuinely new
+surface, and it is the least-built part of the spec.
 
-**Timing is the risk.** Claudexor went 0 → 400 stars and shipped this entire
-feature set in ten weeks; QM took 12,955 stars in 12 days. The L3 window is open now
-and will not stay open.
+**Timing is the risk, and it is Claudexor's clock, not QM's.** Claudexor went 0 →
+400 stars and shipped this entire feature set in ten weeks. QM's 12,955 stars in 12
+days measure attention on a different product; the risk it carries is that a funded
+adjacent team with four working harness drivers is one 5KB file away from adding
+selection.
 
 ## Evidence
 
@@ -173,7 +212,14 @@ Searched: GitHub repository search (star/push filters, `gh api`), Hacker News
 threads, YC company directory, vendor engineering blogs, and the
 `awesome-cli-coding-agents` catalogue (150+ tools). Star counts and push dates were
 read from the GitHub API on 2026-08-10, not from prose. Claims about Claudexor's
-architecture come from its README; claims about QM from YC's release coverage.
+architecture come from its README.
+
+Claims about QM come from the repository itself, not the launch coverage: its
+README, the file listing of `src/harness/` with per-driver byte sizes, the contents
+of `src/harness/harness-router.ts`, and a repo-wide code search for rotation and
+quota logic. An earlier revision of this report called QM "a structural competitor
+to the whole harness layer" on the strength of third-party launch coverage; reading
+the code contradicted that, and the section above is the corrected finding.
 
 ## Tracking
 
