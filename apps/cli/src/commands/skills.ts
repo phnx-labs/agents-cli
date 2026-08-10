@@ -501,18 +501,6 @@ Examples:
       }
     });
 
-  // `skills sync` is gone — sync runs automatically when the agent launches.
-  skillsCmd
-    .command('sync', { hidden: true })
-    .allowUnknownOption()
-    .allowExcessArguments()
-    .action(() => {
-      console.error(chalk.red('"agents skills sync" is gone.'));
-      console.error(chalk.gray('Sync runs automatically when you launch the agent.'));
-      console.error(chalk.gray('To remove orphans, use:  agents prune cleanup skills'));
-      process.exit(1);
-    });
-
   // `skills prune` moved to the top-level `agents prune cleanup` command.
   skillsCmd
     .command('prune', { hidden: true })

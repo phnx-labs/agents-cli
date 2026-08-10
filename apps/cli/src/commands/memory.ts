@@ -130,11 +130,16 @@ export function registerMemoryCommands(program: Command): void {
       console.log(fs.readFileSync(fact.path, 'utf-8'));
     });
 
+  // Deprecated: superseded by `agents sync --memory`. Kept as a warned, functional
+  // alias so old muscle-memory and scripts don't break.
   memoryCmd
-    .command('sync [agent]')
-    .description('Copy canonical memory into capable agent version homes')
+    .command('sync [agent]', { hidden: true })
+    .description('Deprecated — use `agents sync --memory` instead.')
     .option('-a, --agent <agent>', 'Limit to one agent (or agent@version)')
     .action(async (agentArg: string | undefined, options: { agent?: string }) => {
+      console.warn(chalk.yellow('`agents memory sync` is deprecated — use `agents sync --memory` instead:'));
+      console.warn(chalk.gray('  all agents:  agents sync --memory'));
+      console.warn(chalk.gray('  one agent:   agents sync --memory <agent>'));
       ensureUserMemoryDir();
       const input = agentArg || options.agent;
       if (input) {
