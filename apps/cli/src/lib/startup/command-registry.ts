@@ -46,7 +46,6 @@ export const loadCli: ModuleLoader = async () => (await import('../../commands/c
 export const loadSubagents: ModuleLoader = async () => (await import('../../commands/subagents.js')).registerSubagentsCommands;
 export const loadPlugins: ModuleLoader = async () => (await import('../../commands/plugins.js')).registerPluginsCommands;
 export const loadWorkflows: ModuleLoader = async () => (await import('../../commands/workflows.js')).registerWorkflowsCommands;
-export const loadWorktree: ModuleLoader = async () => (await import('../../commands/worktree.js')).registerWorktreeCommands;
 export const loadVersions: ModuleLoader = async () => (await import('../../commands/versions.js')).registerVersionsCommands;
 export const loadUpdate: ModuleLoader = async () => (await import('../../commands/update.js')).registerUpdateCommand;
 export const loadImport: ModuleLoader = async () => (await import('../../commands/import.js')).registerImportCommand;
@@ -172,7 +171,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   subagents: [loadSubagents],
   plugins: [loadPlugins],
   workflows: [loadWorkflows],
-  worktree: [loadWorktree],
   add: [loadVersions],
   use: [loadVersions],
   list: [loadVersions],

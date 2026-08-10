@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 97,
-  "commands": 567,
+  "groups": 96,
+  "commands": 563,
   "root": {
     "name": "agents",
     "path": "",
@@ -30046,148 +30046,6 @@
             }
           ],
           "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
-    },
-    {
-      "name": "worktree",
-      "path": "worktree",
-      "aliases": [],
-      "description": "Provision, release, and prune per-terminal git worktrees for agent isolation.",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "# Create (or reuse) an isolated worktree for an agent terminal — prints the path\n      agents worktree provision CC-1747509823-3\n\n      # Remove the worktree if it's clean and merged/pushed\n      agents worktree release CC-1747509823-3\n\n      # Preview what 'prune' would release across all agent worktrees\n      agents worktree prune --dry-run\n\n      # Release every agent worktree that's safe to remove\n      agents worktree prune",
-      "notes": "Worktrees live at <repo>/.agents/worktrees/<terminal-id> on branch agents/<terminal-id>.\n      Use --force on 'release' to skip safety checks (DANGEROUS — discards unpushed work).",
-      "subcommands": [
-        {
-          "name": "provision",
-          "path": "worktree provision",
-          "aliases": [],
-          "description": "Create (or reuse) an isolated worktree for an agent terminal. Prints the absolute path.",
-          "args": [
-            {
-              "name": "terminal-id",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--root <path>",
-              "description": "Repo root (defaults to current working directory)",
-              "long": "--root",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "prune",
-          "path": "worktree prune",
-          "aliases": [],
-          "description": "Try to release every agent worktree under .agents/worktrees/. Skips dirty or unpushed ones.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--root <path>",
-              "description": "Repo root (defaults to current working directory)",
-              "long": "--root",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--dry-run",
-              "description": "Report what would be removed without touching anything",
-              "long": "--dry-run",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "release",
-          "path": "worktree release",
-          "aliases": [],
-          "description": "Remove the worktree if clean and the branch is merged or has no unpushed commits.",
-          "args": [
-            {
-              "name": "terminal-id",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--root <path>",
-              "description": "Repo root (defaults to current working directory)",
-              "long": "--root",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--force",
-              "description": "Skip safety checks (DANGEROUS: discards unpushed work)",
-              "long": "--force",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
             {
               "flags": "-h, --help",
               "description": "Show help",
