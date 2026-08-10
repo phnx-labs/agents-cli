@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 104,
-  "commands": 583,
+  "commands": 584,
   "root": {
     "name": "agents",
     "path": "",
@@ -24482,6 +24482,46 @@
           ],
           "examples": "# Preview by the 8-character ID shown in agents sessions\n      agents sessions preview 407b8dd5\n\n      # A full UUID resolves on the first device that owns it\n      agents sessions preview c70ecdea-6210-4039-9845-246a3a7a9942\n\n      # Stay on this machine or restrict the authoritative lookup to one peer\n      agents sessions preview 407b8dd5 --local\n      agents sessions preview 407b8dd5 --device zion",
           "notes": "- Full UUIDs are globally unique and may stop the fleet lookup at the first exact hit.\n      - Short IDs wait for every selected device so ambiguity is never hidden.\n      - Active status is refreshed through the bounded live-state TTL; transcript-derived details use the durable session index.",
+          "subcommands": []
+        },
+        {
+          "name": "reap",
+          "path": "sessions reap",
+          "aliases": [],
+          "description": "Kill tmux sessions whose panes are all dead.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Emit a JSON result object instead of human output.",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--socket <path>",
+              "description": "Path to the tmux server socket (default: agents helper socket).",
+              "long": "--socket",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# Reap dead sessions interactively\nagents sessions reap\n\n# JSON output (for scripts)\nagents sessions reap --json",
+          "notes": "Sessions stay open after their process exits because `remain-on-exit on` is set\nso the harness can inspect exit status. This command cleans them up on demand.\n\nSafety: sessions with at least one live pane are never touched.",
           "subcommands": []
         },
         {

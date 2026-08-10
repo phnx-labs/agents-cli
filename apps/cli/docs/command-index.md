@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_104 command groups · 583 commands._
+_104 command groups · 584 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -873,6 +873,7 @@ agents sessions migrate [session-id]        Relocate a running session onto anot
 agents sessions migrations                  Show the migration ledger — sessions handed off to/from other machines.
 agents sessions optimize                    Compact the session search index (FTS5), reclaiming bloat from repeated re-indexing
 agents sessions preview <id>                Show one rich session card without rendering the full transcript
+agents sessions reap                        Kill tmux sessions whose panes are all dead.
 agents sessions reconnect [session-id]      Re-enter a dropped agent terminal: attach the live pane if it survived, else resume the session
 agents sessions render <selectors...>       Render one or more sessions as readable, redacted Markdown for review or sharing.
 agents sessions resume [query]              Reopen one session by canonical identity, or multi-select history into terminal tabs/splits.
