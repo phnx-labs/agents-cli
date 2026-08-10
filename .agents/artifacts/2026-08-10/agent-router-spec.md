@@ -479,3 +479,28 @@ This document specifies the **is + the proposed contract**, not a build plan. If
 5. **Cross-harness delegation** (C4) — the genuinely new surface; needs the child-result contract first.
 
 Hand these to `/swarm:plan` to propose the delta. Named routers (slice 2) are the recommended first build: they deliver the user-visible value, generalize the existing profile mechanism, and sidestep the classification gap since the user selects the router explicitly.
+
+## Tracking
+
+Linear (epic → tasks → subtasks), project **Agents CLI**:
+
+- **RUSH-2555** — Agent Router — meta-harness routing _(epic)_
+  - **RUSH-2556** — named routers: `routers` resource kind + `agents route` CRUD CLI _(E1, E2)_
+    - RUSH-2562 — `routers` ResourceKind + `routers.ts` IO lib
+    - RUSH-2563 — `agents route` CRUD command group
+    - RUSH-2564 — token validation + docs + CHANGELOG
+  - **RUSH-2557** — resolve + run within a named router _(E3, E4, E5)_
+    - RUSH-2565 — `router-resolve.ts` (allowlist+linked filter, fail-loud empty)
+    - RUSH-2566 — dispatch wiring + `--using` + `--explain` scoreboard
+  - **RUSH-2558** — `agents route <task>` (formalize `run auto`) + decision provenance _(A1, A6, C1)_
+    - RUSH-2567 — `agents route <task>` + M1 decision card
+    - RUSH-2568 — decision provenance on session (local + SSH + teams + cloud)
+  - **RUSH-2559** — routing policy engine _(B1–B4)_
+    - RUSH-2569 — `route-policy.ts` parse + `matchRule`
+    - RUSH-2570 — `scoreCandidates` + `--explain` contributions + default
+  - **RUSH-2560** — cross-harness fallback + opt-in hijack _(C2, C3)_
+    - RUSH-2571 — cross-harness fallback chain
+    - RUSH-2572 — `route.hijack` opt-in re-route / default fail-loud
+  - **RUSH-2561** — cross-harness runtime delegation _(C4)_
+    - RUSH-2573 — child-result contract + `route-delegate.ts`
+    - RUSH-2574 — parent/child session linking
