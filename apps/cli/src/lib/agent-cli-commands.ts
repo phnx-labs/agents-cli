@@ -27,5 +27,5 @@ export const AGENT_CLI_COMMANDS: readonly string[] = [
   'droid',
   'hermes',
   'muse',
-  'oz',
+  'warp',
 ] as const;

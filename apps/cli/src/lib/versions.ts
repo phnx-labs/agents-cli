@@ -1095,18 +1095,17 @@ export function getBinaryPath(agent: AgentId, version: string): string {
       : path.join(getHomeDir(), '.local', 'bin', 'muse');
   }
   if (agent === 'warp') {
-    // Warp Agent CLI installs a single global, self-updating `oz` binary — brew
-    // cask on macOS, the `oz-stable` apt|yum|pacman package on Linux — so, unlike
-    // droid/muse (which land at ~/.local/bin), its install location is
-    // platform/package specific. Resolve the real binary on PATH (findInPath
-    // skips our own shims dir) so isVersionInstalled / agents view agree with
-    // what executes. When oz is not installed, fall back to a deterministic path
-    // that won't exist, so isVersionInstalled reports uninstalled honestly.
-    const onPath = findInPath('oz');
+    // Warp Agent CLI installs a single global, self-updating `warp` binary at
+    // ~/.local/bin/warp via the curl installer (Windows: the agent-cli.ps1) —
+    // like droid/muse. Resolve the real binary on PATH (findInPath skips our own
+    // shims dir) so isVersionInstalled / agents view agree with what executes.
+    // When warp is not installed, fall back to its default install path so
+    // isVersionInstalled reports uninstalled honestly.
+    const onPath = findInPath('warp');
     if (onPath) return onPath;
     return IS_WINDOWS
-      ? path.join(getHomeDir(), 'bin', 'oz.exe')
-      : '/opt/warpdotdev/oz-stable/oz';
+      ? path.join(getHomeDir(), 'bin', 'warp.exe')
+      : path.join(getHomeDir(), '.local', 'bin', 'warp');
   }
   const versionDir = getVersionDir(agent, version);
   return path.join(versionDir, 'node_modules', '.bin', agentConfig.cliCommand);

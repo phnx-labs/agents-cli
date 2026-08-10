@@ -78,7 +78,7 @@ describe('reservedBrandNames / validateBrandName (RUSH-2331)', () => {
   it('rejects reserved harness CLI names', () => {
     expect(validateBrandName('claude')).toMatch(/reserved/);
     expect(validateBrandName('cursor-agent')).toMatch(/reserved/);
-    expect(validateBrandName('oz')).toMatch(/reserved/);
+    expect(validateBrandName('warp')).toMatch(/reserved/);
     expect(validateBrandName('agents')).toMatch(/reserved/);
     expect(validateBrandName('ag')).toMatch(/reserved/);
   });

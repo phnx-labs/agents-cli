@@ -722,13 +722,12 @@ elif [ "$AGENT" = "muse" ]; then
     fi
   fi
 elif [ "$AGENT" = "warp" ]; then
-  # Warp Agent CLI installs a global, self-updating oz binary (brew cask on
-  # macOS, the oz-stable apt|yum|pacman package on Linux) -- a platform/package
-  # specific location, not ~/.local/bin -- so resolve it from PATH with the same
-  # shims-dir re-exec guard as droid/muse.
+  # Warp Agent CLI installs a global, self-updating warp binary at
+  # ~/.local/bin/warp (curl installer) -- like droid/muse -- so resolve it from
+  # PATH with the same shims-dir re-exec guard as droid/muse.
   BINARY=$(adopted_original_bin || echo "")
   if [ -z "$BINARY" ]; then
-    BINARY=$(command -v oz 2>/dev/null || echo "")
+    BINARY=$(command -v warp 2>/dev/null || echo "")
     case "$(readlink -f "$BINARY" 2>/dev/null)" in
       "$AGENTS_USER_DIR/.cache/shims/"*) BINARY="" ;;
     esac
@@ -1249,10 +1248,10 @@ else
   esac
 fi`
           : agent === 'warp'
-            ? `# Warp Agent CLI installs a global self-updating \`oz\` binary (brew cask on
-# macOS, oz-stable apt|yum|pacman on Linux) — a platform-specific location, not
-# ~/.local/bin — so resolve it from PATH, refusing anything under our shims dir.
-BINARY=$(command -v oz 2>/dev/null || echo "")
+            ? `# Warp Agent CLI installs a global self-updating \`warp\` binary at
+# ~/.local/bin/warp (curl installer) — like droid/muse — so resolve it from
+# PATH, refusing anything under our shims dir.
+BINARY=$(command -v warp 2>/dev/null || echo "")
 case "$BINARY" in
   "$HOME/.agents/.cache/shims/"*) BINARY="" ;;
 esac`

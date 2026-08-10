@@ -904,27 +904,32 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       interactiveRepl: true,
     },
   },
-  // Warp Agent CLI (`oz`) — the standalone coding-agent CLI on Warp's "Oz"
-  // platform (the same shared Warp binary invoked via the `oz` symlink). Native
-  // binary via `brew install --cask oz` (macOS) / `oz-stable` apt|yum|pacman
-  // package (Linux); self-updating, no npm package. Config lives under `~/.warp/`
-  // (`.mcp.json`, `skills/`, `tab_configs/`, `worktrees/`, `remote-server`).
-  // Headless: `oz agent run --prompt "<task>" [--model <id>]` (local) /
-  // `oz agent run-cloud` (cloud). Auth: `oz login` (browser OAuth) or a
-  // `WARP_API_KEY` env token for headless/CI (`oz api-key create`). Rules/context
-  // file is `AGENTS.md` (also reads WARP.md / CLAUDE.md). Autonomy is governed by
-  // the selected agent profile (`--profile`), not a per-run permission flag.
-  // Sessions/conversations are stored SERVER-SIDE (retrieved with auth via
-  // `oz run conversation get <id>`), so there is no local transcript for
-  // `agents sessions` to index — warp is intentionally absent from SESSION_AGENTS.
-  // Docs: https://docs.warp.dev/reference/cli
+  // Warp Agent CLI (`warp`) — Warp's standalone interactive TUI coding agent
+  // (docs.warp.dev/cli). Installed by the official cross-platform installer
+  // `curl -fsSL https://app.warp.dev/download/agent-cli | bash` (Windows: the
+  // sibling agent-cli.ps1), which drops a self-updating `warp` binary at
+  // ~/.local/bin/warp — NOT the older `oz` platform runner (brew cask `oz` /
+  // apt `oz-stable`), a separate headless product that no longer matches this
+  // CLI. Config lives under `~/.warp/` (`.mcp.json`, `skills/`, `tui/`). It is
+  // interactive-only: bare `warp` opens the TUI (streamed responses, diffs,
+  // inline approvals). There is NO headless one-shot form — the documented
+  // flags are --api-key / --auto-approve / --resume <token> /
+  // --set-provider-api-key / --clear-provider-api-key / --version / --help; no
+  // -p/--prompt, no --model (model is the `/model` picker), no JSON output.
+  // Auth: interactive browser sign-in on launch, or the `WARP_API_KEY` env
+  // token / `--api-key` for CI. Rules/context file is `AGENTS.md` (also reads
+  // WARP.md / CLAUDE.md). Conversations sync SERVER-SIDE to the Warp/Oz
+  // platform (resume a prior one with `warp --resume <token>`), so there is no
+  // local transcript for `agents sessions` to index — warp is intentionally
+  // absent from SESSION_AGENTS.
+  // Docs: https://docs.warp.dev/cli/quickstart
   warp: {
     id: 'warp',
     name: 'Warp',
     color: 'blueBright',
-    cliCommand: 'oz',
+    cliCommand: 'warp',
     npmPackage: '',
-    installScript: 'brew install --cask oz',
+    installScript: 'curl -fsSL https://app.warp.dev/download/agent-cli | bash',
     configDir: path.join(HOME, '.warp'),
     commandsDir: '',
     commandsSubdir: '',
@@ -933,44 +938,42 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
-    // Oz has no event->shell-command hook registration surface (its documented
-    // capabilities are agent-profiles-permissions, codebase-context,
-    // full-terminal-use, mcp, planning, rules, slash-commands — no hooks).
+    // Warp has no event->shell-command hook registration surface (its startup
+    // flags are --api-key/--auto-approve/--resume/--set-provider-api-key/
+    // --clear-provider-api-key — no hooks).
     supportsHooks: false,
     capabilities: {
       hooks: false,
-      // MCP: Oz reads the Claude `{ "mcpServers": {...} }` schema from
-      // `.warp/.mcp.json` (user `~/.warp/.mcp.json`, project `<root>/.warp/.mcp.json`)
-      // and accepts `--mcp <path|json>` at run time; `oz mcp list` reads them
-      // back. stdio + http with headers, same schema as Claude's .mcp.json.
+      // MCP: Warp reads the Claude `{ "mcpServers": {...} }` schema from
+      // `.warp/.mcp.json` (user `~/.warp/.mcp.json`, project `<root>/.warp/.mcp.json`),
+      // stdio + http with headers, same schema as Claude's .mcp.json.
       mcp: true,
       mcpHttp: true,
       mcpHeaders: true,
-      // Autonomy is governed by the selected agent profile
-      // (agent-profiles-permissions), not a Claude-style tool-name allow/deny
-      // list agents-cli can write — so no allowlist writer (mirrors muse).
+      // Autonomy is a single toggle (`--auto-approve`), not a Claude-style
+      // tool-name allow/deny list agents-cli can write — so no allowlist writer
+      // (mirrors muse).
       allowlist: false,
-      // Skills: `--skill <spec>` + `oz agent skills`; searched in
-      // `.agents/skills/`, `.warp/skills/`, `.claude/skills/`, `.codex/skills/`.
+      // Skills searched in `.agents/skills/`, `.warp/skills/`, `.claude/skills/`,
+      // `.codex/skills/`.
       skills: true,
       // Slash-commands are native/server-managed (no droppable markdown
       // command-file directory for agents-cli to sync into).
       commands: false,
       // No Claude marketplace / plugin manifest support.
       plugins: false,
-      // Cloud agents + agent profiles are server-side; no installable
-      // subagent-definition directory to sync into (keeps the table truthful).
+      // Cloud agents are server-side; no installable subagent-definition
+      // directory to sync into (keeps the table truthful).
       subagents: false,
       rules: { file: 'AGENTS.md' },
       workflows: false,
       memory: false,
-      // Oz has no per-run permission flag; a single autonomous mode maps to no
-      // flags (the `--profile` selection governs autonomy). Mirrors hermes.
+      // No per-run permission flag beyond `--auto-approve`; the single `edit`
+      // mode maps to no flags (mirrors hermes).
       modes: ['edit'],
       rulesImports: false,
-      // `oz agent run` requires a prompt (--prompt/--saved-prompt/--task-id/
-      // --skill), so a bare invocation opens no REPL.
-      interactiveRepl: false,
+      // Bare `warp` opens the interactive TUI (its only run form).
+      interactiveRepl: true,
     },
   },
 };

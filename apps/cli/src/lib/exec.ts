@@ -916,22 +916,22 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     // `resume` subcommand — special-cased in buildExecCommand.
     resume: { flag: '--session-id' },
   },
-  // Warp Agent CLI (`oz agent run`). Headless is `-p/--prompt "<task>"`; JSON is
-  // the global `--output-format json`. Autonomy comes from the selected agent
-  // profile (`--profile`), not a per-run permission flag, so the single `edit`
-  // mode maps to no flags (mirrors hermes). `--model` overrides the base model
-  // (`oz model list`). No `resume`: Oz's `oz agent run --conversation <id>`
-  // continues a SERVER-SIDE conversation by id, and warp is not session-tracked
-  // (absent from SESSION_AGENTS), so agents-cli has no local id to resume from —
-  // declaring it would make nativeResume(warp) true against an unreachable path.
+  // Warp Agent CLI (`warp`) — the interactive TUI. It has NO headless one-shot
+  // form: the documented flags are --api-key/--auto-approve/--resume <token>/
+  // --set-provider-api-key/--clear-provider-api-key/--version/--help — no
+  // -p/--prompt, no --model (model is the `/model` picker), no JSON output. So
+  // bare `warp` opens the TUI and the single `edit` mode maps to no flags
+  // (mirrors hermes); there are no jsonFlags/modelFlag to declare. No `resume`:
+  // `warp --resume <token>` reopens a SERVER-SIDE conversation by token, but
+  // warp is not session-tracked (absent from SESSION_AGENTS) so agents-cli has
+  // no local id to feed — declaring it would make nativeResume(warp) true
+  // against an unreachable path.
   warp: {
-    base: ['oz', 'agent', 'run'],
-    promptFlag: '-p',
+    base: ['warp'],
+    promptFlag: 'positional',
     modeFlags: {
       edit: [],
     },
-    jsonFlags: ['--output-format', 'json'],
-    modelFlag: '--model',
   },
 };
 
