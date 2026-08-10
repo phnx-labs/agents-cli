@@ -2418,12 +2418,16 @@ nothing but its own view cache.
   session-cache-warm, usage-refresh, and auto-dispatch ticks (RUSH-2353) were
   formerly hardcoded `setInterval`s inside `runDaemon()` — a second, unowned
   scheduling path duplicating what routines already provide (declaration, run
-  history, pause, device pin). They are now shipped system routines
-  (`gh:phnx-labs/.agents-system` `routines/*.yml`) whose `command:` invokes
-  the migrated tick body (`lib/daemon-ticks.ts`) via `agents __daemon-tick
-  <name>`, fired by the same pid-claimed `JobScheduler` as every other
-  routine — one scheduler, one executor, same as before, minus the duplicate
-  concept.
+  history, pause, device pin). They are now **daemon-owned built-in routines**
+  (`lib/builtin-routines.ts`, RUSH-2465): the definitions live in daemon code and
+  are injected as the lowest layer of `listJobs()`, below project > user > system,
+  so a same-named on-disk file (a `~/.agents/routines/` override) still shadows
+  them. Each `command:` invokes the migrated tick body (`lib/daemon-ticks.ts`) via
+  `agents __daemon-tick <name>`, fired by the same pid-claimed `JobScheduler` as
+  every other routine — one scheduler, one executor, still declared/listed/
+  run-tracked/pausable/device-pinnable, but no longer shipped from the
+  `gh:phnx-labs/.agents-system` config repo every install pulls (only
+  `check-updates` remains a system routine there).
 - **SING-2 (MUST NOT).** A UI surface (apps/factory, the menubar app, the iOS app)
   MUST NOT own a timer, watcher, or loop that detects a condition and performs a
   fleet-affecting action. Detection and decision MUST live in the CLI, which holds
