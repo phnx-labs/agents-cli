@@ -1384,7 +1384,7 @@ export function registerRunCommand(program: Command): void {
           const { runLeaseSetup } = await import('./lease.js');
           const ok = await runLeaseSetup({ provider: backend ?? 'hetzner' });
           if (!ok) {
-            console.error(chalk.yellow('Leasing needs a cloud provider set up. Run `agents lease setup` and retry.'));
+            console.error(chalk.yellow('Leasing needs a cloud provider set up. Run `agents devices lease setup` and retry.'));
             process.exit(1);
           }
         }
@@ -1478,7 +1478,7 @@ export function registerRunCommand(program: Command): void {
           }
           if (!hasKey) {
             console.error(chalk.yellow('Tailscale requested but no auth key is configured — falling back to a public-IP lease.'));
-            console.error(chalk.gray('Set one up with `agents lease setup` (mint an EPHEMERAL, pre-authorized, tag:crabbox key), or store CRABBOX_TAILSCALE_AUTH_KEY in a secrets bundle.'));
+            console.error(chalk.gray('Set one up with `agents devices lease setup` (mint an EPHEMERAL, pre-authorized, tag:crabbox key), or store CRABBOX_TAILSCALE_AUTH_KEY in a secrets bundle.'));
             netMode = 'public';
           }
         }
@@ -1696,7 +1696,7 @@ export function registerRunCommand(program: Command): void {
             if (log.length) process.stderr.write(chalk.dim(log.join('\n')) + '\n');
           }
           const keptAddr = boxAddress(box);
-          console.error(chalk.gray(toreDown ? `Box ${box.slug} destroyed.` : `Box ${box.slug} kept${keptAddr ? ` (${keptAddr})` : ''}. Stop it: agents lease stop ${box.slug}`));
+          console.error(chalk.gray(toreDown ? `Box ${box.slug} destroyed.` : `Box ${box.slug} kept${keptAddr ? ` (${keptAddr})` : ''}. Stop it: agents devices lease stop ${box.slug}`));
           process.exit(exitCode === null ? 1 : exitCode);
         } catch (err) {
           stopTimer();

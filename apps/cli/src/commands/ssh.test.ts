@@ -172,7 +172,7 @@ describe('renderLeasedBoxesSection — F4 devices "Leased boxes" (RUSH-1923)', (
     expect(flat).toContain('bh.ts.net'); // tailnet FQDN preferred over public IP
     expect(flat).not.toContain('203.0.113.9');
     expect(flat).toContain('agents run --box <slug>');
-    expect(flat).toContain('agents lease stop <slug>');
+    expect(flat).toContain('agents devices lease stop <slug>');
   });
 });
 

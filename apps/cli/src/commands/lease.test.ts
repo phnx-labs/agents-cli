@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { Command } from 'commander';
 import {
   validateHetznerToken,
   fmtDurationShort,
@@ -8,10 +9,28 @@ import {
   boxStatus,
   reusableBoxes,
   formatBoxRow,
+  registerLeaseCommand,
 } from './lease.js';
 import type { CrabboxBox } from '../lib/crabbox/cli.js';
 
 const NOW = 1_700_000_000;
+
+describe('lease command registration', () => {
+  it('registers every lease verb below devices, not at the top level', () => {
+    const program = new Command();
+    const devices = program.command('devices');
+    registerLeaseCommand(devices);
+
+    expect(program.commands.map((command) => command.name())).toEqual(['devices']);
+    expect(devices.commands.map((command) => command.name())).toEqual(['lease']);
+    expect(devices.commands[0].commands.map((command) => command.name())).toEqual([
+      'setup',
+      'list',
+      'stop',
+      'gc',
+    ]);
+  });
+});
 
 function box(over: Partial<CrabboxBox> = {}): CrabboxBox {
   return {

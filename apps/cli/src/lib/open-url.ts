@@ -1,6 +1,6 @@
 /**
  * Open a URL in the user's default browser, cross-platform. Best-effort and
- * detached — never throws and never blocks the caller. Shared by `agents lease`
+ * detached — never throws and never blocks the caller. Shared by `agents devices lease`
  * (Hetzner console) and `agents fleet login` (the local login dashboard).
  */
 import { spawn } from 'child_process';
