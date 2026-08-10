@@ -49,12 +49,29 @@ newer_than_latest() { # $1 = version
   [[ "$(printf '%s\n%s\n' "$LATEST" "$1" | sort -V | tail -1)" == "$1" ]]
 }
 
+# Is this the one deadlock case? Decided once, up front, so the loop below can
+# drop ONLY main's own version from the candidate set. Exempting by returning
+# early instead would suppress the whole report, hiding a genuine
+# died-between-tag-and-publish jam that happens to sit behind main's version.
+EXEMPT_MAIN=false
+if [[ "$BUMP_KIND" == "patch-from-main" && -n "$MAIN_VERSION" ]]; then
+  EXEMPT_MAIN=true
+fi
+
 STUCK=""
 while read -r version published _rest; do
   [[ -n "${version:-}" ]] || continue
   [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
   [[ "${published:-}" == "no" ]] || continue
   newer_than_latest "$version" || continue
+  # The sanctioned step over an unpublishable stuck release (see the header).
+  # Say so on stderr rather than disarming silently: release.sh prints nothing
+  # in this path, and a guard that steps over a tagged-but-unpublished version
+  # without a word is exactly the silent skip this repo forbids at boundaries.
+  if $EXEMPT_MAIN && [[ "$version" == "$MAIN_VERSION" ]]; then
+    echo "note: v$version is tagged but unpublishable (main already carries it); $BUMP_KIND steps over it" >&2
+    continue
+  fi
   # Oldest stuck version wins: that is the one blocking the queue, and finishing
   # it is what lets every later version publish in order.
   if [[ -z "$STUCK" ]] \
@@ -64,14 +81,4 @@ while read -r version published _rest; do
 done
 
 [[ -n "$STUCK" ]] || exit 1
-
-# The sanctioned step over an unpublishable stuck release (see the header). Kept
-# deliberately narrow -- it fires ONLY when the caller already resolved the bump
-# as patch-from-main AND the blocking tag is main's own version. Any other stuck
-# version still blocks, and every other bump kind still blocks on this one, so a
-# genuine died-between-tag-and-publish jam is reported exactly as before.
-if [[ "$BUMP_KIND" == "patch-from-main" && -n "$MAIN_VERSION" && "$STUCK" == "$MAIN_VERSION" ]]; then
-  exit 1
-fi
-
 printf '%s\n' "$STUCK"

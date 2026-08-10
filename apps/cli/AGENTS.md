@@ -713,9 +713,17 @@ the operator's unwedge path, since `release` only drops a lease *this checkout*
 claimed. It shares one predicate with `claim`, so it can never take a live holder's
 lease either.
 
-**Finish a stuck release before cutting a new one.** `release.sh` refuses to start
-when an older `v*` tag exists that npm never received, and prints the re-run that
-finishes it. Without this, a release that died between tag and publish left the
+**Finish a stuck release before cutting a new one — with one exemption.** `release.sh`
+refuses to start when an older `v*` tag exists that npm never received, and prints
+the re-run that finishes it. The single carve-out is a **`patch-from-main` bump
+stepping over main's own version**, because that stuck release cannot be finished
+at all: `release.sh`'s catch-up guard rejects it and points at "cut the next patch",
+so without the exemption the two guards deadlock and *nothing* publishes (2026-08-10,
+npm at 1.22.35 with `v1.22.36` tagged — its CI-tested tree predated the prepack
+version-gate fix, so its own `npm publish` rejected a correct binary). Only main's
+own version is dropped from the candidate set, and `stuck-release.sh` says so on
+stderr; any other stuck tag still blocks, under every bump kind. Without the guard,
+a release that died between tag and publish left the
 next run validating its bump against a registry that was behind, so it cut the
 *next* version and the gap widened by one every time — that is how npm sat at
 1.20.78 while `main` carried 1.20.81.

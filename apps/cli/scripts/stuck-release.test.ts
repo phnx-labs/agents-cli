@@ -244,4 +244,21 @@ describe('stuck-release: the 2026-08-10 deadlock', () => {
   it('keeps blocking when no bump kind is supplied (unchanged default)', () => {
     expect(stuck('1.22.35', TAGS)).toBe('1.22.36');
   });
+
+  it('still reports a genuine jam sitting BEHIND main own version', () => {
+    // The exemption drops only main's version from the candidate set — it must
+    // not suppress the whole report. A second tag that really did die between
+    // `git tag` and `npm publish` is still the answer, even though the oldest
+    // stuck version is the exempt one.
+    expect(
+      stuck(
+        '1.22.35',
+        [
+          ['1.22.36', 'no'],
+          ['1.22.38', 'no'],
+        ],
+        { kind: 'patch-from-main', mainVersion: '1.22.36' },
+      ),
+    ).toBe('1.22.38');
+  });
 });
