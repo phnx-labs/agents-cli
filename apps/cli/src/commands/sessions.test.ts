@@ -16,6 +16,7 @@ import {
   buildSessionDescription,
   fleetCandidatesByQuery,
   metadataResolveOutcome,
+  isUniqueEnoughSelector,
   metadataResolveForwardedArgs,
   isDefinitiveMatch,
   selectorAllowsEarlyExit,
@@ -1293,6 +1294,57 @@ describe('agents sessions --resolve local-peer critical path', () => {
       label: 'release-train',
     };
     expect(metadataResolveOutcome([session], { sessions: [], unreachable: ['offline-box'] }, 'release-train')).toEqual({
+      kind: 'partial',
+      failedPeers: ['offline-box'],
+    });
+  });
+
+  it('reports ambiguity — not a resolve — when two reachable sessions share the prefix', () => {
+    // The accepted risk in SES-9a is bounded by this: a prefix collision among
+    // peers that ANSWERED still surfaces, because each distinct full id is its
+    // own candidate. Only a collision hiding on a peer that never answered can
+    // slip through, which is the trade the spec names explicitly.
+    const base = {
+      agent: 'codex' as const,
+      version: '0.146.0',
+      mode: 'edit',
+      timestamp: '2026-08-05T09:29:43.616Z',
+    };
+    const a: SessionMeta = { ...base, id: '019fd0c8-b3e9-77a2-a1a4-444698c4d897', shortId: '019fd0c8', machine: 'yosemite-s0', filePath: '/sessions/a.jsonl' };
+    const b: SessionMeta = { ...base, id: '019fd0c8-aaaa-4bbb-8ccc-dddddddddddd', shortId: '019fd0c8', machine: 'yosemite-s1', filePath: '/sessions/b.jsonl' };
+    // With a peer still missing, two candidates means we cannot claim
+    // uniqueness at all — fail closed rather than pick one.
+    expect(metadataResolveOutcome([a, b], { sessions: [], unreachable: ['offline-box'] }, '019fd0c8')).toEqual({
+      kind: 'partial',
+      failedPeers: ['offline-box'],
+    });
+    // Once every peer has answered, the same collision surfaces as a real
+    // ambiguity listing both machines — never a silent resolve.
+    const settled = metadataResolveOutcome([a, b], { sessions: [], unreachable: [] }, '019fd0c8');
+    expect(settled.kind).toBe('ambiguous');
+    expect(settled.kind === 'ambiguous' && settled.candidates.map(c => c.id).sort()).toEqual([b.id, a.id].sort());
+  });
+
+  it('keeps a keyword-shaped selector fail-closed even though it is all hex characters', () => {
+    // looksLikeSessionId accepts any 6+ char [0-9a-f-] run, so ordinary words
+    // like `facade` and `decade` match it. Those are searches, not identifiers,
+    // and must still wait for every peer.
+    const session: SessionMeta = {
+      id: '019fd0c8-b3e9-77a2-a1a4-444698c4d897',
+      shortId: '019fd0c8',
+      agent: 'codex',
+      version: '0.146.0',
+      mode: 'edit',
+      machine: 'yosemite-s0',
+      timestamp: '2026-08-05T09:29:43.616Z',
+      filePath: '/sessions/codex.jsonl',
+      label: 'facade',
+    };
+    expect(isUniqueEnoughSelector('facade')).toBe(false);
+    expect(isUniqueEnoughSelector('decade')).toBe(false);
+    expect(isUniqueEnoughSelector('019fd0c8')).toBe(true);
+    expect(isUniqueEnoughSelector('019fd0c8-b3e9-77a2-a1a4-444698c4d897')).toBe(true);
+    expect(metadataResolveOutcome([session], { sessions: [], unreachable: ['offline-box'] }, 'facade')).toEqual({
       kind: 'partial',
       failedPeers: ['offline-box'],
     });

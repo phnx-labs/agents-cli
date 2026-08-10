@@ -218,10 +218,24 @@ SSH access (§7); rendering sessions that no harness produced.
 
 - **SES-9a (MUST).** `sessions preview <id-or-prefix>` MUST resolve ID-shaped
   selectors through the SQLite ID index across the selected fleet. A full UUID
-  MAY return on its first exact hit; a short prefix MUST wait for all selected
-  peers and fail closed when any peer is unavailable. Durable preview data MUST
-  be invalidated by the transcript's actual mtime + size. Live status MUST NOT
-  be stored in that durable digest and MUST expire within 15 seconds.
+  MAY return on its first exact hit. When the sweep has completed and some peer
+  did not answer, a selector that is a complete id, or at least 8 hex characters
+  wide (`SHORT_SESSION_ID_WIDTH`, the printed `shortId` width), MUST resolve if
+  exactly one session on the reachable fleet matches it; a shorter or
+  non-ID-shaped selector, and any label, MUST fail closed. Durable preview data
+  MUST be invalidated by the transcript's actual mtime + size. Live status MUST
+  NOT be stored in that durable digest and MUST expire within 15 seconds.
+
+  *Accepted risk, amended 2026-08-10.* This requirement previously made every
+  short prefix fail closed whenever any peer was unavailable. On a fleet with a
+  permanently offline registered device that voids 100% of short-id lookups —
+  measured at 9 offline devices — to guard a prefix collision that is at most
+  2^-32 per pair **and** must land specifically on a peer that did not answer.
+  Collisions among peers that DID answer are still reported: they produce two
+  candidates and surface through the `ambiguous` outcome, which is unchanged.
+  RUSH-2203's early-exit rule is also unchanged and stays full-UUID-only
+  (`isDefinitiveMatch`), because that cancels a sweep still in flight, where a
+  silent peer is still expected to answer.
 - **SES-10 (MUST).** A preview string MUST be cleaned of terminal/harness noise
   (OSC titles, CSI/SGR, harness tags, collapsed whitespace) before display
   (`cleanPreview`, `commands/sessions.ts:329-337`), and truncated width-aware
@@ -742,7 +756,10 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `sync`, `resume
   peer sweep (including malformed successful output, device-registry failure, or an
   older peer rejecting that protocol) MUST emit no JSON, MUST NOT decide
   unique/no-match from partial rows, and MUST exit 2 with the failed source(s) on
-  stderr
+  stderr — **except** for the SES-9a case, where a selector that is a complete id
+  or at least 8 hex characters wide and matches exactly one session on the
+  reachable fleet MUST resolve and emit its row; a keyword, a shorter selector, or
+  a label still MUST NOT be decided from partial rows
   (`commands/sessions.ts` `serializeResolvedSessionsJson`, `resolveSessionMetadata`,
   `metadataResolveOutcome`, `fleetCandidatesByQuery`,
   `metadataResolveForwardedArgs`; tests
