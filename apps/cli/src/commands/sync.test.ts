@@ -58,6 +58,195 @@ function run(args: string[], home: string): { stdout: string; stderr: string; st
   };
 }
 
+// ---------------------------------------------------------------------------
+// Helpers shared across per-kind flag tests
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a disposable commander probe that re-declares every option from the
+ * registered sync command. Parsing flags against this probe never fires the
+ * sync action — it only exercises flag registration and option collection.
+ */
+function buildSyncProbe(): Command {
+  const program = new Command();
+  program.exitOverride();
+  registerSyncCommand(program);
+  const sync = program.commands.find((c) => c.name() === 'sync')!;
+  const probe = new Command('sync').exitOverride();
+  for (const o of sync.options) {
+    if (o.flags) probe.option(o.flags, o.description ?? '');
+  }
+  return probe;
+}
+
+// ---------------------------------------------------------------------------
+// Per-kind selector flags — commander registration and option parsing
+// ---------------------------------------------------------------------------
+
+describe('agents sync per-kind selector flags', () => {
+  it('all per-kind flags are registered on the sync command', () => {
+    const program = new Command();
+    program.exitOverride();
+    registerSyncCommand(program);
+    const sync = program.commands.find((c) => c.name() === 'sync')!;
+    const longs = (sync!.options ?? []).map((o) => o.long);
+    // Every kind pair (singular + plural alias)
+    for (const flag of [
+      '--plugin', '--plugins',
+      '--command', '--commands',
+      '--skill', '--skills',
+      '--hook', '--hooks',
+      '--subagent', '--subagents',
+      '--permission', '--permissions',
+      '--mcp', '--mcps',
+      '--workflow', '--workflows',
+      '--rule', '--rules',
+      '--memory',
+    ]) {
+      expect(longs, `missing flag ${flag}`).toContain(flag);
+    }
+  });
+
+  it('singular and plural flags accumulate the same value (--plugin fleet == --plugins fleet)', () => {
+    const a = buildSyncProbe();
+    a.parse(['--plugin', 'fleet'], { from: 'user' });
+    const b = buildSyncProbe();
+    b.parse(['--plugins', 'fleet'], { from: 'user' });
+    // kindCollector normalises both into an array via the same argParser
+    expect(a.opts().plugin).toEqual(['fleet']);
+    expect(b.opts().plugins).toEqual(['fleet']);
+  });
+
+  it('bare flag (no value) yields true → "all of that kind"', () => {
+    const probe = buildSyncProbe();
+    probe.parse(['--plugins'], { from: 'user' });
+    expect(probe.opts().plugins).toBe(true);
+  });
+
+  it('bare --skills sets skills only, leaves other kinds undefined', () => {
+    const probe = buildSyncProbe();
+    probe.parse(['--skills'], { from: 'user' });
+    const opts = probe.opts();
+    expect(opts.skills).toBe(true);
+    expect(opts.plugins).toBeUndefined();
+    expect(opts.hooks).toBeUndefined();
+    expect(opts.commands).toBeUndefined();
+  });
+
+  it('kind flags are additive: --plugins --hooks sets both, leaves others undefined', () => {
+    const probe = buildSyncProbe();
+    probe.parse(['--plugins', '--hooks'], { from: 'user' });
+    const opts = probe.opts();
+    expect(opts.plugins).toBe(true);
+    expect(opts.hooks).toBe(true);
+    expect(opts.skills).toBeUndefined();
+    expect(opts.commands).toBeUndefined();
+    expect(opts.subagents).toBeUndefined();
+  });
+
+  it('repeated flags accumulate: --plugin fleet --plugin code → [fleet, code]', () => {
+    const probe = buildSyncProbe();
+    probe.parse(['--plugin', 'fleet', '--plugin', 'code'], { from: 'user' });
+    expect(probe.opts().plugin).toEqual(['fleet', 'code']);
+  });
+
+  it('comma-separated value accumulates: --plugin fleet,code → [fleet, code]', () => {
+    const probe = buildSyncProbe();
+    probe.parse(['--plugin', 'fleet,code'], { from: 'user' });
+    expect(probe.opts().plugin).toEqual(['fleet', 'code']);
+  });
+
+  it('--rule and --rules are registered as kind flags for the memory kind', () => {
+    const probe = buildSyncProbe();
+    probe.parse(['--rule'], { from: 'user' });
+    // --rule is a bare flag (no required value); truthy when present
+    expect(probe.opts().rule).toBeTruthy();
+  });
+
+  it('--memory is registered as a boolean flag aliasing the rule kind', () => {
+    const probe = buildSyncProbe();
+    probe.parse(['--memory'], { from: 'user' });
+    expect(probe.opts().memory).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auto-promotion: bare `agents sync --agent claude` with multiple versions
+// ---------------------------------------------------------------------------
+
+/** Populate a test home with N fake claude version dirs that pass isVersionInstalled. */
+function seedFakeClaudeVersions(home: string, versions: string[]): void {
+  for (const ver of versions) {
+    // getPackageBinaryPath reads package.json → bin field then checks the file
+    const pkgDir = path.join(
+      home, '.agents', '.history', 'versions', 'claude', ver,
+      'node_modules', '@anthropic-ai', 'claude-code',
+    );
+    const binDir = path.join(pkgDir, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(pkgDir, 'package.json'),
+      JSON.stringify({ name: '@anthropic-ai/claude-code', version: ver, bin: { claude: 'bin/claude' } }),
+    );
+    // The binary only needs to exist as a file; we never launch it in tests.
+    fs.writeFileSync(path.join(binDir, 'claude'), '#!/bin/sh\n');
+    fs.chmodSync(path.join(binDir, 'claude'), 0o755);
+  }
+}
+
+describe('agents sync auto-promotion to @all', () => {
+  it('targets all versions when multiple are installed and no default is pinned', () => {
+    const home = guardedHome();
+    seedFakeClaudeVersions(home, ['1.0.0', '1.1.0']);
+    // --dry-run avoids actually writing to the fake version homes;
+    // --json guarantees machine-readable output we can parse.
+    const { stdout, status } = run(['sync', '--agent', 'claude', '--dry-run', '--json'], home);
+    // Old code: exits with { mode: 'agent', error: 'No default Claude version pinned.' }
+    // New code: auto-promotes to @all → { mode: 'dry-run', versions: ['1.0.0', '1.1.0'] }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(stdout.trim());
+    } catch {
+      throw new Error(`stdout was not valid JSON:\n${stdout}\nstderr:\n${(run(['sync', '--agent', 'claude', '--dry-run', '--json'], home)).stderr}`);
+    }
+    expect(parsed.mode).toBe('dry-run');
+    expect(parsed.agent).toBe('claude');
+    expect(Array.isArray(parsed.versions)).toBe(true);
+    expect((parsed.versions as string[]).sort()).toEqual(['1.0.0', '1.1.0']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Retired per-resource sync verbs (agents/retire branch)
+// ---------------------------------------------------------------------------
+
+describe('agents sync retired per-resource verbs', () => {
+  it('agents hooks sync returns commander unknown-command error', () => {
+    const home = guardedHome();
+    const { stderr, status } = run(['hooks', 'sync'], home);
+    expect(status).not.toBe(0);
+    expect(stderr).toMatch(/unknown command|error.*unknown/i);
+  });
+
+  it('agents skills sync returns commander unknown-command error', () => {
+    const home = guardedHome();
+    const { stderr, status } = run(['skills', 'sync'], home);
+    expect(status).not.toBe(0);
+    expect(stderr).toMatch(/unknown command|error.*unknown/i);
+  });
+
+  it('agents commands sync returns commander unknown-command error', () => {
+    const home = guardedHome();
+    const { stderr, status } = run(['commands', 'sync'], home);
+    expect(status).not.toBe(0);
+    expect(stderr).toMatch(/unknown command|error.*unknown/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Original RUSH-2216 fleet fan-out tests
+// ---------------------------------------------------------------------------
+
 describe('agents sync --json (RUSH-2216 fleet fan-out)', () => {
   it('commander registers --json (no unknown option on parse)', () => {
     // Unit-level guard: the option must be registered on the sync command so a

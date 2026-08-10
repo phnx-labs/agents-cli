@@ -104,7 +104,7 @@ generated `.<agent>/` directory is intentionally not auto-added to `.gitignore`;
 projects that do not want to commit generated agent resources should ignore it
 themselves.
 
-## Sync Targets: Version Selectors and Repo Scoping
+## Sync Targets: Version Selectors, Repo Scoping, and Kind Filtering
 
 `agents sync` accepts the full [agent-spec vocabulary](version-management.md#agent-spec-resolution)
 plus an optional repo scope:
@@ -114,16 +114,84 @@ agents sync claude              # the resolved default version (interactive prev
 agents sync claude@all          # every installed Claude version
 agents sync claude@all system   # scope to one DotAgent repo: system | user | project | <alias>
 agents sync claude --repo user  # same, via the flag form
-agents sync --json              # machine-readable umbrella result (also used by --host all)
-agents sync --host all          # fan out umbrella sync across every registered device
+agents sync --json              # machine-readable umbrella result (also used by --device all)
+agents sync --device all        # fan out umbrella sync across every registered device
 ```
 
 A repo scope reconciles **only** that layer's resources into the target
 version(s), leaving the other layers' already-synced resources untouched. Bare
 `agents sync` (no agent) runs the umbrella verb — fetch remote state, then
 reconcile every installed agent. `--json` emits a single JSON object on stdout
-(and forces non-interactive mode); the fleet fan-out path (`--host all` /
-`--device all`) injects `--json` on each peer so the roster can parse results.
+(and forces non-interactive mode); the fleet fan-out path (`--device all`)
+injects `--json` on each peer so the roster can parse results.
+
+### Per-kind selector flags
+
+Use kind flags to restrict a sync to one or more resource types. Omitting all
+kind flags syncs everything (the default).
+
+```bash
+agents sync claude --plugins            # every plugin, nothing else
+agents sync claude --plugin fleet       # only the plugin named "fleet"
+agents sync claude --plugin fleet,code  # two plugins, comma-separated
+agents sync claude --plugin fleet --plugin code  # same, repeated flags accumulate
+agents sync claude --plugins --hooks    # plugins AND hooks; all other kinds skipped
+agents sync claude --skills --repo user # user-layer skills only
+```
+
+Each resource kind has a singular flag and a hidden plural alias — they are
+identical in meaning:
+
+| Singular       | Plural (hidden alias)  | Syncs                                      |
+|----------------|------------------------|--------------------------------------------|
+| `--plugin`     | `--plugins`            | Plugins                                    |
+| `--command`    | `--commands`           | Slash commands                             |
+| `--skill`      | `--skills`             | Skills                                     |
+| `--hook`       | `--hooks`              | Hooks                                      |
+| `--subagent`   | `--subagents`          | Subagent definitions                       |
+| `--permission` | `--permissions`        | Permission allowlists                      |
+| `--mcp`        | `--mcps`               | MCP server entries                         |
+| `--workflow`   | `--workflows`          | Workflow definitions                       |
+| `--rule`       | `--rules`              | Rules / memory file (always full recompile)|
+| `--memory`     | —                      | Alias of `--rule` (boolean, no name filter)|
+
+**Bare flag = all of that kind.** `--plugins` (no value) selects every plugin.
+`--plugin fleet` narrows to the plugin named `fleet`. Comma-separated values
+(`--plugin fleet,code`) or repeated flags (`--plugin fleet --plugin code`) both
+accumulate into the same name list.
+
+**Kind flags are additive.** `--plugins --hooks` selects both kinds and nothing
+else. Only the kinds explicitly named are included when any kind flag is present.
+
+**`--rule` / `--rules` / `--memory` always trigger a full memory recompile.**
+The memory file is composed from all rule layers and is not individually filterable
+by rule name; any of these flags selects the entire memory kind regardless of the
+value passed.
+
+### Version auto-promotion
+
+When no version is specified and no default is pinned but multiple versions of an
+agent are installed, `agents sync --agent claude` automatically targets every
+installed version (`claude@all`) rather than exiting with an error.
+
+### Per-resource sync verbs (retired)
+
+`agents hooks sync`, `agents skills sync`, and `agents commands sync` were
+deprecated stubs. They have been removed; calling them now returns commander's
+unknown-command error. Use `agents sync claude --hooks` (or `--skills`,
+`--commands`) instead.
+
+### Repo sync split
+
+Passing a DotAgent repo name as the sole argument (`agents sync system`,
+`agents sync user`) git-syncs that repo. This positional form is deprecated in
+favour of the explicit verb:
+
+```bash
+agents repo sync system    # preferred
+agents repo sync user      # preferred
+agents sync system         # deprecated — still works, prints a warning
+```
 
 ## Pruning: resources removed from source disappear from version homes
 

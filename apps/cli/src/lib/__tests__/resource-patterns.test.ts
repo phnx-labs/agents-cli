@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parsePattern, expandPatterns, defaultPatterns, isLegacyName } from '../resource-patterns.js';
+import { buildSelection } from '../versions.js';
 
 describe('parsePattern', () => {
   it('parses a wildcard inclusion', () => {
@@ -113,6 +114,105 @@ describe('expandPatterns', () => {
     it('ignores comma-grouped names not in available', () => {
       const result = expandPatterns(['system:brain-scan,nonexistent'], available);
       expect(result).toEqual(['brain-scan']);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildSelection kind filtering (added by agents/core per-kind flag surface)
+// ---------------------------------------------------------------------------
+
+describe('buildSelection kind filtering', () => {
+  it('no restrictions → every kind is "all"', () => {
+    const sel = buildSelection([]);
+    expect(sel.commands).toBe('all');
+    expect(sel.skills).toBe('all');
+    expect(sel.plugins).toBe('all');
+    expect(sel.hooks).toBe('all');
+    expect(sel.subagents).toBe('all');
+    expect(sel.permissions).toBe('all');
+    expect(sel.mcp).toBe('all');
+    expect(sel.workflows).toBe('all');
+    expect(sel.memory).toBe('all');
+  });
+
+  it('{ plugins: "all" } → only plugins in result (other kinds absent)', () => {
+    const sel = buildSelection([], { plugins: 'all' });
+    expect(sel.plugins).toBe('all');
+    expect(sel.skills).toBeUndefined();
+    expect(sel.hooks).toBeUndefined();
+    expect(sel.commands).toBeUndefined();
+  });
+
+  it('{ plugins: "all", hooks: "all" } → only plugins and hooks', () => {
+    const sel = buildSelection([], { plugins: 'all', hooks: 'all' });
+    expect(sel.plugins).toBe('all');
+    expect(sel.hooks).toBe('all');
+    expect(sel.skills).toBeUndefined();
+    expect(sel.commands).toBeUndefined();
+  });
+
+  it('{ plugins: ["fleet"] } → plugins: ["fleet"]', () => {
+    const sel = buildSelection([], { plugins: ['fleet'] });
+    expect(sel.plugins).toEqual(['fleet']);
+    expect(sel.skills).toBeUndefined();
+  });
+
+  it('value accumulation: { plugins: ["fleet", "code"] } → plugins: ["fleet", "code"]', () => {
+    const sel = buildSelection([], { plugins: ['fleet', 'code'] });
+    expect(sel.plugins).toEqual(['fleet', 'code']);
+  });
+
+  it('memory is included when kindFilter has memory set', () => {
+    const sel = buildSelection([], { plugins: 'all', memory: 'all' });
+    expect(sel.plugins).toBe('all');
+    expect(sel.memory).toBe('all');
+  });
+
+  describe('collision cases: same name in different kinds resolves independently', () => {
+    // "sessions" exists as both a system plugin and a system skill on this fleet.
+    // The kind flag determines WHICH resource is targeted — they are independent.
+
+    it('--plugin sessions selects plugins only, not skills', () => {
+      const pluginSel = buildSelection([], { plugins: ['sessions'] });
+      expect(pluginSel.plugins).toEqual(['sessions']);
+      expect(pluginSel.skills).toBeUndefined();
+    });
+
+    it('--skill sessions selects skills only, not plugins', () => {
+      const skillSel = buildSelection([], { skills: ['sessions'] });
+      expect(skillSel.skills).toEqual(['sessions']);
+      expect(skillSel.plugins).toBeUndefined();
+    });
+
+    it('--plugin sessions and --skill sessions produce different ResourceSelections', () => {
+      const pluginSel = buildSelection([], { plugins: ['sessions'] });
+      const skillSel = buildSelection([], { skills: ['sessions'] });
+      // They differ in which kind key carries the name
+      expect(Object.keys(pluginSel)).not.toEqual(Object.keys(skillSel));
+      expect(pluginSel).not.toEqual(skillSel);
+    });
+
+    // "browser" exists as a skill in both the user repo and the system repo.
+    // --skill browser targets the skill kind regardless of repo scope;
+    // repo scope is a separate dimension that constrains the source layer.
+    it('--skill browser selects the skill kind, not the plugin kind', () => {
+      const sel = buildSelection([], { skills: ['browser'] });
+      expect(sel.skills).toEqual(['browser']);
+      expect(sel.plugins).toBeUndefined();
+    });
+
+    // "swarm" exists as both a system plugin and a system command.
+    it('--plugin swarm selects plugins only, not commands', () => {
+      const sel = buildSelection([], { plugins: ['swarm'] });
+      expect(sel.plugins).toEqual(['swarm']);
+      expect(sel.commands).toBeUndefined();
+    });
+
+    it('--command swarm selects commands only, not plugins', () => {
+      const sel = buildSelection([], { commands: ['swarm'] });
+      expect(sel.commands).toEqual(['swarm']);
+      expect(sel.plugins).toBeUndefined();
     });
   });
 });
