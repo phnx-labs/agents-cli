@@ -701,8 +701,16 @@ export async function openFocusTabs(
   }
 
   console.log(chalk.gray(`Opening ${openable.length} session${openable.length === 1 ? '' : 's'} in ${backend} (tabs)…`));
+  // Pass agent + sessionId so the vscodium-agent backend can stamp the tab
+  // chip without sniffing the local process tree (remote attach has no agent
+  // binary on this box — #2478).
   const results = await open(
-    openable.map((p) => ({ cwd: cwdFor(p.s, byId), command: p.plan.command })),
+    openable.map((p) => ({
+      cwd: cwdFor(p.s, byId),
+      command: p.plan.command,
+      agent: p.s.kind || undefined,
+      sessionId: p.s.sessionId || undefined,
+    })),
     { backend, packing: 'tabs' },
   );
   let opened = 0;

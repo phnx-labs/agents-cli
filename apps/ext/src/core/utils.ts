@@ -122,6 +122,11 @@ export interface ParsedTerminalName {
 /**
  * Parse a terminal name to identify if it's an agent terminal.
  * Strict matching: only matches exact prefixes or "PREFIX - label" format.
+ *
+ * Also accepts process-title forms that shell integration / `${process}` tab
+ * titles produce after `exec agents run <agent>` — e.g. "Agents grok",
+ * "agents claude". Those used to fail identification, so the status bar fell
+ * through to "Agents: Terminal" and scanExisting never re-bound the tab.
  */
 export function parseTerminalName(name: string): ParsedTerminalName {
   const trimmed = name.trim();
@@ -154,6 +159,23 @@ export function parseTerminalName(name: string): ParsedTerminalName {
           return { isAgent: true, prefix: canonicalPrefix, label, sessionChunk: chunk };
         }
       }
+    }
+  }
+
+  // Process-title form: "Agents grok" / "agents run claude" / "Agents: Grok".
+  // The word after Agents (or agents run) is looked up in NAME_TO_PREFIX.
+  const processTitle = trimmed.match(
+    /^(?:Agents?|agents)(?:\s+run)?[\s:]+([A-Za-z][\w-]*)\b(?:\s*-\s*(.+))?$/i
+  );
+  if (processTitle) {
+    const token = processTitle[1];
+    const label = processTitle[2]?.trim() || null;
+    const canonical =
+      NAME_TO_PREFIX[token] ||
+      NAME_TO_PREFIX[token.toLowerCase()] ||
+      NAME_TO_PREFIX[token.charAt(0).toUpperCase() + token.slice(1).toLowerCase()];
+    if (canonical) {
+      return { isAgent: true, prefix: canonical, label, sessionChunk: null };
     }
   }
 

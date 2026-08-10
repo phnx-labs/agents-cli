@@ -18,8 +18,17 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 export function specForRequest(req: LaunchRequest): LaunchSpec {
   const backend = BACKENDS[req.backend];
   if (!backend) throw new Error(`unknown backend: ${req.backend}`);
-  if (req.layout === 'tab') return backend.buildTab(req.cwd, req.command);
-  return backend.buildSplit(req.cwd, req.command, req.layout === 'split-down' ? 'down' : 'right');
+  const meta =
+    req.agent || req.sessionId || req.title
+      ? { agent: req.agent, sessionId: req.sessionId, title: req.title }
+      : undefined;
+  if (req.layout === 'tab') return backend.buildTab(req.cwd, req.command, meta);
+  return backend.buildSplit(
+    req.cwd,
+    req.command,
+    req.layout === 'split-down' ? 'down' : 'right',
+    meta,
+  );
 }
 
 export interface OpenOptions {
@@ -45,6 +54,10 @@ export async function openSurface(req: LaunchRequest, opts: OpenOptions = {}): P
 export interface SurfaceItem {
   cwd: string;
   command: string[];
+  /** Optional harness identity for editor-backed backends (vscodium-agent). */
+  agent?: string;
+  sessionId?: string;
+  title?: string;
 }
 
 export interface BuildRequestsOptions {
@@ -62,6 +75,9 @@ export function buildRequests(items: SurfaceItem[], opts: BuildRequestsOptions):
     cwd: item.cwd,
     command: item.command,
     host: opts.host,
+    agent: item.agent,
+    sessionId: item.sessionId,
+    title: item.title,
   }));
 }
 

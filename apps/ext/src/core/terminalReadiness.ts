@@ -168,7 +168,47 @@ export function dispose(entry: ReadinessEntry, reason: string = 'disposed'): voi
 
 // --- Agent CLI detection (pure helpers) -----------------------------------
 
-export type AgentLauncherKey = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode';
+/**
+ * Every harness the extension can promote a shell tab into. Must stay aligned
+ * with BUILT_IN_AGENTS runners (everything except 'shell') and with the CLI
+ * registry ids that `agents run <id>` accepts for those harnesses.
+ *
+ * Grok/Kimi/Droid/Antigravity were missing here after they were added as
+ * first-class New-agent commands — process-tree adoption and the spawn URI
+ * path then left those tabs as generic shells (wrong icon + status bar
+ * "Agents: Terminal"). See #2478 and the tab-icon regression.
+ */
+export type AgentLauncherKey =
+  | 'claude'
+  | 'codex'
+  | 'gemini'
+  | 'cursor'
+  | 'opencode'
+  | 'antigravity'
+  | 'grok'
+  | 'kimi'
+  | 'droid';
+
+const AGENT_RUN_KEYS =
+  'claude|codex|gemini|cursor|opencode|antigravity|grok|kimi|droid';
+
+/** Binary basenames (and node-wrapped *.js) that map to a launcher key. */
+const BINARY_TO_AGENT: Record<string, AgentLauncherKey> = {
+  claude: 'claude',
+  'claude.js': 'claude',
+  codex: 'codex',
+  'codex.js': 'codex',
+  gemini: 'gemini',
+  'gemini.js': 'gemini',
+  'cursor-agent': 'cursor',
+  opencode: 'opencode',
+  // Antigravity's installed CLI is `agy` (agents.cli.ts CLI_AGENT_META).
+  agy: 'antigravity',
+  antigravity: 'antigravity',
+  grok: 'grok',
+  kimi: 'kimi',
+  droid: 'droid',
+};
 
 /**
  * Detect a known agent CLI from a `ps -o args=` output string.
@@ -176,17 +216,14 @@ export type AgentLauncherKey = 'claude' | 'codex' | 'gemini' | 'cursor' | 'openc
  * `agents run <agent>` wrappers from agents-cli.
  */
 export function detectAgentKeyFromArgs(args: string): AgentLauncherKey | null {
-  const runMatch = args.match(/\bagents\s+run\s+(claude|codex|gemini|cursor|opencode)\b/);
+  const runMatch = args.match(new RegExp(`\\bagents\\s+run\\s+(${AGENT_RUN_KEYS})\\b`));
   if (runMatch) return runMatch[1] as AgentLauncherKey;
 
   const tokens = args.split(/\s+/).filter(Boolean);
   for (const tok of tokens) {
     const base = (tok.split('/').pop() || '').toLowerCase();
-    if (base === 'claude' || base === 'claude.js') return 'claude';
-    if (base === 'codex' || base === 'codex.js') return 'codex';
-    if (base === 'gemini' || base === 'gemini.js') return 'gemini';
-    if (base === 'cursor-agent') return 'cursor';
-    if (base === 'opencode') return 'opencode';
+    const key = BINARY_TO_AGENT[base];
+    if (key) return key;
   }
   return null;
 }

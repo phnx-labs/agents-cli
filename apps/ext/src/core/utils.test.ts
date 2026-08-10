@@ -94,6 +94,43 @@ describe('parseTerminalName', () => {
     expect(parseTerminalName('node')).toEqual({ isAgent: false, prefix: null, label: null, sessionChunk: null });
   });
 
+  test('accepts process-title forms from shell integration (Agents grok)', () => {
+    // After `exec agents run grok`, VS Code's ${process} tab title can show
+    // "Agents grok" / "agents claude" — those must still identify as agents so
+    // the status bar and scanExisting re-bind the tab.
+    expect(parseTerminalName('Agents grok')).toEqual({
+      isAgent: true,
+      prefix: 'GK',
+      label: null,
+      sessionChunk: null,
+    });
+    expect(parseTerminalName('Agents claude')).toEqual({
+      isAgent: true,
+      prefix: 'CC',
+      label: null,
+      sessionChunk: null,
+    });
+    expect(parseTerminalName('agents run kimi')).toEqual({
+      isAgent: true,
+      prefix: 'KM',
+      label: null,
+      sessionChunk: null,
+    });
+    expect(parseTerminalName('Agents: Grok - auth')).toEqual({
+      isAgent: true,
+      prefix: 'GK',
+      label: 'auth',
+      sessionChunk: null,
+    });
+    // Unknown harness after Agents is still not an agent tab.
+    expect(parseTerminalName('Agents foobar')).toEqual({
+      isAgent: false,
+      prefix: null,
+      label: null,
+      sessionChunk: null,
+    });
+  });
+
   test('rejects partial matches (strict mode)', () => {
     // Should NOT match "cc" in lowercase
     expect(parseTerminalName('cc')).toEqual({ isAgent: false, prefix: null, label: null, sessionChunk: null });

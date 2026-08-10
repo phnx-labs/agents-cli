@@ -1890,28 +1890,43 @@ function aliveSpawnParent(): vscode.Terminal | undefined {
 }
 
 // Open an editor-tab terminal running an arbitrary command (the /spawn verb).
-// The terminal is registered as a shell terminal with shell adoption armed, so
-// a resume command like `claude --resume <id>` is auto-promoted to the Claude
-// chip + session tracking. When req.split is set, the terminal splits beside
-// the previous /spawn pane instead of opening a new tab.
+//
+// Prefer an explicit agent from the spawn payload (sessions focus/resume over
+// vscodium-agent), then fall back to sniffing the command line for a local
+// resume like `claude --resume <id>` / `agents run grok …`. Only when neither
+// yields a harness do we open as SH + shell-adoption — that path cannot set the
+// icon later (VS Code tab icons are immutable) and cannot promote remote
+// attaches whose local tree is just `ssh … tmux attach` (#2478).
+//
+// When req.split is set, the terminal splits beside the previous /spawn pane
+// instead of opening a new tab.
 async function spawnCommandTerminal(
   context: vscode.ExtensionContext,
   req: SpawnRequest
 ): Promise<void> {
-  const shellDef = getBuiltInByKey('shell');
-  if (!shellDef) return;
+  const detectedKey =
+    (req.agent && getBuiltInByKey(req.agent) ? req.agent : null) ||
+    readiness.detectAgentKeyFromArgs(req.command) ||
+    null;
+  const def = (detectedKey && getBuiltInByKey(detectedKey)) || getBuiltInByKey('shell');
+  if (!def) return;
+
   const agentConfig = createAgentConfig(
     context.extensionPath,
-    shellDef.title,
-    shellDef.command,
-    shellDef.icon,
-    shellDef.prefix
+    def.title,
+    def.command,
+    def.icon,
+    def.prefix
   );
 
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
   const cwd = req.cwd || workspaceFolder;
   const terminalId = terminals.nextId(agentConfig.prefix);
-  const title = buildTerminalTitle(agentConfig.title, undefined, context, null);
+  const sessionId =
+    req.sessionId || readiness.extractSessionIdFromArgs(req.command) || null;
+  const title =
+    req.title?.trim() ||
+    buildTerminalTitle(agentConfig.title, undefined, context, sessionId);
 
   const parent = req.split ? aliveSpawnParent() : undefined;
   const surface = resolveSpawnSurface({
@@ -1919,7 +1934,11 @@ async function spawnCommandTerminal(
     hasParent: !!parent,
   });
 
-  const env = buildAgentTerminalEnv(terminalId, null, cwd, undefined, { scrubSensitive: false });
+  const isShell = def.key === 'shell';
+  const env = buildAgentTerminalEnv(terminalId, sessionId, cwd, undefined, {
+    scrubSensitive: !isShell,
+    kind: isShell ? 'shell' : 'agent',
+  });
 
   const location: vscode.TerminalEditorLocationOptions | vscode.TerminalSplitLocationOptions =
     surface === 'native-split' && parent
@@ -1938,9 +1957,24 @@ async function spawnCommandTerminal(
   const pid = await terminal.processId;
   terminals.register(terminal, terminalId, agentConfig, pid, context);
   readiness.registerTerminal(terminal);
-  armShellAdoptionForTerminal(terminal, context);
+
+  if (!isShell && detectedKey) {
+    const resumeKey = agentKeyFromSession(detectedKey);
+    if (resumeKey) {
+      terminals.setAgentType(terminal, resumeKey);
+      if (sessionId) {
+        terminals.setSessionId(terminal, sessionId);
+        startAutoLabelPollerForTerminal(terminal, context);
+      }
+    }
+  } else {
+    armShellAdoptionForTerminal(terminal, context);
+  }
 
   await sendCommandWhenReady(terminal, req.command);
+  if (vscode.window.activeTerminal === terminal) {
+    updateStatusBarForTerminal(terminal, context.extensionPath);
+  }
   terminal.show();
   lastSpawnedTerminal = terminal;
 }

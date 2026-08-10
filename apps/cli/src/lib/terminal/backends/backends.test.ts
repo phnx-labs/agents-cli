@@ -103,6 +103,29 @@ describe('vscodium-agent backend', () => {
     expect(payload.cwd).toBe('/Users/me/my project');
     expect(payload.command).toBe('claude --resume a b&c=d');
   });
+  it('spawnUri carries agent + sessionId meta for remote-attach chip stamping (#2478)', () => {
+    const url = spawnUri(
+      'vscodium',
+      '/Users/me/dev',
+      ['ssh', '-tt', 'yosemite-s0', 'tmux attach -t ag'],
+      undefined,
+      { agent: 'claude', sessionId: '115db661-1079-4e6b-846c-ce9aa05494f8', title: 'CC - restore' },
+    );
+    const payload = payloadOf(url);
+    expect(payload.agent).toBe('claude');
+    expect(payload.sessionId).toBe('115db661-1079-4e6b-846c-ce9aa05494f8');
+    expect(payload.title).toBe('CC - restore');
+    expect(payload.command).toContain('ssh');
+  });
+  it('buildTab forwards meta into the spawn URI', () => {
+    const argv = vscodiumAgentBackend.buildTab('/d', ['ssh', 'x'], {
+      agent: 'grok',
+      sessionId: 'abc',
+    });
+    const payload = payloadOf(argv.argv[2]);
+    expect(payload.agent).toBe('grok');
+    expect(payload.sessionId).toBe('abc');
+  });
   it('makeVscodiumAgentBackend binds a variant CLI + scheme (Cursor, VS Code)', () => {
     const cursor = makeVscodiumAgentBackend(EDITOR_VARIANTS[1]);
     expect(cursor.buildTab('/d', CMD).argv[0]).toBe('cursor');

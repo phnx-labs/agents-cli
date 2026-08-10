@@ -121,6 +121,18 @@ describe('shell adoption — detectAgentKeyFromArgs', () => {
     expect(detectAgentKeyFromArgs('agents run gemini --model pro')).toBe('gemini');
   });
 
+  test('grok / kimi / droid / antigravity (added after the original five)', () => {
+    expect(detectAgentKeyFromArgs('agents run grok --interactive')).toBe('grok');
+    expect(detectAgentKeyFromArgs('agents run kimi --strategy balanced')).toBe('kimi');
+    expect(detectAgentKeyFromArgs('agents run droid --mode auto')).toBe('droid');
+    expect(detectAgentKeyFromArgs('agents run antigravity --interactive')).toBe('antigravity');
+    expect(detectAgentKeyFromArgs('grok --foo')).toBe('grok');
+    expect(detectAgentKeyFromArgs('kimi')).toBe('kimi');
+    expect(detectAgentKeyFromArgs('droid')).toBe('droid');
+    // Antigravity's installed binary is `agy` (CLI_AGENT_META).
+    expect(detectAgentKeyFromArgs('agy --resume abc')).toBe('antigravity');
+  });
+
   test('unknown commands return null', () => {
     expect(detectAgentKeyFromArgs('vim file.ts')).toBeNull();
     expect(detectAgentKeyFromArgs('git status')).toBeNull();

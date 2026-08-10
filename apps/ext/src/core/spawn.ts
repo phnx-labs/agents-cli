@@ -11,6 +11,17 @@ export interface SpawnRequest {
   cwd?: string;
   // When set, split beside the previously spawned pane instead of a new tab.
   split?: SpawnSplit;
+  /**
+   * Harness id (claude/codex/grok/…) when the caller already knows it.
+   * Required for remote attach commands (`ssh … tmux attach`) where the local
+   * process tree has no agent binary to sniff — without this the tab stays a
+   * generic SH shell with the wrong icon (#2478).
+   */
+  agent?: string;
+  /** Canonical session id to stamp on the terminal for resume/status-bar. */
+  sessionId?: string;
+  /** Optional pre-baked tab title; otherwise the extension formats from agent. */
+  title?: string;
 }
 
 // Parse the query of a `…/spawn?p=<payload>` URI into a spawn request. The
@@ -33,7 +44,11 @@ export function parseSpawnRequest(query: string): SpawnRequest | null {
   const cwd = typeof obj?.cwd === 'string' && obj.cwd.trim() ? obj.cwd.trim() : undefined;
   const split: SpawnSplit | undefined =
     obj?.split === 'right' || obj?.split === 'down' ? obj.split : undefined;
-  return { command, cwd, split };
+  const agent = typeof obj?.agent === 'string' && obj.agent.trim() ? obj.agent.trim().toLowerCase() : undefined;
+  const sessionId =
+    typeof obj?.sessionId === 'string' && obj.sessionId.trim() ? obj.sessionId.trim() : undefined;
+  const title = typeof obj?.title === 'string' && obj.title.trim() ? obj.title.trim() : undefined;
+  return { command, cwd, split, agent, sessionId, title };
 }
 
 // Which surface a spawn request lands on.

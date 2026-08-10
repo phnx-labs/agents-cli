@@ -225,8 +225,16 @@ async function sessionsResumeAction(query: string | undefined, options: ResumeOp
   }
   console.log(chalk.gray(`Opening ${items.length} session${items.length === 1 ? '' : 's'} in ${where} (${packing})…`));
 
+  // agent + sessionId ride the SurfaceItem into the vscodium-agent spawn URI
+  // so the extension can set the tab chip without process-tree sniffing (#2478).
   const results = await openSurfaces(
-    items.map((it) => ({ cwd: it.cwd, command: it.command })),
+    items.map((it) => ({
+      cwd: it.cwd,
+      command: it.command,
+      agent: it.session.agent || undefined,
+      sessionId: it.session.id || undefined,
+      title: it.session.label || it.session.topic || undefined,
+    })),
     { backend, host: options.host, packing },
   );
 

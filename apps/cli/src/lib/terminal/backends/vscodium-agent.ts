@@ -56,18 +56,34 @@ function appExists(p: string): boolean {
  * it, so a `command`/`cwd` containing `&` (or `=`) would be mis-split by a naive
  * multi-param query. base64url is `[A-Za-z0-9_-]` only (no `&`, `=`, `%`, `+`,
  * `/`), so it survives that decode untouched and round-trips exactly.
+ *
+ * Optional `meta.agent` / `meta.sessionId` / `meta.title` let the extension set
+ * the tab chip and status bar without sniffing the local process tree — required
+ * when `command` is a remote attach (`ssh … tmux attach`) with no agent binary
+ * on this box (#2478).
  */
 export function spawnUri(
   scheme: string,
   cwd: string,
   command: string[],
   direction?: SplitDirection,
+  meta?: { agent?: string; sessionId?: string; title?: string },
 ): string {
-  const payload: { command: string; cwd: string; split?: SplitDirection } = {
+  const payload: {
+    command: string;
+    cwd: string;
+    split?: SplitDirection;
+    agent?: string;
+    sessionId?: string;
+    title?: string;
+  } = {
     command: command.join(' '),
     cwd,
   };
   if (direction) payload.split = direction;
+  if (meta?.agent) payload.agent = meta.agent;
+  if (meta?.sessionId) payload.sessionId = meta.sessionId;
+  if (meta?.title) payload.title = meta.title;
   const p = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
   return `${scheme}://${EXTENSION_AUTHORITY}/spawn?p=${p}`;
 }
@@ -80,11 +96,11 @@ export function makeVscodiumAgentBackend(variant: EditorVariant): TerminalBacken
     isAvailable(ctx: EngineContext): boolean {
       return ctx.platform === 'darwin' && appExists(variant.app);
     },
-    buildTab(cwd: string, command: string[]): LaunchSpec {
-      return { argv: [variant.cli, '--open-url', spawnUri(variant.scheme, cwd, command)] };
+    buildTab(cwd: string, command: string[], meta?): LaunchSpec {
+      return { argv: [variant.cli, '--open-url', spawnUri(variant.scheme, cwd, command, undefined, meta)] };
     },
-    buildSplit(cwd: string, command: string[], direction: SplitDirection): LaunchSpec {
-      return { argv: [variant.cli, '--open-url', spawnUri(variant.scheme, cwd, command, direction)] };
+    buildSplit(cwd: string, command: string[], direction: SplitDirection, meta?): LaunchSpec {
+      return { argv: [variant.cli, '--open-url', spawnUri(variant.scheme, cwd, command, direction, meta)] };
     },
   };
 }

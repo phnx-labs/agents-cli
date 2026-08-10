@@ -34,6 +34,22 @@ export interface LaunchSpec {
   argv: string[];
 }
 
+/**
+ * Optional identity the caller already knows about the surface. The
+ * vscodium-agent backend forwards these into the swarm-ext `/spawn` URI so the
+ * extension can set the tab chip/name/session without sniffing the local
+ * process tree (required for remote `ssh … tmux attach` resumes — #2478).
+ * Other backends ignore them.
+ */
+export interface SurfaceMeta {
+  /** Harness id: claude, codex, grok, … */
+  agent?: string;
+  /** Canonical session id. */
+  sessionId?: string;
+  /** Optional pre-baked tab title. */
+  title?: string;
+}
+
 /** A single "open this command as this surface" instruction. */
 export interface LaunchRequest {
   backend: Backend;
@@ -44,6 +60,10 @@ export interface LaunchRequest {
   command: string[];
   /** undefined / 'local' = this machine; otherwise a resolvable host alias. */
   host?: string;
+  /** Optional agent identity for editor-backed backends. */
+  agent?: string;
+  sessionId?: string;
+  title?: string;
 }
 
 /** Outcome of opening one surface. Never throws for launch failures — reports them. */
@@ -64,7 +84,7 @@ export interface TerminalBackend {
   /** Can this backend be driven here? (platform + app installed / inside tmux). */
   isAvailable(ctx: EngineContext): boolean;
   /** Command that opens a new tab running `command` in `cwd`. */
-  buildTab(cwd: string, command: string[]): LaunchSpec;
+  buildTab(cwd: string, command: string[], meta?: SurfaceMeta): LaunchSpec;
   /** Command that splits the current surface, running `command` in `cwd`. */
-  buildSplit(cwd: string, command: string[], direction: SplitDirection): LaunchSpec;
+  buildSplit(cwd: string, command: string[], direction: SplitDirection, meta?: SurfaceMeta): LaunchSpec;
 }
