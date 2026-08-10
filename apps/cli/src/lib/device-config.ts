@@ -265,6 +265,13 @@ let migrationDone = false;
  * and the next process retries the fold. Honors AGENTS_SKIP_MIGRATION=1, the
  * same gate bootstrap's runMigration uses (tests pin it so a fork never folds
  * the developer's real ~/.agents as a side effect).
+ *
+ * Call this ONLY from a lifecycle entry point (daemon boot, `runMigration`).
+ * It must never hang off a config read or write: `~/.agents/agents.yaml` is a
+ * tracked file shared by every machine in the fleet, so a migration on the read
+ * path means an ordinary `agents config get` can dirty the shared file. That is
+ * what left yosemite-s0 unable to pull — 13 machines each rewriting one tracked
+ * path, on nearly every command.
  */
 export function ensureDeviceConfigMigrated(): void {
   if (migrationDone || process.env.AGENTS_SKIP_MIGRATION === '1') return;
@@ -301,7 +308,6 @@ function targetDevice(opts?: ConfigTarget): string {
 
 /** Get one config key's value and the layer that set it. */
 export function getConfigValue(name: string, opts?: ConfigTarget): ConfigEntry {
-  ensureDeviceConfigMigrated();
   const spec = configKeySpec(name);
   if (spec.scope === 'user') {
     const value = readMeta().config?.[spec.yamlKey];
@@ -361,7 +367,6 @@ function unsetInCentralBlock(device: string, spec: ConfigKeySpec): void {
 
 /** Set a config key (validated). Device-scope keys target this machine unless `opts.device` names a peer. */
 export function setConfigValue(name: string, value: unknown, opts?: ConfigTarget): void {
-  ensureDeviceConfigMigrated();
   const spec = configKeySpec(name);
   assertValidValue(spec, value);
   if (spec.scope === 'user') {
@@ -373,7 +378,6 @@ export function setConfigValue(name: string, value: unknown, opts?: ConfigTarget
 
 /** Unset a config key — restores default behavior. No-op when already unset. */
 export function unsetConfigValue(name: string, opts?: ConfigTarget): void {
-  ensureDeviceConfigMigrated();
   const spec = configKeySpec(name);
   if (spec.scope === 'user') {
     updateMeta((m) => {
