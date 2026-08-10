@@ -735,10 +735,10 @@ agents resume <session> [prompt]  Resume a session by id, tmux alias, or exact l
 agents roster  Live agent roster (alias of `agents sessions --active`). Who is running right now.
 ```
 
-## routines — Schedule agents to run on a cron schedule or at a specific time. The scheduler auto-starts on first add.
+## routines — Schedule agents to run on a cron schedule or at a specific time. The daemon starts at install/upgrade and on setup when daemon.enabled is not false; routines add also ensures it is running.
 
 ```
-agents routines                         Schedule agents to run on a cron schedule or at a specific time. The scheduler auto-starts on first add.
+agents routines                         Schedule agents to run on a cron schedule or at a specific time. The daemon starts at install/upgrade and on setup when daemon.enabled is not false; routines add also ensures it is running.
 agents routines add [nameOrPath]        Create a new routine from a YAML file or inline flags. Starts the scheduler automatically if it is not already running.
 agents routines catchup                 Run any routines that missed their last scheduled fire on demand. The daemon already does this every 5 minutes — use this to force a pass now. Detached: runs in the background under the scheduler.
 agents routines cleanup                 Remove expired one-shot routines that already fired and still have a user-layer YAML file.
