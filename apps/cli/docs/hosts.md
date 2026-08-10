@@ -571,7 +571,7 @@ guarantee (see Context, below).
   forwarded argv is still a plain `agents run <agent> …`.
 - `-P, --project <slug>[@worktree]` resolves `<slug>` against your projects root
   (auto-inferred from the launch repo and cached in `agents.yaml`; set via
-  `agents defaults project-root <path>`) and lands on the host home-relative
+  `agents config set project.root <path>`) and lands on the host home-relative
   (`~/…`), so the host expands it to its own home. `@worktree` targets
   `<repo>/.agents/worktrees/<worktree>`.
 - `--remote-cwd <dir>` is the explicit escape hatch — a literal remote path used

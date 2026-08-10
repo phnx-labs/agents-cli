@@ -3,7 +3,7 @@
  *
  * `agents set claude@2.1.220 --model opus-5` pins the default model (and/or
  * mode) that `agents run` uses for that agent version. It reads and writes the
- * same store as `agents defaults run set` (agents.yaml -> run.defaults), so the
+ * same store as `agents config set run.<agent@version>.*` (agents.yaml -> run.defaults), so the
  * two stay consistent — `set` is just the short front door.
  *
  *   agents set                          # list every configured default
@@ -88,7 +88,7 @@ export function registerSetCommand(program: Command): void {
     notes: `
       Selectors use <agent>@<version> or <agent>:<version>; * matches all versions.
       Exact selectors override wildcard selectors field by field.
-      Writes the same store as 'agents defaults run set'. Explicit flags on
+      Writes the same store as 'agents config set run.<agent@version>.*'. Explicit flags on
       'agents run' always win over configured defaults.
     `,
   });

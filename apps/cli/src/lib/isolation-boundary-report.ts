@@ -15,7 +15,6 @@ export function explainIsolationBoundary(err: IsolationBoundaryError): void {
   console.error(chalk.gray('\n  To keep the sandbox and act inside it:'));
   console.error(chalk.gray(`    agents add ${err.agent}@<version> --isolated    # another isolated copy`));
   console.error(chalk.gray(`    agents use ${err.agent}@<version>               # pick which one 'agents run ${err.agent}' uses`));
-  console.error(chalk.gray(`    agents export ${err.agent}                      # copy its config out to your real config dir`));
   console.error(chalk.gray('\n  To manage this agent normally instead, remove the isolated copies first:'));
   for (const v of versions) {
     console.error(chalk.gray(`    agents remove ${err.agent}@${v} --isolated`));

@@ -156,7 +156,7 @@ export async function ensureProjectRoot(cwd: string): Promise<string> {
     throw new Error(
       'Could not determine your projects root. Run once from inside a project ' +
         '(a git repo under your projects dir) so it can be inferred, or set it:\n' +
-        '  agents defaults project-root ~/src/github.com/<you>',
+        '  agents config set project.root ~/src/github.com/<you>',
     );
   }
   updateMeta({ projectRoot: inferred });

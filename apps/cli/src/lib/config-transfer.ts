@@ -2,10 +2,9 @@
  * Primitives for moving an agent config directory across the agents-cli boundary.
  *
  * Both helpers were part of {@link ./uninstall.ts} and are unchanged — teardown was
- * simply the first caller. `agents export` needs the same two operations (relocate a
- * directory that may sit on another volume; copy one without dragging `~/.agents`
- * symlinks along), so they live here rather than being duplicated or imported out of
- * a module named for teardown.
+ * simply the first caller. Other config-transfer paths need the same operations, so
+ * they live here rather than being duplicated or imported out of a module named for
+ * teardown.
  */
 import * as fs from 'fs';
 import * as path from 'path';

@@ -1,0 +1,1 @@
+- Remove the top-level `agents defaults` and `agents export` commands. Configure run defaults and the projects root through `agents config`; isolated installs are removed with `agents remove <agent>@<version> --isolated`.

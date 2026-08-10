@@ -13,7 +13,7 @@ import { MODEL_TIERS, type ModelTier } from './model-tiers.js';
 import { VERSION_RE } from './run-defaults.js';
 
 /** The top-level scope of a unified config key. */
-export type ConfigScope = 'run' | 'interactive' | 'browser' | 'device';
+export type ConfigScope = 'run' | 'interactive' | 'browser' | 'project' | 'device';
 
 /** A run-time default key: model, mode, effort, or tier override. */
 export interface ParsedRunConfigKey {
@@ -37,6 +37,11 @@ export interface ParsedBrowserConfigKey {
   device?: string;
 }
 
+export interface ParsedProjectConfigKey {
+  scope: 'project';
+  property: 'root';
+}
+
 /** A per-device configuration key. */
 export interface ParsedDeviceConfigKey {
   scope: 'device';
@@ -48,6 +53,7 @@ export type ParsedConfigKey =
   | ParsedRunConfigKey
   | ParsedInteractiveConfigKey
   | ParsedBrowserConfigKey
+  | ParsedProjectConfigKey
   | ParsedDeviceConfigKey;
 
 export type DeviceConfigProperty =
@@ -102,6 +108,7 @@ export function formatAgentVersion(agent: AgentId, version: string): string {
  *   run.<agent@version>.tier.<cheap|default|best|ultra>
  *   interactive.host
  *   browser.profile
+ *   project.root
  *   devices.<name>.max-agents
  *   devices.<name>.scheduler
  *   devices.<name>.daemon
@@ -134,6 +141,10 @@ export function parseConfigKey(key: string): ParsedConfigKey {
     return { scope: 'browser', property: 'profile' };
   }
 
+  if (raw === 'project.root') {
+    return { scope: 'project', property: 'root' };
+  }
+
   const deviceMatch = raw.match(
     /^devices\.(.+)\.(max-agents|scheduler|daemon|watchdog|notes|browser\.remote-control|browser\.profile)$/,
   );
@@ -157,6 +168,9 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   if (raw.startsWith('browser.')) {
     throw new Error(`Invalid browser config key '${key}'. Use browser.profile.`);
   }
+  if (raw.startsWith('project.')) {
+    throw new Error(`Invalid project config key '${key}'. Use project.root.`);
+  }
   if (raw.startsWith('devices.')) {
     throw new Error(
       `Invalid device config key '${key}'. Expected devices.<name>.<${DEVICE_CONFIG_PROPERTIES.join('|')}>.`,
@@ -164,7 +178,7 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   }
 
   throw new Error(
-    `Unknown config scope in '${key}'. Use one of: run, interactive, browser, devices.`,
+    `Unknown config scope in '${key}'. Use one of: run, interactive, browser, project, devices.`,
   );
 }
 
@@ -180,6 +194,8 @@ export function formatConfigKey(parsed: ParsedConfigKey): string {
       return 'interactive.host';
     case 'browser':
       return parsed.device ? `devices.${parsed.device}.browser.profile` : 'browser.profile';
+    case 'project':
+      return 'project.root';
     case 'device':
       return `devices.${parsed.device}.${parsed.property}`;
   }
@@ -196,7 +212,7 @@ export function listKnownConfigKeys(): string[] {
   for (const tier of MODEL_TIERS) {
     keys.push(`run.<agent@version>.tier.${tier}`);
   }
-  keys.push('interactive.host', 'browser.profile');
+  keys.push('interactive.host', 'browser.profile', 'project.root');
   for (const prop of DEVICE_CONFIG_PROPERTIES) {
     keys.push(`devices.<name>.${prop}`);
   }
@@ -244,6 +260,8 @@ export function configKeyStorageHint(parsed: ParsedConfigKey): string {
       return parsed.device
         ? `fleet.devices.${parsed.device}.config.defaultBrowserProfile`
         : 'fleet.devices.<self>.config.defaultBrowserProfile';
+    case 'project':
+      return 'devices.<self>.projectRoot';
     case 'device':
       return `fleet.devices.${parsed.device}.config ${devicePropertyToConfigName(parsed.property)}`;
   }

@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_104 command groups · 584 commands._
+_102 command groups · 577 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -228,17 +228,6 @@ agents daemon status    Identity (state/pid/uptime/binary), duplicate daemons, d
 agents daemon stop      Stop the daemon.
 ```
 
-## defaults — Manage default options for agents-cli commands
-
-```
-agents defaults                       Manage default options for agents-cli commands
-agents defaults project-root [path]   Show or set the projects root for `agents run --project` (auto-inferred when unset)
-agents defaults run                   Manage selector-based defaults for `agents run`
-agents defaults run list              List configured run defaults
-agents defaults run set <selector>    Set defaults for an agent/version selector
-agents defaults run unset <selector>  Remove defaults for an agent/version selector
-```
-
 ## devices — Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale. Alias: fleet.
 _aliases: fleet_
 
@@ -277,12 +266,6 @@ agents doctor [target]  Diagnose CLI availability, sync status, and resource div
 ```
 agents events       Read the unified event stream (operational + agent activity)
 agents events emit  Record events produced outside this process (reads JSONL on stdin)
-```
-
-## export — Copy an isolated install's config out to your real ~/.<agent>
-
-```
-agents export <spec>  Copy an isolated install's config out to your real ~/.<agent>
 ```
 
 ## feed — Operator inbox + agent status posts (aliases: inbox = needs-you; timeline = --filter updates)
