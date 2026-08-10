@@ -935,6 +935,7 @@ const META_KEY_SCOPE: Record<keyof Meta, 'central' | 'device'> = {
   isolatedAgents: 'device',
   versions: 'device',
   deviceRoutines: 'device',
+  deviceConfig: 'device',
   // Central — synced via agents.yaml.
   accounts: 'central',
   run: 'central',
@@ -1034,7 +1035,7 @@ function serializeCentral(central: Record<string, unknown>): string {
 }
 
 function writeMetaUnlocked(meta: Meta): void {
-  const { agents, isolatedAgents, versions, deviceRoutines, ...central } = meta;
+  const { agents, isolatedAgents, versions, deviceRoutines, deviceConfig, ...central } = meta;
 
   // Write the machine-local files FIRST, then strip central — so a crash mid-write
   // never removes pins/versions from central before they're persisted elsewhere.
@@ -1046,15 +1047,20 @@ function writeMetaUnlocked(meta: Meta): void {
   // it does not have.
   const hasIsolatedAgents = !!isolatedAgents && Object.keys(isolatedAgents).length > 0;
   const hasDeviceRoutines = Array.isArray(deviceRoutines);
-  if (hasAgents || hasIsolatedAgents || hasDeviceRoutines) {
+  // Machine-visibility operator config. Lives here rather than in the synced
+  // central file because nothing off-box reads it — and because
+  // browser.remote-control is a consent flag that must not propagate on pull.
+  const hasDeviceConfig = !!deviceConfig && Object.keys(deviceConfig).length > 0;
+  if (hasAgents || hasIsolatedAgents || hasDeviceRoutines || hasDeviceConfig) {
     // Device-local doc carries `agents:` pins and `routines:` — per-machine and
     // must never land in central agents.yaml (which syncs). Operator config
     // used to ride this doc under `config:`; it now lives centrally under
     // `fleet.devices.<name>.config` (see lib/device-config.ts).
-    const deviceDoc: Partial<Meta> & { routines?: string[] } = {};
+    const deviceDoc: Partial<Meta> & { routines?: string[]; config?: Record<string, unknown> } = {};
     if (hasAgents) deviceDoc.agents = agents;
     if (hasIsolatedAgents) deviceDoc.isolatedAgents = isolatedAgents;
     if (hasDeviceRoutines) deviceDoc.routines = deviceRoutines;
+    if (hasDeviceConfig) deviceDoc.config = deviceConfig;
     fs.mkdirSync(path.dirname(devicePath), { recursive: true });
     writeIfChanged(devicePath, META_HEADER + yaml.stringify(deviceDoc));
   } else if (fs.existsSync(devicePath)) {
@@ -1100,6 +1106,9 @@ function overlayMachineLocal(meta: Meta): Meta {
     if (dm) {
       if (dm?.agents) meta.agents = { ...meta.agents, ...dm.agents };
       if (dm?.isolatedAgents) meta.isolatedAgents = { ...meta.isolatedAgents, ...dm.isolatedAgents };
+      if (dm?.config && typeof dm.config === 'object' && !Array.isArray(dm.config)) {
+        meta.deviceConfig = { ...meta.deviceConfig, ...(dm.config as Record<string, unknown>) };
+      }
       if (dm && Object.prototype.hasOwnProperty.call(dm, 'routines')) {
         if (!Array.isArray(dm.routines) || dm.routines.some((name) => typeof name !== 'string')) {
           throw new Error(`Device config corrupted at ${devicePath}: routines must be a string list.`);
