@@ -23,6 +23,15 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
   harness until the CLI picks one) registers against the `shell` def and lets
   adoption re-key it, so it is a tracked tab from the first frame.
 
+- **`New <Agent> (Auto)` now actually offloads.** Behavior change, surfaced by
+  the above: `autoHost` has never been read — it is declared and passed by every
+  `…Auto` command but nothing consumed it — and because those commands set an
+  agent key, the old local/device test was false, so `(Auto)` emitted no device
+  flag and quietly ran on this machine. It now emits `--device auto` and lets
+  the CLI pick, which is what the command name promises. Device selection stays
+  in the CLI rather than being scored in the extension. `New <Agent> (Pick Host)`
+  answered with **This Mac** stays local, as it always should have.
+
 - **Tab icons + status bar for Grok/Kimi/Droid/Antigravity and resumed sessions.**
   Shell-adoption only recognised the original five harnesses (`claude`/`codex`/
   `gemini`/`cursor`/`opencode`), so a New Grok tab (or any focus/resume that

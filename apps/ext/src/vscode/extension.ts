@@ -479,9 +479,16 @@ async function launchAgent(context: vscode.ExtensionContext, opts: LaunchAgentOp
   // commands) and a Pick Host prompt the user answered with "This Mac", which
   // returns no host. Passing plain `opts.local` there leaves it undefined, the
   // builder's `local = false` default fires `--device auto`, and a deliberate
-  // This-Mac pick silently dispatches to another box. An AUTOMATIC launch is
-  // different: no host and no pick means "choose for me", which is exactly what
-  // `--device auto` is for, so it must NOT be treated as local.
+  // This-Mac pick silently dispatches to another box.
+  //
+  // Everything else — an automatic launch, and `opts.autoHost` (the `(Auto)`
+  // commands) — means "choose a machine for me", which is what `--device auto`
+  // is for, so it must NOT be treated as local. NOTE this changes `(Auto)`:
+  // `opts.autoHost` has never been read (it is declared and passed but dead on
+  // main too), and because those commands DO set an agentKey the old
+  // `automatic && !opts.local` test was false, so `(Auto)` emitted no device
+  // flag at all and silently ran on this Mac. Device choice stays with the CLI
+  // rather than being scored here, per the thin-client contract.
   const isLocal = opts.local === true || (opts.pickHost === true && !host);
   const command = buildAgentLaunchCommand(
     agent, null, defaultModel, undefined, undefined, 'balanced', 'auto',
