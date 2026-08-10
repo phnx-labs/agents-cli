@@ -104,7 +104,7 @@ command. Every one is verified against this machine, not inferred.
 
 | # | Mechanism | Evidence |
 | --- | --- | --- |
-| 1 | The global rule tells every agent to install globally, and this repo carves out no exception | `/home/muqsit/.claude/CLAUDE.md:455` — *"No locally built CLIs. Install globally (`npm i -g`…)"*. npm prefix is `/home/muqsit/.local`, so `npm i -g .` lands on the real install. |
+| 1 | The global rule tells every agent to install globally, and this repo carves out no exception | `/home/you/.claude/CLAUDE.md:455` — *"No locally built CLIs. Install globally (`npm i -g`…)"*. npm prefix is `/home/you/.local`, so `npm i -g .` lands on the real install. |
 | 2 | `install.sh` links the dev build under the production names | `apps/cli/scripts/install.sh:141-146` — `for bin in agents ag browser; do ln -sf "$src" "$LINK_DIR/$bin"` |
 | 3 | `install.sh` restarts the shared daemon pinned to the dev binary | `install.sh:196` `AGENTS_INSTALL_BIN="$LINKED_PATH"` → `install.sh:205` `d.startDaemon?.(bin)` → `apps/cli/src/lib/daemon.ts:1313` |
 
@@ -124,15 +124,15 @@ That is true about the npm prefix and false about the command you actually type.
 
 ```console
 $ ls -la ~/.local/bin/agents ~/.local/bin/ag ~/.local/bin/browser
-agents  -> /home/muqsit/.local/agents-cli-dev/bin/agents
-ag      -> /home/muqsit/.local/agents-cli-dev/bin/ag
-browser -> /home/muqsit/.local/agents-cli-dev/bin/browser
+agents  -> /home/you/.local/agents-cli-dev/bin/agents
+ag      -> /home/you/.local/agents-cli-dev/bin/ag
+browser -> /home/you/.local/agents-cli-dev/bin/browser
 
 $ ls ~/.local/agents-cli-dev/lib/node_modules/@phnx-labs/
                                      # empty - the dev prefix was cleaned
 
 $ ~/.local/bin/agents --version
-zsh: no such file or directory: /home/muqsit/.local/bin/agents
+zsh: no such file or directory: /home/you/.local/bin/agents
 
 $ pgrep -af __daemon-run
 4163347 bun .agents/worktrees/rush-2431-binary-shadow/apps/cli/dist/index.js __daemon-run
@@ -147,13 +147,13 @@ Any shell that puts `~/.local/bin` first gets a broken `agents`.
 
 ```console
 $ bash scripts/install.sh --skip-tests
-  bin:    /home/muqsit/.local/bin/agents-dev
+  bin:    /home/you/.local/bin/agents-dev
   Removed stale dev link: ~/.local/bin/agents -> ~/.local/agents-cli-dev/bin/agents
   Removed stale dev link: ~/.local/bin/ag     -> ~/.local/agents-cli-dev/bin/ag
   Removed stale dev link: ~/.local/bin/browser -> ~/.local/agents-cli-dev/bin/browser
   Shared daemon left on production code (secrets broker, browser IPC, routines).
   Ready
-  /home/muqsit/.local/bin/agents-dev (0.0.0-dev.41ae41f60-dirty)
+  /home/you/.local/bin/agents-dev (0.0.0-dev.41ae41f60-dirty)
   Run 'agents-dev <args>'. Your installed 'agents' is untouched.
 
 $ ls ~/.local/bin/agents ~/.local/bin/ag ~/.local/bin/browser

@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Unify native logins and provider credentials as named accounts</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:5px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-awaiting-go">awaiting-go</span></div>
+<h1>Unify native logins and provider credentials as named accounts</h1>
+<p class="summary">Give native OAuth identities and portable provider credentials one account catalog, then bind named accounts to native installations and custom harnesses with positional commands. Native OAuth remains owned by each harness and never enters the agents-cli keychain; portable secrets move only through an explicit, verified sync operation.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Provider accounts already use canonical secrets bundles with stable UUIDs and policy never.<span class="meta-sep" aria-hidden="true">·</span>Native identities are currently discovered read-only and labels are not rendered in agents view.<span class="meta-sep" aria-hidden="true">·</span>Direct run, routines, custom harnesses, native installations, and fleet sync do not yet share one account resolver.</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Account unification follow-up</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Codex</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">019fdef4</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a href="#intent"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Intent</a><a href="#current-architecture"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Current architecture</a><a href="#purpose"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#public-interface"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#proposed-changes"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#plan"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Plan</a><a href="#validation"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Tracking</a><a href="#delta-spec"><span class="toc-index">11&nbsp;&middot;&nbsp;</span>Delta Spec</a></nav><article class="artifact-body"><h1>Unify native logins and provider credentials as named accounts</h1>
+<h2 id="focus-for-review">Focus for review</h2>
+<ul>
+<li>Is the positional grammar natural: <code>name &lt;source&gt; &lt;name&gt;</code> and <code>attach &lt;account&gt; &lt;target&gt;</code>?</li>
+<li>Should a native OAuth alias be attachable only where that same harness-owned login already exists? This plan says yes.</li>
+<li>Should portable provider credentials be copied only by an explicit <code>accounts sync</code> command? This plan says yes.</li>
+</ul>
+<h2 id="intent">Intent</h2>
+<p>Manage a Claude, Codex, Cursor, or other native login separately from the installed CLI version, give it a memorable name such as <code>work</code>, and connect it to one or more installations. Use the same model for OpenRouter, DeepInfra, and other API-key or long-lived-token providers without making native OAuth credentials pass through agents-cli storage.</p>
+<div class="artifact-callout"><strong>Core rule:</strong> an account is a named identity. A native account stores only identity metadata and a binding to a harness-owned login. A provider account stores a portable credential in the existing secrets backend. Attaching never copies a native OAuth token.</div><h2 id="current-architecture">Current architecture</h2>
+<section class="artifact-grid artifact-grid-2">
+<article class="artifact-panel">
+<figcaption><strong>Current:</strong> the name command reports success, but <code>agents view</code> still shows only the email and version.</figcaption>
+
+```text
+$ agents accounts name work --from claude@2.1.220
+Named the claude account 'work'.
+
+$ agents view claude
+2.1.220  default  user@example.com
+```
+</article>
+
+<article class="artifact-panel">
+<figcaption><strong>Proposed:</strong> the source and target are positional, and the name is visible everywhere the identity appears.</figcaption>
+
+```text
+$ agents accounts name claude@2.1.220 work
+Named claude@2.1.220 as work.
+
+$ agents accounts attach work claude@2.1.225
+Attached work to claude@2.1.225.
+
+$ agents view claude
+2.1.225  opus[1m]  work · user@example.com  Max
+2.1.220  default   work · user@example.com  Max
+```
+</article>
+</section><figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg class="artifact-diagram" viewBox="0 0 1040 350" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title id="account-title">Unified account catalog and binding flow</title>
+  <desc id="account-desc">Native aliases point to harness-owned OAuth state while provider accounts point to portable secret bundles. Both resolve through bindings to installations and custom harnesses.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#a3e635"></path></marker>
+  </defs>
+  <text x="30" y="28" fill="#a3e635" font-family="Inter,system-ui" font-size="14" font-weight="700">ACCOUNT CATALOG</text>
+  <rect x="30" y="48" width="260" height="105" rx="12" fill="#111827" stroke="#a3e635" stroke-width="2"></rect><text x="50" y="79" fill="#f8fafc" font-family="Inter,system-ui" font-size="15">native · work</text><text x="50" y="104" fill="#cbd5e1" font-family="Inter,system-ui" font-size="12">identity fingerprint + label</text><text x="50" y="128" fill="#cbd5e1" font-family="Inter,system-ui" font-size="12">secret stays in Claude/Codex/Cursor</text>
+  <rect x="30" y="190" width="260" height="105" rx="12" fill="#111827" stroke="#a3e635" stroke-width="2"></rect><text x="50" y="221" fill="#f8fafc" font-family="Inter,system-ui" font-size="15">provider · openrouter-work</text><text x="50" y="246" fill="#cbd5e1" font-family="Inter,system-ui" font-size="12">provider + auth type + stable UUID</text><text x="50" y="270" fill="#cbd5e1" font-family="Inter,system-ui" font-size="12">secret bundle, policy never</text>
+  <path d="M290 100H405" stroke="#a3e635" stroke-width="3" fill="none" marker-end="url(#arrow)"></path><path d="M290 242H405" stroke="#a3e635" stroke-width="3" fill="none" marker-end="url(#arrow)"></path>
+  <text x="420" y="28" fill="#a3e635" font-family="Inter,system-ui" font-size="14" font-weight="700">BINDINGS</text>
+  <rect x="405" y="48" width="260" height="247" rx="12" fill="#111827" stroke="#475569" stroke-width="2"></rect><text x="430" y="84" fill="#f8fafc" font-family="Inter,system-ui" font-size="15">work → claude@2.1.220</text><text x="430" y="121" fill="#f8fafc" font-family="Inter,system-ui" font-size="15">work → claude@2.1.225</text><text x="430" y="176" fill="#f8fafc" font-family="Inter,system-ui" font-size="15">openrouter-work → codex@0.145.0</text><text x="430" y="213" fill="#f8fafc" font-family="Inter,system-ui" font-size="15">openrouter-work → cursor@latest</text><text x="430" y="268" fill="#f8fafc" font-family="Inter,system-ui" font-size="15">openrouter-work → deepseek</text>
+  <path d="M665 170H780" stroke="#a3e635" stroke-width="3" fill="none" marker-end="url(#arrow)"></path>
+  <text x="795" y="28" fill="#a3e635" font-family="Inter,system-ui" font-size="14" font-weight="700">EXECUTION</text>
+  <rect x="780" y="48" width="230" height="247" rx="12" fill="#111827" stroke="#475569" stroke-width="2"></rect><text x="805" y="92" fill="#f8fafc" font-family="Inter,system-ui" font-size="15">native installation</text><text x="805" y="120" fill="#cbd5e1" font-family="Inter,system-ui" font-size="12">validate existing login</text><text x="805" y="166" fill="#f8fafc" font-family="Inter,system-ui" font-size="15">custom harness</text><text x="805" y="194" fill="#cbd5e1" font-family="Inter,system-ui" font-size="12">inject provider credential</text><text x="805" y="240" fill="#f8fafc" font-family="Inter,system-ui" font-size="15">remote fleet run</text><text x="805" y="268" fill="#cbd5e1" font-family="Inter,system-ui" font-size="12">resolve account on target</text>
+</svg>
+<figcaption>One catalog and one resolver, with different custody rules for native and portable credentials.</figcaption>
+</figure><h2 id="purpose">Purpose</h2>
+<p>The existing account work has two disconnected concepts. Provider credentials are durable account bundles, while native OAuth identities are read-only discovery rows. The old label path records a label outside the rendered catalog, so <code>agents view</code> cannot show it. Account selection also differs between direct runs, routines, custom harnesses, and remote dispatch.</p>
+<p>The change standardizes the user model without pretending every harness supports the same authentication mechanics.</p>
+<h2 id="public-interface">Public Interface</h2>
+<h3>Command grammar</h3>
+<table>
+<thead>
+<tr>
+<th>Intent</th>
+<th>Command</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Name a discovered native login</td>
+<td><code>agents accounts name claude@2.1.220 work</code></td>
+<td>Create or update native account <code>work</code> from the login found in that installation</td>
+</tr>
+<tr>
+<td>Add a portable provider credential</td>
+<td><code>agents accounts add openrouter-work --provider openrouter --auth api-key</code></td>
+<td>Create provider account and securely prompt for its key</td>
+</tr>
+<tr>
+<td>Attach an account</td>
+<td><code>agents accounts attach work claude@2.1.225</code></td>
+<td>Bind the named account to an exact native installation</td>
+</tr>
+<tr>
+<td>Attach to a custom harness</td>
+<td><code>agents accounts attach openrouter-work deepseek</code></td>
+<td>Bind the provider account to the named custom harness</td>
+</tr>
+<tr>
+<td>Detach</td>
+<td><code>agents accounts detach work claude@2.1.225</code></td>
+<td>Remove exactly that binding</td>
+</tr>
+<tr>
+<td>Inspect</td>
+<td><code>agents accounts view work</code></td>
+<td>Show identity metadata, credential custody, bindings, and availability</td>
+</tr>
+<tr>
+<td>Rename</td>
+<td><code>agents accounts rename work rush-work</code></td>
+<td>Rename the account while retaining its stable ID and bindings</td>
+</tr>
+<tr>
+<td>Remove</td>
+<td><code>agents accounts remove rush-work</code></td>
+<td>Refuse while bindings/defaults still reference it; explain how to detach</td>
+</tr>
+<tr>
+<td>Copy portable credentials</td>
+<td><code>agents accounts sync openrouter-work zion</code></td>
+<td>Explicitly provision the same stable provider account on another device</td>
+</tr>
+</tbody></table>
+<p><code>--from</code> and <code>--to</code> are removed from the proposed API. Flags remain for optional attributes and behavior, such as <code>--provider</code>, <code>--auth</code>, <code>--json</code>, <code>--force</code>, and <code>--default</code>.</p>
+<h3>Complete happy paths</h3>
+<p>Native OAuth account:</p>
+<pre><code>agents accounts name claude@2.1.220 work
+agents accounts attach work claude@2.1.225
+agents accounts view work
+agents run claude@2.1.225
+</code></pre>
+<p>Portable provider account:</p>
+<pre><code>agents accounts add openrouter-work --provider openrouter --auth api-key
+agents accounts attach openrouter-work codex@0.145.0
+agents accounts attach openrouter-work cursor@latest
+agents accounts attach openrouter-work deepseek
+agents accounts sync openrouter-work zion
+</code></pre>
+<h3>Output contract</h3>
+<pre><code>$ agents accounts view work
+work
+  kind        native login
+  identity    user@example.com
+  provider    Anthropic
+  custody     Claude Code (not stored by agents-cli)
+  scope       version
+  available   yes
+  attached    claude@2.1.220, claude@2.1.225
+</code></pre>
+<pre><code>$ agents accounts view openrouter-work
+openrouter-work
+  kind        provider credential
+  provider    OpenRouter
+  auth        API key
+  custody     agents secrets (no biometric ACL)
+  available   this device, zion
+  attached    codex@0.145.0, cursor@latest, deepseek
+</code></pre>
+<p>Every human-readable account row uses <code>name · identity</code> when both exist. Every command that emits account data supports <code>--json</code> and returns the stable account ID, kind, display name, identity metadata, custody, availability, and bindings.</p>
+<h2 id="proposed-changes">Proposed Changes</h2>
+<h3>1. One typed catalog, two credential custody models</h3>
+<p>Extend the existing account registry rather than add a second store:</p>
+<pre><code>type Account =
+  | {
+      id: string;
+      name: string;
+      kind: "native";
+      agent: AgentId;
+      identityKey: string;
+      identityLabel?: string;
+      authScope: "version" | "device";
+    }
+  | {
+      id: string;
+      name: string;
+      kind: "provider";
+      provider: AccountProviderId;
+      authType: "api-key" | "token";
+      bundle: string;
+    };
+
+type AccountBinding = {
+  accountId: string;
+  target: string;
+};
+</code></pre>
+<p>Native records contain no OAuth access token, refresh token, auth file, or keychain reference. Provider records continue to use the canonical secrets bundle with stable UUID and <code>policy: never</code>.</p>
+<h3>2. One target parser and resolver</h3>
+<p>Parse the second positional argument into either an exact native installation (<code>claude@2.1.225</code>, <code>codex@0.145.0</code>, <code>cursor@latest</code>) or a custom harness (<code>deepseek</code>). Resolve accounts in this order:</p>
+<ol>
+<li>explicit run account;</li>
+<li>exact target binding;</li>
+<li>bare-agent default;</li>
+<li>current native or balanced selection.</li>
+</ol>
+<p>The same resolver is used by direct runs, routines, teams, local dispatch, and remote fleet dispatch. Cloud/lease runs fail clearly for device-local native accounts. They do not export native OAuth automatically.</p>
+<h3>3. Capability registry keeps harness claims truthful</h3>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Harnesses / handling</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Version-scoped native identity</td>
+<td>Claude, Codex, Grok; Muse when identity inspection is strong</td>
+</tr>
+<tr>
+<td>Device-scoped native identity</td>
+<td>Cursor after correcting false XDG isolation; Antigravity, Kimi, Droid, OpenCode where their auth is device-global</td>
+</tr>
+<tr>
+<td>Requires inspector work before attach</td>
+<td>Copilot</td>
+</tr>
+<tr>
+<td>Discovery only / legacy</td>
+<td>Gemini</td>
+</tr>
+<tr>
+<td>Unsupported until modeled</td>
+<td>Pi, OpenClaw, Amp, Kiro, Goose, Hermes, Warp</td>
+</tr>
+<tr>
+<td>Portable provider credential</td>
+<td>Registry-driven adapters only; unsupported provider/harness pairs fail loud</td>
+</tr>
+</tbody></table>
+<p>For a native account, <code>attach</code> validates that the target already exposes the same identity fingerprint. It never logs in, copies, or rewrites OAuth state. A device-scoped harness rejects an exact-version attachment and explains that the account applies to the device.</p>
+<h3>4. Labels render everywhere</h3>
+<p>Use one account renderer in <code>accounts</code>, <code>agents view</code>, <code>harness view</code>, run banners, pickers, routines, and fleet inventory. Recover archived fingerprint labels transactionally where the identity still matches. Do not auto-merge opaque identities.</p>
+<h3>5. Explicit and verifiable portable sync</h3>
+<p><code>accounts sync &lt;account&gt; &lt;device&gt;</code> applies only to provider accounts. The destination import is one atomic transaction with rollback and read-back verification. Transport requirements:</p>
+<ul>
+<li>pinned managed SSH host key; reject unknown or changed keys;</li>
+<li>no SSH multiplex reuse for the credential transfer;</li>
+<li>secret bytes only on stdin, never argv, environment, logs, or config;</li>
+<li>no persistent plaintext or reusable secret fingerprint;</li>
+<li>same name with a different stable account ID fails unless explicitly forced;</li>
+<li>macOS uses a silent, non-biometric Keychain item; Linux uses the encrypted file backend; Windows uses Credential Manager.</li>
+</ul>
+<p>Sync provisions the same logical account ID on another device. Attaching one account to several harnesses does not clone it into several logical accounts.</p>
+<h3>6. No Touch ID noise in normal operation</h3>
+<p>Normal <code>accounts</code>, <code>view</code>, routing, attachment validation, and usage inspection read only native metadata or provider bundle metadata. They never read native OAuth secrets. Provider accounts use non-biometric secret policy, so headless execution does not trigger Touch ID. A secret read occurs only when launching a harness that requires the selected portable credential or during explicit sync.</p>
+<h2 id="plan">Plan</h2>
+<div class="checklist"><div class="checklist-head">0 / 9 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Add native account metadata and binding schema; migrate matching archived labels.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Replace relationship flags with positional <code>name</code>, <code>attach</code>, <code>detach</code>, <code>view</code>, and <code>sync</code> grammars plus workflow-first help.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Add the capability registry and identity validation for every supported native harness.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Route custom harnesses, native installations, direct runs, routines, teams, and SSH dispatch through one account resolver.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Render names, custody, availability, and bindings consistently in text and JSON.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Remove ordinary cloud/lease native OAuth export and enforce device-local errors.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Harden provider sync with pinned hosts, atomic import, rollback, and equality verification.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Update CLI docs, specifications, README, CHANGELOG, and audit companion <code>.agents-system</code> consumers.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Run focused account tests, full remote tests, and installed-CLI E2E on macOS, Linux, and Windows credential backends.</span></li></ul></div>
+<h2 id="validation">Validation</h2>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Required result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Name Claude login</td>
+<td><code>accounts view work</code> and <code>agents view claude</code> show <code>work · email</code></td>
+</tr>
+<tr>
+<td>Attach native alias to matching login</td>
+<td>Binding succeeds without reading or copying OAuth secrets</td>
+</tr>
+<tr>
+<td>Attach native alias to different identity</td>
+<td>Nonzero error names both identities; no state changes</td>
+</tr>
+<tr>
+<td>Attach provider to Codex/Cursor/custom harness</td>
+<td>Each installed target resolves the same stable provider account</td>
+</tr>
+<tr>
+<td>Normal view/routing</td>
+<td>No biometric prompt and no native secret access</td>
+</tr>
+<tr>
+<td>Remote run</td>
+<td>Destination resolves the account locally; no implicit secret transfer</td>
+</tr>
+<tr>
+<td>Explicit provider sync</td>
+<td>Atomic destination import verifies and reports availability on both devices</td>
+</tr>
+<tr>
+<td>Native sync attempt</td>
+<td>Refused with <code>native login credentials remain owned by &lt;harness&gt;</code></td>
+</tr>
+<tr>
+<td>Unsupported harness</td>
+<td>Clear nonzero capability error, never a silent no-op</td>
+</tr>
+</tbody></table>
+<pre><code>cd apps/cli
+./scripts/build.sh --skip-tests
+bun run test:remote
+agents accounts name claude@2.1.220 work
+agents accounts attach work claude@2.1.225
+agents accounts view work --json
+agents view claude
+</code></pre>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Handling</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A label points at the wrong human identity</td>
+<td>Bind by stable fingerprint; never email text alone; opaque identities do not auto-merge</td>
+</tr>
+<tr>
+<td>Cursor isolation is overstated</td>
+<td>Mark Cursor device-scoped until its runtime behavior is corrected and verified</td>
+</tr>
+<tr>
+<td>Removing <code>--from</code> / <code>--to</code> breaks unreleased examples</td>
+<td>Change code, help, docs, and companion guidance together; do not add a compatibility shim unless a shipped version requires it</td>
+</tr>
+<tr>
+<td>Account removal leaves dangling consumers</td>
+<td>Refuse removal while bindings, defaults, profiles, harnesses, or routines reference the ID</td>
+</tr>
+<tr>
+<td>Sync exposes a reusable credential</td>
+<td>Explicit command only, pinned transport, stdin-only atomic import, no native OAuth path</td>
+</tr>
+<tr>
+<td>Provider adapter claims exceed real support</td>
+<td>Registry completeness tests pin every supported pair and require clear unsupported errors</td>
+</tr>
+</tbody></table>
+<h2 id="tracking">Tracking</h2>
+<p>The implementation should use one account-unification ticket and link this rendered plan from that ticket. Any prerequisite harness inspector work should be a linked subtask and referenced back here before implementation begins.</p>
+<h2 id="delta-spec">Delta Spec</h2>
+<ul>
+<li>Account names MUST be unique across native and provider accounts and MUST resolve through stable IDs.</li>
+<li><code>accounts name &lt;source&gt; &lt;name&gt;</code> MUST create only native metadata and MUST NOT read or store native OAuth credentials.</li>
+<li><code>accounts attach &lt;account&gt; &lt;target&gt;</code> MUST use positional arguments and MUST validate compatibility before changing bindings.</li>
+<li>A native attachment MUST reference a harness-owned login already present at the target scope; it MUST NOT migrate credentials.</li>
+<li>A provider attachment MAY bind one portable account to multiple compatible native installations and custom harnesses.</li>
+<li>Normal inspection, routing, and status commands MUST NOT trigger biometric prompts.</li>
+<li>Portable credential sync MUST be explicit, destination-authenticated, atomic, rollback-safe, and verifiable without persisting plaintext.</li>
+<li>Remote execution MUST resolve the account on the destination. It MUST NOT transfer credentials implicitly.</li>
+<li>Text and JSON account renderers MUST expose the same account identity, custody, availability, and binding facts.</li>
+<li>Unsupported harness or provider combinations MUST fail nonzero with the missing capability named.</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGVtcGxhdGU6IHBsYW4udjEKc3VyZmFjZTogY2xpCnRpdGxlOiBVbmlmeSBuYXRpdmUgbG9naW5zIGFuZCBwcm92aWRlciBjcmVkZW50aWFscyBhcyBuYW1lZCBhY2NvdW50cwpzdW1tYXJ5OiBHaXZlIG5hdGl2ZSBPQXV0aCBpZGVudGl0aWVzIGFuZCBwb3J0YWJsZSBwcm92aWRlciBjcmVkZW50aWFscyBvbmUgYWNjb3VudCBjYXRhbG9nLCB0aGVuIGJpbmQgbmFtZWQgYWNjb3VudHMgdG8gbmF0aXZlIGluc3RhbGxhdGlvbnMgYW5kIGN1c3RvbSBoYXJuZXNzZXMgd2l0aCBwb3NpdGlvbmFsIGNvbW1hbmRzLiBOYXRpdmUgT0F1dGggcmVtYWlucyBvd25lZCBieSBlYWNoIGhhcm5lc3MgYW5kIG5ldmVyIGVudGVycyB0aGUgYWdlbnRzLWNsaSBrZXljaGFpbjsgcG9ydGFibGUgc2VjcmV0cyBtb3ZlIG9ubHkgdGhyb3VnaCBhbiBleHBsaWNpdCwgdmVyaWZpZWQgc3luYyBvcGVyYXRpb24uCnN0YXR1czogYXdhaXRpbmctZ28KdHJhY2tpbmc6ICJBY2NvdW50IHVuaWZpY2F0aW9uIGZvbGxvdy11cCIKcHJvamVjdDogYWdlbnRzLWNsaQpyZXBvc2l0b3J5OiBwaG54LWxhYnMvYWdlbnRzLWNsaQpicmFuY2g6IG1haW4KaGFybmVzczogY29kZXgKYWdlbnQ6IENvZGV4Cmh1bWFuOiBNdXFzaXQKaG9zdDogeW9zZW1pdGUtczAKc2Vzc2lvbjogMDE5ZmRlZjQKZGF0ZTogJzIwMjYtMDgtMTAnCmZhY3RzOgogIC0gUHJvdmlkZXIgYWNjb3VudHMgYWxyZWFkeSB1c2UgY2Fub25pY2FsIHNlY3JldHMgYnVuZGxlcyB3aXRoIHN0YWJsZSBVVUlEcyBhbmQgcG9saWN5IG5ldmVyLgogIC0gTmF0aXZlIGlkZW50aXRpZXMgYXJlIGN1cnJlbnRseSBkaXNjb3ZlcmVkIHJlYWQtb25seSBhbmQgbGFiZWxzIGFyZSBub3QgcmVuZGVyZWQgaW4gYWdlbnRzIHZpZXcuCiAgLSBEaXJlY3QgcnVuLCByb3V0aW5lcywgY3VzdG9tIGhhcm5lc3NlcywgbmF0aXZlIGluc3RhbGxhdGlvbnMsIGFuZCBmbGVldCBzeW5jIGRvIG5vdCB5ZXQgc2hhcmUgb25lIGFjY291bnQgcmVzb2x2ZXIuCi0tLQoKIyBVbmlmeSBuYXRpdmUgbG9naW5zIGFuZCBwcm92aWRlciBjcmVkZW50aWFscyBhcyBuYW1lZCBhY2NvdW50cwoKIyMgRm9jdXMgZm9yIHJldmlldwoKLSBJcyB0aGUgcG9zaXRpb25hbCBncmFtbWFyIG5hdHVyYWw6IGBuYW1lIDxzb3VyY2U+IDxuYW1lPmAgYW5kIGBhdHRhY2ggPGFjY291bnQ+IDx0YXJnZXQ+YD8KLSBTaG91bGQgYSBuYXRpdmUgT0F1dGggYWxpYXMgYmUgYXR0YWNoYWJsZSBvbmx5IHdoZXJlIHRoYXQgc2FtZSBoYXJuZXNzLW93bmVkIGxvZ2luIGFscmVhZHkgZXhpc3RzPyBUaGlzIHBsYW4gc2F5cyB5ZXMuCi0gU2hvdWxkIHBvcnRhYmxlIHByb3ZpZGVyIGNyZWRlbnRpYWxzIGJlIGNvcGllZCBvbmx5IGJ5IGFuIGV4cGxpY2l0IGBhY2NvdW50cyBzeW5jYCBjb21tYW5kPyBUaGlzIHBsYW4gc2F5cyB5ZXMuCgojIyBJbnRlbnQKCk1hbmFnZSBhIENsYXVkZSwgQ29kZXgsIEN1cnNvciwgb3Igb3RoZXIgbmF0aXZlIGxvZ2luIHNlcGFyYXRlbHkgZnJvbSB0aGUgaW5zdGFsbGVkIENMSSB2ZXJzaW9uLCBnaXZlIGl0IGEgbWVtb3JhYmxlIG5hbWUgc3VjaCBhcyBgd29ya2AsIGFuZCBjb25uZWN0IGl0IHRvIG9uZSBvciBtb3JlIGluc3RhbGxhdGlvbnMuIFVzZSB0aGUgc2FtZSBtb2RlbCBmb3IgT3BlblJvdXRlciwgRGVlcEluZnJhLCBhbmQgb3RoZXIgQVBJLWtleSBvciBsb25nLWxpdmVkLXRva2VuIHByb3ZpZGVycyB3aXRob3V0IG1ha2luZyBuYXRpdmUgT0F1dGggY3JlZGVudGlhbHMgcGFzcyB0aHJvdWdoIGFnZW50cy1jbGkgc3RvcmFnZS4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQiPjxzdHJvbmc+Q29yZSBydWxlOjwvc3Ryb25nPiBhbiBhY2NvdW50IGlzIGEgbmFtZWQgaWRlbnRpdHkuIEEgbmF0aXZlIGFjY291bnQgc3RvcmVzIG9ubHkgaWRlbnRpdHkgbWV0YWRhdGEgYW5kIGEgYmluZGluZyB0byBhIGhhcm5lc3Mtb3duZWQgbG9naW4uIEEgcHJvdmlkZXIgYWNjb3VudCBzdG9yZXMgYSBwb3J0YWJsZSBjcmVkZW50aWFsIGluIHRoZSBleGlzdGluZyBzZWNyZXRzIGJhY2tlbmQuIEF0dGFjaGluZyBuZXZlciBjb3BpZXMgYSBuYXRpdmUgT0F1dGggdG9rZW4uPC9kaXY+CgojIyBDdXJyZW50IGFyY2hpdGVjdHVyZQoKPHNlY3Rpb24gY2xhc3M9ImFydGlmYWN0LWdyaWQgYXJ0aWZhY3QtZ3JpZC0yIj4KPGFydGljbGUgY2xhc3M9ImFydGlmYWN0LXBhbmVsIiBkYXRhLXN0YXRlPSJjdXJyZW50IiBkYXRhLWV2aWRlbmNlPSJjYXB0dXJlIj4KPGZpZ2NhcHRpb24+PHN0cm9uZz5DdXJyZW50Ojwvc3Ryb25nPiB0aGUgbmFtZSBjb21tYW5kIHJlcG9ydHMgc3VjY2VzcywgYnV0IDxjb2RlPmFnZW50cyB2aWV3PC9jb2RlPiBzdGlsbCBzaG93cyBvbmx5IHRoZSBlbWFpbCBhbmQgdmVyc2lvbi48L2ZpZ2NhcHRpb24+CgpgYGB0ZXh0CiQgYWdlbnRzIGFjY291bnRzIG5hbWUgd29yayAtLWZyb20gY2xhdWRlQDIuMS4yMjAKTmFtZWQgdGhlIGNsYXVkZSBhY2NvdW50ICd3b3JrJy4KCiQgYWdlbnRzIHZpZXcgY2xhdWRlCjIuMS4yMjAgIGRlZmF1bHQgIG11cXNpdEBnZXRydXNoLmFpCmBgYAo8L2FydGljbGU+Cgo8YXJ0aWNsZSBjbGFzcz0iYXJ0aWZhY3QtcGFuZWwiIGRhdGEtc3RhdGU9InByb3Bvc2VkIiBkYXRhLWV2aWRlbmNlPSJtb2NrdXAiPgo8ZmlnY2FwdGlvbj48c3Ryb25nPlByb3Bvc2VkOjwvc3Ryb25nPiB0aGUgc291cmNlIGFuZCB0YXJnZXQgYXJlIHBvc2l0aW9uYWwsIGFuZCB0aGUgbmFtZSBpcyB2aXNpYmxlIGV2ZXJ5d2hlcmUgdGhlIGlkZW50aXR5IGFwcGVhcnMuPC9maWdjYXB0aW9uPgoKYGBgdGV4dAokIGFnZW50cyBhY2NvdW50cyBuYW1lIGNsYXVkZUAyLjEuMjIwIHdvcmsKTmFtZWQgY2xhdWRlQDIuMS4yMjAgYXMgd29yay4KCiQgYWdlbnRzIGFjY291bnRzIGF0dGFjaCB3b3JrIGNsYXVkZUAyLjEuMjI1CkF0dGFjaGVkIHdvcmsgdG8gY2xhdWRlQDIuMS4yMjUuCgokIGFnZW50cyB2aWV3IGNsYXVkZQoyLjEuMjI1ICBvcHVzWzFtXSAgd29yayDCtyBtdXFzaXRAZ2V0cnVzaC5haSAgTWF4CjIuMS4yMjAgIGRlZmF1bHQgICB3b3JrIMK3IG11cXNpdEBnZXRydXNoLmFpICBNYXgKYGBgCjwvYXJ0aWNsZT4KPC9zZWN0aW9uPgoKPGZpZ3VyZSBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlIGFydGlmYWN0LWZpZ3VyZS1kaWFncmFtIGFydGlmYWN0LWZpZ3VyZS13aWRlIj4KPHN2ZyBjbGFzcz0iYXJ0aWZhY3QtZGlhZ3JhbSIgdmlld0JveD0iMCAwIDEwNDAgMzUwIiByb2xlPSJpbWciIGFyaWEtbGFiZWxsZWRieT0iYWNjb3VudC10aXRsZSBhY2NvdW50LWRlc2MiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPHRpdGxlIGlkPSJhY2NvdW50LXRpdGxlIj5VbmlmaWVkIGFjY291bnQgY2F0YWxvZyBhbmQgYmluZGluZyBmbG93PC90aXRsZT4KICA8ZGVzYyBpZD0iYWNjb3VudC1kZXNjIj5OYXRpdmUgYWxpYXNlcyBwb2ludCB0byBoYXJuZXNzLW93bmVkIE9BdXRoIHN0YXRlIHdoaWxlIHByb3ZpZGVyIGFjY291bnRzIHBvaW50IHRvIHBvcnRhYmxlIHNlY3JldCBidW5kbGVzLiBCb3RoIHJlc29sdmUgdGhyb3VnaCBiaW5kaW5ncyB0byBpbnN0YWxsYXRpb25zIGFuZCBjdXN0b20gaGFybmVzc2VzLjwvZGVzYz4KICA8ZGVmcz4KICAgIDxtYXJrZXIgaWQ9ImFycm93IiB2aWV3Qm94PSIwIDAgMTAgMTAiIHJlZlg9IjkiIHJlZlk9IjUiIG1hcmtlcldpZHRoPSI3IiBtYXJrZXJIZWlnaHQ9IjciIG9yaWVudD0iYXV0by1zdGFydC1yZXZlcnNlIj48cGF0aCBkPSJNMCAwTDEwIDVMMCAxMHoiIGZpbGw9IiNhM2U2MzUiLz48L21hcmtlcj4KICA8L2RlZnM+CiAgPHRleHQgeD0iMzAiIHk9IjI4IiBmaWxsPSIjYTNlNjM1IiBmb250LWZhbWlseT0iSW50ZXIsc3lzdGVtLXVpIiBmb250LXNpemU9IjE0IiBmb250LXdlaWdodD0iNzAwIj5BQ0NPVU5UIENBVEFMT0c8L3RleHQ+CiAgPHJlY3QgeD0iMzAiIHk9IjQ4IiB3aWR0aD0iMjYwIiBoZWlnaHQ9IjEwNSIgcng9IjEyIiBmaWxsPSIjMTExODI3IiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMiIvPjx0ZXh0IHg9IjUwIiB5PSI3OSIgZmlsbD0iI2Y4ZmFmYyIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxNSI+bmF0aXZlIMK3IHdvcms8L3RleHQ+PHRleHQgeD0iNTAiIHk9IjEwNCIgZmlsbD0iI2NiZDVlMSIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxMiI+aWRlbnRpdHkgZmluZ2VycHJpbnQgKyBsYWJlbDwvdGV4dD48dGV4dCB4PSI1MCIgeT0iMTI4IiBmaWxsPSIjY2JkNWUxIiBmb250LWZhbWlseT0iSW50ZXIsc3lzdGVtLXVpIiBmb250LXNpemU9IjEyIj5zZWNyZXQgc3RheXMgaW4gQ2xhdWRlL0NvZGV4L0N1cnNvcjwvdGV4dD4KICA8cmVjdCB4PSIzMCIgeT0iMTkwIiB3aWR0aD0iMjYwIiBoZWlnaHQ9IjEwNSIgcng9IjEyIiBmaWxsPSIjMTExODI3IiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMiIvPjx0ZXh0IHg9IjUwIiB5PSIyMjEiIGZpbGw9IiNmOGZhZmMiIGZvbnQtZmFtaWx5PSJJbnRlcixzeXN0ZW0tdWkiIGZvbnQtc2l6ZT0iMTUiPnByb3ZpZGVyIMK3IG9wZW5yb3V0ZXItd29yazwvdGV4dD48dGV4dCB4PSI1MCIgeT0iMjQ2IiBmaWxsPSIjY2JkNWUxIiBmb250LWZhbWlseT0iSW50ZXIsc3lzdGVtLXVpIiBmb250LXNpemU9IjEyIj5wcm92aWRlciArIGF1dGggdHlwZSArIHN0YWJsZSBVVUlEPC90ZXh0Pjx0ZXh0IHg9IjUwIiB5PSIyNzAiIGZpbGw9IiNjYmQ1ZTEiIGZvbnQtZmFtaWx5PSJJbnRlcixzeXN0ZW0tdWkiIGZvbnQtc2l6ZT0iMTIiPnNlY3JldCBidW5kbGUsIHBvbGljeSBuZXZlcjwvdGV4dD4KICA8cGF0aCBkPSJNMjkwIDEwMEg0MDUiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIzIiBmaWxsPSJub25lIiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPjxwYXRoIGQ9Ik0yOTAgMjQySDQwNSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjMiIGZpbGw9Im5vbmUiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIi8+CiAgPHRleHQgeD0iNDIwIiB5PSIyOCIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxNCIgZm9udC13ZWlnaHQ9IjcwMCI+QklORElOR1M8L3RleHQ+CiAgPHJlY3QgeD0iNDA1IiB5PSI0OCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSIyNDciIHJ4PSIxMiIgZmlsbD0iIzExMTgyNyIgc3Ryb2tlPSIjNDc1NTY5IiBzdHJva2Utd2lkdGg9IjIiLz48dGV4dCB4PSI0MzAiIHk9Ijg0IiBmaWxsPSIjZjhmYWZjIiBmb250LWZhbWlseT0iSW50ZXIsc3lzdGVtLXVpIiBmb250LXNpemU9IjE1Ij53b3JrIOKGkiBjbGF1ZGVAMi4xLjIyMDwvdGV4dD48dGV4dCB4PSI0MzAiIHk9IjEyMSIgZmlsbD0iI2Y4ZmFmYyIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxNSI+d29yayDihpIgY2xhdWRlQDIuMS4yMjU8L3RleHQ+PHRleHQgeD0iNDMwIiB5PSIxNzYiIGZpbGw9IiNmOGZhZmMiIGZvbnQtZmFtaWx5PSJJbnRlcixzeXN0ZW0tdWkiIGZvbnQtc2l6ZT0iMTUiPm9wZW5yb3V0ZXItd29yayDihpIgY29kZXhAMC4xNDUuMDwvdGV4dD48dGV4dCB4PSI0MzAiIHk9IjIxMyIgZmlsbD0iI2Y4ZmFmYyIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxNSI+b3BlbnJvdXRlci13b3JrIOKGkiBjdXJzb3JAbGF0ZXN0PC90ZXh0Pjx0ZXh0IHg9IjQzMCIgeT0iMjY4IiBmaWxsPSIjZjhmYWZjIiBmb250LWZhbWlseT0iSW50ZXIsc3lzdGVtLXVpIiBmb250LXNpemU9IjE1Ij5vcGVucm91dGVyLXdvcmsg4oaSIGRlZXBzZWVrPC90ZXh0PgogIDxwYXRoIGQ9Ik02NjUgMTcwSDc4MCIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjMiIGZpbGw9Im5vbmUiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIi8+CiAgPHRleHQgeD0iNzk1IiB5PSIyOCIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxNCIgZm9udC13ZWlnaHQ9IjcwMCI+RVhFQ1VUSU9OPC90ZXh0PgogIDxyZWN0IHg9Ijc4MCIgeT0iNDgiIHdpZHRoPSIyMzAiIGhlaWdodD0iMjQ3IiByeD0iMTIiIGZpbGw9IiMxMTE4MjciIHN0cm9rZT0iIzQ3NTU2OSIgc3Ryb2tlLXdpZHRoPSIyIi8+PHRleHQgeD0iODA1IiB5PSI5MiIgZmlsbD0iI2Y4ZmFmYyIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxNSI+bmF0aXZlIGluc3RhbGxhdGlvbjwvdGV4dD48dGV4dCB4PSI4MDUiIHk9IjEyMCIgZmlsbD0iI2NiZDVlMSIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxMiI+dmFsaWRhdGUgZXhpc3RpbmcgbG9naW48L3RleHQ+PHRleHQgeD0iODA1IiB5PSIxNjYiIGZpbGw9IiNmOGZhZmMiIGZvbnQtZmFtaWx5PSJJbnRlcixzeXN0ZW0tdWkiIGZvbnQtc2l6ZT0iMTUiPmN1c3RvbSBoYXJuZXNzPC90ZXh0Pjx0ZXh0IHg9IjgwNSIgeT0iMTk0IiBmaWxsPSIjY2JkNWUxIiBmb250LWZhbWlseT0iSW50ZXIsc3lzdGVtLXVpIiBmb250LXNpemU9IjEyIj5pbmplY3QgcHJvdmlkZXIgY3JlZGVudGlhbDwvdGV4dD48dGV4dCB4PSI4MDUiIHk9IjI0MCIgZmlsbD0iI2Y4ZmFmYyIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxNSI+cmVtb3RlIGZsZWV0IHJ1bjwvdGV4dD48dGV4dCB4PSI4MDUiIHk9IjI2OCIgZmlsbD0iI2NiZDVlMSIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxMiI+cmVzb2x2ZSBhY2NvdW50IG9uIHRhcmdldDwvdGV4dD4KPC9zdmc+CjxmaWdjYXB0aW9uPk9uZSBjYXRhbG9nIGFuZCBvbmUgcmVzb2x2ZXIsIHdpdGggZGlmZmVyZW50IGN1c3RvZHkgcnVsZXMgZm9yIG5hdGl2ZSBhbmQgcG9ydGFibGUgY3JlZGVudGlhbHMuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCiMjIFB1cnBvc2UKClRoZSBleGlzdGluZyBhY2NvdW50IHdvcmsgaGFzIHR3byBkaXNjb25uZWN0ZWQgY29uY2VwdHMuIFByb3ZpZGVyIGNyZWRlbnRpYWxzIGFyZSBkdXJhYmxlIGFjY291bnQgYnVuZGxlcywgd2hpbGUgbmF0aXZlIE9BdXRoIGlkZW50aXRpZXMgYXJlIHJlYWQtb25seSBkaXNjb3Zlcnkgcm93cy4gVGhlIG9sZCBsYWJlbCBwYXRoIHJlY29yZHMgYSBsYWJlbCBvdXRzaWRlIHRoZSByZW5kZXJlZCBjYXRhbG9nLCBzbyBgYWdlbnRzIHZpZXdgIGNhbm5vdCBzaG93IGl0LiBBY2NvdW50IHNlbGVjdGlvbiBhbHNvIGRpZmZlcnMgYmV0d2VlbiBkaXJlY3QgcnVucywgcm91dGluZXMsIGN1c3RvbSBoYXJuZXNzZXMsIGFuZCByZW1vdGUgZGlzcGF0Y2guCgpUaGUgY2hhbmdlIHN0YW5kYXJkaXplcyB0aGUgdXNlciBtb2RlbCB3aXRob3V0IHByZXRlbmRpbmcgZXZlcnkgaGFybmVzcyBzdXBwb3J0cyB0aGUgc2FtZSBhdXRoZW50aWNhdGlvbiBtZWNoYW5pY3MuCgojIyBQdWJsaWMgSW50ZXJmYWNlCgojIyMgQ29tbWFuZCBncmFtbWFyCgp8IEludGVudCB8IENvbW1hbmQgfCBNZWFuaW5nIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IE5hbWUgYSBkaXNjb3ZlcmVkIG5hdGl2ZSBsb2dpbiB8IGBhZ2VudHMgYWNjb3VudHMgbmFtZSBjbGF1ZGVAMi4xLjIyMCB3b3JrYCB8IENyZWF0ZSBvciB1cGRhdGUgbmF0aXZlIGFjY291bnQgYHdvcmtgIGZyb20gdGhlIGxvZ2luIGZvdW5kIGluIHRoYXQgaW5zdGFsbGF0aW9uIHwKfCBBZGQgYSBwb3J0YWJsZSBwcm92aWRlciBjcmVkZW50aWFsIHwgYGFnZW50cyBhY2NvdW50cyBhZGQgb3BlbnJvdXRlci13b3JrIC0tcHJvdmlkZXIgb3BlbnJvdXRlciAtLWF1dGggYXBpLWtleWAgfCBDcmVhdGUgcHJvdmlkZXIgYWNjb3VudCBhbmQgc2VjdXJlbHkgcHJvbXB0IGZvciBpdHMga2V5IHwKfCBBdHRhY2ggYW4gYWNjb3VudCB8IGBhZ2VudHMgYWNjb3VudHMgYXR0YWNoIHdvcmsgY2xhdWRlQDIuMS4yMjVgIHwgQmluZCB0aGUgbmFtZWQgYWNjb3VudCB0byBhbiBleGFjdCBuYXRpdmUgaW5zdGFsbGF0aW9uIHwKfCBBdHRhY2ggdG8gYSBjdXN0b20gaGFybmVzcyB8IGBhZ2VudHMgYWNjb3VudHMgYXR0YWNoIG9wZW5yb3V0ZXItd29yayBkZWVwc2Vla2AgfCBCaW5kIHRoZSBwcm92aWRlciBhY2NvdW50IHRvIHRoZSBuYW1lZCBjdXN0b20gaGFybmVzcyB8CnwgRGV0YWNoIHwgYGFnZW50cyBhY2NvdW50cyBkZXRhY2ggd29yayBjbGF1ZGVAMi4xLjIyNWAgfCBSZW1vdmUgZXhhY3RseSB0aGF0IGJpbmRpbmcgfAp8IEluc3BlY3QgfCBgYWdlbnRzIGFjY291bnRzIHZpZXcgd29ya2AgfCBTaG93IGlkZW50aXR5IG1ldGFkYXRhLCBjcmVkZW50aWFsIGN1c3RvZHksIGJpbmRpbmdzLCBhbmQgYXZhaWxhYmlsaXR5IHwKfCBSZW5hbWUgfCBgYWdlbnRzIGFjY291bnRzIHJlbmFtZSB3b3JrIHJ1c2gtd29ya2AgfCBSZW5hbWUgdGhlIGFjY291bnQgd2hpbGUgcmV0YWluaW5nIGl0cyBzdGFibGUgSUQgYW5kIGJpbmRpbmdzIHwKfCBSZW1vdmUgfCBgYWdlbnRzIGFjY291bnRzIHJlbW92ZSBydXNoLXdvcmtgIHwgUmVmdXNlIHdoaWxlIGJpbmRpbmdzL2RlZmF1bHRzIHN0aWxsIHJlZmVyZW5jZSBpdDsgZXhwbGFpbiBob3cgdG8gZGV0YWNoIHwKfCBDb3B5IHBvcnRhYmxlIGNyZWRlbnRpYWxzIHwgYGFnZW50cyBhY2NvdW50cyBzeW5jIG9wZW5yb3V0ZXItd29yayB6aW9uYCB8IEV4cGxpY2l0bHkgcHJvdmlzaW9uIHRoZSBzYW1lIHN0YWJsZSBwcm92aWRlciBhY2NvdW50IG9uIGFub3RoZXIgZGV2aWNlIHwKCmAtLWZyb21gIGFuZCBgLS10b2AgYXJlIHJlbW92ZWQgZnJvbSB0aGUgcHJvcG9zZWQgQVBJLiBGbGFncyByZW1haW4gZm9yIG9wdGlvbmFsIGF0dHJpYnV0ZXMgYW5kIGJlaGF2aW9yLCBzdWNoIGFzIGAtLXByb3ZpZGVyYCwgYC0tYXV0aGAsIGAtLWpzb25gLCBgLS1mb3JjZWAsIGFuZCBgLS1kZWZhdWx0YC4KCiMjIyBDb21wbGV0ZSBoYXBweSBwYXRocwoKTmF0aXZlIE9BdXRoIGFjY291bnQ6CgpgYGBiYXNoCmFnZW50cyBhY2NvdW50cyBuYW1lIGNsYXVkZUAyLjEuMjIwIHdvcmsKYWdlbnRzIGFjY291bnRzIGF0dGFjaCB3b3JrIGNsYXVkZUAyLjEuMjI1CmFnZW50cyBhY2NvdW50cyB2aWV3IHdvcmsKYWdlbnRzIHJ1biBjbGF1ZGVAMi4xLjIyNQpgYGAKClBvcnRhYmxlIHByb3ZpZGVyIGFjY291bnQ6CgpgYGBiYXNoCmFnZW50cyBhY2NvdW50cyBhZGQgb3BlbnJvdXRlci13b3JrIC0tcHJvdmlkZXIgb3BlbnJvdXRlciAtLWF1dGggYXBpLWtleQphZ2VudHMgYWNjb3VudHMgYXR0YWNoIG9wZW5yb3V0ZXItd29yayBjb2RleEAwLjE0NS4wCmFnZW50cyBhY2NvdW50cyBhdHRhY2ggb3BlbnJvdXRlci13b3JrIGN1cnNvckBsYXRlc3QKYWdlbnRzIGFjY291bnRzIGF0dGFjaCBvcGVucm91dGVyLXdvcmsgZGVlcHNlZWsKYWdlbnRzIGFjY291bnRzIHN5bmMgb3BlbnJvdXRlci13b3JrIHppb24KYGBgCgojIyMgT3V0cHV0IGNvbnRyYWN0CgpgYGB0ZXh0CiQgYWdlbnRzIGFjY291bnRzIHZpZXcgd29yawp3b3JrCiAga2luZCAgICAgICAgbmF0aXZlIGxvZ2luCiAgaWRlbnRpdHkgICAgbXVxc2l0QGdldHJ1c2guYWkKICBwcm92aWRlciAgICBBbnRocm9waWMKICBjdXN0b2R5ICAgICBDbGF1ZGUgQ29kZSAobm90IHN0b3JlZCBieSBhZ2VudHMtY2xpKQogIHNjb3BlICAgICAgIHZlcnNpb24KICBhdmFpbGFibGUgICB5ZXMKICBhdHRhY2hlZCAgICBjbGF1ZGVAMi4xLjIyMCwgY2xhdWRlQDIuMS4yMjUKYGBgCgpgYGB0ZXh0CiQgYWdlbnRzIGFjY291bnRzIHZpZXcgb3BlbnJvdXRlci13b3JrCm9wZW5yb3V0ZXItd29yawogIGtpbmQgICAgICAgIHByb3ZpZGVyIGNyZWRlbnRpYWwKICBwcm92aWRlciAgICBPcGVuUm91dGVyCiAgYXV0aCAgICAgICAgQVBJIGtleQogIGN1c3RvZHkgICAgIGFnZW50cyBzZWNyZXRzIChubyBiaW9tZXRyaWMgQUNMKQogIGF2YWlsYWJsZSAgIHRoaXMgZGV2aWNlLCB6aW9uCiAgYXR0YWNoZWQgICAgY29kZXhAMC4xNDUuMCwgY3Vyc29yQGxhdGVzdCwgZGVlcHNlZWsKYGBgCgpFdmVyeSBodW1hbi1yZWFkYWJsZSBhY2NvdW50IHJvdyB1c2VzIGBuYW1lIMK3IGlkZW50aXR5YCB3aGVuIGJvdGggZXhpc3QuIEV2ZXJ5IGNvbW1hbmQgdGhhdCBlbWl0cyBhY2NvdW50IGRhdGEgc3VwcG9ydHMgYC0tanNvbmAgYW5kIHJldHVybnMgdGhlIHN0YWJsZSBhY2NvdW50IElELCBraW5kLCBkaXNwbGF5IG5hbWUsIGlkZW50aXR5IG1ldGFkYXRhLCBjdXN0b2R5LCBhdmFpbGFiaWxpdHksIGFuZCBiaW5kaW5ncy4KCiMjIFByb3Bvc2VkIENoYW5nZXMKCiMjIyAxLiBPbmUgdHlwZWQgY2F0YWxvZywgdHdvIGNyZWRlbnRpYWwgY3VzdG9keSBtb2RlbHMKCkV4dGVuZCB0aGUgZXhpc3RpbmcgYWNjb3VudCByZWdpc3RyeSByYXRoZXIgdGhhbiBhZGQgYSBzZWNvbmQgc3RvcmU6CgpgYGB0cwp0eXBlIEFjY291bnQgPQogIHwgewogICAgICBpZDogc3RyaW5nOwogICAgICBuYW1lOiBzdHJpbmc7CiAgICAgIGtpbmQ6ICJuYXRpdmUiOwogICAgICBhZ2VudDogQWdlbnRJZDsKICAgICAgaWRlbnRpdHlLZXk6IHN0cmluZzsKICAgICAgaWRlbnRpdHlMYWJlbD86IHN0cmluZzsKICAgICAgYXV0aFNjb3BlOiAidmVyc2lvbiIgfCAiZGV2aWNlIjsKICAgIH0KICB8IHsKICAgICAgaWQ6IHN0cmluZzsKICAgICAgbmFtZTogc3RyaW5nOwogICAgICBraW5kOiAicHJvdmlkZXIiOwogICAgICBwcm92aWRlcjogQWNjb3VudFByb3ZpZGVySWQ7CiAgICAgIGF1dGhUeXBlOiAiYXBpLWtleSIgfCAidG9rZW4iOwogICAgICBidW5kbGU6IHN0cmluZzsKICAgIH07Cgp0eXBlIEFjY291bnRCaW5kaW5nID0gewogIGFjY291bnRJZDogc3RyaW5nOwogIHRhcmdldDogc3RyaW5nOwp9OwpgYGAKCk5hdGl2ZSByZWNvcmRzIGNvbnRhaW4gbm8gT0F1dGggYWNjZXNzIHRva2VuLCByZWZyZXNoIHRva2VuLCBhdXRoIGZpbGUsIG9yIGtleWNoYWluIHJlZmVyZW5jZS4gUHJvdmlkZXIgcmVjb3JkcyBjb250aW51ZSB0byB1c2UgdGhlIGNhbm9uaWNhbCBzZWNyZXRzIGJ1bmRsZSB3aXRoIHN0YWJsZSBVVUlEIGFuZCBgcG9saWN5OiBuZXZlcmAuCgojIyMgMi4gT25lIHRhcmdldCBwYXJzZXIgYW5kIHJlc29sdmVyCgpQYXJzZSB0aGUgc2Vjb25kIHBvc2l0aW9uYWwgYXJndW1lbnQgaW50byBlaXRoZXIgYW4gZXhhY3QgbmF0aXZlIGluc3RhbGxhdGlvbiAoYGNsYXVkZUAyLjEuMjI1YCwgYGNvZGV4QDAuMTQ1LjBgLCBgY3Vyc29yQGxhdGVzdGApIG9yIGEgY3VzdG9tIGhhcm5lc3MgKGBkZWVwc2Vla2ApLiBSZXNvbHZlIGFjY291bnRzIGluIHRoaXMgb3JkZXI6CgoxLiBleHBsaWNpdCBydW4gYWNjb3VudDsKMi4gZXhhY3QgdGFyZ2V0IGJpbmRpbmc7CjMuIGJhcmUtYWdlbnQgZGVmYXVsdDsKNC4gY3VycmVudCBuYXRpdmUgb3IgYmFsYW5jZWQgc2VsZWN0aW9uLgoKVGhlIHNhbWUgcmVzb2x2ZXIgaXMgdXNlZCBieSBkaXJlY3QgcnVucywgcm91dGluZXMsIHRlYW1zLCBsb2NhbCBkaXNwYXRjaCwgYW5kIHJlbW90ZSBmbGVldCBkaXNwYXRjaC4gQ2xvdWQvbGVhc2UgcnVucyBmYWlsIGNsZWFybHkgZm9yIGRldmljZS1sb2NhbCBuYXRpdmUgYWNjb3VudHMuIFRoZXkgZG8gbm90IGV4cG9ydCBuYXRpdmUgT0F1dGggYXV0b21hdGljYWxseS4KCiMjIyAzLiBDYXBhYmlsaXR5IHJlZ2lzdHJ5IGtlZXBzIGhhcm5lc3MgY2xhaW1zIHRydXRoZnVsCgp8IENhcGFiaWxpdHkgfCBIYXJuZXNzZXMgLyBoYW5kbGluZyB8CnwgLS0tIHwgLS0tIHwKfCBWZXJzaW9uLXNjb3BlZCBuYXRpdmUgaWRlbnRpdHkgfCBDbGF1ZGUsIENvZGV4LCBHcm9rOyBNdXNlIHdoZW4gaWRlbnRpdHkgaW5zcGVjdGlvbiBpcyBzdHJvbmcgfAp8IERldmljZS1zY29wZWQgbmF0aXZlIGlkZW50aXR5IHwgQ3Vyc29yIGFmdGVyIGNvcnJlY3RpbmcgZmFsc2UgWERHIGlzb2xhdGlvbjsgQW50aWdyYXZpdHksIEtpbWksIERyb2lkLCBPcGVuQ29kZSB3aGVyZSB0aGVpciBhdXRoIGlzIGRldmljZS1nbG9iYWwgfAp8IFJlcXVpcmVzIGluc3BlY3RvciB3b3JrIGJlZm9yZSBhdHRhY2ggfCBDb3BpbG90IHwKfCBEaXNjb3Zlcnkgb25seSAvIGxlZ2FjeSB8IEdlbWluaSB8CnwgVW5zdXBwb3J0ZWQgdW50aWwgbW9kZWxlZCB8IFBpLCBPcGVuQ2xhdywgQW1wLCBLaXJvLCBHb29zZSwgSGVybWVzLCBXYXJwIHwKfCBQb3J0YWJsZSBwcm92aWRlciBjcmVkZW50aWFsIHwgUmVnaXN0cnktZHJpdmVuIGFkYXB0ZXJzIG9ubHk7IHVuc3VwcG9ydGVkIHByb3ZpZGVyL2hhcm5lc3MgcGFpcnMgZmFpbCBsb3VkIHwKCkZvciBhIG5hdGl2ZSBhY2NvdW50LCBgYXR0YWNoYCB2YWxpZGF0ZXMgdGhhdCB0aGUgdGFyZ2V0IGFscmVhZHkgZXhwb3NlcyB0aGUgc2FtZSBpZGVudGl0eSBmaW5nZXJwcmludC4gSXQgbmV2ZXIgbG9ncyBpbiwgY29waWVzLCBvciByZXdyaXRlcyBPQXV0aCBzdGF0ZS4gQSBkZXZpY2Utc2NvcGVkIGhhcm5lc3MgcmVqZWN0cyBhbiBleGFjdC12ZXJzaW9uIGF0dGFjaG1lbnQgYW5kIGV4cGxhaW5zIHRoYXQgdGhlIGFjY291bnQgYXBwbGllcyB0byB0aGUgZGV2aWNlLgoKIyMjIDQuIExhYmVscyByZW5kZXIgZXZlcnl3aGVyZQoKVXNlIG9uZSBhY2NvdW50IHJlbmRlcmVyIGluIGBhY2NvdW50c2AsIGBhZ2VudHMgdmlld2AsIGBoYXJuZXNzIHZpZXdgLCBydW4gYmFubmVycywgcGlja2Vycywgcm91dGluZXMsIGFuZCBmbGVldCBpbnZlbnRvcnkuIFJlY292ZXIgYXJjaGl2ZWQgZmluZ2VycHJpbnQgbGFiZWxzIHRyYW5zYWN0aW9uYWxseSB3aGVyZSB0aGUgaWRlbnRpdHkgc3RpbGwgbWF0Y2hlcy4gRG8gbm90IGF1dG8tbWVyZ2Ugb3BhcXVlIGlkZW50aXRpZXMuCgojIyMgNS4gRXhwbGljaXQgYW5kIHZlcmlmaWFibGUgcG9ydGFibGUgc3luYwoKYGFjY291bnRzIHN5bmMgPGFjY291bnQ+IDxkZXZpY2U+YCBhcHBsaWVzIG9ubHkgdG8gcHJvdmlkZXIgYWNjb3VudHMuIFRoZSBkZXN0aW5hdGlvbiBpbXBvcnQgaXMgb25lIGF0b21pYyB0cmFuc2FjdGlvbiB3aXRoIHJvbGxiYWNrIGFuZCByZWFkLWJhY2sgdmVyaWZpY2F0aW9uLiBUcmFuc3BvcnQgcmVxdWlyZW1lbnRzOgoKLSBwaW5uZWQgbWFuYWdlZCBTU0ggaG9zdCBrZXk7IHJlamVjdCB1bmtub3duIG9yIGNoYW5nZWQga2V5czsKLSBubyBTU0ggbXVsdGlwbGV4IHJldXNlIGZvciB0aGUgY3JlZGVudGlhbCB0cmFuc2ZlcjsKLSBzZWNyZXQgYnl0ZXMgb25seSBvbiBzdGRpbiwgbmV2ZXIgYXJndiwgZW52aXJvbm1lbnQsIGxvZ3MsIG9yIGNvbmZpZzsKLSBubyBwZXJzaXN0ZW50IHBsYWludGV4dCBvciByZXVzYWJsZSBzZWNyZXQgZmluZ2VycHJpbnQ7Ci0gc2FtZSBuYW1lIHdpdGggYSBkaWZmZXJlbnQgc3RhYmxlIGFjY291bnQgSUQgZmFpbHMgdW5sZXNzIGV4cGxpY2l0bHkgZm9yY2VkOwotIG1hY09TIHVzZXMgYSBzaWxlbnQsIG5vbi1iaW9tZXRyaWMgS2V5Y2hhaW4gaXRlbTsgTGludXggdXNlcyB0aGUgZW5jcnlwdGVkIGZpbGUgYmFja2VuZDsgV2luZG93cyB1c2VzIENyZWRlbnRpYWwgTWFuYWdlci4KClN5bmMgcHJvdmlzaW9ucyB0aGUgc2FtZSBsb2dpY2FsIGFjY291bnQgSUQgb24gYW5vdGhlciBkZXZpY2UuIEF0dGFjaGluZyBvbmUgYWNjb3VudCB0byBzZXZlcmFsIGhhcm5lc3NlcyBkb2VzIG5vdCBjbG9uZSBpdCBpbnRvIHNldmVyYWwgbG9naWNhbCBhY2NvdW50cy4KCiMjIyA2LiBObyBUb3VjaCBJRCBub2lzZSBpbiBub3JtYWwgb3BlcmF0aW9uCgpOb3JtYWwgYGFjY291bnRzYCwgYHZpZXdgLCByb3V0aW5nLCBhdHRhY2htZW50IHZhbGlkYXRpb24sIGFuZCB1c2FnZSBpbnNwZWN0aW9uIHJlYWQgb25seSBuYXRpdmUgbWV0YWRhdGEgb3IgcHJvdmlkZXIgYnVuZGxlIG1ldGFkYXRhLiBUaGV5IG5ldmVyIHJlYWQgbmF0aXZlIE9BdXRoIHNlY3JldHMuIFByb3ZpZGVyIGFjY291bnRzIHVzZSBub24tYmlvbWV0cmljIHNlY3JldCBwb2xpY3ksIHNvIGhlYWRsZXNzIGV4ZWN1dGlvbiBkb2VzIG5vdCB0cmlnZ2VyIFRvdWNoIElELiBBIHNlY3JldCByZWFkIG9jY3VycyBvbmx5IHdoZW4gbGF1bmNoaW5nIGEgaGFybmVzcyB0aGF0IHJlcXVpcmVzIHRoZSBzZWxlY3RlZCBwb3J0YWJsZSBjcmVkZW50aWFsIG9yIGR1cmluZyBleHBsaWNpdCBzeW5jLgoKIyMgUGxhbgoKLSBbIF0gQWRkIG5hdGl2ZSBhY2NvdW50IG1ldGFkYXRhIGFuZCBiaW5kaW5nIHNjaGVtYTsgbWlncmF0ZSBtYXRjaGluZyBhcmNoaXZlZCBsYWJlbHMuCi0gWyBdIFJlcGxhY2UgcmVsYXRpb25zaGlwIGZsYWdzIHdpdGggcG9zaXRpb25hbCBgbmFtZWAsIGBhdHRhY2hgLCBgZGV0YWNoYCwgYHZpZXdgLCBhbmQgYHN5bmNgIGdyYW1tYXJzIHBsdXMgd29ya2Zsb3ctZmlyc3QgaGVscC4KLSBbIF0gQWRkIHRoZSBjYXBhYmlsaXR5IHJlZ2lzdHJ5IGFuZCBpZGVudGl0eSB2YWxpZGF0aW9uIGZvciBldmVyeSBzdXBwb3J0ZWQgbmF0aXZlIGhhcm5lc3MuCi0gWyBdIFJvdXRlIGN1c3RvbSBoYXJuZXNzZXMsIG5hdGl2ZSBpbnN0YWxsYXRpb25zLCBkaXJlY3QgcnVucywgcm91dGluZXMsIHRlYW1zLCBhbmQgU1NIIGRpc3BhdGNoIHRocm91Z2ggb25lIGFjY291bnQgcmVzb2x2ZXIuCi0gWyBdIFJlbmRlciBuYW1lcywgY3VzdG9keSwgYXZhaWxhYmlsaXR5LCBhbmQgYmluZGluZ3MgY29uc2lzdGVudGx5IGluIHRleHQgYW5kIEpTT04uCi0gWyBdIFJlbW92ZSBvcmRpbmFyeSBjbG91ZC9sZWFzZSBuYXRpdmUgT0F1dGggZXhwb3J0IGFuZCBlbmZvcmNlIGRldmljZS1sb2NhbCBlcnJvcnMuCi0gWyBdIEhhcmRlbiBwcm92aWRlciBzeW5jIHdpdGggcGlubmVkIGhvc3RzLCBhdG9taWMgaW1wb3J0LCByb2xsYmFjaywgYW5kIGVxdWFsaXR5IHZlcmlmaWNhdGlvbi4KLSBbIF0gVXBkYXRlIENMSSBkb2NzLCBzcGVjaWZpY2F0aW9ucywgUkVBRE1FLCBDSEFOR0VMT0csIGFuZCBhdWRpdCBjb21wYW5pb24gYC5hZ2VudHMtc3lzdGVtYCBjb25zdW1lcnMuCi0gWyBdIFJ1biBmb2N1c2VkIGFjY291bnQgdGVzdHMsIGZ1bGwgcmVtb3RlIHRlc3RzLCBhbmQgaW5zdGFsbGVkLUNMSSBFMkUgb24gbWFjT1MsIExpbnV4LCBhbmQgV2luZG93cyBjcmVkZW50aWFsIGJhY2tlbmRzLgoKIyMgVmFsaWRhdGlvbgoKfCBTY2VuYXJpbyB8IFJlcXVpcmVkIHJlc3VsdCB8CnwgLS0tIHwgLS0tIHwKfCBOYW1lIENsYXVkZSBsb2dpbiB8IGBhY2NvdW50cyB2aWV3IHdvcmtgIGFuZCBgYWdlbnRzIHZpZXcgY2xhdWRlYCBzaG93IGB3b3JrIMK3IGVtYWlsYCB8CnwgQXR0YWNoIG5hdGl2ZSBhbGlhcyB0byBtYXRjaGluZyBsb2dpbiB8IEJpbmRpbmcgc3VjY2VlZHMgd2l0aG91dCByZWFkaW5nIG9yIGNvcHlpbmcgT0F1dGggc2VjcmV0cyB8CnwgQXR0YWNoIG5hdGl2ZSBhbGlhcyB0byBkaWZmZXJlbnQgaWRlbnRpdHkgfCBOb256ZXJvIGVycm9yIG5hbWVzIGJvdGggaWRlbnRpdGllczsgbm8gc3RhdGUgY2hhbmdlcyB8CnwgQXR0YWNoIHByb3ZpZGVyIHRvIENvZGV4L0N1cnNvci9jdXN0b20gaGFybmVzcyB8IEVhY2ggaW5zdGFsbGVkIHRhcmdldCByZXNvbHZlcyB0aGUgc2FtZSBzdGFibGUgcHJvdmlkZXIgYWNjb3VudCB8CnwgTm9ybWFsIHZpZXcvcm91dGluZyB8IE5vIGJpb21ldHJpYyBwcm9tcHQgYW5kIG5vIG5hdGl2ZSBzZWNyZXQgYWNjZXNzIHwKfCBSZW1vdGUgcnVuIHwgRGVzdGluYXRpb24gcmVzb2x2ZXMgdGhlIGFjY291bnQgbG9jYWxseTsgbm8gaW1wbGljaXQgc2VjcmV0IHRyYW5zZmVyIHwKfCBFeHBsaWNpdCBwcm92aWRlciBzeW5jIHwgQXRvbWljIGRlc3RpbmF0aW9uIGltcG9ydCB2ZXJpZmllcyBhbmQgcmVwb3J0cyBhdmFpbGFiaWxpdHkgb24gYm90aCBkZXZpY2VzIHwKfCBOYXRpdmUgc3luYyBhdHRlbXB0IHwgUmVmdXNlZCB3aXRoIGBuYXRpdmUgbG9naW4gY3JlZGVudGlhbHMgcmVtYWluIG93bmVkIGJ5IDxoYXJuZXNzPmAgfAp8IFVuc3VwcG9ydGVkIGhhcm5lc3MgfCBDbGVhciBub256ZXJvIGNhcGFiaWxpdHkgZXJyb3IsIG5ldmVyIGEgc2lsZW50IG5vLW9wIHwKCmBgYGJhc2gKY2QgYXBwcy9jbGkKLi9zY3JpcHRzL2J1aWxkLnNoIC0tc2tpcC10ZXN0cwpidW4gcnVuIHRlc3Q6cmVtb3RlCmFnZW50cyBhY2NvdW50cyBuYW1lIGNsYXVkZUAyLjEuMjIwIHdvcmsKYWdlbnRzIGFjY291bnRzIGF0dGFjaCB3b3JrIGNsYXVkZUAyLjEuMjI1CmFnZW50cyBhY2NvdW50cyB2aWV3IHdvcmsgLS1qc29uCmFnZW50cyB2aWV3IGNsYXVkZQpgYGAKCiMjIFJpc2tzCgp8IFJpc2sgfCBIYW5kbGluZyB8CnwgLS0tIHwgLS0tIHwKfCBBIGxhYmVsIHBvaW50cyBhdCB0aGUgd3JvbmcgaHVtYW4gaWRlbnRpdHkgfCBCaW5kIGJ5IHN0YWJsZSBmaW5nZXJwcmludDsgbmV2ZXIgZW1haWwgdGV4dCBhbG9uZTsgb3BhcXVlIGlkZW50aXRpZXMgZG8gbm90IGF1dG8tbWVyZ2UgfAp8IEN1cnNvciBpc29sYXRpb24gaXMgb3ZlcnN0YXRlZCB8IE1hcmsgQ3Vyc29yIGRldmljZS1zY29wZWQgdW50aWwgaXRzIHJ1bnRpbWUgYmVoYXZpb3IgaXMgY29ycmVjdGVkIGFuZCB2ZXJpZmllZCB8CnwgUmVtb3ZpbmcgYC0tZnJvbWAgLyBgLS10b2AgYnJlYWtzIHVucmVsZWFzZWQgZXhhbXBsZXMgfCBDaGFuZ2UgY29kZSwgaGVscCwgZG9jcywgYW5kIGNvbXBhbmlvbiBndWlkYW5jZSB0b2dldGhlcjsgZG8gbm90IGFkZCBhIGNvbXBhdGliaWxpdHkgc2hpbSB1bmxlc3MgYSBzaGlwcGVkIHZlcnNpb24gcmVxdWlyZXMgaXQgfAp8IEFjY291bnQgcmVtb3ZhbCBsZWF2ZXMgZGFuZ2xpbmcgY29uc3VtZXJzIHwgUmVmdXNlIHJlbW92YWwgd2hpbGUgYmluZGluZ3MsIGRlZmF1bHRzLCBwcm9maWxlcywgaGFybmVzc2VzLCBvciByb3V0aW5lcyByZWZlcmVuY2UgdGhlIElEIHwKfCBTeW5jIGV4cG9zZXMgYSByZXVzYWJsZSBjcmVkZW50aWFsIHwgRXhwbGljaXQgY29tbWFuZCBvbmx5LCBwaW5uZWQgdHJhbnNwb3J0LCBzdGRpbi1vbmx5IGF0b21pYyBpbXBvcnQsIG5vIG5hdGl2ZSBPQXV0aCBwYXRoIHwKfCBQcm92aWRlciBhZGFwdGVyIGNsYWltcyBleGNlZWQgcmVhbCBzdXBwb3J0IHwgUmVnaXN0cnkgY29tcGxldGVuZXNzIHRlc3RzIHBpbiBldmVyeSBzdXBwb3J0ZWQgcGFpciBhbmQgcmVxdWlyZSBjbGVhciB1bnN1cHBvcnRlZCBlcnJvcnMgfAoKIyMgVHJhY2tpbmcKClRoZSBpbXBsZW1lbnRhdGlvbiBzaG91bGQgdXNlIG9uZSBhY2NvdW50LXVuaWZpY2F0aW9uIHRpY2tldCBhbmQgbGluayB0aGlzIHJlbmRlcmVkIHBsYW4gZnJvbSB0aGF0IHRpY2tldC4gQW55IHByZXJlcXVpc2l0ZSBoYXJuZXNzIGluc3BlY3RvciB3b3JrIHNob3VsZCBiZSBhIGxpbmtlZCBzdWJ0YXNrIGFuZCByZWZlcmVuY2VkIGJhY2sgaGVyZSBiZWZvcmUgaW1wbGVtZW50YXRpb24gYmVnaW5zLgoKIyMgRGVsdGEgU3BlYwoKLSBBY2NvdW50IG5hbWVzIE1VU1QgYmUgdW5pcXVlIGFjcm9zcyBuYXRpdmUgYW5kIHByb3ZpZGVyIGFjY291bnRzIGFuZCBNVVNUIHJlc29sdmUgdGhyb3VnaCBzdGFibGUgSURzLgotIGBhY2NvdW50cyBuYW1lIDxzb3VyY2U+IDxuYW1lPmAgTVVTVCBjcmVhdGUgb25seSBuYXRpdmUgbWV0YWRhdGEgYW5kIE1VU1QgTk9UIHJlYWQgb3Igc3RvcmUgbmF0aXZlIE9BdXRoIGNyZWRlbnRpYWxzLgotIGBhY2NvdW50cyBhdHRhY2ggPGFjY291bnQ+IDx0YXJnZXQ+YCBNVVNUIHVzZSBwb3NpdGlvbmFsIGFyZ3VtZW50cyBhbmQgTVVTVCB2YWxpZGF0ZSBjb21wYXRpYmlsaXR5IGJlZm9yZSBjaGFuZ2luZyBiaW5kaW5ncy4KLSBBIG5hdGl2ZSBhdHRhY2htZW50IE1VU1QgcmVmZXJlbmNlIGEgaGFybmVzcy1vd25lZCBsb2dpbiBhbHJlYWR5IHByZXNlbnQgYXQgdGhlIHRhcmdldCBzY29wZTsgaXQgTVVTVCBOT1QgbWlncmF0ZSBjcmVkZW50aWFscy4KLSBBIHByb3ZpZGVyIGF0dGFjaG1lbnQgTUFZIGJpbmQgb25lIHBvcnRhYmxlIGFjY291bnQgdG8gbXVsdGlwbGUgY29tcGF0aWJsZSBuYXRpdmUgaW5zdGFsbGF0aW9ucyBhbmQgY3VzdG9tIGhhcm5lc3Nlcy4KLSBOb3JtYWwgaW5zcGVjdGlvbiwgcm91dGluZywgYW5kIHN0YXR1cyBjb21tYW5kcyBNVVNUIE5PVCB0cmlnZ2VyIGJpb21ldHJpYyBwcm9tcHRzLgotIFBvcnRhYmxlIGNyZWRlbnRpYWwgc3luYyBNVVNUIGJlIGV4cGxpY2l0LCBkZXN0aW5hdGlvbi1hdXRoZW50aWNhdGVkLCBhdG9taWMsIHJvbGxiYWNrLXNhZmUsIGFuZCB2ZXJpZmlhYmxlIHdpdGhvdXQgcGVyc2lzdGluZyBwbGFpbnRleHQuCi0gUmVtb3RlIGV4ZWN1dGlvbiBNVVNUIHJlc29sdmUgdGhlIGFjY291bnQgb24gdGhlIGRlc3RpbmF0aW9uLiBJdCBNVVNUIE5PVCB0cmFuc2ZlciBjcmVkZW50aWFscyBpbXBsaWNpdGx5LgotIFRleHQgYW5kIEpTT04gYWNjb3VudCByZW5kZXJlcnMgTVVTVCBleHBvc2UgdGhlIHNhbWUgYWNjb3VudCBpZGVudGl0eSwgY3VzdG9keSwgYXZhaWxhYmlsaXR5LCBhbmQgYmluZGluZyBmYWN0cy4KLSBVbnN1cHBvcnRlZCBoYXJuZXNzIG9yIHByb3ZpZGVyIGNvbWJpbmF0aW9ucyBNVVNUIGZhaWwgbm9uemVybyB3aXRoIHRoZSBtaXNzaW5nIGNhcGFiaWxpdHkgbmFtZWQuCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

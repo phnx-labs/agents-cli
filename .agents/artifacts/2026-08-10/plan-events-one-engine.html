@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>One event engine — events is truth; audit and logs are aliases</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:5px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-awaiting-go">awaiting-go</span></div>
+<h1>One event engine — events is truth; audit and logs are aliases</h1>
+<p class="summary">Collapse agents events, agents logs, and agents audit onto a single EventRecord store and a single read/write engine. audit and logs become thin wrappers with fixed filters. Sessions-style --include/--exclude filters the one stream. Bare events stays full; teach --exclude commands for noise.
+</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Decision: one source of truth, one engine<span class="meta-sep" aria-hidden="true">·</span>Decision: audit and logs are aliases only — no separate implementations<span class="meta-sep" aria-hidden="true">·</span>Decision: bare events stays full stream; teach --exclude commands<span class="meta-sep" aria-hidden="true">·</span>Today: logs audit already calls runEventsCommand; audit list is a separate store<span class="meta-sep" aria-hidden="true">·</span>Today: agent.run.end already exists as EventType; hash-chain audit is a parallel product</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">events/logs/audit consolidation</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Grok</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">989a55d9</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a href="#intent"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Intent</a><a href="#current-vs-proposed-what-you-type"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Current vs proposed (what you type)</a><a href="#architecture-before-after"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Architecture: before → after</a><a href="#purpose"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#public-interface"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Public interface</a><a href="#run-dispatch-rows-absorb-audit-list"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Run-dispatch rows (absorb audit list)</a><a href="#proposed-changes"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#implementation-plan"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Implementation plan</a><a href="#key-files"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Key files</a><a href="#validation"><span class="toc-index">11&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">12&nbsp;&middot;&nbsp;</span>Risks</a><a href="#plan-checklist"><span class="toc-index">13&nbsp;&middot;&nbsp;</span>Plan checklist</a></nav><article class="artifact-body"><h1>One event engine: <code>events</code> is truth; <code>audit</code> and <code>logs</code> are aliases</h1>
+<h2 id="focus-for-review">Focus for review</h2>
+<ol>
+<li><strong>Single store + single engine</strong> — ops, activity, and former run-dispatch audit rows all become <code>EventRecord</code>s through one <code>emit</code> / <code>query</code> / <code>readUnifiedEvents</code> path.</li>
+<li><strong><code>audit</code> and <code>logs</code> are wrappers only</strong> — fixed flag presets over <code>agents events</code>, zero independent logic.</li>
+<li><strong>Hash chain</strong> — fold onto run events in the same engine (<code>events verify</code>) <strong>or</strong> drop verify as a product. No second file under <code>.history/audit/</code>.</li>
+<li><strong><code>logs [id]</code> content path</strong> — transcripts/host stdout leave this product; they stay on <code>sessions</code> / <code>hosts logs</code>.</li>
+<li><strong>Default noise</strong> — bare <code>events</code> stays full; <code>--exclude commands</code> is the taught path.</li>
+</ol>
+<h2 id="intent">Intent</h2>
+<p>You looked at <code>agents audit list</code> and <code>agents events</code> and saw three similar commands with three implementations. Your direction:</p>
+<ul>
+<li>One source of truth for logs, events, and audit.</li>
+<li>One engine for read and write.</li>
+<li><code>audit</code> is a bare-bones alias/wrapper over <code>events</code>.</li>
+<li>Same for <code>logs</code>.</li>
+<li>Track broadly by default; filter with sessions-style <code>--include</code> / <code>--exclude</code>.</li>
+</ul>
+<p>This plan follows that. Earlier drafts that kept three stores are rejected.</p>
+<h2 id="current-vs-proposed-what-you-type">Current vs proposed (what you type)</h2>
+<section class="artifact-grid artifact-grid-2">
+<article class="artifact-panel">
+<figcaption><strong>Current:</strong> three nouns, two stores, wall of command noise, wrong verb fails.</figcaption>
+
+```text
+$ agents events
+2026-08-10 … command.end  sessions
+2026-08-10 … command.end  sessions
+… (×40) …
+
+$ agents audit list
+3055  2026-08-08 … plan fail exit=1  /
+
+$ agents logs audit
+# ops-only events — same reader as events --audit
+# but lives under a different parent command
+
+$ agents events list
+error: too many arguments for 'events'
+```
+</article>
+
+<article class="artifact-panel">
+<figcaption><strong>Proposed:</strong> one engine; three nouns are the same command with defaults; filters kill noise.</figcaption>
+
+```text
+$ agents events --exclude commands --limit 5
+2026-08-10 … secrets.get   bundle=share
+2026-08-10 … pr.opened     https://github.com/…
+
+$ agents audit
+# ≡ agents events --include runs
+3055  2026-08-08 … agent.run.end  plan fail exit=1
+
+$ agents logs
+# ≡ agents events
+
+$ agents events stats
+$ agents events rotate --days 7
+$ agents sessions a1b2c3d4   # transcript content (not events)
+```
+</article>
+</section><h2 id="architecture-before-after">Architecture: before → after</h2>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg class="artifact-diagram" viewBox="0 0 1080 420" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title id="ev-title">Before three stores; after one EventRecord engine</title>
+  <desc id="ev-desc">Left side shows three write paths and three CLIs. Right side shows one emit/query engine with events primary and audit/logs as aliases.</desc>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#a3e635"></path></marker>
+  </defs>
+
+  <text x="40" y="32" fill="#f87171" font-family="Inter,system-ui" font-size="14" font-weight="700">BEFORE — three products</text>
+
+  <rect x="30" y="52" width="200" height="70" rx="10" fill="#111827" stroke="#f87171" stroke-width="2"></rect>
+  <text x="48" y="82" fill="#f8fafc" font-family="JetBrains Mono,monospace" font-size="13">events/*.jsonl</text>
+  <text x="48" y="104" fill="#94a3b8" font-family="Inter,system-ui" font-size="11">ops emit()</text>
+
+  <rect x="30" y="138" width="200" height="70" rx="10" fill="#111827" stroke="#f87171" stroke-width="2"></rect>
+  <text x="48" y="168" fill="#f8fafc" font-family="JetBrains Mono,monospace" font-size="13">activity/*.jsonl</text>
+  <text x="48" y="190" fill="#94a3b8" font-family="Inter,system-ui" font-size="11">milestones</text>
+
+  <rect x="30" y="224" width="200" height="70" rx="10" fill="#111827" stroke="#f87171" stroke-width="2"></rect>
+  <text x="48" y="254" fill="#f8fafc" font-family="JetBrains Mono,monospace" font-size="13">audit/log.jsonl</text>
+  <text x="48" y="276" fill="#94a3b8" font-family="Inter,system-ui" font-size="11">hash chain (separate)</text>
+
+  <path d="M230 87H300" stroke="#64748b" stroke-width="2" fill="none" marker-end="url(#arr)"></path>
+  <path d="M230 173H300" stroke="#64748b" stroke-width="2" fill="none" marker-end="url(#arr)"></path>
+  <path d="M230 259H300" stroke="#64748b" stroke-width="2" fill="none" marker-end="url(#arr)"></path>
+
+  <rect x="300" y="52" width="170" height="50" rx="8" fill="#1e293b" stroke="#475569"></rect>
+  <text x="318" y="82" fill="#e2e8f0" font-family="JetBrains Mono,monospace" font-size="12">agents events</text>
+  <rect x="300" y="148" width="170" height="50" rx="8" fill="#1e293b" stroke="#475569"></rect>
+  <text x="318" y="178" fill="#e2e8f0" font-family="JetBrains Mono,monospace" font-size="12">agents logs …</text>
+  <rect x="300" y="244" width="170" height="50" rx="8" fill="#1e293b" stroke="#475569"></rect>
+  <text x="318" y="274" fill="#e2e8f0" font-family="JetBrains Mono,monospace" font-size="12">agents audit</text>
+
+  <text x="30" y="340" fill="#94a3b8" font-family="Inter,system-ui" font-size="12">logs audit already aliases events — the outlier is audit/log.jsonl + logs[id] content</text>
+  <text x="30" y="362" fill="#94a3b8" font-family="Inter,system-ui" font-size="12">Transcripts stay on sessions / hosts logs (not this product)</text>
+
+  <text x="560" y="32" fill="#a3e635" font-family="Inter,system-ui" font-size="14" font-weight="700">AFTER — one engine</text>
+
+  <rect x="560" y="52" width="240" height="200" rx="12" fill="#111827" stroke="#a3e635" stroke-width="2"></rect>
+  <text x="580" y="88" fill="#a3e635" font-family="Inter,system-ui" font-size="13" font-weight="700">EventRecord engine</text>
+  <text x="580" y="118" fill="#f8fafc" font-family="JetBrains Mono,monospace" font-size="12">emit() / query()</text>
+  <text x="580" y="142" fill="#f8fafc" font-family="JetBrains Mono,monospace" font-size="12">readUnifiedEvents()</text>
+  <text x="580" y="174" fill="#cbd5e1" font-family="Inter,system-ui" font-size="12">ops + activity + run rows</text>
+  <text x="580" y="198" fill="#cbd5e1" font-family="Inter,system-ui" font-size="12">same schema, one filter layer</text>
+  <text x="580" y="222" fill="#cbd5e1" font-family="Inter,system-ui" font-size="12">stats · rotate · follow · verify?</text>
+
+  <path d="M800 152H860" stroke="#a3e635" stroke-width="3" fill="none" marker-end="url(#arr)"></path>
+
+  <rect x="860" y="60" width="190" height="48" rx="8" fill="#14532d" stroke="#a3e635" stroke-width="2"></rect>
+  <text x="878" y="90" fill="#ecfccb" font-family="JetBrains Mono,monospace" font-size="12">events (primary)</text>
+
+  <rect x="860" y="128" width="190" height="48" rx="8" fill="#1e293b" stroke="#64748b"></rect>
+  <text x="878" y="150" fill="#e2e8f0" font-family="JetBrains Mono,monospace" font-size="12">audit</text>
+  <text x="878" y="168" fill="#94a3b8" font-family="Inter,system-ui" font-size="11">≡ --include runs</text>
+
+  <rect x="860" y="196" width="190" height="48" rx="8" fill="#1e293b" stroke="#64748b"></rect>
+  <text x="878" y="218" fill="#e2e8f0" font-family="JetBrains Mono,monospace" font-size="12">logs</text>
+  <text x="878" y="236" fill="#94a3b8" font-family="Inter,system-ui" font-size="11">≡ events (passthrough)</text>
+
+  <text x="560" y="300" fill="#a3e635" font-family="Inter,system-ui" font-size="13" font-weight="700">Families</text>
+  <text x="560" y="328" fill="#cbd5e1" font-family="JetBrains Mono,monospace" font-size="12">ops · activity · commands · runs · security</text>
+  <text x="560" y="354" fill="#94a3b8" font-family="Inter,system-ui" font-size="12">--include / --exclude (mutex, like sessions roles)</text>
+  <text x="560" y="380" fill="#94a3b8" font-family="Inter,system-ui" font-size="12">run.dispatched / agent.run.end absorb old audit list rows</text>
+</svg>
+<figcaption>One write/read engine. CLI nouns are entry points, not products. Content viewing stays on sessions/hosts.</figcaption>
+</figure><div class="artifact-callout"><strong>Core rule:</strong> if it is a timestamped fleet fact, it is an <code>EventRecord</code> and goes through the events engine. If it is a session transcript or host task stdout, it is not this product — use <code>sessions</code> / <code>hosts logs</code>.</div><h2 id="purpose">Purpose</h2>
+<p>Three top-level commands print similar rows from different writers. Operators and agents guess wrong (<code>events list</code> fails; <code>logs audit</code> vs <code>audit list</code> are different products that share a name). Half the surface already shares an engine (<code>logs audit</code> → <code>runEventsCommand</code>). The outliers are the hash-chain file and the misnamed content viewer under <code>logs [id]</code>.</p>
+<p>The fix is one pipeline — not better help text.</p>
+<h2 id="public-interface">Public interface</h2>
+<h3>Primary: <code>agents events</code></h3>
+<pre><code># Full stream (default)
+agents events
+agents events --limit 0 --json
+
+# Sessions-style families
+agents events --exclude commands              # drop command.start/end noise
+agents events --include activity              # milestones only
+agents events --include ops                   # operational only
+agents events --include runs                  # what audit list used to show
+agents events --include security              # level=audit / secrets sugar
+
+# Existing field filters (keep)
+agents events --module secrets --bundle share
+agents events --event pr.opened --since 7d
+agents events --session &lt;id&gt;
+agents events -f
+
+# Housekeeping (moved off logs)
+agents events stats [--since 7d] [--json]
+agents events rotate [--days 7] [--max-mb 50]
+agents events emit --source factory &lt; batch.jsonl
+# optional if chain retained:
+agents events verify [--json]
+</code></pre>
+<h3>Families</h3>
+<table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Definition</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>ops</code></td>
+<td>Operational log rows (module ≠ activity)</td>
+</tr>
+<tr>
+<td><code>activity</code></td>
+<td>Agent milestones (module = activity)</td>
+</tr>
+<tr>
+<td><code>commands</code></td>
+<td><code>command.start</code> + <code>command.end</code> only</td>
+</tr>
+<tr>
+<td><code>runs</code></td>
+<td>Run-dispatch outcomes (<code>agent.run.end</code> / <code>run.dispatched</code>)</td>
+</tr>
+<tr>
+<td><code>security</code></td>
+<td>level <code>audit</code> and/or secrets.* (sugar)</td>
+</tr>
+</tbody></table>
+<p><code>--include</code> and <code>--exclude</code> are mutually exclusive, same rule as <code>sessions</code>.</p>
+<h3>Aliases (zero independent logic)</h3>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Expands to</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>agents audit</code></td>
+<td><code>agents events --include runs</code></td>
+</tr>
+<tr>
+<td><code>agents audit list</code></td>
+<td>same</td>
+</tr>
+<tr>
+<td><code>agents audit verify</code></td>
+<td><code>agents events verify</code> (if H1) or removed (if H2)</td>
+</tr>
+<tr>
+<td><code>agents logs</code></td>
+<td><code>agents events</code></td>
+</tr>
+<tr>
+<td><code>agents logs audit</code></td>
+<td><code>agents events --include ops</code></td>
+</tr>
+<tr>
+<td><code>agents logs stats</code></td>
+<td><code>agents events stats</code></td>
+</tr>
+<tr>
+<td><code>agents logs rotate</code></td>
+<td><code>agents events rotate</code></td>
+</tr>
+</tbody></table>
+<p>Implementation pattern: one <code>runEventsCommand</code>; aliases only set default opts.</p>
+<h3>Leaves this surface</h3>
+<table>
+<thead>
+<tr>
+<th>Old</th>
+<th>New home</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>agents logs &lt;session-id&gt;</code> transcript</td>
+<td><code>agents sessions &lt;id&gt;</code> / <code>sessions tail</code></td>
+</tr>
+<tr>
+<td><code>agents logs &lt;task-id&gt;</code> host stdout</td>
+<td><code>agents hosts logs &lt;id&gt;</code></td>
+</tr>
+</tbody></table>
+<p>If <code>agents logs &lt;id&gt;</code> is kept for muscle memory, it <strong>redirects</strong> with a clear message — it does not reimplement content viewing.</p>
+<h2 id="run-dispatch-rows-absorb-audit-list">Run-dispatch rows (absorb <code>audit list</code>)</h2>
+<p>Today <code>audit list</code> shows: index, ts, agent@version, mode, ok/fail, exit, repo.</p>
+<p>At the exec chokepoint that currently calls <code>recordDispatchedRun</code>:</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code"> appendAuditRecord({ ts, agent, version, repo, mode, outcome, exit })</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> emit('agent.run.end', { agent, version, repo, mode, outcome, exit })</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code"> // or 'run.dispatched' if end is too overloaded</span></span></pre></div><p><code>--include runs</code> (and thus <code>agents audit</code>) can use a <strong>row format</strong> tuned like the old audit table. Presentation is not a second engine.</p>
+<h3>Hash chain (pick at implement start)</h3>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>H1</strong></td>
+<td><code>prevHash</code>/<code>hash</code> on run rows only; <code>events verify</code> walks them in the same stream</td>
+</tr>
+<tr>
+<td><strong>H2</strong></td>
+<td>Drop chain product; just emit outcomes; delete verify</td>
+</tr>
+</tbody></table>
+<p>Recommendation: H1 only if something still gates on <code>audit verify</code> in CI; else H2. Either way <strong>no separate <code>audit/log.jsonl</code> product.</strong></p>
+<h2 id="proposed-changes">Proposed Changes</h2>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>One EventRecord engine</td>
+<td>All timeline writes go through <code>emit()</code>; all reads through <code>query</code> / <code>readUnifiedEvents</code> + family filters</td>
+</tr>
+<tr>
+<td><code>--include</code> / <code>--exclude</code></td>
+<td>Sessions-style family filters: ops, activity, commands, runs, security</td>
+</tr>
+<tr>
+<td><code>agents audit</code></td>
+<td>Thin alias of <code>agents events --include runs</code> — no second store</td>
+</tr>
+<tr>
+<td><code>agents logs</code></td>
+<td>Thin alias of <code>agents events</code>; stats/rotate re-dispatch; <code>logs [id]</code> redirects to sessions/hosts</td>
+</tr>
+<tr>
+<td>Run-dispatch rows</td>
+<td><code>recordDispatchedRun</code> becomes <code>emit('agent.run.end'…)</code> (or <code>run.dispatched</code>)</td>
+</tr>
+<tr>
+<td>Retire <code>audit/log.jsonl</code></td>
+<td>Stop writing the hash-chain file for new runs; optional H1 verify on run rows or H2 drop</td>
+</tr>
+</tbody></table>
+<h3>Diff sketch — alias not peer product</h3>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">// commands/audit.ts</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code"> readAuditLog() + custom renderRow for AuditRecord</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> runEventsCommand({ ...opts, include: 'runs' })</span></span></pre></div><h3>Diff sketch — run end writes events</h3>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">// exec dispatch end</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code"> appendAuditRecord({ ts, agent, version, repo, mode, outcome, exit })</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> emit('agent.run.end', { agent, version, repo, mode, outcome, exit })</span></span></pre></div><h2 id="implementation-plan">Implementation plan</h2>
+<h3>Phase 1 — families on the existing engine</h3>
+<ul>
+<li>Add <code>--include</code> / <code>--exclude</code> family parser in the events option surface (mutex).</li>
+<li>Map families → <code>includeActivity</code> + eventTypes / level inside <code>readUnifiedEvents</code> (no second scan).</li>
+<li>Help leads with <code>--exclude commands</code>.</li>
+<li>Tests: family filters, mutex, interaction with <code>--module</code> / <code>--event</code>.</li>
+</ul>
+<h3>Phase 2 — collapse CLIs onto one handler</h3>
+<ul>
+<li><code>registerAuditCommands</code> → thin alias (default <code>--include runs</code>).</li>
+<li><code>registerLogsCommand</code> → thin alias of events; stats/rotate re-dispatch.</li>
+<li>Remove independent <code>readAuditLog</code> list renderer from the audit command tree.</li>
+<li><code>logs [id]</code> → redirect to sessions/hosts.</li>
+<li>Deprecation one-liners for one train if needed.</li>
+</ul>
+<h3>Phase 3 — absorb run-dispatch into emit</h3>
+<ul>
+<li>At run end: <code>emit(...)</code> with fields audit list needed.</li>
+<li>Stop appending to <code>audit/log.jsonl</code> for new runs.</li>
+<li>Optional migration of historical chain rows into events JSONL.</li>
+<li>Gut or delete <code>lib/audit/log.ts</code> once no writers remain.</li>
+<li>H1 or H2 for verify.</li>
+</ul>
+<h3>Phase 4 — docs + fleet guidance</h3>
+<ul>
+<li>Rewrite <code>apps/cli/docs/observability.md</code> table.</li>
+<li>CHANGELOG under next version.</li>
+<li>Companion <code>.agents-system</code> skills/rules that teach old names — linked PR if consumers exist.</li>
+</ul>
+<h2 id="key-files">Key files</h2>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Path</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Types + emit + query + stats + rotate</td>
+<td><code>apps/cli/src/lib/events.ts</code></td>
+</tr>
+<tr>
+<td>Unified reader</td>
+<td><code>apps/cli/src/lib/event-stream.ts</code></td>
+</tr>
+<tr>
+<td>Events CLI + shared handler</td>
+<td><code>apps/cli/src/commands/events.ts</code></td>
+</tr>
+<tr>
+<td>Audit CLI → alias</td>
+<td><code>apps/cli/src/commands/audit.ts</code></td>
+</tr>
+<tr>
+<td>Logs CLI → alias</td>
+<td><code>apps/cli/src/commands/logs.ts</code></td>
+</tr>
+<tr>
+<td>Hash chain (retire)</td>
+<td><code>apps/cli/src/lib/audit/log.ts</code></td>
+</tr>
+<tr>
+<td>Run end write site</td>
+<td>exec dispatch / <code>recordDispatchedRun</code> call sites</td>
+</tr>
+<tr>
+<td>Docs</td>
+<td><code>apps/cli/docs/observability.md</code></td>
+</tr>
+</tbody></table>
+<h2 id="validation">Validation</h2>
+<pre><code># same engine answers all three nouns
+agents events --include runs --limit 5 --json
+agents audit --limit 5 --json          # identical records
+agents logs --include runs --limit 5 --json
+
+agents events --exclude commands --limit 10
+agents events stats --json
+agents events rotate --days 7 --max-mb 50
+
+# content is not events
+agents sessions &lt;id&gt; --markdown
+agents hosts logs &lt;task-id&gt;
+</code></pre>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Scripts call <code>audit list</code> / <code>logs audit</code></td>
+<td>Wrappers keep flags/JSON working</td>
+</tr>
+<tr>
+<td>Hash-chain consumers</td>
+<td>H1 keeps verify on same stream; or document drop</td>
+</tr>
+<tr>
+<td><code>logs &lt;id&gt;</code> muscle memory</td>
+<td>Explicit redirect to sessions/hosts</td>
+</tr>
+<tr>
+<td>Activity still sharded on disk</td>
+<td>Same schema + one reader; write split is internal</td>
+</tr>
+<tr>
+<td>Bare events still noisy</td>
+<td>Teach <code>--exclude commands</code> (locked decision)</td>
+</tr>
+</tbody></table>
+<h2 id="plan-checklist">Plan checklist</h2>
+<div class="checklist"><div class="checklist-head">0 / 6 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Confirm H1 vs H2 for hash chain at implement start</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Phase 1: <code>--include</code> / <code>--exclude</code> on events engine</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Phase 2: audit + logs as aliases; move stats/rotate; redirect logs [id]</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Phase 3: emit run outcomes into events; retire <code>audit/log.jsonl</code> writer</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Phase 4: docs, CHANGELOG, companion guidance</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Prove: three CLI nouns → one query path; new runs never open the old audit file</span></li></ul></div>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGVtcGxhdGU6IHBsYW4udjEKc3VyZmFjZTogY2xpCnRpdGxlOiBPbmUgZXZlbnQgZW5naW5lIOKAlCBldmVudHMgaXMgdHJ1dGg7IGF1ZGl0IGFuZCBsb2dzIGFyZSBhbGlhc2VzCnN1bW1hcnk6ID4KICBDb2xsYXBzZSBhZ2VudHMgZXZlbnRzLCBhZ2VudHMgbG9ncywgYW5kIGFnZW50cyBhdWRpdCBvbnRvIGEgc2luZ2xlIEV2ZW50UmVjb3JkCiAgc3RvcmUgYW5kIGEgc2luZ2xlIHJlYWQvd3JpdGUgZW5naW5lLiBhdWRpdCBhbmQgbG9ncyBiZWNvbWUgdGhpbiB3cmFwcGVycyB3aXRoCiAgZml4ZWQgZmlsdGVycy4gU2Vzc2lvbnMtc3R5bGUgLS1pbmNsdWRlLy0tZXhjbHVkZSBmaWx0ZXJzIHRoZSBvbmUgc3RyZWFtLgogIEJhcmUgZXZlbnRzIHN0YXlzIGZ1bGw7IHRlYWNoIC0tZXhjbHVkZSBjb21tYW5kcyBmb3Igbm9pc2UuCnN0YXR1czogYXdhaXRpbmctZ28KdHJhY2tpbmc6ICJldmVudHMvbG9ncy9hdWRpdCBjb25zb2xpZGF0aW9uIgpwcm9qZWN0OiBhZ2VudHMtY2xpCnJlcG9zaXRvcnk6IHBobngtbGFicy9hZ2VudHMtY2xpCmJyYW5jaDogbWFpbgpob3N0OiB5b3NlbWl0ZS1zMApkYXRlOiAnMjAyNi0wOC0xMCcKZmFjdHM6CiAgLSAiRGVjaXNpb246IG9uZSBzb3VyY2Ugb2YgdHJ1dGgsIG9uZSBlbmdpbmUiCiAgLSAiRGVjaXNpb246IGF1ZGl0IGFuZCBsb2dzIGFyZSBhbGlhc2VzIG9ubHkg4oCUIG5vIHNlcGFyYXRlIGltcGxlbWVudGF0aW9ucyIKICAtICJEZWNpc2lvbjogYmFyZSBldmVudHMgc3RheXMgZnVsbCBzdHJlYW07IHRlYWNoIC0tZXhjbHVkZSBjb21tYW5kcyIKICAtICJUb2RheTogbG9ncyBhdWRpdCBhbHJlYWR5IGNhbGxzIHJ1bkV2ZW50c0NvbW1hbmQ7IGF1ZGl0IGxpc3QgaXMgYSBzZXBhcmF0ZSBzdG9yZSIKICAtICJUb2RheTogYWdlbnQucnVuLmVuZCBhbHJlYWR5IGV4aXN0cyBhcyBFdmVudFR5cGU7IGhhc2gtY2hhaW4gYXVkaXQgaXMgYSBwYXJhbGxlbCBwcm9kdWN0IgotLS0KCiMgT25lIGV2ZW50IGVuZ2luZTogYGV2ZW50c2AgaXMgdHJ1dGg7IGBhdWRpdGAgYW5kIGBsb2dzYCBhcmUgYWxpYXNlcwoKIyMgRm9jdXMgZm9yIHJldmlldwoKMS4gKipTaW5nbGUgc3RvcmUgKyBzaW5nbGUgZW5naW5lKiog4oCUIG9wcywgYWN0aXZpdHksIGFuZCBmb3JtZXIgcnVuLWRpc3BhdGNoIGF1ZGl0IHJvd3MgYWxsIGJlY29tZSBgRXZlbnRSZWNvcmRgcyB0aHJvdWdoIG9uZSBgZW1pdGAgLyBgcXVlcnlgIC8gYHJlYWRVbmlmaWVkRXZlbnRzYCBwYXRoLgoyLiAqKmBhdWRpdGAgYW5kIGBsb2dzYCBhcmUgd3JhcHBlcnMgb25seSoqIOKAlCBmaXhlZCBmbGFnIHByZXNldHMgb3ZlciBgYWdlbnRzIGV2ZW50c2AsIHplcm8gaW5kZXBlbmRlbnQgbG9naWMuCjMuICoqSGFzaCBjaGFpbioqIOKAlCBmb2xkIG9udG8gcnVuIGV2ZW50cyBpbiB0aGUgc2FtZSBlbmdpbmUgKGBldmVudHMgdmVyaWZ5YCkgKipvcioqIGRyb3AgdmVyaWZ5IGFzIGEgcHJvZHVjdC4gTm8gc2Vjb25kIGZpbGUgdW5kZXIgYC5oaXN0b3J5L2F1ZGl0L2AuCjQuICoqYGxvZ3MgW2lkXWAgY29udGVudCBwYXRoKiog4oCUIHRyYW5zY3JpcHRzL2hvc3Qgc3Rkb3V0IGxlYXZlIHRoaXMgcHJvZHVjdDsgdGhleSBzdGF5IG9uIGBzZXNzaW9uc2AgLyBgaG9zdHMgbG9nc2AuCjUuICoqRGVmYXVsdCBub2lzZSoqIOKAlCBiYXJlIGBldmVudHNgIHN0YXlzIGZ1bGw7IGAtLWV4Y2x1ZGUgY29tbWFuZHNgIGlzIHRoZSB0YXVnaHQgcGF0aC4KCiMjIEludGVudAoKWW91IGxvb2tlZCBhdCBgYWdlbnRzIGF1ZGl0IGxpc3RgIGFuZCBgYWdlbnRzIGV2ZW50c2AgYW5kIHNhdyB0aHJlZSBzaW1pbGFyIGNvbW1hbmRzIHdpdGggdGhyZWUgaW1wbGVtZW50YXRpb25zLiBZb3VyIGRpcmVjdGlvbjoKCi0gT25lIHNvdXJjZSBvZiB0cnV0aCBmb3IgbG9ncywgZXZlbnRzLCBhbmQgYXVkaXQuCi0gT25lIGVuZ2luZSBmb3IgcmVhZCBhbmQgd3JpdGUuCi0gYGF1ZGl0YCBpcyBhIGJhcmUtYm9uZXMgYWxpYXMvd3JhcHBlciBvdmVyIGBldmVudHNgLgotIFNhbWUgZm9yIGBsb2dzYC4KLSBUcmFjayBicm9hZGx5IGJ5IGRlZmF1bHQ7IGZpbHRlciB3aXRoIHNlc3Npb25zLXN0eWxlIGAtLWluY2x1ZGVgIC8gYC0tZXhjbHVkZWAuCgpUaGlzIHBsYW4gZm9sbG93cyB0aGF0LiBFYXJsaWVyIGRyYWZ0cyB0aGF0IGtlcHQgdGhyZWUgc3RvcmVzIGFyZSByZWplY3RlZC4KCiMjIEN1cnJlbnQgdnMgcHJvcG9zZWQgKHdoYXQgeW91IHR5cGUpCgo8c2VjdGlvbiBjbGFzcz0iYXJ0aWZhY3QtZ3JpZCBhcnRpZmFjdC1ncmlkLTIiPgo8YXJ0aWNsZSBjbGFzcz0iYXJ0aWZhY3QtcGFuZWwiIGRhdGEtc3RhdGU9ImN1cnJlbnQiIGRhdGEtZXZpZGVuY2U9ImNhcHR1cmUiPgo8ZmlnY2FwdGlvbj48c3Ryb25nPkN1cnJlbnQ6PC9zdHJvbmc+IHRocmVlIG5vdW5zLCB0d28gc3RvcmVzLCB3YWxsIG9mIGNvbW1hbmQgbm9pc2UsIHdyb25nIHZlcmIgZmFpbHMuPC9maWdjYXB0aW9uPgoKYGBgdGV4dAokIGFnZW50cyBldmVudHMKMjAyNi0wOC0xMCDigKYgY29tbWFuZC5lbmQgIHNlc3Npb25zCjIwMjYtMDgtMTAg4oCmIGNvbW1hbmQuZW5kICBzZXNzaW9ucwrigKYgKMOXNDApIOKApgoKJCBhZ2VudHMgYXVkaXQgbGlzdAozMDU1ICAyMDI2LTA4LTA4IOKApiBwbGFuIGZhaWwgZXhpdD0xICAvCgokIGFnZW50cyBsb2dzIGF1ZGl0CiMgb3BzLW9ubHkgZXZlbnRzIOKAlCBzYW1lIHJlYWRlciBhcyBldmVudHMgLS1hdWRpdAojIGJ1dCBsaXZlcyB1bmRlciBhIGRpZmZlcmVudCBwYXJlbnQgY29tbWFuZAoKJCBhZ2VudHMgZXZlbnRzIGxpc3QKZXJyb3I6IHRvbyBtYW55IGFyZ3VtZW50cyBmb3IgJ2V2ZW50cycKYGBgCjwvYXJ0aWNsZT4KCjxhcnRpY2xlIGNsYXNzPSJhcnRpZmFjdC1wYW5lbCIgZGF0YS1zdGF0ZT0icHJvcG9zZWQiIGRhdGEtZXZpZGVuY2U9Im1vY2t1cCI+CjxmaWdjYXB0aW9uPjxzdHJvbmc+UHJvcG9zZWQ6PC9zdHJvbmc+IG9uZSBlbmdpbmU7IHRocmVlIG5vdW5zIGFyZSB0aGUgc2FtZSBjb21tYW5kIHdpdGggZGVmYXVsdHM7IGZpbHRlcnMga2lsbCBub2lzZS48L2ZpZ2NhcHRpb24+CgpgYGB0ZXh0CiQgYWdlbnRzIGV2ZW50cyAtLWV4Y2x1ZGUgY29tbWFuZHMgLS1saW1pdCA1CjIwMjYtMDgtMTAg4oCmIHNlY3JldHMuZ2V0ICAgYnVuZGxlPXNoYXJlCjIwMjYtMDgtMTAg4oCmIHByLm9wZW5lZCAgICAgaHR0cHM6Ly9naXRodWIuY29tL+KApgoKJCBhZ2VudHMgYXVkaXQKIyDiiaEgYWdlbnRzIGV2ZW50cyAtLWluY2x1ZGUgcnVucwozMDU1ICAyMDI2LTA4LTA4IOKApiBhZ2VudC5ydW4uZW5kICBwbGFuIGZhaWwgZXhpdD0xCgokIGFnZW50cyBsb2dzCiMg4omhIGFnZW50cyBldmVudHMKCiQgYWdlbnRzIGV2ZW50cyBzdGF0cwokIGFnZW50cyBldmVudHMgcm90YXRlIC0tZGF5cyA3CiQgYWdlbnRzIHNlc3Npb25zIGExYjJjM2Q0ICAgIyB0cmFuc2NyaXB0IGNvbnRlbnQgKG5vdCBldmVudHMpCmBgYAo8L2FydGljbGU+Cjwvc2VjdGlvbj4KCiMjIEFyY2hpdGVjdHVyZTogYmVmb3JlIOKGkiBhZnRlcgoKPGZpZ3VyZSBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlIGFydGlmYWN0LWZpZ3VyZS1kaWFncmFtIGFydGlmYWN0LWZpZ3VyZS13aWRlIj4KPHN2ZyBjbGFzcz0iYXJ0aWZhY3QtZGlhZ3JhbSIgdmlld0JveD0iMCAwIDEwODAgNDIwIiByb2xlPSJpbWciIGFyaWEtbGFiZWxsZWRieT0iZXYtdGl0bGUgZXYtZGVzYyIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8dGl0bGUgaWQ9ImV2LXRpdGxlIj5CZWZvcmUgdGhyZWUgc3RvcmVzOyBhZnRlciBvbmUgRXZlbnRSZWNvcmQgZW5naW5lPC90aXRsZT4KICA8ZGVzYyBpZD0iZXYtZGVzYyI+TGVmdCBzaWRlIHNob3dzIHRocmVlIHdyaXRlIHBhdGhzIGFuZCB0aHJlZSBDTElzLiBSaWdodCBzaWRlIHNob3dzIG9uZSBlbWl0L3F1ZXJ5IGVuZ2luZSB3aXRoIGV2ZW50cyBwcmltYXJ5IGFuZCBhdWRpdC9sb2dzIGFzIGFsaWFzZXMuPC9kZXNjPgogIDxkZWZzPgogICAgPG1hcmtlciBpZD0iYXJyIiB2aWV3Qm94PSIwIDAgMTAgMTAiIHJlZlg9IjkiIHJlZlk9IjUiIG1hcmtlcldpZHRoPSI3IiBtYXJrZXJIZWlnaHQ9IjciIG9yaWVudD0iYXV0by1zdGFydC1yZXZlcnNlIj48cGF0aCBkPSJNMCAwTDEwIDVMMCAxMHoiIGZpbGw9IiNhM2U2MzUiLz48L21hcmtlcj4KICA8L2RlZnM+CgogIDx0ZXh0IHg9IjQwIiB5PSIzMiIgZmlsbD0iI2Y4NzE3MSIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxNCIgZm9udC13ZWlnaHQ9IjcwMCI+QkVGT1JFIOKAlCB0aHJlZSBwcm9kdWN0czwvdGV4dD4KCiAgPHJlY3QgeD0iMzAiIHk9IjUyIiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjcwIiByeD0iMTAiIGZpbGw9IiMxMTE4MjciIHN0cm9rZT0iI2Y4NzE3MSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iNDgiIHk9IjgyIiBmaWxsPSIjZjhmYWZjIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sbW9ub3NwYWNlIiBmb250LXNpemU9IjEzIj5ldmVudHMvKi5qc29ubDwvdGV4dD4KICA8dGV4dCB4PSI0OCIgeT0iMTA0IiBmaWxsPSIjOTRhM2I4IiBmb250LWZhbWlseT0iSW50ZXIsc3lzdGVtLXVpIiBmb250LXNpemU9IjExIj5vcHMgZW1pdCgpPC90ZXh0PgoKICA8cmVjdCB4PSIzMCIgeT0iMTM4IiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjcwIiByeD0iMTAiIGZpbGw9IiMxMTE4MjciIHN0cm9rZT0iI2Y4NzE3MSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iNDgiIHk9IjE2OCIgZmlsbD0iI2Y4ZmFmYyIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyI+YWN0aXZpdHkvKi5qc29ubDwvdGV4dD4KICA8dGV4dCB4PSI0OCIgeT0iMTkwIiBmaWxsPSIjOTRhM2I4IiBmb250LWZhbWlseT0iSW50ZXIsc3lzdGVtLXVpIiBmb250LXNpemU9IjExIj5taWxlc3RvbmVzPC90ZXh0PgoKICA8cmVjdCB4PSIzMCIgeT0iMjI0IiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjcwIiByeD0iMTAiIGZpbGw9IiMxMTE4MjciIHN0cm9rZT0iI2Y4NzE3MSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iNDgiIHk9IjI1NCIgZmlsbD0iI2Y4ZmFmYyIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyI+YXVkaXQvbG9nLmpzb25sPC90ZXh0PgogIDx0ZXh0IHg9IjQ4IiB5PSIyNzYiIGZpbGw9IiM5NGEzYjgiIGZvbnQtZmFtaWx5PSJJbnRlcixzeXN0ZW0tdWkiIGZvbnQtc2l6ZT0iMTEiPmhhc2ggY2hhaW4gKHNlcGFyYXRlKTwvdGV4dD4KCiAgPHBhdGggZD0iTTIzMCA4N0gzMDAiIHN0cm9rZT0iIzY0NzQ4YiIgc3Ryb2tlLXdpZHRoPSIyIiBmaWxsPSJub25lIiBtYXJrZXItZW5kPSJ1cmwoI2FycikiLz4KICA8cGF0aCBkPSJNMjMwIDE3M0gzMDAiIHN0cm9rZT0iIzY0NzQ4YiIgc3Ryb2tlLXdpZHRoPSIyIiBmaWxsPSJub25lIiBtYXJrZXItZW5kPSJ1cmwoI2FycikiLz4KICA8cGF0aCBkPSJNMjMwIDI1OUgzMDAiIHN0cm9rZT0iIzY0NzQ4YiIgc3Ryb2tlLXdpZHRoPSIyIiBmaWxsPSJub25lIiBtYXJrZXItZW5kPSJ1cmwoI2FycikiLz4KCiAgPHJlY3QgeD0iMzAwIiB5PSI1MiIgd2lkdGg9IjE3MCIgaGVpZ2h0PSI1MCIgcng9IjgiIGZpbGw9IiMxZTI5M2IiIHN0cm9rZT0iIzQ3NTU2OSIvPgogIDx0ZXh0IHg9IjMxOCIgeT0iODIiIGZpbGw9IiNlMmU4ZjAiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubyxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPmFnZW50cyBldmVudHM8L3RleHQ+CiAgPHJlY3QgeD0iMzAwIiB5PSIxNDgiIHdpZHRoPSIxNzAiIGhlaWdodD0iNTAiIHJ4PSI4IiBmaWxsPSIjMWUyOTNiIiBzdHJva2U9IiM0NzU1NjkiLz4KICA8dGV4dCB4PSIzMTgiIHk9IjE3OCIgZmlsbD0iI2UyZThmMCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiI+YWdlbnRzIGxvZ3Mg4oCmPC90ZXh0PgogIDxyZWN0IHg9IjMwMCIgeT0iMjQ0IiB3aWR0aD0iMTcwIiBoZWlnaHQ9IjUwIiByeD0iOCIgZmlsbD0iIzFlMjkzYiIgc3Ryb2tlPSIjNDc1NTY5Ii8+CiAgPHRleHQgeD0iMzE4IiB5PSIyNzQiIGZpbGw9IiNlMmU4ZjAiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubyxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPmFnZW50cyBhdWRpdDwvdGV4dD4KCiAgPHRleHQgeD0iMzAiIHk9IjM0MCIgZmlsbD0iIzk0YTNiOCIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxMiI+bG9ncyBhdWRpdCBhbHJlYWR5IGFsaWFzZXMgZXZlbnRzIOKAlCB0aGUgb3V0bGllciBpcyBhdWRpdC9sb2cuanNvbmwgKyBsb2dzW2lkXSBjb250ZW50PC90ZXh0PgogIDx0ZXh0IHg9IjMwIiB5PSIzNjIiIGZpbGw9IiM5NGEzYjgiIGZvbnQtZmFtaWx5PSJJbnRlcixzeXN0ZW0tdWkiIGZvbnQtc2l6ZT0iMTIiPlRyYW5zY3JpcHRzIHN0YXkgb24gc2Vzc2lvbnMgLyBob3N0cyBsb2dzIChub3QgdGhpcyBwcm9kdWN0KTwvdGV4dD4KCiAgPHRleHQgeD0iNTYwIiB5PSIzMiIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxNCIgZm9udC13ZWlnaHQ9IjcwMCI+QUZURVIg4oCUIG9uZSBlbmdpbmU8L3RleHQ+CgogIDxyZWN0IHg9IjU2MCIgeT0iNTIiIHdpZHRoPSIyNDAiIGhlaWdodD0iMjAwIiByeD0iMTIiIGZpbGw9IiMxMTE4MjciIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iNTgwIiB5PSI4OCIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxMyIgZm9udC13ZWlnaHQ9IjcwMCI+RXZlbnRSZWNvcmQgZW5naW5lPC90ZXh0PgogIDx0ZXh0IHg9IjU4MCIgeT0iMTE4IiBmaWxsPSIjZjhmYWZjIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIj5lbWl0KCkgLyBxdWVyeSgpPC90ZXh0PgogIDx0ZXh0IHg9IjU4MCIgeT0iMTQyIiBmaWxsPSIjZjhmYWZjIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIj5yZWFkVW5pZmllZEV2ZW50cygpPC90ZXh0PgogIDx0ZXh0IHg9IjU4MCIgeT0iMTc0IiBmaWxsPSIjY2JkNWUxIiBmb250LWZhbWlseT0iSW50ZXIsc3lzdGVtLXVpIiBmb250LXNpemU9IjEyIj5vcHMgKyBhY3Rpdml0eSArIHJ1biByb3dzPC90ZXh0PgogIDx0ZXh0IHg9IjU4MCIgeT0iMTk4IiBmaWxsPSIjY2JkNWUxIiBmb250LWZhbWlseT0iSW50ZXIsc3lzdGVtLXVpIiBmb250LXNpemU9IjEyIj5zYW1lIHNjaGVtYSwgb25lIGZpbHRlciBsYXllcjwvdGV4dD4KICA8dGV4dCB4PSI1ODAiIHk9IjIyMiIgZmlsbD0iI2NiZDVlMSIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxMiI+c3RhdHMgwrcgcm90YXRlIMK3IGZvbGxvdyDCtyB2ZXJpZnk/PC90ZXh0PgoKICA8cGF0aCBkPSJNODAwIDE1Mkg4NjAiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIzIiBmaWxsPSJub25lIiBtYXJrZXItZW5kPSJ1cmwoI2FycikiLz4KCiAgPHJlY3QgeD0iODYwIiB5PSI2MCIgd2lkdGg9IjE5MCIgaGVpZ2h0PSI0OCIgcng9IjgiIGZpbGw9IiMxNDUzMmQiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iODc4IiB5PSI5MCIgZmlsbD0iI2VjZmNjYiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiI+ZXZlbnRzIChwcmltYXJ5KTwvdGV4dD4KCiAgPHJlY3QgeD0iODYwIiB5PSIxMjgiIHdpZHRoPSIxOTAiIGhlaWdodD0iNDgiIHJ4PSI4IiBmaWxsPSIjMWUyOTNiIiBzdHJva2U9IiM2NDc0OGIiLz4KICA8dGV4dCB4PSI4NzgiIHk9IjE1MCIgZmlsbD0iI2UyZThmMCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiI+YXVkaXQ8L3RleHQ+CiAgPHRleHQgeD0iODc4IiB5PSIxNjgiIGZpbGw9IiM5NGEzYjgiIGZvbnQtZmFtaWx5PSJJbnRlcixzeXN0ZW0tdWkiIGZvbnQtc2l6ZT0iMTEiPuKJoSAtLWluY2x1ZGUgcnVuczwvdGV4dD4KCiAgPHJlY3QgeD0iODYwIiB5PSIxOTYiIHdpZHRoPSIxOTAiIGhlaWdodD0iNDgiIHJ4PSI4IiBmaWxsPSIjMWUyOTNiIiBzdHJva2U9IiM2NDc0OGIiLz4KICA8dGV4dCB4PSI4NzgiIHk9IjIxOCIgZmlsbD0iI2UyZThmMCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiI+bG9nczwvdGV4dD4KICA8dGV4dCB4PSI4NzgiIHk9IjIzNiIgZmlsbD0iIzk0YTNiOCIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxMSI+4omhIGV2ZW50cyAocGFzc3Rocm91Z2gpPC90ZXh0PgoKICA8dGV4dCB4PSI1NjAiIHk9IjMwMCIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxMyIgZm9udC13ZWlnaHQ9IjcwMCI+RmFtaWxpZXM8L3RleHQ+CiAgPHRleHQgeD0iNTYwIiB5PSIzMjgiIGZpbGw9IiNjYmQ1ZTEiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubyxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPm9wcyDCtyBhY3Rpdml0eSDCtyBjb21tYW5kcyDCtyBydW5zIMK3IHNlY3VyaXR5PC90ZXh0PgogIDx0ZXh0IHg9IjU2MCIgeT0iMzU0IiBmaWxsPSIjOTRhM2I4IiBmb250LWZhbWlseT0iSW50ZXIsc3lzdGVtLXVpIiBmb250LXNpemU9IjEyIj4tLWluY2x1ZGUgLyAtLWV4Y2x1ZGUgKG11dGV4LCBsaWtlIHNlc3Npb25zIHJvbGVzKTwvdGV4dD4KICA8dGV4dCB4PSI1NjAiIHk9IjM4MCIgZmlsbD0iIzk0YTNiOCIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSIgZm9udC1zaXplPSIxMiI+cnVuLmRpc3BhdGNoZWQgLyBhZ2VudC5ydW4uZW5kIGFic29yYiBvbGQgYXVkaXQgbGlzdCByb3dzPC90ZXh0Pgo8L3N2Zz4KPGZpZ2NhcHRpb24+T25lIHdyaXRlL3JlYWQgZW5naW5lLiBDTEkgbm91bnMgYXJlIGVudHJ5IHBvaW50cywgbm90IHByb2R1Y3RzLiBDb250ZW50IHZpZXdpbmcgc3RheXMgb24gc2Vzc2lvbnMvaG9zdHMuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQiPjxzdHJvbmc+Q29yZSBydWxlOjwvc3Ryb25nPiBpZiBpdCBpcyBhIHRpbWVzdGFtcGVkIGZsZWV0IGZhY3QsIGl0IGlzIGFuIDxjb2RlPkV2ZW50UmVjb3JkPC9jb2RlPiBhbmQgZ29lcyB0aHJvdWdoIHRoZSBldmVudHMgZW5naW5lLiBJZiBpdCBpcyBhIHNlc3Npb24gdHJhbnNjcmlwdCBvciBob3N0IHRhc2sgc3Rkb3V0LCBpdCBpcyBub3QgdGhpcyBwcm9kdWN0IOKAlCB1c2UgPGNvZGU+c2Vzc2lvbnM8L2NvZGU+IC8gPGNvZGU+aG9zdHMgbG9nczwvY29kZT4uPC9kaXY+CgojIyBQdXJwb3NlCgpUaHJlZSB0b3AtbGV2ZWwgY29tbWFuZHMgcHJpbnQgc2ltaWxhciByb3dzIGZyb20gZGlmZmVyZW50IHdyaXRlcnMuIE9wZXJhdG9ycyBhbmQgYWdlbnRzIGd1ZXNzIHdyb25nIChgZXZlbnRzIGxpc3RgIGZhaWxzOyBgbG9ncyBhdWRpdGAgdnMgYGF1ZGl0IGxpc3RgIGFyZSBkaWZmZXJlbnQgcHJvZHVjdHMgdGhhdCBzaGFyZSBhIG5hbWUpLiBIYWxmIHRoZSBzdXJmYWNlIGFscmVhZHkgc2hhcmVzIGFuIGVuZ2luZSAoYGxvZ3MgYXVkaXRgIOKGkiBgcnVuRXZlbnRzQ29tbWFuZGApLiBUaGUgb3V0bGllcnMgYXJlIHRoZSBoYXNoLWNoYWluIGZpbGUgYW5kIHRoZSBtaXNuYW1lZCBjb250ZW50IHZpZXdlciB1bmRlciBgbG9ncyBbaWRdYC4KClRoZSBmaXggaXMgb25lIHBpcGVsaW5lIOKAlCBub3QgYmV0dGVyIGhlbHAgdGV4dC4KCiMjIFB1YmxpYyBpbnRlcmZhY2UKCiMjIyBQcmltYXJ5OiBgYWdlbnRzIGV2ZW50c2AKCmBgYGJhc2gKIyBGdWxsIHN0cmVhbSAoZGVmYXVsdCkKYWdlbnRzIGV2ZW50cwphZ2VudHMgZXZlbnRzIC0tbGltaXQgMCAtLWpzb24KCiMgU2Vzc2lvbnMtc3R5bGUgZmFtaWxpZXMKYWdlbnRzIGV2ZW50cyAtLWV4Y2x1ZGUgY29tbWFuZHMgICAgICAgICAgICAgICMgZHJvcCBjb21tYW5kLnN0YXJ0L2VuZCBub2lzZQphZ2VudHMgZXZlbnRzIC0taW5jbHVkZSBhY3Rpdml0eSAgICAgICAgICAgICAgIyBtaWxlc3RvbmVzIG9ubHkKYWdlbnRzIGV2ZW50cyAtLWluY2x1ZGUgb3BzICAgICAgICAgICAgICAgICAgICMgb3BlcmF0aW9uYWwgb25seQphZ2VudHMgZXZlbnRzIC0taW5jbHVkZSBydW5zICAgICAgICAgICAgICAgICAgIyB3aGF0IGF1ZGl0IGxpc3QgdXNlZCB0byBzaG93CmFnZW50cyBldmVudHMgLS1pbmNsdWRlIHNlY3VyaXR5ICAgICAgICAgICAgICAjIGxldmVsPWF1ZGl0IC8gc2VjcmV0cyBzdWdhcgoKIyBFeGlzdGluZyBmaWVsZCBmaWx0ZXJzIChrZWVwKQphZ2VudHMgZXZlbnRzIC0tbW9kdWxlIHNlY3JldHMgLS1idW5kbGUgc2hhcmUKYWdlbnRzIGV2ZW50cyAtLWV2ZW50IHByLm9wZW5lZCAtLXNpbmNlIDdkCmFnZW50cyBldmVudHMgLS1zZXNzaW9uIDxpZD4KYWdlbnRzIGV2ZW50cyAtZgoKIyBIb3VzZWtlZXBpbmcgKG1vdmVkIG9mZiBsb2dzKQphZ2VudHMgZXZlbnRzIHN0YXRzIFstLXNpbmNlIDdkXSBbLS1qc29uXQphZ2VudHMgZXZlbnRzIHJvdGF0ZSBbLS1kYXlzIDddIFstLW1heC1tYiA1MF0KYWdlbnRzIGV2ZW50cyBlbWl0IC0tc291cmNlIGZhY3RvcnkgPCBiYXRjaC5qc29ubAojIG9wdGlvbmFsIGlmIGNoYWluIHJldGFpbmVkOgphZ2VudHMgZXZlbnRzIHZlcmlmeSBbLS1qc29uXQpgYGAKCiMjIyBGYW1pbGllcwoKfCBGYW1pbHkgfCBEZWZpbml0aW9uIHwKfCAtLS0gfCAtLS0gfAp8IGBvcHNgIHwgT3BlcmF0aW9uYWwgbG9nIHJvd3MgKG1vZHVsZSDiiaAgYWN0aXZpdHkpIHwKfCBgYWN0aXZpdHlgIHwgQWdlbnQgbWlsZXN0b25lcyAobW9kdWxlID0gYWN0aXZpdHkpIHwKfCBgY29tbWFuZHNgIHwgYGNvbW1hbmQuc3RhcnRgICsgYGNvbW1hbmQuZW5kYCBvbmx5IHwKfCBgcnVuc2AgfCBSdW4tZGlzcGF0Y2ggb3V0Y29tZXMgKGBhZ2VudC5ydW4uZW5kYCAvIGBydW4uZGlzcGF0Y2hlZGApIHwKfCBgc2VjdXJpdHlgIHwgbGV2ZWwgYGF1ZGl0YCBhbmQvb3Igc2VjcmV0cy4qIChzdWdhcikgfAoKYC0taW5jbHVkZWAgYW5kIGAtLWV4Y2x1ZGVgIGFyZSBtdXR1YWxseSBleGNsdXNpdmUsIHNhbWUgcnVsZSBhcyBgc2Vzc2lvbnNgLgoKIyMjIEFsaWFzZXMgKHplcm8gaW5kZXBlbmRlbnQgbG9naWMpCgp8IENvbW1hbmQgfCBFeHBhbmRzIHRvIHwKfCAtLS0gfCAtLS0gfAp8IGBhZ2VudHMgYXVkaXRgIHwgYGFnZW50cyBldmVudHMgLS1pbmNsdWRlIHJ1bnNgIHwKfCBgYWdlbnRzIGF1ZGl0IGxpc3RgIHwgc2FtZSB8CnwgYGFnZW50cyBhdWRpdCB2ZXJpZnlgIHwgYGFnZW50cyBldmVudHMgdmVyaWZ5YCAoaWYgSDEpIG9yIHJlbW92ZWQgKGlmIEgyKSB8CnwgYGFnZW50cyBsb2dzYCB8IGBhZ2VudHMgZXZlbnRzYCB8CnwgYGFnZW50cyBsb2dzIGF1ZGl0YCB8IGBhZ2VudHMgZXZlbnRzIC0taW5jbHVkZSBvcHNgIHwKfCBgYWdlbnRzIGxvZ3Mgc3RhdHNgIHwgYGFnZW50cyBldmVudHMgc3RhdHNgIHwKfCBgYWdlbnRzIGxvZ3Mgcm90YXRlYCB8IGBhZ2VudHMgZXZlbnRzIHJvdGF0ZWAgfAoKSW1wbGVtZW50YXRpb24gcGF0dGVybjogb25lIGBydW5FdmVudHNDb21tYW5kYDsgYWxpYXNlcyBvbmx5IHNldCBkZWZhdWx0IG9wdHMuCgojIyMgTGVhdmVzIHRoaXMgc3VyZmFjZQoKfCBPbGQgfCBOZXcgaG9tZSB8CnwgLS0tIHwgLS0tIHwKfCBgYWdlbnRzIGxvZ3MgPHNlc3Npb24taWQ+YCB0cmFuc2NyaXB0IHwgYGFnZW50cyBzZXNzaW9ucyA8aWQ+YCAvIGBzZXNzaW9ucyB0YWlsYCB8CnwgYGFnZW50cyBsb2dzIDx0YXNrLWlkPmAgaG9zdCBzdGRvdXQgfCBgYWdlbnRzIGhvc3RzIGxvZ3MgPGlkPmAgfAoKSWYgYGFnZW50cyBsb2dzIDxpZD5gIGlzIGtlcHQgZm9yIG11c2NsZSBtZW1vcnksIGl0ICoqcmVkaXJlY3RzKiogd2l0aCBhIGNsZWFyIG1lc3NhZ2Ug4oCUIGl0IGRvZXMgbm90IHJlaW1wbGVtZW50IGNvbnRlbnQgdmlld2luZy4KCiMjIFJ1bi1kaXNwYXRjaCByb3dzIChhYnNvcmIgYGF1ZGl0IGxpc3RgKQoKVG9kYXkgYGF1ZGl0IGxpc3RgIHNob3dzOiBpbmRleCwgdHMsIGFnZW50QHZlcnNpb24sIG1vZGUsIG9rL2ZhaWwsIGV4aXQsIHJlcG8uCgpBdCB0aGUgZXhlYyBjaG9rZXBvaW50IHRoYXQgY3VycmVudGx5IGNhbGxzIGByZWNvcmREaXNwYXRjaGVkUnVuYDoKCmBgYGRpZmYKLSBhcHBlbmRBdWRpdFJlY29yZCh7IHRzLCBhZ2VudCwgdmVyc2lvbiwgcmVwbywgbW9kZSwgb3V0Y29tZSwgZXhpdCB9KQorIGVtaXQoJ2FnZW50LnJ1bi5lbmQnLCB7IGFnZW50LCB2ZXJzaW9uLCByZXBvLCBtb2RlLCBvdXRjb21lLCBleGl0IH0pCiAgLy8gb3IgJ3J1bi5kaXNwYXRjaGVkJyBpZiBlbmQgaXMgdG9vIG92ZXJsb2FkZWQKYGBgCgpgLS1pbmNsdWRlIHJ1bnNgIChhbmQgdGh1cyBgYWdlbnRzIGF1ZGl0YCkgY2FuIHVzZSBhICoqcm93IGZvcm1hdCoqIHR1bmVkIGxpa2UgdGhlIG9sZCBhdWRpdCB0YWJsZS4gUHJlc2VudGF0aW9uIGlzIG5vdCBhIHNlY29uZCBlbmdpbmUuCgojIyMgSGFzaCBjaGFpbiAocGljayBhdCBpbXBsZW1lbnQgc3RhcnQpCgp8IE9wdGlvbiB8IEJlaGF2aW9yIHwKfCAtLS0gfCAtLS0gfAp8ICoqSDEqKiB8IGBwcmV2SGFzaGAvYGhhc2hgIG9uIHJ1biByb3dzIG9ubHk7IGBldmVudHMgdmVyaWZ5YCB3YWxrcyB0aGVtIGluIHRoZSBzYW1lIHN0cmVhbSB8CnwgKipIMioqIHwgRHJvcCBjaGFpbiBwcm9kdWN0OyBqdXN0IGVtaXQgb3V0Y29tZXM7IGRlbGV0ZSB2ZXJpZnkgfAoKUmVjb21tZW5kYXRpb246IEgxIG9ubHkgaWYgc29tZXRoaW5nIHN0aWxsIGdhdGVzIG9uIGBhdWRpdCB2ZXJpZnlgIGluIENJOyBlbHNlIEgyLiBFaXRoZXIgd2F5ICoqbm8gc2VwYXJhdGUgYGF1ZGl0L2xvZy5qc29ubGAgcHJvZHVjdC4qKgoKCiMjIFByb3Bvc2VkIENoYW5nZXMKCnwgQ2hhbmdlIHwgV2hhdCBoYXBwZW5zIHwKfCAtLS0gfCAtLS0gfAp8IE9uZSBFdmVudFJlY29yZCBlbmdpbmUgfCBBbGwgdGltZWxpbmUgd3JpdGVzIGdvIHRocm91Z2ggYGVtaXQoKWA7IGFsbCByZWFkcyB0aHJvdWdoIGBxdWVyeWAgLyBgcmVhZFVuaWZpZWRFdmVudHNgICsgZmFtaWx5IGZpbHRlcnMgfAp8IGAtLWluY2x1ZGVgIC8gYC0tZXhjbHVkZWAgfCBTZXNzaW9ucy1zdHlsZSBmYW1pbHkgZmlsdGVyczogb3BzLCBhY3Rpdml0eSwgY29tbWFuZHMsIHJ1bnMsIHNlY3VyaXR5IHwKfCBgYWdlbnRzIGF1ZGl0YCB8IFRoaW4gYWxpYXMgb2YgYGFnZW50cyBldmVudHMgLS1pbmNsdWRlIHJ1bnNgIOKAlCBubyBzZWNvbmQgc3RvcmUgfAp8IGBhZ2VudHMgbG9nc2AgfCBUaGluIGFsaWFzIG9mIGBhZ2VudHMgZXZlbnRzYDsgc3RhdHMvcm90YXRlIHJlLWRpc3BhdGNoOyBgbG9ncyBbaWRdYCByZWRpcmVjdHMgdG8gc2Vzc2lvbnMvaG9zdHMgfAp8IFJ1bi1kaXNwYXRjaCByb3dzIHwgYHJlY29yZERpc3BhdGNoZWRSdW5gIGJlY29tZXMgYGVtaXQoJ2FnZW50LnJ1bi5lbmQn4oCmKWAgKG9yIGBydW4uZGlzcGF0Y2hlZGApIHwKfCBSZXRpcmUgYGF1ZGl0L2xvZy5qc29ubGAgfCBTdG9wIHdyaXRpbmcgdGhlIGhhc2gtY2hhaW4gZmlsZSBmb3IgbmV3IHJ1bnM7IG9wdGlvbmFsIEgxIHZlcmlmeSBvbiBydW4gcm93cyBvciBIMiBkcm9wIHwKCiMjIyBEaWZmIHNrZXRjaCDigJQgYWxpYXMgbm90IHBlZXIgcHJvZHVjdAoKYGBgZGlmZgovLyBjb21tYW5kcy9hdWRpdC50cwotIHJlYWRBdWRpdExvZygpICsgY3VzdG9tIHJlbmRlclJvdyBmb3IgQXVkaXRSZWNvcmQKKyBydW5FdmVudHNDb21tYW5kKHsgLi4ub3B0cywgaW5jbHVkZTogJ3J1bnMnIH0pCmBgYAoKIyMjIERpZmYgc2tldGNoIOKAlCBydW4gZW5kIHdyaXRlcyBldmVudHMKCmBgYGRpZmYKLy8gZXhlYyBkaXNwYXRjaCBlbmQKLSBhcHBlbmRBdWRpdFJlY29yZCh7IHRzLCBhZ2VudCwgdmVyc2lvbiwgcmVwbywgbW9kZSwgb3V0Y29tZSwgZXhpdCB9KQorIGVtaXQoJ2FnZW50LnJ1bi5lbmQnLCB7IGFnZW50LCB2ZXJzaW9uLCByZXBvLCBtb2RlLCBvdXRjb21lLCBleGl0IH0pCmBgYAoKIyMgSW1wbGVtZW50YXRpb24gcGxhbgoKIyMjIFBoYXNlIDEg4oCUIGZhbWlsaWVzIG9uIHRoZSBleGlzdGluZyBlbmdpbmUKCi0gQWRkIGAtLWluY2x1ZGVgIC8gYC0tZXhjbHVkZWAgZmFtaWx5IHBhcnNlciBpbiB0aGUgZXZlbnRzIG9wdGlvbiBzdXJmYWNlIChtdXRleCkuCi0gTWFwIGZhbWlsaWVzIOKGkiBgaW5jbHVkZUFjdGl2aXR5YCArIGV2ZW50VHlwZXMgLyBsZXZlbCBpbnNpZGUgYHJlYWRVbmlmaWVkRXZlbnRzYCAobm8gc2Vjb25kIHNjYW4pLgotIEhlbHAgbGVhZHMgd2l0aCBgLS1leGNsdWRlIGNvbW1hbmRzYC4KLSBUZXN0czogZmFtaWx5IGZpbHRlcnMsIG11dGV4LCBpbnRlcmFjdGlvbiB3aXRoIGAtLW1vZHVsZWAgLyBgLS1ldmVudGAuCgojIyMgUGhhc2UgMiDigJQgY29sbGFwc2UgQ0xJcyBvbnRvIG9uZSBoYW5kbGVyCgotIGByZWdpc3RlckF1ZGl0Q29tbWFuZHNgIOKGkiB0aGluIGFsaWFzIChkZWZhdWx0IGAtLWluY2x1ZGUgcnVuc2ApLgotIGByZWdpc3RlckxvZ3NDb21tYW5kYCDihpIgdGhpbiBhbGlhcyBvZiBldmVudHM7IHN0YXRzL3JvdGF0ZSByZS1kaXNwYXRjaC4KLSBSZW1vdmUgaW5kZXBlbmRlbnQgYHJlYWRBdWRpdExvZ2AgbGlzdCByZW5kZXJlciBmcm9tIHRoZSBhdWRpdCBjb21tYW5kIHRyZWUuCi0gYGxvZ3MgW2lkXWAg4oaSIHJlZGlyZWN0IHRvIHNlc3Npb25zL2hvc3RzLgotIERlcHJlY2F0aW9uIG9uZS1saW5lcnMgZm9yIG9uZSB0cmFpbiBpZiBuZWVkZWQuCgojIyMgUGhhc2UgMyDigJQgYWJzb3JiIHJ1bi1kaXNwYXRjaCBpbnRvIGVtaXQKCi0gQXQgcnVuIGVuZDogYGVtaXQoLi4uKWAgd2l0aCBmaWVsZHMgYXVkaXQgbGlzdCBuZWVkZWQuCi0gU3RvcCBhcHBlbmRpbmcgdG8gYGF1ZGl0L2xvZy5qc29ubGAgZm9yIG5ldyBydW5zLgotIE9wdGlvbmFsIG1pZ3JhdGlvbiBvZiBoaXN0b3JpY2FsIGNoYWluIHJvd3MgaW50byBldmVudHMgSlNPTkwuCi0gR3V0IG9yIGRlbGV0ZSBgbGliL2F1ZGl0L2xvZy50c2Agb25jZSBubyB3cml0ZXJzIHJlbWFpbi4KLSBIMSBvciBIMiBmb3IgdmVyaWZ5LgoKIyMjIFBoYXNlIDQg4oCUIGRvY3MgKyBmbGVldCBndWlkYW5jZQoKLSBSZXdyaXRlIGBhcHBzL2NsaS9kb2NzL29ic2VydmFiaWxpdHkubWRgIHRhYmxlLgotIENIQU5HRUxPRyB1bmRlciBuZXh0IHZlcnNpb24uCi0gQ29tcGFuaW9uIGAuYWdlbnRzLXN5c3RlbWAgc2tpbGxzL3J1bGVzIHRoYXQgdGVhY2ggb2xkIG5hbWVzIOKAlCBsaW5rZWQgUFIgaWYgY29uc3VtZXJzIGV4aXN0LgoKIyMgS2V5IGZpbGVzCgp8IEFyZWEgfCBQYXRoIHwKfCAtLS0gfCAtLS0gfAp8IFR5cGVzICsgZW1pdCArIHF1ZXJ5ICsgc3RhdHMgKyByb3RhdGUgfCBgYXBwcy9jbGkvc3JjL2xpYi9ldmVudHMudHNgIHwKfCBVbmlmaWVkIHJlYWRlciB8IGBhcHBzL2NsaS9zcmMvbGliL2V2ZW50LXN0cmVhbS50c2AgfAp8IEV2ZW50cyBDTEkgKyBzaGFyZWQgaGFuZGxlciB8IGBhcHBzL2NsaS9zcmMvY29tbWFuZHMvZXZlbnRzLnRzYCB8CnwgQXVkaXQgQ0xJIOKGkiBhbGlhcyB8IGBhcHBzL2NsaS9zcmMvY29tbWFuZHMvYXVkaXQudHNgIHwKfCBMb2dzIENMSSDihpIgYWxpYXMgfCBgYXBwcy9jbGkvc3JjL2NvbW1hbmRzL2xvZ3MudHNgIHwKfCBIYXNoIGNoYWluIChyZXRpcmUpIHwgYGFwcHMvY2xpL3NyYy9saWIvYXVkaXQvbG9nLnRzYCB8CnwgUnVuIGVuZCB3cml0ZSBzaXRlIHwgZXhlYyBkaXNwYXRjaCAvIGByZWNvcmREaXNwYXRjaGVkUnVuYCBjYWxsIHNpdGVzIHwKfCBEb2NzIHwgYGFwcHMvY2xpL2RvY3Mvb2JzZXJ2YWJpbGl0eS5tZGAgfAoKIyMgVmFsaWRhdGlvbgoKYGBgYmFzaAojIHNhbWUgZW5naW5lIGFuc3dlcnMgYWxsIHRocmVlIG5vdW5zCmFnZW50cyBldmVudHMgLS1pbmNsdWRlIHJ1bnMgLS1saW1pdCA1IC0tanNvbgphZ2VudHMgYXVkaXQgLS1saW1pdCA1IC0tanNvbiAgICAgICAgICAjIGlkZW50aWNhbCByZWNvcmRzCmFnZW50cyBsb2dzIC0taW5jbHVkZSBydW5zIC0tbGltaXQgNSAtLWpzb24KCmFnZW50cyBldmVudHMgLS1leGNsdWRlIGNvbW1hbmRzIC0tbGltaXQgMTAKYWdlbnRzIGV2ZW50cyBzdGF0cyAtLWpzb24KYWdlbnRzIGV2ZW50cyByb3RhdGUgLS1kYXlzIDcgLS1tYXgtbWIgNTAKCiMgY29udGVudCBpcyBub3QgZXZlbnRzCmFnZW50cyBzZXNzaW9ucyA8aWQ+IC0tbWFya2Rvd24KYWdlbnRzIGhvc3RzIGxvZ3MgPHRhc2staWQ+CmBgYAoKIyMgUmlza3MKCnwgUmlzayB8IE1pdGlnYXRpb24gfAp8IC0tLSB8IC0tLSB8CnwgU2NyaXB0cyBjYWxsIGBhdWRpdCBsaXN0YCAvIGBsb2dzIGF1ZGl0YCB8IFdyYXBwZXJzIGtlZXAgZmxhZ3MvSlNPTiB3b3JraW5nIHwKfCBIYXNoLWNoYWluIGNvbnN1bWVycyB8IEgxIGtlZXBzIHZlcmlmeSBvbiBzYW1lIHN0cmVhbTsgb3IgZG9jdW1lbnQgZHJvcCB8CnwgYGxvZ3MgPGlkPmAgbXVzY2xlIG1lbW9yeSB8IEV4cGxpY2l0IHJlZGlyZWN0IHRvIHNlc3Npb25zL2hvc3RzIHwKfCBBY3Rpdml0eSBzdGlsbCBzaGFyZGVkIG9uIGRpc2sgfCBTYW1lIHNjaGVtYSArIG9uZSByZWFkZXI7IHdyaXRlIHNwbGl0IGlzIGludGVybmFsIHwKfCBCYXJlIGV2ZW50cyBzdGlsbCBub2lzeSB8IFRlYWNoIGAtLWV4Y2x1ZGUgY29tbWFuZHNgIChsb2NrZWQgZGVjaXNpb24pIHwKCiMjIFBsYW4gY2hlY2tsaXN0CgotIFsgXSBDb25maXJtIEgxIHZzIEgyIGZvciBoYXNoIGNoYWluIGF0IGltcGxlbWVudCBzdGFydAotIFsgXSBQaGFzZSAxOiBgLS1pbmNsdWRlYCAvIGAtLWV4Y2x1ZGVgIG9uIGV2ZW50cyBlbmdpbmUKLSBbIF0gUGhhc2UgMjogYXVkaXQgKyBsb2dzIGFzIGFsaWFzZXM7IG1vdmUgc3RhdHMvcm90YXRlOyByZWRpcmVjdCBsb2dzIFtpZF0KLSBbIF0gUGhhc2UgMzogZW1pdCBydW4gb3V0Y29tZXMgaW50byBldmVudHM7IHJldGlyZSBgYXVkaXQvbG9nLmpzb25sYCB3cml0ZXIKLSBbIF0gUGhhc2UgNDogZG9jcywgQ0hBTkdFTE9HLCBjb21wYW5pb24gZ3VpZGFuY2UKLSBbIF0gUHJvdmU6IHRocmVlIENMSSBub3VucyDihpIgb25lIHF1ZXJ5IHBhdGg7IG5ldyBydW5zIG5ldmVyIG9wZW4gdGhlIG9sZCBhdWRpdCBmaWxlCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

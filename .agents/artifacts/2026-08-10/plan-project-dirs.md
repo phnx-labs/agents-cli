@@ -293,7 +293,7 @@ Steps 1 through 3 are the spine. Steps 4 and 5 are independent consumers of step
 | `agents projects view agents-cli` | Three `repo` lines, each with its own path |
 | `agents run claude --project agents-cli` | cwd is `agents-cli`; two `--add-dir` flags for the siblings |
 | Grant is real | Inside the spawned agent, read a file under `~/.agents/.system` and edit one under `agents-cli-web` |
-| `--host yosemite-s0` | Forwarded paths are `~/…`, not `/Users/muqsit/…` |
+| `--host yosemite-s0` | Forwarded paths are `~/…`, not `/Users/you/…` |
 | `agents teams create … --project agents-cli` | Teammate lands in the primary dir with sibling grants |
 | Extension Cmd-Shift-A | Terminal shows `agents run <agent> --interactive --project agents-cli` |
 | Fleet | `projects view` matches on one Linux worker and one Mac; a box missing `agents-cli-web` skips it without error |

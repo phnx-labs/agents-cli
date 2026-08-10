@@ -120,7 +120,7 @@ command. Every one is verified against this machine, not inferred.</p>
 <tbody><tr>
 <td>1</td>
 <td>The global rule tells every agent to install globally, and this repo carves out no exception</td>
-<td><code>/home/muqsit/.claude/CLAUDE.md:455</code> — <em>"No locally built CLIs. Install globally (<code>npm i -g</code>…)"</em>. npm prefix is <code>/home/muqsit/.local</code>, so <code>npm i -g .</code> lands on the real install.</td>
+<td><code>/home/you/.claude/CLAUDE.md:455</code> — <em>"No locally built CLIs. Install globally (<code>npm i -g</code>…)"</em>. npm prefix is <code>/home/you/.local</code>, so <code>npm i -g .</code> lands on the real install.</td>
 </tr>
 <tr>
 <td>2</td>
@@ -146,15 +146,15 @@ That is true about the npm prefix and false about the command you actually type.
 
 ```console
 $ ls -la ~/.local/bin/agents ~/.local/bin/ag ~/.local/bin/browser
-agents  -&gt; /home/muqsit/.local/agents-cli-dev/bin/agents
-ag      -&gt; /home/muqsit/.local/agents-cli-dev/bin/ag
-browser -&gt; /home/muqsit/.local/agents-cli-dev/bin/browser
+agents  -&gt; /home/you/.local/agents-cli-dev/bin/agents
+ag      -&gt; /home/you/.local/agents-cli-dev/bin/ag
+browser -&gt; /home/you/.local/agents-cli-dev/bin/browser
 
 $ ls ~/.local/agents-cli-dev/lib/node_modules/@phnx-labs/
                                      # empty - the dev prefix was cleaned
 
 $ ~/.local/bin/agents --version
-zsh: no such file or directory: /home/muqsit/.local/bin/agents
+zsh: no such file or directory: /home/you/.local/bin/agents
 
 $ pgrep -af __daemon-run
 4163347 bun .agents/worktrees/rush-2431-binary-shadow/apps/cli/dist/index.js __daemon-run
@@ -169,13 +169,13 @@ Any shell that puts `~/.local/bin` first gets a broken `agents`.
 
 ```console
 $ bash scripts/install.sh --skip-tests
-  bin:    /home/muqsit/.local/bin/agents-dev
+  bin:    /home/you/.local/bin/agents-dev
   Removed stale dev link: ~/.local/bin/agents -&gt; ~/.local/agents-cli-dev/bin/agents
   Removed stale dev link: ~/.local/bin/ag     -&gt; ~/.local/agents-cli-dev/bin/ag
   Removed stale dev link: ~/.local/bin/browser -&gt; ~/.local/agents-cli-dev/bin/browser
   Shared daemon left on production code (secrets broker, browser IPC, routines).
   Ready
-  /home/muqsit/.local/bin/agents-dev (0.0.0-dev.41ae41f60-dirty)
+  /home/you/.local/bin/agents-dev (0.0.0-dev.41ae41f60-dirty)
   Run 'agents-dev '. Your installed 'agents' is untouched.
 
 $ ls ~/.local/bin/agents ~/.local/bin/ag ~/.local/bin/browser
