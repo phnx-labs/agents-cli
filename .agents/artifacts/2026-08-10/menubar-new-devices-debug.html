@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Menu bar NEW DEVICES: why 20 boxes reappeared, and why Ignore looked broken</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:5px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span><span class="status-badge status-complete">complete</span></div>
+<h1>Menu bar NEW DEVICES: why 20 boxes reappeared, and why Ignore looked broken</h1>
+<p class="summary">reconcilePendingSentinels only subtracted the ignore-list, never the registered roster; a redirected-registry writer could poison the live pending-sentinel dir with already-registered fleet boxes. Fixed and merged (PR #2615); ignore-list persistence was never actually broken.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">menubar-devices-debug-artifact</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">723f55ec</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a href="#findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a href="#evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a><a href="#recommendations"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Recommendations</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2>
+<p>The macOS menu bar's <strong>NEW DEVICES (20)</strong> section was listing ~20 tailnet
+nodes as unapproved — most of them already-registered fleet machines — and
+"Ignore" appeared not to stick. Two separate things were going on:</p>
+<ol>
+<li><strong>Real bug (fixed):</strong> the daemon's pending-sentinel writer,
+<code>reconcilePendingSentinels</code>, filtered incoming candidates against the
+ignore-list only, never against the registered device roster. A process
+whose registry view was redirected/empty (a hermetic test run) could still
+write to the live sentinel directory the menu bar polls, marking every
+tailnet node — including already-registered fleet boxes — as "new."</li>
+<li><strong>Not a bug:</strong> the ignore-list itself was persisting correctly the whole
+time. The apparent failure came from checking
+<code>~/.agents/devices/ignored.json</code> (empty/unused) instead of the real path,
+<code>~/.agents/.history/devices/ignored.json</code>.</li>
+</ol>
+<p>The fix is merged to <code>main</code> (PR #2615, commit <code>d940ddb0c</code>), tested, documented,
+and the immediate symptom has already been remediated live on the affected
+machines ahead of the next scheduled release.</p>
+<h2 id="findings">Findings</h2>
+<h3>How NEW DEVICES gets populated</h3>
+<svg viewBox="0 0 900 320" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>
+    </marker>
+  </defs>
+  <rect x="20" y="20" width="220" height="70" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"></rect>
+  <text x="35" y="45" font-size="13">daemon device-probe</text>
+  <text x="35" y="63" font-size="11">runs every ~3 min (daemon.ts)</text>
+
+  <rect x="330" y="20" width="260" height="70" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"></rect>
+  <text x="345" y="45" font-size="13">reconcilePendingSentinels(pending)</text>
+  <text x="345" y="63" font-size="11">devices/pending.ts</text>
+
+  <rect x="670" y="20" width="210" height="70" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"></rect>
+  <text x="685" y="45" font-size="13">~/.agents/.cache/state/</text>
+  <text x="685" y="62" font-size="13">devices-pending/*</text>
+
+  <path d="M240,55 H330" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)" fill="none"></path>
+  <path d="M590,55 H670" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)" fill="none"></path>
+
+  <rect x="330" y="140" width="260" height="90" fill="none" stroke="currentColor" stroke-width="1.5" rx="8" stroke-dasharray="4,3"></rect>
+  <text x="345" y="163" font-size="13">BEFORE FIX: filter subtracted</text>
+  <text x="345" y="181" font-size="13">only the ignore-list —</text>
+  <text x="345" y="199" font-size="13">never the registered roster</text>
+
+  <rect x="670" y="140" width="210" height="90" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"></rect>
+  <text x="685" y="163" font-size="13">menu bar polls</text>
+  <text x="685" y="181" font-size="13">devices-pending/ every</text>
+  <text x="685" y="199" font-size="13">~10s -&gt; NEW DEVICES</text>
+
+  <path d="M460,140 V110" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)" fill="none"></path>
+  <path d="M775,140 V110" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)" fill="none"></path>
+
+  <rect x="20" y="140" width="260" height="90" fill="none" stroke="currentColor" stroke-width="1.5" rx="8" stroke-dasharray="2,2" opacity="0.85"></rect>
+  <text x="35" y="163" font-size="13">Hermetic test run</text>
+  <text x="35" y="181" font-size="11">AGENTS_DEVICES_DIR redirected</text>
+  <text x="35" y="199" font-size="11">(registry looks empty to it)</text>
+  <text x="35" y="217" font-size="11">but still writes the LIVE</text>
+  <text x="35" y="235" font-size="11">devices-pending/ dir</text>
+  <path d="M150,140 V110" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)" fill="none"></path>
+  <path d="M280,185 H330" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)" fill="none"></path>
+
+  <text x="20" y="290" font-size="13" font-weight="600">Result: real, already-registered fleet boxes get written as "new" sentinels — and nothing removes them, because they were never actually ignored, just wrongly classified.</text>
+</svg><h3>Root cause 1 — pending-sentinel pollution</h3>
+<p><code>reconcilePendingSentinels</code> (<code>apps/cli/src/lib/devices/pending.ts</code>) built its
+"still pending" set by subtracting only the persisted ignore-list, never the
+registered roster. A test/hermetic process that redirects
+<code>AGENTS_DEVICES_DIR</code> (so its own registry view is empty) still writes to the
+<strong>live</strong> <code>~/.agents/.cache/state/devices-pending/</code> directory — that path is
+governed by a separate override (<code>AGENTS_STATE_DIR</code> / <code>getRuntimeStateDir()</code>)
+that isn't redirected by the same env var. From that process's point of view
+every tailnet node looked unregistered, so it wrote a sentinel for all of
+them, including real, already-registered fleet boxes. Once written, nothing
+removed those sentinels — the devices genuinely weren't on the ignore-list,
+they were simply misclassified as new.</p>
+<h3>Root cause 2 — "Ignore didn't persist" was a false alarm</h3>
+<p><code>agents devices ignore &lt;name&gt;</code> (<code>apps/cli/src/commands/ssh.ts:1170-1177</code>)
+correctly calls <code>removeDevice</code> -&gt; <code>addIgnored</code> -&gt; <code>clearPendingSentinel</code>. The
+ignore-list's real path is resolved by <code>getDevicesDir()</code>
+(<code>apps/cli/src/lib/state.ts</code>), which returns
+<code>path.join(HISTORY_DIR, 'devices')</code> — i.e. <strong><code>~/.agents/.history/devices/</code></strong>,
+not <code>~/.agents/devices/</code>. Checking the latter (which is empty/unused) made
+ignoring look broken. On the affected machine, the real ignore-list file
+exists and is populated with ~10 dismissed personal/test devices, most recent
+update within the hour of investigation. Ignores were persisting correctly the
+whole time.</p>
+<h3>Which of the 20 were real vs. test/ephemeral</h3>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Examples</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Real fleet device</strong></td>
+<td>The CLI-managed compute fleet (Mac and Linux boxes named in this repo's own Host &amp; Fleet vocabulary)</td>
+<td>Present in the device registry; these are the machines the fleet actually schedules work on</td>
+</tr>
+<tr>
+<td>Real, CI-only</td>
+<td>A CI runner tailnet node</td>
+<td>Legitimately registered, not a personal device</td>
+</tr>
+<tr>
+<td><strong>Test / personal / ephemeral</strong></td>
+<td>Personal phones, tablets, and laptops on the same tailnet</td>
+<td>Now on the ignore-list; not fleet-managed compute</td>
+</tr>
+</tbody></table>
+<p>None of the 20 were phantom or fabricated — the bug was misclassification, not
+invented devices.</p>
+<h2 id="evidence">Evidence</h2>
+<p><strong>The fix (merged):</strong> <a href="https://github.com/phnx-labs/agents-cli/pull/2615">PR #2615</a>,
+commit <code>d940ddb0c</code>, <code>fix(devices): stop NEW DEVICES listing registered/ignored boxes</code>.</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code"> let ignored: Set&lt;string&gt;;</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code"> try { ignored = await loadIgnored(); } catch { ignored = new Set(); }</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code"> const want = new Map(</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">   pending</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">     .filter((p) =&gt; isSafeName(p.name) &amp;&amp; !ignored.has(p.name))</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">     .filter((p) =&gt; isSafeName(p.name) &amp;&amp; !dismissed.has(p.name))  // dismissed = ignored ∪ registered</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">     .map((p) =&gt; [p.name, p.platform]),</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code"> );</span></span></pre></div><ul>
+<li><code>reconcilePendingSentinels</code> re-subtracts <strong>registered + ignored</strong> names, not just ignored.</li>
+<li>New <code>pruneDismissedPendingSentinels()</code> runs on daemon start and on every
+soft-fail probe tick (no live tailscale required), so leftover pollution
+clears without waiting on the 3-minute interval.</li>
+<li>2 new real-filesystem tests in <code>pending.test.ts</code> reproduce the
+registered-device leak and the soft-fail prune path — real <code>mkdtemp</code> HOME,
+no mocking. <code>bun test src/lib/devices/pending.test.ts</code> -&gt; 8 pass / 0 fail.</li>
+<li>Docs (<code>apps/cli/docs/menubar.md</code>) and a changelog fragment
+(<code>apps/cli/.changelog/next/pending-devices-registry-filter.md</code>) updated.</li>
+<li>CI green on every shard (gitleaks, scope, preflight, 3 test shards, docs).</li>
+<li>Merged to <code>main</code> 2026-08-10T18:55:40Z.</li>
+</ul>
+<h3>Before / after (live-verified, this investigation)</h3>
+<table>
+<thead>
+<tr>
+<th>Signal</th>
+<th>Before</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Pending sentinel count on the affected machine</td>
+<td>20</td>
+<td><strong>0</strong></td>
+</tr>
+<tr>
+<td>Device registry entries</td>
+<td>30 (14 test/phantom)</td>
+<td><strong>16</strong> real devices</td>
+</tr>
+<tr>
+<td>Ignore-list ("didn't persist" claim)</td>
+<td>Checked wrong path -&gt; looked empty</td>
+<td>Real path confirmed populated and correctly persisted throughout</td>
+</tr>
+</tbody></table>
+<h3>Independent verification</h3>
+<p>Two blind subagent reviews (separate contexts, no shared conclusions, each
+reasoning only from source) independently reached the same root cause: the
+choke point <code>reconcilePendingSentinels</code> filtered only against the ignore-list,
+never the registered roster, and the "ignore didn't persist" complaint traced
+to checking the wrong on-disk path rather than a real persistence failure.
+Both quoted the same file:line evidence cited above.</p>
+<h2 id="recommendations">Recommendations</h2>
+<ul>
+<li><strong>No further code change needed.</strong> The fix is complete, tested, and merged.</li>
+<li><strong>Shipping:</strong> this repo runs a release train (<code>release-train</code> routine, every
+4h) — a feature agent's job ends at merged-to-main + changelog fragment, both
+already done. The next train publishes to npm and rolls the fix to every
+reachable fleet host; no manual release was taken here.</li>
+<li><strong>Immediate relief:</strong> the user-facing symptom (phantom NEW DEVICES) was
+already remediated live on the affected machines ahead of the release, by
+pruning the stale sentinel files directly — a safe, idempotent operation,
+since the daemon's own probe recomputes the same result once the release
+ships.</li>
+<li><strong>Tracking:</strong> <a href="https://linear.app">RUSH-2551</a> filed and closed with proof,
+linked to PR #2615 and this report.</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0ZW1wbGF0ZTogcmVwb3J0LnYxCnRpdGxlOiAiTWVudSBiYXIgTkVXIERFVklDRVM6IHdoeSAyMCBib3hlcyByZWFwcGVhcmVkLCBhbmQgd2h5IElnbm9yZSBsb29rZWQgYnJva2VuIgpzdW1tYXJ5OiAicmVjb25jaWxlUGVuZGluZ1NlbnRpbmVscyBvbmx5IHN1YnRyYWN0ZWQgdGhlIGlnbm9yZS1saXN0LCBuZXZlciB0aGUgcmVnaXN0ZXJlZCByb3N0ZXI7IGEgcmVkaXJlY3RlZC1yZWdpc3RyeSB3cml0ZXIgY291bGQgcG9pc29uIHRoZSBsaXZlIHBlbmRpbmctc2VudGluZWwgZGlyIHdpdGggYWxyZWFkeS1yZWdpc3RlcmVkIGZsZWV0IGJveGVzLiBGaXhlZCBhbmQgbWVyZ2VkIChQUiAjMjYxNSk7IGlnbm9yZS1saXN0IHBlcnNpc3RlbmNlIHdhcyBuZXZlciBhY3R1YWxseSBicm9rZW4uIgpzdGF0dXM6IGNvbXBsZXRlCi0tLQoKIyMgU3VtbWFyeQoKVGhlIG1hY09TIG1lbnUgYmFyJ3MgKipORVcgREVWSUNFUyAoMjApKiogc2VjdGlvbiB3YXMgbGlzdGluZyB+MjAgdGFpbG5ldApub2RlcyBhcyB1bmFwcHJvdmVkIOKAlCBtb3N0IG9mIHRoZW0gYWxyZWFkeS1yZWdpc3RlcmVkIGZsZWV0IG1hY2hpbmVzIOKAlCBhbmQKIklnbm9yZSIgYXBwZWFyZWQgbm90IHRvIHN0aWNrLiBUd28gc2VwYXJhdGUgdGhpbmdzIHdlcmUgZ29pbmcgb246CgoxLiAqKlJlYWwgYnVnIChmaXhlZCk6KiogdGhlIGRhZW1vbidzIHBlbmRpbmctc2VudGluZWwgd3JpdGVyLAogICBgcmVjb25jaWxlUGVuZGluZ1NlbnRpbmVsc2AsIGZpbHRlcmVkIGluY29taW5nIGNhbmRpZGF0ZXMgYWdhaW5zdCB0aGUKICAgaWdub3JlLWxpc3Qgb25seSwgbmV2ZXIgYWdhaW5zdCB0aGUgcmVnaXN0ZXJlZCBkZXZpY2Ugcm9zdGVyLiBBIHByb2Nlc3MKICAgd2hvc2UgcmVnaXN0cnkgdmlldyB3YXMgcmVkaXJlY3RlZC9lbXB0eSAoYSBoZXJtZXRpYyB0ZXN0IHJ1bikgY291bGQgc3RpbGwKICAgd3JpdGUgdG8gdGhlIGxpdmUgc2VudGluZWwgZGlyZWN0b3J5IHRoZSBtZW51IGJhciBwb2xscywgbWFya2luZyBldmVyeQogICB0YWlsbmV0IG5vZGUg4oCUIGluY2x1ZGluZyBhbHJlYWR5LXJlZ2lzdGVyZWQgZmxlZXQgYm94ZXMg4oCUIGFzICJuZXcuIgoyLiAqKk5vdCBhIGJ1ZzoqKiB0aGUgaWdub3JlLWxpc3QgaXRzZWxmIHdhcyBwZXJzaXN0aW5nIGNvcnJlY3RseSB0aGUgd2hvbGUKICAgdGltZS4gVGhlIGFwcGFyZW50IGZhaWx1cmUgY2FtZSBmcm9tIGNoZWNraW5nCiAgIGB+Ly5hZ2VudHMvZGV2aWNlcy9pZ25vcmVkLmpzb25gIChlbXB0eS91bnVzZWQpIGluc3RlYWQgb2YgdGhlIHJlYWwgcGF0aCwKICAgYH4vLmFnZW50cy8uaGlzdG9yeS9kZXZpY2VzL2lnbm9yZWQuanNvbmAuCgpUaGUgZml4IGlzIG1lcmdlZCB0byBgbWFpbmAgKFBSICMyNjE1LCBjb21taXQgYGQ5NDBkZGIwY2ApLCB0ZXN0ZWQsIGRvY3VtZW50ZWQsCmFuZCB0aGUgaW1tZWRpYXRlIHN5bXB0b20gaGFzIGFscmVhZHkgYmVlbiByZW1lZGlhdGVkIGxpdmUgb24gdGhlIGFmZmVjdGVkCm1hY2hpbmVzIGFoZWFkIG9mIHRoZSBuZXh0IHNjaGVkdWxlZCByZWxlYXNlLgoKIyMgRmluZGluZ3MKCiMjIyBIb3cgTkVXIERFVklDRVMgZ2V0cyBwb3B1bGF0ZWQKCjxzdmcgdmlld0JveD0iMCAwIDkwMCAzMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPGRlZnM+CiAgICA8bWFya2VyIGlkPSJhcnJvdyIgdmlld0JveD0iMCAwIDEwIDEwIiByZWZYPSI5IiByZWZZPSI1IiBtYXJrZXJXaWR0aD0iNiIgbWFya2VySGVpZ2h0PSI2IiBvcmllbnQ9ImF1dG8tc3RhcnQtcmV2ZXJzZSI+CiAgICAgIDxwYXRoIGQ9Ik0wLDAgTDEwLDUgTDAsMTAgeiIgZmlsbD0iY3VycmVudENvbG9yIi8+CiAgICA8L21hcmtlcj4KICA8L2RlZnM+CiAgPHJlY3QgeD0iMjAiIHk9IjIwIiB3aWR0aD0iMjIwIiBoZWlnaHQ9IjcwIiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIxLjUiIHJ4PSI4Ii8+CiAgPHRleHQgeD0iMzUiIHk9IjQ1IiBmb250LXNpemU9IjEzIj5kYWVtb24gZGV2aWNlLXByb2JlPC90ZXh0PgogIDx0ZXh0IHg9IjM1IiB5PSI2MyIgZm9udC1zaXplPSIxMSIgb3BhY2l0eT0iMC43Ij5ydW5zIGV2ZXJ5IH4zIG1pbiAoZGFlbW9uLnRzKTwvdGV4dD4KCiAgPHJlY3QgeD0iMzMwIiB5PSIyMCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI3MCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMS41IiByeD0iOCIvPgogIDx0ZXh0IHg9IjM0NSIgeT0iNDUiIGZvbnQtc2l6ZT0iMTMiPnJlY29uY2lsZVBlbmRpbmdTZW50aW5lbHMocGVuZGluZyk8L3RleHQ+CiAgPHRleHQgeD0iMzQ1IiB5PSI2MyIgZm9udC1zaXplPSIxMSIgb3BhY2l0eT0iMC43Ij5kZXZpY2VzL3BlbmRpbmcudHM8L3RleHQ+CgogIDxyZWN0IHg9IjY3MCIgeT0iMjAiIHdpZHRoPSIyMTAiIGhlaWdodD0iNzAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjEuNSIgcng9IjgiLz4KICA8dGV4dCB4PSI2ODUiIHk9IjQ1IiBmb250LXNpemU9IjEzIj5+Ly5hZ2VudHMvLmNhY2hlL3N0YXRlLzwvdGV4dD4KICA8dGV4dCB4PSI2ODUiIHk9IjYyIiBmb250LXNpemU9IjEzIj5kZXZpY2VzLXBlbmRpbmcvKjwvdGV4dD4KCiAgPHBhdGggZD0iTTI0MCw1NSBIMzMwIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIxLjUiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIiBmaWxsPSJub25lIi8+CiAgPHBhdGggZD0iTTU5MCw1NSBINjcwIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIxLjUiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIiBmaWxsPSJub25lIi8+CgogIDxyZWN0IHg9IjMzMCIgeT0iMTQwIiB3aWR0aD0iMjYwIiBoZWlnaHQ9IjkwIiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIxLjUiIHJ4PSI4IiBzdHJva2UtZGFzaGFycmF5PSI0LDMiLz4KICA8dGV4dCB4PSIzNDUiIHk9IjE2MyIgZm9udC1zaXplPSIxMyI+QkVGT1JFIEZJWDogZmlsdGVyIHN1YnRyYWN0ZWQ8L3RleHQ+CiAgPHRleHQgeD0iMzQ1IiB5PSIxODEiIGZvbnQtc2l6ZT0iMTMiPm9ubHkgdGhlIGlnbm9yZS1saXN0IOKAlDwvdGV4dD4KICA8dGV4dCB4PSIzNDUiIHk9IjE5OSIgZm9udC1zaXplPSIxMyI+bmV2ZXIgdGhlIHJlZ2lzdGVyZWQgcm9zdGVyPC90ZXh0PgoKICA8cmVjdCB4PSI2NzAiIHk9IjE0MCIgd2lkdGg9IjIxMCIgaGVpZ2h0PSI5MCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMS41IiByeD0iOCIvPgogIDx0ZXh0IHg9IjY4NSIgeT0iMTYzIiBmb250LXNpemU9IjEzIj5tZW51IGJhciBwb2xsczwvdGV4dD4KICA8dGV4dCB4PSI2ODUiIHk9IjE4MSIgZm9udC1zaXplPSIxMyI+ZGV2aWNlcy1wZW5kaW5nLyBldmVyeTwvdGV4dD4KICA8dGV4dCB4PSI2ODUiIHk9IjE5OSIgZm9udC1zaXplPSIxMyI+fjEwcyAtJmd0OyBORVcgREVWSUNFUzwvdGV4dD4KCiAgPHBhdGggZD0iTTQ2MCwxNDAgVjExMCIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIgZmlsbD0ibm9uZSIvPgogIDxwYXRoIGQ9Ik03NzUsMTQwIFYxMTAiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiIGZpbGw9Im5vbmUiLz4KCiAgPHJlY3QgeD0iMjAiIHk9IjE0MCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI5MCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMS41IiByeD0iOCIgc3Ryb2tlLWRhc2hhcnJheT0iMiwyIiBvcGFjaXR5PSIwLjg1Ii8+CiAgPHRleHQgeD0iMzUiIHk9IjE2MyIgZm9udC1zaXplPSIxMyI+SGVybWV0aWMgdGVzdCBydW48L3RleHQ+CiAgPHRleHQgeD0iMzUiIHk9IjE4MSIgZm9udC1zaXplPSIxMSIgb3BhY2l0eT0iMC43Ij5BR0VOVFNfREVWSUNFU19ESVIgcmVkaXJlY3RlZDwvdGV4dD4KICA8dGV4dCB4PSIzNSIgeT0iMTk5IiBmb250LXNpemU9IjExIiBvcGFjaXR5PSIwLjciPihyZWdpc3RyeSBsb29rcyBlbXB0eSB0byBpdCk8L3RleHQ+CiAgPHRleHQgeD0iMzUiIHk9IjIxNyIgZm9udC1zaXplPSIxMSIgb3BhY2l0eT0iMC43Ij5idXQgc3RpbGwgd3JpdGVzIHRoZSBMSVZFPC90ZXh0PgogIDx0ZXh0IHg9IjM1IiB5PSIyMzUiIGZvbnQtc2l6ZT0iMTEiIG9wYWNpdHk9IjAuNyI+ZGV2aWNlcy1wZW5kaW5nLyBkaXI8L3RleHQ+CiAgPHBhdGggZD0iTTE1MCwxNDAgVjExMCIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIgZmlsbD0ibm9uZSIvPgogIDxwYXRoIGQ9Ik0yODAsMTg1IEgzMzAiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiIGZpbGw9Im5vbmUiLz4KCiAgPHRleHQgeD0iMjAiIHk9IjI5MCIgZm9udC1zaXplPSIxMyIgZm9udC13ZWlnaHQ9IjYwMCI+UmVzdWx0OiByZWFsLCBhbHJlYWR5LXJlZ2lzdGVyZWQgZmxlZXQgYm94ZXMgZ2V0IHdyaXR0ZW4gYXMgIm5ldyIgc2VudGluZWxzIOKAlCBhbmQgbm90aGluZyByZW1vdmVzIHRoZW0sIGJlY2F1c2UgdGhleSB3ZXJlIG5ldmVyIGFjdHVhbGx5IGlnbm9yZWQsIGp1c3Qgd3JvbmdseSBjbGFzc2lmaWVkLjwvdGV4dD4KPC9zdmc+CgojIyMgUm9vdCBjYXVzZSAxIOKAlCBwZW5kaW5nLXNlbnRpbmVsIHBvbGx1dGlvbgoKYHJlY29uY2lsZVBlbmRpbmdTZW50aW5lbHNgIChgYXBwcy9jbGkvc3JjL2xpYi9kZXZpY2VzL3BlbmRpbmcudHNgKSBidWlsdCBpdHMKInN0aWxsIHBlbmRpbmciIHNldCBieSBzdWJ0cmFjdGluZyBvbmx5IHRoZSBwZXJzaXN0ZWQgaWdub3JlLWxpc3QsIG5ldmVyIHRoZQpyZWdpc3RlcmVkIHJvc3Rlci4gQSB0ZXN0L2hlcm1ldGljIHByb2Nlc3MgdGhhdCByZWRpcmVjdHMKYEFHRU5UU19ERVZJQ0VTX0RJUmAgKHNvIGl0cyBvd24gcmVnaXN0cnkgdmlldyBpcyBlbXB0eSkgc3RpbGwgd3JpdGVzIHRvIHRoZQoqKmxpdmUqKiBgfi8uYWdlbnRzLy5jYWNoZS9zdGF0ZS9kZXZpY2VzLXBlbmRpbmcvYCBkaXJlY3Rvcnkg4oCUIHRoYXQgcGF0aCBpcwpnb3Zlcm5lZCBieSBhIHNlcGFyYXRlIG92ZXJyaWRlIChgQUdFTlRTX1NUQVRFX0RJUmAgLyBgZ2V0UnVudGltZVN0YXRlRGlyKClgKQp0aGF0IGlzbid0IHJlZGlyZWN0ZWQgYnkgdGhlIHNhbWUgZW52IHZhci4gRnJvbSB0aGF0IHByb2Nlc3MncyBwb2ludCBvZiB2aWV3CmV2ZXJ5IHRhaWxuZXQgbm9kZSBsb29rZWQgdW5yZWdpc3RlcmVkLCBzbyBpdCB3cm90ZSBhIHNlbnRpbmVsIGZvciBhbGwgb2YKdGhlbSwgaW5jbHVkaW5nIHJlYWwsIGFscmVhZHktcmVnaXN0ZXJlZCBmbGVldCBib3hlcy4gT25jZSB3cml0dGVuLCBub3RoaW5nCnJlbW92ZWQgdGhvc2Ugc2VudGluZWxzIOKAlCB0aGUgZGV2aWNlcyBnZW51aW5lbHkgd2VyZW4ndCBvbiB0aGUgaWdub3JlLWxpc3QsCnRoZXkgd2VyZSBzaW1wbHkgbWlzY2xhc3NpZmllZCBhcyBuZXcuCgojIyMgUm9vdCBjYXVzZSAyIOKAlCAiSWdub3JlIGRpZG4ndCBwZXJzaXN0IiB3YXMgYSBmYWxzZSBhbGFybQoKYGFnZW50cyBkZXZpY2VzIGlnbm9yZSA8bmFtZT5gIChgYXBwcy9jbGkvc3JjL2NvbW1hbmRzL3NzaC50czoxMTcwLTExNzdgKQpjb3JyZWN0bHkgY2FsbHMgYHJlbW92ZURldmljZWAgLT4gYGFkZElnbm9yZWRgIC0+IGBjbGVhclBlbmRpbmdTZW50aW5lbGAuIFRoZQppZ25vcmUtbGlzdCdzIHJlYWwgcGF0aCBpcyByZXNvbHZlZCBieSBgZ2V0RGV2aWNlc0RpcigpYAooYGFwcHMvY2xpL3NyYy9saWIvc3RhdGUudHNgKSwgd2hpY2ggcmV0dXJucwpgcGF0aC5qb2luKEhJU1RPUllfRElSLCAnZGV2aWNlcycpYCDigJQgaS5lLiAqKmB+Ly5hZ2VudHMvLmhpc3RvcnkvZGV2aWNlcy9gKiosCm5vdCBgfi8uYWdlbnRzL2RldmljZXMvYC4gQ2hlY2tpbmcgdGhlIGxhdHRlciAod2hpY2ggaXMgZW1wdHkvdW51c2VkKSBtYWRlCmlnbm9yaW5nIGxvb2sgYnJva2VuLiBPbiB0aGUgYWZmZWN0ZWQgbWFjaGluZSwgdGhlIHJlYWwgaWdub3JlLWxpc3QgZmlsZQpleGlzdHMgYW5kIGlzIHBvcHVsYXRlZCB3aXRoIH4xMCBkaXNtaXNzZWQgcGVyc29uYWwvdGVzdCBkZXZpY2VzLCBtb3N0IHJlY2VudAp1cGRhdGUgd2l0aGluIHRoZSBob3VyIG9mIGludmVzdGlnYXRpb24uIElnbm9yZXMgd2VyZSBwZXJzaXN0aW5nIGNvcnJlY3RseSB0aGUKd2hvbGUgdGltZS4KCiMjIyBXaGljaCBvZiB0aGUgMjAgd2VyZSByZWFsIHZzLiB0ZXN0L2VwaGVtZXJhbAoKfCBDYXRlZ29yeSB8IEV4YW1wbGVzIHwgV2h5IHwKfC0tLXwtLS18LS0tfAp8ICoqUmVhbCBmbGVldCBkZXZpY2UqKiB8IFRoZSBDTEktbWFuYWdlZCBjb21wdXRlIGZsZWV0IChNYWMgYW5kIExpbnV4IGJveGVzIG5hbWVkIGluIHRoaXMgcmVwbydzIG93biBIb3N0ICYgRmxlZXQgdm9jYWJ1bGFyeSkgfCBQcmVzZW50IGluIHRoZSBkZXZpY2UgcmVnaXN0cnk7IHRoZXNlIGFyZSB0aGUgbWFjaGluZXMgdGhlIGZsZWV0IGFjdHVhbGx5IHNjaGVkdWxlcyB3b3JrIG9uIHwKfCBSZWFsLCBDSS1vbmx5IHwgQSBDSSBydW5uZXIgdGFpbG5ldCBub2RlIHwgTGVnaXRpbWF0ZWx5IHJlZ2lzdGVyZWQsIG5vdCBhIHBlcnNvbmFsIGRldmljZSB8CnwgKipUZXN0IC8gcGVyc29uYWwgLyBlcGhlbWVyYWwqKiB8IFBlcnNvbmFsIHBob25lcywgdGFibGV0cywgYW5kIGxhcHRvcHMgb24gdGhlIHNhbWUgdGFpbG5ldCB8IE5vdyBvbiB0aGUgaWdub3JlLWxpc3Q7IG5vdCBmbGVldC1tYW5hZ2VkIGNvbXB1dGUgfAoKTm9uZSBvZiB0aGUgMjAgd2VyZSBwaGFudG9tIG9yIGZhYnJpY2F0ZWQg4oCUIHRoZSBidWcgd2FzIG1pc2NsYXNzaWZpY2F0aW9uLCBub3QKaW52ZW50ZWQgZGV2aWNlcy4KCiMjIEV2aWRlbmNlCgoqKlRoZSBmaXggKG1lcmdlZCk6KiogW1BSICMyNjE1XShodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnZW50cy1jbGkvcHVsbC8yNjE1KSwKY29tbWl0IGBkOTQwZGRiMGNgLCBgZml4KGRldmljZXMpOiBzdG9wIE5FVyBERVZJQ0VTIGxpc3RpbmcgcmVnaXN0ZXJlZC9pZ25vcmVkIGJveGVzYC4KCmBgYGRpZmYKLSBsZXQgaWdub3JlZDogU2V0PHN0cmluZz47Ci0gdHJ5IHsgaWdub3JlZCA9IGF3YWl0IGxvYWRJZ25vcmVkKCk7IH0gY2F0Y2ggeyBpZ25vcmVkID0gbmV3IFNldCgpOyB9CiAgY29uc3Qgd2FudCA9IG5ldyBNYXAoCiAgICBwZW5kaW5nCi0gICAgIC5maWx0ZXIoKHApID0+IGlzU2FmZU5hbWUocC5uYW1lKSAmJiAhaWdub3JlZC5oYXMocC5uYW1lKSkKKyAgICAgLmZpbHRlcigocCkgPT4gaXNTYWZlTmFtZShwLm5hbWUpICYmICFkaXNtaXNzZWQuaGFzKHAubmFtZSkpICAvLyBkaXNtaXNzZWQgPSBpZ25vcmVkIOKIqiByZWdpc3RlcmVkCiAgICAgIC5tYXAoKHApID0+IFtwLm5hbWUsIHAucGxhdGZvcm1dKSwKICApOwpgYGAKCi0gYHJlY29uY2lsZVBlbmRpbmdTZW50aW5lbHNgIHJlLXN1YnRyYWN0cyAqKnJlZ2lzdGVyZWQgKyBpZ25vcmVkKiogbmFtZXMsIG5vdCBqdXN0IGlnbm9yZWQuCi0gTmV3IGBwcnVuZURpc21pc3NlZFBlbmRpbmdTZW50aW5lbHMoKWAgcnVucyBvbiBkYWVtb24gc3RhcnQgYW5kIG9uIGV2ZXJ5CiAgc29mdC1mYWlsIHByb2JlIHRpY2sgKG5vIGxpdmUgdGFpbHNjYWxlIHJlcXVpcmVkKSwgc28gbGVmdG92ZXIgcG9sbHV0aW9uCiAgY2xlYXJzIHdpdGhvdXQgd2FpdGluZyBvbiB0aGUgMy1taW51dGUgaW50ZXJ2YWwuCi0gMiBuZXcgcmVhbC1maWxlc3lzdGVtIHRlc3RzIGluIGBwZW5kaW5nLnRlc3QudHNgIHJlcHJvZHVjZSB0aGUKICByZWdpc3RlcmVkLWRldmljZSBsZWFrIGFuZCB0aGUgc29mdC1mYWlsIHBydW5lIHBhdGgg4oCUIHJlYWwgYG1rZHRlbXBgIEhPTUUsCiAgbm8gbW9ja2luZy4gYGJ1biB0ZXN0IHNyYy9saWIvZGV2aWNlcy9wZW5kaW5nLnRlc3QudHNgIC0+IDggcGFzcyAvIDAgZmFpbC4KLSBEb2NzIChgYXBwcy9jbGkvZG9jcy9tZW51YmFyLm1kYCkgYW5kIGEgY2hhbmdlbG9nIGZyYWdtZW50CiAgKGBhcHBzL2NsaS8uY2hhbmdlbG9nL25leHQvcGVuZGluZy1kZXZpY2VzLXJlZ2lzdHJ5LWZpbHRlci5tZGApIHVwZGF0ZWQuCi0gQ0kgZ3JlZW4gb24gZXZlcnkgc2hhcmQgKGdpdGxlYWtzLCBzY29wZSwgcHJlZmxpZ2h0LCAzIHRlc3Qgc2hhcmRzLCBkb2NzKS4KLSBNZXJnZWQgdG8gYG1haW5gIDIwMjYtMDgtMTBUMTg6NTU6NDBaLgoKIyMjIEJlZm9yZSAvIGFmdGVyIChsaXZlLXZlcmlmaWVkLCB0aGlzIGludmVzdGlnYXRpb24pCgp8IFNpZ25hbCB8IEJlZm9yZSB8IEFmdGVyIHwKfC0tLXwtLS18LS0tfAp8IFBlbmRpbmcgc2VudGluZWwgY291bnQgb24gdGhlIGFmZmVjdGVkIG1hY2hpbmUgfCAyMCB8ICoqMCoqIHwKfCBEZXZpY2UgcmVnaXN0cnkgZW50cmllcyB8IDMwICgxNCB0ZXN0L3BoYW50b20pIHwgKioxNioqIHJlYWwgZGV2aWNlcyB8CnwgSWdub3JlLWxpc3QgKCJkaWRuJ3QgcGVyc2lzdCIgY2xhaW0pIHwgQ2hlY2tlZCB3cm9uZyBwYXRoIC0+IGxvb2tlZCBlbXB0eSB8IFJlYWwgcGF0aCBjb25maXJtZWQgcG9wdWxhdGVkIGFuZCBjb3JyZWN0bHkgcGVyc2lzdGVkIHRocm91Z2hvdXQgfAoKIyMjIEluZGVwZW5kZW50IHZlcmlmaWNhdGlvbgoKVHdvIGJsaW5kIHN1YmFnZW50IHJldmlld3MgKHNlcGFyYXRlIGNvbnRleHRzLCBubyBzaGFyZWQgY29uY2x1c2lvbnMsIGVhY2gKcmVhc29uaW5nIG9ubHkgZnJvbSBzb3VyY2UpIGluZGVwZW5kZW50bHkgcmVhY2hlZCB0aGUgc2FtZSByb290IGNhdXNlOiB0aGUKY2hva2UgcG9pbnQgYHJlY29uY2lsZVBlbmRpbmdTZW50aW5lbHNgIGZpbHRlcmVkIG9ubHkgYWdhaW5zdCB0aGUgaWdub3JlLWxpc3QsCm5ldmVyIHRoZSByZWdpc3RlcmVkIHJvc3RlciwgYW5kIHRoZSAiaWdub3JlIGRpZG4ndCBwZXJzaXN0IiBjb21wbGFpbnQgdHJhY2VkCnRvIGNoZWNraW5nIHRoZSB3cm9uZyBvbi1kaXNrIHBhdGggcmF0aGVyIHRoYW4gYSByZWFsIHBlcnNpc3RlbmNlIGZhaWx1cmUuCkJvdGggcXVvdGVkIHRoZSBzYW1lIGZpbGU6bGluZSBldmlkZW5jZSBjaXRlZCBhYm92ZS4KCiMjIFJlY29tbWVuZGF0aW9ucwoKLSAqKk5vIGZ1cnRoZXIgY29kZSBjaGFuZ2UgbmVlZGVkLioqIFRoZSBmaXggaXMgY29tcGxldGUsIHRlc3RlZCwgYW5kIG1lcmdlZC4KLSAqKlNoaXBwaW5nOioqIHRoaXMgcmVwbyBydW5zIGEgcmVsZWFzZSB0cmFpbiAoYHJlbGVhc2UtdHJhaW5gIHJvdXRpbmUsIGV2ZXJ5CiAgNGgpIOKAlCBhIGZlYXR1cmUgYWdlbnQncyBqb2IgZW5kcyBhdCBtZXJnZWQtdG8tbWFpbiArIGNoYW5nZWxvZyBmcmFnbWVudCwgYm90aAogIGFscmVhZHkgZG9uZS4gVGhlIG5leHQgdHJhaW4gcHVibGlzaGVzIHRvIG5wbSBhbmQgcm9sbHMgdGhlIGZpeCB0byBldmVyeQogIHJlYWNoYWJsZSBmbGVldCBob3N0OyBubyBtYW51YWwgcmVsZWFzZSB3YXMgdGFrZW4gaGVyZS4KLSAqKkltbWVkaWF0ZSByZWxpZWY6KiogdGhlIHVzZXItZmFjaW5nIHN5bXB0b20gKHBoYW50b20gTkVXIERFVklDRVMpIHdhcwogIGFscmVhZHkgcmVtZWRpYXRlZCBsaXZlIG9uIHRoZSBhZmZlY3RlZCBtYWNoaW5lcyBhaGVhZCBvZiB0aGUgcmVsZWFzZSwgYnkKICBwcnVuaW5nIHRoZSBzdGFsZSBzZW50aW5lbCBmaWxlcyBkaXJlY3RseSDigJQgYSBzYWZlLCBpZGVtcG90ZW50IG9wZXJhdGlvbiwKICBzaW5jZSB0aGUgZGFlbW9uJ3Mgb3duIHByb2JlIHJlY29tcHV0ZXMgdGhlIHNhbWUgcmVzdWx0IG9uY2UgdGhlIHJlbGVhc2UKICBzaGlwcy4KLSAqKlRyYWNraW5nOioqIFtSVVNILTI1NTFdKGh0dHBzOi8vbGluZWFyLmFwcCkgZmlsZWQgYW5kIGNsb3NlZCB3aXRoIHByb29mLAogIGxpbmtlZCB0byBQUiAjMjYxNSBhbmQgdGhpcyByZXBvcnQuCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
