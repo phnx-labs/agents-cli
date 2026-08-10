@@ -16,7 +16,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { getDevicesPendingDir } from '../state.js';
-import { loadIgnored } from './registry.js';
+import { loadDevices, loadIgnored } from './registry.js';
 
 export interface PendingDevice {
   name: string;
@@ -30,6 +30,46 @@ function isSafeName(name: string): boolean {
 }
 
 /**
+ * Best-effort load of names that must never appear as "NEW DEVICES": the
+ * ignore-list and the registered roster. A corrupted registry/ignore file
+ * (both throw by design) must not crash the daemon loop — treat it as empty
+ * and let the next probe recover once the file is fixed.
+ */
+async function loadDismissedNames(): Promise<Set<string>> {
+  const out = new Set<string>();
+  try {
+    for (const name of await loadIgnored()) out.add(name);
+  } catch { /* treat as nothing ignored */ }
+  try {
+    for (const name of Object.keys(await loadDevices())) out.add(name);
+  } catch { /* treat as nothing registered */ }
+  return out;
+}
+
+/**
+ * Drop pending sentinels for devices that are already registered or ignored.
+ * Safe without a live tailscale probe — only removes names we know are no
+ * longer "new". Used when soft-fail discovery cannot recompute the full
+ * pending set, so a test leak or race cannot leave registered fleet boxes in
+ * the menu bar's NEW DEVICES section forever.
+ */
+export async function pruneDismissedPendingSentinels(): Promise<void> {
+  const dir = getDevicesPendingDir();
+  const dismissed = await loadDismissedNames();
+  if (dismissed.size === 0) return;
+  let existing: string[];
+  try {
+    existing = fs.readdirSync(dir).filter((n) => !n.startsWith('.'));
+  } catch {
+    return;
+  }
+  for (const name of existing) {
+    if (!dismissed.has(name)) continue;
+    try { fs.unlinkSync(path.join(dir, name)); } catch { /* already gone */ }
+  }
+}
+
+/**
  * Make the sentinel dir exactly match `pending`: create a file per pending
  * device (content = platform), and delete any leftover sentinel whose device is
  * no longer pending (it got registered, ignored, or left the tailnet). Best-
@@ -38,23 +78,23 @@ function isSafeName(name: string): boolean {
  *
  * The sentinel writer is the single authoritative choke point every discovery
  * path flows through (the daemon device-probe timer and `agents sync`), so it
- * re-subtracts the persisted ignore-list here rather than trusting the caller's
- * `pending` set. This closes the probe/ignore race (RUSH-2495): a probe that
- * computed `pending` BEFORE the user pressed "Ignore" (which persists the
- * dismissal via `addIgnored`) would otherwise re-create the just-dismissed
- * device's sentinel and the menu bar would re-surface it. A device on the
- * ignore-list is never written, regardless of what the caller passed.
+ * re-subtracts the persisted ignore-list AND the registered roster rather than
+ * trusting the caller's `pending` set. That closes two races:
+ *   - probe/ignore (RUSH-2495): a probe that computed `pending` BEFORE the user
+ *     pressed "Ignore" would otherwise re-create the just-dismissed device's
+ *     sentinel and the menu bar would re-surface it.
+ *   - registry-empty pollution: a process that had AGENTS_DEVICES_DIR redirected
+ *     (tests / hermetic runs) but still wrote the live devices-pending dir
+ *     treated every tailnet node as new — including already-registered fleet
+ *     boxes. Re-subtracting the live registry means those phantoms are never
+ *     written and are removed if they already exist.
  */
 export async function reconcilePendingSentinels(pending: PendingDevice[]): Promise<void> {
   const dir = getDevicesPendingDir();
-  // Best-effort: a corrupted ignore-list (loadIgnored throws by design) must not
-  // crash the daemon loop — treat it as "nothing ignored" and let the next probe
-  // recover once the file is fixed, rather than failing the whole reconcile.
-  let ignored: Set<string>;
-  try { ignored = await loadIgnored(); } catch { ignored = new Set(); }
+  const dismissed = await loadDismissedNames();
   const want = new Map(
     pending
-      .filter((p) => isSafeName(p.name) && !ignored.has(p.name))
+      .filter((p) => isSafeName(p.name) && !dismissed.has(p.name))
       .map((p) => [p.name, p.platform]),
   );
 

@@ -12,6 +12,11 @@
  *   5. a device the user has ignored is never written as a sentinel, even when
  *      the caller passes it in a stale `pending` set (the probe/ignore race,
  *      RUSH-2495) — the writer re-subtracts the persisted ignore-list.
+ *   6. a device already in the registry is never written as a sentinel either —
+ *      hermetic/test pollution that empties the registry view while writing the
+ *      live devices-pending dir would otherwise surface every fleet box as NEW.
+ *   7. pruneDismissedPendingSentinels removes registered/ignored sentinels
+ *      without needing a live tailscale probe (soft-fail recovery).
  */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
@@ -21,9 +26,19 @@ import * as path from 'path';
 
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-devices-pending-test-'));
 process.env.HOME = TEST_HOME;
+// Point devices registry/ignore at the hermetic home (tests/setup pins a shared
+// AGENTS_DEVICES_DIR; this suite needs its own registry for registered-name
+// filtering).
+process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, '.agents', '.history', 'devices');
+process.env.AGENTS_STATE_DIR = path.join(TEST_HOME, '.agents', '.cache', 'state');
 
-const { reconcilePendingSentinels, clearPendingSentinel, readPendingSentinels } = await import('./pending.js');
-const { addIgnored, removeIgnored } = await import('./registry.js');
+const {
+  reconcilePendingSentinels,
+  pruneDismissedPendingSentinels,
+  clearPendingSentinel,
+  readPendingSentinels,
+} = await import('./pending.js');
+const { addIgnored, removeIgnored, upsertDevice, removeDevice } = await import('./registry.js');
 
 function pendingDir(): string {
   return path.join(TEST_HOME, '.agents', '.cache', 'state', 'devices-pending');
@@ -31,6 +46,7 @@ function pendingDir(): string {
 
 beforeEach(async () => {
   await fsp.rm(pendingDir(), { recursive: true, force: true });
+  await fsp.rm(process.env.AGENTS_DEVICES_DIR!, { recursive: true, force: true });
 });
 
 afterAll(async () => {
@@ -91,6 +107,51 @@ describe('pending-device sentinels', () => {
       expect(readPendingSentinels()).toEqual([]);
     } finally {
       await removeIgnored('ghost');
+    }
+  });
+
+  it('never re-surfaces a device already in the registry, even in a stale pending set', async () => {
+    // Hermetic runs that redirect AGENTS_DEVICES_DIR empty the registry view
+    // while still writing the live devices-pending dir — every tailnet node
+    // then lands as NEW, including boxes already on the real roster. The
+    // writer re-subtracts the live registry so those phantoms are dropped.
+    await upsertDevice('zion', {
+      platform: 'macos',
+      address: { via: 'tailscale', dnsName: 'zion.example.ts.net' },
+    });
+    try {
+      await reconcilePendingSentinels([
+        { name: 'zion', platform: 'macos' },
+        { name: 'newbox', platform: 'linux' },
+      ]);
+      expect(readPendingSentinels().map((p) => p.name)).toEqual(['newbox']);
+      // A leftover sentinel for a device that later got registered is removed.
+      await reconcilePendingSentinels([{ name: 'zion', platform: 'macos' }]);
+      expect(readPendingSentinels()).toEqual([]);
+    } finally {
+      await removeDevice('zion');
+    }
+  });
+
+  it('pruneDismissedPendingSentinels removes registered/ignored without a full reconcile', async () => {
+    // Soft-fail recovery path: tailscale is down, so we cannot recompute the
+    // full pending set, but we can still drop names we know are dismissed.
+    await reconcilePendingSentinels([
+      { name: 'ghost', platform: 'linux' },
+      { name: 'zion', platform: 'macos' },
+      { name: 'maybe-new', platform: 'linux' },
+    ]);
+    await addIgnored('ghost');
+    await upsertDevice('zion', {
+      platform: 'macos',
+      address: { via: 'tailscale', dnsName: 'zion.example.ts.net' },
+    });
+    try {
+      await pruneDismissedPendingSentinels();
+      expect(readPendingSentinels().map((p) => p.name)).toEqual(['maybe-new']);
+    } finally {
+      await removeIgnored('ghost');
+      await removeDevice('zion');
     }
   });
 });

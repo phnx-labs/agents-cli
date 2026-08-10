@@ -268,7 +268,10 @@ One rule shapes the menu: **attention floats up, context groups down.**
 - **NEW DEVICES** — newly-discovered tailnet nodes awaiting approval, each with a
   Register / Ignore submenu. Shown only when there are pending nodes, and it now
   sits just above the DEVICES roster at the bottom (previously it floated up under
-  NEEDS YOU).
+  NEEDS YOU). Sentinels under `~/.agents/.cache/state/devices-pending/` are
+  written by the daemon device-probe; the writer re-subtracts both the ignore-list
+  and the registered roster so already-known or dismissed boxes never appear here
+  (and soft-fail probe ticks still prune them).
 - **DEVICES** — the full registered-fleet roster as **one collapsible block,
   folded by default** (the fleet is long, so `▶ DEVICES (N)` stays out of the way
   until you open it — same in-place accordion as ACTIVE, no CLI on toggle). Each

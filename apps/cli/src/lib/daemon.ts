@@ -1050,8 +1050,11 @@ export async function runDaemon(): Promise<void> {
   // appeared tailnet nodes, dropping a sentinel per pending device so the
   // menu-bar helper can surface "NEW DEVICES → Register / Ignore". Refresh mode
   // never auto-registers a newcomer; a machine without tailscale is a clean
-  // no-op. `reconcilePendingSentinels` re-subtracts the ignore-list itself, so a
-  // device the user dismissed is never re-surfaced (RUSH-2495).
+  // no-op. `reconcilePendingSentinels` re-subtracts the ignore-list AND the
+  // registered roster, so a dismissed or already-known device is never
+  // re-surfaced (RUSH-2495 + registry-empty pollution). On soft-fail (no
+  // tailscale) we still prune registered/ignored sentinels so a hermetic test
+  // leak cannot leave fleet boxes in NEW DEVICES forever.
   let deviceProbeInterval: NodeJS.Timeout | undefined;
   if (isEnabled('device-probe')) {
     let deviceProbeInFlight = false;
@@ -1060,9 +1063,16 @@ export async function runDaemon(): Promise<void> {
       deviceProbeInFlight = true;
       try {
         const { runDeviceSync } = await import('./devices/sync.js');
-        const { reconcilePendingSentinels } = await import('./devices/pending.js');
+        const {
+          reconcilePendingSentinels,
+          pruneDismissedPendingSentinels,
+        } = await import('./devices/pending.js');
         const dev = await runDeviceSync({ soft: true, mode: 'refresh' });
-        if (!dev.ok) return;
+        if (!dev.ok) {
+          await pruneDismissedPendingSentinels();
+          if (dev.reason) log('WARN', `device probe soft-fail: ${dev.reason}`);
+          return;
+        }
         await reconcilePendingSentinels(dev.pending);
         if (dev.pending.length) {
           log('INFO', `devices: ${dev.pending.length} new pending (${dev.pending.map((p) => p.name).join(', ')})`);
@@ -1073,6 +1083,10 @@ export async function runDaemon(): Promise<void> {
         deviceProbeInFlight = false;
       }
     };
+    // Fire once on start so a leftover pollution set is cleared without waiting
+    // for the first interval tick (the 3-minute lag is how the menubar sat on
+    // 20 phantom NEW DEVICES after a hermetic leak).
+    void runDeviceProbeTick();
     deviceProbeInterval = setInterval(() => { void runDeviceProbeTick(); }, DEVICE_PROBE_TICK_MS);
   } else {
     log('INFO', 'Device-probe service disabled');
