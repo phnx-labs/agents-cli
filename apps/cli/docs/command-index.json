@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 103,
-  "commands": 581,
+  "groups": 104,
+  "commands": 584,
   "root": {
     "name": "agents",
     "path": "",
@@ -47,12 +47,12 @@
       "name": "accounts",
       "path": "accounts",
       "aliases": [],
-      "description": "Manage durable provider credentials",
+      "description": "Browse and name signed-in harness accounts",
       "args": [],
       "options": [
         {
           "flags": "--json",
-          "description": "Machine-readable account metadata",
+          "description": "Machine-readable discovered accounts",
           "long": "--json",
           "required": false,
           "optional": false,
@@ -70,111 +70,57 @@
           "negate": false
         }
       ],
-      "examples": "agents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts inspect work --json\nagents run claude --account work",
-      "notes": "Accounts are durable credentials, independent of agent versions. Native OAuth login remains managed by the harness and is not copied or renamed by agents-cli.",
+      "examples": "agents accounts\nagents accounts name work\nagents accounts name work --from claude@2.1.220\nagents run claude --account work",
+      "notes": "First run the harness and complete its normal login. A label names one provider account; every matching installed version is discovered automatically. OAuth credentials are never copied or shared.",
       "subcommands": [
-        {
-          "name": "add",
-          "path": "accounts add",
-          "aliases": [],
-          "description": "Add a durable API key, setup token, or bearer token",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--provider <provider>",
-              "description": "Credential provider (anthropic, bedrock, cursor, foundry, google, litellm, ollama, openai, opencode, openrouter, proxy, truefoundry, vllm, xai)",
-              "long": "--provider",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--auth <type>",
-              "description": "Credential type: api-key | setup-token | bearer-token",
-              "long": "--auth",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--from-secrets <bundle:key>",
-              "description": "Import from an existing agents secrets entry",
-              "long": "--from-secrets",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "inspect",
-          "path": "accounts inspect",
-          "aliases": [],
-          "description": "Show safe account metadata",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Machine-readable output",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
         {
           "name": "list",
           "path": "accounts list",
           "aliases": [],
-          "description": "List credential accounts",
+          "description": "Alias for accounts",
           "args": [],
           "options": [
             {
               "flags": "--json",
-              "description": "Machine-readable account metadata",
+              "description": "Machine-readable discovered accounts",
               "long": "--json",
               "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "name",
+          "path": "accounts name",
+          "aliases": [],
+          "description": "Name one signed-in account; matching installed versions are found automatically",
+          "args": [
+            {
+              "name": "label",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--from <agent@version>",
+              "description": "Non-interactive identity source",
+              "long": "--from",
+              "required": true,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -196,10 +142,10 @@
           "name": "remove",
           "path": "accounts remove",
           "aliases": [],
-          "description": "Remove an account and its device-local credential",
+          "description": "Remove a saved account label",
           "args": [
             {
-              "name": "name",
+              "name": "label",
               "required": true,
               "variadic": false,
               "description": ""
@@ -223,7 +169,7 @@
           "name": "rename",
           "path": "accounts rename",
           "aliases": [],
-          "description": "Rename an account without changing its stable id",
+          "description": "Rename a saved account label",
           "args": [
             {
               "name": "old",
@@ -239,42 +185,6 @@
             }
           ],
           "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "set-key",
-          "path": "accounts set-key",
-          "aliases": [],
-          "description": "Rotate an account credential without changing its identity",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--from-secrets <bundle:key>",
-              "description": "Import from an existing agents secrets entry",
-              "long": "--from-secrets",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -5521,6 +5431,163 @@
       ]
     },
     {
+      "name": "config",
+      "path": "config",
+      "aliases": [],
+      "description": "Unified config barrel: get, set, list, and unset agent run defaults, tier overrides, and device options.",
+      "args": [],
+      "options": [
+        {
+          "flags": "-h, --help",
+          "description": "Show help",
+          "short": "-h",
+          "long": "--help",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        }
+      ],
+      "examples": "agents config set run.claude@*.model best\n      agents config set run.claude@*.tier.best claude-opus-4-8\n      agents config set run.claude@2.1.45.model claude-opus-4-8\n      agents config set run.claude@*.mode auto\n      agents config set interactive.host zion\n      agents config set browser.profile work\n      agents config set devices.mac-mini.max-agents 4\n      agents config get run.claude@*.model\n      agents config unset run.claude@*.tier.best\n      agents config list",
+      "notes": "Every agent/harness reference uses agent@version. Use * for all versions.\n      Tier overrides are part of the run namespace: run.<agent@version>.tier.<tier>.\n      Old commands (defaults run, models tier, devices configure, etc.) still work\n      but delegate here and print a deprecation warning.",
+      "subcommands": [
+        {
+          "name": "get",
+          "path": "config get",
+          "aliases": [],
+          "description": "Get the current value of a config key",
+          "args": [
+            {
+              "name": "key",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Output machine-readable JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "list",
+          "path": "config list",
+          "aliases": [],
+          "description": "List configured config keys and their values",
+          "args": [],
+          "options": [
+            {
+              "flags": "--device <name>",
+              "description": "List config for a specific device instead of this machine",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Output machine-readable JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "set",
+          "path": "config set",
+          "aliases": [],
+          "description": "Set a config key",
+          "args": [
+            {
+              "name": "key",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "value",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "unset",
+          "path": "config unset",
+          "aliases": [],
+          "description": "Unset a config key (restore default behavior)",
+          "args": [
+            {
+              "name": "key",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        }
+      ]
+    },
+    {
       "name": "cost",
       "path": "cost",
       "aliases": [],
@@ -6166,8 +6233,6 @@
           "negate": false
         }
       ],
-      "examples": "Discover & register:\n        agents devices sync            # pick which tailscale nodes to keep (TTY)\n        agents devices sync --yes      # register all non-ignored nodes\n        agents devices ignore ipad165  # dismiss a node so it's never re-suggested\n\n      Inspect:\n        agents devices list            # what's registered (★ = interactive host)\n        agents devices status          # live reachability + load\n        agents devices ping            # quick liveness probe\n\n      Configure a device:\n        agents devices set-interactive zion   # where agents show YOU artifacts\n        agents devices configure mac-mini --max-agents 4 --scheduler off\n        agents devices note mac-mini \"runs the releases — don't reboot\"\n        agents devices set win-mini --auth password --bundle muqsit\n        agents devices set worker --auth key --identity-file ~/.ssh/worker_ed25519\n        agents devices render --write  # write ~/.ssh/config.d/agents include\n\n      Factory auto-launch:\n        agents devices prefer mac-mini   # boost in auto-launch ranking\n        agents devices disable zion      # exclude from auto-launch\n\n      Fleet operations:\n        agents fleet update              # roll out latest agents-cli everywhere\n        agents fleet run uname -a        # run a command on every online device",
-      "notes": "`agents fleet` is an alias for `agents devices` — same subcommands.",
       "subcommands": [
         {
           "name": "accounts",
@@ -6450,7 +6515,9 @@
         {
           "name": "configure",
           "path": "devices configure",
-          "aliases": [],
+          "aliases": [
+            "config"
+          ],
           "description": "Get or set per-device config: --max-agents, --scheduler. Written to ~/.agents/devices/<name>/agents.yaml (works for any device — the devices/ tree syncs). Unset = default behavior.",
           "args": [
             {
@@ -6480,6 +6547,15 @@
               "negate": false
             },
             {
+              "flags": "--inherited",
+              "description": "also show user-level keys (e.g. interactive.host) that apply to this device",
+              "long": "--inherited",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--json",
               "description": "output machine-readable JSON",
               "long": "--json",
@@ -6499,8 +6575,8 @@
               "negate": false
             }
           ],
-          "examples": "agents devices configure mac-mini --max-agents 4      # cap concurrent agents\n      agents devices configure mac-mini --scheduler off     # no routines firing there\n      agents devices configure mac-mini                     # print its current config\n      agents devices configure mac-mini --json              # machine-readable",
-          "notes": "Run it on any machine for any device: the value lands in\n      ~/.agents/devices/<name>/agents.yaml locally and reaches the device on the\n      next 'agents repo push/pull'. Unset keys keep today's behavior.\n      --scheduler takes effect when the daemon reloads or restarts on that\n      device ('agents routines start' / the reload a 'routines add' sends).\n      For the default browser profile use 'agents browser profiles set-default\n      <name>'; for free-form text use 'agents devices note'.",
+          "examples": "agents devices config mac-mini --max-agents 4         # cap concurrent agents\n      agents devices config mac-mini --scheduler off        # no routines firing there\n      agents devices config mac-mini                        # print its current config\n      agents devices config mac-mini --inherited            # include user-level keys\n      agents devices config mac-mini --json                 # machine-readable",
+          "notes": "Run it on any machine for any device: the value lands in\n      ~/.agents/devices/<name>/agents.yaml locally and reaches the device on the\n      next 'agents repo push/pull'. Unset keys keep today's behavior.\n      --scheduler takes effect when the daemon reloads or restarts on that\n      device ('agents routines start' / the reload a 'routines add' sends).\n      For the default browser profile use 'agents browser profiles set-default\n      <name>'; for free-form text use 'agents devices note'.\n      User-level keys such as interactive.host live in ~/.agents/agents.yaml and\n      sync fleet-wide; use --inherited to see them in this device view.",
           "subcommands": []
         },
         {
@@ -8383,17 +8459,8 @@
               "negate": false
             },
             {
-              "flags": "--account <name>",
-              "description": "Default durable credential account",
-              "long": "--account",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--auth-provider <provider>",
-              "description": "Removed: use agents accounts add, then --account",
+              "description": "Attach a keychain-backed API key under this provider (for private endpoints)",
               "long": "--auth-provider",
               "required": true,
               "optional": false,
@@ -8420,7 +8487,7 @@
             },
             {
               "flags": "--from-secrets <bundle>[:<key>]",
-              "description": "Removed: import the value with agents accounts add, then use --account",
+              "description": "Copy a value from an agents secrets bundle into this harness's own keychain item, once (not a live link)",
               "long": "--from-secrets",
               "required": true,
               "optional": true,
@@ -8491,17 +8558,8 @@
               "negate": false
             },
             {
-              "flags": "--account <name>",
-              "description": "Change the default durable credential account",
-              "long": "--account",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--auth-provider <provider>",
-              "description": "Removed: use agents accounts add, then --account",
+              "description": "Repoint auth at a different provider (keychain-backed)",
               "long": "--auth-provider",
               "required": true,
               "optional": false,
@@ -8537,7 +8595,7 @@
             },
             {
               "flags": "--from-secrets <bundle>[:<key>]",
-              "description": "Removed: import the value with agents accounts add, then use --account",
+              "description": "Copy a value from an agents secrets bundle into this harness's own keychain item, once (not a live link)",
               "long": "--from-secrets",
               "required": true,
               "optional": true,
@@ -8605,17 +8663,8 @@
               "negate": false
             },
             {
-              "flags": "--account <name>",
-              "description": "Default durable credential account",
-              "long": "--account",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--auth-provider <provider>",
-              "description": "Removed: use agents accounts add, then --account",
+              "description": "Attach a keychain-backed API key under this provider",
               "long": "--auth-provider",
               "required": true,
               "optional": false,
@@ -8642,7 +8691,7 @@
             },
             {
               "flags": "--from-secrets <bundle>[:<key>]",
-              "description": "Removed: import the value with agents accounts add, then use --account",
+              "description": "Copy a value from an agents secrets bundle into this harness's own keychain item, once (not a live link)",
               "long": "--from-secrets",
               "required": true,
               "optional": true,
@@ -14492,15 +14541,6 @@
               "negate": false
             },
             {
-              "flags": "--account <name>",
-              "description": "Attach an existing durable credential account",
-              "long": "--account",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--key-stdin",
               "description": "Read API key from stdin instead of prompting (for scripts/CI)",
               "long": "--key-stdin",
@@ -19795,8 +19835,8 @@
           "negate": false
         },
         {
-          "flags": "--account <name>",
-          "description": "Use this durable provider credential for the run",
+          "flags": "--account <label>",
+          "description": "Run a healthy installed version currently signed into this named account (never falls back to another identity)",
           "long": "--account",
           "required": true,
           "optional": false,
@@ -29233,6 +29273,15 @@
           "negate": false
         },
         {
+          "flags": "--account <label>",
+          "description": "Disambiguate by signed-in account when several installations match",
+          "long": "--account",
+          "required": true,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
           "flags": "--json",
           "description": "Machine-readable result",
           "long": "--json",
@@ -29252,8 +29301,8 @@
           "negate": false
         }
       ],
-      "examples": "agents update list claude\nagents update claude@2.0.65\nagents update claude@2.0.65 --to 2.1.220\nagents update claude@2.0.65 --json",
-      "notes": "An installation keeps its name for life; only the release inside it moves. That is why a default, a project pin, a routine version, or a profile that names claude@2.0.65 keeps working after you update it. The selector matches either the installation name or the release it currently carries — when two installations share a release, select one by its installation name. The new release is fetched and launched before it replaces the working one, so a bad release leaves your agent running.",
+      "examples": "agents update list claude\nagents update claude@2.0.65\nagents update claude@2.0.65 --to 2.1.220\nagents update claude --account work\nagents update claude@2.0.65 --json",
+      "notes": "An installation keeps its name for life; only the release inside it moves. That is why a default, a project pin, a routine version, or a profile that names claude@2.0.65 keeps working after you update it. The selector matches either the installation name or the release it currently carries — when two installations share a release, name one or pass --account <label> (see: agents accounts). The new release is fetched and launched before it replaces the working one, so a bad release leaves your agent running.",
       "subcommands": [
         {
           "name": "list",

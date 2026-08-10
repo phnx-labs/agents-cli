@@ -14,18 +14,16 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_103 command groups · 581 commands._
+_104 command groups · 584 commands._
 
-## accounts — Manage durable provider credentials
+## accounts — Browse and name signed-in harness accounts
 
 ```
-agents accounts                     Manage durable provider credentials
-agents accounts add <name>          Add a durable API key, setup token, or bearer token
-agents accounts inspect <name>      Show safe account metadata
-agents accounts list                List credential accounts
-agents accounts remove <name>       Remove an account and its device-local credential
-agents accounts rename <old> <new>  Rename an account without changing its stable id
-agents accounts set-key <name>      Rotate an account credential without changing its identity
+agents accounts                     Browse and name signed-in harness accounts
+agents accounts list                Alias for accounts
+agents accounts name <label>        Name one signed-in account; matching installed versions are found automatically
+agents accounts remove <label>      Remove a saved account label
+agents accounts rename <old> <new>  Rename a saved account label
 ```
 
 ## add — Download and install agent CLI versions. Enables subsidized API usage through managed binaries.
@@ -185,6 +183,16 @@ agents computer stop         Deactivate the helper daemon — local launchd (mac
 agents computer type         Set a field value (--id) or paste at a coordinate (--x --y)
 agents computer type-text    Type an arbitrary unicode string into the focused field (focus first via click/focus)
 agents computer wait         Wait for a duration (--duration) or for an element (--id / --role/--label) to satisfy --until
+```
+
+## config — Unified config barrel: get, set, list, and unset agent run defaults, tier overrides, and device options.
+
+```
+agents config                    Unified config barrel: get, set, list, and unset agent run defaults, tier overrides, and device options.
+agents config get <key>          Get the current value of a config key
+agents config list               List configured config keys and their values
+agents config set <key> <value>  Set a config key
+agents config unset <key>        Unset a config key (restore default behavior)
 ```
 
 ## cost — Roll up $ cost and duration across local agent sessions
