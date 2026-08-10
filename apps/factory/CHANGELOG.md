@@ -6,6 +6,20 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **New Sessions tab — see and recover every session you own.** A dense, virtualized
+  Sessions surface is now the first subtab on the Floor (before Agents). It lists every
+  session across projects — local and remote, active and **orphaned** — and its whole
+  reason for being is the reboot case: when your machine sleeps or drops off the network,
+  the sessions that got detached (orphaned) or crashed float to a **Needs reconnecting**
+  band with one-click **Resume** (and a Resume-all), each routed to the session's owning
+  machine. **Star** any session (☆) to pin it to the top. Filter by All / Active /
+  Orphaned / Starred, project, host, or free-text search; **group** by State / Project /
+  Host / Flat and **sort** by Last active / Started / Status / Name / Tokens. It reads the
+  roster Factory already polls and does all filtering/sorting/grouping client-side, and
+  the list is virtualized, so hundreds of sessions stay instant. Under the hood the CLI's
+  real lifecycle status (`orphaned`/`crashed`/`abandoned`) is now preserved end-to-end
+  (`FloorAgent.liveStatus`/`pidAlive`) instead of being collapsed to `idle`.
+
 - **Factory no longer maps a new Codex tab to an older same-folder session (RUSH-2430).** Newly-created tabs wait for their own rollout across managed Codex version homes, restored tabs retain recovery, and local or picked-host tabs replace a stored UUID when that device's live `AGENT_TERMINAL_ID` map proves it stale. Picked-host identity hydration now runs even when automatic tab labels are disabled.
 
 - **Picked-host Codex tabs auto-label after remote ID hydration (RUSH-2411).** A

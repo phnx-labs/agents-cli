@@ -150,6 +150,7 @@ export interface FloorAgent {
   tok: number           // output tok/s; 0 when not streaming
   since: string          // human elapsed, e.g. "2s", "14m", "3h"
   lastActivityMs: number // epoch ms of last observed activity; drives the live heartbeat. 0 when unknown.
+  startedAtMs?: number   // epoch ms the session started; 0/undefined when unknown. Drives the Sessions "Started" (creation-time) sort, distinct from lastActivityMs. Set by the adapters; fixtures may omit it.
   files: number
   tools: number
   needs: boolean         // waiting || failed || (done && unreviewed)
@@ -168,6 +169,7 @@ export interface FloorAgent {
   worktreePath: string   // absolute worktree path, for the Reveal-worktree action; '' when not a worktree
   resp: string           // last response text (Anthropic Agent-view style)
   prompt?: string        // the ORIGINAL task (first user message / dispatch prompt / topic); anchors the card, distinct from the last message
+  topic?: string         // the session's task/label line from the roster (topic/label/prompt). The Sessions surface's row title + search field. Falls back to prompt/name when absent.
   messages: string[]     // the last few assistant messages (from the CLI's last_messages window); [] when none. Drives the detail-pane Activity feed.
   question: StructuredQuestion | null
   reply: ReplyTarget     // how a user reply reaches this agent (host dispatches on kind)
@@ -182,6 +184,51 @@ export interface FloorAgent {
    * usageStatus — set when the session transcript shows 429 / rate-limit text.
    */
   rateLimited?: boolean
+  /**
+   * Raw CLI lifecycle word ('orphaned' | 'crashed' | 'abandoned' | 'idle' |
+   * 'running' | 'waiting' | ...), carried verbatim from the roster because `phase`
+   * collapses orphaned/crashed into a state it can't tell apart. The Sessions
+   * surface reads this to route a detached-but-alive session into the "needs
+   * reconnecting" band. '' / undefined when the CLI supplied no status (e.g. a
+   * Factory-owned local tab, which is attached by definition).
+   */
+  liveStatus?: string
+  /** Whether the session's OS process is still alive (from the CLI `pidAlive`).
+   *  Undefined for Factory-owned tabs (always live). Distinguishes an orphaned but
+   *  running session (resume attaches) from a crashed one (resume relaunches). */
+  pidAlive?: boolean
+}
+
+// ---------- Sessions surface (manage / recover) ----------
+
+/** The status filter chips on the Sessions surface. */
+export type SessionFilter = 'all' | 'active' | 'orphaned' | 'starred'
+/** How the Sessions list is grouped into sections. */
+export type SessionGroup = 'state' | 'project' | 'host' | 'flat'
+/** The within-group sort key for the Sessions list. */
+export type SessionSort = 'recent' | 'started' | 'status' | 'name' | 'tok'
+
+/**
+ * The band a session belongs to when grouped by state — the shape the Sessions
+ * surface leads with. 'reconnect' is the acute case (alive-but-detached or
+ * crashed) the whole surface exists for; it is derived from the raw `liveStatus`,
+ * never from `phase` (which can't see it). Pure so it is unit-tested.
+ */
+export type SessionBand = 'reconnect' | 'active' | 'done'
+
+/** Lowercased lifecycle words that mean "alive/left-behind, resume to reconnect". */
+const RECONNECT_STATUSES = new Set(['orphaned', 'crashed', 'abandoned'])
+
+/** Does this session need reconnecting (detached-but-alive, crashed, or abandoned)? */
+export function needsReconnect(a: Pick<FloorAgent, 'liveStatus'>): boolean {
+  return RECONNECT_STATUSES.has((a.liveStatus ?? '').toLowerCase())
+}
+
+/** Assign a session to its state band. reconnect > active(working/waiting/idle) > done. */
+export function sessionBand(a: FloorAgent): SessionBand {
+  if (needsReconnect(a)) return 'reconnect'
+  if (a.phase === 'done') return 'done'
+  return 'active'
 }
 
 // ---------- HOSTS sidebar rows ----------
@@ -344,7 +391,7 @@ export interface FloorTicket {
 
 // ---------- controls state ----------
 
-export type CenterMode = 'agents' | 'backlog' | 'host' | 'projects' | 'recap' | 'prs'
+export type CenterMode = 'sessions' | 'agents' | 'backlog' | 'host' | 'projects' | 'recap' | 'prs'
 
 // Host detail pane payloads. Mirror of extension/src/core/hostInventory.ts —
 // the webview can't import from src/*, so the shape is redeclared here and

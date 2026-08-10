@@ -125,6 +125,13 @@ export interface RemoteSessionLike {
   cwd: string
   project: string
   phase: 'running' | 'idle' | 'waiting' | 'failed' | 'done'
+  /** Raw CLI lifecycle word ('orphaned' | 'crashed' | 'idle' | 'running' | ...),
+   *  carried verbatim because `phase` can't distinguish orphaned/crashed from idle.
+   *  Read by the Sessions surface to route a detached-but-alive session into the
+   *  "needs reconnecting" band. Absent on older payloads. */
+  liveStatus?: string
+  /** Whether the OS process is still alive (`pidAlive` from the CLI). Absent -> treated alive. */
+  pidAlive?: boolean
   activity: string
   tokPerSec: number
   waitingForInput: boolean
@@ -504,6 +511,9 @@ export function toFloorAgentFromUnified(
     since: sinceFromIso(u.timestamp, opts.nowMs),
     // u.timestamp is the session's last-activity stamp, so the heartbeat is exact locally.
     lastActivityMs: isoToMs(u.timestamp),
+    // A Factory-owned tab carries no reliable start epoch in the unified model; 0
+    // means "unknown", which the Started sort orders last. Default sort is recency.
+    startedAtMs: 0,
     files: u.files.length,
     tools: u.toolCalls,
     needs,
@@ -522,6 +532,8 @@ export function toFloorAgentFromUnified(
     plans,
     resp,
     prompt,
+    // The Sessions surface's row title: the task line, falling back to the tab name.
+    topic: prompt || u.displayName,
     messages,
     // Prefer the AskUserQuestion tool-call's own question + options (they live in the
     // tool INPUT, invisible to the text heuristic); fall back to parsing the last message.
@@ -621,6 +633,10 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     name,
     abbr: abbrFor(r.agentType),
     phase,
+    // Raw lifecycle word (orphaned/crashed/abandoned/...) kept for the Sessions
+    // reconnect band; phase can't carry it. Undefined -> the session is attached.
+    liveStatus: r.liveStatus,
+    pidAlive: r.pidAlive,
     verb,
     target,
     tok: r.tokPerSec,
@@ -630,6 +646,8 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     // turn, not the session's age. Fall back to start when no file signal exists; 0
     // (unknown) disables the heartbeat rather than raising a false stall.
     lastActivityMs: r.lastActivityMs && r.lastActivityMs > 0 ? r.lastActivityMs : (r.startedAtMs > 0 ? r.startedAtMs : 0),
+    startedAtMs: r.startedAtMs || 0,
+    topic: r.topic || r.label || undefined,
     files: 0,
     tools: 0,
     needs,

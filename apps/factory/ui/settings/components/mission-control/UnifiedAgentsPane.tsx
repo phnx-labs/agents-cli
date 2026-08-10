@@ -39,6 +39,7 @@ import { TicketDetail } from './TicketDetail'
 import { HostDetail } from './HostDetail'
 import { ProjectsPane } from './ProjectsPane'
 import { FeedItem, FollowUpBox } from './FeedItem'
+import { SessionsPane } from './SessionsPane'
 import { NeedsYouClusters } from './NeedsYouClusters'
 import { AgentDecision } from './AgentDecision'
 import {
@@ -50,6 +51,7 @@ import {
   ticketWorkers,
   projectRollups,
   visibleFloorAgents,
+  needsReconnect,
   type FloorAgent,
   type FloorAttachment,
   type FloorTicket,
@@ -1739,6 +1741,14 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     }
   }, [unifiedById])
 
+  // Bulk reconnect: resume/focus every selected session. Each opens on its OWNING
+  // machine via the same single-session path (the CLI decides attach vs recover and
+  // routes remote sessions to their host) — so a whole project's worth of lost work
+  // comes back in one action. The extension owns launching; this only posts intents.
+  const resumeManyAgents = useCallback((list: FloorAgent[]) => {
+    for (const a of list) openTerminalForAgent(a)
+  }, [openTerminalForAgent])
+
   const onBatchReply = useCallback((cluster: FloorAgent[], option: string) => {
     for (const a of cluster) replyToAgent(a, option)
   }, [replyToAgent])
@@ -2044,6 +2054,9 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
 
   // The fixed sub-tabs: one per CenterMode, with a live count + (agents) needs badge.
   const fixedTabs: FixedTab[] = useMemo(() => [
+    // Sessions leads: the manage/recover surface for every session you own (local +
+    // remote, active + orphaned). The needs badge counts sessions to reconnect.
+    { center: 'sessions', label: 'Sessions', count: floorAgents.length, needs: floorAgents.filter(needsReconnect).length },
     { center: 'agents', label: 'Agents', count: floorAgents.length, needs: needsAgents.length },
     { center: 'backlog', label: 'Backlog', count: floorTickets.length },
     { center: 'projects', label: 'Projects', count: managedProjects.length },
@@ -2087,6 +2100,15 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         )}
       </div>
     </div>
+  ) : center === 'sessions' ? (
+    <SessionsPane
+      agents={floorAgents}
+      onToggleStar={(a) => togglePin(a.id)}
+      onResume={openTerminalForAgent}
+      onResumeMany={resumeManyAgents}
+      onSelect={(a) => selectFloorAgent(a.id)}
+      selectedId={selectedAgentId}
+    />
   ) : center === 'backlog' ? (
     <BacklogCenter
       tickets={floorTickets}

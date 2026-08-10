@@ -160,6 +160,18 @@ export interface RemoteSession {
   cwd: string;
   project: string;
   phase: RemotePhase;
+  /** The RAW CLI lifecycle status word, lowercased ('running' | 'idle' |
+   *  'orphaned' | 'crashed' | 'abandoned' | 'waiting' | 'closed' | ...), carried
+   *  verbatim because `phase` collapses it (orphaned/crashed both map to a phase
+   *  that can't be told apart). The Sessions surface reads this to route a
+   *  detached-but-alive session into the "needs reconnecting" band. '' when the
+   *  CLI supplied no status. */
+  liveStatus: string;
+  /** Whether the session's OS process is still alive, from the CLI payload
+   *  (`pidAlive`). Distinguishes an orphaned-but-running session (resume attaches)
+   *  from a crashed one (resume relaunches via /continue). Defaults true when the
+   *  CLI omits it (a live roster row). */
+  pidAlive: boolean;
   /** Live now-line for the card (the CLI's `preview` while the agent is working). */
   activity: string;
   /** Output-token throughput from the CLI payload (`ActiveSession.tokPerSec`), rounded. */
@@ -596,6 +608,10 @@ export function normalizeActiveSession(
     cwd,
     project: resolveProject(cwd, projectRules),
     phase,
+    // Raw lifecycle word kept verbatim (phase loses orphaned/crashed). Absent -> ''.
+    liveStatus: (status || '').toLowerCase(),
+    // The CLI omits pidAlive for some rows (cloud/team) — treat a live roster row as alive.
+    pidAlive: raw.pidAlive !== false,
     // The now-line is live only while the CLI says the agent is working; an idle
     // or waiting session must not keep showing its last tool action as current.
     activity: raw.activity === 'working' ? preview : '',
@@ -700,6 +716,10 @@ export function normalizeRecentSession(
     cwd,
     project: asStr(raw.project) || resolveProject(cwd, projectRules),
     phase: 'idle',
+    // A recent (historical, not-live) session is a resumable transcript, not a
+    // running process — surface it as such rather than inventing an orphan state.
+    liveStatus: 'idle',
+    pidAlive: false,
     activity: '',
     tokPerSec: 0,
     waitingForInput: false,
