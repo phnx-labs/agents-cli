@@ -2,8 +2,6 @@
 
 ## 1.22.36
 
-- **DeepInfra is a built-in profile and durable account provider (RUSH-2362).** `agents accounts add deepinfra --provider deepinfra --auth api-key` stores the API key in the existing prompt-free account bundle, and `agents profiles add deepinfra --account deepinfra` configures Codex for `https://api.deepinfra.com/v1/openai` with `deepseek-ai/DeepSeek-V3`. The daemon-owned BYOK refresh path reads DeepInfra's documented `/payment/checklist` endpoint so `agents view` can show current usage and remaining budget without raising a credential prompt.
-
 - **`agents repo sync <alias>` is a new git-level sync verb for a single DotAgents repo.** The old `agents sync <repo>` umbrella syncs resources (skills, hooks, memory, …) from the repo's files into each agent's home dir; `agents repo sync` only does the git pull/push — the same step `agents sync` does first, now accessible on its own. Alias semantics: `system` is pull-only (the system repo is a read-only mirror); `user` and any registered extra also push. The command mirrors the existing `repos pull` / `repos push` pair's alias grammar but runs them as one round-trip. Source: `apps/cli/src/commands/repo.ts`.
 
 - **`agents hooks sync`, `agents skills sync`, and `agents commands sync` — dead error stubs removed.** These hidden subcommands existed solely to print `"agents X sync" is gone.` and exit 1. They pre-dated auto-sync on launch and had no callers; removing them cleans the command surface without any behavior change (auto-sync on launch remains). Source: `apps/cli/src/commands/hooks.ts`, `apps/cli/src/commands/skills.ts`, `apps/cli/src/commands/commands.ts`.
