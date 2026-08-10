@@ -18,6 +18,7 @@ import { spawn, execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { getCliLaunch, getAgentsBinDir } from './cli-entry.js';
 import type { JobConfig, RunMeta } from './routines.js';
 import {
   resolveJobPrompt,
@@ -780,16 +781,59 @@ function buildShellCommand(command: string): string[] {
  * Real (un-sandboxed) environment for a command routine. Command routines do
  * `npm i -g` / `git pull` and need the actual $HOME / $PATH, not the sandbox
  * overlay. Only TZ is injected when the routine pins a timezone.
+ *
+ * The current binary's directory is prepended to PATH so bare `agents` invocations
+ * resolve to the same install on Windows (where shell-function injection is not
+ * available) and as a fallback on POSIX for invocations like `command agents`.
  */
 function commandSpawnEnv(config: JobConfig): Record<string, string> {
   const env = { ...process.env } as Record<string, string>;
   if (config.timezone) env.TZ = config.timezone;
+  const sep = process.platform === 'win32' ? ';' : ':';
+  const binDir = getAgentsBinDir();
+  const existing = env.PATH ?? '';
+  if (!existing.split(sep).includes(binDir)) {
+    env.PATH = existing ? `${binDir}${sep}${existing}` : binDir;
+  }
   return env;
 }
 
 /** POSIX single-quote a string so it is safe to embed in a `/bin/sh -c` script. */
 function shSingleQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Build a POSIX shell function that forwards `agents <sub...>` to the SAME binary
+ * currently running. Command routines shell out to the bare name `agents`
+ * (`agents __daemon-tick usage-refresh`); without this, the routine resolves
+ * `agents` through its inherited PATH, which can pick up a stale install in an
+ * nvm/system Node prefix that shadows the current binary (RUSH-2431).
+ *
+ * Uses getCliLaunch so the relaunch is correct for both JS installs
+ * (`node <entry> <sub...>`) and compiled standalone binaries (`<bin> <sub...>`).
+ */
+function agentsShellFunction(): string {
+  const launch = getCliLaunch(['__ac_placeholder__']);
+  const parts: string[] = [launch.command];
+  // JS installs: getCliLaunch returns [node, entryScript, placeholder].
+  // Standalone: it returns [binary, placeholder].
+  if (launch.args.length > 0 && launch.args[0] !== '__ac_placeholder__' && fs.existsSync(launch.args[0])) {
+    parts.push(launch.args[0]);
+  }
+  const invocation = parts.map(shSingleQuote).join(' ');
+  return `agents() { ${invocation} "$@"; }`;
+}
+
+/**
+ * Wrap a command-routine shell string so any bare `agents` invocation resolves
+ * to the current binary. On POSIX this injects an `agents` shell function; on
+ * Windows it is left unchanged and commandSpawnEnv prepends the current binary's
+ * directory to PATH instead.
+ */
+function wrapCommandRoutine(command: string): string {
+  if (process.platform === 'win32') return command;
+  return `${agentsShellFunction()}\n${command}`;
 }
 
 /**
@@ -1642,7 +1686,7 @@ async function executeCommandJobForeground(config: JobConfig, attempt: RoutineAt
   writeRunMeta(meta);
 
   const timeoutMs = parseTimeout(config.timeout) || 10 * 60 * 1000;
-  const cmd = buildShellCommand(config.command!);
+  const cmd = buildShellCommand(wrapCommandRoutine(config.command!));
   const env = commandSpawnEnv(config);
 
   process.stderr.write(`[agents] routine ${config.name}: running command\n`);
@@ -1960,10 +2004,11 @@ function executeCommandJobDetached(config: JobConfig, attempt: RoutineAttempt, h
   const exitCodePath = path.join(runDir, 'exit-code');
   // Run the command in a SUBSHELL `( … )` so that if it calls `exit`, only the
   // subshell exits — the outer shell still captures `$?` and writes the file.
+  const wrappedCommand = wrapCommandRoutine(config.command!);
   const cmd = process.platform === 'win32'
-    ? buildShellCommand(config.command!)
+    ? buildShellCommand(wrappedCommand)
     : ['/bin/sh', '-c',
-        `(\n${config.command!}\n)\n__ac_rc=$?; printf '%s' "$__ac_rc" > ${shSingleQuote(exitCodePath)} 2>/dev/null; exit $__ac_rc`];
+        `(\n${wrappedCommand}\n)\n__ac_rc=$?; printf '%s' "$__ac_rc" > ${shSingleQuote(exitCodePath)} 2>/dev/null; exit $__ac_rc`];
   const env = commandSpawnEnv(config);
 
   const meta: RunMeta = {

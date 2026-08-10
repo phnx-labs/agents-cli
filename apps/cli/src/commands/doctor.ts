@@ -82,6 +82,7 @@ import { auditWindowsSshEnrollment, diagnoseWindowsSshFailure } from '../lib/dev
 import { scanUserRcFiles, masterPassphraseInEnv } from '../lib/secrets/rc-hygiene.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 import { readRepoBehindMarkers, type FetchStatusMarker } from '../lib/auto-pull.js';
+import { detectAgentsBinaryShadows } from '../lib/binary-shadow.js';
 import {
   remediateStaleAgentsCliInstalls,
   resolveRunningPackageRoot,
@@ -589,6 +590,7 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
         // Can the owner-delivery lane escalate a block from THIS box? Local only —
         // remote boxes self-report it in their own `agents doctor --json`.
         ownerSink: await probeOwnerSink(readMeta()),
+        binaryShadows: detectAgentsBinaryShadows(),
       }));
       accounts[localName] = r.inventory?.signIn ?? {};
       continue;
@@ -1899,6 +1901,7 @@ export function registerDoctorCommand(program: Command): void {
 
         const findings = buildLocalFindings({
           device: localName,
+          binaryShadows: detectAgentsBinaryShadows(),
           syncRows,
           orphanRows,
           repoBehind: repoBehindMarkers,

@@ -568,6 +568,30 @@ describeSpawn('command-mode routines (executeJobDetached — daemon/cron path)',
     await waitTerminal(config.name, first.runId, 7000);
   });
 
+  it('ignores a shadowing `agents` binary on PATH and runs the current CLI (RUSH-2431)', async () => {
+    // Place a fake `agents` binary earlier on PATH than the real one. Without the
+    // shell-function guard, the routine would run the fake and print "SHADOW".
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-shadow-'));
+    const fakeAgents = path.join(tmpDir, 'agents');
+    fs.writeFileSync(fakeAgents, '#!/bin/sh\necho SHADOW\n', { mode: 0o755 });
+    const savedPath = process.env.PATH;
+    process.env.PATH = `${tmpDir}${path.delimiter}${savedPath ?? ''}`;
+    try {
+      const config = commandConfig('cmd-det-shadow', 'agents --version');
+      const meta = await executeJobDetached(config);
+      // The routine reaches a terminal state; its exit code depends on what the
+      // real CLI does with `--version` in this environment, so the discriminating
+      // signal is that the fake was NOT run — a broken guard would print SHADOW.
+      const final = await waitTerminal('cmd-det-shadow', meta.runId);
+      expect(['completed', 'failed']).toContain(final.status);
+      const log = fs.readFileSync(path.join(getRunDir('cmd-det-shadow', meta.runId), 'stdout.log'), 'utf-8');
+      expect(log).not.toContain('SHADOW');
+    } finally {
+      process.env.PATH = savedPath ?? '';
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it('monitorRunningJobs kills a detached process after its persisted deadline', async () => {
     const jobName = 'cmd-det-restart-timeout';
     jobs.push(jobName);

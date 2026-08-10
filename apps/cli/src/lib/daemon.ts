@@ -1539,19 +1539,25 @@ function daemonNodeBinDir(): string {
 }
 
 /**
- * The full PATH value the daemon service manifest pins, in order: the Node runtime
- * dir (so the shim's shebang and any child resolve the exact installing Node — see
- * {@link daemonNodeBinDir}), then the directory of the `agents` shim itself, then
- * the platform's system dirs. The shim's own dir matters because a scheduled
- * `command` routine shells out to the bare name `agents`
- * (`/bin/sh -c 'agents watchdog --nudge'`): when the shim lives outside the Node
- * bin dir — a `~/.local/bin` global install, a separate npm prefix — a PATH
- * carrying only the Node dir resolves `agents` to nothing and every routine dies
- * with `exit 127`. Deduped across the whole list, so a Node/shim dir that already
- * appears among the system dirs (e.g. a `/usr/local/bin` install) never doubles.
+ * The full PATH value the daemon service manifest pins, in order: the directory
+ * of the `agents` shim itself FIRST, then the Node runtime dir, then the
+ * platform's system dirs.
+ *
+ * The shim's own dir must lead so a scheduled `command` routine that shells out
+ * to the bare name `agents` (`/bin/sh -c 'agents __daemon-tick usage-refresh'`)
+ * resolves the SAME binary the daemon is running. When the Node runtime dir came
+ * first, a stale `agents` install inside that dir (common with nvm or an npm
+ * global in the same Node prefix) shadowed the current binary and routines failed
+ * with `unknown command '__daemon-tick'`.
+ *
+ * The Node runtime dir stays second so the shim's shebang (`#!/usr/bin/env node`)
+ * still resolves the exact Node that installed the service — never an ancient
+ * system node or a pruned nvm version. Deduped across the whole list, so a
+ * Node/shim dir that already appears among the system dirs (e.g. a
+ * `/usr/local/bin` install) never doubles.
  */
 function daemonPathValue(agentsBin: string, systemDirs: readonly string[]): string {
-  return [...new Set([daemonNodeBinDir(), path.dirname(agentsBin), ...systemDirs])].join(':');
+  return [...new Set([path.dirname(agentsBin), daemonNodeBinDir(), ...systemDirs])].join(':');
 }
 
 /**

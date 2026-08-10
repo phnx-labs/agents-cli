@@ -144,9 +144,10 @@ describe('generateLaunchdPlist', () => {
     expect(plist).not.toContain('CLAUDE_CODE_OAUTH_TOKEN');
     // The PATH entry is always present so EnvironmentVariables is never empty.
     expect(plist).toContain('<key>PATH</key>');
-    // PATH pins the running Node's bin dir first and drops the stale hardcoded
-    // nvm version that bricked the daemon fleet-wide when it was pruned.
-    expect(plist).toContain(`<string>${path.dirname(process.execPath)}:`);
+    // PATH pins the agents shim dir first so routines resolve the same binary
+    // (RUSH-2431), and drops the stale hardcoded nvm version that bricked the
+    // daemon fleet-wide when it was pruned.
+    expect(plist).toContain(`<string>${path.dirname(getAgentsBinPath())}:`);
     expect(plist).not.toContain('v24.0.0');
   });
 
@@ -235,17 +236,18 @@ describe.skipIf(process.platform === 'win32')('generateSystemdUnit', () => {
     return m[1].split(':');
   };
 
-  it('pins the running Node bin dir first on PATH and drops the stale hardcoded nvm version', () => {
+  it('pins the agents shim dir first on PATH so routines resolve the same binary (RUSH-2431)', () => {
     const segs = systemdPath(generateSystemdUnit());
-    expect(segs[0]).toBe(path.dirname(process.execPath));
+    expect(segs[0]).toBe(path.dirname(getAgentsBinPath()));
     expect(segs).toEqual(expect.arrayContaining(['/usr/local/bin', '/usr/bin', '/bin']));
     expect(generateSystemdUnit()).not.toContain('v24.0.0');
   });
 
-  it('also puts the agents shim dir on PATH so a child routine resolves `agents` (exit-127 fix)', () => {
+  it('puts the agents shim dir ahead of the Node dir so a stale agents in the Node prefix cannot shadow it (RUSH-2431)', () => {
     // A shim installed OUTSIDE the Node bin dir — the ~/.local/bin global-install
-    // shape that left the daemon PATH carrying only the Node dir, so every
-    // `command` routine shelling out to `agents …` died with exit 127.
+    // shape. The Node dir must still be present (for the shim's shebang), but the
+    // agents shim dir has to lead so `agents __daemon-tick ...` resolves the same
+    // binary the daemon is running, not a stale install inside the Node prefix.
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-shim-'));
     const shimDir = path.join(tmpDir, 'local-bin');
     fs.mkdirSync(shimDir, { recursive: true });
@@ -253,8 +255,8 @@ describe.skipIf(process.platform === 'win32')('generateSystemdUnit', () => {
     fs.writeFileSync(shim, '');
     try {
       const unitSegs = systemdPath(generateSystemdUnit(shim));
-      expect(unitSegs[0]).toBe(path.dirname(process.execPath)); // Node still first
-      expect(unitSegs).toContain(shimDir); // the shim's dir is now on PATH — the fix
+      expect(unitSegs[0]).toBe(shimDir); // agents shim dir now first
+      expect(unitSegs).toContain(path.dirname(process.execPath)); // Node still present
       expect(launchdPath(generateLaunchdPlist(shim))).toContain(shimDir);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });

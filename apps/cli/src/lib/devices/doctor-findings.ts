@@ -26,7 +26,8 @@
  *              never-synced · stale · repo-behind · repo-drift · version-skew ·
  *              fleet-resource-gap · hook-runtime-visibility-unavailable · orphan · duplicate-hook ·
  *              duplicate-hook-drift · host-cli-missing · host-cli-invalid ·
- *              rc-secret-export · env-secret-export · exec-policy · stale-cli.
+ *              rc-secret-export · env-secret-export · exec-policy · stale-cli ·
+ *              binary-shadow.
  *   (RUSH-2162 moved never-synced and duplicate-hook-drift to WARNING: both are
  *   stale-sync states one `agents sync` resolves, not "needs you now".)
  *
@@ -44,6 +45,7 @@ import { CONFIG_ENV_ISOLATED_AGENTS } from '../shims.js';
 import { padToWidth, stringWidth } from '../session/width.js';
 import type { AgentId } from '../types.js';
 import type { DuplicateVersionHook } from '../hooks.js';
+import type { AgentsBinaryShadow } from '../binary-shadow.js';
 import type { RcSecretFinding } from '../secrets/rc-hygiene.js';
 import type { OwnerSinkStatus } from '../channels/owner-sink.js';
 import { windowsSshEnrollmentProblem, type WindowsSshEnrollmentAudit } from './windows-ssh-enrollment.js';
@@ -127,6 +129,7 @@ export const ALL_FINDING_KINDS = [
   'exec-policy',         // Windows execution policy blocks agents.ps1
   'ssh-key-enrollment',  // Windows OpenSSH public-key path/content/ACL is invalid
   'stale-cli',
+  'binary-shadow',         // another agents binary on PATH or in a well-known dir shadows the running copy
   'owner-sink-unreachable', // the feed/notify owner-delivery lane can't reach the owner from this box
 ] as const;
 
@@ -175,6 +178,7 @@ export const FINDING_SEVERITY: Record<FindingKind, FindingSeverity> = {
   'exec-policy': 'warning',
   'ssh-key-enrollment': 'critical',
   'stale-cli': 'warning',
+  'binary-shadow': 'warning',
 };
 
 /** A machine-stable class for a finding. Derived from the runtime list above so
@@ -325,6 +329,8 @@ export function remediationFor(finding: DoctorFinding): string {
       return 'repair the reported AuthorizedKeysFile, then rerun agents doctor';
     case 'stale-cli':
       return 'upgrade';
+    case 'binary-shadow':
+      return 'remove or repoint the shadowing agents install(s)';
     case 'owner-sink-unreachable':
       // The lane delivers over the rush-backed owner channel, which needs rush on
       // PATH AND a usable session in THIS context. Non-interactive shells miss a
@@ -423,6 +429,8 @@ export interface LocalFindingInputs {
    *  `rush` transport, so it stays out of this pure module). Absent → no probe ran
    *  → no finding. */
   ownerSink?: OwnerSinkStatus;
+  /** `agents` binaries that shadow the currently running CLI (RUSH-2431). */
+  binaryShadows?: AgentsBinaryShadow[];
 }
 
 /**
@@ -661,6 +669,19 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
   // (warning). Signed-in versions produce no finding — the accounts line shows
   // them. Agents that can't be inspected never yield a logout finding.
   out.push(...signInToFindings(device, input.signIn));
+
+  // agents binary shadows (warning) — another install could be resolved by a
+  // scheduled routine or by a different shell PATH, running stale code.
+  const shadows = input.binaryShadows ?? [];
+  if (shadows.length > 0) {
+    const examples = shadows.slice(0, 2).map((s) => `${s.path}${s.version ? ` (${s.version})` : ''}`).join(', ');
+    out.push(finding({
+      severity: FINDING_SEVERITY['binary-shadow'], kind: 'binary-shadow', device,
+      message: shadows.length === 1
+        ? `agents binary shadowed by ${examples}`
+        : `${shadows.length} agents binaries may shadow the running copy (incl. ${examples})`,
+    }));
+  }
 
   return collapseAcrossVersions(out, new Set(input.isolatedVersions ?? []));
 }
@@ -1172,6 +1193,7 @@ function warningSubject(f: DoctorFinding): string {
   // Never "this device" — the row already sits under its own `▸ <device>` block,
   // so a self-referential subject reads as the local machine in fleet mode.
   if (f.kind === 'stale-cli') return 'agents-cli';
+  if (f.kind === 'binary-shadow') return 'agents-cli';
   if (f.kind === 'orphan') return 'orphans';
   if (f.kind === 'rc-secret-export') return 'shell rc';
   if (f.kind === 'env-secret-export') return 'environment';

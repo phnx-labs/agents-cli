@@ -53,6 +53,21 @@ function localInput(over: Partial<LocalFindingInputs> = {}): LocalFindingInputs 
 }
 
 describe('severity rubric', () => {
+  it('a binary shadow is a WARNING and names the shadowing install', () => {
+    const findings = buildLocalFindings(localInput({
+      binaryShadows: [
+        { path: '/usr/local/bin/agents', version: '1.20.90' },
+        { path: '/home/user/.nvm/versions/node/v24.0.0/bin/agents' },
+      ],
+    }));
+    const f = findings.find((x) => x.kind === 'binary-shadow');
+    expect(f?.severity).toBe('warning');
+    expect(f?.device).toBe('boxA');
+    expect(f?.message).toContain('/usr/local/bin/agents (1.20.90)');
+    expect(f?.message).toContain('2 agents binaries may shadow');
+    expect(f?.remediation).toBe('remove or repoint the shadowing agents install(s)');
+  });
+
   it('a broken Windows OpenSSH enrollment is CRITICAL and names the effective file', () => {
     const findings = buildLocalFindings(localInput({
       windowsSshEnrollment: { status: {
