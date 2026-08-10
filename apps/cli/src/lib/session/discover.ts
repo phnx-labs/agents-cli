@@ -390,7 +390,18 @@ export async function queryIndexedSessions(
     { includeLimit: true },
   ));
   if (indexedOptions.resolveLinear !== false) await resolveLinearProjects(sessions);
-  for (const s of sessions) s.machine = machineForSessionFile(s.filePath, s.agent);
+  for (const s of sessions) {
+    // A non-empty transcript path is authoritative for origin (a live-home file
+    // is this box; `backups/<agent>/<machine>/…` names that peer), so derive
+    // there. An EMPTY file_path carries no such signal — `machineForSessionFile`
+    // falls back to THIS box — so keep the machine the row was recorded with
+    // instead: a host dispatch stamps the EXECUTION host on its empty-file index
+    // row (`registerHostSession`), and re-deriving re-attributed the dispatcher's
+    // own pool row to itself, splitting it from the executing peer's fan-out row
+    // and making resume-by-id read as "ambiguous (2 sessions)" (RUSH-2486 /
+    // RUSH-2479 criterion 2). A recorded-less empty-file row still falls back.
+    if (s.filePath || !s.machine?.trim()) s.machine = machineForSessionFile(s.filePath, s.agent);
+  }
   return scopeToManaged(sessions, agents, options);
 }
 

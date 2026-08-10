@@ -47,7 +47,7 @@ import { isSessionTrackedAgent, SESSION_AGENTS, type SessionAgentId, type Sessio
 import { AGENTS } from '../agents.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
 import { loadDevices, type DeviceRegistry } from '../devices/registry.js';
-import { machineId } from '../machine-id.js';
+import { machineId, normalizeHost } from '../machine-id.js';
 import { presenceFromStore, type Presence } from './detached.js';
 import { classifyHostLink, HOST_HEARTBEAT_STALE_MS, type HostLink } from './host-link.js';
 import { mapBounded } from '../concurrency.js';
@@ -1217,6 +1217,7 @@ export function summarizeMission(prompt: string | null | undefined): string | un
 export async function listTeamsActive(opts: { localOnly?: boolean } = {}): Promise<ActiveSession[]> {
   const mgr = new AgentManager(undefined, undefined, undefined, undefined, undefined, opts.localOnly ?? false);
   const running = await mgr.listRunning();
+  const self = machineId();
   return running.map((a): ActiveSession => {
     // The teammate's OWN transcript is `remoteSessionId` (captured from its first
     // stream event). `parentSessionId` is the ORCHESTRATOR that spawned the team
@@ -1230,11 +1231,27 @@ export async function listTeamsActive(opts: { localOnly?: boolean } = {}): Promi
     const pidAlive = a.pid ? isPidAlive(a.pid) : true;
     const { state, tokPerSec } = computeLiveSignals(a.agentType, sessionFile, a.cwd ?? undefined, pidAlive);
     const resolvedId = ownSessionId ?? sessionIdFromFile(sessionFile);
+    // A remote teams teammate (`teams add --device <peer>`) EXECUTES on that
+    // peer, not on this orchestrator box — but it gets no host-dispatch index
+    // row, so `foldExecutionMachine` can't reach it and the self-stamp in
+    // `commands/sessions.ts` would claim it, listing a peer's teammate under
+    // `--device <orchestrator>` (SES-GAP-10). Attribute the row to the execution
+    // host and mark the dispatcher, the same shape `run --device` gets: `machine`
+    // survives the cross-machine fan-out because `parseRemoteActive` keeps an
+    // `offloadedFrom` row's own machine, and `offloadedFrom` is COMPARED to this
+    // box by `sessionProcessIsLocal` (never merely tested), so a third box seeing
+    // this row over the fan-out reads it as the peer's, not its own. A local
+    // teammate (no `hostName`, or pinned to this box) is left unattributed for
+    // the self-stamp.
+    const execHost = a.hostName ? normalizeHost(a.hostName) : undefined;
+    const offloaded = execHost !== undefined && execHost !== self;
     return applyState({
       context: 'teams',
       kind: a.agentType,
       pid: a.pid ?? undefined,
       sessionId: resolvedId,
+      machine: offloaded ? execHost : undefined,
+      offloadedFrom: offloaded ? self : undefined,
       orchestratorSessionId: a.parentSessionId ?? undefined,
       cwd: a.cwd ?? undefined,
       label: a.name ?? undefined,
