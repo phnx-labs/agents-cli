@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **`agents open` resumes a session from an `agents://` deep link, and registers the OS URL-scheme handler.** A rendered artifact (plan/report) can now carry an
+  `agents://session/<id>` link in its provenance line; clicking it hands off to the
+  OS, which runs `agents open <url>`, parses it, and routes the id into the existing
+  resume engine (`sessions focus`) — reopening the terminal on the session's owning
+  host with the cursor in the input bar. `agents setup` registers the scheme
+  automatically (idempotent); `agents open register` / `unregister` / `status` manage
+  it manually. Linux (`.desktop` + `xdg-mime`), macOS (AppleScript app + `lsregister`),
+  and Windows (`HKCU` registry) are supported. The session id is validated and passed
+  as argv, never interpolated into a shell. Source: `apps/cli/src/commands/open.ts`,
+  `apps/cli/src/lib/deeplink/`.
+
 - **The macOS `computer` helper's `trust_status` RPC now reports Screen Recording trust, not just Accessibility (RUSH-1882).** It previously returned only
   `AX.isTrusted()`, so a missing Screen Recording grant only surfaced indirectly
   when a `screenshot` capture timed out after 5s. Adds a `screen_recording` field

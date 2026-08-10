@@ -230,6 +230,17 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
     }
   }
 
+  // Register the agents:// URL scheme so deep links in rendered artifacts can
+  // resume a session (RUSH — session deep links). Best-effort and idempotent:
+  // never fails setup, only registers when missing.
+  try {
+    const { registerAgentsUrlScheme } = await import('../lib/deeplink/register.js');
+    const scheme = registerAgentsUrlScheme({ ifMissing: true });
+    if (scheme.registered) console.log(chalk.gray('Registered the agents:// URL scheme (artifact session deep links).'));
+  } catch {
+    // non-fatal — the user can run `agents open register` later.
+  }
+
   if (options.suppressFooter) return;
 
   // Fresh-machine hub: offer to set up the optional capabilities that need their
