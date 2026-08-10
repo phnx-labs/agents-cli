@@ -1,1 +1,0 @@
-- **Nest Funnel management under the daemon command.** Use `agents daemon funnel status|up|down` for webhook ingress; the former top-level `agents funnel` command has been removed. Source: `apps/cli/src/commands/daemon.ts`.

@@ -1,1 +1,0 @@
-- **Removed the top-level `agents publish` command.** Skill registry search and install remain available for existing indexes, but generating and pushing an index is no longer a built-in agents-cli surface.

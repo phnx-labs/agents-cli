@@ -1,1 +1,0 @@
-- **Remove the resource-profile command tree.** `agents profile` and the resource-profile aliases `agents profiles use/status` no longer register; `agents profiles` remains the provider/host profile surface for Kimi, DeepSeek, and other custom harnesses. Source: `apps/cli/src/commands/profiles.ts`, `apps/cli/src/lib/startup/command-registry.ts`.

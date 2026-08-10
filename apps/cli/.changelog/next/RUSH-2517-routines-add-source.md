@@ -1,4 +1,0 @@
-- `agents routines add <file>` no longer rewrites the file you hand it. When the source is already the canonical routine YAML — the normal case for a definition tracked in `~/.agents` — the definition is left byte-for-byte alone instead of being re-serialized with its `devices:` pin stripped. A source from anywhere else is still copied in.
-- A `devices:` pin now says it applies to this box only and names `agents routines devices <name> --set`, instead of silently reading as `Devices: all` on every peer.
-- `agents routines edit <name> --cwd <path>` and `--project-anchor <name>` apply and save without opening `$EDITOR`, so the repair the readiness gate prints is one an agent can actually run.
-- A paused routine now names `agents routines resume <name>` as the follow-up.

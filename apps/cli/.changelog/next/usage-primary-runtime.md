@@ -1,1 +1,0 @@
-- **Fleet usage primary runtime.** When `usage.primary-host` (or `interactive.host`) is set, only that device runs frequent live usage API refreshes; peers pull a token-free snapshot. Standalone mode keeps per-host refresh when no pin is set.
