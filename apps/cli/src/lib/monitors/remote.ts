@@ -41,11 +41,11 @@ export function parseRemoteMonitors(stdout: string, machine: string): RemoteMoni
   } catch {
     return [];
   }
-  const rows = Array.isArray(parsed)
-    ? parsed
-    : Array.isArray((parsed as { monitors?: unknown })?.monitors)
-      ? (parsed as { monitors: unknown[] }).monitors
-      : [];
+  // `monitors list --json` writes a BARE array (stdoutJson -> JSON.stringify of
+  // monitors.map(...)); it has never wrapped. Guarding an envelope shape that has
+  // never existed would be a fallback for an imaginary bug.
+  if (!Array.isArray(parsed)) return [];
+  const rows = parsed;
   const out: RemoteMonitor[] = [];
   for (const row of rows) {
     if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
@@ -63,6 +63,9 @@ export function parseRemoteMonitors(stdout: string, machine: string): RemoteMoni
 
 export interface FleetMonitorsResult {
   monitors: RemoteMonitor[];
+  /** Target discovery failed before any peer was dialed — the fleet was not
+   *  consulted at all, which must not read as "no duplicate anywhere". */
+  discoveryFailed: boolean;
   /** Peers dialed but unreachable / erroring — the guard reports these rather than
    *  silently treating "we could not ask" as "there is no duplicate". */
   skipped: string[];
@@ -84,8 +87,11 @@ export async function gatherFleetMonitors(): Promise<FleetMonitorsResult> {
     return {
       monitors: result.items,
       skipped: [...result.skipped, ...result.parseFailed],
+      discoveryFailed: result.discoveryFailed,
     };
   } catch {
-    return { monitors: [], skipped: [] };
+    // Could not consult the fleet at all. Reported as such by the caller, never
+    // as an absence of duplicates.
+    return { monitors: [], skipped: [], discoveryFailed: true };
   }
 }

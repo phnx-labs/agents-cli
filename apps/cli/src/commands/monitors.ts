@@ -19,7 +19,7 @@ import {
   signalDaemonReload,
   startDaemon,
 } from '../lib/daemon.js';
-import { findDuplicateMonitor } from '../lib/monitors/fingerprint.js';
+import { findDuplicateMonitor, monitorFingerprint } from '../lib/monitors/fingerprint.js';
 import { gatherFleetMonitors, NO_MONITOR_FANOUT_ENV } from '../lib/monitors/remote.js';
 import {
   listMonitors,
@@ -258,6 +258,57 @@ async function pickMonitor(message: string, alternatives: string[] = []): Promis
 }
 
 /** Register the `agents monitors` command tree. */
+/**
+ * Refuse a monitor that duplicates one already in play — same NAME (which
+ * `writeMonitor` would silently overwrite) or same BEHAVIOR under any name, on
+ * this box or any other. Exits the process on a refusal.
+ *
+ * Shared by BOTH `add` paths. The file path (`add ./watcher.yml`) returns early
+ * and used to skip the guard entirely, so a duplicate could be walked straight
+ * in through a YAML file — the one input an agent is most likely to generate.
+ */
+async function guardAgainstDuplicateMonitor(config: MonitorConfig, force: boolean): Promise<void> {
+  if (force) return;
+  const existing = listMonitors();
+  const sameName = existing.find((m) => m.name === config.name);
+  if (sameName) {
+    stderrLine(chalk.red(`Monitor '${config.name}' already exists — adding would overwrite it.`));
+    stderrLine(chalk.gray(`  Inspect it:   agents monitors view ${config.name}`));
+    stderrLine(chalk.gray(`  Replace it:   agents monitors add ${config.name} ... --force`));
+    process.exit(1);
+  }
+  const duplicate = findDuplicateMonitor(config, existing);
+  if (duplicate) {
+    stderrLine(chalk.red(`Monitor '${duplicate}' already watches this exact source and fires the same action.`));
+    stderrLine(chalk.gray('  Adding it again would fire the same trigger twice.'));
+    stderrLine(chalk.gray(`  Inspect it:   agents monitors view ${duplicate}`));
+    stderrLine(chalk.gray(`  Add anyway:   agents monitors add ${config.name} ... --force`));
+    process.exit(1);
+  }
+
+  // The case a local check cannot see: another agent, on another box, already
+  // watching this same work item with these same arguments. One work item, two
+  // triggers. Identity is the arguments, so the claim has to be fleet-wide —
+  // different arguments (another PR) are not a clash and still pass.
+  if (process.env[NO_MONITOR_FANOUT_ENV]) return;
+  const fleet = await gatherFleetMonitors();
+  const mine = monitorFingerprint(config);
+  const clash = fleet.monitors.find((r) => monitorFingerprint(r.monitor) === mine);
+  if (clash) {
+    stderrLine(chalk.red(`Monitor '${clash.monitor.name}' on ${chalk.bold(clash.machine)} already watches this exact source and fires the same action.`));
+    stderrLine(chalk.gray('  Two boxes watching one work item is a double trigger.'));
+    stderrLine(chalk.gray(`  Inspect it:   agents ssh ${clash.machine} 'agents monitors view ${clash.monitor.name}'`));
+    stderrLine(chalk.gray(`  Add anyway:   agents monitors add ${config.name} ... --force`));
+    process.exit(1);
+  }
+  // Never treat "could not ask" as "no duplicate".
+  if (fleet.discoveryFailed) {
+    stderrLine(chalk.yellow('  Note: could not reach the device registry — the fleet was not checked for duplicates.'));
+  } else if (fleet.skipped.length > 0) {
+    stderrLine(chalk.yellow(`  Note: could not check ${fleet.skipped.join(', ')} — a duplicate there would not have been caught.`));
+  }
+}
+
 export function registerMonitorsCommands(program: Command): void {
   const monitorsCmd = program
     .command('monitors')
@@ -361,6 +412,7 @@ export function registerMonitorsCommands(program: Command): void {
           for (const err of errors) stderrLine(chalk.red(`  - ${err}`));
           process.exit(1);
         }
+        await guardAgainstDuplicateMonitor(config, options.force === true);
         writeMonitor(config);
         console.log(chalk.green(`Monitor '${name}' added`));
         ensureDaemonRunning();
@@ -438,52 +490,7 @@ export function registerMonitorsCommands(program: Command): void {
         stderrLine(chalk.yellow(`  Note: --match '${condition.match}' only fires on success — it stays silent if the source breaks or never matches.`));
       }
 
-      // Double-trigger guard. A monitor's NAME is not its identity: two watchers
-      // polling the same source and firing the same action are one trigger fired
-      // twice, whatever they are called. Refuse both collisions rather than
-      // silently overwriting (writeMonitor overwrites by name) or silently
-      // stacking a second copy of an existing watcher.
-      if (!options.force) {
-        const existing = listMonitors();
-        const sameName = existing.find((m) => m.name === nameOrPath);
-        if (sameName) {
-          stderrLine(chalk.red(`Monitor '${nameOrPath}' already exists — adding would overwrite it.`));
-          stderrLine(chalk.gray(`  Inspect it:   agents monitors view ${nameOrPath}`));
-          stderrLine(chalk.gray(`  Replace it:   agents monitors add ${nameOrPath} ... --force`));
-          process.exit(1);
-        }
-        const duplicate = findDuplicateMonitor(config, existing);
-        if (duplicate) {
-          stderrLine(chalk.red(`Monitor '${duplicate}' already watches this exact source and fires the same action.`));
-          stderrLine(chalk.gray('  Adding it again would fire the same trigger twice.'));
-          stderrLine(chalk.gray(`  Inspect it:   agents monitors view ${duplicate}`));
-          stderrLine(chalk.gray(`  Add anyway:   agents monitors add ${nameOrPath} ... --force`));
-          process.exit(1);
-        }
-
-        // The case a local check cannot see: another agent, on another box,
-        // already watching this same work item with these same arguments. One
-        // work item, two triggers. Identity is the arguments, so the claim has
-        // to be fleet-wide — different arguments (another PR) are not a clash
-        // and still pass.
-        if (!process.env[NO_MONITOR_FANOUT_ENV]) {
-          const fleet = await gatherFleetMonitors();
-          const clash = fleet.monitors.find(
-            (r) => findDuplicateMonitor(config, [{ ...r.monitor, name: `${r.machine}:${r.monitor.name}` }]) !== null,
-          );
-          if (clash) {
-            stderrLine(chalk.red(`Monitor '${clash.monitor.name}' on ${chalk.bold(clash.machine)} already watches this exact source and fires the same action.`));
-            stderrLine(chalk.gray('  Two boxes watching one work item is a double trigger.'));
-            stderrLine(chalk.gray(`  Inspect it:   agents monitors view ${clash.monitor.name} --device ${clash.machine}`));
-            stderrLine(chalk.gray(`  Add anyway:   agents monitors add ${nameOrPath} ... --force`));
-            process.exit(1);
-          }
-          // Never treat "could not ask" as "no duplicate".
-          if (fleet.skipped.length > 0) {
-            stderrLine(chalk.yellow(`  Note: could not check ${fleet.skipped.join(', ')} — a duplicate there would not have been caught.`));
-          }
-        }
-      }
+      await guardAgainstDuplicateMonitor(config, options.force === true);
 
       writeMonitor(config);
       console.log(chalk.green(`Monitor '${nameOrPath}' added`));
@@ -506,7 +513,11 @@ export function registerMonitorsCommands(program: Command): void {
             enabled: m.enabled,
             source: m.source,
             condition: m.condition,
-            action: { type: m.action.type },
+            // Full action, not just `type`: the cross-machine duplicate guard
+            // fingerprints source+condition+action, so a type-only action made
+            // every `--run` monitor unmatchable and the fleet check inert for
+            // exactly the case it exists for. `source` already ships whole.
+            action: m.action,
             owner: ownerLabel(m),
             runsHere: monitorRunsOnThisDevice(m),
             lastSeenAt: state?.lastSeenAt ?? null,
