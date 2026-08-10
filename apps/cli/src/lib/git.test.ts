@@ -226,10 +226,16 @@ describe('syncRepoGit', () => {
   });
 
   // The collision guard reads status.files, not the per-category arrays. These
-  // pin the dirty states that a hand-rolled union kept missing: a staged
-  // deletion, a staged rename (both ends), and a conflicted path. Each asserts
-  // a REFUSAL, so gutting dirtyPathSet turns them red rather than leaving the
-  // suite green — the failure mode the review caught.
+  // pin the dirty states a hand-rolled union kept missing: a staged deletion, a
+  // staged rename (both ends), and a C-quoted path.
+  //
+  // Honest about their strength: they assert `success:false` plus the path, and
+  // `merge --ff-only` supplies that on its own by aborting, so gutting
+  // dirtyPathSet leaves them GREEN. The two that genuinely go red on that
+  // mutation are the ones asserting the refusal wording only dirtyTreeRefusal
+  // emits ("incoming changes touch uncommitted paths", "Blocked by local
+  // changes"). These three pin the user-visible outcome; those two pin the
+  // function.
 
   it('treats a staged deletion as dirty and refuses when it collides', async () => {
     await commitFile(author, 'doomed.txt', 'v1\n', 'add doomed');
@@ -261,21 +267,27 @@ describe('syncRepoGit', () => {
     expect(res.error).toMatch(/before\.txt/);
   });
 
-  it('refuses when a path with a space collides, despite git C-quoting it', async () => {
-    // `git diff --name-only` quotes such paths unless -z is used, so without it
-    // the two sides of the comparison never string-match and the guard misses.
-    await commitFile(author, 'my file.txt', 'v1\n', 'add spaced');
+  it('refuses when a C-quoted unicode path collides — the case -z exists for', async () => {
+    // `git diff --name-only` emits this as "caf\303\251.txt" while status.files
+    // reports it raw, so without -z the two sides never string-match and the
+    // collision is missed. A space does NOT trigger quoting, so a spaced path
+    // would pass with or without the fix and prove nothing.
+    await commitFile(author, 'caf\u00e9.txt', 'v1\n', 'add unicode');
     await simpleGit(author).push('origin', 'main');
     await syncRepoGit(local, { push: false });
-    await commitFile(author, 'my file.txt', 'v2\n', 'upstream edits spaced');
+    await commitFile(author, 'caf\u00e9.txt', 'v2\n', 'upstream edits unicode');
     await simpleGit(author).push('origin', 'main');
-    fs.writeFileSync(path.join(local, 'my file.txt'), 'local edit\n');
+    fs.writeFileSync(path.join(local, 'caf\u00e9.txt'), 'local edit\n');
 
     const res = await syncRepoGit(local, { push: false });
 
     expect(res.success).toBe(false);
-    expect(res.error).toMatch(/my file\.txt/);
-    expect(fs.readFileSync(path.join(local, 'my file.txt'), 'utf8')).toBe('local edit\n');
+    // Assert OUR refusal wording, not just failure: git's own ff-only abort also
+    // fails and also names the path, so `success:false` alone passes with -z
+    // removed and proves nothing. This phrase only dirtyTreeRefusal emits.
+    expect(res.error).toMatch(/incoming changes touch uncommitted paths/);
+    expect(res.error).toMatch(/caf/);
+    expect(fs.readFileSync(path.join(local, 'caf\u00e9.txt'), 'utf8')).toBe('local edit\n');
   });
 
   // pullRepo is the sibling entry point — `agents sync` with no repo argument

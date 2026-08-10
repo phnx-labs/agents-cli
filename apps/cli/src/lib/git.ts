@@ -1221,10 +1221,11 @@ function dirtyPathSet(status: { files: Array<{ path: string; from?: string }> })
  *   - an incoming path that is also dirty → refuse, and name it;
  *   - otherwise the fast-forward touches nothing the author is holding.
  *
- * `-z` on the diff because `git diff --name-only` C-quotes paths with unicode or
- * spaces while `status.files` does not: without it the two sides of the
- * comparison are in different encodings and a collision on such a path silently
- * misses.
+ * `-z` on the diff because `git diff --name-only` C-quotes paths containing
+ * unicode or control characters — `café.txt` comes back as `"caf\303\251.txt"`,
+ * while `status.files` reports it raw. Without `-z` the two sides are in
+ * different encodings and a collision on such a path silently misses. (A plain
+ * space does NOT trigger quoting; `my file.txt` is emitted as-is either way.)
  */
 async function dirtyTreeRefusal(
   git: SimpleGit,
