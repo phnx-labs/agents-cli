@@ -2272,9 +2272,15 @@ export async function renderSessionPreview(
     }
   }
   if (outcome.kind === 'partial') {
-    console.error(chalk.red(`Partial session resolution: ${outcome.failedPeers.join(', ')} did not answer.`));
-    console.error(chalk.gray('Nothing matched on the reachable fleet, so the session may live on a peer that did not answer.'));
-    process.exitCode = 2;
+    // RUSH-2492: an unreachable peer is a warning, not a hard failure. The
+    // resolver already resolves an id found on the reachable fleet (SES-9a),
+    // so reaching here means the session was not found on any device we COULD
+    // reach — it may live on an unreachable peer, which we could not check.
+    const offline = outcome.failedPeers;
+    console.error(chalk.yellow(`Warning: ${offline.length} device(s) unreachable, not checked: ${offline.join(', ')}`));
+    console.error(chalk.red(`No session matching "${query}" on any reachable device (${offline.length} unreachable, not checked).`));
+    console.error(chalk.gray('  If it lives on an offline box, wake it (agents devices) or run there: agents ssh <device>'));
+    process.exitCode = 1;
     return;
   }
   if (outcome.kind === 'not-found') {
@@ -4969,8 +4975,15 @@ async function renderOneSession(
   if (looksLikeSessionId(query)) {
     const outcome = await resolveSessionMetadataValue(query, scope);
     if (outcome.kind === 'partial') {
-      console.error(chalk.red(`Partial session resolution: ${outcome.failedPeers.join(', ')} did not answer.`));
-      process.exit(2);
+      // RUSH-2492: an unreachable peer is a warning, not a hard failure. The
+      // resolver already resolves an id found on the reachable fleet (SES-9a),
+      // so reaching here means the session was not found on any device we
+      // COULD reach — it may live on an unreachable peer we could not check.
+      const offline = outcome.failedPeers;
+      console.error(chalk.yellow(`Warning: ${offline.length} device(s) unreachable, not checked: ${offline.join(', ')}`));
+      console.error(chalk.red(`No session matching "${query}" on any reachable device (${offline.length} unreachable, not checked).`));
+      console.error(chalk.gray('  If it lives on an offline box, wake it (agents devices) or run there: agents ssh <device>'));
+      process.exit(1);
     }
     // An index miss can be a transcript created since the last incremental
     // scan, or a Claude history alias. Fall through to the established
@@ -5393,8 +5406,11 @@ export async function resolveSessionMetadataValue(
 
 /** Resolve one selector to indexed metadata across the fleet without reading or
  * rendering transcript events. A peer answering the parent sweep returns every
- * local candidate; the parent performs the one logical-session uniqueness gate. */
-async function resolveSessionMetadata(
+ * local candidate; the parent performs the one logical-session uniqueness gate.
+ * Backs `agents sessions --resolve <selector> --json`. Exported (deps already
+ * injectable) so tests can drive this real call site against a fake fan-out
+ * instead of only the pure resolver it wraps. */
+export async function resolveSessionMetadata(
   selector: string,
   scope: { agent?: string; project?: string; local?: boolean; hosts?: string[] },
   deps: Pick<FleetResolveDeps, 'gatherRemoteList'> = { gatherRemoteList },
@@ -5414,9 +5430,15 @@ async function resolveSessionMetadata(
 
   const outcome = await resolveSessionMetadataValue(selector, scope, deps);
   if (outcome.kind === 'partial') {
-    console.error(chalk.red(`Partial session resolution: ${outcome.failedPeers.join(', ')} did not answer.`));
-    console.error(chalk.gray('No unique/no-match decision was made. Upgrade or reconnect every peer, then retry.'));
-    process.exit(2);
+    // RUSH-2492: an unreachable peer is a warning, not a hard failure. The
+    // resolver already resolves an id found on the reachable fleet (SES-9a),
+    // so reaching here means the session was not found on any device we
+    // COULD reach — it may live on an unreachable peer we could not check.
+    const offline = outcome.failedPeers;
+    console.error(chalk.yellow(`Warning: ${offline.length} device(s) unreachable, not checked: ${offline.join(', ')}`));
+    console.error(chalk.red(`No session matching "${selector}" on any reachable device (${offline.length} unreachable, not checked).`));
+    console.error(chalk.gray('  If it lives on an offline box, wake it (agents devices) or run there: agents ssh <device>'));
+    process.exit(1);
   }
   if (outcome.kind === 'not-found') {
     console.error(chalk.red(`No session found matching: ${selector}`));
