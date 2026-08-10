@@ -8,6 +8,7 @@ import { readProfile } from '../lib/profiles.js';
 import { setKeychainBackendForTest, secretsKeychainItem, getKeychainToken, type KeychainBackend } from '../lib/secrets/index.js';
 import { keychainItemName } from '../lib/secrets/profiles.js';
 import { writeBundleWithItems, keychainRef } from '../lib/secrets/bundles.js';
+import { findAccount } from '../lib/account-registry.js';
 
 let TEST_ROOT: string;
 let USER_DIR: string;
@@ -47,11 +48,13 @@ afterEach(() => {
 });
 
 describe('addProfile — --from-secrets threading (host + model path)', () => {
-  it('copies the bundle value into the harness\'s own keychain item and attaches auth', async () => {
+  it('migrates the copied bundle value into a durable account reference', async () => {
     await addProfile('corp', { host: 'claude', model: 'gpt-x', authProvider: 'corp', fromSecrets: 'prod' }, 'Harness');
     const p = readProfile('corp');
-    expect(p.auth).toEqual({ envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.corp.token' });
-    expect(getKeychainToken(keychainItemName('corp'))).toBe('sk-test-secret');
+    expect(p.auth).toBeUndefined();
+    const account = findAccount(p.account!);
+    expect(account?.provider).toBe('proxy');
+    expect(getKeychainToken(account!.secretRef)).toBe('sk-test-secret');
   });
 
   it('does not clobber the host\'s own keychain item when --from-secrets is given without --auth-provider', async () => {
@@ -75,7 +78,9 @@ describe('addProfile — --from-secrets threading (host + model path)', () => {
     // ...and the harness's own auth was attached under the bundle's name instead.
     const p = readProfile('corp');
     expect(p.provider).toBe('prod');
-    expect(getKeychainToken(keychainItemName('prod'))).toBe('sk-test-secret');
+    const account = findAccount(p.account!);
+    expect(account?.provider).toBe('proxy');
+    expect(getKeychainToken(account!.secretRef)).toBe('sk-test-secret');
   });
 });
 
@@ -89,7 +94,9 @@ describe('addProfile — --from-secrets threading (preset path)', () => {
       addProfile('kimi', { preset: 'kimi', fromSecrets: 'prod' }, 'Harness'),
     ).resolves.toBeUndefined();
     const p = readProfile('kimi');
-    expect(getKeychainToken(p.auth!.keychainItem)).toBe('sk-test-secret');
+    const account = findAccount(p.account!);
+    expect(account?.provider).toBe('openrouter');
+    expect(getKeychainToken(account!.secretRef)).toBe('sk-test-secret');
   });
 });
 

@@ -8,12 +8,16 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'node:crypto';
 import * as yaml from 'yaml';
 import type { AgentId } from './types.js';
 import { getUserAgentsDir } from './state.js';
-import { getKeychainToken, hasKeychainToken, keychainItemName } from './secrets/profiles.js';
+import { deleteKeychainToken, getKeychainToken, hasKeychainToken, keychainItemName } from './secrets/profiles.js';
 import { getPreset, type Preset } from './profiles-presets.js';
 import { MODEL_TIERS, isTierToken, type ModelTier } from './model-tiers.js';
+import { addAccount, findAccount, resolveCredentialAccount } from './account-registry.js';
+import { atomicWriteFileSync } from './fs-atomic.js';
+import { listAccountProviders } from './account-provider-registry.js';
 
 /** A named profile binding an agent host, env vars, and optional keychain auth. */
 export interface Profile {
@@ -23,6 +27,8 @@ export interface Profile {
     version?: string;
   };
   env: Record<string, string>;
+  /** Default durable credential account. A per-run --account overrides it. */
+  account?: string;
   auth?: {
     envVar: string;
     keychainItem: string;
@@ -143,7 +149,38 @@ export function readProfile(name: string): Profile {
   if (!parsed.env || typeof parsed.env !== 'object') {
     parsed.env = {};
   }
+  migrateLegacyProfileAuth(parsed, file);
   return parsed;
+}
+
+function migrateLegacyProfileAuth(profile: Profile, file: string): void {
+  if (!profile.auth || profile.account) return;
+  if (!profile.provider) {
+    throw new Error(`Profile '${profile.name}' owns a legacy credential without a provider. Add a durable account with 'agents accounts add', then set account: <name> in ${file}.`);
+  }
+  const provider = listAccountProviders().includes(profile.provider) ? profile.provider : 'proxy';
+  const suffix = crypto.createHash('sha256').update(profile.auth.keychainItem).digest('hex').slice(0, 8);
+  const accountName = `legacy-${profile.provider}-${suffix}`;
+  if (!findAccount(accountName)) {
+    const kind = profile.auth.envVar.includes('BEARER_TOKEN') ? 'bearer-token' : 'api-key';
+    addAccount(accountName, provider, kind, getKeychainToken(profile.auth.keychainItem));
+  }
+  const migratedAccount = findAccount(accountName)!;
+  const oldItem = profile.auth.keychainItem;
+  profile.account = migratedAccount.id;
+  delete profile.auth;
+  delete profile.authOptional;
+  atomicWriteFileSync(file, yaml.stringify(profile));
+
+  const stillReferenced = fs.readdirSync(path.dirname(file))
+    .filter(entry => /\.ya?ml$/.test(entry) && path.join(path.dirname(file), entry) !== file)
+    .some(entry => {
+      try {
+        const other = yaml.parse(fs.readFileSync(path.join(path.dirname(file), entry), 'utf8')) as Profile | null;
+        return other?.auth?.keychainItem === oldItem;
+      } catch { return false; }
+    });
+  if (!stillReferenced) deleteKeychainToken(oldItem);
 }
 
 /** Write a profile to disk atomically (write-to-tmp then rename). */
@@ -570,6 +607,10 @@ export function renameProfile(oldName: string, newName: string): void {
  */
 export function resolveProfileEnv(profile: Profile): Record<string, string> {
   const env: Record<string, string> = { ...profile.env };
+  if (profile.account) {
+    const account = resolveCredentialAccount(profile.account, profile.host.agent, profile.provider);
+    Object.assign(env, account.env);
+  }
   if (profile.auth) {
     // Optional auth (host manages its own login) with no stored token: inject
     // nothing and let the host use its own credentials. Only required auth
