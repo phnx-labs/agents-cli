@@ -173,9 +173,9 @@ function parseKindSelection(opts: SyncOpts): ResourceSelection | undefined {
 
 /**
  * Attach the resource-selector flag family to the sync command.
- * Kept local — these flags are specific to `agents sync`.
+ * Exported for testing flag registration in sync.test.ts.
  */
-function addSelectorOptions(cmd: Command): Command {
+export function addSelectorOptions(cmd: Command): Command {
   const kindCollector = (val: string, prev: string[] | undefined): string[] => {
     const names = val.split(',').map((s) => s.trim()).filter(Boolean);
     const base = Array.isArray(prev) ? prev : [];
