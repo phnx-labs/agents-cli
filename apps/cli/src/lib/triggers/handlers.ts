@@ -46,6 +46,26 @@ export interface WebhookHandler {
    * to one platform. Omitted runs locally.
    */
   host?: string;
+  /**
+   * Named project (`agents projects`) whose base directory the dispatched
+   * agent/workflow run lands in — the execution anchor, mirroring a routine's
+   * `project`. Without it an agent handler runs at the target's `$HOME` with no
+   * repo checkout to edit. Applies to `run.agent`/`run.workflow` and the
+   * `routine:` delegate; ignored by `run.command` (put a `cd` in the command).
+   */
+  project?: string;
+  /**
+   * Portable execution directory for the dispatched run. A relative value
+   * resolves under `project` when set, otherwise the target's `$HOME`. Mirrors
+   * a routine's `cwd`.
+   */
+  cwd?: string;
+  /**
+   * Permission mode for a dispatched agent/workflow run. Defaults to `auto`
+   * (write with the classifier). Set `skip`/`full` for fully unattended edits,
+   * or `plan` for a read-only run.
+   */
+  mode?: JobConfig['mode'];
   run?: {
     agent?: AgentId;
     workflow?: string;
@@ -418,7 +438,7 @@ async function executeHandlerAction(
   if (handler.run?.agent || handler.run?.workflow) {
     const config: JobConfig = {
       name: handler.name,
-      mode: 'auto',
+      mode: handler.mode ?? 'auto',
       effort: 'auto',
       timeout: '10m',
       enabled: true,
@@ -426,6 +446,8 @@ async function executeHandlerAction(
       ...(handler.run.agent ? { agent: handler.run.agent } : { workflow: handler.run.workflow! }),
       ...(handler.devices ? { devices: handler.devices } : {}),
       ...(handler.run.env ? { env: handler.run.env } : {}),
+      ...(handler.project ? { project: handler.project } : {}),
+      ...(handler.cwd ? { cwd: handler.cwd } : {}),
       ...(hostFields.host ? { host: hostFields.host } : {}),
       ...(hostFields.hostStrategy ? { hostStrategy: hostFields.hostStrategy } : {}),
     };
@@ -451,6 +473,9 @@ async function executeHandlerAction(
       ...routine,
       prompt: substituteWebhookPrompt(routine.prompt, context),
       ...(handler.devices ? { devices: handler.devices } : {}),
+      ...(handler.project ? { project: handler.project } : {}),
+      ...(handler.cwd ? { cwd: handler.cwd } : {}),
+      ...(handler.mode ? { mode: handler.mode } : {}),
       ...(hostFields.host ? { host: hostFields.host } : {}),
       ...(hostFields.hostStrategy ? { hostStrategy: hostFields.hostStrategy } : {}),
     };
