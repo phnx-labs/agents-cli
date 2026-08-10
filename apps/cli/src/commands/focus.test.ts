@@ -10,10 +10,30 @@ import {
   openFocusTabs,
   isAttachableLiveSession,
   inheritFocusOptions,
+  focusTargetForResolved,
 } from './focus.js';
 import { refuseFallback } from './go.js';
 import type { ActiveSession } from '../lib/session/active.js';
+import type { SessionMeta } from '../lib/session/types.js';
 import type { SurfaceItem, LaunchResult } from '../lib/terminal/index.js';
+
+describe('focusTargetForResolved — an id resolves fleet-wide, no --device needed', () => {
+  const resolved: SessionMeta = {
+    id: '019fd0c8-b3e9-77a2-a1a4-444698c4d897',
+    shortId: '019fd0c8', agent: 'codex', version: '0.146.0', mode: 'edit',
+    machine: 'yosemite-s0', timestamp: '2026-08-10T00:00:00Z', filePath: '/s/a.jsonl',
+  };
+  it('focuses the fleet-resolved session when it is outside the display pool', () => {
+    // The candidate pool (project/window/device-filtered) did not contain the
+    // peer-owned session, but the fleet resolver found it — focus it anyway,
+    // rather than the old "does not match the selected focus filters" rejection.
+    expect(focusTargetForResolved(undefined, resolved)).toBe(resolved);
+  });
+  it('prefers the pool row when present (it carries already-gathered live status)', () => {
+    const poolRow: SessionMeta = { ...resolved, _remote: true } as SessionMeta;
+    expect(focusTargetForResolved(poolRow, resolved)).toBe(poolRow);
+  });
+});
 
 function s(over: Partial<ActiveSession>): ActiveSession {
   return { context: 'terminal', kind: 'claude', status: 'running', ...over } as ActiveSession;

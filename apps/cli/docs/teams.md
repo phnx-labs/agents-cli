@@ -93,7 +93,17 @@ a team or running `agents teams status <team>` performs the full status read.
 | `--use-worktree <path>` | All teammates share this existing worktree path |
 | `--devices <a,b,c>` | Distributed teams: pool of machines the team may run teammates on (alias `--hosts`). See [Distributed teams](#distributed-teams). |
 | `--repo <url\|path>` | How each **remote** (`--device`) teammate gets the code — one git URL/path for the whole team. Defaults to the local checkout's `origin`. **A team is single-repo:** for work spanning repos, make one team per repo. See [Placement & repos](#placement-and-repos). |
+| `--project <slug>` | Work the team on a defined project (`agents projects`). Its primary directory becomes each local teammate's base cwd; its other bound directories are attached as `--add-dir` grants. Validated at create time, so a slug that does not resolve fails here rather than at the first `teams add`. |
 | `--json` | Machine-readable JSON |
+
+**`--project` vs `--repo`.** They answer different questions and compose. `--repo` is
+*how a remote teammate gets the code* (clone URL / path on the host). `--project` is
+*which directories a teammate can reach* — a project may bind several checkouts, and
+the sibling ones ride along as access grants. A teammate's cwd resolves
+`worktree → --cwd → the project's primary directory → the current directory`, so an
+explicit `--cwd` or `--worktree` still wins; the grants are attached either way.
+Only Claude and Codex consume `--add-dir` — other harnesses see the cwd alone. Full
+detail: [Projects](projects.md#a-project-is-a-set-of-directories).
 
 ### Placement and repos
 

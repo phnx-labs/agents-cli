@@ -27,7 +27,7 @@ import { BrowserIPCServer, getSocketPath as getBrowserIpcSocketPath } from './br
 import { secretsBrokerSocketPath, brokerPidAlive } from './secrets/agent.js';
 import { redactSecrets } from './redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from './cli-entry.js';
-import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled } from './device-config.js';
+import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled, getConfigValue } from './device-config.js';
 import { reapTerminalRoutineProcesses } from './routine-process-cleanup.js';
 import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC, SUBSYSTEM_DAEMON_START } from './daemon-health.js';
 import { startAccountStateService } from './account-state-service.js';
@@ -73,6 +73,12 @@ const SELF_HEAL_KICKOFF_MS = 30_000;
 const BROKER_SELF_HEAL_TICK_MS = 60_000;
 const KEYCHAIN_REAP_TICK_MS = 5 * 60_000;
 const STATE_DIR_CHECK_TICK_MS = 60_000;
+// Watchdog nudges this host's own stalled sessions; device-probe refreshes
+// registered devices' reachability and surfaces newly appeared tailnet nodes.
+// Both are daemon-owned housekeeping timers, NOT routines (RUSH-2495) — plain
+// in-process intervals the daemon holds directly, same cadence the old timers ran.
+const WATCHDOG_TICK_MS = 3 * 60_000;
+const DEVICE_PROBE_TICK_MS = 3 * 60_000;
 const WEDGE_THRESHOLD_TICKS = 3;
 
 /**
@@ -905,11 +911,53 @@ export async function runDaemon(): Promise<void> {
     onError: (area, error) => log('WARN', `${area} state refresh failed: ${(error as Error).message}`),
   });
 
-  // watchdog, device-probe, tmux-reconcile, launch-health,
-  // session-cache-warm, and auto-dispatch used to be hardcoded setInterval
-  // ticks here (RUSH-2353). They are DAEMON-OWNED built-in routines
-  // (`builtin-routines.ts`, RUSH-2465), injected as the lowest layer of
-  // `listJobs()` and fired by the pid-claimed JobScheduler.
+  // Watchdog: nudge this host's own stalled agent sessions. Gated on the
+  // `watchdog.enabled` device-config flag (`agents watchdog enable`), so the
+  // timer always fires but only does work when the user opted in. Overlap-safe
+  // via the in-flight guard (a slow pass never overlaps the next tick).
+  let watchdogInFlight = false;
+  const runWatchdogTick = async (): Promise<void> => {
+    if (watchdogInFlight) return;
+    watchdogInFlight = true;
+    try {
+      if (getConfigValue('watchdog.enabled').value !== true) return;
+      const { runWatchdogPass } = await import('./watchdog/service.js');
+      const result = await runWatchdogPass({ nudge: true });
+      log('INFO', `watchdog: ${result.counts.total} live, ${result.counts.stalled} stalled, ${result.counts.nudged} nudged`);
+    } catch (err) {
+      log('WARN', `watchdog tick failed: ${(err as Error).message}`);
+    } finally {
+      watchdogInFlight = false;
+    }
+  };
+  const watchdogInterval = setInterval(() => { void runWatchdogTick(); }, WATCHDOG_TICK_MS);
+
+  // Device probe: refresh registered devices' reachability and detect newly
+  // appeared tailnet nodes, dropping a sentinel per pending device so the
+  // menu-bar helper can surface "NEW DEVICES → Register / Ignore". Refresh mode
+  // never auto-registers a newcomer; a machine without tailscale is a clean
+  // no-op. `reconcilePendingSentinels` re-subtracts the ignore-list itself, so a
+  // device the user dismissed is never re-surfaced (RUSH-2495).
+  let deviceProbeInFlight = false;
+  const runDeviceProbeTick = async (): Promise<void> => {
+    if (deviceProbeInFlight) return;
+    deviceProbeInFlight = true;
+    try {
+      const { runDeviceSync } = await import('./devices/sync.js');
+      const { reconcilePendingSentinels } = await import('./devices/pending.js');
+      const dev = await runDeviceSync({ soft: true, mode: 'refresh' });
+      if (!dev.ok) return;
+      await reconcilePendingSentinels(dev.pending);
+      if (dev.pending.length) {
+        log('INFO', `devices: ${dev.pending.length} new pending (${dev.pending.map((p) => p.name).join(', ')})`);
+      }
+    } catch (err) {
+      log('WARN', `device probe tick failed: ${(err as Error).message}`);
+    } finally {
+      deviceProbeInFlight = false;
+    }
+  };
+  const deviceProbeInterval = setInterval(() => { void runDeviceProbeTick(); }, DEVICE_PROBE_TICK_MS);
 
   // Monitor engine: event-triggered watchers, beside the cron scheduler. Same
   // daemon, same dispatch seam — a monitor is a routine whose trigger is a
@@ -1151,6 +1199,8 @@ export async function runDaemon(): Promise<void> {
   const handleShutdown = singleShot(async () => {
     log('INFO', 'Daemon shutting down');
     accountStateService.stop();
+    clearInterval(watchdogInterval);
+    clearInterval(deviceProbeInterval);
     stopScheduler();
     monitorEngine.stop();
     await browserIPC.stop();
@@ -1554,11 +1604,11 @@ function daemonNodeBinDir(): string {
  * platform's system dirs.
  *
  * The shim's own dir must lead so a scheduled `command` routine that shells out
- * to the bare name `agents` (`/bin/sh -c 'agents __daemon-tick usage-refresh'`)
- * resolves the SAME binary the daemon is running. When the Node runtime dir came
- * first, a stale `agents` install inside that dir (common with nvm or an npm
- * global in the same Node prefix) shadowed the current binary and routines failed
- * with `unknown command '__daemon-tick'`.
+ * to the bare name `agents` (`/bin/sh -c 'agents repo pull system'`) resolves the
+ * SAME binary the daemon is running. When the Node runtime dir came first, a
+ * stale `agents` install inside that dir (common with nvm or an npm global in the
+ * same Node prefix) shadowed the current binary and routines failed with an
+ * `unknown command` error against the wrong build.
  *
  * The Node runtime dir stays second so the shim's shebang (`#!/usr/bin/env node`)
  * still resolves the exact Node that installed the service — never an ancient

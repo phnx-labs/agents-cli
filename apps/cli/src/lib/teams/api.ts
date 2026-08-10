@@ -322,6 +322,8 @@ export async function handleSpawn(
   hostName: string | null = null,
   hostTarget: string | null = null,
   repoPath: string | null = null,
+  /** The team's `--project`; grants resolve from it at launch. */
+  project: string | null = null,
 ): Promise<SpawnResult> {
   const defaultMode = manager.getDefaultMode();
   const resolvedMode = resolveMode(mode, defaultMode);
@@ -377,6 +379,7 @@ export async function handleSpawn(
     hostName,
     hostTarget,
     repoPath,
+    project,
   );
 
   debug(`[spawn] Spawned ${agentType} agent ${agent.agentId} for task "${taskName}"`);

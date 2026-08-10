@@ -588,9 +588,14 @@ export async function runWorkflowForEach(
  * the directory and is mutually exclusive with `--cwd`/`--remote-cwd`; both the
  * main dispatch and the `--terminal` handoff need the same answer, so the rule
  * and its error live here once instead of in two places that can drift.
+ *
+ * A project that binds several directories also contributes the ones it is not
+ * landing in as `--add-dir` grants, so an agent on a multi-repo project can
+ * actually reach the sibling checkouts. Only Claude and Codex consume those
+ * grants; other harnesses ignore them.
  */
 async function resolveRunCwd(
-  options: Pick<ExecCommandActionOptions, 'cwd' | 'project' | 'remoteCwd'>,
+  options: Pick<ExecCommandActionOptions, 'cwd' | 'project' | 'remoteCwd' | 'addDir'>,
   opts: { forRemote: boolean },
 ): Promise<string | undefined> {
   if (!options.project) return options.cwd;
@@ -598,9 +603,18 @@ async function resolveRunCwd(
     console.error(chalk.red('Pass --project alone — not with --cwd or --remote-cwd.'));
     process.exit(1);
   }
-  const { resolveProjectRef } = await import('../lib/project-root.js');
+  const { resolveProjectDirs } = await import('../lib/project-root.js');
   try {
-    return await resolveProjectRef(options.project, { forRemote: opts.forRemote });
+    const { cwd, extraDirs } = await resolveProjectDirs(options.project, {
+      forRemote: opts.forRemote,
+    });
+    // Explicit --add-dir values keep their position; a directory the project
+    // already contributes is not passed twice.
+    if (extraDirs.length > 0) {
+      const seen = new Set(options.addDir ?? []);
+      options.addDir = [...(options.addDir ?? []), ...extraDirs.filter((d) => !seen.has(d))];
+    }
+    return cwd;
   } catch (err) {
     console.error(chalk.red((err as Error).message));
     process.exit(1);

@@ -28,6 +28,7 @@ import {
   getMonitorPath,
   validateMonitor,
   monitorRunsOnThisDevice,
+  parseInterval,
   type MonitorConfig,
   type MonitorSource,
   type MonitorSourceType,
@@ -35,8 +36,9 @@ import {
   type ActionConfig,
   type MonitorWebhookSource,
 } from '../lib/monitors/config.js';
-import { evaluateMonitorOnce } from '../lib/monitors/engine.js';
-import { listFires, readState } from '../lib/monitors/state.js';
+import { formatRelativeTime } from '../lib/session/relative-time.js';
+import { evaluateMonitorOnce, POLL_SOURCE_TYPES } from '../lib/monitors/engine.js';
+import { listFires, readState, readLiveness, type MonitorLiveness } from '../lib/monitors/state.js';
 import { listRuns, getLatestRun, getRunDir } from '../lib/routines.js';
 import { getMonitorsDir } from '../lib/state.js';
 import { IS_WINDOWS } from '../lib/platform/index.js';
@@ -98,6 +100,52 @@ function ownerLabel(monitor: MonitorConfig): string {
   return 'all';
 }
 
+/** A monitor's evaluation cadence in ms (falls back to the engine default). */
+function monitorIntervalMs(monitor: MonitorConfig): number {
+  if (monitor.source.interval) return parseInterval(monitor.source.interval) ?? 60_000;
+  return 60_000;
+}
+
+/**
+ * True when an enabled, locally-owned monitor's last poll is far enough past its
+ * interval that the engine has plainly stopped checking it (dead engine, swallowed
+ * start failure, never picked up). Tolerates a few missed ticks before flagging.
+ */
+function isStalled(monitor: MonitorConfig, liveness: MonitorLiveness | null): boolean {
+  if (!monitor.enabled || !monitorRunsOnThisDevice(monitor)) return false;
+  if (!liveness) return false; // "never polled" is its own state, handled separately
+  const staleAfter = Math.max(monitorIntervalMs(monitor) * 3, 90_000);
+  return Date.now() - new Date(liveness.lastCheckedAt).getTime() > staleAfter;
+}
+
+/**
+ * The human liveness line for a monitor. This is the RUSH-2485 fix: it makes
+ * "the engine has never touched this" (`never polled`) visibly distinct from
+ * "polling steadily, condition just isn't matching" (`checked Nx`), from a real
+ * fire, and from a stalled engine.
+ */
+function livenessLabel(monitor: MonitorConfig, state: ReturnType<typeof readState>, liveness: MonitorLiveness | null): string {
+  const here = monitorRunsOnThisDevice(monitor);
+  if (!monitor.enabled) return chalk.gray('paused');
+  if (!here) {
+    // Not owned by this box — this daemon never checks it, so there's no local
+    // liveness to report; fall back to fire history if the owner synced it.
+    return state?.lastFiredAt ? chalk.gray(`fired ${formatRelativeTime(state.lastFiredAt)}`) : chalk.gray('owned elsewhere');
+  }
+  if (!liveness) return chalk.yellow('never polled');
+  if (isStalled(monitor, liveness)) {
+    return chalk.red(`STALLED — last poll ${formatRelativeTime(liveness.lastCheckedAt)}`);
+  }
+  const checkedAgo = formatRelativeTime(liveness.lastCheckedAt);
+  if (liveness.lastError) {
+    return chalk.red(`checked ${liveness.checkCount}x · error: ${liveness.lastError.replace(/\s+/g, ' ').slice(0, 60)}`);
+  }
+  if (state?.lastFiredAt) {
+    return chalk.green(`fired ${formatRelativeTime(state.lastFiredAt)}`) + chalk.gray(` · checked ${liveness.checkCount}x`);
+  }
+  return chalk.gray(`checked ${liveness.checkCount}x · last ${checkedAgo} · no match yet`);
+}
+
 /** Start or reload the background daemon so a newly-added monitor is watched. */
 function ensureDaemonRunning(): void {
   if (isDaemonRunning()) {
@@ -112,6 +160,37 @@ function ensureDaemonRunning(): void {
   } else {
     stderrLine(chalk.yellow('Could not start the daemon. Start it manually with: agents routines start'));
   }
+}
+
+/**
+ * Assert the postcondition of `add`: the engine actually picked the monitor up.
+ * Config acceptance is not enough — RUSH-2485 was a monitor that added cleanly,
+ * listed as `on`, and never polled. A poll-model monitor owned by and enabled on
+ * this box should show a liveness heartbeat within a couple of engine ticks; wait
+ * for it and report the real outcome instead of reporting success on write. A
+ * miss is a warning, not a hard failure — a freshly-started daemon may still be
+ * booting — but it is surfaced so a dead engine can never masquerade as healthy.
+ */
+async function assertEnginePickup(monitor: MonitorConfig): Promise<void> {
+  const pollSource = POLL_SOURCE_TYPES.has(monitor.source.type);
+  if (!monitor.enabled || !monitorRunsOnThisDevice(monitor) || !pollSource) return; // nothing to assert here
+  const before = readLiveness(monitor.name);
+  const baseline = before?.checkCount ?? 0;
+  const deadline = Date.now() + 12_000; // a couple of 5s ticks, plus daemon-boot slack
+  stderrLine(chalk.gray('  waiting for the engine to poll it…'));
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 500));
+    const now = readLiveness(monitor.name);
+    if (now && now.checkCount > baseline) {
+      console.log(chalk.green(`  engine picked it up — first poll ${formatRelativeTime(now.lastCheckedAt)}`));
+      if (now.lastError) {
+        stderrLine(chalk.yellow(`  note: that poll errored — ${now.lastError.replace(/\s+/g, ' ').slice(0, 80)}`));
+      }
+      return;
+    }
+  }
+  stderrLine(chalk.yellow(`  the engine has not polled '${monitor.name}' yet.`));
+  stderrLine(chalk.yellow(`  confirm the daemon is running (agents routines status) and re-check with: agents monitors view ${monitor.name}`));
 }
 
 /** Validate a single device name against the registered fleet; exit on miss. */
@@ -361,6 +440,7 @@ export function registerMonitorsCommands(program: Command): void {
         writeMonitor(config);
         console.log(chalk.green(`Monitor '${name}' added`));
         ensureDaemonRunning();
+        await assertEnginePickup(config);
         return;
       }
 
@@ -439,6 +519,7 @@ export function registerMonitorsCommands(program: Command): void {
       console.log(chalk.green(`Monitor '${nameOrPath}' added`));
       console.log(chalk.gray(`  ${sourceLabel(source)} → [${condition.mode}] → ${actionLabel(action)} · owner: ${ownerLabel(config)}`));
       ensureDaemonRunning();
+      await assertEnginePickup(config);
     });
 
   // ─── list ────────────────────────────────────────────────────────────────────
@@ -451,6 +532,7 @@ export function registerMonitorsCommands(program: Command): void {
       if (options.json) {
         const payload = monitors.map((m) => {
           const state = readState(m.name);
+          const liveness = readLiveness(m.name);
           return {
             name: m.name,
             enabled: m.enabled,
@@ -461,6 +543,13 @@ export function registerMonitorsCommands(program: Command): void {
             runsHere: monitorRunsOnThisDevice(m),
             lastSeenAt: state?.lastSeenAt ?? null,
             lastFiredAt: state?.lastFiredAt ?? null,
+            // Liveness heartbeat (RUSH-2485): distinguishes never-polled from
+            // polling-not-matching from a stalled engine.
+            lastCheckedAt: liveness?.lastCheckedAt ?? null,
+            checkCount: liveness?.checkCount ?? 0,
+            lastError: liveness?.lastError ?? null,
+            consecutiveErrors: liveness?.consecutiveErrors ?? 0,
+            stalled: isStalled(m, liveness),
           };
         });
         stdoutJson(payload);
@@ -474,12 +563,12 @@ export function registerMonitorsCommands(program: Command): void {
       console.log(chalk.bold('Monitors\n'));
       for (const m of monitors) {
         const state = readState(m.name);
+        const liveness = readLiveness(m.name);
         const enabled = m.enabled ? chalk.green('on') : chalk.gray('off');
         const here = monitorRunsOnThisDevice(m);
         const owner = here ? ownerLabel(m) : chalk.gray(ownerLabel(m));
-        const lastFired = state?.lastFiredAt ? `fired ${state.lastFiredAt}` : chalk.gray('never fired');
         console.log(`  ${chalk.cyan(m.name.padEnd(22))} ${enabled.padEnd(3)} ${sourceLabel(m.source)}`);
-        console.log(`  ${' '.repeat(22)}     ${chalk.gray(`[${m.condition.mode}]`)} → ${actionLabel(m.action)}  ${chalk.gray(`owner: ${owner}`)}  ${chalk.gray(lastFired)}`);
+        console.log(`  ${' '.repeat(22)}     ${chalk.gray(`[${m.condition.mode}]`)} → ${actionLabel(m.action)}  ${chalk.gray(`owner: ${owner}`)}  ${livenessLabel(m, state, liveness)}`);
       }
       console.log();
     });
@@ -500,6 +589,7 @@ export function registerMonitorsCommands(program: Command): void {
         process.exit(1);
       }
       const state = readState(name);
+      const liveness = readLiveness(name);
       const recentFires = listFires(name).slice(-5);
       if (options.json) {
         stdoutJson({
@@ -508,14 +598,29 @@ export function registerMonitorsCommands(program: Command): void {
           owner: ownerLabel(monitor),
           runsHere: monitorRunsOnThisDevice(monitor),
           state,
+          liveness,
+          stalled: isStalled(monitor, liveness),
           recentFires,
         });
         return;
       }
       console.log(chalk.bold(`Monitor: ${name}\n`));
       console.log(yaml.stringify(monitor));
+      // Liveness first (RUSH-2485): the heartbeat is the answer to "is this thing
+      // actually running?" — it renders even when the monitor has never fired.
+      console.log(chalk.bold('Liveness'));
+      console.log(`  ${livenessLabel(monitor, state, liveness)}`);
+      if (liveness) {
+        console.log(chalk.gray(`  last checked: ${liveness.lastCheckedAt} (${formatRelativeTime(liveness.lastCheckedAt)})`));
+        console.log(chalk.gray(`  checks:       ${liveness.checkCount}`));
+        if (liveness.lastError) {
+          console.log(chalk.red(`  last error:   ${liveness.lastError.replace(/\s+/g, ' ').slice(0, 200)} (${liveness.consecutiveErrors} in a row)`));
+        }
+      } else if (monitor.enabled && monitorRunsOnThisDevice(monitor)) {
+        console.log(chalk.yellow('  The engine has not polled this monitor yet. If this persists, the daemon may not have picked it up — check: agents routines status'));
+      }
       if (state) {
-        console.log(chalk.bold('Watched state'));
+        console.log(chalk.bold('\nWatched state'));
         console.log(chalk.gray(`  last seen:  ${state.lastSeenAt}`));
         if (state.lastFiredAt) console.log(chalk.gray(`  last fired: ${state.lastFiredAt}`));
         console.log(chalk.gray(`  last value: ${state.lastValue.replace(/\s+/g, ' ').slice(0, 120)}`));

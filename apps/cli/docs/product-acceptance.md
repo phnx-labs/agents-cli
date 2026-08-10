@@ -138,7 +138,7 @@ agents <cmd> …
 |---|---|
 | “As a user I want better sessions so I can be productive.” | Role + specific command/UI + observable outcome + independent test |
 | Scenarios that restate the implementation | Scenarios a second agent could implement without re-asking you |
-| No must-not-break | Explicit adjacent surfaces (JSON, flags, Factory, menubar) |
+| No must-not-break | Explicit adjacent surfaces (JSON, flags, AGI EXT, menubar) |
 | “tests pass” as proof | Named proof command whose **output** is quoted |
 
 ---

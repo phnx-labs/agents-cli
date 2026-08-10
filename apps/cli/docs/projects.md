@@ -44,8 +44,9 @@ description: "Rush app"
 root: ~/src/github.com/phnx-labs/rush
 defaultPath: ~/src/github.com/phnx-labs/rush/apps/web   # where an agent's cwd lands
 repo: phnx-labs/rush            # primary GitHub slug (PR / merge rollup)
-repos:                          # additional repos, each with an optional monorepo subpath
+repos:                          # every directory this project binds (see below)
   - slug: phnx-labs/rush-infra
+    path: ~/src/github.com/phnx-labs/rush-infra
 goals:                          # the outcomes this project serves (OKR-shaped)
   - objective: "Ship Rush 2.0"
     measure: "all tiers migrated"
@@ -73,7 +74,7 @@ dispatch:
 | `name` | Stable id, == filename. What `--project` takes. |
 | `root` | Repo / monorepo root, home-relative → portable. |
 | `defaultPath` | Where an agent's cwd lands (a monorepo subdir). Defaults to `root`. |
-| `repo` / `repos[]` | GitHub slug(s), each with an optional `subpath`, for the PR/merge rollup. `repos[].path` (home-relative) names that repo's local checkout and opts it into workspace probing (`status`). |
+| `repo` / `repos[]` | GitHub slug(s), each with an optional `subpath`, for the PR/merge rollup. `repos[].path` (home-relative) names that repo's local checkout: it opts the repo into workspace probing (`status`) **and** into the directories an agent spawned on this project can reach (see [A project is a set of directories](#a-project-is-a-set-of-directories)). |
 | `contexts[]` | `{path, purpose}` described starting points — indexed anchors for agents. |
 | `goals[]` | `{objective, measure}` the OKR-shaped outcomes a project serves — a project may have several. The objective is the "why"; `measure` is the optional key result. Milestones (pulled from Linear) are the dated checkpoints toward them. |
 | `integrations[]` | `{kind, url, label}` external context sources. |
@@ -92,6 +93,66 @@ Resolution is intentionally **not** beta-gated — only the `agents projects` co
 tree is. A definition exists solely by explicit user action (`projects add`,
 `projects import`, or hand-authoring the YAML), so honoring it in `--project`
 resolution is additive and safe; users without any definitions see zero change.
+
+## A project is a set of directories
+
+A project usually spans more than one checkout — a CLI, its website, and the
+DotAgents repo it ships resources into. Each `repos[]` entry with a `path` is one
+of those directories, and everything that starts an agent resolves all of them:
+
+```bash
+# --root sets where agents start; --dir binds the directories they may reach.
+# The slug is read from EACH directory's own origin remote.
+agents projects add agents-cli \
+  --root ~/src/github.com/muqsitnawaz/agents-cli \
+  --dir ~/src/github.com/muqsitnawaz/agents-cli-web \
+  --dir ~/.agents/.system
+
+agents projects set agents-cli --add-dir ~/.agents/.system     # bind one more
+agents projects set agents-cli --rm-dir  ~/.agents/.system     # unbind it
+agents projects set agents-cli --add-dir ./vendor/thing --slug o/thing  # no origin
+```
+
+**The slug comes from the directory, never from its path.** A checkout at
+`~/src/github.com/muqsitnawaz/agents-cli` whose origin is `phnx-labs/agents-cli`
+records the remote it actually pushes to. `--slug` names it explicitly for a
+directory with no origin; it applies to a single `--add-dir`.
+
+**Which one is the cwd.** `defaultPath ?? root` — set by `--root` / `--path`, and
+**not** by `--dir`. `--dir` binds a directory; it never moves where an agent starts.
+Every bound directory other than that cwd is attached as an `--add-dir` grant:
+
+```bash
+agents run claude --project agents-cli
+#   cwd        ~/src/github.com/muqsitnawaz/agents-cli
+#   --add-dir  ~/src/github.com/muqsitnawaz/agents-cli-web
+#   --add-dir  ~/.agents/.system
+
+agents teams create feat --project agents-cli   # same, for every teammate
+```
+
+This holds for `agents run` (local and `--host`) and for `agents teams`. In a
+team, the project's directory sits **below** `--cwd` and a `--worktree` in the cwd
+precedence chain — an explicit one still wins — but the grants are attached either
+way, since the siblings are what the project binds, not where the teammate sits.
+
+**Only Claude and Codex consume `--add-dir`.** Claude takes the native flag; Codex
+folds the directories into its `workspace_roots`. Every other harness ignores them,
+so an agent there sees the cwd alone. That is a harness limitation, not a
+configuration mistake.
+
+**A directory missing on this box is skipped, not an error.** A definition binding
+a checkout that only exists on some machines still loads, and the primary cwd still
+resolves. For a `--host` run the paths stay `~/…` and are **not** filtered against
+this machine's filesystem — the target host has its own checkouts, and the `agents
+run` on that host expands `~` against its own `$HOME` before the harness sees it.
+
+For a team, the grants are resolved **at launch**, not when you run `teams add`. On
+a `--devices` pool an unpinned teammate has no host until the scheduler places it,
+so freezing directories at add time would hand it this machine's absolute paths.
+
+Definitions are syncable, not synced: after binding directories, push them with
+`agents repo push user` and `agents repo pull user` on the other boxes.
 
 ## One name everywhere — activity, feed, sessions
 
@@ -260,18 +321,21 @@ A local workspace probe always feeds this footer (cheap, no SSH). The full per-h
 | Command | Does |
 | --- | --- |
 | `agents projects list [--json] [--with-agents]` | All defined projects (root, repo, …). Definitions only by default — zero session scan / SSH. `--with-agents` is an explicit opt-in for **local** active counts only. |
-| `agents projects add <name>` | Scaffold `<name>.yaml`; infers `root` + origin slug from the current repo. Flags: `--root`, `--path`, `--repo`, `--context path:purpose`, `--goal objective:measure`, `--linear`. |
+| `agents projects add <name>` | Scaffold `<name>.yaml`; infers `root` + origin slug from the current repo. Flags: `--root`, `--path`, `--repo`, `--dir <path...>` (bind directories; slug read from each one's origin), `--context path:purpose`, `--goal objective:measure`, `--linear`. |
 | `agents projects save --json` | Create or update one project from a complete `ProjectDef` JSON object on stdin; validates against the canonical schema, writes atomically under `~/.agents/projects/`, prints the saved definition as JSON. Used by the ext (and any other machine client). |
 | `agents projects view <name>` / `show` | Alias of `status <name>`: full card, every milestone, stored definition. |
 | `agents projects edit <name>` | Open the YAML in `$EDITOR`. |
 | `agents projects status [name] [--json] [--window N] [--no-remote] [--device name...] [--devices a,b,c]` (aliases `view`, `show`) | Progress card for every project across the whole fleet (per-device workspace drift over SSH), or one named project. Named form also prints every milestone and the stored definition. `--device`/`--devices` scopes the fan-out to a subset. |
 | `agents projects link <name> --linear [query]` | Bind a Linear project into the def (`linear.projectId` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. |
 | `agents projects import --from-linear` | Import the workspace's Linear projects (via the `linear` CLI) as definitions. See [Importing](#importing--from-linear). There is no ext import path — `~/.agents/factory/projects.json` is never read. |
-| `agents projects set <name> [--repo\|--root\|--path\|--description\|--goal objective:measure]` | Change one field, preserving every other. `--goal` (repeatable) replaces the goals list. Use this rather than `add --force`, which rebuilds the definition from flags alone. |
+| `agents projects set <name> [--repo\|--root\|--path\|--description\|--goal objective:measure\|--add-dir\|--rm-dir\|--slug]` | Change one field, preserving every other. `--goal` (repeatable) replaces the goals list. `--add-dir` / `--rm-dir` (both repeatable) bind and unbind directories; `--slug` names the remote for a single `--add-dir` whose origin cannot be read. Removals apply before additions, so `--rm-dir old --add-dir new` re-points a directory in one command. Use this rather than `add --force`, which rebuilds the definition from flags alone. |
 | `agents projects rm <name> [--json]` | Delete the definition (never touches the repo). `--json` prints `{ ok, name, removed }` (or `{ ok: false, name, error }` on failure). |
 
+`agents teams create <team> --project <name>` binds a whole team to a project.
+
 `agents run --project <name>` is unchanged in spelling — it just resolves richer
-definitions now.
+definitions now, and attaches the project's other directories as `--add-dir`
+grants.
 
 ## Importing — from Linear
 

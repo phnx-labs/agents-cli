@@ -10,6 +10,7 @@ import {
   removeProjectDef,
   validateProjectDef,
   projectBasePath,
+  projectDirsAbs,
   resolveDefinedProjectPath,
   projectNameForCwd,
   resolveProjectNameForCwd,
@@ -365,5 +366,106 @@ describe('projectNameForCwd — monorepo subprojects', () => {
     expect(projectNameForCwd(path.join(mono, 'apps', 'web'), reversed)).toBe('rush');
     expect(projectNameForCwd(mono, defs)).toBe('rush');
     expect(projectNameForCwd(mono, reversed)).toBe('rush');
+  });
+});
+
+describe('projectDirsAbs', () => {
+  // Real directories on disk: the local branch filters by existence, so a
+  // fixture that only pretends to exist would test nothing.
+  let realA: string;
+  let realB: string;
+
+  beforeEach(() => {
+    realA = fs.mkdtempSync(path.join(os.tmpdir(), 'proj-dir-a-'));
+    realB = fs.mkdtempSync(path.join(os.tmpdir(), 'proj-dir-b-'));
+  });
+  afterEach(() => {
+    fs.rmSync(realA, { recursive: true, force: true });
+    fs.rmSync(realB, { recursive: true, force: true });
+  });
+
+  it('puts the cwd first, then each bound repo', () => {
+    const def: ProjectDef = {
+      name: 'multi',
+      root: realA,
+      repos: [{ slug: 'o/b', path: realB }],
+    };
+    expect(projectDirsAbs(def, { forRemote: false })).toEqual([realA, realB]);
+  });
+
+  it('collapses a repo row that points back at the primary', () => {
+    // The natural way to declare a project is to list every directory including
+    // the main one; that must not produce a duplicate grant.
+    const def: ProjectDef = {
+      name: 'dup',
+      root: realA,
+      repos: [{ slug: 'o/a', path: realA }, { slug: 'o/b', path: realB }],
+    };
+    expect(projectDirsAbs(def, { forRemote: false })).toEqual([realA, realB]);
+  });
+
+  it('drops a directory absent from THIS box, but keeps it for a remote spawn', () => {
+    const missing = path.join(os.tmpdir(), 'proj-dir-does-not-exist-9f3a');
+    const def: ProjectDef = {
+      name: 'partial',
+      root: realA,
+      repos: [{ slug: 'o/gone', path: missing }],
+    };
+    // Local: a grant for a path that is not here is noise.
+    expect(projectDirsAbs(def, { forRemote: false })).toEqual([realA]);
+    // Remote: the target host has its own checkouts — this box's filesystem
+    // must not decide what exists there.
+    expect(projectDirsAbs(def, { forRemote: true })).toContain(missing);
+  });
+
+  it('joins subpath onto the bound directory', () => {
+    const sub = path.join(realB, 'apps', 'web');
+    fs.mkdirSync(sub, { recursive: true });
+    const def: ProjectDef = {
+      name: 'mono',
+      root: realA,
+      repos: [{ slug: 'o/b', path: realB, subpath: 'apps/web' }],
+    };
+    expect(projectDirsAbs(def, { forRemote: false })).toEqual([realA, sub]);
+  });
+
+  it('keeps home-relative form for a remote spawn so ~ re-roots on the host', () => {
+    const def: ProjectDef = {
+      name: 'remote',
+      root: '~/src/thing',
+      repos: [{ slug: 'o/sys', path: '~/.agents/.system' }],
+    };
+    expect(projectDirsAbs(def, { forRemote: true })).toEqual([
+      '~/src/thing',
+      '~/.agents/.system',
+    ]);
+  });
+
+  it('honors an explicit primary so a worktree run still grants the siblings', () => {
+    // `--project slug@worktree` lands in the worktree, not in `root`; the
+    // sibling repos must still come along.
+    const wt = path.join(realA, '.agents', 'worktrees', 'feature');
+    fs.mkdirSync(wt, { recursive: true });
+    const def: ProjectDef = {
+      name: 'wt',
+      root: realA,
+      repos: [{ slug: 'o/b', path: realB }],
+    };
+    expect(projectDirsAbs(def, { forRemote: false, primary: wt })).toEqual([wt, realB]);
+  });
+
+  it('is just the cwd when the project binds no extra directories', () => {
+    expect(projectDirsAbs({ name: 'solo', root: realA }, { forRemote: false })).toEqual([realA]);
+  });
+
+  it('ignores a repo row that carries only a slug', () => {
+    // `repos[].path` is the opt-in; a slug-only row is PR/CI metadata and names
+    // nothing on disk to grant.
+    const def: ProjectDef = {
+      name: 'slugonly',
+      root: realA,
+      repos: [{ slug: 'o/no-checkout' }],
+    };
+    expect(projectDirsAbs(def, { forRemote: false })).toEqual([realA]);
   });
 });

@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>A project is a set of directories, each with its own remote</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:5px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-draft">draft</span></div>
+<h1>A project is a set of directories, each with its own remote</h1>
+<p class="summary">Bind agents-cli-web and ~/.agents/.system to the agents-cli project, and make every spawn path — agents run, agents teams, and the extension's New Agent — resolve all of a project's directories instead of just one.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">zion</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">9ae6ccdf</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a href="#purpose"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#behavior-what-happens-when-you-do-x"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Behavior — what happens when you do X</a><a href="#current-architecture"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Current architecture</a><a href="#proposed-changes"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#to-do"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>To-do</a><a href="#validation"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="focus-for-review">Focus for review</h2>
+<p>Five things worth your attention before I build this.</p>
+<ol>
+<li><strong>The spawn contract.</strong> One cwd (the project's primary directory) plus every other project directory attached as an <code>--add-dir</code> grant. Only Claude and Codex consume <code>--add-dir</code> today; other harnesses drop it silently.</li>
+<li><strong>The CLI surface.</strong> <code>--dir</code> on <code>projects add</code>, <code>--add-dir</code> / <code>--rm-dir</code> on <code>projects set</code>. Extending the two commands that already exist rather than adding a <code>projects repo</code> subcommand group.</li>
+<li><strong>A slug comes from the directory, never from the path.</strong> Your checkout sits at <code>~/src/github.com/muqsitnawaz/agents-cli</code> while the remote is <code>phnx-labs/agents-cli</code>. Every slug is read from that directory's own <code>origin</code>.</li>
+<li><strong>This lands in agents-cli, not Factory.</strong> The extension gets thinner: it stops computing a cwd and passes <code>--project &lt;slug&gt;</code>.</li>
+<li><strong><code>agents teams</code> gains <code>--project</code>.</strong> It has no such flag today, so this is genuinely new surface.</li>
+</ol>
+<h2 id="purpose">Purpose</h2>
+<blockquote>
+<p>"Can we add the agents-cli-web repo and ~/.agents/.system repo to be part of the agents-cli project? ... And when we spin up an agent via <code>agents run</code> or <code>agents teams</code> or using 'Agents: New Agent' via the extension, then it should properly add all these cwds. ... Our project should have a way to specify different directories and then be able to connect their GitHub remote as well. ... This functionality should be agents-cli level, not Factory or extension level."</p>
+</blockquote>
+<p>Binding the two repos is a one-line YAML edit. The request underneath it is the real work: a project should <em>be</em> a set of directories, and everything that starts an agent should know all of them.</p>
+<h2 id="behavior-what-happens-when-you-do-x">Behavior — what happens when you do X</h2>
+<table>
+<thead>
+<tr>
+<th>When you…</th>
+<th>Today</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>agents run claude --project agents-cli</code></td>
+<td>Lands in <code>agents-cli</code>. The web repo and <code>.system</code> are invisible to the agent.</td>
+<td>Lands in <code>agents-cli</code>, with <code>agents-cli-web</code> and <code>~/.agents/.system</code> attached as accessible roots.</td>
+</tr>
+<tr>
+<td><code>agents run … --project agents-cli --host yosemite-s0</code></td>
+<td>Same, remote. Extra dirs still invisible.</td>
+<td>Extra dirs forwarded home-relative, re-rooted at the host's own <code>$HOME</code>.</td>
+</tr>
+<tr>
+<td><code>agents teams create X</code></td>
+<td>No <code>--project</code> flag exists at all.</td>
+<td><code>--project agents-cli</code> sets each teammate's base cwd and grants the sibling dirs.</td>
+</tr>
+<tr>
+<td>Cmd-Shift-A (<code>Agents: New Agent</code>) in the agents-cli window</td>
+<td>cwd is hardcoded to <code>workspaceFolders[0]</code>; projects are never consulted.</td>
+<td>Emits <code>--project agents-cli</code>; the CLI resolves cwd and grants.</td>
+</tr>
+<tr>
+<td>A box that has no <code>agents-cli-web</code> checkout</td>
+<td>n/a</td>
+<td>Definition loads fine; the missing dir is skipped at spawn, not an error.</td>
+</tr>
+</tbody></table>
+<section class="artifact-grid artifact-grid-2">
+  <article class="artifact-panel">
+    <h4>Today — <code>agents projects view agents-cli</code></h4>
+    <pre><code>agents-cli  ·  1 live
+  Agents CLI and Factory
+  fleet    7/11 clean · 3 behind · 2 dirty · 1 missing
+           win-mini: ✗ missing  ·  yosemite-m0: ⚠ ↓57 · main  ·  zion: ✓ clean · main
+  repos    phnx-labs/agents-cli
+
+  root     ~/src/github.com/muqsitnawaz/agents-cli
+  path     ~/src/github.com/muqsitnawaz/agents-cli
+  linear   8eb8f5b1-3870-4590-ba67-36f3811d1435</code></pre>
+    <p>One repo, one root, one probed directory. Captured on zion, 2026-08-10.</p>
+    <h4>Today — spawning into it</h4>
+    <pre><code>$ agents run claude --project agents-cli
+  cwd  ~/src/github.com/muqsitnawaz/agents-cli
+  (agents-cli-web and ~/.agents/.system are not reachable by the agent)</code></pre>
+  </article>
+  <article class="artifact-panel">
+    <h4>Proposed — <code>agents projects view agents-cli</code></h4>
+    <pre><code>agents-cli  ·  1 live
+  Agents CLI and Factory
+  fleet    21/33 clean · 3 behind · 2 dirty · 1 missing        (3 dirs × 11 hosts)
+           win-mini: ✗ missing  ·  yosemite-m0: ⚠ ↓57 · main  ·  zion: ✓ clean · main
+  repo     phnx-labs/agents-cli       (~/src/github.com/muqsitnawaz/agents-cli)
+  repo     phnx-labs/agents-cli-web   (~/src/github.com/muqsitnawaz/agents-cli-web)
+  repo     phnx-labs/.agents-system   (~/.agents/.system)
+
+  root     ~/src/github.com/muqsitnawaz/agents-cli
+  path     ~/src/github.com/muqsitnawaz/agents-cli
+  linear   8eb8f5b1-3870-4590-ba67-36f3811d1435</code></pre>
+    <p>Three bound directories, each with the remote read from its own <code>origin</code>. The one-line <code>repos</code> summary becomes the per-repo form that <code>projects.ts:631-633</code> already prints.</p>
+    <h4>Proposed — spawning into it</h4>
+    <pre><code>$ agents run claude --project agents-cli
+  cwd       ~/src/github.com/muqsitnawaz/agents-cli
+  --add-dir ~/src/github.com/muqsitnawaz/agents-cli-web
+  --add-dir ~/.agents/.system</code></pre>
+  </article>
+</section><p><strong>Figure 1.</strong> The user-visible change: a project stops being one directory that lists extra slugs and becomes a set of directories every spawn path can reach. The current state is captured live on zion; the proposed state is a mockup.</p>
+<h2 id="current-architecture">Current architecture</h2>
+<p><code>ProjectDef.repos[]</code> already has the exact shape needed — <code>{ slug, subpath?, path? }</code> at <code>apps/cli/src/lib/projects.ts:41-52</code>, with <code>path</code> documented as the opt-in for an additional repo. Two gaps sit on either side of it.</p>
+<p><strong>Nothing writes it.</strong> <code>projects add</code> and <code>projects set</code> each take a singular <code>--repo &lt;owner/repo&gt;</code> that only ever assigns <code>def.repo</code> (<code>projects.ts:557</code>, <code>:868</code>; bodies at <code>:588</code>, <code>:887</code>). <code>repos[]</code> is reachable only by hand-editing YAML or piping a complete <code>ProjectDef</code> into <code>projects save --json</code>.</p>
+<p><strong>Nothing that spawns an agent reads it.</strong> <code>resolveDefinedProjectPath</code> — the function behind <code>agents run --project</code> — consults only <code>def.defaultPath ?? def.root</code>:</p>
+<pre><code>// apps/cli/src/lib/projects.ts:475-489
+export function resolveDefinedProjectPath(def, worktree, forRemote) {
+  if (worktree) { /* … root ?? defaultPath … */ }
+  const base = projectBasePath(def, forRemote);   // defaultPath ?? root, :352-356
+  if (!base) return undefined;
+  return forRemote ? base : path.resolve(base);
+}
+</code></pre>
+<p><code>repos[].path</code> <em>is</em> resolved elsewhere, but only for two read-only purposes: git-status probing in <code>project-probe.ts:120-125</code>, and mapping an existing cwd back to a project name in <code>projects.ts:403-407</code>. Never for placing an agent.</p>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+  <svg class="artifact-diagram" viewBox="0 0 940 300" role="img" aria-label="Before: one resolved directory with two orphan repos. After: three directories resolved into one agent.">
+    <text x="20" y="26" fill="#8a8a8a" font-family="JetBrains Mono, monospace" font-size="12">BEFORE</text>
+    <rect x="20" y="40" width="400" height="230" rx="10" fill="#141414" stroke="#3a3a3a" stroke-width="1"></rect>
+    <text x="40" y="66" fill="#c8c8c8" font-family="Inter, system-ui, sans-serif" font-size="13">agents-cli.yaml</text>
+    <rect x="40" y="80" width="240" height="42" rx="6" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+    <text x="56" y="100" fill="#f59e0b" font-family="JetBrains Mono, monospace" font-size="11">root: agents-cli</text>
+    <text x="56" y="115" fill="#8a8a8a" font-family="JetBrains Mono, monospace" font-size="10">phnx-labs/agents-cli</text>
+    <rect x="40" y="134" width="240" height="36" rx="6" fill="#111" stroke="#333" stroke-width="1" stroke-dasharray="4 3"></rect>
+    <text x="56" y="156" fill="#5a5a5a" font-family="JetBrains Mono, monospace" font-size="11">agents-cli-web  (orphan)</text>
+    <rect x="40" y="180" width="240" height="36" rx="6" fill="#111" stroke="#333" stroke-width="1" stroke-dasharray="4 3"></rect>
+    <text x="56" y="202" fill="#5a5a5a" font-family="JetBrains Mono, monospace" font-size="11">.agents/.system (orphan)</text>
+    <line x1="280" y1="101" x2="340" y2="101" stroke="#f59e0b" stroke-width="2"></line>
+    <circle cx="346" cy="101" r="18" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></circle>
+    <text x="346" y="106" text-anchor="middle" fill="#f59e0b" font-family="Inter, system-ui, sans-serif" font-size="11">cwd</text>
+    <text x="346" y="240" text-anchor="middle" fill="#5a5a5a" font-family="Inter, system-ui, sans-serif" font-size="11">agent sees 1 of 3</text>
+    <path d="M 448 155 L 486 155" stroke="#38bdf8" stroke-width="2"></path>
+    <path d="M 478 149 L 486 155 L 478 161 Z" fill="#38bdf8"></path>
+    <text x="520" y="26" fill="#8a8a8a" font-family="JetBrains Mono, monospace" font-size="12">AFTER</text>
+    <rect x="520" y="40" width="400" height="230" rx="10" fill="#141414" stroke="#3a3a3a" stroke-width="1"></rect>
+    <text x="540" y="66" fill="#c8c8c8" font-family="Inter, system-ui, sans-serif" font-size="13">agents-cli.yaml — repos[]</text>
+    <rect x="540" y="80" width="230" height="42" rx="6" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+    <text x="556" y="100" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="11">agents-cli</text>
+    <text x="556" y="115" fill="#8a8a8a" font-family="JetBrains Mono, monospace" font-size="10">phnx-labs/agents-cli</text>
+    <rect x="540" y="130" width="230" height="42" rx="6" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+    <text x="556" y="150" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="11">agents-cli-web</text>
+    <text x="556" y="165" fill="#8a8a8a" font-family="JetBrains Mono, monospace" font-size="10">phnx-labs/agents-cli-web</text>
+    <rect x="540" y="180" width="230" height="42" rx="6" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+    <text x="556" y="200" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="11">.agents/.system</text>
+    <text x="556" y="215" fill="#8a8a8a" font-family="JetBrains Mono, monospace" font-size="10">phnx-labs/.agents-system</text>
+    <path d="M 770 101 L 840 101" stroke="#a3e635" stroke-width="2"></path>
+    <path d="M 770 151 L 812 151 L 812 112" stroke="#38bdf8" stroke-width="1.5" fill="none" stroke-dasharray="3 3"></path>
+    <path d="M 770 201 L 812 201 L 812 112" stroke="#38bdf8" stroke-width="1.5" fill="none" stroke-dasharray="3 3"></path>
+    <circle cx="858" cy="101" r="20" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></circle>
+    <text x="858" y="106" text-anchor="middle" fill="#a3e635" font-family="Inter, system-ui, sans-serif" font-size="11">cwd</text>
+    <text x="846" y="240" text-anchor="middle" fill="#38bdf8" font-family="Inter, system-ui, sans-serif" font-size="11">+ 2 granted roots</text>
+  </svg>
+  <figcaption><b>Figure 2.</b> Solid line is the working directory; dashed lines are <code>--add-dir</code> grants. Today two of the three repos are named in the definition but reach no agent.</figcaption>
+</figure><h2 id="proposed-changes">Proposed Changes</h2>
+<h3>1. Write path — <code>apps/cli/src/commands/projects.ts</code></h3>
+<p><code>projects add</code> gains a repeatable <code>--dir &lt;path...&gt;</code>; <code>projects set</code> gains repeatable <code>--add-dir &lt;path&gt;</code> and <code>--rm-dir &lt;path&gt;</code>. Each value names a <strong>local directory</strong>, and the slug is derived from it:</p>
+<pre><code># you name the directory; the slug is read from ITS origin remote
+agents projects set agents-cli \
+  --add-dir ~/src/github.com/muqsitnawaz/agents-cli-web \
+  --add-dir ~/.agents/.system
+
+# resolution per dir:
+#   expandLocalHome(path) -&gt; assert git repo -&gt; git remote get-url origin
+#                         -&gt; { slug, path: toHomeRelative(abs) } into def.repos[]
+</code></pre>
+<p><code>--slug owner/repo</code> overrides inference for a directory with no origin. <code>writeProjectDef</code> already normalizes every <code>repos[].path</code> through <code>toHomeRelative(expandLocalHome(...))</code> (<code>projects.ts:320-324</code>), so portability across machines needs nothing new.</p>
+<p>The stale help note at <code>projects.ts:498-502</code> still tells the user to sync with <code>agents push/pull</code>; both were removed and now hard-redirect (<code>apps/cli/src/commands/push.ts:16-18</code>). It gets corrected to <code>agents repo push user</code> in the same change.</p>
+<h3>2. One resolver — <code>apps/cli/src/lib/projects.ts</code></h3>
+<pre><code>/** Ordered directories for a project: primary first, then each bound repo. */
+export function projectDirsAbs(
+  def: ProjectDef,
+  opts: { forRemote: boolean },
+): string[]
+</code></pre>
+<ul>
+<li>primary first: <code>defaultPath ?? root</code>, identical to <code>projectBasePath</code>, so cwd behavior does not change;</li>
+<li>then every <code>repos[].path</code>, joined with <code>subpath</code> when present;</li>
+<li>deduped, and for local resolution filtered to directories that exist, so a box without <code>agents-cli-web</code> never receives a bogus grant;</li>
+<li><code>forRemote: true</code> keeps <code>~/…</code> so the remote shell re-roots it, matching <code>resolveDefinedProjectPath</code>.</li>
+</ul>
+<p><code>workspaceTargetsForDef</code> (<code>project-probe.ts:120-125</code>) already computes nearly this list. It is refactored to call the new function so there is one canonical answer instead of two that drift.</p>
+<h3>3. <code>agents run --project</code> — <code>apps/cli/src/commands/exec.ts</code></h3>
+<p><code>resolveRunCwd</code> (<code>exec.ts:592-608</code>) keeps returning the primary directory. The secondary directories are merged into <code>options.addDir</code> at dispatch (<code>exec.ts:1695-1701</code>), deduped against anything passed explicitly.</p>
+<p>Everything downstream already works and needs no change:</p>
+<pre><code>claude   -&gt; repeated --add-dir flags        exec.ts (lib) :1268-1273
+codex    -&gt; folded into workspace_roots     exec.ts (lib) :1132-1134, codex-policy.ts:34-42
+--host   -&gt; toRemotePortable -&gt; hostAddDirs exec.ts :1783
+            forwarded verbatim              hosts/remote-cmd.ts:92, hosts/dispatch.ts:500
+</code></pre>
+<aside class="artifact-callout"><strong>Known limit, stated plainly:</strong> <code>--add-dir</code> is emitted only for Claude and Codex — the guard is <code>options.agent === 'claude'</code> at <code>exec.ts:1269</code>, and the flag's own help text names only those two (<code>exec.ts:754</code>). For gemini, droid, grok and the rest the extra directories are dropped. The project still resolves the correct cwd; only the grants do not apply.</aside><h3>4. <code>agents teams</code> — <code>apps/cli/src/commands/teams.ts</code></h3>
+<p><code>teams create</code> gains <code>--project &lt;slug&gt;</code>, stored in team meta beside the existing <code>enable_worktrees</code> / <code>use_worktree</code> / <code>repo</code> fields (<code>teams.ts:1592-1601</code>). <code>teams add</code> then uses the project's primary directory as the base cwd when neither <code>--cwd</code> nor a worktree is given, making the precedence chain at <code>teams.ts:2055</code>:</p>
+<pre><code>worktree path  -&gt;  --cwd  -&gt;  project primary dir  -&gt;  process.cwd()
+</code></pre>
+<p>The project's other directories are appended as <code>--add-dir</code> in <code>buildCommand</code> (<code>apps/cli/src/lib/teams/agents.ts:2782-2792</code>), which already appends <code>--add-dir &lt;cwd&gt;</code> for Claude.</p>
+<h3>5. Extension — <code>apps/factory</code></h3>
+<p><code>agents.newAgent</code> (<code>extension.ts:1622</code> → <code>launchAgent:788</code> → <code>openSingleAgent:2197</code>) hardcodes the cwd and never consults projects:</p>
+<pre><code>// apps/factory/src/vscode/extension.ts:2227  — today
+const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+</code></pre>
+<p>It changes to resolve that folder to a project name through the CLI — <code>resolveProjectNameForCwd</code> already exists and already matches against <code>repos[].path</code> (<code>projects.ts:403-407</code>, <code>:432-452</code>) — and, when one matches, <code>buildAgentLaunchCommand</code> (<code>apps/factory/src/core/agents.ts:187-195</code>) emits <code>--project &lt;slug&gt;</code> in place of the computed <code>--cwd</code>. No match means today's behavior, unchanged.</p>
+<p><code>--project</code> is mutually exclusive with <code>--cwd</code> / <code>--remote-cwd</code> (<code>exec.ts:598</code>), so the two branches must never both fire. <code>resolveProjectRef</code> handles <code>forRemote</code>, so a fleet-host launch works through the same path.</p>
+<p>Separately, <code>defToManaged</code> (<code>apps/factory/src/core/managedProjects.ts:53-87</code>) collapses a multi-directory project into one <code>path</code> plus <code>repos[0].slug</code>. It gains a <code>dirs: { slug, path }[]</code> field so the Projects pane shows all three rather than silently dropping two. No resolution logic moves into the extension; it asks the CLI.</p>
+<h3>6. Bind the three repos, then push to the fleet</h3>
+<p>Slugs verified by reading each directory's <code>origin</code> on zion:</p>
+<table>
+<thead>
+<tr>
+<th>Directory</th>
+<th>Remote</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>~/src/github.com/muqsitnawaz/agents-cli</code></td>
+<td><code>phnx-labs/agents-cli</code></td>
+</tr>
+<tr>
+<td><code>~/src/github.com/muqsitnawaz/agents-cli-web</code></td>
+<td><code>phnx-labs/agents-cli-web</code></td>
+</tr>
+<tr>
+<td><code>~/.agents/.system</code></td>
+<td><code>phnx-labs/.agents-system</code></td>
+</tr>
+</tbody></table>
+<pre><code># ~/.agents/projects/agents-cli.yaml
+name: agents-cli
+description: Agents CLI and Factory
+root: ~/src/github.com/muqsitnawaz/agents-cli
+defaultPath: ~/src/github.com/muqsitnawaz/agents-cli
+repo: phnx-labs/agents-cli
+repos:
+  - slug: phnx-labs/agents-cli
+    path: ~/src/github.com/muqsitnawaz/agents-cli
+  - slug: phnx-labs/agents-cli-web
+    path: ~/src/github.com/muqsitnawaz/agents-cli-web
+  - slug: phnx-labs/.agents-system
+    path: ~/.agents/.system
+linear:
+  projectId: 8eb8f5b1-3870-4590-ba67-36f3811d1435
+  name: Agents CLI
+</code></pre>
+<p>Fleet propagation is not automatic. <code>~/.agents/projects/</code> is syncable, not synced — an uncommitted definitions directory has been deleted twice by a reconcile (<code>projects.ts:10-16</code>).</p>
+<pre><code>agents repo push user                       # on zion
+agents ssh &lt;host&gt; 'agents repo pull user'   # every reachable device
+agents ssh &lt;host&gt; 'agents projects view agents-cli'
+</code></pre>
+<h2 id="public-interface">Public Interface</h2>
+<pre><code># Define a project across several directories (slug read from each dir's origin)
+agents projects add agents-cli \
+  --dir ~/src/github.com/muqsitnawaz/agents-cli \
+  --dir ~/src/github.com/muqsitnawaz/agents-cli-web \
+  --dir ~/.agents/.system
+
+# Amend an existing definition
+agents projects set agents-cli --add-dir ~/.agents/.system
+agents projects set agents-cli --rm-dir  ~/.agents/.system
+agents projects set agents-cli --add-dir ./vendor/thing --slug phnx-labs/thing  # no origin
+
+# Spawning: unchanged flags, wider reach
+agents run claude --project agents-cli                  # cwd + sibling grants
+agents run claude --project agents-cli --host yosemite-s0
+agents teams create my-feature --project agents-cli     # NEW flag on teams
+</code></pre>
+<p>Unchanged: <code>--project &lt;slug&gt;[@worktree]</code> syntax, its mutual exclusion with <code>--cwd</code> / <code>--remote-cwd</code>, and the directory it resolves as cwd. Nothing that works today changes meaning.</p>
+<h2 id="to-do">To-do</h2>
+<div class="checklist"><div class="checklist-head">0 / 7 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>1</strong> — <code>--dir</code> on <code>projects add</code>; <code>--add-dir</code> / <code>--rm-dir</code> on <code>projects set</code>; slug from origin; fix the stale <code>agents push/pull</code> note</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>2</strong> — <code>projectDirsAbs()</code> in <code>lib/projects.ts</code>; refactor <code>workspaceTargetsForDef</code> onto it</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>3</strong> — <code>agents run --project</code> merges secondary dirs into <code>--add-dir</code>, local and <code>--host</code></span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>4</strong> — <code>--project</code> on <code>teams create</code>, honored in <code>teams add</code> cwd precedence and <code>buildCommand</code></span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>5</strong> — extension <code>New Agent</code> emits <code>--project</code>; <code>defToManaged</code> carries all dirs</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>6</strong> — bind the three repos; <code>repo push user</code> and pull across the fleet</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>7</strong> — tests, <code>docs/11-projects.md</code>, CHANGELOG</span></li></ul></div>
+<p>Steps 1 through 3 are the spine. Steps 4 and 5 are independent consumers of step 2 and can land in parallel. Step 6 needs only step 1.</p>
+<h2 id="validation">Validation</h2>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Expected result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>projectDirsAbs</code> unit</td>
+<td>Non-existent dir filtered locally, kept under <code>forRemote</code>; <code>subpath</code> joined; paths stored <code>~/…</code></td>
+</tr>
+<tr>
+<td><code>--dir</code> unit</td>
+<td>Slug inferred from <code>origin</code>, not from the directory path</td>
+</tr>
+<tr>
+<td><code>agents projects view agents-cli</code></td>
+<td>Three <code>repo</code> lines, each with its own path</td>
+</tr>
+<tr>
+<td><code>agents run claude --project agents-cli</code></td>
+<td>cwd is <code>agents-cli</code>; two <code>--add-dir</code> flags for the siblings</td>
+</tr>
+<tr>
+<td>Grant is real</td>
+<td>Inside the spawned agent, read a file under <code>~/.agents/.system</code> and edit one under <code>agents-cli-web</code></td>
+</tr>
+<tr>
+<td><code>--host yosemite-s0</code></td>
+<td>Forwarded paths are <code>~/…</code>, not <code>/Users/muqsit/…</code></td>
+</tr>
+<tr>
+<td><code>agents teams create … --project agents-cli</code></td>
+<td>Teammate lands in the primary dir with sibling grants</td>
+</tr>
+<tr>
+<td>Extension Cmd-Shift-A</td>
+<td>Terminal shows <code>agents run &lt;agent&gt; --interactive --project agents-cli</code></td>
+</tr>
+<tr>
+<td>Fleet</td>
+<td><code>projects view</code> matches on one Linux worker and one Mac; a box missing <code>agents-cli-web</code> skips it without error</td>
+</tr>
+</tbody></table>
+<pre><code># the spine, end to end
+agents projects view agents-cli
+agents run claude --project agents-cli --print-command
+agents run claude --project agents-cli --host yosemite-s0 --print-command
+agents teams create dirs-check --project agents-cli
+agents teams add dirs-check claude "list your accessible roots" --name probe
+</code></pre>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A directory in <code>repos[]</code> is absent on some fleet box</td>
+<td><code>projectDirsAbs</code> filters non-existent dirs for local resolution; the definition still loads and the primary cwd still resolves</td>
+</tr>
+<tr>
+<td><code>--project</code> and <code>--cwd</code> both emitted by the extension</td>
+<td>They are mutually exclusive (<code>exec.ts:598</code>); the two branches are exclusive by construction and covered by a test</td>
+</tr>
+<tr>
+<td>Grants silently dropped on non-Claude/Codex harnesses</td>
+<td>Named in the docs and in <code>--project</code> help text rather than papered over; no fallback path is invented</td>
+</tr>
+<tr>
+<td>Definitions lost before they sync</td>
+<td><code>agents repo push user</code> immediately after step 6, per the warning at <code>projects.ts:10-16</code></td>
+</tr>
+<tr>
+<td>Refactoring <code>workspaceTargetsForDef</code> changes <code>projects status</code></td>
+<td>Existing probe tests must pass unchanged; the new function returns the same set plus ordering</td>
+</tr>
+</tbody></table>
+<h2 id="tracking">Tracking</h2>
+<p>No Linear ticket covers this yet. One is opened against the <strong>Agents CLI</strong> project (<code>8eb8f5b1-3870-4590-ba67-36f3811d1435</code>) before implementation, this plan is attached to it, and the ticket id lands back in this section.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGVtcGxhdGU6IHBsYW4udjEKdGl0bGU6IEEgcHJvamVjdCBpcyBhIHNldCBvZiBkaXJlY3RvcmllcywgZWFjaCB3aXRoIGl0cyBvd24gcmVtb3RlCnN1bW1hcnk6IEJpbmQgYWdlbnRzLWNsaS13ZWIgYW5kIH4vLmFnZW50cy8uc3lzdGVtIHRvIHRoZSBhZ2VudHMtY2xpIHByb2plY3QsIGFuZCBtYWtlIGV2ZXJ5IHNwYXduIHBhdGgg4oCUIGFnZW50cyBydW4sIGFnZW50cyB0ZWFtcywgYW5kIHRoZSBleHRlbnNpb24ncyBOZXcgQWdlbnQg4oCUIHJlc29sdmUgYWxsIG9mIGEgcHJvamVjdCdzIGRpcmVjdG9yaWVzIGluc3RlYWQgb2YganVzdCBvbmUuCnN1cmZhY2U6IGNsaQpzdGF0dXM6IGRyYWZ0Ci0tLQoKIyMgRm9jdXMgZm9yIHJldmlldwoKRml2ZSB0aGluZ3Mgd29ydGggeW91ciBhdHRlbnRpb24gYmVmb3JlIEkgYnVpbGQgdGhpcy4KCjEuICoqVGhlIHNwYXduIGNvbnRyYWN0LioqIE9uZSBjd2QgKHRoZSBwcm9qZWN0J3MgcHJpbWFyeSBkaXJlY3RvcnkpIHBsdXMgZXZlcnkgb3RoZXIgcHJvamVjdCBkaXJlY3RvcnkgYXR0YWNoZWQgYXMgYW4gYC0tYWRkLWRpcmAgZ3JhbnQuIE9ubHkgQ2xhdWRlIGFuZCBDb2RleCBjb25zdW1lIGAtLWFkZC1kaXJgIHRvZGF5OyBvdGhlciBoYXJuZXNzZXMgZHJvcCBpdCBzaWxlbnRseS4KMi4gKipUaGUgQ0xJIHN1cmZhY2UuKiogYC0tZGlyYCBvbiBgcHJvamVjdHMgYWRkYCwgYC0tYWRkLWRpcmAgLyBgLS1ybS1kaXJgIG9uIGBwcm9qZWN0cyBzZXRgLiBFeHRlbmRpbmcgdGhlIHR3byBjb21tYW5kcyB0aGF0IGFscmVhZHkgZXhpc3QgcmF0aGVyIHRoYW4gYWRkaW5nIGEgYHByb2plY3RzIHJlcG9gIHN1YmNvbW1hbmQgZ3JvdXAuCjMuICoqQSBzbHVnIGNvbWVzIGZyb20gdGhlIGRpcmVjdG9yeSwgbmV2ZXIgZnJvbSB0aGUgcGF0aC4qKiBZb3VyIGNoZWNrb3V0IHNpdHMgYXQgYH4vc3JjL2dpdGh1Yi5jb20vbXVxc2l0bmF3YXovYWdlbnRzLWNsaWAgd2hpbGUgdGhlIHJlbW90ZSBpcyBgcGhueC1sYWJzL2FnZW50cy1jbGlgLiBFdmVyeSBzbHVnIGlzIHJlYWQgZnJvbSB0aGF0IGRpcmVjdG9yeSdzIG93biBgb3JpZ2luYC4KNC4gKipUaGlzIGxhbmRzIGluIGFnZW50cy1jbGksIG5vdCBGYWN0b3J5LioqIFRoZSBleHRlbnNpb24gZ2V0cyB0aGlubmVyOiBpdCBzdG9wcyBjb21wdXRpbmcgYSBjd2QgYW5kIHBhc3NlcyBgLS1wcm9qZWN0IDxzbHVnPmAuCjUuICoqYGFnZW50cyB0ZWFtc2AgZ2FpbnMgYC0tcHJvamVjdGAuKiogSXQgaGFzIG5vIHN1Y2ggZmxhZyB0b2RheSwgc28gdGhpcyBpcyBnZW51aW5lbHkgbmV3IHN1cmZhY2UuCgojIyBQdXJwb3NlCgo+ICJDYW4gd2UgYWRkIHRoZSBhZ2VudHMtY2xpLXdlYiByZXBvIGFuZCB+Ly5hZ2VudHMvLnN5c3RlbSByZXBvIHRvIGJlIHBhcnQgb2YgdGhlIGFnZW50cy1jbGkgcHJvamVjdD8gLi4uIEFuZCB3aGVuIHdlIHNwaW4gdXAgYW4gYWdlbnQgdmlhIGBhZ2VudHMgcnVuYCBvciBgYWdlbnRzIHRlYW1zYCBvciB1c2luZyAnQWdlbnRzOiBOZXcgQWdlbnQnIHZpYSB0aGUgZXh0ZW5zaW9uLCB0aGVuIGl0IHNob3VsZCBwcm9wZXJseSBhZGQgYWxsIHRoZXNlIGN3ZHMuIC4uLiBPdXIgcHJvamVjdCBzaG91bGQgaGF2ZSBhIHdheSB0byBzcGVjaWZ5IGRpZmZlcmVudCBkaXJlY3RvcmllcyBhbmQgdGhlbiBiZSBhYmxlIHRvIGNvbm5lY3QgdGhlaXIgR2l0SHViIHJlbW90ZSBhcyB3ZWxsLiAuLi4gVGhpcyBmdW5jdGlvbmFsaXR5IHNob3VsZCBiZSBhZ2VudHMtY2xpIGxldmVsLCBub3QgRmFjdG9yeSBvciBleHRlbnNpb24gbGV2ZWwuIgoKQmluZGluZyB0aGUgdHdvIHJlcG9zIGlzIGEgb25lLWxpbmUgWUFNTCBlZGl0LiBUaGUgcmVxdWVzdCB1bmRlcm5lYXRoIGl0IGlzIHRoZSByZWFsIHdvcms6IGEgcHJvamVjdCBzaG91bGQgKmJlKiBhIHNldCBvZiBkaXJlY3RvcmllcywgYW5kIGV2ZXJ5dGhpbmcgdGhhdCBzdGFydHMgYW4gYWdlbnQgc2hvdWxkIGtub3cgYWxsIG9mIHRoZW0uCgojIyBCZWhhdmlvciDigJQgd2hhdCBoYXBwZW5zIHdoZW4geW91IGRvIFgKCnwgV2hlbiB5b3XigKYgfCBUb2RheSB8IEFmdGVyIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IGBhZ2VudHMgcnVuIGNsYXVkZSAtLXByb2plY3QgYWdlbnRzLWNsaWAgfCBMYW5kcyBpbiBgYWdlbnRzLWNsaWAuIFRoZSB3ZWIgcmVwbyBhbmQgYC5zeXN0ZW1gIGFyZSBpbnZpc2libGUgdG8gdGhlIGFnZW50LiB8IExhbmRzIGluIGBhZ2VudHMtY2xpYCwgd2l0aCBgYWdlbnRzLWNsaS13ZWJgIGFuZCBgfi8uYWdlbnRzLy5zeXN0ZW1gIGF0dGFjaGVkIGFzIGFjY2Vzc2libGUgcm9vdHMuIHwKfCBgYWdlbnRzIHJ1biDigKYgLS1wcm9qZWN0IGFnZW50cy1jbGkgLS1ob3N0IHlvc2VtaXRlLXMwYCB8IFNhbWUsIHJlbW90ZS4gRXh0cmEgZGlycyBzdGlsbCBpbnZpc2libGUuIHwgRXh0cmEgZGlycyBmb3J3YXJkZWQgaG9tZS1yZWxhdGl2ZSwgcmUtcm9vdGVkIGF0IHRoZSBob3N0J3Mgb3duIGAkSE9NRWAuIHwKfCBgYWdlbnRzIHRlYW1zIGNyZWF0ZSBYYCB8IE5vIGAtLXByb2plY3RgIGZsYWcgZXhpc3RzIGF0IGFsbC4gfCBgLS1wcm9qZWN0IGFnZW50cy1jbGlgIHNldHMgZWFjaCB0ZWFtbWF0ZSdzIGJhc2UgY3dkIGFuZCBncmFudHMgdGhlIHNpYmxpbmcgZGlycy4gfAp8IENtZC1TaGlmdC1BIChgQWdlbnRzOiBOZXcgQWdlbnRgKSBpbiB0aGUgYWdlbnRzLWNsaSB3aW5kb3cgfCBjd2QgaXMgaGFyZGNvZGVkIHRvIGB3b3Jrc3BhY2VGb2xkZXJzWzBdYDsgcHJvamVjdHMgYXJlIG5ldmVyIGNvbnN1bHRlZC4gfCBFbWl0cyBgLS1wcm9qZWN0IGFnZW50cy1jbGlgOyB0aGUgQ0xJIHJlc29sdmVzIGN3ZCBhbmQgZ3JhbnRzLiB8CnwgQSBib3ggdGhhdCBoYXMgbm8gYGFnZW50cy1jbGktd2ViYCBjaGVja291dCB8IG4vYSB8IERlZmluaXRpb24gbG9hZHMgZmluZTsgdGhlIG1pc3NpbmcgZGlyIGlzIHNraXBwZWQgYXQgc3Bhd24sIG5vdCBhbiBlcnJvci4gfAoKPHNlY3Rpb24gY2xhc3M9ImFydGlmYWN0LWdyaWQgYXJ0aWZhY3QtZ3JpZC0yIj4KICA8YXJ0aWNsZSBjbGFzcz0iYXJ0aWZhY3QtcGFuZWwiIGRhdGEtc3RhdGU9ImN1cnJlbnQiIGRhdGEtZXZpZGVuY2U9ImNhcHR1cmUiPgogICAgPGg0PlRvZGF5IOKAlCA8Y29kZT5hZ2VudHMgcHJvamVjdHMgdmlldyBhZ2VudHMtY2xpPC9jb2RlPjwvaDQ+CiAgICA8cHJlPjxjb2RlPmFnZW50cy1jbGkgIMK3ICAxIGxpdmUKICBBZ2VudHMgQ0xJIGFuZCBGYWN0b3J5CiAgZmxlZXQgICAgNy8xMSBjbGVhbiDCtyAzIGJlaGluZCDCtyAyIGRpcnR5IMK3IDEgbWlzc2luZwogICAgICAgICAgIHdpbi1taW5pOiDinJcgbWlzc2luZyAgwrcgIHlvc2VtaXRlLW0wOiDimqAg4oaTNTcgwrcgbWFpbiAgwrcgIHppb246IOKckyBjbGVhbiDCtyBtYWluCiAgcmVwb3MgICAgcGhueC1sYWJzL2FnZW50cy1jbGkKCiAgcm9vdCAgICAgfi9zcmMvZ2l0aHViLmNvbS9tdXFzaXRuYXdhei9hZ2VudHMtY2xpCiAgcGF0aCAgICAgfi9zcmMvZ2l0aHViLmNvbS9tdXFzaXRuYXdhei9hZ2VudHMtY2xpCiAgbGluZWFyICAgOGViOGY1YjEtMzg3MC00NTkwLWJhNjctMzZmMzgxMWQxNDM1PC9jb2RlPjwvcHJlPgogICAgPHA+T25lIHJlcG8sIG9uZSByb290LCBvbmUgcHJvYmVkIGRpcmVjdG9yeS4gQ2FwdHVyZWQgb24gemlvbiwgMjAyNi0wOC0xMC48L3A+CiAgICA8aDQ+VG9kYXkg4oCUIHNwYXduaW5nIGludG8gaXQ8L2g0PgogICAgPHByZT48Y29kZT4kIGFnZW50cyBydW4gY2xhdWRlIC0tcHJvamVjdCBhZ2VudHMtY2xpCiAgY3dkICB+L3NyYy9naXRodWIuY29tL211cXNpdG5hd2F6L2FnZW50cy1jbGkKICAoYWdlbnRzLWNsaS13ZWIgYW5kIH4vLmFnZW50cy8uc3lzdGVtIGFyZSBub3QgcmVhY2hhYmxlIGJ5IHRoZSBhZ2VudCk8L2NvZGU+PC9wcmU+CiAgPC9hcnRpY2xlPgogIDxhcnRpY2xlIGNsYXNzPSJhcnRpZmFjdC1wYW5lbCIgZGF0YS1zdGF0ZT0icHJvcG9zZWQiIGRhdGEtZXZpZGVuY2U9Im1vY2t1cCI+CiAgICA8aDQ+UHJvcG9zZWQg4oCUIDxjb2RlPmFnZW50cyBwcm9qZWN0cyB2aWV3IGFnZW50cy1jbGk8L2NvZGU+PC9oND4KICAgIDxwcmU+PGNvZGU+YWdlbnRzLWNsaSAgwrcgIDEgbGl2ZQogIEFnZW50cyBDTEkgYW5kIEZhY3RvcnkKICBmbGVldCAgICAyMS8zMyBjbGVhbiDCtyAzIGJlaGluZCDCtyAyIGRpcnR5IMK3IDEgbWlzc2luZyAgICAgICAgKDMgZGlycyDDlyAxMSBob3N0cykKICAgICAgICAgICB3aW4tbWluaTog4pyXIG1pc3NpbmcgIMK3ICB5b3NlbWl0ZS1tMDog4pqgIOKGkzU3IMK3IG1haW4gIMK3ICB6aW9uOiDinJMgY2xlYW4gwrcgbWFpbgogIHJlcG8gICAgIHBobngtbGFicy9hZ2VudHMtY2xpICAgICAgICh+L3NyYy9naXRodWIuY29tL211cXNpdG5hd2F6L2FnZW50cy1jbGkpCiAgcmVwbyAgICAgcGhueC1sYWJzL2FnZW50cy1jbGktd2ViICAgKH4vc3JjL2dpdGh1Yi5jb20vbXVxc2l0bmF3YXovYWdlbnRzLWNsaS13ZWIpCiAgcmVwbyAgICAgcGhueC1sYWJzLy5hZ2VudHMtc3lzdGVtICAgKH4vLmFnZW50cy8uc3lzdGVtKQoKICByb290ICAgICB+L3NyYy9naXRodWIuY29tL211cXNpdG5hd2F6L2FnZW50cy1jbGkKICBwYXRoICAgICB+L3NyYy9naXRodWIuY29tL211cXNpdG5hd2F6L2FnZW50cy1jbGkKICBsaW5lYXIgICA4ZWI4ZjViMS0zODcwLTQ1OTAtYmE2Ny0zNmYzODExZDE0MzU8L2NvZGU+PC9wcmU+CiAgICA8cD5UaHJlZSBib3VuZCBkaXJlY3RvcmllcywgZWFjaCB3aXRoIHRoZSByZW1vdGUgcmVhZCBmcm9tIGl0cyBvd24gPGNvZGU+b3JpZ2luPC9jb2RlPi4gVGhlIG9uZS1saW5lIDxjb2RlPnJlcG9zPC9jb2RlPiBzdW1tYXJ5IGJlY29tZXMgdGhlIHBlci1yZXBvIGZvcm0gdGhhdCA8Y29kZT5wcm9qZWN0cy50czo2MzEtNjMzPC9jb2RlPiBhbHJlYWR5IHByaW50cy48L3A+CiAgICA8aDQ+UHJvcG9zZWQg4oCUIHNwYXduaW5nIGludG8gaXQ8L2g0PgogICAgPHByZT48Y29kZT4kIGFnZW50cyBydW4gY2xhdWRlIC0tcHJvamVjdCBhZ2VudHMtY2xpCiAgY3dkICAgICAgIH4vc3JjL2dpdGh1Yi5jb20vbXVxc2l0bmF3YXovYWdlbnRzLWNsaQogIC0tYWRkLWRpciB+L3NyYy9naXRodWIuY29tL211cXNpdG5hd2F6L2FnZW50cy1jbGktd2ViCiAgLS1hZGQtZGlyIH4vLmFnZW50cy8uc3lzdGVtPC9jb2RlPjwvcHJlPgogIDwvYXJ0aWNsZT4KPC9zZWN0aW9uPgoKKipGaWd1cmUgMS4qKiBUaGUgdXNlci12aXNpYmxlIGNoYW5nZTogYSBwcm9qZWN0IHN0b3BzIGJlaW5nIG9uZSBkaXJlY3RvcnkgdGhhdCBsaXN0cyBleHRyYSBzbHVncyBhbmQgYmVjb21lcyBhIHNldCBvZiBkaXJlY3RvcmllcyBldmVyeSBzcGF3biBwYXRoIGNhbiByZWFjaC4gVGhlIGN1cnJlbnQgc3RhdGUgaXMgY2FwdHVyZWQgbGl2ZSBvbiB6aW9uOyB0aGUgcHJvcG9zZWQgc3RhdGUgaXMgYSBtb2NrdXAuCgojIyBDdXJyZW50IGFyY2hpdGVjdHVyZQoKYFByb2plY3REZWYucmVwb3NbXWAgYWxyZWFkeSBoYXMgdGhlIGV4YWN0IHNoYXBlIG5lZWRlZCDigJQgYHsgc2x1Zywgc3VicGF0aD8sIHBhdGg/IH1gIGF0IGBhcHBzL2NsaS9zcmMvbGliL3Byb2plY3RzLnRzOjQxLTUyYCwgd2l0aCBgcGF0aGAgZG9jdW1lbnRlZCBhcyB0aGUgb3B0LWluIGZvciBhbiBhZGRpdGlvbmFsIHJlcG8uIFR3byBnYXBzIHNpdCBvbiBlaXRoZXIgc2lkZSBvZiBpdC4KCioqTm90aGluZyB3cml0ZXMgaXQuKiogYHByb2plY3RzIGFkZGAgYW5kIGBwcm9qZWN0cyBzZXRgIGVhY2ggdGFrZSBhIHNpbmd1bGFyIGAtLXJlcG8gPG93bmVyL3JlcG8+YCB0aGF0IG9ubHkgZXZlciBhc3NpZ25zIGBkZWYucmVwb2AgKGBwcm9qZWN0cy50czo1NTdgLCBgOjg2OGA7IGJvZGllcyBhdCBgOjU4OGAsIGA6ODg3YCkuIGByZXBvc1tdYCBpcyByZWFjaGFibGUgb25seSBieSBoYW5kLWVkaXRpbmcgWUFNTCBvciBwaXBpbmcgYSBjb21wbGV0ZSBgUHJvamVjdERlZmAgaW50byBgcHJvamVjdHMgc2F2ZSAtLWpzb25gLgoKKipOb3RoaW5nIHRoYXQgc3Bhd25zIGFuIGFnZW50IHJlYWRzIGl0LioqIGByZXNvbHZlRGVmaW5lZFByb2plY3RQYXRoYCDigJQgdGhlIGZ1bmN0aW9uIGJlaGluZCBgYWdlbnRzIHJ1biAtLXByb2plY3RgIOKAlCBjb25zdWx0cyBvbmx5IGBkZWYuZGVmYXVsdFBhdGggPz8gZGVmLnJvb3RgOgoKYGBgdHMKLy8gYXBwcy9jbGkvc3JjL2xpYi9wcm9qZWN0cy50czo0NzUtNDg5CmV4cG9ydCBmdW5jdGlvbiByZXNvbHZlRGVmaW5lZFByb2plY3RQYXRoKGRlZiwgd29ya3RyZWUsIGZvclJlbW90ZSkgewogIGlmICh3b3JrdHJlZSkgeyAvKiDigKYgcm9vdCA/PyBkZWZhdWx0UGF0aCDigKYgKi8gfQogIGNvbnN0IGJhc2UgPSBwcm9qZWN0QmFzZVBhdGgoZGVmLCBmb3JSZW1vdGUpOyAgIC8vIGRlZmF1bHRQYXRoID8/IHJvb3QsIDozNTItMzU2CiAgaWYgKCFiYXNlKSByZXR1cm4gdW5kZWZpbmVkOwogIHJldHVybiBmb3JSZW1vdGUgPyBiYXNlIDogcGF0aC5yZXNvbHZlKGJhc2UpOwp9CmBgYAoKYHJlcG9zW10ucGF0aGAgKmlzKiByZXNvbHZlZCBlbHNld2hlcmUsIGJ1dCBvbmx5IGZvciB0d28gcmVhZC1vbmx5IHB1cnBvc2VzOiBnaXQtc3RhdHVzIHByb2JpbmcgaW4gYHByb2plY3QtcHJvYmUudHM6MTIwLTEyNWAsIGFuZCBtYXBwaW5nIGFuIGV4aXN0aW5nIGN3ZCBiYWNrIHRvIGEgcHJvamVjdCBuYW1lIGluIGBwcm9qZWN0cy50czo0MDMtNDA3YC4gTmV2ZXIgZm9yIHBsYWNpbmcgYW4gYWdlbnQuCgo8ZmlndXJlIGNsYXNzPSJhcnRpZmFjdC1maWd1cmUgYXJ0aWZhY3QtZmlndXJlLWRpYWdyYW0gYXJ0aWZhY3QtZmlndXJlLXdpZGUiPgogIDxzdmcgY2xhc3M9ImFydGlmYWN0LWRpYWdyYW0iIHZpZXdCb3g9IjAgMCA5NDAgMzAwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkJlZm9yZTogb25lIHJlc29sdmVkIGRpcmVjdG9yeSB3aXRoIHR3byBvcnBoYW4gcmVwb3MuIEFmdGVyOiB0aHJlZSBkaXJlY3RvcmllcyByZXNvbHZlZCBpbnRvIG9uZSBhZ2VudC4iPgogICAgPHRleHQgeD0iMjAiIHk9IjI2IiBmaWxsPSIjOGE4YThhIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiI+QkVGT1JFPC90ZXh0PgogICAgPHJlY3QgeD0iMjAiIHk9IjQwIiB3aWR0aD0iNDAwIiBoZWlnaHQ9IjIzMCIgcng9IjEwIiBmaWxsPSIjMTQxNDE0IiBzdHJva2U9IiMzYTNhM2EiIHN0cm9rZS13aWR0aD0iMSIgLz4KICAgIDx0ZXh0IHg9IjQwIiB5PSI2NiIgZmlsbD0iI2M4YzhjOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiPmFnZW50cy1jbGkueWFtbDwvdGV4dD4KICAgIDxyZWN0IHg9IjQwIiB5PSI4MCIgd2lkdGg9IjI0MCIgaGVpZ2h0PSI0MiIgcng9IjYiIGZpbGw9IiMxNjEyMGEiIHN0cm9rZT0iI2Y1OWUwYiIgc3Ryb2tlLXdpZHRoPSIxLjUiIC8+CiAgICA8dGV4dCB4PSI1NiIgeT0iMTAwIiBmaWxsPSIjZjU5ZTBiIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+cm9vdDogYWdlbnRzLWNsaTwvdGV4dD4KICAgIDx0ZXh0IHg9IjU2IiB5PSIxMTUiIGZpbGw9IiM4YThhOGEiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5waG54LWxhYnMvYWdlbnRzLWNsaTwvdGV4dD4KICAgIDxyZWN0IHg9IjQwIiB5PSIxMzQiIHdpZHRoPSIyNDAiIGhlaWdodD0iMzYiIHJ4PSI2IiBmaWxsPSIjMTExIiBzdHJva2U9IiMzMzMiIHN0cm9rZS13aWR0aD0iMSIgc3Ryb2tlLWRhc2hhcnJheT0iNCAzIiAvPgogICAgPHRleHQgeD0iNTYiIHk9IjE1NiIgZmlsbD0iIzVhNWE1YSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPmFnZW50cy1jbGktd2ViICAob3JwaGFuKTwvdGV4dD4KICAgIDxyZWN0IHg9IjQwIiB5PSIxODAiIHdpZHRoPSIyNDAiIGhlaWdodD0iMzYiIHJ4PSI2IiBmaWxsPSIjMTExIiBzdHJva2U9IiMzMzMiIHN0cm9rZS13aWR0aD0iMSIgc3Ryb2tlLWRhc2hhcnJheT0iNCAzIiAvPgogICAgPHRleHQgeD0iNTYiIHk9IjIwMiIgZmlsbD0iIzVhNWE1YSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPi5hZ2VudHMvLnN5c3RlbSAob3JwaGFuKTwvdGV4dD4KICAgIDxsaW5lIHgxPSIyODAiIHkxPSIxMDEiIHgyPSIzNDAiIHkyPSIxMDEiIHN0cm9rZT0iI2Y1OWUwYiIgc3Ryb2tlLXdpZHRoPSIyIiAvPgogICAgPGNpcmNsZSBjeD0iMzQ2IiBjeT0iMTAxIiByPSIxOCIgZmlsbD0iIzE2MTIwYSIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEuNSIgLz4KICAgIDx0ZXh0IHg9IjM0NiIgeT0iMTA2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZjU5ZTBiIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSI+Y3dkPC90ZXh0PgogICAgPHRleHQgeD0iMzQ2IiB5PSIyNDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM1YTVhNWEiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIj5hZ2VudCBzZWVzIDEgb2YgMzwvdGV4dD4KICAgIDxwYXRoIGQ9Ik0gNDQ4IDE1NSBMIDQ4NiAxNTUiIHN0cm9rZT0iIzM4YmRmOCIgc3Ryb2tlLXdpZHRoPSIyIiAvPgogICAgPHBhdGggZD0iTSA0NzggMTQ5IEwgNDg2IDE1NSBMIDQ3OCAxNjEgWiIgZmlsbD0iIzM4YmRmOCIgLz4KICAgIDx0ZXh0IHg9IjUyMCIgeT0iMjYiIGZpbGw9IiM4YThhOGEiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIj5BRlRFUjwvdGV4dD4KICAgIDxyZWN0IHg9IjUyMCIgeT0iNDAiIHdpZHRoPSI0MDAiIGhlaWdodD0iMjMwIiByeD0iMTAiIGZpbGw9IiMxNDE0MTQiIHN0cm9rZT0iIzNhM2EzYSIgc3Ryb2tlLXdpZHRoPSIxIiAvPgogICAgPHRleHQgeD0iNTQwIiB5PSI2NiIgZmlsbD0iI2M4YzhjOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiPmFnZW50cy1jbGkueWFtbCDigJQgcmVwb3NbXTwvdGV4dD4KICAgIDxyZWN0IHg9IjU0MCIgeT0iODAiIHdpZHRoPSIyMzAiIGhlaWdodD0iNDIiIHJ4PSI2IiBmaWxsPSIjMGYxNjBhIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41IiAvPgogICAgPHRleHQgeD0iNTU2IiB5PSIxMDAiIGZpbGw9IiNhM2U2MzUiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIj5hZ2VudHMtY2xpPC90ZXh0PgogICAgPHRleHQgeD0iNTU2IiB5PSIxMTUiIGZpbGw9IiM4YThhOGEiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5waG54LWxhYnMvYWdlbnRzLWNsaTwvdGV4dD4KICAgIDxyZWN0IHg9IjU0MCIgeT0iMTMwIiB3aWR0aD0iMjMwIiBoZWlnaHQ9IjQyIiByeD0iNiIgZmlsbD0iIzBmMTYwYSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIgLz4KICAgIDx0ZXh0IHg9IjU1NiIgeT0iMTUwIiBmaWxsPSIjYTNlNjM1IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+YWdlbnRzLWNsaS13ZWI8L3RleHQ+CiAgICA8dGV4dCB4PSI1NTYiIHk9IjE2NSIgZmlsbD0iIzhhOGE4YSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiPnBobngtbGFicy9hZ2VudHMtY2xpLXdlYjwvdGV4dD4KICAgIDxyZWN0IHg9IjU0MCIgeT0iMTgwIiB3aWR0aD0iMjMwIiBoZWlnaHQ9IjQyIiByeD0iNiIgZmlsbD0iIzBmMTYwYSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIgLz4KICAgIDx0ZXh0IHg9IjU1NiIgeT0iMjAwIiBmaWxsPSIjYTNlNjM1IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+LmFnZW50cy8uc3lzdGVtPC90ZXh0PgogICAgPHRleHQgeD0iNTU2IiB5PSIyMTUiIGZpbGw9IiM4YThhOGEiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5waG54LWxhYnMvLmFnZW50cy1zeXN0ZW08L3RleHQ+CiAgICA8cGF0aCBkPSJNIDc3MCAxMDEgTCA4NDAgMTAxIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMiIgLz4KICAgIDxwYXRoIGQ9Ik0gNzcwIDE1MSBMIDgxMiAxNTEgTCA4MTIgMTEyIiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41IiBmaWxsPSJub25lIiBzdHJva2UtZGFzaGFycmF5PSIzIDMiIC8+CiAgICA8cGF0aCBkPSJNIDc3MCAyMDEgTCA4MTIgMjAxIEwgODEyIDExMiIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjEuNSIgZmlsbD0ibm9uZSIgc3Ryb2tlLWRhc2hhcnJheT0iMyAzIiAvPgogICAgPGNpcmNsZSBjeD0iODU4IiBjeT0iMTAxIiByPSIyMCIgZmlsbD0iIzBmMTYwYSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIgLz4KICAgIDx0ZXh0IHg9Ijg1OCIgeT0iMTA2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYTNlNjM1IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSI+Y3dkPC90ZXh0PgogICAgPHRleHQgeD0iODQ2IiB5PSIyNDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMzOGJkZjgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIj4rIDIgZ3JhbnRlZCByb290czwvdGV4dD4KICA8L3N2Zz4KICA8ZmlnY2FwdGlvbj48Yj5GaWd1cmUgMi48L2I+IFNvbGlkIGxpbmUgaXMgdGhlIHdvcmtpbmcgZGlyZWN0b3J5OyBkYXNoZWQgbGluZXMgYXJlIDxjb2RlPi0tYWRkLWRpcjwvY29kZT4gZ3JhbnRzLiBUb2RheSB0d28gb2YgdGhlIHRocmVlIHJlcG9zIGFyZSBuYW1lZCBpbiB0aGUgZGVmaW5pdGlvbiBidXQgcmVhY2ggbm8gYWdlbnQuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCiMjIFByb3Bvc2VkIENoYW5nZXMKCiMjIyAxLiBXcml0ZSBwYXRoIOKAlCBgYXBwcy9jbGkvc3JjL2NvbW1hbmRzL3Byb2plY3RzLnRzYAoKYHByb2plY3RzIGFkZGAgZ2FpbnMgYSByZXBlYXRhYmxlIGAtLWRpciA8cGF0aC4uLj5gOyBgcHJvamVjdHMgc2V0YCBnYWlucyByZXBlYXRhYmxlIGAtLWFkZC1kaXIgPHBhdGg+YCBhbmQgYC0tcm0tZGlyIDxwYXRoPmAuIEVhY2ggdmFsdWUgbmFtZXMgYSAqKmxvY2FsIGRpcmVjdG9yeSoqLCBhbmQgdGhlIHNsdWcgaXMgZGVyaXZlZCBmcm9tIGl0OgoKYGBgYmFzaAojIHlvdSBuYW1lIHRoZSBkaXJlY3Rvcnk7IHRoZSBzbHVnIGlzIHJlYWQgZnJvbSBJVFMgb3JpZ2luIHJlbW90ZQphZ2VudHMgcHJvamVjdHMgc2V0IGFnZW50cy1jbGkgXAogIC0tYWRkLWRpciB+L3NyYy9naXRodWIuY29tL211cXNpdG5hd2F6L2FnZW50cy1jbGktd2ViIFwKICAtLWFkZC1kaXIgfi8uYWdlbnRzLy5zeXN0ZW0KCiMgcmVzb2x1dGlvbiBwZXIgZGlyOgojICAgZXhwYW5kTG9jYWxIb21lKHBhdGgpIC0+IGFzc2VydCBnaXQgcmVwbyAtPiBnaXQgcmVtb3RlIGdldC11cmwgb3JpZ2luCiMgICAgICAgICAgICAgICAgICAgICAgICAgLT4geyBzbHVnLCBwYXRoOiB0b0hvbWVSZWxhdGl2ZShhYnMpIH0gaW50byBkZWYucmVwb3NbXQpgYGAKCmAtLXNsdWcgb3duZXIvcmVwb2Agb3ZlcnJpZGVzIGluZmVyZW5jZSBmb3IgYSBkaXJlY3Rvcnkgd2l0aCBubyBvcmlnaW4uIGB3cml0ZVByb2plY3REZWZgIGFscmVhZHkgbm9ybWFsaXplcyBldmVyeSBgcmVwb3NbXS5wYXRoYCB0aHJvdWdoIGB0b0hvbWVSZWxhdGl2ZShleHBhbmRMb2NhbEhvbWUoLi4uKSlgIChgcHJvamVjdHMudHM6MzIwLTMyNGApLCBzbyBwb3J0YWJpbGl0eSBhY3Jvc3MgbWFjaGluZXMgbmVlZHMgbm90aGluZyBuZXcuCgpUaGUgc3RhbGUgaGVscCBub3RlIGF0IGBwcm9qZWN0cy50czo0OTgtNTAyYCBzdGlsbCB0ZWxscyB0aGUgdXNlciB0byBzeW5jIHdpdGggYGFnZW50cyBwdXNoL3B1bGxgOyBib3RoIHdlcmUgcmVtb3ZlZCBhbmQgbm93IGhhcmQtcmVkaXJlY3QgKGBhcHBzL2NsaS9zcmMvY29tbWFuZHMvcHVzaC50czoxNi0xOGApLiBJdCBnZXRzIGNvcnJlY3RlZCB0byBgYWdlbnRzIHJlcG8gcHVzaCB1c2VyYCBpbiB0aGUgc2FtZSBjaGFuZ2UuCgojIyMgMi4gT25lIHJlc29sdmVyIOKAlCBgYXBwcy9jbGkvc3JjL2xpYi9wcm9qZWN0cy50c2AKCmBgYHRzCi8qKiBPcmRlcmVkIGRpcmVjdG9yaWVzIGZvciBhIHByb2plY3Q6IHByaW1hcnkgZmlyc3QsIHRoZW4gZWFjaCBib3VuZCByZXBvLiAqLwpleHBvcnQgZnVuY3Rpb24gcHJvamVjdERpcnNBYnMoCiAgZGVmOiBQcm9qZWN0RGVmLAogIG9wdHM6IHsgZm9yUmVtb3RlOiBib29sZWFuIH0sCik6IHN0cmluZ1tdCmBgYAoKLSBwcmltYXJ5IGZpcnN0OiBgZGVmYXVsdFBhdGggPz8gcm9vdGAsIGlkZW50aWNhbCB0byBgcHJvamVjdEJhc2VQYXRoYCwgc28gY3dkIGJlaGF2aW9yIGRvZXMgbm90IGNoYW5nZTsKLSB0aGVuIGV2ZXJ5IGByZXBvc1tdLnBhdGhgLCBqb2luZWQgd2l0aCBgc3VicGF0aGAgd2hlbiBwcmVzZW50OwotIGRlZHVwZWQsIGFuZCBmb3IgbG9jYWwgcmVzb2x1dGlvbiBmaWx0ZXJlZCB0byBkaXJlY3RvcmllcyB0aGF0IGV4aXN0LCBzbyBhIGJveCB3aXRob3V0IGBhZ2VudHMtY2xpLXdlYmAgbmV2ZXIgcmVjZWl2ZXMgYSBib2d1cyBncmFudDsKLSBgZm9yUmVtb3RlOiB0cnVlYCBrZWVwcyBgfi/igKZgIHNvIHRoZSByZW1vdGUgc2hlbGwgcmUtcm9vdHMgaXQsIG1hdGNoaW5nIGByZXNvbHZlRGVmaW5lZFByb2plY3RQYXRoYC4KCmB3b3Jrc3BhY2VUYXJnZXRzRm9yRGVmYCAoYHByb2plY3QtcHJvYmUudHM6MTIwLTEyNWApIGFscmVhZHkgY29tcHV0ZXMgbmVhcmx5IHRoaXMgbGlzdC4gSXQgaXMgcmVmYWN0b3JlZCB0byBjYWxsIHRoZSBuZXcgZnVuY3Rpb24gc28gdGhlcmUgaXMgb25lIGNhbm9uaWNhbCBhbnN3ZXIgaW5zdGVhZCBvZiB0d28gdGhhdCBkcmlmdC4KCiMjIyAzLiBgYWdlbnRzIHJ1biAtLXByb2plY3RgIOKAlCBgYXBwcy9jbGkvc3JjL2NvbW1hbmRzL2V4ZWMudHNgCgpgcmVzb2x2ZVJ1bkN3ZGAgKGBleGVjLnRzOjU5Mi02MDhgKSBrZWVwcyByZXR1cm5pbmcgdGhlIHByaW1hcnkgZGlyZWN0b3J5LiBUaGUgc2Vjb25kYXJ5IGRpcmVjdG9yaWVzIGFyZSBtZXJnZWQgaW50byBgb3B0aW9ucy5hZGREaXJgIGF0IGRpc3BhdGNoIChgZXhlYy50czoxNjk1LTE3MDFgKSwgZGVkdXBlZCBhZ2FpbnN0IGFueXRoaW5nIHBhc3NlZCBleHBsaWNpdGx5LgoKRXZlcnl0aGluZyBkb3duc3RyZWFtIGFscmVhZHkgd29ya3MgYW5kIG5lZWRzIG5vIGNoYW5nZToKCmBgYApjbGF1ZGUgICAtPiByZXBlYXRlZCAtLWFkZC1kaXIgZmxhZ3MgICAgICAgIGV4ZWMudHMgKGxpYikgOjEyNjgtMTI3Mwpjb2RleCAgICAtPiBmb2xkZWQgaW50byB3b3Jrc3BhY2Vfcm9vdHMgICAgIGV4ZWMudHMgKGxpYikgOjExMzItMTEzNCwgY29kZXgtcG9saWN5LnRzOjM0LTQyCi0taG9zdCAgIC0+IHRvUmVtb3RlUG9ydGFibGUgLT4gaG9zdEFkZERpcnMgZXhlYy50cyA6MTc4MwogICAgICAgICAgICBmb3J3YXJkZWQgdmVyYmF0aW0gICAgICAgICAgICAgIGhvc3RzL3JlbW90ZS1jbWQudHM6OTIsIGhvc3RzL2Rpc3BhdGNoLnRzOjUwMApgYGAKCjxhc2lkZSBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+PHN0cm9uZz5Lbm93biBsaW1pdCwgc3RhdGVkIHBsYWlubHk6PC9zdHJvbmc+IDxjb2RlPi0tYWRkLWRpcjwvY29kZT4gaXMgZW1pdHRlZCBvbmx5IGZvciBDbGF1ZGUgYW5kIENvZGV4IOKAlCB0aGUgZ3VhcmQgaXMgPGNvZGU+b3B0aW9ucy5hZ2VudCA9PT0gJ2NsYXVkZSc8L2NvZGU+IGF0IDxjb2RlPmV4ZWMudHM6MTI2OTwvY29kZT4sIGFuZCB0aGUgZmxhZydzIG93biBoZWxwIHRleHQgbmFtZXMgb25seSB0aG9zZSB0d28gKDxjb2RlPmV4ZWMudHM6NzU0PC9jb2RlPikuIEZvciBnZW1pbmksIGRyb2lkLCBncm9rIGFuZCB0aGUgcmVzdCB0aGUgZXh0cmEgZGlyZWN0b3JpZXMgYXJlIGRyb3BwZWQuIFRoZSBwcm9qZWN0IHN0aWxsIHJlc29sdmVzIHRoZSBjb3JyZWN0IGN3ZDsgb25seSB0aGUgZ3JhbnRzIGRvIG5vdCBhcHBseS48L2FzaWRlPgoKIyMjIDQuIGBhZ2VudHMgdGVhbXNgIOKAlCBgYXBwcy9jbGkvc3JjL2NvbW1hbmRzL3RlYW1zLnRzYAoKYHRlYW1zIGNyZWF0ZWAgZ2FpbnMgYC0tcHJvamVjdCA8c2x1Zz5gLCBzdG9yZWQgaW4gdGVhbSBtZXRhIGJlc2lkZSB0aGUgZXhpc3RpbmcgYGVuYWJsZV93b3JrdHJlZXNgIC8gYHVzZV93b3JrdHJlZWAgLyBgcmVwb2AgZmllbGRzIChgdGVhbXMudHM6MTU5Mi0xNjAxYCkuIGB0ZWFtcyBhZGRgIHRoZW4gdXNlcyB0aGUgcHJvamVjdCdzIHByaW1hcnkgZGlyZWN0b3J5IGFzIHRoZSBiYXNlIGN3ZCB3aGVuIG5laXRoZXIgYC0tY3dkYCBub3IgYSB3b3JrdHJlZSBpcyBnaXZlbiwgbWFraW5nIHRoZSBwcmVjZWRlbmNlIGNoYWluIGF0IGB0ZWFtcy50czoyMDU1YDoKCmBgYAp3b3JrdHJlZSBwYXRoICAtPiAgLS1jd2QgIC0+ICBwcm9qZWN0IHByaW1hcnkgZGlyICAtPiAgcHJvY2Vzcy5jd2QoKQpgYGAKClRoZSBwcm9qZWN0J3Mgb3RoZXIgZGlyZWN0b3JpZXMgYXJlIGFwcGVuZGVkIGFzIGAtLWFkZC1kaXJgIGluIGBidWlsZENvbW1hbmRgIChgYXBwcy9jbGkvc3JjL2xpYi90ZWFtcy9hZ2VudHMudHM6Mjc4Mi0yNzkyYCksIHdoaWNoIGFscmVhZHkgYXBwZW5kcyBgLS1hZGQtZGlyIDxjd2Q+YCBmb3IgQ2xhdWRlLgoKIyMjIDUuIEV4dGVuc2lvbiDigJQgYGFwcHMvZmFjdG9yeWAKCmBhZ2VudHMubmV3QWdlbnRgIChgZXh0ZW5zaW9uLnRzOjE2MjJgIOKGkiBgbGF1bmNoQWdlbnQ6Nzg4YCDihpIgYG9wZW5TaW5nbGVBZ2VudDoyMTk3YCkgaGFyZGNvZGVzIHRoZSBjd2QgYW5kIG5ldmVyIGNvbnN1bHRzIHByb2plY3RzOgoKYGBgdHMKLy8gYXBwcy9mYWN0b3J5L3NyYy92c2NvZGUvZXh0ZW5zaW9uLnRzOjIyMjcgIOKAlCB0b2RheQpjb25zdCB3b3Jrc3BhY2VGb2xkZXIgPSB2c2NvZGUud29ya3NwYWNlLndvcmtzcGFjZUZvbGRlcnM/LlswXT8udXJpLmZzUGF0aCB8fCBwcm9jZXNzLmN3ZCgpOwpgYGAKCkl0IGNoYW5nZXMgdG8gcmVzb2x2ZSB0aGF0IGZvbGRlciB0byBhIHByb2plY3QgbmFtZSB0aHJvdWdoIHRoZSBDTEkg4oCUIGByZXNvbHZlUHJvamVjdE5hbWVGb3JDd2RgIGFscmVhZHkgZXhpc3RzIGFuZCBhbHJlYWR5IG1hdGNoZXMgYWdhaW5zdCBgcmVwb3NbXS5wYXRoYCAoYHByb2plY3RzLnRzOjQwMy00MDdgLCBgOjQzMi00NTJgKSDigJQgYW5kLCB3aGVuIG9uZSBtYXRjaGVzLCBgYnVpbGRBZ2VudExhdW5jaENvbW1hbmRgIChgYXBwcy9mYWN0b3J5L3NyYy9jb3JlL2FnZW50cy50czoxODctMTk1YCkgZW1pdHMgYC0tcHJvamVjdCA8c2x1Zz5gIGluIHBsYWNlIG9mIHRoZSBjb21wdXRlZCBgLS1jd2RgLiBObyBtYXRjaCBtZWFucyB0b2RheSdzIGJlaGF2aW9yLCB1bmNoYW5nZWQuCgpgLS1wcm9qZWN0YCBpcyBtdXR1YWxseSBleGNsdXNpdmUgd2l0aCBgLS1jd2RgIC8gYC0tcmVtb3RlLWN3ZGAgKGBleGVjLnRzOjU5OGApLCBzbyB0aGUgdHdvIGJyYW5jaGVzIG11c3QgbmV2ZXIgYm90aCBmaXJlLiBgcmVzb2x2ZVByb2plY3RSZWZgIGhhbmRsZXMgYGZvclJlbW90ZWAsIHNvIGEgZmxlZXQtaG9zdCBsYXVuY2ggd29ya3MgdGhyb3VnaCB0aGUgc2FtZSBwYXRoLgoKU2VwYXJhdGVseSwgYGRlZlRvTWFuYWdlZGAgKGBhcHBzL2ZhY3Rvcnkvc3JjL2NvcmUvbWFuYWdlZFByb2plY3RzLnRzOjUzLTg3YCkgY29sbGFwc2VzIGEgbXVsdGktZGlyZWN0b3J5IHByb2plY3QgaW50byBvbmUgYHBhdGhgIHBsdXMgYHJlcG9zWzBdLnNsdWdgLiBJdCBnYWlucyBhIGBkaXJzOiB7IHNsdWcsIHBhdGggfVtdYCBmaWVsZCBzbyB0aGUgUHJvamVjdHMgcGFuZSBzaG93cyBhbGwgdGhyZWUgcmF0aGVyIHRoYW4gc2lsZW50bHkgZHJvcHBpbmcgdHdvLiBObyByZXNvbHV0aW9uIGxvZ2ljIG1vdmVzIGludG8gdGhlIGV4dGVuc2lvbjsgaXQgYXNrcyB0aGUgQ0xJLgoKIyMjIDYuIEJpbmQgdGhlIHRocmVlIHJlcG9zLCB0aGVuIHB1c2ggdG8gdGhlIGZsZWV0CgpTbHVncyB2ZXJpZmllZCBieSByZWFkaW5nIGVhY2ggZGlyZWN0b3J5J3MgYG9yaWdpbmAgb24gemlvbjoKCnwgRGlyZWN0b3J5IHwgUmVtb3RlIHwKfCAtLS0gfCAtLS0gfAp8IGB+L3NyYy9naXRodWIuY29tL211cXNpdG5hd2F6L2FnZW50cy1jbGlgIHwgYHBobngtbGFicy9hZ2VudHMtY2xpYCB8CnwgYH4vc3JjL2dpdGh1Yi5jb20vbXVxc2l0bmF3YXovYWdlbnRzLWNsaS13ZWJgIHwgYHBobngtbGFicy9hZ2VudHMtY2xpLXdlYmAgfAp8IGB+Ly5hZ2VudHMvLnN5c3RlbWAgfCBgcGhueC1sYWJzLy5hZ2VudHMtc3lzdGVtYCB8CgpgYGB5YW1sCiMgfi8uYWdlbnRzL3Byb2plY3RzL2FnZW50cy1jbGkueWFtbApuYW1lOiBhZ2VudHMtY2xpCmRlc2NyaXB0aW9uOiBBZ2VudHMgQ0xJIGFuZCBGYWN0b3J5CnJvb3Q6IH4vc3JjL2dpdGh1Yi5jb20vbXVxc2l0bmF3YXovYWdlbnRzLWNsaQpkZWZhdWx0UGF0aDogfi9zcmMvZ2l0aHViLmNvbS9tdXFzaXRuYXdhei9hZ2VudHMtY2xpCnJlcG86IHBobngtbGFicy9hZ2VudHMtY2xpCnJlcG9zOgogIC0gc2x1ZzogcGhueC1sYWJzL2FnZW50cy1jbGkKICAgIHBhdGg6IH4vc3JjL2dpdGh1Yi5jb20vbXVxc2l0bmF3YXovYWdlbnRzLWNsaQogIC0gc2x1ZzogcGhueC1sYWJzL2FnZW50cy1jbGktd2ViCiAgICBwYXRoOiB+L3NyYy9naXRodWIuY29tL211cXNpdG5hd2F6L2FnZW50cy1jbGktd2ViCiAgLSBzbHVnOiBwaG54LWxhYnMvLmFnZW50cy1zeXN0ZW0KICAgIHBhdGg6IH4vLmFnZW50cy8uc3lzdGVtCmxpbmVhcjoKICBwcm9qZWN0SWQ6IDhlYjhmNWIxLTM4NzAtNDU5MC1iYTY3LTM2ZjM4MTFkMTQzNQogIG5hbWU6IEFnZW50cyBDTEkKYGBgCgpGbGVldCBwcm9wYWdhdGlvbiBpcyBub3QgYXV0b21hdGljLiBgfi8uYWdlbnRzL3Byb2plY3RzL2AgaXMgc3luY2FibGUsIG5vdCBzeW5jZWQg4oCUIGFuIHVuY29tbWl0dGVkIGRlZmluaXRpb25zIGRpcmVjdG9yeSBoYXMgYmVlbiBkZWxldGVkIHR3aWNlIGJ5IGEgcmVjb25jaWxlIChgcHJvamVjdHMudHM6MTAtMTZgKS4KCmBgYGJhc2gKYWdlbnRzIHJlcG8gcHVzaCB1c2VyICAgICAgICAgICAgICAgICAgICAgICAjIG9uIHppb24KYWdlbnRzIHNzaCA8aG9zdD4gJ2FnZW50cyByZXBvIHB1bGwgdXNlcicgICAjIGV2ZXJ5IHJlYWNoYWJsZSBkZXZpY2UKYWdlbnRzIHNzaCA8aG9zdD4gJ2FnZW50cyBwcm9qZWN0cyB2aWV3IGFnZW50cy1jbGknCmBgYAoKIyMgUHVibGljIEludGVyZmFjZQoKYGBgYmFzaAojIERlZmluZSBhIHByb2plY3QgYWNyb3NzIHNldmVyYWwgZGlyZWN0b3JpZXMgKHNsdWcgcmVhZCBmcm9tIGVhY2ggZGlyJ3Mgb3JpZ2luKQphZ2VudHMgcHJvamVjdHMgYWRkIGFnZW50cy1jbGkgXAogIC0tZGlyIH4vc3JjL2dpdGh1Yi5jb20vbXVxc2l0bmF3YXovYWdlbnRzLWNsaSBcCiAgLS1kaXIgfi9zcmMvZ2l0aHViLmNvbS9tdXFzaXRuYXdhei9hZ2VudHMtY2xpLXdlYiBcCiAgLS1kaXIgfi8uYWdlbnRzLy5zeXN0ZW0KCiMgQW1lbmQgYW4gZXhpc3RpbmcgZGVmaW5pdGlvbgphZ2VudHMgcHJvamVjdHMgc2V0IGFnZW50cy1jbGkgLS1hZGQtZGlyIH4vLmFnZW50cy8uc3lzdGVtCmFnZW50cyBwcm9qZWN0cyBzZXQgYWdlbnRzLWNsaSAtLXJtLWRpciAgfi8uYWdlbnRzLy5zeXN0ZW0KYWdlbnRzIHByb2plY3RzIHNldCBhZ2VudHMtY2xpIC0tYWRkLWRpciAuL3ZlbmRvci90aGluZyAtLXNsdWcgcGhueC1sYWJzL3RoaW5nICAjIG5vIG9yaWdpbgoKIyBTcGF3bmluZzogdW5jaGFuZ2VkIGZsYWdzLCB3aWRlciByZWFjaAphZ2VudHMgcnVuIGNsYXVkZSAtLXByb2plY3QgYWdlbnRzLWNsaSAgICAgICAgICAgICAgICAgICMgY3dkICsgc2libGluZyBncmFudHMKYWdlbnRzIHJ1biBjbGF1ZGUgLS1wcm9qZWN0IGFnZW50cy1jbGkgLS1ob3N0IHlvc2VtaXRlLXMwCmFnZW50cyB0ZWFtcyBjcmVhdGUgbXktZmVhdHVyZSAtLXByb2plY3QgYWdlbnRzLWNsaSAgICAgIyBORVcgZmxhZyBvbiB0ZWFtcwpgYGAKClVuY2hhbmdlZDogYC0tcHJvamVjdCA8c2x1Zz5bQHdvcmt0cmVlXWAgc3ludGF4LCBpdHMgbXV0dWFsIGV4Y2x1c2lvbiB3aXRoIGAtLWN3ZGAgLyBgLS1yZW1vdGUtY3dkYCwgYW5kIHRoZSBkaXJlY3RvcnkgaXQgcmVzb2x2ZXMgYXMgY3dkLiBOb3RoaW5nIHRoYXQgd29ya3MgdG9kYXkgY2hhbmdlcyBtZWFuaW5nLgoKIyMgVG8tZG8KCi0gWyBdICoqMSoqIOKAlCBgLS1kaXJgIG9uIGBwcm9qZWN0cyBhZGRgOyBgLS1hZGQtZGlyYCAvIGAtLXJtLWRpcmAgb24gYHByb2plY3RzIHNldGA7IHNsdWcgZnJvbSBvcmlnaW47IGZpeCB0aGUgc3RhbGUgYGFnZW50cyBwdXNoL3B1bGxgIG5vdGUKLSBbIF0gKioyKiog4oCUIGBwcm9qZWN0RGlyc0FicygpYCBpbiBgbGliL3Byb2plY3RzLnRzYDsgcmVmYWN0b3IgYHdvcmtzcGFjZVRhcmdldHNGb3JEZWZgIG9udG8gaXQKLSBbIF0gKiozKiog4oCUIGBhZ2VudHMgcnVuIC0tcHJvamVjdGAgbWVyZ2VzIHNlY29uZGFyeSBkaXJzIGludG8gYC0tYWRkLWRpcmAsIGxvY2FsIGFuZCBgLS1ob3N0YAotIFsgXSAqKjQqKiDigJQgYC0tcHJvamVjdGAgb24gYHRlYW1zIGNyZWF0ZWAsIGhvbm9yZWQgaW4gYHRlYW1zIGFkZGAgY3dkIHByZWNlZGVuY2UgYW5kIGBidWlsZENvbW1hbmRgCi0gWyBdICoqNSoqIOKAlCBleHRlbnNpb24gYE5ldyBBZ2VudGAgZW1pdHMgYC0tcHJvamVjdGA7IGBkZWZUb01hbmFnZWRgIGNhcnJpZXMgYWxsIGRpcnMKLSBbIF0gKio2Kiog4oCUIGJpbmQgdGhlIHRocmVlIHJlcG9zOyBgcmVwbyBwdXNoIHVzZXJgIGFuZCBwdWxsIGFjcm9zcyB0aGUgZmxlZXQKLSBbIF0gKio3Kiog4oCUIHRlc3RzLCBgZG9jcy8xMS1wcm9qZWN0cy5tZGAsIENIQU5HRUxPRwoKU3RlcHMgMSB0aHJvdWdoIDMgYXJlIHRoZSBzcGluZS4gU3RlcHMgNCBhbmQgNSBhcmUgaW5kZXBlbmRlbnQgY29uc3VtZXJzIG9mIHN0ZXAgMiBhbmQgY2FuIGxhbmQgaW4gcGFyYWxsZWwuIFN0ZXAgNiBuZWVkcyBvbmx5IHN0ZXAgMS4KCiMjIFZhbGlkYXRpb24KCnwgQ2hlY2sgfCBFeHBlY3RlZCByZXN1bHQgfAp8IC0tLSB8IC0tLSB8CnwgYHByb2plY3REaXJzQWJzYCB1bml0IHwgTm9uLWV4aXN0ZW50IGRpciBmaWx0ZXJlZCBsb2NhbGx5LCBrZXB0IHVuZGVyIGBmb3JSZW1vdGVgOyBgc3VicGF0aGAgam9pbmVkOyBwYXRocyBzdG9yZWQgYH4v4oCmYCB8CnwgYC0tZGlyYCB1bml0IHwgU2x1ZyBpbmZlcnJlZCBmcm9tIGBvcmlnaW5gLCBub3QgZnJvbSB0aGUgZGlyZWN0b3J5IHBhdGggfAp8IGBhZ2VudHMgcHJvamVjdHMgdmlldyBhZ2VudHMtY2xpYCB8IFRocmVlIGByZXBvYCBsaW5lcywgZWFjaCB3aXRoIGl0cyBvd24gcGF0aCB8CnwgYGFnZW50cyBydW4gY2xhdWRlIC0tcHJvamVjdCBhZ2VudHMtY2xpYCB8IGN3ZCBpcyBgYWdlbnRzLWNsaWA7IHR3byBgLS1hZGQtZGlyYCBmbGFncyBmb3IgdGhlIHNpYmxpbmdzIHwKfCBHcmFudCBpcyByZWFsIHwgSW5zaWRlIHRoZSBzcGF3bmVkIGFnZW50LCByZWFkIGEgZmlsZSB1bmRlciBgfi8uYWdlbnRzLy5zeXN0ZW1gIGFuZCBlZGl0IG9uZSB1bmRlciBgYWdlbnRzLWNsaS13ZWJgIHwKfCBgLS1ob3N0IHlvc2VtaXRlLXMwYCB8IEZvcndhcmRlZCBwYXRocyBhcmUgYH4v4oCmYCwgbm90IGAvVXNlcnMvbXVxc2l0L+KApmAgfAp8IGBhZ2VudHMgdGVhbXMgY3JlYXRlIOKApiAtLXByb2plY3QgYWdlbnRzLWNsaWAgfCBUZWFtbWF0ZSBsYW5kcyBpbiB0aGUgcHJpbWFyeSBkaXIgd2l0aCBzaWJsaW5nIGdyYW50cyB8CnwgRXh0ZW5zaW9uIENtZC1TaGlmdC1BIHwgVGVybWluYWwgc2hvd3MgYGFnZW50cyBydW4gPGFnZW50PiAtLWludGVyYWN0aXZlIC0tcHJvamVjdCBhZ2VudHMtY2xpYCB8CnwgRmxlZXQgfCBgcHJvamVjdHMgdmlld2AgbWF0Y2hlcyBvbiBvbmUgTGludXggd29ya2VyIGFuZCBvbmUgTWFjOyBhIGJveCBtaXNzaW5nIGBhZ2VudHMtY2xpLXdlYmAgc2tpcHMgaXQgd2l0aG91dCBlcnJvciB8CgpgYGBiYXNoCiMgdGhlIHNwaW5lLCBlbmQgdG8gZW5kCmFnZW50cyBwcm9qZWN0cyB2aWV3IGFnZW50cy1jbGkKYWdlbnRzIHJ1biBjbGF1ZGUgLS1wcm9qZWN0IGFnZW50cy1jbGkgLS1wcmludC1jb21tYW5kCmFnZW50cyBydW4gY2xhdWRlIC0tcHJvamVjdCBhZ2VudHMtY2xpIC0taG9zdCB5b3NlbWl0ZS1zMCAtLXByaW50LWNvbW1hbmQKYWdlbnRzIHRlYW1zIGNyZWF0ZSBkaXJzLWNoZWNrIC0tcHJvamVjdCBhZ2VudHMtY2xpCmFnZW50cyB0ZWFtcyBhZGQgZGlycy1jaGVjayBjbGF1ZGUgImxpc3QgeW91ciBhY2Nlc3NpYmxlIHJvb3RzIiAtLW5hbWUgcHJvYmUKYGBgCgojIyBSaXNrcwoKfCBSaXNrIHwgTWl0aWdhdGlvbiB8CnwgLS0tIHwgLS0tIHwKfCBBIGRpcmVjdG9yeSBpbiBgcmVwb3NbXWAgaXMgYWJzZW50IG9uIHNvbWUgZmxlZXQgYm94IHwgYHByb2plY3REaXJzQWJzYCBmaWx0ZXJzIG5vbi1leGlzdGVudCBkaXJzIGZvciBsb2NhbCByZXNvbHV0aW9uOyB0aGUgZGVmaW5pdGlvbiBzdGlsbCBsb2FkcyBhbmQgdGhlIHByaW1hcnkgY3dkIHN0aWxsIHJlc29sdmVzIHwKfCBgLS1wcm9qZWN0YCBhbmQgYC0tY3dkYCBib3RoIGVtaXR0ZWQgYnkgdGhlIGV4dGVuc2lvbiB8IFRoZXkgYXJlIG11dHVhbGx5IGV4Y2x1c2l2ZSAoYGV4ZWMudHM6NTk4YCk7IHRoZSB0d28gYnJhbmNoZXMgYXJlIGV4Y2x1c2l2ZSBieSBjb25zdHJ1Y3Rpb24gYW5kIGNvdmVyZWQgYnkgYSB0ZXN0IHwKfCBHcmFudHMgc2lsZW50bHkgZHJvcHBlZCBvbiBub24tQ2xhdWRlL0NvZGV4IGhhcm5lc3NlcyB8IE5hbWVkIGluIHRoZSBkb2NzIGFuZCBpbiBgLS1wcm9qZWN0YCBoZWxwIHRleHQgcmF0aGVyIHRoYW4gcGFwZXJlZCBvdmVyOyBubyBmYWxsYmFjayBwYXRoIGlzIGludmVudGVkIHwKfCBEZWZpbml0aW9ucyBsb3N0IGJlZm9yZSB0aGV5IHN5bmMgfCBgYWdlbnRzIHJlcG8gcHVzaCB1c2VyYCBpbW1lZGlhdGVseSBhZnRlciBzdGVwIDYsIHBlciB0aGUgd2FybmluZyBhdCBgcHJvamVjdHMudHM6MTAtMTZgIHwKfCBSZWZhY3RvcmluZyBgd29ya3NwYWNlVGFyZ2V0c0ZvckRlZmAgY2hhbmdlcyBgcHJvamVjdHMgc3RhdHVzYCB8IEV4aXN0aW5nIHByb2JlIHRlc3RzIG11c3QgcGFzcyB1bmNoYW5nZWQ7IHRoZSBuZXcgZnVuY3Rpb24gcmV0dXJucyB0aGUgc2FtZSBzZXQgcGx1cyBvcmRlcmluZyB8CgojIyBUcmFja2luZwoKTm8gTGluZWFyIHRpY2tldCBjb3ZlcnMgdGhpcyB5ZXQuIE9uZSBpcyBvcGVuZWQgYWdhaW5zdCB0aGUgKipBZ2VudHMgQ0xJKiogcHJvamVjdCAoYDhlYjhmNWIxLTM4NzAtNDU5MC1iYTY3LTM2ZjM4MTFkMTQzNWApIGJlZm9yZSBpbXBsZW1lbnRhdGlvbiwgdGhpcyBwbGFuIGlzIGF0dGFjaGVkIHRvIGl0LCBhbmQgdGhlIHRpY2tldCBpZCBsYW5kcyBiYWNrIGluIHRoaXMgc2VjdGlvbi4K"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

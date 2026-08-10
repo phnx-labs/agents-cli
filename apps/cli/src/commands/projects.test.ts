@@ -1,4 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { execFileSync } from 'child_process';
 import {
   computeProjectListWidths,
   formatFleetSkippedNote,
@@ -6,6 +10,7 @@ import {
   formatMilestoneDue,
   formatMilestoneLines,
   formatNextMilestone,
+  projectRepoFromDir,
   type ProjectListRow,
 } from './projects.js';
 
@@ -198,5 +203,83 @@ describe('formatMilestoneLines', () => {
     const out = formatMilestoneLines([], ms[0], now, 1).map(stripAnsi);
     expect(out).toHaveLength(1);
     expect(out[0]).toContain('Factory converts strategy');
+  });
+});
+
+describe('projectRepoFromDir', () => {
+  // Real git repos with real remotes — the whole point of the function is that
+  // it reads `git remote get-url origin`, so a fixture without git tests nothing.
+  let tmp: string;
+
+  const git = (cwd: string, args: string[]) =>
+    execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+
+  const repoAt = (name: string, origin?: string): string => {
+    const p = path.join(tmp, name);
+    fs.mkdirSync(p, { recursive: true });
+    git(p, ['init', '-b', 'main']);
+    if (origin) git(p, ['remote', 'add', 'origin', origin]);
+    return p;
+  };
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'projrepo-test-'));
+  });
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('reads the slug from the directory OWN origin, not from its path', () => {
+    // The regression this guards: a checkout under `.../muqsitnawaz/agents-cli`
+    // whose origin is `phnx-labs/agents-cli` must record what it pushes to.
+    const dir = repoAt(path.join('muqsitnawaz', 'agents-cli'), 'git@github.com:phnx-labs/agents-cli.git');
+    const r = projectRepoFromDir(dir);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.repo.slug).toBe('phnx-labs/agents-cli');
+  });
+
+  it('refuses a directory with no origin, and names the flag that fixes it', () => {
+    const dir = repoAt('no-origin');
+    const r = projectRepoFromDir(dir);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).toMatch(/no origin remote/);
+      expect(r.error).toMatch(/--slug <owner\/repo>/);
+    }
+  });
+
+  it('accepts an explicit slug override for a directory with no origin', () => {
+    const dir = repoAt('vendored');
+    const r = projectRepoFromDir(dir, 'phnx-labs/thing');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.repo.slug).toBe('phnx-labs/thing');
+  });
+
+  it('refuses a path that does not exist, and one that is a file', () => {
+    const missing = projectRepoFromDir(path.join(tmp, 'nope'));
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.error).toMatch(/No such directory/);
+
+    const file = path.join(tmp, 'a-file');
+    fs.writeFileSync(file, 'x');
+    const notDir = projectRepoFromDir(file);
+    expect(notDir.ok).toBe(false);
+    if (!notDir.ok) expect(notDir.error).toMatch(/Not a directory/);
+  });
+
+  it('stores the path home-relative when the directory lives under $HOME', () => {
+    // Portability: the same definition has to re-root on every machine.
+    const home = process.env.HOME ?? os.homedir();
+    const under = path.join(home, `.projrepo-test-${process.pid}`);
+    fs.mkdirSync(under, { recursive: true });
+    try {
+      git(under, ['init', '-b', 'main']);
+      git(under, ['remote', 'add', 'origin', 'git@github.com:o/r.git']);
+      const r = projectRepoFromDir(under);
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.repo.path?.startsWith('~/')).toBe(true);
+    } finally {
+      fs.rmSync(under, { recursive: true, force: true });
+    }
   });
 });

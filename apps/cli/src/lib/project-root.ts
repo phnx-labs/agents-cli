@@ -18,7 +18,7 @@ import * as fs from 'fs';
 import { readMeta, updateMeta } from './state.js';
 import { getMainRepoRoot } from './git.js';
 import { toPosix } from './platform/index.js';
-import { loadProjectDef, resolveDefinedProjectPath } from './projects.js';
+import { loadProjectDef, projectDirsAbs, resolveDefinedProjectPath } from './projects.js';
 import { shellQuote } from './ssh-exec.js';
 
 const HOME = process.env.HOME ?? os.homedir();
@@ -224,4 +224,26 @@ export async function resolveProjectRef(
     throw new Error(`Project path not found: ${resolved}`);
   }
   return resolved;
+}
+
+/**
+ * Resolve a `--project` ref to the cwd an agent lands in PLUS the other
+ * directories that project binds, so a spawn can grant them.
+ *
+ * `cwd` is exactly what `resolveProjectRef` returns — this never changes where
+ * an agent starts. `extraDirs` is every other `repos[].path`, and is empty for
+ * a convention-resolved project (no definition means no bound repos) and for a
+ * definition that binds only its primary checkout.
+ */
+export async function resolveProjectDirs(
+  ref: string,
+  opts: { forRemote: boolean; cwd?: string },
+): Promise<{ cwd: string; extraDirs: string[] }> {
+  const resolved = await resolveProjectRef(ref, opts);
+  const { slug } = parseProjectRef(ref);
+  const def = slug ? loadProjectDef(slug) : undefined;
+  if (!def) return { cwd: resolved, extraDirs: [] };
+
+  const all = projectDirsAbs(def, { forRemote: opts.forRemote, primary: resolved });
+  return { cwd: resolved, extraDirs: all.filter((d) => d !== resolved) };
 }

@@ -11,6 +11,7 @@ import {
   buildProjectPath,
   inferProjectRoot,
   resolveProjectRef,
+  resolveProjectDirs,
 } from './project-root.js';
 import { writeProjectDef } from './projects.js';
 
@@ -110,6 +111,58 @@ describe('resolveProjectRef — definition first', () => {
   // The convention fallback (undefined slug → <root>/<slug>) is covered by the
   // buildProjectPath tests above; exercising it through resolveProjectRef would
   // couple to the machine's cached projectRoot, so it is not re-tested here.
+});
+
+describe('resolveProjectDirs', () => {
+  let projDir: string;
+  let sysDir: string;
+  let mainDir: string;
+
+  beforeAll(() => {
+    projDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proj-dirs-'));
+    process.env.AGENTS_PROJECTS_DIR = projDir;
+    // Real directories: the local branch of projectDirsAbs filters by existence.
+    mainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proj-main-'));
+    sysDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proj-sys-'));
+    writeProjectDef({
+      name: 'multi',
+      root: mainDir,
+      repos: [
+        { slug: 'o/main', path: mainDir },
+        { slug: 'o/sys', path: sysDir },
+      ],
+    });
+    writeProjectDef({ name: 'lonely', root: mainDir });
+  });
+  afterAll(() => {
+    delete process.env.AGENTS_PROJECTS_DIR;
+    for (const d of [projDir, mainDir, sysDir]) fs.rmSync(d, { recursive: true, force: true });
+  });
+
+  it('returns the cwd resolveProjectRef gives, and never repeats it in extraDirs', async () => {
+    const { cwd, extraDirs } = await resolveProjectDirs('multi', { forRemote: false });
+    expect(cwd).toBe(await resolveProjectRef('multi', { forRemote: false }));
+    expect(extraDirs).toEqual([path.resolve(sysDir)]);
+    expect(extraDirs).not.toContain(cwd);
+  });
+
+  it('is empty for a project that binds only its own checkout', async () => {
+    const { cwd, extraDirs } = await resolveProjectDirs('lonely', { forRemote: false });
+    expect(cwd).toBe(path.resolve(mainDir));
+    expect(extraDirs).toEqual([]);
+  });
+
+  it('a @worktree ref keeps the worktree as cwd and grants the main checkout too', async () => {
+    // The worktree is the cwd, so the project's own checkout stops being the
+    // primary and becomes a grant like any other bound directory. That is the
+    // wanted behavior: a teammate isolated in a worktree still needs to read
+    // the checkout it branched from, and the siblings.
+    const wt = path.join(mainDir, '.agents', 'worktrees', 'fix');
+    fs.mkdirSync(wt, { recursive: true });
+    const { cwd, extraDirs } = await resolveProjectDirs('multi@fix', { forRemote: false });
+    expect(cwd).toBe(path.resolve(wt));
+    expect(extraDirs).toEqual([path.resolve(mainDir), path.resolve(sysDir)]);
+  });
 });
 
 describe('inferProjectRoot', () => {

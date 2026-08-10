@@ -5,7 +5,7 @@ import { spawnSync, spawn } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'url';
 
-import { migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateKimiSubagentsToMarkdown, migrateRoutineDeviceToDevices, migrateRoutineRemoteCwdToCwd, migrateWatchdogSentinelToRoutine, repairSelfReferentialBinShims, seedActiveCursorLoginPerVersion } from './migrate.js';
+import { migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateKimiSubagentsToMarkdown, migrateRoutineDeviceToDevices, migrateRoutineRemoteCwdToCwd, migrateWatchdogSentinelToConfig, repairSelfReferentialBinShims, seedActiveCursorLoginPerVersion } from './migrate.js';
 import { toPosix } from './platform/index.js';
 import * as yaml from 'yaml';
 
@@ -699,31 +699,31 @@ describe('v12 device migration scheduler startup failure (POSIX)', () => {
   });
 });
 
-describe('migrateWatchdogSentinelToRoutine', () => {
-  it('no sentinel on disk -> no-op (never ensures a routine)', () => {
+describe('migrateWatchdogSentinelToConfig', () => {
+  it('no sentinel on disk -> no-op (never sets the config)', () => {
     const dir = makeTempHistoryDir();
     const sentinel = path.join(dir, 'enabled'); // deliberately not created
     let called = false;
-    migrateWatchdogSentinelToRoutine(sentinel, () => { called = true; });
+    migrateWatchdogSentinelToConfig(sentinel, () => { called = true; });
     expect(called).toBe(false);
   });
 
-  it('sentinel present -> ensures the routine ENABLED and deletes the sentinel', () => {
+  it('sentinel present -> sets watchdog.enabled true and deletes the sentinel', () => {
     const dir = makeTempHistoryDir();
     const sentinel = path.join(dir, 'enabled');
     fs.writeFileSync(sentinel, 'enabled\n');
-    const calls: Array<[string, boolean]> = [];
-    migrateWatchdogSentinelToRoutine(sentinel, (name, enabled) => { calls.push([name, enabled]); });
+    const calls: boolean[] = [];
+    migrateWatchdogSentinelToConfig(sentinel, (enabled) => { calls.push(enabled); });
     // Opted-in state is carried forward, and the one-shot marker is consumed.
-    expect(calls).toEqual([['watchdog', true]]);
+    expect(calls).toEqual([true]);
     expect(fs.existsSync(sentinel)).toBe(false);
   });
 
-  it('leaves the sentinel in place if ensuring the routine throws (retry next run)', () => {
+  it('leaves the sentinel in place if setting the config throws (retry next run)', () => {
     const dir = makeTempHistoryDir();
     const sentinel = path.join(dir, 'enabled');
     fs.writeFileSync(sentinel, 'enabled\n');
-    migrateWatchdogSentinelToRoutine(sentinel, () => { throw new Error('routines dir unwritable'); });
+    migrateWatchdogSentinelToConfig(sentinel, () => { throw new Error('config unwritable'); });
     // Never silently lose the opt-in — the sentinel survives for a later attempt.
     expect(fs.existsSync(sentinel)).toBe(true);
   });

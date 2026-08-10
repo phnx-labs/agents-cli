@@ -35,6 +35,32 @@ export interface MonitorState {
 
 const MAX_STORED_VALUE = 4096;
 
+/**
+ * Per-monitor liveness heartbeat, recorded on EVERY poll — fire or not, match or
+ * not. This is deliberately a separate record from MonitorState: change-detection
+ * state (lastHash/lastValue) is written only when a monitor fires or establishes
+ * a baseline, so a monitor that polls steadily but never matches leaves no
+ * change-detection trace. Without a heartbeat, `view` on such a monitor showed
+ * `state: null` — indistinguishable from a monitor the engine never touched, the
+ * exact confusion RUSH-2485 reports. The heartbeat makes "never checked" (no
+ * record) visibly distinct from "checked N times, not matching" (recent record,
+ * zero fires). Kept in its own file so it can never perturb the baseline logic in
+ * decideFire/hasChanged.
+ */
+export interface MonitorLiveness {
+  monitorName: string;
+  /** RFC3339 timestamp of the last poll attempt. */
+  lastCheckedAt: string;
+  /** Total polls the engine has run against this monitor's source. */
+  checkCount: number;
+  /** The last poll's error (source produced nothing / threw), cleared on the next good poll. */
+  lastError?: string;
+  /** Consecutive failed polls; reset to 0 on any successful observation. Drives drought escalation. */
+  consecutiveErrors: number;
+  /** RFC3339 timestamp of the last drought notification, so the engine notifies once per drought. */
+  droughtNotifiedAt?: string;
+}
+
 /** Per-monitor history root, with the (untrusted) name contained to one segment. */
 export function getMonitorHistoryDir(name: string): string {
   return safeJoin(getMonitorsHistoryDir(), name);
@@ -42,6 +68,10 @@ export function getMonitorHistoryDir(name: string): string {
 
 function getStatePath(name: string): string {
   return path.join(getMonitorHistoryDir(name), 'state.json');
+}
+
+function getLivenessPath(name: string): string {
+  return path.join(getMonitorHistoryDir(name), 'liveness.json');
 }
 
 /** Directory holding a monitor's fire history. */
@@ -125,6 +155,63 @@ export function hasChanged(name: string, observation: string, dedupeKey?: string
   const prev = readState(name);
   if (!prev) return true;
   return prev.lastHash !== hashSignature(observation, dedupeKey);
+}
+
+/** Read a monitor's liveness heartbeat, or null if the engine has never polled it. */
+export function readLiveness(name: string): MonitorLiveness | null {
+  const livenessPath = getLivenessPath(name);
+  if (!fs.existsSync(livenessPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(livenessPath, 'utf-8')) as MonitorLiveness;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Record one poll attempt as the monitor's liveness heartbeat — the single call
+ * the engine makes on every evaluation, regardless of fire/match. A successful
+ * observation clears `lastError`/`consecutiveErrors` and any drought flag; a
+ * failed one (source threw or produced nothing) records the error and increments
+ * the consecutive-failure counter the drought escalation reads. Written
+ * atomically (temp + rename) like writeStateRaw, and never touches state.json, so
+ * change-detection is untouched.
+ */
+export function recordCheck(
+  name: string,
+  checkedAt: string,
+  error?: string,
+): MonitorLiveness {
+  const prev = readLiveness(name);
+  const consecutiveErrors = error ? (prev?.consecutiveErrors ?? 0) + 1 : 0;
+  const liveness: MonitorLiveness = {
+    monitorName: name,
+    lastCheckedAt: checkedAt,
+    checkCount: (prev?.checkCount ?? 0) + 1,
+    consecutiveErrors,
+    ...(error ? { lastError: error } : {}),
+    // A drought flag only survives while the drought does — cleared on recovery.
+    ...(error && prev?.droughtNotifiedAt ? { droughtNotifiedAt: prev.droughtNotifiedAt } : {}),
+  };
+  ensureAgentsDir();
+  const dir = getMonitorHistoryDir(name);
+  fs.mkdirSync(dir, { recursive: true });
+  const livenessPath = path.join(dir, 'liveness.json');
+  const tmp = `${livenessPath}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(liveness, null, 2), 'utf-8');
+  fs.renameSync(tmp, livenessPath);
+  return liveness;
+}
+
+/** Stamp the drought-notified marker so the engine notifies at most once per drought. */
+export function markDroughtNotified(name: string, at: string): void {
+  const prev = readLiveness(name);
+  if (!prev) return;
+  const livenessPath = getLivenessPath(name);
+  const next: MonitorLiveness = { ...prev, droughtNotifiedAt: at };
+  const tmp = `${livenessPath}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(next, null, 2), 'utf-8');
+  fs.renameSync(tmp, livenessPath);
 }
 
 /**

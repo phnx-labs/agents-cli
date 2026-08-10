@@ -62,7 +62,7 @@ import {
   type QueryOptions,
 } from './db.js';
 import { buildRunNameMap } from './run-names.js';
-import { resolveLinearApiKey } from '../auto-dispatch-linear.js';
+import { resolveLinearApiKey } from '../linear-cache.js';
 import {
   ToolCallCollector,
   collectClaudeToolCalls,

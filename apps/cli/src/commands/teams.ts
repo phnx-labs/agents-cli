@@ -783,6 +783,14 @@ async function reactWithTeammate(
       null,
       worktreeName,
       worktreePath,
+      null, // profileName
+      null, // hostName
+      null, // hostTarget
+      null, // repoPath
+      // A pr-watch fixer belongs to the same team, so it gets the same project
+      // grants as any other teammate. Wiring `--project` into only the
+      // `teams add` caller would have left this one silently without them.
+      (await getTeam(team))?.project ?? null,
     );
   } catch (err) {
     // The spawn failed after we created this fixer's worktree — tear it down so
@@ -1598,9 +1606,21 @@ export function registerTeamsCommands(program: Command): void {
     .option('--devices <list>', 'Pool of machines this team may run teammates on (comma-separated). Enables distributed auto-scheduling.')
     .option('--hosts <list>', 'Alias for --devices.')
     .option('--repo <urlOrPath>', 'How each remote (--device) teammate gets the code — ONE git URL/path for the whole team (existing checkout reused, else cloned). A team is single-repo; for work across repos, make one team per repo. Defaults to this checkout origin.')
+    .option('--project <slug>', "Work this team on a defined project: its primary directory is each local teammate's base cwd, its other directories become --add-dir grants")
     .option('--json', 'Output machine-readable JSON')
-    .action(async (team: string, opts: { description?: string; enableWorktrees?: boolean; useWorktree?: string; devices?: string; hosts?: string; repo?: string; json?: boolean }) => {
+    .action(async (team: string, opts: { description?: string; enableWorktrees?: boolean; useWorktree?: string; devices?: string; hosts?: string; repo?: string; project?: string; json?: boolean }) => {
       try {
+        // Fail here, not at the first `teams add`: a team created against a
+        // project that does not resolve would silently fall back to the
+        // orchestrator's cwd for every teammate.
+        if (opts.project) {
+          const { resolveProjectRef } = await import('../lib/project-root.js');
+          try {
+            await resolveProjectRef(opts.project, { forRemote: false });
+          } catch (err) {
+            dieFriction('teams', 'project-unresolved', (err as Error).message);
+          }
+        }
         // --devices / --hosts are aliases; commander can't express a two-name
         // option that isn't a short flag, so merge them here. Split on comma,
         // trim, drop blanks, dedupe (preserving first-seen order).
@@ -1652,6 +1672,7 @@ export function registerTeamsCommands(program: Command): void {
           useWorktree: opts.useWorktree,
           devices,
           repo,
+          project: opts.project,
         });
         if (isJsonMode(opts)) {
           console.log(JSON.stringify({ team, ...meta }, null, 2));
@@ -1663,6 +1684,7 @@ export function registerTeamsCommands(program: Command): void {
         if (meta.use_worktree) console.log(chalk.gray(`  worktree: ${meta.use_worktree}`));
         if (meta.devices && meta.devices.length) console.log(chalk.gray(`  devices: ${meta.devices.join(', ')}`));
         if (meta.repo) console.log(chalk.gray(`  repo: ${meta.repo}`));
+        if (meta.project) console.log(chalk.gray(`  project: ${meta.project}`));
         console.log();
         console.log(chalk.gray('Add your first teammate:'));
         if (meta.enable_worktrees) {
@@ -2049,10 +2071,32 @@ export function registerTeamsCommands(program: Command): void {
         dieFriction('teams', 'worktree-requires-enable-worktrees', `--worktree requires --enable-worktrees on the team. Recreate the team with: agents teams create ${team} --enable-worktrees`);
       }
 
+      // The team's project (`teams create --project`) contributes a base cwd and
+      // the access grants for its other directories. It sits BELOW --cwd in the
+      // precedence chain: an explicit --cwd on this teammate still wins.
+      //
+      // Grants are attached even when a worktree or --cwd owns the cwd — the
+      // sibling repos are what the project binds, not where the teammate sits.
+      // Only the base cwd is resolved here — a LOCAL teammate needs a concrete
+      // directory to start in. The GRANTS are deliberately not resolved now:
+      // an unpinned teammate on a --devices pool is placed at launch, so its
+      // shape (absolute vs ~/…) is not yet knowable. The project name rides on
+      // the record and resolveTeammateGrants resolves it per launch.
+      let projectCwd: string | undefined;
+      if (teamMeta?.project && !hostName) {
+        const { resolveProjectRef } = await import('../lib/project-root.js');
+        try {
+          projectCwd = await resolveProjectRef(teamMeta.project, { forRemote: false });
+        } catch (err) {
+          dieFriction('teams', 'project-unresolved', (err as Error).message);
+        }
+      }
+
       // Distributed teammates have no LOCAL cwd — their working dir lives on the
       // host (repoPath / the remote worktree). Local teammates default to the
-      // worktree path, then --cwd, then the current directory.
-      const cwd = hostName ? null : (worktreePath ?? opts.cwd ?? process.cwd());
+      // worktree path, then --cwd, then the project's primary directory, then
+      // the current directory.
+      const cwd = hostName ? null : (worktreePath ?? opts.cwd ?? projectCwd ?? process.cwd());
 
       // Factory teammates: prepend the worker-skill preamble to every task
       // prompt so implementers/testers/reviewers know about the Ledger, the
@@ -2139,6 +2183,7 @@ export function registerTeamsCommands(program: Command): void {
           hostName,
           hostTarget,
           hostRepoPath,
+          teamMeta?.project ?? null,
         );
 
         emit('teams.add', { module: 'teams', team, agent, name: result.name, agent_id: result.agent_id, status: result.status });

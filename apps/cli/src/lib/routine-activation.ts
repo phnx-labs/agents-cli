@@ -31,21 +31,6 @@ export function replaceEnabledRoutines(names: Iterable<string>): string[] {
   return normalized;
 }
 
-/** Add newly introduced replacements to an already-materialized device manifest. */
-export function addEnabledRoutinesOnUpgrade(names: Iterable<string>): boolean {
-  const additions = normalizeRoutineNames(names);
-  let changed = false;
-  updateMeta((meta) => {
-    if (!Array.isArray(meta.deviceRoutines)) return meta;
-    const current = normalizeRoutineNames(meta.deviceRoutines);
-    const next = normalizeRoutineNames([...current, ...additions]);
-    if (next.length === current.length && next.every((name, index) => name === current[index])) return meta;
-    changed = true;
-    return { ...meta, deviceRoutines: next };
-  });
-  return changed;
-}
-
 /**
  * Add or remove one routine on this machine. `legacyEnabledNames` seeds the
  * manifest the first time an upgraded host changes activation, preserving every
