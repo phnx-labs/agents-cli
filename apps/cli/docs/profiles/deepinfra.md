@@ -30,4 +30,4 @@ agents harness fork deepinfra deepinfra-model \
   --account deepinfra
 ```
 
-DeepInfra does not document an account-balance endpoint, so `agents view` reports the account identity without inventing remaining-credit data.
+`agents view` reads DeepInfra's documented `/payment/checklist` endpoint through the daemon-owned BYOK refresh path. It renders current usage against the configured spending limit, or available prepaid credit when the account has no limit.
