@@ -121,6 +121,21 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     },
   },
   {
+    name: 'usage.primary-host',
+    yamlKey: 'usagePrimaryHost',
+    scope: 'user',
+    type: 'string',
+    description: 'Device whose usage snapshots are authoritative for fleet-wide usage reporting.',
+    validate: (v) => {
+      try {
+        assertValidDeviceName(v as string);
+        return null;
+      } catch (err: any) {
+        return err?.message ?? String(err);
+      }
+    },
+  },
+  {
     name: 'browser.profile',
     yamlKey: 'defaultBrowserProfile',
     scope: 'device',
@@ -414,6 +429,13 @@ export function listConfig(opts?: ConfigTarget): ConfigEntry[] {
  * in per-device views without implying those keys are device-local. */
 export function listUserConfig(): ConfigEntry[] {
   return CONFIG_KEYS.filter((spec) => spec.scope === 'user').map((spec) => getConfigValue(spec.name));
+}
+
+/** Resolve the explicit usage host, falling back to the user's interactive host. */
+export function resolveUsagePrimaryHost(): string | null {
+  return (getConfigValue('usage.primary-host').value as string | undefined)
+    ?? (getConfigValue('interactive.host').value as string | undefined)
+    ?? null;
 }
 
 // ─── Writes ───────────────────────────────────────────────────────────────────

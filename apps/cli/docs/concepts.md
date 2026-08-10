@@ -212,9 +212,14 @@ registry stays the **discovery cache** (address, tailscale snapshot,
 reachability); the config's `ssh.*` / `platform` / user values overlay the
 registry profile at dial time (`src/lib/devices/resolve-profile.ts`), so
 `agents ssh`, the ssh_config render, host dispatch, and the `devices list`
-table all honor them. The one user-scope key, `interactive.host`
+table all honor them. The user-scope key `interactive.host`
 (`config.interactiveHost`), names the device agents show YOU artifacts on
 (browser opens, dashboards), so skills stop guessing "the online macOS box".
+Usage collection has a separate user-scope pin, `usage.primary-host`
+(`config.usagePrimaryHost`), operated only through `agents config set|get|unset|list`.
+`resolveUsagePrimaryHost()` resolves the explicit usage pin first, then falls back to
+`interactive.host`, then to no primary host. The interactive host answers where the
+user sees artifacts; it does not by itself declare that device authoritative for usage.
 The interactive host is marked `★ interactive` in `agents devices list`;
 `list --json` carries each row's effective profile plus its `config` block and
 an `interactive` flag. The retired subcommands (`configure`, `note`, `set`,

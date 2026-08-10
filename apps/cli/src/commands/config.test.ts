@@ -74,6 +74,16 @@ describe('config command', () => {
     expect(getOut).toContain('zion');
   });
 
+  it('round-trips and lists the usage primary host', () => {
+    runAgents(home, ['config', 'set', 'usage.primary-host', 'zion']);
+    expect(runAgents(home, ['config', 'get', 'usage.primary-host'])).toContain('zion');
+    expect(runAgents(home, ['config', 'list'])).toContain('usage.primary-host');
+
+    runAgents(home, ['config', 'unset', 'usage.primary-host']);
+    expect(runAgents(home, ['config', 'get', 'usage.primary-host'])).toContain('(unset)');
+    expect(runAgents(home, ['config', 'list'])).not.toContain('usage.primary-host');
+  });
+
   it('sets, gets, and unsets the projects root', () => {
     const root = path.join(home, 'src', 'github.com', 'example');
     runAgents(home, ['config', 'set', 'project.root', root]);

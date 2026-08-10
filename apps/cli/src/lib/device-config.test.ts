@@ -38,6 +38,18 @@ afterEach(() => {
 });
 
 describe('user-scope keys (interactive.host)', () => {
+  it('resolves the usage primary override, interactive fallback, and null default', async () => {
+    const { resolveUsagePrimaryHost, setConfigValue, unsetConfigValue } = await freshModules();
+
+    expect(resolveUsagePrimaryHost()).toBeNull();
+    setConfigValue('interactive.host', 'zion');
+    expect(resolveUsagePrimaryHost()).toBe('zion');
+    setConfigValue('usage.primary-host', 'mac-mini');
+    expect(resolveUsagePrimaryHost()).toBe('mac-mini');
+    unsetConfigValue('usage.primary-host');
+    expect(resolveUsagePrimaryHost()).toBe('zion');
+  });
+
   it('round-trips through central agents.yaml under config:, never the fleet block', async () => {
     const { setConfigValue, getConfigValue, unsetConfigValue } = await freshModules();
 
@@ -306,6 +318,7 @@ describe('listConfig', () => {
       'ssh.bundle-key',
       'ssh.identity-file',
       'ssh.user',
+      'usage.primary-host',
       'watchdog.enabled',
     ]);
     expect(byName['interactive.host']).toMatchObject({ value: 'zion', layer: 'user' });

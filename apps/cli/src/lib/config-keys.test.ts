@@ -53,6 +53,10 @@ describe('config-keys', () => {
       expect(parseConfigKey('interactive.host')).toEqual({ scope: 'interactive', property: 'host' });
     });
 
+    it('parses usage primary host', () => {
+      expect(parseConfigKey('usage.primary-host')).toEqual({ scope: 'usage', property: 'primary-host' });
+    });
+
     it('parses browser profile', () => {
       expect(parseConfigKey('browser.profile')).toEqual({ scope: 'browser', property: 'profile' });
     });
@@ -115,6 +119,7 @@ describe('config-keys', () => {
         'run.claude@*.model',
         'run.claude@2.1.45.tier.best',
         'interactive.host',
+        'usage.primary-host',
         'browser.profile',
         'devices.mac-mini.max-agents',
       ]) {
@@ -141,6 +146,7 @@ describe('config-keys', () => {
       expect(keys).toContain('run.<agent@version>.model');
       expect(keys).toContain('run.<agent@version>.tier.best');
       expect(keys).toContain('interactive.host');
+      expect(keys).toContain('usage.primary-host');
       expect(keys).toContain('browser.profile');
       expect(keys).toContain('devices.<name>.max-agents');
     });
@@ -153,6 +159,12 @@ describe('config-keys', () => {
       );
       expect(configKeyStorageHint(parseConfigKey('run.claude@*.tier.best'))).toBe(
         'model.tiers.claude:*.best',
+      );
+    });
+
+    it('describes where the usage primary host is stored', () => {
+      expect(configKeyStorageHint(parseConfigKey('usage.primary-host'))).toBe(
+        'config.usagePrimaryHost',
       );
     });
   });

@@ -5,6 +5,7 @@
  *   - run defaults (model, mode, effort)
  *   - tier overrides (folded into the run namespace)
  *   - interactive host
+ *   - usage primary host
  *   - browser profile
  *   - local projects root
  *   - per-device config keys
@@ -70,6 +71,8 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
       return raw.trim();
     case 'interactive':
       return raw.trim();
+    case 'usage':
+      return raw.trim();
     case 'browser':
       return raw.trim();
     case 'project':
@@ -117,6 +120,10 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
       setConfigValue('interactive.host', value as string);
       return;
     }
+    case 'usage': {
+      setConfigValue('usage.primary-host', value as string);
+      return;
+    }
     case 'browser': {
       // Device-local default lives in the central fleet.devices.<name>.config
       // block (same store `agents devices config` / getConfigValue use). Bare
@@ -160,6 +167,11 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
       unsetConfigValue('interactive.host');
       return had;
     }
+    case 'usage': {
+      const had = getConfigValue('usage.primary-host').value !== undefined;
+      unsetConfigValue('usage.primary-host');
+      return had;
+    }
     case 'browser': {
       const target = parsed.device ? { device: parsed.device } : undefined;
       const had = getConfigValue('browser.profile', target).value !== undefined;
@@ -195,6 +207,8 @@ function getConfig(parsed: ParsedConfigKey): unknown {
     }
     case 'interactive':
       return getConfigValue('interactive.host').value;
+    case 'usage':
+      return getConfigValue('usage.primary-host').value;
     case 'browser': {
       return getConfigValue(
         'browser.profile',
@@ -251,6 +265,9 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
   const meta = readMeta();
   if (meta.config?.interactiveHost !== undefined) {
     yield { key: 'interactive.host', value: meta.config.interactiveHost, hint: 'config.interactiveHost' };
+  }
+  if (meta.config?.usagePrimaryHost !== undefined) {
+    yield { key: 'usage.primary-host', value: meta.config.usagePrimaryHost, hint: 'config.usagePrimaryHost' };
   }
   if (meta.projectRoot !== undefined) {
     yield { key: 'project.root', value: meta.projectRoot, hint: 'devices.<self>.projectRoot' };
@@ -314,11 +331,14 @@ export function registerConfigCommand(program: Command): void {
       agents config set run.claude@2.1.45.model claude-opus-4-8
       agents config set run.claude@*.mode auto
       agents config set interactive.host zion
+      agents config set usage.primary-host zion
       agents config set browser.profile work
       agents config set project.root ~/src/github.com/<you>
       agents config set devices.mac-mini.max-agents 4
       agents config get run.claude@*.model
+      agents config get usage.primary-host
       agents config unset run.claude@*.tier.best
+      agents config unset usage.primary-host
       agents config list
     `,
     notes: `

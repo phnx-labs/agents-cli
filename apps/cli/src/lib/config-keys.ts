@@ -13,7 +13,7 @@ import { MODEL_TIERS, type ModelTier } from './model-tiers.js';
 import { VERSION_RE } from './run-defaults.js';
 
 /** The top-level scope of a unified config key. */
-export type ConfigScope = 'run' | 'interactive' | 'browser' | 'project' | 'device';
+export type ConfigScope = 'run' | 'interactive' | 'usage' | 'browser' | 'project' | 'device';
 
 /** A run-time default key: model, mode, effort, or tier override. */
 export interface ParsedRunConfigKey {
@@ -28,6 +28,12 @@ export interface ParsedRunConfigKey {
 export interface ParsedInteractiveConfigKey {
   scope: 'interactive';
   property: 'host';
+}
+
+/** The host whose usage snapshots are authoritative for fleet-wide reporting. */
+export interface ParsedUsageConfigKey {
+  scope: 'usage';
+  property: 'primary-host';
 }
 
 /** The default browser profile (device-scope, self or peer). */
@@ -52,6 +58,7 @@ export interface ParsedDeviceConfigKey {
 export type ParsedConfigKey =
   | ParsedRunConfigKey
   | ParsedInteractiveConfigKey
+  | ParsedUsageConfigKey
   | ParsedBrowserConfigKey
   | ParsedProjectConfigKey
   | ParsedDeviceConfigKey;
@@ -107,6 +114,7 @@ export function formatAgentVersion(agent: AgentId, version: string): string {
  *   run.<agent@version>.effort
  *   run.<agent@version>.tier.<cheap|default|best|ultra>
  *   interactive.host
+ *   usage.primary-host
  *   browser.profile
  *   project.root
  *   devices.<name>.max-agents
@@ -137,6 +145,10 @@ export function parseConfigKey(key: string): ParsedConfigKey {
     return { scope: 'interactive', property: 'host' };
   }
 
+  if (raw === 'usage.primary-host') {
+    return { scope: 'usage', property: 'primary-host' };
+  }
+
   if (raw === 'browser.profile') {
     return { scope: 'browser', property: 'profile' };
   }
@@ -165,6 +177,9 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   if (raw.startsWith('interactive.')) {
     throw new Error(`Invalid interactive config key '${key}'. Use interactive.host.`);
   }
+  if (raw.startsWith('usage.')) {
+    throw new Error(`Invalid usage config key '${key}'. Use usage.primary-host.`);
+  }
   if (raw.startsWith('browser.')) {
     throw new Error(`Invalid browser config key '${key}'. Use browser.profile.`);
   }
@@ -178,7 +193,7 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   }
 
   throw new Error(
-    `Unknown config scope in '${key}'. Use one of: run, interactive, browser, project, devices.`,
+    `Unknown config scope in '${key}'. Use one of: run, interactive, usage, browser, project, devices.`,
   );
 }
 
@@ -192,6 +207,8 @@ export function formatConfigKey(parsed: ParsedConfigKey): string {
       return `run.${formatAgentVersion(parsed.agent, parsed.version)}.${parsed.property}`;
     case 'interactive':
       return 'interactive.host';
+    case 'usage':
+      return 'usage.primary-host';
     case 'browser':
       return parsed.device ? `devices.${parsed.device}.browser.profile` : 'browser.profile';
     case 'project':
@@ -212,7 +229,7 @@ export function listKnownConfigKeys(): string[] {
   for (const tier of MODEL_TIERS) {
     keys.push(`run.<agent@version>.tier.${tier}`);
   }
-  keys.push('interactive.host', 'browser.profile', 'project.root');
+  keys.push('interactive.host', 'usage.primary-host', 'browser.profile', 'project.root');
   for (const prop of DEVICE_CONFIG_PROPERTIES) {
     keys.push(`devices.<name>.${prop}`);
   }
@@ -256,6 +273,8 @@ export function configKeyStorageHint(parsed: ParsedConfigKey): string {
       return `run.defaults.${parsed.agent}:${parsed.version}.${parsed.property}`;
     case 'interactive':
       return 'config.interactiveHost';
+    case 'usage':
+      return 'config.usagePrimaryHost';
     case 'browser':
       return parsed.device
         ? `fleet.devices.${parsed.device}.config.defaultBrowserProfile`
