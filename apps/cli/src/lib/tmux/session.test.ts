@@ -209,14 +209,14 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     expect(pane).toMatch(/^%\d+$/);
     expect(dead).toBe('1');
 
-    expect(await prepareSessionForResume('legacy-dead-resume', socket)).toBe('create');
+    expect((await prepareSessionForResume('legacy-dead-resume', socket)).decision).toBe('create');
     expect(await hasSession('legacy-dead-resume', socket)).toBe(false);
   });
 
   it('native resume reuses a positively living existing pane', async () => {
     await createSession({ name: 'living-resume', cmd: 'sleep 30', socket });
 
-    expect(await prepareSessionForResume('living-resume', socket)).toBe('attach');
+    expect((await prepareSessionForResume('living-resume', socket)).decision).toBe('attach');
     expect(await hasSession('living-resume', socket)).toBe(true);
   });
 

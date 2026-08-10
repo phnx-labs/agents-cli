@@ -2148,17 +2148,44 @@ schema (`--json` passes through each agent's native stream format).
   detach) or a dead pane whose `#{pane_dead_status}` tmux read as `0`. Every
   other case is UNKNOWN — the pane is unreadable because the server or session
   went away, or it is dead with no reported status — and MUST resolve to
-  `UNKNOWN_OUTCOME_EXIT_CODE` (1), with a stderr banner saying the outcome is
-  unknown. `tmuxRunExitCode(pane, knownAlive)` is the single decision
-  (`lib/exec.ts: tmuxRunExitCode`), used by all three `runInTmux` return
-  paths so the banner and the returned code can never disagree.
+  `UNKNOWN_OUTCOME_EXIT_CODE` (1) with a stderr banner, never silently.
+  `tmuxRunExitCode(pane, knownAlive)` is the single decision
+  (`lib/exec.ts: tmuxRunExitCode`); **every** `runInTmux` return path routes
+  through it, so the banner and the returned code can never disagree.
 
-  This closes a drift, not a hypothetical: the three paths previously returned
-  `status ?? 0` / a literal `0`, so an interactive run whose tmux server died
+  Two banners serve the two UNKNOWN causes, because they are not the same
+  event and one message cannot honestly describe both. A pane tmux **cannot
+  read at all** gets the dedicated `outcome unknown` banner naming the cause —
+  the session went away, or the run never had a readable pane id
+  (`lib/exec.ts: resolveAfterAttach`). A pane tmux **reports dead with no
+  status** gets `surfacePaneFailure`'s recap (`agents: <agent> exited (exit
+  1)`) plus the pane tail, which is the more useful output when there is a
+  pane to quote; that recap is gated on `shouldRecapDeadPane` (F2), so a
+  headless run keeps its quiet path.
+
+  **A resume-attach is an attach and is bound by this too.** `runInTmux`'s
+  native-resume branch re-attaches an existing live session
+  (`prepareSessionForResume` → `attach`); it MUST resolve its outcome the same
+  way rather than returning a literal `0`. `prepareSessionForResume` therefore
+  returns the pane it positively resolved (`ResumePreparation`,
+  `lib/tmux/session.ts`) — without that handle the caller has nothing to ask
+  tmux about and can only assume success.
+
+  This closes a drift, not a hypothetical: every path previously returned
+  `status ?? 0` or a literal `0`, so an interactive run whose tmux server died
   mid-work (`[server exited unexpectedly]`, the agent stranded at an approval
   prompt) printed a failure banner reading `exit 1` and handed its caller `0`.
-  The rule matches the `--host` follow path already in the exit-code table
-  below — "the remote's own exit code, or 1 if unknown".
+  The rule matches the `--host` follow path in the exit-code table below —
+  "the remote's own exit code, or 1 if unknown".
+
+  **Known cost (accepted).** The daemon reaps any session whose panes are all
+  dead every `DEAD_PANE_REAP_TICK_MS` (5 min, `lib/daemon.ts`). A cleanly
+  exited run is in that state between its pane dying and `paneExitStatus`
+  reading it, so a tick landing inside that one-tmux-round-trip window leaves
+  the pane unreadable and a genuinely successful run resolves `1`. Once the
+  pane is gone the CLI has no other evidence of the outcome, so this direction
+  of error is deliberate: EXEC-23b prefers a false unknown over a false
+  success.
 
   **GWT-E9 — a tmux server that dies under an interactive run is not success.**
   Given an `agents run --interactive` wrapped in tmux; When the tmux server or
@@ -2362,7 +2389,8 @@ and host/lease dispatch (`--host`/`--device`/`--remote-cwd`/`--no-follow`/
 
 | Path | Exit code | Evidence |
 |---|---|---|
-| Plain run / fallback chain | the child's own exit code, verbatim | `commands/exec.ts:2687` |
+| Plain run / fallback chain (no tmux wrapper) | the child's own exit code, verbatim | `commands/exec.ts:2687` |
+| tmux-wrapped run (incl. `--interactive`, `--resume` attach) | the pane's exit status when tmux reported one; `0` for a confirmed-alive pane (clean detach); otherwise **1 if unknown** — there is no child exit code to read once the pane is unreadable (EXEC-23b) | `lib/exec.ts: tmuxRunExitCode`, `runInTmux` |
 | `--acp` | `runAcpHeadless`'s own exit code, verbatim | `commands/exec.ts:2473` |
 | `--loop` | `loopExitCode(stoppedBy)`: `condition-met`/`max`→0, `budget`→7, `signal`→130, `stalled`/`error`→1 | `commands/exec.ts:373-387` |
 | Live budget hard-cap kill (non-loop) | 7 (`BUDGET_KILL_EXIT_CODE`) | `lib/exec.ts:2061,2048` |

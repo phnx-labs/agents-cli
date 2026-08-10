@@ -549,6 +549,16 @@ async function lowestPaneId(name: string, socket: string): Promise<string | unde
 }
 
 /**
+ * The outcome of {@link prepareSessionForResume}. `attach` carries the pane it
+ * positively resolved so the caller can read that pane's exit status back after
+ * its attach client returns — without that, a resume-attach has no handle to ask
+ * tmux what happened and can only assume success (EXEC-23b).
+ */
+export type ResumePreparation =
+  | { decision: 'attach'; pane: string }
+  | { decision: 'create' };
+
+/**
  * Decide whether a native resume may attach an existing managed tmux session.
  * Only a positively resolved, living agent pane is reusable. Metadata-less
  * legacy sessions and stale metadata resolve their real first pane through
@@ -558,9 +568,9 @@ async function lowestPaneId(name: string, socket: string): Promise<string | unde
 export async function prepareSessionForResume(
   name: string,
   socket?: string,
-): Promise<'attach' | 'create'> {
+): Promise<ResumePreparation> {
   const sock = socket ?? getDefaultSocketPath();
-  if (!(await hasSession(name, sock))) return 'create';
+  if (!(await hasSession(name, sock))) return { decision: 'create' };
 
   const recordedPane = readSessionMeta(name)?.pane;
   const recordedState = recordedPane ? await paneExitStatus(recordedPane, sock) : undefined;
@@ -568,10 +578,10 @@ export async function prepareSessionForResume(
     ? recordedPane
     : await lowestPaneId(name, sock);
   const state = pane ? await paneExitStatus(pane, sock) : undefined;
-  if (pane && state?.found && !state.dead) return 'attach';
+  if (pane && state?.found && !state.dead) return { decision: 'attach', pane };
 
   await killSession(name, sock);
-  return 'create';
+  return { decision: 'create' };
 }
 
 /**

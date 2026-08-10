@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, writeTmuxEnvFile, formatPaneTail, detectRateLimit, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, tmuxRunExitCode, UNKNOWN_OUTCOME_EXIT_CODE, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
+import { isTmuxInstalled } from './tmux/binary.js';
 import { mailboxDir } from './mailbox.js';
 import { getVersionHomePath } from './versions.js';
 import { bundleItemStore, keychainRef, writeBundle, type SecretsBundle } from './secrets/bundles.js';
@@ -757,8 +758,11 @@ describePosix('tmuxRunExitCode — an unknown outcome is never success', () => {
 
 // The unknown-outcome input above is a real tmux state, not a hypothetical:
 // a server that goes away leaves paneExitStatus unable to answer. Proven
-// against real tmux — no mocking.
-describePosix('paneExitStatus against a real tmux server that went away', () => {
+// against real tmux — no mocking. Skipped whole when tmux is absent, matching
+// tmux/session.test.ts:37 — this is the first tmux-server-spawning suite in
+// this file, so a bare image would otherwise fail here where its sibling skips.
+const tmuxSkipReason = isTmuxInstalled() ? null : 'tmux not installed';
+describePosix.skipIf(tmuxSkipReason)('paneExitStatus against a real tmux server that went away', () => {
   it('cannot read a pane whose server is gone → {found:false, dead:false}', async () => {
     const { createSession, killAll, paneExitStatus } = await import('./tmux/session.js');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tmux-exitcode-'));
@@ -779,6 +783,34 @@ describePosix('paneExitStatus against a real tmux server that went away', () => 
       expect(orphaned.dead).toBe(false);
       expect(orphaned.status).toBeUndefined();
       // That state MUST NOT resolve to success.
+      expect(tmuxRunExitCode(orphaned, false)).not.toBe(0);
+    } finally {
+      await killAll(socket).catch(() => {});
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The resume-attach path had the same defect: it returned a hardcoded 0
+  // without ever asking tmux. It can only ask if prepareSessionForResume hands
+  // back the pane it resolved, so that handle is the fix's load-bearing part.
+  it('prepareSessionForResume returns the pane a resume-attach must query', async () => {
+    const { createSession, killAll, prepareSessionForResume, paneExitStatus } = await import('./tmux/session.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tmux-resume-'));
+    const socket = path.join(dir, 'srv.sock');
+    try {
+      const meta = await createSession({ name: 'ag-resume-probe', cmd: 'sleep 30', socket, source: 'cli' });
+      const prep = await prepareSessionForResume('ag-resume-probe', socket);
+      expect(prep.decision).toBe('attach');
+      // The handle must be real and usable — a resume-attach reads THIS pane.
+      const pane = prep.decision === 'attach' ? prep.pane : undefined;
+      expect(pane).toBe(meta.pane);
+      expect(pane).toMatch(/^%\d+$/);
+
+      // And once the server is gone under that resumed session, the outcome is
+      // unknown — the resume path must not report success either.
+      await killAll(socket);
+      const orphaned = await paneExitStatus(pane!, socket);
+      expect(orphaned.found).toBe(false);
       expect(tmuxRunExitCode(orphaned, false)).not.toBe(0);
     } finally {
       await killAll(socket).catch(() => {});
