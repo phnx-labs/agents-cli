@@ -133,7 +133,7 @@ PRs) are not CLI flags - the ticket is joined from the session index at post
 time. No em-dashes in title/body - they are scrubbed on the way out.
 
 Configure where a post is mirrored under feed.broadcast in agents.yaml - see
-docs/06-observability.md. A milestone is always recorded, but it does not text
+docs/observability.md. A milestone is always recorded, but it does not text
 the owner when the sink has minLevel: important. Add --level important for a
 phone-worthy successful update. Use --blocked only when work cannot continue.
 The owner destination comes from humans.yaml; do not duplicate it in agents.yaml.

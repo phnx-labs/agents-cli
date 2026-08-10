@@ -13,7 +13,7 @@ sit *above* Claude Code / Codex / Gemini. Neither is “another coding agent.”
 | Users choosing tools | Know which problem each product actually solves |
 | Anyone confused by Gas Town vocabulary | Glossary + parallels under the lore |
 
-Related: [Landscape](04-landscape.md) · [Teams](teams.md) · [Hooks](hooks.md) · [Sessions](05-sessions.md)
+Related: [Landscape](landscape.md) · [Teams](teams.md) · [Hooks](hooks.md) · [Sessions](sessions.md)
 
 ---
 
@@ -335,7 +335,7 @@ Primary product materials:
 
 - [Gas Town README](https://github.com/gastownhall/gastown)
 - [Welcome to Gas Town — Steve Yegge](https://steve-yegge.medium.com/welcome-to-gas-town-4f25ee16dd04)
-- agents-cli docs: this tree, especially [teams](teams.md), [hooks](hooks.md), [sessions](05-sessions.md), [landscape](04-landscape.md)
+- agents-cli docs: this tree, especially [teams](teams.md), [hooks](hooks.md), [sessions](sessions.md), [landscape](landscape.md)
 
 Sentiment / field reports (non-exhaustive; views are the authors’):
 

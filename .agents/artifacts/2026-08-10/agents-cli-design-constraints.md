@@ -111,10 +111,10 @@ The correct invariant is not “a transcript is literally parsed only once.” I
 
 | Invariant | Status | Evidence |
 |---|---|---|
-| Unchanged directories and files are served from SQLite without reparsing | Current | [`05-sessions.md:115`](../../../apps/cli/docs/05-sessions.md) |
-| Claude, Codex, and Kimi resume from persisted byte offsets and accumulators | Current | [`05-sessions.md:278`](../../../apps/cli/docs/05-sessions.md) |
+| Unchanged directories and files are served from SQLite without reparsing | Current | [`sessions.md:115`](../../../apps/cli/docs/sessions.md) |
+| Claude, Codex, and Kimi resume from persisted byte offsets and accumulators | Current | [`sessions.md:278`](../../../apps/cli/docs/sessions.md) |
 | Incremental output must equal a from-scratch parse | `SES-5`, Current | [`specifications.md:180`](../../../apps/cli/docs/specifications.md) |
-| Unterminated JSONL tails are deferred, preventing partial/double application | `SES-5`, Current | [`05-sessions.md:295`](../../../apps/cli/docs/05-sessions.md) |
+| Unterminated JSONL tails are deferred, preventing partial/double application | `SES-5`, Current | [`sessions.md:295`](../../../apps/cli/docs/sessions.md) |
 | Claude/Codex first-event identity is rechecked before trusting continuation | `SES-5`, Current | [`discover.ts:4007`](../../../apps/cli/src/lib/session/discover.ts) |
 | A malformed line is skipped; an unknown format fails loudly | `SES-3/4`, Current | [`specifications.md:173`](../../../apps/cli/docs/specifications.md) |
 
@@ -128,7 +128,7 @@ The correct invariant is not “a transcript is literally parsed only once.” I
 | PID liveness must guard against PID reuse | `SES-17`, Current |
 | File-gone sessions with indexed user content remain archived and render from the DB | Current, RUSH-2436 |
 
-Evidence: [`05-sessions.md:137`](../../../apps/cli/docs/05-sessions.md), [`05-sessions.md:194`](../../../apps/cli/docs/05-sessions.md), and [`specifications.md:262`](../../../apps/cli/docs/specifications.md).
+Evidence: [`sessions.md:137`](../../../apps/cli/docs/sessions.md), [`sessions.md:194`](../../../apps/cli/docs/sessions.md), and [`specifications.md:262`](../../../apps/cli/docs/specifications.md).
 
 ### 2. Secrets
 
@@ -254,7 +254,7 @@ Evidence: [`specifications.md:2771`](../../../apps/cli/docs/specifications.md) a
 The findings were checked against the current normative specification, subsystem design documents, and the scanner/database implementation. The linked source locations throughout the report are the evidence index; the primary sources are:
 
 - [`apps/cli/docs/specifications.md`](../../../apps/cli/docs/specifications.md)
-- [`apps/cli/docs/05-sessions.md`](../../../apps/cli/docs/05-sessions.md)
+- [`apps/cli/docs/sessions.md`](../../../apps/cli/docs/sessions.md)
 - [`apps/cli/docs/teams.md`](../../../apps/cli/docs/teams.md)
 - [`apps/cli/src/lib/session/discover.ts`](../../../apps/cli/src/lib/session/discover.ts)
 - [`apps/cli/src/lib/session/db.ts`](../../../apps/cli/src/lib/session/db.ts)

@@ -12680,7 +12680,7 @@
             },
             {
               "flags": "--device <name>",
-              "description": "OWNER (not body placement) — the single machine that evaluates + fires (exactly-once). See docs/00-concepts.md#placement.",
+              "description": "OWNER (not body placement) — the single machine that evaluates + fires (exactly-once). See docs/concepts.md#placement.",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -17081,7 +17081,7 @@
             },
             {
               "flags": "--run-on <name>",
-              "description": "BODY placement: execute the job body on this machine over SSH (registered host, device, capability tag, or user@host). Sets hostStrategy=host. Same model as agents run --where device:<name> (docs/00-concepts.md#placement).",
+              "description": "BODY placement: execute the job body on this machine over SSH (registered host, device, capability tag, or user@host). Sets hostStrategy=host. Same model as agents run --where device:<name> (docs/concepts.md#placement).",
               "long": "--run-on",
               "required": true,
               "optional": false,
@@ -19900,7 +19900,7 @@
         },
         {
           "flags": "--where <spec>",
-          "description": "Where this run's body executes (one placement door): local | device:<name> | auto | lease[:backend] | cloud[:provider]. Expands to --host/--lease/--cloud. Do not combine with those flags. See docs/00-concepts.md#placement.",
+          "description": "Where this run's body executes (one placement door): local | device:<name> | auto | lease[:backend] | cloud[:provider]. Expands to --host/--lease/--cloud. Do not combine with those flags. See docs/concepts.md#placement.",
           "long": "--where",
           "required": true,
           "optional": false,

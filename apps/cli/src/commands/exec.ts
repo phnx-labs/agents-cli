@@ -821,7 +821,7 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--where <spec>',
-      'Where this run\'s body executes (one placement door): local | device:<name> | auto | lease[:backend] | cloud[:provider]. Expands to --host/--lease/--cloud. Do not combine with those flags. See docs/00-concepts.md#placement.',
+      'Where this run\'s body executes (one placement door): local | device:<name> | auto | lease[:backend] | cloud[:provider]. Expands to --host/--lease/--cloud. Do not combine with those flags. See docs/concepts.md#placement.',
     )
     .option(
       '--host <name>',
@@ -1051,7 +1051,7 @@ export function registerRunCommand(program: Command): void {
 
       // Placement: --where expands into --host / --lease / --cloud before any
       // dispatch. One door for "where does the body run?" — old flags remain
-      // aliases. See lib/placement.ts and docs/00-concepts.md#placement.
+      // aliases. See lib/placement.ts and docs/concepts.md#placement.
       {
         const { placementFromRunFlags, expandPlacementToRunFlags, PlacementError } =
           await import('../lib/placement.js');

@@ -1,7 +1,7 @@
 # Secrets: trust boundaries & what the agent sees (design)
 
 > Status: **accepted** · Related: [secrets.md](secrets.md) (reference),
-> [08-secrets-agent-process-model.md](08-secrets-agent-process-model.md) (broker process model)
+> [secrets-agent-process-model.md](secrets-agent-process-model.md) (broker process model)
 
 A design record for the **one question every operator eventually asks**: when an
 AI coding agent runs a release (or any task) with `agents secrets`, *does the agent
@@ -131,7 +131,7 @@ boundary seen from two sides.
   resolved bundle behind a Unix socket in a `0700` directory, with the socket file
   itself chmod'd `0600` (`src/lib/secrets/agent.ts:145`, `:445`; `session-store.ts`) so
   Path A stays promptless across concurrent runs — still no
-  stdout exposure. See [08-secrets-agent-process-model.md](08-secrets-agent-process-model.md).
+  stdout exposure. See [secrets-agent-process-model.md](secrets-agent-process-model.md).
 - **Auto-mode classifiers.** In hosted agent harnesses, an attempt to scan bundles or
   materialize a value (`secrets show`, bulk `--reveal`) is challenged as credential
   exploration — a runtime backstop on top of this design, not a substitute for it.
@@ -164,4 +164,4 @@ explicit, differently-named opt-in.
 ## See also
 
 - [secrets.md](secrets.md) — full reference (commands, backends, recipes, ACL threat model)
-- [08-secrets-agent-process-model.md](08-secrets-agent-process-model.md) — where the broker lives as a process
+- [secrets-agent-process-model.md](secrets-agent-process-model.md) — where the broker lives as a process

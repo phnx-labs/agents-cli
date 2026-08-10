@@ -223,7 +223,7 @@ export function formatPlacement(p: Placement): string {
 }
 
 /**
- * Short matrix for help footers and docs. Keep in sync with 00-concepts.md.
+ * Short matrix for help footers and docs. Keep in sync with concepts.md.
  */
 export const PLACEMENT_MATRIX = `
   Intent                         Flag / path

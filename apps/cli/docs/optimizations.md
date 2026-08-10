@@ -244,7 +244,7 @@ trades correctness guarantees for speed.
 
 ## OPT-02: SSH Transport — One Multiplexed Engine
 
-Full design rationale: [09-ssh-transport.md](09-ssh-transport.md).
+Full design rationale: [ssh-transport.md](ssh-transport.md).
 
 ### Problem
 
@@ -296,7 +296,7 @@ Reproduce: `bun run build && node scripts/bench-ssh.mjs <host>`.
 
 | File | Role |
 |------|------|
-| `docs/09-ssh-transport.md` | Design rationale for the shared SSH transport |
+| `docs/ssh-transport.md` | Design rationale for the shared SSH transport |
 | `scripts/bench-ssh.mjs` | A/B benchmark harness (needs a live host) |
 
 ### Modified files

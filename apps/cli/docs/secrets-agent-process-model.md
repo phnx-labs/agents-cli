@@ -1,6 +1,6 @@
 # Secrets-agent process model (design decision)
 
-> Status: **accepted** · Supersedes nothing · Related: [secrets.md](secrets.md), [03-routines.md](03-routines.md)
+> Status: **accepted** · Supersedes nothing · Related: [secrets.md](secrets.md), [routines.md](routines.md)
 
 > **Implementation (#416, steps 1 & 2 — landed):** the daemon hosts the broker
 > socket-first. `runDaemon()` calls `startHostedBroker()` before the scheduler

@@ -331,7 +331,7 @@ export function registerMonitorsCommands(program: Command): void {
     .option('--notify [channel]', 'Notify the owner (notify.owner); [channel] overrides the owner channel')
     .option('--webhook-out <url>', 'POST the event to this URL')
     // PLACEMENT / hygiene
-    .option('--device <name>', 'OWNER (not body placement) — the single machine that evaluates + fires (exactly-once). See docs/00-concepts.md#placement.')
+    .option('--device <name>', 'OWNER (not body placement) — the single machine that evaluates + fires (exactly-once). See docs/concepts.md#placement.')
     .option('--devices <list>', 'Allowlist (comma-separated): each device fires independently')
     .option('--run-on <host>', 'BODY placement — execute the ACTION on this machine over SSH (same idea as run --where device:<host>)')
     .option('--rate-limit <spec>', 'Auto-pause if it fires more than N/<interval> (e.g. 5/1m)')

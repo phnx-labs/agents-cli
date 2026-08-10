@@ -8,7 +8,7 @@ Reference documentation for every feature `agents` ships.
 |---|---|
 | **[`QUICKSTART.md`](QUICKSTART.md)** | New to agents-cli? Install, add harnesses, smoke-test a team, and set up a fleet — start here if you are a human getting set up. |
 | **[`AGENT-CHEATSHEET.md`](AGENT-CHEATSHEET.md)** | The dozen concepts agents repeatedly need, on one page. Start here if you are an agent touching the codebase. |
-| [`00-concepts.md`](00-concepts.md) | DotAgents repos, resource kinds, and the layered resolution model that everything else builds on. |
+| [`concepts.md`](concepts.md) | DotAgents repos, resource kinds, and the layered resolution model that everything else builds on. |
 | [`architecture.md`](architecture.md) | How the CLI and AGI EXT layer, and the two meanings of "session". |
 | [`command-reference.html`](command-reference.html) | Searchable API reference for every `agents` command, subcommand, argument, flag variant, default, example, and note. Generated from the registered Commander tree (`npm run gen:index`). |
 | [`command-index.md`](command-index.md) | Compact index of the whole command tree. The canonical structured surface is [`command-index.json`](command-index.json). |
@@ -23,16 +23,17 @@ How agents-cli is laid out on disk and how it decides what to load.
 
 | Doc | What it covers |
 |---|---|
-| [Concepts](00-concepts.md) | DotAgents repos, resource kinds, project › user › system resolution. |
-| [Version management](01-version-management.md) | Installing, pinning, switching, and isolating agent CLI versions. |
+| [Concepts](concepts.md) | DotAgents repos, resource kinds, project › user › system resolution. |
+| [Version management](version-management.md) | Installing, pinning, switching, and isolating agent CLI versions. |
 | [Self-healing installs](self-healing.md) | Detect, surface, and repair a broken agent binary (gutted install / `ENOENT`) instead of dying cryptically. |
-| [Resource sync](02-resource-sync.md) | How rules, commands, skills, hooks, etc. land in each version home. |
+| [Resource sync](resource-sync.md) | How rules, commands, skills, hooks, etc. land in each version home. |
 | [**Specifications**](specifications.md) | **The normative contract** (MUST/SHOULD + Given/When/Then, cited to `file:line`) for the major subsystems — [Sessions](specifications.md#sessions), [Secrets](specifications.md#secrets), [Agent execution](specifications.md#agent-execution). Read the spec for the guarantee; the per-feature docs below for the how-to. |
-| [Sessions](05-sessions.md) | Unified transcript and tool-call search across all 12 `SESSION_AGENTS` harnesses; distinct-call queries, fleet fan-out, readable redacted Markdown rendering for Claude, Codex, Kimi, Grok, Cursor, and Droid; resume, export/import, live-session migration, and local/distributed benchmarks. |
-| [Observability](06-observability.md) | The three `--json` sources (sessions / cloud / teams) as a fleet view, plus `agents mailboxes` fleet comms. |
-| [SSH transport](09-ssh-transport.md) | The one multiplexed engine every `--host` command rides — default connection reuse, keepalive, one-round-trip follow. |
-| [Optimizations](99-optimizations.md) | Sync manifest, SSH transport, startup profiling, hot-path notes. |
-| [Landscape](04-landscape.md) | Where agents-cli sits next to similar tools. |
+| [Sessions](sessions.md) | Unified transcript and tool-call search across all 12 `SESSION_AGENTS` harnesses; distinct-call queries, fleet fan-out, readable redacted Markdown rendering for Claude, Codex, Kimi, Grok, Cursor, and Droid; resume, export/import, live-session migration, and local/distributed benchmarks. |
+| [Observability](observability.md) | The three `--json` sources (sessions / cloud / teams) as a fleet view, plus `agents mailboxes` fleet comms. |
+| [SSH transport](ssh-transport.md) | The one multiplexed engine every `--host` command rides — default connection reuse, keepalive, one-round-trip follow. |
+| [Optimizations](optimizations.md) | Sync manifest, SSH transport, startup profiling, hot-path notes. |
+| [Landscape](landscape.md) | Where agents-cli sits next to similar tools. |
+| [Toolchain thesis](toolchain-thesis.md) | Research synthesis: the nine-layer CLI-agent toolchain, the ranked pain points behind it, and how agents-cli maps onto each. |
 | [Product acceptance](product-acceptance.md) | User stories + Product cards: stop product regressions when agents write the code. |
 | [vs Gas Town](vs-gastown.md) | How agents-cli differs from Gas Town (multi-agent factory): parallels, glossary, what users like/dislike. |
 
@@ -43,7 +44,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [Profiles](profiles.md) | Named (host CLI, endpoint, model, keychain auth) bundles — run Kimi / MiniMax / GLM / DeepSeek / Qwen through Claude Code with no proxy. |
 | [Model tiers](model-tiers.md) | `--model cheap\|default\|best\|ultra` on `run` / `teams` — per-harness cost tiers, the provider ranking mechanism, and the `agents models` tier map. Permission modes (`--mode`) are listed with `agents modes [agent[@version]]` (same discovery shape). |
 | [Secrets](secrets.md) | Keychain-backed env-var bundles. Inject into runs via `agents run --secrets <name>`. 1Password import/export, encrypted push/pull. |
-| [Secrets-agent process model](08-secrets-agent-process-model.md) | Design decision: fold the secrets broker into a hardened, always-on daemon — make the host reliable enough to carry the critical service rather than routing around it. |
+| [Secrets-agent process model](secrets-agent-process-model.md) | Design decision: fold the secrets broker into a hardened, always-on daemon — make the host reliable enough to carry the critical service rather than routing around it. |
 | [Secrets trust boundaries](secrets-trust-boundaries.md) | Design record: the plaintext data-flow — exactly which commands inject into a child process vs materialize a value into the agent's context/transcript. |
 | [Credential management](credential-management.md) | Design record: the fleet auth model — the interactive/rotating login is untouchable, only a deliberate setup-token is shareable across devices, and the per-harness Touch ID fix. |
 
@@ -56,9 +57,9 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [Cloud](cloud.md) | Unified dispatch across Rush Cloud / Codex Cloud / Factory. Multi-repo tasks, balanced routing, SSE streaming. |
 | [Hosts](hosts.md) | Offload `agents run` to your own machines over SSH (`--host`); track with `agents hosts ps` and view/follow with `agents logs`. |
 | [Share](share.md) | Publish an HTML artifact to a public link on your own Cloudflare R2 (`agents share <file>`) — zero-egress, BYO-Cloudflare, expiry + fleet mode. |
-| [Routines](03-routines.md) | Cron-scheduled and signed-webhook-triggered agent runs with sandboxed permissions and a long-running daemon. |
-| [Monitors](10-monitors.md) | Durable event-triggered watchers: watch a source, detect a change, fire an action. A routine whose trigger is a watched source instead of a clock. |
-| [Projects](11-projects.md) | Named multi-repo projects layered over the `--project` convention, plus the progress rollup — one card per project instead of a per-agent activity line. Beta. |
+| [Routines](routines.md) | Cron-scheduled and signed-webhook-triggered agent runs with sandboxed permissions and a long-running daemon. |
+| [Monitors](monitors.md) | Durable event-triggered watchers: watch a source, detect a change, fire an action. A routine whose trigger is a watched source instead of a clock. |
+| [Projects](projects.md) | Named multi-repo projects layered over the `--project` convention, plus the progress rollup — one card per project instead of a per-agent activity line. Beta. |
 | [Watchdog](watchdog.md) | Detect **idle** agents across the fleet and steer them to completion — one device-local daemon pass every three minutes analyzes stalled sessions and nudges them with the concrete next step (idle is its job; `waiting` belongs to the feed). |
 
 ## Extensibility
@@ -70,7 +71,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [Workflows](workflows.md) | `WORKFLOW.md` multi-agent pipelines, auto-secrets, allowed-agents allow-list. |
 | [Subagents](subagents.md) | Focused agent definitions that parent agents can spawn via `Task()`. |
 | [Hooks](hooks.md) | Shell scripts on agent lifecycle events. Predicate matchers (`tool_name`, `cwd_includes`, `git_dirty`, …). |
-| [Entrypoints & Loops](07-entrypoints-and-loops.md) | Plugin packaging model, unified `run` target grammar, `loop:` block design. |
+| [Entrypoints & Loops](entrypoints-and-loops.md) | Plugin packaging model, unified `run` target grammar, `loop:` block design. |
 
 ## Automation
 

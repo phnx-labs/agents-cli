@@ -493,7 +493,7 @@ notification argument can never become an open-anything primitive), and
 `routines:list` opens the runs folder. The Node side lives in
 `src/lib/menubar/notify-desktop.ts` (routing), `src/lib/routine-notify.ts`
 (routine start/finish content + anti-spam threshold; see
-[routines.md](03-routines.md#desktop-notifications)), and `src/lib/run-notify.ts`
+[routines.md](routines.md#desktop-notifications)), and `src/lib/run-notify.ts`
 (the `agents run --notify` finish notice).
 
 **Two images: the app on the left, the agent on the right.** macOS draws the
