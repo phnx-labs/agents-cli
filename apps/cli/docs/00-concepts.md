@@ -114,28 +114,28 @@ two `pid → id` writers (the CLI's registry vs the SessionStart hook).
 
 ## Devices & Hosts
 
-### Logical account labels
+### Credential accounts
 
-Installed harness versions keep their own credentials, so the same Claude or
-Codex version can be signed into different identities on different devices.
-`agents accounts` discovers those local credentials and lets the operator name
-one provider account:
+An account is a named, durable provider credential. It is independent of agent
+versions: one OpenRouter account can authenticate multiple compatible harnesses,
+and rotating its key does not change its stable id or name.
 
 ```bash
 agents accounts
-agents accounts name work
-# non-interactive:
-agents accounts name work --from claude@2.1.220
+agents accounts add work --provider anthropic --auth setup-token
+agents accounts add gateway --provider openrouter --auth api-key \
+  --from-secrets openrouter.ai:OPENROUTER_API_KEY
 agents run claude --account work
 ```
 
-The central `~/.agents/accounts.yaml` registry stores only SHA-256 identity
-fingerprints plus the provider harness id. Credentials remain inside each
-version home and are never copied. A label names exactly one provider account;
-matching installed versions and devices are derived from their live identity,
-with no binding file or cross-provider OAuth association. `run --account` picks
-a healthy matching version and fails when none exists; it never falls back to a
-different account. Vendor-cloud and lease placement do not use local labels.
+`~/.agents/accounts.yaml` stores the stable id, name, provider, authentication
+kind, and a device-local secret reference. Raw credentials remain in the OS
+credential store. Supported credential kinds are API keys, long-lived Claude
+setup tokens, and bearer tokens. Native OAuth login remains owned by the harness;
+agents-cli does not turn a login discovered in an agent version home into a named
+account. A custom harness can set `account: <name>`, and a per-run `--account`
+overrides that default. An incompatible provider/host pair or a missing secret
+fails before the agent process starts.
 
 agents-cli can run commands on **other machines**, not just the local one. Two
 independent registries back this, both using SSH as the only transport (no daemon).

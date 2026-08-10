@@ -498,8 +498,9 @@ agents add claude@2.0.65     # Install a specific version
 agents add codex@latest       # Install latest
 agents add codex@oldest       # Install the oldest published version
 agents view                   # See everything installed
-agents accounts              # Discover signed-in accounts across installed versions
-agents accounts name work    # Name one account through a picker
+agents accounts add work --provider anthropic --auth setup-token
+agents accounts add gateway --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY
+agents run claude --account work
 agents run claude --account work
 ```
 

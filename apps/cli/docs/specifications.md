@@ -1699,22 +1699,21 @@ skips the audit funnel, a flag that stops crossing the `--host` SSH boundary.
 When code and this spec disagree, one of them is a bug; fixing the drift is
 mandatory, not optional.
 
-Logical account selection adds three requirements to that funnel:
+Credential account selection adds three requirements to that funnel:
 
-- **EXEC-ACCOUNT-1 (MUST).** A logical account label MUST store only a derived
-  identity fingerprint centrally; raw tokens, emails, and provider account IDs
-  MUST remain in the harness version home (`lib/account-labels.ts`).
-- **EXEC-ACCOUNT-2 (MUST).** Naming an account MUST inspect signed-in version
-  homes and store one provider harness plus one fingerprint. Version membership
-  MUST be discovered from live identities, never persisted as a binding
-  (`commands/accounts.ts`; `lib/account-labels.ts`).
-- **EXEC-ACCOUNT-3 (MUST).** `agents run --account <label>` MUST select only a
-  healthy installed version whose live identity matches that provider account,
-  and MUST fail instead of using another identity (`commands/exec.ts`). Routines
-  with `account:` MUST use the same fail-closed resolver (`lib/runner.ts`). Host
-  dispatch MUST forward the label and resolve it against the remote host's live
-  version homes (`lib/hosts/dispatch.ts`; `lib/hosts/run-target.ts`). Local labels
-  MUST be rejected for cloud and lease placement.
+- **EXEC-ACCOUNT-1 (MUST).** An account MUST have a stable id, name, provider,
+  authentication kind, and secret reference. Raw credential bytes MUST remain
+  in the device credential store and MUST NOT appear in `accounts.yaml`
+  (`lib/account-registry.ts`).
+- **EXEC-ACCOUNT-2 (MUST).** Accounts MUST be created from durable API keys,
+  setup tokens, or bearer tokens. A harness version's native OAuth login MUST
+  NOT define account identity (`commands/accounts.ts`).
+- **EXEC-ACCOUNT-3 (MUST).** `agents run --account <name>`, profile `account:`,
+  and routine `account:` MUST use the same provider adapter and fail before spawn
+  when the provider cannot authenticate the host or the credential is absent on
+  the execution device (`lib/account-registry.ts`; `commands/exec.ts`;
+  `lib/profiles.ts`; `lib/runner.ts`). Explicit `--env` remains the final env
+  override. Cloud and lease placement MUST reject device-local accounts.
 
 Requirement keywords **MUST / MUST NOT / SHOULD / MAY** are used per
 [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119). Every requirement cites the

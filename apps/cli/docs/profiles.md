@@ -1,10 +1,10 @@
 # Profiles
 
-Named bundles of (host CLI, endpoint, model, auth) — run alternative providers through a standard agent interface without a local proxy.
+Named bundles of host CLI, endpoint, model, and a durable account reference — run alternative providers through a standard agent interface without a local proxy.
 
 ## Overview
 
-A profile pins a host agent binary to a non-default API endpoint and model, with its API key stored in macOS Keychain. Running `agents run <profile>` resolves the profile at spawn time — env vars are injected into the child process and the key is read from Keychain, so the YAML on disk never holds secrets and is safe to commit.
+A profile pins a host agent binary to a non-default API endpoint and model. Its `account:` field stores a stable account ID; the credential stays in the device keychain. Running `agents run <profile>` resolves the account at spawn time, injects the provider-specific environment, and fails before spawning if the credential is absent.
 
 Built-in presets cover the top open-weight models via OpenRouter (one shared key) and native CLI providers (xAI, Google). Custom profiles work with any OpenAI-compatible endpoint: Ollama, vLLM, LiteLLM Proxy. Profile YAML files live under `~/.agents/profiles/` and are resolved by name at `agents run` time.
 
@@ -22,11 +22,11 @@ agents run spark "refactor api/handlers/checkout.py"
 # per-run model override still wins over the profile
 agents run spark --model opencode/big-pickle "quick pass"
 
-# private OpenAI/Anthropic-compatible endpoint with a keychain-backed key
-agents harness add corp --host claude --model gpt-x --base-url https://gw.corp/v1 --auth-provider corp
+# private OpenAI/Anthropic-compatible endpoint using an existing account
+agents harness add corp --host claude --model gpt-x --base-url https://gw.corp/v1 --account corp
 ```
 
-The model is written to the host's model env var — `OPENCODE_MODEL` for opencode, `ANTHROPIC_MODEL` for claude, `GROK_MODEL` for grok, `GEMINI_MODEL` for gemini. Hosts that manage their own login (e.g. opencode) need no `--auth-provider`; omit it and no auth block is written.
+The model is written to the host's model env var — `OPENCODE_MODEL` for opencode, `ANTHROPIC_MODEL` for claude, `GROK_MODEL` for grok, `GEMINI_MODEL` for gemini. Native OAuth remains harness-managed; omit `--account` to use that login.
 
 `agents harness list` shows three groups: your custom harnesses, the addable built-in presets, and the native harness registry. `agents harness view <name>` and `agents harness remove <name>` round it out.
 
@@ -38,16 +38,16 @@ A harness *is* a profile — same `~/.agents/profiles/<name>.yml`, same `agents 
 
 ```sh
 # fork the native OpenCode harness onto a DeepSeek model, keyed by OpenRouter
-agents harness fork opencode deepseek --model deepseek/deepseek-v4-flash-0731 --auth-provider openrouter
+agents harness fork opencode deepseek --model deepseek/deepseek-v4-flash-0731 --account openrouter-work
 
 # fork Claude Code onto a private gateway
-agents harness fork claude corp --model gpt-x --base-url https://gw.corp/v1 --auth-provider corp
+agents harness fork claude corp --model gpt-x --base-url https://gw.corp/v1 --account corp
 
 # copy an existing harness and swap only the model
 agents harness fork deepseek deepseek-chat --model deepseek/deepseek-chat-v3
 ```
 
-Forking a **native** harness requires `--model` — there is no model to inherit. Forking a **custom** harness copies everything (env, endpoint, auth binding, `fallback_model`, host version pin) and applies only the flags you pass; the two diverge from that point, so removing the source never affects the fork. `--force` overwrites an existing harness of the same name. The name `agents view` prints is derived from the harness `name` — `deepseek-flash` renders as `DeepSeek Flash` — so there is no flag to set it. The fork records its parent as `forkedFrom:` in the YAML — display-only lineage.
+Forking a **native** harness requires `--model` — there is no model to inherit. Forking a **custom** harness copies everything (env, endpoint, account binding, `fallback_model`, host version pin) and applies only the flags you pass; the two diverge from that point, so removing the source never affects the fork. `--force` overwrites an existing harness of the same name. The name `agents view` prints is derived from the harness `name` — `deepseek-flash` renders as `DeepSeek Flash` — so there is no flag to set it. The fork records its parent as `forkedFrom:` in the YAML — display-only lineage.
 
 ### Editing and renaming a harness (`agents harness edit` / `rename`)
 
@@ -57,8 +57,8 @@ Forking a **native** harness requires `--model` — there is no model to inherit
 # swap the pinned model
 agents harness edit deepseek --model deepseek/deepseek-v3.2
 
-# repoint auth at a different provider and re-enter the key
-agents harness edit corp --auth-provider corp2
+# attach a different durable account
+agents harness edit corp --account corp2
 
 # unpin the host CLI version
 agents harness edit spark --version ""
@@ -67,19 +67,20 @@ agents harness edit spark --version ""
 agents harness edit deepseek --fallback-model deepseek/deepseek-chat-v3
 ```
 
-`edit` takes the same override flags as `fork` (`--model`, `--base-url`, `--auth-provider`, `--version`, `--description`, `--from-secrets`) plus one edit-only flag, `--fallback-model`, for `Profile.fallback_model` (see [`03-routines.md`](03-routines.md) and the fallback cascade in `runWithFallback`). Unlike `fork`, `edit` never rewrites `forkedFrom` to point at itself.
+`edit` takes the same override flags as `fork` (`--model`, `--base-url`, `--account`, `--version`, `--description`) plus one edit-only flag, `--fallback-model`, for `Profile.fallback_model` (see [`03-routines.md`](03-routines.md) and the fallback cascade in `runWithFallback`). Unlike `fork`, `edit` never rewrites `forkedFrom` to point at itself.
 
 Giving zero flags **in a terminal** now opens the same interactive wizard `add`/`fork` use, pre-filled with the harness's current values (`agents harness edit deepseek` with no flags). It walks each editable field — model, endpoint, auth, version, fallback, description — and writes only what you change; leaving every prompt at its default is a no-op. Fields the host can't carry are shown disabled with a reason: a host with no custom-endpoint slot (anything but claude/codex) skips the base-URL prompt, and a self-updating host (grok/droid/antigravity/cursor/hermes/muse/kiro/goose) skips the version pin, rather than silently accepting a value a run would drop. Giving zero flags **without** a terminal stays a no-op error naming the available ones, so scripts are unchanged.
 
 `agents harness rename <old-name> <new-name>` renames the underlying YAML file and updates the `name:` field inside it; every other harness whose `forkedFrom:` pointed at the old name is rewritten to the new one. Renaming onto an existing name is a hard error — there is no overwrite path (use `remove` first if that's really the intent).
 
-### Copying a key out of an existing secrets bundle (`--from-secrets`)
+### Importing a key from an existing secrets bundle
 
-`add`, `fork`, and `edit` all accept `--from-secrets <bundle>` or `--from-secrets <bundle>:<key>` (the key is optional only when the bundle has exactly one). This is a **one-time copy**, not a live link: it reads the value out of the named `agents secrets` bundle (Touch ID on macOS, once) and writes it into the harness's own keychain item (`agents-cli.<provider>.token`), which is never gated behind biometry-required prefixes, so every later `agents run <harness>` reads it silently.
+Accounts own credentials; harnesses only reference accounts. Import an existing secret while creating the account, then attach that account wherever it is needed:
 
 ```sh
-agents harness add corp --host claude --model gpt-x --auth-provider corp --from-secrets prod:OPENROUTER_KEY
-agents harness edit corp --from-secrets prod:OPENROUTER_KEY   # rotate later without retyping
+agents accounts add corp --provider proxy --auth api-key --from-secrets prod:OPENROUTER_KEY
+agents harness add corp-model --host claude --model gpt-x --base-url https://gw.corp/v1 --account corp
+agents accounts set-key corp --from-secrets prod:OPENROUTER_KEY
 ```
 
 ### Interactive wizard (`agents harness add` / `fork` / `edit`)
