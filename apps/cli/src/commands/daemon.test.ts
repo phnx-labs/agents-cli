@@ -291,9 +291,14 @@ describeDaemon('agents daemon', () => {
     await new Promise((r) => setTimeout(r, 1500));
     const services = run(home, ['services', '--json']);
     expect(services.status).toBe(0);
-    const payload = JSON.parse(services.stdout) as { secretsBroker: { reachable: boolean; record: unknown } };
+    // `record` is the internal field name (probeSecretsBroker, daemon.ts:318);
+    // `services --json` publishes it as `health` (daemon.ts:547, and :454 for
+    // `status --json`). Asserting `record` here read an absent key as undefined,
+    // so this test could never pass on macOS — and since the macOS legs only run
+    // on release/** branches, it stayed invisible until a release PR ran.
+    const payload = JSON.parse(services.stdout) as { secretsBroker: { reachable: boolean; health: unknown } };
     expect(payload.secretsBroker.reachable).toBe(false);
-    expect(payload.secretsBroker.record).toBeNull();
+    expect(payload.secretsBroker.health).toBeNull();
     run(home, ['stop']);
   }, 30_000);
 
