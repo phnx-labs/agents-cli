@@ -45,14 +45,21 @@ export function parseRemoteActive(stdout: string, machine: string): ActiveSessio
   const out: ActiveSession[] = [];
   for (const x of parsed) {
     if (x && typeof x === 'object' && !Array.isArray(x)) {
-      // The peer's OWN `machine` wins when it names a third box: a host-dispatched
-      // run reports the execution host, not the dispatcher we happen to be dialing
-      // (foldExecutionMachine, RUSH-2479). Stamping the dialed peer here would
-      // undo that correction and re-claim the session for the wrong machine.
-      // Everything else — the common case, where a peer reports itself or nothing
-      // at all — still gets tagged with the box we asked.
-      const reported = (x as ActiveSession).machine;
-      const row = { ...(x as ActiveSession), machine: reported || machine };
+      // The dialed machine still wins by default. That is deliberate: the peer
+      // reports `machineId()` (its hostname) while we key on the REGISTERED
+      // device name, and stamping ours is the only thing reconciling the two —
+      // drop it and a device whose registered name differs from its hostname
+      // silently answers a `--device <name>` scope with zero rows.
+      //
+      // The one row that must keep its own answer is an offloaded run, whose
+      // execution host is a THIRD box, not the peer we dialed
+      // (foldExecutionMachine, RUSH-2479). `offloadedFrom` marks exactly that
+      // row, so it is the discriminator rather than "the peer said something".
+      const reported = x as ActiveSession;
+      const row = {
+        ...reported,
+        machine: reported.offloadedFrom && reported.machine ? reported.machine : machine,
+      };
       row.viewingIn = parseViewingIn((x as { viewingIn?: unknown }).viewingIn);
       out.push(row);
     }

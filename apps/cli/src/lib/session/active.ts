@@ -37,7 +37,7 @@ import { readSessionActorRecord, writeSessionAliasRecord } from './actor-sidecar
 import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
 import { buildClaudeLabelMap, getAgentSessionDirs } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
-import { latestSessionFileForCwd, findSessionsByShortIds, getSessionById } from './db.js';
+import { latestSessionFileForCwd, findSessionsByShortIds, findSessionMachinesByIds } from './db.js';
 import { extractSessionTopic } from './prompt.js';
 import { readSessionTailWithRaw } from './tail.js';
 import { parseSession } from './parse.js';
@@ -2200,21 +2200,35 @@ export function foldExecutionMachine(
 }
 
 /**
- * The index lookup behind {@link foldExecutionMachine}. Best-effort: a missing
- * or locked DB leaves rows attributed to this box rather than failing the whole
- * live view (mirrors `loadBackfillMetaFor`). Deduplicates ids so N rows in one
- * session cost one query.
+ * Is the PROCESS behind this row running on this machine?
+ *
+ * `machine` answers a different question — "where does the agent execute" —
+ * which is what a `--device` scope, preview routing, and resume ownership need.
+ * For an offloaded run the two answers diverge: {@link foldExecutionMachine}
+ * points `machine` at the peer, while the shim process, its tmux pane, and its
+ * terminal window are all still HERE. `offloadedFrom` marks exactly that row.
+ *
+ * Any caller reaching for a LOCAL pid, pane, or window must ask this rather
+ * than `machine === self`. A local tmux pane id (`%N`) handed to a peer's tmux
+ * server does not fail — pane ids are small per-server integers, so it can
+ * resolve against an unrelated pane and attach the user to someone else's
+ * session. That is why this predicate exists instead of ten copies of the
+ * comparison.
+ */
+export function sessionProcessIsLocal(s: Pick<ActiveSession, 'machine' | 'offloadedFrom'>, self: string): boolean {
+  if (s.offloadedFrom) return true;
+  return !s.machine || s.machine === self;
+}
+
+/**
+ * The index lookup behind {@link foldExecutionMachine}. One batched query for
+ * every live row (`findSessionMachinesByIds`), not a per-row `SELECT *` —
+ * `getActiveSessions` is a hot path the daemon, menubar, and watchdog all poll.
+ * Best-effort: an unavailable DB yields an empty map, leaving rows attributed
+ * to this box rather than failing the whole live view.
  */
 function recordedMachineLookup(rows: ActiveSession[]): (sessionId: string) => string | undefined {
-  const byId = new Map<string, string | undefined>();
-  for (const s of rows) {
-    if (!s.sessionId || byId.has(s.sessionId)) continue;
-    try {
-      byId.set(s.sessionId, getSessionById(s.sessionId)?.machine);
-    } catch {
-      byId.set(s.sessionId, undefined);
-    }
-  }
+  const byId = findSessionMachinesByIds(rows.map((s) => s.sessionId).filter((id): id is string => !!id));
   return (id) => byId.get(id);
 }
 

@@ -889,6 +889,21 @@ device over SSH, through one shared gather — `gatherActiveSessions` in
 `src/commands/sessions.ts`. `--host`/`--device` **scopes** that sweep to the named
 machines rather than adding to it.
 
+The scope is enforced against the machine a session **executes** on, not the box
+that reported it — the two differ for a host-dispatched run. `agents run --device
+<peer>` leaves a live shim process on the *dispatching* box carrying the remote
+run's session id, so `foldExecutionMachine` re-tags that row with the execution
+host recorded at dispatch (`lib/hosts/session-index.ts`) and marks it
+`offloadedFrom: <dispatcher>`. Such a session therefore appears under
+`--device <peer>`, **not** under `--device <dispatcher>` (RUSH-2479, contract
+SES-23a).
+
+`machine` answers "where does the agent execute" — which is what the scope,
+preview routing, and resume ownership need. It is not "where is the process I
+would attach to": for an offloaded run the shim's pid, tmux pane, and terminal
+window are all still on the dispatcher. Anything reaching for a local pane or
+window asks `sessionProcessIsLocal(s, self)` instead of comparing `machine`.
+
 **Cross-surface cache (RUSH-2062).** The default path is cache-first against a
 daemon-warmed snapshot (`src/lib/session/session-cache.ts`, ~15s freshness). The
 daemon publishes this host's local active set on a short tick; menubar, Factory,

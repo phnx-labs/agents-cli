@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { foldExecutionMachine, type ActiveSession } from './active.js';
+import { foldExecutionMachine, sessionProcessIsLocal, type ActiveSession } from './active.js';
 
 const self = 'zion';
 
@@ -78,5 +78,33 @@ describe('foldExecutionMachine', () => {
     foldExecutionMachine(rows, index({ a: 'yosemite-s0', b: self }), self);
     expect(rows.map((r) => r.machine)).toEqual(['yosemite-s0', self, self]);
     expect(rows.map((r) => r.offloadedFrom)).toEqual([self, undefined, undefined]);
+  });
+});
+
+/**
+ * `machine` says WHERE THE AGENT EXECUTES. `sessionProcessIsLocal` says where the
+ * PROCESS is. For an offloaded run those differ, and conflating them is what made
+ * `agents go`/`focus` send a LOCAL tmux pane id to a peer's tmux server — pane ids
+ * are small per-server integers, so that can attach an unrelated session.
+ */
+describe('sessionProcessIsLocal', () => {
+  it('calls an offloaded run LOCAL — its shim, pane and window are on this box', () => {
+    expect(sessionProcessIsLocal({ machine: 'yosemite-s0', offloadedFrom: 'zion' }, 'zion')).toBe(true);
+  });
+
+  it('calls a genuine peer session REMOTE', () => {
+    expect(sessionProcessIsLocal({ machine: 'yosemite-s0' }, 'zion')).toBe(false);
+  });
+
+  it('calls this machine, and an untagged row, LOCAL', () => {
+    expect(sessionProcessIsLocal({ machine: 'zion' }, 'zion')).toBe(true);
+    expect(sessionProcessIsLocal({}, 'zion')).toBe(true);
+  });
+
+  it('disagrees with a bare machine comparison exactly on the offloaded row', () => {
+    const row = { machine: 'yosemite-s0', offloadedFrom: 'zion' };
+    // The predicate every caller used before this fix, and the bug it caused.
+    expect(row.machine !== 'zion').toBe(true);
+    expect(sessionProcessIsLocal(row, 'zion')).toBe(true);
   });
 });

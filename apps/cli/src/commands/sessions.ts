@@ -23,7 +23,7 @@ import type { SessionAgentId, SessionMeta, ViewMode } from '../lib/session/types
 import { SESSION_AGENTS } from '../lib/session/types.js';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session/artifacts.js';
 import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
-import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
+import { getActiveSessions, sessionProcessIsLocal, type ActiveSession } from '../lib/session/active.js';
 import { enumerateGhosttyTabs, assignGhosttyTabs, type GhosttySurface } from '../lib/session/ghostty-tabs.js';
 import { mapPanesToTargets, listClients } from '../lib/tmux/session.js';
 import { resolveViewingIn, viewingInLabel } from '../lib/session/viewing-in.js';
@@ -1653,7 +1653,7 @@ async function renderActiveSessions(
     // is how a consumer distinguishes a session someone is looking at from one
     // running orphaned after its terminal died. tmux-only (no osascript) so the
     // scriptable path stays cheap — see enrichTmuxLocators.
-    await enrichTmuxLocators(sessions.filter(s => !s.machine || s.machine === self));
+    await enrichTmuxLocators(sessions.filter(s => sessionProcessIsLocal(s, self)));
     process.stdout.write(JSON.stringify(serializeActiveSessionsForJson(sessions), null, 2) + '\n');
     if (waitingOnly && sessions.some(isAwaitingUser)) process.exitCode = 1;
     return;
@@ -1668,7 +1668,7 @@ async function renderActiveSessions(
   // Enrich LOCAL sessions with jump locators (display-only, after the --json /
   // --waiting gates so scriptable output stays osascript-free). Remote sessions
   // keep their raw pane id — their tmux/Ghostty live on the other machine.
-  await enrichLocalLocators(sessions.filter(s => !s.machine || s.machine === self));
+  await enrichLocalLocators(sessions.filter(s => sessionProcessIsLocal(s, self)));
 
   const grouped = groupSessionsByMachine(sessions, self);
   let firstMachine = true;

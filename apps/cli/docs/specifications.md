@@ -440,10 +440,26 @@ SSH access (§7); rendering sessions that no harness produced.
     MUST NOT overwrite a peer-reported `machine` that names a third box
     (`lib/session/remote-active.ts`).
   - **A peer's self-report outranks a local index copy.** A row the fan-out
-    already attributed to a peer MUST be left alone.
+    already attributed to a peer MUST be left alone. Enforced on the fan-out
+    boundary (`lib/session/remote-active.ts`), where an `offloadedFrom` row keeps
+    its own `machine` and every other row takes the dialed device name; the guard
+    in `foldExecutionMachine` is the same rule stated locally.
   - Consequence for SES-8: an offloaded row is then `_remote`, so
     `liveSessionToMeta` → `buildPreview` renders the "on `<peer>`" affordance
     instead of the empty "full transcript not indexed here" branch.
+  - **`machine` is not "where the process is".** For an offloaded run the shim
+    process, its tmux pane, and its terminal window remain on the dispatcher.
+    Any caller reaching for a LOCAL pid/pane/window MUST ask
+    `sessionProcessIsLocal(s, self)` (`lib/session/active.ts`) rather than
+    comparing `machine` to this box — a local pane id (`%N`) sent to a peer's
+    tmux server can resolve against an unrelated pane and attach the wrong
+    session.
+  - **Scope: host-dispatched runs only.** The correction is driven by the index
+    row `agents run --host/--device` writes (`lib/hosts/session-index.ts`).
+    Remote **teams teammates** are not covered — `listTeamsActive` sets no
+    `machine` and nothing registers an index row for them — so a
+    `--device`-pinned teammate is still attributed to the orchestrator. Named as
+    SES-GAP-10 rather than silently claimed.
 - **SES-24 (MUST).** `agents sessions export --encrypt` MUST seal each
   transcript body client-side with AES-256-GCM (fresh IV) before it leaves the
   machine, and `agents sessions import` MUST decrypt before writing it to the
@@ -940,6 +956,15 @@ normative — a change that widens/narrows a cell is a spec change.
   evidence when its source file is gone mid-backfill (`tool-index.ts`
   `ensureToolIndex` on a `statSync` throw, reached via `agents sessions backfill`);
   SES-40 removed the purge only from the `querySessions` read path.
+- **SES-GAP-10.** SES-23a's execution-host attribution covers only
+  **host-dispatched runs** (`agents run --host/--device`), because it is driven by
+  the index row `registerHostSession` / `registerInteractiveHostSession` write
+  (`lib/hosts/session-index.ts:55,134`). A **remote teams teammate**
+  (`agents teams add … --device <peer>`) gets no such row and `listTeamsActive`
+  (`lib/session/active.ts`) never sets `machine`, so the orchestrator's
+  self-stamp claims it: `--device <orchestrator>` still lists a teammate
+  executing on the peer. Closing it means folding `AgentProcess`'s host
+  placement in `listTeamsActive` the same way.
 ---
 
 ### 8. Given/When/Then scenarios

@@ -3466,6 +3466,36 @@ export function topSessionsByCost(
 }
 
 /** Look up a single session by its unique ID. */
+/**
+ * Batch-resolve session ids to the machine each one runs on, in ONE indexed
+ * query. `getActiveSessions` needs only this column for every live row, and
+ * `getSessionById` would re-`prepare` a `SELECT *` and materialize a full
+ * `SessionMeta` per id to read it — mirrors {@link findSessionsByShortIds}'s
+ * single-round-trip pattern. Ids absent from the index are simply absent from
+ * the map. Best-effort: an unavailable DB yields an empty map, so the live view
+ * still renders (the caller then leaves rows attributed to this box).
+ */
+export function findSessionMachinesByIds(ids: string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  const uniq = [...new Set(ids.filter(Boolean))];
+  if (uniq.length === 0) return out;
+  try {
+    const db = getDB();
+    const CHUNK = 500; // stay well under SQLite's default 999-variable limit
+    for (let i = 0; i < uniq.length; i += CHUNK) {
+      const batch = uniq.slice(i, i + CHUNK);
+      const placeholders = batch.map(() => '?').join(',');
+      const rows = db
+        .prepare(`SELECT id, machine FROM sessions WHERE id IN (${placeholders})`)
+        .all(...batch) as Array<{ id: string; machine: string | null }>;
+      for (const r of rows) if (r.machine) out.set(r.id, r.machine);
+    }
+  } catch {
+    /* index read is best-effort — an unavailable DB leaves rows un-attributed */
+  }
+  return out;
+}
+
 export function getSessionById(id: string): SessionMeta | null {
   const db = getDB();
   const row = db.prepare(`SELECT * FROM sessions WHERE id = ?`).get(id) as SessionRow | undefined;

@@ -60,13 +60,24 @@ describe('parseRemoteActive viewingIn normalization', () => {
   // host-dispatched run executes where it was sent, not where it was launched.
   // Stamping the dialed peer over that would re-claim the session for the wrong
   // machine and undo foldExecutionMachine's correction.
-  it("keeps a peer's own machine when it names a third box (offloaded run)", () => {
+  it("keeps an OFFLOADED row's own machine — its execution host is a third box", () => {
     const stdout = JSON.stringify([
       { context: 'terminal', kind: 'claude', status: 'running', sessionId: 'off', machine: 'yosemite-s0', offloadedFrom: 'zion' },
     ]);
     const out = parseRemoteActive(stdout, 'zion');
     expect(out[0].machine).toBe('yosemite-s0');
     expect(out[0].offloadedFrom).toBe('zion');
+  });
+
+  it('still stamps the dialed device over a peer\'s own hostname (the name we key scopes on)', () => {
+    // The peer reports machineId() (its hostname); we dial and scope by the
+    // REGISTERED device name. Stamping ours is what reconciles the two — drop it
+    // and a device whose registered name differs from its hostname answers a
+    // `--device <name>` scope with zero rows.
+    const stdout = JSON.stringify([
+      { context: 'terminal', kind: 'claude', status: 'running', sessionId: 'a', machine: 'mark.local' },
+    ]);
+    expect(parseRemoteActive(stdout, 'mark')[0].machine).toBe('mark');
   });
 
   it('still stamps the dialed peer when the row reports no machine at all', () => {
