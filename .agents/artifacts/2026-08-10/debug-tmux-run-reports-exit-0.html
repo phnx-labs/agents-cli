@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>An interactive run killed mid-work reported exit 0</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:5px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span></div>
+<h1>An interactive run killed mid-work reported exit 0</h1>
+
+<div class="meta" aria-label="Artifact metadata"><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fix-tmux-fabricated-exit0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">zion</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/b8b4a450-6c04-4d83-a179-e9070217617f">b8b4a450</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a href="#findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a href="#evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a></nav><article class="artifact-body"><h1>An interactive run killed mid-work reported exit 0</h1>
+<p><strong>A remote interactive <code>agents run</code> died at an approval prompt and the CLI reported success.</strong> The tmux server hosting the run went away; <code>runInTmux</code> could no longer read the agent pane, and every path where tmux cannot report a status fell back to <code>exitCode: 0</code>. The failure banner printed <code>exit 1</code> while the caller received <code>0</code>.</p>
+<h2 id="summary">Summary</h2>
+<h3>Focus for review</h3>
+<ul>
+<li>The fix changes an <strong>exit code</strong> on a path that previously always returned <code>0</code>. Anything scripting <code>agents run</code> in a tmux-wrapped interactive context will now see <code>1</code> where it saw <code>0</code> — for runs whose outcome was genuinely unknown.</li>
+<li>A clean <code>Ctrl-b d</code> detach still exits <code>0</code>. That is the one case with positive proof the pane is alive.</li>
+<li>Two of the three symptoms in the original report are <strong>environmental, not code</strong> — named below so they are not silently folded into "fixed".</li>
+</ul>
+<h3>Intent vs observed</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Intended</strong></td>
+<td>Run codex interactively on a worker box: <code>agents run codex --interactive --device &lt;worker&gt;</code>.</td>
+</tr>
+<tr>
+<td><strong>Observed</strong></td>
+<td>The agent stalled at an approval prompt, the terminal printed <code>[server exited unexpectedly]</code> / <code>[detached (from session …)]</code>, and the CLI printed <code>agents: codex exited (exit 0).</code></td>
+</tr>
+<tr>
+<td><strong>Delta</strong></td>
+<td>A run that was killed mid-work — the agent never answered the approval it was blocked on — was reported to the caller as a <strong>successful</strong> run.</td>
+</tr>
+</tbody></table>
+<h2 id="findings">Findings</h2>
+<h3>Root cause</h3>
+<p><code>runInTmux</code> recovers the wrapped agent's exit code by asking tmux for the pane's <code>#{pane_dead} #{pane_dead_status}</code> after the attach client returns. <code>paneExitStatus</code> collapses two very different answers into one value:</p>
+<pre><code>// apps/cli/src/lib/tmux/session.ts:441-455
+export async function paneExitStatus(pane: string, socket?: string): Promise&lt;PaneExit&gt; {
+  let res;
+  try {
+    res = await runTmux({ socket, args: ['display-message', '-pt', pane, '-p', '#{pane_dead} #{pane_dead_status}'], throwOnError: false });
+  } catch {
+    return { found: false, dead: false };   // tmux never answered
+  }
+  if (res.code !== 0) return { found: false, dead: false };   // ...same value
+  ...
+}
+</code></pre>
+<p><code>{ dead: false }</code> therefore means <em>either</em> "the pane is alive" <em>or</em> "tmux could not tell us". The three return paths in <code>runInTmux</code> then treated the second as success:</p>
+<pre><code>// apps/cli/src/lib/exec.ts (before)
+return { exitCode: before.status ?? 0, stderr: '', stdout: '' };   // :1779  dead pane, no status
+return { exitCode: after.status  ?? 0, stderr: '', stdout: '' };   // :1805  dead pane, no status
+return { exitCode: 0,                  stderr: '', stdout: '' };   // :1816  pane unreadable
+</code></pre>
+<p>The banner printed immediately above those returns already used the opposite default:</p>
+<pre><code>// apps/cli/src/lib/exec.ts:1758
+process.stderr.write(`\nagents: ${headline} (exit ${status ?? 1}).\n`);
+</code></pre>
+<p>So in exactly the unknown case the message said <code>exit 1</code> and the function returned <code>0</code>.</p>
+<figure>
+<svg viewBox="0 0 860 300" role="img" aria-label="Flow from tmux server loss to a fabricated exit code zero" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7b8794"></path>
+    </marker>
+  </defs>
+  <rect x="8" y="20" width="180" height="62" rx="8" fill="none" stroke="#7b8794" stroke-width="1.5"></rect>
+  <text x="98" y="45" text-anchor="middle" font-family="ui-monospace,monospace" font-size="13" fill="currentColor">agent blocked at</text>
+  <text x="98" y="63" text-anchor="middle" font-family="ui-monospace,monospace" font-size="13" fill="currentColor">approval prompt</text>
+
+  <line x1="192" y1="51" x2="242" y2="51" stroke="#7b8794" stroke-width="1.5" marker-end="url(#ar)"></line>
+
+  <rect x="246" y="20" width="196" height="62" rx="8" fill="none" stroke="#d97706" stroke-width="1.5"></rect>
+  <text x="344" y="45" text-anchor="middle" font-family="ui-monospace,monospace" font-size="13" fill="currentColor">tmux server goes</text>
+  <text x="344" y="63" text-anchor="middle" font-family="ui-monospace,monospace" font-size="13" fill="currentColor">away under the run</text>
+
+  <line x1="446" y1="51" x2="496" y2="51" stroke="#7b8794" stroke-width="1.5" marker-end="url(#ar)"></line>
+
+  <rect x="500" y="20" width="240" height="62" rx="8" fill="none" stroke="#7b8794" stroke-width="1.5"></rect>
+  <text x="620" y="45" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">paneExitStatus() -&gt;</text>
+  <text x="620" y="63" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">{found:false, dead:false}</text>
+
+  <line x1="620" y1="86" x2="620" y2="124" stroke="#7b8794" stroke-width="1.5" marker-end="url(#ar)"></line>
+
+  <rect x="440" y="128" width="360" height="60" rx="8" fill="none" stroke="#7b8794" stroke-width="1.5" stroke-dasharray="4 3"></rect>
+  <text x="620" y="152" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">"pane alive" and "tmux did not answer"</text>
+  <text x="620" y="170" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">are the same value</text>
+
+  <line x1="440" y1="158" x2="330" y2="158" stroke="#7b8794" stroke-width="1.5" marker-end="url(#ar)"></line>
+
+  <rect x="90" y="128" width="236" height="60" rx="8" fill="none" stroke="#dc2626" stroke-width="2"></rect>
+  <text x="208" y="152" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">BEFORE: status ?? 0</text>
+  <text x="208" y="171" text-anchor="middle" font-family="ui-monospace,monospace" font-size="13" fill="#dc2626">exit 0 (fabricated)</text>
+
+  <line x1="208" y1="192" x2="208" y2="228" stroke="#7b8794" stroke-width="1.5" marker-end="url(#ar)"></line>
+  <rect x="60" y="232" width="296" height="52" rx="8" fill="none" stroke="#16a34a" stroke-width="2"></rect>
+  <text x="208" y="255" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">AFTER: tmuxRunExitCode(pane, alive)</text>
+  <text x="208" y="273" text-anchor="middle" font-family="ui-monospace,monospace" font-size="13" fill="#16a34a">exit 1 + "outcome unknown" banner</text>
+
+  <rect x="440" y="232" width="360" height="52" rx="8" fill="none" stroke="#16a34a" stroke-width="1.5"></rect>
+  <text x="620" y="255" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">exit 0 reserved for: confirmed-alive pane</text>
+  <text x="620" y="273" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">(clean detach), or a status tmux really read</text>
+</svg>
+<figcaption>The unknown outcome and the clean detach shared one return value, so the unknown one inherited success.</figcaption>
+</figure><h3>The spec gap that let it through</h3>
+<p><code>EXEC-23a (F3)</code> already covers this exact branch — but only its <em>session-teardown</em> consequence:</p>
+<blockquote>
+<p>An ambiguous result MUST <code>killSession</code> rather than keep the orphan.</p>
+</blockquote>
+<p>It says nothing about the exit code, so nothing contradicted <code>?? 0</code>. Meanwhile the exit-code contract table in the same document already set the house rule for the analogous case:</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Exit code</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>--host</code>, followed to completion</td>
+<td>the remote's own exit code, <strong>or 1 if unknown</strong></td>
+</tr>
+</tbody></table>
+<p>The fix adds <strong>EXEC-23b</strong> so the tmux path states the same rule, plus <code>GWT-E9</code> as its scenario.</p>
+<h3>The fix</h3>
+<p>One pure decision, used by all three return paths, so the banner and the returned code cannot diverge again:</p>
+<pre><code>export function tmuxRunExitCode(pane: { dead: boolean; status?: number }, knownAlive: boolean): number {
+  if (knownAlive) return 0;                                    // clean Ctrl-b d detach
+  if (pane.dead &amp;&amp; pane.status !== undefined) return pane.status;  // tmux really read a status
+  return UNKNOWN_OUTCOME_EXIT_CODE;                            // 1 — outcome unknown
+}
+</code></pre>
+<p>The unreadable-pane path also gains an explicit stderr banner naming what happened, instead of exiting mutely.</p>
+<h2 id="evidence">Evidence</h2>
+<h3>Verification</h3>
+<p>Tests drive real tmux — a server is torn down under a live pane, and <code>paneExitStatus</code> is then genuinely unable to answer.</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>tmuxRunExitCode</code> suite against the OLD constant (<code>= 0</code>)</td>
+<td>2 failed — the regression is reproduced</td>
+</tr>
+<tr>
+<td><code>tmuxRunExitCode</code> suite with the fix</td>
+<td>5 passed</td>
+</tr>
+<tr>
+<td>Real-tmux "server went away" test</td>
+<td>1 passed</td>
+</tr>
+<tr>
+<td><code>tsc --noEmit</code></td>
+<td>clean</td>
+</tr>
+</tbody></table>
+<p>Four unrelated failures (<code>buildExecEnv</code> mailbox/autoupdater, two <code>orphan-reap</code> helper tests) reproduce identically on <code>main</code> at the same commit — pre-existing, not touched by this change.</p>
+<h3>Named as environmental, NOT fixed here</h3>
+<p>Two symptoms in the original report are not code defects, and folding them into "fixed" would be wrong:</p>
+<ul>
+<li><strong><code>ssh: Could not resolve hostname … Temporary failure in name resolution</code></strong> — DNS on the worker box is <strong>intermittent</strong> under the fleet's own SSH churn. Measured from inside the harness sandbox: one run failed to resolve both an internal name and <code>github.com</code>; a second, minutes later, resolved <code>github.com</code> to a real address through the same systemd-resolved stub. Transient resolver failure, not a sandbox network block.</li>
+<li><strong><code>codex has no 'auto' mode; using 'edit'</code></strong> — expected, and printed by the CLI. It does mean an unattended interactive codex run will sit on approval prompts nobody answers.</li>
+</ul>
+<p><strong>Not established:</strong> <em>why</em> the tmux server went away. A shared tmux server was proven to survive its creating SSH session teardown (probe: session created, connection closed, server still serving 8s later), and the daemon's dead-pane reaper had not logged since hours before the incident. Whatever killed it, the exit-code defect above is what turned it into a silent success — and that is what this change fixes.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0aXRsZTogQW4gaW50ZXJhY3RpdmUgcnVuIGtpbGxlZCBtaWQtd29yayByZXBvcnRlZCBleGl0IDAKc3VyZmFjZTogY2xpCi0tLQoKIyBBbiBpbnRlcmFjdGl2ZSBydW4ga2lsbGVkIG1pZC13b3JrIHJlcG9ydGVkIGV4aXQgMAoKKipBIHJlbW90ZSBpbnRlcmFjdGl2ZSBgYWdlbnRzIHJ1bmAgZGllZCBhdCBhbiBhcHByb3ZhbCBwcm9tcHQgYW5kIHRoZSBDTEkgcmVwb3J0ZWQgc3VjY2Vzcy4qKiBUaGUgdG11eCBzZXJ2ZXIgaG9zdGluZyB0aGUgcnVuIHdlbnQgYXdheTsgYHJ1bkluVG11eGAgY291bGQgbm8gbG9uZ2VyIHJlYWQgdGhlIGFnZW50IHBhbmUsIGFuZCBldmVyeSBwYXRoIHdoZXJlIHRtdXggY2Fubm90IHJlcG9ydCBhIHN0YXR1cyBmZWxsIGJhY2sgdG8gYGV4aXRDb2RlOiAwYC4gVGhlIGZhaWx1cmUgYmFubmVyIHByaW50ZWQgYGV4aXQgMWAgd2hpbGUgdGhlIGNhbGxlciByZWNlaXZlZCBgMGAuCgojIyBTdW1tYXJ5CgojIyMgRm9jdXMgZm9yIHJldmlldwoKLSBUaGUgZml4IGNoYW5nZXMgYW4gKipleGl0IGNvZGUqKiBvbiBhIHBhdGggdGhhdCBwcmV2aW91c2x5IGFsd2F5cyByZXR1cm5lZCBgMGAuIEFueXRoaW5nIHNjcmlwdGluZyBgYWdlbnRzIHJ1bmAgaW4gYSB0bXV4LXdyYXBwZWQgaW50ZXJhY3RpdmUgY29udGV4dCB3aWxsIG5vdyBzZWUgYDFgIHdoZXJlIGl0IHNhdyBgMGAg4oCUIGZvciBydW5zIHdob3NlIG91dGNvbWUgd2FzIGdlbnVpbmVseSB1bmtub3duLgotIEEgY2xlYW4gYEN0cmwtYiBkYCBkZXRhY2ggc3RpbGwgZXhpdHMgYDBgLiBUaGF0IGlzIHRoZSBvbmUgY2FzZSB3aXRoIHBvc2l0aXZlIHByb29mIHRoZSBwYW5lIGlzIGFsaXZlLgotIFR3byBvZiB0aGUgdGhyZWUgc3ltcHRvbXMgaW4gdGhlIG9yaWdpbmFsIHJlcG9ydCBhcmUgKiplbnZpcm9ubWVudGFsLCBub3QgY29kZSoqIOKAlCBuYW1lZCBiZWxvdyBzbyB0aGV5IGFyZSBub3Qgc2lsZW50bHkgZm9sZGVkIGludG8gImZpeGVkIi4KCiMjIyBJbnRlbnQgdnMgb2JzZXJ2ZWQKCnwgfCB8CnwtLS18LS0tfAp8ICoqSW50ZW5kZWQqKiB8IFJ1biBjb2RleCBpbnRlcmFjdGl2ZWx5IG9uIGEgd29ya2VyIGJveDogYGFnZW50cyBydW4gY29kZXggLS1pbnRlcmFjdGl2ZSAtLWRldmljZSA8d29ya2VyPmAuIHwKfCAqKk9ic2VydmVkKiogfCBUaGUgYWdlbnQgc3RhbGxlZCBhdCBhbiBhcHByb3ZhbCBwcm9tcHQsIHRoZSB0ZXJtaW5hbCBwcmludGVkIGBbc2VydmVyIGV4aXRlZCB1bmV4cGVjdGVkbHldYCAvIGBbZGV0YWNoZWQgKGZyb20gc2Vzc2lvbiDigKYpXWAsIGFuZCB0aGUgQ0xJIHByaW50ZWQgYGFnZW50czogY29kZXggZXhpdGVkIChleGl0IDApLmAgfAp8ICoqRGVsdGEqKiB8IEEgcnVuIHRoYXQgd2FzIGtpbGxlZCBtaWQtd29yayDigJQgdGhlIGFnZW50IG5ldmVyIGFuc3dlcmVkIHRoZSBhcHByb3ZhbCBpdCB3YXMgYmxvY2tlZCBvbiDigJQgd2FzIHJlcG9ydGVkIHRvIHRoZSBjYWxsZXIgYXMgYSAqKnN1Y2Nlc3NmdWwqKiBydW4uIHwKCiMjIEZpbmRpbmdzCgojIyMgUm9vdCBjYXVzZQoKYHJ1bkluVG11eGAgcmVjb3ZlcnMgdGhlIHdyYXBwZWQgYWdlbnQncyBleGl0IGNvZGUgYnkgYXNraW5nIHRtdXggZm9yIHRoZSBwYW5lJ3MgYCN7cGFuZV9kZWFkfSAje3BhbmVfZGVhZF9zdGF0dXN9YCBhZnRlciB0aGUgYXR0YWNoIGNsaWVudCByZXR1cm5zLiBgcGFuZUV4aXRTdGF0dXNgIGNvbGxhcHNlcyB0d28gdmVyeSBkaWZmZXJlbnQgYW5zd2VycyBpbnRvIG9uZSB2YWx1ZToKCmBgYHRzCi8vIGFwcHMvY2xpL3NyYy9saWIvdG11eC9zZXNzaW9uLnRzOjQ0MS00NTUKZXhwb3J0IGFzeW5jIGZ1bmN0aW9uIHBhbmVFeGl0U3RhdHVzKHBhbmU6IHN0cmluZywgc29ja2V0Pzogc3RyaW5nKTogUHJvbWlzZTxQYW5lRXhpdD4gewogIGxldCByZXM7CiAgdHJ5IHsKICAgIHJlcyA9IGF3YWl0IHJ1blRtdXgoeyBzb2NrZXQsIGFyZ3M6IFsnZGlzcGxheS1tZXNzYWdlJywgJy1wdCcsIHBhbmUsICctcCcsICcje3BhbmVfZGVhZH0gI3twYW5lX2RlYWRfc3RhdHVzfSddLCB0aHJvd09uRXJyb3I6IGZhbHNlIH0pOwogIH0gY2F0Y2ggewogICAgcmV0dXJuIHsgZm91bmQ6IGZhbHNlLCBkZWFkOiBmYWxzZSB9OyAgIC8vIHRtdXggbmV2ZXIgYW5zd2VyZWQKICB9CiAgaWYgKHJlcy5jb2RlICE9PSAwKSByZXR1cm4geyBmb3VuZDogZmFsc2UsIGRlYWQ6IGZhbHNlIH07ICAgLy8gLi4uc2FtZSB2YWx1ZQogIC4uLgp9CmBgYAoKYHsgZGVhZDogZmFsc2UgfWAgdGhlcmVmb3JlIG1lYW5zICplaXRoZXIqICJ0aGUgcGFuZSBpcyBhbGl2ZSIgKm9yKiAidG11eCBjb3VsZCBub3QgdGVsbCB1cyIuIFRoZSB0aHJlZSByZXR1cm4gcGF0aHMgaW4gYHJ1bkluVG11eGAgdGhlbiB0cmVhdGVkIHRoZSBzZWNvbmQgYXMgc3VjY2VzczoKCmBgYHRzCi8vIGFwcHMvY2xpL3NyYy9saWIvZXhlYy50cyAoYmVmb3JlKQpyZXR1cm4geyBleGl0Q29kZTogYmVmb3JlLnN0YXR1cyA/PyAwLCBzdGRlcnI6ICcnLCBzdGRvdXQ6ICcnIH07ICAgLy8gOjE3NzkgIGRlYWQgcGFuZSwgbm8gc3RhdHVzCnJldHVybiB7IGV4aXRDb2RlOiBhZnRlci5zdGF0dXMgID8/IDAsIHN0ZGVycjogJycsIHN0ZG91dDogJycgfTsgICAvLyA6MTgwNSAgZGVhZCBwYW5lLCBubyBzdGF0dXMKcmV0dXJuIHsgZXhpdENvZGU6IDAsICAgICAgICAgICAgICAgICAgc3RkZXJyOiAnJywgc3Rkb3V0OiAnJyB9OyAgIC8vIDoxODE2ICBwYW5lIHVucmVhZGFibGUKYGBgCgpUaGUgYmFubmVyIHByaW50ZWQgaW1tZWRpYXRlbHkgYWJvdmUgdGhvc2UgcmV0dXJucyBhbHJlYWR5IHVzZWQgdGhlIG9wcG9zaXRlIGRlZmF1bHQ6CgpgYGB0cwovLyBhcHBzL2NsaS9zcmMvbGliL2V4ZWMudHM6MTc1OApwcm9jZXNzLnN0ZGVyci53cml0ZShgXG5hZ2VudHM6ICR7aGVhZGxpbmV9IChleGl0ICR7c3RhdHVzID8/IDF9KS5cbmApOwpgYGAKClNvIGluIGV4YWN0bHkgdGhlIHVua25vd24gY2FzZSB0aGUgbWVzc2FnZSBzYWlkIGBleGl0IDFgIGFuZCB0aGUgZnVuY3Rpb24gcmV0dXJuZWQgYDBgLgoKPGZpZ3VyZT4KPHN2ZyB2aWV3Qm94PSIwIDAgODYwIDMwMCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJGbG93IGZyb20gdG11eCBzZXJ2ZXIgbG9zcyB0byBhIGZhYnJpY2F0ZWQgZXhpdCBjb2RlIHplcm8iIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPGRlZnM+CiAgICA8bWFya2VyIGlkPSJhciIgdmlld0JveD0iMCAwIDEwIDEwIiByZWZYPSI5IiByZWZZPSI1IiBtYXJrZXJXaWR0aD0iNyIgbWFya2VySGVpZ2h0PSI3IiBvcmllbnQ9ImF1dG8tc3RhcnQtcmV2ZXJzZSI+CiAgICAgIDxwYXRoIGQ9Ik0gMCAwIEwgMTAgNSBMIDAgMTAgeiIgZmlsbD0iIzdiODc5NCIvPgogICAgPC9tYXJrZXI+CiAgPC9kZWZzPgogIDxyZWN0IHg9IjgiIHk9IjIwIiB3aWR0aD0iMTgwIiBoZWlnaHQ9IjYyIiByeD0iOCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjN2I4Nzk0IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9Ijk4IiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9ImN1cnJlbnRDb2xvciI+YWdlbnQgYmxvY2tlZCBhdDwvdGV4dD4KICA8dGV4dCB4PSI5OCIgeT0iNjMiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjEzIiBmaWxsPSJjdXJyZW50Q29sb3IiPmFwcHJvdmFsIHByb21wdDwvdGV4dD4KCiAgPGxpbmUgeDE9IjE5MiIgeTE9IjUxIiB4Mj0iMjQyIiB5Mj0iNTEiIHN0cm9rZT0iIzdiODc5NCIgc3Ryb2tlLXdpZHRoPSIxLjUiIG1hcmtlci1lbmQ9InVybCgjYXIpIi8+CgogIDxyZWN0IHg9IjI0NiIgeT0iMjAiIHdpZHRoPSIxOTYiIGhlaWdodD0iNjIiIHJ4PSI4IiBmaWxsPSJub25lIiBzdHJva2U9IiNkOTc3MDYiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iMzQ0IiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9ImN1cnJlbnRDb2xvciI+dG11eCBzZXJ2ZXIgZ29lczwvdGV4dD4KICA8dGV4dCB4PSIzNDQiIHk9IjYzIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyIgZmlsbD0iY3VycmVudENvbG9yIj5hd2F5IHVuZGVyIHRoZSBydW48L3RleHQ+CgogIDxsaW5lIHgxPSI0NDYiIHkxPSI1MSIgeDI9IjQ5NiIgeTI9IjUxIiBzdHJva2U9IiM3Yjg3OTQiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI2FyKSIvPgoKICA8cmVjdCB4PSI1MDAiIHk9IjIwIiB3aWR0aD0iMjQwIiBoZWlnaHQ9IjYyIiByeD0iOCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjN2I4Nzk0IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjYyMCIgeT0iNDUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSJjdXJyZW50Q29sb3IiPnBhbmVFeGl0U3RhdHVzKCkgLSZndDs8L3RleHQ+CiAgPHRleHQgeD0iNjIwIiB5PSI2MyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9ImN1cnJlbnRDb2xvciI+e2ZvdW5kOmZhbHNlLCBkZWFkOmZhbHNlfTwvdGV4dD4KCiAgPGxpbmUgeDE9IjYyMCIgeTE9Ijg2IiB4Mj0iNjIwIiB5Mj0iMTI0IiBzdHJva2U9IiM3Yjg3OTQiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI2FyKSIvPgoKICA8cmVjdCB4PSI0NDAiIHk9IjEyOCIgd2lkdGg9IjM2MCIgaGVpZ2h0PSI2MCIgcng9IjgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzdiODc5NCIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1kYXNoYXJyYXk9IjQgMyIvPgogIDx0ZXh0IHg9IjYyMCIgeT0iMTUyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iY3VycmVudENvbG9yIj4icGFuZSBhbGl2ZSIgYW5kICJ0bXV4IGRpZCBub3QgYW5zd2VyIjwvdGV4dD4KICA8dGV4dCB4PSI2MjAiIHk9IjE3MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9ImN1cnJlbnRDb2xvciI+YXJlIHRoZSBzYW1lIHZhbHVlPC90ZXh0PgoKICA8bGluZSB4MT0iNDQwIiB5MT0iMTU4IiB4Mj0iMzMwIiB5Mj0iMTU4IiBzdHJva2U9IiM3Yjg3OTQiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI2FyKSIvPgoKICA8cmVjdCB4PSI5MCIgeT0iMTI4IiB3aWR0aD0iMjM2IiBoZWlnaHQ9IjYwIiByeD0iOCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZGMyNjI2IiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSIyMDgiIHk9IjE1MiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9ImN1cnJlbnRDb2xvciI+QkVGT1JFOiBzdGF0dXMgPz8gMDwvdGV4dD4KICA8dGV4dCB4PSIyMDgiIHk9IjE3MSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNkYzI2MjYiPmV4aXQgMCAoZmFicmljYXRlZCk8L3RleHQ+CgogIDxsaW5lIHgxPSIyMDgiIHkxPSIxOTIiIHgyPSIyMDgiIHkyPSIyMjgiIHN0cm9rZT0iIzdiODc5NCIgc3Ryb2tlLXdpZHRoPSIxLjUiIG1hcmtlci1lbmQ9InVybCgjYXIpIi8+CiAgPHJlY3QgeD0iNjAiIHk9IjIzMiIgd2lkdGg9IjI5NiIgaGVpZ2h0PSI1MiIgcng9IjgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzE2YTM0YSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iMjA4IiB5PSIyNTUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSJjdXJyZW50Q29sb3IiPkFGVEVSOiB0bXV4UnVuRXhpdENvZGUocGFuZSwgYWxpdmUpPC90ZXh0PgogIDx0ZXh0IHg9IjIwOCIgeT0iMjczIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyIgZmlsbD0iIzE2YTM0YSI+ZXhpdCAxICsgIm91dGNvbWUgdW5rbm93biIgYmFubmVyPC90ZXh0PgoKICA8cmVjdCB4PSI0NDAiIHk9IjIzMiIgd2lkdGg9IjM2MCIgaGVpZ2h0PSI1MiIgcng9IjgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzE2YTM0YSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI2MjAiIHk9IjI1NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9ImN1cnJlbnRDb2xvciI+ZXhpdCAwIHJlc2VydmVkIGZvcjogY29uZmlybWVkLWFsaXZlIHBhbmU8L3RleHQ+CiAgPHRleHQgeD0iNjIwIiB5PSIyNzMiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSJjdXJyZW50Q29sb3IiPihjbGVhbiBkZXRhY2gpLCBvciBhIHN0YXR1cyB0bXV4IHJlYWxseSByZWFkPC90ZXh0Pgo8L3N2Zz4KPGZpZ2NhcHRpb24+VGhlIHVua25vd24gb3V0Y29tZSBhbmQgdGhlIGNsZWFuIGRldGFjaCBzaGFyZWQgb25lIHJldHVybiB2YWx1ZSwgc28gdGhlIHVua25vd24gb25lIGluaGVyaXRlZCBzdWNjZXNzLjwvZmlnY2FwdGlvbj4KPC9maWd1cmU+CgojIyMgVGhlIHNwZWMgZ2FwIHRoYXQgbGV0IGl0IHRocm91Z2gKCmBFWEVDLTIzYSAoRjMpYCBhbHJlYWR5IGNvdmVycyB0aGlzIGV4YWN0IGJyYW5jaCDigJQgYnV0IG9ubHkgaXRzICpzZXNzaW9uLXRlYXJkb3duKiBjb25zZXF1ZW5jZToKCj4gQW4gYW1iaWd1b3VzIHJlc3VsdCBNVVNUIGBraWxsU2Vzc2lvbmAgcmF0aGVyIHRoYW4ga2VlcCB0aGUgb3JwaGFuLgoKSXQgc2F5cyBub3RoaW5nIGFib3V0IHRoZSBleGl0IGNvZGUsIHNvIG5vdGhpbmcgY29udHJhZGljdGVkIGA/PyAwYC4gTWVhbndoaWxlIHRoZSBleGl0LWNvZGUgY29udHJhY3QgdGFibGUgaW4gdGhlIHNhbWUgZG9jdW1lbnQgYWxyZWFkeSBzZXQgdGhlIGhvdXNlIHJ1bGUgZm9yIHRoZSBhbmFsb2dvdXMgY2FzZToKCnwgUGF0aCB8IEV4aXQgY29kZSB8CnwtLS18LS0tfAp8IGAtLWhvc3RgLCBmb2xsb3dlZCB0byBjb21wbGV0aW9uIHwgdGhlIHJlbW90ZSdzIG93biBleGl0IGNvZGUsICoqb3IgMSBpZiB1bmtub3duKiogfAoKVGhlIGZpeCBhZGRzICoqRVhFQy0yM2IqKiBzbyB0aGUgdG11eCBwYXRoIHN0YXRlcyB0aGUgc2FtZSBydWxlLCBwbHVzIGBHV1QtRTlgIGFzIGl0cyBzY2VuYXJpby4KCiMjIyBUaGUgZml4CgpPbmUgcHVyZSBkZWNpc2lvbiwgdXNlZCBieSBhbGwgdGhyZWUgcmV0dXJuIHBhdGhzLCBzbyB0aGUgYmFubmVyIGFuZCB0aGUgcmV0dXJuZWQgY29kZSBjYW5ub3QgZGl2ZXJnZSBhZ2FpbjoKCmBgYHRzCmV4cG9ydCBmdW5jdGlvbiB0bXV4UnVuRXhpdENvZGUocGFuZTogeyBkZWFkOiBib29sZWFuOyBzdGF0dXM/OiBudW1iZXIgfSwga25vd25BbGl2ZTogYm9vbGVhbik6IG51bWJlciB7CiAgaWYgKGtub3duQWxpdmUpIHJldHVybiAwOyAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC8vIGNsZWFuIEN0cmwtYiBkIGRldGFjaAogIGlmIChwYW5lLmRlYWQgJiYgcGFuZS5zdGF0dXMgIT09IHVuZGVmaW5lZCkgcmV0dXJuIHBhbmUuc3RhdHVzOyAgLy8gdG11eCByZWFsbHkgcmVhZCBhIHN0YXR1cwogIHJldHVybiBVTktOT1dOX09VVENPTUVfRVhJVF9DT0RFOyAgICAgICAgICAgICAgICAgICAgICAgICAgICAvLyAxIOKAlCBvdXRjb21lIHVua25vd24KfQpgYGAKClRoZSB1bnJlYWRhYmxlLXBhbmUgcGF0aCBhbHNvIGdhaW5zIGFuIGV4cGxpY2l0IHN0ZGVyciBiYW5uZXIgbmFtaW5nIHdoYXQgaGFwcGVuZWQsIGluc3RlYWQgb2YgZXhpdGluZyBtdXRlbHkuCgojIyBFdmlkZW5jZQoKIyMjIFZlcmlmaWNhdGlvbgoKVGVzdHMgZHJpdmUgcmVhbCB0bXV4IOKAlCBhIHNlcnZlciBpcyB0b3JuIGRvd24gdW5kZXIgYSBsaXZlIHBhbmUsIGFuZCBgcGFuZUV4aXRTdGF0dXNgIGlzIHRoZW4gZ2VudWluZWx5IHVuYWJsZSB0byBhbnN3ZXIuCgp8IENoZWNrIHwgUmVzdWx0IHwKfC0tLXwtLS18CnwgYHRtdXhSdW5FeGl0Q29kZWAgc3VpdGUgYWdhaW5zdCB0aGUgT0xEIGNvbnN0YW50IChgPSAwYCkgfCAyIGZhaWxlZCDigJQgdGhlIHJlZ3Jlc3Npb24gaXMgcmVwcm9kdWNlZCB8CnwgYHRtdXhSdW5FeGl0Q29kZWAgc3VpdGUgd2l0aCB0aGUgZml4IHwgNSBwYXNzZWQgfAp8IFJlYWwtdG11eCAic2VydmVyIHdlbnQgYXdheSIgdGVzdCB8IDEgcGFzc2VkIHwKfCBgdHNjIC0tbm9FbWl0YCB8IGNsZWFuIHwKCkZvdXIgdW5yZWxhdGVkIGZhaWx1cmVzIChgYnVpbGRFeGVjRW52YCBtYWlsYm94L2F1dG91cGRhdGVyLCB0d28gYG9ycGhhbi1yZWFwYCBoZWxwZXIgdGVzdHMpIHJlcHJvZHVjZSBpZGVudGljYWxseSBvbiBgbWFpbmAgYXQgdGhlIHNhbWUgY29tbWl0IOKAlCBwcmUtZXhpc3RpbmcsIG5vdCB0b3VjaGVkIGJ5IHRoaXMgY2hhbmdlLgoKIyMjIE5hbWVkIGFzIGVudmlyb25tZW50YWwsIE5PVCBmaXhlZCBoZXJlCgpUd28gc3ltcHRvbXMgaW4gdGhlIG9yaWdpbmFsIHJlcG9ydCBhcmUgbm90IGNvZGUgZGVmZWN0cywgYW5kIGZvbGRpbmcgdGhlbSBpbnRvICJmaXhlZCIgd291bGQgYmUgd3Jvbmc6CgotICoqYHNzaDogQ291bGQgbm90IHJlc29sdmUgaG9zdG5hbWUg4oCmIFRlbXBvcmFyeSBmYWlsdXJlIGluIG5hbWUgcmVzb2x1dGlvbmAqKiDigJQgRE5TIG9uIHRoZSB3b3JrZXIgYm94IGlzICoqaW50ZXJtaXR0ZW50KiogdW5kZXIgdGhlIGZsZWV0J3Mgb3duIFNTSCBjaHVybi4gTWVhc3VyZWQgZnJvbSBpbnNpZGUgdGhlIGhhcm5lc3Mgc2FuZGJveDogb25lIHJ1biBmYWlsZWQgdG8gcmVzb2x2ZSBib3RoIGFuIGludGVybmFsIG5hbWUgYW5kIGBnaXRodWIuY29tYDsgYSBzZWNvbmQsIG1pbnV0ZXMgbGF0ZXIsIHJlc29sdmVkIGBnaXRodWIuY29tYCB0byBhIHJlYWwgYWRkcmVzcyB0aHJvdWdoIHRoZSBzYW1lIHN5c3RlbWQtcmVzb2x2ZWQgc3R1Yi4gVHJhbnNpZW50IHJlc29sdmVyIGZhaWx1cmUsIG5vdCBhIHNhbmRib3ggbmV0d29yayBibG9jay4KLSAqKmBjb2RleCBoYXMgbm8gJ2F1dG8nIG1vZGU7IHVzaW5nICdlZGl0J2AqKiDigJQgZXhwZWN0ZWQsIGFuZCBwcmludGVkIGJ5IHRoZSBDTEkuIEl0IGRvZXMgbWVhbiBhbiB1bmF0dGVuZGVkIGludGVyYWN0aXZlIGNvZGV4IHJ1biB3aWxsIHNpdCBvbiBhcHByb3ZhbCBwcm9tcHRzIG5vYm9keSBhbnN3ZXJzLgoKKipOb3QgZXN0YWJsaXNoZWQ6KiogKndoeSogdGhlIHRtdXggc2VydmVyIHdlbnQgYXdheS4gQSBzaGFyZWQgdG11eCBzZXJ2ZXIgd2FzIHByb3ZlbiB0byBzdXJ2aXZlIGl0cyBjcmVhdGluZyBTU0ggc2Vzc2lvbiB0ZWFyZG93biAocHJvYmU6IHNlc3Npb24gY3JlYXRlZCwgY29ubmVjdGlvbiBjbG9zZWQsIHNlcnZlciBzdGlsbCBzZXJ2aW5nIDhzIGxhdGVyKSwgYW5kIHRoZSBkYWVtb24ncyBkZWFkLXBhbmUgcmVhcGVyIGhhZCBub3QgbG9nZ2VkIHNpbmNlIGhvdXJzIGJlZm9yZSB0aGUgaW5jaWRlbnQuIFdoYXRldmVyIGtpbGxlZCBpdCwgdGhlIGV4aXQtY29kZSBkZWZlY3QgYWJvdmUgaXMgd2hhdCB0dXJuZWQgaXQgaW50byBhIHNpbGVudCBzdWNjZXNzIOKAlCBhbmQgdGhhdCBpcyB3aGF0IHRoaXMgY2hhbmdlIGZpeGVzLgo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
