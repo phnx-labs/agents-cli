@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { foldExecutionMachine, sessionProcessIsLocal, type ActiveSession } from './active.js';
+import { foldExecutionMachine, sessionProcessIsLocal, sessionProcessHost, type ActiveSession } from './active.js';
 
 const self = 'zion';
 
@@ -106,5 +106,32 @@ describe('sessionProcessIsLocal', () => {
     // The predicate every caller used before this fix, and the bug it caused.
     expect(row.machine !== 'zion').toBe(true);
     expect(sessionProcessIsLocal(row, 'zion')).toBe(true);
+  });
+
+  // The three-box case. These rows travel: `--active --json` spreads them and the
+  // fan-out preserves their foreign `machine`, so a box that is NEITHER the
+  // dispatcher nor the executor sees them. Answering "local" there sent the
+  // caller down the local-tmux path with another box's pane id — the same
+  // attach-an-unrelated-pane hazard, one machine over.
+  it('calls A-dispatched-to-B REMOTE when asked on a third box C', () => {
+    expect(sessionProcessIsLocal({ machine: 'B', offloadedFrom: 'A' }, 'C')).toBe(false);
+  });
+});
+
+describe('sessionProcessHost', () => {
+  it('is undefined when the process is here — the offloaded shim on its dispatcher', () => {
+    expect(sessionProcessHost({ machine: 'yosemite-s0', offloadedFrom: 'zion' }, 'zion')).toBeUndefined();
+    expect(sessionProcessHost({ machine: 'zion' }, 'zion')).toBeUndefined();
+    expect(sessionProcessHost({}, 'zion')).toBeUndefined();
+  });
+
+  it('points at the DISPATCHER for an offloaded row seen from a third box, not the executor', () => {
+    // Correcting only the predicate would send C to B carrying A's pane id —
+    // the hazard relocated rather than fixed. The process is on A.
+    expect(sessionProcessHost({ machine: 'B', offloadedFrom: 'A' }, 'C')).toBe('A');
+  });
+
+  it('points at the peer for an ordinary remote session', () => {
+    expect(sessionProcessHost({ machine: 'yosemite-s0' }, 'zion')).toBe('yosemite-s0');
   });
 });

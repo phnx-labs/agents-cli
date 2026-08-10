@@ -2216,8 +2216,32 @@ export function foldExecutionMachine(
  * comparison.
  */
 export function sessionProcessIsLocal(s: Pick<ActiveSession, 'machine' | 'offloadedFrom'>, self: string): boolean {
-  if (s.offloadedFrom) return true;
+  // `offloadedFrom` names WHICH box holds the shim, so it must be compared, not
+  // merely tested. These rows travel: `--active --json` spreads them verbatim
+  // and the fan-out preserves their foreign `machine`, so a THIRD box sees
+  // `{machine: B, offloadedFrom: A}` — a shim that is emphatically not its own.
+  // Answering "local" there sends the caller down the local-tmux path with
+  // A's pane id, attaching an unrelated pane on C: the same hazard this
+  // predicate exists to prevent, one machine over.
+  if (s.offloadedFrom) return s.offloadedFrom === self;
   return !s.machine || s.machine === self;
+}
+
+/**
+ * The machine to reach for this session's PROCESS — its pid, tmux pane, and
+ * window — or `undefined` when that process is right here.
+ *
+ * Not the same as `machine`, which is where the AGENT executes. For an offloaded
+ * run the process lives on the dispatcher (`offloadedFrom`) while the agent runs
+ * on the peer, so a caller that ssh'd to `machine` would carry the dispatcher's
+ * pane id to a box that never had it.
+ */
+export function sessionProcessHost(
+  s: Pick<ActiveSession, 'machine' | 'offloadedFrom'>,
+  self: string,
+): string | undefined {
+  if (sessionProcessIsLocal(s, self)) return undefined;
+  return s.offloadedFrom ?? s.machine;
 }
 
 /**

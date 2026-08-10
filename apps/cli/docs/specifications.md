@@ -453,7 +453,11 @@ SSH access (§7); rendering sessions that no harness produced.
     `sessionProcessIsLocal(s, self)` (`lib/session/active.ts`) rather than
     comparing `machine` to this box — a local pane id (`%N`) sent to a peer's
     tmux server can resolve against an unrelated pane and attach the wrong
-    session.
+    session. The predicate MUST compare `offloadedFrom` to this machine, not
+    merely test it: these rows travel (`--active --json` spreads them, the
+    fan-out preserves their foreign `machine`), so a THIRD box sees a shim that
+    is not its own. The box to reach for the process is `sessionProcessHost`
+    (`offloadedFrom ?? machine`), never `machine` alone.
   - **Scope: host-dispatched runs only.** The correction is driven by the index
     row `agents run --host/--device` writes (`lib/hosts/session-index.ts`).
     Remote **teams teammates** are not covered — `listTeamsActive` sets no

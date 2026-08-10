@@ -19,7 +19,7 @@ import chalk from 'chalk';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { getActiveSessions, findSessionFileForKind, sessionProcessIsLocal, type ActiveSession } from '../lib/session/active.js';
+import { getActiveSessions, findSessionFileForKind, sessionProcessIsLocal, sessionProcessHost, type ActiveSession } from '../lib/session/active.js';
 import { gatherRemoteActive } from '../lib/session/remote-active.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { deriveShortId } from '../lib/session/short-id.js';
@@ -219,7 +219,7 @@ function shortId(s: ActiveSession): string {
  * `jumpTo` below: remote-tmux, then local-tmux, then ghostty, then refuse.
  */
 export function describeWhere(s: ActiveSession, self: string): Where {
-  const remote = sessionProcessIsLocal(s, self) ? undefined : s.machine;
+  const remote = sessionProcessHost(s, self);
   const mux = s.provenance?.mux;
   if (mux?.kind === 'tmux' && mux.pane) {
     // When the renderer has resolved the current viewer, fold it into the label
@@ -254,7 +254,7 @@ export type AttachRailLiveness =
 export async function probeAttachRail(s: ActiveSession, self: string): Promise<AttachRailLiveness> {
   const mux = s.provenance?.mux;
   if (mux?.kind !== 'tmux' || !mux.pane) return { state: 'missing' };
-  const remote = sessionProcessIsLocal(s, self) ? undefined : s.machine;
+  const remote = sessionProcessHost(s, self);
   if (!remote) {
     const pane = await paneExitStatus(mux.pane, mux.socket ?? getDefaultSocketPath());
     if (!pane.found) return { state: 'missing' };
@@ -294,7 +294,7 @@ export async function refuseFallback(s: ActiveSession, remote: string | undefine
 }
 
 export async function jumpTo(s: ActiveSession, self: string, fallback: UnreachableFallback = refuseFallback): Promise<void> {
-  const remote = sessionProcessIsLocal(s, self) ? undefined : s.machine;
+  const remote = sessionProcessHost(s, self);
   const mux = s.provenance?.mux;
 
   // Path C: remote tmux — ssh in and attach, resolving the pane's session on the remote.

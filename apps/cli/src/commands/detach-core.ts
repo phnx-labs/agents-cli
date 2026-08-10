@@ -3,7 +3,7 @@
  * resolver. Kept import-light (only a type import) so it is unit-tested without
  * loading the live-session discovery graph.
  */
-import { sessionProcessIsLocal, type ActiveSession } from '../lib/session/active.js';
+import { sessionProcessHost, type ActiveSession } from '../lib/session/active.js';
 
 /**
  * The prompt the backgrounded run resumes with. Its whole job is to stop a
@@ -55,10 +55,12 @@ export function resolveDetachTarget(s: ActiveSession, self: string): DetachTarge
   if (!sessionId) {
     return { kind: 'refuse', reason: 'That session has no id to resume, so it cannot be detached.' };
   }
-  // `sessionProcessIsLocal` returns true for an unset `machine`, so reaching
-  // here means the row names a peer that is genuinely running the process.
-  if (!sessionProcessIsLocal(s, self) && s.machine) {
-    return { kind: 'remote', machine: s.machine, sessionId };
+  // The box to hop to is where the PROCESS is (a shim lives on its dispatcher),
+  // which is not always `machine`. `sessionProcessHost` returns undefined when
+  // the process is here, so a value means a genuine remote takeover.
+  const processHost = sessionProcessHost(s, self);
+  if (processHost) {
+    return { kind: 'remote', machine: processHost, sessionId };
   }
   return { kind: 'local', sessionId };
 }

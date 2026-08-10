@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import chalk from 'chalk';
 import { confirm } from '@inquirer/prompts';
 import { gatherLiveTargets, pickLiveTarget, pickLiveTargets, jumpTo, probeAttachRail, refuseFallback, type AttachRailLiveness, type UnreachableFallback } from './go.js';
-import { sessionProcessIsLocal, type ActiveSession } from '../lib/session/active.js';
+import { sessionProcessIsLocal, sessionProcessHost, type ActiveSession } from '../lib/session/active.js';
 import { SESSION_AGENTS, type SessionMeta, type SessionAgentId } from '../lib/session/types.js';
 import {
   buildSessionRecoveryCommand,
@@ -464,7 +464,7 @@ async function focusResolvedSession(
     process.exitCode = 1;
     return;
   }
-  const remote = sessionProcessIsLocal(meta, self) ? undefined : meta.machine;
+  const remote = sessionProcessHost(meta, self);
   if (remote) {
     console.log(chalk.gray(`Recovering ${meta.shortId} on ${remote}…`));
     const rc = await runOnPeer(sessionRecoveryRunArgs(meta), remote, { tty: true });
@@ -561,7 +561,7 @@ export function planFocusSurface(
   resumeCommandFor: (s: ActiveSession) => string[] | null,
   rail: AttachRailLiveness = { state: 'alive' },
 ): FocusSurfacePlan {
-  const remote = sessionProcessIsLocal(s, self) ? undefined : s.machine;
+  const remote = sessionProcessHost(s, self);
   const mux = s.provenance?.mux;
   const sid = shortId(s);
 
