@@ -395,23 +395,34 @@ describe('usage formatting', () => {
     try {
       const logDir = path.join(home, '.grok', 'logs');
       fs.mkdirSync(logDir, { recursive: true });
+      // Relative dates so the fixture stays in-period under the freshness filter
+      // (absolute Aug 2026 ends were already expired when this PR landed).
+      const now = Date.now();
+      const day = 24 * 60 * 60 * 1000;
+      const periodEnd = new Date(now + 6 * day).toISOString();
       // Two billing lines; the parser keeps the LAST one seen.
       const lines = [
         JSON.stringify({
-          ts: '2026-08-01T00:00:00.000Z',
+          ts: new Date(now - 2 * day).toISOString(),
           msg: 'billing: fetched credits config',
-          ctx: { config: { creditUsagePercent: 10, currentPeriod: { end: '2026-08-01T18:27:00Z' } }, subscriptionTier: 'X Premium' },
+          ctx: {
+            config: {
+              creditUsagePercent: 10,
+              currentPeriod: { end: new Date(now - day).toISOString() },
+            },
+            subscriptionTier: 'X Premium',
+          },
         }),
         // Real-world shape captured from ~/.grok/logs/unified.jsonl.
         JSON.stringify({
-          ts: '2026-08-02T04:00:49.628Z',
+          ts: new Date(now - 60_000).toISOString(),
           src: 'shell',
           lvl: 'info',
           msg: 'billing: fetched credits config',
           ctx: {
             config: {
               creditUsagePercent: 100.0,
-              currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', end: '2026-08-02T18:27:00.269749+00:00' },
+              currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', end: periodEnd },
               isUnifiedBillingUser: true,
             },
             subscriptionTier: 'X Premium+',
@@ -427,7 +438,40 @@ describe('usage formatting', () => {
       expect(week?.shortLabel).toBe('W');
       // Real credit consumption is surfaced, not a hardcoded 0%.
       expect(week?.usedPercent).toBe(100);
-      expect(week?.resetsAt?.toISOString()).toBe(new Date('2026-08-02T18:27:00.269749+00:00').toISOString());
+      expect(week?.resetsAt?.toISOString()).toBe(new Date(periodEnd).toISOString());
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('drops an expired Grok billing window from the real log shape', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-grok-expired-'));
+    try {
+      const logDir = path.join(home, '.grok', 'logs');
+      fs.mkdirSync(logDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(logDir, 'unified.jsonl'),
+        `${JSON.stringify({
+          ts: '2026-08-02T04:00:49.628Z',
+          msg: 'billing: fetched credits config',
+          ctx: {
+            config: {
+              creditUsagePercent: 100.0,
+              currentPeriod: {
+                type: 'USAGE_PERIOD_TYPE_WEEKLY',
+                end: '2026-08-02T18:27:00.269749+00:00',
+              },
+            },
+            subscriptionTier: 'X Premium+',
+          },
+        })}\n`
+      );
+
+      const { snapshot, error } = await getUsageInfo('grok', { home });
+      expect(error).toBeNull();
+      expect(snapshot?.plan).toBe('X Premium+');
+      expect(snapshot?.windows).toEqual([]);
+      expect(deriveUsageStatusFromSnapshot(snapshot)).toBeNull();
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
