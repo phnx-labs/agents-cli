@@ -161,4 +161,16 @@ describe('command index generation', () => {
     expect(ids.has('agents')).toBe(true);
     expect(html).not.toContain('id=""');
   });
+
+  it('keeps the reserved root anchor free of collisions', async () => {
+    // nodeId() hands the root the reserved id `agents` because its path is
+    // empty. That is only safe while no top-level group is named `agents` — a
+    // group by that name would mean `agents agents` and silently steal the
+    // root's anchor. Enforce the claim the comment makes instead of trusting it.
+    const nodes = await tree();
+    expect(nodes.map((node) => node.name)).not.toContain('agents');
+    const html = renderHtml(nodes, rootNode(await buildFullCommandTree()));
+    const ids = [...html.matchAll(/<article id="([^"]*)"/g)].map((m) => m[1]);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
 });
