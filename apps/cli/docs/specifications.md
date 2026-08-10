@@ -295,7 +295,7 @@ SSH access (§7); rendering sessions that no harness produced.
   Status: `[Intended]` — coverage is uneven today (the live path forces
   non-Codex→Claude, and no harness populates `costUsd`); the shortfall is
   SES-GAP-2.
-- **SES-38 (MUST).** A Claude session MUST be attributed to the account that
+- **SES-44 (MUST).** A Claude session MUST be attributed to the account that
   produced *it*, never to one account resolved once per process. Attribution is a
   pure function of the transcript's `file_path` and its recorded `version` — no
   per-file I/O, no dependence on the transcript still existing — resolved in
@@ -310,11 +310,11 @@ SSH access (§7); rendering sessions that no harness produced.
   recorded version — the file's location is what proves which config dir was used.
   Attribution is implemented for Claude only; other harnesses MUST report a NULL
   `account_key` rather than a guessed one.
-- **SES-39 (MUST).** Grouping MUST key on the org-scoped `account_key`
+- **SES-45 (MUST).** Grouping MUST key on the org-scoped `account_key`
   (`claude:org=<uuid>`), never on the email: two orgs under one email (a Team seat
   and a personal Max plan) are separate rate-limit buckets, the same invariant
   `candidateIdentity` enforces in `lib/rotate.ts`. `account` is display-only.
-- **SES-40 (MUST).** A session whose account cannot be established MUST surface as
+- **SES-46 (MUST).** A session whose account cannot be established MUST surface as
   `unattributed:<reason>`, with distinct reasons in distinct buckets, and MUST NOT
   be dropped or folded into a real account. This includes retired homes that are
   signed out, backup mirrors (no `.claude.json`), versions whose retired snapshots
@@ -551,7 +551,7 @@ SSH access (§7); rendering sessions that no harness produced.
 - **SES-30 (MUST).** One malformed row's constraint failure MUST NOT roll back the
   batch and MUST NOT stamp that row's ledger entry, so it is retried next scan
   (self-healing) (`lib/session/db.ts:975-982,1035-1039`).
-- **SES-40 (MUST).** The local index MUST be authoritative for a session's
+- **SES-47 (MUST).** The local index MUST be authoritative for a session's
   user-turn content: a session whose transcript file is gone from disk but whose
   `session_text` `content` still holds its user turns MUST remain listable and
   renderable, not dropped (RUSH-2436). `querySessions` and `topSessionsByCost`
@@ -985,7 +985,7 @@ normative — a change that widens/narrows a cell is a spec change.
   older CLI opening a DB written by a newer one silently proceeds instead of
   failing safe (`lib/session/db.ts` schema gate). The "fail safe on newer DB"
   guarantee is aspirational until a guard is added.
-- **SES-GAP-9.** The archived-vs-phantom discriminator (SES-40) is *content
+- **SES-GAP-9.** The archived-vs-phantom discriminator (SES-47) is *content
   presence*, not supersession detection. A file-gone row keeps `archived` iff its
   `session_text` content is non-empty; there is no signal for "this session's
   content now lives under another current row." For real harnesses this is a
@@ -996,7 +996,7 @@ normative — a change that widens/narrows a cell is a spec change.
   Relatedly, the tool-index **backfill** path still purges an archived session's
   evidence when its source file is gone mid-backfill (`tool-index.ts`
   `ensureToolIndex` on a `statSync` throw, reached via `agents sessions backfill`);
-  SES-40 removed the purge only from the `querySessions` read path.
+  SES-47 removed the purge only from the `querySessions` read path.
 - **SES-GAP-10 (resolved, RUSH-2486).** SES-23a's execution-host attribution now
   covers **remote teams teammates** as well as host-dispatched runs. A
   `agents teams add … --device <peer>` teammate still gets no index row, so
@@ -2607,7 +2607,7 @@ nothing but its own view cache.
   election with lease handoff for any remaining UI-side coordination protocol
   (apps/ext `src/monitor/leader.ts` — presence fan-out only, not task
   execution), and idempotent effects so a redelivery is a no-op.
-- **SING-11 (MUST).** A single scheduled fire MUST launch a routine at most once,
+- **SING-15 (MUST).** A single scheduled fire MUST launch a routine at most once,
   even when the same UTC occurrence is evaluated by more than one timer callback,
   a restart replays `loadAll()` (`lib/scheduler.ts`), or a manual `catchup` overlaps
   the daemon pass. Uniqueness MUST be a structural claim on the occurrence identity
@@ -2620,7 +2620,7 @@ nothing but its own view cache.
   scheduled dispatch path (see SING-GAP-3): today the forward-timer dispatch has no
   durable per-slot claim of its own, so two live schedulers evaluating one occurrence
   is prevented by the pid-file singleton (SING-5), not by an occurrence claim.
-- **SING-12 (MUST).** The slot claim (SING-11 — "may this occurrence dispatch?") and
+- **SING-16 (MUST).** The slot claim (SING-15 — "may this occurrence dispatch?") and
   the active-run claim (SING-13 — "is an instance of this routine already running?")
   MUST be distinct guards: a routine that overlaps itself (a long run still executing
   when the next slot arrives) is a different condition from one occurrence firing
@@ -2831,8 +2831,8 @@ a machine-wide process sweep.)
   (`lib/session/presence.ts`) would be the singular home. Informative; a future
   consolidation SHOULD retire it in the daemon's favor.
 - **SING-GAP-3 (RUSH-2290).** The primary scheduled-dispatch path has no durable
-  per-occurrence claim of its own (SING-11 [Intended]), the slot claim and the
-  active-run claim are not yet separated (SING-12 [Intended]), and self-overlap does
+  per-occurrence claim of its own (SING-15 [Intended]), the slot claim and the
+  active-run claim are not yet separated (SING-16 [Intended]), and self-overlap does
   not yet record a `skipped` run (SING-13 [Intended]). The catch-up path's atomic
   `mkdir` claim (`lib/catchup.ts`) already makes a *missed* fire at-most-once, and the
   daemon pid singleton (SING-5) prevents two schedulers, but a single scheduler that
@@ -2985,7 +2985,7 @@ readiness/context fields RT-1..RT-8 describe.
   readiness-failure runs (RT-5) and the menu History surface that renders them.
 - **RT-7 (MUST, [Intended]).** `RunMeta.status` MUST distinguish, at minimum:
   `running`, `completed`, `failed` (the body ran and errored), `timeout`, `missed`
-  (a scheduled fire the daemon never got to — SING-11), `blocked` (readiness failed,
+  (a scheduled fire the daemon never got to — SING-15), `blocked` (readiness failed,
   no body ran — RT-5), and `skipped` (the routine was already running, self-overlap —
   SING-13). `blocked` and `failed` MUST NOT be collapsed: a routine that never ran
   because its account was dead is a different operational state from one whose body

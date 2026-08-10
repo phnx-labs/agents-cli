@@ -140,7 +140,7 @@ reliability contract — context resolution, readiness/pause-on-blocker, single-
 `(routine, scheduledFor)` claim distinct from the active-run claim, and the
 `blocked`/`skipped` run statuses — is normative in
 [`docs/specifications.md` §Routine execution & readiness](docs/specifications.md#routine-execution--readiness)
-(RT-1..RT-11) and §Scheduling & execution singularity (SING-11..SING-13); much of it
+(RT-1..RT-11) and §Scheduling & execution singularity (SING-13, SING-15, SING-16); much of it
 is `[Intended]` (RUSH-2290), and each requirement marks landed vs intended.
 
 Routine execution context is separate from grouping and repository identity.
