@@ -6,6 +6,23 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+- **`New <Agent>` tabs get their identity back — logo, chip, session id, labels,
+  and the commands that depend on them.** `launchAgent` had been rewritten to a
+  bare `createTerminal`, which dropped the whole post-create sequence: every
+  New-Agent tab showed the generic terminal glyph labelled `Agents claude`, the
+  status bar read `Agents: Terminal`, auto-labels never armed, and the tab was
+  never registered — so Copy Session ID, Copy Session Trace, Resume, Resume in
+  Best Profile, Handoff, Continue in New Session and Fork all answered *"Active
+  terminal is not an agent terminal"*, and a window reload lost the tab entirely
+  because nothing scheduled its persistence. The per-agent Default Model
+  (`--model`) and a workspace's bound project (`--project`) were silently
+  dropped from the launch command too. Registration now lives in one
+  `registerAgentTerminal` that both creation paths call, and the command is
+  built by the existing `buildAgentLaunchCommand` rather than a second
+  hand-rolled string. `Agents: New Agent` (the automatic launch, which has no
+  harness until the CLI picks one) registers against the `shell` def and lets
+  adoption re-key it, so it is a tracked tab from the first frame.
+
 - **Tab icons + status bar for Grok/Kimi/Droid/Antigravity and resumed sessions.**
   Shell-adoption only recognised the original five harnesses (`claude`/`codex`/
   `gemini`/`cursor`/`opencode`), so a New Grok tab (or any focus/resume that

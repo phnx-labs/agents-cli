@@ -597,7 +597,16 @@ describe('agent tab icons', () => {
     expect(start).toBeGreaterThan(-1);
     const body = src.slice(start, src.indexOf('\n}', start));
     expect(body).toContain('createTerminal(');
-    expect(body).toContain('iconPath');
+    // Mutation-resistant on purpose: a bare `toContain('iconPath')` passes even
+    // for `iconPath: undefined` AND for the buildIconPath(def.prefix, ...) trap
+    // below, i.e. it cannot fail on the regression it exists to catch. Pin the
+    // resolved value, and forbid the prefix-keyed lookup outright.
+    expect(body).toMatch(/iconPath:\s*agentConfig\.iconPath/);
+    expect(body).not.toMatch(/buildIconPath\(/);
+    // Registration must not be conditional on knowing the agent: an automatic
+    // launch (agents.newAgent) has no agentKey and must still be registered.
+    expect(body).toMatch(/await registerAgentTerminal\(terminal, context, \{/);
+    expect(body).not.toMatch(/if \(agentConfig && terminalId\)/);
   });
 
   test('the icon table is keyed by TITLE, never by the lowercase prefix', () => {

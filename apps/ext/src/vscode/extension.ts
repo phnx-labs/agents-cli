@@ -454,52 +454,59 @@ async function launchAgent(context: vscode.ExtensionContext, opts: LaunchAgentOp
   const agent = opts.agentKey ?? 'auto';
   const cwd = getActiveWorkspaceFolder()?.uri.fsPath;
   const builtIn = opts.agentKey ? getBuiltInByKey(opts.agentKey) : undefined;
-  let command = `agents run ${agent} --interactive`;
-  if (host) command += ` --device ${shquote(host)}`;
-  else if (automatic && !opts.local) command += ' --device auto';
-  command += ' --strategy balanced --mode auto';
-  // The per-agent Default Model and the workspace's bound project are launch
-  // inputs the CLI cannot infer. openSingleAgent passes both; this path dropped
-  // them in #2534, silently ignoring the user's configured model.
+
+  // An automatic launch has no harness yet — the CLI picks it — but the tab must
+  // still be a tracked terminal, so it registers against the `shell` def and
+  // shell adoption upgrades the entry once the runner announces itself. That is
+  // the same fallback spawnCommandTerminal uses. Registering only when the agent
+  // is known would leave `agents.newAgent` (the flagship command) unregistered
+  // and, worse, silently unreadied: sendCommandWhenReady rejects without a
+  // readiness registration and the launch line gets typed into a prompt-less
+  // shell.
+  const def = builtIn ?? getBuiltInByKey('shell');
+  if (!def) return;
+  const agentConfig = createAgentConfig(
+    context.extensionPath, def.title, def.command, def.icon, def.prefix,
+  );
+
   const defaultModel = builtIn
     ? settings.getDefaultModel(context, builtIn.key as Parameters<typeof settings.getDefaultModel>[1])
     : undefined;
-  if (defaultModel) command += ` --model ${shquote(defaultModel)}`;
+  // `--project` owns the working directory end-to-end, so it and cwd are
+  // mutually exclusive (buildAgentLaunchCommand throws if both are passed).
   const projectSlug = cwd ? await resolveProjectForCwd(cwd) : undefined;
-  if (projectSlug) command += ` --project ${shquote(projectSlug)}`;
+  const command = buildAgentLaunchCommand(
+    agent, null, defaultModel, undefined, undefined, 'balanced', 'auto',
+    { host, local: opts.local, project: projectSlug, cwd: projectSlug ? undefined : cwd },
+  );
 
   // Tab identity must be established AT createTerminal: iconPath and name are
   // frozen there (no setter), and AGENT_TERMINAL_ID is the join key the CLI's
   // `sessions --active` rows carry back — without it the status bar can never
   // resolve a session id. Shell adoption cannot repair any of it later; it only
   // rewrites the internal registry, never the live terminal.
-  const agentConfig = builtIn
-    ? createAgentConfig(context.extensionPath, builtIn.title, builtIn.command, builtIn.icon, builtIn.prefix)
-    : null;
-  const terminalId = agentConfig ? terminals.nextId(agentConfig.prefix) : undefined;
+  const terminalId = terminals.nextId(agentConfig.prefix);
+  const isShellTab = !builtIn || opts.agentKey === 'shell';
   const terminal = vscode.window.createTerminal({
-    name: agentConfig
-      ? buildTerminalTitle(agentConfig.title, undefined, context, null)
-      : 'Agents Auto',
-    iconPath: agentConfig?.iconPath,
+    name: automatic ? 'Agents Auto' : buildTerminalTitle(agentConfig.title, undefined, context, null),
+    iconPath: agentConfig.iconPath,
     location: { viewColumn: vscode.ViewColumn.Active },
-    env: terminalId
-      ? buildAgentTerminalEnv(terminalId, undefined, cwd, undefined, {
-          scrubSensitive: opts.agentKey !== 'shell',
-          kind: opts.agentKey === 'shell' ? 'shell' : 'agent',
-        })
-      : undefined,
+    env: buildAgentTerminalEnv(terminalId, undefined, cwd, undefined, {
+      scrubSensitive: !isShellTab,
+      kind: isShellTab ? 'shell' : 'agent',
+    }),
     isTransient: true,
   });
   terminal.show(false);
-  if (agentConfig && terminalId) {
-    await registerAgentTerminal(terminal, context, {
-      terminalId,
-      agentConfig,
-      agentKey: opts.agentKey,
-      host,
-    });
-  }
+  await registerAgentTerminal(terminal, context, {
+    terminalId,
+    agentConfig,
+    agentKey: opts.agentKey,
+    host,
+  });
+  // The harness is unknown until the runner starts, so let adoption re-key the
+  // entry to the real agent the CLI picked.
+  if (automatic) armShellAdoptionForTerminal(terminal, context);
   await sendCommandWhenReady(terminal, command);
   if (opts.agentKey) {
     readiness.armAgentReady(terminal, {});
