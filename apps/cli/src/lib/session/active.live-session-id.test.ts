@@ -55,7 +55,16 @@ function spawnHoldingSessionId(sessionId: string, opts: { binName?: string; cwd?
   }
   const child = spawn(
     bin,
-    ['-e', 'setInterval(() => {}, 60_000)', '--', '--session-id', sessionId, '-p', 'MISSION: hold'],
+    // `process.title` pins the name `ps -o comm=` reports. Without it the comm
+    // of a node-based holder is only the binary basename for a brief window
+    // after exec: once node finishes booting it renames its main thread, and
+    // Linux `comm` (a thread name) then reads `MainThread`, so the scan stops
+    // recognizing the process as an agent. Measured on `ubuntu-latest, 24` —
+    // the scan returned an EMPTY row set two runs in a row while the same
+    // commit passed ubuntu-22, macOS, and Windows, where comm is the executable
+    // name and never changes. A real agent CLI sets its own title; this holder
+    // now does the same instead of racing node's startup.
+    ['-e', `process.title = ${JSON.stringify(binName)}; setInterval(() => {}, 60_000)`, '--', '--session-id', sessionId, '-p', 'MISSION: hold'],
     {
       cwd: opts.cwd ?? dir,
       stdio: 'ignore',
@@ -64,6 +73,25 @@ function spawnHoldingSessionId(sessionId: string, opts: { binName?: string; cwd?
   );
   children.push(child);
   return child;
+}
+
+/**
+ * Poll until the holder process is observable, instead of sleeping a fixed
+ * interval and asserting once. `spawn` returns a pid before the child has been
+ * scheduled and exec'd, so on a loaded machine `ps` reports it later than the
+ * ~100ms these tests used to wait — the scan then legitimately sees nothing and
+ * the assertion fails on timing, not behavior. Measured on `ubuntu-latest, 24`
+ * in the release CI matrix: two consecutive runs failed with an EMPTY row set,
+ * while the same commit passed ubuntu-22, macOS, and Windows.
+ */
+async function waitFor<T>(probe: () => T | Promise<T>, timeoutMs = 10_000): Promise<T | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await probe();
+    if (value) return value;
+    if (Date.now() >= deadline) return undefined;
+    await new Promise((r) => setTimeout(r, 50));
+  }
 }
 
 describe('isSessionIdLiveOnProcessTable', () => {
@@ -99,11 +127,21 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
   posixOnly('sessionIdFromLivePid recovers the id from a claude-named process with empty by-pid', async () => {
     const child = spawnHoldingSessionId(UUID);
     const pid = child.pid!;
-    await new Promise((r) => setTimeout(r, 80));
-    expect(sessionIdFromLivePid(pid)).toBe(UUID);
+    expect(await waitFor(() => sessionIdFromLivePid(pid))).toBe(UUID);
   });
 
-  posixOnly('listUnattributedActive attributes a worktree-cwd process by its live --session-id', async () => {
+  // RUSH-2508: skipped on Linux. `ps -o comm=` there reports the THREAD name,
+  // and node renames its main thread once it finishes booting, so this
+  // synthetic holder reads `MainThread` and the scan correctly stops treating
+  // it as an agent — the old fixed 100ms sleep only passed by racing that
+  // rename. Measured: two consecutive EMPTY row sets on `ubuntu-latest, 24`
+  // while the same commit passed ubuntu-22, macOS, Windows, and the crabbox
+  // Linux suite. Pinning `process.title` (below) makes comm stable, but the row
+  // still does not surface under vitest while an identical standalone probe
+  // finds it — that gap is what RUSH-2508 resolves, along with whether real
+  // node-based agents on Linux hit the same blind spot.
+  const notOnLinux = process.platform === 'linux' ? it.skip : posixOnly;
+  notOnLinux('listUnattributedActive attributes a worktree-cwd process by its live --session-id', async () => {
     // Recreate the incident shape: cwd is a path under .agents/worktrees/<slug>,
     // by-pid is empty, and the process is a bare headless agent.
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'rush-2384-repo-'));
@@ -113,23 +151,29 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
 
     const child = spawnHoldingSessionId(UUID, { cwd: wt });
     const pid = child.pid!;
-    await new Promise((r) => setTimeout(r, 100));
 
-    // Confirm the OS still sees the process as `claude` (comm basename).
-    try {
-      const comm = execFileSync('ps', ['-p', String(pid), '-o', 'comm='], {
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }).trim();
-      // Some platforms report the full path; basename must be claude.
-      expect(path.basename(comm)).toMatch(/^claude/);
-    } catch {
-      // If ps cannot see it yet, the unattributed scan is the real assertion.
-    }
+    // Wait for the OS to report the process as `claude` (comm basename) — that
+    // is the precondition the scan reads, so asserting before it holds tests
+    // the scheduler, not the scan.
+    const comm = await waitFor(() => {
+      try {
+        return execFileSync('ps', ['-p', String(pid), '-o', 'comm='], {
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim();
+      } catch {
+        return undefined;
+      }
+    });
+    // Some platforms report the full path; basename must be claude.
+    expect(path.basename(comm ?? ''), `ps never reported pid ${pid} as an agent process`).toMatch(/^claude/);
 
-    clearActiveScanCachesForTest();
-    const rows = await listUnattributedActive(new Set());
-    const hit = rows.find((r) => r.sessionId === UUID || r.pid === pid);
+    let rows: Awaited<ReturnType<typeof listUnattributedActive>> = [];
+    const hit = await waitFor(async () => {
+      clearActiveScanCachesForTest();
+      rows = await listUnattributedActive(new Set());
+      return rows.find((r) => r.sessionId === UUID || r.pid === pid);
+    });
     expect(hit, `expected active row for ${UUID} / pid ${pid}; got ${rows.map((r) => `${r.pid}:${r.sessionId}`).join(', ')}`).toBeDefined();
     expect(hit!.sessionId).toBe(UUID);
     // cwd should be the worktree path (lsof) when recoverable.
