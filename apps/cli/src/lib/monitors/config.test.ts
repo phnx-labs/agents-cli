@@ -208,8 +208,10 @@ describe('system-layer monitors (built-ins from ~/.agents/.system/monitors/)', (
     expect(found).toBeDefined();
     expect(found!.enabled).toBe(true);
     expect(readMonitor('built-in')?.source.type).toBe('poll');
-    // getMonitorPath resolves into the system dir when only a built-in exists.
-    expect(getMonitorPath('built-in')).toBe(path.join(sysDir, 'built-in.yml'));
+    // getMonitorPath is user-layer only (its caller writes), so a system-only
+    // built-in returns null — `edit` materializes a user copy rather than
+    // opening the pull-only mirror.
+    expect(getMonitorPath('built-in')).toBeNull();
   });
 
   it('(b) a user monitor of the same name shadows the system one', () => {

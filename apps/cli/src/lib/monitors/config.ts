@@ -486,15 +486,17 @@ export function readMonitor(name: string): MonitorConfig | null {
 }
 
 /**
- * Get the filesystem path of a monitor's YAML config, or null if not found.
- * Resolves the user dir before the system dir, matching readMonitor().
+ * Get the filesystem path of a monitor's YAML config in the USER dir, or null.
+ * User-layer only by design — like routines' getJobPath (lib/routines.ts), its
+ * caller (`agents monitors edit`) writes to the returned path, and the system
+ * mirror is pull-only. To edit a system built-in, `edit` materializes a user
+ * copy (prefilled via readMonitor()) rather than opening the mirror.
  */
 export function getMonitorPath(name: string): string | null {
-  for (const { path: dir } of monitorLayers()) {
-    for (const ext of ['.yml', '.yaml']) {
-      const filePath = safeJoin(dir, name + ext);
-      if (fs.existsSync(filePath)) return filePath;
-    }
+  const dir = getMonitorsDir();
+  for (const ext of ['.yml', '.yaml']) {
+    const filePath = safeJoin(dir, name + ext);
+    if (fs.existsSync(filePath)) return filePath;
   }
   return null;
 }

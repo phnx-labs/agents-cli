@@ -64,11 +64,18 @@ function statePath(home: string, name: string): string {
   return path.join(home, '.agents', '.history', 'monitors', name, 'state.json');
 }
 
-function run(home: string, args: string[]): ReturnType<typeof spawnSync> {
+function writeSystemMonitor(home: string, monitor: Record<string, unknown>): void {
+  const dir = path.join(home, '.agents', '.system', 'monitors');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${monitor.name}.yml`), yaml.stringify(monitor));
+}
+
+function run(home: string, args: string[], extraEnv: Record<string, string> = {}): ReturnType<typeof spawnSync> {
   return spawnSync(process.execPath, ['--import', 'tsx', 'src/index.ts', 'monitors', ...args], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
+      ...extraEnv,
       HOME: home,
       // os.homedir() reads USERPROFILE on Windows, so HOME alone leaves the
       // spawned CLI resolving the real profile ('agents-cli is not set up').
@@ -183,4 +190,33 @@ describe('monitors inspection JSON and stderr', () => {
     expect(res.stderr).toContain('Validation errors:');
     expect(res.stderr).toContain("action.type 'run' requires action.prompt");
   });
+
+  // POSIX-only: uses `true` as a no-op $EDITOR; cmd.exe has no equivalent.
+  it.skipIf(process.platform === 'win32')(
+    'edit on a system built-in materializes a user copy and never writes the system mirror',
+    () => {
+      const home = makeHome();
+      const sysFile = path.join(home, '.agents', '.system', 'monitors', 'ci-built-in.yml');
+      // A built-in with no `enabled:` field (opt-in) and no user copy.
+      writeSystemMonitor(home, {
+        name: 'ci-built-in',
+        source: { type: 'poll', command: 'echo hi', interval: '30s' },
+        condition: { mode: 'on-change' },
+        action: { type: 'notify', notifyChannel: 'telegram' },
+      });
+      const sysBefore = fs.readFileSync(sysFile, 'utf-8');
+
+      // `true` ignores its file arg and exits 0, so the editor is a no-op.
+      const res = run(home, ['edit', 'ci-built-in'], { EDITOR: 'true' });
+      expect(res.status).toBe(0);
+
+      // A user copy now exists, prefilled from the built-in's own config.
+      const userFile = path.join(home, '.agents', 'monitors', 'ci-built-in.yml');
+      expect(fs.existsSync(userFile)).toBe(true);
+      expect(yaml.parse(fs.readFileSync(userFile, 'utf-8')).source.command).toBe('echo hi');
+
+      // The system mirror is byte-for-byte untouched.
+      expect(fs.readFileSync(sysFile, 'utf-8')).toBe(sysBefore);
+    },
+  );
 });

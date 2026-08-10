@@ -588,19 +588,28 @@ export function registerMonitorsCommands(program: Command): void {
         name = (await pickMonitor('Select monitor to edit', ['agents monitors edit <name>'])) ?? undefined;
         if (!name) return;
       }
+      // getMonitorPath is user-layer only: edits always land in the user dir,
+      // never the pull-only system mirror. Editing a system built-in (no user
+      // copy yet) materializes one, prefilled with the built-in's own config.
       let monitorPath = getMonitorPath(name);
       if (!monitorPath) {
         const dir = getMonitorsDir();
         fs.mkdirSync(dir, { recursive: true });
         monitorPath = safeJoin(dir, `${name}.yml`);
-        const template = yaml.stringify({
-          name,
-          source: { type: 'poll', command: 'echo hello', interval: '1m' },
-          condition: { mode: 'on-change' },
-          action: { type: 'notify' },
-        });
-        fs.writeFileSync(monitorPath, template, 'utf-8');
-        console.log(chalk.gray(`Created new monitor file: ${monitorPath}`));
+        const builtIn = readMonitor(name);
+        if (builtIn) {
+          fs.writeFileSync(monitorPath, yaml.stringify(builtIn), 'utf-8');
+          console.log(chalk.gray(`Editing a copy of built-in monitor '${name}' in your user dir: ${monitorPath}`));
+        } else {
+          const template = yaml.stringify({
+            name,
+            source: { type: 'poll', command: 'echo hello', interval: '1m' },
+            condition: { mode: 'on-change' },
+            action: { type: 'notify' },
+          });
+          fs.writeFileSync(monitorPath, template, 'utf-8');
+          console.log(chalk.gray(`Created new monitor file: ${monitorPath}`));
+        }
       }
       const editor = process.env.EDITOR || process.env.VISUAL || (IS_WINDOWS ? 'notepad' : 'vi');
       const parts = editor.split(/\s+/).filter(Boolean);
@@ -781,6 +790,10 @@ export function registerMonitorsCommands(program: Command): void {
           signalDaemonReload();
           stderrLine(chalk.gray('Daemon reloaded'));
         }
+      } else if (readMonitor(name)) {
+        // Resolvable but not in the user dir: a pull-only system built-in.
+        stderrLine(chalk.red(`Monitor '${name}' is a built-in and can't be removed; disable it with: agents monitors disable ${name}`));
+        process.exit(1);
       } else {
         stderrLine(chalk.red(`Monitor '${name}' not found`));
         process.exit(1);
