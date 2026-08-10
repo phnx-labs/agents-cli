@@ -1795,13 +1795,18 @@ Credential account selection adds three requirements to that funnel:
   (`lib/account-registry.ts`).
 - **EXEC-ACCOUNT-2 (MUST).** Accounts MUST be created from durable API keys,
   setup tokens, or bearer tokens. A harness version's native OAuth login MUST
-  NOT define account identity (`commands/accounts.ts`).
+  NOT be converted into a provider account or copied between devices; it remains
+  a distinct, device-local native identity (`commands/accounts.ts`).
 - **EXEC-ACCOUNT-3 (MUST).** `agents run --account <name>`, profile `account:`,
-  and routine `account:` MUST use the same provider adapter and fail before spawn
-  when the provider cannot authenticate the host or the credential is absent on
-  the execution device (`lib/account-registry.ts`; `commands/exec.ts`;
-  `lib/profiles.ts`; `lib/runner.ts`). Explicit `--env` remains the final env
-  override. Cloud and lease placement MUST reject device-local accounts.
+  and a routine `account:` that names a provider bundle MUST use the same provider
+  adapter and fail before spawn when the provider cannot authenticate the host or
+  the credential is absent on the execution device. A routine `account:` that
+  names a harness-native identity MUST instead pin the installed version home that
+  owns it and fail before spawn when that identity is unavailable; it MUST NOT
+  rotate or forward the native identity through the provider-account path
+  (`lib/account-registry.ts`; `commands/exec.ts`; `lib/profiles.ts`;
+  `lib/runner.ts`). Explicit `--env` remains the final env override. Cloud and
+  lease placement MUST reject device-local accounts.
 
 Requirement keywords **MUST / MUST NOT / SHOULD / MAY** are used per
 [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119). Every requirement cites the

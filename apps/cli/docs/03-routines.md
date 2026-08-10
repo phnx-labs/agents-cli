@@ -896,33 +896,21 @@ is the one exception — its transcripts live in one incrementally-scanned SQLit
 db (`~/.local/share/opencode/opencode.db`), not a per-session file tree, so
 there's nothing for this mechanism to copy out.
 
-### Claude auth for routines
+### Account auth for routines
 
-A routine is pinned to one account's per-version home:
+A native Claude identity is pinned to its installed version home:
 `buildRoutineSpawnEnv` sets `CLAUDE_CONFIG_DIR` to that home (`runner.ts`), so even
 under the sandbox overlay — which gives the spawn a clean `HOME` — Claude Code
-resolves its credential from `CLAUDE_CONFIG_DIR` rather than the ambient one.
+resolves the credential it owns from `CLAUDE_CONFIG_DIR`. The routine removes an
+ambient `CLAUDE_CODE_OAUTH_TOKEN`; agents-cli neither copies nor converts native
+OAuth material.
 
-**A routine does NOT authenticate the same way an interactive `agents run claude`
-does — the two deliberately diverge.** A routine is headless, so it authenticates
-with that account's long-lived `claude setup-token` from the reserved file-backed
-`auth` bundle, which `runner.ts` resolves and asserts explicitly
-(`resolveClaudeSetupToken` → `out.CLAUDE_CODE_OAUTH_TOKEN`). An **interactive** run
-is left on the home's own on-disk/Keychain login and is never handed that token
-(EXEC-2a in [`specifications.md`](specifications.md)). The split is the point: a
-setup-token never rotates, so a scheduled run cannot land on a sibling home's
-just-rotated-out credential, while a human at a TTY keeps the login they
-established — which is also the only credential carrying the `user:profile` scope
-that usage reads need (RUSH-2392).
-
-What the daemon does **not** hold or forward is an *ambient, shared* Claude token:
-`runner.ts` overwrites `CLAUDE_CODE_OAUTH_TOKEN` with the per-account setup-token
-keyed to the pinned home, and deletes the variable outright when no such token
-resolves — so an inherited value never survives into a routine either way.
-A shared token was the *cause* of the fleet-wide rotation logout, not the fix (see
-"Pinning an account" below). If a routine's pinned account login has gone dead, the
-auth-health preflight (`runner.ts`) skips the run up front with a `re-login required`
-message rather than firing a doomed run.
+A provider account follows the same adapter path as interactive `agents run`: its
+device-local secret bundle supplies the configured API key, setup token, or bearer
+token. The account may be selected explicitly with `account:` or through the
+agent's provider default. A routine preflights the account metadata and secret on
+the firing device before spawn. A missing bundle, mismatched stable identity, or
+incompatible provider/model fails the run rather than rotating to another account.
 
 To bring a signed-out box back, log in on that box once — `agents run claude` (or
 `claude` directly) drives the interactive login and writes the credential the
@@ -951,8 +939,9 @@ Cursor's own workspace-trust prompt and never add `--trust`.
 
 ### Pinning an account (avoid the OAuth-rotation revocation storm)
 
-Left unpinned, a `claude` routine selects its account by the default `balanced`
-strategy — a stateless weighted-random roll (`rotate.ts`) that can land two
+When no provider default is configured, an unpinned `claude` routine selects a
+native identity by the default `balanced` strategy — a stateless weighted-random
+roll (`rotate.ts`) that can land two
 concurrent runs, on one box or across the fleet, on the *same* account. Claude's
 OAuth refresh token is **single-use and rotates server-side on every refresh**, so
 when a second run refreshes an account the first is still holding, the first run's
@@ -981,10 +970,9 @@ account: muqsit@trp.so      # this box's routines all refresh ONE account, no on
 Prefer `account:` over `version:`: a `version:` pin names a version *number* that
 is garbage-collected on the next `claude` upgrade, after which the routine
 silently falls back to `balanced` and the storm returns. Pinning by account
-identity survives version churn. If the named account is not signed in on the box
-at fire time, the run warns and falls back to the strategy rather than refusing —
-so a stale pin degrades to "unpinned", never to "dead". List signed-in accounts
-with `agents view`.
+identity survives version churn. If the named native identity is not signed in on
+the box at fire time, the routine refuses to run rather than rotating to a sibling
+identity. List native and provider accounts with `agents accounts`.
 
 ## Execution Flow
 

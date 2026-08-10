@@ -145,6 +145,14 @@ provider/host pair or a bundle absent from the destination fails before the agen
 process starts. A migrated v2 `accounts.yaml` becomes these bundles transactionally;
 the old registry is archived only after every bundle was written successfully.
 
+Routine `account:` accepts either kind of identity. A provider-bundle name uses the
+same provider adapter and device-local secret as `agents run --account`; when omitted,
+the harness default applies before native balancing. A harness-native login identity
+(for example a Claude login email) pins the installed version home that owns it and
+is never copied or converted into a provider bundle. Missing native pins, mismatched
+`version:` pins, missing provider bundles, and incompatible providers all fail before
+spawn instead of rotating to another identity.
+
 Usage and authentication health are device-local read models owned by the
 agents-cli daemon. Every ordinary consumer (`agents run`, `view`, `versions`,
 `teams`, device inventory, and Factory) reads the same persisted snapshots and
