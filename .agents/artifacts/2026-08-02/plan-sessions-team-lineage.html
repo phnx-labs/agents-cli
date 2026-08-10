@@ -514,7 +514,7 @@ installed binary — not <code>./bin</code>.</p>
 agents sessions --device workstation
 
 <span class="c"># 2. an offline box reads "unreachable", not "no matches"</span>
-agents sessions --device gpu-box
+agents sessions --device [worker]
 
 <span class="c"># 3. legacy paths untouched</span>
 agents sessions --device workstation --json | jq length

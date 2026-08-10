@@ -592,8 +592,8 @@ Median of three runs on this box; the fleet column is the default SSH fan-out ac
 </table>
 <p>Three things fall out of the measurement. Every surface is <b>sub-4 s locally</b> and multiplies
 <b>3–7×</b> under fan-out — the tail is remote work, not the local read. The fan-out is
-<b>partition-safe in practice</b>: on these runs three boxes (<code>bismas-macbook-pro</code>,
-<code>winbox</code>, <code>gpu-box</code>) were unreachable and were <em>skipped</em>, not waited on —
+<b>partition-safe in practice</b>: on these runs three boxes (<code>[worker-1]</code>,
+<code>[worker-2]</code>, <code>[worker-3]</code>) were unreachable and were <em>skipped</em>, not waited on —
 the live proof of §08's point that a dead or slow box contributes zero rows and never blocks the view.
 And the surfaces differ in what fan-out even means: the <b>mailbox spool has no built-in fan-out</b> —
 the <code>mailboxes</code> command takes no <code>--host</code>, so a peer's box is reached with

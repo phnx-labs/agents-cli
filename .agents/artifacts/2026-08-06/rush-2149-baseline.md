@@ -27,7 +27,7 @@ That's CLI boot (~97 ms) + the daemon-probe/IPC-connect path
 independent of whether a daemon exists to answer. Confirms: the persistent-client
 fix needs to eliminate the boot, not just speed up CDP dispatch.
 
-## pinnacles (macos, load avg ~3, Comet daemon live) — clean baseline, closest to ticket conditions
+## [worker] (macos, load avg ~3, Comet daemon live) — clean baseline, closest to ticket conditions
 
 | Layer | Median (n=5) | Raw (ms) |
 | --- | --- | --- |
@@ -58,7 +58,7 @@ workstation is under real load right now (fleet snapshot at session start: 1058%
 confirmed by `uptime` load averages 112-136). Absolute numbers here are inflated
 by host contention, not representative of the ticket's original "warm, idle"
 measurement — kept for the record and because the after-fix run should also land
-on workstation for an apples-to-apples same-host comparison, but **pinnacles is the more
+on workstation for an apples-to-apples same-host comparison, but **[worker] is the more
 credible reference baseline** for the loop shape.
 
 ## Takeaways for the fix
@@ -67,8 +67,8 @@ credible reference baseline** for the loop shape.
    **no CDP work and (on worker-s1) no daemon at all** still costs ~245-266 ms —
    confirms the fat is CLI boot + IPC/daemon-probe path, not the CDP op.
 2. The persistent-client fix should be benchmarked on the **same host** as its
-   baseline (host load swings the absolute numbers by 2-3x here); pinnacles
+   baseline (host load swings the absolute numbers by 2-3x here); [worker]
    (idle, Comet daemon live) is the cleanest host available on this fleet right
    now for a same-host before/after.
 3. Re-run `apps/cli/scripts/bench-browser-loop.sh` against Codex's branch on
-   pinnacles once a PR/branch exists, using the same `rush2149-bench` task.
+   [worker] once a PR/branch exists, using the same `rush2149-bench` task.

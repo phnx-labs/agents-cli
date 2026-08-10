@@ -77,10 +77,10 @@ This confirms the account resolver supplied a valid OpenRouter credential to a r
 
 ## Cross-device result
 
-The installed CLI copied that disposable account to `yosemite-s0`:
+The installed CLI copied that disposable account to `[worker]`:
 
 ```text
-rush-2470-demo synced to yosemite-s0 (5 keys, file backend, policy never).
+rush-2470-demo synced to [worker] (5 keys, file backend, policy never).
 ```
 
 Remote inspection confirmed the intended schema survived transport:
