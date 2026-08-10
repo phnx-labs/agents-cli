@@ -506,8 +506,11 @@ describe('agents.yaml device-local split (routing + read overlay)', () => {
       import * as fs from 'fs';
       import { writeMeta, readMeta } from ${JSON.stringify(moduleUrl)};
       const p = process.env.HOME + '/.agents/agents.yaml';
-      fs.writeFileSync(p, ['# keep this comment', 'projectRoot: /old/path', ''].join('\\n'));
-      writeMeta({ ...readMeta(), projectRoot: '/new/path' });
+      // Use a field that STAYS central. projectRoot moved to the per-machine doc
+      // (it is an inferred local path), so updating it here would delete it from
+      // this file along with the comment attached to it — testing the wrong thing.
+      fs.writeFileSync(p, ['# keep this comment', 'source: /old/path', ''].join('\\n'));
+      writeMeta({ ...readMeta(), source: '/new/path' });
       const after = fs.readFileSync(p, 'utf8');
       console.log(JSON.stringify({
         commentSurvived: after.includes('keep this comment'),

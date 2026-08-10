@@ -58,7 +58,10 @@ describe('user-scope keys (interactive.host)', () => {
   });
 
   it('keeps hand-written comments in central agents.yaml when setting config', async () => {
-    writeCentral('# my hand-written note\nprojectRoot: ~/src\n# another comment\n');
+    // Anchor on a key that STAYS central. A leading comment belongs to the key
+    // it precedes, so anchoring on one that moves machine-local (projectRoot did)
+    // would delete the comment with it and test the wrong thing.
+    writeCentral('# my hand-written note\nnotify:\n  owner:\n    channel: imessage\n    to: me\n# another comment\n');
     const { setConfigValue } = await freshModules();
 
     setConfigValue('interactive.host', 'zion');
@@ -66,8 +69,22 @@ describe('user-scope keys (interactive.host)', () => {
     const central = readCentral();
     expect(central).toContain('# my hand-written note');
     expect(central).toContain('# another comment');
-    expect(central).toContain('projectRoot: ~/src');
+    expect(central).toContain('channel: imessage');
     expect(central).toContain('interactiveHost: zion');
+  });
+
+  it('moves projectRoot out of the shared file on the next write', async () => {
+    // projectRoot is inferred from whatever directory the CLI happened to run in
+    // (lib/project-root.ts), so it is machine state, not fleet policy. It now
+    // lives in this machine's own doc and is dropped from the synced file.
+    writeCentral('projectRoot: ~/src\n');
+    const { setConfigValue, readMeta } = await freshModules();
+
+    setConfigValue('interactive.host', 'zion');
+
+    expect(readCentral()).not.toContain('projectRoot');
+    // ...and the value itself is not lost — it is read back from the device doc.
+    expect(readMeta().projectRoot).toBe('~/src');
   });
 });
 
