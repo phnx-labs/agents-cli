@@ -609,6 +609,21 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     }
     const scopeLabel = repoScope ? chalk.gray(` (repo: ${repoScope})`) : '';
     if (!json) outLog(chalk.cyan(`Syncing ${installed.length} ${agentLabel(agentId)} version(s)${scopeLabel}.`));
+    if (opts.dryRun) {
+      if (!quiet && !json) {
+        console.log(chalk.cyan(`Dry run — would sync ${agentLabel(agentId)} (${installed.length} version(s))${scopeLabel}:`));
+        if (selection) {
+          for (const [k, v] of Object.entries(selection) as [string, string[] | 'all'][]) {
+            const names = v === 'all' ? chalk.gray('(all)') : v.join(', ');
+            console.log(chalk.gray(`  ${k}: ${names}`));
+          }
+        } else {
+          console.log(chalk.gray('  (all resources)'));
+        }
+      }
+      if (json) emitJson({ ok: true, mode: 'dry-run', agent: agentId, repo: repoScope, versions: installed, selection: selection ?? 'all' });
+      return;
+    }
     const versions: Array<{ version: string; result: SyncResult }> = [];
     for (const v of installed) {
       // A repo scope makes @all a full reconcile of that repo → prune resources
@@ -801,6 +816,21 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   }
 
   // ---------- 5. Run sync ----------
+  if (opts.dryRun) {
+    if (!quiet && !json) {
+      console.log(chalk.cyan(`Dry run — would sync into ${agentLabel(agentId)}@${version}${repoScope ? ` (repo: ${repoScope})` : ''}:`));
+      if (selection) {
+        for (const [k, v] of Object.entries(selection) as [string, string[] | 'all'][]) {
+          const names = v === 'all' ? chalk.gray('(all)') : v.join(', ');
+          console.log(chalk.gray(`  ${k}: ${names}`));
+        }
+      } else {
+        console.log(chalk.gray('  (all resources)'));
+      }
+    }
+    if (json) emitJson({ ok: true, mode: 'dry-run', agent: agentId, version, repo: repoScope, selection: selection ?? 'all' });
+    return;
+  }
   const result = syncResourcesToVersion(agentId, version, selection, { projectDir, cwd, force, allowExecSurfaces: !!opts.allowExecSurfaces });
 
   // Compile project-scope rules into the workspace itself so each agent's
