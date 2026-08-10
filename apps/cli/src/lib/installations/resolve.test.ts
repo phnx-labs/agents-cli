@@ -78,7 +78,7 @@ describe('resolveInstallation', () => {
     await expect(resolve.resolveInstallation('claude', '2.0.65')).rejects.toThrow(
       /matches 2 .* installations/
     );
-    await expect(resolve.resolveInstallation('claude', '2.0.65')).rejects.toThrow(/--account/);
+    await expect(resolve.resolveInstallation('claude', '2.0.65')).rejects.toThrow(/installation label/);
   });
 
   it('with no selector takes the sole installation', async () => {

@@ -1,6 +1,6 @@
 /**
  * The `agents update` surface. Pins the command shape agents and scripts call
- * (`<agent>@<installed-version>`, `--to`, `--account`, `--json`) and the two
+ * (`<agent>@<installed-version>`, `--to`, `--json`) and the two
  * boundaries where a wrong answer is worse than an error: naming an agent that
  * cannot be pinned, and naming an installation that does not exist.
  */
@@ -64,7 +64,7 @@ describe('agents update', () => {
     const update = (await program()).commands.find((c) => c.name() === 'update');
     expect(update).toBeDefined();
     const flags = update!.options.map((o) => o.long);
-    expect(flags).toEqual(expect.arrayContaining(['--to', '--account', '--json']));
+    expect(flags).toEqual(expect.arrayContaining(['--to', '--json']));
     expect(update!.commands.map((c) => c.name())).toContain('list');
   });
 
@@ -78,7 +78,7 @@ describe('agents update', () => {
 
     const help = root.commands.find((c) => c.name() === 'update')!.helpInformation();
     expect(help).toContain('agents update claude@2.0.65 --to 2.1.220');
-    expect(help).toContain('--account');
+    expect(help).not.toContain('--account');
   });
 
   it('rejects an unknown agent by name', async () => {
@@ -111,7 +111,7 @@ describe('agents update', () => {
     const result = await run(['update', 'claude@2.1.220']);
     expect(result.err).toContain('1.0.0 (release 2.1.220)');
     expect(result.err).toContain('1.0.1 (release 2.1.220)');
-    expect(result.err).toContain('--account');
+    expect(result.err).toContain('installation label');
     expect(result.exitCode).toBe(1);
   });
 

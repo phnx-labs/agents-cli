@@ -1,4 +1,3 @@
-import { resolveAccountLabel } from '../account-labels.js';
 import { AGENTS } from '../agents.js';
 import { getGlobalDefault } from '../versions.js';
 import type { AgentId } from '../types.js';
@@ -44,7 +43,7 @@ export class InstallationAmbiguousError extends Error {
     super(
       `'${selector ?? agent}' matches ${candidates.length} ${AGENTS[agent].name} installations `
       + `(${candidates.map((i) => describeInstallation(i)).join(', ')}). `
-      + `Name one by its installation label, or disambiguate with --account <label>.`
+      + `Select one by its installation label.`
     );
     this.name = 'InstallationAmbiguousError';
   }
@@ -82,11 +81,7 @@ export async function resolveInstallation(
 
   let candidates = all;
   if (options.account) {
-    // resolveAccountLabel answers with the version-dir label of the install that
-    // is signed into that account — i.e. an installation label.
-    const label = await resolveAccountLabel(agent, options.account);
-    candidates = candidates.filter((i) => i.label === label);
-    if (candidates.length === 0) throw new InstallationNotFoundError(agent, selector, all);
+    throw new Error("--account no longer selects an installation. Account names are durable credentials used by 'agents run --account'; select the installation by its label instead.");
   }
 
   if (selector) {

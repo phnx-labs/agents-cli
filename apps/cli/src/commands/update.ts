@@ -16,7 +16,6 @@ import type { AgentId } from '../lib/types.js';
 
 interface UpdateOptions {
   to?: string;
-  account?: string;
   json?: boolean;
 }
 
@@ -105,7 +104,6 @@ export function registerUpdateCommand(program: Command): void {
     .command('update [target]')
     .description('Move a frozen agent installation to a new release, keeping its name and every reference to it')
     .option('--to <release>', 'Release to move to: latest (default), oldest, or an exact version')
-    .option('--account <label>', 'Disambiguate by signed-in account when several installations match')
     .option('--json', 'Machine-readable result')
     .action(async (target: string | undefined, options: UpdateOptions) => {
       try {
@@ -122,7 +120,7 @@ export function registerUpdateCommand(program: Command): void {
           );
         }
 
-        const installation = await resolveInstallation(agent, selector, { account: options.account });
+        const installation = await resolveInstallation(agent, selector);
         const strategy = selectUpdateStrategy(agent);
         if (!options.json && !strategy.transactional) {
           console.log(chalk.yellow(
@@ -165,13 +163,12 @@ export function registerUpdateCommand(program: Command): void {
     examples: `agents update list claude
 agents update claude@2.0.65
 agents update claude@2.0.65 --to 2.1.220
-agents update claude --account work
 agents update claude@2.0.65 --json`,
     notes:
       'An installation keeps its name for life; only the release inside it moves. That is why a default, a project pin, '
       + 'a routine version, or a profile that names claude@2.0.65 keeps working after you update it. '
       + 'The selector matches either the installation name or the release it currently carries — when two installations '
-      + 'share a release, name one or pass --account <label> (see: agents accounts). '
+      + 'share a release, select one by its installation name. '
       + 'The new release is fetched and launched before it replaces the working one, so a bad release leaves your agent running.',
   });
 }
