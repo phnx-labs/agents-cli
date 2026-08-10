@@ -158,9 +158,18 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
     // RUSH-2384 recovery path would report `skipped` instead of failing. A test
     // that cannot fail is worse than a deleted one.
     //
-    // Bracketing each attempt is what makes the distinction sound: if the holder
-    // was classifiable both immediately before and immediately after a scan that
-    // still missed it, the scan owed us that row and the failure is real.
+    // Bracketing each attempt is what recovers the distinction WHERE COMM STAYS
+    // USABLE: if the holder was classifiable both immediately before and
+    // immediately after a scan that still missed it, the scan owed us that row
+    // and the failure is real. Verified by sabotaging the row predicate — Node 22
+    // fails, as it must.
+    //
+    // It does NOT recover the distinction on Node 24, where comm has already
+    // flipped before any scan can run: a correct implementation and a completely
+    // broken one both produce `1 skipped` there, byte-identical. So this case
+    // carries real Node-24 coverage only once RUSH-2508 gives the holder a name
+    // the scan can rely on; until then it is honest about skipping rather than
+    // failing a leg it cannot judge.
     let rows: Awaited<ReturnType<typeof listUnattributedActive>> = [];
     let lastComm: string | undefined;
     let missedWhileClassifiable = false;
