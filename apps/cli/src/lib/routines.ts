@@ -36,7 +36,6 @@ import {
   routineEnabledOnThisDevice,
   setRoutineEnabledOnThisDevice,
 } from './routine-activation.js';
-import { builtinRoutineJobs, builtinRoutineJob } from './builtin-routines.js';
 
 /** Tool/site/directory allow-list for sandboxed job execution. */
 export interface JobAllowConfig {
@@ -334,21 +333,6 @@ export interface JobConfig {
    * - Absent/empty — routine belongs to no project ("Operations" group).
    */
   projects?: string[];
-  /**
-   * True for a daemon-owned built-in routine (`builtin-routines.ts`, RUSH-2465):
-   * the definition lives in daemon code, not in a `~/.agents/routines/` file or
-   * the `.agents-system` config repo. Synthesized by `listJobs()`/`readJob()` as
-   * the lowest definition layer, so a same-named on-disk file shadows it.
-   *
-   * It does not affect scheduling, firing, activation, or device pinning (a
-   * built-in is scheduled/pinned exactly like any other routine), but it DOES
-   * gate two behaviors: `overdue.ts` skips built-ins for catch-up, and
-   * `agents routines list` tags them `(built-in)`. Because of that, this is a
-   * SYNTHESIZED-only marker that must never be persisted to a file — `writeJob`
-   * and the `edit` command strip it, so a routine that has a real on-disk file
-   * always reads `builtin: undefined`.
-   */
-  builtin?: boolean;
 }
 
 /**
@@ -794,19 +778,16 @@ function overlayUserRoutineDevices(job: JobConfig, userJob: JobConfig | null): J
 }
 
 /**
- * List all job configs, scanning project > user > system routine dirs, then the
- * daemon-owned built-in routines as the lowest layer (RUSH-2465).
+ * List all job configs, scanning project > user > system routine dirs.
  * Higher layers shadow lower ones of the same name (first-seen wins): a project
- * routine shadows a user routine, a user routine shadows a system routine
- * (`~/.agents/.system/routines/`, shipped via gh:phnx-labs/.agents-system), and
- * any of those shadows a daemon-owned built-in (`builtin-routines.ts`).
+ * routine shadows a user routine, and a user routine shadows a system routine
+ * (`~/.agents/.system/routines/`, shipped via gh:phnx-labs/.agents-system).
  * When a same-name project routine wins for inspection, the user-layer
  * `devices` allowlist is overlaid only if the project routine does not declare
  * its own allowlist, so CWD project discovery cannot hide an operational fleet
  * pin or erase a project-authored one.
  * Project discovery is opt-in via `cwd`; the daemon (which calls `listJobs()`
- * with no argument) sees user + system + built-in routines, so a built-in routine
- * fires for every install unless the user overrides or disables it by name.
+ * with no argument) sees user + system routines.
  */
 export function listJobs(cwd?: string): JobConfig[] {
   ensureAgentsDir();
@@ -837,16 +818,6 @@ export function listJobs(cwd?: string): JobConfig[] {
     }
   }
 
-  // Daemon-owned built-in routines are the LOWEST layer (RUSH-2465): a
-  // same-named on-disk file (project/user/system, e.g. a `.agents-system` YAML
-  // still shipped during the removal transition, or a user override) already
-  // won above and shadows the built-in, so exactly one definition ever fires.
-  for (const job of builtinRoutineJobs()) {
-    if (seen.has(job.name)) continue;
-    seen.add(job.name);
-    jobs.push(job);
-  }
-
   return jobs.map(applyDeviceActivation);
 }
 
@@ -856,8 +827,7 @@ export function listJobs(cwd?: string): JobConfig[] {
  * the project routine does not declare its own allowlist, for the same reason
  * as listJobs().
  * Project discovery is opt-in via `cwd`; daemon callers pass no argument and
- * resolve user + system routines (a user routine of the same name shadows a
- * built-in system routine).
+ * resolve user + system routines.
  */
 export function readJob(name: string, cwd?: string): JobConfig | null {
   ensureAgentsDir();
@@ -877,9 +847,6 @@ export function readJob(name: string, cwd?: string): JobConfig | null {
       return applyDeviceActivation(job);
     }
   }
-  // No on-disk file shadows it: fall back to the daemon-owned built-in (RUSH-2465).
-  const builtin = builtinRoutineJob(name);
-  if (builtin) return applyDeviceActivation(builtin);
   return null;
 }
 
@@ -1008,12 +975,6 @@ export function writeJob(config: JobConfig): void {
   if (output.runOnce === false || output.runOnce === undefined) delete output.runOnce;
   if (output.catchup === true || output.catchup === undefined) delete output.catchup;
   delete output.devices;
-  // `builtin` is a synthesized provenance marker (RUSH-2465), never a persisted
-  // field: a JobConfig loaded from `readJob()` for one of the daemon-owned
-  // built-ins carries `builtin: true`, and writing it to a real file would make
-  // that now-file-backed routine read as a built-in forever — silently disabling
-  // its overdue/catch-up (`overdue.ts`) and showing a false `(built-in)` tag.
-  delete output.builtin;
   // Persist projects in canonical form: deduplicated, first-seen order, field
   // omitted when nothing survives. This is the schema boundary, so a routine
   // written from any path (add, edit, enable/disable re-write) lands canonical
@@ -1096,16 +1057,10 @@ export function setJobEnabled(name: string, enabled: boolean): void {
 /** Materialize legacy definition state into this device's activation manifest. */
 export function migrateLegacyRoutineActivation(): boolean {
   if (enabledRoutineNames() !== null) return false;
-  // Legacy activation migration is about preserving FILE-BACKED routines' old
-  // `enabled:`/`devices:` state into the device manifest. Daemon-owned built-ins
-  // (RUSH-2465) are always-enabled and carry no legacy state, so they must NOT
-  // trigger materialization on their own — otherwise a box with zero user
-  // routines (a portable-only migration) would spuriously grow a device manifest
-  // just because the built-ins are present in `listJobs()`. They are seeded into
-  // an already-materialized manifest separately by `addEnabledRoutinesOnUpgrade`
-  // (migrate.ts), so excluding them here keeps built-ins enabled after upgrade
-  // while leaving a routine-less box's manifest uncreated.
-  const jobs = listJobs().filter((job) => !job.builtin);
+  // Legacy activation migration preserves FILE-BACKED routines' old
+  // `enabled:`/`devices:` state into the device manifest. A box with zero
+  // routines never grows a manifest here (nothing enabled or pinned to seed).
+  const jobs = listJobs();
   if (!jobs.some((job) => job.enabled || Array.isArray(job.devices))) return false;
   replaceEnabledRoutines(
     jobs.filter((job) => job.enabled && jobRunsOnThisDevice(job)).map((job) => job.name),

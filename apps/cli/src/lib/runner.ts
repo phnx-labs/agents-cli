@@ -806,9 +806,9 @@ function shSingleQuote(s: string): string {
 /**
  * Build a POSIX shell function that forwards `agents <sub...>` to the SAME binary
  * currently running. Command routines shell out to the bare name `agents`
- * (`agents __daemon-tick usage-refresh`); without this, the routine resolves
- * `agents` through its inherited PATH, which can pick up a stale install in an
- * nvm/system Node prefix that shadows the current binary (RUSH-2431).
+ * (e.g. `agents repo pull system`); without this, the routine resolves `agents`
+ * through its inherited PATH, which can pick up a stale install in an nvm/system
+ * Node prefix that shadows the current binary (RUSH-2431).
  *
  * Uses getCliLaunch so the relaunch is correct for both JS installs
  * (`node <entry> <sub...>`) and compiled standalone binaries (`<bin> <sub...>`).

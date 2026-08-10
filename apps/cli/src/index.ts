@@ -16,7 +16,6 @@
  *   - `__secrets-get` / `__secrets-ping` / `__secrets-lock` (SYNC_* tokens)
  *   - `__shim`
  *   - `__daemon-run`
- *   - `__daemon-tick`
  *
  * The tokens are imported from the leaf module sync-commands.ts — the SAME
  * bindings the clients spawn with, so this dispatch and those spawns cannot
@@ -109,22 +108,6 @@ if (process.argv[2] === '__daemon-run') {
     crash('startup failure')(err);
   }
   process.exit(process.exitCode ?? 0);
-}
-
-// One-shot invocation of a migrated daemon housekeeping tick (RUSH-2353). The
-// shipped system routines (`watchdog`, `device-probe`, `fleet-cache-warm`, ...)
-// run this as their `command:` instead of the daemon holding a setInterval —
-// same tick body, now scheduled/tracked/pinnable through the routines system.
-if (process.argv[2] === '__daemon-tick') {
-  const name = process.argv[3] || '';
-  const { runDaemonTick } = await import('./lib/daemon-ticks.js');
-  try {
-    await runDaemonTick(name);
-    process.exit(0);
-  } catch (err) {
-    process.stderr.write(`[agents] daemon tick '${name}' failed: ${(err as Error).message}\n`);
-    process.exit(1);
-  }
 }
 
 // Full CLI: commander tree, update checks, migrations, parse. Static imports
