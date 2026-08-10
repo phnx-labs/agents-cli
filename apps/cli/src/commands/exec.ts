@@ -785,7 +785,7 @@ export function registerRunCommand(program: Command): void {
       '--strategy <strategy>',
       'Version/account selection strategy: pinned | available | balanced. Defaults to run.<agent>.strategy, then balanced (spreads load across healthy accounts and skips any that are rate-limited). (Legacy `rotate` accepted as alias for `balanced`.)',
     )
-    .option('--account <label>', 'Run a healthy installed version currently signed into this named account (never falls back to another identity)')
+    .option('--account <name>', 'Use this durable provider credential for the run')
     .option(
       '--acp',
       'Route through the Agent Client Protocol instead of direct exec. Supported for claude via @zed-industries/claude-code-acp adapter. Unified event stream; emits ndjson when --json.',
@@ -2169,7 +2169,7 @@ export function registerRunCommand(program: Command): void {
       const [
         { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, implicitModeFor, headlessPlanStallCommand, nativeResume, resolveInteractive, inferredInteractiveWithoutTty },
         { ALL_AGENT_IDS, ACCOUNT_INSPECTION_AGENT_IDS, agentLabel, supportsAccountInspection },
-        { profileExists, resolveProfileForRun },
+        { profileExists, readProfile, resolveProfileForRun },
         { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported },
         { splitBundleRef, resolveHostSshTarget, remoteResolveEnv },
         { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES, collectHarnessCandidates, pickHarnessWeighted, classifyHarnessCandidates, formatHarnessPickBanner, formatNoHealthyHarnessError, formatNoHealthyAccountError, signInRecoverableCandidates },
@@ -2202,6 +2202,8 @@ export function registerRunCommand(program: Command): void {
       let agent: AgentId;
       let version: string | undefined = rawVersion || undefined;
       let profileEnv: Record<string, string> | undefined;
+      let accountEnv: Record<string, string> | undefined;
+      let profileProvider: string | undefined;
       let fromProfile = false;
       let profileFallbackModel: { envKey: string; model: string } | undefined;
       let workflowModel: string | undefined;
@@ -2288,6 +2290,7 @@ export function registerRunCommand(program: Command): void {
           agent = resolved.agent;
           if (!version) version = resolved.version;
           profileEnv = resolved.env;
+          profileProvider = readProfile(rawAgent).provider;
           profileFallbackModel = resolved.fallbackModel;
           fromProfile = true;
           process.stderr.write(chalk.gray(`Resolved custom harness '${resolved.profileName}' -> ${agent}${version ? `@${version}` : ''}\n`));
@@ -2555,11 +2558,11 @@ export function registerRunCommand(program: Command): void {
 
       if (options.account) {
         if (options.cloud || options.provider || options.lease) {
-          console.error(chalk.red('--account selects a local installed identity and cannot be combined with cloud or lease placement.'));
+          console.error(chalk.red('--account selects a device-local credential and cannot be combined with cloud or lease placement.'));
           process.exit(1);
         }
-        const { resolveAccountLabel } = await import('../lib/account-labels.js');
-        try { const selected = await resolveAccountLabel(agent, options.account); if (version && version !== selected) throw new Error(`${agent}@${version} is not a healthy match for account '${options.account}'.`); version ??= selected; }
+        const { resolveCredentialAccount } = await import('../lib/account-registry.js');
+        try { accountEnv = resolveCredentialAccount(options.account, agent, profileProvider).env; }
         catch (err) { console.error(chalk.red((err as Error).message)); process.exit(1); }
       }
 
@@ -3073,14 +3076,14 @@ export function registerRunCommand(program: Command): void {
         ? shareRuntimeEnv()
         : undefined;
 
-      // Merge order (later wins): profile env < auto share token < secrets bundles < --env K=V.
+      // Merge order (later wins): profile env < selected account < auto share token < secrets bundles < --env K=V.
       // Profile carries provider auth; secrets bundles carry user-defined
       // values; --env is the per-invocation override. The share token is
       // best-effort: if it is not already in env or an unlocked bundle, unrelated
       // runs keep working, and `agents share` itself still fails loudly on use.
-      const hasOverrides = profileEnv || autoShareEnv || options.secrets.length > 0 || userEnv;
+      const hasOverrides = profileEnv || accountEnv || autoShareEnv || options.secrets.length > 0 || userEnv;
       const env: Record<string, string> | undefined = hasOverrides
-        ? { ...(profileEnv ?? {}), ...(autoShareEnv ?? {}), ...secretsEnv, ...(userEnv ?? {}) }
+        ? { ...(profileEnv ?? {}), ...(accountEnv ?? {}), ...(autoShareEnv ?? {}), ...secretsEnv, ...(userEnv ?? {}) }
         : undefined;
 
       const modelSource = runCmd.getOptionValueSource('model');
