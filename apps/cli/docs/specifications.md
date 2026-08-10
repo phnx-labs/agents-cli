@@ -1206,7 +1206,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
   remaining `agents secrets export` variants (`--plaintext`, `--to-file`,
   `--to-1password`) MUST stay `agentOnly: true` **unconditionally** and MUST NOT
   prompt even at an interactive terminal (`commands/secrets.ts:1642`, `:2293`,
-  `:2360`, `:2399`) — prompting there would either dump plaintext onto a visible
+  `:2360`, `:2402`) — prompting there would either dump plaintext onto a visible
   screen (`export --plaintext`, which prints) or block a `$(…)` capture
   mid-pipeline (`get`). `export --host` is on the human side because neither hazard
   applies: it prints a key COUNT, never a value, and nothing captures its stdout,
@@ -1448,8 +1448,8 @@ and `export --host` inject yet CAN prompt interactively, while `export
 | `secrets export --to-1password` / `--to-file` | **Neither** (to `op` argv / AES file) | never | `commands/secrets.ts:2360,2293` |
 | `secrets mcp` (`get_secret`) | **JIT, per-request** — never `process.env`, names-only in `tools/list` | never | `lib/secrets/mcp.ts` |
 | `secrets export --plaintext` | **Materialize** | never (automation primitive) | `commands/secrets.ts:2399,2402` |
-| `secrets view --reveal` | **Materialize** | **interactive TTY only** (SEC-13b) | `commands/secrets.ts:1498,1500` |
-| `secrets get [b] [KEY]` | **Materialize** (automation primitive, ungated) | never | `commands/secrets.ts:1593` |
+| `secrets view --reveal` | **Materialize** | **interactive TTY only** (SEC-13b) | `commands/secrets.ts:1546,1549` |
+| `secrets get [b] [KEY]` | **Materialize** (automation primitive, ungated) | never | `commands/secrets.ts:1642` |
 | `list` / `view` (default) / all CRUD / `unlock` / `lock` / `status` / `push` / `pull` | **Neither** (metadata/status/counts only) | only `unlock` prompts | e.g. `commands/secrets.ts` list/view/unlock |
 
 Rule of thumb (normative): **if `--plaintext`, `--reveal`, or `get` appears in an

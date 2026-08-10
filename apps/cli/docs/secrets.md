@@ -18,7 +18,7 @@ The sheet is raised only by a deliberate human request on a **locked** bundle:
 exec`, or an `agents secrets export --host` you run **at a real interactive
 terminal** (a TTY, outside any agent runtime) — one sheet, then the value is
 revealed / the command runs / the bundle is pushed. `agents secrets get` and the
-value-emitting `agents secrets export` variants (`--plaintext`, `--to-file`,
+automation-primitive `agents secrets export` variants (`--plaintext`, `--to-file`,
 `--to-1password`) **never raise the sheet at all**, in any shell: they are
 automation primitives (`$(agents secrets get …)`, `eval "$(agents secrets export …
 --plaintext)"`), so a locked bundle fails fast toward `agents secrets unlock
@@ -42,7 +42,7 @@ Which `agents secrets` commands can raise a biometric sheet, and when:
 | any command on an already-unlocked bundle | never prompts — the broker fast-path returns before Keychain is touched |
 
 The rule: a **deliberate human reveal/run/push** (`view --reveal`, `exec`,
-`export --host`) at a terminal gets one sheet; the **value-emitting automation
+`export --host`) at a terminal gets one sheet; the **automation
 primitives** (`get`, `export --plaintext` / `--to-file` / `--to-1password`) never
 do, because prompting would either dump plaintext onto a visible screen or block a
 `$(…)` capture mid-pipeline. Everything an **agent** launches stays broker-only.
