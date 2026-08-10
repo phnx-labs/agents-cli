@@ -283,7 +283,7 @@ export async function addProfile(name: string, opts: AddProfileOptions, label: '
         'Or build a custom harness: --host <agent> --model <id>.',
     );
   }
-  if (!opts.fromSecrets && !preset.authOptional) {
+  if (!account && !opts.fromSecrets && !preset.authOptional) {
     await ensureProviderToken(preset.provider, preset.signupUrl, opts.keyStdin);
   }
   const profile = profileFromPreset(name, preset, opts.version);

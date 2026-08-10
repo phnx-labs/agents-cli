@@ -8,7 +8,7 @@ import { readProfile, resolveProfileForRun } from '../lib/profiles.js';
 import { setKeychainBackendForTest, secretsKeychainItem, getKeychainToken, type KeychainBackend } from '../lib/secrets/index.js';
 import { keychainItemName } from '../lib/secrets/profiles.js';
 import { writeBundleWithItems, keychainRef } from '../lib/secrets/bundles.js';
-import { findAccount } from '../lib/account-registry.js';
+import { addAccount, findAccount } from '../lib/account-registry.js';
 
 let TEST_ROOT: string;
 let USER_DIR: string;
@@ -86,6 +86,18 @@ describe('addProfile — --from-secrets threading (host + model path)', () => {
 });
 
 describe('addProfile — --from-secrets threading (preset path)', () => {
+  it('uses a durable account without acquiring the preset legacy token', async () => {
+    const account = addAccount('openrouter-work', 'openrouter', 'api-key', 'sk-account-secret', USER_DIR);
+
+    await expect(
+      addProfile('kimi-account', { preset: 'kimi', account: 'openrouter-work' }, 'Harness'),
+    ).resolves.toBeUndefined();
+
+    const profile = readProfile('kimi-account');
+    expect(profile.account).toBe(account.id);
+    expect(profile.provider).toBe('openrouter');
+  });
+
   it('skips the interactive key prompt entirely — a preset that normally requires auth still succeeds non-interactively', async () => {
     // 'kimi' is not authOptional, so without --from-secrets this would call
     // ensureProviderToken -> promptForSecret, which throws outside a TTY. A
