@@ -74,7 +74,7 @@ async function replay(chunks: string[]) {
 function expectScanParity(inc: any, full: any) {
   expect(inc).toEqual(full);
   const fields = [
-    'sessionId', 'timestamp', 'cwd', 'gitBranch', 'version', 'topic',
+    'sessionId', 'timestamp', 'cwd', 'gitBranch', 'version', 'model', 'topic',
     'messageCount', 'tokenCount', 'outputTokens', 'costUsd', 'durationMs',
     'lastActivity', 'contentText', 'prUrl', 'prNumber', 'worktreeSlug',
     'ticketId', 'createdTickets', 'spawnedTeam', 'todos', 'recentDirectoriesTouched',
@@ -173,6 +173,34 @@ describe('codex incremental parity — straddled two-event patterns', () => {
     ]);
     const { inc, full } = await replay([chunkA, chunkB]);
     expect(inc.spawnedTeam).toBe('my-feature');
+    expectScanParity(inc, full);
+  });
+});
+
+describe('codex incremental parity — turn_context metadata fallback', () => {
+  it('extracts model from turn_context when session_meta omits it', async () => {
+    const chunkA = jsonl([
+      { type: 'session_meta', timestamp: '2026-06-28T00:00:00.000Z', payload: { id: 's', cwd: '/x' } },
+      { type: 'response_item', timestamp: '2026-06-28T00:01:00.000Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hello' }] } },
+    ]);
+    const chunkB = jsonl([
+      { type: 'turn_context', timestamp: '2026-06-28T00:02:00.000Z', payload: { model: 'gpt-5.6-sol', cwd: '/y' } },
+    ]);
+    const { inc, full } = await replay([chunkA, chunkB]);
+    expect(inc.model).toBe('gpt-5.6-sol');
+    expect(inc.cwd).toBe('/x');
+    expectScanParity(inc, full);
+  });
+
+  it('session_meta model wins over turn_context model', async () => {
+    const chunkA = jsonl([
+      { type: 'session_meta', timestamp: '2026-06-28T00:00:00.000Z', payload: { id: 's', cwd: '/x', model: 'gpt-5-codex' } },
+    ]);
+    const chunkB = jsonl([
+      { type: 'turn_context', timestamp: '2026-06-28T00:01:00.000Z', payload: { model: 'gpt-5.6-sol' } },
+    ]);
+    const { inc, full } = await replay([chunkA, chunkB]);
+    expect(inc.model).toBe('gpt-5-codex');
     expectScanParity(inc, full);
   });
 });

@@ -4239,6 +4239,17 @@ export function applyCodexLine(state: CodexParseState, parsed: any): void {
     return;
   }
 
+  // Codex rollouts put per-turn metadata (including the model) on
+  // `turn_context` events. Use them as a fallback when session_meta itself
+  // does not carry the field, otherwise `agents sessions` shows blank model
+  // info for Codex.
+  if (parsed.type === 'turn_context') {
+    const payload = parsed.payload || {};
+    if (!state.model && typeof payload.model === 'string') state.model = payload.model;
+    if (!state.cwd && typeof payload.cwd === 'string') state.cwd = payload.cwd;
+    return;
+  }
+
   if (parsed.type === 'response_item' && parsed.payload?.type === 'message') {
     const role = parsed.payload.role === 'user' || parsed.payload.role === 'developer'
       ? 'user'
