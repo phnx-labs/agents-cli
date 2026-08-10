@@ -1380,7 +1380,7 @@ agents routines report <name>         # Show report from latest run
 agents routines report <name> --run <id>  # Show specific run report
 agents sessions <run-id>              # Show the archived agent transcript summary
 
-# Scheduler (install/upgrade/setup start the daemon; these are manual controls)
+# Scheduler (install/upgrade/setup start the daemon when enabled; these are manual controls)
 agents routines start                 # Start the background scheduler
 agents routines stop                  # Stop the scheduler
 agents routines status                # Show scheduler status + upcoming runs
