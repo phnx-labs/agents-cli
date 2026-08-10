@@ -13,7 +13,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { getMonitorsDir, ensureAgentsDir } from '../state.js';
+import { getMonitorsDir, getSystemMonitorsDir, ensureAgentsDir } from '../state.js';
 import { safeJoin, isSafeSegmentName } from '../paths.js';
 import { atomicWriteFileSync } from '../fs-atomic.js';
 import { machineId, normalizeHost } from '../machine-id.js';
@@ -414,54 +414,87 @@ export function validateMonitor(config: Partial<MonitorConfig>): string[] {
   return errors;
 }
 
-function readMonitorFile(filePath: string): MonitorConfig | null {
+/**
+ * Read and normalize a monitor file. `scope` decides the enabled default when
+ * the YAML has no explicit `enabled:` field: a `user` monitor defaults to
+ * enabled (MONITOR_DEFAULTS), while a `system` built-in stays opt-in (disabled)
+ * until the user enables it — mirroring how routines treat a fresh built-in
+ * (lib/routines.ts readJobFile).
+ */
+function readMonitorFile(filePath: string, scope: 'user' | 'system' = 'user'): MonitorConfig | null {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     const parsed = yaml.parse(content);
     if (!parsed || typeof parsed !== 'object') return null;
+    const hasEnabled = Object.prototype.hasOwnProperty.call(parsed, 'enabled');
     return {
       ...MONITOR_DEFAULTS,
       ...parsed,
       name: parsed.name || path.basename(filePath).replace(/\.ya?ml$/, ''),
+      // A system built-in with no explicit `enabled:` is opt-in until enabled;
+      // a user monitor keeps the enabled-by-default behavior.
+      enabled: hasEnabled ? parsed.enabled !== false : scope === 'system' ? false : (MONITOR_DEFAULTS.enabled ?? true),
     } as MonitorConfig;
   } catch {
     return null;
   }
 }
 
-/** List all monitor configs in ~/.agents/monitors/. */
+/** The layered monitor dirs, user before system so user shadows system by name. */
+function monitorLayers(): Array<{ scope: 'user' | 'system'; path: string }> {
+  return [
+    { scope: 'user', path: getMonitorsDir() },
+    { scope: 'system', path: getSystemMonitorsDir() },
+  ];
+}
+
+/**
+ * List all monitor configs, unioning the user dir (~/.agents/monitors/) over the
+ * built-in system dir (~/.agents/.system/monitors/). Higher layer wins by name
+ * (first-seen), so a user monitor shadows a system built-in of the same name.
+ */
 export function listMonitors(): MonitorConfig[] {
   ensureAgentsDir();
-  const dir = getMonitorsDir();
-  if (!fs.existsSync(dir)) return [];
   const monitors: MonitorConfig[] = [];
   const seen = new Set<string>();
-  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))) {
-    const monitor = readMonitorFile(path.join(dir, file));
-    if (!monitor || seen.has(monitor.name)) continue;
-    seen.add(monitor.name);
-    monitors.push(monitor);
+  for (const { scope, path: dir } of monitorLayers()) {
+    if (!fs.existsSync(dir)) continue;
+    for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))) {
+      const monitor = readMonitorFile(path.join(dir, file), scope);
+      if (!monitor || seen.has(monitor.name)) continue;
+      seen.add(monitor.name);
+      monitors.push(monitor);
+    }
   }
   return monitors;
 }
 
-/** Read a single monitor config by name. Returns null if not found or corrupt. */
+/**
+ * Read a single monitor config by name, checking the user dir then the system
+ * dir (a user monitor shadows a system built-in). Returns null if not found or
+ * corrupt.
+ */
 export function readMonitor(name: string): MonitorConfig | null {
   ensureAgentsDir();
-  const dir = getMonitorsDir();
-  for (const ext of ['.yml', '.yaml']) {
-    const filePath = safeJoin(dir, name + ext);
-    if (fs.existsSync(filePath)) return readMonitorFile(filePath);
+  for (const { scope, path: dir } of monitorLayers()) {
+    for (const ext of ['.yml', '.yaml']) {
+      const filePath = safeJoin(dir, name + ext);
+      if (fs.existsSync(filePath)) return readMonitorFile(filePath, scope);
+    }
   }
   return null;
 }
 
-/** Get the filesystem path of a monitor's YAML config, or null if not found. */
+/**
+ * Get the filesystem path of a monitor's YAML config, or null if not found.
+ * Resolves the user dir before the system dir, matching readMonitor().
+ */
 export function getMonitorPath(name: string): string | null {
-  const dir = getMonitorsDir();
-  for (const ext of ['.yml', '.yaml']) {
-    const filePath = safeJoin(dir, name + ext);
-    if (fs.existsSync(filePath)) return filePath;
+  for (const { path: dir } of monitorLayers()) {
+    for (const ext of ['.yml', '.yaml']) {
+      const filePath = safeJoin(dir, name + ext);
+      if (fs.existsSync(filePath)) return filePath;
+    }
   }
   return null;
 }

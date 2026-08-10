@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
   validateMonitor,
   parseInterval,
@@ -7,9 +10,12 @@ import {
   readMonitor,
   deleteMonitor,
   listMonitors,
+  setMonitorEnabled,
+  getMonitorPath,
   type MonitorConfig,
 } from './config.js';
 import { machineId } from '../machine-id.js';
+import { getMonitorsDir, getSystemMonitorsDir } from '../state.js';
 
 /** Minimal valid monitor: poll a command, on-change, notify. */
 function base(partial: Partial<MonitorConfig> = {}): Partial<MonitorConfig> {
@@ -152,5 +158,107 @@ describe('monitor CRUD round-trip', () => {
 
     expect(deleteMonitor(name)).toBe(true);
     expect(readMonitor(name)).toBeNull();
+  });
+});
+
+describe('system-layer monitors (built-ins from ~/.agents/.system/monitors/)', () => {
+  let userDir: string;
+  let sysDir: string;
+  const prevUser = process.env.AGENTS_MONITORS_DIR;
+  const prevSys = process.env.AGENTS_SYSTEM_MONITORS_DIR;
+
+  /**
+   * A full valid monitor YAML: a poll source + on-change condition + a notify
+   * action on the given channel. `header` prepends name/enabled lines per test.
+   */
+  function monitorYaml(header: string, notifyChannel = 'telegram'): string {
+    return (
+      header +
+      'source:\n' +
+      '  type: poll\n' +
+      '  command: echo hi\n' +
+      '  interval: 30s\n' +
+      'condition:\n' +
+      '  mode: on-change\n' +
+      'action:\n' +
+      '  type: notify\n' +
+      `  notifyChannel: ${notifyChannel}\n`
+    );
+  }
+
+  beforeEach(() => {
+    userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mon-user-'));
+    sysDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mon-sys-'));
+    process.env.AGENTS_MONITORS_DIR = userDir;
+    process.env.AGENTS_SYSTEM_MONITORS_DIR = sysDir;
+  });
+
+  afterEach(() => {
+    if (prevUser === undefined) delete process.env.AGENTS_MONITORS_DIR;
+    else process.env.AGENTS_MONITORS_DIR = prevUser;
+    if (prevSys === undefined) delete process.env.AGENTS_SYSTEM_MONITORS_DIR;
+    else process.env.AGENTS_SYSTEM_MONITORS_DIR = prevSys;
+    fs.rmSync(userDir, { recursive: true, force: true });
+    fs.rmSync(sysDir, { recursive: true, force: true });
+  });
+
+  it('(a) discovers a monitor placed in the system dir', () => {
+    fs.writeFileSync(path.join(sysDir, 'built-in.yml'), monitorYaml('name: built-in\nenabled: true\n'));
+    const found = listMonitors().find((m) => m.name === 'built-in');
+    expect(found).toBeDefined();
+    expect(found!.enabled).toBe(true);
+    expect(readMonitor('built-in')?.source.type).toBe('poll');
+    // getMonitorPath resolves into the system dir when only a built-in exists.
+    expect(getMonitorPath('built-in')).toBe(path.join(sysDir, 'built-in.yml'));
+  });
+
+  it('(b) a user monitor of the same name shadows the system one', () => {
+    fs.writeFileSync(path.join(sysDir, 'dupe.yml'), monitorYaml('name: dupe\nenabled: true\n', 'telegram'));
+    fs.writeFileSync(path.join(userDir, 'dupe.yml'), monitorYaml('name: dupe\nenabled: true\n', 'desktop'));
+
+    // Exactly one entry for the name, and it is the user copy.
+    const matches = listMonitors().filter((m) => m.name === 'dupe');
+    expect(matches.length).toBe(1);
+    expect(matches[0].action.notifyChannel).toBe('desktop');
+    expect(readMonitor('dupe')?.action.notifyChannel).toBe('desktop');
+    // getMonitorPath returns the user copy, not the system one.
+    expect(getMonitorPath('dupe')).toBe(path.join(userDir, 'dupe.yml'));
+  });
+
+  it('(c) a system built-in with no enabled: field is opt-in (disabled until toggled)', () => {
+    fs.writeFileSync(path.join(sysDir, 'optin.yml'), monitorYaml('name: optin\n'));
+
+    // Read straight from the system layer — opt-in, so disabled.
+    expect(readMonitor('optin')?.enabled).toBe(false);
+    expect(listMonitors().find((m) => m.name === 'optin')?.enabled).toBe(false);
+
+    // A user monitor with no enabled: field, by contrast, defaults to enabled.
+    fs.writeFileSync(path.join(userDir, 'userdefault.yml'), monitorYaml('name: userdefault\n'));
+    expect(readMonitor('userdefault')?.enabled).toBe(true);
+  });
+
+  it('(d) enabling a system built-in writes into the USER dir, never the system dir', () => {
+    fs.writeFileSync(path.join(sysDir, 'optin.yml'), monitorYaml('name: optin\n'));
+    expect(readMonitor('optin')?.enabled).toBe(false);
+
+    setMonitorEnabled('optin', true);
+
+    // The user dir now holds the materialized copy; the system mirror is untouched.
+    expect(fs.existsSync(path.join(userDir, 'optin.yml'))).toBe(true);
+    const sysBody = fs.readFileSync(path.join(sysDir, 'optin.yml'), 'utf-8');
+    expect(sysBody).not.toContain('enabled: true');
+    // The user copy now wins and reads enabled.
+    expect(readMonitor('optin')?.enabled).toBe(true);
+    expect(getMonitorPath('optin')).toBe(path.join(userDir, 'optin.yml'));
+
+    // Editing (write) also lands in the user dir only.
+    const cfg = readMonitor('optin')!;
+    cfg.action = { type: 'notify', notifyChannel: 'desktop' };
+    writeMonitor(cfg);
+    expect(getMonitorsDir()).toBe(userDir);
+    expect(getSystemMonitorsDir()).toBe(sysDir);
+    expect(readMonitor('optin')?.action.notifyChannel).toBe('desktop');
+    // The system file's action was not rewritten.
+    expect(fs.readFileSync(path.join(sysDir, 'optin.yml'), 'utf-8')).toContain('notifyChannel: telegram');
   });
 });
