@@ -762,16 +762,21 @@ describe('registerHooksToSettings - OpenCode', () => {
   });
 
   it('enforces the manifest timeout', async () => {
+    // Timeout must be long enough for Bun.spawn to actually start the child on
+    // slow Windows CI. With 10ms the timer often fires before the process is
+    // live, taskkill fails on a not-yet-running PID, the child then finishes
+    // and writes the side-effect — flake: timeout error + sideEffect:true.
+    // 150ms gives spawn room; the side-effect is delayed well past the kill.
     const homeScopedDir = fs.mkdtempSync(path.join(os.homedir(), '.opencode-hook-test-'));
     const homeAgentsDir = path.join(homeScopedDir, '.agents');
     fs.mkdirSync(path.join(homeAgentsDir, 'hooks'), { recursive: true });
     const scriptPath = path.join(homeAgentsDir, 'hooks', 'slow.js');
     const sideEffectPath = path.join(tmpDir, 'too-late');
-    fs.writeFileSync(scriptPath, `#!/usr/bin/env node\nsetTimeout(() => require("fs").writeFileSync(${JSON.stringify(sideEffectPath)}, ""), 200)\n`, 'utf-8');
+    fs.writeFileSync(scriptPath, `#!/usr/bin/env node\nsetTimeout(() => require("fs").writeFileSync(${JSON.stringify(sideEffectPath)}, ""), 800)\n`, 'utf-8');
     fs.chmodSync(scriptPath, 0o755);
     const versionHome = path.join(tmpDir, 'home');
     registerHooksToSettings('opencode', versionHome, {
-      slow: { script: 'slow.js', events: ['SessionStart'], timeout: 0.01 },
+      slow: { script: 'slow.js', events: ['SessionStart'], timeout: 0.15 },
     }, homeAgentsDir);
     const pluginPath = path.join(
       versionHome, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts'
@@ -791,13 +796,13 @@ describe('registerHooksToSettings - OpenCode', () => {
       } catch (caught) {
         error = caught.message
       }
-      await Bun.sleep(300)
+      await Bun.sleep(400)
       await Bun.write(${JSON.stringify(resultPath)}, JSON.stringify({ error, sideEffect: await Bun.file(${JSON.stringify(sideEffectPath)}).exists() }))
       process.exit(0)
     `, 'utf-8');
     execFileSync('bun', [runnerPath]);
     expect(JSON.parse(fs.readFileSync(resultPath, 'utf-8'))).toEqual({
-      error: 'slow timed out after 0.01 seconds',
+      error: 'slow timed out after 0.15 seconds',
       sideEffect: false,
     });
     fs.rmSync(homeScopedDir, { recursive: true, force: true });

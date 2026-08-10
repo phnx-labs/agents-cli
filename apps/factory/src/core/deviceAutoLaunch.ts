@@ -8,49 +8,70 @@ export interface AutoLaunchPreference {
   preferred?: boolean;
 }
 
-export interface AutoLaunchPreferences {
-  devices: Record<string, AutoLaunchPreference>;
-  updatedAt?: string;
-}
-
-function autoLaunchPath(): string {
-  const dir =
-    process.env.AGENTS_DEVICES_DIR ??
-    path.join(os.homedir(), '.agents', '.history', 'devices');
-  return path.join(dir, 'auto-launch.json');
-}
-
 /**
  * Root of the user DotAgents repo (`~/.agents`), overridable for tests. The
- * per-device config docs (`devices/<host>/agents.yaml`) live here — a
- * different tree from the AGENTS_DEVICES_DIR registry dir above.
+ * central `agents.yaml` lives here — its `fleet.devices.<name>.config` block
+ * is the ONE store for per-device operator config (written by
+ * `agents devices config <name>`; it syncs via the DotAgents repo, so a cap or
+ * flag set on any box is visible here).
  */
 function userAgentsDir(): string {
   return process.env.AGENTS_USER_AGENTS_DIR ?? path.join(os.homedir(), '.agents');
 }
 
 /**
- * Load auto-launch preferences written by `agents devices enable/disable/prefer`.
- * Synchronous because callers need it during ranking without awaiting another turn.
+ * Read the central `fleet.devices` map from `~/.agents/agents.yaml`.
  *
  * Corruption handling deliberately differs from the CLI's reader of this same
- * file (`apps/cli/src/lib/devices/registry.ts loadAutoLaunchPreferences`, which
- * throws): there, the user typed a command and can act on the error. Here, the
- * caller is a launch the user just triggered, and a bad prefs file must not stop
- * them getting a terminal — so this degrades to "every device enabled, none
- * preferred" (the documented default) and says so on the extension log. It is a
- * stated fallback to a defined state, not a silent swallow.
+ * file (which throws): there, the user typed a command and can act on the
+ * error. Here, the caller is a launch the user just triggered, and a bad
+ * config file must not stop them getting a terminal — so this degrades to "no
+ * device config" (every device enabled, none preferred, uncapped — the
+ * documented defaults) and says so on the extension log. It is a stated
+ * fallback to a defined state, not a silent swallow.
  */
-export function loadAutoLaunchPreferences(): Record<string, AutoLaunchPreference> {
+function readFleetDeviceConfigs(): Record<string, Record<string, unknown>> {
+  let raw: string;
   try {
-    const raw = fs.readFileSync(autoLaunchPath(), 'utf-8');
-    const parsed = JSON.parse(raw) as AutoLaunchPreferences;
-    return parsed.devices && typeof parsed.devices === 'object' ? parsed.devices : {};
+    raw = fs.readFileSync(path.join(userAgentsDir(), 'agents.yaml'), 'utf-8');
   } catch (err: any) {
     if (err && err.code === 'ENOENT') return {};
-    console.error('[deviceAutoLaunch] failed to load preferences:', err?.message ?? err);
+    console.error('[deviceAutoLaunch] failed to read central agents.yaml:', err?.message ?? err);
     return {};
   }
+  try {
+    const parsed = yaml.parse(raw) as {
+      fleet?: { devices?: 'all' | Record<string, { config?: Record<string, unknown> }> };
+    } | null;
+    const devices = parsed?.fleet?.devices;
+    if (!devices || devices === 'all' || typeof devices !== 'object') return {};
+    const out: Record<string, Record<string, unknown>> = {};
+    for (const [name, override] of Object.entries(devices)) {
+      const config = override?.config;
+      if (config && typeof config === 'object' && !Array.isArray(config)) out[name] = config;
+    }
+    return out;
+  } catch (err: any) {
+    console.error('[deviceAutoLaunch] failed to parse central agents.yaml:', err?.message ?? err);
+    return {};
+  }
+}
+
+/**
+ * Auto-launch preferences for every device with a flag set (enabled/preferred),
+ * keyed by device name — the shape launch ranking consumes. Synchronous because
+ * callers need it during ranking without awaiting another turn.
+ */
+export function loadAutoLaunchPreferences(): Record<string, AutoLaunchPreference> {
+  const configs = readFleetDeviceConfigs();
+  const out: Record<string, AutoLaunchPreference> = {};
+  for (const [name, config] of Object.entries(configs)) {
+    const pref: AutoLaunchPreference = {};
+    if (config.autoLaunchEnabled === false) pref.enabled = false;
+    if (config.autoLaunchPreferred === true) pref.preferred = true;
+    if (pref.enabled !== undefined || pref.preferred !== undefined) out[name] = pref;
+  }
+  return out;
 }
 
 /** True if the device is enabled for auto-launch. Defaults to true. */
@@ -70,32 +91,17 @@ export function isAutoLaunchPreferred(
 }
 
 /**
- * Read a device's `agents.max-concurrent` cap from its synced device doc
- * (`~/.agents/devices/<name>/agents.yaml`, `config.maxAgents`) — written by
- * `agents devices configure <name> --max-agents N`. Local file read, no SSH;
- * the devices/ tree syncs via the DotAgents repo so the cap the operator set
- * on any box is visible here.
+ * Read a device's `agents.max-concurrent` cap from the central config block
+ * (`fleet.devices.<name>.config.maxAgents`) — written by
+ * `agents devices config <name> agents.max-concurrent N`. Local file read, no
+ * SSH; the block syncs via the DotAgents repo so the cap the operator set on
+ * any box is visible here.
  *
  * Returns undefined when uncapped (the default). Same corruption contract as
- * loadAutoLaunchPreferences above: a malformed doc degrades to "uncapped" with
- * a log line rather than blocking a launch the user just triggered.
+ * loadAutoLaunchPreferences above: a malformed file degrades to "uncapped"
+ * rather than blocking a launch the user just triggered.
  */
 export function readDeviceMaxConcurrent(name: string): number | undefined {
-  const docPath = path.join(userAgentsDir(), 'devices', name, 'agents.yaml');
-  let raw: string;
-  try {
-    raw = fs.readFileSync(docPath, 'utf-8');
-  } catch (err: any) {
-    if (err && err.code === 'ENOENT') return undefined;
-    console.error('[deviceAutoLaunch] failed to read device doc:', err?.message ?? err);
-    return undefined;
-  }
-  try {
-    const parsed = yaml.parse(raw) as { config?: { maxAgents?: unknown } } | null;
-    const cap = parsed?.config?.maxAgents;
-    return typeof cap === 'number' && Number.isInteger(cap) && cap >= 1 ? cap : undefined;
-  } catch (err: any) {
-    console.error('[deviceAutoLaunch] failed to parse device doc:', err?.message ?? err);
-    return undefined;
-  }
+  const cap = readFleetDeviceConfigs()[name]?.maxAgents;
+  return typeof cap === 'number' && Number.isInteger(cap) && cap >= 1 ? cap : undefined;
 }

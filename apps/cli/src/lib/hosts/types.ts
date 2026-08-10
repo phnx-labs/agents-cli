@@ -43,7 +43,7 @@ export class DeviceOffloadUnsupportedError extends Error {
     super(
       `Device "${name}" uses password auth, which --host offload can't use yet ` +
         `(runs go over ssh with BatchMode=yes). Switch it to key auth with ` +
-        `\`agents devices set ${name} --auth key\`, or enroll it as a host with ` +
+        `\`agents devices config ${name} ssh.auth key\`, or enroll it as a host with ` +
         `\`agents hosts add ${name}\`.`,
     );
     this.name = 'DeviceOffloadUnsupportedError';

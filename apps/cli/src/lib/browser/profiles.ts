@@ -4,6 +4,7 @@ import {
   readMeta,
   writeMeta,
 } from '../state.js';
+import { getConfigValue } from '../device-config.js';
 import type { BrowserProfileConfig } from '../types.js';
 import type { BrowserProfile } from './types.js';
 import { findBrowserPath, findFirstInstalledBrowser, isPortInUse } from './chrome.js';
@@ -17,11 +18,12 @@ export const DEFAULT_BROWSER_PROFILE_NAME = 'default';
  * The device-local configured default profile name (set via
  * `agents browser profiles set-default`), or undefined when unset. When set, it
  * is the profile `agents browser start` resolves to for BOTH the no-`--profile`
- * path and an explicit `--profile default`. Stored per-machine — see
- * `Meta.defaultBrowserProfile`.
+ * path and an explicit `--profile default`. Stored as this machine's
+ * `browser.profile` device-config key (central `fleet.devices.<name>.config`
+ * block — see lib/device-config.ts).
  */
 export function getConfiguredDefaultProfileName(): string | undefined {
-  return readMeta().defaultBrowserProfile || undefined;
+  return (getConfigValue('browser.profile').value as string | undefined) || undefined;
 }
 
 export function getBrowserRuntimeDir(): string {

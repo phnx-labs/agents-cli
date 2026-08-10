@@ -1,33 +1,33 @@
 /**
- * Device/user config keys — typed read/write over the two-tier agents.yaml store.
+ * Device/user config keys — typed read/write over the central agents.yaml store.
  *
  * One registry (`CONFIG_KEYS`) maps each CLI dotted name to where it lives:
  *   - user scope   → central `~/.agents/agents.yaml` under `config:` (syncs
  *                    fleet-wide via `agents repo push/pull`)
- *   - device scope → `~/.agents/devices/<host>/agents.yaml` under `config:`
- *                    (per-machine; mirrors how `defaultBrowserProfile` is routed)
+ *   - device scope → central `~/.agents/agents.yaml` under
+ *                    `fleet.devices.<name>.config` — the ONE store for
+ *                    per-device operator settings. Central means a setting is
+ *                    readable/writable from any box, syncs with the repo, and
+ *                    is backed up with it. Names and non-secret values only
+ *                    (a secrets-bundle NAME is fine; a credential never is).
  *
- * This machine's keys go through the readMeta/updateMeta funnel (state.ts) so the
- * partition/overlay logic stays the single writer. Another device's doc is
- * read/written in place — the devices/ tree syncs via the DotAgents repo, so
- * editing `devices/mac-mini/agents.yaml` locally is how `configure`/`note`
- * target a peer (`--device`-style).
+ * The device registry (`~/.agents/.history/devices/registry.json`) stays the
+ * DISCOVERY cache (address, tailscale snapshot, reachability); the profile
+ * fields config can override (ssh.*, platform, user) are overlaid onto it at
+ * read time by `lib/devices/resolve-profile.ts`.
  *
- * `browser.profile` is NOT a `config:` key — it is the existing
- * `Meta.defaultBrowserProfile` field; the registry entry documents the mapping
- * and set/get route to it so there is one source of truth (no duplicate key).
+ * Legacy stores (per-device `devices/<host>/agents.yaml` config and
+ * `.history/devices/auto-launch.json`) are folded into the central block once
+ * by `lib/devices/config-migration.ts`, invoked on the first read/write in a
+ * process — after migration there is ONE read path, no fallback branches.
  *
- * Unset always means today's behavior.
+ * Unset always means today's behavior (the documented default).
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
-import * as yaml from 'yaml';
-import { META_HEADER, getUserAgentsDir, readMeta, updateMeta } from './state.js';
-import { atomicWriteFileSync } from './fs-atomic.js';
+import { readMeta, updateMeta } from './state.js';
 import { machineId } from './machine-id.js';
 import { assertValidDeviceName } from './devices/registry.js';
-import type { Meta } from './types.js';
+import { fleetDevicesMapForWrite, migrateDeviceConfigToCentral } from './devices/config-migration.js';
 
 /** Which tier of the agents.yaml store a key lives in. */
 export type ConfigScope = 'user' | 'device';
@@ -39,17 +39,14 @@ export type ConfigType = 'string' | 'int' | 'bool' | 'string-list';
 export interface ConfigKeySpec {
   /** CLI dotted name, e.g. `interactive.host`. */
   name: string;
-  /** camelCase key under the YAML `config:` block. */
+  /** camelCase key under the YAML config block. */
   yamlKey: string;
   scope: ConfigScope;
   type: ConfigType;
   /** One-line description for help/list output. */
   description: string;
-  /**
-   * When set, the value lives in this top-level Meta field instead of the
-   * `config:` block (only `browser.profile` → `defaultBrowserProfile` today).
-   */
-  field?: 'defaultBrowserProfile';
+  /** The effective value when the key is unset (bool keys; drives the interactive menu's default). */
+  defaultValue?: unknown;
   /** Extra validation beyond the type check; return an error string or null. */
   validate?: (value: unknown) => string | null;
 }
@@ -63,10 +60,13 @@ export interface ConfigEntry {
   layer?: ConfigScope;
 }
 
-/** Options scoping a read/write to a specific device's doc (default: this machine). */
+/** Options scoping a read/write to a specific device (default: this machine). */
 export interface ConfigTarget {
   device?: string;
 }
+
+const DEVICE_PLATFORMS = ['windows', 'linux', 'macos', 'unknown'] as const;
+const SSH_AUTH_METHODS = ['key', 'password'] as const;
 
 export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
   {
@@ -90,7 +90,6 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     yamlKey: 'defaultBrowserProfile',
     scope: 'device',
     type: 'string',
-    field: 'defaultBrowserProfile',
     description:
       'Browser profile `agents browser start` resolves to without --profile (set via `agents browser profiles set-default`).',
   },
@@ -109,6 +108,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     yamlKey: 'schedulerEnabled',
     scope: 'device',
     type: 'bool',
+    defaultValue: true,
     description: 'Whether the routines scheduler (daemon) may fire on this device.',
   },
   {
@@ -116,6 +116,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     yamlKey: 'daemonEnabled',
     scope: 'device',
     type: 'bool',
+    defaultValue: true,
     description:
       'Whether the daemon may run on this device at all (secrets broker, browser IPC, watchdog, and the ' +
       'routines scheduler). Disabling is the top-level kill switch: nothing auto-starts the daemon while it ' +
@@ -127,6 +128,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     yamlKey: 'watchdogEnabled',
     scope: 'device',
     type: 'bool',
+    defaultValue: false,
     description: 'Whether the daemon runs the watchdog pass on this device.',
   },
   {
@@ -134,6 +136,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     yamlKey: 'browserRemoteControl',
     scope: 'device',
     type: 'bool',
+    defaultValue: false,
     description:
       "Whether other fleet machines may drive THIS device's browser over `browser --host <this-device>`. " +
       'Default off — a fleet-remote drive is refused until the owner runs `agents browser remote-control on`.',
@@ -143,7 +146,73 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     yamlKey: 'notes',
     scope: 'device',
     type: 'string-list',
-    description: 'Free-form operator notes about this device (one entry per `agents devices note`).',
+    description: 'Free-form operator notes about this device (one entry per `agents devices config <name> notes <text>`).',
+  },
+  {
+    name: 'ssh.user',
+    yamlKey: 'sshUser',
+    scope: 'device',
+    type: 'string',
+    description: 'SSH login user for the device — overrides the registry profile’s user at dial time.',
+  },
+  {
+    name: 'ssh.auth',
+    yamlKey: 'sshAuth',
+    scope: 'device',
+    type: 'string',
+    description: 'SSH auth method: `key` (ssh agent / on-disk keys) or `password` (pulled from a secrets bundle).',
+    validate: (v) =>
+      (SSH_AUTH_METHODS as readonly string[]).includes(v as string)
+        ? null
+        : `ssh.auth must be one of ${SSH_AUTH_METHODS.join(' | ')}.`,
+  },
+  {
+    name: 'ssh.bundle',
+    yamlKey: 'sshBundle',
+    scope: 'device',
+    type: 'string',
+    description: 'Secrets bundle holding the SSH password (for ssh.auth=password). A bundle NAME — never a secret value.',
+  },
+  {
+    name: 'ssh.bundle-key',
+    yamlKey: 'sshBundleKey',
+    scope: 'device',
+    type: 'string',
+    description: "Key within the bundle whose value is the password (default 'password').",
+  },
+  {
+    name: 'ssh.identity-file',
+    yamlKey: 'sshIdentityFile',
+    scope: 'device',
+    type: 'string',
+    description: 'Explicit private-key path for key auth (passed to OpenSSH with IdentitiesOnly=yes).',
+  },
+  {
+    name: 'platform',
+    yamlKey: 'platform',
+    scope: 'device',
+    type: 'string',
+    description: 'OS family of the device — picks PowerShell vs POSIX on the remote end. Overrides the discovered platform.',
+    validate: (v) =>
+      (DEVICE_PLATFORMS as readonly string[]).includes(v as string)
+        ? null
+        : `platform must be one of ${DEVICE_PLATFORMS.join(' | ')}.`,
+  },
+  {
+    name: 'auto-launch.enabled',
+    yamlKey: 'autoLaunchEnabled',
+    scope: 'device',
+    type: 'bool',
+    defaultValue: true,
+    description: 'Whether Factory auto-launch may pick this device (default on).',
+  },
+  {
+    name: 'auto-launch.preferred',
+    yamlKey: 'autoLaunchPreferred',
+    scope: 'device',
+    type: 'bool',
+    defaultValue: false,
+    description: 'Boost this device in Factory auto-launch ranking (default off).',
   },
 ];
 
@@ -186,82 +255,60 @@ function assertValidValue(spec: ConfigKeySpec, value: unknown): void {
   if (err) throw new Error(`Invalid value for '${spec.name}': ${err}`);
 }
 
-// ─── Sibling-device doc access ────────────────────────────────────────────────
+// ─── Migration hook ───────────────────────────────────────────────────────────
 
-/** Path to any device's doc (self or a peer) under the synced devices/ tree. */
-function deviceDocPath(device: string): string {
-  return path.join(getUserAgentsDir(), 'devices', device, 'agents.yaml');
-}
+let migrationDone = false;
 
 /**
- * Read a device doc directly. Returns null when the file does not exist. A
- * malformed file is a hard error — silently returning null would let the next
- * write wipe the device's pins/default (same contract as the device registry).
- * A valid-but-non-map document (a bare string, a list) is the same kind of
- * corruption: reject it here instead of failing later with a TypeError.
+ * Fold the legacy per-device config stores into the central block, once per
+ * process. A failure is loud but non-fatal — config reads must keep working,
+ * and the next process retries the fold. Honors AGENTS_SKIP_MIGRATION=1, the
+ * same gate bootstrap's runMigration uses (tests pin it so a fork never folds
+ * the developer's real ~/.agents as a side effect).
  */
-function readDeviceDoc(device: string): Meta | null {
-  const p = deviceDocPath(device);
-  let raw: string;
+export function ensureDeviceConfigMigrated(): void {
+  if (migrationDone || process.env.AGENTS_SKIP_MIGRATION === '1') return;
   try {
-    raw = fs.readFileSync(p, 'utf-8');
+    migrateDeviceConfigToCentral();
+    migrationDone = true;
   } catch (err: any) {
-    if (err && err.code === 'ENOENT') return null;
-    throw err;
+    console.error(`device config migration failed (${err?.message ?? err}); a later run retries`);
   }
-  const corrupted = (detail: string) =>
-    new Error(`Device config corrupted at ${p}: ${detail}. Inspect and restore from backup.`);
-  let parsed: unknown;
-  try {
-    parsed = yaml.parse(raw);
-  } catch (err: any) {
-    throw corrupted(err?.message ?? String(err));
-  }
-  if (parsed === null || parsed === undefined) return {};
-  if (typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw corrupted(`expected a YAML map, got ${Array.isArray(parsed) ? 'a list' : JSON.stringify(parsed)}`);
-  }
-  return parsed as Meta;
-}
-
-/** Write a device doc in place (atomic). Only ever holds device-local fields. */
-function writeDeviceDoc(device: string, doc: Meta): void {
-  const p = deviceDocPath(device);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  const body = Object.keys(doc).length > 0 ? doc : { agents: {} };
-  atomicWriteFileSync(p, META_HEADER + yaml.stringify(body));
 }
 
 // ─── Reads ────────────────────────────────────────────────────────────────────
 
-function entryFromMeta(spec: ConfigKeySpec, meta: Meta): ConfigEntry {
-  if (spec.field === 'defaultBrowserProfile') {
-    const value = meta.defaultBrowserProfile;
-    return { spec, value, layer: value !== undefined ? 'device' : undefined };
-  }
-  if (spec.scope === 'user') {
-    const value = meta.config?.[spec.yamlKey];
-    return { spec, value, layer: value !== undefined ? 'user' : undefined };
-  }
-  const value = meta.deviceConfig?.[spec.yamlKey];
-  return { spec, value, layer: value !== undefined ? 'device' : undefined };
+/**
+ * The raw device-scope config block for `device` from the central
+ * `fleet.devices.<name>.config` map ({} when unset). This is the single read
+ * path post-migration — the profile resolver (`lib/devices/resolve-profile.ts`)
+ * goes through here. Deliberately does NOT auto-trigger the migration: it
+ * serves the hot dial/render paths, and the keys it resolves (ssh.*, platform)
+ * are new — they never existed in the legacy stores. Keys with legacy data are
+ * read through the public API below, which triggers the fold.
+ */
+export function readDeviceConfigValues(device: string): Record<string, unknown> {
+  const devices = readMeta().fleet?.devices;
+  if (!devices || devices === 'all') return {};
+  const config = devices[device]?.config;
+  return config && typeof config === 'object' && !Array.isArray(config) ? config : {};
 }
 
-/** True when `device` names this machine (case-insensitive, mirroring
- * `isLocalDevice` in teams/scheduler.ts) — `configure ZION` on host zion must
- * take the self path (readMeta/updateMeta funnel), not the peer-doc path. */
-function isSelfDevice(device: string): boolean {
-  return device.toLowerCase() === machineId();
+/** The device a targeted read/write applies to (default: this machine). */
+function targetDevice(opts?: ConfigTarget): string {
+  return opts?.device ?? machineId();
 }
 
 /** Get one config key's value and the layer that set it. */
 export function getConfigValue(name: string, opts?: ConfigTarget): ConfigEntry {
+  ensureDeviceConfigMigrated();
   const spec = configKeySpec(name);
-  if (spec.scope === 'device' && opts?.device && !isSelfDevice(opts.device)) {
-    const doc = readDeviceDoc(opts.device) ?? {};
-    return entryFromMeta(spec, { deviceConfig: doc.config, defaultBrowserProfile: doc.defaultBrowserProfile });
+  if (spec.scope === 'user') {
+    const value = readMeta().config?.[spec.yamlKey];
+    return { spec, value, layer: value !== undefined ? 'user' : undefined };
   }
-  return entryFromMeta(spec, readMeta());
+  const value = readDeviceConfigValues(targetDevice(opts))[spec.yamlKey];
+  return { spec, value, layer: value !== undefined ? 'device' : undefined };
 }
 
 /** List every known key with its value and the layer that set it. */
@@ -277,82 +324,126 @@ export function listUserConfig(): ConfigEntry[] {
 
 // ─── Writes ───────────────────────────────────────────────────────────────────
 
-function setInMeta(spec: ConfigKeySpec, value: unknown): void {
+function setInCentralBlock(device: string, spec: ConfigKeySpec, value: unknown): void {
   updateMeta((m) => {
-    if (spec.field === 'defaultBrowserProfile') {
-      return { ...m, defaultBrowserProfile: value as string };
-    }
-    if (spec.scope === 'user') {
-      return { ...m, config: { ...m.config, [spec.yamlKey]: value } };
-    }
-    return { ...m, deviceConfig: { ...m.deviceConfig, [spec.yamlKey]: value } };
+    const devices = fleetDevicesMapForWrite(m.fleet);
+    const prev = devices[device] ?? {};
+    devices[device] = { ...prev, config: { ...prev.config, [spec.yamlKey]: value } };
+    return { ...m, fleet: { ...m.fleet, devices } };
   });
 }
 
-function unsetInMeta(spec: ConfigKeySpec): void {
+function unsetInCentralBlock(device: string, spec: ConfigKeySpec): void {
   updateMeta((m) => {
-    if (spec.field === 'defaultBrowserProfile') {
-      const { defaultBrowserProfile, ...rest } = m;
-      void defaultBrowserProfile;
+    const stored = m.fleet?.devices;
+    if (!stored || stored === 'all') return m; // nothing stored — unset is a no-op (never upgrade 'all' for one)
+    const prev = stored[device];
+    if (!prev?.config || !(spec.yamlKey in prev.config)) return m; // key not present — no write needed
+    const config = { ...prev.config };
+    delete config[spec.yamlKey];
+    const override = { ...prev };
+    if (Object.keys(config).length > 0) override.config = config;
+    else delete override.config;
+    const devices = { ...stored };
+    if (Object.keys(override).length > 0) devices[device] = override;
+    else delete devices[device];
+    const fleet = { ...m.fleet, devices };
+    // Drop the fleet block entirely when the unset emptied a block that holds
+    // nothing else — don't leave a vestigial `fleet: {devices: {}}` behind.
+    if (Object.keys(devices).length === 0 && !fleet.defaults && !fleet.secrets && !fleet.routines) {
+      const { fleet: _, ...rest } = m;
+      void _;
       return rest;
     }
-    const block = spec.scope === 'user' ? m.config : m.deviceConfig;
-    if (!block || !(spec.yamlKey in block)) return m;
-    const next = { ...block };
-    delete next[spec.yamlKey];
-    const cleaned = Object.keys(next).length > 0 ? next : undefined;
-    return spec.scope === 'user' ? { ...m, config: cleaned } : { ...m, deviceConfig: cleaned };
+    return { ...m, fleet };
   });
-}
-
-function setInDeviceDoc(device: string, spec: ConfigKeySpec, value: unknown): void {
-  const doc = readDeviceDoc(device) ?? {};
-  if (spec.field === 'defaultBrowserProfile') {
-    doc.defaultBrowserProfile = value as string;
-  } else {
-    doc.config = { ...doc.config, [spec.yamlKey]: value };
-  }
-  writeDeviceDoc(device, doc);
-}
-
-function unsetInDeviceDoc(device: string, spec: ConfigKeySpec): void {
-  const doc = readDeviceDoc(device);
-  if (!doc) return; // nothing stored — unset is a no-op
-  if (spec.field === 'defaultBrowserProfile') {
-    delete doc.defaultBrowserProfile;
-  } else if (doc.config && spec.yamlKey in doc.config) {
-    delete doc.config[spec.yamlKey];
-    if (Object.keys(doc.config).length === 0) delete doc.config;
-  } else {
-    return; // key not present — no write needed
-  }
-  writeDeviceDoc(device, doc);
 }
 
 /** Set a config key (validated). Device-scope keys target this machine unless `opts.device` names a peer. */
 export function setConfigValue(name: string, value: unknown, opts?: ConfigTarget): void {
+  ensureDeviceConfigMigrated();
   const spec = configKeySpec(name);
   assertValidValue(spec, value);
-  if (spec.scope === 'device' && opts?.device && !isSelfDevice(opts.device)) {
-    setInDeviceDoc(opts.device, spec, value);
+  if (spec.scope === 'user') {
+    updateMeta((m) => ({ ...m, config: { ...m.config, [spec.yamlKey]: value } }));
     return;
   }
-  setInMeta(spec, value);
+  setInCentralBlock(targetDevice(opts), spec, value);
 }
 
 /** Unset a config key — restores default behavior. No-op when already unset. */
 export function unsetConfigValue(name: string, opts?: ConfigTarget): void {
+  ensureDeviceConfigMigrated();
   const spec = configKeySpec(name);
-  if (spec.scope === 'device' && opts?.device && !isSelfDevice(opts.device)) {
-    unsetInDeviceDoc(opts.device, spec);
+  if (spec.scope === 'user') {
+    updateMeta((m) => {
+      if (!m.config || !(spec.yamlKey in m.config)) return m;
+      const next = { ...m.config };
+      delete next[spec.yamlKey];
+      return { ...m, config: Object.keys(next).length > 0 ? next : undefined };
+    });
     return;
   }
-  unsetInMeta(spec);
+  unsetInCentralBlock(targetDevice(opts), spec);
+}
+
+// ─── Auto-launch preferences (Factory auto-host selection) ────────────────────
+
+/** A device's auto-launch flags, as read by Factory's launch ranking. */
+export interface AutoLaunchPreference {
+  enabled?: boolean;
+  preferred?: boolean;
+}
+
+/** True if the device is enabled for auto-launch. Unset defaults to true. */
+export function isAutoLaunchEnabled(name: string): boolean {
+  assertValidDeviceName(name);
+  return getConfigValue('auto-launch.enabled', { device: name }).value !== false;
+}
+
+/** Set whether a device is enabled for auto-launch. Setting the default
+ * (enabled) removes the key to keep the block minimal. */
+export function setAutoLaunchEnabled(name: string, enabled: boolean): void {
+  assertValidDeviceName(name);
+  if (enabled) unsetConfigValue('auto-launch.enabled', { device: name });
+  else setConfigValue('auto-launch.enabled', false, { device: name });
+}
+
+/** True if the device is preferred for auto-launch ranking. */
+export function isAutoLaunchPreferred(name: string): boolean {
+  assertValidDeviceName(name);
+  return getConfigValue('auto-launch.preferred', { device: name }).value === true;
+}
+
+/** Set whether a device is preferred for auto-launch. Setting the default
+ * (not preferred) removes the key to keep the block minimal. */
+export function setAutoLaunchPreferred(name: string, preferred: boolean): void {
+  assertValidDeviceName(name);
+  if (preferred) setConfigValue('auto-launch.preferred', true, { device: name });
+  else unsetConfigValue('auto-launch.preferred', { device: name });
+}
+
+/** Every device's auto-launch flags, keyed by device name (set flags only) —
+ * the shape Factory's launch ranking consumes. */
+export function loadAutoLaunchPreferences(): Record<string, AutoLaunchPreference> {
+  ensureDeviceConfigMigrated();
+  const devices = readMeta().fleet?.devices;
+  const out: Record<string, AutoLaunchPreference> = {};
+  if (!devices || devices === 'all') return out;
+  for (const [name, override] of Object.entries(devices)) {
+    const config = override?.config;
+    if (!config) continue;
+    const pref: AutoLaunchPreference = {};
+    if (config.autoLaunchEnabled === false) pref.enabled = false;
+    if (config.autoLaunchPreferred === true) pref.preferred = true;
+    if (pref.enabled !== undefined || pref.preferred !== undefined) out[name] = pref;
+  }
+  return out;
 }
 
 // ─── Consumers' helpers ───────────────────────────────────────────────────────
 
-/** True unless this machine's device doc disables the routines scheduler. */
+/** True unless this machine's config disables the routines scheduler. */
 export function isSchedulerEnabled(): boolean {
   return getConfigValue('scheduler.enabled').value !== false;
 }
@@ -366,12 +457,12 @@ export function isSchedulerEnabled(): boolean {
 export function assertSchedulerEnabled(): void {
   if (isSchedulerEnabled()) return;
   throw new Error(
-    `The routines scheduler is disabled on this device (scheduler.enabled=false in ~/.agents/devices/${machineId()}/agents.yaml). ` +
-      `Re-enable with: agents config set devices.${machineId()}.scheduler on`,
+    `The routines scheduler is disabled on this device (scheduler.enabled=false in ~/.agents/agents.yaml fleet.devices.${machineId()}.config). ` +
+      `Re-enable with: agents devices config ${machineId()} scheduler.enabled on`,
   );
 }
 
-/** True unless this machine's device doc disables the daemon outright (top-level kill switch). */
+/** True unless this machine's config disables the daemon outright (top-level kill switch). */
 export function isDaemonEnabled(): boolean {
   return getConfigValue('daemon.enabled').value !== false;
 }
@@ -386,14 +477,14 @@ export function isDaemonEnabled(): boolean {
 export function assertDaemonEnabled(): void {
   if (isDaemonEnabled()) return;
   throw new Error(
-    `The daemon is disabled on this device (daemon.enabled=false in ~/.agents/devices/${machineId()}/agents.yaml). ` +
+    `The daemon is disabled on this device (daemon.enabled=false in ~/.agents/agents.yaml fleet.devices.${machineId()}.config). ` +
       `Re-enable with: agents daemon enable`,
   );
 }
 
 /**
- * Read the `agents.max-concurrent` cap for each named device from its synced
- * device doc (no SSH). Devices without a cap are omitted — uncapped is the
+ * Read the `agents.max-concurrent` cap for each named device from the central
+ * config block (no SSH). Devices without a cap are omitted — uncapped is the
  * default. Used as an input to host ranking (teams placement, Factory
  * auto-launch), never as a remote probe.
  */

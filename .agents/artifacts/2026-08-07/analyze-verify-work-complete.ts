@@ -126,7 +126,7 @@ function parseArgs(argv: string[]): Args {
     else if (arg === '--markdown-out') out.markdownOut = argv[++i];
     else if (arg === '--sessions-file') out.sessionsFile = argv[++i];
     else if (arg === '--help' || arg === '-h') {
-      console.log(`Usage: bun .agents/reports/analyze-verify-work-complete.ts [options]
+      console.log(`Usage: bun .agents/artifacts/2026-08-07/analyze-verify-work-complete.ts [options]
 
 Options:
   --since <duration>       Rolling window, such as 7d or 48h (default: 7d)
@@ -632,10 +632,10 @@ This separates “installed” from “observable”: Codex has a native Stop re
 ## Reproduce
 
 \`\`\`bash
-bun .agents/reports/analyze-verify-work-complete.ts \\
+bun .agents/artifacts/2026-08-07/analyze-verify-work-complete.ts \\
   --since ${audit.window.since} \\
   --json-out ${privateEvidencePath} \\
-  --markdown-out .agents/reports/verify-work-complete-effectiveness-${audit.window.end.slice(0, 10)}.md
+  --markdown-out .agents/artifacts/2026-08-07/verify-work-complete-effectiveness-${audit.window.end.slice(0, 10)}.md
 \`\`\`
 
 The detailed JSON is local and redacted. It contains bounded context windows for review and must not be committed or published because session transcripts are confidential.

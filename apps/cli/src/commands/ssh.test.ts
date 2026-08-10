@@ -209,8 +209,9 @@ describe('devices auto-launch preferences', () => {
     return { AGENTS_DEVICES_DIR: devicesDir() };
   }
 
-  function autoLaunchPath(): string {
-    return path.join(devicesDir(), 'auto-launch.json');
+  function centralDoc(): string {
+    const p = path.join(testHome, '.agents', 'agents.yaml');
+    return fs.existsSync(p) ? fs.readFileSync(p, 'utf-8') : '';
   }
 
   // These commands refuse a device that is not registered, so the fixture has
@@ -236,30 +237,28 @@ describe('devices auto-launch preferences', () => {
     );
   }
 
-  it('disable and enable persist through the CLI', () => {
+  it('disable and enable persist through the CLI into the central config block', () => {
     guardedHome();
     registerDevice('zion');
 
-    expect(run(['devices', 'disable', 'zion'], devicesEnv()).status).toBe(0);
-    const disabled = JSON.parse(fs.readFileSync(autoLaunchPath(), 'utf-8'));
-    expect(disabled.devices.zion).toEqual({ enabled: false });
+    const off = run(['devices', 'disable', 'zion'], devicesEnv());
+    expect(off.status).toBe(0);
+    expect(off.stderr).toContain('Deprecated'); // tombstone notice
+    expect(centralDoc()).toContain('autoLaunchEnabled: false');
 
     expect(run(['devices', 'enable', 'zion'], devicesEnv()).status).toBe(0);
-    const enabled = JSON.parse(fs.readFileSync(autoLaunchPath(), 'utf-8'));
-    expect(enabled.devices.zion).toBeUndefined();
+    expect(centralDoc()).not.toContain('autoLaunchEnabled');
   });
 
-  it('prefer and unprefer persist through the CLI', () => {
+  it('prefer and unprefer persist through the CLI into the central config block', () => {
     guardedHome();
     registerDevice('mac-mini');
 
     expect(run(['devices', 'prefer', 'mac-mini'], devicesEnv()).status).toBe(0);
-    const preferred = JSON.parse(fs.readFileSync(autoLaunchPath(), 'utf-8'));
-    expect(preferred.devices['mac-mini']).toEqual({ preferred: true });
+    expect(centralDoc()).toContain('autoLaunchPreferred: true');
 
     expect(run(['devices', 'unprefer', 'mac-mini'], devicesEnv()).status).toBe(0);
-    const unpreferred = JSON.parse(fs.readFileSync(autoLaunchPath(), 'utf-8'));
-    expect(unpreferred.devices['mac-mini']).toBeUndefined();
+    expect(centralDoc()).not.toContain('autoLaunchPreferred');
   });
 
   it('refuses a device that is not registered instead of writing a dead entry', () => {
@@ -268,6 +267,6 @@ describe('devices auto-launch preferences', () => {
     const r = run(['devices', 'disable', 'zoin'], devicesEnv());
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/Unknown device 'zoin'/);
-    expect(fs.existsSync(autoLaunchPath())).toBe(false);
+    expect(centralDoc()).not.toContain('autoLaunchEnabled');
   });
 });

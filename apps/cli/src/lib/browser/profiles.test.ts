@@ -4,6 +4,11 @@ vi.mock('../state.js', () => ({
   getBrowserRuntimeDir: vi.fn(() => '/tmp/agents-browser-test'),
   readMeta: vi.fn(() => ({ browser: {} })),
   writeMeta: vi.fn(),
+  // device-config.js (the browser.profile store) reads/writes through these.
+  updateMeta: vi.fn(),
+  META_HEADER: '',
+  getUserAgentsDir: vi.fn(() => '/tmp/agents-browser-test/.agents'),
+  getDevicesAutoLaunchPath: vi.fn(() => '/tmp/agents-browser-test/auto-launch.json'),
 }));
 
 vi.mock('./chrome.js', () => ({
@@ -26,6 +31,13 @@ import { findBrowserPath, findFirstInstalledBrowser, isPortInUse } from './chrom
 import type { BrowserProfile } from './types.js';
 import type { BrowserProfileConfig } from '../types.js';
 import { readMeta, writeMeta } from '../state.js';
+import { machineId } from '../machine-id.js';
+
+/** The configured default profile, fixtured where it really lives: this machine's
+ * central fleet.devices.<self>.config block (lib/device-config.ts). */
+function withDefaultProfile(store: { browser: Record<string, BrowserProfileConfig> }, name: string) {
+  return { ...store, fleet: { devices: { [machineId()]: { config: { defaultBrowserProfile: name } } } } };
+}
 
 function profile(endpoints: string[]): BrowserProfile {
   return { name: 'test', browser: 'chrome', endpoints };
@@ -425,7 +437,7 @@ describe('ensureDefaultBrowserProfile', () => {
   });
 
   it("falls back to auto-detect when the configured default can't launch here", async () => {
-    const store: { browser: Record<string, BrowserProfileConfig>; defaultBrowserProfile?: string } = {
+    const store = withDefaultProfile({
       browser: {
         'mac-chrome': {
           browser: 'custom',
@@ -433,8 +445,7 @@ describe('ensureDefaultBrowserProfile', () => {
           endpoints: ['cdp://127.0.0.1:9333'],
         },
       },
-      defaultBrowserProfile: 'mac-chrome',
-    };
+    }, 'mac-chrome');
     vi.mocked(readMeta).mockImplementation(() => store as any);
     vi.mocked(writeMeta).mockImplementation((meta: any) => {
       store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
@@ -455,12 +466,11 @@ describe('ensureDefaultBrowserProfile', () => {
 
   it('reuses a remote (ssh://) configured default without a local binary check', async () => {
     // The browser lives on the far host; there is no local binary to validate.
-    const store: { browser: Record<string, BrowserProfileConfig>; defaultBrowserProfile?: string } = {
+    const store = withDefaultProfile({
       browser: {
         'zion-comet': { browser: 'comet', endpoints: ['ssh://muqsit@zion?port=9344'] },
       },
-      defaultBrowserProfile: 'zion-comet',
-    };
+    }, 'zion-comet');
     vi.mocked(readMeta).mockImplementation(() => store as any);
 
     const profile = await ensureDefaultBrowserProfile();
@@ -481,10 +491,9 @@ describe('ensureDefaultBrowserProfile', () => {
   });
 
   it('returns the configured default profile without auto-detecting', async () => {
-    const store: { browser: Record<string, BrowserProfileConfig>; defaultBrowserProfile?: string } = {
+    const store = withDefaultProfile({
       browser: { 'comet-local': { browser: 'comet', endpoints: ['cdp://localhost:9333'] } },
-      defaultBrowserProfile: 'comet-local',
-    };
+    }, 'comet-local');
     vi.mocked(readMeta).mockImplementation(() => store as any);
 
     const profile = await ensureDefaultBrowserProfile();
@@ -496,13 +505,12 @@ describe('ensureDefaultBrowserProfile', () => {
   });
 
   it('configured default wins over a literal default profile', async () => {
-    const store: { browser: Record<string, BrowserProfileConfig>; defaultBrowserProfile?: string } = {
+    const store = withDefaultProfile({
       browser: {
         default: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9222'] },
         'comet-local': { browser: 'comet', endpoints: ['cdp://localhost:9333'] },
       },
-      defaultBrowserProfile: 'comet-local',
-    };
+    }, 'comet-local');
     vi.mocked(readMeta).mockImplementation(() => store as any);
 
     const profile = await ensureDefaultBrowserProfile();
@@ -512,10 +520,7 @@ describe('ensureDefaultBrowserProfile', () => {
   });
 
   it('warns and falls back to auto-detect when the configured default is missing', async () => {
-    const store: { browser: Record<string, BrowserProfileConfig>; defaultBrowserProfile?: string } = {
-      browser: {},
-      defaultBrowserProfile: 'ghost',
-    };
+    const store = withDefaultProfile({ browser: {} }, 'ghost');
     vi.mocked(readMeta).mockImplementation(() => store as any);
     vi.mocked(writeMeta).mockImplementation((meta: any) => {
       store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;

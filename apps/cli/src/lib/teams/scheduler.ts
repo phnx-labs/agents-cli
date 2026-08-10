@@ -216,7 +216,7 @@ export function pickLeastLoaded(
       .join(', ');
     throw new Error(
       `Every device in the pool is at its agents.max-concurrent cap: ${detail}. ` +
-        `Raise a cap with 'agents devices configure <name> --max-agents N' or add a device to the pool.`,
+        `Raise a cap with 'agents devices config <name> agents.max-concurrent N' or add a device to the pool.`,
     );
   }
   // Iterate the pool in declared order so the first device wins ties.

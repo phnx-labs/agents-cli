@@ -151,20 +151,31 @@ password from a Keychain bundle via an askpass shim. `agents devices render --wr
 emits a `~/.ssh/config.d/agents` include so plain `ssh`/`scp`/`rsync` resolve the
 same logical names.
 
-**Per-device and fleet-wide settings** live in the same two-tier agents.yaml
-store as version pins. `agents devices configure <name>` sets device-scope keys
-(`--max-agents`, `--scheduler on|off`) and `agents devices
-note <name> "…"` appends free-form operator notes — both land under `config:` in
-`~/.agents/devices/<name>/agents.yaml`, so they are per-machine by default and
-can be written for a peer from any box (the `devices/` tree syncs, each machine
-reads only its own). `agents devices set-interactive <name>` sets the one
-user-scope key, `config.interactiveHost` in the *central* agents.yaml: the
-device agents show YOU artifacts on (browser opens, dashboards), so skills stop
-guessing "the online macOS box". The interactive host is marked `★ interactive`
-in `agents devices list`; `list --json` carries each row's `config` and an
-`interactive` flag. The default browser profile is likewise device-local config
-(`browser.profile` → `agents browser profiles set-default`). Unset keys always
-mean today's behavior. The key registry is `src/lib/device-config.ts`.
+**Per-device and fleet-wide settings** live in the central agents.yaml. ONE
+command owns them: `agents devices config <name> [key] [value] [--unset]
+[--json]` — bare opens an interactive settings menu on a TTY (and prints the
+resolved config when piped), `key` reads one value back, `key value` sets it
+with validation, `key --unset` restores the default, and `notes <text>`
+appends a free-form operator note. Device-scope keys (`agents.max-concurrent`,
+`scheduler.enabled`, `daemon.enabled`, `watchdog.enabled`,
+`browser.remote-control`, `browser.profile`, `notes`, the `ssh.*` profile
+overrides, `platform`, `auto-launch.*`) land in `fleet.devices.<name>.config`
+in `~/.agents/agents.yaml` — central, so any box can configure any device and
+the settings sync + back up with the repo (a `fleet.devices: all` declaration
+upgrades to an explicit roster map on the first config write). The device
+registry stays the **discovery cache** (address, tailscale snapshot,
+reachability); the config's `ssh.*` / `platform` / user values overlay the
+registry profile at dial time (`src/lib/devices/resolve-profile.ts`), so
+`agents ssh`, the ssh_config render, host dispatch, and the `devices list`
+table all honor them. The one user-scope key, `interactive.host`
+(`config.interactiveHost`), names the device agents show YOU artifacts on
+(browser opens, dashboards), so skills stop guessing "the online macOS box".
+The interactive host is marked `★ interactive` in `agents devices list`;
+`list --json` carries each row's effective profile plus its `config` block and
+an `interactive` flag. The retired subcommands (`configure`, `note`, `set`,
+`set-interactive`, `enable`/`disable`/`prefer`/`unprefer`) still work as hidden
+tombstones that forward into `devices config` with a stderr notice. Unset keys
+always mean today's behavior. The key registry is `src/lib/device-config.ts`.
 
 The keys are consumed, not just stored. `scheduler.enabled=false` keeps the
 routines scheduler from starting on that device — `routines add` skips the

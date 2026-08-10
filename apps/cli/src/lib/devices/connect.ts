@@ -22,6 +22,7 @@ import { homeRemainder, remoteCdPrefix } from '../project-root.js';
 import { getCacheDir } from '../state.js';
 import { hostKeyCheckingOpts } from './known-hosts.js';
 import { hostNameFor } from './ssh-config.js';
+import { resolveDeviceProfile } from './resolve-profile.js';
 import { type DeviceProfile } from './registry.js';
 
 /** Env var the askpass shim reads to know which bundle holds the password. */
@@ -42,11 +43,12 @@ export const ASKPASS_AGENT_ONLY_ENV = 'AGENTS_SSH_AGENT_ONLY';
  * it against the shared injection guard. Throws if the device has no address.
  */
 export function sshTargetFor(device: DeviceProfile): string {
-  const host = hostNameFor(device);
+  const resolved = resolveDeviceProfile(device);
+  const host = hostNameFor(resolved);
   if (!host) {
-    throw new Error(`Device '${device.name}' has no address (dnsName/ip). Run \`agents devices sync\` or \`agents devices add\`.`);
+    throw new Error(`Device '${resolved.name}' has no address (dnsName/ip). Run \`agents devices sync\` or \`agents devices add\`.`);
   }
-  const target = device.user ? `${device.user}@${host}` : host;
+  const target = resolved.user ? `${resolved.user}@${host}` : host;
   assertValidSshTarget(target);
   return target;
 }
@@ -67,7 +69,8 @@ export function fleetDialTarget(device: DeviceProfile): string {
   try {
     return sshTargetFor(device);
   } catch {
-    return device.user ? `${device.user}@${device.name}` : device.name;
+    const resolved = resolveDeviceProfile(device);
+    return resolved.user ? `${resolved.user}@${resolved.name}` : resolved.name;
   }
 }
 
@@ -150,8 +153,9 @@ export interface SshHostKeyOptions {
 
 /** OpenSSH argv that makes an explicit device key authoritative. */
 export function deviceIdentityArgs(device: DeviceProfile): string[] {
-  return device.auth?.method === 'key' && device.auth.identityFile
-    ? ['-i', device.auth.identityFile, '-o', 'IdentitiesOnly=yes']
+  const resolved = resolveDeviceProfile(device);
+  return resolved.auth?.method === 'key' && resolved.auth.identityFile
+    ? ['-i', resolved.auth.identityFile, '-o', 'IdentitiesOnly=yes']
     : [];
 }
 
@@ -184,6 +188,9 @@ export function buildSshInvocation(
   hostKey: SshHostKeyOptions = {},
   opts: { agentOnly?: boolean; interactiveCwd?: string } = {},
 ): { args: string[]; env: Record<string, string> } {
+  // The effective profile: central config (ssh.*/platform/user) overlaid on
+  // the registry's discovery record.
+  device = resolveDeviceProfile(device);
   const target = sshTargetFor(device);
   // No cmd ⇒ interactive login. It may still carry a derived cd+login-shell
   // wrapper (interactiveCwd), which is an interactive login too and still needs
@@ -200,7 +207,7 @@ export function buildSshInvocation(
 
   if (device.auth.method === 'password') {
     if (!device.auth.bundle) {
-      throw new Error(`Device '${device.name}' uses password auth but has no secrets bundle. Set one with \`agents devices set ${device.name} --bundle <name>\`.`);
+      throw new Error(`Device '${device.name}' uses password auth but has no secrets bundle. Set one with \`agents devices config ${device.name} ssh.bundle <name>\`.`);
     }
     env.SSH_ASKPASS = askpassShimPath;
     env.SSH_ASKPASS_REQUIRE = 'force';

@@ -140,8 +140,8 @@ window, a dashboard, a plan — when an agent opens something for you to look
 at. This is usually the laptop or desktop you actually sit at:
 
 ```bash
-agents devices set-interactive worker-1   # replace with your device's name
-agents devices set-interactive             # print the current interactive host
+agents devices config worker-1 interactive.host worker-1   # replace with your device's name
+agents devices config worker-1 interactive.host            # print the current interactive host
 ```
 
 Once several machines are registered, reconcile them all to one profile —
