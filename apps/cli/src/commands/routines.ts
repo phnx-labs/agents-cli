@@ -832,6 +832,12 @@ function buildRoutineDetail(job: JobConfig, scheduler: JobScheduler, now: Date):
  * dividers, with a live four-block detail pane and a full drill-in on select.
  */
 async function runRoutinesBrowser(options: RoutinesListOptions): Promise<void> {
+  // Same --group-by validation as the static list, so a bad value fails the same
+  // way on a TTY as it does under --json / a pipe (rather than silently defaulting).
+  if (options.groupBy && options.groupBy !== 'device' && options.groupBy !== 'project') {
+    console.error(chalk.red(`Unsupported --group-by '${options.groupBy}'. Use: project (default) or device`));
+    process.exit(1);
+  }
   try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
   const jobs = listAllJobs(process.cwd());
   if (jobs.length === 0) {
