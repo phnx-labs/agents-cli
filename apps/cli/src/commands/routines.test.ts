@@ -150,6 +150,45 @@ describeRoutines('routines edit transaction', () => {
   });
 });
 
+// RUSH-2465: `agents routines edit <builtin>` materializes a real file from the
+// built-in JobConfig, which carries the synthesized `builtin: true`. That marker
+// must never reach the persisted file, or the now-file-backed routine would read
+// as a built-in forever (overdue/catch-up silently disabled, false `(built-in)` tag).
+describeRoutines('routines edit never persists the synthesized builtin marker', () => {
+  it('materializing a built-in via edit (save unmodified) writes a file with no builtin field', () => {
+    const home = makeHome({ registry: { 'yosemite-s0': registry['yosemite-s0'] } });
+    const editor = path.join(home, 'noop-editor.sh');
+    fs.writeFileSync(editor, '#!/bin/sh\ntrue\n', { mode: 0o755 }); // leave the pre-fill unchanged
+    const routinePath = path.join(home, '.agents', 'routines', 'watchdog.yml');
+    try {
+      const res = run(home, ['edit', 'watchdog'], { EDITOR: editor, AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
+      expect(res.status).toBe(0);
+      expect(fs.existsSync(routinePath)).toBe(true);
+      const raw = fs.readFileSync(routinePath, 'utf-8');
+      expect(raw).not.toContain('builtin');
+      expect(yaml.parse(raw).builtin).toBeUndefined();
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('strips a hand-added builtin:true from the saved buffer (defense in depth)', () => {
+    const home = makeHome({ registry: { 'yosemite-s0': registry['yosemite-s0'] } });
+    const editor = path.join(home, 'inject-editor.sh');
+    // Append a bogus marker to whatever was pre-filled, simulating a hand edit.
+    fs.writeFileSync(editor, '#!/bin/sh\nprintf "\\nbuiltin: true\\n" >> "$1"\n', { mode: 0o755 });
+    const routinePath = path.join(home, '.agents', 'routines', 'tmux-reconcile.yml');
+    try {
+      const res = run(home, ['edit', 'tmux-reconcile'], { EDITOR: editor, AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
+      expect(res.status).toBe(0);
+      const raw = fs.readFileSync(routinePath, 'utf-8');
+      expect(raw).not.toContain('builtin');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
 function writeRunMeta(home: string, jobName: string, runId: string, meta: Record<string, unknown>): void {
   const runDir = path.join(home, '.agents', '.history', 'runs', jobName, runId);
   fs.mkdirSync(runDir, { recursive: true });

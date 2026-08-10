@@ -1209,6 +1209,13 @@ export function registerRoutinesCommands(program: Command): void {
       }
 
       const existing = readJob(name);
+      // Editing one of the 8 daemon-owned built-ins (RUSH-2465) materializes a
+      // real file from the built-in JobConfig, which carries the synthesized
+      // `builtin: true` marker. Strip it from the pre-fill so it never lands in
+      // the editor buffer (and thus never persists into the new file) — a
+      // file-backed routine that read `builtin: true` would have its
+      // overdue/catch-up silently disabled and show a false `(built-in)` tag.
+      if (existing) delete existing.builtin;
       if (existing && (options.stateTo !== undefined || options.stateFrom !== undefined)) {
         if (!existing.trigger || existing.trigger.type !== 'linear_event') {
           console.error(chalk.red(`'${name}' does not have a Linear trigger; --state-to/--state-from only apply to linear triggers`));
@@ -1251,6 +1258,14 @@ export function registerRoutinesCommands(program: Command): void {
         try {
           const raw = fs.readFileSync(editPath, 'utf-8');
           const job = yaml.parse(raw) as JobConfig;
+          // Defense in depth: if the saved buffer still carries the synthesized
+          // `builtin` marker (hand-added, or a pre-fix edit file), strip it and
+          // re-serialize before the file is renamed into place, so a persisted
+          // routine never reads as a built-in (RUSH-2465).
+          if (job && job.builtin !== undefined) {
+            delete job.builtin;
+            fs.writeFileSync(editPath, yaml.stringify(job), { encoding: 'utf-8', mode: 0o600 });
+          }
           const errors = validateJob(job);
           if (errors.length > 0) throw new Error(errors.join('\n'));
           const readiness = await evaluateActivationReadinessLive(job);

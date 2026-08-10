@@ -555,6 +555,32 @@ On upgrade, explicit legacy `enabled:` and `devices:` values are materialized
 once into the current host's routine membership. Subsequent toggles edit only the
 device manifest.
 
+### Built-in daemon routines
+
+Eight routines are **daemon-owned built-ins** — their definitions live in the CLI
+itself (`lib/builtin-routines.ts`), not in a `~/.agents/routines/` file:
+`usage-refresh`, `fleet-cache-warm`, `session-cache-warm`, `device-probe`,
+`auto-dispatch`, `watchdog`, `tmux-reconcile`, and `launch-health`. They are the
+daemon's own housekeeping (cache warming, the watchdog, self-heal), fired by the
+same scheduler via `agents __daemon-tick <name>`. `agents routines list` shows them
+with a `(built-in)` tag, and `--json` carries `builtin: true`.
+
+They behave like any other routine — enable/disable and pin them by name:
+
+```bash
+agents routines list                          # shows the 8, tagged (built-in)
+agents routines pause watchdog                # device-activation manifest, by name
+agents routines devices auto-dispatch --set yosemite-s0   # owner-pin a shared-input job
+```
+
+They are the **lowest** definition layer, so a same-named file always wins:
+dropping `~/.agents/routines/watchdog.yml` overrides the built-in entirely. Running
+`agents routines edit <name>` on a built-in **materializes** a real file from the
+built-in definition (the `(built-in)` tag then disappears, because it is now a
+normal file-backed routine you own). Built-ins are excluded from missed-fire
+catch-up (a missed 3–6 min housekeeping tick is redone by the next tick, not
+replayed).
+
 ### Legacy device allowlists
 
 > Historical format only. `enabled:` and `devices:` in definition YAML are read

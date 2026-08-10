@@ -338,9 +338,15 @@ export interface JobConfig {
    * True for a daemon-owned built-in routine (`builtin-routines.ts`, RUSH-2465):
    * the definition lives in daemon code, not in a `~/.agents/routines/` file or
    * the `.agents-system` config repo. Synthesized by `listJobs()`/`readJob()` as
-   * the lowest definition layer, so a same-named on-disk file shadows it. Purely
-   * a provenance marker — it does not affect scheduling, firing, activation, or
-   * device pinning, all of which treat a built-in exactly like any other routine.
+   * the lowest definition layer, so a same-named on-disk file shadows it.
+   *
+   * It does not affect scheduling, firing, activation, or device pinning (a
+   * built-in is scheduled/pinned exactly like any other routine), but it DOES
+   * gate two behaviors: `overdue.ts` skips built-ins for catch-up, and
+   * `agents routines list` tags them `(built-in)`. Because of that, this is a
+   * SYNTHESIZED-only marker that must never be persisted to a file — `writeJob`
+   * and the `edit` command strip it, so a routine that has a real on-disk file
+   * always reads `builtin: undefined`.
    */
   builtin?: boolean;
 }
@@ -968,6 +974,12 @@ export function writeJob(config: JobConfig): void {
   if (output.runOnce === false || output.runOnce === undefined) delete output.runOnce;
   if (output.catchup === true || output.catchup === undefined) delete output.catchup;
   delete output.devices;
+  // `builtin` is a synthesized provenance marker (RUSH-2465), never a persisted
+  // field: a JobConfig loaded from `readJob()` for one of the daemon-owned
+  // built-ins carries `builtin: true`, and writing it to a real file would make
+  // that now-file-backed routine read as a built-in forever — silently disabling
+  // its overdue/catch-up (`overdue.ts`) and showing a false `(built-in)` tag.
+  delete output.builtin;
   // Persist projects in canonical form: deduplicated, first-seen order, field
   // omitted when nothing survives. This is the schema boundary, so a routine
   // written from any path (add, edit, enable/disable re-write) lands canonical
