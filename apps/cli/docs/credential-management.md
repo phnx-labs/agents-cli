@@ -30,7 +30,7 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
 1. **The daemon holds no token.** No fallback, no injected, no per-account token. It
    never reuses a live/interactive token, never refreshes or rotates one, never logs
    in for the user. A routine runs the *exact same* `agents run` process a user runs
-   directly. (Shipped: PR #1583.) See [`03-routines.md`](../../apps/cli/docs/03-routines.md).
+   directly. (Shipped: PR #1583.) See [`03-routines.md`](03-routines.md).
 
 2. **The interactive/rotating login is untouchable.** agents-cli never reads,
    stores, syncs, or references a harness's interactive OAuth login. Not for usage,

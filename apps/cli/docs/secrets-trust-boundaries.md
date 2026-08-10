@@ -1,13 +1,13 @@
 # Secrets: trust boundaries & what the agent sees (design)
 
-> Status: **accepted** · Related: [secrets.md](../../apps/cli/docs/secrets.md) (reference),
-> [08-secrets-agent-process-model.md](../../apps/cli/docs/08-secrets-agent-process-model.md) (broker process model)
+> Status: **accepted** · Related: [secrets.md](secrets.md) (reference),
+> [08-secrets-agent-process-model.md](08-secrets-agent-process-model.md) (broker process model)
 
 A design record for the **one question every operator eventually asks**: when an
 AI coding agent runs a release (or any task) with `agents secrets`, *does the agent
 ever see the plaintext key?* The answer is "only if a command materializes it" —
 and this doc pins down exactly which commands do, why, and where the boundary is
-enforced. It complements the reference doc's [Security model](../../apps/cli/docs/secrets.md#security-model)
+enforced. It complements the reference doc's [Security model](secrets.md#security-model)
 (which covers the *keychain ACL* threat model) by tracing the **plaintext data-flow**
 past a second boundary the ACL section doesn't name: the agent's own context and
 its session transcript.
@@ -131,14 +131,14 @@ boundary seen from two sides.
   resolved bundle behind a Unix socket in a `0700` directory, with the socket file
   itself chmod'd `0600` (`src/lib/secrets/agent.ts:145`, `:445`; `session-store.ts`) so
   Path A stays promptless across concurrent runs — still no
-  stdout exposure. See [08-secrets-agent-process-model.md](../../apps/cli/docs/08-secrets-agent-process-model.md).
+  stdout exposure. See [08-secrets-agent-process-model.md](08-secrets-agent-process-model.md).
 - **Auto-mode classifiers.** In hosted agent harnesses, an attempt to scan bundles or
   materialize a value (`secrets show`, bulk `--reveal`) is challenged as credential
   exploration — a runtime backstop on top of this design, not a substitute for it.
 
 ## What this boundary does NOT do
 
-Inherited from the reference doc's [Security model](../../apps/cli/docs/secrets.md#security-model),
+Inherited from the reference doc's [Security model](secrets.md#security-model),
 restated here because they bound *this* boundary too:
 
 - **Path A env is inherited by the whole subprocess tree.** A value injected into a
@@ -163,5 +163,5 @@ explicit, differently-named opt-in.
 
 ## See also
 
-- [secrets.md](../../apps/cli/docs/secrets.md) — full reference (commands, backends, recipes, ACL threat model)
-- [08-secrets-agent-process-model.md](../../apps/cli/docs/08-secrets-agent-process-model.md) — where the broker lives as a process
+- [secrets.md](secrets.md) — full reference (commands, backends, recipes, ACL threat model)
+- [08-secrets-agent-process-model.md](08-secrets-agent-process-model.md) — where the broker lives as a process
