@@ -178,11 +178,51 @@ describe('syncRepoGit', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('refuses to sync when the working tree is dirty', async () => {
+  // A dirty tree used to fail the sync outright, which stranded merged upstream
+  // changes behind unrelated local files — a modified agents.yaml, a session's
+  // scratch file — indefinitely and silently. The contract is now: fast-forward
+  // past dirt the incoming commits do not touch, refuse when they do.
+
+  it('fast-forwards past dirt the incoming changes do not touch, preserving it', async () => {
+    await commitFile(author, 'README.md', 'v2\n', 'upstream change');
+    await simpleGit(author).push('origin', 'main');
     fs.writeFileSync(path.join(local, 'dirty.txt'), 'uncommitted\n');
+
     const res = await syncRepoGit(local, { push: false });
+
+    expect(res.success).toBe(true);
+    // Upstream content arrived...
+    expect(fs.readFileSync(path.join(local, 'README.md'), 'utf8')).toBe('v2\n');
+    // ...and the unrelated local work is untouched.
+    expect(fs.readFileSync(path.join(local, 'dirty.txt'), 'utf8')).toBe('uncommitted\n');
+  });
+
+  it('refuses when an incoming change touches an uncommitted path, and names it', async () => {
+    await commitFile(author, 'README.md', 'v2\n', 'upstream change');
+    await simpleGit(author).push('origin', 'main');
+    // The same file the upstream commit edits.
+    fs.writeFileSync(path.join(local, 'README.md'), 'local edit\n');
+
+    const res = await syncRepoGit(local, { push: false });
+
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/uncommitted changes/);
+    expect(res.error).toMatch(/README\.md/);
+    // The local edit survives the refusal.
+    expect(fs.readFileSync(path.join(local, 'README.md'), 'utf8')).toBe('local edit\n');
+  });
+
+  it('refuses on a dirty tree when local commits still need rebasing', async () => {
+    await commitFile(author, 'README.md', 'v2\n', 'upstream change');
+    await simpleGit(author).push('origin', 'main');
+    // A local commit to replay, plus unrelated dirt: a rebase needs a clean tree.
+    await commitFile(local, 'local-only.txt', 'mine\n', 'local work');
+    fs.writeFileSync(path.join(local, 'dirty.txt'), 'uncommitted\n');
+
+    const res = await syncRepoGit(local, { push: false });
+
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/local commit/);
   });
 
   it('rebases local onto new upstream commits (pull-only)', async () => {

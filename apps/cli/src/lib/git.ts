@@ -1164,18 +1164,65 @@ export async function pullRepo(
 }
 
 /**
+ * Every repo-relative path a status reports as locally touched, in one set.
+ *
+ * `simple-git` splits the same information across several arrays and one file
+ * can appear in more than one (a staged-then-edited file is in both `staged`
+ * and `modified`), so a caller asking "is this path dirty?" needs the union.
+ * `renamed` contributes both ends: the incoming side may collide with either.
+ */
+function dirtyPathSet(status: {
+  modified: string[];
+  created: string[];
+  deleted: string[];
+  staged: string[];
+  not_added: string[];
+  conflicted: string[];
+  renamed: Array<{ from: string; to: string }>;
+}): Set<string> {
+  const out = new Set<string>();
+  for (const p of [
+    ...status.modified,
+    ...status.created,
+    ...status.deleted,
+    ...status.staged,
+    ...status.not_added,
+    ...status.conflicted,
+  ]) {
+    if (p) out.add(p);
+  }
+  for (const r of status.renamed || []) {
+    if (r?.from) out.add(r.from);
+    if (r?.to) out.add(r.to);
+  }
+  return out;
+}
+
+/**
  * Rebase a repo onto its remote, optionally pushing local commits back up.
  *
  * The one-repo counterpart to `pullRepo` used by `agents sync <repo>`:
- *   1. Refuse if the working tree is dirty (commit or discard first).
- *   2. `git fetch origin` then `git pull --rebase origin <branch>` — rebase, not
- *      merge, so a local commit lands cleanly on top of upstream with no merge
- *      bubble.
- *   3. When `push` is set, `git push origin <branch>` to send local commits up.
+ *   1. `git fetch origin`.
+ *   2. Clean tree → `git pull --rebase origin <branch>`: rebase, not merge, so a
+ *      local commit lands cleanly on top of upstream with no merge bubble.
+ *   3. Dirty tree → fast-forward instead, but only when that is provably safe:
+ *      no local commits ahead of upstream, and no incoming path collides with a
+ *      dirty one. Otherwise refuse, naming the paths that collided.
+ *   4. When `push` is set, `git push origin <branch>` to send local commits up.
  *
  * The branch is read from the repo's current HEAD (falls back to `main`) rather
  * than hardcoded. System repos pass `push: false` — they are pull-only mirrors
  * of the npm-shipped upstream.
+ *
+ * Why step 3 exists: refusing on *any* dirt strands merged changes indefinitely.
+ * A DotAgents repo accumulates unrelated local state — a modified `agents.yaml`,
+ * a session's scratch file, a machine-local dotfile — and under the old rule one
+ * such file froze that box's layer forever, silently. Measured 2026-08-10: a
+ * merged fix could not reach three of three boxes, each blocked by files the
+ * incoming commits never touched. A `--ff-only` merge is the safe primitive
+ * here: it cannot rewrite local commits, and git itself aborts rather than
+ * overwrite a modified file, so the path check is belt-and-braces, not the only
+ * guard.
  */
 export async function syncRepoGit(
   dir: string,
@@ -1188,19 +1235,40 @@ export async function syncRepoGit(
     const git = simpleGit(dir);
     const status = await git.status();
 
-    if (!status.isClean()) {
-      return {
-        success: false,
-        commit: '',
-        pushed: false,
-        error: `Working tree has uncommitted changes. Commit or discard them first.\n\n  cd ${dir} && git status`,
-      };
-    }
-
     const branch = status.current || 'main';
     assertValidBranchName(branch);
     await git.fetch('origin');
-    await git.pull('origin', branch, { '--rebase': 'true' });
+
+    if (status.isClean()) {
+      await git.pull('origin', branch, { '--rebase': 'true' });
+    } else {
+      // Dirty tree: a rebase would refuse outright, so fast-forward instead —
+      // but only when nothing local can be lost. Both conditions must hold.
+      const dirtyPaths = dirtyPathSet(status);
+      const ahead = status.ahead > 0;
+      const incoming = ahead
+        ? []
+        : (await git.raw(['diff', '--name-only', `HEAD..origin/${branch}`]))
+            .split('\n')
+            .map((p) => p.trim())
+            .filter(Boolean);
+      const collisions = incoming.filter((p) => dirtyPaths.has(p));
+
+      if (ahead || collisions.length > 0) {
+        const why = ahead
+          ? `the branch has ${status.ahead} local commit(s) to rebase, which needs a clean tree`
+          : `incoming changes touch uncommitted paths: ${collisions.slice(0, 5).join(', ')}${collisions.length > 5 ? ` (+${collisions.length - 5} more)` : ''}`;
+        return {
+          success: false,
+          commit: '',
+          pushed: false,
+          error: `Working tree has uncommitted changes and ${why}. Commit or discard them first.\n\n  cd ${dir} && git status`,
+        };
+      }
+
+      // Safe: no local commits, and every incoming path is untouched locally.
+      await git.raw(['merge', '--ff-only', `origin/${branch}`]);
+    }
 
     installGithooksSymlinks(dir);
 
