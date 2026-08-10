@@ -4,6 +4,9 @@ template: report.v1
 title: "Menu bar NEW DEVICES: why 20 boxes reappeared, and why Ignore looked broken"
 summary: "reconcilePendingSentinels only subtracted the ignore-list, never the registered roster; a redirected-registry writer could poison the live pending-sentinel dir with already-registered fleet boxes. Fixed and merged (PR #2615); ignore-list persistence was never actually broken."
 status: complete
+human: "Owner"
+host: "worker"
+session: "[redacted]"
 ---
 
 ## Summary
