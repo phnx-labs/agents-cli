@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Best General-Purpose Agents — OpenClaw, Hermes, Cursor (Aug 2026)</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e8e8e8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e8e8e8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:5px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header"><div class="header-label">Phoenix Labs / Research</div><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span><span class="status-badge status-research-complete">research complete</span></div>
+<h1>Best General-Purpose Agents — OpenClaw, Hermes, Cursor (Aug 2026)</h1>
+<p class="summary">Evidence-backed comparison of always-on personal agents (OpenClaw, Hermes) versus coding agents (Cursor, Claude Code), with GitHub stats, recent releases, community likes/dislikes, and the models people actually run.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">OpenClaw ~385k stars · Hermes ~225k stars<span class="meta-sep" aria-hidden="true">·</span>Category split coding vs always-on personal<span class="meta-sep" aria-hidden="true">·</span>Kilo ~1,300 Reddit comments analyzed<span class="meta-sep" aria-hidden="true">·</span>Models verified via GitHub + OpenRouter + community</p><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">openclaw/openclaw</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/NousResearch/hermes-agent" target="_blank" rel="noopener">hermes-agent</a></span></li><li class="chip"><span class="chip-value"><img class="chip-favicon" src="https://www.google.com/s2/favicons?domain=kilo.ai&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><a href="https://kilo.ai/openclaw/vs-hermes" target="_blank" rel="noopener">Kilo Reddit analysis</a></span></li><li class="chip"><span class="chip-value"><img class="chip-favicon" src="https://www.google.com/s2/favicons?domain=docs.openclaw.ai&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><a href="https://docs.openclaw.ai" target="_blank" rel="noopener">OpenClaw docs</a></span></li><li class="chip"><span class="chip-value"><img class="chip-favicon" src="https://www.google.com/s2/favicons?domain=hermes-agent.nousresearch.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><a href="https://hermes-agent.nousresearch.com/docs/" target="_blank" rel="noopener">Hermes docs</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">artifact-gp-agents-report</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Cursor composer</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">24b2ee27</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a href="#findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a href="#evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a><a href="#recommendations"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Recommendations</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2>
+<p>There is no single best general-purpose agent. The market has split into two product classes that share branding but not jobs:</p>
+<table>
+<thead>
+<tr>
+<th>Job</th>
+<th>Best fit</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Interactive coding in an IDE</td>
+<td><strong>Cursor Agent</strong></td>
+<td>Best day-one editor UX; Cloud Agents for async PRs</td>
+</tr>
+<tr>
+<td>Deep terminal coding</td>
+<td><strong>Claude Code</strong></td>
+<td>Strongest long-horizon coding quality in most 2026 reviews</td>
+</tr>
+<tr>
+<td>Always-on personal agent</td>
+<td><strong>Hermes or OpenClaw</strong></td>
+<td>Model-agnostic gateways with messaging, cron, memory</td>
+</tr>
+<tr>
+<td>Background self-improving loops</td>
+<td><strong>Hermes</strong> (edge)</td>
+<td>Learning loop + memory are the core pitch</td>
+</tr>
+<tr>
+<td>Largest skill marketplace / channels</td>
+<td><strong>OpenClaw</strong> (edge)</td>
+<td>ClawHub + broadest messaging surface</td>
+</tr>
+</tbody></table>
+<p>Experienced operators converge on a stack, not a winner: <strong>Cursor or Claude Code for code</strong>, plus <strong>Hermes and/or OpenClaw for everything else</strong>.</p>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg class="artifact-diagram" viewBox="0 0 1080 420" role="img" aria-label="Agent landscape map splitting coding agents from always-on personal agents">
+  <rect x="20" y="20" width="1040" height="380" rx="14" fill="#090c0f" stroke="#303840" stroke-width="1.5"></rect>
+
+  <text x="50" y="55" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bdf8">CODING AGENTS</text>
+  <rect x="50" y="70" width="300" height="130" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="70" y="100" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#c8c8c8">Cursor Agent</text>
+  <text x="70" y="122" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">IDE · autocomplete · Cloud Agents / PRs</text>
+  <text x="70" y="142" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">best day-one coding UX</text>
+  <text x="70" y="172" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#c8c8c8">Claude Code</text>
+  <text x="70" y="194" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">terminal · deep multi-file · MCP</text>
+
+  <text x="390" y="55" font-family="JetBrains Mono, monospace" font-size="12" fill="#a3e635">ALWAYS-ON PERSONAL</text>
+  <rect x="390" y="70" width="300" height="130" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="410" y="100" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#c8c8c8">OpenClaw</text>
+  <text x="410" y="122" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">~385k★ · ClawHub · multi-channel</text>
+  <text x="410" y="142" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">ecosystem breadth · update fragility</text>
+  <text x="410" y="172" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#c8c8c8">Hermes Agent</text>
+  <text x="410" y="194" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">~225k★ · learning loop · memory</text>
+
+  <text x="730" y="55" font-family="JetBrains Mono, monospace" font-size="12" fill="#f59e0b">OPERATOR STACK</text>
+  <rect x="730" y="70" width="300" height="130" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+  <text x="750" y="105" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">1. Code with Cursor / Claude Code</text>
+  <text x="750" y="130" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">2. Live ops via Hermes / OpenClaw</text>
+  <text x="750" y="155" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">3. Route models by cost × quality</text>
+  <text x="750" y="180" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">~20% of Reddit power users run both gateways</text>
+
+  <path d="M350 135 L390 135" stroke="#38bdf8" stroke-width="2" stroke-dasharray="5 5" opacity="0.8"></path>
+  <path d="M690 135 L730 135" stroke="#a3e635" stroke-width="2" stroke-dasharray="5 5" opacity="0.8"></path>
+
+  <text x="50" y="240" font-family="JetBrains Mono, monospace" font-size="11" fill="#8a8a8a">COMMUNITY SPLIT (r/openclaw · ~1,300 comments · Kilo)</text>
+  <rect x="50" y="255" width="230" height="110" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="70" y="290" font-family="Inter, system-ui, sans-serif" font-size="22" fill="#a3e635">35%</text>
+  <text x="70" y="320" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">stay on OpenClaw</text>
+  <text x="70" y="340" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">skills · cron · ecosystem</text>
+
+  <rect x="300" y="255" width="230" height="110" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+  <text x="320" y="290" font-family="Inter, system-ui, sans-serif" font-size="22" fill="#f59e0b">30%</text>
+  <text x="320" y="320" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">switched to Hermes</text>
+  <text x="320" y="340" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">setup · memory · fewer breaks</text>
+
+  <rect x="550" y="255" width="230" height="110" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="570" y="290" font-family="Inter, system-ui, sans-serif" font-size="22" fill="#38bdf8">20%</text>
+  <text x="570" y="320" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">run both</text>
+  <text x="570" y="340" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">orchestrate + execute</text>
+
+  <rect x="800" y="255" width="230" height="110" rx="8" fill="#1a1010" stroke="#ff6b6b" stroke-width="1.5"></rect>
+  <text x="820" y="290" font-family="Inter, system-ui, sans-serif" font-size="22" fill="#ff6b6b">15%</text>
+  <text x="820" y="320" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">distrust Hermes</text>
+  <text x="820" y="340" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">astroturf / hype noise</text>
+</svg>
+<figcaption>Read left to right: coding agents and personal gateways are different jobs; the Reddit sample is split, not crowned.</figcaption>
+</figure><section class="artifact-grid artifact-grid-3">
+  <div class="artifact-stat">
+    <span class="artifact-stat-value">~385k</span>
+    <span class="artifact-stat-label">OpenClaw GitHub stars (Aug 2026)</span>
+  </div>
+  <div class="artifact-stat">
+    <span class="artifact-stat-value">~225k</span>
+    <span class="artifact-stat-label">Hermes GitHub stars (Aug 2026)</span>
+  </div>
+  <div class="artifact-stat">
+    <span class="artifact-stat-value">#1</span>
+    <span class="artifact-stat-label">Hermes on OpenRouter daily tokens (May 2026 peak)</span>
+  </div>
+</section><div class="artifact-callout"><strong>Bottom line:</strong> for a new always-on personal agent, start with <strong>Hermes</strong> (memory + setup + recent reliability story). Keep or add <strong>OpenClaw</strong> when you need ClawHub skills or channel breadth. Do not replace Cursor / Claude Code with either for production coding.</div><h2 id="findings">Findings</h2>
+<h3>Category mistake to avoid</h3>
+<p>Cursor Agent, Hermes, and OpenClaw are often compared as peers. They are not. Cursor (and Claude Code / Codex) optimize for software engineering loops. Hermes and OpenClaw optimize for persistent, multi-channel, scheduled personal/ops agents. Ranking them on one axis produces a wrong answer.</p>
+<h3>Live repo snapshot (GitHub API, Aug 2026)</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>OpenClaw</th>
+<th>Hermes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Repo</td>
+<td><a href="https://github.com/openclaw/openclaw">openclaw/openclaw</a></td>
+<td><a href="https://github.com/NousResearch/hermes-agent">NousResearch/hermes-agent</a></td>
+</tr>
+<tr>
+<td>Stars</td>
+<td>~385,049</td>
+<td>~224,884</td>
+</tr>
+<tr>
+<td>Forks</td>
+<td>~80,934</td>
+<td>~43,570</td>
+</tr>
+<tr>
+<td>Language</td>
+<td>TypeScript</td>
+<td>Python</td>
+</tr>
+<tr>
+<td>Latest stable</td>
+<td><code>v2026.7.1</code> (Jul 13)</td>
+<td><code>v0.20.0</code> / <code>v2026.8.3</code> (Aug 3, Herald)</td>
+</tr>
+<tr>
+<td>Latest pre</td>
+<td><code>v2026.7.2-beta.7</code> (Aug 2)</td>
+<td>—</td>
+</tr>
+<tr>
+<td>License</td>
+<td>MIT-style</td>
+<td>MIT</td>
+</tr>
+</tbody></table>
+<p>OpenClaw still has the larger installed base. Hermes has been catching up on OpenRouter token volume (reported ~224B tokens/day vs OpenClaw ~186B around May 10, 2026).</p>
+<h3>What people like and hate</h3>
+<section class="artifact-grid artifact-grid-2">
+  <article class="artifact-panel">
+    <h3>OpenClaw — likes</h3>
+    <ul>
+      <li>Largest skill ecosystem (ClawHub ~13k+ skills)</li>
+      <li>Meets you in WhatsApp / Telegram / Discord / Slack / Signal / iMessage</li>
+      <li>Native iOS / Android / macOS apps + Control UI feel productized</li>
+      <li>Deterministic cron praised by long-time users</li>
+      <li>Coding-agent bridges (<code>openclaw attach</code>, Codex / Copilot delegation)</li>
+    </ul>
+  </article>
+  <article class="artifact-panel">
+    <h3>OpenClaw — hates</h3>
+    <ul>
+      <li>Update fragility (top Reddit complaint; ~25% break risk quoted by users)</li>
+      <li>Security history (early-2026 CVE wave; exposed gateways; ClawHub malware audits)</li>
+      <li>Docs lag during fast ship weeks</li>
+      <li>Runaway cost / retry loops; gateway memory leaks in open issues</li>
+      <li>Silent failures when you are not watching</li>
+    </ul>
+  </article>
+  <article class="artifact-panel">
+    <h3>Hermes — likes</h3>
+    <ul>
+      <li>Leaner day-one setup (“finally get things done instead of debugging”)</li>
+      <li>Memory continuity out of the box (biggest migration reason)</li>
+      <li>Checkpoint / rollback before file mutations</li>
+      <li>Model-agnostic + OpenRouter-first; learning loop that creates skills</li>
+      <li>Cleaner public security track so far; explicit <code>hermes claw migrate</code></li>
+    </ul>
+  </article>
+  <article class="artifact-panel">
+    <h3>Hermes — hates</h3>
+    <ul>
+      <li>Astroturfing suspicion (~15% of Kilo sample distrust the hype)</li>
+      <li>Overconfident self-improvement (“always thinks it did a good job”)</li>
+      <li>Smaller skill ecosystem vs ClawHub</li>
+      <li>High fixed token overhead (~14k tokens cited in open issues)</li>
+      <li>Not a coding agent — Claude Code / Cursor win for production code</li>
+    </ul>
+  </article>
+</section><h3>Models people actually run</h3>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg class="artifact-diagram" viewBox="0 0 1080 280" role="img" aria-label="Model tiering for OpenClaw and Hermes workloads">
+  <rect x="20" y="20" width="1040" height="240" rx="14" fill="#090c0f" stroke="#303840" stroke-width="1.5"></rect>
+  <text x="50" y="55" font-family="JetBrains Mono, monospace" font-size="12" fill="#a3e635">QUALITY CEILING</text>
+  <rect x="50" y="70" width="230" height="150" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="70" y="110" font-family="Inter, system-ui, sans-serif" font-size="14" fill="#c8c8c8">Claude Opus</text>
+  <text x="70" y="135" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">4.6 / 4.7 / 4.8</text>
+  <text x="70" y="160" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">best agentic quality</text>
+  <text x="70" y="185" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">expensive · ban pressure</text>
+
+  <text x="310" y="55" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bdf8">DAILY DRIVERS</text>
+  <rect x="310" y="70" width="230" height="150" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="330" y="105" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#c8c8c8">Claude Sonnet</text>
+  <text x="330" y="130" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#c8c8c8">GPT-5.4</text>
+  <text x="330" y="155" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#c8c8c8">MiniMax M2.7</text>
+  <text x="330" y="190" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">Hermes default: Sonnet via OR</text>
+
+  <text x="570" y="55" font-family="JetBrains Mono, monospace" font-size="12" fill="#f59e0b">HIGH VOLUME / BUDGET</text>
+  <rect x="570" y="70" width="230" height="150" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+  <text x="590" y="105" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#c8c8c8">Qwen 3.5 / 3.6</text>
+  <text x="590" y="130" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#c8c8c8">GLM · Kimi K2.5</text>
+  <text x="590" y="155" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#c8c8c8">DeepSeek / Flash</text>
+  <text x="590" y="190" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">often free / flat-rate on OR</text>
+
+  <text x="830" y="55" font-family="JetBrains Mono, monospace" font-size="12" fill="#8a8a8a">LOCAL</text>
+  <rect x="830" y="70" width="200" height="150" rx="8" fill="#121212" stroke="#555" stroke-width="1.5"></rect>
+  <text x="850" y="110" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#c8c8c8">Ollama / Qwen3</text>
+  <text x="850" y="140" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">fine for light tasks</text>
+  <text x="850" y="165" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">&lt;14B often fails</text>
+  <text x="850" y="185" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">multi-step tools</text>
+</svg>
+<figcaption>Community model routing for OpenClaw / Hermes: Opus for hard reasoning, Sonnet/GPT-5.4/MiniMax for daily loops, Qwen-class for volume.</figcaption>
+</figure><p>Trend: Anthropic account bans and per-token burn are pushing operators toward flat-rate MiniMax / Ollama Pro Cloud and free OpenRouter Qwen for routine automation.</p>
+<h2 id="evidence">Evidence</h2>
+<h3>OpenClaw — recent shipments</h3>
+<p><strong><code>v2026.7.1</code> (stable, Jul 13)</strong> — ~3,063 contributions / 532 contributors:</p>
+<ul>
+<li>Control UI overhaul (tasks, cost/usage, pairing, approvals, gateway health)</li>
+<li>Major official iOS / Android / macOS app work</li>
+<li>Models: GPT-5.6, Tencent Hy3, Meta Muse Spark 1.1, broader Claude / Ollama / ClawRouter</li>
+<li>Coding bridges: <code>openclaw attach</code> for Claude Code; Codex / Copilot delegation</li>
+<li>Gateway crash loops leave a repair path instead of restarting forever</li>
+<li>Scheduled wake-on-change, remote browser tab pairing, workspace terminals</li>
+</ul>
+<p><strong><code>v2026.7.2</code> betas (through Aug 2)</strong>: Claude Opus 5, Kimi K3, GPT Live realtime, in-process llama.cpp GGUF, session rewind/fork, Quick Chat on macOS/Linux, MCP Apps, cloud workers + paired-node coding sessions.</p>
+<p><strong>Pain evidence from the tracker / community:</strong></p>
+<ul>
+<li>April <code>2026.4.26</code> cluster: Discord unresponsive, gateway 100% CPU, multi-minute latency; users rolled back / switched Hermes to primary</li>
+<li>Open issues cite gateway RSS growth (350MB → 15GB), runaway model-call retries billing hundreds of dollars, silent subagent completion loss</li>
+<li>Security timeline: CVE-2026-25253 (exposed RCE), March 2026 CVE flood, ClawHub malicious-skill audits</li>
+</ul>
+<h3>Hermes — recent shipments</h3>
+<p><strong><code>v0.19.0</code> Quicksilver (Jul 20)</strong> — ~2,245 commits, ~3,300 issues closed:</p>
+<ul>
+<li>80% cold-start latency cut (4.3s → ~0.9s TTFT)</li>
+<li>Smart approvals default (independent LLM reviews risky commands)</li>
+<li>Bitwarden / 1Password secret sources</li>
+<li>Live subagent transcripts + durable background delegation</li>
+<li>Delivery-obligation ledger (do not lose replies on gateway crash)</li>
+<li>Profile-based multi-tenant routing on one gateway</li>
+</ul>
+<p><strong><code>v0.20.0</code> Herald (Aug 3)</strong> — ~3,650 commits, ~1,200 issues closed:</p>
+<ul>
+<li>Streaming conversational voice with barge-in + on-device wake words</li>
+<li>Grounded citations + fact-checking skill</li>
+<li>Signed outbound webhooks; A2A v1.0 agent-to-agent protocol</li>
+<li>Desktop platform: artifacts, plugin SDK, quick-entry hotkey</li>
+<li>CLI power tools (<code>!shell</code>, <code>/init</code>, <code>/diff</code>, <code>/context</code>, mid-turn redirects)</li>
+<li>Tools self-recover; iteration limit 90 → 500; smarter compression</li>
+<li>New models: GPT-5.6 family, grok-4.5, kimi-k3, Claude Fable/Sonnet 5, Hy3</li>
+</ul>
+<p>Hermes documented OpenRouter default: <code>~anthropic/claude-sonnet-latest</code>. Axis Intelligence hands-on score: <strong>8.2/10</strong> for experienced developers (not non-technical users).</p>
+<h3>Cursor Agent — placement</h3>
+<p>Cursor is not competing for the personal WhatsApp agent slot.</p>
+<ul>
+<li>Local Agent mode: best-in-class IDE autocomplete + multi-file agent</li>
+<li>Cloud Agents (ex-Background Agents): isolated VMs, parallel PR factory, desktop/browser verification</li>
+<li>Strength: day-one coding productivity and team PR workflow</li>
+<li>Gap vs Hermes/OpenClaw: no 24/7 messaging gateway, no life-OS memory loop</li>
+</ul>
+<h3>Community verdict (Kilo · ~1,300 r/openclaw comments)</h3>
+<table>
+<thead>
+<tr>
+<th>Camp</th>
+<th>Share</th>
+<th>Stance</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Stay on OpenClaw</td>
+<td>~35%</td>
+<td>Ecosystem + cron + skills worth the pain</td>
+</tr>
+<tr>
+<td>Switched to Hermes</td>
+<td>~30%</td>
+<td>Setup + memory + fewer breakages</td>
+</tr>
+<tr>
+<td>Run both</td>
+<td>~20%</td>
+<td>OpenClaw orchestrates; Hermes executes recurring loops</td>
+</tr>
+<tr>
+<td>Distrust Hermes</td>
+<td>~15%</td>
+<td>Astroturf / hype accounts</td>
+</tr>
+</tbody></table>
+<p>Independent reviews (Axis, eesel, HundredTabs, Techsona, Agent Shortlist, pasqualepillitteri) land on the same pragmatic line: assign by job; do not crown an absolute winner.</p>
+<h2 id="recommendations">Recommendations</h2>
+<ol>
+<li><strong>New always-on personal agent:</strong> start with <strong>Hermes</strong> (<code>v0.20</code> Herald). Prioritize memory, setup time, and recent reliability/latency work.</li>
+<li><strong>Need ClawHub / WhatsApp-heavy / already invested:</strong> stay on <strong>OpenClaw</strong>, pin known-good releases, never expose the gateway to the public internet, treat ClawHub skills as untrusted by default.</li>
+<li><strong>Power setup:</strong> run <strong>both</strong> — OpenClaw for channel breadth / skills; Hermes for long-running learned workflows. Use <code>hermes claw migrate</code> when testing a side-by-side.</li>
+<li><strong>Coding workload:</strong> Cursor (daily IDE) + Claude Code (deep/terminal). Do not demote either in favor of a personal gateway for production code.</li>
+<li><strong>Model routing defaults:</strong><ul>
+<li>Hard reasoning → Claude Opus</li>
+<li>Daily agent loops → Claude Sonnet or GPT-5.4 (Hermes OR default Sonnet)</li>
+<li>High volume → MiniMax or Qwen via OpenRouter</li>
+<li>Avoid expecting reliable multi-step tools from tiny local models (&lt;14B)</li>
+</ul>
+</li>
+</ol>
+<pre><code># Hermes quick path
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+hermes model   # pick provider / model
+hermes gateway # Telegram / Discord / Slack / WhatsApp
+
+# OpenClaw quick path
+curl -fsSL https://openclaw.ai/install.sh | bash
+openclaw onboard --install-daemon
+openclaw gateway status
+</code></pre>
+<h3>Sources</h3>
+<ul>
+<li>GitHub API: <code>openclaw/openclaw</code>, <code>NousResearch/hermes-agent</code> (stats, READMEs, release notes)</li>
+<li>Releases: OpenClaw <code>2026.7.1</code> / <code>2026.7.2-beta.*</code>; Hermes <code>v2026.7.20</code> / <code>v2026.8.3</code></li>
+<li>Community: <a href="https://kilo.ai/openclaw/vs-hermes">Kilo OpenClaw vs Hermes</a>, r/openclaw breakage threads, ClawMage Reddit roundup</li>
+<li>Reviews: Axis Hermes, eesel, HundredTabs, Techsona, Agent Shortlist, OpenRouter Hermes tutorial</li>
+<li>Security: GitHub advisories / CVE timeline writeups for OpenClaw early–mid 2026</li>
+</ul>
+</article>
+<footer class="document-footer">Community + repo audit · not a product endorsement</footer>
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0aXRsZTogQmVzdCBHZW5lcmFsLVB1cnBvc2UgQWdlbnRzIOKAlCBPcGVuQ2xhdywgSGVybWVzLCBDdXJzb3IgKEF1ZyAyMDI2KQpzdW1tYXJ5OiBFdmlkZW5jZS1iYWNrZWQgY29tcGFyaXNvbiBvZiBhbHdheXMtb24gcGVyc29uYWwgYWdlbnRzIChPcGVuQ2xhdywgSGVybWVzKSB2ZXJzdXMgY29kaW5nIGFnZW50cyAoQ3Vyc29yLCBDbGF1ZGUgQ29kZSksIHdpdGggR2l0SHViIHN0YXRzLCByZWNlbnQgcmVsZWFzZXMsIGNvbW11bml0eSBsaWtlcy9kaXNsaWtlcywgYW5kIHRoZSBtb2RlbHMgcGVvcGxlIGFjdHVhbGx5IHJ1bi4KaGVhZGVyOiBQaG9lbml4IExhYnMgLyBSZXNlYXJjaApmb290ZXI6IENvbW11bml0eSArIHJlcG8gYXVkaXQgwrcgbm90IGEgcHJvZHVjdCBlbmRvcnNlbWVudApwcm9qZWN0OiBhZ2VudHMtY2xpCmNvbnRleHQ6IGFnZW50IGxhbmRzY2FwZSByZXNlYXJjaApyZXBvc2l0b3J5OiBwaG54LWxhYnMvYWdlbnRzLWNsaQpicmFuY2g6IGFydGlmYWN0LWdwLWFnZW50cy1yZXBvcnQKc3RhdHVzOiByZXNlYXJjaCBjb21wbGV0ZQpoYXJuZXNzOiBjdXJzb3IKYWdlbnQ6IGNvbXBvc2VyCmhvc3Q6IHlvc2VtaXRlLXMwCmRhdGU6ICIyMDI2LTA4LTEwIgpmYWN0czoKICAtIE9wZW5DbGF3IH4zODVrIHN0YXJzIMK3IEhlcm1lcyB+MjI1ayBzdGFycwogIC0gQ2F0ZWdvcnkgc3BsaXQgY29kaW5nIHZzIGFsd2F5cy1vbiBwZXJzb25hbAogIC0gS2lsbyB+MSwzMDAgUmVkZGl0IGNvbW1lbnRzIGFuYWx5emVkCiAgLSBNb2RlbHMgdmVyaWZpZWQgdmlhIEdpdEh1YiArIE9wZW5Sb3V0ZXIgKyBjb21tdW5pdHkKbGlua3M6CiAgLSB1cmw6IGh0dHBzOi8vZ2l0aHViLmNvbS9vcGVuY2xhdy9vcGVuY2xhdwogICAgbGFiZWw6IG9wZW5jbGF3L29wZW5jbGF3CiAgLSB1cmw6IGh0dHBzOi8vZ2l0aHViLmNvbS9Ob3VzUmVzZWFyY2gvaGVybWVzLWFnZW50CiAgICBsYWJlbDogaGVybWVzLWFnZW50CiAgLSB1cmw6IGh0dHBzOi8va2lsby5haS9vcGVuY2xhdy92cy1oZXJtZXMKICAgIGxhYmVsOiBLaWxvIFJlZGRpdCBhbmFseXNpcwogIC0gdXJsOiBodHRwczovL2RvY3Mub3BlbmNsYXcuYWkKICAgIGxhYmVsOiBPcGVuQ2xhdyBkb2NzCiAgLSB1cmw6IGh0dHBzOi8vaGVybWVzLWFnZW50Lm5vdXNyZXNlYXJjaC5jb20vZG9jcy8KICAgIGxhYmVsOiBIZXJtZXMgZG9jcwotLS0KCiMjIFN1bW1hcnkKClRoZXJlIGlzIG5vIHNpbmdsZSBiZXN0IGdlbmVyYWwtcHVycG9zZSBhZ2VudC4gVGhlIG1hcmtldCBoYXMgc3BsaXQgaW50byB0d28gcHJvZHVjdCBjbGFzc2VzIHRoYXQgc2hhcmUgYnJhbmRpbmcgYnV0IG5vdCBqb2JzOgoKfCBKb2IgfCBCZXN0IGZpdCB8IFdoeSB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCBJbnRlcmFjdGl2ZSBjb2RpbmcgaW4gYW4gSURFIHwgKipDdXJzb3IgQWdlbnQqKiB8IEJlc3QgZGF5LW9uZSBlZGl0b3IgVVg7IENsb3VkIEFnZW50cyBmb3IgYXN5bmMgUFJzIHwKfCBEZWVwIHRlcm1pbmFsIGNvZGluZyB8ICoqQ2xhdWRlIENvZGUqKiB8IFN0cm9uZ2VzdCBsb25nLWhvcml6b24gY29kaW5nIHF1YWxpdHkgaW4gbW9zdCAyMDI2IHJldmlld3MgfAp8IEFsd2F5cy1vbiBwZXJzb25hbCBhZ2VudCB8ICoqSGVybWVzIG9yIE9wZW5DbGF3KiogfCBNb2RlbC1hZ25vc3RpYyBnYXRld2F5cyB3aXRoIG1lc3NhZ2luZywgY3JvbiwgbWVtb3J5IHwKfCBCYWNrZ3JvdW5kIHNlbGYtaW1wcm92aW5nIGxvb3BzIHwgKipIZXJtZXMqKiAoZWRnZSkgfCBMZWFybmluZyBsb29wICsgbWVtb3J5IGFyZSB0aGUgY29yZSBwaXRjaCB8CnwgTGFyZ2VzdCBza2lsbCBtYXJrZXRwbGFjZSAvIGNoYW5uZWxzIHwgKipPcGVuQ2xhdyoqIChlZGdlKSB8IENsYXdIdWIgKyBicm9hZGVzdCBtZXNzYWdpbmcgc3VyZmFjZSB8CgpFeHBlcmllbmNlZCBvcGVyYXRvcnMgY29udmVyZ2Ugb24gYSBzdGFjaywgbm90IGEgd2lubmVyOiAqKkN1cnNvciBvciBDbGF1ZGUgQ29kZSBmb3IgY29kZSoqLCBwbHVzICoqSGVybWVzIGFuZC9vciBPcGVuQ2xhdyBmb3IgZXZlcnl0aGluZyBlbHNlKiouCgo8ZmlndXJlIGNsYXNzPSJhcnRpZmFjdC1maWd1cmUgYXJ0aWZhY3QtZmlndXJlLWRpYWdyYW0gYXJ0aWZhY3QtZmlndXJlLXdpZGUiPgo8c3ZnIGNsYXNzPSJhcnRpZmFjdC1kaWFncmFtIiB2aWV3Qm94PSIwIDAgMTA4MCA0MjAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iQWdlbnQgbGFuZHNjYXBlIG1hcCBzcGxpdHRpbmcgY29kaW5nIGFnZW50cyBmcm9tIGFsd2F5cy1vbiBwZXJzb25hbCBhZ2VudHMiPgogIDxyZWN0IHg9IjIwIiB5PSIyMCIgd2lkdGg9IjEwNDAiIGhlaWdodD0iMzgwIiByeD0iMTQiIGZpbGw9IiMwOTBjMGYiIHN0cm9rZT0iIzMwMzg0MCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KCiAgPHRleHQgeD0iNTAiIHk9IjU1IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzM4YmRmOCI+Q09ESU5HIEFHRU5UUzwvdGV4dD4KICA8cmVjdCB4PSI1MCIgeT0iNzAiIHdpZHRoPSIzMDAiIGhlaWdodD0iMTMwIiByeD0iOCIgZmlsbD0iIzBlMTQxOCIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjcwIiB5PSIxMDAiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIiBmaWxsPSIjYzhjOGM4Ij5DdXJzb3IgQWdlbnQ8L3RleHQ+CiAgPHRleHQgeD0iNzAiIHk9IjEyMiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPklERSDCtyBhdXRvY29tcGxldGUgwrcgQ2xvdWQgQWdlbnRzIC8gUFJzPC90ZXh0PgogIDx0ZXh0IHg9IjcwIiB5PSIxNDIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5iZXN0IGRheS1vbmUgY29kaW5nIFVYPC90ZXh0PgogIDx0ZXh0IHg9IjcwIiB5PSIxNzIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIiBmaWxsPSIjYzhjOGM4Ij5DbGF1ZGUgQ29kZTwvdGV4dD4KICA8dGV4dCB4PSI3MCIgeT0iMTk0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+dGVybWluYWwgwrcgZGVlcCBtdWx0aS1maWxlIMK3IE1DUDwvdGV4dD4KCiAgPHRleHQgeD0iMzkwIiB5PSI1NSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNhM2U2MzUiPkFMV0FZUy1PTiBQRVJTT05BTDwvdGV4dD4KICA8cmVjdCB4PSIzOTAiIHk9IjcwIiB3aWR0aD0iMzAwIiBoZWlnaHQ9IjEzMCIgcng9IjgiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI0MTAiIHk9IjEwMCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNjOGM4YzgiPk9wZW5DbGF3PC90ZXh0PgogIDx0ZXh0IHg9IjQxMCIgeT0iMTIyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+fjM4NWvimIUgwrcgQ2xhd0h1YiDCtyBtdWx0aS1jaGFubmVsPC90ZXh0PgogIDx0ZXh0IHg9IjQxMCIgeT0iMTQyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+ZWNvc3lzdGVtIGJyZWFkdGggwrcgdXBkYXRlIGZyYWdpbGl0eTwvdGV4dD4KICA8dGV4dCB4PSI0MTAiIHk9IjE3MiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNjOGM4YzgiPkhlcm1lcyBBZ2VudDwvdGV4dD4KICA8dGV4dCB4PSI0MTAiIHk9IjE5NCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPn4yMjVr4piFIMK3IGxlYXJuaW5nIGxvb3AgwrcgbWVtb3J5PC90ZXh0PgoKICA8dGV4dCB4PSI3MzAiIHk9IjU1IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2Y1OWUwYiI+T1BFUkFUT1IgU1RBQ0s8L3RleHQ+CiAgPHJlY3QgeD0iNzMwIiB5PSI3MCIgd2lkdGg9IjMwMCIgaGVpZ2h0PSIxMzAiIHJ4PSI4IiBmaWxsPSIjMTYxMjBhIiBzdHJva2U9IiNmNTllMGIiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNzUwIiB5PSIxMDUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYzhjOGM4Ij4xLiBDb2RlIHdpdGggQ3Vyc29yIC8gQ2xhdWRlIENvZGU8L3RleHQ+CiAgPHRleHQgeD0iNzUwIiB5PSIxMzAiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYzhjOGM4Ij4yLiBMaXZlIG9wcyB2aWEgSGVybWVzIC8gT3BlbkNsYXc8L3RleHQ+CiAgPHRleHQgeD0iNzUwIiB5PSIxNTUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYzhjOGM4Ij4zLiBSb3V0ZSBtb2RlbHMgYnkgY29zdCDDlyBxdWFsaXR5PC90ZXh0PgogIDx0ZXh0IHg9Ijc1MCIgeT0iMTgwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+fjIwJSBvZiBSZWRkaXQgcG93ZXIgdXNlcnMgcnVuIGJvdGggZ2F0ZXdheXM8L3RleHQ+CgogIDxwYXRoIGQ9Ik0zNTAgMTM1IEwzOTAgMTM1IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWRhc2hhcnJheT0iNSA1IiBvcGFjaXR5PSIwLjgiLz4KICA8cGF0aCBkPSJNNjkwIDEzNSBMNzMwIDEzNSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1kYXNoYXJyYXk9IjUgNSIgb3BhY2l0eT0iMC44Ii8+CgogIDx0ZXh0IHg9IjUwIiB5PSIyNDAiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjOGE4YThhIj5DT01NVU5JVFkgU1BMSVQgKHIvb3BlbmNsYXcgwrcgfjEsMzAwIGNvbW1lbnRzIMK3IEtpbG8pPC90ZXh0PgogIDxyZWN0IHg9IjUwIiB5PSIyNTUiIHdpZHRoPSIyMzAiIGhlaWdodD0iMTEwIiByeD0iOCIgZmlsbD0iIzBmMTYwYSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjcwIiB5PSIyOTAiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjIyIiBmaWxsPSIjYTNlNjM1Ij4zNSU8L3RleHQ+CiAgPHRleHQgeD0iNzAiIHk9IjMyMCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjOGM4YzgiPnN0YXkgb24gT3BlbkNsYXc8L3RleHQ+CiAgPHRleHQgeD0iNzAiIHk9IjM0MCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPnNraWxscyDCtyBjcm9uIMK3IGVjb3N5c3RlbTwvdGV4dD4KCiAgPHJlY3QgeD0iMzAwIiB5PSIyNTUiIHdpZHRoPSIyMzAiIGhlaWdodD0iMTEwIiByeD0iOCIgZmlsbD0iIzE2MTIwYSIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjMyMCIgeT0iMjkwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIyMiIgZmlsbD0iI2Y1OWUwYiI+MzAlPC90ZXh0PgogIDx0ZXh0IHg9IjMyMCIgeT0iMzIwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2M4YzhjOCI+c3dpdGNoZWQgdG8gSGVybWVzPC90ZXh0PgogIDx0ZXh0IHg9IjMyMCIgeT0iMzQwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+c2V0dXAgwrcgbWVtb3J5IMK3IGZld2VyIGJyZWFrczwvdGV4dD4KCiAgPHJlY3QgeD0iNTUwIiB5PSIyNTUiIHdpZHRoPSIyMzAiIGhlaWdodD0iMTEwIiByeD0iOCIgZmlsbD0iIzBlMTQxOCIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjU3MCIgeT0iMjkwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIyMiIgZmlsbD0iIzM4YmRmOCI+MjAlPC90ZXh0PgogIDx0ZXh0IHg9IjU3MCIgeT0iMzIwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2M4YzhjOCI+cnVuIGJvdGg8L3RleHQ+CiAgPHRleHQgeD0iNTcwIiB5PSIzNDAiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5vcmNoZXN0cmF0ZSArIGV4ZWN1dGU8L3RleHQ+CgogIDxyZWN0IHg9IjgwMCIgeT0iMjU1IiB3aWR0aD0iMjMwIiBoZWlnaHQ9IjExMCIgcng9IjgiIGZpbGw9IiMxYTEwMTAiIHN0cm9rZT0iI2ZmNmI2YiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI4MjAiIHk9IjI5MCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjIiIGZpbGw9IiNmZjZiNmIiPjE1JTwvdGV4dD4KICA8dGV4dCB4PSI4MjAiIHk9IjMyMCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjOGM4YzgiPmRpc3RydXN0IEhlcm1lczwvdGV4dD4KICA8dGV4dCB4PSI4MjAiIHk9IjM0MCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmFzdHJvdHVyZiAvIGh5cGUgbm9pc2U8L3RleHQ+Cjwvc3ZnPgo8ZmlnY2FwdGlvbj5SZWFkIGxlZnQgdG8gcmlnaHQ6IGNvZGluZyBhZ2VudHMgYW5kIHBlcnNvbmFsIGdhdGV3YXlzIGFyZSBkaWZmZXJlbnQgam9iczsgdGhlIFJlZGRpdCBzYW1wbGUgaXMgc3BsaXQsIG5vdCBjcm93bmVkLjwvZmlnY2FwdGlvbj4KPC9maWd1cmU+Cgo8c2VjdGlvbiBjbGFzcz0iYXJ0aWZhY3QtZ3JpZCBhcnRpZmFjdC1ncmlkLTMiPgogIDxkaXYgY2xhc3M9ImFydGlmYWN0LXN0YXQiPgogICAgPHNwYW4gY2xhc3M9ImFydGlmYWN0LXN0YXQtdmFsdWUiPn4zODVrPC9zcGFuPgogICAgPHNwYW4gY2xhc3M9ImFydGlmYWN0LXN0YXQtbGFiZWwiPk9wZW5DbGF3IEdpdEh1YiBzdGFycyAoQXVnIDIwMjYpPC9zcGFuPgogIDwvZGl2PgogIDxkaXYgY2xhc3M9ImFydGlmYWN0LXN0YXQiPgogICAgPHNwYW4gY2xhc3M9ImFydGlmYWN0LXN0YXQtdmFsdWUiPn4yMjVrPC9zcGFuPgogICAgPHNwYW4gY2xhc3M9ImFydGlmYWN0LXN0YXQtbGFiZWwiPkhlcm1lcyBHaXRIdWIgc3RhcnMgKEF1ZyAyMDI2KTwvc3Bhbj4KICA8L2Rpdj4KICA8ZGl2IGNsYXNzPSJhcnRpZmFjdC1zdGF0Ij4KICAgIDxzcGFuIGNsYXNzPSJhcnRpZmFjdC1zdGF0LXZhbHVlIj4jMTwvc3Bhbj4KICAgIDxzcGFuIGNsYXNzPSJhcnRpZmFjdC1zdGF0LWxhYmVsIj5IZXJtZXMgb24gT3BlblJvdXRlciBkYWlseSB0b2tlbnMgKE1heSAyMDI2IHBlYWspPC9zcGFuPgogIDwvZGl2Pgo8L3NlY3Rpb24+Cgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1jYWxsb3V0Ij48c3Ryb25nPkJvdHRvbSBsaW5lOjwvc3Ryb25nPiBmb3IgYSBuZXcgYWx3YXlzLW9uIHBlcnNvbmFsIGFnZW50LCBzdGFydCB3aXRoIDxzdHJvbmc+SGVybWVzPC9zdHJvbmc+IChtZW1vcnkgKyBzZXR1cCArIHJlY2VudCByZWxpYWJpbGl0eSBzdG9yeSkuIEtlZXAgb3IgYWRkIDxzdHJvbmc+T3BlbkNsYXc8L3N0cm9uZz4gd2hlbiB5b3UgbmVlZCBDbGF3SHViIHNraWxscyBvciBjaGFubmVsIGJyZWFkdGguIERvIG5vdCByZXBsYWNlIEN1cnNvciAvIENsYXVkZSBDb2RlIHdpdGggZWl0aGVyIGZvciBwcm9kdWN0aW9uIGNvZGluZy48L2Rpdj4KCiMjIEZpbmRpbmdzCgojIyMgQ2F0ZWdvcnkgbWlzdGFrZSB0byBhdm9pZAoKQ3Vyc29yIEFnZW50LCBIZXJtZXMsIGFuZCBPcGVuQ2xhdyBhcmUgb2Z0ZW4gY29tcGFyZWQgYXMgcGVlcnMuIFRoZXkgYXJlIG5vdC4gQ3Vyc29yIChhbmQgQ2xhdWRlIENvZGUgLyBDb2RleCkgb3B0aW1pemUgZm9yIHNvZnR3YXJlIGVuZ2luZWVyaW5nIGxvb3BzLiBIZXJtZXMgYW5kIE9wZW5DbGF3IG9wdGltaXplIGZvciBwZXJzaXN0ZW50LCBtdWx0aS1jaGFubmVsLCBzY2hlZHVsZWQgcGVyc29uYWwvb3BzIGFnZW50cy4gUmFua2luZyB0aGVtIG9uIG9uZSBheGlzIHByb2R1Y2VzIGEgd3JvbmcgYW5zd2VyLgoKIyMjIExpdmUgcmVwbyBzbmFwc2hvdCAoR2l0SHViIEFQSSwgQXVnIDIwMjYpCgp8IHwgT3BlbkNsYXcgfCBIZXJtZXMgfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgUmVwbyB8IFtvcGVuY2xhdy9vcGVuY2xhd10oaHR0cHM6Ly9naXRodWIuY29tL29wZW5jbGF3L29wZW5jbGF3KSB8IFtOb3VzUmVzZWFyY2gvaGVybWVzLWFnZW50XShodHRwczovL2dpdGh1Yi5jb20vTm91c1Jlc2VhcmNoL2hlcm1lcy1hZ2VudCkgfAp8IFN0YXJzIHwgfjM4NSwwNDkgfCB+MjI0LDg4NCB8CnwgRm9ya3MgfCB+ODAsOTM0IHwgfjQzLDU3MCB8CnwgTGFuZ3VhZ2UgfCBUeXBlU2NyaXB0IHwgUHl0aG9uIHwKfCBMYXRlc3Qgc3RhYmxlIHwgYHYyMDI2LjcuMWAgKEp1bCAxMykgfCBgdjAuMjAuMGAgLyBgdjIwMjYuOC4zYCAoQXVnIDMsIEhlcmFsZCkgfAp8IExhdGVzdCBwcmUgfCBgdjIwMjYuNy4yLWJldGEuN2AgKEF1ZyAyKSB8IOKAlCB8CnwgTGljZW5zZSB8IE1JVC1zdHlsZSB8IE1JVCB8CgpPcGVuQ2xhdyBzdGlsbCBoYXMgdGhlIGxhcmdlciBpbnN0YWxsZWQgYmFzZS4gSGVybWVzIGhhcyBiZWVuIGNhdGNoaW5nIHVwIG9uIE9wZW5Sb3V0ZXIgdG9rZW4gdm9sdW1lIChyZXBvcnRlZCB+MjI0QiB0b2tlbnMvZGF5IHZzIE9wZW5DbGF3IH4xODZCIGFyb3VuZCBNYXkgMTAsIDIwMjYpLgoKIyMjIFdoYXQgcGVvcGxlIGxpa2UgYW5kIGhhdGUKCjxzZWN0aW9uIGNsYXNzPSJhcnRpZmFjdC1ncmlkIGFydGlmYWN0LWdyaWQtMiI+CiAgPGFydGljbGUgY2xhc3M9ImFydGlmYWN0LXBhbmVsIj4KICAgIDxoMz5PcGVuQ2xhdyDigJQgbGlrZXM8L2gzPgogICAgPHVsPgogICAgICA8bGk+TGFyZ2VzdCBza2lsbCBlY29zeXN0ZW0gKENsYXdIdWIgfjEzaysgc2tpbGxzKTwvbGk+CiAgICAgIDxsaT5NZWV0cyB5b3UgaW4gV2hhdHNBcHAgLyBUZWxlZ3JhbSAvIERpc2NvcmQgLyBTbGFjayAvIFNpZ25hbCAvIGlNZXNzYWdlPC9saT4KICAgICAgPGxpPk5hdGl2ZSBpT1MgLyBBbmRyb2lkIC8gbWFjT1MgYXBwcyArIENvbnRyb2wgVUkgZmVlbCBwcm9kdWN0aXplZDwvbGk+CiAgICAgIDxsaT5EZXRlcm1pbmlzdGljIGNyb24gcHJhaXNlZCBieSBsb25nLXRpbWUgdXNlcnM8L2xpPgogICAgICA8bGk+Q29kaW5nLWFnZW50IGJyaWRnZXMgKDxjb2RlPm9wZW5jbGF3IGF0dGFjaDwvY29kZT4sIENvZGV4IC8gQ29waWxvdCBkZWxlZ2F0aW9uKTwvbGk+CiAgICA8L3VsPgogIDwvYXJ0aWNsZT4KICA8YXJ0aWNsZSBjbGFzcz0iYXJ0aWZhY3QtcGFuZWwiPgogICAgPGgzPk9wZW5DbGF3IOKAlCBoYXRlczwvaDM+CiAgICA8dWw+CiAgICAgIDxsaT5VcGRhdGUgZnJhZ2lsaXR5ICh0b3AgUmVkZGl0IGNvbXBsYWludDsgfjI1JSBicmVhayByaXNrIHF1b3RlZCBieSB1c2Vycyk8L2xpPgogICAgICA8bGk+U2VjdXJpdHkgaGlzdG9yeSAoZWFybHktMjAyNiBDVkUgd2F2ZTsgZXhwb3NlZCBnYXRld2F5czsgQ2xhd0h1YiBtYWx3YXJlIGF1ZGl0cyk8L2xpPgogICAgICA8bGk+RG9jcyBsYWcgZHVyaW5nIGZhc3Qgc2hpcCB3ZWVrczwvbGk+CiAgICAgIDxsaT5SdW5hd2F5IGNvc3QgLyByZXRyeSBsb29wczsgZ2F0ZXdheSBtZW1vcnkgbGVha3MgaW4gb3BlbiBpc3N1ZXM8L2xpPgogICAgICA8bGk+U2lsZW50IGZhaWx1cmVzIHdoZW4geW91IGFyZSBub3Qgd2F0Y2hpbmc8L2xpPgogICAgPC91bD4KICA8L2FydGljbGU+CiAgPGFydGljbGUgY2xhc3M9ImFydGlmYWN0LXBhbmVsIj4KICAgIDxoMz5IZXJtZXMg4oCUIGxpa2VzPC9oMz4KICAgIDx1bD4KICAgICAgPGxpPkxlYW5lciBkYXktb25lIHNldHVwICjigJxmaW5hbGx5IGdldCB0aGluZ3MgZG9uZSBpbnN0ZWFkIG9mIGRlYnVnZ2luZ+KAnSk8L2xpPgogICAgICA8bGk+TWVtb3J5IGNvbnRpbnVpdHkgb3V0IG9mIHRoZSBib3ggKGJpZ2dlc3QgbWlncmF0aW9uIHJlYXNvbik8L2xpPgogICAgICA8bGk+Q2hlY2twb2ludCAvIHJvbGxiYWNrIGJlZm9yZSBmaWxlIG11dGF0aW9uczwvbGk+CiAgICAgIDxsaT5Nb2RlbC1hZ25vc3RpYyArIE9wZW5Sb3V0ZXItZmlyc3Q7IGxlYXJuaW5nIGxvb3AgdGhhdCBjcmVhdGVzIHNraWxsczwvbGk+CiAgICAgIDxsaT5DbGVhbmVyIHB1YmxpYyBzZWN1cml0eSB0cmFjayBzbyBmYXI7IGV4cGxpY2l0IDxjb2RlPmhlcm1lcyBjbGF3IG1pZ3JhdGU8L2NvZGU+PC9saT4KICAgIDwvdWw+CiAgPC9hcnRpY2xlPgogIDxhcnRpY2xlIGNsYXNzPSJhcnRpZmFjdC1wYW5lbCI+CiAgICA8aDM+SGVybWVzIOKAlCBoYXRlczwvaDM+CiAgICA8dWw+CiAgICAgIDxsaT5Bc3Ryb3R1cmZpbmcgc3VzcGljaW9uICh+MTUlIG9mIEtpbG8gc2FtcGxlIGRpc3RydXN0IHRoZSBoeXBlKTwvbGk+CiAgICAgIDxsaT5PdmVyY29uZmlkZW50IHNlbGYtaW1wcm92ZW1lbnQgKOKAnGFsd2F5cyB0aGlua3MgaXQgZGlkIGEgZ29vZCBqb2LigJ0pPC9saT4KICAgICAgPGxpPlNtYWxsZXIgc2tpbGwgZWNvc3lzdGVtIHZzIENsYXdIdWI8L2xpPgogICAgICA8bGk+SGlnaCBmaXhlZCB0b2tlbiBvdmVyaGVhZCAofjE0ayB0b2tlbnMgY2l0ZWQgaW4gb3BlbiBpc3N1ZXMpPC9saT4KICAgICAgPGxpPk5vdCBhIGNvZGluZyBhZ2VudCDigJQgQ2xhdWRlIENvZGUgLyBDdXJzb3Igd2luIGZvciBwcm9kdWN0aW9uIGNvZGU8L2xpPgogICAgPC91bD4KICA8L2FydGljbGU+Cjwvc2VjdGlvbj4KCiMjIyBNb2RlbHMgcGVvcGxlIGFjdHVhbGx5IHJ1bgoKPGZpZ3VyZSBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlIGFydGlmYWN0LWZpZ3VyZS1kaWFncmFtIGFydGlmYWN0LWZpZ3VyZS13aWRlIj4KPHN2ZyBjbGFzcz0iYXJ0aWZhY3QtZGlhZ3JhbSIgdmlld0JveD0iMCAwIDEwODAgMjgwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9Ik1vZGVsIHRpZXJpbmcgZm9yIE9wZW5DbGF3IGFuZCBIZXJtZXMgd29ya2xvYWRzIj4KICA8cmVjdCB4PSIyMCIgeT0iMjAiIHdpZHRoPSIxMDQwIiBoZWlnaHQ9IjI0MCIgcng9IjE0IiBmaWxsPSIjMDkwYzBmIiBzdHJva2U9IiMzMDM4NDAiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNTAiIHk9IjU1IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2EzZTYzNSI+UVVBTElUWSBDRUlMSU5HPC90ZXh0PgogIDxyZWN0IHg9IjUwIiB5PSI3MCIgd2lkdGg9IjIzMCIgaGVpZ2h0PSIxNTAiIHJ4PSI4IiBmaWxsPSIjMGYxNjBhIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNzAiIHk9IjExMCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiNjOGM4YzgiPkNsYXVkZSBPcHVzPC90ZXh0PgogIDx0ZXh0IHg9IjcwIiB5PSIxMzUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj40LjYgLyA0LjcgLyA0Ljg8L3RleHQ+CiAgPHRleHQgeD0iNzAiIHk9IjE2MCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmJlc3QgYWdlbnRpYyBxdWFsaXR5PC90ZXh0PgogIDx0ZXh0IHg9IjcwIiB5PSIxODUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5leHBlbnNpdmUgwrcgYmFuIHByZXNzdXJlPC90ZXh0PgoKICA8dGV4dCB4PSIzMTAiIHk9IjU1IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzM4YmRmOCI+REFJTFkgRFJJVkVSUzwvdGV4dD4KICA8cmVjdCB4PSIzMTAiIHk9IjcwIiB3aWR0aD0iMjMwIiBoZWlnaHQ9IjE1MCIgcng9IjgiIGZpbGw9IiMwZTE0MTgiIHN0cm9rZT0iIzM4YmRmOCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIzMzAiIHk9IjEwNSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNjOGM4YzgiPkNsYXVkZSBTb25uZXQ8L3RleHQ+CiAgPHRleHQgeD0iMzMwIiB5PSIxMzAiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIiBmaWxsPSIjYzhjOGM4Ij5HUFQtNS40PC90ZXh0PgogIDx0ZXh0IHg9IjMzMCIgeT0iMTU1IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZmlsbD0iI2M4YzhjOCI+TWluaU1heCBNMi43PC90ZXh0PgogIDx0ZXh0IHg9IjMzMCIgeT0iMTkwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+SGVybWVzIGRlZmF1bHQ6IFNvbm5ldCB2aWEgT1I8L3RleHQ+CgogIDx0ZXh0IHg9IjU3MCIgeT0iNTUiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSIjZjU5ZTBiIj5ISUdIIFZPTFVNRSAvIEJVREdFVDwvdGV4dD4KICA8cmVjdCB4PSI1NzAiIHk9IjcwIiB3aWR0aD0iMjMwIiBoZWlnaHQ9IjE1MCIgcng9IjgiIGZpbGw9IiMxNjEyMGEiIHN0cm9rZT0iI2Y1OWUwYiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI1OTAiIHk9IjEwNSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNjOGM4YzgiPlF3ZW4gMy41IC8gMy42PC90ZXh0PgogIDx0ZXh0IHg9IjU5MCIgeT0iMTMwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZmlsbD0iI2M4YzhjOCI+R0xNIMK3IEtpbWkgSzIuNTwvdGV4dD4KICA8dGV4dCB4PSI1OTAiIHk9IjE1NSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNjOGM4YzgiPkRlZXBTZWVrIC8gRmxhc2g8L3RleHQ+CiAgPHRleHQgeD0iNTkwIiB5PSIxOTAiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5vZnRlbiBmcmVlIC8gZmxhdC1yYXRlIG9uIE9SPC90ZXh0PgoKICA8dGV4dCB4PSI4MzAiIHk9IjU1IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzhhOGE4YSI+TE9DQUw8L3RleHQ+CiAgPHJlY3QgeD0iODMwIiB5PSI3MCIgd2lkdGg9IjIwMCIgaGVpZ2h0PSIxNTAiIHJ4PSI4IiBmaWxsPSIjMTIxMjEyIiBzdHJva2U9IiM1NTUiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iODUwIiB5PSIxMTAiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIiBmaWxsPSIjYzhjOGM4Ij5PbGxhbWEgLyBRd2VuMzwvdGV4dD4KICA8dGV4dCB4PSI4NTAiIHk9IjE0MCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmZpbmUgZm9yIGxpZ2h0IHRhc2tzPC90ZXh0PgogIDx0ZXh0IHg9Ijg1MCIgeT0iMTY1IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+Jmx0OzE0QiBvZnRlbiBmYWlsczwvdGV4dD4KICA8dGV4dCB4PSI4NTAiIHk9IjE4NSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPm11bHRpLXN0ZXAgdG9vbHM8L3RleHQ+Cjwvc3ZnPgo8ZmlnY2FwdGlvbj5Db21tdW5pdHkgbW9kZWwgcm91dGluZyBmb3IgT3BlbkNsYXcgLyBIZXJtZXM6IE9wdXMgZm9yIGhhcmQgcmVhc29uaW5nLCBTb25uZXQvR1BULTUuNC9NaW5pTWF4IGZvciBkYWlseSBsb29wcywgUXdlbi1jbGFzcyBmb3Igdm9sdW1lLjwvZmlnY2FwdGlvbj4KPC9maWd1cmU+CgpUcmVuZDogQW50aHJvcGljIGFjY291bnQgYmFucyBhbmQgcGVyLXRva2VuIGJ1cm4gYXJlIHB1c2hpbmcgb3BlcmF0b3JzIHRvd2FyZCBmbGF0LXJhdGUgTWluaU1heCAvIE9sbGFtYSBQcm8gQ2xvdWQgYW5kIGZyZWUgT3BlblJvdXRlciBRd2VuIGZvciByb3V0aW5lIGF1dG9tYXRpb24uCgojIyBFdmlkZW5jZQoKIyMjIE9wZW5DbGF3IOKAlCByZWNlbnQgc2hpcG1lbnRzCgoqKmB2MjAyNi43LjFgIChzdGFibGUsIEp1bCAxMykqKiDigJQgfjMsMDYzIGNvbnRyaWJ1dGlvbnMgLyA1MzIgY29udHJpYnV0b3JzOgoKLSBDb250cm9sIFVJIG92ZXJoYXVsICh0YXNrcywgY29zdC91c2FnZSwgcGFpcmluZywgYXBwcm92YWxzLCBnYXRld2F5IGhlYWx0aCkKLSBNYWpvciBvZmZpY2lhbCBpT1MgLyBBbmRyb2lkIC8gbWFjT1MgYXBwIHdvcmsKLSBNb2RlbHM6IEdQVC01LjYsIFRlbmNlbnQgSHkzLCBNZXRhIE11c2UgU3BhcmsgMS4xLCBicm9hZGVyIENsYXVkZSAvIE9sbGFtYSAvIENsYXdSb3V0ZXIKLSBDb2RpbmcgYnJpZGdlczogYG9wZW5jbGF3IGF0dGFjaGAgZm9yIENsYXVkZSBDb2RlOyBDb2RleCAvIENvcGlsb3QgZGVsZWdhdGlvbgotIEdhdGV3YXkgY3Jhc2ggbG9vcHMgbGVhdmUgYSByZXBhaXIgcGF0aCBpbnN0ZWFkIG9mIHJlc3RhcnRpbmcgZm9yZXZlcgotIFNjaGVkdWxlZCB3YWtlLW9uLWNoYW5nZSwgcmVtb3RlIGJyb3dzZXIgdGFiIHBhaXJpbmcsIHdvcmtzcGFjZSB0ZXJtaW5hbHMKCioqYHYyMDI2LjcuMmAgYmV0YXMgKHRocm91Z2ggQXVnIDIpKio6IENsYXVkZSBPcHVzIDUsIEtpbWkgSzMsIEdQVCBMaXZlIHJlYWx0aW1lLCBpbi1wcm9jZXNzIGxsYW1hLmNwcCBHR1VGLCBzZXNzaW9uIHJld2luZC9mb3JrLCBRdWljayBDaGF0IG9uIG1hY09TL0xpbnV4LCBNQ1AgQXBwcywgY2xvdWQgd29ya2VycyArIHBhaXJlZC1ub2RlIGNvZGluZyBzZXNzaW9ucy4KCioqUGFpbiBldmlkZW5jZSBmcm9tIHRoZSB0cmFja2VyIC8gY29tbXVuaXR5OioqCgotIEFwcmlsIGAyMDI2LjQuMjZgIGNsdXN0ZXI6IERpc2NvcmQgdW5yZXNwb25zaXZlLCBnYXRld2F5IDEwMCUgQ1BVLCBtdWx0aS1taW51dGUgbGF0ZW5jeTsgdXNlcnMgcm9sbGVkIGJhY2sgLyBzd2l0Y2hlZCBIZXJtZXMgdG8gcHJpbWFyeQotIE9wZW4gaXNzdWVzIGNpdGUgZ2F0ZXdheSBSU1MgZ3Jvd3RoICgzNTBNQiDihpIgMTVHQiksIHJ1bmF3YXkgbW9kZWwtY2FsbCByZXRyaWVzIGJpbGxpbmcgaHVuZHJlZHMgb2YgZG9sbGFycywgc2lsZW50IHN1YmFnZW50IGNvbXBsZXRpb24gbG9zcwotIFNlY3VyaXR5IHRpbWVsaW5lOiBDVkUtMjAyNi0yNTI1MyAoZXhwb3NlZCBSQ0UpLCBNYXJjaCAyMDI2IENWRSBmbG9vZCwgQ2xhd0h1YiBtYWxpY2lvdXMtc2tpbGwgYXVkaXRzCgojIyMgSGVybWVzIOKAlCByZWNlbnQgc2hpcG1lbnRzCgoqKmB2MC4xOS4wYCBRdWlja3NpbHZlciAoSnVsIDIwKSoqIOKAlCB+MiwyNDUgY29tbWl0cywgfjMsMzAwIGlzc3VlcyBjbG9zZWQ6CgotIH44MCUgY29sZC1zdGFydCBsYXRlbmN5IGN1dCAofjQuM3Mg4oaSIH4wLjlzIFRURlQpCi0gU21hcnQgYXBwcm92YWxzIGRlZmF1bHQgKGluZGVwZW5kZW50IExMTSByZXZpZXdzIHJpc2t5IGNvbW1hbmRzKQotIEJpdHdhcmRlbiAvIDFQYXNzd29yZCBzZWNyZXQgc291cmNlcwotIExpdmUgc3ViYWdlbnQgdHJhbnNjcmlwdHMgKyBkdXJhYmxlIGJhY2tncm91bmQgZGVsZWdhdGlvbgotIERlbGl2ZXJ5LW9ibGlnYXRpb24gbGVkZ2VyIChkbyBub3QgbG9zZSByZXBsaWVzIG9uIGdhdGV3YXkgY3Jhc2gpCi0gUHJvZmlsZS1iYXNlZCBtdWx0aS10ZW5hbnQgcm91dGluZyBvbiBvbmUgZ2F0ZXdheQoKKipgdjAuMjAuMGAgSGVyYWxkIChBdWcgMykqKiDigJQgfjMsNjUwIGNvbW1pdHMsIH4xLDIwMCBpc3N1ZXMgY2xvc2VkOgoKLSBTdHJlYW1pbmcgY29udmVyc2F0aW9uYWwgdm9pY2Ugd2l0aCBiYXJnZS1pbiArIG9uLWRldmljZSB3YWtlIHdvcmRzCi0gR3JvdW5kZWQgY2l0YXRpb25zICsgZmFjdC1jaGVja2luZyBza2lsbAotIFNpZ25lZCBvdXRib3VuZCB3ZWJob29rczsgQTJBIHYxLjAgYWdlbnQtdG8tYWdlbnQgcHJvdG9jb2wKLSBEZXNrdG9wIHBsYXRmb3JtOiBhcnRpZmFjdHMsIHBsdWdpbiBTREssIHF1aWNrLWVudHJ5IGhvdGtleQotIENMSSBwb3dlciB0b29scyAoYCFzaGVsbGAsIGAvaW5pdGAsIGAvZGlmZmAsIGAvY29udGV4dGAsIG1pZC10dXJuIHJlZGlyZWN0cykKLSBUb29scyBzZWxmLXJlY292ZXI7IGl0ZXJhdGlvbiBsaW1pdCA5MCDihpIgNTAwOyBzbWFydGVyIGNvbXByZXNzaW9uCi0gTmV3IG1vZGVsczogR1BULTUuNiBmYW1pbHksIGdyb2stNC41LCBraW1pLWszLCBDbGF1ZGUgRmFibGUvU29ubmV0IDUsIEh5MwoKSGVybWVzIGRvY3VtZW50ZWQgT3BlblJvdXRlciBkZWZhdWx0OiBgfmFudGhyb3BpYy9jbGF1ZGUtc29ubmV0LWxhdGVzdGAuIEF4aXMgSW50ZWxsaWdlbmNlIGhhbmRzLW9uIHNjb3JlOiAqKjguMi8xMCoqIGZvciBleHBlcmllbmNlZCBkZXZlbG9wZXJzIChub3Qgbm9uLXRlY2huaWNhbCB1c2VycykuCgojIyMgQ3Vyc29yIEFnZW50IOKAlCBwbGFjZW1lbnQKCkN1cnNvciBpcyBub3QgY29tcGV0aW5nIGZvciB0aGUgcGVyc29uYWwgV2hhdHNBcHAgYWdlbnQgc2xvdC4KCi0gTG9jYWwgQWdlbnQgbW9kZTogYmVzdC1pbi1jbGFzcyBJREUgYXV0b2NvbXBsZXRlICsgbXVsdGktZmlsZSBhZ2VudAotIENsb3VkIEFnZW50cyAoZXgtQmFja2dyb3VuZCBBZ2VudHMpOiBpc29sYXRlZCBWTXMsIHBhcmFsbGVsIFBSIGZhY3RvcnksIGRlc2t0b3AvYnJvd3NlciB2ZXJpZmljYXRpb24KLSBTdHJlbmd0aDogZGF5LW9uZSBjb2RpbmcgcHJvZHVjdGl2aXR5IGFuZCB0ZWFtIFBSIHdvcmtmbG93Ci0gR2FwIHZzIEhlcm1lcy9PcGVuQ2xhdzogbm8gMjQvNyBtZXNzYWdpbmcgZ2F0ZXdheSwgbm8gbGlmZS1PUyBtZW1vcnkgbG9vcAoKIyMjIENvbW11bml0eSB2ZXJkaWN0IChLaWxvIMK3IH4xLDMwMCByL29wZW5jbGF3IGNvbW1lbnRzKQoKfCBDYW1wIHwgU2hhcmUgfCBTdGFuY2UgfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgU3RheSBvbiBPcGVuQ2xhdyB8IH4zNSUgfCBFY29zeXN0ZW0gKyBjcm9uICsgc2tpbGxzIHdvcnRoIHRoZSBwYWluIHwKfCBTd2l0Y2hlZCB0byBIZXJtZXMgfCB+MzAlIHwgU2V0dXAgKyBtZW1vcnkgKyBmZXdlciBicmVha2FnZXMgfAp8IFJ1biBib3RoIHwgfjIwJSB8IE9wZW5DbGF3IG9yY2hlc3RyYXRlczsgSGVybWVzIGV4ZWN1dGVzIHJlY3VycmluZyBsb29wcyB8CnwgRGlzdHJ1c3QgSGVybWVzIHwgfjE1JSB8IEFzdHJvdHVyZiAvIGh5cGUgYWNjb3VudHMgfAoKSW5kZXBlbmRlbnQgcmV2aWV3cyAoQXhpcywgZWVzZWwsIEh1bmRyZWRUYWJzLCBUZWNoc29uYSwgQWdlbnQgU2hvcnRsaXN0LCBwYXNxdWFsZXBpbGxpdHRlcmkpIGxhbmQgb24gdGhlIHNhbWUgcHJhZ21hdGljIGxpbmU6IGFzc2lnbiBieSBqb2I7IGRvIG5vdCBjcm93biBhbiBhYnNvbHV0ZSB3aW5uZXIuCgojIyBSZWNvbW1lbmRhdGlvbnMKCjEuICoqTmV3IGFsd2F5cy1vbiBwZXJzb25hbCBhZ2VudDoqKiBzdGFydCB3aXRoICoqSGVybWVzKiogKGB2MC4yMGAgSGVyYWxkKS4gUHJpb3JpdGl6ZSBtZW1vcnksIHNldHVwIHRpbWUsIGFuZCByZWNlbnQgcmVsaWFiaWxpdHkvbGF0ZW5jeSB3b3JrLgoyLiAqKk5lZWQgQ2xhd0h1YiAvIFdoYXRzQXBwLWhlYXZ5IC8gYWxyZWFkeSBpbnZlc3RlZDoqKiBzdGF5IG9uICoqT3BlbkNsYXcqKiwgcGluIGtub3duLWdvb2QgcmVsZWFzZXMsIG5ldmVyIGV4cG9zZSB0aGUgZ2F0ZXdheSB0byB0aGUgcHVibGljIGludGVybmV0LCB0cmVhdCBDbGF3SHViIHNraWxscyBhcyB1bnRydXN0ZWQgYnkgZGVmYXVsdC4KMy4gKipQb3dlciBzZXR1cDoqKiBydW4gKipib3RoKiog4oCUIE9wZW5DbGF3IGZvciBjaGFubmVsIGJyZWFkdGggLyBza2lsbHM7IEhlcm1lcyBmb3IgbG9uZy1ydW5uaW5nIGxlYXJuZWQgd29ya2Zsb3dzLiBVc2UgYGhlcm1lcyBjbGF3IG1pZ3JhdGVgIHdoZW4gdGVzdGluZyBhIHNpZGUtYnktc2lkZS4KNC4gKipDb2Rpbmcgd29ya2xvYWQ6KiogQ3Vyc29yIChkYWlseSBJREUpICsgQ2xhdWRlIENvZGUgKGRlZXAvdGVybWluYWwpLiBEbyBub3QgZGVtb3RlIGVpdGhlciBpbiBmYXZvciBvZiBhIHBlcnNvbmFsIGdhdGV3YXkgZm9yIHByb2R1Y3Rpb24gY29kZS4KNS4gKipNb2RlbCByb3V0aW5nIGRlZmF1bHRzOioqCiAgIC0gSGFyZCByZWFzb25pbmcg4oaSIENsYXVkZSBPcHVzCiAgIC0gRGFpbHkgYWdlbnQgbG9vcHMg4oaSIENsYXVkZSBTb25uZXQgb3IgR1BULTUuNCAoSGVybWVzIE9SIGRlZmF1bHQgU29ubmV0KQogICAtIEhpZ2ggdm9sdW1lIOKGkiBNaW5pTWF4IG9yIFF3ZW4gdmlhIE9wZW5Sb3V0ZXIKICAgLSBBdm9pZCBleHBlY3RpbmcgcmVsaWFibGUgbXVsdGktc3RlcCB0b29scyBmcm9tIHRpbnkgbG9jYWwgbW9kZWxzICgmbHQ7MTRCKQoKYGBgYmFzaAojIEhlcm1lcyBxdWljayBwYXRoCmN1cmwgLWZzU0wgaHR0cHM6Ly9oZXJtZXMtYWdlbnQubm91c3Jlc2VhcmNoLmNvbS9pbnN0YWxsLnNoIHwgYmFzaApoZXJtZXMgbW9kZWwgICAjIHBpY2sgcHJvdmlkZXIgLyBtb2RlbApoZXJtZXMgZ2F0ZXdheSAjIFRlbGVncmFtIC8gRGlzY29yZCAvIFNsYWNrIC8gV2hhdHNBcHAKCiMgT3BlbkNsYXcgcXVpY2sgcGF0aApjdXJsIC1mc1NMIGh0dHBzOi8vb3BlbmNsYXcuYWkvaW5zdGFsbC5zaCB8IGJhc2gKb3BlbmNsYXcgb25ib2FyZCAtLWluc3RhbGwtZGFlbW9uCm9wZW5jbGF3IGdhdGV3YXkgc3RhdHVzCmBgYAoKIyMjIFNvdXJjZXMKCi0gR2l0SHViIEFQSTogYG9wZW5jbGF3L29wZW5jbGF3YCwgYE5vdXNSZXNlYXJjaC9oZXJtZXMtYWdlbnRgIChzdGF0cywgUkVBRE1FcywgcmVsZWFzZSBub3RlcykKLSBSZWxlYXNlczogT3BlbkNsYXcgYDIwMjYuNy4xYCAvIGAyMDI2LjcuMi1iZXRhLipgOyBIZXJtZXMgYHYyMDI2LjcuMjBgIC8gYHYyMDI2LjguM2AKLSBDb21tdW5pdHk6IFtLaWxvIE9wZW5DbGF3IHZzIEhlcm1lc10oaHR0cHM6Ly9raWxvLmFpL29wZW5jbGF3L3ZzLWhlcm1lcyksIHIvb3BlbmNsYXcgYnJlYWthZ2UgdGhyZWFkcywgQ2xhd01hZ2UgUmVkZGl0IHJvdW5kdXAKLSBSZXZpZXdzOiBBeGlzIEhlcm1lcywgZWVzZWwsIEh1bmRyZWRUYWJzLCBUZWNoc29uYSwgQWdlbnQgU2hvcnRsaXN0LCBPcGVuUm91dGVyIEhlcm1lcyB0dXRvcmlhbAotIFNlY3VyaXR5OiBHaXRIdWIgYWR2aXNvcmllcyAvIENWRSB0aW1lbGluZSB3cml0ZXVwcyBmb3IgT3BlbkNsYXcgZWFybHnigJNtaWQgMjAyNgo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
