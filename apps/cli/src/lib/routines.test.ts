@@ -332,10 +332,11 @@ describe('daemon-owned built-in routines (lowest layer)', () => {
     if (tmpHome) fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it('listJobs surfaces all 8 built-ins when no on-disk file exists', () => {
+  it('listJobs surfaces all 6 built-ins when no on-disk file exists', () => {
     enterTmp();
     const jobs = listJobs();
-    for (const name of ['watchdog', 'usage-refresh', 'fleet-cache-warm', 'session-cache-warm',
+    // usage-refresh + fleet-cache-warm are account-state-service clocks (RUSH-2451), not scheduler built-ins.
+    for (const name of ['watchdog', 'session-cache-warm',
       'device-probe', 'auto-dispatch', 'tmux-reconcile', 'launch-health']) {
       const job = jobs.find((j) => j.name === name);
       expect(job, `built-in '${name}' should be listed`).toBeDefined();
