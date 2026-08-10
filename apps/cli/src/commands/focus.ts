@@ -200,6 +200,7 @@ export function registerFocusCommand(program: Command): void {
       - space toggles a session, enter opens the selected set; a single check + enter opens just one.
       - With no selector/filter, the picker shows the live fleet. An id focuses directly; agent@version and text selectors always show the preview picker.
       - A living tmux pane is JOINED (a second client, no fork). Dead/missing panes recover on the origin device: exact healthy origin uses native resume; otherwise a healthy version of the same harness receives /continue <id>.
+      - An id/identity selector resolves across the whole reachable fleet on its own — you do NOT need --device to focus a session that lives on another box (same as resume/preview). --device only narrows the browsable picker and the agent/version resolution.
       - --host/--device and the sessions-browser filters compose. latest/oldest resolve against each selected device's installed versions.
       Lifecycle siblings (not synonyms):
         focus              attach if alive, otherwise recover (default "take me there")
@@ -292,13 +293,17 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
         process.exitCode = 1;
         return;
       }
+      // The fleet resolver is authoritative for an id/identity selector — the same
+      // one `resume`/`preview` use, and it already fanned out across the reachable
+      // fleet. Focus the session it found even when that session falls outside the
+      // candidate-pool DISPLAY filters (project scope, time window, device): those
+      // filters scope the browsable list, not an exact id lookup. Requiring the
+      // resolved row to ALSO be in the filtered pool is what made focusing a
+      // peer-owned (or older / other-project) session need `--device`. Prefer the
+      // pool's row when it carries the already-gathered live status, else fall back
+      // to the resolved metadata (focusResolvedSession hops to the owner from it).
       const filteredMatch = sessions.find((session) => session.id === outcome.session.id);
-      if (!filteredMatch) {
-        console.error(chalk.red(`Session ${outcome.session.shortId} does not match the selected focus filters.`));
-        process.exitCode = 1;
-        return;
-      }
-      exact = [filteredMatch];
+      exact = [focusTargetForResolved(filteredMatch, outcome.session)];
     }
     if (exact.length === 1) {
       await focusResolvedSession(exact[0], liveById, self, fallback, opts.attachOnly === true);
@@ -445,6 +450,22 @@ async function pickFocusCandidates(
     if (isPromptCancelled(err)) return [];
     throw err;
   }
+}
+
+/**
+ * The session to focus once an id/identity selector has resolved across the
+ * fleet. Prefer the already-gathered candidate-pool row (it carries the live
+ * status collected for the picker), but fall back to the resolver's own metadata
+ * when the resolved session is not in the filtered pool — a peer-owned, older, or
+ * other-project session that the display filters excluded. Returning the resolved
+ * session there (instead of rejecting it) is what lets `focus <id>` reach a
+ * peer-owned session without `--device`, matching `resume`/`preview`.
+ */
+export function focusTargetForResolved(
+  poolMatch: SessionMeta | undefined,
+  resolved: SessionMeta,
+): SessionMeta {
+  return poolMatch ?? resolved;
 }
 
 async function focusResolvedSession(
