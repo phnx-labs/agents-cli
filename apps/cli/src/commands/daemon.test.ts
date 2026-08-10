@@ -358,4 +358,62 @@ describeDaemon('agents daemon', () => {
       }
     },
   );
+
+  /**
+   * RUSH-2493: a daemon whose entry file has been deleted answers every probe
+   * and reads healthy, but cannot restart and runs whatever was loaded before
+   * the delete. Observed live: one ran 4h14m from a removed worktree while
+   * `systemctl is-active` said `active`.
+   *
+   * Real process launched from a real file that is then unlinked — no mocks.
+   */
+  it('status flags a daemon whose entry file was deleted from disk', async () => {
+    const home = makeHome();
+    const scriptDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-stale-entry-'));
+    const script = path.join(scriptDir, 'index.js');
+    fs.writeFileSync(script, 'setInterval(() => {}, 1e9);\n');
+    const child = spawn(process.execPath, [script, '__daemon-run'], { stdio: 'ignore' });
+    await new Promise((r) => setTimeout(r, 200));
+    try {
+      // Still on disk -> not stale.
+      const before = JSON.parse(run(home, ['status', '--json']).stdout);
+      expect(before.staleBinaries.some((s: { pid: number }) => s.pid === child.pid)).toBe(false);
+
+      fs.rmSync(scriptDir, { recursive: true, force: true });
+
+      const after = JSON.parse(run(home, ['status', '--json']).stdout);
+      const hit = after.staleBinaries.find((s: { pid: number }) => s.pid === child.pid);
+      expect(hit, 'deleted entry must be reported').toBeTruthy();
+      expect(hit.entry).toBe(script);
+
+      const text = run(home, ['status']);
+      expect(text.stdout).toContain('Stale code');
+      expect(text.stdout).toContain(String(child.pid));
+
+      // And it is a health problem, not just a display row.
+      const health = JSON.parse(run(home, ['doctor', '--json']).stdout);
+      expect(health.problems.some((p: string) => p.includes('deleted from disk'))).toBe(true);
+    } finally {
+      try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* gone */ }
+      fs.rmSync(scriptDir, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('does not flag a non-path entry as deleted code', async () => {
+    const home = makeHome();
+    // `node -e '<code>' __daemon-run` — the second-to-last token is a code blob,
+    // not a file. It "does not exist on disk" and must NOT be reported.
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)', '__daemon-run'], {
+      stdio: 'ignore',
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    try {
+      const payload = JSON.parse(run(home, ['status', '--json']).stdout);
+      expect(payload.staleBinaries.some((s: { pid: number }) => s.pid === child.pid)).toBe(false);
+    } finally {
+      try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* gone */ }
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
 });

@@ -54,6 +54,41 @@ interface DaemonProcess {
   entry: string | null;
   /** Resolved package version for `entry`, or null if it couldn't be found. */
   version: string | null;
+  /**
+   * Whether `entry` still exists on disk. False means the process is running
+   * code that has been DELETED — see {@link entryIsGone} for why this is
+   * reported separately from duplicate detection.
+   */
+  entryExists: boolean;
+}
+
+/**
+ * A daemon whose launch entry no longer exists on disk (RUSH-2493).
+ *
+ * Orthogonal to duplicate detection, and deliberately so. Duplicates are a
+ * heuristic about *scope* — which state dir a process serves — and RUSH-2368
+ * had to narrow that scope after a leaked vitest fixture under its own `/tmp`
+ * HOME was reported as a stray to `kill`. "The file this process was launched
+ * from is gone" needs no such judgement: it is a fact about the filesystem,
+ * true regardless of HOME, so it cannot reproduce that false positive.
+ *
+ * Observed 2026-08-10 on yosemite-s0: a daemon ran for 4h14m from
+ * `.agents/worktrees/rush-2431-binary-shadow/apps/cli/dist/index.js` after that
+ * worktree was deleted. `systemctl --user is-active` said `active`,
+ * `agents daemon status` reported healthy, and nothing anywhere named it —
+ * while it held a second routine scheduler, the double-fire class the
+ * one-scheduler-one-executor rule exists to prevent. A restart would also have
+ * failed, since the manifest pointed at the same missing path.
+ *
+ * ABSOLUTE PATHS ONLY. `entryFromTokens` returns the second-to-last argv token,
+ * which is the entry for a real daemon (`getDaemonLaunch` always spawns an
+ * absolute one) but is arbitrary text for anything else — `node -e '<code>'
+ * __daemon-run` yields the code blob, which of course does not exist on disk.
+ * Requiring absoluteness keeps a non-path token from being reported as deleted
+ * code, the same false-positive class RUSH-2368 had to correct for duplicates.
+ */
+function entryIsGone(p: DaemonProcess): boolean {
+  return p.entry !== null && path.isAbsolute(p.entry) && !p.entryExists;
 }
 
 /**
@@ -152,7 +187,11 @@ function scanDaemonProcesses(): DaemonProcess[] {
     if (isNaN(pid)) continue;
     const entry = entryFromTokens(tokens);
     const version = entry ? resolveVersionNear(entry, pid) : null;
-    found.push({ pid, entry, version });
+    // existsSync, not a stat of the pid's own view: we are asking whether the
+    // code is still on disk for the NEXT launch, which is what a restart and
+    // every other reader will see.
+    const entryExists = entry ? fs.existsSync(entry) : true;
+    found.push({ pid, entry, version, entryExists });
   }
   return found;
 }
@@ -296,6 +335,10 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
   const processes = scanDaemonProcesses();
   const owner = pid ? processes.find((p) => p.pid === pid) : undefined;
   const duplicates = registryScopedDuplicates(processes, pid ?? null);
+  // Every daemon whose code is gone from disk, including this device's own if
+  // it is one. Not filtered by the duplicate scope — see entryIsGone.
+  const stale = processes.filter(entryIsGone);
+  const ownerEntryGone = owner ? entryIsGone(owner) : false;
 
   const [secrets, browserIpc] = await Promise.all([probeSecretsBroker(), probeBrowserIPC()]);
   const scheduler = schedulerSummary();
@@ -309,7 +352,9 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
       logPath: status.logPath,
       binaryPath: owner?.entry ?? status.binaryPath,
       binaryVersion: owner?.version ?? null,
+      binaryMissing: ownerEntryGone,
       duplicates: duplicates.map((d) => ({ pid: d.pid, entry: d.entry, version: d.version })),
+      staleBinaries: stale.map((d) => ({ pid: d.pid, entry: d.entry, version: d.version })),
       daemonEnabled: enabled,
       services: {
         secretsBroker: {
@@ -347,10 +392,24 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
   if (pid) console.log(`  PID:        ${pid}`);
   if (uptime !== null) console.log(`  Uptime:     ${humanDuration(uptime)}`);
   if (heartbeatAgeMs !== null) console.log(`  Heartbeat:  ${Math.round(heartbeatAgeMs / 1000)}s ago`);
-  console.log(`  Binary:     ${chalk.gray(owner?.entry ?? status.binaryPath ?? 'unknown')}`);
+  const binaryLabel = owner?.entry ?? status.binaryPath ?? 'unknown';
+  console.log(`  Binary:     ${ownerEntryGone ? chalk.red(`${binaryLabel}  (MISSING from disk)`) : chalk.gray(binaryLabel)}`);
   console.log(`  Version:    ${chalk.gray(owner?.version ?? 'unknown')}`);
   console.log(`  Log:        ${chalk.gray(status.logPath)}`);
   if (!enabled) console.log(chalk.yellow(`  daemon.enabled is false — nothing auto-starts it. Explicit start: agents daemon start`));
+
+  if (stale.length > 0) {
+    console.log(chalk.red(`\nStale code (${stale.length})\n`));
+    for (const d of stale) {
+      const mine = pid !== null && d.pid === pid ? ' — this is the daemon above' : '';
+      console.log(`  PID ${d.pid}  ${chalk.gray(d.entry ?? 'unknown entry')}${chalk.red('  (deleted)')}${chalk.gray(mine)}`);
+    }
+    console.log(chalk.gray(
+      '\n  These run code that no longer exists on disk, so a restart fails and their\n' +
+      '  behaviour is whatever was loaded when the file was deleted.\n' +
+      `  Yours: ${chalk.white('agents daemon restart')}   A stray from a removed worktree: ${chalk.white('kill <pid>')}`,
+    ));
+  }
 
   if (duplicates.length > 0) {
     console.log(chalk.red(`\nDuplicates (${duplicates.length})\n`));
@@ -491,9 +550,21 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
     problems.push(`Daemon start has ${startHealth.consecutiveFailures} consecutive failure(s): ${startHealth.lastError}`);
   }
 
-  const duplicates = registryScopedDuplicates(scanDaemonProcesses(), status.pid);
+  const healthProcesses = scanDaemonProcesses();
+  const duplicates = registryScopedDuplicates(healthProcesses, status.pid);
   if (duplicates.length > 0) {
     problems.push(`${duplicates.length} duplicate daemon process(es) running: ${duplicates.map((d) => d.pid).join(', ')}. Stop the stray(s).`);
+  }
+
+  // A daemon whose entry is gone from disk is a problem even when it answers
+  // every probe: it cannot restart, and it is running whatever was loaded
+  // before the file was deleted (RUSH-2493).
+  for (const p of healthProcesses.filter(entryIsGone)) {
+    const own = status.pid !== null && p.pid === status.pid;
+    problems.push(
+      `Daemon pid ${p.pid} runs code deleted from disk (${p.entry}). ` +
+      (own ? 'Restart it: agents daemon restart' : 'Stray from a removed install/worktree. Stop it: kill ' + p.pid),
+    );
   }
 
   const secrets = await probeSecretsBroker();
@@ -581,7 +652,7 @@ export function registerDaemonCommand(program: Command): void {
   });
 
   cmd.command('status')
-    .description('Identity (state/pid/uptime/binary), duplicate daemon processes, and per-service health.')
+    .description('Identity (state/pid/uptime/binary), duplicate daemons, daemons running deleted code, and per-service health.')
     .option('--json', 'Emit as JSON')
     .action(async (opts, command) => {
       await runStatus({ json: command.optsWithGlobals().json === true });

@@ -6198,7 +6198,7 @@
           "name": "status",
           "path": "daemon status",
           "aliases": [],
-          "description": "Identity (state/pid/uptime/binary), duplicate daemon processes, and per-service health.",
+          "description": "Identity (state/pid/uptime/binary), duplicate daemons, daemons running deleted code, and per-service health.",
           "args": [],
           "options": [
             {

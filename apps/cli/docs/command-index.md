@@ -224,7 +224,7 @@ agents daemon reload    Send SIGHUP to reload jobs and re-evaluate the scheduler
 agents daemon restart   Stop then start the daemon.
 agents daemon services  The two hosted services (secrets broker, browser IPC): bound state, socket path, and health.
 agents daemon start     Start the daemon. Bypasses daemon.enabled — this is the deliberate override.
-agents daemon status    Identity (state/pid/uptime/binary), duplicate daemon processes, and per-service health.
+agents daemon status    Identity (state/pid/uptime/binary), duplicate daemons, daemons running deleted code, and per-service health.
 agents daemon stop      Stop the daemon.
 ```
 
