@@ -15,6 +15,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { registerSyncCommand } from './sync.js';
+import { addSelectorOptions } from '../lib/hosts/option.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
@@ -63,19 +64,18 @@ function run(args: string[], home: string): { stdout: string; stderr: string; st
 // ---------------------------------------------------------------------------
 
 /**
- * Build a disposable commander probe that re-declares every option from the
- * registered sync command. Parsing flags against this probe never fires the
- * sync action — it only exercises flag registration and option collection.
+ * Build a disposable commander probe with the real kind-selector options
+ * (including their kindCollector argParser). Parsing flags against this probe
+ * never fires the sync action — it only exercises flag registration and
+ * option collection.
+ *
+ * Uses addSelectorOptions directly so kindCollector is wired up identically
+ * to the real sync command, ensuring array-accumulation and comma-split
+ * assertions match production behaviour.
  */
 function buildSyncProbe(): Command {
-  const program = new Command();
-  program.exitOverride();
-  registerSyncCommand(program);
-  const sync = program.commands.find((c) => c.name() === 'sync')!;
   const probe = new Command('sync').exitOverride();
-  for (const o of sync.options) {
-    if (o.flags) probe.option(o.flags, o.description ?? '');
-  }
+  addSelectorOptions(probe);
   return probe;
 }
 
