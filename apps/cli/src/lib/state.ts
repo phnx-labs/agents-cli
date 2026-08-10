@@ -936,6 +936,7 @@ const META_KEY_SCOPE: Record<keyof Meta, 'central' | 'device'> = {
   versions: 'device',
   deviceRoutines: 'device',
   deviceConfig: 'device',
+  deviceBrowser: 'device',
   // Central — synced via agents.yaml.
   accounts: 'central',
   run: 'central',
@@ -949,7 +950,7 @@ const META_KEY_SCOPE: Record<keyof Meta, 'central' | 'device'> = {
   registries: 'central',
   profiles: 'central',
   source: 'central',
-  projectRoot: 'central',
+  projectRoot: 'device',
   extraRepos: 'central',
   brands: 'central',
   actors: 'central',
@@ -1035,7 +1036,7 @@ function serializeCentral(central: Record<string, unknown>): string {
 }
 
 function writeMetaUnlocked(meta: Meta): void {
-  const { agents, isolatedAgents, versions, deviceRoutines, deviceConfig, ...central } = meta;
+  const { agents, isolatedAgents, versions, deviceRoutines, deviceConfig, deviceBrowser, projectRoot, ...central } = meta;
 
   // Write the machine-local files FIRST, then strip central — so a crash mid-write
   // never removes pins/versions from central before they're persisted elsewhere.
@@ -1051,7 +1052,10 @@ function writeMetaUnlocked(meta: Meta): void {
   // central file because nothing off-box reads it — and because
   // browser.remote-control is a consent flag that must not propagate on pull.
   const hasDeviceConfig = !!deviceConfig && Object.keys(deviceConfig).length > 0;
-  if (hasAgents || hasIsolatedAgents || hasDeviceRoutines || hasDeviceConfig) {
+  const hasDeviceBrowser = !!deviceBrowser && Object.keys(deviceBrowser).length > 0;
+  // An inferred local filesystem path — machine state, never fleet policy.
+  const hasProjectRoot = typeof projectRoot === 'string' && projectRoot.length > 0;
+  if (hasAgents || hasIsolatedAgents || hasDeviceRoutines || hasDeviceConfig || hasDeviceBrowser || hasProjectRoot) {
     // Device-local doc carries `agents:` pins and `routines:` — per-machine and
     // must never land in central agents.yaml (which syncs). Operator config
     // used to ride this doc under `config:`; it now lives centrally under
@@ -1061,6 +1065,8 @@ function writeMetaUnlocked(meta: Meta): void {
     if (hasIsolatedAgents) deviceDoc.isolatedAgents = isolatedAgents;
     if (hasDeviceRoutines) deviceDoc.routines = deviceRoutines;
     if (hasDeviceConfig) deviceDoc.config = deviceConfig;
+    if (hasDeviceBrowser) deviceDoc.browser = deviceBrowser;
+    if (hasProjectRoot) deviceDoc.projectRoot = projectRoot;
     fs.mkdirSync(path.dirname(devicePath), { recursive: true });
     writeIfChanged(devicePath, META_HEADER + yaml.stringify(deviceDoc));
   } else if (fs.existsSync(devicePath)) {
@@ -1106,6 +1112,10 @@ function overlayMachineLocal(meta: Meta): Meta {
     if (dm) {
       if (dm?.agents) meta.agents = { ...meta.agents, ...dm.agents };
       if (dm?.isolatedAgents) meta.isolatedAgents = { ...meta.isolatedAgents, ...dm.isolatedAgents };
+      if (typeof dm?.projectRoot === 'string') meta.projectRoot = dm.projectRoot;
+      if (dm?.browser && typeof dm.browser === 'object' && !Array.isArray(dm.browser)) {
+        meta.deviceBrowser = { ...meta.deviceBrowser, ...(dm.browser as Record<string, never>) };
+      }
       if (dm?.config && typeof dm.config === 'object' && !Array.isArray(dm.config)) {
         meta.deviceConfig = { ...meta.deviceConfig, ...(dm.config as Record<string, unknown>) };
       }
