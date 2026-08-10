@@ -520,5 +520,5 @@ working copies.
 
 ## Tracking
 
-- [RUSH-2536 — agents projects pull: sync a project's fleet checkouts](https://linear.app/getrush/issue/RUSH-2536/agents-projects-pull-sync-a-projects-fleet-checkouts)
+- [RUSH-2536 — agents projects pull: sync a project's fleet checkouts](https://linear.app/issue/RUSH-2536)
 - Source screenshot: local session attachment only; not published because the plan restates its text.
