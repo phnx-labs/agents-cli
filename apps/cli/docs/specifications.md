@@ -1200,13 +1200,13 @@ access control (that is 1Password/Vault; this tool is device-local first).
   `agents secrets export --host` — all three gate `agentOnly` on
   `isHeadlessSecretsContext() || !isInteractiveTerminal()`
   (`commands/secrets.ts:1433`, `:1549`, `:2334`, `:2473`), the push forwarding it
-  through `resolveBundleForPush` (`lib/secrets/push.ts:115`, which defaults to
+  through `resolveBundleForPush` (`lib/secrets/push.ts:117`, which defaults to
   `true` so an automated caller that says nothing stays broker-only). Conversely,
-  the **value-emitting automation primitives** `agents secrets get` and the
+  the **automation primitives** `agents secrets get` and the
   remaining `agents secrets export` variants (`--plaintext`, `--to-file`,
   `--to-1password`) MUST stay `agentOnly: true` **unconditionally** and MUST NOT
   prompt even at an interactive terminal (`commands/secrets.ts:1642`, `:2293`,
-  `:2351`, `:2400`) — prompting there would either dump plaintext onto a visible
+  `:2360`, `:2399`) — prompting there would either dump plaintext onto a visible
   screen (`export --plaintext`, which prints) or block a `$(…)` capture
   mid-pipeline (`get`). `export --host` is on the human side because neither hazard
   applies: it prints a key COUNT, never a value, and nothing captures its stdout,
@@ -1217,7 +1217,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
   `agents secrets exec <locked> -- <cmd>`, or `agents secrets export <locked> --host
   <target>` **When** the bundle is not
   broker-held **Then** exactly one Touch ID sheet is raised and the value is
-  revealed / command run / bundle pushed; whereas `get` or a value-emitting
+  revealed / command run / bundle pushed; whereas `get` or an automation-primitive
   `export` on the same locked bundle
   fails fast naming `agents secrets unlock <bundle>`, no sheet. This is the
   reveal-vs-automation split — `view --reveal`/`exec`/`export --host` are the only
@@ -1442,12 +1442,12 @@ and `export --host` inject yet CAN prompt interactively, while `export
 
 | Command | Boundary side | Prompts (locked)? | Evidence |
 |---|---|---|---|
-| `secrets exec <b> -- <cmd>` | **Inject** (child env) | **interactive TTY only** (SEC-13b) | `commands/secrets.ts:2454,2463` |
+| `secrets exec <b> -- <cmd>` | **Inject** (child env) | **interactive TTY only** (SEC-13b) | `commands/secrets.ts:2463,2473` |
 | `run --secrets <b>` | **Inject** (run child env) | never (SEC-13a) | `commands/exec.ts` secrets injection |
-| `secrets export --host` (SSH push) | **Inject** (over ssh stdin) | **interactive TTY only** (SEC-13b) | `commands/secrets.ts:2334`, `lib/secrets/push.ts:115` |
-| `secrets export --to-1password` / `--to-file` | **Neither** (to `op` argv / AES file) | never | `commands/secrets.ts:2350,2229` |
+| `secrets export --host` (SSH push) | **Inject** (over ssh stdin) | **interactive TTY only** (SEC-13b) | `commands/secrets.ts:2334`, `lib/secrets/push.ts:117` |
+| `secrets export --to-1password` / `--to-file` | **Neither** (to `op` argv / AES file) | never | `commands/secrets.ts:2360,2293` |
 | `secrets mcp` (`get_secret`) | **JIT, per-request** — never `process.env`, names-only in `tools/list` | never | `lib/secrets/mcp.ts` |
-| `secrets export --plaintext` | **Materialize** | never (automation primitive) | `commands/secrets.ts:2390,2392` |
+| `secrets export --plaintext` | **Materialize** | never (automation primitive) | `commands/secrets.ts:2399,2402` |
 | `secrets view --reveal` | **Materialize** | **interactive TTY only** (SEC-13b) | `commands/secrets.ts:1498,1500` |
 | `secrets get [b] [KEY]` | **Materialize** (automation primitive, ungated) | never | `commands/secrets.ts:1593` |
 | `list` / `view` (default) / all CRUD / `unlock` / `lock` / `status` / `push` / `pull` | **Neither** (metadata/status/counts only) | only `unlock` prompts | e.g. `commands/secrets.ts` list/view/unlock |

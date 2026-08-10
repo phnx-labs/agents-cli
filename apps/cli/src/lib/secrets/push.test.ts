@@ -270,10 +270,11 @@ describe('bundleEnvToDotenv', () => {
  * The bug: it passed `agentOnly: true` unconditionally, so `agents secrets export
  * --host` refused every keychain-backed bundle with "not unlocked in the secrets
  * agent" — even for a human at a TTY who could simply answer the Touch ID sheet.
- * Its sibling reads (`view --reveal`, `get`) already decided this per-invocation
- * with `isHeadlessSecretsContext() || !isInteractiveTerminal()`, and `view
- * --reveal` prints plaintext to the screen, so the push path was the strictest
- * read for no stated reason.
+ * The interactive sibling reads (`view --reveal`, `exec`) already decided this
+ * per-invocation with `isHeadlessSecretsContext() || !isInteractiveTerminal()`, and
+ * `view --reveal` prints plaintext to the screen, so the push path was the
+ * strictest read for no stated reason. (`get` is deliberately NOT a sibling here:
+ * it stays unconditionally `agentOnly` so a `$(…)` capture cannot hang.)
  *
  * Real path, no mocking of logic: the production `readAndResolveBundleEnv` runs
  * unchanged, with only the STORAGE backend swapped for an in-memory one — the

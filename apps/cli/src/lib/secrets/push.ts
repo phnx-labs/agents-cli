@@ -103,8 +103,10 @@ export interface PushBundleResult {
  * per-bundle prefix becomes a broad `agents-cli.` scan after service-name
  * hashing, and macOS evaluates unrelated biometry ACLs during it, one sheet per
  * installed version (bundles.ts, RUSH-2440). A human at a TTY is not that case:
- * they can answer one prompt, and every sibling read (`view --reveal`, `get`)
- * already lets them. It defaults to `true` so an automated caller that says
+ * they can answer one prompt, and the interactive sibling reads (`view --reveal`,
+ * `exec`) already let them. NOT `get` — it is unconditionally `agentOnly` on
+ * purpose, because prompting would hang a `$(agents secrets get …)` capture
+ * mid-pipeline (SEC-13b). It defaults to `true` so an automated caller that says
  * nothing stays broker-only.
  */
 export function resolveBundleForPush(

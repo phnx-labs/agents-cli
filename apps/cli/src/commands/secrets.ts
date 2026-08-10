@@ -2324,7 +2324,7 @@ Examples:
           // Resolve ONCE for N hosts — reading a bundle can prompt, and doing it
           // per host would prompt per host.
           //
-          // Same predicate as `view --reveal` / `get`: a human at a TTY gets the
+          // Same predicate as `view --reveal` / `exec`: a human at a TTY gets the
           // Touch ID sheet, an agent launch or a piped/CI run stays broker-only
           // and fails fast with the `agents secrets unlock` hint. Requiring a
           // prior unlock for an interactive push was an inconsistency, not a
