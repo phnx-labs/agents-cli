@@ -141,12 +141,15 @@ export function groupSessions(
   group: SessionGroup,
   sort: SessionSort,
   desc: boolean,
+  /** True when the active status filter is already 'starred' — then the whole list
+   *  is starred, so a separate top "Starred" section would be pure noise. Keyed off
+   *  the actual filter, NOT "every visible row happens to be pinned" (which would
+   *  also drop the section for a user whose only sessions are all starred on the
+   *  'all' filter — the exact case the top section exists for). */
+  filterIsStarred = false,
 ): SessionSection[] {
   const sections: SessionSection[] = []
 
-  // Pull starred to their own top section, unless the filter is already 'starred'
-  // (then they're the whole list — group them normally instead of double-listing).
-  const filterIsStarred = scoped.every((a) => a.pinned) && scoped.length > 0
   const starred = filterIsStarred ? [] : scoped.filter((a) => a.pinned)
   const rest = filterIsStarred ? scoped : scoped.filter((a) => !a.pinned)
 

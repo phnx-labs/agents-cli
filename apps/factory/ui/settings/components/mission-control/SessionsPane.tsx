@@ -89,7 +89,7 @@ export function SessionsPane({ agents, onToggleStar, onResume, onResumeMany, onS
 
   const scope: SessionScope = useMemo(() => ({ filter, project, host, search }), [filter, project, host, search])
   const scoped = useMemo(() => scopeSessions(agents, scope), [agents, scope])
-  const sections = useMemo(() => groupSessions(scoped, group, sort, desc), [scoped, group, sort, desc])
+  const sections = useMemo(() => groupSessions(scoped, group, sort, desc, filter === 'starred'), [scoped, group, sort, desc, filter])
 
   // Flatten sections into a single windowable item list with per-item heights.
   const items: VItem[] = useMemo(() => {
@@ -296,6 +296,12 @@ function SessionRowImpl({ agent: a, selected, active, onToggleSelect, onToggleSt
   const reconnect = needsReconnect(a)
   // A live, attached session focuses; a detached / crashed one resumes.
   const actionLabel = reconnect || a.phase === 'done' ? 'Resume' : 'Focus'
+  // pidAlive (from the CLI) tells the user WHAT resume will do: an orphaned session
+  // whose process still runs is reattached; a crashed/dead one is relaunched from
+  // its transcript. The CLI decides the mechanism — this is the honest tooltip.
+  const resumeTitle = reconnect
+    ? (a.pidAlive === false ? 'Resume — relaunch from the transcript (process has exited)' : 'Reattach — the process is still running on its machine')
+    : actionLabel === 'Resume' ? 'Resume this session' : 'Focus this session in its terminal'
   const title = (a.topic || a.prompt || a.name || '').split('\n')[0] || a.name
   return (
     <div
@@ -328,6 +334,7 @@ function SessionRowImpl({ agent: a, selected, active, onToggleSelect, onToggleSt
       </span>
       <button
         className={`sx-resume${reconnect ? ' pri' : ''}`}
+        title={resumeTitle}
         onClick={(e) => { e.stopPropagation(); onResume(a) }}
       >{actionLabel}</button>
     </div>

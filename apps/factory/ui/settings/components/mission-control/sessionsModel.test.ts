@@ -141,8 +141,14 @@ describe('groupSessions — starred pinned to a single top section', () => {
   })
   test('filter=starred: no separate Starred band (the whole list is starred)', () => {
     const onlyStar = [mk({ id: 's1', pinned: true }), mk({ id: 's2', pinned: true })]
-    const secs = groupSessions(onlyStar, 'state', 'recent', true)
+    const secs = groupSessions(onlyStar, 'state', 'recent', true, /* filterIsStarred */ true)
     expect(secs.some((s) => s.kind === 'starred')).toBe(false)
+  })
+  test('all-pinned on a non-starred filter STILL renders the Starred band (keyed off filter, not pin ratio)', () => {
+    const onlyStar = [mk({ id: 's1', pinned: true, phase: 'running' }), mk({ id: 's2', pinned: true, phase: 'idle' })]
+    const secs = groupSessions(onlyStar, 'state', 'recent', true, /* filterIsStarred */ false)
+    expect(secs[0]!.kind).toBe('starred')
+    expect(secs[0]!.agents.map((a) => a.id).sort()).toEqual(['s1', 's2'])
   })
 })
 
