@@ -20,6 +20,7 @@ import {
   startDaemon,
 } from '../lib/daemon.js';
 import { findDuplicateMonitor } from '../lib/monitors/fingerprint.js';
+import { gatherFleetMonitors, NO_MONITOR_FANOUT_ENV } from '../lib/monitors/remote.js';
 import {
   listMonitors,
   readMonitor,
@@ -458,6 +459,29 @@ export function registerMonitorsCommands(program: Command): void {
           stderrLine(chalk.gray(`  Inspect it:   agents monitors view ${duplicate}`));
           stderrLine(chalk.gray(`  Add anyway:   agents monitors add ${nameOrPath} ... --force`));
           process.exit(1);
+        }
+
+        // The case a local check cannot see: another agent, on another box,
+        // already watching this same work item with these same arguments. One
+        // work item, two triggers. Identity is the arguments, so the claim has
+        // to be fleet-wide — different arguments (another PR) are not a clash
+        // and still pass.
+        if (!process.env[NO_MONITOR_FANOUT_ENV]) {
+          const fleet = await gatherFleetMonitors();
+          const clash = fleet.monitors.find(
+            (r) => findDuplicateMonitor(config, [{ ...r.monitor, name: `${r.machine}:${r.monitor.name}` }]) !== null,
+          );
+          if (clash) {
+            stderrLine(chalk.red(`Monitor '${clash.monitor.name}' on ${chalk.bold(clash.machine)} already watches this exact source and fires the same action.`));
+            stderrLine(chalk.gray('  Two boxes watching one work item is a double trigger.'));
+            stderrLine(chalk.gray(`  Inspect it:   agents monitors view ${clash.monitor.name} --device ${clash.machine}`));
+            stderrLine(chalk.gray(`  Add anyway:   agents monitors add ${nameOrPath} ... --force`));
+            process.exit(1);
+          }
+          // Never treat "could not ask" as "no duplicate".
+          if (fleet.skipped.length > 0) {
+            stderrLine(chalk.yellow(`  Note: could not check ${fleet.skipped.join(', ')} — a duplicate there would not have been caught.`));
+          }
         }
       }
 

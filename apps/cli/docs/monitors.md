@@ -102,7 +102,13 @@ to notice. One real box accumulated `open-pr-watch`, `pr-ci-fail`, three stale
 `pr2222-*` watchers and an agent-added lander, all polling the same PR queue,
 added without a single warning.
 
-`agents monitors add` now refuses two collisions:
+The check runs **across the fleet**, not just this box — reusing the same
+cross-machine fan-out `sessions --active` uses. Two agents on two machines
+creating a watcher for the same work item is the case a local check cannot see.
+When a peer is unreachable the command says which ones it could not consult,
+rather than treating that as "no duplicate".
+
+`agents monitors add` refuses two collisions:
 
 - **Same name** — adding would overwrite an existing monitor.
 - **Same behavior** — an existing monitor (user *or* built-in) already watches
