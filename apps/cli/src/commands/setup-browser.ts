@@ -10,7 +10,7 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { updateMeta } from '../lib/state.js';
+import { setConfigValue } from '../lib/device-config.js';
 import { findFirstInstalledBrowser, listInstalledBrowsers } from '../lib/browser/chrome.js';
 import {
   DEFAULT_BROWSER_PROFILE_NAME,
@@ -138,7 +138,7 @@ async function maybeSetDeviceDefault(
     default: true,
   });
   if (set) {
-    updateMeta((m) => ({ ...m, defaultBrowserProfile: name }));
+    setConfigValue('browser.profile', name);
     console.log(chalk.dim(`Bare \`agents browser start\` will now use "${name}" on this machine.`));
   }
 }

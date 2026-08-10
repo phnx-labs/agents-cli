@@ -30,7 +30,7 @@ function writeCentral(yamlText: string) {
   fs.writeFileSync(centralPath(), yamlText);
 }
 
-describe('defaultBrowserProfile is device-local', () => {
+describe('device doc carries only machine-local pins (config moved to the central fleet block)', () => {
   beforeEach(() => {
     TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-state-test-'));
     process.env.HOME = TMP;
@@ -41,34 +41,29 @@ describe('defaultBrowserProfile is device-local', () => {
     try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best-effort */ }
   });
 
-  it('writes to devices/<machine>/agents.yaml, never central, and overlays back on read', async () => {
+  it('routes agents: pins to the device file and fleet config to central, never crossed', async () => {
     const { updateMeta, readMeta } = await freshState();
 
-    updateMeta((m) => ({ ...m, defaultBrowserProfile: 'comet-local' }));
+    updateMeta((m) => ({
+      ...m,
+      agents: { claude: '2.1.0' },
+      fleet: { devices: { testbox: { config: { maxAgents: 4 } } } },
+    }));
+
+    const device = fs.readFileSync(devicePath(), 'utf-8');
+    expect(device).toContain('claude: 2.1.0');
+    // Operator config never lands in the device doc — it is central now.
+    expect(device).not.toContain('maxAgents');
+    expect(device).not.toContain('config:');
 
     const central = fs.readFileSync(centralPath(), 'utf-8');
-    expect(central).not.toContain('defaultBrowserProfile');
+    expect(central).not.toContain('claude: 2.1.0');
+    expect(central).toContain('maxAgents: 4');
 
-    const device = fs.readFileSync(devicePath(), 'utf-8');
-    expect(device).toContain('defaultBrowserProfile: comet-local');
-
-    // Overlay makes it visible again on read (device is the sole source).
-    expect(readMeta().defaultBrowserProfile).toBe('comet-local');
-  });
-
-  it('clears the value cleanly (no stale overlay resurrecting it)', async () => {
-    const { updateMeta, readMeta } = await freshState();
-
-    updateMeta((m) => ({ ...m, defaultBrowserProfile: 'comet-local' }));
-    updateMeta((m) => {
-      const { defaultBrowserProfile, ...rest } = m;
-      void defaultBrowserProfile;
-      return rest;
-    });
-
-    expect(readMeta().defaultBrowserProfile).toBeUndefined();
-    const device = fs.readFileSync(devicePath(), 'utf-8');
-    expect(device).not.toContain('defaultBrowserProfile');
+    // Both sides read back through the overlay.
+    expect(readMeta().agents?.claude).toBe('2.1.0');
+    const fleet = readMeta().fleet;
+    expect((fleet?.devices as Record<string, { config?: Record<string, unknown> }>).testbox.config).toEqual({ maxAgents: 4 });
   });
 });
 

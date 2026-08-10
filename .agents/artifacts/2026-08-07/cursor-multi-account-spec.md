@@ -34,7 +34,7 @@ Today it prints two accounts:
 
 ```
 Cursor (balanced)
-  2026.08.04 (default)  muqsitnawaz@gmail.com   (signed in)
+  2026.08.04 (default)  user@example.com   (signed in)
   2026.07.23            (logged out — log in with: cursor-agent)
 ```
 
@@ -44,7 +44,7 @@ That display is cosmetic. Cursor is a single self-updating binary with one confi
 
 **Before (today).** All three paths silently collapse to the one live login:
 
-- `agents run cursor@2026.07.23` → you expect the logged-out home; you get the **default** account (`muqsitnawaz@gmail.com`), because the spawned `cursor-agent` reads `~/.cursor`, a symlink to whichever version is the current default.
+- `agents run cursor@2026.07.23` → you expect the logged-out home; you get the **default** account (`user@example.com`), because the spawned `cursor-agent` reads `~/.cursor`, a symlink to whichever version is the current default.
 - `agents run auto` with balanced rotation "picks" a Cursor account → same single login runs regardless of the pick.
 - Two Cursor runs on two accounts at once → both authenticate as the same account; the "second account" is a display artifact, not a session.
 
@@ -169,5 +169,5 @@ Spike: set `HOME` and `XDG_CONFIG_HOME` to a scratch home containing a known acc
 ## Tracking
 
 - **RUSH-2400** — feat(cursor): make multiple Cursor accounts real — <https://linear.app/rush/issue/RUSH-2400>
-- Spec PR — added on open (this document, committed under `.agents/reports/`).
+- Spec PR — added on open (this document, committed under `.agents/artifacts/`).
 - Implementation — follow-up, gated on the empirical spike and your approval of Option B.

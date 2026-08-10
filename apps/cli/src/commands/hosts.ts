@@ -154,7 +154,7 @@ async function doAdd(name: string | undefined, target: string | undefined, opts:
     }
     if (!spec) {
       if (device?.auth.method === 'password') {
-        console.log(chalk.red(`Device "${name}" uses password auth — dispatch needs key auth. Switch it first: agents devices set ${name} --auth key`));
+        console.log(chalk.red(`Device "${name}" uses password auth — dispatch needs key auth. Switch it first: agents devices config ${name} ssh.auth key`));
       } else {
         console.log(chalk.red(`"${name}" is not in ~/.ssh/config or the devices registry. Pass a target: agents hosts add ${name} <user@host>`));
       }

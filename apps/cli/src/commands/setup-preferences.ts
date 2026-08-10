@@ -77,7 +77,7 @@ export async function maybePickInteractiveHost(): Promise<boolean> {
     default: defaultInteractiveHostChoice(macs, self) ?? SKIP,
     choices: [
       ...macs.map((n) => ({ name: n === self ? `${n}  ${chalk.dim('(this machine)')}` : n, value: n })),
-      { name: `Skip ${chalk.dim('— decide later: agents devices set-interactive <name>')}`, value: SKIP },
+      { name: `Skip ${chalk.dim('— decide later: agents devices config <name> interactive.host <name>')}`, value: SKIP },
     ],
   });
   if (picked === SKIP) return false;

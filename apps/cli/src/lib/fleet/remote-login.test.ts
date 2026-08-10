@@ -107,7 +107,9 @@ describe('isPendingVerdict', () => {
 });
 
 function device(name: string, platform: string): DeviceProfile {
-  return { name, platform } as unknown as DeviceProfile;
+  // A real registry profile always carries auth (upsertDevice defaults
+  // { method: 'key' }); the resolver reads it, so the fixture must too.
+  return { name, platform, auth: { method: 'key' } } as unknown as DeviceProfile;
 }
 
 function health(verdict: AuthHealth['verdict']): AuthHealth {

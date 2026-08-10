@@ -20,14 +20,16 @@ export interface DeviceLoad {
   // score.
   loadAvg1?: number;
   memPercent?: number;
-  // User preference from `agents devices prefer <name>` (auto-launch.json). A
+  // User preference from `agents devices config <name> auto-launch.preferred on`
+  // (central fleet.devices.<name>.config block). A
   // preferred device gets PREFERENCE_BONUS shaved off its score so it wins
   // against otherwise-equivalent machines. Lives here rather than in each
   // caller so EVERY ranking path — the warm-cache pick and the balanced pool
   // pick both route through hostScore — honors the preference identically.
   preferred?: boolean;
-  // Operator cap from `agents devices configure <name> --max-agents N` (read
-  // from the synced device doc). A device at its cap is EXCLUDED from the
+  // Operator cap from `agents devices config <name> agents.max-concurrent N`
+  // (read from the central fleet.devices.<name>.config block). A device at its
+  // cap is EXCLUDED from the
   // auto-pick entirely — it never reaches hostScore. undefined = uncapped
   // (the default).
   maxConcurrent?: number;
@@ -110,7 +112,7 @@ export function noHostReason(loaded: DeviceLoad[], agentKey?: string): string | 
     const detail = capped.map((c) => `${c.name} (${c.running}/${c.maxConcurrent})`).join(', ');
     return (
       `every online device is at its agents.max-concurrent cap: ${detail} — ` +
-      `raise with: agents devices configure <name> --max-agents N`
+      `raise with: agents devices config <name> agents.max-concurrent N`
     );
   }
   if (agentKey && loaded.length > 0) {

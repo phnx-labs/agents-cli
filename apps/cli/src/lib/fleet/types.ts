@@ -36,6 +36,15 @@ export interface FleetDeviceOverride {
   agents?: string[];
   sync?: string[];
   login?: FleetLoginMode;
+  /**
+   * Operator config for this device, written by `agents devices config <name>`
+   * — the device-scope keys of the `lib/device-config.ts` registry (maxAgents,
+   * schedulerEnabled, ssh*, autoLaunch*, notes, …). This is the ONE store for
+   * per-device settings: central, synced, and backed up with agents.yaml.
+   * LEAK-FREE like the rest of the manifest — names and non-secret values only
+   * (a secrets-bundle NAME is fine; a credential value never is).
+   */
+  config?: Record<string, unknown>;
 }
 
 /**

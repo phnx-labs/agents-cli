@@ -147,7 +147,7 @@ This separates “installed” from “observable”: Codex has a native Stop re
 ## Reproduce
 
 ```bash
-bun .agents/reports/analyze-verify-work-complete.ts \
+bun .agents/artifacts/2026-08-07/analyze-verify-work-complete.ts \
   --since 7d \
   --json-out /tmp/verify-work-complete-events-2026-08-07.json \
   --markdown-out /tmp/verify-work-complete-effectiveness-2026-08-07.md

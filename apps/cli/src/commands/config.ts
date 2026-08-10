@@ -43,7 +43,7 @@ import {
   listConfig,
   type ConfigEntry,
 } from '../lib/device-config.js';
-import { readMeta, updateMeta } from '../lib/state.js';
+import { readMeta } from '../lib/state.js';
 import { MODEL_TIERS } from '../lib/model-tiers.js';
 import { machineId } from '../lib/machine-id.js';
 
@@ -114,11 +114,15 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
       return;
     }
     case 'browser': {
-      if (parsed.device) {
-        setConfigValue('browser.profile', value as string, { device: parsed.device });
-      } else {
-        updateMeta((m) => ({ ...m, defaultBrowserProfile: value as string }));
-      }
+      // Device-local default lives in the central fleet.devices.<name>.config
+      // block (same store `agents devices config` / getConfigValue use). Bare
+      // browser.profile targets this machine; devices.<name>.browser.profile
+      // targets a peer.
+      setConfigValue(
+        'browser.profile',
+        value as string,
+        parsed.device ? { device: parsed.device } : undefined,
+      );
       return;
     }
     case 'device': {
@@ -150,17 +154,9 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
       return had;
     }
     case 'browser': {
-      if (parsed.device) {
-        const had = getConfigValue('browser.profile', { device: parsed.device }).value !== undefined;
-        unsetConfigValue('browser.profile', { device: parsed.device });
-        return had;
-      }
-      const had = readMeta().defaultBrowserProfile !== undefined;
-      updateMeta((m) => {
-        const { defaultBrowserProfile, ...rest } = m;
-        void defaultBrowserProfile;
-        return rest;
-      });
+      const target = parsed.device ? { device: parsed.device } : undefined;
+      const had = getConfigValue('browser.profile', target).value !== undefined;
+      unsetConfigValue('browser.profile', target);
       return had;
     }
     case 'device': {
@@ -185,10 +181,10 @@ function getConfig(parsed: ParsedConfigKey): unknown {
     case 'interactive':
       return getConfigValue('interactive.host').value;
     case 'browser': {
-      if (parsed.device) {
-        return getConfigValue('browser.profile', { device: parsed.device }).value;
-      }
-      return readMeta().defaultBrowserProfile;
+      return getConfigValue(
+        'browser.profile',
+        parsed.device ? { device: parsed.device } : undefined,
+      ).value;
     }
     case 'device': {
       const configName = devicePropertyToConfigName(parsed.property);
@@ -239,9 +235,12 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
   if (meta.config?.interactiveHost !== undefined) {
     yield { key: 'interactive.host', value: meta.config.interactiveHost, hint: 'config.interactiveHost' };
   }
-  if (meta.defaultBrowserProfile !== undefined) {
+  // This machine's default browser profile lives in fleet.devices.<self>.config
+  // (device-config), not the legacy top-level Meta.defaultBrowserProfile field.
+  const browserProfile = getConfigValue('browser.profile').value;
+  if (browserProfile !== undefined) {
     const key = 'browser.profile';
-    yield { key, value: meta.defaultBrowserProfile, hint: configKeyStorageHint(parseConfigKey(key)) };
+    yield { key, value: browserProfile, hint: configKeyStorageHint(parseConfigKey(key)) };
   }
 }
 

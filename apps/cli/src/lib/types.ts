@@ -997,31 +997,13 @@ export interface Meta {
    */
   browser?: Record<string, BrowserProfileConfig>;
   /**
-   * Device-local pointer: the browser profile `agents browser start` resolves to
-   * when no `--profile` is passed (and what an explicit `--profile default`
-   * re-points to). Stored per-machine in `~/.agents/devices/<machine>/agents.yaml`,
-   * NOT central — the target profile may carry machine-local logins, so the choice
-   * must not ride `agents repo push/pull` to other machines. Unset = auto-detect an
-   * installed Chromium-family browser (legacy behavior). Set via
-   * `agents browser profiles set-default <name>`.
-   */
-  defaultBrowserProfile?: string;
-  /**
    * User-scope config block (`config:` in central agents.yaml). Holds the
    * user-scope keys from the device-config registry (`lib/device-config.ts`) —
    * today just `interactiveHost`. Syncs fleet-wide via `agents repo push/pull`.
-   * Device-scope keys live in {@link Meta.deviceConfig} instead.
+   * Device-scope keys live under `fleet.devices.<name>.config` instead (see
+   * {@link Meta.fleet}).
    */
   config?: Record<string, unknown>;
-  /**
-   * Device-scope config block, carried in memory under a distinct field so it
-   * can never leak into the central (synced) agents.yaml: `writeMetaUnlocked`
-   * routes it to `~/.agents/devices/<machine>/agents.yaml` under the `config:`
-   * key (mirroring how `defaultBrowserProfile` is routed), and
-   * `overlayMachineLocal` reads it back. Holds the device-scope keys from the
-   * device-config registry (`maxAgents`, `schedulerEnabled`, `notes`). Per-machine by design — unset = today's behavior.
-   */
-  deviceConfig?: Record<string, unknown>;
   /**
    * Routine names enabled on this machine. In memory this stays distinct from
    * portable user config; state.ts writes it as top-level `routines:` in
@@ -1040,6 +1022,9 @@ export interface Meta {
    * Declarative fleet profile (`agents apply` / `ag apply`). Additive to the
    * schema — project `agents:` version-pins are untouched. Declares which agents
    * every device should have, which config to sync, and how login propagates.
+   * `fleet.devices.<name>.config` is also the central store for per-device
+   * operator config (`agents devices config <name>`) — the device-scope keys of
+   * the `lib/device-config.ts` registry.
    * Full shape in `lib/fleet/types.ts` (FleetManifest).
    */
   fleet?: import('./fleet/types.js').FleetManifest;

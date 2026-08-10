@@ -278,7 +278,7 @@ test('noHostReason: an all-capped pool names the caps first, even with an agentK
   ];
   const reason = noHostReason(pool, 'claude');
   expect(reason).toContain('agents.max-concurrent cap: mac-mini (4/4)');
-  expect(reason).toContain('agents devices configure <name> --max-agents N');
+  expect(reason).toContain('agents devices config <name> agents.max-concurrent N');
   expect(reason).not.toContain('usable claude version');
 });
 

@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_105 command groups · 590 commands._
+_105 command groups · 583 commands._
 
 ## accounts — Manage durable provider credentials
 
@@ -240,34 +240,27 @@ agents defaults run unset <selector>  Remove defaults for an agent/version selec
 _aliases: fleet_
 
 ```
-agents devices                         Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale. Alias: fleet.
-agents devices accounts                Per device, one row per account: which harnesses share it, signed-in, quota, and ready. The identity lens on `agents devices harnesses`.
-agents devices add <name> <target>     Add a device manually (target is user@host or host).
-agents devices apply                   Reconcile the fleet to a declared profile: install agents, sync config, propagate login.
-agents devices capture                 Snapshot the live environment (roster names, agents, browser, secret-bundle names, routines) into agents.yaml fleet:.
-agents devices configure <name>        Get or set per-device config: --max-agents, --scheduler. Written to ~/.agents/devices/<name>/agents.yaml (works for any device — the devices/ tree syncs). Unset = default behavior.
-agents devices disable <name>          Exclude a registered device from Factory auto-launch. It can still be picked manually via (Pick Host).
-agents devices enable <name>           Allow a registered device to be auto-picked by Factory agent launches.
-agents devices harnesses               Per device, one row per installed agent@version: account, signed-in, quota, and a single ready verdict. SSH-probes each online box.
-agents devices ignore <name>           Dismiss a node from auto-discovery so it is never re-suggested (and remove it from the registry if present).
-agents devices list                    List registered devices with platform, address, reachability, and live resource headroom.
-agents devices login                   Log agent CLIs into fleet boxes over SSH: drive each box's device-code OAuth, scrape the URL + code, and surface every pending login in one local browser page. Default drives all codes at once; --interactive walks one box at a time (codes requested just-in-time so they don't expire).
-agents devices note <name> [text...]   Append a free-form note to a device (repeat to append more). No text prints the notes; --clear empties them.
-agents devices pair-ios [name]         Pair an iPhone/iPad cockpit (RUSH-1733): mint a control token for `agents serve --control` and mark the device control-only. The token is shown ONCE — enter it in the app. Run this on the anchor.
-agents devices ping                    Live auth health: complete a real request for every agent account across the fleet (unlike the cached "signed in" flag). Writes the shared auth-health cache read by `agents view` and `fleet status`.
-agents devices prefer <name>           Boost a registered device in Factory auto-launch ranking.
-agents devices register <name>         Register a discovered (pending) node by name — used by the menu-bar "NEW DEVICES → Register" action.
-agents devices render                  Render the registry to ssh_config. Prints to stdout, or use --write to update ~/.ssh/config.d/agents.
-agents devices rm <name>               Remove a device from the registry.
-agents devices run <cmd...>            Run a command on every online registered device. Offline devices are skipped. Alias surface: agents fleet run …
-agents devices set <name>              Update fields on an existing device (platform, user, auth).
-agents devices set-interactive [name]  Get or set the interactive host — the one device that shows YOU artifacts (browser opens, dashboards, rendered plans). Stored fleet-wide as config.interactiveHost in central agents.yaml.
-agents devices show <name>             Show the full profile for one device.
-agents devices status                  Fleet health at a glance: online/offline rollup, a NEEDS ATTENTION list (each with its fix command), and quiet per-device rows grouped by OS. Use --verbose for the full auth/CLI/sync grid.
-agents devices sync                    Ingest `tailscale status --json` into device profiles. In a terminal, opens a checkbox to register/unregister nodes; with --yes, registers every non-ignored node.
-agents devices unignore <name>         Undo `ignore`: allow a node to be discovered and registered again.
-agents devices unprefer <name>         Remove the auto-launch preference boost from a device.
-agents devices update [version]        Roll out agents-cli to every online registered device (`agents upgrade --yes` on each), then verify each box actually runs the new version. Offline devices are skipped.
+agents devices                                 Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale. Alias: fleet.
+agents devices accounts                        Per device, one row per account: which harnesses share it, signed-in, quota, and ready. The identity lens on `agents devices harnesses`.
+agents devices add <name> <target>             Add a device manually (target is user@host or host).
+agents devices apply                           Reconcile the fleet to a declared profile: install agents, sync config, propagate login.
+agents devices capture                         Snapshot the live environment (roster names, agents, browser, secret-bundle names, routines) into agents.yaml fleet:.
+agents devices config <name> [key] [value...]  Get, set, or unset a device’s settings (scheduler, agent cap, ssh overrides, auto-launch, notes). Bare opens an interactive settings menu (TTY) or prints the resolved config (piped). Stored centrally in ~/.agents/agents.yaml under fleet.devices.<name>.config — synced, so any box can configure any device.
+agents devices harnesses                       Per device, one row per installed agent@version: account, signed-in, quota, and a single ready verdict. SSH-probes each online box.
+agents devices ignore <name>                   Dismiss a node from auto-discovery so it is never re-suggested (and remove it from the registry if present).
+agents devices list                            List registered devices with platform, address, reachability, and live resource headroom.
+agents devices login                           Log agent CLIs into fleet boxes over SSH: drive each box's device-code OAuth, scrape the URL + code, and surface every pending login in one local browser page. Default drives all codes at once; --interactive walks one box at a time (codes requested just-in-time so they don't expire).
+agents devices pair-ios [name]                 Pair an iPhone/iPad cockpit (RUSH-1733): mint a control token for `agents serve --control` and mark the device control-only. The token is shown ONCE — enter it in the app. Run this on the anchor.
+agents devices ping                            Live auth health: complete a real request for every agent account across the fleet (unlike the cached "signed in" flag). Writes the shared auth-health cache read by `agents view` and `fleet status`.
+agents devices register <name>                 Register a discovered (pending) node by name — used by the menu-bar "NEW DEVICES → Register" action.
+agents devices render                          Render the registry to ssh_config. Prints to stdout, or use --write to update ~/.ssh/config.d/agents.
+agents devices rm <name>                       Remove a device from the registry.
+agents devices run <cmd...>                    Run a command on every online registered device. Offline devices are skipped. Alias surface: agents fleet run …
+agents devices show <name>                     Show the full profile for one device.
+agents devices status                          Fleet health at a glance: online/offline rollup, a NEEDS ATTENTION list (each with its fix command), and quiet per-device rows grouped by OS. Use --verbose for the full auth/CLI/sync grid.
+agents devices sync                            Ingest `tailscale status --json` into device profiles. In a terminal, opens a checkbox to register/unregister nodes; with --yes, registers every non-ignored node.
+agents devices unignore <name>                 Undo `ignore`: allow a node to be discovered and registered again.
+agents devices update [version]                Roll out agents-cli to every online registered device (`agents upgrade --yes` on each), then verify each box actually runs the new version. Offline devices are skipped.
 ```
 
 ## doctor — Diagnose CLI availability, sync status, and resource divergence (optionally for a specific agent[@version]).

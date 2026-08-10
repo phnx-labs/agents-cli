@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/phnx-labs/agents-cli/main/apps/cli/schema/agents-yaml.schema.json",
   "title": "agents-cli agents.yaml",
-  "description": "agents-cli metadata file. Two tiers share this shape: the central (synced) ~/.agents/agents.yaml and each per-device ~/.agents/devices/<host>/agents.yaml. Device-local fields (agents, isolatedAgents, defaultBrowserProfile, routines, device-scope config) belong in the device doc; everything else is portable user config. Source of truth: apps/cli/src/lib/types.ts (Meta).",
+  "description": "agents-cli metadata file. Two tiers share this shape: the central (synced) ~/.agents/agents.yaml and each per-device ~/.agents/devices/<host>/agents.yaml. Device-local fields (agents, isolatedAgents, routines) belong in the device doc; device-scope operator config lives centrally under fleet.devices.<name>.config (`agents devices config <name>`); everything else is portable user config. Source of truth: apps/cli/src/lib/types.ts (Meta).",
   "type": "object",
   "additionalProperties": true,
   "properties": {
@@ -18,7 +18,7 @@
     },
     "defaultBrowserProfile": {
       "type": "string",
-      "description": "Browser profile `agents browser start` resolves to without --profile. Device doc only (config key: browser.profile)."
+      "description": "Browser profile `agents browser start` resolves to without --profile. Superseded: now this machine's browser.profile key in the central fleet.devices.<name>.config block (`agents devices config <name> browser.profile <profile>`)."
     },
     "routines": {
       "type": "array",
@@ -28,26 +28,12 @@
     },
     "config": {
       "type": "object",
-      "description": "Typed config keys (registry: apps/cli/src/lib/device-config.ts). In the central file this holds user-scope keys (interactiveHost); in a device doc it holds device-scope keys (maxAgents, schedulerEnabled, notes). Unset keys keep default behavior.",
+      "description": "Typed user-scope config keys (registry: apps/cli/src/lib/device-config.ts). Device-scope keys (maxAgents, schedulerEnabled, notes, ssh*, autoLaunch*) live in the central fleet.devices.<name>.config block instead — see the fleet property. Unset keys keep default behavior.",
       "additionalProperties": true,
       "properties": {
         "interactiveHost": {
           "type": "string",
-          "description": "User scope. Device that shows the user artifacts (browser opens, dashboards). Set via `agents devices set-interactive`."
-        },
-        "maxAgents": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Device scope. Cap on concurrent agents (agents.max-concurrent). Factory auto-launch counts device-wide running agents; teams placement counts the team's roster on the device."
-        },
-        "schedulerEnabled": {
-          "type": "boolean",
-          "description": "Device scope. Whether the routines scheduler may fire here (scheduler.enabled)."
-        },
-        "notes": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Device scope. Free-form operator notes (`agents devices note`)."
+          "description": "User scope. Device that shows the user artifacts (browser opens, dashboards). Set via `agents devices config <name> interactive.host <name>`."
         }
       }
     },
@@ -144,7 +130,88 @@
     },
     "fleet": {
       "type": "object",
-      "description": "Declarative fleet profile (`agents apply`). Shape: lib/fleet/types.ts FleetManifest."
+      "description": "Declarative fleet profile (`agents apply`). Shape: lib/fleet/types.ts FleetManifest. `fleet.devices.<name>.config` is also the central store for per-device operator config (`agents devices config <name>`) — names and non-secret values only.",
+      "properties": {
+        "devices": {
+          "description": "The string 'all', or a map of device name → override. Each override's `config` holds the device-scope keys of the device-config registry (`agents devices config <name> <key> <value>`).",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "config": {
+                "type": "object",
+                "description": "Device-scope operator config for this device (central, synced). Unset keys keep default behavior.",
+                "additionalProperties": true,
+                "properties": {
+                  "maxAgents": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Cap on concurrent agents (agents.max-concurrent). Factory auto-launch counts device-wide running agents; teams placement counts the team's roster on the device."
+                  },
+                  "schedulerEnabled": {
+                    "type": "boolean",
+                    "description": "Whether the routines scheduler may fire here (scheduler.enabled)."
+                  },
+                  "daemonEnabled": {
+                    "type": "boolean",
+                    "description": "Top-level kill switch: whether the daemon may run on this device at all (daemon.enabled)."
+                  },
+                  "watchdogEnabled": {
+                    "type": "boolean",
+                    "description": "Whether the daemon runs the watchdog pass on this device (watchdog.enabled)."
+                  },
+                  "browserRemoteControl": {
+                    "type": "boolean",
+                    "description": "Whether other fleet machines may drive THIS device's browser (browser.remote-control). Default off."
+                  },
+                  "defaultBrowserProfile": {
+                    "type": "string",
+                    "description": "Browser profile `agents browser start` resolves to without --profile on this device (browser.profile)."
+                  },
+                  "notes": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Free-form operator notes (`agents devices config <name> notes <text>` appends one)."
+                  },
+                  "sshUser": {
+                    "type": "string",
+                    "description": "SSH login user (ssh.user) — overrides the registry profile's user at dial time."
+                  },
+                  "sshAuth": {
+                    "type": "string",
+                    "enum": ["key", "password"],
+                    "description": "SSH auth method (ssh.auth): key (agent/on-disk keys) or password (from a secrets bundle)."
+                  },
+                  "sshBundle": {
+                    "type": "string",
+                    "description": "Secrets bundle holding the SSH password (ssh.bundle). A bundle NAME — never a secret value."
+                  },
+                  "sshBundleKey": {
+                    "type": "string",
+                    "description": "Key within the bundle whose value is the password (ssh.bundle-key; default 'password')."
+                  },
+                  "sshIdentityFile": {
+                    "type": "string",
+                    "description": "Explicit private-key path for key auth (ssh.identity-file; passed to OpenSSH with IdentitiesOnly=yes)."
+                  },
+                  "platform": {
+                    "type": "string",
+                    "enum": ["windows", "linux", "macos", "unknown"],
+                    "description": "OS family of the device (platform) — picks PowerShell vs POSIX remotely. Overrides the discovered platform."
+                  },
+                  "autoLaunchEnabled": {
+                    "type": "boolean",
+                    "description": "Whether Factory auto-launch may pick this device (auto-launch.enabled; default on)."
+                  },
+                  "autoLaunchPreferred": {
+                    "type": "boolean",
+                    "description": "Boost this device in Factory auto-launch ranking (auto-launch.preferred; default off)."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "share": {
       "type": "object",

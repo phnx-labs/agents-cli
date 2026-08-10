@@ -375,7 +375,7 @@ did not ask for. Pass
 `--force` to downgrade that to a warning and start anyway. A probe that simply
 could not reach the pool (no positive evidence) does **not** trigger the failure —
 the real error then surfaces at the SSH dispatch. Set a per-device cap with
-`agents devices configure <name> --max-agents N`.
+`agents devices config <name> agents.max-concurrent N`.
 
 **Repo provisioning.** The team's `--repo` (defaulting to the local checkout's
 `origin`) is used to ensure the code is present on each device — an existing

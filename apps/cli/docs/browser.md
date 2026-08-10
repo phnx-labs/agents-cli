@@ -93,10 +93,10 @@ this order:
    this machine** rather than failing with "Custom binary not found". Remote
    (`ssh://`) defaults skip this check: their browser lives on the far host.
 
-The configured default is **device-local**: it lives in
-`~/.agents/devices/<machine>/agents.yaml` and never syncs to your other
-machines (they keep auto-detecting), because the profile it points at may hold
-machine-local logins. Set it once per machine.
+The configured default is a **per-device setting**: it lives in this machine's
+`browser.profile` config key (centrally, under `fleet.devices.<machine>.config`
+in `~/.agents/agents.yaml`), so each machine keeps its own choice — the profile
+it points at may hold machine-local logins. Set it once per machine.
 
 Safari and Firefox are not supported. They do not implement the Chrome
 DevTools Protocol.
@@ -214,8 +214,9 @@ whether it allows it:
 | `agents browser remote-control on` | Allow other fleet machines to drive this browser |
 | `agents browser remote-control off` | Refuse remote drives (the default) |
 
-Consent is **device-local** (stored in `~/.agents/devices/<machine>/agents.yaml`,
-never synced) and **off by default**: a `browser --host <this-machine> start` from
+Consent is a **per-device setting** (the `browser.remote-control` config key,
+stored centrally under `fleet.devices.<machine>.config` in `~/.agents/agents.yaml`)
+and **off by default**: a `browser --host <this-machine> start` from
 elsewhere is refused with a message naming how to enable it, until the owner runs
 `agents browser remote-control on` here. Local starts (no `--host`) are never gated.
 

@@ -455,8 +455,8 @@ async function resolveBalancedHost(pool?: string[], agentKey?: string): Promise<
       online: !!d.online,
       running: 0,
       preferred: isAutoLaunchPreferred(preferences, d.name),
-      // Operator cap from the synced device doc (agents devices configure
-      // <name> --max-agents N) — local read, no SSH.
+      // Operator cap from the central fleet.devices.<name>.config block
+      // (agents devices config <name> agents.max-concurrent N) — local read, no SSH.
       maxConcurrent: readDeviceMaxConcurrent(d.name),
     }));
   const eligible = resolveBalancePool(fleet, { localName, pool }).filter(c => c.online);

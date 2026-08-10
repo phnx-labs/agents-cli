@@ -101,7 +101,7 @@ describe('agents.max-concurrent caps (auto-pick only)', () => {
     expect(() => pickLeastLoaded(['box-a', 'box-b'], roster, { 'box-a': 2, 'box-b': 1 }))
       .toThrow(/agents\.max-concurrent cap: box-a \(2\/2\), box-b \(1\/1\)/);
     expect(() => pickLeastLoaded(['box-a', 'box-b'], roster, { 'box-a': 2, 'box-b': 1 }))
-      .toThrow(/agents devices configure <name> --max-agents N/);
+      .toThrow(/agents devices config <name> agents\.max-concurrent N/);
   });
 
   it('cappedDevices reports the exclusion reason with live counts', () => {

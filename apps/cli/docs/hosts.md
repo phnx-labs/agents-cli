@@ -507,7 +507,7 @@ stream + exit code; no custom `command_output`/`command_done` framing (which is
 what the rush daemon had to invent over its WebSocket).
 
 Auth: your existing SSH keys, or a per-device private key configured with
-`agents devices set <name> --auth key --identity-file <path>`. The configured
+`agents devices config <name> ssh.identity-file <path>`. The configured
 path is passed to every OpenSSH connection for that device. If a host is reachable only
 over a tailnet, the registered `address` is its tailnet name and SSH rides it
 transparently — no Tailscale-specific code path. (Tailscale SSH / ACL-tag auth

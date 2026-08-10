@@ -325,7 +325,8 @@ so the copied config does not depend on the CLI's own tree.
 `~/.<agent>` config symlink.
 
 ```yaml
-# ~/.agents/devices/<machine>/agents.yaml   (device-local, never synced)
+# ~/.agents/devices/<machine>/agents.yaml   (device-local content; the file syncs,
+# but each machine only ever writes its OWN folder, so pulls never conflict)
 agents:                 # global defaults — own the launcher, shim and config symlink
   claude: 2.1.220
 isolatedAgents:         # sandbox pointers — own nothing

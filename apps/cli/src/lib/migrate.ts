@@ -21,6 +21,7 @@ import { migrateLegacyRoutineActivation, setJobEnabled, listJobs, validateJob } 
 import { addEnabledRoutinesOnUpgrade, enabledRoutineNames, replaceEnabledRoutines } from './routine-activation.js';
 import { evaluateActivationReadiness } from './routine-readiness.js';
 import { DAEMON_TICK_ROUTINE_NAMES } from './daemon-ticks.js';
+import { migrateDeviceConfigToCentral } from './devices/config-migration.js';
 
 const HOME = process.env.HOME ?? os.homedir();
 const USER_DIR = path.join(HOME, '.agents');
@@ -2150,6 +2151,13 @@ export async function runMigration(): Promise<void> {
   // agents.yaml. After migrateVersionResourcesToPatterns so versions: is already
   // in pattern form when it moves to the history file.
   migrateSplitDeviceLocalMeta();
+  // Fold per-device operator config (device-doc config:/defaultBrowserProfile
+  // and .history/devices/auto-launch.json) into the central
+  // fleet.devices.<name>.config block. After migrateSplitDeviceLocalMeta so the
+  // device docs are in their canonical location. Also invoked on daemon boot
+  // and on the first device-config read/write in a process, so sentinel'd
+  // installs (which skip this whole run) still converge.
+  migrateDeviceConfigToCentral();
   // Bucket moves: collapse runtime state into ~/.agents/.history and ~/.agents/.cache.
   migrateRuntimeToHistory();
   migrateLegacySessionMarkersToBookmarks();

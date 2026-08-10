@@ -3,8 +3,8 @@ import * as path from 'path';
 
 import { buildRoutineListJson } from '../../commands/routines.js';
 import { backfillActiveRowsFromIndex, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson } from '../../commands/sessions.js';
-import { getConfigValue } from '../device-config.js';
-import { loadAutoLaunchPreferences, loadDevices } from '../devices/registry.js';
+import { getConfigValue, loadAutoLaunchPreferences } from '../device-config.js';
+import { loadDevices } from '../devices/registry.js';
 import { machineId } from '../machine-id.js';
 import { querySessions } from '../session/db.js';
 import { readActiveSessionsCache } from '../session/session-cache.js';

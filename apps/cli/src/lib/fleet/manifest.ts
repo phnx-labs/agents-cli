@@ -69,7 +69,16 @@ export function parseFleetManifest(raw: unknown): FleetManifest {
     const map: Record<string, FleetDeviceOverride> = {};
     for (const [name, ov] of Object.entries(o.devices as Record<string, unknown>)) {
       // An empty entry (`device: {}`) inherits defaults — represent as {}.
-      const merged = ov == null ? {} : validateDefaults(ov, `devices.${name}`);
+      const merged: FleetDeviceOverride = ov == null ? {} : validateDefaults(ov, `devices.${name}`);
+      // `config:` is the operator-config block (`agents devices config`) —
+      // inert to the reconcile engine but part of the manifest shape.
+      const cfg = ov != null ? (ov as Record<string, unknown>).config : undefined;
+      if (cfg !== undefined) {
+        if (typeof cfg !== 'object' || cfg === null || Array.isArray(cfg)) {
+          throw new Error(`fleet: devices.${name}.config must be a mapping of config keys to values.`);
+        }
+        merged.config = cfg as Record<string, unknown>;
+      }
       map[name] = merged;
     }
     devices = map;

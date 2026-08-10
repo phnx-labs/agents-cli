@@ -41,12 +41,10 @@ coverage/
 # Generated test reports (session-tracker scenario recorder, run-report aggregator)
 **/tests/reports/
 
-# Implementation plans are durable review artifacts; worktrees/scratch stay local.
-!.agents/plans/
-!.agents/plans/*.html
+# Durable agent artifacts (plans, reports, visuals) are committed under
+# .agents/artifacts/<yyyy-mm-dd>/; worktrees and scratch stay local.
 .agents/worktrees/
 .agents/scratch/
-.agents/artifacts/
 .plans/
 
 # Scrub script lists personal data strings — must not be committed to public repo

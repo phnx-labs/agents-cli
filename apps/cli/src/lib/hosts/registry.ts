@@ -28,6 +28,7 @@ import { readMeta } from '../state.js';
 import { isSshConfigHost } from './ssh-config.js';
 import { resolveRemoteOsSync } from './remote-os.js';
 import { loadDevices, isControlDevice, type DeviceProfile, type DeviceRegistry } from '../devices/registry.js';
+import { resolveDeviceProfile } from '../devices/resolve-profile.js';
 import { isDeviceAuto, resolveDeviceAffinity, type DeviceAffinityPlan } from '../smart-launch.js';
 import { localMachineId } from '../session/origin-machine.js';
 
@@ -114,20 +115,24 @@ function deviceStatus(device: DeviceProfile): Host['status'] {
  * device can never be made dispatchable by shadowing it with an inline entry.
  */
 function deviceHost(device: DeviceProfile, user: string | undefined, overlay?: HostEntry): ResolvedHost {
-  const address = device.address.dnsName ?? device.address.ip;
+  // Effective profile: the central config's ssh.*/platform keys overlay the
+  // discovery record, so an operator edit via `agents devices config` is
+  // honored at dispatch time.
+  const resolved = resolveDeviceProfile(device);
+  const address = resolved.address.dnsName ?? resolved.address.ip;
   return {
-    name: device.name,
+    name: resolved.name,
     provider: 'devices',
     source: 'inline',
     ...(address ? { address } : {}),
-    user: user ?? device.user,
-    identityFile: device.auth.identityFile,
-    os: device.platform !== 'unknown' ? device.platform : overlay?.os,
+    user: user ?? resolved.user,
+    identityFile: resolved.auth.identityFile,
+    os: resolved.platform !== 'unknown' ? resolved.platform : overlay?.os,
     ...(overlay?.caps?.length ? { caps: overlay.caps } : {}),
     enrolled: true,
-    status: deviceStatus(device),
-    dispatchable: device.auth.method !== 'password',
-    device,
+    status: deviceStatus(resolved),
+    dispatchable: resolved.auth.method !== 'password',
+    device: resolved,
   };
 }
 

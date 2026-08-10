@@ -31,14 +31,14 @@
 <p>You asked whether "multiple Cursor profiles" shipped. It did not — and the reason is a trap: <code>agents view cursor</code> <em>looks</em> like it works.</p>
 <p>Today it prints two accounts:</p>
 <pre><code>Cursor (balanced)
-  2026.08.04 (default)  muqsitnawaz@gmail.com   (signed in)
+  2026.08.04 (default)  user@example.com   (signed in)
   2026.07.23            (logged out — log in with: cursor-agent)
 </code></pre>
 <p>That display is cosmetic. Cursor is a single self-updating binary with one config location, and agents-cli isolates a harness's accounts by pinning a per-account config dir at exec — a mechanism Cursor never got. So the picker, the <code>@version</code> selector, and balanced rotation all compute an account choice that has <strong>zero effect</strong> on which login actually runs. This spec makes the choice real.</p>
 <h2 id="behavior-before-and-after">Behavior — before and after</h2>
 <p><strong>Before (today).</strong> All three paths silently collapse to the one live login:</p>
 <ul>
-<li><code>agents run cursor@2026.07.23</code> → you expect the logged-out home; you get the <strong>default</strong> account (<code>muqsitnawaz@gmail.com</code>), because the spawned <code>cursor-agent</code> reads <code>~/.cursor</code>, a symlink to whichever version is the current default.</li>
+<li><code>agents run cursor@2026.07.23</code> → you expect the logged-out home; you get the <strong>default</strong> account (<code>user@example.com</code>), because the spawned <code>cursor-agent</code> reads <code>~/.cursor</code>, a symlink to whichever version is the current default.</li>
 <li><code>agents run auto</code> with balanced rotation "picks" a Cursor account → same single login runs regardless of the pick.</li>
 <li>Two Cursor runs on two accounts at once → both authenticate as the same account; the "second account" is a display artifact, not a session.</li>
 </ul>
@@ -223,7 +223,7 @@ agents accounts cursor --remove work    # drop an account home
 <aside class="artifact-callout"><strong>Load-bearing takeaway:</strong> the pick is discarded at exec, not at display. The fix is a real per-account credential home plus per-child <code>HOME</code>/<code>XDG_CONFIG_HOME</code> pinning — never a global symlink swap, which is unsafe under the concurrent runs this feature exists to enable.</aside><h2 id="tracking">Tracking</h2>
 <ul>
 <li><strong>RUSH-2400</strong> — feat(cursor): make multiple Cursor accounts real — <a href="https://linear.app/rush/issue/RUSH-2400">https://linear.app/rush/issue/RUSH-2400</a></li>
-<li>Spec PR — added on open (this document, committed under <code>.agents/reports/</code>).</li>
+<li>Spec PR — added on open (this document, committed under <code>.agents/artifacts/</code>).</li>
 <li>Implementation — follow-up, gated on the empirical spike and your approval of Option B.</li>
 </ul>
 </article>

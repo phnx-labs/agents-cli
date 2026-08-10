@@ -30,8 +30,6 @@ import {
   loadIgnored,
   removeDevice,
   removeIgnored,
-  setAutoLaunchEnabled,
-  setAutoLaunchPreferred,
   upsertDevice,
   writeReachability,
   type DeviceAuthMethod,
@@ -39,6 +37,7 @@ import {
   type DeviceProfile,
   type DeviceRegistry,
 } from '../lib/devices/registry.js';
+import { resolveDeviceProfile } from '../lib/devices/resolve-profile.js';
 import { collectReachabilityWriteBacks, deviceOnlineState } from '../lib/devices/reachability.js';
 import { addControlToken } from '../lib/serve/token.js';
 import { DEFAULT_SERVE_PORT } from '../lib/serve/server.js';
@@ -128,13 +127,14 @@ import {
   type VerdictSummary,
 } from '../lib/auth-health.js';
 import { runFleetLogin, type LoginStatus } from '../lib/fleet/remote-login.js';
-import { getConfigValue, listConfig, listUserConfig, setConfigValue, unsetConfigValue } from '../lib/device-config.js';
+import { getConfigValue, listConfig, setConfigValue, unsetConfigValue, configKeySpec, type ConfigKeySpec } from '../lib/device-config.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 
 /** One-line summary of a device for `list`. `isSelf` marks the machine this
  * command is running on so it stands out from the rest of the tailnet.
- * `isInteractive` marks the configured interactive host (`devices set-interactive`). */
+ * `isInteractive` marks the configured interactive host (`devices config <name> interactive.host`). */
 function deviceSummary(d: DeviceProfile, isSelf = false, stats?: DeviceStats, isInteractive = false): string {
+  d = resolveDeviceProfile(d);
   const addr = hostNameFor(d) ?? chalk.gray('no address');
   // Prefer a fresh live verdict (this run's probe, else the written-back
   // reachability) over the stale tailscale.online snapshot (RUSH-1965).
@@ -202,7 +202,9 @@ function renderDeviceTable(
   lines.push(head);
 
   for (const name of names) {
-    const d = reg[name];
+    // Effective profile: the operator's central config (ssh.*/platform/user)
+    // overlays the discovery record, so the table shows what would be dialed.
+    const d = resolveDeviceProfile(reg[name]);
     const isSelf = name === self;
     const marker = isSelf ? chalk.cyan('▸ ') : '  ';
     const label = isSelf ? chalk.bold.cyan(name.padEnd(16)) : chalk.bold(name.padEnd(16));
@@ -574,7 +576,7 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
   const remoteTargets: FleetStatusTarget[] = remoteFleetTargets(planned, self)
     .map((t) => ({
       name: t.device.name,
-      platform: t.device.platform,
+      platform: resolveDeviceProfile(t.device).platform,
       // Fail fast: gate the expensive version+doctor dials on the reachability
       // verdict the cheap stats probe already computed one step earlier. A box
       // it found unreachable skips straight to an `unreachable` row instead of
@@ -763,7 +765,7 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
 
   const remoteTargets: FleetStatusTarget[] = remoteFleetTargets(planned, self).map((t) => ({
     name: t.device.name,
-    platform: t.device.platform,
+    platform: resolveDeviceProfile(t.device).platform,
     skip: t.skip,
     dialTarget: fleetDialTarget(t.device),
     extraSshArgs: deviceIdentityArgs(t.device),
@@ -866,7 +868,7 @@ async function collectFleetHarnesses(opts: HarnessInventoryOpts): Promise<HostHa
   const planned = planFleetTargets(reg);
   let remoteTargets: FleetStatusTarget[] = remoteFleetTargets(planned, self).map((t) => ({
     name: t.device.name,
-    platform: t.device.platform,
+    platform: resolveDeviceProfile(t.device).platform,
     skip: t.skip,
     dialTarget: fleetDialTarget(t.device),
     extraSshArgs: deviceIdentityArgs(t.device),
@@ -1063,16 +1065,15 @@ function registerDevicesCommands(program: Command): void {
         agents devices ping            # quick liveness probe
 
       Configure a device:
-        agents devices set-interactive zion   # where agents show YOU artifacts
-        agents devices configure mac-mini --max-agents 4 --scheduler off
-        agents devices note mac-mini "runs the releases — don't reboot"
-        agents devices set win-mini --auth password --bundle muqsit
-        agents devices set worker --auth key --identity-file ~/.ssh/worker_ed25519
+        agents devices config mac-mini                       # settings menu (TTY) / print (piped)
+        agents devices config mac-mini agents.max-concurrent 4
+        agents devices config mac-mini scheduler.enabled off
+        agents devices config mac-mini notes "runs the releases"
+        agents devices config win-mini ssh.auth password
+        agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519
+        agents devices config mac-mini auto-launch.enabled off
+        agents devices config mac-mini interactive.host zion # where agents show YOU artifacts
         agents devices render --write  # write ~/.ssh/config.d/agents include
-
-      Factory auto-launch:
-        agents devices prefer mac-mini   # boost in auto-launch ranking
-        agents devices disable zion      # exclude from auto-launch
 
       Fleet operations:
         agents fleet update              # roll out latest agents-cli everywhere
@@ -1084,8 +1085,7 @@ function registerDevicesCommands(program: Command): void {
   registerCommandGroups(devicesCmd, [
     { title: 'Discover & register', names: ['sync', 'register', 'add', 'ignore', 'unignore', 'rm'] },
     { title: 'Inspect', names: ['list', 'show', 'status', 'ping', 'harnesses', 'accounts'] },
-    { title: 'Configure a device', names: ['set', 'configure', 'note', 'set-interactive', 'render'] },
-    { title: 'Factory auto-launch', names: ['enable', 'disable', 'prefer', 'unprefer'] },
+    { title: 'Configure a device', names: ['config', 'render'] },
     { title: 'Fleet operations', names: ['update', 'run', 'login', 'pair-ios', 'capture', 'apply'] },
   ]);
 
@@ -1164,13 +1164,246 @@ function registerDevicesCommands(program: Command): void {
       console.log(chalk.green(`No longer ignoring '${name}'`) + chalk.gray(' — run `agents devices sync` to register it.'));
     });
 
+  // ─── devices config (unified settings surface) ────────────────────────────
+  //
+  // ONE command for every per-device setting: `agents devices config <name>
+  // [key] [value] [--unset] [--json]`. The retired subcommands (configure,
+  // note, set-interactive, set, enable/disable/prefer/unprefer) are hidden
+  // tombstones below — each prints a deprecation notice on STDERR (so a --json
+  // consumer's stdout stays parseable) and delegates to this same engine,
+  // preserving its old output shape and exit codes.
+
+  /** Parse a raw CLI string into a config key's typed value (bool/int pass validation, strings verbatim). */
+  const parseConfigValueInput = (spec: ConfigKeySpec, raw: string): unknown => {
+    switch (spec.type) {
+      case 'int': {
+        const n = Number(raw);
+        if (!Number.isInteger(n)) throw new Error(`Config key '${spec.name}' expects an integer, got '${raw}'.`);
+        return n;
+      }
+      case 'bool': {
+        if (raw === 'on' || raw === 'true') return true;
+        if (raw === 'off' || raw === 'false') return false;
+        throw new Error(`Config key '${spec.name}' expects on/off (or true/false), got '${raw}'.`);
+      }
+      default:
+        return raw;
+    }
+  };
+
+  const writeJson = (payload: unknown): void => {
+    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+  };
+
+  /** The device-scope config entries for `name` (what the config surface edits). */
+  const deviceConfigEntries = (name: string) =>
+    listConfig({ device: name }).filter((e) => e.spec.scope === 'device');
+
+  /** Print the full resolved config for a device (bare invocation, non-menu). */
+  const printDevicesConfig = (name: string, json: boolean): void => {
+    const entries = deviceConfigEntries(name);
+    if (json) {
+      const config: Record<string, unknown> = {};
+      for (const e of entries) if (e.value !== undefined) config[e.spec.name] = e.value;
+      writeJson({ device: name, config });
+      return;
+    }
+    console.log(chalk.bold(`Config for '${name}'`));
+    for (const e of entries) {
+      const value = e.value === undefined ? chalk.gray('— (default)') : chalk.cyan(JSON.stringify(e.value));
+      console.log(`  ${e.spec.name.padEnd(24)} ${value}${chalk.gray(`  ${e.spec.description}`)}`);
+    }
+  };
+
+  /**
+   * The `devices config` engine — shared by the config command's action and
+   * every tombstone. `quiet` performs the write with no output (a tombstone
+   * that prints its own legacy shape). Throws on a bad key/value; callers map
+   * that to exit 1.
+   */
+  const runDevicesConfig = async (
+    name: string,
+    key: string | undefined,
+    valueParts: string[],
+    opts: { unset?: boolean; json?: boolean; quiet?: boolean },
+  ): Promise<void> => {
+    const spec = key ? configKeySpec(key) : undefined; // unknown key → throw listing the valid keys
+    // User-scope keys (interactive.host) are stored centrally — the device name
+    // is syntax only, so an unregistered name is not an error for them.
+    if (!spec || spec.scope === 'device') await mustGetDevice(name);
+
+    if (opts.unset) {
+      if (!spec) throw new Error('--unset needs a key: agents devices config <name> <key> --unset');
+      unsetConfigValue(spec.name, { device: name });
+      if (opts.quiet) return;
+      if (opts.json) writeJson({ device: name, key: spec.name, value: null });
+      else console.log(chalk.green(`Unset ${spec.name}`) + chalk.gray(` on '${name}' — back to the default.`));
+      return;
+    }
+
+    if (spec && valueParts.length > 0) {
+      let value: unknown;
+      if (spec.type === 'string-list') {
+        // List keys (notes) APPEND — one entry per invocation.
+        const existing = (getConfigValue(spec.name, { device: name }).value as string[] | undefined) ?? [];
+        value = [...existing, valueParts.join(' ')];
+      } else {
+        value = parseConfigValueInput(spec, valueParts.join(' '));
+      }
+      setConfigValue(spec.name, value, { device: name });
+      if (opts.quiet) return;
+      if (opts.json) writeJson({ device: name, key: spec.name, value });
+      else console.log(chalk.green(`Set ${spec.name} = ${JSON.stringify(value)}`) + chalk.gray(` on '${name}'.`));
+      return;
+    }
+
+    if (spec) {
+      const entry = getConfigValue(spec.name, { device: name });
+      if (opts.quiet) return;
+      if (opts.json) {
+        writeJson({ device: name, key: spec.name, value: entry.value ?? null });
+      } else if (entry.value === undefined) {
+        console.log(`  ${spec.name.padEnd(24)} ${chalk.gray('— (default)')}${chalk.gray(`  ${spec.description}`)}`);
+      } else {
+        console.log(`  ${spec.name.padEnd(24)} ${chalk.cyan(JSON.stringify(entry.value))}${chalk.gray(`  ${spec.description}`)}`);
+      }
+      return;
+    }
+
+    // Bare: TTY → the interactive settings menu; piped/--json → print.
+    if (opts.json || !isInteractiveTerminal()) {
+      printDevicesConfig(name, Boolean(opts.json));
+      return;
+    }
+    await runDevicesConfigMenu(name);
+  };
+
+  /** The interactive settings menu: pick a key, edit it, repeat. TTY-only. */
+  const runDevicesConfigMenu = async (name: string): Promise<void> => {
+    const { select, input, confirm } = await import('@inquirer/prompts');
+    const DONE = '__done__';
+    try {
+      for (;;) {
+        const entries = deviceConfigEntries(name);
+        const picked = await select<string>({
+          message: `Config for '${name}' — pick a key to edit:`,
+          pageSize: Math.min(entries.length + 1, 20),
+          choices: [
+            ...entries.map((e) => {
+              const value =
+                e.value !== undefined
+                  ? chalk.cyan(JSON.stringify(e.value))
+                  : chalk.gray(
+                      e.spec.defaultValue !== undefined
+                        ? `default: ${JSON.stringify(e.spec.defaultValue)}`
+                        : 'unset (default)',
+                    );
+              return { value: e.spec.name, name: `${e.spec.name.padEnd(24)} ${value}  ${chalk.gray(e.spec.description)}` };
+            }),
+            { value: DONE, name: 'Done' },
+          ],
+        });
+        if (picked === DONE) return;
+        const spec = configKeySpec(picked);
+        if (spec.type === 'bool') {
+          const current = getConfigValue(picked, { device: name }).value as boolean | undefined;
+          const next = await confirm({
+            message: `${picked} — enable?`,
+            default: current ?? (spec.defaultValue as boolean | undefined) ?? true,
+          });
+          setConfigValue(picked, next, { device: name });
+          console.log(chalk.green(`Set ${picked} = ${next}`) + chalk.gray(` on '${name}'.`));
+        } else if (spec.type === 'string-list') {
+          const text = await input({ message: `${picked} — append an entry (empty to go back):` });
+          if (text.trim().length > 0) {
+            const existing = (getConfigValue(picked, { device: name }).value as string[] | undefined) ?? [];
+            setConfigValue(picked, [...existing, text.trim()], { device: name });
+            console.log(chalk.green(`Noted on '${name}':`) + ` ${text.trim()}`);
+          }
+        } else {
+          const current = getConfigValue(picked, { device: name }).value;
+          const raw = await input({
+            message: `${picked}:`,
+            default: current === undefined ? undefined : String(current),
+          });
+          if (raw.trim().length === 0) continue;
+          const value = parseConfigValueInput(spec, raw.trim());
+          setConfigValue(spec.name, value, { device: name });
+          console.log(chalk.green(`Set ${spec.name} = ${JSON.stringify(value)}`) + chalk.gray(` on '${name}'.`));
+        }
+      }
+    } catch (err) {
+      if (isPromptCancelled(err)) return; // ctrl-c / esc — leave the menu quietly
+      throw err;
+    }
+  };
+
+  const configCmd = devicesCmd
+    .command('config <name> [key] [value...]')
+    .description(
+      'Get, set, or unset a device’s settings (scheduler, agent cap, ssh overrides, auto-launch, notes). ' +
+        'Bare opens an interactive settings menu (TTY) or prints the resolved config (piped). ' +
+        'Stored centrally in ~/.agents/agents.yaml under fleet.devices.<name>.config — synced, so any box can configure any device.',
+    )
+    .option('--unset', 'reset the key to its default (removes the stored value)')
+    .option('--json', 'output machine-readable JSON')
+    .action(async (name: string, key: string | undefined, valueParts: string[] | undefined, opts: { unset?: boolean; json?: boolean }) => {
+      try {
+        await runDevicesConfig(name, key, valueParts ?? [], opts);
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+    });
+  setHelpSections(configCmd, {
+    examples: `
+      agents devices config mac-mini                            # settings menu (TTY) / print config (piped)
+      agents devices config mac-mini agents.max-concurrent 4    # cap concurrent agents
+      agents devices config mac-mini scheduler.enabled off      # no routines firing there
+      agents devices config mac-mini scheduler.enabled          # read one key back
+      agents devices config mac-mini scheduler.enabled --unset  # back to the default
+      agents devices config mac-mini notes "runs the releases"  # append an operator note
+      agents devices config win-mini ssh.auth password          # password auth…
+      agents devices config win-mini ssh.bundle muqsit          # …from this secrets bundle
+      agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519
+      agents devices config mac-mini auto-launch.enabled off    # exclude from Factory auto-launch
+      agents devices config mac-mini auto-launch.preferred on   # boost in auto-launch ranking
+      agents devices config zion interactive.host zion          # user scope: where agents show YOU artifacts
+      agents devices config mac-mini --json                     # machine-readable
+    `,
+    notes: `
+      Keys: agents.max-concurrent, scheduler.enabled, daemon.enabled,
+      watchdog.enabled, browser.remote-control, browser.profile, notes,
+      ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,
+      ssh.identity-file, platform (windows|linux|macos|unknown),
+      auto-launch.enabled, auto-launch.preferred — plus the user-scope
+      interactive.host (stored centrally; the device name is syntax only).
+
+      Booleans take on/off (or true/false). 'notes' appends one entry per
+      invocation. Values land in ~/.agents/agents.yaml under
+      fleet.devices.<name>.config and sync with 'agents repo push/pull'.
+      ssh.* / platform / user overlay the discovered registry profile at dial
+      time. scheduler.enabled / daemon.enabled take effect when the daemon
+      reloads or restarts on that device.
+
+      The retired subcommands still work and forward here: configure, note,
+      set, set-interactive, enable, disable, prefer, unprefer.
+    `,
+  });
+
+  /** Deprecation notice for a retired subcommand — STDERR only, so a --json consumer's stdout stays parseable. */
+  const configTombstoneNotice = (retired: string, replacement: string): void => {
+    console.error(chalk.yellow(`Deprecated: "agents devices ${retired}" is now "agents devices ${replacement}". Running that for you.\n`));
+  };
+
   devicesCmd
-    .command('enable <name>')
-    .description('Allow a registered device to be auto-picked by Factory agent launches.')
+    .command('enable <name>', { hidden: true })
     .action(async (name: string) => {
       try {
+        configTombstoneNotice('enable <name>', 'config <name> auto-launch.enabled on');
         await mustGetDevice(name);
-        await setAutoLaunchEnabled(name, true);
+        // Back to the default (enabled) = remove the key.
+        await runDevicesConfig(name, 'auto-launch.enabled', [], { unset: true, quiet: true });
         console.log(chalk.green(`Enabled '${name}'`) + chalk.gray(' for Factory auto-launch.'));
       } catch (err: any) {
         console.error(chalk.red(err.message));
@@ -1179,12 +1412,12 @@ function registerDevicesCommands(program: Command): void {
     });
 
   devicesCmd
-    .command('disable <name>')
-    .description('Exclude a registered device from Factory auto-launch. It can still be picked manually via (Pick Host).')
+    .command('disable <name>', { hidden: true })
     .action(async (name: string) => {
       try {
+        configTombstoneNotice('disable <name>', 'config <name> auto-launch.enabled off');
         await mustGetDevice(name);
-        await setAutoLaunchEnabled(name, false);
+        await runDevicesConfig(name, 'auto-launch.enabled', ['off'], { quiet: true });
         console.log(chalk.green(`Disabled '${name}'`) + chalk.gray(' for Factory auto-launch.'));
       } catch (err: any) {
         console.error(chalk.red(err.message));
@@ -1193,12 +1426,12 @@ function registerDevicesCommands(program: Command): void {
     });
 
   devicesCmd
-    .command('prefer <name>')
-    .description('Boost a registered device in Factory auto-launch ranking.')
+    .command('prefer <name>', { hidden: true })
     .action(async (name: string) => {
       try {
+        configTombstoneNotice('prefer <name>', 'config <name> auto-launch.preferred on');
         await mustGetDevice(name);
-        await setAutoLaunchPreferred(name, true);
+        await runDevicesConfig(name, 'auto-launch.preferred', ['on'], { quiet: true });
         console.log(chalk.green(`Preferred '${name}'`) + chalk.gray(' for Factory auto-launch.'));
       } catch (err: any) {
         console.error(chalk.red(err.message));
@@ -1207,12 +1440,13 @@ function registerDevicesCommands(program: Command): void {
     });
 
   devicesCmd
-    .command('unprefer <name>')
-    .description('Remove the auto-launch preference boost from a device.')
+    .command('unprefer <name>', { hidden: true })
     .action(async (name: string) => {
       try {
+        configTombstoneNotice('unprefer <name>', 'config <name> auto-launch.preferred off');
         await mustGetDevice(name);
-        await setAutoLaunchPreferred(name, false);
+        // Back to the default (not preferred) = remove the key.
+        await runDevicesConfig(name, 'auto-launch.preferred', [], { unset: true, quiet: true });
         console.log(chalk.green(`No longer preferring '${name}'`) + chalk.gray(' for Factory auto-launch.'));
       } catch (err: any) {
         console.error(chalk.red(err.message));
@@ -1220,197 +1454,103 @@ function registerDevicesCommands(program: Command): void {
       }
     });
 
-  const interactiveDeprecation = chalk.yellow(
-    'Deprecation: `agents devices set-interactive` is replaced by `agents config set interactive.host <name>`.',
-  );
-  const setInteractiveCmd = devicesCmd
-    .command('set-interactive [name]')
-    .description('Get or set the interactive host — the one device that shows YOU artifacts (browser opens, dashboards, rendered plans). Stored fleet-wide as config.interactiveHost in central agents.yaml.')
+  devicesCmd
+    .command('set-interactive [name]', { hidden: true })
     .option('--unset', 'clear the interactive host')
     .option('--json', 'output machine-readable JSON')
     .action(async (name: string | undefined, opts: { unset?: boolean; json?: boolean }) => {
       try {
-        console.warn(interactiveDeprecation);
+        configTombstoneNotice('set-interactive [name]', 'config <name> interactive.host <name>');
         if (opts.unset) {
           unsetConfigValue('interactive.host');
-          if (opts.json) process.stdout.write(JSON.stringify({ interactiveHost: null }, null, 2) + '\n');
+          if (opts.json) writeJson({ interactiveHost: null });
           else console.log(chalk.green('Cleared the interactive host.'));
           return;
         }
         if (name) {
           await mustGetDevice(name);
           setConfigValue('interactive.host', name);
-          if (opts.json) process.stdout.write(JSON.stringify({ interactiveHost: name }, null, 2) + '\n');
+          if (opts.json) writeJson({ interactiveHost: name });
           else console.log(chalk.green(`Interactive host: '${name}'`) + chalk.gray(' — agents show you artifacts there. Clear with --unset.'));
           return;
         }
         const current = getConfigValue('interactive.host').value as string | undefined;
         if (opts.json) {
-          process.stdout.write(JSON.stringify({ interactiveHost: current ?? null }, null, 2) + '\n');
+          writeJson({ interactiveHost: current ?? null });
         } else if (current) {
           console.log(`${chalk.bold('Interactive host:')} ${chalk.cyan(current)}`);
         } else {
-          console.log(chalk.gray("No interactive host set. Set one with 'agents devices set-interactive <name>'."));
+          console.log(chalk.gray("No interactive host set. Set one with 'agents devices config <name> interactive.host <name>'."));
         }
       } catch (err: any) {
         console.error(chalk.red(err.message));
         process.exit(1);
       }
     });
-  setHelpSections(setInteractiveCmd, {
-    examples: `
-      agents devices set-interactive zion      # zion is where artifacts open for you
-      agents devices set-interactive           # print the current interactive host
-      agents devices set-interactive --unset   # back to no interactive host
-      agents devices set-interactive --json    # machine-readable (for skills)
-    `,
-    notes: `
-      The interactive host answers "which online macOS device do I show this on?"
-      so skills stop guessing. It is marked ★ interactive in 'agents devices list'.
-      The value syncs fleet-wide (central agents.yaml, config.interactiveHost);
-      per-device settings live under 'agents devices configure' instead.
-    `,
-  });
 
-  const configureDeprecation = chalk.yellow(
-    'Deprecation: `agents devices configure` is replaced by `agents config set devices.<name>.<key> <value>`.',
-  );
-  const configureCmd = devicesCmd
-    .command('configure <name>')
-    .alias('config')
-    .description('Get or set per-device config: --max-agents, --scheduler. Written to ~/.agents/devices/<name>/agents.yaml (works for any device — the devices/ tree syncs). Unset = default behavior.')
-    .option('--max-agents <n>', 'cap concurrent agents (Factory auto-launch counts device-wide; teams placement counts the team’s roster on the device)')
-    .option('--scheduler <on|off>', 'allow the routines scheduler (daemon) to fire on this device (takes effect on daemon reload/restart)')
-    .option('--inherited', 'also show user-level keys (e.g. interactive.host) that apply to this device')
+  devicesCmd
+    .command('configure <name>', { hidden: true })
+    .option('--max-agents <n>', 'cap concurrent agents')
+    .option('--scheduler <on|off>', 'allow the routines scheduler (daemon) to fire on this device')
     .option('--json', 'output machine-readable JSON')
     .action(async (name: string, opts: { maxAgents?: string; scheduler?: string; inherited?: boolean; json?: boolean }) => {
       try {
-        console.warn(configureDeprecation);
+        configTombstoneNotice('configure <name> [--max-agents N] [--scheduler on|off]', 'config <name> <key> <value>');
         await mustGetDevice(name);
-        const parseOnOff = (flag: string, raw: string): boolean => {
-          if (raw === 'on') return true;
-          if (raw === 'off') return false;
-          throw new Error(`--${flag} expects 'on' or 'off', got '${raw}'.`);
-        };
-        const writes: Array<[string, unknown]> = [];
-        if (opts.maxAgents !== undefined) {
-          const n = Number(opts.maxAgents);
-          if (!Number.isInteger(n)) throw new Error(`--max-agents expects an integer, got '${opts.maxAgents}'.`);
-          writes.push(['agents.max-concurrent', n]);
-        }
-        if (opts.scheduler !== undefined) writes.push(['scheduler.enabled', parseOnOff('scheduler', opts.scheduler)]);
-
-        if (writes.length > 0) {
-          for (const [key, value] of writes) setConfigValue(key, value, { device: name });
-          if (!opts.json) {
-            for (const [key, value] of writes) {
-              console.log(chalk.green(`Set ${key} = ${JSON.stringify(value)}`) + chalk.gray(` on '${name}'.`));
-            }
+        const writes: Array<[string, string]> = [];
+        if (opts.maxAgents !== undefined) writes.push(['agents.max-concurrent', opts.maxAgents]);
+        if (opts.scheduler !== undefined) {
+          if (opts.scheduler !== 'on' && opts.scheduler !== 'off') {
+            throw new Error(`--scheduler expects 'on' or 'off', got '${opts.scheduler}'.`);
           }
+          writes.push(['scheduler.enabled', opts.scheduler]);
         }
-
-        if (opts.json || writes.length === 0) {
-          const entries = listConfig({ device: name }).filter((e) => e.spec.scope === 'device');
-          const inherited = opts.inherited ? listUserConfig().filter((e) => e.value !== undefined) : [];
-          if (opts.json) {
-            const config: Record<string, unknown> = {};
-            for (const e of entries) if (e.value !== undefined) config[e.spec.name] = e.value;
-            const out: Record<string, unknown> = { device: name, config };
-            if (opts.inherited) {
-              const inheritedObj: Record<string, unknown> = {};
-              for (const e of inherited) inheritedObj[e.spec.name] = e.value;
-              out.inherited = inheritedObj;
-            }
-            process.stdout.write(JSON.stringify(out, null, 2) + '\n');
-          } else {
-            console.log(chalk.bold(`Config for '${name}'`));
-            for (const e of entries) {
-              const value = e.value === undefined ? chalk.gray('— (default)') : chalk.cyan(JSON.stringify(e.value));
-              console.log(`  ${e.spec.name.padEnd(24)} ${value}${chalk.gray(`  ${e.spec.description}`)}`);
-            }
-            if (inherited.length > 0) {
-              console.log(chalk.bold('\nInherited from ~/.agents/agents.yaml'));
-              for (const e of inherited) {
-                console.log(`  ${e.spec.name.padEnd(24)} ${chalk.cyan(JSON.stringify(e.value))}${chalk.gray(`  ${e.spec.description}`)}`);
-              }
-            }
-          }
+        for (const [key, value] of writes) {
+          await runDevicesConfig(name, key, [value], { quiet: Boolean(opts.json) });
         }
+        if (opts.json) printDevicesConfig(name, true);
+        else if (writes.length === 0) printDevicesConfig(name, false);
       } catch (err: any) {
         console.error(chalk.red(err.message));
         process.exit(1);
       }
     });
-  setHelpSections(configureCmd, {
-    examples: `
-      agents devices config mac-mini --max-agents 4         # cap concurrent agents
-      agents devices config mac-mini --scheduler off        # no routines firing there
-      agents devices config mac-mini                        # print its current config
-      agents devices config mac-mini --inherited            # include user-level keys
-      agents devices config mac-mini --json                 # machine-readable
-    `,
-    notes: `
-      Run it on any machine for any device: the value lands in
-      ~/.agents/devices/<name>/agents.yaml locally and reaches the device on the
-      next 'agents repo push/pull'. Unset keys keep today's behavior.
-      --scheduler takes effect when the daemon reloads or restarts on that
-      device ('agents routines start' / the reload a 'routines add' sends).
-      For the default browser profile use 'agents config set browser.profile
-      <name>'; for free-form text use 'agents devices note'.
-      User-level keys such as interactive.host live in ~/.agents/agents.yaml and
-      sync fleet-wide; use --inherited to see them in this device view.
-    `,
-  });
 
-  const noteCmd = devicesCmd
-    .command('note <name> [text...]')
-    .description('Append a free-form note to a device (repeat to append more). No text prints the notes; --clear empties them.')
+  devicesCmd
+    .command('note <name> [text...]', { hidden: true })
     .option('--clear', 'remove all notes from the device')
     .option('--json', 'output machine-readable JSON')
     .action(async (name: string, text: string[], opts: { clear?: boolean; json?: boolean }) => {
       try {
+        configTombstoneNotice('note <name> [text...]', 'config <name> notes <text>');
         await mustGetDevice(name);
         if (opts.clear) {
-          unsetConfigValue('notes', { device: name });
-          if (opts.json) process.stdout.write(JSON.stringify({ device: name, notes: [] }, null, 2) + '\n');
+          await runDevicesConfig(name, 'notes', [], { unset: true, quiet: true });
+          if (opts.json) writeJson({ device: name, notes: [] });
           else console.log(chalk.green(`Cleared notes on '${name}'.`));
           return;
         }
         if (text.length > 0) {
-          const existing = (getConfigValue('notes', { device: name }).value as string[] | undefined) ?? [];
-          const notes = [...existing, text.join(' ')];
-          setConfigValue('notes', notes, { device: name });
-          if (opts.json) process.stdout.write(JSON.stringify({ device: name, notes }, null, 2) + '\n');
+          await runDevicesConfig(name, 'notes', text, { quiet: true });
+          const notes = (getConfigValue('notes', { device: name }).value as string[] | undefined) ?? [];
+          if (opts.json) writeJson({ device: name, notes });
           else console.log(chalk.green(`Noted on '${name}':`) + ` ${text.join(' ')}`);
           return;
         }
         const notes = (getConfigValue('notes', { device: name }).value as string[] | undefined) ?? [];
         if (opts.json) {
-          process.stdout.write(JSON.stringify({ device: name, notes }, null, 2) + '\n');
+          writeJson({ device: name, notes });
         } else if (notes.length > 0) {
           console.log(chalk.bold(`Notes for '${name}'`));
           for (const n of notes) console.log(`  ${chalk.gray('•')} ${n}`);
         } else {
-          console.log(chalk.gray(`No notes on '${name}'. Add one with 'agents devices note ${name} "..."'.`));
+          console.log(chalk.gray(`No notes on '${name}'. Add one with 'agents devices config ${name} notes "..."'.`));
         }
       } catch (err: any) {
         console.error(chalk.red(err.message));
         process.exit(1);
       }
     });
-  setHelpSections(noteCmd, {
-    examples: `
-      agents devices note mac-mini "runs the releases — don't reboot"
-      agents devices note mac-mini "4 displays attached"   # appends a second note
-      agents devices note mac-mini                         # print its notes
-      agents devices note mac-mini --clear                 # drop them all
-    `,
-    notes: `
-      Notes are operator memory for a box (why it exists, what to never do to
-      it). They sync like every other device doc; 'agents devices list --json'
-      carries them under config.notes.
-    `,
-  });
 
   /** Device-scope config block for `list --json`, keyed by yamlKey (set keys only). */
   const deviceConfigJson = (name: string): Record<string, unknown> | undefined => {
@@ -1427,15 +1567,17 @@ function registerDevicesCommands(program: Command): void {
     const names = Object.keys(reg).sort();
     const interactiveHost = getConfigValue('interactive.host').value as string | undefined;
     if (opts.json) {
-      // Registry + local device docs, always fast — the Factory extension polls
-      // this path. Each row carries its device-scope `config` (maxAgents,
-      // schedulerEnabled, notes, defaultBrowserProfile — set keys
-      // only) and an `interactive` flag for the configured interactive host.
+      // Registry + central config block, always fast — the Factory extension
+      // polls this path. Each row is the EFFECTIVE profile (registry overlaid
+      // with the central ssh.*/platform/user config) and carries its
+      // device-scope `config` (maxAgents, schedulerEnabled, notes, ssh*,
+      // autoLaunch* — set keys only) plus an `interactive` flag for the
+      // configured interactive host.
       process.stdout.write(
         JSON.stringify(
           names.map((n) => {
             const config = deviceConfigJson(n);
-            return { ...reg[n], interactive: n === interactiveHost, ...(config ? { config } : {}) };
+            return { ...resolveDeviceProfile(reg[n]), interactive: n === interactiveHost, ...(config ? { config } : {}) };
           }),
           null,
           2,
@@ -1663,8 +1805,7 @@ email) into a single row. Use \`agents devices harnesses\` for the per-install v
     });
 
   devicesCmd
-    .command('set <name>')
-    .description('Update fields on an existing device (platform, user, auth).')
+    .command('set <name>', { hidden: true })
     .option('--platform <platform>', 'windows | linux | macos')
     .option('--user <user>', 'login user')
     .option('--auth <method>', 'key | password')
@@ -1674,21 +1815,28 @@ email) into a single row. Use \`agents devices harnesses\` for the per-install v
     .option('--clear-identity-file', 'return key auth to ssh-agent/default-key discovery')
     .action(async (name: string, opts: { platform?: string; user?: string; auth?: string; bundle?: string; bundleKey?: string; identityFile?: string; clearIdentityFile?: boolean }) => {
       try {
+        configTombstoneNotice('set <name> [--platform|--user|--auth|--bundle|--bundle-key|--identity-file …]', 'config <name> <ssh.*|platform> <value>');
         const existing = await mustGetDevice(name);
-        const nextMethod = (opts.auth as DeviceAuthMethod | undefined) ?? existing.auth.method;
+        const nextMethod = (opts.auth as DeviceAuthMethod | undefined) ?? resolveDeviceProfile(existing).auth.method;
         if (opts.identityFile && nextMethod !== 'key') {
           throw new Error('--identity-file requires key auth; pass --auth key in the same command.');
         }
-        const auth = opts.auth || opts.bundle || opts.bundleKey || opts.identityFile || opts.clearIdentityFile
-          ? nextMethod === 'key'
-            ? { method: nextMethod, identityFile: opts.clearIdentityFile ? undefined : (opts.identityFile ?? existing.auth.identityFile) }
-            : { method: nextMethod, bundle: opts.bundle ?? existing.auth.bundle, bundleKey: opts.bundleKey ?? existing.auth.bundleKey }
-          : undefined;
-        const d = await upsertDevice(name, {
-          platform: (opts.platform as DevicePlatform) ?? undefined,
-          user: opts.user ?? undefined,
-          auth,
-        });
+        const writes: Array<{ key: string; value?: string }> = [];
+        if (opts.platform) writes.push({ key: 'platform', value: opts.platform });
+        if (opts.user) writes.push({ key: 'ssh.user', value: opts.user });
+        if (opts.auth) writes.push({ key: 'ssh.auth', value: opts.auth });
+        if (opts.bundle) writes.push({ key: 'ssh.bundle', value: opts.bundle });
+        if (opts.bundleKey) writes.push({ key: 'ssh.bundle-key', value: opts.bundleKey });
+        if (opts.identityFile) writes.push({ key: 'ssh.identity-file', value: opts.identityFile });
+        if (opts.clearIdentityFile) writes.push({ key: 'ssh.identity-file' }); // unset
+        if (writes.length === 0) {
+          printDevicesConfig(name, false);
+          return;
+        }
+        for (const w of writes) {
+          await runDevicesConfig(name, w.key, w.value !== undefined ? [w.value] : [], { unset: w.value === undefined, quiet: true });
+        }
+        const d = resolveDeviceProfile((await mustGetDevice(name)));
         console.log(chalk.green(`Updated device '${name}'`) + chalk.gray(` (auth: ${d.auth.method}${d.auth.bundle ? ` via ${d.auth.bundle}` : ''})`));
       } catch (err: any) {
         console.error(chalk.red(err.message));
@@ -1889,14 +2037,17 @@ the target when it exists, else the remote home. Same portable-cwd rule as
       // `user@device` (same device, login user overridden — dialed via its
       // Tailscale route, not LAN DNS), or an ad-hoc `user@host`/`host` literal.
       // A bare unregistered alias still errors as "Unknown device".
-      const device = await resolveDeviceTarget(target);
-      if (!device) {
+      const resolvedTarget = await resolveDeviceTarget(target);
+      if (!resolvedTarget) {
         // Not a registered device — it may be a leased crabbox box slug. ssh into
         // it directly (crabbox@<tailnet|ip>:2222) before giving up.
         trySshLeasedBox(target, cmd); // exits the process on a match
         console.error(chalk.red(`Unknown device '${target}'. See 'agents devices list'.`));
         process.exit(1);
       }
+      // The effective profile: central config (ssh.*/platform/user) overlaid on
+      // the discovery record.
+      const device = resolveDeviceProfile(resolvedTarget);
 
       // Preflight: a device Tailscale last saw offline would otherwise hang
       // for the full ConnectTimeout. Fail fast with a clear message instead.

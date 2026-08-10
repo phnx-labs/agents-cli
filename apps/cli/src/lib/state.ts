@@ -177,7 +177,7 @@ const USER_PROMPTCUTS_FILE = path.join(USER_AGENTS_DIR, 'hooks', 'promptcuts.yam
  * Header prepended to every agents.yaml the CLI writes (central and per-device
  * docs). Carries the yaml-language-server schema hint so editors validate the
  * file against `schema/agents-yaml.schema.json`. Exported so
- * `lib/device-config.ts` writes a sibling device's doc with the same header.
+ * `lib/devices/config-migration.ts` rewrites a device doc with the same header.
  */
 export const META_HEADER = `# agents-cli metadata
 # Auto-generated - do not edit manually
@@ -620,7 +620,7 @@ export function getDevicesRegistryPath(): string { return path.join(getDevicesDi
 /** Path to the device ignore-list — tailscale node names the user dismissed, so auto-discovery never re-suggests them. Per-machine, same dir as the registry. */
 export function getDevicesIgnoredPath(): string { return path.join(getDevicesDir(), 'ignored.json'); }
 
-/** Path to the device auto-launch preference file — which registered devices are eligible/preferred for Factory's auto-host selection. Per-machine, same dir as the registry. */
+/** Path to the LEGACY device auto-launch preference file — which registered devices are eligible/preferred for Factory's auto-host selection. Superseded by the central `fleet.devices.<name>.config` block; only lib/devices/config-migration.ts still reads it (to fold + remove it). */
 export function getDevicesAutoLaunchPath(): string { return path.join(getDevicesDir(), 'auto-launch.json'); }
 
 /** Dir of "pending device" sentinels (~/.agents/.cache/state/devices-pending/) — one empty-ish file per newly-discovered, not-yet-approved tailnet node. Written by the daemon probe, read by the menu-bar helper (mirrors the attention sentinel dir). */
@@ -879,9 +879,10 @@ function writeIfChanged(filePath: string, content: string): void {
 /**
  * Partition the in-memory Meta across three files by sync-domain:
  *   - central  `~/.agents/agents.yaml`             — portable, everything else
- *              (including the user-scope `config:` block)
+ *              (including the user-scope `config:` block and the per-device
+ *              operator config under `fleet.devices.<name>.config`)
  *   - device   `~/.agents/devices/<machine>/agents.yaml` — `agents:` pins +
- *              `defaultBrowserProfile:` + device-scope `config:` (all per-device)
+ *              `routines:` (all per-machine)
  *   - history  `~/.agents/.history/version-resources.json` — `versions:` (machine-local)
  * All callers funnel through writeMeta → here, so nothing else changes. Empty
  * `agents:` / `versions:` are not written (no empty committed files).
@@ -902,8 +903,6 @@ const META_KEY_SCOPE: Record<keyof Meta, 'central' | 'device'> = {
   agents: 'device',
   isolatedAgents: 'device',
   versions: 'device',
-  defaultBrowserProfile: 'device',
-  deviceConfig: 'device',
   deviceRoutines: 'device',
   // Central — synced via agents.yaml.
   run: 'central',
@@ -1003,7 +1002,7 @@ function serializeCentral(central: Record<string, unknown>): string {
 }
 
 function writeMetaUnlocked(meta: Meta): void {
-  const { agents, isolatedAgents, versions, defaultBrowserProfile, deviceConfig, deviceRoutines, ...central } = meta;
+  const { agents, isolatedAgents, versions, deviceRoutines, ...central } = meta;
 
   // Write the machine-local files FIRST, then strip central — so a crash mid-write
   // never removes pins/versions from central before they're persisted elsewhere.
@@ -1014,20 +1013,15 @@ function writeMetaUnlocked(meta: Meta): void {
   // central doc that syncs — otherwise another machine inherits a pointer to a copy
   // it does not have.
   const hasIsolatedAgents = !!isolatedAgents && Object.keys(isolatedAgents).length > 0;
-  const hasDefaultBrowser = !!defaultBrowserProfile;
-  // Device-scope config (`maxAgents`, `schedulerEnabled`, …) is per-machine, so it
-  // rides the device doc under `config:` — never the central doc that syncs.
-  const hasDeviceConfig = !!deviceConfig && Object.keys(deviceConfig).length > 0;
   const hasDeviceRoutines = Array.isArray(deviceRoutines);
-  if (hasAgents || hasIsolatedAgents || hasDefaultBrowser || hasDeviceConfig || hasDeviceRoutines) {
-    // Device-local doc carries `agents:` pins, `defaultBrowserProfile:`, and the
-    // device-scope `config:` — all per-machine and must never land in central
-    // agents.yaml (which syncs).
+  if (hasAgents || hasIsolatedAgents || hasDeviceRoutines) {
+    // Device-local doc carries `agents:` pins and `routines:` — per-machine and
+    // must never land in central agents.yaml (which syncs). Operator config
+    // used to ride this doc under `config:`; it now lives centrally under
+    // `fleet.devices.<name>.config` (see lib/device-config.ts).
     const deviceDoc: Partial<Meta> & { routines?: string[] } = {};
     if (hasAgents) deviceDoc.agents = agents;
     if (hasIsolatedAgents) deviceDoc.isolatedAgents = isolatedAgents;
-    if (hasDefaultBrowser) deviceDoc.defaultBrowserProfile = defaultBrowserProfile;
-    if (hasDeviceConfig) deviceDoc.config = deviceConfig;
     if (hasDeviceRoutines) deviceDoc.routines = deviceRoutines;
     fs.mkdirSync(path.dirname(devicePath), { recursive: true });
     writeIfChanged(devicePath, META_HEADER + yaml.stringify(deviceDoc));
@@ -1054,14 +1048,15 @@ function writeMetaUnlocked(meta: Meta): void {
  *   - `agents:` and `isolatedAgents:` from the device file (device wins; the union
  *     both preserves the one-level merge and self-heals a pre-migration central that
  *     still has pins)
- *   - `defaultBrowserProfile:` from the device file (device is the sole source;
- *     the field is stripped from central on write, so nothing to merge against)
- *   - `config:` from the device file into `deviceConfig` (device is the sole
- *     source for device-scope config, same routing as `defaultBrowserProfile`;
- *     the in-memory field is named `deviceConfig` so it can never collide with
- *     the user-scope `config:` central carries)
+ *   - `routines:` from the device file into `deviceRoutines` (device-local
+ *     routine activation)
  *   - `versions:` from the history JSON (wholesale replace; falls back to
  *     whatever central carried when the history file doesn't exist yet)
+ *
+ * (Device operator config is NOT overlaid here: it lives centrally under
+ * `fleet.devices.<name>.config` — see lib/device-config.ts. The legacy
+ * `config:`/`defaultBrowserProfile:` keys in a device doc are folded into the
+ * central block by lib/devices/config-migration.ts.)
  */
 function overlayMachineLocal(meta: Meta): Meta {
   const devicePath = getDeviceMetaPath();
@@ -1073,8 +1068,6 @@ function overlayMachineLocal(meta: Meta): Meta {
     if (dm) {
       if (dm?.agents) meta.agents = { ...meta.agents, ...dm.agents };
       if (dm?.isolatedAgents) meta.isolatedAgents = { ...meta.isolatedAgents, ...dm.isolatedAgents };
-      if (dm?.defaultBrowserProfile) meta.defaultBrowserProfile = dm.defaultBrowserProfile;
-      if (dm?.config) meta.deviceConfig = dm.config;
       if (dm && Object.prototype.hasOwnProperty.call(dm, 'routines')) {
         if (!Array.isArray(dm.routines) || dm.routines.some((name) => typeof name !== 'string')) {
           throw new Error(`Device config corrupted at ${devicePath}: routines must be a string list.`);

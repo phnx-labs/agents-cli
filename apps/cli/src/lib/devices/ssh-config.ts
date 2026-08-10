@@ -11,6 +11,7 @@
  * exact rendering is unit-testable.
  */
 import { type DeviceProfile, type DeviceRegistry } from './registry.js';
+import { resolveDeviceProfile } from './resolve-profile.js';
 
 const HEADER = [
   '# Managed by `agents devices` — do not edit by hand.',
@@ -25,12 +26,15 @@ export function hostNameFor(device: DeviceProfile): string | undefined {
 
 /** Render a single device into an ssh_config `Host` stanza, or null if it has no address. */
 function renderHost(device: DeviceProfile): string | null {
-  const hostName = hostNameFor(device);
+  // Effective profile: operator config (ssh.user / ssh.identity-file) overlaid
+  // on the discovery record, so the rendered stanza matches what `agents ssh` dials.
+  const resolved = resolveDeviceProfile(device);
+  const hostName = hostNameFor(resolved);
   if (!hostName) return null;
-  const lines = [`Host ${device.name}`, `    HostName ${hostName}`];
-  if (device.user) lines.push(`    User ${device.user}`);
-  if (device.auth.method === 'key' && device.auth.identityFile) {
-    lines.push(`    IdentityFile ${device.auth.identityFile}`, '    IdentitiesOnly yes');
+  const lines = [`Host ${resolved.name}`, `    HostName ${hostName}`];
+  if (resolved.user) lines.push(`    User ${resolved.user}`);
+  if (resolved.auth.method === 'key' && resolved.auth.identityFile) {
+    lines.push(`    IdentityFile ${resolved.auth.identityFile}`, '    IdentitiesOnly yes');
   }
   return lines.join('\n');
 }
