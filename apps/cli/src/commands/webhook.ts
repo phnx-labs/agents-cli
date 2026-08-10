@@ -2,7 +2,7 @@
  * `agents webhook` — localhost receiver for signed public webhook ingress.
  *
  * The receiver intentionally binds localhost by default. Public exposure is a
- * separate `agents funnel up <host>` step so the HTTP process can be tested and
+ * separate `agents daemon funnel up <host>` step so the HTTP process can be tested and
  * rotated without changing the Tailscale Funnel config.
  */
 import type { Command } from 'commander';

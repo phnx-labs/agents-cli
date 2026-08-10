@@ -121,7 +121,6 @@ export const loadServe: ModuleLoader = async () => (await import('../../commands
 export const loadShare: ModuleLoader = async () => (await import('../../commands/share.js')).registerShareCommands;
 export const loadAudit: ModuleLoader = async () => (await import('../../commands/audit.js')).registerAuditCommands;
 export const loadWebhook: ModuleLoader = async () => (await import('../../commands/webhook.js')).registerWebhookCommand;
-export const loadFunnel: ModuleLoader = async () => (await import('../../commands/funnel.js')).registerFunnelCommand;
 export const loadHumans: ModuleLoader = async () => (await import('../../commands/humans.js')).registerHumansCommands;
 export const loadAccounts: ModuleLoader = async () => (await import('../../commands/accounts.js')).registerAccountsCommand;
 export const loadDaemon: ModuleLoader = async () => (await import('../../commands/daemon.js')).registerDaemonCommand;
@@ -285,7 +284,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   unshare: [loadShare],
   audit: [loadAudit],
   webhook: [loadWebhook],
-  funnel: [loadFunnel],
   humans: [loadHumans],
   daemon: [loadDaemon],
   cp: [loadCp],

@@ -277,7 +277,7 @@ Run and dispatch:
   routines                        Run agents on a cron schedule (scheduler auto-starts)
   daemon                          Runtime status/control for the always-on daemon (secrets broker, browser IPC, scheduler)
   webhook                         Receive signed GitHub/Linear webhooks for trigger routines
-  funnel                          Expose a webhook receiver through Tailscale Funnel
+  daemon funnel                   Expose a webhook receiver through Tailscale Funnel
   sessions                        Browse, search, and replay past runs (live-search in TTY; grouped by workspace)
   logs [id]                       Show a run's log — host-dispatch task or session; -f to follow
   browser                         Automate a browser — navigate, click, screenshot, console, network

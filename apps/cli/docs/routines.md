@@ -342,11 +342,11 @@ Funnel commands.
 Expose the receiver publicly from a Linux/macOS Tailscale node with Funnel:
 
 ```bash
-agents funnel up yosemite-s0 --local-port 8787 --port 443
-agents funnel status yosemite-s0
+agents daemon funnel up yosemite-s0 --local-port 8787 --port 443
+agents daemon funnel status yosemite-s0
 ```
 
-Funnel public ports are limited to `443`, `8443`, and `10000`; `agents funnel up`
+Funnel public ports are limited to `443`, `8443`, and `10000`; `agents daemon funnel up`
 validates that before running the remote Tailscale CLI.
 
 Operational runbook:
@@ -371,8 +371,8 @@ Operational runbook:
 3. Enable Funnel only after the receiver is listening:
 
    ```bash
-   agents funnel up yosemite-s0 --local-port 8787 --port 443
-   agents funnel status yosemite-s0
+   agents daemon funnel up yosemite-s0 --local-port 8787 --port 443
+   agents daemon funnel status yosemite-s0
    ```
 
 4. Rotate a signing key source by source. Set the new source secret in the
@@ -383,8 +383,8 @@ Operational runbook:
 5. Disable public ingress before stopping or moving the receiver:
 
    ```bash
-   agents funnel down yosemite-s0 --port 443
-   agents funnel status yosemite-s0
+   agents daemon funnel down yosemite-s0 --port 443
+   agents daemon funnel status yosemite-s0
    ```
 
 ### Webhook handlers
@@ -517,7 +517,7 @@ Tailscale Funnel:
 ```bash
 # On mac-mini
 agents webhook serve --secrets-bundle webhooks --port 8787 &
-agents funnel up mac-mini --local-port 8787 --port 443
+agents daemon funnel up mac-mini --local-port 8787 --port 443
 ```
 
 Then point Linear/GitHub at `https://mac-mini.<tailnet>.ts.net/hooks/<source>`.

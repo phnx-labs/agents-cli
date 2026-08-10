@@ -1,5 +1,5 @@
 /**
- * `agents funnel` — thin Tailscale Funnel wrapper for webhook ingress nodes.
+ * `agents daemon funnel` — thin Tailscale Funnel wrapper for webhook ingress nodes.
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';

@@ -45,6 +45,7 @@ import { listJobs, getLatestRun } from '../lib/routines.js';
 import { JobScheduler } from '../lib/scheduler.js';
 import { followFile } from '../lib/log-follow.js';
 import { parseDuration } from '../lib/hooks/cache.js';
+import { registerFunnelCommand } from './funnel.js';
 
 // ─── Process scanning — which install owns the pid, and every duplicate ──────
 
@@ -730,6 +731,10 @@ export function registerDaemonCommand(program: Command): void {
       # Just the two hosted services (secrets broker, browser IPC)
       agents daemon services
 
+      # Manage public ingress for daemon-world webhook receivers
+      agents daemon funnel status yosemite-s0
+      agents daemon funnel up yosemite-s0 --local-port 8787 --port 443
+
       # Tail the daemon's own log, warnings and up, from the last hour
       agents daemon logs -f --level warn --since 1h
 
@@ -839,11 +844,13 @@ export function registerDaemonCommand(program: Command): void {
     });
 
   cmd.command('services')
-    .description('The two hosted services (secrets broker, browser IPC): bound state, socket path, and health.')
+    .description('The two hosted services (secrets broker, browser IPC): bound state, socket path, and health. See sibling `daemon funnel` for public ingress.')
     .option('--json', 'Emit as JSON')
     .action(async (opts, command) => {
       await runServices({ json: command.optsWithGlobals().json === true });
     });
+
+  registerFunnelCommand(cmd);
 
   cmd.command('logs')
     .description('Read the daemon\'s own log (lifecycle + subsystem errors — not routine run output).')

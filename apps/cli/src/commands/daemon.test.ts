@@ -90,10 +90,36 @@ describeDaemon('agents daemon', () => {
     expect(res.stdout).not.toContain("unknown command 'daemon'");
     expect(res.stdout).toContain('status');
     expect(res.stdout).toContain('services');
+    expect(res.stdout).toContain('funnel');
     expect(res.stdout).toContain('logs');
     expect(res.stdout).toContain('doctor');
     // No `jobs` subcommand — scheduled work is `agents routines`, always.
     expect(res.stdout).not.toMatch(/^\s*jobs\b/m);
+  });
+
+  it('nests Funnel management under daemon and removes the top-level command', () => {
+    const home = makeHome();
+    const nested = run(home, ['funnel', '--help']);
+    expect(nested.status).toBe(0);
+    expect(nested.stdout).toContain('status <host>');
+    expect(nested.stdout).toContain('up [options] <host>');
+    expect(nested.stdout).toContain('down [options] <host>');
+
+    const topLevel = spawnSync('node', ['--import', TSX_IMPORT, CLI_ENTRYPOINT, 'funnel', '--help'], {
+      cwd: REPO_ROOT,
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        AGENTS_SKIP_MIGRATION: '1',
+        AGENTS_NO_AUTOPULL: '1',
+        AGENTS_CLI_DISABLE_AUTO_UPDATE: '1',
+      },
+      encoding: 'utf-8',
+      timeout: 30_000,
+    });
+    expect(topLevel.status).not.toBe(0);
+    expect(topLevel.stderr + topLevel.stdout).toContain("unknown command 'funnel'");
   });
 
   it('status --json reports stopped with no pid when no daemon is running for THIS install', () => {

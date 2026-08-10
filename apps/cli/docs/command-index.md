@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_103 command groups · 584 commands._
+_102 command groups · 584 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -215,17 +215,21 @@ agents cp <src> <dst>  Copy a file or directory between fleet hosts. Either endp
 ## daemon — The always-on daemon: secrets broker, browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.
 
 ```
-agents daemon           The always-on daemon: secrets broker, browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.
-agents daemon disable   Persist daemon.enabled: false — nothing auto-starts the daemon until re-enabled. Does not stop a running daemon.
-agents daemon doctor    One-shot health check: identity, duplicates, hosted services, scheduler. Non-zero exit on problems.
-agents daemon enable    Clear the daemon.enabled kill switch. Does not start the daemon by itself.
-agents daemon logs      Read the daemon's own log (lifecycle + subsystem errors — not routine run output).
-agents daemon reload    Send SIGHUP to reload jobs and re-evaluate the scheduler.enabled gate, without a restart.
-agents daemon restart   Stop then start the daemon.
-agents daemon services  The two hosted services (secrets broker, browser IPC): bound state, socket path, and health.
-agents daemon start     Start the daemon. Bypasses daemon.enabled — this is the deliberate override.
-agents daemon status    Identity (state/pid/uptime/binary), duplicate daemons, daemons running deleted code, and per-service health.
-agents daemon stop      Stop the daemon.
+agents daemon                       The always-on daemon: secrets broker, browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.
+agents daemon disable               Persist daemon.enabled: false — nothing auto-starts the daemon until re-enabled. Does not stop a running daemon.
+agents daemon doctor                One-shot health check: identity, duplicates, hosted services, scheduler. Non-zero exit on problems.
+agents daemon enable                Clear the daemon.enabled kill switch. Does not start the daemon by itself.
+agents daemon funnel                Manage Tailscale Funnel exposure for a fleet webhook receiver.
+agents daemon funnel down <host>    Disable Tailscale Funnel exposure for a public HTTPS port.
+agents daemon funnel status <host>  Show Tailscale Funnel status on a fleet host.
+agents daemon funnel up <host>      Expose a localhost webhook receiver through Tailscale Funnel.
+agents daemon logs                  Read the daemon's own log (lifecycle + subsystem errors — not routine run output).
+agents daemon reload                Send SIGHUP to reload jobs and re-evaluate the scheduler.enabled gate, without a restart.
+agents daemon restart               Stop then start the daemon.
+agents daemon services              The two hosted services (secrets broker, browser IPC): bound state, socket path, and health. See sibling `daemon funnel` for public ingress.
+agents daemon start                 Start the daemon. Bypasses daemon.enabled — this is the deliberate override.
+agents daemon status                Identity (state/pid/uptime/binary), duplicate daemons, daemons running deleted code, and per-service health.
+agents daemon stop                  Stop the daemon.
 ```
 
 ## defaults — Manage default options for agents-cli commands
@@ -301,15 +305,6 @@ agents feed post <text...>  Post a status update to the fleet activity stream (f
 
 ```
 agents feedback [summary...]  Open a pre-filled feedback Discussion or bug report
-```
-
-## funnel — Manage Tailscale Funnel exposure for a fleet webhook receiver.
-
-```
-agents funnel                Manage Tailscale Funnel exposure for a fleet webhook receiver.
-agents funnel down <host>    Disable Tailscale Funnel exposure for a public HTTPS port.
-agents funnel status <host>  Show Tailscale Funnel status on a fleet host.
-agents funnel up <host>      Expose a localhost webhook receiver through Tailscale Funnel.
 ```
 
 ## harness — Custom harnesses — name a (host CLI + model) combo and run it like a native agent type.
