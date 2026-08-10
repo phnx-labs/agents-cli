@@ -12724,6 +12724,15 @@
               "negate": false
             },
             {
+              "flags": "--force",
+              "description": "Overwrite a same-named monitor, or add one that duplicates an existing watcher",
+              "long": "--force",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "-h, --help",
               "description": "Show help",
               "short": "-h",
