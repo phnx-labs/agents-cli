@@ -54,7 +54,7 @@ agents run claude "explain this repo"  # run any agent on your existing subscrip
 
 Full path -- installing harnesses, logging in, smoke-testing `agents teams`, and setting up your own fleet: [`apps/cli/docs/QUICKSTART.md`](apps/cli/docs/QUICKSTART.md).
 
-**Learn (concepts):** [Loop + graph engineering](https://agents-cli.sh/learn/loop-and-graph-engineering) — how AGI CLI applies 2026 loop and graph engineering to coding agents on your fleet. Also: [harness engineering](https://agents-cli.sh/learn/harness-engineering), [visual longform](https://share.agents-cli.sh/muqsitnawaz/agents-loop-and-graph-engineering).
+**Learn (concepts):** [Loop + graph engineering](https://agents-cli.sh/learn/loop-and-graph-engineering) · [Teams as graph engineering](https://agents-cli.sh/learn/teams-graph-engineering) · [Sessions · index + cross-device](https://agents-cli.sh/learn/sessions-index) · [Distributed fleet execution](https://agents-cli.sh/learn/distributed-fleet). Also: [harness engineering](https://agents-cli.sh/learn/harness-engineering) · [visual longform](https://share.agents-cli.sh/muqsitnawaz/agents-loop-and-graph-engineering).
 
 Already installed? `agents upgrade` updates agents-cli itself to the latest version (`agents upgrade 1.2.3` for a specific version or dist-tag, `-y` to skip the confirm prompt). The command is `upgrade` on every platform -- do not reach for `agents update`, which updates an installed **agent harness**, not agents-cli (and on macOS, `agents helper update` is a third thing: it reinstalls the keychain helper).
 
