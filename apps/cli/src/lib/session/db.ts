@@ -3896,10 +3896,15 @@ export interface ComputerSessionRecord {
 /**
  * Upsert one browser task's durable metadata.
  *
- * Called at task START, from the CLI process that asked for the task -- never
- * from the browser daemon, which is shared and long-lived and would attribute
- * every task to itself (the RUSH-2020 bug). `agents browser stop` deliberately
- * does NOT delete this row: the whole point is that the link outlives the task.
+ * Called at task START. This executes INSIDE the browser daemon (daemon.ts
+ * constructs BrowserService; ipc.ts dispatches `start` to it), which makes the
+ * shared daemon a writer of this DB — but the identity it writes is RESOLVED IN
+ * THE CALLING CLI PROCESS and forwarded over IPC, never resolved here. That
+ * distinction is the whole fix: resolving it daemon-side would attribute every
+ * task to the daemon's own actor (the RUSH-2020 bug).
+ *
+ * `agents browser stop` deliberately does NOT delete this row: the whole point
+ * is that the link outlives the task.
  *
  * Identity fields are only ever widened, never blanked. A later capture-count
  * update carries no session id, and `COALESCE(excluded.…, browser_sessions.…)`
@@ -4031,12 +4036,16 @@ function toStoredBrowserSession(row: BrowserSessionRow): StoredBrowserSession {
   };
 }
 
-/** Every stored browser task, newest first; optionally scoped to one profile. */
-export function listBrowserSessionRecords(profile?: string): StoredBrowserSession[] {
+/** Stored browser tasks, newest first, bounded; optionally scoped to one profile. */
+export function listBrowserSessionRecords(
+  profile?: string,
+  opts: { limit?: number } = {},
+): StoredBrowserSession[] {
   const db = getDB();
+  const limit = opts.limit ?? TOOL_SESSION_LIST_LIMIT;
   const rows = (profile
-    ? db.prepare(`SELECT * FROM browser_sessions WHERE profile = ? ORDER BY started_at DESC`).all(profile)
-    : db.prepare(`SELECT * FROM browser_sessions ORDER BY started_at DESC`).all()) as BrowserSessionRow[];
+    ? db.prepare(`SELECT * FROM browser_sessions WHERE profile = ? ORDER BY started_at DESC LIMIT ?`).all(profile, limit)
+    : db.prepare(`SELECT * FROM browser_sessions ORDER BY started_at DESC LIMIT ?`).all(limit)) as BrowserSessionRow[];
   return rows.map(toStoredBrowserSession);
 }
 
@@ -4074,12 +4083,48 @@ interface ComputerSessionRow {
   task_preview: string | null;
 }
 
-/** Every stored computer-use invocation, newest first. */
-export function listComputerSessionRecords(): StoredComputerSession[] {
+/**
+ * Retention for the tool-session tables.
+ *
+ * These are the durable answer to a ledger that prunes at 7 days, so they are
+ * deliberately long-lived — but "durable" is not "unbounded". `computer_sessions`
+ * takes one row per `agents computer` CLI PROCESS (`COMPUTER_INVOCATION_ID` is
+ * minted per process), and an agent driving a desktop invokes that hundreds of
+ * times a day, so an unbounded table would grow without limit and be read in
+ * full on every listing.
+ */
+export const TOOL_SESSION_MAX_AGE_DAYS = 365;
+/** Default ceiling on rows one listing will read. */
+export const TOOL_SESSION_LIST_LIMIT = 2000;
+
+/**
+ * Drop tool-session rows past {@link TOOL_SESSION_MAX_AGE_DAYS}.
+ *
+ * Called from the listing path, never from the write hot path: an
+ * `agents computer` action must not pay for a table sweep (see the fail-soft
+ * note on `recordComputerSession`'s caller). Returns rows deleted.
+ */
+export function pruneToolSessions(maxAgeDays: number = TOOL_SESSION_MAX_AGE_DAYS): number {
+  const db = getDB();
+  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+  const computer = db.prepare(`DELETE FROM computer_sessions WHERE started_at < ?`).run(cutoff);
+  const browser = db.prepare(`DELETE FROM browser_sessions WHERE started_at < ?`).run(cutoff);
+  return Number(computer.changes ?? 0) + Number(browser.changes ?? 0);
+}
+
+/**
+ * Stored computer-use invocations, newest first, bounded.
+ *
+ * The limit is a real ceiling, not a nicety: `--json` serializes whatever this
+ * returns, so an unbounded read would dump the entire table on every call.
+ */
+export function listComputerSessionRecords(
+  opts: { limit?: number } = {},
+): StoredComputerSession[] {
   const db = getDB();
   const rows = db
-    .prepare(`SELECT * FROM computer_sessions ORDER BY started_at DESC`)
-    .all() as ComputerSessionRow[];
+    .prepare(`SELECT * FROM computer_sessions ORDER BY started_at DESC LIMIT ?`)
+    .all(opts.limit ?? TOOL_SESSION_LIST_LIMIT) as ComputerSessionRow[];
   return rows.map((row) => ({
     invocationId: row.invocation_id,
     sessionId: row.session_id ?? undefined,

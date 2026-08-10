@@ -24,7 +24,7 @@ import {
   printComputerSessionRows,
   buildComputerSessionRows,
   matchesComputerSessionRow,
-  formatActionCounts,
+  formatRowActions,
   type ComputerRunRow,
   type ComputerAction,
 } from '../lib/computer/sessions-list.js';
@@ -83,12 +83,12 @@ function rowLinkSummary(row: ComputerRunRow): string {
 function formatRowLabel(row: ComputerRunRow): string {
   // Pad the raw text first, THEN colorize — padEnd on an already-chalked
   // string counts the ANSI escape bytes as width and misaligns the column.
-  const rawName = row.task ?? row.bundle ?? `pid ${row.pid}`;
+  const rawName = row.task ?? row.bundle ?? (row.pid ? `pid ${row.pid}` : 'recovered run');
   const name = rawName.slice(0, 40).padEnd(40);
   const coloredName = row.task ? name : chalk.gray(name);
   const where = (row.remoteHost ? `${row.machine} -> ${row.remoteHost}` : row.machine).padEnd(24);
   const age = formatRelativeTime(new Date(row.endMs).toISOString());
-  const counts = formatActionCounts(row.counts);
+  const counts = formatRowActions(row);
   return [coloredName, where, age.padEnd(11), counts.padEnd(24), rowLinkSummary(row)].join(' ');
 }
 
@@ -112,7 +112,7 @@ function buildRowPreview(row: ComputerRunRow): string {
   }
 
   parts.push('');
-  parts.push(chalk.bold(`Actions (${row.actions.length})`) + `  ${formatActionCounts(row.counts)}`);
+  parts.push(chalk.bold(`Actions (${row.recoveredActionCount ?? row.actions.length})`) + `  ${formatRowActions(row)}`);
   for (const a of row.actions.slice(0, PREVIEW_ACTION_LIMIT)) {
     parts.push(`  ${formatActionLabel(a)}`);
   }

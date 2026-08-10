@@ -318,11 +318,18 @@ recorded at all — captures taken before this shipped, whose identity was
 discarded at stop and cannot be recovered. Either way the captures are still
 listed and openable. Downloads sit in their own row, separate from any task.
 
-The DB row is **metadata only** — task, profile, identity, timing, per-kind
-capture counts, and the capture directory path. The screenshots, PDFs and
-recordings themselves stay on disk under
-`~/.agents/.cache/browser/<profile>/sessions/<task>/`; nothing copies them into
-the database. Search matches task name, profile, the
+The DB row is **metadata only** — task, profile, identity, timing, and the
+capture directory path. The screenshots, PDFs and recordings themselves stay on
+disk under `~/.agents/.cache/browser/<profile>/sessions/<task>/`; nothing copies
+them into the database, and the listing counts captures by reading that
+directory rather than trusting a stored tally.
+
+**Known gap — `--host` drives record no session.** `agents browser start --host
+<device>` runs the CLI on the remote box, and the SSH dispatch forwards only
+`AGENTS_ACTOR*` and `AGENT_TERMINAL_ID` — not `AGENT_SESSION_ID`. A task started
+that way therefore records no session and lists as `unlinked`. Local drives are
+unaffected. Forwarding session identity across the SSH hop is tracked on
+RUSH-2549 and is not fixed here. Search matches task name, profile, the
 linked session's agent/topic, or an artifact filename; `enter` opens the
 highlighted capture directly (or drills into a capture list first when a task
 holds more than one). `--no-interactive` prints the flat per-artifact table
