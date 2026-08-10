@@ -72,6 +72,13 @@ async function spawnFakeRegisteredDaemon(home: string): Promise<ChildProcess> {
   return child;
 }
 
+/** Register a pid in `home`'s instance registry — the scope stale/duplicate reporting uses. */
+function registerInstance(home: string, pid: number): void {
+  const dir = path.join(home, '.agents', '.cache', 'helpers', 'daemon', 'instances');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, String(pid)), '__daemon-run', 'utf-8');
+}
+
 function killFakeDaemon(child: ChildProcess): void {
   try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* already gone */ }
 }
@@ -374,6 +381,7 @@ describeDaemon('agents daemon', () => {
     fs.writeFileSync(script, 'setInterval(() => {}, 1e9);\n');
     const child = spawn(process.execPath, [script, '__daemon-run'], { stdio: 'ignore' });
     await new Promise((r) => setTimeout(r, 200));
+    registerInstance(home, child.pid!);
     try {
       // Still on disk -> not stale.
       const before = JSON.parse(run(home, ['status', '--json']).stdout);
@@ -408,6 +416,7 @@ describeDaemon('agents daemon', () => {
       stdio: 'ignore',
     });
     await new Promise((r) => setTimeout(r, 200));
+    registerInstance(home, child.pid!);
     try {
       const payload = JSON.parse(run(home, ['status', '--json']).stdout);
       expect(payload.staleBinaries.some((s: { pid: number }) => s.pid === child.pid)).toBe(false);
@@ -428,6 +437,7 @@ describeDaemon('agents daemon', () => {
     fs.writeFileSync(script, 'setInterval(() => {}, 1e9);\n');
     const child = spawn(process.execPath, [script, '__daemon-run'], { stdio: 'ignore' });
     await new Promise((r) => setTimeout(r, 200));
+    registerInstance(home, child.pid!);
     try {
       const payload = JSON.parse(run(home, ['status', '--json']).stdout);
       expect(payload.staleBinaries.some((s: { pid: number }) => s.pid === child.pid)).toBe(false);
@@ -437,4 +447,57 @@ describeDaemon('agents daemon', () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
+  it('never accuses a daemon outside this install\'s registry (RUSH-2368 scope)', async () => {
+    const home = makeHome();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-foreign-'));
+    const script = path.join(dir, 'index.js');
+    fs.writeFileSync(script, 'setInterval(() => {}, 1e9);\n');
+    const child = spawn(process.execPath, [script, '__daemon-run'], { stdio: 'ignore' });
+    await new Promise((r) => setTimeout(r, 200));
+    // Deliberately NOT registered: this stands for another install's daemon, or
+    // an orphan a SIGKILLed test run left behind. Its entry is genuinely gone,
+    // but naming it would make `daemon doctor` exit 1 for everyone on the box.
+    fs.rmSync(dir, { recursive: true, force: true });
+    try {
+      const payload = JSON.parse(run(home, ['status', '--json']).stdout);
+      expect(payload.staleBinaries.some((s: { pid: number }) => s.pid === child.pid)).toBe(false);
+      const health = JSON.parse(run(home, ['doctor', '--json']).stdout);
+      expect(health.problems.some((p: string) => p.includes(String(child.pid)))).toBe(false);
+    } finally {
+      try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* gone */ }
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  // root ignores mode bits, so the EACCES condition cannot be produced there and
+  // the test would pass without exercising anything.
+  it.skipIf(typeof process.getuid === 'function' && process.getuid() === 0)(
+    'does not call an unreadable entry deleted (EACCES is not ENOENT)', async () => {
+    const home = makeHome();
+    const outer = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-eacces-'));
+    const inner = path.join(outer, 'inner');
+    fs.mkdirSync(inner);
+    const script = path.join(inner, 'index.js');
+    fs.writeFileSync(script, 'setInterval(() => {}, 1e9);\n');
+    const child = spawn(process.execPath, [script, '__daemon-run'], { stdio: 'ignore' });
+    await new Promise((r) => setTimeout(r, 200));
+    registerInstance(home, child.pid!);
+    // The file is present the whole time; only its parent becomes untraversable.
+    // fs.existsSync cannot tell this from deletion, which is the bug this pins:
+    // reporting it would tell the user to kill a healthy daemon they cannot stat.
+    fs.chmodSync(inner, 0o000);
+    try {
+      const stillThere = (() => { try { fs.chmodSync(inner, 0o700); const ok = fs.existsSync(script); fs.chmodSync(inner, 0o000); return ok; } catch { return false; } })();
+      expect(stillThere, 'entry must really still exist').toBe(true);
+
+      const payload = JSON.parse(run(home, ['status', '--json']).stdout);
+      expect(payload.staleBinaries.some((s: { pid: number }) => s.pid === child.pid)).toBe(false);
+    } finally {
+      try { fs.chmodSync(inner, 0o700); } catch { /* ignore */ }
+      try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* gone */ }
+      fs.rmSync(outer, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  },
+  );
 });
