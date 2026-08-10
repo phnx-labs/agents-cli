@@ -836,7 +836,9 @@ describe('classifyRemovableAgentsCliInstalls / purge (RUSH-2415)', () => {
     expect(fs.existsSync(root)).toBe(true);
   });
 
-  it('remediateStaleAgentsCliInstalls end-to-end: fixed peer + npx stale → purged', () => {
+  // findAgentsCliInstalls is POSIX-only (returns [] on win32 — Windows npm
+  // bins are .cmd wrappers, not symlinks; see findAgentsCliInstalls).
+  it.skipIf(process.platform === 'win32')('remediateStaleAgentsCliInstalls end-to-end: fixed peer + npx stale → purged', () => {
     const homeDir = makeTempDir('remediate');
     const fixedRoot = path.join(homeDir, 'fixed', 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
     fs.mkdirSync(path.join(fixedRoot, 'dist', 'lib'), { recursive: true });
