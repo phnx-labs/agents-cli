@@ -29359,6 +29359,16 @@
           "negate": false
         },
         {
+          "flags": "-r, --refresh",
+          "description": "Collect fresh usage through the shared device coordinator before rendering",
+          "short": "-r",
+          "long": "--refresh",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
           "flags": "-h, --help",
           "description": "Show help",
           "short": "-h",
