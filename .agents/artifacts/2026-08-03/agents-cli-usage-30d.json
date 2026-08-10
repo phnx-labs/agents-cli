@@ -2966,7 +2966,7 @@
       3
     ],
     [
-      "ssh user@example.com uptime",
+      "ssh [account-redacted] uptime",
       3
     ],
     [
@@ -15312,7 +15312,7 @@
       3
     ],
     [
-      "ssh user@example.com uptime",
+      "ssh [account-redacted] uptime",
       3
     ],
     [
@@ -27446,7 +27446,7 @@
       3
     ],
     [
-      "ssh user@example.com uptime",
+      "ssh [account-redacted] uptime",
       3
     ],
     [

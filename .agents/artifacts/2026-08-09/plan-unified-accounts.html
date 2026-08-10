@@ -203,7 +203,7 @@ accounts:
 <pre><code>BEFORE
   agents accounts name work --from claude@2.1.220
   agents view claude
-    2.1.220  user@example.com            # "work" is absent
+    2.1.220  [account-redacted]            # "work" is absent
 
   agents harness add deepseek --preset deepseek
     # OpenRouter provider key is copied into a provider-wide keychain item
@@ -211,7 +211,7 @@ accounts:
 AFTER
   agents accounts name work --from claude@2.1.220
   agents view claude
-    2.1.220  work · user@example.com
+    2.1.220  work · [account-redacted]
 
   agents accounts add openrouter-work --provider openrouter --auth api-key
   agents harness add deepseek --preset deepseek --account openrouter-work
@@ -223,9 +223,9 @@ AFTER
 
   NAME                 PROVIDER     AUTH             AVAILABLE   USED BY
   work                 Anthropic    managed login    3 versions  claude
-    user@example.com · this device, workstation
+    [account-redacted] · this device, workstation
   personal             Anthropic    managed login    1 version   claude
-    user@example.com · workstation
+    [account-redacted] · workstation
   openrouter-work      OpenRouter   API key          this device deepseek, kimi
     Production API Key · scopes unavailable
 

@@ -59,7 +59,7 @@ If the refresh cannot establish a fresh account, exit nonzero with:
 
 ```text
 agents: cannot choose a Claude account — all 7 usage snapshots are stale and refresh failed
-oldest snapshot: user@example.com, captured 59 hours ago
+oldest snapshot: [account-redacted], captured 59 hours ago
 run `agents view claude --refresh` for provider details
 ```
 
