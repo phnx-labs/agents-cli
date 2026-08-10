@@ -281,6 +281,22 @@ describeDaemon('agents daemon', () => {
     expect(services.find((s) => s.id === 'secrets-broker')!.enabled).toBe(true);
   });
 
+  it('a disabled secrets-broker is not hosted by the daemon on macOS', async () => {
+    if (process.platform !== 'darwin') return;
+    const home = makeHome();
+    run(home, ['services', 'disable', 'secrets-broker']);
+    const start = run(home, ['start']);
+    expect(start.status).toBe(0);
+    // Give the daemon time to boot and skip hosting the broker.
+    await new Promise((r) => setTimeout(r, 1500));
+    const services = run(home, ['services', '--json']);
+    expect(services.status).toBe(0);
+    const payload = JSON.parse(services.stdout) as { secretsBroker: { reachable: boolean; record: unknown } };
+    expect(payload.secretsBroker.reachable).toBe(false);
+    expect(payload.secretsBroker.record).toBeNull();
+    run(home, ['stop']);
+  }, 30_000);
+
   it('services enable|disable reject unknown service ids', () => {
     const home = makeHome();
     const enable = run(home, ['services', 'enable', 'not-a-service']);

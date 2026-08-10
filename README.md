@@ -1095,7 +1095,8 @@ agents daemon disable        # persist daemon.enabled: false -- nothing auto-sta
 agents daemon enable         # clear the kill switch
 
 agents daemon reload                        # SIGHUP -- reload jobs, re-evaluate scheduler.enabled, no restart
-agents daemon services                      # list every toggleable service and its current state
+agents daemon services                      # health of the two hosted services (secrets broker, browser IPC)
+agents daemon services list                 # every toggleable service and its current on/off state
 agents daemon services enable secrets-broker
 agents daemon services disable browser-ipc  # stop hosting browser IPC without stopping the daemon
 agents daemon logs -f --level warn --since 1h

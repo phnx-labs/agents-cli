@@ -5,7 +5,9 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { describe, it, expect } from 'vitest';
 import type { SecretsBundle } from './bundles.js';
-import { handleAgentRequest, isRequestAuthorized, makeConnectionHandler, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, shouldClientEvictSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, startHostedBroker, runSecretsAgent, agentPing, secretsAgentServiceInstalled, retireLegacySecretsAgentService, clampHoldMs, syncClientLaunch, lastLine, runAgentLockSync, closeServerBounded, SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD, DEFAULT_TTL_MS, MIN_HOLD_MS, MAX_HOLD_MS, META_CACHE_PREFIX, type StoredBundle, type Response, type Request } from './agent.js';
+import {
+  handleAgentRequest, isRequestAuthorized, makeConnectionHandler, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, shouldClientEvictSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, startHostedBroker, runSecretsAgent, agentPing, secretsAgentServiceInstalled, retireLegacySecretsAgentService, clampHoldMs, syncClientLaunch, lastLine, runAgentLockSync, closeServerBounded, SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD, DEFAULT_TTL_MS, MIN_HOLD_MS, MAX_HOLD_MS, META_CACHE_PREFIX, isSecretsBrokerEnabled, agentGetSync, ensureAgentRunning, agentAutoLoadSync, type StoredBundle, type Response, type Request,
+} from './agent.js';
 
 /**
  * These tests target the broker's store semantics — the part with real bug
@@ -979,5 +981,48 @@ describe('runAgentLockSync refuses a nameless lock', () => {
   // deleted. The wire-level proof lives in the RECORDING_BROKER test above.
   it('returns 3 for an empty name without contacting the broker', async () => {
     expect(await runAgentLockSync('')).toBe(3);
+  });
+});
+
+describe('secrets broker service toggle', () => {
+  let prevConfigDir: string | undefined;
+
+  beforeEach(() => {
+    prevConfigDir = process.env.AGENTS_DAEMON_CONFIG_DIR;
+  });
+
+  afterEach(() => {
+    if (prevConfigDir === undefined) delete process.env.AGENTS_DAEMON_CONFIG_DIR;
+    else process.env.AGENTS_DAEMON_CONFIG_DIR = prevConfigDir;
+  });
+
+  function disableBrokerConfig(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-daemon-config-'));
+    fs.writeFileSync(path.join(dir, 'services.yaml'), 'services:\n  secrets-broker: false\n', 'utf-8');
+    process.env.AGENTS_DAEMON_CONFIG_DIR = dir;
+    return dir;
+  }
+
+  it('isSecretsBrokerEnabled is true by default and false when the service is disabled', () => {
+    expect(isSecretsBrokerEnabled()).toBe(true);
+    disableBrokerConfig();
+    expect(isSecretsBrokerEnabled()).toBe(false);
+  });
+
+  it('agentGetSync returns null when the broker is disabled', () => {
+    disableBrokerConfig();
+    expect(agentGetSync('prod')).toBeNull();
+  });
+
+  it('ensureAgentRunning returns false when the broker is disabled on darwin', () => {
+    if (process.platform !== 'darwin') return;
+    disableBrokerConfig();
+    return expect(ensureAgentRunning()).resolves.toBe(false);
+  });
+
+  it('agentAutoLoadSync is a no-op when the broker is disabled on darwin', () => {
+    if (process.platform !== 'darwin') return;
+    disableBrokerConfig();
+    expect(() => agentAutoLoadSync('prod', { name: 'prod', vars: {} }, { K: 'v' }, 60_000)).not.toThrow();
   });
 });

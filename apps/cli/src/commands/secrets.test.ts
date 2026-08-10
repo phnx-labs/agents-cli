@@ -930,3 +930,36 @@ describe('resolveImportBundle — an undecryptable bundle record', () => {
     expect(fresh.backend).toBe('file');
   });
 });
+
+describe('secrets unlock when the broker is disabled', () => {
+  function runSecrets(home: string, args: string[]): ReturnType<typeof spawnSync> {
+    return spawnSync('node', ['--import', 'tsx', 'src/index.ts', 'secrets', ...args], {
+      cwd: path.resolve(__dirname, '../..'),
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        AGENTS_SECRETS_PASSPHRASE: 'rush-disabled-broker-test',
+        AGENTS_NO_USAGE_TRACK: '1',
+      },
+    });
+  }
+
+  it.skipIf(process.platform !== 'darwin')('exits with a clear message when secrets-broker is disabled', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-secrets-disabled-'));
+    try {
+      fs.mkdirSync(path.join(home, '.agents', '.system'), { recursive: true });
+      spawnSync('git', ['init', '--quiet'], { cwd: path.join(home, '.agents', '.system'), encoding: 'utf-8' });
+      fs.mkdirSync(path.join(home, '.agents', 'daemon'), { recursive: true });
+      fs.writeFileSync(path.join(home, '.agents', 'daemon', 'services.yaml'), 'services:\n  secrets-broker: false\n', 'utf-8');
+
+      const res = runSecrets(home, ['unlock', 'some-bundle']);
+      expect(res.status).toBe(1);
+      expect(res.stderr + res.stdout).toContain('Secrets broker is disabled');
+      expect(res.stderr + res.stdout).toContain('agents daemon services enable secrets-broker');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});

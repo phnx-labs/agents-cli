@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { randomBytes } from 'node:crypto';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
   filterAgentHitBySubsetAndExpiry,
   assertRemoteBundleFlagsUnsupported,
@@ -26,6 +29,7 @@ import {
   type KeychainBackend,
 } from './index.js';
 import { saveSession } from './session-store.js';
+import { isSecretsBrokerEnabled } from './agent.js';
 
 describe('humanUnlockDuration', () => {
   it('renders the actual configured hold for prompt text', () => {
@@ -654,5 +658,72 @@ describe('metadata is stored no-ACL at every tier (RUSH-1759)', () => {
     expect(mem.noAcl.get(secretsKeychainItem('billing', 'API_KEY'))).toBe(false);
     expect(mem.get(secretsKeychainItem('billing', 'API_KEY'))).toBe('sk-live-1');
     expect(bundlePolicy(readBundle('billing'))).toBe('hold');
+  });
+});
+
+describe('disabled secrets broker fails loud before keychain fallback', () => {
+  class MemBackend implements KeychainBackend {
+    store = new Map<string, string>();
+    has(item: string) { return this.store.has(item); }
+    get(item: string) {
+      const v = this.store.get(item);
+      if (v === undefined) throw new Error(`missing ${item}`);
+      return v;
+    }
+    set(item: string, value: string) { this.store.set(item, value); }
+    delete(item: string) { return this.store.delete(item); }
+    list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
+  }
+  let mem: MemBackend;
+  let prevBackend: KeychainBackend;
+  let prevConfigDir: string | undefined;
+  let prevNoAgent: string | undefined;
+
+  beforeEach(() => {
+    mem = new MemBackend();
+    prevBackend = setKeychainBackendForTest(mem);
+    prevConfigDir = process.env.AGENTS_DAEMON_CONFIG_DIR;
+    prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
+    // The test process may inherit AGENTS_SECRETS_NO_AGENT=1 from the parent
+    // environment; delete it so the disabled-broker check is actually reachable.
+    delete process.env.AGENTS_SECRETS_NO_AGENT;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-daemon-config-'));
+    fs.writeFileSync(path.join(dir, 'services.yaml'), 'services:\n  secrets-broker: false\n', 'utf-8');
+    process.env.AGENTS_DAEMON_CONFIG_DIR = dir;
+  });
+
+  afterEach(() => {
+    setKeychainBackendForTest(prevBackend);
+    if (prevConfigDir === undefined) delete process.env.AGENTS_DAEMON_CONFIG_DIR;
+    else process.env.AGENTS_DAEMON_CONFIG_DIR = prevConfigDir;
+    if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
+    else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
+  });
+
+  it('throws a clear error on keychain-backed reads when the broker is disabled', () => {
+    const name = `disabled-${randomBytes(4).toString('hex')}`;
+    writeBundleWithItems(
+      { name, policy: 'never', vars: { TOKEN: 'keychain:TOKEN' } },
+      new Map([[secretsKeychainItem(name, 'TOKEN'), 'secret-value']]),
+    );
+    const b = readBundle(name);
+    b.backend = 'keychain';
+    writeBundle(b);
+    expect(isSecretsBrokerEnabled()).toBe(false);
+    expect(() => readAndResolveBundleEnv(name)).toThrow(/Secrets broker is disabled/);
+  });
+
+  it('still allows direct keychain reads when AGENTS_SECRETS_NO_AGENT=1', () => {
+    process.env.AGENTS_SECRETS_NO_AGENT = '1';
+    const name = `noagent-${randomBytes(4).toString('hex')}`;
+    writeBundleWithItems(
+      { name, policy: 'never', vars: { TOKEN: 'keychain:TOKEN' } },
+      new Map([[secretsKeychainItem(name, 'TOKEN'), 'secret-value']]),
+    );
+    const b = readBundle(name);
+    b.backend = 'keychain';
+    writeBundle(b);
+    const { env } = readAndResolveBundleEnv(name);
+    expect(env).toEqual({ TOKEN: 'secret-value' });
   });
 });

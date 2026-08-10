@@ -792,7 +792,7 @@ export async function runDaemon(): Promise<void> {
 
   // Per-service toggles live outside device-config so they can be checked by
   // service clients (e.g. secrets) without loading the whole config stack.
-  const servicesConfig = readDaemonServicesConfig();
+  let servicesConfig = readDaemonServicesConfig();
   const isEnabled = (id: DaemonServiceId): boolean => servicesConfig.services[id] !== false;
 
   // The daemon holds NO Claude credential of its own. Routine runs authenticate
@@ -1269,6 +1269,8 @@ export async function runDaemon(): Promise<void> {
         log('INFO', `Service '${id}' toggled ${now ? 'on' : 'off'} — restart daemon to apply`);
       }
     }
+    // Remember the reloaded state so subsequent reloads log transitions truthfully.
+    servicesConfig = reloadedConfig;
 
     // Refresh user-layer copies of opted-in project routines BEFORE the
     // scheduler reloads, so YAML edits under `<project>/.agents/routines/`
