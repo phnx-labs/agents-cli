@@ -229,9 +229,14 @@ Detail in [teams.md](teams.md); the SSH transport is [ssh-transport.md](ssh-tran
 Usage and auth health are exceptions to on-demand computation. The daemon starts
 one `account-state-service` per state directory: it refreshes persisted usage
 snapshots and authentication verdicts, while command and UI readers only render
-those files. Explicit `--refresh` calls use the same device-wide lease keyed by
-provider account, so separate `agents` processes cannot duplicate a provider
-request. The lease owner atomically publishes the snapshot; waiters re-read it.
+those files. When `usage.primary-host` is configured, only that host's usage tick
+calls providers. It publishes a schema-limited envelope containing usage windows
+and routing headroom; peer ticks fetch it over the registered SSH path and merge
+it into their local caches. Tokens and credentials are never exported. Without a
+pin, the prior per-host refresh behavior remains active. Explicit `--refresh`
+calls use the same device-wide lease keyed by provider account, so separate
+`agents` processes cannot duplicate a provider request. The lease owner atomically
+publishes the snapshot; waiters re-read it.
 Local-log sources such as Codex and Grok follow the same rule because a render
 loop repeatedly scanning transcripts is still duplicate collection.
 

@@ -70,9 +70,23 @@ export async function runFleetCacheWarmTick(): Promise<void> {
 /**
  * Usage refresh: keep the usage cache the `agents run` router reads
  * (RUSH-2061, readOnly hot path) fresh, WITHOUT the hot path ever fetching.
- * This host is the sole writer for its own local accounts.
+ * The configured primary host is the fleet's sole provider-facing writer;
+ * subscribers import its token-free derived cache.
  */
 export async function runUsageRefreshTick(): Promise<void> {
+  const { resolveUsagePrimaryHost } = await import('./device-config.js');
+  const { machineId } = await import('./machine-id.js');
+  // usage.primary-host, else interactive.host, else null (standalone local refresh)
+  const primaryHost = resolveUsagePrimaryHost() ?? undefined;
+
+  const self = machineId();
+  const { importUsageFleetFromHost, usageRefreshRole } = await import('./usage-fleet.js');
+  if (usageRefreshRole(primaryHost, self) === 'subscriber') {
+    const imported = await importUsageFleetFromHost(primaryHost!);
+    console.log(`usage refresh: imported ${Object.keys(imported.usage).length} account(s) from primary host ${primaryHost}`);
+    return;
+  }
+
   const { runUsageRefresh, buildLocalUsageAccounts } = await import('./usage-refresh.js');
   const { writeClaudeUsageCache } = await import('./usage.js');
   const { usageRateLimitedUntil } = await import('./usage-backoff.js');
@@ -84,8 +98,10 @@ export async function runUsageRefreshTick(): Promise<void> {
   const { listProfiles } = await import('./profiles.js');
   const { refreshDueByokUsage } = await import('./byok-usage.js');
   const byok = await refreshDueByokUsage(listProfiles());
+  const { exportUsageFleet } = await import('./usage-fleet.js');
+  const published = exportUsageFleet();
   console.log(
-    `usage refresh: ${r.refreshed} refreshed, ${r.failed} failed, ${r.skippedNotDue} not-due, ${r.skippedBackoff} backed-off, ${r.skippedCap} capped; BYOK ${byok.refreshed} refreshed, ${byok.skipped} not-due`,
+    `usage refresh: ${r.refreshed} refreshed, ${r.failed} failed, ${r.skippedNotDue} not-due, ${r.skippedBackoff} backed-off, ${r.skippedCap} capped; BYOK ${byok.refreshed} refreshed, ${byok.skipped} not-due; published ${Object.keys(published.usage).length} account(s)`,
   );
 }
 

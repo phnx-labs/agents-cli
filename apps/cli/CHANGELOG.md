@@ -2,6 +2,14 @@
 
 ## 1.22.36
 
+- **One configured host now owns fleet usage refreshes.** When
+  `usage.primary-host` is set, that daemon alone calls usage providers and
+  publishes derived usage windows plus routing headroom. Every other host imports
+  the primary's cache over the registered SSH path; the export schema contains no
+  credentials, access tokens, refresh tokens, or authorization headers. With no
+  configured primary, the existing local refresh behavior is unchanged. Source:
+  `apps/cli/src/lib/daemon-ticks.ts`, `apps/cli/src/lib/usage-fleet.ts`.
+
 - **`agents cp <src> <dst>` — first-class fleet file transfer (RUSH-2297).** New
   top-level command that copies files and directories between fleet hosts
   (local-to-remote, remote-to-local, and remote-to-remote) using the same

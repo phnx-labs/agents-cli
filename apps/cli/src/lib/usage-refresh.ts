@@ -1,15 +1,17 @@
 /**
- * Daemon-owned usage refresher (per host).
+ * Daemon-owned usage refresher (publisher host).
  *
  * The routing hot path (`agents run` → collectRunCandidates) reads usage
  * CACHE-ONLY (`getUsageInfoForIdentity`, RUSH-2061) and never blocks
  * on a provider fetch. Something still has to keep that cache fresh — this
- * module is that something, running inside the daemon on **each machine**.
+ * module is that something, running inside the daemon on the configured
+ * `usage.primary-host` (or locally when no primary is configured).
  *
  * Design:
  *
- *  - **Per-host sole writer.** Only accounts whose credentials live on THIS
- *    box are listed; no fleet-wide usage sync.
+ *  - **Fleet sole writer.** Only the configured primary lists credential-backed
+ *    accounts and calls providers. It exports derived snapshots/headroom;
+ *    subscriber hosts import that token-free envelope (`usage-fleet.ts`).
  *  - **Fixed 5-minute cadence** (`REFRESH_INTERVAL_MS`). Enough to keep
  *    balanced/`agents view` off multi-hour stale data without thrashing
  *    provider APIs when the user runs agents frequently. The delay helpers
@@ -224,7 +226,7 @@ export function nextHeadroomEntry(
   };
 }
 
-/** An account whose credentials live on THIS host — the only ones we refresh. */
+/** An account whose credentials live on the publisher host. */
 export interface LocalUsageAccount {
   usageKey: string;
   agentId: AgentId;
@@ -238,7 +240,7 @@ export interface LocalUsageAccount {
  * canonicalization `getUsageInfoByIdentity` uses). Each carries a closure that
  * live-fetches its usage. This is the daemon's `listAccounts`; because it only
  * ever lists local, signed-in accounts, each host is the sole writer for its own
- * accounts' caches — no cross-host coordination.
+ * accounts' caches. `runUsageRefreshTick` calls this only on the fleet publisher.
  */
 export async function buildLocalUsageAccounts(): Promise<LocalUsageAccount[]> {
   const accounts: LocalUsageAccount[] = [];

@@ -2575,6 +2575,15 @@ nothing but its own view cache.
   cross-device state is limited to safe account labels, auth verdicts, and usage
   snapshots. Named API-key/setup-token/bearer accounts retain device-local secret
   material and synchronized metadata.
+- **SING-1c (MUST).** When `usage.primary-host` is configured, only that host's
+  daemon usage tick MUST call usage providers. Every other host MUST import the
+  primary's derived usage windows and routing headroom without exporting or
+  copying credentials, access tokens, refresh tokens, or authorization headers.
+  The publisher/subscriber gate is `runUsageRefreshTick`
+  (`lib/daemon-ticks.ts`); the safe envelope is `UsageFleetExport`
+  (`lib/usage-fleet.ts`). Given a peer whose configured primary differs from its
+  machine id, when its usage tick runs, then no local provider refresh runs and
+  the primary envelope is merged into its usage/headroom caches.
 - **SING-2 (MUST NOT).** A UI surface (apps/ext, the menubar app, the iOS app)
   MUST NOT own a timer, watcher, or loop that detects a condition and performs a
   fleet-affecting action. Detection and decision MUST live in the CLI, which holds

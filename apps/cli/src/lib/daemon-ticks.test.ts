@@ -19,6 +19,7 @@ import {
   setActiveSessionsSnapshotPathForTest,
   setImmutableMemoPathForTest,
 } from './session/session-cache.js';
+import { usageRefreshRole } from './usage-fleet.js';
 
 describe('isFreshFleetAuthSnapshot', () => {
   const minimum = 1_000;
@@ -58,5 +59,16 @@ describe('runActiveSessionsWarmTick', () => {
     const journal = fs.readFileSync(path.join(dir, 'snap.json.journal.jsonl'), 'utf8').trim().split('\n');
     expect(journal.length).toBeGreaterThanOrEqual(1);
     expect(JSON.parse(journal.at(-1)!)).toMatchObject({ version: 1, scope: 'local', upserts: [], removes: [] });
+  });
+});
+
+describe('usage refresh publisher/subscriber gate', () => {
+  it('publishes locally when this host is primary or the pin is absent', () => {
+    expect(usageRefreshRole(undefined, 'zion')).toBe('publisher');
+    expect(usageRefreshRole('zion', 'zion')).toBe('publisher');
+  });
+
+  it('subscribes without provider refreshes when another host is primary', () => {
+    expect(usageRefreshRole('yosemite-s0', 'zion')).toBe('subscriber');
   });
 });
