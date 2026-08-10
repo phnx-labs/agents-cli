@@ -129,8 +129,20 @@ export function clearTierOverride(selectorInput: string, tierInput?: string): bo
       delete tiers[parsed.selector];
       changed = true;
     }
-    model.tiers = tiers;
-    return { ...meta, model };
+    // Drop the emptied container rather than leaving `model: {tiers: {}}` in the
+    // shared agents.yaml — the same discipline lib/hosts/providers/local.ts uses
+    // for an emptied `hosts:`. A vestigial empty map is a real diff on a tracked
+    // file that every machine syncs, so clearing the last override would show up
+    // as a spurious local change on whichever box happened to run the command.
+    if (Object.keys(tiers).length > 0) {
+      model.tiers = tiers;
+      return { ...meta, model };
+    }
+    delete model.tiers;
+    if (Object.keys(model).length > 0) return { ...meta, model };
+    const { model: _dropped, ...rest } = meta;
+    void _dropped;
+    return rest;
   });
 
   return changed;
