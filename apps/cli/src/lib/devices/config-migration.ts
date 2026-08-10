@@ -25,12 +25,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import {
-  META_HEADER,
   getDevicesAutoLaunchPath,
   getUserAgentsDir,
   updateMeta,
 } from '../state.js';
-import { atomicWriteFileSync } from '../fs-atomic.js';
 import { loadDevicesSync } from './registry.js';
 import type { FleetDeviceOverride, FleetManifest } from '../fleet/types.js';
 
@@ -168,29 +166,19 @@ export function migrateDeviceConfigToCentral(): void {
     return { ...m, fleet };
   });
 
-  // 2. Strip the legacy stores. A device doc left with nothing but the folded
-  //    keys is removed; one with agent pins / routines keeps exactly those.
-  for (const { path: docPath, doc } of docs) {
-    const rest = { ...doc };
-    delete rest.config;
-    delete rest.defaultBrowserProfile;
-    try {
-      if (Object.keys(rest).length === 0) {
-        fs.rmSync(docPath, { force: true });
-        // Drop the device dir too when the doc was its only occupant.
-        try {
-          fs.rmdirSync(path.dirname(docPath));
-        } catch { /* not empty — other device-local files live here */ }
-      } else {
-        atomicWriteFileSync(docPath, META_HEADER + yaml.stringify(rest));
-      }
-    } catch (err) {
-      console.error(`device config migration: could not rewrite ${docPath} (${(err as Error).message}); a later run retries`);
-    }
-  }
-  try {
-    fs.rmSync(autoLaunchPath, { force: true });
-  } catch (err) {
-    console.error(`device config migration: could not remove ${autoLaunchPath} (${(err as Error).message}); a later run retries`);
-  }
+  // 2. The legacy stores are deliberately LEFT IN PLACE.
+  //
+  //    This migration used to delete them — `fs.rmSync` on the device doc and
+  //    `fs.rmdirSync` on its directory. Deleting is what made the fold unsafe
+  //    to run anywhere: it had to win a race against every other machine's copy
+  //    of the same shared file, and a box on an older CLI that re-created the
+  //    doc would be stripped again on the next command.
+  //
+  //    An additive fold has neither problem. The central block is written; the
+  //    source is untouched; a box still running the previous CLI keeps reading
+  //    what it always read. The now-redundant legacy copy is pruned in a later
+  //    release by one explicit operator command, not by 13 machines each
+  //    deciding to delete on their own schedule.
+  void docs;
+  void autoLaunchPath;
 }
