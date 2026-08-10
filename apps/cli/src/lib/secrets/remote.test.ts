@@ -38,7 +38,17 @@ import {
   evaluateKeychainWriteVerification,
   keychainWriteFailureMessage,
   buildRemoteFileImportCommand,
+  credentialTransportSshOpts,
 } from './remote.js';
+
+/** Flatten an ssh `-o KEY=VALUE` opt list to the KEY=VALUE strings for assertions. */
+function optValues(hostKeyOpts: string[] | undefined): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < (hostKeyOpts?.length ?? 0); i++) {
+    if (hostKeyOpts![i] === '-o' && hostKeyOpts![i + 1]) out.push(hostKeyOpts![i + 1]);
+  }
+  return out;
+}
 
 const ok = (stdout: string): SshExecResult => ({ code: 0, stdout, stderr: '', timedOut: false });
 
@@ -178,6 +188,50 @@ describe('remoteSecretsRaw', () => {
     expect(remoteCmd).toContain('powershell -NoProfile -EncodedCommand ');
     expect(remoteCmd).not.toContain('bash -lc');
   });
+
+  it('a plain browse call inherits the shared multiplexed baseline — no host-key pin', () => {
+    // Only the secret-bearing push tightens the posture; a read-only `list`
+    // should stay on the fast, shared connection (no needless pin churn).
+    sshExecMock.mockReturnValue(ok('listed'));
+    remoteSecretsRaw('yosemite-s1', ['list']);
+    const opts = sshExecMock.mock.calls[0][2] ?? {};
+    expect(opts.multiplex).toBeUndefined();
+    expect(opts.hostKeyOpts).toBeUndefined();
+  });
+
+  it('a secret-bearing push pins the managed host key and refuses to multiplex (RUSH-2527)', () => {
+    // The credential-transport posture: managed known_hosts (a changed key is
+    // refused) plus no reusable control master left to the destination.
+    sshExecMock.mockReturnValue(ok('Imported 2 key(s).'));
+    remoteSecretsRaw('mac-mini', ['import', 'mybundle', '--from', '-'], { input: 'A="1"\n', secret: true });
+    const opts = sshExecMock.mock.calls[0][2] ?? {};
+    expect(opts.multiplex).toBe(false);
+    const kv = optValues(opts.hostKeyOpts);
+    expect(kv.some((s) => s.startsWith('UserKnownHostsFile='))).toBe(true);
+    expect(kv.some((s) => s.startsWith('StrictHostKeyChecking='))).toBe(true);
+  });
+});
+
+describe('credentialTransportSshOpts (RUSH-2527)', () => {
+  it('always refuses to multiplex and pins against the CLI-managed known_hosts store', () => {
+    const opts = credentialTransportSshOpts('some-host');
+    expect(opts.multiplex).toBe(false);
+    const kv = optValues(opts.hostKeyOpts);
+    // Verify against the managed store (not ~/.ssh/known_hosts), and set a strict
+    // posture: `yes` once pinned, `accept-new` before (which still refuses a
+    // CHANGED key). Either value is acceptable here; the key is that it's set.
+    expect(kv.find((s) => s.startsWith('UserKnownHostsFile='))).toBeDefined();
+    const strict = kv.find((s) => s.startsWith('StrictHostKeyChecking='));
+    expect(strict === 'StrictHostKeyChecking=yes' || strict === 'StrictHostKeyChecking=accept-new').toBe(true);
+  });
+
+  it('matches on the host part of a user@host target for known_hosts lookup', () => {
+    // `user@host` and `host` must resolve to the same pin state, or a push via
+    // `user@host` would silently skip a pin recorded under `host`.
+    const a = credentialTransportSshOpts('muqsit@box');
+    const b = credentialTransportSshOpts('box');
+    expect(optValues(a.hostKeyOpts)).toEqual(optValues(b.hostKeyOpts));
+  });
 });
 
 describe('remoteResolveEnv', () => {
@@ -188,6 +242,10 @@ describe('remoteResolveEnv', () => {
     const [, remoteCmd, opts] = sshExecMock.mock.calls[0];
     expect(remoteCmd).toBe(`bash -lc 'agents secrets export r2.backups --plaintext --format json'`);
     expect(opts.input).toBeUndefined();
+    // The plaintext streams back over ssh stdout, so this read is secret-bearing:
+    // it pins the managed host key and refuses to multiplex (RUSH-2527).
+    expect(opts.multiplex).toBe(false);
+    expect(optValues(opts.hostKeyOpts).some((s) => s.startsWith('StrictHostKeyChecking='))).toBe(true);
   });
 
   it('uses the original host name when resolving an inline Windows target', async () => {

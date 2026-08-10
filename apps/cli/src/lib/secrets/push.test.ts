@@ -106,7 +106,21 @@ describe('planPushTransport — which transport a backend/OS pair selects', () =
       kind: 'remote-secrets',
       args: ['import', 'apple.com', '--from', '-'],
       input: RESOLVED.dotenv,
+      multiplex: false,
     });
+  });
+
+  it('never multiplexes a credential-bearing push — no reusable control master to the destination (RUSH-2527)', () => {
+    // A credential push must not reuse or leave a persistent authenticated
+    // control master to the box it just shipped secrets to; every non-refuse
+    // transport therefore pins `multiplex: false`, mirroring `--copy-creds`.
+    for (const host of ['push-test-linux', 'push-test-win', 'push-test-never-registered']) {
+      for (const backend of ['file', 'keychain'] as const) {
+        const t = plan(host, backend);
+        if (t.kind === 'refuse') continue; // file→Windows is unsupported, tested above
+        expect(t.multiplex).toBe(false);
+      }
+    }
   });
 
   it('resolves the target OS after stripping a user@ prefix', () => {

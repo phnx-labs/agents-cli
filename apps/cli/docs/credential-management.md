@@ -51,7 +51,13 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
    `never` set unconditionally — never the OS keychain's biometry ACL, so reading
    it raises no Touch ID prompt. There is no shared "auth" bundle name; a user can
    hold as many named accounts as they need, and only the accounts they explicitly
-   `agents accounts sync <name> --device <device>` cross the fleet.
+   `agents accounts sync <name> --device <device>` cross the fleet. That sync (and
+   every `agents secrets` transport that moves credential bytes) rides a hardened
+   SSH posture (RUSH-2527): the destination is verified against the CLI-managed
+   known_hosts store — a **changed** host key is refused — and the credential
+   connection is never multiplexed, so it leaves no reusable authenticated control
+   master behind. Secret bytes cross on ssh **stdin** (push) / **stdout** (resolve),
+   never on argv.
 
 5. **Usage and account views read the setup-token**, not the interactive login —
    and never a prompting keychain read. Caveat (RUSH-2392): Anthropic's
