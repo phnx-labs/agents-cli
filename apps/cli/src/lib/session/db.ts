@@ -4117,6 +4117,21 @@ export const TOOL_SESSION_LIST_LIMIT = 2000;
 export function pruneToolSessions(maxAgeDays: number = TOOL_SESSION_MAX_AGE_DAYS): number {
   const db = getDB();
   const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+
+  // Cheap indexed guard first, so the common case is one lookup rather than a
+  // write transaction (the same shape as the account repair below). Every
+  // listing calls this, and on any table younger than the retention window
+  // there is nothing to delete — but a bare DELETE still opens a write
+  // transaction, which under `busy_timeout = 30000` can make a read-only
+  // listing wait on the session indexer for no reason at all.
+  const stale = db.prepare(`
+    SELECT 1 FROM computer_sessions WHERE started_at < ?
+    UNION ALL
+    SELECT 1 FROM browser_sessions WHERE started_at < ?
+    LIMIT 1
+  `).get(cutoff, cutoff);
+  if (!stale) return 0;
+
   const computer = db.prepare(`DELETE FROM computer_sessions WHERE started_at < ?`).run(cutoff);
   const browser = db.prepare(`DELETE FROM browser_sessions WHERE started_at < ?`).run(cutoff);
   return Number(computer.changes ?? 0) + Number(browser.changes ?? 0);

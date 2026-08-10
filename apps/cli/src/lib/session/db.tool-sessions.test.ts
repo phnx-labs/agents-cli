@@ -149,10 +149,15 @@ describe('recovering runs past the read limit (RUSH-2549 review follow-up)', () 
     }
     const ledgerOldest = base + 7 * 1000; // the ledger still holds the newest three
 
-    const newestOnly = listComputerSessionRecords({ limit: 3 })
-      .map((r) => r.invocationId);
-    const complement = listComputerSessionRecords({ limit: 3, startedBeforeMs: ledgerOldest })
-      .map((r) => r.invocationId);
+    // Filter to this test's own rows: both reads are global over a DB shared
+    // with the rest of the file, so a row inserted by another describe (which
+    // defaults startedAt to Date.now(), far above `base`) would otherwise break
+    // this with an unrelated-looking failure.
+    const mine = (ids: string[]) => ids.filter((id) => id.startsWith('bounded-'));
+    const newestOnly = mine(listComputerSessionRecords({ limit: 3 }).map((r) => r.invocationId!));
+    const complement = mine(
+      listComputerSessionRecords({ limit: 3, startedBeforeMs: ledgerOldest }).map((r) => r.invocationId!),
+    );
 
     // A bare newest-N read hands back exactly what the ledger already covers.
     expect(newestOnly).toEqual(['bounded-9', 'bounded-8', 'bounded-7']);

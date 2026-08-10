@@ -279,8 +279,12 @@ function appendPrunedRunsFromDb(rows: ComputerRunRow[], limit?: number): void {
     ? Math.min(...rows.map((r) => r.startMs))
     : undefined;
   for (const record of listComputerSessionRecords({ limit, startedBeforeMs })) {
-    // Still deduped: the ledger's oldest row and a DB row can share a boundary
-    // timestamp, and a caller may pass rows from a wider window than it read.
+    // The dedup is LOAD-BEARING — do not delete it as redundant with the WHERE
+    // clause above. A run's DB `started_at` is its TRUE start and is never
+    // updated, while the ledger row's `startMs` is only its oldest RETAINED
+    // action. So a long `computer run` that began before the ledger window but
+    // kept acting inside it sits below the cutoff, is selected by the SQL, and
+    // is already present as a ledger row. This is what drops the duplicate.
     if (seen.has(record.invocationId)) continue;
     const linked = record.sessionId ? getSessionById(record.sessionId) : null;
     rows.push({
