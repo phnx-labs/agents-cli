@@ -8,7 +8,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { shouldIncludeLocal, remoteHostsToDial, hasNoBrowserDisqualifyingFlags } from '../sessions.js';
+import { shouldIncludeLocal, remoteHostsToDial, hasNoBrowserDisqualifyingFlags, filterActiveSessionsByHostScope } from '../sessions.js';
+import type { ActiveSession } from '../../lib/session/active.js';
 
 describe('shouldIncludeLocal', () => {
   const self = 'zion';
@@ -88,5 +89,57 @@ describe('hasNoBrowserDisqualifyingFlags (bare interactive --host routing)', () 
     // SQL-filtered listing --skill/--plugin actually produce.
     expect(hasNoBrowserDisqualifyingFlags({ skill: 'design' } as any, undefined)).toBe(false);
     expect(hasNoBrowserDisqualifyingFlags({ plugin: 'rush' } as any, undefined)).toBe(false);
+  });
+});
+
+/**
+ * RUSH-2479. `shouldIncludeLocal`/`remoteHostsToDial` decide which boxes to ASK;
+ * this decides what the answer may CONTAIN. They are different questions, and
+ * conflating them is the bug: a host-dispatched run (`agents run --device peer`)
+ * is reported by the box that dispatched it while the agent executes on the
+ * peer, so `--device <dispatcher>` listed sessions running somewhere else.
+ */
+describe('filterActiveSessionsByHostScope', () => {
+  const self = 'zion';
+  const row = (over: Partial<ActiveSession>): ActiveSession =>
+    ({ context: 'terminal', kind: 'claude', status: 'running', ...over }) as ActiveSession;
+
+  it('passes everything through when no host is scoped (full fleet view)', () => {
+    const rows = [row({ machine: 'zion' }), row({ machine: 'yosemite-s0' })];
+    expect(filterActiveSessionsByHostScope(rows, undefined, self)).toHaveLength(2);
+    expect(filterActiveSessionsByHostScope(rows, [], self)).toHaveLength(2);
+  });
+
+  it('drops a session that zion dispatched but yosemite-s0 is executing', () => {
+    const rows = [
+      row({ machine: 'zion', sessionId: 'here' }),
+      row({ machine: 'yosemite-s0', sessionId: 'offloaded', offloadedFrom: 'zion' }),
+    ];
+    const out = filterActiveSessionsByHostScope(rows, ['zion'], self);
+    expect(out.map((s) => s.sessionId)).toEqual(['here']);
+  });
+
+  it('keeps that same session under the machine it actually runs on', () => {
+    const rows = [row({ machine: 'yosemite-s0', sessionId: 'offloaded', offloadedFrom: 'zion' })];
+    expect(filterActiveSessionsByHostScope(rows, ['yosemite-s0'], self)).toHaveLength(1);
+  });
+
+  it('treats an untagged row as this machine', () => {
+    const rows = [row({ machine: undefined, sessionId: 'local' })];
+    expect(filterActiveSessionsByHostScope(rows, ['zion'], self)).toHaveLength(1);
+    expect(filterActiveSessionsByHostScope(rows, ['yosemite-s0'], self)).toHaveLength(0);
+  });
+
+  it('matches a host the same way the seed does — case, domain suffix, user@host', () => {
+    const rows = [row({ machine: 'yosemite-s0' })];
+    for (const h of ['YOSEMITE-S0', 'yosemite-s0.tail.ts.net', 'muqsit@yosemite-s0']) {
+      expect(filterActiveSessionsByHostScope(rows, [h], self)).toHaveLength(1);
+    }
+  });
+
+  it('unions a multi-host scope', () => {
+    const rows = [row({ machine: 'zion' }), row({ machine: 'yosemite-s0' }), row({ machine: 'mac-mini' })];
+    const out = filterActiveSessionsByHostScope(rows, ['zion', 'mac-mini'], self);
+    expect(out.map((s) => s.machine)).toEqual(['zion', 'mac-mini']);
   });
 });

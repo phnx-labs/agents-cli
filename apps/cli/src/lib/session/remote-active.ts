@@ -45,7 +45,14 @@ export function parseRemoteActive(stdout: string, machine: string): ActiveSessio
   const out: ActiveSession[] = [];
   for (const x of parsed) {
     if (x && typeof x === 'object' && !Array.isArray(x)) {
-      const row = { ...(x as ActiveSession), machine };
+      // The peer's OWN `machine` wins when it names a third box: a host-dispatched
+      // run reports the execution host, not the dispatcher we happen to be dialing
+      // (foldExecutionMachine, RUSH-2479). Stamping the dialed peer here would
+      // undo that correction and re-claim the session for the wrong machine.
+      // Everything else — the common case, where a peer reports itself or nothing
+      // at all — still gets tagged with the box we asked.
+      const reported = (x as ActiveSession).machine;
+      const row = { ...(x as ActiveSession), machine: reported || machine };
       row.viewingIn = parseViewingIn((x as { viewingIn?: unknown }).viewingIn);
       out.push(row);
     }

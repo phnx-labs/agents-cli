@@ -425,6 +425,25 @@ SSH access (§7); rendering sessions that no harness produced.
     this machine leaves nothing remote to dial; the fan-out MUST be skipped rather
     than passing an empty list to `gatherRemoteList`, which reads `[]` as "no hosts
     given" and sweeps every online device.
+- **SES-23a (MUST).** A `--host`/`--device` scope on `--active` names **where the
+  session runs**, not which box reported it. Every returned row MUST satisfy
+  `machine ∈ scope` (`filterActiveSessionsByHostScope`,
+  `commands/sessions.ts`), applied inside the single gather so the interactive
+  browser and `--active --json` cannot disagree.
+  - **The executing machine owns the row.** A host-dispatched run
+    (`agents run --device <peer>`) leaves a live shim process on the DISPATCHING
+    box carrying the remote run's session id, so choosing whom to ASK is not the
+    same as deciding who OWNS the session. `machine` MUST be the execution host:
+    `foldExecutionMachine` (`lib/session/active.ts`) folds the machine the
+    dispatch recorded in the index (`lib/hosts/session-index.ts:55,134`) back
+    onto the live row before it leaves the box, and the cross-machine fan-out
+    MUST NOT overwrite a peer-reported `machine` that names a third box
+    (`lib/session/remote-active.ts`).
+  - **A peer's self-report outranks a local index copy.** A row the fan-out
+    already attributed to a peer MUST be left alone.
+  - Consequence for SES-8: an offloaded row is then `_remote`, so
+    `liveSessionToMeta` → `buildPreview` renders the "on `<peer>`" affordance
+    instead of the empty "full transcript not indexed here" branch.
 - **SES-24 (MUST).** `agents sessions export --encrypt` MUST seal each
   transcript body client-side with AES-256-GCM (fresh IV) before it leaves the
   machine, and `agents sessions import` MUST decrypt before writing it to the
@@ -890,6 +909,12 @@ normative — a change that widens/narrows a cell is a spec change.
   local↔remote seam; a session surfacing both locally and via a peer's self-report
   is not provably collapsed and is untested
   (`lib/session/active.ts:1324` vs `remote-active.ts:43-47`).
+  - **Narrowed (RUSH-2479).** The one case that is now provably collapsed is the
+    offloaded run, whose dispatcher shim and executing machine's own row share a
+    `machine:sessionId` key once SES-23a attributes both to the execution host.
+    `dedupeByMachineSession` MUST keep the row that is not an offload shim
+    (`offloadedFrom` unset), so the merged fleet view never trades a real
+    transcript for a `[host/<peer>]` placeholder. The general seam is still open.
 - **SES-GAP-6.** Whole-**file** JSON parse failure is inconsistent: Gemini throws
   (and `parseSession` has no outer catch), while Hermes/Antigravity degrade to
   `[]` (`lib/session/parse.ts:143-169,691-696`). Standardize on degrade-to-empty.

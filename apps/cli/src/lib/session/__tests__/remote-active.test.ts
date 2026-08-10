@@ -55,4 +55,24 @@ describe('parseRemoteActive viewingIn normalization', () => {
     const rows = parseRemoteActive(JSON.stringify([{ sessionId: 'a', viewingIn: { app: 'ghostty', tab: 2 } }]), 'peer');
     expect(rows[0].viewingIn).toEqual({ app: 'ghostty', tab: 2 });
   });
+
+  // RUSH-2479: a peer answering the fan-out may report a THIRD box, because a
+  // host-dispatched run executes where it was sent, not where it was launched.
+  // Stamping the dialed peer over that would re-claim the session for the wrong
+  // machine and undo foldExecutionMachine's correction.
+  it("keeps a peer's own machine when it names a third box (offloaded run)", () => {
+    const stdout = JSON.stringify([
+      { context: 'terminal', kind: 'claude', status: 'running', sessionId: 'off', machine: 'yosemite-s0', offloadedFrom: 'zion' },
+    ]);
+    const out = parseRemoteActive(stdout, 'zion');
+    expect(out[0].machine).toBe('yosemite-s0');
+    expect(out[0].offloadedFrom).toBe('zion');
+  });
+
+  it('still stamps the dialed peer when the row reports no machine at all', () => {
+    const stdout = JSON.stringify([
+      { context: 'terminal', kind: 'claude', status: 'running', sessionId: 'a' },
+    ]);
+    expect(parseRemoteActive(stdout, 'zion')[0].machine).toBe('zion');
+  });
 });

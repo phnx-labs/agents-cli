@@ -1171,16 +1171,45 @@ export function groupSessionsByMachine(sessions: ActiveSession[], localMachine: 
  * correlated, so they're all kept.
  */
 export function dedupeByMachineSession(sessions: ActiveSession[]): ActiveSession[] {
-  const seen = new Set<string>();
+  const seen = new Map<string, number>();
   const out: ActiveSession[] = [];
   for (const s of sessions) {
     if (!s.sessionId) { out.push(s); continue; }
     const key = `${s.machine ?? ''}:${s.sessionId}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(s);
+    const at = seen.get(key);
+    if (at === undefined) {
+      seen.set(key, out.length);
+      out.push(s);
+      continue;
+    }
+    // Both rows now describe the same session on the same machine, so the tie is
+    // between the EXECUTING box's own row and the dispatcher's shim row for a
+    // host-dispatched run (they only started colliding once foldExecutionMachine
+    // attributed both to the executing host — RUSH-2479). The shim carries no
+    // transcript and a `[host/<peer>]` placeholder label, so keeping it first
+    // would strip a real preview off the merged fleet view. Prefer the row that
+    // is not an offload shim; otherwise the first one still wins.
+    if (out[at].offloadedFrom && !s.offloadedFrom) out[at] = s;
   }
   return out;
+}
+
+/**
+ * Narrow a gathered live set to the machines an explicit `--host`/`--device`
+ * scope named. The gather picks which boxes to ASK; this asserts what the answer
+ * may contain, and the two are not the same question: a host-dispatched run is
+ * reported by the box that dispatched it while executing somewhere else, so
+ * `--device <dispatcher>` used to list sessions that were not running there at
+ * all (RUSH-2479). No scope → unchanged. Pure; exported for unit testing.
+ */
+export function filterActiveSessionsByHostScope(
+  sessions: ActiveSession[],
+  hosts: string[] | undefined,
+  self: string,
+): ActiveSession[] {
+  if (!hosts || hosts.length === 0) return sessions;
+  const wanted = new Set(hosts.map(hostToken));
+  return sessions.filter((s) => wanted.has(s.machine ?? self));
 }
 
 /**
@@ -1567,7 +1596,15 @@ async function gatherActiveSessionsLive(
       merged = dedupeByMachineSession([...local, ...remote.sessions]);
     }
   }
-  return { sessions: merged, remoteDeviceCount };
+  // Asking a box is not the same as a session running there: a host-dispatched
+  // run is reported by its dispatcher while executing on the peer. Scope on the
+  // machine the session runs on so `--device X` never lists someone else's work
+  // (RUSH-2479). Applied here, in the single gather, so the interactive browser
+  // gets the same answer as `--active --json`.
+  return {
+    sessions: filterActiveSessionsByHostScope(merged, opts.hosts, self),
+    remoteDeviceCount,
+  };
 }
 
 /**

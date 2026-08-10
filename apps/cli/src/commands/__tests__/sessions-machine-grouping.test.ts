@@ -142,6 +142,38 @@ describe('dedupeByMachineSession', () => {
     ]);
     expect(out).toHaveLength(2);
   });
+
+  // RUSH-2479. Once foldExecutionMachine attributes a host-dispatched run to the
+  // box it EXECUTES on, the dispatcher's shim row and the executing machine's own
+  // row collide on the same key. The shim has no transcript and only a
+  // `[host/<peer>]` placeholder, so first-wins would strip the real preview off
+  // the merged fleet view.
+  it('prefers the executing machine\'s row over the dispatcher\'s offload shim', () => {
+    const out = dedupeByMachineSession([
+      mk({ machine: 'yosemite-s0', sessionId: 'off', offloadedFrom: 'zion', label: '[host/yosemite-s0]' }),
+      mk({ machine: 'yosemite-s0', sessionId: 'off', sessionFile: '/t.jsonl', topic: 'real work' }),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].offloadedFrom).toBeUndefined();
+    expect(out[0].topic).toBe('real work');
+  });
+
+  it('keeps the shim when it is the only row for that session (peer unreachable)', () => {
+    const out = dedupeByMachineSession([
+      mk({ machine: 'yosemite-s0', sessionId: 'off', offloadedFrom: 'zion' }),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].offloadedFrom).toBe('zion');
+  });
+
+  it('does not reorder when the first row is already the executing machine\'s', () => {
+    const out = dedupeByMachineSession([
+      mk({ machine: 'yosemite-s0', sessionId: 'off', topic: 'real work' }),
+      mk({ machine: 'yosemite-s0', sessionId: 'off', offloadedFrom: 'zion' }),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].topic).toBe('real work');
+  });
 });
 
 describe('mergeLocalFirst', () => {
