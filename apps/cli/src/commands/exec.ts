@@ -1191,8 +1191,15 @@ export function registerRunCommand(program: Command): void {
           ? { kind: 'resolved' as const, session: injectedSource }
           : await (await import('./sessions.js')).resolveSessionMetadataValue(selector);
         if (outcome.kind === 'partial') {
-          console.error(chalk.red(`Could not resolve session while these devices were unavailable: ${outcome.failedPeers.join(', ')}`));
-          process.exit(2);
+          // RUSH-2492: an unreachable peer is a warning, not a hard failure. The
+          // resolver already resolves an id found on the reachable fleet (SES-9a),
+          // so reaching here means the session was not found on any device we
+          // COULD reach — it may live on an unreachable peer we could not check.
+          const offline = outcome.failedPeers;
+          console.error(chalk.yellow(`Warning: ${offline.length} device(s) unreachable, not checked: ${offline.join(', ')}`));
+          console.error(chalk.red(`No session matching "${selector}" on any reachable device (${offline.length} unreachable, not checked).`));
+          console.error(chalk.gray('  If it lives on an offline box, wake it (agents devices) or run there: agents ssh <device>'));
+          process.exit(1);
         }
         if (outcome.kind === 'not-found') {
           console.error(chalk.red(`No session matching "${selector}".`));

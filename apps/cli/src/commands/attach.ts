@@ -26,8 +26,15 @@ export function registerAttachCommand(program: Command): void {
 export async function attachAction(id: string): Promise<void> {
   const outcome = await resolveSessionMetadataValue(id);
   if (outcome.kind === 'partial') {
-    console.error(chalk.red(`Could not resolve session while these devices were unavailable: ${outcome.failedPeers.join(', ')}`));
-    process.exitCode = 2;
+    // RUSH-2492: an unreachable peer is a warning, not a hard failure. The
+    // resolver already resolves an id found on the reachable fleet (SES-9a), so
+    // reaching here means the session was not found on any device we COULD reach
+    // — it may live on one of the unreachable peers, which we could not check.
+    const offline = outcome.failedPeers;
+    console.error(chalk.yellow(`Warning: ${offline.length} device(s) unreachable, not checked: ${offline.join(', ')}`));
+    console.error(chalk.red(`No session matching "${id}" on any reachable device (${offline.length} unreachable, not checked).`));
+    console.error(chalk.gray('  If it lives on an offline box, wake it (agents devices) or run there: agents ssh <device>'));
+    process.exitCode = 1;
     return;
   }
   if (outcome.kind === 'not-found') {
