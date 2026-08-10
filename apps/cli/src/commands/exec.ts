@@ -2167,7 +2167,7 @@ export function registerRunCommand(program: Command): void {
           exitCode: resumeExit,
         });
         // A resumed loop is always headless; surface any commits it left unpushed
-        // and any open PR it left without a durable lander (RUSH-2394).
+        // and any open PR it left unattended (RUSH-2394).
         if (shouldWarnUnpushed(resumeExec.mode ?? 'auto', false)) {
           const resumeCwd = resumeExec.cwd ?? process.cwd();
           await warnUnpushedWork(resumeCwd);
@@ -3276,7 +3276,7 @@ export function registerRunCommand(program: Command): void {
           // the normal finalize below — record its one audit entry.
           recordDispatchedRun({ agent, version: defaultVersion ?? 'unknown', mode, cwd, exitCode });
           // ACP headless run always has a prompt; surface any unpushed commits
-          // and any open PR left without a durable lander (RUSH-2394).
+          // and any open PR left unattended (RUSH-2394).
           if (shouldWarnUnpushed(mode, false)) {
             await warnUnpushedWork(cwd);
             await warnOrphanedOpenPr(cwd);
@@ -3488,8 +3488,8 @@ export function registerRunCommand(program: Command): void {
         cleanupWorkflowSubagents();
         // Surface committed-but-unpushed work a headless writable run left
         // behind, so it isn't silently stranded in a worktree. Also warn when
-        // the branch has an OPEN PR with no durable lander (RUSH-2394) — a
-        // background `gh pr checks --watch` dies with the agent. Advisory only,
+        // the branch still has an OPEN PR (RUSH-2394) — a background
+        // `gh pr checks --watch` dies with the agent. Advisory only,
         // never throws; skipped for interactive runs (the human sees the shell)
         // and read-only plan mode (can't commit).
         if (shouldWarnUnpushed(mode, resolveInteractive(execOptions))) {
