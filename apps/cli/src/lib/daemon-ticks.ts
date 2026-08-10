@@ -29,6 +29,16 @@
 
 import { getConfigValue } from './device-config.js';
 import type { FleetStatusRow } from './fleet-status.js';
+import type { AuthProbeRow } from './auth-health.js';
+
+export function isFreshFleetAuthSnapshot(
+  value: { row: FleetStatusRow; authRows: AuthProbeRow[] },
+  minimumCapturedAt: number,
+): boolean {
+  return value.row.capturedAt >= minimumCapturedAt
+    && value.authRows.length > 0
+    && value.authRows.every(authRow => authRow.health.checkedAt >= minimumCapturedAt);
+}
 
 /** ~every 3 min. Mirrors the old WATCHDOG_TICK_MS. */
 export async function runWatchdogTick(): Promise<void> {
@@ -124,7 +134,7 @@ export async function refreshLocalFleetAuthState(): Promise<{ row: FleetStatusRo
     // During mixed-version rollout the former system routine may still fire.
     // A recent daemon publication is the completed result, not a reason to
     // probe every provider a second time.
-    isCompleted: (value) => value.row.capturedAt >= minimumCapturedAt,
+    isCompleted: (value) => isFreshFleetAuthSnapshot(value, minimumCapturedAt),
     refresh: async () => {
       const authRows = await probeLocalFleetAuth({ cliVersion: getCliVersion() });
       writeFleetAuthRows(self, authRows);

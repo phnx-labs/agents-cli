@@ -12,7 +12,19 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { DAEMON_TICKS, runDaemonTick } from './daemon-ticks.js';
+import { DAEMON_TICKS, isFreshFleetAuthSnapshot, runDaemonTick } from './daemon-ticks.js';
+
+describe('isFreshFleetAuthSnapshot', () => {
+  const minimum = 1_000;
+  const row = { host: 'host-a', agents: { running: 0, live: 0, byContext: {}, byAgent: {} }, stats: null, capturedAt: minimum };
+  const authRow = { agent: 'claude' as const, version: '1.0.0', health: { verdict: 'live' as const, checkedAt: minimum } };
+
+  it('requires auth rows captured in the same freshness window as fleet status', () => {
+    expect(isFreshFleetAuthSnapshot({ row, authRows: [] }, minimum)).toBe(false);
+    expect(isFreshFleetAuthSnapshot({ row, authRows: [{ ...authRow, health: { ...authRow.health, checkedAt: minimum - 1 } }] }, minimum)).toBe(false);
+    expect(isFreshFleetAuthSnapshot({ row, authRows: [authRow] }, minimum)).toBe(true);
+  });
+});
 
 describe('DAEMON_TICKS registry', () => {
   it('has exactly the 8 names the shipped system routine YAML invokes', () => {
