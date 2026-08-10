@@ -115,8 +115,20 @@ describe('applyAddDirs — grok', () => {
 
     const toml = fs.readFileSync(path.join(tmp, '.grok', 'sandbox.toml'), 'utf-8');
     expect(toml).toContain(`[profiles.${GROK_PROJECT_SANDBOX_PROFILE}]`);
+    expect(toml).toContain('extends = "workspace"');
     expect(toml).toContain('"/sib/a"');
     expect(toml).toContain('read_write');
+  });
+
+  it('when GROK_SANDBOX=strict, extends strict (does not widen to workspace)', () => {
+    const cmd = ['grok'];
+    applyAddDirs('grok', cmd, ['/sib/a'], {
+      cwd: tmp,
+      env: { GROK_SANDBOX: 'strict' },
+    });
+    const toml = fs.readFileSync(path.join(tmp, '.grok', 'sandbox.toml'), 'utf-8');
+    expect(toml).toContain('extends = "strict"');
+    expect(toml).not.toContain('extends = "workspace"');
   });
 
   it('replaces a prior --sandbox pair when widening', () => {
@@ -151,5 +163,19 @@ describe('applyAddDirs — grok', () => {
     expect(text).toContain('- /x');
     expect(text).toContain('- /y');
     expect(text).toMatch(/read \+ write/i);
+  });
+
+  it('refuses to append a second agents-project when a bare hand-written block exists', () => {
+    const grokDir = path.join(tmp, '.grok');
+    fs.mkdirSync(grokDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(grokDir, 'sandbox.toml'),
+      `[profiles.${GROK_PROJECT_SANDBOX_PROFILE}]\nextends = "workspace"\n`,
+      'utf-8',
+    );
+    expect(ensureGrokProjectSandboxProfile(tmp, ['/a'])).toBeNull();
+    const toml = fs.readFileSync(path.join(tmp, '.grok', 'sandbox.toml'), 'utf-8');
+    expect(toml.match(/\[profiles\.agents-project\]/g)).toHaveLength(1);
+    expect(toml).not.toContain('# BEGIN agents-cli managed');
   });
 });

@@ -86,31 +86,50 @@ export function appendNativeAddDirFlags(cmd: string[], dirs: string[]): void {
 export const GROK_PROJECT_SANDBOX_PROFILE = 'agents-project';
 
 /**
- * Whether Grok's active sandbox would block writes outside cwd without a
- * widened profile. `off` / unset / `devbox` do not need a custom profile
- * (devbox already writes almost everywhere; off is unrestricted).
+ * Active Grok sandbox profile from the env, if a non-off profile is set.
+ * Returns null when sandbox is off / unset / devbox (no widen needed).
+ *
+ * Only `GROK_SANDBOX` is consulted — a profile set only in config.toml is not
+ * visible here (Grok does not expose it on the CLI), so those runs still get
+ * the rules note but not a custom widen. Prefer env when launching sandboxed.
  */
+export function grokActiveSandboxProfile(env: NodeJS.ProcessEnv = process.env): string | null {
+  const raw = (env.GROK_SANDBOX ?? '').trim();
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  if (lower === 'off' || lower === 'devbox') return null;
+  // Never extend our own managed profile (would recurse).
+  if (lower === GROK_PROJECT_SANDBOX_PROFILE.toLowerCase()) return 'workspace';
+  return raw;
+}
+
+/** Whether Grok's active sandbox needs a custom profile with extra read_write. */
 export function grokNeedsSandboxWiden(env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = (env.GROK_SANDBOX ?? '').trim().toLowerCase();
-  if (!raw || raw === 'off') return false;
-  if (raw === 'devbox') return false;
-  // workspace | read-only | strict | any custom base that extends those
-  return true;
+  return grokActiveSandboxProfile(env) !== null;
 }
 
 /**
  * Ensure `.grok/sandbox.toml` under `cwd` defines `[profiles.agents-project]`
- * with `read_write` covering every grant. Returns the profile name to pass as
- * `--sandbox`, or null when no file write was needed / possible.
+ * with `read_write` covering every grant, **extending the active base profile**
+ * (so `GROK_SANDBOX=strict` does not silently widen to `workspace`).
+ * Returns the profile name to pass as `--sandbox`, or null when not needed.
  *
  * Idempotent: rewrites only the managed profile block.
  */
 export function ensureGrokProjectSandboxProfile(
   cwd: string,
   dirs: string[],
+  opts: { extendsBase?: string } = {},
 ): string | null {
   if (!dirs.length) return null;
   if (!cwd) return null;
+
+  const base = opts.extendsBase ?? 'workspace';
+  // Refuse to extend ourselves or an empty name.
+  const extendsBase =
+    !base || base.toLowerCase() === GROK_PROJECT_SANDBOX_PROFILE.toLowerCase()
+      ? 'workspace'
+      : base;
 
   const grokDir = path.join(cwd, '.grok');
   const sandboxPath = path.join(grokDir, 'sandbox.toml');
@@ -122,7 +141,7 @@ export function ensureGrokProjectSandboxProfile(
   const managedBlock = [
     '# BEGIN agents-cli managed — project multi-repo grants (do not edit by hand)',
     `[profiles.${GROK_PROJECT_SANDBOX_PROFILE}]`,
-    'extends = "workspace"',
+    `extends = ${JSON.stringify(extendsBase)}`,
     'read_write = [',
     readWriteLines,
     ']',
@@ -148,6 +167,14 @@ export function ensureGrokProjectSandboxProfile(
     const endCut = afterEnd === -1 ? existing.length : afterEnd + 1;
     next = existing.slice(0, beginIdx) + managedBlock + existing.slice(endCut);
   } else if (existing.trim()) {
+    // If a hand-written [profiles.agents-project] already exists without our
+    // markers, refuse to append a second block with the same name.
+    const bare = new RegExp(
+      `\\[profiles\\.${GROK_PROJECT_SANDBOX_PROFILE}\\]`,
+    );
+    if (bare.test(existing)) {
+      return null;
+    }
     next = existing.replace(/\s*$/, '\n\n') + managedBlock;
   } else {
     next = managedBlock;
@@ -158,11 +185,17 @@ export function ensureGrokProjectSandboxProfile(
   return GROK_PROJECT_SANDBOX_PROFILE;
 }
 
-/** Short rules blob so Grok's model treats sibling dirs as in-scope. */
-export function grokAddDirRules(dirs: string[]): string {
+/**
+ * Short rules blob so Grok's model treats sibling dirs as in-scope.
+ * Wording tracks whether we actually widened the sandbox for write access.
+ */
+export function grokAddDirRules(dirs: string[], opts: { writeGranted?: boolean } = {}): string {
   const list = dirs.map((d) => `- ${d}`).join('\n');
+  const access = opts.writeGranted === false
+    ? 'intended as first-class workspace roots (OS sandbox may still restrict writes unless GROK_SANDBOX is set so agents-cli can widen it)'
+    : 'read + write';
   return [
-    'Project sibling directories (part of this multi-repo project; read + write):',
+    `Project sibling directories (part of this multi-repo project; ${access}):`,
     list,
     'Treat these as first-class workspace roots alongside the primary cwd.',
   ].join('\n');
@@ -190,22 +223,30 @@ export function applyAddDirs(
   }
 
   if (strategy === 'grok-sandbox') {
-    // Model awareness always — even when the OS sandbox is off.
-    cmd.push('--rules', grokAddDirRules(normalized));
     const env = opts.env ?? process.env;
-    if (grokNeedsSandboxWiden(env)) {
+    const activeBase = grokActiveSandboxProfile(env);
+    let writeGranted = true; // default off sandbox = unrestricted FS
+    if (activeBase) {
       const cwd = opts.cwd ?? process.cwd();
-      const profile = ensureGrokProjectSandboxProfile(cwd, normalized);
+      const profile = ensureGrokProjectSandboxProfile(cwd, normalized, {
+        extendsBase: activeBase,
+      });
       if (profile) {
-        // Drop a prior --sandbox <x> pair so the widened profile wins.
+        // Drop a prior --sandbox <x> pair so the managed profile wins.
         for (let i = cmd.length - 2; i >= 0; i--) {
           if (cmd[i] === '--sandbox') {
             cmd.splice(i, 2);
           }
         }
         cmd.push('--sandbox', profile);
+        writeGranted = true;
+      } else {
+        // Could not write the profile (e.g. hand-owned agents-project block).
+        writeGranted = false;
       }
     }
+    // Model awareness always — even when the OS sandbox is off.
+    cmd.push('--rules', grokAddDirRules(normalized, { writeGranted }));
     return true;
   }
 
