@@ -49,7 +49,15 @@ describe('detectAgentsBinaryShadows', () => {
     try {
       const shadows = detectAgentsBinaryShadows(realAgents, []);
       expect(shadows).toHaveLength(1);
-      expect(fs.realpathSync(shadows[0].path)).toBe(fs.realpathSync(shadowAgents));
+      // Identify the file by its contents, not by path spelling. On Windows the
+      // runner's TMP is an 8.3 short name (C:\Users\RUNNER~1\...) and
+      // fs.realpathSync expands it for a `where`-resolved path but leaves it
+      // short for the path we built from os.tmpdir(), so comparing the two
+      // spellings fails even though both name the same file. `writeBinary` gives
+      // the shadow and the real binary distinct output, so this asserts the
+      // stronger property anyway: the shadow we found is the shadow we wrote.
+      expect(path.basename(shadows[0].path)).toBe(path.basename(shadowAgents));
+      expect(fs.readFileSync(shadows[0].path, 'utf8')).toBe(fs.readFileSync(shadowAgents, 'utf8'));
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
