@@ -1,7 +1,7 @@
 /**
  * Built-in, daemon-owned routine definitions (RUSH-2465).
  *
- * These 8 "daemon housekeeping tick" routines used to be shipped as YAML files
+ * These 6 "daemon housekeeping tick" routines used to be shipped as YAML files
  * in the config repo (`gh:phnx-labs/.agents-system` `routines/*.yml`), pulled
  * onto every install. RUSH-2353 had migrated them off hardcoded daemon
  * `setInterval`s to gain declaration, run history, pause, and device pin; but a
@@ -23,9 +23,9 @@
  * `.agents-system` files are removed, the built-in becomes the active
  * definition with no gap and byte-identical schedule/command.
  *
- * The `schedule`/`timeout` values here mirror the shipped YAML exactly; a test
- * (`builtin-routines.test.ts`) asserts these names set-equal the tick registry
- * (`DAEMON_TICK_ROUTINE_NAMES`) so the two can never drift.
+ * The `schedule`/`timeout` values here mirror the shipped YAML exactly. Usage
+ * and authentication health are excluded because `account-state-service.ts`
+ * owns those first-party caches directly inside the daemon.
  */
 
 import type { JobConfig } from './routines.js';
@@ -40,22 +40,13 @@ interface BuiltinRoutineSpec {
 }
 
 /**
- * The 8 daemon-owned housekeeping routines. Schedules and timeouts are copied
- * verbatim from the `.agents-system` `routines/*.yml` they replace (RUSH-2353,
- * with usage-refresh already at the 5-minute check cadence from RUSH-2451).
+ * The 6 daemon-owned housekeeping routines. Schedules and timeouts are copied
+ * verbatim from the `.agents-system` `routines/*.yml` they replace (RUSH-2353).
  *
  * NOT included: `check-updates` — that is genuine user-facing config sync
  * (`agents repo pull system`), so it stays a system routine and is untouched.
  */
 const BUILTIN_ROUTINE_SPECS: readonly BuiltinRoutineSpec[] = Object.freeze([
-  // Keep the usage cache the `agents run` router reads fresh. Sole writer for
-  // this host's own local accounts; each account is internally on a fixed
-  // 5-minute cadence + 429 backoff, so this clock only decides how often to
-  // CHECK for due accounts (RUSH-2061/2451).
-  { name: 'usage-refresh', schedule: '*/5 * * * *', timeout: '1m' },
-  // Publish THIS host's row for `agents fleet status` / `devices list`.
-  // PUBLISH-OWN / READ-UNION: probes only itself, never SSHes a peer (RUSH-2061).
-  { name: 'fleet-cache-warm', schedule: '*/3 * * * *', timeout: '2m' },
   // Publish THIS host's local active sessions snapshot. Publish-own only (RUSH-2062).
   { name: 'session-cache-warm', schedule: '*/3 * * * *', timeout: '2m' },
   // Refresh device reachability + detect new tailnet nodes (own host's view).
