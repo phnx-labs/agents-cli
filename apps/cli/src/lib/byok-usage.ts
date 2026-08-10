@@ -18,6 +18,8 @@ import { createHash } from 'node:crypto';
 import { getCacheDir } from './state.js';
 import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
 import { withRefreshLease } from './refresh-coordinator.js';
+import { findAccount, resolveCredentialAccount } from './account-registry.js';
+import { getAccountProvider } from './account-provider-registry.js';
 
 export interface ByokBudgetInfo {
   limitUsd: number | null;
@@ -69,7 +71,7 @@ function writeCacheEntry(key: string, entry: CacheEntry): void {
 }
 
 function byokCacheKey(profile: Profile): string {
-  return createHash('sha256').update(`${profile.provider}\0${profile.auth?.keychainItem ?? ''}`).digest('hex');
+  return createHash('sha256').update(`${profile.provider}\0${profile.account ?? profile.auth?.keychainItem ?? ''}`).digest('hex');
 }
 
 export const BYOK_REFRESH_INTERVAL_MS = 5 * 60_000;
@@ -87,21 +89,31 @@ export function resetByokCacheForTest(): void {
 // ─── Provider registry ───────────────────────────────────────────────────────
 
 interface ByokProviderEntry {
-  fetch(keychainItem: string): Promise<ByokUsageResult>;
+  fetch(token: string): Promise<ByokUsageResult>;
 }
 
-async function fetchOpenRouter(keychainItem: string): Promise<ByokUsageResult> {
-  try {
-    if (!hasKeychainToken(keychainItem)) return { budget: null, error: null };
-  } catch {
-    return { budget: null, error: null };
+function resolveByokToken(profile: Profile): string | null {
+  if (profile.account) {
+    try {
+      const account = findAccount(profile.account);
+      if (!account) return null;
+      const resolved = resolveCredentialAccount(profile.account, profile.host.agent, profile.provider);
+      return resolved.env[getAccountProvider(account.provider).envFor(profile.host.agent, account.auth)] ?? null;
+    } catch {
+      return null;
+    }
   }
-  let token: string;
+  const keychainItem = profile.auth?.keychainItem;
+  if (!keychainItem) return null;
   try {
-    token = getKeychainToken(keychainItem);
+    if (!hasKeychainToken(keychainItem)) return null;
+    return getKeychainToken(keychainItem);
   } catch {
-    return { budget: null, error: null };
+    return null;
   }
+}
+
+async function fetchOpenRouter(token: string): Promise<ByokUsageResult> {
   try {
     const res = await _fetch('https://openrouter.ai/api/v1/key', {
       headers: { Authorization: `Bearer ${token}` },
@@ -129,8 +141,36 @@ async function fetchOpenRouter(keychainItem: string): Promise<ByokUsageResult> {
   }
 }
 
+async function fetchDeepInfra(token: string): Promise<ByokUsageResult> {
+  try {
+    const res = await _fetch('https://api.deepinfra.com/payment/checklist', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return { budget: null, error: `HTTP ${res.status}` };
+    const json = (await res.json()) as { stripe_balance: number; recent: number; limit: number | null };
+    const limitUsd = json.limit !== null && json.limit >= 0 ? json.limit : null;
+    const usedUsd = json.recent;
+    const remainingUsd = limitUsd !== null
+      ? Math.max(0, limitUsd - usedUsd)
+      : json.stripe_balance < 0 ? -json.stripe_balance : null;
+    return {
+      budget: {
+        limitUsd,
+        remainingUsd,
+        usedUsd,
+        usedPercent: limitUsd !== null && limitUsd > 0 ? (usedUsd / limitUsd) * 100 : null,
+        fetchedAt: new Date(),
+      },
+      error: null,
+    };
+  } catch (err) {
+    return { budget: null, error: String(err) };
+  }
+}
+
 const BYOK_REGISTRY: Record<string, ByokProviderEntry> = {
   openrouter: { fetch: fetchOpenRouter },
+  deepinfra: { fetch: fetchDeepInfra },
 };
 
 export function hasByokProvider(provider: string): boolean {
@@ -170,8 +210,7 @@ export async function getByokUsageForHarness(
   profile: Profile,
   opts?: { forceRefresh?: boolean },
 ): Promise<ByokUsageResult | null> {
-  if (!profile.provider || !hasByokProvider(profile.provider) || !profile.auth) return null;
-  const keychainItem = profile.auth.keychainItem;
+  if (!profile.provider || !hasByokProvider(profile.provider) || (!profile.auth && !profile.account)) return null;
   const provider = BYOK_REGISTRY[profile.provider];
   const cacheKey = byokCacheKey(profile);
   const cached = readCache()[cacheKey];
@@ -184,7 +223,8 @@ export async function getByokUsageForHarness(
     readCompleted: () => readCache()[cacheKey] ?? null,
     isCompleted: (entry) => entry.fetchedAt > previousFetchedAt,
     refresh: async () => {
-      const result = await provider.fetch(keychainItem);
+      const token = resolveByokToken(profile);
+      const result = token ? await provider.fetch(token) : { budget: null, error: null };
       const entry = { result, fetchedAt: Math.max(Date.now(), previousFetchedAt + 1) };
       writeCacheEntry(cacheKey, entry);
       return entry;
@@ -199,7 +239,7 @@ export async function refreshDueByokUsage(
 ): Promise<{ refreshed: number; skipped: number }> {
   const due = new Map<string, Profile>();
   for (const profile of profiles) {
-    if (!profile.provider || !profile.auth || !hasByokProvider(profile.provider)) continue;
+    if (!profile.provider || (!profile.auth && !profile.account) || !hasByokProvider(profile.provider)) continue;
     due.set(byokCacheKey(profile), profile);
   }
 

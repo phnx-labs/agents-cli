@@ -68,11 +68,8 @@ const ADAPTERS = new Map<string, AccountProviderAdapter>([
   ['deepinfra', fixed(
     'deepinfra',
     ['api-key'],
-    { codex: 'OPENAI_API_KEY', opencode: 'OPENAI_API_KEY' },
-    {
-      codex: { OPENAI_BASE_URL: 'https://api.deepinfra.com/v1/openai' },
-      opencode: { OPENAI_BASE_URL: 'https://api.deepinfra.com/v1/openai' },
-    },
+    { codex: 'OPENAI_API_KEY' },
+    { codex: { OPENAI_BASE_URL: 'https://api.deepinfra.com/v1/openai' } },
   )],
   ['openai', fixed('openai', ['api-key'], { codex: 'OPENAI_API_KEY', opencode: 'OPENAI_API_KEY' }, {}, { codex: 'OPENAI_BASE_URL', opencode: 'OPENAI_BASE_URL' })],
   ['xai', fixed('xai', ['api-key'], { grok: 'XAI_API_KEY', claude: 'ANTHROPIC_AUTH_TOKEN' })],
