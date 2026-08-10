@@ -98,7 +98,7 @@
           "options": [
             {
               "flags": "--provider <provider>",
-              "description": "Credential provider (anthropic, bedrock, cursor, foundry, google, litellm, ollama, openai, opencode, openrouter, proxy, truefoundry, vllm, xai)",
+              "description": "Credential provider (anthropic, bedrock, cursor, deepinfra, foundry, google, litellm, ollama, openai, opencode, openrouter, proxy, truefoundry, vllm, xai)",
               "long": "--provider",
               "required": true,
               "optional": false,
