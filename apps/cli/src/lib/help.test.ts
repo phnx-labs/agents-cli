@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { describe, expect, it } from 'vitest';
 
-import { applyGlobalHelpConventions, setHelpSections } from './help.js';
+import { applyGlobalHelpConventions, registerCommandGroups, setHelpSections } from './help.js';
 
 function buildTestCommand(opts: { examples?: string; notes?: string } = {}): Command {
   const root = new Command('agents');
@@ -83,5 +83,62 @@ describe('setHelpSections + formatHelpCommandsFirst', () => {
     expect(help).toContain('  Modes:');
     expect(help).toContain('    plan  read-only');
     expect(help).toContain('    edit  can write');
+  });
+});
+
+describe('registerCommandGroups', () => {
+  function buildGroupedParent(): Command {
+    const root = new Command('agents');
+    const parent = root.command('devices').description('Device registry.');
+    for (const name of ['sync', 'list', 'show', 'status', 'prefer']) {
+      parent.command(name).description(`${name} devices.`);
+    }
+    applyGlobalHelpConventions(root);
+    registerCommandGroups(parent, [
+      { title: 'Discover & register', names: ['sync'] },
+      { title: 'Inspect', names: ['list', 'show', 'status'] },
+    ]);
+    return parent;
+  }
+
+  it('renders groups as titled sections in the registered order', () => {
+    const help = buildGroupedParent().helpInformation();
+
+    const discoverIdx = help.indexOf('Discover & register:');
+    const inspectIdx = help.indexOf('Inspect:');
+
+    expect(discoverIdx).toBeGreaterThanOrEqual(0);
+    expect(inspectIdx).toBeGreaterThan(discoverIdx);
+    expect(help.slice(discoverIdx, inspectIdx)).toContain('sync');
+    expect(help.slice(inspectIdx)).toContain('list');
+    expect(help.slice(inspectIdx)).toContain('show');
+    expect(help.slice(inspectIdx)).toContain('status');
+  });
+
+  it('renders ungrouped subcommands under a plain Commands section after the groups', () => {
+    const help = buildGroupedParent().helpInformation();
+
+    const inspectIdx = help.indexOf('Inspect:');
+    const commandsIdx = help.indexOf('Commands:');
+
+    expect(commandsIdx).toBeGreaterThan(inspectIdx);
+    expect(help.slice(commandsIdx)).toContain('prefer');
+    expect(help.slice(commandsIdx)).not.toContain('sync');
+  });
+
+  it('skips a group whose names match no visible subcommand', () => {
+    const root = new Command('agents');
+    const parent = root.command('devices').description('Device registry.');
+    parent.command('list').description('List devices.');
+    applyGlobalHelpConventions(root);
+    registerCommandGroups(parent, [
+      { title: 'Ghost group', names: ['nope'] },
+      { title: 'Inspect', names: ['list'] },
+    ]);
+    const help = parent.helpInformation();
+
+    expect(help).not.toContain('Ghost group:');
+    expect(help).toContain('Inspect:');
+    expect(help).not.toContain('Commands:');
   });
 });

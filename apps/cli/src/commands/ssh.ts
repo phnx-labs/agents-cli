@@ -129,7 +129,7 @@ import {
 } from '../lib/auth-health.js';
 import { runFleetLogin, type LoginStatus } from '../lib/fleet/remote-login.js';
 import { getConfigValue, listConfig, setConfigValue, unsetConfigValue } from '../lib/device-config.js';
-import { setHelpSections } from '../lib/help.js';
+import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 
 /** One-line summary of a device for `list`. `isSelf` marks the machine this
  * command is running on so it stands out from the rest of the tailnet.
@@ -1048,26 +1048,46 @@ function registerDevicesCommands(program: Command): void {
   const devicesCmd = program
     .command('devices')
     .alias('fleet')
-    .description('Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale. Alias: fleet.')
-    .addHelpText('after', `
-Typical workflow:
-  agents devices sync            # curate: pick which tailscale nodes to keep (TTY)
-  agents devices sync --yes      # non-interactive: register all non-ignored nodes
-  agents devices list            # see what's registered (★ = interactive host)
-  agents devices ignore ipad165  # dismiss a node so it's never re-suggested
-  agents devices disable zion    # exclude a device from Factory auto-launch
-  agents devices prefer mac-mini # boost a device in Factory auto-launch ranking
-  agents devices set-interactive zion        # where agents show YOU artifacts
-  agents devices configure mac-mini --max-agents 4 --scheduler off
-  agents devices note mac-mini "runs the releases — don't reboot"
-  agents devices set win-mini --auth password --bundle muqsit
-  agents devices set worker --auth key --identity-file ~/.ssh/worker_ed25519
-  agents devices render --write  # write ~/.ssh/config.d/agents include
-  agents fleet update            # roll out latest agents-cli to every online device
-  agents fleet run uname -a      # run a command on every online device
+    .description('Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale. Alias: fleet.');
 
-\`agents fleet\` is an alias for \`agents devices\` — same subcommands.
-`);
+  setHelpSections(devicesCmd, {
+    examples: `
+      Discover & register:
+        agents devices sync            # pick which tailscale nodes to keep (TTY)
+        agents devices sync --yes      # register all non-ignored nodes
+        agents devices ignore ipad165  # dismiss a node so it's never re-suggested
+
+      Inspect:
+        agents devices list            # what's registered (★ = interactive host)
+        agents devices status          # live reachability + load
+        agents devices ping            # quick liveness probe
+
+      Configure a device:
+        agents devices set-interactive zion   # where agents show YOU artifacts
+        agents devices configure mac-mini --max-agents 4 --scheduler off
+        agents devices note mac-mini "runs the releases — don't reboot"
+        agents devices set win-mini --auth password --bundle muqsit
+        agents devices set worker --auth key --identity-file ~/.ssh/worker_ed25519
+        agents devices render --write  # write ~/.ssh/config.d/agents include
+
+      Factory auto-launch:
+        agents devices prefer mac-mini   # boost in auto-launch ranking
+        agents devices disable zion      # exclude from auto-launch
+
+      Fleet operations:
+        agents fleet update              # roll out latest agents-cli everywhere
+        agents fleet run uname -a        # run a command on every online device
+    `,
+    notes: '`agents fleet` is an alias for `agents devices` — same subcommands.',
+  });
+
+  registerCommandGroups(devicesCmd, [
+    { title: 'Discover & register', names: ['sync', 'register', 'add', 'ignore', 'unignore', 'rm'] },
+    { title: 'Inspect', names: ['list', 'show', 'status', 'ping', 'harnesses', 'accounts'] },
+    { title: 'Configure a device', names: ['set', 'configure', 'note', 'set-interactive', 'render'] },
+    { title: 'Factory auto-launch', names: ['enable', 'disable', 'prefer', 'unprefer'] },
+    { title: 'Fleet operations', names: ['update', 'run', 'login', 'pair-ios', 'capture', 'apply'] },
+  ]);
 
   devicesCmd
     .command('sync')
