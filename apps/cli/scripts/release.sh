@@ -573,7 +573,9 @@ while read -r _sha _ref; do
   fi
 done <<< "$REMOTE_TAG_LINES"
 
-UNPUBLISHED_TAG="$(printf '%s' "$TAG_FACTS" | scripts/stuck-release.sh "$PHNX_LATEST" || true)"
+# $BUMP + $PKG_JSON_VERSION let stuck-release.sh exempt the one deadlock case:
+# patch-from-main stepping over main's own unpublishable version (see its header).
+UNPUBLISHED_TAG="$(printf '%s' "$TAG_FACTS" | scripts/stuck-release.sh "$PHNX_LATEST" "$BUMP" "$PKG_JSON_VERSION" || true)"
 
 if [[ -n "$UNPUBLISHED_TAG" && "$UNPUBLISHED_TAG" != "$TARGET" ]]; then
   red "v$UNPUBLISHED_TAG is tagged but was never published -- finish that release first."

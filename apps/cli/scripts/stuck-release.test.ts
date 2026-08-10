@@ -16,9 +16,14 @@ import * as path from 'path';
 const SCRIPT = path.resolve(__dirname, 'stuck-release.sh');
 
 /** Run the real script. Returns the stuck version, or null when nothing is stuck. */
-function stuck(registryLatest: string, tags: Array<[string, 'yes' | 'no']>) {
+function stuck(
+  registryLatest: string,
+  tags: Array<[string, 'yes' | 'no']>,
+  bump?: { kind: string; mainVersion: string },
+) {
   const input = tags.map(([v, published]) => `${v} ${published}`).join('\n') + '\n';
-  const r = spawnSync('bash', [SCRIPT, registryLatest], { input, encoding: 'utf-8' });
+  const args = bump ? [registryLatest, bump.kind, bump.mainVersion] : [registryLatest];
+  const r = spawnSync('bash', [SCRIPT, ...args], { input, encoding: 'utf-8' });
   return r.status === 0 ? r.stdout.trim() : null;
 }
 
@@ -201,3 +206,42 @@ describe('stuck-release: version ordering', () => {
   });
 });
 
+
+describe('stuck-release: the 2026-08-10 deadlock', () => {
+  // npm at 1.22.35, main carrying 1.22.36, v1.22.36 tagged but unpublishable
+  // (its CI-tested tree predates the prepack version-gate fix 1dffc78bc, so its
+  // own `npm publish` rejects a correct binary). Both guards fired and each named
+  // the other as the way out, so no version could ship at all.
+  const TAGS: Array<[string, 'yes' | 'no']> = [
+    ['1.22.35', 'yes'],
+    ['1.22.36', 'no'],
+  ];
+
+  it('still blocks a plain patch bump past the stuck tag', () => {
+    expect(stuck('1.22.35', TAGS, { kind: 'patch', mainVersion: '1.22.36' })).toBe('1.22.36');
+  });
+
+  it('lets patch-from-main step over main own unpublishable version', () => {
+    expect(stuck('1.22.35', TAGS, { kind: 'patch-from-main', mainVersion: '1.22.36' })).toBeNull();
+  });
+
+  it('does not exempt a stuck tag that is NOT main own version', () => {
+    // A release that genuinely died between tag and publish still blocks, even
+    // under patch-from-main — otherwise the exemption would reopen the gap-widening
+    // bug this whole script exists to prevent.
+    expect(
+      stuck(
+        '1.22.35',
+        [
+          ['1.22.36', 'no'],
+          ['1.22.37', 'no'],
+        ],
+        { kind: 'patch-from-main', mainVersion: '1.22.37' },
+      ),
+    ).toBe('1.22.36');
+  });
+
+  it('keeps blocking when no bump kind is supplied (unchanged default)', () => {
+    expect(stuck('1.22.35', TAGS)).toBe('1.22.36');
+  });
+});
