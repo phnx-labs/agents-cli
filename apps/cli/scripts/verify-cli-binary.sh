@@ -38,12 +38,15 @@ fi
 
 # scripts/build-bin.sh bakes the version in as `const VERSION = "<v>";` and
 # bun's bundler carries it into the binary as `var VERSION = "<v>";` (no
-# minification here). Grep the keyword-independent tail so a const/var change
-# in the bundler can't break the gate; -a because grep otherwise refuses to
-# match inside a binary. Runs even where the Mach-O cannot execute (Linux
-# release box).
+# minification here) — or, when it merges adjacent declarations, as
+# `var VERSION = "<v>", NEXT_CONST = …;` (observed with bun 1.3.14 once the
+# RUSH-2335 bootstrap split put another const right after VERSION). Grep only
+# up to the closing quote so declaration merging can't false-fail the gate;
+# the quoted version is already an exact match. -a because grep otherwise
+# refuses to match inside a binary. Runs even where the Mach-O cannot execute
+# (Linux release box).
 version="$(node -p "require('./package.json').version")"
-if ! LC_ALL=C grep -aqF "VERSION = \"$version\";" "$BIN"; then
+if ! LC_ALL=C grep -aqF "VERSION = \"$version\"" "$BIN"; then
   echo "dist/bin/agents does not embed version $version - stale binary; re-run scripts/sign-cli-binary.sh" >&2
   exit 1
 fi
