@@ -132,10 +132,7 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
     const child = spawnHoldingSessionId(UUID, { cwd: wt });
     const pid = child.pid!;
 
-    // Wait for the OS to report the process as `claude` (comm basename) — that
-    // is the precondition the scan reads, so asserting before it holds tests
-    // the scheduler, not the scan.
-    const comm = await waitFor(() => {
+    const commOf = (): string | undefined => {
       try {
         return execFileSync('ps', ['-p', String(pid), '-o', 'comm='], {
           encoding: 'utf-8',
@@ -144,20 +141,9 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
       } catch {
         return undefined;
       }
-    });
-    // RUSH-2508: on some platforms this holder is unclassifiable by the time we
-    // can observe it. `ps -o comm=` on Linux reports the THREAD name, and node
-    // renames its main thread shortly after boot — measured on Node 24, comm
-    // flips to `MainThread` within a second, while Node 22 keeps `claude`. The
-    // scan then correctly stops treating the process as an agent, so there is
-    // nothing left for this case to assert. Gate on the observed comm rather
-    // than on the platform: an environment where comm stays usable (macOS,
-    // Windows, Linux on an older node) keeps full coverage, and only the
-    // environment that cannot support the case skips, naming why.
-    if (!comm || !/^claude/.test(path.basename(comm))) {
-      ctx.skip(`ps reports comm='${comm ?? '<unreadable>'}' for the holder, not an agent name — see RUSH-2508`);
-      return;
-    }
+    };
+    const classifiable = (comm: string | undefined): boolean =>
+      !!comm && /^claude/.test(path.basename(comm));
 
     let rows: Awaited<ReturnType<typeof listUnattributedActive>> = [];
     const hit = await waitFor(async () => {
@@ -165,6 +151,20 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
       rows = await listUnattributedActive(new Set());
       return rows.find((r) => r.sessionId === UUID || r.pid === pid);
     });
+
+    // RUSH-2508: read the holder's comm AFTER the scan, not before. `ps -o comm=`
+    // on Linux reports the THREAD name, and node renames its main thread a beat
+    // after boot — measured on Node 24 it flips to `MainThread` within a second,
+    // while Node 22 keeps `claude`. Sampling before the scan therefore proves
+    // nothing: the value can be `claude` at the check and `MainThread` by the
+    // time the scan reads it, which is exactly how `build (ubuntu-latest, 24)`
+    // failed with an EMPTY row set while ubuntu-22, macOS and Windows passed. If
+    // the holder is no longer classifiable, the scan is right to omit it and
+    // there is nothing left for this case to assert.
+    if (!hit && !classifiable(commOf())) {
+      ctx.skip(`ps reports comm='${commOf() ?? '<unreadable>'}' for the holder, not an agent name — see RUSH-2508`);
+      return;
+    }
     expect(hit, `expected active row for ${UUID} / pid ${pid}; got ${rows.map((r) => `${r.pid}:${r.sessionId}`).join(', ')}`).toBeDefined();
     expect(hit!.sessionId).toBe(UUID);
     // cwd should be the worktree path (lsof) when recoverable.
