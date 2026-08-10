@@ -161,15 +161,17 @@ export function remoteSecretsRaw(
   opts: { tty?: boolean; input?: string; osLookupName?: string; secret?: boolean } = {},
 ): SshExecResult {
   const remoteCmd = buildRemoteAgentsInvocation(['secrets', ...args], undefined, osForTarget(target, opts.osLookupName));
-  // A `-tt` session forces a fresh connection; a secret-bearing call (the push
-  // transport and its policy/literal follow-ups) additionally pins the managed
-  // host key and refuses to multiplex — see `credentialTransportSshOpts`
-  // (RUSH-2527). A plain browse `list` inherits the shared multiplexed baseline.
+  // A secret-bearing call (`secret: true`) pins the managed host key and refuses
+  // to multiplex — see `credentialTransportSshOpts` (RUSH-2527). A `-tt` session
+  // (a remote reveal/passphrase prompt) additionally allocates a PTY and never
+  // multiplexes, and it COMPOSES with the secret posture: a `view --reveal` over
+  // `--host` both prompts AND streams the plaintext value back over ssh stdout,
+  // so it needs the managed host-key pin too — `tty` must not short-circuit past
+  // `secret`. A plain browse `list` passes neither and keeps the shared baseline.
+  const posture = opts.secret ? credentialTransportSshOpts(target) : {};
   const conn = opts.tty
-    ? { extraSshArgs: ['-tt'], multiplex: false as const }
-    : opts.secret
-      ? credentialTransportSshOpts(target)
-      : {};
+    ? { ...posture, extraSshArgs: ['-tt'], multiplex: false as const }
+    : posture;
   return sshExec(target, remoteCmd, {
     timeoutMs: REMOTE_TIMEOUT_MS,
     input: opts.input,
@@ -192,7 +194,10 @@ export function remoteSecretsRaw(
  */
 export function remoteSecretsStream(target: string, args: string[], opts: { osLookupName?: string } = {}): number {
   const remoteCmd = buildRemoteAgentsInvocation(['secrets', ...args], undefined, osForTarget(target, opts.osLookupName));
-  return sshStream(target, remoteCmd, { tty: true });
+  // `unlock --host` carries the remote bundle's passphrase to the destination over
+  // this interactive channel, so it is secret-bearing: pin the managed host key
+  // (a changed key is refused) and never multiplex (RUSH-2527).
+  return sshStream(target, remoteCmd, { tty: true, ...credentialTransportSshOpts(target) });
 }
 
 /**

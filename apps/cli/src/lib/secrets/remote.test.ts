@@ -210,6 +210,18 @@ describe('remoteSecretsRaw', () => {
     expect(kv.some((s) => s.startsWith('UserKnownHostsFile='))).toBe(true);
     expect(kv.some((s) => s.startsWith('StrictHostKeyChecking='))).toBe(true);
   });
+
+  it('tty COMPOSES with secret — a remote `view --reveal` both prompts AND pins the host key (RUSH-2527)', () => {
+    // `tty` must not short-circuit past `secret`: a `view --reveal` over `--host`
+    // allocates a PTY (for the prompt) AND streams the plaintext value back, so
+    // it needs the managed host-key pin, not just `-tt` + no-multiplex.
+    sshExecMock.mockReturnValue(ok('SECRET_VALUE'));
+    remoteSecretsRaw('mac-mini', ['view', 'b', '--reveal'], { tty: true, secret: true });
+    const opts = sshExecMock.mock.calls[0][2] ?? {};
+    expect(opts.extraSshArgs).toEqual(['-tt']);
+    expect(opts.multiplex).toBe(false);
+    expect(optValues(opts.hostKeyOpts).some((s) => s.startsWith('StrictHostKeyChecking='))).toBe(true);
+  });
 });
 
 describe('credentialTransportSshOpts (RUSH-2527)', () => {

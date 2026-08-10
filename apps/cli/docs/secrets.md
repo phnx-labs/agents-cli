@@ -266,14 +266,18 @@ agents run claude "ship it" --secrets r2.backups@yosemite-s1   # bundle@host suf
   `view --reveal` from an interactive terminal (it forces an SSH TTY so the prompt
   can surface). This machine's passphrase is never forwarded.
 - **Secret-bearing transports are pinned and never reused (RUSH-2527).** Any call
-  that moves credential bytes — the `export --host` / `accounts sync` push, its
-  read-back and policy follow-ups, and a remote **resolve** (`exec --host`,
-  `run --secrets b@host`) whose plaintext returns over ssh stdout — verifies the
-  destination against the CLI-managed known_hosts store (a **changed** host key is
-  refused) and forces a fresh connection with no lingering `ControlMaster` socket,
-  so no unrelated later `agents` invocation can reuse the authenticated channel to
-  a box you just shipped secrets to. Read-only `list --host` browsing keeps the
-  fast shared-connection baseline.
+  that moves credential bytes verifies the destination against the CLI-managed
+  known_hosts store (a **changed** host key is refused) and forces a fresh
+  connection with no lingering `ControlMaster` socket, so no unrelated later
+  `agents` invocation can reuse the authenticated channel to a box you just
+  touched secrets on. This covers the `export --host` / `accounts sync` push and
+  its read-back / policy follow-ups; a remote **resolve** (`exec --host`,
+  `run --secrets b@host`); a **`view --reveal --host`** (the plaintext value
+  returns over ssh stdout — on the interactive prompt path and the `--plaintext`
+  non-interactive path alike); and **`unlock --host`** (you type the remote
+  bundle's passphrase over the channel). Read-only `list --host` and a masked
+  `view --host` (no `--reveal`) carry no secret bytes and keep the fast
+  shared-connection baseline.
 
 ### Pushing to a headless sign host — use `--remote-backend file`
 
