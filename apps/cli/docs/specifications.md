@@ -814,8 +814,9 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `sync`, `resume
   protocol so an older unsafe peer rejects before serializing a row. An incomplete
   peer sweep (including malformed successful output, device-registry failure, or an
   older peer rejecting that protocol) MUST emit no JSON, MUST NOT decide
-  unique/no-match from partial rows, and MUST exit 2 with the failed source(s) on
-  stderr — **except** for the SES-9a case, where a selector that is a complete id
+  unique/no-match from partial rows, and MUST warn with the failed source(s) on
+  stderr and exit 1 as a degraded not-found-on-the-reachable-fleet result, not a
+  hard abort — **except** for the SES-9a case, where a selector that is a complete id
   or at least 8 hex characters wide and matches exactly one session on the
   reachable fleet MUST resolve and emit its row; a keyword, a shorter selector, or
   a label still MUST NOT be decided from partial rows
@@ -824,6 +825,15 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `sync`, `resume
   `metadataResolveForwardedArgs`; tests
   `commands/sessions.test.ts`,
   `lib/session/remote-list.test.ts`).
+
+  *Amended 2026-08-10 (RUSH-2492).* This requirement previously mandated exit 2
+  for an incomplete peer sweep, aborting `--resolve` outright whenever any peer
+  was malformed, protocol-incompatible, or unreachable — even when the session in
+  question lived on a perfectly reachable device. `attach`/`focus`/`resume`/`run
+  --resume` hit the same abort through the shared resolver. It now degrades to a
+  warning and exit 1, matching `sessions --resolve`'s existing not-found exit
+  code, so a genuinely offline or misbehaving peer no longer blocks resolving a
+  session that IS reachable.
 - **SES-IF-2b (MUST).** A positional query that exactly names an installed
   `<agent>@<version>` MUST route to the same structured agent/version filter as
   `--agent <agent@version>`. An uninstalled, unknown, or malformed pair MUST

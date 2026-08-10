@@ -1377,10 +1377,12 @@ describe('agents sessions --resolve local-peer critical path', () => {
         repoDir,
         tempHome,
       );
-      expect(result.status).toBe(2);
+      // RUSH-2492: an incomplete peer sweep degrades to a warning + exit 1
+      // instead of the old hard-abort exit 2 (SES-IF-2a, amended 2026-08-10).
+      expect(result.status).toBe(1);
       expect(result.stdout).toBe('');
       expect(result.stderr).toContain(peer.target);
-      expect(result.stderr).toContain('No unique/no-match decision was made.');
+      expect(result.stderr).toContain('unreachable, not checked');
       expect(fs.readFileSync(peer.proofFile, 'utf-8')).toBe(
         "1.20.88:unknown option '--resolve-safe-v1'\n",
       );
@@ -1406,17 +1408,19 @@ describe('agents sessions --resolve local-peer critical path', () => {
         repoDir,
         tempHome,
       );
-      expect(result.status).toBe(2);
+      // RUSH-2492: an incomplete peer sweep degrades to a warning + exit 1
+      // instead of the old hard-abort exit 2 (SES-IF-2a, amended 2026-08-10).
+      expect(result.status).toBe(1);
       expect(result.stdout).toBe('');
       expect(result.stderr).toContain(peer.target);
-      expect(result.stderr).toContain('No unique/no-match decision was made.');
+      expect(result.stderr).toContain('unreachable, not checked');
     } finally {
       if (peer) await stopSessionResolverSshPeer(peer);
       rmTempHomeWithRetries(tempHome);
     }
   });
 
-  it('exits 2 when the real parent cannot read the device registry', () => {
+  it('exits 1 when the real parent cannot read the device registry', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-resolve-registry-'));
     try {
       writeUpdateCache(tempHome);
@@ -1431,7 +1435,9 @@ describe('agents sessions --resolve local-peer critical path', () => {
         tempHome,
         { AGENTS_DEVICES_DIR: devicesDir },
       );
-      expect(result.status).toBe(2);
+      // RUSH-2492: an incomplete peer sweep degrades to a warning + exit 1
+      // instead of the old hard-abort exit 2 (SES-IF-2a, amended 2026-08-10).
+      expect(result.status).toBe(1);
       expect(result.stdout).toBe('');
       expect(result.stderr).toContain('device registry');
     } finally {
