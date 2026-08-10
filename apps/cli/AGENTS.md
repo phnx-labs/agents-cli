@@ -646,9 +646,9 @@ merge the PR, push the tag — and only fail at the sign step, leaving a
 tagged-but-**unpublished** release (RUSH-2535; npm stuck at 1.22.35 with `v1.22.36`
 tagged). `release.sh` now **preflights the resolved home base BEFORE any mutation**
 ([`scripts/signing-home-base-probe.sh`](scripts/signing-home-base-probe.sh), run on
-that box over `agents ssh`): an unprovisioned `--device` aborts at `[1/6]` with the
-exact gap, before the crabbox/PR/merge/tag phases, so a mac-mini outage no longer
-risks a half-finished release. Provisioning a *new* signing home base (seeding the
+that box over `agents ssh`): an unprovisioned `--device` aborts at the preflight,
+before the crabbox/PR/merge/tag phases, naming the exact gap, so a mac-mini outage
+no longer risks a half-finished release. Provisioning a *new* signing home base (seeding the
 keychain, the pass files, and the secrets bundles) is tracked by **RUSH-2541** — do
 that first, then `--device <that-mac>` works.
 

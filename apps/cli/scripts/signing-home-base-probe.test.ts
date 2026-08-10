@@ -118,3 +118,71 @@ describe('release.sh: the preflight gates the mutating phases', () => {
     expect(call).toBeLessThan(lineOf(/^git push origin "v\$TARGET"$/)); // the primary tag push
   });
 });
+
+/**
+ * Execute the REAL `assert_signing_home_base` function body under the same
+ * `set -euo pipefail` release.sh runs with. The static ordering test above
+ * proves the call is placed right; this proves the function itself fails LOUD.
+ *
+ * The bug this guards (found in review of the first cut): `out="$(cmd)"; rc=$?`
+ * under errexit terminates the script AT the assignment when the probe fails,
+ * before `rc=$?` runs -- so the diagnostic dump and the `die` message were dead
+ * code and the release aborted with no stated reason. The `&& rc=0 || rc=$?`
+ * form is what keeps the die branch reachable.
+ */
+function runAssert(probeExit: 'fail' | 'pass'): { status: number | null; out: string } {
+  // Extract the function definition (from its header to the first line that is a
+  // bare `}` at column 0) rather than sourcing release.sh, which executes.
+  const lines = fs.readFileSync(RELEASE, 'utf-8').split('\n');
+  const start = lines.findIndex((l) => l.startsWith('assert_signing_home_base() {'));
+  expect(start, 'assert_signing_home_base() { not found').toBeGreaterThanOrEqual(0);
+  const end = lines.findIndex((l, i) => i > start && l === '}');
+  expect(end, 'closing } for assert_signing_home_base not found').toBeGreaterThan(start);
+  const fnBody = lines.slice(start, end + 1).join('\n');
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'assert-preflight-'));
+  fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+  // Stand in for the probe with a real script on the exact path the function
+  // invokes (`scripts/signing-home-base-probe.sh`, run in ON_HOME_BASE mode).
+  const stub =
+    probeExit === 'fail'
+      ? "#!/usr/bin/env bash\nprintf 'MISSING: no cert\\n' >&2\nexit 1\n"
+      : '#!/usr/bin/env bash\necho OK\nexit 0\n';
+  fs.writeFileSync(path.join(dir, 'scripts/signing-home-base-probe.sh'), stub, { mode: 0o755 });
+
+  // Harness: the real release.sh errexit settings + minimal stubs for the shell
+  // helpers the function calls, then the real function body, then invoke it.
+  const harness = [
+    'set -euo pipefail',
+    'ON_HOME_BASE=true',
+    'RELEASE_HOME_BASE=testbox',
+    'bold(){ :; }',
+    "phase_ok(){ printf 'PHASE_OK: %s\\n' \"$1\"; }",
+    "die(){ printf 'DIE: %s\\n' \"$1\" >&2; exit 1; }",
+    fnBody,
+    'assert_signing_home_base',
+  ].join('\n');
+  const harnessPath = path.join(dir, 'harness.sh');
+  fs.writeFileSync(harnessPath, harness);
+  const r = spawnSync('bash', [harnessPath], { cwd: dir, encoding: 'utf-8' });
+  return { status: r.status, out: `${r.stdout}${r.stderr}` };
+}
+
+describe('release.sh: assert_signing_home_base fails loud under set -e', () => {
+  it('aborts with the actionable die message when the probe fails', () => {
+    const { status, out } = runAssert('fail');
+    expect(status).not.toBe(0);
+    // The die branch MUST run -- the bug was that errexit skipped it entirely.
+    expect(out).toContain('DIE:');
+    expect(out).toContain('not a provisioned signing home base');
+    expect(out).toContain('RUSH-2541');
+    expect(out).toContain('MISSING: no cert'); // the probe's diagnostic is surfaced
+  });
+
+  it('reports phase_ok and exits 0 when the probe passes', () => {
+    const { status, out } = runAssert('pass');
+    expect(status).toBe(0);
+    expect(out).toContain('PHASE_OK:');
+    expect(out).not.toContain('DIE:');
+  });
+});

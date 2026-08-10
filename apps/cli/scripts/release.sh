@@ -501,17 +501,23 @@ route_home_base_phase() {
 assert_signing_home_base() {
   local out rc probe="scripts/signing-home-base-probe.sh"
   bold "Preflight: verifying $RELEASE_HOME_BASE is a provisioned signing home base..."
+  # Capture rc with `&& rc=0 || rc=$?`, NOT `out="$(cmd)"; rc=$?`: under this
+  # script's `set -euo pipefail`, a bare failing assignment trips errexit and
+  # kills the script AT that line, before `rc=$?` runs -- so the diagnostic dump
+  # and the die() below would be dead code and the release would abort with no
+  # stated reason (the very "fail loud at boundaries" the preflight exists for).
+  # The && / || tested context suppresses errexit and preserves the probe's rc.
   if $ON_HOME_BASE; then
-    out="$(bash "$probe" 2>&1)"; rc=$?
+    out="$(bash "$probe" 2>&1)" && rc=0 || rc=$?
   elif command -v agents >/dev/null 2>&1; then
     # Ship THIS worktree's fresh probe over stdin and run it in the home base's
     # own checkout dir, so its git rev-parse resolves that box's provisionprofile.
     # Piping (bash -s) -- not invoking a remote path -- because the home base's
     # on-disk checkout may predate this script (route_home_base_phase makes the
     # same choice for the same reason). Snippet on stdin; $HOME expands remotely.
-    out="$(agents ssh "$RELEASE_HOME_BASE" -- 'cd $HOME/src/github.com/muqsitnawaz/agents-cli && bash -s' < "$probe" 2>&1)"; rc=$?
+    out="$(agents ssh "$RELEASE_HOME_BASE" -- 'cd $HOME/src/github.com/muqsitnawaz/agents-cli && bash -s' < "$probe" 2>&1)" && rc=0 || rc=$?
   else
-    out="$(ssh "$RELEASE_HOME_BASE" 'cd $HOME/src/github.com/muqsitnawaz/agents-cli && bash -s' < "$probe" 2>&1)"; rc=$?
+    out="$(ssh "$RELEASE_HOME_BASE" 'cd $HOME/src/github.com/muqsitnawaz/agents-cli && bash -s' < "$probe" 2>&1)" && rc=0 || rc=$?
   fi
   if [[ "$rc" != "0" ]]; then
     printf '%s\n' "$out" | sed 's/^/  /' >&2
