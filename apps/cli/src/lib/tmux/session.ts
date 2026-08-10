@@ -220,7 +220,7 @@ export async function killSession(
   }
   if (opts.reapOrphans !== false) {
     const { reapProcessesForTmuxSession } = await import('./orphan-reap.js');
-    await reapProcessesForTmuxSession(name).catch(() => ({ killed: 0, details: [], candidates: [] }));
+    await reapProcessesForTmuxSession(name, sock).catch(() => ({ killed: 0, details: [], candidates: [], warnings: [] }));
   }
   removeSessionMeta(name);
   return true;
@@ -264,6 +264,8 @@ export interface ReapDeadPanesResult {
   processes: number;
   /** One human-readable line per terminated helper process. */
   processDetails: string[];
+  /** Non-fatal observations worth logging — e.g. a tier-1 sweep skipped this tick because a tmux query failed. */
+  warnings: string[];
 }
 
 /**
@@ -290,16 +292,19 @@ export interface ReapDeadPanesResult {
  */
 export async function reapDeadTmuxPanes(
   socket?: string,
-  opts: { dryRun?: boolean } = {},
+  opts: { dryRun?: boolean; pids?: number[] } = {},
 ): Promise<ReapDeadPanesResult> {
   const sock = socket ?? getDefaultSocketPath();
-  const result: ReapDeadPanesResult = { reaped: 0, sessions: [], details: [], processes: 0, processDetails: [] };
+  const result: ReapDeadPanesResult = { reaped: 0, sessions: [], details: [], processes: 0, processDetails: [], warnings: [] };
 
   // The process sweep runs even with no server on this socket: a torn-down
   // server (`killAll` unlinks the socket) is the strongest orphan signal there
   // is, and skipping it here would strand exactly those leftovers forever.
+  // `opts.pids` is a test-only process-table scope (see `readAgentProcesses`)
+  // — production callers never set it.
   const { reapOrphanAgentProcesses } = await import('./orphan-reap.js');
-  const orphans = await reapOrphanAgentProcesses({ socket: sock, dryRun: opts.dryRun });
+  const orphans = await reapOrphanAgentProcesses({ socket: sock, dryRun: opts.dryRun, pids: opts.pids });
+  result.warnings = orphans.warnings;
   result.processes = opts.dryRun ? orphans.candidates.length : orphans.killed;
   result.processDetails = orphans.details;
 

@@ -2,7 +2,6 @@ import chalk from 'chalk';
 import type { Command } from 'commander';
 import { setHelpSections } from '../lib/help.js';
 import { reapDeadTmuxPanes } from '../lib/tmux/session.js';
-import { reapOrphanAgentProcesses } from '../lib/tmux/orphan-reap.js';
 import { getDefaultSocketPath } from '../lib/tmux/paths.js';
 
 interface ReapOptions {
@@ -57,9 +56,12 @@ export function registerSessionsReapCommand(sessionsCmd: Command): void {
         details: result.details,
         processes: result.processes,
         processDetails: result.processDetails,
+        warnings: result.warnings,
       }));
       return;
     }
+
+    for (const w of result.warnings) console.log(chalk.yellow(`warning: ${w}`));
 
     if (result.reaped === 0 && result.processes === 0) {
       console.log(chalk.gray('No dead tmux sessions or orphaned processes to reap.'));

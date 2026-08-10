@@ -65,7 +65,7 @@ The final acceptance run used the existing `deepseek` custom harness, not the di
 
 ```text
 $ agents run deepseek "Reply with exactly: ACCOUNT_E2E_OK" --mode plan --timeout 2m
-[agents] using the encrypted file store at /home/muqsit/.agents/.cache/secrets
+[agents] using the encrypted file store at /home/you/.agents/.cache/secrets
 Resolved custom harness 'deepseek' -> claude
 [agents] strategy balanced ignored: custom harness pins its own version/auth
 Running: claude@2.1.219 --permission-mode plan --print ...

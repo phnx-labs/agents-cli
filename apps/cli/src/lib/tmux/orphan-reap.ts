@@ -57,6 +57,34 @@
  *   whatever the pane state;
  * - the reaping process itself, its ancestors, pid 1, and every long-lived
  *   agents-cli service ({@link isProtectedAgentsService}) are never candidates.
+ * - an UNRELIABLE read of tmux's session state (the query threw, timed out, or
+ *   tmux itself never answered) disables tier 1 for that sweep entirely — an
+ *   absent map entry proves a session is gone only when the map is known-good.
+ *   Distinguishing "tmux answered: no such session" (a completed, if nonzero,
+ *   exit — genuinely nothing there) from "tmux did not answer" (a thrown
+ *   error/timeout — unknown) is exactly this: a completed process is a real
+ *   answer, a rejected promise is not one at all.
+ * - tier 2 is anchored on the actual claude EXECUTABLE (argv[0]'s basename),
+ *   never a substring match anywhere in the command line, and excludes any
+ *   process that still carries a LIVE or attached pane marker — a live
+ *   interactive agent whose own argv happens to quote this file's docblock (it
+ *   contains the exact `daemon run --spawned-by {"pid":...}` shape) must never
+ *   become a kill seed.
+ *
+ * ## Known platform gap — tier 1 is Linux-only today
+ *
+ * Tier 1's env-marker attribution requires reading another process's
+ * environment. `/proc/<pid>/environ` makes that a plain file read on Linux.
+ * macOS has no `/proc`; `ps -E` was the fallback, but on modern macOS (verified
+ * live on mac-mini 15.6, macOS Sequoia) `ps -E` no longer prints another
+ * process's environment at all — only the CALLING process's own env shows up.
+ * `readAgentProcesses()` therefore returns every macOS process with
+ * `tmuxSession: undefined`, and tier 1's `if (!p.tmuxSession) continue` skips
+ * all of them. This is SAFE (tier 1 silently no-ops rather than misattributing
+ * anything) but not effective: on macOS, only tier 2 — the detached-helper
+ * registry — can reap anything today. A macOS fix needs a different channel
+ * entirely (env is inherently unreadable cross-process there without a native
+ * helper); it is not a parsing bug {@link parseTmuxSessionMarker} can fix.
  */
 
 import { execFile } from 'child_process';
@@ -67,6 +95,15 @@ const execFileAsync = promisify(execFile);
 
 /** Ceiling on the `ps` snapshot so a wedged `ps` can never stall the daemon tick. */
 const PS_TIMEOUT_MS = 10_000;
+
+/**
+ * Ceiling on a single tmux pane-owner query. Without this a wedged tmux server
+ * hangs `readPaneOwners` forever, which — before this bound existed — could
+ * only be told apart from "genuinely no sessions" by the caller giving up and
+ * treating it as empty (RUSH-2521 review: exactly the failure mode that let a
+ * flaky tick select every marked process on the box as orphaned).
+ */
+const TMUX_QUERY_TIMEOUT_MS = 10_000;
 
 /** Grace between SIGTERM and SIGKILL for a reaped orphan. */
 export const REAP_GRACE_MS = 2_000;
@@ -110,6 +147,12 @@ export interface OrphanReapResult {
   details: string[];
   /** Selected candidates, whether or not they were killed (`dryRun`). */
   candidates: OrphanCandidate[];
+  /**
+   * Non-fatal observations worth logging — e.g. "tier 1 skipped this sweep:
+   * a tmux query failed" (see {@link selectOrphanProcesses}'s `ownersReliable`).
+   * Never gates the reap; it only explains why fewer candidates were found.
+   */
+  warnings: string[];
 }
 
 /**
@@ -127,15 +170,39 @@ export interface DetachedHelperRule {
 }
 
 /**
+ * Basename of argv[0] — the actual executable a process runs, not whatever
+ * text later argv tokens happen to contain. `ps -o args=` gives one opaque
+ * command-line string (no reliable per-token quoting to split on), so this
+ * takes the first whitespace-delimited run and strips its directory prefix.
+ */
+function argv0Basename(args: string): string {
+  const m = /^\s*(\S+)/.exec(args);
+  const token = m ? m[1] : '';
+  const base = token.split(/[\\/]/).pop() ?? '';
+  return base.toLowerCase();
+}
+
+/**
  * Claude Code's background daemon pool. Its argv carries a JSON `--spawned-by`
  * blob naming the claude process that started it, e.g.
  * `claude.exe daemon run --origin transient --spawned-by {"label":"claude","cwd":"/…","pid":3834601}`.
  * The `bg-pty-host` / `bg-spare` workers are its children and are reaped as
  * descendants rather than matched individually — they carry no owner of their own.
+ *
+ * Anchored on argv[0]'s basename, not a substring match anywhere in the full
+ * command line: `daemon\s+run` and `--spawned-by\s+.*"pid"\s*:\s*(\d+)` both
+ * appear verbatim in THIS FILE's own docblock above, so a `grep`, `cat`, or
+ * pager viewing `orphan-reap.ts` — or a coding agent whose tool-call argv
+ * quotes this review's own bug report — matched the old substring-only rule
+ * and became a kill seed for its whole process subtree (RUSH-2521 review,
+ * reproduced against the exact diff text). Only a process whose real
+ * executable is `claude`/`claude.exe` can seed this rule now.
  */
 const CLAUDE_BG_DAEMON: DetachedHelperRule = {
   agent: 'claude',
   spawnerPid(args: string): number | undefined {
+    const exe = argv0Basename(args);
+    if (exe !== 'claude' && exe !== 'claude.exe') return undefined;
     if (!/\bdaemon\s+run\b/.test(args)) return undefined;
     const m = /--spawned-by\s+.*?"pid"\s*:\s*(\d+)/.exec(args);
     if (!m) return undefined;
@@ -178,16 +245,31 @@ function livePid(pid: number): boolean {
  * Pure. Select the processes whose owning agent is provably gone.
  *
  * `owners` maps a tmux session name to its liveness; a name ABSENT from the map
- * is a session tmux no longer has, which is the strongest orphan signal there is.
+ * is a session tmux no longer has, which is the strongest orphan signal there is
+ * — but ONLY when `owners` is itself known-complete. `opts.ownersReliable`
+ * (default `true`, so existing direct callers/tests keep their prior meaning)
+ * says whether the caller actually got a real answer from tmux for every
+ * socket it queried. When it is `false` — a query threw, timed out, or tmux
+ * itself never answered — tier 1 is skipped entirely for this call: an absent
+ * map entry proves nothing when the map itself might be missing entries for
+ * sessions tmux never got asked about (RUSH-2521 review — a flaky tick must
+ * never fall back to "treat every marked process as orphaned").
  */
 export function selectOrphanProcesses(
   procs: AgentProcess[],
   owners: Map<string, PaneOwner>,
-  opts: { protectedPids: Set<number>; isAlive?: (pid: number) => boolean },
+  opts: { protectedPids: Set<number>; isAlive?: (pid: number) => boolean; ownersReliable?: boolean },
 ): OrphanCandidate[] {
   const isAlive = opts.isAlive ?? livePid;
+  const ownersReliable = opts.ownersReliable ?? true;
   const eligible = (p: AgentProcess): boolean =>
     p.pid > 1 && !opts.protectedPids.has(p.pid) && !isProtectedAgentsService(p.args);
+  /** A process still owned by a live/attached pane can never seed a kill, whatever its own argv says. */
+  const ownedByLivePane = (p: AgentProcess): boolean => {
+    if (!p.tmuxSession) return false;
+    const owner = owners.get(p.tmuxSession);
+    return !!owner && (owner.agentAlive || owner.attached);
+  };
 
   const out: OrphanCandidate[] = [];
   const seen = new Set<number>();
@@ -197,25 +279,30 @@ export function selectOrphanProcesses(
     out.push({ pid: p.pid, args: p.args, reason, tmuxSession: p.tmuxSession });
   };
 
-  // Tier 1 — inherited pane marker with a dead owner.
-  for (const p of procs) {
-    if (!p.tmuxSession || !eligible(p)) continue;
-    const owner = owners.get(p.tmuxSession);
-    if (!owner) {
-      push(p, 'tmux-session-gone');
-      continue;
+  // Tier 1 — inherited pane marker with a dead owner. Skipped whole when the
+  // owners read is unreliable (see the docstring above).
+  if (ownersReliable) {
+    for (const p of procs) {
+      if (!p.tmuxSession || !eligible(p)) continue;
+      const owner = owners.get(p.tmuxSession);
+      if (!owner) {
+        push(p, 'tmux-session-gone');
+        continue;
+      }
+      // An attached client or a live agent pane process is a hard exclusion.
+      if (owner.attached || owner.agentAlive) continue;
+      push(p, 'tmux-agent-exited');
     }
-    // An attached client or a live agent pane process is a hard exclusion.
-    if (owner.attached || owner.agentAlive) continue;
-    push(p, 'tmux-agent-exited');
   }
 
   // Tier 2 — a detached helper daemon whose declared spawner is dead, plus the
   // workers it owns. Its own descendants are pulled in because they carry no
-  // owner declaration of their own.
+  // owner declaration of their own. A candidate seed that still carries a
+  // LIVE/attached pane marker is excluded even if its argv matches a rule: it
+  // is provably not a detached daemon, whatever text its command line quotes.
   const seeds: AgentProcess[] = [];
   for (const p of procs) {
-    if (!eligible(p)) continue;
+    if (!eligible(p) || ownedByLivePane(p)) continue;
     for (const rule of DETACHED_HELPER_RULES) {
       const spawner = rule.spawnerPid(p.args);
       if (spawner === undefined || isAlive(spawner)) continue;
@@ -310,14 +397,24 @@ export function parsePaneOwners(stdout: string, isAlive: (pid: number) => boolea
  *
  * Two readers because no single command works on both platforms: Linux exposes
  * `/proc/<pid>/environ` (one cheap read per pid), while macOS has no `/proc` and
- * instead lets `ps -E` print a process's own-uid environment after its command.
- * Windows has no tmux integration at all, so it returns an empty table rather
- * than pretending to reap.
+ * instead lets `ps -E` print a process's own-uid environment after its command
+ * — though on modern macOS `ps -E` no longer includes it at all (see the
+ * "Known platform gap" section in this file's docblock); tier 1 safely no-ops
+ * there rather than misattributing anything. Windows has no tmux integration
+ * at all, so it returns an empty table rather than pretending to reap.
+ *
+ * `opts.pids` restricts the `ps` snapshot to an explicit pid allowlist instead
+ * of the whole machine (`-A`) — a test-only escape hatch so a reap exercised
+ * against real spawned processes can never select or signal a real, unrelated
+ * process on a shared box (RUSH-2521 review: the integration tests previously
+ * called the machine-wide reap directly, which is safe only by construction of
+ * the fixture, not by anything the reaper itself guarantees).
  */
-export async function readAgentProcesses(): Promise<AgentProcess[]> {
+export async function readAgentProcesses(opts: { pids?: number[] } = {}): Promise<AgentProcess[]> {
   if (process.platform === 'win32') return [];
+  const scope = opts.pids && opts.pids.length > 0 ? ['-p', opts.pids.join(',')] : ['-A'];
   const hasProc = fs.existsSync('/proc/self/environ');
-  const args = hasProc ? ['-A', '-o', 'pid=,ppid=,args='] : ['-A', '-E', '-o', 'pid=,ppid=,args='];
+  const args = hasProc ? [...scope, '-o', 'pid=,ppid=,args='] : [...scope, '-E', '-o', 'pid=,ppid=,args='];
   let stdout: string;
   try {
     ({ stdout } = await execFileAsync('ps', args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: PS_TIMEOUT_MS }));
@@ -342,33 +439,74 @@ export async function readAgentProcesses(): Promise<AgentProcess[]> {
   return rows;
 }
 
-/** Read every tmux session's ownership state from one socket. */
-export async function readPaneOwners(socket: string): Promise<Map<string, PaneOwner>> {
-  if (!fs.existsSync(socket)) return new Map();
+/** One socket's pane-ownership read. `ok: false` means tmux never actually answered. */
+export interface PaneOwnersRead {
+  /**
+   * `true` when tmux completed the query (whatever its exit code — a nonzero
+   * exit from `list-panes -a` IS tmux affirmatively answering "no server /
+   * no sessions here", a real and trustworthy empty result). `false` means the
+   * query never got that far: a thrown error, a timeout, or a missing/wrong
+   * tmux — in which case `owners` carries no information and must not be
+   * trusted as "no sessions".
+   */
+  ok: boolean;
+  owners: Map<string, PaneOwner>;
+}
+
+/**
+ * Read one tmux socket's session-ownership state.
+ *
+ * Distinguishes "tmux answered: nothing here" from "tmux did not answer" —
+ * the two were previously conflated (`.catch(() => null)` then `!res` folded
+ * into the same empty-map return as a clean nonzero exit), which meant a
+ * missing/wrong-version tmux, a spawn failure, or a wedged server were
+ * indistinguishable from a genuinely empty box. A completed process — even a
+ * nonzero exit — is a real answer; a rejected promise is not an answer at all
+ * (RUSH-2521 review).
+ */
+export async function readPaneOwners(socket: string): Promise<PaneOwnersRead> {
+  // No socket file at all means no server was ever started here — for the
+  // shared agents socket this is reliable (tmux unlinks its own socket on
+  // exit), so this is a confident, reliable EMPTY read, not an unknown one.
+  if (!fs.existsSync(socket)) return { ok: true, owners: new Map() };
   const { runTmux } = await import('./binary.js');
-  const res = await runTmux({
-    socket,
-    args: ['list-panes', '-a', '-F', '#{session_name}\t#{pane_pid}\t#{session_attached}'],
-    throwOnError: false,
-  }).catch(() => null);
-  if (!res || res.code !== 0) return new Map();
-  return parsePaneOwners(res.stdout);
+  try {
+    const res = await runTmux({
+      socket,
+      args: ['list-panes', '-a', '-F', '#{session_name}\t#{pane_pid}\t#{session_attached}'],
+      throwOnError: false,
+      timeoutMs: TMUX_QUERY_TIMEOUT_MS,
+    });
+    // A completed run answered, whatever its exit code — tmux itself is
+    // telling us there's no server/no sessions on a nonzero exit here.
+    return { ok: true, owners: res.code === 0 ? parsePaneOwners(res.stdout) : new Map() };
+  } catch {
+    // Threw: tmux missing/unsupported version (assertTmuxAvailable), a spawn
+    // failure, or the query timed out. We genuinely do not know.
+    return { ok: false, owners: new Map() };
+  }
 }
 
 /**
  * Ownership across every socket that could own a marked process, merged so a
- * session that is live on ANY of them protects its processes.
+ * session that is live on ANY of them protects its processes. `reliable` is
+ * `false` the moment ANY queried socket's read failed — the merged map could
+ * then be missing entries for sessions that live there, so a caller MUST NOT
+ * treat an absent key in it as proof of anything.
  *
  * The union is load bearing, not defensive: the process table is machine-wide,
  * so a reap driven from a non-default socket (`agents sessions reap --socket`,
  * or a test's temp socket) would otherwise see every real agent's marker with no
  * matching session and classify a whole box's live helpers as orphans.
  */
-async function readAllPaneOwners(socket: string): Promise<Map<string, PaneOwner>> {
+async function readAllPaneOwners(socket: string): Promise<{ owners: Map<string, PaneOwner>; reliable: boolean }> {
   const { getDefaultSocketPath } = await import('./paths.js');
   const merged = new Map<string, PaneOwner>();
+  let reliable = true;
   for (const sock of new Set([socket, getDefaultSocketPath()].filter(Boolean))) {
-    for (const [name, owner] of await readPaneOwners(sock)) {
+    const read = await readPaneOwners(sock);
+    reliable = reliable && read.ok;
+    for (const [name, owner] of read.owners) {
       const prev = merged.get(name);
       merged.set(name, {
         agentAlive: (prev?.agentAlive ?? false) || owner.agentAlive,
@@ -376,7 +514,7 @@ async function readAllPaneOwners(socket: string): Promise<Map<string, PaneOwner>
       });
     }
   }
-  return merged;
+  return { owners: merged, reliable };
 }
 
 /** Pids the reaper must never signal: itself and its whole ancestor chain. */
@@ -421,18 +559,27 @@ function describe(c: OrphanCandidate): string {
  * Called from the daemon's periodic tick and from `agents sessions reap`. Panes
  * are read BEFORE processes so a session that disappears mid-scan is treated as
  * gone (reapable) rather than as a live owner.
+ *
+ * `opts.pids` is the test-only process-table scope described on
+ * {@link readAgentProcesses} — never set by production callers.
  */
 export async function reapOrphanAgentProcesses(
-  opts: { socket: string; dryRun?: boolean; graceMs?: number } = { socket: '' },
+  opts: { socket: string; dryRun?: boolean; graceMs?: number; pids?: number[] } = { socket: '' },
 ): Promise<OrphanReapResult> {
-  const result: OrphanReapResult = { killed: 0, details: [], candidates: [] };
+  const result: OrphanReapResult = { killed: 0, details: [], candidates: [], warnings: [] };
   if (process.platform === 'win32') return result;
 
-  const owners = await readAllPaneOwners(opts.socket);
-  const procs = await readAgentProcesses();
+  const { owners, reliable } = await readAllPaneOwners(opts.socket);
+  if (!reliable) {
+    result.warnings.push('tier 1 (pane-marker) sweep skipped this tick: a tmux session query failed to answer');
+  }
+  const procs = await readAgentProcesses({ pids: opts.pids });
   if (procs.length === 0) return result;
 
-  const candidates = selectOrphanProcesses(procs, owners, { protectedPids: selfProtectedPids(procs) });
+  const candidates = selectOrphanProcesses(procs, owners, {
+    protectedPids: selfProtectedPids(procs),
+    ownersReliable: reliable,
+  });
   result.candidates = candidates;
   if (candidates.length === 0) return result;
 
@@ -448,16 +595,40 @@ export async function reapOrphanAgentProcesses(
  * `killSession` calls this so an agent's helpers die with the session that owned
  * them instead of waiting for the next daemon tick. The tmux session is being
  * destroyed by the caller, so ownership needs no liveness check — anything still
- * carrying this session's marker is leftover by definition.
+ * carrying this session's marker is leftover by definition, PROVIDED the name
+ * is unique to the socket in play.
+ *
+ * `socket` narrows that: a session name is only unique WITHIN one tmux server,
+ * so the exact same marker value could legitimately belong to a live, unrelated
+ * session on a DIFFERENT socket (e.g. the shared agents socket vs. a test's own
+ * temp socket). When `socket` names a non-default socket, this checks the
+ * default agents socket for a live/attached session of the same name and backs
+ * off entirely if one exists — the caller is tearing down one session, not a
+ * same-named one it does not own.
+ *
+ * `opts.pids` is the test-only process-table scope described on
+ * {@link readAgentProcesses} — never set by production callers.
  */
 export async function reapProcessesForTmuxSession(
   name: string,
-  opts: { dryRun?: boolean; graceMs?: number } = {},
+  socket?: string,
+  opts: { dryRun?: boolean; graceMs?: number; pids?: number[] } = {},
 ): Promise<OrphanReapResult> {
-  const result: OrphanReapResult = { killed: 0, details: [], candidates: [] };
+  const result: OrphanReapResult = { killed: 0, details: [], candidates: [], warnings: [] };
   if (process.platform === 'win32') return result;
 
-  const procs = await readAgentProcesses();
+  const { getDefaultSocketPath } = await import('./paths.js');
+  const defaultSocket = getDefaultSocketPath();
+  if (socket && socket !== defaultSocket) {
+    const elsewhere = await readPaneOwners(defaultSocket);
+    const owner = elsewhere.owners.get(name);
+    if (owner && (owner.agentAlive || owner.attached)) {
+      result.warnings.push(`skipped: "${name}" is a live session on the agents socket, not the one being torn down`);
+      return result;
+    }
+  }
+
+  const procs = await readAgentProcesses({ pids: opts.pids });
   if (procs.length === 0) return result;
 
   const protectedPids = selfProtectedPids(procs);

@@ -741,6 +741,7 @@ async function runDeadPaneReap(): Promise<void> {
     const { reapDeadTmuxPanes } = await import('./tmux/session.js');
     const { getDefaultSocketPath } = await import('./tmux/paths.js');
     const result = await reapDeadTmuxPanes(getDefaultSocketPath());
+    for (const w of result.warnings) log('WARN', `Dead-pane reaper: ${w}`);
     if (result.processes > 0) {
       log('INFO', `Dead-pane reaper: terminated ${result.processes} orphaned helper process(es)`);
       for (const d of result.processDetails) log('INFO', `  ${d}`);

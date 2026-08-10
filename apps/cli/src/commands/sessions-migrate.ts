@@ -42,6 +42,7 @@ import { injectIntoTerminal } from '../lib/terminal/index.js';
 import { iLoginShell } from '../lib/terminal/shell.js';
 import { shellQuote as quoteArg } from '../lib/terminal/quote.js';
 import { killSession } from '../lib/tmux/session.js';
+import { getDefaultSocketPath } from '../lib/tmux/paths.js';
 
 import { listAllHosts, resolveHost } from '../lib/hosts/registry.js';
 import type { Host } from '../lib/hosts/types.js';
@@ -471,6 +472,49 @@ function prepareEphemeralCwd(sshTarget: string, source: SessionMeta, branch: str
 }
 
 /**
+ * Pure. The remote shell commands that create the target's tmux session on the
+ * SAME socket its reaper queries, and that probe its liveness afterward.
+ *
+ * `homeRelSocketPath` is `getDefaultSocketPath()` expressed relative to the
+ * LOCAL home dir (`path.relative(os.homedir(), getDefaultSocketPath())`) — a
+ * portable suffix, not a resolved absolute path, because the local and remote
+ * HOME can differ (different user, different OS). It is spliced in after a
+ * literal, unquoted `$HOME/` so the REMOTE shell resolves it; `$HOME` MUST
+ * NEVER be resolved locally (see AGENTS.md's remote-path guidance).
+ *
+ * Extracted as a pure function so the "does the migrated session land on the
+ * agents socket, not tmux's bare default socket" invariant is unit-testable
+ * without an SSH round-trip (RUSH-2521 review — a bare `tmux` here made the
+ * migrated agent's helpers invisible to `readAllPaneOwners`, so the reaper's
+ * next tick killed the still-live, just-migrated agent as `tmux-session-gone`).
+ */
+export function buildMigrateResumeCommands(opts: {
+  sessionName: string;
+  homeRelSocketPath: string;
+  inner: string;
+  cwd?: string;
+}): { launchCmd: string; probeCmd: string; socketFlag: string } {
+  const socketDirRelToHome = path.dirname(opts.homeRelSocketPath);
+  const socketFlag = `-S "$HOME/${opts.homeRelSocketPath}"`;
+  const argv = ['set-option', '-g', 'remain-on-exit', 'on', ';', 'new-session', '-d', '-s', opts.sessionName];
+  if (opts.cwd && opts.cwd !== '~') argv.push('-c', opts.cwd);
+  argv.push(opts.inner);
+  // Mirror createSession's second half: keep remain-on-exit on THIS pane (the
+  // liveness probe below reads `pane_dead`), then put the server-wide default
+  // back to off. Leaving `-g on` set made every later pane on the target — user
+  // splits included — retain a corpse when its command finished.
+  argv.push(';', 'set-option', '-t', opts.sessionName, '-p', 'remain-on-exit', 'on');
+  argv.push(';', 'set-option', '-g', 'remain-on-exit', 'off');
+  // Unlike tmux's own scratch dir (auto-created under /tmp), the agents socket's
+  // parent may not exist yet on a fresh worker or ephemeral box that never ran a
+  // tmux-backed `agents` command — `mkdir -p` it before tmux tries to bind there.
+  const launchCmd = `mkdir -p "$HOME/${socketDirRelToHome}" && tmux ${socketFlag} ` + argv.map(shellQuote).join(' ');
+  const q = shellQuote(opts.sessionName);
+  const probeCmd = `sleep 3; tmux ${socketFlag} has-session -t ${q} 2>/dev/null || exit 3; test "$(tmux ${socketFlag} list-panes -t ${q} -F '#{pane_dead}' 2>/dev/null | head -n1)" = 0 || exit 4`;
+  return { launchCmd, probeCmd, socketFlag };
+}
+
+/**
  * Resume the session on the target through the SAME host path as
  * `sessions resume --host` (tmux backend). Returns true when the resume launched.
  */
@@ -498,21 +542,15 @@ async function resumeOnTarget(
   //
   // The pane exports AGENT_TMUX_SESSION_NAME the way a local `createSession`
   // pane does, so the target's reaper can attribute the helpers this agent
-  // spawns and collect them when it exits (RUSH-2521,
-  // `lib/tmux/orphan-reap.ts`).
+  // spawns and collect them when it exits (RUSH-2521, `lib/tmux/orphan-reap.ts`)
+  // — see {@link buildMigrateResumeCommands} for why the session MUST land on
+  // the agents socket rather than tmux's bare default socket.
   const sessionName = `migrate-${source.shortId}`;
+  const homeRelSocketPath = path.relative(os.homedir(), getDefaultSocketPath());
   const inner = iLoginShell(`export AGENT_TMUX_SESSION_NAME=${sessionName}; exec ${command!.map(quoteArg).join(' ')}`);
-  const argv = ['tmux', 'set-option', '-g', 'remain-on-exit', 'on', ';', 'new-session', '-d', '-s', sessionName];
   const cwd = remoteCwd ?? source.cwd;
-  if (cwd && cwd !== '~') argv.push('-c', cwd);
-  argv.push(inner);
-  // Mirror createSession's second half: keep remain-on-exit on THIS pane (the
-  // liveness probe below reads `pane_dead`), then put the server-wide default
-  // back to off. Leaving `-g on` set made every later pane on the target — user
-  // splits included — retain a corpse when its command finished.
-  argv.push(';', 'set-option', '-t', sessionName, '-p', 'remain-on-exit', 'on');
-  argv.push(';', 'set-option', '-g', 'remain-on-exit', 'off');
-  const launch = sshExec(sshTarget, argv.map(shellQuote).join(' '), { timeoutMs: 60000 });
+  const { launchCmd, probeCmd } = buildMigrateResumeCommands({ sessionName, homeRelSocketPath, inner, cwd });
+  const launch = sshExec(sshTarget, launchCmd, { timeoutMs: 60000 });
   if (launch.code !== 0) {
     console.log(chalk.red(`  Resume on ${sshTarget} failed: ${launch.stderr.trim().split('\n').pop() || `tmux exited ${launch.code}`}`));
     return false;
@@ -520,9 +558,7 @@ async function resumeOnTarget(
   // Liveness gate for the invariant: give the agent a moment to boot, then require
   // the pane to be ALIVE (not merely the session to exist) before the caller may
   // stop the source. An agent that dies on launch → we refuse to move.
-  const q = shellQuote(sessionName);
-  const probe = `sleep 3; tmux has-session -t ${q} 2>/dev/null || exit 3; test "$(tmux list-panes -t ${q} -F '#{pane_dead}' 2>/dev/null | head -n1)" = 0 || exit 4`;
-  const check = sshExec(sshTarget, probe, { timeoutMs: 30000 });
+  const check = sshExec(sshTarget, probeCmd, { timeoutMs: 30000 });
   if (check.code !== 0) {
     const why = check.code === 4 ? 'the agent exited immediately on the target'
       : check.code === 3 ? 'the session did not start'
