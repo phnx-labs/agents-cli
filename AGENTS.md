@@ -148,9 +148,9 @@ them (see [§Code review conventions](#code-review-conventions-the-reviewer-must
 Never hand-roll a build or a release. A bare `tsc` / `bun run build` / `npm publish` /
 `vsce publish` skips the version stamping, gates (tests + semver + CHANGELOG), and
 sign/notarize + tap/marketplace steps these scripts own — a green local compile that
-ships broken. Each component's `scripts/` dir is the contract (see
-[`.agents/skills/scripts`](.agents/skills/scripts/SKILL.md)); add a `scripts/<verb>.sh`
-rather than a one-off command in a PR.
+ships broken. Each component's `scripts/` dir is the contract — the table below is
+the canonical entry point per task; add a `scripts/<verb>.sh` there rather than a
+one-off command in a PR.
 
 | Task | Script | Contract |
 |---|---|---|

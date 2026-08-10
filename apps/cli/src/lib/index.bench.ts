@@ -334,8 +334,6 @@ describe('command-registry.ts loaders — warm in-process registration only (mod
  * source and dist are the same code doing the same syscalls.
  */
 
-/** Repo root of THIS checkout — dirname³ of src/lib/, i.e. apps/cli/../.. */
-const REPO_ROOT = path.resolve(__dirname, '../../../..');
 /** apps/cli of THIS checkout. */
 const CLI_ROOT = path.resolve(__dirname, '../..');
 /** Derived from CLI_ENTRY (declared above) so the two can never disagree. */
@@ -374,16 +372,40 @@ afterAll(() => {
 });
 
 /**
- * A real file two levels under a real git repo root — `<repo>/scripts/release.sh`.
- * `dirname(dirname())` of it is REPO_ROOT, which carries both `.git` and a
+ * A real file two levels under a real, synthetic git-repo root —
+ * `<fixture>/scripts/release.sh`. `dirname(dirname())` of it is
+ * FOREIGN_GIT_ROOT, which carries both a real `.git` entry and a real
  * `package.json`, so this is the only one of these inputs that reaches the end
  * of detectDevBuild: realpath -> existsSync(.git) HIT -> existsSync(package.json)
  * HIT -> readFileSync -> JSON.parse -> name compare (dev-build.ts:28-34). The
- * name there is `agents-cli-monorepo`, not `@phnx-labs/agents-cli`, so it
- * returns false — this is exactly the false-positive the guard at dev-build.ts:34
- * was added to reject, priced end to end.
+ * fixture's package.json name is `agents-cli-monorepo` (this repo's own root
+ * manifest, before RUSH-2463 removed it), so the compare returns false — this
+ * is exactly the false-positive the guard at dev-build.ts:34 was added to
+ * reject, priced end to end.
+ *
+ * Built as a synthetic fixture rather than pointed at the real repo root
+ * because the repo root no longer carries a `package.json` (RUSH-2463) —
+ * the same construction `dev-build.test.ts` already uses for its "unrelated
+ * ancestor git repo" case, just with real syscalls on a real inode instead of
+ * vitest's in-memory fs. Per-pid named and removed in afterAll for the same
+ * collision/cleanup reasons as SHIM_LINK above.
  */
-const GIT_ROOT_TWO_LEVELS_DOWN = path.join(REPO_ROOT, 'scripts', 'release.sh');
+const FOREIGN_GIT_ROOT = path.join(
+  os.tmpdir(),
+  `agents-cli-bench-foreign-git-root-${process.pid}`,
+);
+fs.rmSync(FOREIGN_GIT_ROOT, { recursive: true, force: true });
+fs.mkdirSync(path.join(FOREIGN_GIT_ROOT, '.git'), { recursive: true });
+fs.mkdirSync(path.join(FOREIGN_GIT_ROOT, 'scripts'), { recursive: true });
+fs.writeFileSync(
+  path.join(FOREIGN_GIT_ROOT, 'package.json'),
+  JSON.stringify({ name: 'agents-cli-monorepo' }),
+);
+fs.writeFileSync(path.join(FOREIGN_GIT_ROOT, 'scripts', 'release.sh'), '');
+afterAll(() => {
+  fs.rmSync(FOREIGN_GIT_ROOT, { recursive: true, force: true });
+});
+const GIT_ROOT_TWO_LEVELS_DOWN = path.join(FOREIGN_GIT_ROOT, 'scripts', 'release.sh');
 
 /**
  * The real installed version string, read from this checkout's package.json the
