@@ -23901,13 +23901,22 @@
           "name": "reap",
           "path": "sessions reap",
           "aliases": [],
-          "description": "Kill tmux sessions whose panes are all dead.",
+          "description": "Kill tmux sessions whose panes are all dead, and the helper processes their agents left behind.",
           "args": [],
           "options": [
             {
               "flags": "--json",
               "description": "Emit a JSON result object instead of human output.",
               "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--dry-run",
+              "description": "List what would be reaped without killing anything.",
+              "long": "--dry-run",
               "required": false,
               "optional": false,
               "variadic": false,
@@ -23933,8 +23942,8 @@
               "negate": false
             }
           ],
-          "examples": "# Reap dead sessions interactively\nagents sessions reap\n\n# JSON output (for scripts)\nagents sessions reap --json",
-          "notes": "Sessions stay open after their process exits because `remain-on-exit on` is set\nso the harness can inspect exit status. This command cleans them up on demand.\n\nSafety: sessions with at least one live pane are never touched.",
+          "examples": "# Reap dead sessions and orphaned helper processes\nagents sessions reap\n\n# See what would be reaped, without killing anything\nagents sessions reap --dry-run\n\n# JSON output (for scripts)\nagents sessions reap --json",
+          "notes": "Sessions stay open after their process exits because `remain-on-exit on` is set\nso the harness can inspect exit status. Killing the pane only SIGHUPs its\nforeground process group, so MCP servers and harness background daemons that\nmoved out of that group outlive the agent. This command collects both.\n\nSafety: sessions with at least one live pane are never touched, and a helper\nprocess is killed only when its owning tmux session is gone, or that session\nhas no attached client AND its agent process has exited.\n\nThe routines daemon runs the same sweep every 5 minutes.",
           "subcommands": []
         },
         {

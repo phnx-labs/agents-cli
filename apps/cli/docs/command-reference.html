@@ -2804,21 +2804,39 @@ pass --decrypt &lt;key&gt;). It is the inverse of &#39;sessions export --to-r2&#
       agents sessions preview 407b8dd5 --device zion</code></pre><h4>Notes</h4><p class="notes">- Full UUIDs are globally unique and may stop the fleet lookup at the first exact hit.
       - Short IDs wait for every selected device so ambiguity is never hidden.
       - Active status is refreshed through the bounded live-state TTL; transcript-derived details use the durable session index.</p></article>
-<article id="sessions-reap" data-search="reap sessions reap  kill tmux sessions whose panes are all dead. --json emit a json result object instead of human output. --socket &lt;path&gt; path to the tmux server socket (default: agents helper socket). -h, --help show help # reap dead sessions interactively
+<article id="sessions-reap" data-search="reap sessions reap  kill tmux sessions whose panes are all dead, and the helper processes their agents left behind. --json emit a json result object instead of human output. --dry-run list what would be reaped without killing anything. --socket &lt;path&gt; path to the tmux server socket (default: agents helper socket). -h, --help show help # reap dead sessions and orphaned helper processes
 agents sessions reap
+
+# see what would be reaped, without killing anything
+agents sessions reap --dry-run
 
 # json output (for scripts)
 agents sessions reap --json sessions stay open after their process exits because `remain-on-exit on` is set
-so the harness can inspect exit status. this command cleans them up on demand.
+so the harness can inspect exit status. killing the pane only sighups its
+foreground process group, so mcp servers and harness background daemons that
+moved out of that group outlive the agent. this command collects both.
 
-safety: sessions with at least one live pane are never touched."><div class="command-head"><h3><code>agents sessions reap</code></h3></div><p>Kill tmux sessions whose panes are all dead.</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--json</code></td><td>Emit a JSON result object instead of human output.</td><td></td><td></td></tr><tr><td><code>--socket &lt;path&gt;</code></td><td>Path to the tmux server socket (default: agents helper socket).</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Reap dead sessions interactively
+safety: sessions with at least one live pane are never touched, and a helper
+process is killed only when its owning tmux session is gone, or that session
+has no attached client and its agent process has exited.
+
+the routines daemon runs the same sweep every 5 minutes."><div class="command-head"><h3><code>agents sessions reap</code></h3></div><p>Kill tmux sessions whose panes are all dead, and the helper processes their agents left behind.</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--json</code></td><td>Emit a JSON result object instead of human output.</td><td></td><td></td></tr><tr><td><code>--dry-run</code></td><td>List what would be reaped without killing anything.</td><td></td><td></td></tr><tr><td><code>--socket &lt;path&gt;</code></td><td>Path to the tmux server socket (default: agents helper socket).</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Reap dead sessions and orphaned helper processes
 agents sessions reap
+
+# See what would be reaped, without killing anything
+agents sessions reap --dry-run
 
 # JSON output (for scripts)
 agents sessions reap --json</code></pre><h4>Notes</h4><p class="notes">Sessions stay open after their process exits because `remain-on-exit on` is set
-so the harness can inspect exit status. This command cleans them up on demand.
+so the harness can inspect exit status. Killing the pane only SIGHUPs its
+foreground process group, so MCP servers and harness background daemons that
+moved out of that group outlive the agent. This command collects both.
 
-Safety: sessions with at least one live pane are never touched.</p></article>
+Safety: sessions with at least one live pane are never touched, and a helper
+process is killed only when its owning tmux session is gone, or that session
+has no attached client AND its agent process has exited.
+
+The routines daemon runs the same sweep every 5 minutes.</p></article>
 <article id="sessions-reconnect" data-search="reconnect sessions reconnect  re-enter a dropped agent terminal: attach the live pane if it survived, else resume the session session-id session id/prefix to reconnect (default: the most recent session started here) -h, --help show help # reconnect the session that just dropped in this shell (most recent here)
       agents reconnect
 

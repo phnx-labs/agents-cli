@@ -186,8 +186,22 @@ export async function createSession(opts: CreateSessionOptions): Promise<Session
   return meta;
 }
 
-/** Kill one named session. Idempotent — killing a non-existent session is a no-op. */
-export async function killSession(name: string, socket?: string): Promise<boolean> {
+/**
+ * Kill one named session. Idempotent — killing a non-existent session is a no-op.
+ *
+ * Destroying the tmux session only SIGHUPs each pane's FOREGROUND process group,
+ * so a helper the agent put in its own process group (an MCP server, a harness
+ * background daemon) survives and reparents to init. `reapOrphans` therefore
+ * defaults ON: the session's leftover helpers are terminated with it rather than
+ * waiting for the daemon's next sweep (RUSH-2521). {@link reapDeadTmuxPanes}
+ * passes `false` because it sweeps every session's leftovers in one pass instead
+ * of re-snapshotting the process table per session.
+ */
+export async function killSession(
+  name: string,
+  socket?: string,
+  opts: { reapOrphans?: boolean } = {},
+): Promise<boolean> {
   assertValidSessionName(name);
   const sock = socket ?? getDefaultSocketPath();
   const existed = await hasSession(name, sock);
@@ -203,6 +217,10 @@ export async function killSession(name: string, socket?: string): Promise<boolea
     } else {
       throw err;
     }
+  }
+  if (opts.reapOrphans !== false) {
+    const { reapProcessesForTmuxSession } = await import('./orphan-reap.js');
+    await reapProcessesForTmuxSession(name).catch(() => ({ killed: 0, details: [], candidates: [] }));
   }
   removeSessionMeta(name);
   return true;
@@ -242,22 +260,49 @@ export interface ReapDeadPanesResult {
   sessions: string[];
   /** Human-readable lines describing each reap, for log output. */
   details: string[];
+  /** Orphaned helper processes terminated (MCP servers, harness background daemons). */
+  processes: number;
+  /** One human-readable line per terminated helper process. */
+  processDetails: string[];
 }
 
 /**
- * Kill every tmux session whose panes are ALL dead (`pane_dead=1`).
+ * Kill every tmux session whose panes are ALL dead (`pane_dead=1`), and
+ * terminate the helper processes whose owning agent has exited.
  *
  * Dead panes accumulate because `remain-on-exit on` is intentionally set
  * per-pane so the harness can inspect exit status. Without a periodic sweep
  * they pile up indefinitely — e.g. 48 of 127 sessions dead on yosemite-s0
  * (RUSH-2501).
  *
+ * Killing the pane is not enough on its own: it SIGHUPs only the pane's
+ * FOREGROUND process group, so an MCP server or harness background daemon that
+ * moved itself out of that group survives the session that spawned it and keeps
+ * its memory forever (RUSH-2521). The process sweep runs FIRST, while the dead
+ * sessions still exist, so every leftover is attributed to a named session
+ * rather than to a session tmux has already forgotten.
+ *
  * Safety invariant: a session with ANY live pane (`pane_dead=0`) is never
- * touched. Only all-dead sessions are reaped.
+ * touched, and neither are the processes belonging to a session whose agent is
+ * still running or that has a client attached.
+ *
+ * `dryRun` reports both halves without killing anything.
  */
-export async function reapDeadTmuxPanes(socket?: string): Promise<ReapDeadPanesResult> {
+export async function reapDeadTmuxPanes(
+  socket?: string,
+  opts: { dryRun?: boolean } = {},
+): Promise<ReapDeadPanesResult> {
   const sock = socket ?? getDefaultSocketPath();
-  const result: ReapDeadPanesResult = { reaped: 0, sessions: [], details: [] };
+  const result: ReapDeadPanesResult = { reaped: 0, sessions: [], details: [], processes: 0, processDetails: [] };
+
+  // The process sweep runs even with no server on this socket: a torn-down
+  // server (`killAll` unlinks the socket) is the strongest orphan signal there
+  // is, and skipping it here would strand exactly those leftovers forever.
+  const { reapOrphanAgentProcesses } = await import('./orphan-reap.js');
+  const orphans = await reapOrphanAgentProcesses({ socket: sock, dryRun: opts.dryRun });
+  result.processes = opts.dryRun ? orphans.candidates.length : orphans.killed;
+  result.processDetails = orphans.details;
+
   if (!fs.existsSync(sock)) return result;
 
   const res = await runTmux({
@@ -283,10 +328,12 @@ export async function reapDeadTmuxPanes(socket?: string): Promise<ReapDeadPanesR
   for (const [name, flags] of sessionFlags) {
     if (flags.length === 0 || !flags.every(d => d)) continue;
     try {
-      await killSession(name, sock);
+      // The one process-table sweep above already collected this session's
+      // leftovers; a per-session reap here would re-snapshot `ps` N times.
+      if (!opts.dryRun) await killSession(name, sock, { reapOrphans: false });
       result.reaped++;
       result.sessions.push(name);
-      result.details.push(`killed ${name} (${flags.length} dead pane${flags.length === 1 ? '' : 's'})`);
+      result.details.push(`${name} (${flags.length} dead pane${flags.length === 1 ? '' : 's'})`);
     } catch {
       // Best-effort: session may already be gone by the time we hit it.
     }

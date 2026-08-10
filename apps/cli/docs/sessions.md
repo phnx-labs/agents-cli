@@ -1235,6 +1235,56 @@ whether it is `background` or `parked` is decided live from the recorded pid plu
 start-time fingerprint (which defeats PID reuse). Ad-hoc headless runs and cloud/team
 rows carry no presence — they are not on this axis.
 
+## Reaping what an exited agent left behind (`sessions reap`)
+
+An interactive agent is the leaf of a detached tmux pane, and the pane is created
+with `remain-on-exit on` so the harness can read the agent's exit status and
+capture its final output. Two things then accumulate:
+
+- **Dead panes.** A retained pane whose agent exited is diagnostic state; nothing
+  in the attach path collects it when the client that launched it is gone (an SSH
+  drop, a closed terminal).
+- **Helper processes.** Destroying a pane SIGHUPs only its FOREGROUND process
+  group. An MCP server or a harness background daemon that moved itself into its
+  own process group survives, reparents to init, and holds its memory forever.
+  Measured on the fleet: one pane holding 2.5 GB of Claude Code background daemons
+  22 days after its session ended, and 34 orphaned `cgraph-mcp --daemon`
+  processes on a single worker (RUSH-2521).
+
+```bash
+agents sessions reap             # collect both
+agents sessions reap --dry-run   # list what would be collected, kill nothing
+agents sessions reap --json      # { reaped, sessions, details, processes, processDetails }
+```
+
+The routines daemon runs the same sweep every 5 minutes
+([`src/lib/daemon.ts`](../src/lib/daemon.ts) `runDeadPaneReap`), and `killSession`
+collects a session's helpers as it tears that session down, so an agent that exits
+normally leaves nothing behind without waiting for a tick.
+
+**How a helper is attributed to its session.** Every OS handle that names the pane
+is destroyed by the exit itself — ppid ancestry is replaced by init, the
+controlling terminal is disassociated from the whole POSIX session when its leader
+exits, and the surviving helpers are precisely the ones that left the pane's
+process group. What does survive is the environment: the pane exports
+`AGENT_TMUX_SESSION_NAME` and every descendant inherits it, reparented or not. A
+process carrying that marker is reaped when its tmux session no longer exists, or
+when that session has **no attached client AND** its agent pane process has exited.
+A live agent or an attached client protects everything it owns, and the routines
+daemon, the secrets broker, and the reaping process's own ancestry are never
+candidates.
+
+A harness that starts its background daemons with a scrubbed environment is matched
+on the owner it declares in its own argv instead — Claude Code's
+`daemon run --spawned-by {…,"pid":N}` pool is reaped, with its `bg-pty-host` /
+`bg-spare` workers, once pid `N` is dead. Those rules live in
+`DETACHED_HELPER_RULES` ([`src/lib/tmux/orphan-reap.ts`](../src/lib/tmux/orphan-reap.ts)),
+one entry per harness.
+
+Note that this collects **everything** a session's agent spawned, not only MCP
+servers — a server the agent deliberately backgrounded inside its pane is torn down
+with the session too.
+
 ## Lost hosts: `crashed` and `orphaned`
 
 Every other liveness signal answers "is the agent process alive". None of them answer

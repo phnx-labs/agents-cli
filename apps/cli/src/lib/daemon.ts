@@ -705,6 +705,10 @@ async function runKeychainReap(): Promise<void> {
 
 /**
  * RUSH-2501: kill tmux sessions on the helper socket whose panes are ALL dead.
+ * RUSH-2521: and terminate the helper processes (MCP servers, harness background
+ * daemons) whose owning agent has exited — killing the pane only SIGHUPs its
+ * foreground process group, so anything that left that group outlives it.
+ *
  * Runs every DEAD_PANE_REAP_TICK_MS (5 min). The daemon is the single executor
  * so no UI surface can race it.
  */
@@ -715,9 +719,13 @@ async function runDeadPaneReap(): Promise<void> {
     const { reapDeadTmuxPanes } = await import('./tmux/session.js');
     const { getDefaultSocketPath } = await import('./tmux/paths.js');
     const result = await reapDeadTmuxPanes(getDefaultSocketPath());
+    if (result.processes > 0) {
+      log('INFO', `Dead-pane reaper: terminated ${result.processes} orphaned helper process(es)`);
+      for (const d of result.processDetails) log('INFO', `  ${d}`);
+    }
     if (result.reaped > 0) {
       log('INFO', `Dead-pane reaper: reaped ${result.reaped} session(s)`);
-      for (const d of result.details) log('INFO', `  ${d}`);
+      for (const d of result.details) log('INFO', `  killed ${d}`);
     }
   } catch (err) {
     log('ERROR', `Dead-pane reaper failed: ${(err as Error).message}`);

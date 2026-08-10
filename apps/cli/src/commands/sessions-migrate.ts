@@ -495,12 +495,23 @@ async function resumeOnTarget(
   // carries spaces or backticks (the rehydrate prompt) reaches the agent as one
   // clean argument — an unquoted join would let the target shell split it and
   // run its backticks.
+  //
+  // The pane exports AGENT_TMUX_SESSION_NAME the way a local `createSession`
+  // pane does, so the target's reaper can attribute the helpers this agent
+  // spawns and collect them when it exits (RUSH-2521,
+  // `lib/tmux/orphan-reap.ts`).
   const sessionName = `migrate-${source.shortId}`;
-  const inner = iLoginShell(`exec ${command!.map(quoteArg).join(' ')}`);
+  const inner = iLoginShell(`export AGENT_TMUX_SESSION_NAME=${sessionName}; exec ${command!.map(quoteArg).join(' ')}`);
   const argv = ['tmux', 'set-option', '-g', 'remain-on-exit', 'on', ';', 'new-session', '-d', '-s', sessionName];
   const cwd = remoteCwd ?? source.cwd;
   if (cwd && cwd !== '~') argv.push('-c', cwd);
   argv.push(inner);
+  // Mirror createSession's second half: keep remain-on-exit on THIS pane (the
+  // liveness probe below reads `pane_dead`), then put the server-wide default
+  // back to off. Leaving `-g on` set made every later pane on the target — user
+  // splits included — retain a corpse when its command finished.
+  argv.push(';', 'set-option', '-t', sessionName, '-p', 'remain-on-exit', 'on');
+  argv.push(';', 'set-option', '-g', 'remain-on-exit', 'off');
   const launch = sshExec(sshTarget, argv.map(shellQuote).join(' '), { timeoutMs: 60000 });
   if (launch.code !== 0) {
     console.log(chalk.red(`  Resume on ${sshTarget} failed: ${launch.stderr.trim().split('\n').pop() || `tmux exited ${launch.code}`}`));
