@@ -16,6 +16,12 @@ import { createRequire } from 'module';
 import { buildRunsJson, groupRoutineJobsByProject } from './routines.js';
 import type { JobConfig } from '../lib/routines.js';
 import type { RunMeta } from '../lib/routines.js';
+import { BUILTIN_ROUTINE_NAMES } from '../lib/builtin-routines.js';
+
+/** Device-activation entries excluding the always-present daemon-owned built-ins (RUSH-2465). */
+function nonBuiltinDeviceRoutines(home: string, device: string): string[] {
+  return readDeviceRoutines(home, device).filter((n) => !BUILTIN_ROUTINE_NAMES.includes(n));
+}
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const require = createRequire(import.meta.url);
@@ -416,7 +422,10 @@ describeRoutines('routines devices --set normalizes mixed case and FQDN duplicat
       const doc = readRoutineYaml(home, 'test-job');
       expect(doc).not.toBeNull();
       expect(doc!.devices).toEqual(['yosemite-s0']);
-      expect(readDeviceRoutines(home, 'yosemite-s0')).toEqual(['test-job']);
+      // First materialization of an empty manifest seeds every currently-enabled
+      // routine so nothing is silently disabled — that legitimately includes the
+      // daemon-owned built-ins (RUSH-2465); assert on the non-built-in activation.
+      expect(nonBuiltinDeviceRoutines(home, 'yosemite-s0')).toEqual(['test-job']);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

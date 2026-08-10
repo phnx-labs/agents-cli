@@ -382,6 +382,9 @@ function renderRoutineRows({ jobs, scheduler, overdueSet, link, now, local = tru
       : chalk.gray;
 
     const overdueTag = overdueSet.has(job.name) ? chalk.yellow(' (overdue)') : '';
+    // A daemon-owned built-in (no config file, RUSH-2465) — tag it so a reader
+    // knows it lives in daemon code, not a `~/.agents/routines/` file to edit.
+    const builtinTag = job.builtin ? chalk.gray(' (built-in)') : '';
 
     const agentLabelPadded = job.command
       ? chalk.magenta('command'.padEnd(10))
@@ -389,7 +392,7 @@ function renderRoutineRows({ jobs, scheduler, overdueSet, link, now, local = tru
         ? chalk.magenta(`wf:${job.workflow}`.padEnd(10))
         : (job.agent || '').padEnd(10);
     console.log(
-      `  ${chalk.cyan(job.name.padEnd(NAME_W))} ${agentLabelPadded} ${repoCell}${' '.repeat(repoPadding)} ${deviceCell}${' '.repeat(devicePad)} ${schedStr.padEnd(SCHED_W)} ${enabledStr}${' '.repeat(enabledPad)} ${chalk.gray(nextStr.padEnd(NEXT_W))} ${statusColor(lastStatus)}${overdueTag}`
+      `  ${chalk.cyan(job.name.padEnd(NAME_W))} ${agentLabelPadded} ${repoCell}${' '.repeat(repoPadding)} ${deviceCell}${' '.repeat(devicePad)} ${schedStr.padEnd(SCHED_W)} ${enabledStr}${' '.repeat(enabledPad)} ${chalk.gray(nextStr.padEnd(NEXT_W))} ${statusColor(lastStatus)}${overdueTag}${builtinTag}`
     );
   }
 }
@@ -526,6 +529,7 @@ export function buildRoutineListJson(): Record<string, unknown>[] {
         agent: job.agent ?? null,
         workflow: job.workflow ?? null,
         command: job.command ?? null,
+        builtin: job.builtin === true,
         repo: job.repo ?? null,
         schedule: job.schedule ?? null,
         scheduleHuman: fireConditionLabel(job),

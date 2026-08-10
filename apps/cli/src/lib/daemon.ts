@@ -896,11 +896,13 @@ export async function runDaemon(): Promise<void> {
 
   // watchdog, device-probe, tmux-reconcile, launch-health, fleet-cache-warm,
   // session-cache-warm, usage-refresh, and auto-dispatch used to be hardcoded
-  // setInterval ticks here (RUSH-2353). They are now shipped system routines
-  // (gh:phnx-labs/.agents-system routines/*.yml), invoked one-shot via
-  // `agents __daemon-tick <name>` (see daemon-ticks.ts) and fired by the
-  // JobScheduler above like any other routine — declared, listed, run-tracked,
-  // pausable, and device-pinnable, instead of a second unowned scheduling path.
+  // setInterval ticks here (RUSH-2353). They are now DAEMON-OWNED built-in
+  // routines (`builtin-routines.ts`, RUSH-2465): definitions live in daemon code
+  // and are injected as the lowest layer of `listJobs()`, so the same
+  // pid-claimed JobScheduler above schedules and fires them via
+  // `agents __daemon-tick <name>` (see daemon-ticks.ts) like any other routine —
+  // declared, listed, run-tracked, pausable, and device-pinnable — WITHOUT
+  // shipping them from the `.agents-system` config repo every install pulls.
 
   // Monitor engine: event-triggered watchers, beside the cron scheduler. Same
   // daemon, same dispatch seam — a monitor is a routine whose trigger is a

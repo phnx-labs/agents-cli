@@ -105,6 +105,15 @@ export function detectOverdueJobs(now: Date = new Date()): OverdueJob[] {
 
   for (const job of listJobs()) {
     if (!job.enabled) continue;
+    // Daemon-owned built-in housekeeping ticks (RUSH-2465) are deliberately NOT
+    // catch-up-eligible: they fire every 3-6 min (or 6h) and each run redoes the
+    // same idempotent work (warm a cache, nudge, self-heal), so replaying a slot
+    // missed while the daemon was down is pointless — the next scheduled tick
+    // already does it. This matches the pre-RUSH-2353 behavior, when these were
+    // bare `setInterval`s with no catch-up. It also means a built-in (which has
+    // no config file, so no mtime floor for `routineEffectiveStart`) can never be
+    // spuriously flagged overdue for slots before its daemon started.
+    if (job.builtin) continue;
     // One-shot: fires at most once, so a missed slot is not a backlog to replay.
     // Use the same predicate the scheduler does — the raw `runOnce` flag alone
     // missed a one-shot-LIKE schedule (a fixed minute/hour/day/month) that never

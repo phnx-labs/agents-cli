@@ -36,6 +36,7 @@ import {
   routineEnabledOnThisDevice,
   setRoutineEnabledOnThisDevice,
 } from './routine-activation.js';
+import { builtinRoutineJobs, builtinRoutineJob } from './builtin-routines.js';
 
 /** Tool/site/directory allow-list for sandboxed job execution. */
 export interface JobAllowConfig {
@@ -333,6 +334,15 @@ export interface JobConfig {
    * - Absent/empty — routine belongs to no project ("Operations" group).
    */
   projects?: string[];
+  /**
+   * True for a daemon-owned built-in routine (`builtin-routines.ts`, RUSH-2465):
+   * the definition lives in daemon code, not in a `~/.agents/routines/` file or
+   * the `.agents-system` config repo. Synthesized by `listJobs()`/`readJob()` as
+   * the lowest definition layer, so a same-named on-disk file shadows it. Purely
+   * a provenance marker — it does not affect scheduling, firing, activation, or
+   * device pinning, all of which treat a built-in exactly like any other routine.
+   */
+  builtin?: boolean;
 }
 
 /**
@@ -778,17 +788,19 @@ function overlayUserRoutineDevices(job: JobConfig, userJob: JobConfig | null): J
 }
 
 /**
- * List all job configs, scanning project > user > system routine dirs.
+ * List all job configs, scanning project > user > system routine dirs, then the
+ * daemon-owned built-in routines as the lowest layer (RUSH-2465).
  * Higher layers shadow lower ones of the same name (first-seen wins): a project
- * routine shadows a user routine, and a user routine shadows a built-in system
- * routine (`~/.agents/.system/routines/`, shipped via gh:phnx-labs/.agents-system).
+ * routine shadows a user routine, a user routine shadows a system routine
+ * (`~/.agents/.system/routines/`, shipped via gh:phnx-labs/.agents-system), and
+ * any of those shadows a daemon-owned built-in (`builtin-routines.ts`).
  * When a same-name project routine wins for inspection, the user-layer
  * `devices` allowlist is overlaid only if the project routine does not declare
  * its own allowlist, so CWD project discovery cannot hide an operational fleet
  * pin or erase a project-authored one.
  * Project discovery is opt-in via `cwd`; the daemon (which calls `listJobs()`
- * with no argument) sees user + system routines, so a built-in routine fires for
- * every install unless the user overrides or disables it by name.
+ * with no argument) sees user + system + built-in routines, so a built-in routine
+ * fires for every install unless the user overrides or disables it by name.
  */
 export function listJobs(cwd?: string): JobConfig[] {
   ensureAgentsDir();
@@ -818,6 +830,17 @@ export function listJobs(cwd?: string): JobConfig[] {
       jobs.push(job);
     }
   }
+
+  // Daemon-owned built-in routines are the LOWEST layer (RUSH-2465): a
+  // same-named on-disk file (project/user/system, e.g. a `.agents-system` YAML
+  // still shipped during the removal transition, or a user override) already
+  // won above and shadows the built-in, so exactly one definition ever fires.
+  for (const job of builtinRoutineJobs()) {
+    if (seen.has(job.name)) continue;
+    seen.add(job.name);
+    jobs.push(job);
+  }
+
   return jobs.map(applyDeviceActivation);
 }
 
@@ -848,6 +871,9 @@ export function readJob(name: string, cwd?: string): JobConfig | null {
       return applyDeviceActivation(job);
     }
   }
+  // No on-disk file shadows it: fall back to the daemon-owned built-in (RUSH-2465).
+  const builtin = builtinRoutineJob(name);
+  if (builtin) return applyDeviceActivation(builtin);
   return null;
 }
 

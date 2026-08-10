@@ -1,13 +1,20 @@
 /**
- * Daemon housekeeping ticks — one-shot bodies invoked by system routines.
+ * Daemon housekeeping ticks — one-shot bodies invoked by daemon-owned routines.
  *
  * RUSH-2353: these were ~15 hardcoded `setInterval` timers inside
  * `runDaemon()` (daemon.ts) — a parallel, inferior reimplementation of the
  * routines system (no declaration, no run history, no pause/disable, no
  * device pin). Each function here is one migrated tick's *body*, unchanged in
- * behavior, now invoked as a detached one-shot process by a system routine's
- * `command:` (via the `agents __daemon-tick <name>` entrypoint in index.ts)
- * instead of an in-process interval closure.
+ * behavior, invoked as a detached one-shot process by a routine's `command:`
+ * (via the `agents __daemon-tick <name>` entrypoint in index.ts) instead of an
+ * in-process interval closure.
+ *
+ * RUSH-2465: the routine DEFINITIONS that drive these bodies moved out of the
+ * `.agents-system` config repo and into daemon code (`builtin-routines.ts`),
+ * injected as the lowest layer of `listJobs()`. The bodies here are unchanged
+ * and still fired via `agents __daemon-tick <name>`; only the home of the
+ * definition moved. `DAEMON_TICK_ROUTINE_NAMES` below is the single source of
+ * truth the built-in registry is tested against for drift.
  *
  * Overlap protection that used to live in daemon.ts as a per-tick boolean
  * flag (`watchdogInFlight`, `probingDevices`, ...) is now provided by the

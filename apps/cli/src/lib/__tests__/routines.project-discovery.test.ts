@@ -63,7 +63,10 @@ describe('listJobs project discovery', () => {
       prompt: 'project',
     });
 
-    const jobs = listJobs();
+    // Daemon-owned built-in routines (RUSH-2465) are the lowest layer and are
+    // always present; exclude them so these assertions cover only the
+    // project/user/system shadowing under test.
+    const jobs = listJobs().filter((j) => !j.builtin);
     const names = jobs.map((j) => j.name).sort();
     expect(names).toEqual(['user-only']);
   });
@@ -80,7 +83,7 @@ describe('listJobs project discovery', () => {
       prompt: 'project',
     });
 
-    const jobs = listJobs(projectDir);
+    const jobs = listJobs(projectDir).filter((j) => !j.builtin); // exclude built-ins (RUSH-2465)
     const names = jobs.map((j) => j.name).sort();
     expect(names).toEqual(['project-only', 'user-only']);
   });
@@ -97,7 +100,7 @@ describe('listJobs project discovery', () => {
       prompt: 'project-version',
     });
 
-    const jobs = listJobs(projectDir);
+    const jobs = listJobs(projectDir).filter((j) => !j.builtin); // exclude built-ins (RUSH-2465)
     expect(jobs).toHaveLength(1);
     expect(jobs[0].prompt).toBe('project-version');
   });
@@ -117,7 +120,7 @@ describe('listJobs project discovery', () => {
       repo: 'phnx-labs/agents-cli',
     });
 
-    const jobs = listJobs(projectDir);
+    const jobs = listJobs(projectDir).filter((j) => !j.builtin); // exclude built-ins (RUSH-2465)
     expect(jobs).toHaveLength(1);
     expect(jobs[0].prompt).toBe('project-version');
     expect(jobs[0].devices).toEqual(['zion']);
@@ -136,7 +139,7 @@ describe('listJobs project discovery', () => {
       devices: ['ci-runner'],
     });
 
-    const jobs = listJobs(projectDir);
+    const jobs = listJobs(projectDir).filter((j) => !j.builtin); // exclude built-ins (RUSH-2465)
     expect(jobs).toHaveLength(1);
     expect(jobs[0].prompt).toBe('project-version');
     expect(jobs[0].devices).toEqual(['ci-runner']);
