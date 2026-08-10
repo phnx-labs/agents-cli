@@ -1311,14 +1311,20 @@ on the owner it declares in its own argv instead (tier 2) — Claude Code's
 one entry per harness, and are anchored on the process's REAL executable (argv[0]'s
 basename) rather than a substring match anywhere in its command line — a `grep`,
 `cat`, or pager viewing this rule's own source, or an agent whose prompt happens to
-quote it, must never become a kill seed. A process is excluded from seeding
-tier 2, whatever its own argv says, when EITHER of two independent signals
-says it is still owned: tmux's own `#{pane_pid}` says the pid itself is a
-live pane leaf right now — no environment marker needed, so this holds even
-where tier 1's attribution is dead (macOS, or a `claude` invocation started
-outside an agents-cli pane) — or the process carries a marker whose session
-is live/attached. Leaning on the marker alone left exactly that macOS/bare-
-invocation case open even after the executable anchor above.
+quote it — including a subprocess it spawns, e.g. its own Bash tool invoking
+`claude --print "…"` as a sub-task — must never become a kill seed. A process
+is excluded from seeding tier 2, whatever its own argv says, when EITHER of
+two independent signals says it is still owned: tmux's own `#{pane_pid}`,
+expanded to that pane leaf's current process-tree descendants, says the pid
+is still structurally part of a live agent's tree right now — no environment
+marker needed anywhere in that tree, so this holds even where tier 1's
+attribution is dead (macOS, or a `claude` invocation started outside an
+agents-cli pane) — or the process carries a marker whose session is
+live/attached. A process that has genuinely reparented away (a real detached
+daemon, no longer chained to any live pane leaf) is deliberately excluded
+from that tree and remains reapable. Leaning on the marker alone, and later
+on the pane leaf's own pid alone, each left a narrower slice of this open —
+see the file's docblock for both review rounds that found the gaps.
 
 Note that this collects **everything** a session's agent spawned, not only MCP
 servers — a server the agent deliberately backgrounded inside its pane is torn down

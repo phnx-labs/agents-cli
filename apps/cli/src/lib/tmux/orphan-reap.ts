@@ -66,16 +66,24 @@
  *   answer, a rejected promise is not one at all.
  * - tier 2 is anchored on the actual claude EXECUTABLE (argv[0]'s basename),
  *   never a substring match anywhere in the command line, and excludes any
- *   process that is a LIVE pane leaf (tmux's own `#{pane_pid}`, independent of
- *   whether that process's environment marker was ever readable) or that
- *   still carries a marker whose session is live/attached — a live
- *   interactive agent whose own argv happens to quote this file's docblock (it
- *   contains the exact `daemon run --spawned-by {"pid":...}` shape) must never
- *   become a kill seed, and that has to hold even where tier 1's marker is
- *   dead (macOS, or any `claude` invocation started outside an agents-cli
- *   pane) — a review round found the marker-only exclusion left exactly that
- *   gap open, which is why the pane-pid check exists as an independent signal
- *   rather than tier 2 leaning on tier 1's own attribution mechanism.
+ *   process still structurally part of a LIVE pane leaf's process tree right
+ *   now (tmux's own `#{pane_pid}`, expanded to its current descendants —
+ *   independent of whether any of those processes' environment markers were
+ *   ever readable) or that carries a marker whose own session is
+ *   live/attached — a live interactive agent, OR a subprocess it spawns
+ *   (e.g. its own Bash tool invoking `claude --print "…"` as a sub-task),
+ *   whose argv happens to quote this file's docblock (it contains the exact
+ *   `daemon run --spawned-by {"pid":...}` shape) must never become a kill
+ *   seed, and that has to hold even where tier 1's marker is dead (macOS, or
+ *   any `claude` invocation started outside an agents-cli pane). Two review
+ *   rounds found this: first that marker-only exclusion left the whole
+ *   macOS/bare-invocation case open (round 2, closed by the pane-pid check),
+ *   then that the pane-pid check alone only covered the pane LEAF itself, not
+ *   its own live children (round 3, closed by expanding the check to the
+ *   leaf's current descendant set via {@link descendantsOf}). A process that
+ *   has genuinely reparented away — a real detached daemon, no longer chained
+ *   to any live leaf by ppid — is deliberately NOT in that set and remains
+ *   reapable, whatever unrelated live agent happens to also be running.
  *
  * ## Known platform gap — tier 1 is Linux-only today
  *
@@ -288,13 +296,32 @@ export function selectOrphanProcesses(
   const eligible = (p: AgentProcess): boolean =>
     p.pid > 1 && !opts.protectedPids.has(p.pid) && !isProtectedAgentsService(p.args);
   /**
+   * Every pid STILL reachable, right now, from a live pane leaf through ppid
+   * links — not just the leaf itself. A live agent's own child (e.g. a Bash
+   * tool spawning `claude --print "…daemon run --spawned-by…"` as a
+   * sub-invocation) inherits nothing from `livePanePids` (that set only ever
+   * contains the leaf's own pid) unless we walk the tree, and on macOS that
+   * child ALSO carries no readable env marker (tier 1 is dead there) — so
+   * without this expansion, the "must never become a kill seed, whatever its
+   * own argv says" guarantee only held for the leaf itself, not the live
+   * agent's actual subprocess tree the same docblock's threat model names
+   * (RUSH-2521 review, round 3). A process that has genuinely reparented away
+   * (a real detached daemon, ppid now 1 or otherwise no longer chained to the
+   * leaf) is NOT in this set and remains reapable — this only protects what
+   * is still structurally part of the live agent's own tree right now.
+   */
+  const livePaneSubtree = opts.livePanePids && opts.livePanePids.size > 0
+    ? new Set(descendantsOf(procs, [...opts.livePanePids]))
+    : undefined;
+  /**
    * A process still owned by a live/attached pane can never seed a kill,
    * whatever its own argv says. Two independent signals, either sufficient:
-   * the process IS a pane's own leaf pid right now (tmux's own data, no
-   * marker needed), or it carries a marker whose session is live/attached.
+   * the process is still IN a live pane leaf's process tree right now (tmux's
+   * own data, no marker needed), or it carries a marker whose session is
+   * live/attached.
    */
   const ownedByLivePane = (p: AgentProcess): boolean => {
-    if (opts.livePanePids?.has(p.pid)) return true;
+    if (livePaneSubtree?.has(p.pid)) return true;
     if (!p.tmuxSession) return false;
     const owner = owners.get(p.tmuxSession);
     return !!owner && (owner.agentAlive || owner.attached);

@@ -263,6 +263,39 @@ describe('selectOrphanProcesses', () => {
     expect(picked.map(c => c.pid)).toEqual([3868250]);
   });
 
+  // Round-3 finding (non-author review of the round-2 fix): livePanePids only
+  // ever contains a pane LEAF's own pid — a live agent's own CHILD process
+  // (e.g. its Bash tool spawning `claude --print "…daemon run…"` as a
+  // sub-invocation, which the threat model in this file's docblock names
+  // explicitly) has no marker on macOS AND is not itself a pane_pid, so it
+  // was still an unprotected kill seed even after the round-2 fix.
+  it('NEVER seeds tier 2 from a LIVE CHILD of a pane leaf, even with no env marker and no pane_pid of its own', () => {
+    const daemonShapedPrompt = 'claude --print "please fix daemon run --spawned-by {\"label\":\"claude\",\"pid\":99999999} handling"';
+    const paneLeaf = proc(100, 1, 'claude'); // the interactive agent tmux itself tracks
+    const child = proc(55555, 100, daemonShapedPrompt); // its own Bash-tool sub-invocation, ppid=100, no marker
+    const picked = selectOrphanProcesses([paneLeaf, child], owners([]), {
+      ...noneProtected,
+      isAlive: pid => pid !== 99999999,
+      livePanePids: new Set([100]), // tmux only ever reports the LEAF's pid
+    });
+    expect(picked).toEqual([]);
+  });
+
+  it('a process that has genuinely reparented away from a live pane leaf remains reapable', () => {
+    // ppid 1 (init) — NOT a descendant of the live leaf's current tree, even
+    // though some other unrelated live agent happens to be running. This is
+    // the actual detached-daemon shape tier 2 exists to catch.
+    const daemonArgs = 'claude.exe daemon run --origin transient --spawned-by {"label":"claude","pid":3834601}';
+    const reparentedDaemon = proc(3868250, 1, daemonArgs);
+    const paneLeaf = proc(100, 1, 'claude');
+    const picked = selectOrphanProcesses([paneLeaf, reparentedDaemon], owners([]), {
+      ...noneProtected,
+      isAlive: pid => pid !== 3834601,
+      livePanePids: new Set([100]),
+    });
+    expect(picked.map(c => c.pid)).toEqual([3868250]);
+  });
+
   it('argv0Basename anchor: a real claude daemon nested deep in a quoting process is still reaped', () => {
     // Sanity check the anchor doesn't over-correct: the ACTUAL daemon (argv[0]
     // really is claude/claude.exe) is unaffected.
