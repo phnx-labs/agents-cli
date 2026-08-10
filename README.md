@@ -970,10 +970,12 @@ Give a provider credential a durable name once, reuse it everywhere -- across ha
 agents accounts add work --provider anthropic --auth setup-token
 agents accounts add gateway --provider openrouter --auth api-key \
   --from-secrets openrouter.ai:OPENROUTER_API_KEY  # import from an existing secrets bundle
+agents accounts add deepinfra --provider deepinfra --auth api-key
 
 agents accounts set-default claude work   # claude uses `work` when --account is omitted
 agents accounts sync work --device yosemite-s0   # explicitly copy the bundle to a worker device
 agents run claude --account work
+agents profiles add deepinfra --account deepinfra
 ```
 
 One provider account **is** one `agents secrets` bundle -- `agents accounts add` creates it with secrets policy `never`, so a background agent launch on that account never raises Touch ID. `agents accounts` (no subcommand) lists provider bundles next to harness-native signed-in identities so you see both kinds of credential together; `accounts list` / `inspect <name>` / `set-key <name>` (rotate) / `rename` / `remove` manage a bundle by its stable id, independent of its current label.

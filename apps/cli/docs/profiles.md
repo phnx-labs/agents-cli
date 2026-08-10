@@ -203,6 +203,7 @@ All OpenRouter presets share one key (`agents-cli.openrouter.token`). Adding a s
 | `grok-heavy` | xai | `grok-build` | Native grok host (SuperGrok). |
 | `agy` | google | (CLI default) | Native antigravity host. |
 | `anthropic` | anthropic | `claude-3-5-sonnet-latest` | Direct Anthropic API. |
+| `deepinfra` | deepinfra | `deepseek-ai/DeepSeek-V3` | DeepInfra's OpenAI-compatible API through Codex. |
 | `proxy` | proxy | (custom) | Generic local proxy / gateway. |
 | `truefoundry` | truefoundry | (custom) | TrueFoundry AI Gateway. |
 | `bedrock` | bedrock | (custom) | AWS Bedrock native mode. |
@@ -400,6 +401,7 @@ For non-preset providers (gateways, self-hosted), the wizard at `agents profiles
 - [Google Vertex](profiles/vertex.md)
 - [Microsoft Azure AI Foundry](profiles/foundry.md) — distinct from TrueFoundry
 - [OpenRouter](profiles/openrouter.md) — built-in presets
+- [DeepInfra](profiles/deepinfra.md) — built-in Codex preset with a durable provider account
 - [Self-hosted vLLM](profiles/vllm.md) — native Anthropic endpoint, tool_use clean
 - [LiteLLM Proxy](profiles/litellm.md)
 - [Ollama](profiles/ollama.md) — Codex host recommended
