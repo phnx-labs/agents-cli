@@ -11,7 +11,7 @@ import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = path.resolve(HERE, '../../..');
@@ -42,11 +42,15 @@ export async function resolve(specifier, context, nextResolve) {
 }
 `,
   );
+  // Embed absolute file:// URLs — on Windows a bare C:\… path is not a valid
+  // ESM specifier (ERR_UNSUPPORTED_ESM_URL_SCHEME), and pathToFileURL('./')
+  // would resolve against process.cwd() rather than this scratch dir.
+  const hooksUrl = pathToFileURL(hooks).href;
+  const parentUrl = pathToFileURL(dir + path.sep).href;
   fs.writeFileSync(
     register,
     `import { register } from 'node:module';
-import { pathToFileURL } from 'node:url';
-register(${JSON.stringify(hooks)}, pathToFileURL('./'));
+register(${JSON.stringify(hooksUrl)}, ${JSON.stringify(parentUrl)});
 `,
   );
   return { loader: register, log };
@@ -57,9 +61,12 @@ function runCli(args: string[], env: NodeJS.ProcessEnv, loader: string): {
   stdout: string;
   stderr: string;
 } {
+  // On Windows, bare absolute paths are not valid ESM URLs for `--import`
+  // (`c:` is not a scheme → ERR_UNSUPPORTED_ESM_URL_SCHEME). The entry script
+  // still takes a native path (a file:// entry is re-resolved relative to cwd).
   const result = spawnSync(
     process.execPath,
-    ['--import', loader, '--import', 'tsx', INDEX, ...args],
+    ['--import', pathToFileURL(loader).href, '--import', 'tsx', INDEX, ...args],
     {
       cwd: CLI_ROOT,
       env,

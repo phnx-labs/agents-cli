@@ -560,7 +560,10 @@ export interface PurgeRemovableInstallsResult {
 
 /** True when the package root lives under npm's `_npx` cache (ephemeral runs). */
 export function isNpxCacheInstall(packageRoot: string): boolean {
-  const parts = packageRoot.split(path.sep);
+  // Split on either separator so a POSIX-shaped path is still recognized when
+  // this runs on Windows (doctor --fix / tests pass forward literal `_npx`
+  // paths from other boxes). `path.sep` alone missed `/home/…/_npx/…` on win32.
+  const parts = packageRoot.split(/[\\/]/);
   return parts.includes('_npx');
 }
 

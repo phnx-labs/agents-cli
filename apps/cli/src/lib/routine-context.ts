@@ -292,8 +292,17 @@ export function resolveRoutineExecutionContext(input: ExecutionContextInput): Re
       const abs = expandTargetHome(targetHome, cwd);
       return finalize(toTargetPortable(targetHome, abs), 'cwd_missing');
     }
-    if (path.isAbsolute(cwd)) {
-      const resolved = path.resolve(cwd);
+    // Absolute in EITHER path flavour — a Windows daemon resolving a POSIX
+    // target cwd (or the reverse) must not fall through to bare-relative join.
+    // Do not `path.resolve` on the local platform: on win32 that rewrites
+    // `/home/u/override` to `D:\home\u\override` and falsely flags
+    // cwd_not_portable (Windows CI, cross-platform schedule).
+    const cwdIsAbsolute =
+      targetPath(targetHome).isAbsolute(cwd) ||
+      path.posix.isAbsolute(cwd) ||
+      path.win32.isAbsolute(cwd);
+    if (cwdIsAbsolute) {
+      const resolved = cwd;
       if (isInside(targetHome, resolved)) {
         // Normalize an absolute-under-home path to its portable form on save.
         return finalize(toTargetPortable(targetHome, resolved), 'cwd_missing');
