@@ -41,4 +41,9 @@ describe('KNOWN_TOP_LEVEL_COMMANDS', () => {
     expect(isKnownTopLevelCommand('zzzznotacommand')).toBe(false);
     expect(isKnownTopLevelCommand('')).toBe(false);
   });
+
+  it('does not recognize the removed defaults and export commands', () => {
+    expect(isKnownTopLevelCommand('defaults')).toBe(false);
+    expect(isKnownTopLevelCommand('export')).toBe(false);
+  });
 });
