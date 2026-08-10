@@ -88,6 +88,9 @@ export function registerModelsCommand(program: Command): void {
 
   // Override subcommands. These WRITE agents.yaml so the user never hand-edits it;
   // resolution is exact `<agent>@<version>` over `<agent>` over the auto guess.
+  const tierDeprecation = chalk.yellow(
+    'Deprecation: `agents models tier` is replaced by `agents config set run.<agent@version>.tier.<tier>`.',
+  );
   const tier = models
     .command('tier')
     .description('Override which model a cost tier resolves to (per harness, or per agent@version).');
@@ -97,6 +100,7 @@ export function registerModelsCommand(program: Command): void {
     .description('Pin a tier to a model. selector: <agent> or <agent>@<version> (e.g. kimi, kimi@0.19.2).')
     .action((selector: string, tierName: string, model: string) => {
       try {
+        console.warn(tierDeprecation);
         const entry = setTierOverride(selector, tierName, model);
         console.log(chalk.green(`✓ ${entry.selector}  ${chalk.cyan(tierName.toLowerCase())} → ${chalk.bold(model)}`));
       } catch (err) {
@@ -110,6 +114,7 @@ export function registerModelsCommand(program: Command): void {
     .description('Clear one tier (or all tiers) back to the auto guess.')
     .action((selector: string, tierName: string | undefined) => {
       try {
+        console.warn(tierDeprecation);
         const changed = clearTierOverride(selector, tierName);
         console.log(changed ? chalk.green(`✓ cleared ${selector}${tierName ? ` ${tierName}` : ''}`) : chalk.gray('nothing to clear'));
       } catch (err) {
@@ -122,6 +127,7 @@ export function registerModelsCommand(program: Command): void {
     .command('list')
     .description('List all configured tier overrides.')
     .action(() => {
+      console.warn(tierDeprecation);
       const entries = listTierOverrides();
       if (entries.length === 0) {
         console.log(chalk.gray('No tier overrides — every tier uses the auto guess. Set one with `agents models tier set`.'));

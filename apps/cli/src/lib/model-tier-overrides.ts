@@ -90,7 +90,7 @@ export function listTierOverrides(): TierOverrideEntry[] {
 }
 
 /** Pin `tier -> model` for a selector. Writes agents.yaml. */
-export function setTierOverride(selectorInput: string, tierInput: string, model: string): TierOverrideEntry {
+export function setTierOverride(selectorInput: string, tierInput: string | ModelTier, model: string): TierOverrideEntry {
   const parsed = parseRunDefaultSelector(selectorInput);
   const tier = parseTier(tierInput);
   const id = model.trim();

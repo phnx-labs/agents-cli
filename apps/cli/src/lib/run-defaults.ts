@@ -19,7 +19,7 @@ import { readMeta, updateMeta } from './state.js';
 import { getProjectRunConfigs } from './run-config.js';
 import chalk from 'chalk';
 
-const VERSION_RE = /^(?:\*|latest|(?!.*\.\.)[A-Za-z0-9._+-]{1,64})$/;
+export const VERSION_RE = /^(?:\*|latest|(?!.*\.\.)[A-Za-z0-9._+-]{1,64})$/;
 
 export interface ParsedRunDefaultSelector {
   agent: AgentId;
@@ -270,4 +270,17 @@ export function unsetRunDefault(selectorInput: string): boolean {
   });
 
   return removed;
+}
+
+/** Convenience setters used by `agents config` for single-field updates. */
+export function setRunDefaultModel(selectorInput: string, model: string): RunDefaultEntry {
+  return setRunDefault(selectorInput, { model });
+}
+
+export function setRunDefaultMode(selectorInput: string, mode: string): RunDefaultEntry {
+  return setRunDefault(selectorInput, { mode });
+}
+
+export function setRunDefaultEffort(selectorInput: string, effort: string): RunDefaultEntry {
+  return setRunDefault(selectorInput, { effort });
 }

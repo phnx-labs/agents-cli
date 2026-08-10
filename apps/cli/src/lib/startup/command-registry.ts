@@ -60,6 +60,7 @@ export const loadResume: ModuleLoader = async () => (await import('../../command
 export const loadReconnect: ModuleLoader = async () => (await import('../../commands/reconnect.js')).registerReconnectCommand;
 export const loadFork: ModuleLoader = async () => (await import('../../commands/fork.js')).registerForkCommand;
 export const loadDefaults: ModuleLoader = async () => (await import('../../commands/defaults.js')).registerDefaultsCommands;
+export const loadConfig: ModuleLoader = async () => (await import('../../commands/config.js')).registerConfigCommand;
 export const loadSet: ModuleLoader = async () => (await import('../../commands/set.js')).registerSetCommand;
 export const loadModels: ModuleLoader = async () => (await import('../../commands/models.js')).registerModelsCommand;
 export const loadModes: ModuleLoader = async () => (await import('../../commands/modes.js')).registerModesCommand;
@@ -204,6 +205,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   reconnect: [loadReconnect],
   fork: [loadFork],
   defaults: [loadDefaults],
+  config: [loadConfig],
   set: [loadSet],
   models: [loadModels],
   modes: [loadModes],

@@ -154,6 +154,37 @@ describe('devices configure', () => {
     expect(badBool.stderr).toContain("expects 'on' or 'off'");
     expect(run(['devices', 'configure', 'ghost', '--max-agents', '2']).status).toBe(1);
   });
+
+  it('accepts the config alias', () => {
+    guardedHome();
+    expect(run(['devices', 'add', 'mac-mini', 'muqsit@192.0.2.2']).status).toBe(0);
+    const alias = run(['devices', 'config', 'mac-mini', '--max-agents', '3']);
+    expect(alias.status, alias.stderr).toBe(0);
+    expect(deviceDoc('mac-mini')).toContain('maxAgents: 3');
+  });
+
+  it('shows inherited user-level keys only with --inherited', () => {
+    guardedHome();
+    expect(run(['devices', 'add', 'zion', 'muqsit@192.0.2.1']).status).toBe(0);
+    expect(run(['devices', 'add', 'mac-mini', 'muqsit@192.0.2.2']).status).toBe(0);
+    expect(run(['config', 'set', 'interactive.host', 'zion']).status).toBe(0);
+
+    const without = run(['devices', 'config', 'mac-mini']);
+    expect(without.status).toBe(0);
+    expect(without.stdout).toContain("Config for 'mac-mini'");
+    expect(without.stdout).not.toContain('interactive.host');
+
+    const withInherited = run(['devices', 'config', 'mac-mini', '--inherited']);
+    expect(withInherited.status).toBe(0);
+    expect(withInherited.stdout).toContain('Inherited from ~/.agents/agents.yaml');
+    expect(withInherited.stdout).toContain('interactive.host');
+    expect(withInherited.stdout).toContain('zion');
+
+    const json = run(['devices', 'config', 'mac-mini', '--inherited', '--json']);
+    expect(json.status).toBe(0);
+    const parsed = JSON.parse(json.stdout);
+    expect(parsed.inherited).toMatchObject({ 'interactive.host': 'zion' });
+  });
 });
 
 describe('devices note', () => {

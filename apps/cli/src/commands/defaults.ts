@@ -15,6 +15,10 @@ import {
 } from '../lib/run-defaults.js';
 import { getProjectRoot, setProjectRoot } from '../lib/project-root.js';
 
+const DEPRECATION = chalk.yellow(
+  'Deprecation: `agents defaults run` is replaced by `agents config`. Run `agents config --help` for the new surface.',
+);
+
 interface RunDefaultsSetOptions {
   mode?: string;
   model?: string;
@@ -48,6 +52,7 @@ export function registerDefaultsCommands(program: Command): void {
     .command('list')
     .description('List configured run defaults')
     .action(() => {
+      console.warn(DEPRECATION);
       const entries = listRunDefaults();
       if (entries.length === 0) {
         console.log(chalk.gray('No run defaults configured.'));
@@ -69,6 +74,7 @@ export function registerDefaultsCommands(program: Command): void {
     .option('--effort <effort>', 'Default reasoning effort: low, medium, high, xhigh, max, or auto')
     .action((selector: string, options: RunDefaultsSetOptions) => {
       try {
+        console.warn(DEPRECATION);
         const entry = setRunDefault(selector, {
           ...(options.mode !== undefined ? { mode: options.mode } : {}),
           ...(options.model !== undefined ? { model: options.model } : {}),
@@ -87,6 +93,7 @@ export function registerDefaultsCommands(program: Command): void {
     .description('Remove defaults for an agent/version selector')
     .action((selector: string) => {
       try {
+        console.warn(DEPRECATION);
         const removed = unsetRunDefault(selector);
         if (removed) {
           console.log(chalk.green(`Removed run default ${selector}`));

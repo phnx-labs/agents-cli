@@ -152,7 +152,7 @@ is `logout-unprovable`,
 `missing-resource`, `content-drift`, `never-synced`, `stale`, `repo-behind`,
 `repo-drift`, `version-skew`, `fleet-resource-gap`, `hook-runtime-visibility-unavailable`, `orphan`, `duplicate-hook`,
 `duplicate-hook-drift`, `host-cli-missing`, `host-cli-invalid`,
-`rc-secret-export`, `env-secret-export`, `exec-policy` and `stale-cli`. (RUSH-2162 moved
+`rc-secret-export`, `env-secret-export`, `exec-policy`, `stale-cli` and `binary-shadow`. (RUSH-2162 moved
 `never-synced` and `duplicate-hook-drift` to warning — both are stale-sync states
 one `agents sync` resolves.)
 
@@ -307,6 +307,56 @@ recorded transcript cwd, which selected `projects/<cwd-key>`, not the later cwd
 stored from its first user turn. Never add a caller-local fallback that
 native-resumes another version home, and never let `run auto` change harnesses
 during recovery.
+
+## Configuration surface
+
+All persistent configuration that affects how agents run — default model, mode,
+effort, tier overrides, interactive host, browser profile, and per-device limits —
+lives under one command barrel:
+
+```bash
+agents config list
+agents config get <key>
+agents config set <key> <value>
+agents config unset <key>
+```
+
+Keys use `agent@version` as the canonical harness identifier. Examples:
+
+```bash
+agents config set run.claude@*.model best
+agents config set run.claude@*.tier.best claude-opus-4-8
+agents config set run.claude@2.1.45.model claude-opus-4-8
+agents config set run.claude@*.mode auto
+agents config set run.claude@*.effort high
+agents config set interactive.host zion
+agents config set browser.profile work
+agents config set devices.mac-mini.max-agents 4
+agents config set devices.mac-mini.scheduler off
+```
+
+The new command is a **facade over the existing YAML storage**
+(`run.defaults`, `model.tiers`, `config.interactiveHost`,
+`defaultBrowserProfile`, and `deviceConfig`). Fleet sync behavior is unchanged.
+
+`interactive.host` is a **user-level** preference: it lives in central
+`~/.agents/agents.yaml` under `config.interactiveHost`, syncs fleet-wide via
+`agents repo push/pull`, and answers "which device shows me artifacts?" It is
+intentionally not a per-device key. To see it in the per-device view, use
+`agents devices config <name> --inherited`.
+
+The old commands still work but are deprecated and print a warning pointing to
+`agents config`:
+
+- `agents defaults run` → `agents config`
+- `agents models tier` → `agents config set run.<agent@version>.tier.<tier>`
+- `agents devices set-interactive` → `agents config set interactive.host <name>`
+- `agents devices configure` → `agents config set devices.<name>.<key>`
+- `agents browser profiles set-default` → `agents config set browser.profile <name>`
+
+Implementation: [`src/commands/config.ts`](src/commands/config.ts) with key
+parsing in [`src/lib/config-keys.ts`](src/lib/config-keys.ts). Per-device config
+helpers live in [`src/lib/device-config.ts`](src/lib/device-config.ts).
 
 ## Supported harnesses
 

@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import chalk from 'chalk';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -226,11 +227,15 @@ function registerProfilesCommands(browser: Command): void {
       }
     });
 
+  const browserProfileDeprecation = chalk.yellow(
+    'Deprecation: `agents browser profiles set-default` is replaced by `agents config set browser.profile <name>`.',
+  );
   profiles
     .command('set-default [name]')
     .description('Set the profile `agents browser start` uses when no --profile is passed (also re-points an explicit `--profile default`). Device-local — each machine has its own. No name prints the current value.')
     .option('--unset', 'Clear the configured default (revert to auto-detecting an installed browser)')
     .action(async (name: string | undefined, opts: { unset?: boolean }) => {
+      console.warn(browserProfileDeprecation);
       if (opts.unset) {
         updateMeta((m) => {
           const { defaultBrowserProfile, ...rest } = m;

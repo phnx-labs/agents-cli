@@ -128,7 +128,7 @@ import {
   type VerdictSummary,
 } from '../lib/auth-health.js';
 import { runFleetLogin, type LoginStatus } from '../lib/fleet/remote-login.js';
-import { getConfigValue, listConfig, setConfigValue, unsetConfigValue } from '../lib/device-config.js';
+import { getConfigValue, listConfig, listUserConfig, setConfigValue, unsetConfigValue } from '../lib/device-config.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 
 /** One-line summary of a device for `list`. `isSelf` marks the machine this
@@ -1220,6 +1220,9 @@ function registerDevicesCommands(program: Command): void {
       }
     });
 
+  const interactiveDeprecation = chalk.yellow(
+    'Deprecation: `agents devices set-interactive` is replaced by `agents config set interactive.host <name>`.',
+  );
   const setInteractiveCmd = devicesCmd
     .command('set-interactive [name]')
     .description('Get or set the interactive host — the one device that shows YOU artifacts (browser opens, dashboards, rendered plans). Stored fleet-wide as config.interactiveHost in central agents.yaml.')
@@ -1227,6 +1230,7 @@ function registerDevicesCommands(program: Command): void {
     .option('--json', 'output machine-readable JSON')
     .action(async (name: string | undefined, opts: { unset?: boolean; json?: boolean }) => {
       try {
+        console.warn(interactiveDeprecation);
         if (opts.unset) {
           unsetConfigValue('interactive.host');
           if (opts.json) process.stdout.write(JSON.stringify({ interactiveHost: null }, null, 2) + '\n');
@@ -1268,14 +1272,20 @@ function registerDevicesCommands(program: Command): void {
     `,
   });
 
+  const configureDeprecation = chalk.yellow(
+    'Deprecation: `agents devices configure` is replaced by `agents config set devices.<name>.<key> <value>`.',
+  );
   const configureCmd = devicesCmd
     .command('configure <name>')
+    .alias('config')
     .description('Get or set per-device config: --max-agents, --scheduler. Written to ~/.agents/devices/<name>/agents.yaml (works for any device — the devices/ tree syncs). Unset = default behavior.')
     .option('--max-agents <n>', 'cap concurrent agents (Factory auto-launch counts device-wide; teams placement counts the team’s roster on the device)')
     .option('--scheduler <on|off>', 'allow the routines scheduler (daemon) to fire on this device (takes effect on daemon reload/restart)')
+    .option('--inherited', 'also show user-level keys (e.g. interactive.host) that apply to this device')
     .option('--json', 'output machine-readable JSON')
-    .action(async (name: string, opts: { maxAgents?: string; scheduler?: string; json?: boolean }) => {
+    .action(async (name: string, opts: { maxAgents?: string; scheduler?: string; inherited?: boolean; json?: boolean }) => {
       try {
+        console.warn(configureDeprecation);
         await mustGetDevice(name);
         const parseOnOff = (flag: string, raw: string): boolean => {
           if (raw === 'on') return true;
@@ -1301,15 +1311,28 @@ function registerDevicesCommands(program: Command): void {
 
         if (opts.json || writes.length === 0) {
           const entries = listConfig({ device: name }).filter((e) => e.spec.scope === 'device');
+          const inherited = opts.inherited ? listUserConfig().filter((e) => e.value !== undefined) : [];
           if (opts.json) {
             const config: Record<string, unknown> = {};
             for (const e of entries) if (e.value !== undefined) config[e.spec.name] = e.value;
-            process.stdout.write(JSON.stringify({ device: name, config }, null, 2) + '\n');
+            const out: Record<string, unknown> = { device: name, config };
+            if (opts.inherited) {
+              const inheritedObj: Record<string, unknown> = {};
+              for (const e of inherited) inheritedObj[e.spec.name] = e.value;
+              out.inherited = inheritedObj;
+            }
+            process.stdout.write(JSON.stringify(out, null, 2) + '\n');
           } else {
             console.log(chalk.bold(`Config for '${name}'`));
             for (const e of entries) {
               const value = e.value === undefined ? chalk.gray('— (default)') : chalk.cyan(JSON.stringify(e.value));
               console.log(`  ${e.spec.name.padEnd(24)} ${value}${chalk.gray(`  ${e.spec.description}`)}`);
+            }
+            if (inherited.length > 0) {
+              console.log(chalk.bold('\nInherited from ~/.agents/agents.yaml'));
+              for (const e of inherited) {
+                console.log(`  ${e.spec.name.padEnd(24)} ${chalk.cyan(JSON.stringify(e.value))}${chalk.gray(`  ${e.spec.description}`)}`);
+              }
             }
           }
         }
@@ -1320,10 +1343,11 @@ function registerDevicesCommands(program: Command): void {
     });
   setHelpSections(configureCmd, {
     examples: `
-      agents devices configure mac-mini --max-agents 4      # cap concurrent agents
-      agents devices configure mac-mini --scheduler off     # no routines firing there
-      agents devices configure mac-mini                     # print its current config
-      agents devices configure mac-mini --json              # machine-readable
+      agents devices config mac-mini --max-agents 4         # cap concurrent agents
+      agents devices config mac-mini --scheduler off        # no routines firing there
+      agents devices config mac-mini                        # print its current config
+      agents devices config mac-mini --inherited            # include user-level keys
+      agents devices config mac-mini --json                 # machine-readable
     `,
     notes: `
       Run it on any machine for any device: the value lands in
@@ -1333,6 +1357,8 @@ function registerDevicesCommands(program: Command): void {
       device ('agents routines start' / the reload a 'routines add' sends).
       For the default browser profile use 'agents browser profiles set-default
       <name>'; for free-form text use 'agents devices note'.
+      User-level keys such as interactive.host live in ~/.agents/agents.yaml and
+      sync fleet-wide; use --inherited to see them in this device view.
     `,
   });
 
