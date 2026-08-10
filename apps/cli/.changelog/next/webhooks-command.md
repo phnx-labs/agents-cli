@@ -1,0 +1,1 @@
+- Rename the top-level webhook receiver command to `agents webhooks`. The singular spelling is no longer registered; use `agents webhooks serve`.

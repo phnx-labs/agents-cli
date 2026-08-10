@@ -7,7 +7,7 @@
  * WIRING in `commands/message.ts` was not covered — and the wiring is where the
  * bug lived twice over: first the command never consulted the host-task records
  * at all, then it consulted them WITHOUT the `reconcileRunningTasks` heal that
- * `hosts stop`/`hosts ps` both run first.
+ * `agents devices stop`/`agents devices ps` both run first.
  *
  * Real CLI, real on-disk records under a throwaway HOME, no mocking. The cases
  * here are deliberately the ones that need no reachable host: a record that is
@@ -49,7 +49,7 @@ describe.skipIf(process.platform === 'win32' || !BUN)(
       fs.rmSync(home, { recursive: true, force: true });
     });
 
-    /** Write the same `<id>.json` record `agents hosts ps` reads. */
+    /** Write the same `<id>.json` record `agents devices ps` reads. */
     function writeTask(task: Record<string, unknown>): void {
       const dir = path.join(home, '.agents', '.cache', 'hosts');
       fs.mkdirSync(dir, { recursive: true });
@@ -87,14 +87,14 @@ describe.skipIf(process.platform === 'win32' || !BUN)(
       // rather than the generic "no running agent matches" this used to give.
       expect(res.status).not.toBe(0);
       expect(res.out).toContain("Task 'donerun' on host 'somebox' already completed");
-      expect(res.out).toContain('agents hosts logs donerun');
+      expect(res.out).toContain('agents logs donerun');
     }, 60_000);
 
     it('an unknown target still fails loud with both listing commands', () => {
       const res = runMessage('nothing-by-this-name');
       expect(res.status).not.toBe(0);
       expect(res.out).toContain('No running agent or cloud task matches');
-      expect(res.out).toContain('agents hosts ps');
+      expect(res.out).toContain('agents devices ps');
     }, 60_000);
   },
 );

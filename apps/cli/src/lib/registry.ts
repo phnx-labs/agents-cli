@@ -307,7 +307,7 @@ export interface SkillIndexEntry {
   tags?: string[];
   author?: string;
   installs?: number;
-  /** Lowercase hex sha256 of the skill's SKILL.md — written by `agents publish`. */
+  /** Lowercase hex sha256 of the skill's SKILL.md supplied by the registry index. */
   sha256?: string;
 }
 
@@ -624,7 +624,7 @@ export function parseOwnerRepoFromRemote(remoteUrl: string): string | null {
 /**
  * Walk a repo's skills/ and build a flat {@link SkillIndexDocument}. Each entry
  * carries the sha256 of its SKILL.md so install can verify integrity after
- * cloning — this is the artifact `agents publish` commits + pushes.
+ * cloning.
  *
  * `repoSlug` is the 'owner/repo' the skills are published under, written into
  * each entry's `repo` field so {@link skillEntryToGitSource} resolves it to

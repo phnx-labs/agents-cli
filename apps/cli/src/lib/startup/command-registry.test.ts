@@ -39,6 +39,13 @@ describe('KNOWN_TOP_LEVEL_COMMANDS', () => {
   it('rejects a name the CLI does not register', () => {
     expect(isKnownTopLevelCommand('session')).toBe(false); // the RUSH-2022 typo
     expect(isKnownTopLevelCommand('profile')).toBe(false);
+    expect(isKnownTopLevelCommand('publish')).toBe(false);
+    expect(isKnownTopLevelCommand('webhook')).toBe(false);
+    expect(isKnownTopLevelCommand('wallet')).toBe(false);
+    expect(isKnownTopLevelCommand('hosts')).toBe(false);
+    expect(isKnownTopLevelCommand('lock')).toBe(false);
+    expect(isKnownTopLevelCommand('helper')).toBe(false);
+    expect(isKnownTopLevelCommand('whoami')).toBe(false);
     expect(isKnownTopLevelCommand('zzzznotacommand')).toBe(false);
     expect(isKnownTopLevelCommand('')).toBe(false);
   });
@@ -57,5 +64,13 @@ describe('KNOWN_TOP_LEVEL_COMMANDS', () => {
   it('does not recognize the removed defaults and export commands', () => {
     expect(isKnownTopLevelCommand('defaults')).toBe(false);
     expect(isKnownTopLevelCommand('export')).toBe(false);
+  });
+
+  it('registers the plural webhooks command without a singular alias', async () => {
+    const program = await buildFullCommandTree();
+    const names = program.commands.flatMap((command) => [command.name(), ...command.aliases()]);
+
+    expect(names).toContain('webhooks');
+    expect(names).not.toContain('webhook');
   });
 });

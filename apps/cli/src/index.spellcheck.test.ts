@@ -95,4 +95,16 @@ describe('unknown-command spellcheck (RUSH-2329)', () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it('keeps the retired singular webhook command unknown', () => {
+    const home = seedHome();
+    try {
+      const r = run(home, 'webhook', 'serve', '--help');
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain("unknown command 'webhook'");
+      expect(r.stderr).toContain('Did you mean webhooks?');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
 });

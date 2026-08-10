@@ -5,7 +5,7 @@
  * checkout, and runs commands on them. We use it as the transport for
  * `agents run --lease`: warm a box → run the agent on it via `crabbox run` →
  * stop it. crabbox owns the SSH connection, so agents-cli never needs a direct
- * ssh target (unlike the `agents hosts` model).
+ * ssh target (unlike the host-dispatch model).
  *
  * crabbox talks to its cloud provider's API for list/status/warmup/stop, which
  * needs a provider token (e.g. HCLOUD_TOKEN) in the environment. We inject it

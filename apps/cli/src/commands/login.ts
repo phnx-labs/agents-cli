@@ -114,18 +114,4 @@ export function registerLoginCommands(program: Command): void {
       clearVaultKey();
       console.log(chalk.green('Logged out. Synced secrets are locked.'));
     });
-
-  program
-    .command('whoami')
-    .description('Show synced-secrets login status')
-    .action(() => {
-      const session = getVaultSession();
-      if (!session.loggedIn) {
-        console.log(chalk.yellow('Not logged in.'));
-        console.log(chalk.gray(`File: ${vaultPath()}${vaultExists() ? '' : ' (not created)'}`));
-        return;
-      }
-      console.log(chalk.green(`Logged in (${formatRemaining(session.expiresAt)} remaining).`));
-      console.log(chalk.gray(`File: ${vaultPath()}`));
-    });
 }

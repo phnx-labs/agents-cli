@@ -130,7 +130,7 @@ describe('resolveHost — merge, not shadow (RUSH-1967)', () => {
       address: { via: 'tailscale', dnsName: 'mac-mini.tail1a85a1.ts.net' },
       auth: { method: 'key' },
     });
-    // `agents hosts add mac-mini --cap gpu` froze a stale address into the overlay.
+    // An inline overlay entry for mac-mini (--cap gpu) froze a stale address into the overlay.
     updateMeta((m) => ({ ...m, hosts: { 'mac-mini': { source: 'inline', address: 'mac-mini.OLD.ts.net', user: 'muqsit', caps: ['gpu'] } } }));
 
     const host = await resolveHost('mac-mini');
@@ -163,7 +163,7 @@ describe('resolveHost — merge, not shadow (RUSH-1967)', () => {
       address: { via: 'tailscale', dnsName: 'winbox.tail1a85a1.ts.net' },
       auth: { method: 'password', bundle: 'muqsit' },
     });
-    // `agents hosts add winbox muqsit@winbox` writes an inline entry that used to
+    // An inline overlay entry for winbox (muqsit@winbox) used to
     // shadow the device and bypass the typed refusal — an ssh-layer hang.
     updateMeta((m) => ({ ...m, hosts: { winbox: { source: 'inline', address: 'winbox', user: 'muqsit' } } }));
 

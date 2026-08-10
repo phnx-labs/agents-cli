@@ -165,7 +165,7 @@ Examples:
   # Codex Cloud
   agents cloud run "add auth tests" --provider codex --env env_abc123
 
-  # One of your own machines (agents hosts / agents devices), over SSH
+  # One of your own machines (agents devices), over SSH
   agents cloud run "run the nightly benchmark" --host gpu-box --agent claude
   agents cloud run "rebuild the index" --host gpu --any --remote-cwd ~/proj
 

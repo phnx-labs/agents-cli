@@ -325,7 +325,7 @@ export async function resolveHostByCap(cap: string, any = false): Promise<Host> 
   // Non-dispatchable hosts (password-auth devices) are listed for honesty but
   // must never be picked as a run target.
   const matches = (await listAllHosts()).filter((h) => h.caps?.includes(cap) && h.dispatchable !== false);
-  if (matches.length === 0) throw new Error(`No host tagged "${cap}". Tag one with: agents hosts add <name> --cap ${cap}`);
+  if (matches.length === 0) throw new Error(`No host tagged "${cap}". See registered devices: agents devices list`);
   if (matches.length > 1 && !any) {
     throw new Error(`Multiple hosts tagged "${cap}": ${matches.map((h) => h.name).join(', ')}. Name one, or pass --any.`);
   }

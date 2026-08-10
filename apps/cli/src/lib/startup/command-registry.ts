@@ -73,12 +73,9 @@ export const loadProfiles: ModuleLoader = async () => (await import('../../comma
 export const loadHarness: ModuleLoader = async () => (await import('../../commands/harness.js')).registerHarnessCommands;
 export const loadSecrets: ModuleLoader = async () => (await import('../../commands/secrets.js')).registerSecretsCommands;
 export const loadLogin: ModuleLoader = async () => (await import('../../commands/login.js')).registerLoginCommands;
-export const loadWallet: ModuleLoader = async () => (await import('../../commands/wallet.js')).registerWalletCommands;
-export const loadHelper: ModuleLoader = async () => (await import('../../commands/helper.js')).registerHelperCommand;
 export const loadMenubar: ModuleLoader = async () => (await import('../../commands/menubar.js')).registerMenubarCommands;
 export const loadBeta: ModuleLoader = async () => (await import('../../commands/beta.js')).registerBetaCommands;
 export const loadSync: ModuleLoader = async () => (await import('../../commands/sync.js')).registerSyncCommand;
-export const loadLock: ModuleLoader = async () => (await import('../../commands/lock.js')).registerLockCommand;
 export const loadRefreshRules: ModuleLoader = async () => (await import('../../commands/refresh-rules.js')).registerRefreshRulesCommand;
 export const loadFactory: ModuleLoader = async () => (await import('../../commands/factory.js')).registerFactoryCommands;
 export const loadUsage: ModuleLoader = async () => (await import('../../commands/usage.js')).registerUsageCommand;
@@ -97,7 +94,6 @@ export const loadTmux: ModuleLoader = async () => (await import('../../commands/
 export const loadWatchdog: ModuleLoader = async () => (await import('../../commands/watchdog.js')).registerWatchdogCommand;
 export const loadBrowser: ModuleLoader = async () => (await import('../../commands/browser.js')).registerBrowserCommand;
 export const loadComputer: ModuleLoader = async () => (await import('../../commands/computer.js')).registerComputerCommand;
-export const loadHosts: ModuleLoader = async () => (await import('../../commands/hosts.js')).registerHostsCommand;
 export const loadLogs: ModuleLoader = async () => (await import('../../commands/logs.js')).registerLogsCommand;
 export const loadEvents: ModuleLoader = async () => (await import('../../commands/events.js')).registerEventsCommand;
 export const loadSsh: ModuleLoader = async () => (await import('../../commands/ssh.js')).registerSshCommands;
@@ -116,7 +112,7 @@ export const loadMailboxes: ModuleLoader = async () => (await import('../../comm
 export const loadServe: ModuleLoader = async () => (await import('../../commands/serve.js')).registerServeCommand;
 export const loadShare: ModuleLoader = async () => (await import('../../commands/share.js')).registerShareCommands;
 export const loadAudit: ModuleLoader = async () => (await import('../../commands/audit.js')).registerAuditCommands;
-export const loadWebhook: ModuleLoader = async () => (await import('../../commands/webhook.js')).registerWebhookCommand;
+export const loadWebhooks: ModuleLoader = async () => (await import('../../commands/webhook.js')).registerWebhooksCommand;
 export const loadHumans: ModuleLoader = async () => (await import('../../commands/humans.js')).registerHumansCommands;
 export const loadAccounts: ModuleLoader = async () => (await import('../../commands/accounts.js')).registerAccountsCommand;
 export const loadDaemon: ModuleLoader = async () => (await import('../../commands/daemon.js')).registerDaemonCommand;
@@ -184,11 +180,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   registry: [loadPackages],
   search: [loadPackages],
   install: [loadPackages],
-  // packages.ts also registers `publish` at top level (commands/packages.ts:435).
-  // It was missing here, so `agents publish` only worked via the unknown-command
-  // fallback that registers the whole tree — and the --host router could not see
-  // it as a real command at all (RUSH-2022).
-  publish: [loadPackages],
   routines: [loadRoutines],
   monitors: [loadMonitors],
   projects: [loadProjects],
@@ -213,13 +204,9 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   secrets: [loadSecrets],
   login: [loadLogin],
   logout: [loadLogin],
-  whoami: [loadLogin],
-  wallet: [loadWallet],
-  helper: [loadHelper],
   menubar: [loadMenubar],
   beta: [loadBeta],
   sync: [loadSync],
-  lock: [loadLock],
   'refresh-rules': [loadRefreshRules],
   factory: [loadFactory],
   usage: [loadUsage],
@@ -237,7 +224,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   watchdog: [loadWatchdog],
   browser: [loadBrowser],
   computer: [loadComputer],
-  hosts: [loadHosts],
   logs: [loadLogs],
   events: [loadEvents],
   ssh: [loadSsh],
@@ -274,7 +260,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   // commands/share.ts) — same module, registered as its own program.command().
   unshare: [loadShare],
   audit: [loadAudit],
-  webhook: [loadWebhook],
+  webhooks: [loadWebhooks],
   humans: [loadHumans],
   daemon: [loadDaemon],
   cp: [loadCp],
@@ -313,6 +299,9 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
   ...Object.keys(COMMAND_LOADERS),
   ...INLINE_COMMAND_NAMES,
 ]);
+
+export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set(['webhook']);
+
 
 /** Whether `name` is a top-level command this CLI registers. See {@link KNOWN_TOP_LEVEL_COMMANDS}. */
 export function isKnownTopLevelCommand(name: string): boolean {

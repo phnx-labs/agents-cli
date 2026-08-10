@@ -778,7 +778,7 @@ export function registerRunCommand(program: Command): void {
     .option('-i, --interactive', 'Force interactive mode even when a prompt is provided. Mutually exclusive with --headless.')
     .option('--resume [id]', 'Recover a previous conversation on its origin device. The exact healthy origin uses native resume; otherwise a healthy version of the same harness replays via /continue. Pair with a prompt to continue headlessly.')
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.')
-    .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents hosts logs <name>` for --host runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
+    .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents logs <name>` for --host runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
     .option('--notify', 'Post a desktop notification when a headless run finishes. Fired by this process on exit, so it survives whatever launched the run (the menu bar dispatching it, a terminal you closed).')
     .option(
       '--terminal [backend]',
@@ -848,7 +848,7 @@ export function registerRunCommand(program: Command): void {
       'Alias of --host. Pass "auto" for live health/account-aware device placement.',
     )
     .option('--remote-cwd <dir>', "Explicit host working directory for --host runs, used VERBATIM (overrides --cwd; usually --cwd suffices — it re-roots a local-home path onto the remote home). Pass a single-quoted '$HOME/…' or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you).")
-    .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
+    .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents devices ps` and `agents logs`).')
     .option('--any', 'With --host <cap> (a capability tag), pick any matching host instead of erroring when several match.')
     .option(
       '--copy-creds',
@@ -2082,7 +2082,7 @@ export function registerRunCommand(program: Command): void {
             console.log(
               chalk.green(`Dispatched to ${host.name}${task.name ? ` as "${task.name}"` : ''}.`) + '\n' +
               chalk.gray(`  Status:  agents sessions ${handle}`) + chalk.gray('   (compact digest — use this)') + '\n' +
-              chalk.gray(`  Raw log: agents hosts logs ${handle} -f`) + chalk.gray('   (heavy, only if needed)'),
+              chalk.gray(`  Raw log: agents logs ${handle} -f`) + chalk.gray('   (heavy, only if needed)'),
             );
             process.exit(0);
           }

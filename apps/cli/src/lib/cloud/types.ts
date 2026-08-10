@@ -17,7 +17,7 @@ import type { JobTrigger } from '../routines.js';
  *   - `factory`     — Factory Droid Computers (`droid computer ssh` + remote `droid exec`)
  *   - `antigravity` — Google Gemini Managed Agents (Interactions API)
  *   - `cursor`      — Cursor Cloud Agents REST API
- *   - `host`        — a machine you own (`agents hosts` / `agents devices`), over SSH
+ *   - `host`        — a machine you own (`agents devices`), over SSH
  *
  * Agents route to their native cloud automatically (see `cloudProvider` in the
  * agent registry); `--provider` overrides. Nothing auto-routes to `host` — it

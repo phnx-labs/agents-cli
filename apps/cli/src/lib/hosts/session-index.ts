@@ -55,7 +55,7 @@ export function hostSessionMeta(task: HostTask, ctx: HostSessionContext): Sessio
     machine: normalizeHost(task.host),
     topic: ctx.prompt.split('\n')[0]?.slice(0, 120) || undefined,
     // The run's `--name` seeds the label (resolves `agents sessions <name>` and
-    // `agents hosts logs <name>`); an unnamed host run falls back to the
+    // `agents logs <name>`); an unnamed host run falls back to the
     // `[host/<name>]` indicator, mirroring the cloud path's `[cloud/<status>]`.
     label: task.name || `[host/${task.host}]`,
   };

@@ -1640,8 +1640,8 @@ export function registerTeamsCommands(program: Command): void {
             dieFriction(
               'teams',
               'pool-device-not-resolvable',
-              `Couldn't resolve pool device "${name}". Register it with \`agents devices\`, ` +
-                `enroll it with \`agents hosts add ${name}\`, or pass user@host.`,
+              `Couldn't resolve pool device "${name}". Register it with \`agents devices add ${name} <target>\`, ` +
+                `or pass user@host.`,
             );
           }
           if (remoteShellFor(host.os ?? resolveRemoteOsSync(host.name)) === 'powershell') {
@@ -1807,8 +1807,8 @@ export function registerTeamsCommands(program: Command): void {
           dieFriction(
             'teams',
             'device-not-resolvable',
-            `Couldn't resolve --device "${explicitDevice}". Register it with \`agents devices\`, ` +
-              `enroll it with \`agents hosts add ${explicitDevice}\`, or pass user@host.`,
+            `Couldn't resolve --device "${explicitDevice}". Register it with \`agents devices add ${explicitDevice} <target>\`, ` +
+              `or pass user@host.`,
           );
         }
         // POSIX-only in v1: the remote follow/monitor layer offset-tails the log

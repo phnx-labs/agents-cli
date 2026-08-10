@@ -1,6 +1,6 @@
 /**
- * Shared host-task log viewer — the show-or-follow core behind
- * `agents hosts logs <id>` (top-level `agents logs` is the events timeline).
+ * Shared host-task log viewer — the show-or-follow core behind the
+ * top-level `agents logs <id>`.
  *
  * A running task with follow re-enters the offset-tail (`followHostTask`).
  * Otherwise the view is **concise by default**: a bounded tail of the captured

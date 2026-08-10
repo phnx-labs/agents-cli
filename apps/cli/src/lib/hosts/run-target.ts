@@ -53,7 +53,7 @@ export async function resolveHostRunTarget(name: string, opts: { any?: boolean }
       if (msg.startsWith('Multiple hosts')) throw new HostResolutionError(msg);
     }
   }
-  if (!host) throw new HostResolutionError(`Unknown host "${name}". List hosts: agents hosts list`);
+  if (!host) throw new HostResolutionError(`Unknown host "${name}". List devices: agents devices list`);
   return host;
 }
 

@@ -4,9 +4,9 @@
  * Bridges the devices registry (`agents devices`, ~/.agents/.history/devices/
  * registry.json) into the host pool behind the same `HostProvider` seam as
  * `local` — the "tailscale provider" fast-follow named in docs/hosts.md. With
- * it, a machine registered once via `agents devices sync` shows up in
- * `agents hosts list`, participates in capability routing, and is enumerable
- * by target pickers — not just resolvable by exact name.
+ * it, a machine registered once via `agents devices sync` becomes a resolvable
+ * `--host`/`--device` dispatch target, participates in capability routing, and
+ * is enumerable by target pickers — not just resolvable by exact name.
  *
  * Password-auth devices are listed (the pool stays honest about what exists)
  * but marked `dispatchable: false`; resolving one for dispatch throws the same
@@ -32,9 +32,9 @@ function statusOf(device: DeviceProfile): HostStatus {
 /**
  * Bridge a device profile into a `Host`. dnsName (stable across IP churn) is
  * preferred over ip; `source: 'inline'` makes `sshTargetFor` emit `user@address`.
- * Capability tags attach by enrolling the device (`agents hosts add <device>
- * --cap …` sources the target from this profile) — the enrolled entry then
- * shadows this row by provider precedence, carrying the caps.
+ * Capability tags come from an enrolled overlay entry for the device in
+ * agents.yaml (`Meta.hosts`) — that entry shadows this row by provider
+ * precedence, carrying the caps.
  */
 function deviceToPoolHost(rawDevice: DeviceProfile): Host | null {
   // A control device (a cockpit, e.g. a paired iPhone) drives the fleet but

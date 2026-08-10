@@ -56,7 +56,7 @@ function initProviders(): void {
   providers.set('factory', new FactoryCloudProvider(config.providers?.factory));
   providers.set('antigravity', new AntigravityCloudProvider(config.providers?.antigravity));
   providers.set('cursor', new CursorCloudProvider(config.providers?.cursor));
-  // Your own machines (agents hosts / agents devices) over SSH. No agent
+  // Your own machines (agents devices) over SSH. No agent
   // auto-routes here — it's always an explicit --provider host / --host choice.
   providers.set('host', new HostCloudProvider());
 }

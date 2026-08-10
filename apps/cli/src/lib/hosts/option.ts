@@ -17,7 +17,7 @@ export function addHostOption(cmd: Command): Command {
   return cmd
     .option(
       '-H, --host <name>',
-      'Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.',
+      'Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.',
     )
     .option('--device <name>', 'Alias of --host: run this command on a registered device (from `agents devices`), or `all` to run it across the whole fleet.')
     .option('--remote-cwd <dir>', "Working directory on the host for --host runs. Resolves on the REMOTE host — pass a '$HOME'-relative path (single-quoted so your local shell doesn't expand it) or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you). No effect on 'teams add'.")

@@ -2,7 +2,7 @@
  * Shared SSH exec primitive — the single hardened choke point for running a
  * command on a remote host over the system `ssh`.
  *
- * `agents hosts` dispatch and the browser driver both go through here so the
+ * `agents run --host` dispatch and the browser driver both go through here so the
  * connection hardening (`BatchMode`, `accept-new`, `ConnectTimeout`) and the
  * target-injection guard live in exactly one place. Target validation is the
  * canonical definition; `commands/secrets.ts` re-exports it.

@@ -545,9 +545,9 @@ export interface SkillEntry {
   /** Registry-specific trust signal (e.g. 'builtin', 'trusted', 'community'). */
   trustLevel?: string;
   /**
-   * Lowercase hex sha256 of the skill's SKILL.md, as recorded by
-   * `agents publish`. When present, install verifies the cloned SKILL.md
-   * against it and aborts on mismatch.
+   * Lowercase hex sha256 of the skill's SKILL.md, as recorded by the registry
+   * index. When present, install verifies the cloned SKILL.md against it and
+   * aborts on mismatch.
    */
   sha256?: string;
 }
@@ -1045,7 +1045,7 @@ export interface Meta {
    */
   deviceConfig?: Record<string, unknown>;
   /**
-   * Agent-host registry keyed by host name (`agents hosts`). Portable user
+   * Agent-host registry keyed by host name (the `--host`/`--device` dispatch overlay). Portable user
    * config synced with `agents repo push/pull`. For `ssh-config` hosts this is
    * just an overlay (caps/os) — the connection details stay in ~/.ssh/config and
    * are never copied. `inline` hosts carry their own address/user.

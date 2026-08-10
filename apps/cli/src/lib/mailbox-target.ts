@@ -76,7 +76,7 @@ export type HostTaskRoute =
  * local/cloud session (RUSH-2366 follow-up): `getActiveSessions()` has no
  * visibility into a detached `agents run --device <host> --no-follow`
  * dispatch, whose only local record is the `~/.agents/.cache/hosts/<id>.json`
- * sidecar `agents hosts ps` reads. Pure — the caller does the actual lookup
+ * sidecar `agents devices ps` reads. Pure — the caller does the actual lookup
  * (`resolveTaskRef`) and I/O (the ssh reroute).
  *
  * `remoteRef` prefers the remote agent's OWN identity (its captured session id

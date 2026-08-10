@@ -108,7 +108,7 @@ describe('resolveHostRunTarget — capability fall-through', () => {
     });
     const err = await resolveHostRunTarget('nonexistent').catch((e) => e as Error);
     expect(err).toBeInstanceOf(HostResolutionError);
-    expect(err.message).toBe('Unknown host "nonexistent". List hosts: agents hosts list');
+    expect(err.message).toBe('Unknown host "nonexistent". List devices: agents devices list');
   });
 });
 

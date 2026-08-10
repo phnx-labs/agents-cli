@@ -72,8 +72,8 @@ function main() {
   if (!src) {
     // No source bundle to install. Stay silent during postinstall so we don't
     // create noise on Linux/Windows or on builds that intentionally omit the
-    // helper. `agents helper install` surfaces a clearer error if a user
-    // actually needs the helper.
+    // helper. The lazy staleness check in getKeychainHelperPath() surfaces a
+    // clearer error if a user actually needs the helper.
     return;
   }
 

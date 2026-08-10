@@ -2,7 +2,7 @@
  * Local record of dispatched host tasks.
  *
  * Each dispatch writes a `<id>.json` sidecar next to its `<id>.log` (and the
- * remote's `<id>.exit`) under ~/.agents/.cache/hosts/, so `agents hosts ps/logs`
+ * remote's `<id>.exit`) under ~/.agents/.cache/hosts/, so `agents devices ps` / `agents logs`
  * can list runs and follow output across CLI invocations. (Folding these into
  * the cloud SQLite store so `agents cloud ps` sees them is a fast-follow — it
  * needs care around the cloud status-refresh path.)
@@ -26,8 +26,8 @@ export interface HostTask {
   pid?: number;
   /**
    * The durable `agents run --name <slug>` handle for this dispatch, if given.
-   * Chosen at launch and agent-agnostic (unlike sessionId), so `agents hosts
-   * ps/logs <name>` and the dispatch tip can reference the run by a stable name
+   * Chosen at launch and agent-agnostic (unlike sessionId), so `agents devices
+   * ps` / `agents logs <name>` and the dispatch tip can reference the run by a stable name
    * even for agents that never expose a session id up front. Absent when the
    * run was launched without `--name`.
    */
@@ -131,8 +131,8 @@ export function findTaskBySessionId(sessionId: string): HostTask | null {
 }
 
 /**
- * Find the newest host task launched with `--name <name>`, so `agents hosts
- * logs/ps <name>` and resolve-by-handle can address a run by its durable name.
+ * Find the newest host task launched with `--name <name>`, so `agents logs
+ * <name>` / `agents devices ps` and resolve-by-handle can address a run by its durable name.
  * Case-insensitive; newest wins (listTasks is createdAt-desc) when a name was
  * reused across dispatches.
  */
@@ -146,7 +146,7 @@ export function findTaskByName(name: string): HostTask | null {
 }
 
 /**
- * Resolve a host-task reference the way `agents hosts ps/logs/stop` do: a raw
+ * Resolve a host-task reference the way `agents devices ps`, `agents logs`, and `agents devices stop` do: a raw
  * dispatch id first, then a `--name` handle, then the remote agent/session id.
  * Shared so any other caller resolving "does this ref name a detached --device
  * dispatch?" (e.g. `agents message`) uses the identical three-way lookup.

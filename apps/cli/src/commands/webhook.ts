@@ -1,8 +1,8 @@
 /**
- * `agents webhook` — localhost receiver for signed public webhook ingress.
+ * `agents webhooks` — localhost receiver for signed public webhook ingress.
  *
  * The receiver intentionally binds localhost by default. Public exposure is a
- * separate `agents daemon funnel up <host>` step so the HTTP process can be tested and
+ * separate `agents funnel up <host>` step so the HTTP process can be tested and
  * rotated without changing the Tailscale Funnel config.
  */
 import type { Command } from 'commander';
@@ -24,8 +24,8 @@ function positiveInt(value: string | undefined, fallback: number): number {
 
 function readWebhookSecrets(bundleName: string): WebhookSecrets {
   const { env } = readAndResolveBundleEnv(bundleName, {
-    caller: 'webhook serve',
-    // `webhook serve` is a long-running background server started to receive
+    caller: 'webhooks serve',
+    // `webhooks serve` is a long-running background server started to receive
     // signed webhooks, not a human at a Touch ID sheet — so the read is always
     // `agentOnly` (SEC-13: never pop biometry on its own). A `never`/no-ACL or
     // broker-held bundle resolves silently; a locked bundle THROWS the actionable
@@ -64,12 +64,12 @@ function waitForListening(server: Server): Promise<void> {
   });
 }
 
-export function registerWebhookCommand(program: Command): void {
-  const webhook = program
-    .command('webhook')
+export function registerWebhooksCommand(program: Command): void {
+  const webhooks = program
+    .command('webhooks')
     .description('Run a localhost signed webhook receiver for routine triggers.');
 
-  webhook
+  webhooks
     .command('serve')
     .description('Receive signed GitHub/Linear webhooks on /hooks/<source> and fire matching routines.')
     .requiredOption('--secrets-bundle <name>', 'agents secrets bundle containing GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET')
@@ -112,7 +112,7 @@ export function registerWebhookCommand(program: Command): void {
         await waitForListening(server);
         const address = server.address();
         const bound = typeof address === 'object' && address ? address.port : port;
-        console.log(`${chalk.green('agents webhook')} ${chalk.dim('→')} ${chalk.cyan(`http://${opts.host ?? DEFAULT_HOST}:${bound}`)}`);
+        console.log(`${chalk.green('agents webhooks')} ${chalk.dim('→')} ${chalk.cyan(`http://${opts.host ?? DEFAULT_HOST}:${bound}`)}`);
         console.log(chalk.dim('signed · localhost by default · endpoints: /hooks/github, /hooks/linear · Ctrl-C to stop'));
 
         const shutdown = () => {

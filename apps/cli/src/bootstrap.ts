@@ -81,6 +81,7 @@ import {
   COMMAND_LOADERS,
   LAZY_COMMAND_NAMES,
   KNOWN_TOP_LEVEL_COMMANDS,
+  RETIRED_TOP_LEVEL_COMMANDS,
   type ModuleLoader,
 } from './lib/startup/command-registry.js';
 import { closestTopLevelCommand } from './lib/startup/spellcheck.js';
@@ -277,9 +278,9 @@ Run and dispatch:
   routines                        Run agents on a cron schedule (scheduler auto-starts)
   daemon                          Runtime status/control for the always-on daemon (secrets broker, browser IPC, scheduler)
   webhook                         Receive signed GitHub/Linear webhooks for trigger routines
-  daemon funnel                   Expose a webhook receiver through Tailscale Funnel
+  funnel                          Expose a webhook receiver through Tailscale Funnel
   sessions                        Browse, search, and replay past runs (live-search in TTY; grouped by workspace)
-  logs                            Alias of events (timeline). Content: sessions / hosts logs
+  logs [id]                       Show a run's log — host-dispatch task or session; -f to follow
   browser                         Automate a browser — navigate, click, screenshot, console, network
   pty                             Drive interactive terminal programs (REPLs, TUIs) via a persistent PTY session
 
@@ -287,12 +288,13 @@ Observe (read the fleet — no store merge; aliases point at the real readers):
   feed / inbox                    Needs-you inbox (open blocks waiting on you)
   timeline                        Agent progress stream (= feed --filter updates)
   roster                          Live agents (= sessions --active)
-  events                          Unified event trail (ops + activity + runs)
-  audit                           Alias of events --include runs
+  events                          Unified ops + activity event trail
+  audit                           Tamper-evident run-dispatch log (not events)
   snapshot                        One-process inventory + active sessions poll
   status                          Sync/drift only (not the live fleet snapshot)
 
 Credentials and profiles:
+  profile                         Activate resource profiles across skills, MCP, permissions, and secrets
   profiles                        Bundles of (host CLI, endpoint, model, auth)
   secrets                         Keychain-backed env bundles; use 'secrets exec <bundle> -- <cmd>' to inject into a subprocess
 
@@ -307,7 +309,6 @@ Config sync:
   sync [agent]                    Re-materialize installed version homes; --local to skip fetching
   repo init --path <dir>          Scaffold your own editable repo from a template
   repo add <path|gh:user/repo>    Merge an extra repo after the system repo
-  lock [--frozen]                 Write/verify agents.lock (SHA-256 of resolved resources); --frozen fails on drift
 
 Beta features:
   beta                            Enable preview features (factory and more)
@@ -510,7 +511,8 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
   // getKeychainHelperPath() to repair it on their next secret operation. The new
   // package is already on disk, so the dynamic import resolves the freshly-installed
   // helper module + bundle. Best-effort: an upgrade must never fail because the
-  // helper could not be reinstalled (`agents helper install --force` stays available).
+  // helper could not be reinstalled (the lazy staleness check in
+  // getKeychainHelperPath() still repairs it on the next secret operation).
   if (process.platform === 'darwin') {
     try {
       const { ensureKeychainHelperInstalled } = await import('./lib/secrets/install-helper.js');
@@ -950,7 +952,7 @@ program.on('command:*', (operands) => {
   const unknown = operands[0];
   const { closest, minDist } = closestTopLevelCommand(unknown, KNOWN_TOP_LEVEL_COMMANDS);
 
-  if (minDist === 1 && closest) {
+  if (minDist === 1 && closest && !RETIRED_TOP_LEVEL_COMMANDS.has(unknown)) {
     const args = process.argv.slice(2);
     args[0] = closest;
     // The typo'd name was unknown, so the top-level --host router (which ran
@@ -1087,7 +1089,12 @@ if (isLazyRequest && !requestedIsDisabled) {
   const candidates = [...KNOWN_TOP_LEVEL_COMMANDS].filter((name) => !brandDisabled.has(name));
   const { closest, minDist } = closestTopLevelCommand(requestedCommand, candidates);
 
-  if (minDist === 1 && closest && !requestedIsDisabled) {
+  if (
+    minDist === 1 &&
+    closest &&
+    !requestedIsDisabled &&
+    !RETIRED_TOP_LEVEL_COMMANDS.has(requestedCommand)
+  ) {
     // Auto-correct: register ONLY the corrected command, then re-route --host
     // and reparse under the real name (RUSH-2329 + RUSH-2022 review r2).
     passedArgs[0] = closest;
@@ -1287,8 +1294,8 @@ try {
       process.exit(1);
     }
     // A --host targeting a password-auth device throws this from resolveHost.
-    // It carries an actionable message (switch to key auth / enroll as a host);
-    // handling it here covers every resolveHost caller (run, hosts check/rm,
+    // It carries an actionable message (switch to key auth);
+    // handling it here covers every resolveHost caller (run, teams,
     // secrets --host) at the source instead of a catch at each call site.
     if (err.name === 'DeviceOffloadUnsupportedError') {
       console.error(err.message);

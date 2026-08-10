@@ -327,7 +327,7 @@ export function ensureHostReady(host: Host, opts: EnsureReadyOptions): { warning
   }
   if (!probe.version) {
     throw new Error(
-      `agents-cli is not installed on "${host.name}". Enroll it first: agents hosts add ${host.name} (bootstraps agents-cli).`,
+      `agents-cli is not installed on "${host.name}". Install it there first — e.g. \`agents devices update\` to roll it out to registered devices.`,
     );
   }
   return evaluateHostAgentInstall(probe.view, opts, host.name);

@@ -12,7 +12,7 @@
  * written on the host that actually owns the agent. A caller who doesn't already
  * know the host (a detached `agents run --device <h> --no-follow` dispatch) is
  * still resolved automatically: a `target` matching no local/cloud session falls
- * through to the `~/.agents/.cache/hosts/` records `agents hosts ps` reads
+ * through to the `~/.agents/.cache/hosts/` records `agents devices ps` reads
  * (RUSH-2366 follow-up — see decideHostTaskRoute in lib/mailbox-target.ts), and
  * the message is rerouted there.
  *
@@ -179,7 +179,7 @@ async function deliverViaResume(route: AnswerRoute, mailboxId: string): Promise<
  * dispatch (RUSH-2366 follow-up). `getActiveSessions()` never sees these: the
  * live process is on the dispatch's host, not this machine, so the local
  * session resolver in `resolveMessageTarget` reports "no running agent" even
- * while `agents hosts ps` shows the same dispatch running with a live remote
+ * while `agents devices ps` shows the same dispatch running with a live remote
  * pid — the only recovery was kill-and-redispatch, losing all context.
  *
  * Re-spawns `agents message <remoteRef> <text> --host <host>` through
@@ -354,8 +354,8 @@ export function registerMessageCommand(program: Command): void {
           // Not a local/cloud session — check whether it's a detached
           // `--device ... --no-follow` dispatch, which `getActiveSessions()`
           // never sees (its live process is on another host). Same records
-          // `agents hosts ps` reads, so the two commands never disagree.
-          // Heal first, exactly as `hosts stop`/`hosts ps` do: a detached
+          // `agents devices ps` reads, so the two commands never disagree.
+          // Heal first, exactly as `agents devices stop`/`agents devices ps` do: a detached
           // dispatch record never self-updates, so a finished run is still
           // stamped `status:'running'` on disk. Without this we'd route a dead
           // task through an SSH reroute that can only fail, instead of
@@ -373,10 +373,10 @@ export function registerMessageCommand(program: Command): void {
             die(
               `Task '${target}' on host '${hostRoute.host}' already ${hostRoute.status}` +
                 (hostRoute.exitCode !== undefined ? ` (exit ${hostRoute.exitCode})` : '') +
-                `. Nothing to message. View its output: \`agents hosts logs ${target}\`.`,
+                `. Nothing to message. View its output: \`agents logs ${target}\`.`,
             );
           }
-          die(`No running agent or cloud task matches "${target}". List targets with \`agents sessions --active\` or \`agents hosts ps\`.`);
+          die(`No running agent or cloud task matches "${target}". List targets with \`agents sessions --active\` or \`agents devices ps\`.`);
         }
       }
     });

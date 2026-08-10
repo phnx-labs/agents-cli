@@ -143,7 +143,7 @@ describe('hostTaskLogJson', () => {
 
 // Detached-dispatch log retrieval over real ssh (localhost). The literal bug
 // closed by this PR: a --no-follow dispatch captured no local log, so
-// `agents hosts logs <id>` always printed "(no local log captured for this task)".
+// `agents logs <id>` always printed "(no local log captured for this task)".
 // These tests drive a real `ssh localhost cat <file>` through showHostTaskLog to
 // confirm the remote-fetch path works end-to-end.
 describe.skipIf(!LOCALHOST_SSH)('detached-run log fetch over real ssh (localhost)', () => {

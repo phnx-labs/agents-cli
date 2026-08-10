@@ -251,10 +251,10 @@ export function buildWindowsStopRemoteCommand(pid: number, remoteExit: string): 
 }
 
 /**
- * Stop a running host task from the origin machine (`agents hosts stop <id>`).
+ * Stop a running host task from the origin machine (`agents devices stop <id>`).
  *
  * Unlike {@link terminateDispatchedTask} (rollback cleanup after a failed
- * persist), this keeps the remote log so `agents hosts logs <id>` still works,
+ * persist), this keeps the remote log so `agents logs <id>` still works,
  * writes a terminal `.exit` marker only when we actually stopped a live group
  * (or no code existed), and never clobbers a real completed-run exit code.
  */
@@ -295,7 +295,7 @@ interface LaunchOptions {
   /** Stream progress and block until completion (default true). */
   follow?: boolean;
   timeoutMs?: number;
-  /** Task-record labels for `agents hosts ps`. */
+  /** Task-record labels for `agents devices ps`. */
   agentLabel: string;
   promptLabel: string;
   /** Session id the run was launched with, persisted on the task record. */
@@ -405,7 +405,7 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
     remoteShell,
   });
   // -1 = the follow window closed while the run continues on the host. Leave the
-  // record 'running' (do NOT freeze it terminal) so a later `hosts ps`/`logs`
+  // record 'running' (do NOT freeze it terminal) so a later `agents devices ps` / `agents logs`
   // reconcile against the remote `.exit` resolves the true final status.
   const finished = exitCode === -1 ? task : (updateTask(id, terminalPatch(exitCode)) ?? task);
   return { task: finished, exitCode };
@@ -460,7 +460,7 @@ export interface DispatchOptions {
   sessionId?: string;
   /**
    * Durable `--name <slug>` handle, forwarded to the remote `agents run` and
-   * recorded on the local task so `agents hosts logs/ps <name>` resolve it.
+   * recorded on the local task so `agents logs <name>` / `agents devices ps` resolve it.
    */
   name?: string;
   /** Resume an existing session on the host by id (via `agents run --resume`). */

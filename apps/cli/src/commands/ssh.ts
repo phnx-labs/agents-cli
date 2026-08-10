@@ -98,6 +98,10 @@ import { collectLocalFleetInventory } from '../lib/devices/fleet-inventory.js';
 import { checkSyncStatus, countOrphans } from '../lib/drift.js';
 import { checkAllClis } from '../lib/teams/agents.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
+import { listTasks, resolveTaskRef } from '../lib/hosts/tasks.js';
+import { reconcileRunningTasks } from '../lib/hosts/reconcile.js';
+import { stopDispatchedTask } from '../lib/hosts/dispatch.js';
+import { terminalWidth, truncateToWidth } from '../lib/session/width.js';
 import { sshExec, sshExecAsync, SSH_OPTS } from '../lib/ssh-exec.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
@@ -1996,6 +2000,80 @@ A box whose probe cannot answer (no POSIX shell, e.g. Windows) is reported
       const results = runFleet(targets, cmd, { self: machineId() });
       printFleetResults(results);
     });
+
+  devicesCmd
+    .command('ps')
+    .description('List agent tasks dispatched to devices with `agents run --device <name> --no-follow`. Reconciles each still-`running` record against the remote before listing. View a log with `agents logs <id>`.')
+    .option('--json', 'Output JSON')
+    .action((opts: { json?: boolean }) => doDeviceTaskPs(!!opts.json));
+
+  devicesCmd
+    .command('stop <id>')
+    .alias('kill')
+    .description('Terminate a running dispatched task from this machine (SIGTERM the remote process group; marks it failed/143).')
+    .action((id: string) => doDeviceTaskStop(id));
+}
+
+/**
+ * `agents devices ps` — list tasks dispatched to devices (`agents run --device
+ * <name> --no-follow`). Heals any 'running' record whose local follower died
+ * (dropped connection, laptop sleep) against the remote `.exit` before listing,
+ * so a finished run never shows stuck at 'running'.
+ */
+async function doDeviceTaskPs(json: boolean): Promise<void> {
+  const tasks = reconcileRunningTasks(listTasks());
+  if (json) {
+    console.log(JSON.stringify(tasks, null, 2));
+    return;
+  }
+  if (tasks.length === 0) {
+    console.log(chalk.gray('No dispatched tasks yet. Dispatch one: agents run <agent> "<task>" --device <name> --no-follow'));
+    return;
+  }
+  const cols = terminalWidth();
+  console.log(chalk.bold('ID').padEnd(11) + chalk.bold('NAME').padEnd(16) + chalk.bold('DEVICE').padEnd(16) + chalk.bold('AGENT').padEnd(10) + chalk.bold('STATUS').padEnd(11) + chalk.bold('PROMPT'));
+  for (const t of tasks) {
+    const status = t.status === 'completed' ? chalk.green(t.status) : t.status === 'failed' ? chalk.red(t.status) : chalk.yellow(t.status);
+    const nameCol = truncateToWidth(t.name ?? chalk.gray('-'), 15).padEnd(16);
+    const promptCol = truncateToWidth(t.prompt, Math.max(12, cols - (11 + 16 + 16 + 10 + 11)));
+    console.log(t.id.padEnd(11) + nameCol + t.host.padEnd(16) + t.agent.padEnd(10) + status.padEnd(11) + promptCol);
+  }
+}
+
+/** `agents devices stop <id>` — terminate a running dispatched task from the origin machine. */
+async function doDeviceTaskStop(ref: string): Promise<void> {
+  // Heal first so we don't try to kill a process that already exited.
+  const current = resolveTaskRef(ref);
+  if (!current) {
+    console.log(chalk.red(`Unknown task "${ref}".`));
+    process.exitCode = 1;
+    return;
+  }
+  const task = reconcileRunningTasks([current])[0] ?? current;
+  if (task.status !== 'running') {
+    console.log(chalk.gray(`Task ${task.id} is already ${task.status}` + (task.exitCode !== undefined ? ` (exit ${task.exitCode})` : '') + '.'));
+    return;
+  }
+  try {
+    const stopped = stopDispatchedTask(task);
+    const statusColor = stopped.status === 'completed' ? chalk.green : chalk.yellow;
+    const exitNote =
+      stopped.exitCode === 143
+        ? 'exit 143 / SIGTERM'
+        : stopped.exitCode !== undefined
+          ? `exit ${stopped.exitCode}`
+          : stopped.status;
+    console.log(
+      chalk.green(`Stopped ${stopped.id}`) +
+        chalk.gray(` on ${stopped.host}`) +
+        '  ' + statusColor(stopped.status) +
+        chalk.gray(` (${exitNote})`),
+    );
+    console.log(chalk.gray(`Logs: agents logs ${stopped.id}`));
+  } catch (err: any) {
+    console.error(chalk.red(err?.message ?? err));
+    process.exitCode = 1;
+  }
 }
 
 /** Register the `agents ssh` smart wrapper. */

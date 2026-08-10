@@ -3,7 +3,7 @@
  *
  * The real bugs this guards against:
  *   1. A device registered only via `agents devices sync` must appear in
- *      `listAllHosts()` (so `hosts list`, cap routing, and target pickers see
+ *      `listAllHosts()` (so cap routing and target pickers see
  *      it) — the gap this provider exists to close.
  *   2. A password-auth device must be LISTED (`dispatchable: false`) but never
  *      resolved for dispatch (typed error) and never picked by cap routing —
@@ -129,7 +129,7 @@ describe('devices in the unified pool', () => {
       address: { via: 'tailscale', dnsName: 'gpu-dev.tail.ts.net' },
       auth: { method: 'key' },
     });
-    // `agents hosts add gpu-dev --cap gpu` enrolls inline, sourcing the target
+    // An enrolled inline overlay entry for gpu-dev (--cap gpu) sources the target
     // from the device profile — emulate the entry it writes.
     updateMeta((meta) => ({
       ...meta,

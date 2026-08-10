@@ -154,7 +154,7 @@ export function ensureKeychainHelperInstalled(opts: { forceReinstall?: boolean }
     if (!verify.ok) {
       throw new Error(
         `Installed helper failed codesign verification at ${dest}.\n${verify.output}\n` +
-        'The bundle may be corrupted. Try `agents helper install` to reinstall, or reinstall agents-cli.'
+        'The bundle may be corrupted. Reinstall agents-cli to restore it; the helper reinstalls automatically on the next secrets use.'
       );
     }
     heartbeat(); // codesign done; spctl does a network Gatekeeper lookup — refresh again
@@ -174,9 +174,9 @@ export function ensureKeychainHelperInstalled(opts: { forceReinstall?: boolean }
  * Return the absolute path to the helper executable. If the installed bundle
  * is missing, or is stale relative to the bundled source helper, performs a
  * lazy (re)install first. The staleness check is what lets an upgraded CLI
- * replace a helper a previous version installed — `agents helper install`
- * never runs on `npm i -g`, so this call site is the only one every machine
- * is guaranteed to pass through.
+ * replace a helper a previous version installed — the install never runs on
+ * `npm i -g`, so this call site is the only one every machine is guaranteed to
+ * pass through.
  *
  * Throws on non-darwin.
  */
@@ -189,7 +189,7 @@ export function getKeychainHelperPath(): string {
   return exec;
 }
 
-/** Diagnostic snapshot used by `agents helper status`. */
+/** Diagnostic snapshot of the installed Keychain helper. */
 export interface KeychainHelperStatus {
   source: string | null;
   destination: string;

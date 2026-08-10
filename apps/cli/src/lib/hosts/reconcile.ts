@@ -6,7 +6,7 @@
  * the SSH connection drops mid-follow. When that happens the local record is
  * left at `status:'running'` forever, because the only path that finalizes it
  * (dispatch's post-follow `updateTask`) never runs. This module re-reads the
- * remote `.exit` on demand — from `agents hosts ps` / `logs` — and heals the
+ * remote `.exit` on demand — from `agents devices ps` / `agents logs` — and heals the
  * record. We only ever CONFIRM completion; an unreachable host or an absent
  * `.exit` leaves the record `running` (we never guess failure).
  */
@@ -66,7 +66,7 @@ export function reconcileTask(task: HostTask): HostTask {
 }
 
 /**
- * Heal a list of records for a listing (`agents hosts ps`). Only `running` tasks
+ * Heal a list of records for a listing (`agents devices ps`). Only `running` tasks
  * are probed; each host is reachability-checked ONCE (deduped by target) so a
  * down host costs a single short timeout instead of one per task, and its tasks
  * are left `running` rather than falsely failed. Sequential by design — with the

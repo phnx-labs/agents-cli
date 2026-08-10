@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_97 command groups · 568 commands._
+_91 command groups · 548 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -256,12 +256,14 @@ agents devices list                            List registered devices with plat
 agents devices login                           Log agent CLIs into fleet boxes over SSH: drive each box's device-code OAuth, scrape the URL + code, and surface every pending login in one local browser page. Default drives all codes at once; --interactive walks one box at a time (codes requested just-in-time so they don't expire).
 agents devices pair-ios [name]                 Pair an iPhone/iPad cockpit (RUSH-1733): mint a control token for `agents serve --control` and mark the device control-only. The token is shown ONCE — enter it in the app. Run this on the anchor.
 agents devices ping                            Live auth health: complete a real request for every agent account across the fleet (unlike the cached "signed in" flag). Writes the shared auth-health cache read by `agents view` and `fleet status`.
+agents devices ps                              List agent tasks dispatched to devices with `agents run --device <name> --no-follow`. Reconciles each still-`running` record against the remote before listing. View a log with `agents logs <id>`.
 agents devices register <name>                 Register a discovered (pending) node by name — used by the menu-bar "NEW DEVICES → Register" action.
 agents devices render                          Render the registry to ssh_config. Prints to stdout, or use --write to update ~/.ssh/config.d/agents.
 agents devices rm <name>                       Remove a device from the registry.
 agents devices run <cmd...>                    Run a command on every online registered device. Offline devices are skipped. Alias surface: agents fleet run …
 agents devices show <name>                     Show the full profile for one device.
 agents devices status                          Fleet health at a glance: online/offline rollup, a NEEDS ATTENTION list (each with its fix command), and quiet per-device rows grouped by OS. Use --verbose for the full auth/CLI/sync grid.
+agents devices stop <id>                       Terminate a running dispatched task from this machine (SIGTERM the remote process group; marks it failed/143).
 agents devices sync                            Ingest `tailscale status --json` into device profiles. In a terminal, opens a checkbox to register/unregister nodes; with --yes, registers every non-ignored node.
 agents devices unignore <name>                 Undo `ignore`: allow a node to be discovered and registered again.
 agents devices update [version]                Roll out agents-cli to every online registered device (`agents upgrade --yes` on each), then verify each box actually runs the new version. Offline devices are skipped.
@@ -309,16 +311,6 @@ agents harness rename <old-name> <new-name>  Rename a custom harness (updates fo
 agents harness view <name>                   Show one custom harness (host, model, provider, auth, path).
 ```
 
-## helper — Manage the signed macOS Keychain helper (.app) install
-
-```
-agents helper          Manage the signed macOS Keychain helper (.app) install
-agents helper install  Copy the bundled .app to ~/Library/Application Support/agents-cli/
-agents helper status   Show source, destination, codesign and notarization status
-agents helper update   Reinstall the .app, overwriting any existing copy (alias of install)
-agents helper where    Print the absolute path to the installed helper executable
-```
-
 ## hooks — Automate workflows by running shell scripts in response to agent events
 
 ```
@@ -328,19 +320,6 @@ agents hooks list [agent]   Show which hooks are installed and which events they
 agents hooks profile        Per-hook timing + cache stats from recent invocations
 agents hooks remove [name]  Delete a hook from agents (interactive picker if no name given)
 agents hooks view [name]    Read the shell script content for a hook
-```
-
-## hosts — Register and inspect agent hosts (machines you offload runs to with `agents run --host <name>`).
-
-```
-agents hosts                      Register and inspect agent hosts (machines you offload runs to with `agents run --host <name>`).
-agents hosts add [name] [target]  Enroll a host. With no args, pick from ~/.ssh/config + known_hosts. `target` is user@host for hosts not in ssh config.
-agents hosts check <name>         Probe one host: reachable? agents-cli version?
-agents hosts list                 List enrolled + ssh-config hosts (metadata only, no probing).
-agents hosts logs <id>            Show a host task’s concise summary; --full for the raw log, -f to follow a running one.
-agents hosts ps                   List dispatched host tasks.
-agents hosts remove <name>        Remove a host from the registry (does not touch ~/.ssh/config).
-agents hosts stop <id>            Terminate a running host task from this machine (SIGTERM process group; marks failed/143).
 ```
 
 ## humans — Inspect owner identity and notification channel config (humans.yaml)
@@ -398,12 +377,6 @@ agents install <identifier>  Install a package: mcp:, skill:, plugin:, or GitHub
 agents list [agent]  List installed agent CLI versions
 ```
 
-## lock — Write or verify agents.lock — a SHA-256 manifest of resolved resources
-
-```
-agents lock  Write or verify agents.lock — a SHA-256 manifest of resolved resources
-```
-
 ## login — Unlock synced secrets for this shell session
 
 ```
@@ -416,13 +389,13 @@ agents login  Unlock synced secrets for this shell session
 agents logout  Forget the cached synced-secrets key
 ```
 
-## logs — Alias of `agents events`. Pass an id to see the content redirect.
+## logs — Show a run log, audit trail, or stats. Subcommands: audit, stats, rotate.
 
 ```
-agents logs [id]    Alias of `agents events`. Pass an id to see the content redirect.
-agents logs audit   Alias of `agents events --include ops`
-agents logs rotate  Alias of `agents events rotate`
-agents logs stats   Alias of `agents events stats`
+agents logs [id]    Show a run log, audit trail, or stats. Subcommands: audit, stats, rotate.
+agents logs audit   Alias for `agents events --audit`
+agents logs rotate  Apply event retention and the storage ceiling immediately
+agents logs stats   Show aggregate audit statistics
 ```
 
 ## mailboxes — Fleet comms — boxes, live cross-box traffic, threads, and routes across the agent mailbox spool
@@ -627,12 +600,6 @@ agents pty signal <id> [signal]  Send a POSIX signal to the running process. Def
 agents pty start                 Start a new PTY session and return its ID. The session persists until you stop it.
 agents pty stop <id>             Stop a PTY session and clean up. The session ID becomes invalid.
 agents pty write <id> <input>    Send keystrokes to the PTY (like typing into the terminal). Processes escape sequences by default.
-```
-
-## publish — Generate a skills-index.json for a git repo and push it, making its skills discoverable via agents search/install
-
-```
-agents publish  Generate a skills-index.json for a git repo and push it, making its skills discoverable via agents search/install
 ```
 
 ## reconnect — Re-enter a dropped agent terminal: attach the live pane if it survived, else resume the session
@@ -1027,17 +994,6 @@ agents use <agent> [version]  Switch the active version for an agent. This is th
 agents view [agent]  Show what agent CLIs are installed and which versions you have. Inspect resources when you pass agent@version.
 ```
 
-## wallet — Device-local credit-card vault backed by macOS Keychain (Touch ID required to reveal). Encrypted at rest, never leaves your device. Not Apple Pay — stores real PANs, no tokenization.
-
-```
-agents wallet                             Device-local credit-card vault backed by macOS Keychain (Touch ID required to reveal). Encrypted at rest, never leaves your device. Not Apple Pay — stores real PANs, no tokenization.
-agents wallet add                         Add a card to the vault. Interactive prompt for PAN, CVC, expiry, cardholder, nickname.
-agents wallet list                        List stored cards (metadata only — last 4, brand, expiry). No biometric prompt.
-agents wallet remove <id>                 Remove a card from the vault. Argument is a card id or nickname.
-agents wallet rename <id> <new-nickname>  Rename a card. Argument is the current id or nickname.
-agents wallet show <id>                   Reveal a card. Touch ID required. Argument is a card id or nickname.
-```
-
 ## watchdog — Auto-nudge stalled agent terminals: detect stalls, resolve the exact split, inject "Continue." — no menu-bar needed.
 
 ```
@@ -1050,17 +1006,11 @@ agents watchdog rotate <state>               Turn in-place rotate of rate-limite
 agents watchdog status                       Show whether the daemon watchdog pass is enabled and where state is written.
 ```
 
-## webhook — Run a localhost signed webhook receiver for routine triggers.
+## webhooks — Run a localhost signed webhook receiver for routine triggers.
 
 ```
-agents webhook        Run a localhost signed webhook receiver for routine triggers.
-agents webhook serve  Receive signed GitHub/Linear webhooks on /hooks/<source> and fire matching routines.
-```
-
-## whoami — Show synced-secrets login status
-
-```
-agents whoami  Show synced-secrets login status
+agents webhooks        Run a localhost signed webhook receiver for routine triggers.
+agents webhooks serve  Receive signed GitHub/Linear webhooks on /hooks/<source> and fire matching routines.
 ```
 
 ## workflows — Manage multi-agent pipeline workflows (WORKFLOW.md bundles)

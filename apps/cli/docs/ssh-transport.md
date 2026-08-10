@@ -52,7 +52,7 @@ passed it. The un-multiplexed callers were precisely the hot ones:
 | P3 | `sshExec`/`sshStream` default | multiplexing opt-in; the common paths skipped it |
 | P4 | `runRemoteSessions` ([`session/remote.ts`](../src/lib/session/remote.ts)) | a **private copy** of the ssh options with no multiplexing |
 | P5 | secrets push, the `-N` tunnel, and other direct `spawn('ssh')` sites | bypass the choke point; some under-specified (no `ConnectTimeout`) |
-| P6 | `hosts add` ([`hosts.ts`](../src/commands/hosts.ts)) | a duplicate reachability probe |
+| P6 | `devices add` / host enrollment ([`lib/hosts/registry.ts`](../src/lib/hosts/registry.ts)) | a duplicate reachability probe |
 | P7 | `SSH_OPTS` | no keepalive — a dropped link hangs instead of dying |
 
 ## Design

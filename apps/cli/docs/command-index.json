@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 97,
-  "commands": 568,
+  "groups": 91,
+  "commands": 548,
   "root": {
     "name": "agents",
     "path": "",
@@ -5919,7 +5919,7 @@
       "options": [
         {
           "flags": "-H, --host <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-H",
           "long": "--host",
           "required": true,
@@ -7438,6 +7438,35 @@
           "subcommands": []
         },
         {
+          "name": "ps",
+          "path": "devices ps",
+          "aliases": [],
+          "description": "List agent tasks dispatched to devices with `agents run --device <name> --no-follow`. Reconciles each still-`running` record against the remote before listing. View a log with `agents logs <id>`.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Output JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
           "name": "register",
           "path": "devices register",
           "aliases": [],
@@ -7660,6 +7689,35 @@
           "subcommands": []
         },
         {
+          "name": "stop",
+          "path": "devices stop",
+          "aliases": [
+            "kill"
+          ],
+          "description": "Terminate a running dispatched task from this machine (SIGTERM the remote process group; marks it failed/143).",
+          "args": [
+            {
+              "name": "id",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
           "name": "sync",
           "path": "devices sync",
           "aliases": [],
@@ -7760,7 +7818,7 @@
       "options": [
         {
           "flags": "-H, --host <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-H",
           "long": "--host",
           "required": true,
@@ -8995,107 +9053,6 @@
       ]
     },
     {
-      "name": "helper",
-      "path": "helper",
-      "aliases": [],
-      "description": "Manage the signed macOS Keychain helper (.app) install",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "install",
-          "path": "helper install",
-          "aliases": [],
-          "description": "Copy the bundled .app to ~/Library/Application Support/agents-cli/",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "status",
-          "path": "helper status",
-          "aliases": [],
-          "description": "Show source, destination, codesign and notarization status",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "update",
-          "path": "helper update",
-          "aliases": [],
-          "description": "Reinstall the .app, overwriting any existing copy (alias of install)",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "where",
-          "path": "helper where",
-          "aliases": [],
-          "description": "Print the absolute path to the installed helper executable",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
-    },
-    {
       "name": "hooks",
       "path": "hooks",
       "aliases": [],
@@ -9343,279 +9300,6 @@
       ]
     },
     {
-      "name": "hosts",
-      "path": "hosts",
-      "aliases": [],
-      "description": "Register and inspect agent hosts (machines you offload runs to with `agents run --host <name>`).",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "add",
-          "path": "hosts add",
-          "aliases": [],
-          "description": "Enroll a host. With no args, pick from ~/.ssh/config + known_hosts. `target` is user@host for hosts not in ssh config.",
-          "args": [
-            {
-              "name": "name",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "target",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--cap <cap...>",
-              "description": "Capability tag(s) for routing (e.g. --cap gpu)",
-              "long": "--cap",
-              "required": true,
-              "optional": false,
-              "variadic": true,
-              "negate": false
-            },
-            {
-              "flags": "--os <os>",
-              "description": "Override detected OS label",
-              "long": "--os",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--no-enroll",
-              "description": "Register only — skip the remote agents-cli bootstrap/version check",
-              "long": "--no-enroll",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "check",
-          "path": "hosts check",
-          "aliases": [],
-          "description": "Probe one host: reachable? agents-cli version?",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "list",
-          "path": "hosts list",
-          "aliases": [
-            "ls"
-          ],
-          "description": "List enrolled + ssh-config hosts (metadata only, no probing).",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Output JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "logs",
-          "path": "hosts logs",
-          "aliases": [],
-          "description": "Show a host task’s concise summary; --full for the raw log, -f to follow a running one.",
-          "args": [
-            {
-              "name": "id",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-f, --follow",
-              "description": "Follow live output",
-              "short": "-f",
-              "long": "--follow",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-m, --full",
-              "description": "Show the full raw combined-stdout log instead of the concise summary",
-              "short": "-m",
-              "long": "--full",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "ps",
-          "path": "hosts ps",
-          "aliases": [],
-          "description": "List dispatched host tasks.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Output JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "remove",
-          "path": "hosts remove",
-          "aliases": [
-            "rm"
-          ],
-          "description": "Remove a host from the registry (does not touch ~/.ssh/config).",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "stop",
-          "path": "hosts stop",
-          "aliases": [
-            "kill"
-          ],
-          "description": "Terminate a running host task from this machine (SIGTERM process group; marks failed/143).",
-          "args": [
-            {
-              "name": "id",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
-    },
-    {
       "name": "humans",
       "path": "humans",
       "aliases": [],
@@ -9800,7 +9484,7 @@
       "options": [
         {
           "flags": "-H, --host <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-H",
           "long": "--host",
           "required": true,
@@ -10416,7 +10100,7 @@
       "options": [
         {
           "flags": "-H, --host <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-H",
           "long": "--host",
           "required": true,
@@ -10734,7 +10418,7 @@
       "options": [
         {
           "flags": "-H, --host <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-H",
           "long": "--host",
           "required": true,
@@ -10777,45 +10461,6 @@
           "optional": false,
           "variadic": false,
           "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": []
-    },
-    {
-      "name": "lock",
-      "path": "lock",
-      "aliases": [],
-      "description": "Write or verify agents.lock — a SHA-256 manifest of resolved resources",
-      "args": [],
-      "options": [
-        {
-          "flags": "--cwd <path>",
-          "description": "Working directory to resolve resources and the project root from",
-          "long": "--cwd",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--frozen",
-          "description": "Verify resolved resources match agents.lock exactly; fail (non-zero) on any drift",
-          "long": "--frozen",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": false
         },
         {
           "flags": "-h, --help",
@@ -10910,7 +10555,7 @@
       "name": "logs",
       "path": "logs",
       "aliases": [],
-      "description": "Alias of `agents events`. Pass an id to see the content redirect.",
+      "description": "Show a run log, audit trail, or stats. Subcommands: audit, stats, rotate.",
       "args": [
         {
           "name": "id",
@@ -10921,54 +10566,18 @@
       ],
       "options": [
         {
-          "flags": "--include <families>",
-          "description": "Only these families (comma-sep): ops, activity, commands, runs, security",
-          "long": "--include",
+          "flags": "--host <name>",
+          "description": "Scope to runs dispatched to a host",
+          "long": "--host",
           "required": true,
           "optional": false,
           "variadic": false,
           "negate": false
         },
         {
-          "flags": "--exclude <families>",
-          "description": "Drop these families (comma-sep): ops, activity, commands, runs, security",
-          "long": "--exclude",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--module <name>",
-          "description": "Only events from this group (e.g. teams, secrets, activity, daemon, routine, watchdog, browser)",
-          "long": "--module",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--command <path>",
-          "description": "Only this command path — prefix match (e.g. \"teams create\")",
-          "long": "--command",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--event <type>",
-          "description": "Only this typed event (repeatable, e.g. secrets.get, run.dispatched, pr.opened)",
-          "long": "--event",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": []
-        },
-        {
-          "flags": "--agent <name>",
-          "description": "Only events tagged with this agent",
+          "flags": "-a, --agent <agent>",
+          "description": "Filter by agent (e.g. claude, codex@0.116.0)",
+          "short": "-a",
           "long": "--agent",
           "required": true,
           "optional": false,
@@ -10976,18 +10585,9 @@
           "negate": false
         },
         {
-          "flags": "--caller <kind>",
-          "description": "Only this caller kind (claude-code, codex, gemini, cursor, terminal, script)",
-          "long": "--caller",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--level <level>",
-          "description": "Only this level: audit, warn, info, debug",
-          "long": "--level",
+          "flags": "--version <version>",
+          "description": "Filter by agent version",
+          "long": "--version",
           "required": true,
           "optional": false,
           "variadic": false,
@@ -10995,7 +10595,7 @@
         },
         {
           "flags": "--session <id>",
-          "description": "Only events from this session (the provenance sessionId) — e.g. trace which session read a secret",
+          "description": "Select a session/run by id (same as the positional id)",
           "long": "--session",
           "required": true,
           "optional": false,
@@ -11003,45 +10603,8 @@
           "negate": false
         },
         {
-          "flags": "--bundle <name>",
-          "description": "Only events carrying this bundle in their payload — e.g. `--module secrets --bundle share` for every read of the share bundle",
-          "long": "--bundle",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--since <time>",
-          "description": "Only events newer than this (e.g. 2h, 7d, or ISO date)",
-          "long": "--since",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--limit <n>",
-          "description": "Max records to show; 0 for no cap (default 50)",
-          "long": "--limit",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": "50"
-        },
-        {
-          "flags": "--json",
-          "description": "Output raw records as JSON",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
           "flags": "-f, --follow",
-          "description": "Tail today's operational log live",
+          "description": "Follow live output",
           "short": "-f",
           "long": "--follow",
           "required": false,
@@ -11050,9 +10613,19 @@
           "negate": false
         },
         {
-          "flags": "--audit",
-          "description": "Deprecated: operational events only — prefer --include ops or --exclude activity",
-          "long": "--audit",
+          "flags": "-m, --full",
+          "description": "Show the full raw transcript / stdout instead of the concise summary",
+          "short": "-m",
+          "long": "--full",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--json",
+          "description": "Machine-readable JSON: a host task as { kind, task, log }, a session as the redacted { session, events } (same shape as `sessions <id> --json`)",
+          "long": "--json",
           "required": false,
           "optional": false,
           "variadic": false,
@@ -11074,7 +10647,7 @@
           "name": "audit",
           "path": "logs audit",
           "aliases": [],
-          "description": "Alias of `agents events --include ops`",
+          "description": "Alias for `agents events --audit`",
           "args": [],
           "options": [
             {
@@ -11223,7 +10796,7 @@
           "name": "rotate",
           "path": "logs rotate",
           "aliases": [],
-          "description": "Alias of `agents events rotate`",
+          "description": "Apply event retention and the storage ceiling immediately",
           "args": [],
           "options": [
             {
@@ -11263,7 +10836,7 @@
           "name": "stats",
           "path": "logs stats",
           "aliases": [],
-          "description": "Alias of `agents events stats`",
+          "description": "Show aggregate audit statistics",
           "args": [],
           "options": [
             {
@@ -13342,7 +12915,7 @@
       "options": [
         {
           "flags": "-H, --host <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-H",
           "long": "--host",
           "required": true,
@@ -15678,62 +15251,6 @@
       ]
     },
     {
-      "name": "publish",
-      "path": "publish",
-      "aliases": [],
-      "description": "Generate a skills-index.json for a git repo and push it, making its skills discoverable via agents search/install",
-      "args": [],
-      "options": [
-        {
-          "flags": "--repo <alias>",
-          "description": "Publish an extra repo added via `agents repo add` (default: your ~/.agents repo)",
-          "long": "--repo",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--name <name>",
-          "description": "Registry name to suggest in the output (default: the repo name)",
-          "long": "--name",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--branch <branch>",
-          "description": "Branch to push the index to and reference in the raw URL (default: the repo's current branch)",
-          "long": "--branch",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--dry-run",
-          "description": "Write the index and print the URL without committing or pushing",
-          "long": "--dry-run",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": []
-    },
-    {
       "name": "reconnect",
       "path": "reconnect",
       "aliases": [],
@@ -16022,7 +15539,7 @@
       "options": [
         {
           "flags": "-H, --host <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-H",
           "long": "--host",
           "required": true,
@@ -16631,7 +16148,7 @@
       "options": [
         {
           "flags": "-H, --host <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-H",
           "long": "--host",
           "required": true,
@@ -16994,7 +16511,7 @@
             },
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -17069,7 +16586,7 @@
             },
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -17144,7 +16661,7 @@
             },
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -17235,7 +16752,7 @@
             },
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -17310,7 +16827,7 @@
           "options": [
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -17410,7 +16927,7 @@
             },
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -17528,7 +17045,7 @@
             },
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -17603,7 +17120,7 @@
           "options": [
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -17697,7 +17214,7 @@
             },
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -17790,7 +17307,7 @@
             },
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -17863,7 +17380,7 @@
           "options": [
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -17946,7 +17463,7 @@
             },
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -18028,7 +17545,7 @@
             },
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -18110,7 +17627,7 @@
             },
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -18197,7 +17714,7 @@
             },
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -18263,7 +17780,7 @@
           "options": [
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -18345,7 +17862,7 @@
             },
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -18411,7 +17928,7 @@
           "options": [
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -18477,7 +17994,7 @@
           "options": [
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -18559,7 +18076,7 @@
             },
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -18632,7 +18149,7 @@
           "options": [
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -18735,7 +18252,7 @@
             },
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -19205,7 +18722,7 @@
         },
         {
           "flags": "--name <slug>",
-          "description": "Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents hosts logs <name>` for --host runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.",
+          "description": "Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents logs <name>` for --host runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.",
           "long": "--name",
           "required": true,
           "optional": false,
@@ -19424,7 +18941,7 @@
         },
         {
           "flags": "--no-follow",
-          "description": "With --host, dispatch detached and return immediately (track via `agents hosts ps/logs`).",
+          "description": "With --host, dispatch detached and return immediately (track via `agents devices ps` and `agents logs`).",
           "long": "--no-follow",
           "required": false,
           "optional": false,
@@ -23183,7 +22700,7 @@
           "options": [
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -25530,7 +25047,7 @@
       "options": [
         {
           "flags": "-H, --host <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-H",
           "long": "--host",
           "required": true,
@@ -25906,7 +25423,7 @@
       "options": [
         {
           "flags": "-H, --host <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-H",
           "long": "--host",
           "required": true,
@@ -26298,7 +25815,7 @@
           "options": [
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -26515,7 +26032,7 @@
           "options": [
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -26741,7 +26258,7 @@
           "options": [
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -26950,7 +26467,7 @@
           "options": [
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -27041,7 +26558,7 @@
           "options": [
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -27227,7 +26744,7 @@
           "options": [
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -27318,7 +26835,7 @@
           "options": [
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -27442,7 +26959,7 @@
           "options": [
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -27579,7 +27096,7 @@
           "options": [
             {
               "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-H",
               "long": "--host",
               "required": true,
@@ -29169,7 +28686,7 @@
       "options": [
         {
           "flags": "-H, --host <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-H",
           "long": "--host",
           "required": true,
@@ -29316,7 +28833,7 @@
       "options": [
         {
           "flags": "-H, --host <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a device, an ssh-config host, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-H",
           "long": "--host",
           "required": true,
@@ -29536,195 +29053,6 @@
         }
       ],
       "subcommands": []
-    },
-    {
-      "name": "wallet",
-      "path": "wallet",
-      "aliases": [],
-      "description": "Device-local credit-card vault backed by macOS Keychain (Touch ID required to reveal). Encrypted at rest, never leaves your device. Not Apple Pay — stores real PANs, no tokenization.",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "$ agents wallet add                              # interactive: PAN, CVC, expiry, nickname\n      $ agents wallet list                             # last 4 only, no Touch ID prompt\n      $ agents wallet show personal-amex               # Touch ID required, reveals full card\n      $ agents wallet rename personal-amex \"Travel\"\n      $ agents wallet remove personal-amex",
-      "subcommands": [
-        {
-          "name": "add",
-          "path": "wallet add",
-          "aliases": [],
-          "description": "Add a card to the vault. Interactive prompt for PAN, CVC, expiry, cardholder, nickname.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--nickname <name>",
-              "description": "Set the nickname non-interactively (still prompts for PAN/CVC)",
-              "long": "--nickname",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--stdin-json",
-              "description": "Read all fields as a JSON object on stdin (for IPC callers). Emits the new card metadata as JSON to stdout.",
-              "long": "--stdin-json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "list",
-          "path": "wallet list",
-          "aliases": [
-            "ls"
-          ],
-          "description": "List stored cards (metadata only — last 4, brand, expiry). No biometric prompt.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Emit JSON to stdout",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "remove",
-          "path": "wallet remove",
-          "aliases": [
-            "rm"
-          ],
-          "description": "Remove a card from the vault. Argument is a card id or nickname.",
-          "args": [
-            {
-              "name": "id",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "rename",
-          "path": "wallet rename",
-          "aliases": [],
-          "description": "Rename a card. Argument is the current id or nickname.",
-          "args": [
-            {
-              "name": "id",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "new-nickname",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "show",
-          "path": "wallet show",
-          "aliases": [],
-          "description": "Reveal a card. Touch ID required. Argument is a card id or nickname.",
-          "args": [
-            {
-              "name": "id",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Emit JSON to stdout (still triggers Touch ID)",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
     },
     {
       "name": "watchdog",
@@ -30057,8 +29385,8 @@
       ]
     },
     {
-      "name": "webhook",
-      "path": "webhook",
+      "name": "webhooks",
+      "path": "webhooks",
       "aliases": [],
       "description": "Run a localhost signed webhook receiver for routine triggers.",
       "args": [],
@@ -30077,7 +29405,7 @@
       "subcommands": [
         {
           "name": "serve",
-          "path": "webhook serve",
+          "path": "webhooks serve",
           "aliases": [],
           "description": "Receive signed GitHub/Linear webhooks on /hooks/<source> and fire matching routines.",
           "args": [],
@@ -30136,26 +29464,6 @@
           "subcommands": []
         }
       ]
-    },
-    {
-      "name": "whoami",
-      "path": "whoami",
-      "aliases": [],
-      "description": "Show synced-secrets login status",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": []
     },
     {
       "name": "workflows",
