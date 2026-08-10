@@ -56,6 +56,8 @@ scripts/scrub-history.sh
 .refs/
 .crabbox/
 .rush/
+# Local muse state (root only; nested package .config dirs stay tracked)
+/.config/
 
 # Agents (recurisve)
 # Harness config homes written by `agents` config sync. Keep this list in step
