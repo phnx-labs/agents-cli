@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_104 command groups · 584 commands._
+_104 command groups · 585 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -631,6 +631,7 @@ agents profiles view <name>        Show a profile (env, host, auth source, prese
 agents projects                Named multi-repo projects with a progress rollup.
 agents projects add <name>     Define a project. Infers root and repo from the current git repo when not given.
 agents projects edit <name>    Open the project YAML in $EDITOR (it is hand-editable regardless).
+agents projects for-cwd [cwd]  Resolve a directory to its defined project name (root or a repos[].path/subpath match). Defaults to the current directory.
 agents projects import         Import project definitions from Linear (via the `linear` CLI).
 agents projects link <name>    Attach an external tracker to a project definition (writes linear.projectId into the YAML).
 agents projects list           List defined projects (definitions only by default; no session scan).

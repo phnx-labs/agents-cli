@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 104,
-  "commands": 584,
+  "commands": 585,
   "root": {
     "name": "agents",
     "path": "",
@@ -14900,6 +14900,42 @@
             }
           ],
           "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "for-cwd",
+          "path": "projects for-cwd",
+          "aliases": [],
+          "description": "Resolve a directory to its defined project name (root or a repos[].path/subpath match). Defaults to the current directory.",
+          "args": [
+            {
+              "name": "cwd",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Machine-readable output: {\"name\": string | null}",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
             {
               "flags": "-h, --help",
               "description": "Show help",
