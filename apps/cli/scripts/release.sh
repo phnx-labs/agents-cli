@@ -355,9 +355,10 @@ bun install --frozen-lockfile >/dev/null \
   || die "dependency install failed in the isolated release worktree"
 
 # ----- npm auth: resolved ON the home base, never borrowed to the trigger box -----
-# The npm publish token lives only on the home base (mac-mini) and is resolved
-# there (resolve_npm_auth, defined above), in its headless secrets context, at
-# publish time -- it never crosses to the box that invoked the release. Anonymous
+# The npm publish token lives on the home base (the --device target, mac-mini by
+# default) and is resolved there (resolve_npm_auth, defined above), in its
+# headless secrets context, at publish time -- it never crosses to the box that
+# invoked the release. Anonymous
 # `npm view` reads below (latest version, is-target-published) need no token, so
 # version validation + the already-published short-circuit run fine on any box.
 
