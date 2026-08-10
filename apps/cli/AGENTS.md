@@ -80,16 +80,19 @@ DAG-style, boundary contracts, `--watch` supervisor, `--worktree` isolation, opt
 
 ### 7. Every agent conversation is a session; execution ledgers link to it
 
-**Interactive, headless, team, and agent/workflow routine launches all produce
-ordinary harness transcripts that `agents sessions` discovers and indexes in
-`sessions.db`.** A caller MUST NOT replace or hide that conversation record with
-its own execution metadata. The session row carries the relationship instead:
+**An agent conversation from a session-capable harness MUST remain a session,
+whether launched interactively, headlessly, as a teammate, or by a routine.** A
+caller MUST preserve the harness transcript and make it discoverable by `agents
+sessions`; it MUST NOT replace or hide that conversation record with its own
+execution metadata. This applies to `SESSION_AGENTS`, not a harness such as Warp
+that exposes no local transcript. The indexed session row carries the relationship
+when the harness and launch path provide one:
 
 | Launch surface | Session relationship | Separate execution state |
 |---|---|---|
-| `agents run`, including headless and `--host` | Ordinary indexed harness session; the launch id joins a remotely coined session id back to the dispatch | Dispatch/audit events |
-| `agents teams` teammate | Its **own** session id plus `teamOrigin` and `parentSessionId` linking the orchestrator | Team registry + teammate `meta.json` own DAG/task/process state |
-| Agent/workflow routine | Archived transcript indexed with `origin: routine`, `routineName`, and `routineRunId` | `.history/runs/<routine>/<run>/meta.json` owns the attempt outcome |
+| `agents run`, including headless and `--host` | Ordinary indexed session for a session-capable harness; when its SessionStart hook records an id, the launch id joins a remotely coined session back to the dispatch. A hookless run remains unmapped rather than receiving a fabricated id. | Dispatch/audit events |
+| `agents teams` teammate | Its **own** session id plus `teamOrigin`; `parentSessionId` links the orchestrator when the teammate was spawned inside an identified agent session | Team registry + teammate `meta.json` own DAG/task/process state |
+| Agent/workflow routine | The transcript is archived under the run; supported archive readers index it with `origin: routine`, `routineName`, and `routineRunId` | `.history/runs/<routine>/<run>/meta.json` owns the attempt outcome |
 | Command-only, `missed`, `blocked`, or `skipped` routine | No session is synthesized because no agent conversation occurred | The routine run record is the complete canonical record |
 
 Source of truth: `buildExecEnv` / `emitResolvedSessionId` in
@@ -108,6 +111,14 @@ historical listing by default to keep an orchestrator's fan-out from flooding it
 `agents sessions --teams` includes them, while live teammates appear in
 `agents sessions --active` with `context: teams`. That is a presentation filter,
 never permission to omit the transcript from the session index.
+
+**Current routine-archive gap:** `readRoutineArchiveMeta` indexes Claude, Codex,
+and Cursor routine archives. Kimi's `state.json` + `wire.jsonl` are archived by
+`archiveRoutineTranscripts` but do not yet have a routine-archive reader, so they
+are not session rows today. Treat that as named drift from the invariant, never as
+precedent for a second run-only conversation model; adding another routine harness
+requires both archival and a parser in `readRoutineArchiveMeta` plus an indexing
+test.
 
 ### 8. Routine definitions and device activation are separate
 
