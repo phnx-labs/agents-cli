@@ -272,7 +272,7 @@ Packages:
 
 Run and dispatch:
   run <agent|profile> [prompt]    Run an agent. Omit prompt for interactive mode.
-  defaults                        Configure run defaults by agent/version selector
+  config                          Configure run defaults, project root, and device options
   teams                           Coordinate multiple agents on shared work
   routines                        Run agents on a cron schedule (scheduler auto-starts)
   daemon                          Runtime status/control for the always-on daemon (secrets broker, browser IPC, scheduler)

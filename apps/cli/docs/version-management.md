@@ -314,7 +314,7 @@ there precisely because adoption is its purpose.
 Credentials are **skipped by default and reported**, not silently included. An
 isolated copy is a separate principal that signs in on its own, so copying tokens
 into it should be a choice rather than a side effect of wanting your settings.
-`--with-auth` opts in. Symlinks into `~/.agents` are dropped, as with `agents export`,
+`--with-auth` opts in. Symlinks into `~/.agents` are dropped,
 so the copied config does not depend on the CLI's own tree.
 
 ### The isolated default
@@ -356,50 +356,11 @@ whatever `codex` meant on PATH and only `agents run codex@<version>` worked.
 The pointer is verified on read (installed *and* still isolated), and `removeVersion`
 re-points it at the newest surviving isolated copy — or clears it — so it can never
 resolve to a directory that is not there.
-### Exporting an isolated config back out
+### Leaving an isolated install
 
-`agents export <agent>[@<version>]` is the exit door. It copies an isolated
-install's config dir out to the user's real `~/.<agent>` — promoting a sandboxed
-setup to the normal one, or taking the settings and dropping agents-cli entirely.
-
-```
-versions/codex/0.144.6/home/.codex  ──copy──▶  ~/.codex
-```
-
-| Mode | Behavior |
-|------|----------|
-| **merge** (default) | Additive. Copies only paths the user doesn't have. A collision is **not** silently skipped — the incoming file is written beside theirs as `<name>.from-agents-cli`. Their file is never modified. |
-| `--replace` | The isolated config becomes `~/.<agent>`; theirs moves to `backups/<agent>/<ts>`. The only mode that requires confirmation. |
-| `--staged` | Writes the tree to `~/.<agent>/.agents-export-<ts>/` and activates nothing. |
-
-```
-agents export codex --dry-run     # show the plan
-agents export codex --diff        # ...and the delta on every colliding file
-agents export codex               # additive; nothing of yours changes
-```
-
-Properties that hold in every mode:
-
-- **Symlinks into `~/.agents` are stripped.** Synced resources live in a version
-  home as links back into `~/.agents`; copying them verbatim would leave the
-  exported config full of links that dangle the moment `~/.agents` is removed.
-  What lands in `~/.<agent>` stands alone. The user's own symlinks survive.
-- **A receipt is written to `~/.<agent>/.agents-cli-export.json`** recording the
-  source version, mode, files `written`, and `conflicts` (with the path of each
-  incoming sibling). This is what makes provenance answerable — which files are
-  the user's and which came from the CLI — and the export reversible.
-- **A `~/.<agent>` that agents-cli already adopted is refused.** That path is a
-  symlink into some version's home, so writing there would silently mutate that
-  install instead of the user's real config. `agents uninstall` un-adopts.
-
-Only isolated versions can be exported. A normal install's config dir already IS
-`~/.<agent>` by way of the adoption symlink, so there is nothing to copy.
-
-File **contents** are never auto-merged. `smol-toml` does not preserve comments
-across parse+stringify, so unioning keys into a user's `config.toml` would delete
-every comment in it. Export hands over both files and a diff instead. A
-format-preserving TOML editor would be the prerequisite for real key-level
-merging; that is a dependency decision, not a detail of this command.
+Remove the isolated version with `agents remove <agent>@<version> --isolated`.
+To adopt an existing native config into agents-cli instead, use
+`agents import <agent>` after removing every isolated copy for that agent.
 
 ## Resource Syncing
 

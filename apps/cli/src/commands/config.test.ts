@@ -74,6 +74,14 @@ describe('config command', () => {
     expect(getOut).toContain('zion');
   });
 
+  it('sets, gets, and unsets the projects root', () => {
+    const root = path.join(home, 'src', 'github.com', 'example');
+    runAgents(home, ['config', 'set', 'project.root', root]);
+    expect(runAgents(home, ['config', 'get', 'project.root'])).toContain('~/src/github.com/example');
+    runAgents(home, ['config', 'unset', 'project.root']);
+    expect(runAgents(home, ['config', 'get', 'project.root'])).toContain('(unset)');
+  });
+
   it('sets and unsets the browser profile', () => {
     runAgents(home, ['config', 'set', 'browser.profile', 'work']);
     let getOut = runAgents(home, ['config', 'get', 'browser.profile']);

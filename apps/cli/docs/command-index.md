@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_100 command groups · 582 commands._
+_98 command groups · 575 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -190,10 +190,10 @@ agents computer type-text    Type an arbitrary unicode string into the focused f
 agents computer wait         Wait for a duration (--duration) or for an element (--id / --role/--label) to satisfy --until
 ```
 
-## config — Unified config barrel: get, set, list, and unset agent run defaults, tier overrides, and device options.
+## config — Get, set, list, and unset run defaults, tier overrides, the projects root, and device options.
 
 ```
-agents config                    Unified config barrel: get, set, list, and unset agent run defaults, tier overrides, and device options.
+agents config                    Get, set, list, and unset run defaults, tier overrides, the projects root, and device options.
 agents config get <key>          Get the current value of a config key
 agents config list               List configured config keys and their values
 agents config set <key> <value>  Set a config key
@@ -230,17 +230,6 @@ agents daemon services              The two hosted services (secrets broker, bro
 agents daemon start                 Start the daemon. Bypasses daemon.enabled — this is the deliberate override.
 agents daemon status                Identity (state/pid/uptime/binary), duplicate daemons, daemons running deleted code, and per-service health.
 agents daemon stop                  Stop the daemon.
-```
-
-## defaults — Manage default options for agents-cli commands
-
-```
-agents defaults                       Manage default options for agents-cli commands
-agents defaults project-root [path]   Show or set the projects root for `agents run --project` (auto-inferred when unset)
-agents defaults run                   Manage selector-based defaults for `agents run`
-agents defaults run list              List configured run defaults
-agents defaults run set <selector>    Set defaults for an agent/version selector
-agents defaults run unset <selector>  Remove defaults for an agent/version selector
 ```
 
 ## devices — Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale. Alias: fleet.
@@ -286,12 +275,6 @@ agents doctor [target]  Diagnose CLI availability, sync status, and resource div
 ```
 agents events       Read the unified event stream (operational + agent activity)
 agents events emit  Record events produced outside this process (reads JSONL on stdin)
-```
-
-## export — Copy an isolated install's config out to your real ~/.<agent>
-
-```
-agents export <spec>  Copy an isolated install's config out to your real ~/.<agent>
 ```
 
 ## feed — Operator inbox + agent status posts (aliases: inbox = needs-you; timeline = --filter updates)

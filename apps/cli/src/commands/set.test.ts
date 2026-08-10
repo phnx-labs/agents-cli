@@ -35,7 +35,7 @@ describe('set command', () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
-  it('writes the same run.defaults store as `defaults run set`', () => {
+  it('writes the same run.defaults store as `config get` reads', () => {
     const setOut = runAgents(home, ['set', 'claude@2.1.220', '--model', 'opus-5']);
     expect(setOut).toContain('claude:2.1.220');
     expect(setOut).toContain('model opus-5');
@@ -44,10 +44,9 @@ describe('set command', () => {
     expect(yaml).toContain('claude:2.1.220');
     expect(yaml).toContain('model: opus-5');
 
-    // `defaults run list` sees exactly what `set` wrote — one source of truth.
-    const listOut = runAgents(home, ['defaults', 'run', 'list']);
-    expect(listOut).toContain('claude:2.1.220');
-    expect(listOut).toContain('model opus-5');
+    const getOut = runAgents(home, ['config', 'get', 'run.claude@2.1.220.model']);
+    expect(getOut).toContain('run.claude@2.1.220.model');
+    expect(getOut).toContain('opus-5');
   });
 
   it('accepts the @ and : selector forms and both flags', () => {

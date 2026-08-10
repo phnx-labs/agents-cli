@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 100,
-  "commands": 582,
+  "groups": 98,
+  "commands": 575,
   "root": {
     "name": "agents",
     "path": "",
@@ -5647,7 +5647,7 @@
       "name": "config",
       "path": "config",
       "aliases": [],
-      "description": "Unified config barrel: get, set, list, and unset agent run defaults, tier overrides, and device options.",
+      "description": "Get, set, list, and unset run defaults, tier overrides, the projects root, and device options.",
       "args": [],
       "options": [
         {
@@ -5661,8 +5661,8 @@
           "negate": false
         }
       ],
-      "examples": "agents config set run.claude@*.model best\n      agents config set run.claude@*.tier.best claude-opus-4-8\n      agents config set run.claude@2.1.45.model claude-opus-4-8\n      agents config set run.claude@*.mode auto\n      agents config set interactive.host zion\n      agents config set browser.profile work\n      agents config set devices.mac-mini.max-agents 4\n      agents config get run.claude@*.model\n      agents config unset run.claude@*.tier.best\n      agents config list",
-      "notes": "Every agent/harness reference uses agent@version. Use * for all versions.\n      Tier overrides are part of the run namespace: run.<agent@version>.tier.<tier>.\n      Old commands (defaults run, models tier, devices configure, etc.) still work\n      but delegate here and print a deprecation warning.",
+      "examples": "agents config set run.claude@*.model best\n      agents config set run.claude@*.tier.best claude-opus-4-8\n      agents config set run.claude@2.1.45.model claude-opus-4-8\n      agents config set run.claude@*.mode auto\n      agents config set interactive.host zion\n      agents config set browser.profile work\n      agents config set project.root ~/src/github.com/<you>\n      agents config set devices.mac-mini.max-agents 4\n      agents config get run.claude@*.model\n      agents config unset run.claude@*.tier.best\n      agents config list",
+      "notes": "Every agent/harness reference uses agent@version. Use * for all versions.\n      Tier overrides are part of the run namespace: run.<agent@version>.tier.<tier>.\n      Project root is auto-inferred from the current Git repository when unset.",
       "subcommands": [
         {
           "name": "get",
@@ -6382,178 +6382,6 @@
             }
           ],
           "subcommands": []
-        }
-      ]
-    },
-    {
-      "name": "defaults",
-      "path": "defaults",
-      "aliases": [],
-      "description": "Manage default options for agents-cli commands",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "project-root",
-          "path": "defaults project-root",
-          "aliases": [],
-          "description": "Show or set the projects root for `agents run --project` (auto-inferred when unset)",
-          "args": [
-            {
-              "name": "path",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "run",
-          "path": "defaults run",
-          "aliases": [],
-          "description": "Manage selector-based defaults for `agents run`",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "agents defaults run list\n      agents defaults run set 'claude:*' --mode auto --model opus\n      agents defaults run set claude@2.1.45 --mode plan --model sonnet\n      agents defaults run unset 'claude:*'",
-          "notes": "Selectors use <agent>:<version>. Use * for all versions of an agent.\n      Exact selectors override wildcard selectors field by field.\n      Explicit flags on agents run always win over configured defaults.",
-          "subcommands": [
-            {
-              "name": "list",
-              "path": "defaults run list",
-              "aliases": [],
-              "description": "List configured run defaults",
-              "args": [],
-              "options": [
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
-            {
-              "name": "set",
-              "path": "defaults run set",
-              "aliases": [],
-              "description": "Set defaults for an agent/version selector",
-              "args": [
-                {
-                  "name": "selector",
-                  "required": true,
-                  "variadic": false,
-                  "description": ""
-                }
-              ],
-              "options": [
-                {
-                  "flags": "--mode <mode>",
-                  "description": "Default mode: plan, edit, auto, skip. 'full' accepted as alias for skip.",
-                  "long": "--mode",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "--model <model>",
-                  "description": "Default model or model alias, forwarded via --model",
-                  "long": "--model",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "--effort <effort>",
-                  "description": "Default reasoning effort: low, medium, high, xhigh, max, or auto",
-                  "long": "--effort",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
-            {
-              "name": "unset",
-              "path": "defaults run unset",
-              "aliases": [],
-              "description": "Remove defaults for an agent/version selector",
-              "args": [
-                {
-                  "name": "selector",
-                  "required": true,
-                  "variadic": false,
-                  "description": ""
-                }
-              ],
-              "options": [
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            }
-          ]
         }
       ]
     },
@@ -8094,79 +7922,6 @@
           "subcommands": []
         }
       ]
-    },
-    {
-      "name": "export",
-      "path": "export",
-      "aliases": [],
-      "description": "Copy an isolated install's config out to your real ~/.<agent>",
-      "args": [
-        {
-          "name": "spec",
-          "required": true,
-          "variadic": false,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "--replace",
-          "description": "Replace your config wholesale (yours is backed up) instead of merging",
-          "long": "--replace",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--staged",
-          "description": "Write into ~/.<agent>/.agents-export-<ts>/ and activate nothing",
-          "long": "--staged",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--diff",
-          "description": "Show a unified diff for each file you already have",
-          "long": "--diff",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--dry-run",
-          "description": "Show what would change without writing anything",
-          "long": "--dry-run",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-y, --yes",
-          "description": "Skip the confirmation prompt",
-          "short": "-y",
-          "long": "--yes",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": []
     },
     {
       "name": "feed",
@@ -24911,7 +24666,7 @@
         }
       ],
       "examples": "agents set claude@2.1.220 --model opus-5\n      agents set 'claude:*' --mode auto --model opus\n      agents set claude@2.1.220\n      agents set",
-      "notes": "Selectors use <agent>@<version> or <agent>:<version>; * matches all versions.\n      Exact selectors override wildcard selectors field by field.\n      Writes the same store as 'agents defaults run set'. Explicit flags on\n      'agents run' always win over configured defaults.",
+      "notes": "Selectors use <agent>@<version> or <agent>:<version>; * matches all versions.\n      Exact selectors override wildcard selectors field by field.\n      Writes the same store as 'agents config set run.<agent@version>.*'. Explicit flags on\n      'agents run' always win over configured defaults.",
       "subcommands": []
     },
     {

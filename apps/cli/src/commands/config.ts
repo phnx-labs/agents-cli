@@ -6,6 +6,7 @@
  *   - tier overrides (folded into the run namespace)
  *   - interactive host
  *   - browser profile
+ *   - local projects root
  *   - per-device config keys
  *
  * The underlying YAML schema is unchanged; this command translates the new key
@@ -43,9 +44,10 @@ import {
   listConfig,
   type ConfigEntry,
 } from '../lib/device-config.js';
-import { readMeta } from '../lib/state.js';
+import { readMeta, updateMeta } from '../lib/state.js';
 import { MODEL_TIERS } from '../lib/model-tiers.js';
 import { machineId } from '../lib/machine-id.js';
+import { getProjectRoot, setProjectRoot } from '../lib/project-root.js';
 
 interface ConfigListOptions {
   json?: boolean;
@@ -69,6 +71,8 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
     case 'interactive':
       return raw.trim();
     case 'browser':
+      return raw.trim();
+    case 'project':
       return raw.trim();
     case 'device': {
       switch (parsed.property) {
@@ -125,6 +129,9 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
       );
       return;
     }
+    case 'project':
+      setProjectRoot(value as string);
+      return;
     case 'device': {
       const configName = devicePropertyToConfigName(parsed.property);
       if (parsed.property === 'notes') {
@@ -159,6 +166,14 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
       unsetConfigValue('browser.profile', target);
       return had;
     }
+    case 'project': {
+      const had = getProjectRoot() !== undefined;
+      updateMeta((meta) => {
+        const { projectRoot: _projectRoot, ...rest } = meta;
+        return rest;
+      });
+      return had;
+    }
     case 'device': {
       const configName = devicePropertyToConfigName(parsed.property);
       const had = getConfigValue(configName, { device: parsed.device }).value !== undefined;
@@ -186,6 +201,8 @@ function getConfig(parsed: ParsedConfigKey): unknown {
         parsed.device ? { device: parsed.device } : undefined,
       ).value;
     }
+    case 'project':
+      return getProjectRoot();
     case 'device': {
       const configName = devicePropertyToConfigName(parsed.property);
       return getConfigValue(configName, { device: parsed.device }).value;
@@ -234,6 +251,9 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
   const meta = readMeta();
   if (meta.config?.interactiveHost !== undefined) {
     yield { key: 'interactive.host', value: meta.config.interactiveHost, hint: 'config.interactiveHost' };
+  }
+  if (meta.projectRoot !== undefined) {
+    yield { key: 'project.root', value: meta.projectRoot, hint: 'devices.<self>.projectRoot' };
   }
   // This machine's default browser profile lives in fleet.devices.<self>.config
   // (device-config), not the legacy top-level Meta.defaultBrowserProfile field.
@@ -285,7 +305,7 @@ function* listDeviceConfigEntries(device: string): Generator<{ key: string; valu
 export function registerConfigCommand(program: Command): void {
   const config = program
     .command('config')
-    .description('Unified config barrel: get, set, list, and unset agent run defaults, tier overrides, and device options.');
+    .description('Get, set, list, and unset run defaults, tier overrides, the projects root, and device options.');
 
   setHelpSections(config, {
     examples: `
@@ -295,6 +315,7 @@ export function registerConfigCommand(program: Command): void {
       agents config set run.claude@*.mode auto
       agents config set interactive.host zion
       agents config set browser.profile work
+      agents config set project.root ~/src/github.com/<you>
       agents config set devices.mac-mini.max-agents 4
       agents config get run.claude@*.model
       agents config unset run.claude@*.tier.best
@@ -303,8 +324,7 @@ export function registerConfigCommand(program: Command): void {
     notes: `
       Every agent/harness reference uses agent@version. Use * for all versions.
       Tier overrides are part of the run namespace: run.<agent@version>.tier.<tier>.
-      Old commands (defaults run, models tier, devices configure, etc.) still work
-      but delegate here and print a deprecation warning.
+      Project root is auto-inferred from the current Git repository when unset.
     `,
   });
 

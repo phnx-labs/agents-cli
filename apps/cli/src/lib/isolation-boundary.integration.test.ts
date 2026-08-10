@@ -100,7 +100,6 @@ describe.skipIf(process.platform === 'win32')('isolation boundary', () => {
     plant('codex', V, 'codex');
     const out = run('import', 'codex').out;
     expect(out).toContain(`agents add codex@<version> --isolated`);
-    expect(out).toContain(`agents export codex`);
     expect(out).toContain(`agents remove codex@${V} --isolated`);
   }, 180_000);
 
