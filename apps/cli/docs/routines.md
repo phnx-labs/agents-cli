@@ -252,6 +252,29 @@ Raw YAML editing is transactional: `agents routines edit <name> --yaml` edits a
 temporary copy, then parses and validates it before replacing the live definition.
 Invalid YAML leaves the prior definition and activation untouched.
 
+Two edits apply without an editor, so an agent with no TTY can repair a routine
+the readiness gate paused:
+
+```bash
+agents routines edit <name> --cwd apps/api            # set the execution directory
+agents routines edit <name> --project-anchor myapp    # set the execution anchor
+```
+
+Both validate before writing and print the remaining blocker, or the
+`agents routines resume <name>` that activates the routine.
+
+### Registering a definition from a file
+
+`agents routines add <path>` copies a definition into `~/.agents/routines/`. When
+the path you pass is already that canonical file — the normal case for a routine
+tracked in the `~/.agents` git repo — the file is left untouched rather than
+re-serialized, so hand-authored keys and formatting survive registration.
+
+A `devices:` key in a definition is legacy input. Activation now lives in each
+device's `agents.yaml` (see [Device activation](#device-activation)), so `add`
+applies the pin to the current box only and tells you to pin the fleet with
+`agents routines devices <name> --set <hosts>`.
+
 ### One-Shot Jobs
 
 ```bash

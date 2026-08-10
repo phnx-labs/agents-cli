@@ -1939,3 +1939,125 @@ describeRoutines('bare routines command routing', () => {
     }
   });
 });
+
+// RUSH-2517: `agents routines add <file>` used to re-serialize the file the user
+// pointed at. When that file is the canonical routine YAML — the normal case for a
+// definition tracked in the git-backed `~/.agents` repo — writeJob rewrote it in
+// place and serializeJob deleted every key absent from the canonical output,
+// silently dropping the `devices:` pin from committed config.
+describeRoutines('routines add — never rewrites the source it was handed', () => {
+  const pinned = {
+    name: 'release-train',
+    schedule: '0 */4 * * *',
+    agent: 'claude',
+    prompt: 'cut a release',
+    cwd: '~',
+    devices: ['yosemite-s0'],
+  };
+
+  it('leaves a canonical tracked source byte-for-byte identical, devices pin intact', () => {
+    const home = makeHome({ jobs: [pinned] });
+    const sourcePath = path.join(home, '.agents', 'routines', 'release-train.yml');
+    try {
+      const before = fs.readFileSync(sourcePath, 'utf-8');
+      expect(before).toContain('devices:');
+
+      const added = run(home, ['add', sourcePath]);
+      expect(added.status, added.stderr).toBe(0);
+
+      const after = fs.readFileSync(sourcePath, 'utf-8');
+      // The exact corruption from the ticket: the key vanished from tracked config.
+      expect(after).toContain('devices:');
+      expect(after).toContain('yosemite-s0');
+      // Nothing at all was rewritten — not the pin, not the formatting.
+      expect(after).toBe(before);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('still copies a definition in when the source lives outside the routines dir', () => {
+    const home = makeHome();
+    const external = path.join(home, 'authored-elsewhere.yml');
+    fs.writeFileSync(external, yaml.stringify({ ...pinned, name: 'imported-train' }));
+    try {
+      const added = run(home, ['add', external]);
+      expect(added.status, added.stderr).toBe(0);
+      // Copying in is the whole point of passing a path, so the canonical file exists...
+      const canonical = path.join(home, '.agents', 'routines', 'imported-train.yml');
+      expect(fs.existsSync(canonical)).toBe(true);
+      // ...and the file the user authored is left alone.
+      expect(yaml.parse(fs.readFileSync(external, 'utf-8')).devices).toEqual(['yosemite-s0']);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('says a devices: pin is local-only instead of letting it read as fleet-wide', () => {
+    const home = makeHome({ jobs: [pinned] });
+    try {
+      const added = run(home, ['add', path.join(home, '.agents', 'routines', 'release-train.yml')]);
+      expect(added.status, added.stderr).toBe(0);
+      expect(added.stdout).toContain('not propagated to peers');
+      expect(added.stdout).toContain('agents routines devices release-train --set yosemite-s0');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+// RUSH-2517: an agent with no TTY must be able to repair a paused routine and
+// activate it. Before this, the readiness gate printed
+// `agents routines edit <name> --project-anchor <name>  # or --cwd <path>`
+// (routine-context.ts:215,334) while `edit` accepted neither flag and its only
+// surface opened $EDITOR — so the hint named a command that could not be run.
+describeRoutines('routines edit — headless context repair', () => {
+  const noContext = {
+    name: 'needs-cwd',
+    schedule: '0 3 * * *',
+    agent: 'claude',
+    prompt: 'noop',
+  };
+
+  it('--cwd applies and saves without opening an editor', () => {
+    const home = makeHome({ jobs: [noContext] });
+    try {
+      // EDITOR would hang the run if the flag fell through to the $EDITOR path.
+      const edited = run(home, ['edit', 'needs-cwd', '--cwd', '~'], { EDITOR: 'false' });
+      expect(edited.status, edited.stderr).toBe(0);
+      expect(edited.stdout).toContain("Routine 'needs-cwd' updated");
+
+      const saved = yaml.parse(
+        fs.readFileSync(path.join(home, '.agents', 'routines', 'needs-cwd.yml'), 'utf-8'),
+      );
+      expect(saved.cwd).toBe('~');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('--project-anchor applies and saves without opening an editor', () => {
+    const home = makeHome({ jobs: [noContext] });
+    try {
+      const edited = run(home, ['edit', 'needs-cwd', '--project-anchor', 'myapp'], { EDITOR: 'false' });
+      expect(edited.status, edited.stderr).toBe(0);
+      const saved = yaml.parse(
+        fs.readFileSync(path.join(home, '.agents', 'routines', 'needs-cwd.yml'), 'utf-8'),
+      );
+      expect(saved.project).toBe('myapp');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a routine that does not exist instead of creating a stub', () => {
+    const home = makeHome();
+    try {
+      const edited = run(home, ['edit', 'no-such-routine', '--cwd', '~'], { EDITOR: 'false' });
+      expect(edited.status).not.toBe(0);
+      expect(edited.stderr).toContain('not found');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});

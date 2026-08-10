@@ -17750,6 +17750,24 @@
               "negate": false
             },
             {
+              "flags": "--cwd <path>",
+              "description": "Set the execution directory and save, without opening an editor",
+              "long": "--cwd",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--project-anchor <name>",
+              "description": "Set the execution project anchor and save, without opening an editor",
+              "long": "--project-anchor",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "-H, --host <name>",
               "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
               "short": "-H",

@@ -1802,6 +1802,35 @@ export function jobExists(name: string): boolean {
   return readJob(name) !== null;
 }
 
+/**
+ * True when `sourcePath` already IS the canonical user-layer file for `name`.
+ *
+ * `agents routines add <file>` copies a definition into the routines dir, but
+ * users routinely point it at the file that already lives there — the release
+ * train's own `~/.agents/routines/release-train.yml`. `writeJob` would then
+ * re-serialize that file in place and, per {@link serializeJob}, delete every
+ * key absent from the canonical output — silently dropping the legacy
+ * `devices:` pin from config tracked in the git-backed `~/.agents` repo
+ * (RUSH-2517). Callers use this to skip the write when there is nothing to
+ * copy.
+ *
+ * Compares real paths so a symlinked `~/.agents` (the normal layout) still
+ * matches, and falls back to a resolved-path compare when either side cannot be
+ * realpath'd.
+ */
+export function isCanonicalRoutineSource(sourcePath: string, name: string): boolean {
+  const jobsDir = getRoutinesDir();
+  const real = (p: string): string => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const source = real(sourcePath);
+  return ['.yml', '.yaml'].some((ext) => real(safeJoin(jobsDir, name + ext)) === source);
+}
+
 /** Get the filesystem path of a job's YAML config file, or null if not found. */
 export function getJobPath(name: string): string | null {
   const jobsDir = getRoutinesDir();
