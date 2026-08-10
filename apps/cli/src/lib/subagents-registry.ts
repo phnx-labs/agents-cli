@@ -31,6 +31,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import * as TOML from 'smol-toml';
 import * as yaml from 'yaml';
 import type { AgentId, InstalledSubagent, SubagentFrontmatter } from './types.js';
 import { safeJoin } from './paths.js';
@@ -80,7 +81,7 @@ export interface SubagentTarget {
 
 // ── metadata readers (the per-format escape hatch) ───────────────────────────
 
-/** Frontmatter, skipping files that lack a valid block (claude/grok/droid/codex). */
+/** Frontmatter, skipping files that lack a valid block (claude/grok/droid). */
 function metaFrontmatterSkip(filePath: string): SubagentFrontmatter | null {
   return parseSubagentFrontmatter(filePath);
 }
@@ -112,6 +113,28 @@ function metaGooseYaml(filePath: string, name: string): SubagentFrontmatter | nu
       description?: string;
     } | null;
     return { name: recipe?.title || name, description: recipe?.description || '' };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Codex custom-agent TOML: name / description / model (optional).
+ * Codex writes no YAML frontmatter — without this reader, `flatFile.read`
+ * drops every installed `.toml` and `agents subagents list` reports codex
+ * targets as `missing` even when the files are present and Codex loads them.
+ */
+function metaToml(filePath: string, name: string): SubagentFrontmatter | null {
+  try {
+    const cfg = TOML.parse(fs.readFileSync(filePath, 'utf-8')) as {
+      name?: unknown;
+      description?: unknown;
+      model?: unknown;
+    };
+    const tomlName = typeof cfg.name === 'string' ? cfg.name : '';
+    const description = typeof cfg.description === 'string' ? cfg.description : '';
+    const model = typeof cfg.model === 'string' ? cfg.model : undefined;
+    return { name: tomlName || name, description, model };
   } catch {
     return null;
   }
@@ -272,7 +295,12 @@ export const SUBAGENT_TARGETS: Partial<Record<AgentId, SubagentTarget>> = {
   pi: flatFile({ subdir: ['.omp', 'agent', 'agents'], ext: '.md', transform: transformSubagentForClaude, readMeta: metaFrontmatterFallback }),
   droid: flatFile({ subdir: ['.factory', 'droids'], ext: '.md', transform: transformSubagentForDroid }),
   // Bespoke frontmatter/format, still one flat file.
-  codex: flatFile({ subdir: ['.codex', 'agents'], ext: '.toml', transform: transformSubagentForCodex }),
+  codex: flatFile({
+    subdir: ['.codex', 'agents'],
+    ext: '.toml',
+    transform: transformSubagentForCodex,
+    readMeta: metaToml,
+  }),
   opencode: flatFile({
     subdir: ['.config', 'opencode', 'agents'],
     ext: '.md',

@@ -92,6 +92,64 @@ describe('generic engine round-trips (copilot: previously unwired for install/re
   });
 });
 
+describe('Codex TOML listing (readMeta must not use markdown frontmatter)', () => {
+  /**
+   * Codex custom agents are flat `.toml` files with `name` / `description` /
+   * `developer_instructions` — no YAML `---` block. The default
+   * `metaFrontmatterSkip` reader returns null on TOML, so
+   * `listInstalledSubagentsRich` dropped every codex target and
+   * `agents subagents list` reported them as `missing` while the files sat
+   * on disk and Codex loaded them fine (#2399).
+   */
+  it('installs, lists rich metadata, and removes a codex subagent', () => {
+    const home = mkTemp();
+    const src = makeSubagentDir('code-reviewer');
+
+    const res = installSubagentToAgent(src, 'code-reviewer', 'codex', home);
+    expect(res.success).toBe(true);
+    const tomlPath = path.join(home, '.codex', 'agents', 'code-reviewer.toml');
+    expect(fs.existsSync(tomlPath)).toBe(true);
+    const body = fs.readFileSync(tomlPath, 'utf-8');
+    expect(body).toContain('name = "code-reviewer"');
+    expect(body).toContain('description = "Test code-reviewer"');
+
+    // names() never used frontmatter — it already enumerated .toml files.
+    expect(listInstalledSubagentNames('codex', home)).toEqual(['code-reviewer']);
+
+    // The bug: rich listing used metaFrontmatterSkip and returned [].
+    const rich = listInstalledSubagentsRich('codex', home);
+    expect(rich.map((s) => s.name)).toEqual(['code-reviewer']);
+    expect(rich[0].frontmatter.description).toBe('Test code-reviewer');
+    expect(rich[0].frontmatter.model).toBe('gpt-4o');
+
+    // Public list path used by `agents subagents list`.
+    const listed = listSubagentsForAgent('codex', home);
+    expect(listed.map((s) => s.name)).toEqual(['code-reviewer']);
+    expect(listed[0].frontmatter.description).toBe('Test code-reviewer');
+
+    const rm = removeSubagentFromAgent('code-reviewer', 'codex', home);
+    expect(rm.success).toBe(true);
+    expect(fs.existsSync(tomlPath)).toBe(false);
+  });
+
+  it('lists a hand-written TOML that has no model field', () => {
+    // Real Codex agents often omit model; the reader must not require it.
+    const home = mkTemp();
+    const dir = path.join(home, '.codex', 'agents');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'solo.toml'),
+      'name = "solo"\ndescription = "Hand-written agent"\ndeveloper_instructions = """\nDo the thing.\n"""\n',
+      'utf-8',
+    );
+
+    const rich = listInstalledSubagentsRich('codex', home);
+    expect(rich.map((s) => s.name)).toEqual(['solo']);
+    expect(rich[0].frontmatter.description).toBe('Hand-written agent');
+    expect(rich[0].frontmatter.model).toBeUndefined();
+  });
+});
+
 describe('trashSubagentFromHome (soft-delete semantics per layout)', () => {
   it('trashes a flat-file subagent as <basename>.<stamp>', () => {
     const home = mkTemp();
