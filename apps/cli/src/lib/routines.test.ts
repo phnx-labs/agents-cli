@@ -14,7 +14,7 @@ vi.mock('./routine-activation.js', async (importOriginal) => {
     routineEnabledOnThisDevice: () => null,
   };
 });
-import { routineOwnerDevice, hasAmbiguousDevicePin, validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, getJobRunsDir, getRunDir, finalizeRunMeta, writeRunMeta, resolveJobPrompt, getLatestCompletedRun, routineStats, computeProjectGroup, computeProjectGroupKind, projectGroupKey, projectGroupTitle, normalizeProjects, type JobConfig, type RunMeta } from './routines.js';
+import { routineOwnerDevice, hasAmbiguousDevicePin, validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, getJobRunsDir, getRunDir, finalizeRunMeta, writeRunMeta, resolveJobPrompt, getLatestCompletedRun, routineStats, computeProjectGroup, computeProjectGroupKind, projectGroupKey, projectGroupTitle, normalizeProjects, serializeJob, type JobConfig, type RunMeta } from './routines.js';
 import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir } from './state.js';
 import { ROUTINE_AGENT_IDS } from './agents.js';
 
@@ -27,6 +27,20 @@ function baseJob(partial: Partial<JobConfig> = {}): Partial<JobConfig> {
     ...partial,
   };
 }
+
+describe('serializeJob — committed flow-sequence formatting (RUSH-2505)', () => {
+  it('re-serializes an unchanged flow sequence without adding [ a, b ] padding', () => {
+    // Committed routine YAML uses unpadded flow sequences. The yaml emitter
+    // defaults to padded output, which would flip the tracked file to a no-op
+    // diff and block ~/.agents pulls fleet-wide.
+    const committed = 'name: j\nschedule: 0 9 * * *\nagent: claude\nprompt: hi\ndevices: [yosemite-s0, zion]\n';
+    const output = { name: 'j', schedule: '0 9 * * *', agent: 'claude', prompt: 'hi', devices: ['yosemite-s0', 'zion'] };
+    const out = serializeJob(output, committed);
+    expect(out).toContain('devices: [yosemite-s0, zion]');
+    expect(out).not.toMatch(/\[ /);
+    expect(out).not.toMatch(/ \]/);
+  });
+});
 
 describe('validateJob — schedule OR trigger', () => {
   it('accepts a schedule-only job (existing cron behavior unchanged)', () => {
