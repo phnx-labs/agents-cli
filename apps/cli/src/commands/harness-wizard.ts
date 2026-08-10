@@ -40,6 +40,7 @@ import {
 import { listPresets, getPreset, type Preset } from '../lib/profiles-presets.js';
 import { listBundles } from '../lib/secrets/bundles.js';
 import { AGENTS, ALL_AGENT_IDS, isSelfUpdatingAgent, resolveAgentName } from '../lib/agents.js';
+import { readAccountRegistry } from '../lib/account-registry.js';
 
 /** Whether the wizard is creating a new harness or editing an existing one. */
 export type WizardMode = 'create' | 'edit';
@@ -83,6 +84,7 @@ export interface HarnessDraft {
   model?: string;
   baseUrl?: string;
   authProvider?: string;
+  account?: string;
   /** `<bundle>` or `<bundle>:<key>` — a value copied out of an agents secrets bundle. */
   fromSecrets?: string;
   version?: string;
@@ -398,10 +400,17 @@ export function createSteps(): WizardStep[] {
       },
     },
     {
-      id: 'auth',
-      decide: (d) => (d.authProvider && d.fromSecrets === undefined ? 'run' : 'skip'),
+      id: 'account',
+      decide: (d) => (d.authProvider && d.account === undefined ? 'run' : 'skip'),
       async run(io, d) {
-        await askKeySource(io, d, d.authProvider!);
+        const accounts = Object.values(readAccountRegistry().accounts).filter(account => account.provider === d.authProvider);
+        if (accounts.length === 0) {
+          throw new Error(`No '${d.authProvider}' account exists. Add one first with 'agents accounts add <name> --provider ${d.authProvider} --auth api-key'.`);
+        }
+        d.account = await io.select<string>({
+          message: 'Account',
+          choices: accounts.map(account => ({ name: account.name, value: account.name })),
+        });
       },
     },
     connectionTestStep(),
@@ -454,25 +463,17 @@ export function editSteps(original: Profile): WizardStep[] {
       },
     },
     {
-      id: 'auth',
+      id: 'account',
       decide: () => (cap.auth ? 'run' : { disabled: `host '${host}' manages its own login — no auth to edit` }),
       async run(io, d, hooks) {
         if (!editableFor(hooks).auth) return;
-        const bundles = listBundles();
-        const choices: WizardChoice<string>[] = [
-          { name: 'Leave auth unchanged', value: KEEP },
-          { name: 'Repoint to a provider (enter a key)', value: TYPE_NOW },
-        ];
-        if (bundles.length > 0) choices.push({ name: 'Copy a key from an agents secrets bundle', value: FROM_SECRETS });
-        const choice = await io.select<string>({ message: 'Auth', choices });
-        if (choice === KEEP) return;
-        const provider = await io.input({
-          message: 'Provider',
-          default: original.provider,
-          validate: (v) => (v.trim() ? true : 'Provider is required'),
+        const accounts = Object.values(readAccountRegistry().accounts);
+        const choice = await io.select<string>({
+          message: 'Account',
+          choices: [{ name: 'Leave account unchanged', value: KEEP }, ...accounts.map(account => ({ name: `${account.name} (${account.provider})`, value: account.name }))],
         });
-        d.authProvider = provider;
-        if (choice === FROM_SECRETS) await askKeySource(io, d, provider);
+        if (choice === KEEP) return;
+        d.account = choice;
       },
     },
     {

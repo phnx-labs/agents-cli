@@ -115,10 +115,10 @@ describe('createSteps — step gating (decide) is a function of the draft', () =
     expect(steps.name.decide({ mode: 'create' })).toBe('run');
   });
 
-  it('auth runs only when a provider needs a key and no bundle was already chosen', () => {
-    expect(steps.auth.decide({ mode: 'create', authProvider: 'openrouter' })).toBe('run');
-    expect(steps.auth.decide({ mode: 'create', authProvider: 'openrouter', fromSecrets: 'b:k' })).toBe('skip');
-    expect(steps.auth.decide({ mode: 'create' })).toBe('skip');
+  it('account runs only when a provider needs a credential and no account was already chosen', () => {
+    expect(steps.account.decide({ mode: 'create', authProvider: 'openrouter' })).toBe('run');
+    expect(steps.account.decide({ mode: 'create', authProvider: 'openrouter', account: 'work' })).toBe('skip');
+    expect(steps.account.decide({ mode: 'create' })).toBe('skip');
   });
 });
 
@@ -173,7 +173,7 @@ describe('createSteps — a full custom run drives the right prompts and skips t
       baseUrl: 'https://gw.corp/v1',
       authProvider: 'corp',
       providerAsked: true,
-      fromSecrets: 'prod:KEY',
+      account: 'corp',
     };
     await runWizardSteps(createSteps(), prefilled, io);
     expect(io.calls).toHaveLength(0);
@@ -192,7 +192,7 @@ describe('editSteps — matrix gating is sourced from the resolver, per host', (
     const draft: HarnessDraft = { mode: 'edit' };
     expect(steps.model.decide(draft)).toBe('run');
     expect(steps.baseUrl.decide(draft)).toBe('run');
-    expect(steps.auth.decide(draft)).toBe('run');
+    expect(steps.account.decide(draft)).toBe('run');
     expect(steps.version.decide(draft)).toBe('run');
     expect(steps.fallback.decide(draft)).toBe('run');
   });
@@ -202,7 +202,7 @@ describe('editSteps — matrix gating is sourced from the resolver, per host', (
     const draft: HarnessDraft = { mode: 'edit' };
     expect(steps.baseUrl.decide(draft)).toEqual({ disabled: expect.stringContaining('grok') });
     expect(steps.version.decide(draft)).toEqual({ disabled: expect.stringContaining('self-updates') });
-    expect(steps.auth.decide(draft)).toBe('run'); // grok reads XAI_API_KEY
+    expect(steps.account.decide(draft)).toBe('run'); // grok reads XAI_API_KEY
     expect(steps.model.decide(draft)).toBe('run');
   });
 
@@ -211,7 +211,7 @@ describe('editSteps — matrix gating is sourced from the resolver, per host', (
     const draft: HarnessDraft = { mode: 'edit' };
     expect(steps.baseUrl.decide(draft)).toEqual({ disabled: expect.stringContaining('endpoint') });
     expect(steps.version.decide(draft)).toBe('run');
-    expect(steps.auth.decide(draft)).toBe('run');
+    expect(steps.account.decide(draft)).toBe('run');
   });
 });
 
@@ -240,7 +240,7 @@ describe('editSteps — a full edit run keeps only what changed and round-trips'
 
     const io = new FakeIO((p) => {
       if (p.message === 'Model id') return 'deepseek/deepseek-v3.2'; // the one real change
-      if (p.message === 'Auth') return p.choices!.find((c) => c.name.includes('unchanged'))!.value;
+      if (p.message === 'Account') return p.choices!.find((c) => c.name.includes('unchanged'))!.value;
       if (p.kind === 'input') return p.default ?? ''; // accept the pre-filled current value
       throw new Error(`unexpected prompt: ${p.kind} '${p.message}'`);
     });
@@ -270,7 +270,7 @@ describe('editSteps — a full edit run keeps only what changed and round-trips'
     });
     const original = readProfile('pinned');
     const io = new FakeIO((p) => {
-      if (p.message === 'Auth') return p.choices!.find((c) => c.name.includes('unchanged'))!.value;
+      if (p.message === 'Account') return p.choices!.find((c) => c.name.includes('unchanged'))!.value;
       if (p.kind === 'input' && p.message.startsWith('Host CLI version')) return ''; // blank → unpin
       if (p.kind === 'input') return p.default ?? '';
       throw new Error(`unexpected prompt: ${p.kind} '${p.message}'`);
