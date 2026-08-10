@@ -137,4 +137,28 @@ describe('command index generation', () => {
     expect((html.match(/<article /g) ?? []).length).toBe(countCommands(nodes));
     expect(html).not.toMatch(/<(script|link)[^>]+(src|href)=/);
   });
+
+  it('renders a navigable tree with one entry per command card', async () => {
+    const nodes = await tree();
+    const html = renderHtml(nodes);
+    expect(html).toContain('<nav id="nav"');
+    // Every card is reachable by browsing, not only by searching.
+    expect((html.match(/<li data-nav=/g) ?? []).length).toBe(countCommands(nodes));
+    // A group with subcommands is collapsible; its children nest under it.
+    expect(html).toContain('<li data-nav="teams"><details><summary><a href="#teams">teams</a>');
+    expect(html).toContain('<li data-nav="teams-create"><a href="#teams-create">create</a></li>');
+  });
+
+  it('anchors every nav link to a card that exists, including the root node', async () => {
+    const program = await buildFullCommandTree();
+    const nodes = walk(program);
+    const html = renderHtml(nodes, rootNode(program));
+    const ids = new Set([...html.matchAll(/<article id="([^"]*)"/g)].map((m) => m[1]));
+    const targets = [...html.matchAll(/<li data-nav="([^"]*)"/g)].map((m) => m[1]);
+    expect(targets.length).toBeGreaterThan(0);
+    for (const target of targets) expect(ids.has(target)).toBe(true);
+    // The root's path is empty; it must still be linkable rather than id="".
+    expect(ids.has('agents')).toBe(true);
+    expect(html).not.toContain('id=""');
+  });
 });
