@@ -174,13 +174,13 @@ describe('pi (Oh My Pi)', () => {
   });
 });
 
-describe('warp (Warp Agent CLI / Oz)', () => {
+describe('warp (Warp Agent CLI)', () => {
   it('is registered with a truthful capability set', () => {
     expect(ALL_AGENT_IDS).toContain('warp');
-    // MCP + skills are the surfaces Oz actually exposes to agents-cli.
+    // MCP + skills are the surfaces Warp actually exposes to agents-cli.
     expect(capableAgents('mcp')).toContain('warp');
     expect(capableAgents('skills')).toContain('warp');
-    // Oz reads the Claude .mcp.json schema (url + headers).
+    // Warp reads the Claude .mcp.json schema (url + headers).
     expect(capableAgents('mcpHttp')).toContain('warp');
     expect(capableAgents('mcpHeaders')).toContain('warp');
     // No matching install surface for these: hooks (no event->shell registration),
@@ -194,18 +194,18 @@ describe('warp (Warp Agent CLI / Oz)', () => {
     expect(capableAgents('subagents')).not.toContain('warp');
     expect(capableAgents('workflows')).not.toContain('warp');
     expect(capableAgents('memory')).not.toContain('warp');
-    expect(AGENTS.warp.cliCommand).toBe('oz');
+    expect(AGENTS.warp.cliCommand).toBe('warp');
     expect(AGENTS.warp.supportsHooks).toBe(false);
     expect(AGENTS.warp.instructionsFile).toBe('AGENTS.md');
     expect(AGENTS.warp.capabilities.rules).toEqual({ file: 'AGENTS.md' });
-    // Autonomy is governed by the agent profile, not a per-run permission flag,
-    // so a single autonomous mode maps to no flags (mirrors hermes).
+    // Autonomy is a single `--auto-approve` toggle, not a per-run permission
+    // flag, so a single mode maps to no flags (mirrors hermes).
     expect(AGENTS.warp.capabilities.modes).toEqual(['edit']);
   });
 
-  it('is a self-updating agent (brew/apt install, no pinnable semver)', () => {
+  it('is a self-updating agent (curl install, no pinnable semver)', () => {
     expect(AGENTS.warp.npmPackage).toBe('');
-    expect(AGENTS.warp.installScript).toContain('oz');
+    expect(AGENTS.warp.installScript).toContain('agent-cli');
     expect(isSelfUpdatingAgent('warp')).toBe(true);
   });
 
