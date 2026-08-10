@@ -78,7 +78,38 @@ DAG-style, boundary contracts, `--watch` supervisor, `--worktree` isolation, opt
 `--cloud` dispatch. The old `mcp__Swarm__*` surface was folded into teams
 (`migrateLegacySwarmToTeams()` in `src/lib/migrate.ts`). Don't reach for Swarm — gone.
 
-### 7. Routine definitions and device activation are separate
+### 7. Every agent conversation is a session; execution ledgers link to it
+
+**Interactive, headless, team, and agent/workflow routine launches all produce
+ordinary harness transcripts that `agents sessions` discovers and indexes in
+`sessions.db`.** A caller MUST NOT replace or hide that conversation record with
+its own execution metadata. The session row carries the relationship instead:
+
+| Launch surface | Session relationship | Separate execution state |
+|---|---|---|
+| `agents run`, including headless and `--host` | Ordinary indexed harness session; the launch id joins a remotely coined session id back to the dispatch | Dispatch/audit events |
+| `agents teams` teammate | Its **own** session id plus `teamOrigin` and `parentSessionId` linking the orchestrator | Team registry + teammate `meta.json` own DAG/task/process state |
+| Agent/workflow routine | Archived transcript indexed with `origin: routine`, `routineName`, and `routineRunId` | `.history/runs/<routine>/<run>/meta.json` owns the attempt outcome |
+| Command-only, `missed`, `blocked`, or `skipped` routine | No session is synthesized because no agent conversation occurred | The routine run record is the complete canonical record |
+
+Source of truth: `buildExecEnv` / `emitResolvedSessionId` in
+[`src/lib/exec.ts`](src/lib/exec.ts), `listTeamsActive` in
+[`src/lib/session/active.ts`](src/lib/session/active.ts),
+`archiveRoutineTranscripts` in [`src/lib/runner.ts`](src/lib/runner.ts), and
+`decorateRoutineSession` in [`src/lib/session/discover.ts`](src/lib/session/discover.ts).
+Enforced by [`src/lib/session/team-filter.test.ts`](src/lib/session/team-filter.test.ts)
+(`--teams includes team sessions with teamOrigin populated`),
+[`src/lib/runner.test.ts`](src/lib/runner.test.ts) (routine transcript archival), and
+[`src/commands/sessions.test.ts`](src/commands/sessions.test.ts) (routine run history
+plus linked sessions, with no fake session for command-only runs).
+
+Team-origin sessions are durable session rows but are excluded from the ordinary
+historical listing by default to keep an orchestrator's fan-out from flooding it;
+`agents sessions --teams` includes them, while live teammates appear in
+`agents sessions --active` with `context: teams`. That is a presentation filter,
+never permission to omit the transcript from the session index.
+
+### 8. Routine definitions and device activation are separate
 
 Routine YAML under project, user, or system `routines/` describes what runs and
 when. Whether it runs on one host is membership in that host's top-level
@@ -109,7 +140,7 @@ home. `repo` remains GitHub/cloud/webhook identity and MUST NOT be used to infer
 local checkout. Readiness failures save valid definitions paused through device
 activation; they never write mutable activation into routine YAML.
 
-### 8. Self-updating agents are ONE binary, not fictional version-homes
+### 9. Self-updating agents are ONE binary, not fictional version-homes
 
 Some harnesses (droid, grok, antigravity, cursor, hermes, muse, kiro, goose) install
 via an official `curl … | sh` / `brew install` script that carries no version token —
@@ -126,7 +157,7 @@ stale dirs into the survivor, `agents view` shows the live `--version`, and
 grok is self-updating but stores a real per-version binary under each version-home, so
 it is NOT a global-binary agent and is left uncollapsed. (RUSH-1321)
 
-### 9. Diagnostic command taxonomy — `doctor` is the umbrella (RUSH-2027)
+### 10. Diagnostic command taxonomy — `doctor` is the umbrella (RUSH-2027)
 
 Three diagnostics, distinct scopes. Don't blur them — each answers a different
 question, and a new health check goes in the one whose scope it matches.
@@ -294,7 +325,7 @@ Everything but the collector is pure and unit-tested
 ([`harness-inventory.test.ts`](src/lib/devices/harness-inventory.test.ts)). Agent
 coverage is `ALL_AGENT_IDS`-driven, so a new harness is included automatically.
 
-### 10. Session recovery is one decision on the origin device
+### 11. Session recovery is one decision on the origin device
 
 `resolveSessionRecovery` in `src/lib/session/recovery.ts` is the only place that
 chooses native resume versus `/continue`. Focus, resume, attach, and
