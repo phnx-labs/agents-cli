@@ -4,6 +4,11 @@ import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
+// Pure — takes an explicit directory, no HOME-derived state — safe to call
+// directly in this process. getBinaryPath itself is exercised through
+// runVersionSync's isolated-HOME subprocess below, like every other
+// versions.ts function whose paths derive from HOME.
+import { resolveGrokFallbackBinary } from './versions.js';
 
 const tempDirs: string[] = [];
 
@@ -39,7 +44,7 @@ function runVersionSync(home: string, expression: string): unknown {
   // .exe everywhere, so this is shell-free and cross-platform.
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
   const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
-    import { listInstalledVersions, syncResourcesToVersion, buildRepoScopedSelection, getVersionHomePath } from ${JSON.stringify(moduleUrl)};
+    import { listInstalledVersions, syncResourcesToVersion, buildRepoScopedSelection, getVersionHomePath, getBinaryPath } from ${JSON.stringify(moduleUrl)};
     import { registerHooksToSettings } from ${JSON.stringify(pathToFileURL(path.resolve('src/lib/hooks.ts')).href)};
     const home = ${JSON.stringify(home)};
     const result = ${expression};
@@ -1051,9 +1056,16 @@ describe('installVersion Grok binary relocation', () => {
     // version now being installed).
     const strandedConfigDir = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.106', 'home', '.grok');
     fs.mkdirSync(path.join(strandedConfigDir, 'downloads'), { recursive: true });
+    // Filename ("0.2.118") deliberately does not match this version-home's
+    // name ("0.2.106") — the exact scenario RUSH-2459's fallback fix targets.
+    // The sweep below only visits this dir because listInstalledVersions
+    // still counts "0.2.106" as installed, which now requires a real-sized
+    // (>=1MB) grok-* candidate (resolveGrokFallbackBinary's size floor) — pad
+    // past that so this test keeps exercising the self-heal sweep itself,
+    // not the size floor.
     fs.writeFileSync(
       path.join(strandedConfigDir, 'downloads', 'grok-0.2.118-linux-x86_64'),
-      '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "grok 0.2.118"; exit 0; fi\nexit 0\n',
+      `#!/bin/sh\n${'# '.repeat(600_000)}\nif [ "$1" = "--version" ]; then echo "grok 0.2.118"; exit 0; fi\nexit 0\n`,
       'utf-8'
     );
     fs.chmodSync(path.join(strandedConfigDir, 'downloads', 'grok-0.2.118-linux-x86_64'), 0o755);
@@ -1129,6 +1141,77 @@ describe('installVersion Grok binary relocation', () => {
     const targetAuth = JSON.parse(fs.readFileSync(path.join(accountADir, 'auth.json'), 'utf-8'));
     expect(targetAuth['https://auth.x.ai::client-id'].email).toBe('accountA@example.com');
   }, 10000);
+});
+
+// RUSH-2459: grok self-updates its binary in place while running under the
+// shim, so a version-home's downloads dir can accumulate several `grok-*`
+// files whose names have drifted away from that version-home's pinned
+// version. Reproduced on yosemite-s0: version-home 0.2.82 held a real
+// self-updated `grok-1.0.0-linux-aarch64` PLUS a stale, unrelated 99-byte
+// `grok-0.2.118-linux-aarch64` wrapper script (`exec cursor-agent "$@"`) that
+// sorted alphabetically before it — the old "no exact match -> first file"
+// fallback silently launched the wrapper, so `agents run grok` ran Cursor.
+describe('resolveGrokFallbackBinary (RUSH-2459)', () => {
+  function makeDownloadsDir(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-grok-downloads-'));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  function writeGrokFile(dir: string, name: string, bytes: number, mtime: Date): string {
+    const full = path.join(dir, name);
+    fs.writeFileSync(full, Buffer.alloc(bytes, 'a'));
+    fs.chmodSync(full, 0o755);
+    fs.utimesSync(full, mtime, mtime);
+    return full;
+  }
+
+  it('never picks a stray non-binary artifact under the size floor, even when it sorts first', () => {
+    const dir = makeDownloadsDir();
+    // Sorts alphabetically FIRST ("0" < "1" < "l") and is exactly the shape of
+    // the real stray artifact found on yosemite-s0 (a 99-byte cursor-agent
+    // wrapper). Real grok binaries are ~127MB; 2MB here is enough to clear the
+    // 1MB floor without paying to write a full-size fixture in every test run.
+    writeGrokFile(dir, 'grok-0.2.118-linux-aarch64', 99, new Date('2026-08-01T19:35:00Z'));
+    const real = writeGrokFile(dir, 'grok-1.0.0-linux-aarch64', 2_000_000, new Date('2026-08-09T18:38:00Z'));
+    writeGrokFile(dir, 'grok-linux-aarch64', 2_000_000, new Date('2026-08-07T13:50:00Z'));
+
+    expect(resolveGrokFallbackBinary(dir)).toBe(real);
+  });
+
+  it('prefers the most recently modified candidate among several real-sized binaries', () => {
+    const dir = makeDownloadsDir();
+    writeGrokFile(dir, 'grok-linux-aarch64', 2_000_000, new Date('2026-08-01T00:00:00Z'));
+    const newest = writeGrokFile(dir, 'grok-1.0.5-linux-aarch64', 2_000_000, new Date('2026-08-05T00:00:00Z'));
+
+    expect(resolveGrokFallbackBinary(dir)).toBe(newest);
+  });
+
+  it('fails loud (returns null) instead of guessing when every candidate is under the size floor', () => {
+    const dir = makeDownloadsDir();
+    writeGrokFile(dir, 'grok-0.2.118-linux-aarch64', 99, new Date());
+    writeGrokFile(dir, 'grok-stub-macos-arm64', 40, new Date());
+
+    expect(resolveGrokFallbackBinary(dir)).toBeNull();
+  });
+
+  it('returns null for an empty or missing downloads dir', () => {
+    const dir = makeDownloadsDir();
+    expect(resolveGrokFallbackBinary(dir)).toBeNull();
+    expect(resolveGrokFallbackBinary(path.join(dir, 'does-not-exist'))).toBeNull();
+  });
+
+  it.skipIf(process.platform === 'win32')('getBinaryPath resolves through the same validated fallback (not the first alphabetical grok-* file)', () => {
+    const home = makeTempHome();
+    const version = '0.2.82';
+    const downloads = path.join(home, '.agents', '.history', 'versions', 'grok', version, 'home', '.grok', 'downloads');
+    fs.mkdirSync(downloads, { recursive: true });
+    writeGrokFile(downloads, 'grok-0.2.118-linux-aarch64', 99, new Date('2026-08-01T19:35:00Z'));
+    writeGrokFile(downloads, 'grok-1.0.0-linux-aarch64', 2_000_000, new Date('2026-08-09T18:38:00Z'));
+
+    const result = runVersionSync(home, `getBinaryPath('grok', ${JSON.stringify(version)})`) as string;
+    expect(result).toBe(path.join(downloads, 'grok-1.0.0-linux-aarch64'));
+  });
 });
 
 // `resolveVersionAlias` is the shared @selector vocabulary (latest / oldest /

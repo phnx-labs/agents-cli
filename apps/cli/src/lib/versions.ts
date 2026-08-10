@@ -1004,6 +1004,56 @@ export function getVersionDir(agent: AgentId, version: string): string {
 }
 
 /**
+ * Grok binaries are never trusted below this size when picking among several
+ * `grok-*` candidates with no exact version match (see
+ * {@link resolveGrokFallbackBinary}). Grok's real native binary is ~100MB+; a
+ * stray non-binary artifact sharing the `grok-*` naming pattern (a wrapper or
+ * alias script) is at most a few hundred bytes, so 1MB comfortably separates
+ * the two without depending on file content.
+ */
+const MIN_GROK_BINARY_BYTES = 1_000_000;
+
+/**
+ * Pick the real grok binary among `grok-*` entries in `downloadsDir` when NO
+ * filename carries the pinned version string. Grok self-updates its binary in
+ * place while running under the shim, so a version-home's downloads dir can
+ * accumulate several `grok-*` files whose names have drifted away from that
+ * version-home's pinned version (RUSH-2459: on yosemite-s0, version-home
+ * `0.2.82` held `grok-1.0.0-linux-aarch64` after grok self-updated, plus a
+ * stale, unrelated 99-byte `grok-0.2.118-linux-aarch64` wrapper script that
+ * happened to sort alphabetically first).
+ *
+ * Never blindly take whatever `fs.readdirSync` returns first — that is exactly
+ * the bug this replaces. Instead: exclude anything under
+ * {@link MIN_GROK_BINARY_BYTES} (rejects wrapper/alias artifacts on size
+ * alone, no content sniffing needed) and, among the survivors, prefer the most
+ * recently modified — the file grok's self-updater actually wrote last.
+ * Returns null (fail loud, never guess) when nothing survives the size filter.
+ */
+export function resolveGrokFallbackBinary(downloadsDir: string): string | null {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(downloadsDir);
+  } catch {
+    return null;
+  }
+  let best: { name: string; mtimeMs: number } | null = null;
+  for (const entry of entries) {
+    if (!entry.startsWith('grok-')) continue;
+    const full = path.join(downloadsDir, entry);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(full);
+    } catch {
+      continue;
+    }
+    if (!stat.isFile() || stat.size < MIN_GROK_BINARY_BYTES) continue;
+    if (!best || stat.mtimeMs > best.mtimeMs) best = { name: entry, mtimeMs: stat.mtimeMs };
+  }
+  return best ? path.join(downloadsDir, best.name) : null;
+}
+
+/**
  * Get the binary path for a specific agent version.
  */
 export function getBinaryPath(agent: AgentId, version: string): string {
@@ -1015,9 +1065,9 @@ export function getBinaryPath(agent: AgentId, version: string): string {
       const entries = fs.readdirSync(grokDownloads);
       const match = entries.find((e: string) => e.includes(version) && e.startsWith('grok-'));
       if (match) return path.join(grokDownloads, match);
-      const first = entries.find((e: string) => e.startsWith('grok-'));
-      if (first) return path.join(grokDownloads, first);
     } catch {}
+    const fallback = resolveGrokFallbackBinary(grokDownloads);
+    if (fallback) return fallback;
     return path.join(grokDownloads, `grok-${version}`);
   }
   if (agent === 'droid') {
