@@ -407,8 +407,11 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
   const duplicates = registryScopedDuplicates(processes, pid ?? null);
   // Every daemon whose code is gone from disk, including this device's own if
   // it is one. Not filtered by the duplicate scope — see entryIsGone.
-  // One registry snapshot, shared with the duplicate scan below: two reads could
-  // disagree mid-invocation, and each costs a per-pid `ps` spawn.
+  // Deliberately its own read, NOT shared with registryScopedDuplicates above.
+  // That one passes `exclude` INTO findSurvivingStateDirDaemons to drop the
+  // owner, so handing it a shared empty-exclude snapshot would put ownerPid back
+  // in the set and report this device's daemon as its own duplicate. The saving
+  // would be one `ps` spawn per registered pid, at the 1-3 that actually run.
   const registeredPids = new Set(findSurvivingStateDirDaemons(new Set()));
   const staleTiers = staleDaemons(processes, pid ?? null, registeredPids);
   const stale = staleTiers.visible;
