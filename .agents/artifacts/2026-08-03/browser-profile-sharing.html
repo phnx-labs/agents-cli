@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Browser Profile Sharing — Local Client vs Yosemite Agent</title>
+<title>Browser Profile Sharing — Local Client vs [worker] Agent</title>
 <style>
 :root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
 @page{margin:24px}
@@ -23,13 +23,13 @@
 <header class="document-header"><div class="header-label">Phoenix Labs / Engineering</div><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
 <section class="hero">
 <div class="kicker">agents-cli<span class="kicker-separator" aria-hidden="true">&middot;</span>agents browser profiles<span class="kicker-separator" aria-hidden="true">&middot;</span>report</div>
-<h1>Browser Profile Sharing — Local Client vs Yosemite Agent</h1>
+<h1>Browser Profile Sharing — Local Client vs [worker] Agent</h1>
 <p class="summary">One synced profile definition works on both machines at once, but each machine keeps its own cookie jar — log in once per machine, not once per profile.</p>
 <div class="meta" aria-label="Artifact metadata"><ul class="meta-row meta-row-facts"><li class="chip"><span class="chip-value">1 profile name, synced everywhere</span></li><li class="chip"><span class="chip-value">2 separate cookie jars</span></li><li class="chip"><span class="chip-value">0 lock or port conflicts</span></li><li class="chip"><span class="chip-label">status:</span><span class="chip-value">answered</span></li></ul><ul class="meta-row meta-row-provenance"><li class="chip"><span class="chip-label">repo:</span><span class="chip-value"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span></li><li class="chip"><span class="chip-label">branch:</span><span class="chip-value">main</span></li><li class="chip"><span class="chip-label">human:</span><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="4"/><path d="M3.5 21c.8-4.2 4.2-6.5 8.5-6.5s7.7 2.3 8.5 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>Owner</span></li><li class="chip"><span class="chip-label">harness:</span><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5 10 12l-6 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 18.5h8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>kimi</span></li><li class="chip"><span class="chip-label">host:</span><span class="chip-value">worker-s1</span></li><li class="chip"><span class="chip-label">session:</span><span class="chip-value">ae51f993</span></li><li class="chip"><span class="chip-value">2026-08-03</span></li></ul></div>
 </section>
 <nav class="toc" aria-label="Artifact sections"><a href="#summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a href="#findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a href="#evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a><a href="#recommendations"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Recommendations</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2>
 <p><strong>Yes — the same browser profile can be used locally and by a remote agent on
-Yosemite S1 at the same time.</strong> The profile <em>definition</em> (name, browser,
+[worker] S1 at the same time.</strong> The profile <em>definition</em> (name, browser,
 endpoint) lives in the central <code>~/.agents/agents.yaml</code> and syncs across the
 fleet with <code>agents repo push/pull</code>, so <code>work</code> resolves on both machines.</p>
 <p><strong>But it is not one shared session.</strong> Each machine launches its own Chrome with
@@ -74,10 +74,10 @@ be logged into once.</p>
 
 
   <rect x="520" y="150" width="400" height="96" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
-  <text x="720" y="176" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">YOSEMITE S1 (remote agent)</text>
-  <text x="720" y="196" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">agents -H yosemite browser start --profile work</text>
+  <text x="720" y="176" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">[worker] S1 (remote agent)</text>
+  <text x="720" y="196" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">agents -H [worker] browser start --profile work</text>
   <text x="720" y="214" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">Chrome B · own debug port · own SingletonLock</text>
-  <text x="720" y="232" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">SSH passthrough — runs entirely on Yosemite</text>
+  <text x="720" y="232" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">SSH passthrough — runs entirely on [worker]</text>
 
 
   <rect x="40" y="292" width="400" height="72" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5" opacity="0.85"></rect>
@@ -101,8 +101,8 @@ be logged into once.</p>
 <li><strong>Profile definitions sync; runtime state does not.</strong> <code>browser:</code> profiles are
 portable config in central <code>~/.agents/agents.yaml</code>. The cookie jar lives in
 <code>~/.agents/.cache/browser/</code> — explicitly gitignored, regenerable runtime data.</li>
-<li><strong>Remote runs are SSH passthrough.</strong> <code>agents -H yosemite browser …</code> executes
-on Yosemite, resolving the same profile name against Yosemite's synced config
+<li><strong>Remote runs are SSH passthrough.</strong> <code>agents -H [worker] browser …</code> executes
+on [worker], resolving the same profile name against [worker]'s synced config
 and launching Chrome there. Same name, physically separate browser.</li>
 <li><strong>No collisions.</strong> Chromium's <code>SingletonLock</code> is per user-data-dir and debug
 ports are allocated per machine, so both copies run concurrently.</li>
@@ -160,7 +160,7 @@ profile.</li>
 <ol>
 <li><strong>Keep one profile name</strong> (e.g. <code>work</code>) synced everywhere — no need to
 create separate local vs remote profiles.</li>
-<li><strong>Log in once per machine.</strong> The Yosemite agent starts logged-out until its
+<li><strong>Log in once per machine.</strong> The [worker] agent starts logged-out until its
 own chrome-data copy is signed in once; it persists after that
 (<code>session.restore_on_startup</code> is pinned).</li>
 <li><strong>Don't expect a shared live session.</strong> There is no supported mechanism to

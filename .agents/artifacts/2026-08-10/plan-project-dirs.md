@@ -44,7 +44,7 @@ Binding the two repos is a one-line YAML edit. The request underneath it is the 
 
   root     ~/src/github.com/owner/agents-cli
   path     ~/src/github.com/owner/agents-cli
-  linear   8eb8f5b1-3870-4590-ba67-36f3811d1435</code></pre>
+  linear   [project-id-redacted]</code></pre>
     <p>One repo, one root, one probed directory. Captured on [interactive-host], 2026-08-10.</p>
     <h4>Today — spawning into it</h4>
     <pre><code>$ agents run claude --project agents-cli
@@ -63,7 +63,7 @@ Binding the two repos is a one-line YAML edit. The request underneath it is the 
 
   root     ~/src/github.com/owner/agents-cli
   path     ~/src/github.com/owner/agents-cli
-  linear   8eb8f5b1-3870-4590-ba67-36f3811d1435</code></pre>
+  linear   [project-id-redacted]</code></pre>
     <p>Three bound directories, each with the remote read from its own <code>origin</code>. The one-line <code>repos</code> summary becomes the per-repo form that <code>projects.ts:631-633</code> already prints.</p>
     <h4>Proposed — spawning into it</h4>
     <pre><code>$ agents run claude --project agents-cli
@@ -238,7 +238,7 @@ repos:
   - slug: phnx-labs/.agents-system
     path: ~/.agents/.system
 linear:
-  projectId: 8eb8f5b1-3870-4590-ba67-36f3811d1435
+  projectId: [project-id-redacted]
   name: Agents CLI
 ```
 
@@ -322,7 +322,7 @@ agents teams add dirs-check claude "list your accessible roots" --name probe
 | Item | Id | State |
 | --- | --- | --- |
 | Ticket | [RUSH-2489](https://linear.app/phnx-labs/issue/RUSH-2489) — *agents projects: a project is a set of directories, each with its own remote* | Doing |
-| Linear project | Agents CLI (`8eb8f5b1-3870-4590-ba67-36f3811d1435`) | — |
+| Linear project | Agents CLI (`[project-id-redacted]`) | — |
 
 Step 6 (binding the three directories to `agents-cli.yaml`) landed separately as
 `~/.agents@7c57a54`, before the CLI could write `repos[]` — the definition was

@@ -531,7 +531,7 @@ retry loop. This alone accounts for a large share of the 39% red rate on release
   <br><br>
   Separately and still unexplained: a vitest worker-fork crash on Windows <em>after</em> a fully green
   suite (7,358 passed, 0 failed, then <code>Worker exited unexpectedly</code> → exit 1). Which test
-  leaves the handle is not identified; <code>win-mini</code> is in the fleet but its SSH credential is
+  leaves the handle is not identified; <code>[worker]</code> is in the fleet but its SSH credential is
   not in <code>agents secrets</code>, so the available repro path is <code>workflow_dispatch</code>
   iterations. Retry-looping the job would be a band-aid over an unknown crash and is not proposed.
 </div>

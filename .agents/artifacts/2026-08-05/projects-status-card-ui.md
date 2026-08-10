@@ -164,7 +164,7 @@ Add a dedicated `hosts` line. Keep the agents roster for harness × status × ti
     <text x="220" y="64" fill="#c5d0da">claude · running ×5  ·  claude · idle ×2  ·  claude · input_required</text>
     <text x="96" y="92" fill="#7aa2f7">@release-host</text>
     <text x="190" y="92" fill="#c5d0da">claude · running ×1  ·  claude · idle ×1  ·  claude · orphaned ×2</text>
-    <text x="24" y="124" fill="#6b7785" font-family="ui-sans-serif, system-ui" font-size="11">B: better for “who is on yosemite?”; costs vertical space; only when live spans 2+ hosts</text>
+    <text x="24" y="124" fill="#6b7785" font-family="ui-sans-serif, system-ui" font-size="11">B: better for “who is on [worker]?”; costs vertical space; only when live spans 2+ hosts</text>
   </g>
 </svg>
 </div>

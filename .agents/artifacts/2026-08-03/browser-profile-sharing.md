@@ -1,7 +1,7 @@
 ---
 kind: report
 template: report.v1
-title: Browser Profile Sharing — Local Client vs Yosemite Agent
+title: Browser Profile Sharing — Local Client vs worker Agent
 summary: One synced profile definition works on both machines at once, but each machine keeps its own cookie jar — log in once per machine, not once per profile.
 header: Phoenix Labs / Engineering
 footer: agents-cli research artifact
@@ -21,7 +21,7 @@ assets: []
 ## Summary
 
 **Yes — the same browser profile can be used locally and by a remote agent on
-Yosemite S1 at the same time.** The profile *definition* (name, browser,
+remote worker at the same time.** The profile *definition* (name, browser,
 endpoint) lives in the central `~/.agents/agents.yaml` and syncs across the
 fleet with `agents repo push/pull`, so `work` resolves on both machines.
 
@@ -69,12 +69,12 @@ be logged into once.
   <text x="240" y="214" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">Chrome A · local debug port · local SingletonLock</text>
   <text x="240" y="232" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">resolves "work" from its own synced agents.yaml</text>
 
-  <!-- Yosemite machine -->
+  <!-- worker machine -->
   <rect x="520" y="150" width="400" height="96" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"/>
-  <text x="720" y="176" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">YOSEMITE S1 (remote agent)</text>
-  <text x="720" y="196" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">agents -H yosemite browser start --profile work</text>
+  <text x="720" y="176" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">REMOTE WORKER (remote agent)</text>
+  <text x="720" y="196" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">agents -H worker browser start --profile work</text>
   <text x="720" y="214" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">Chrome B · own debug port · own SingletonLock</text>
-  <text x="720" y="232" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">SSH passthrough — runs entirely on Yosemite</text>
+  <text x="720" y="232" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">SSH passthrough — runs entirely on worker</text>
 
   <!-- chrome-data dirs -->
   <rect x="40" y="292" width="400" height="72" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5" opacity="0.85"/>
@@ -99,8 +99,8 @@ be logged into once.
 - **Profile definitions sync; runtime state does not.** `browser:` profiles are
   portable config in central `~/.agents/agents.yaml`. The cookie jar lives in
   `~/.agents/.cache/browser/` — explicitly gitignored, regenerable runtime data.
-- **Remote runs are SSH passthrough.** `agents -H yosemite browser …` executes
-  on Yosemite, resolving the same profile name against Yosemite's synced config
+- **Remote runs are SSH passthrough.** `agents -H worker browser …` executes
+  on worker, resolving the same profile name against worker's synced config
   and launching Chrome there. Same name, physically separate browser.
 - **No collisions.** Chromium's `SingletonLock` is per user-data-dir and debug
   ports are allocated per machine, so both copies run concurrently.
@@ -135,7 +135,7 @@ be logged into once.
 
 1. **Keep one profile name** (e.g. `work`) synced everywhere — no need to
    create separate local vs remote profiles.
-2. **Log in once per machine.** The Yosemite agent starts logged-out until its
+2. **Log in once per machine.** The worker agent starts logged-out until its
    own chrome-data copy is signed in once; it persists after that
    (`session.restore_on_startup` is pinned).
 3. **Don't expect a shared live session.** There is no supported mechanism to
