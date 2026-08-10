@@ -181,6 +181,22 @@ describe('grok binary resolution order', () => {
     expect(script).toContain('/versions/grok/0.2.91/home/.grok/downloads');
   });
 
+  it('routes both the versioned home and the global fallback through the validated resolver (RUSH-2459)', () => {
+    // Same fix as the dispatcher shim: no more "ls | head -1" — both branches
+    // must call the shared, size-and-mtime-validated `_resolve_grok_binary`
+    // so a stray non-binary artifact can never win by sorting first.
+    const script = generateVersionedAliasScript('grok', '0.2.91');
+    // The function is defined exactly once (not duplicated per call site) and
+    // called from both the versioned-home and global-fallback branches.
+    expect(script.match(/_resolve_grok_binary\(\) \{/g) ?? []).toHaveLength(1);
+    const calls = script.match(/_resolve_grok_binary "\$GROK[A-Z_]*DOWNLOADS"/g) ?? [];
+    expect(calls).toHaveLength(2);
+    // Old bug: an un-validated "ls grok-* | grep -i <version> | head -1" (plus
+    // a blind "| head -1" fallback) duplicated per call site. Neither survives
+    // — the shared resolver matches filenames via a `case` glob, never `head`.
+    expect(script).not.toContain('| head -1');
+  });
+
   it('dispatcher execs the grok binary from the versioned home when the global dir is empty', () => {
     // This is the exact bug from #830: binary in the versioned home, global
     // ~/.grok/downloads empty. Pre-fix the dispatcher checked only the global
@@ -256,6 +272,62 @@ describe('grok binary resolution order', () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(fs.readFileSync(logPath, 'utf-8')).toContain('global:ok');
+  });
+
+  it('never execs a stray non-binary artifact that sorts before the real self-updated binary (RUSH-2459)', () => {
+    // Reproduces the exact bug on yosemite-s0: version-home "0.2.82" held a
+    // real self-updated grok-1.0.0-linux-aarch64 PLUS a stale, unrelated
+    // 99-byte grok-0.2.118-linux-aarch64 wrapper script that exec'd
+    // cursor-agent — no filename carries the pinned version "0.2.82", so the
+    // dispatcher's fallback used to pick whichever `ls` sorted first, which
+    // was the tiny wrapper. It must now reject anything under the size floor
+    // and pick the real (padded-to-realistic-size) binary instead.
+    const dir = makeTempDir();
+    const home = path.join(dir, 'home');
+    const project = path.join(dir, 'project');
+    const fakeAgents = path.join(dir, 'agents');
+    const logPath = path.join(dir, 'exec.log');
+    const version = '0.2.82';
+
+    const versionedDownloads = path.join(
+      home, '.agents', '.history', 'versions', 'grok', version, 'home', '.grok', 'downloads',
+    );
+    fs.mkdirSync(versionedDownloads, { recursive: true });
+
+    // Sorts alphabetically FIRST ("0" < "1") — must never be exec'd.
+    fs.writeFileSync(
+      path.join(versionedDownloads, 'grok-0.2.118-linux-aarch64'),
+      `#!/bin/sh\nprintf "WRONG:%s\\n" "$1" >> ${JSON.stringify(logPath)}\n`,
+      { mode: 0o755 },
+    );
+
+    // The real, self-updated binary — no filename match for "0.2.82", padded
+    // well past the 1MB floor so it clears the size-based fallback filter.
+    const padding = '# '.repeat(600_000);
+    fs.writeFileSync(
+      path.join(versionedDownloads, 'grok-1.0.0-linux-aarch64'),
+      `#!/bin/sh\n${padding}\nprintf "RIGHT:%s\\n" "$1" >> ${JSON.stringify(logPath)}\n`,
+      { mode: 0o755 },
+    );
+
+    fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, 'agents.yaml'), `agents:\n  grok: "${version}"\n`, 'utf-8');
+    fs.writeFileSync(fakeAgents, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+    const shimPath = path.join(dir, 'grok-shim');
+    const shim = generateShimScript('grok').replace(/^AGENTS_BIN=.*$/m, `AGENTS_BIN=${JSON.stringify(fakeAgents)}`);
+    fs.writeFileSync(shimPath, shim, { mode: 0o755 });
+
+    const result = spawnSync('bash', [shimPath, 'ok'], {
+      cwd: project,
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const log = fs.readFileSync(logPath, 'utf-8');
+    expect(log).toContain('RIGHT:ok');
+    expect(log).not.toContain('WRONG');
   });
 });
 

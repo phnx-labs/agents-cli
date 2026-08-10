@@ -252,7 +252,21 @@ async function promptConflictStrategy(
 //        The old dispatcher checked only the global dir, so a pinned grok that
 //        installed into the versioned home fell through to the "not installed"
 //        error.
-export const SHIM_SCHEMA_VERSION = 29;
+// v30 — RUSH-2459: two compounding grok binary-resolution bugs fixed. (1) The
+//        "exact version match" grep ran against `ls`'s FULL PATH output, and
+//        the versioned home's own path always contains the version string
+//        (.../versions/grok/<version>/...), so it matched every candidate
+//        unconditionally and silently degraded to "whatever ls sorts first" —
+//        now matched against each candidate's basename instead. (2) When no
+//        filename genuinely carries the version, the fallback no longer
+//        trusts whatever sorts first: it rejects any grok-* candidate under
+//        1MB (real grok binaries are ~100MB+; a stray wrapper/alias script is
+//        a few hundred bytes) and prefers the most recently modified
+//        survivor. On yosemite-s0 both bugs fired together: a stale, unrelated
+//        grok-0.2.118-* file — a 99-byte wrapper that exec'd cursor-agent —
+//        sorted alphabetically before the real self-updated grok binary and
+//        was silently launched instead.
+export const SHIM_SCHEMA_VERSION = 30;
 
 /** Internal marker string used to embed the schema version in shim scripts. */
 const SHIM_VERSION_MARKER = 'agents-shim-version:';
@@ -260,6 +274,60 @@ const SHIM_VERSION_MARKER = 'agents-shim-version:';
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
+
+/**
+ * Bash function embedded in every generated grok binary-resolution block
+ * (the dispatcher shim's `generateShimScript` and the direct alias's
+ * `generateVersionedAliasScript`). Prints the path to use, or nothing.
+ *
+ * Prefers a `grok-*` FILENAME that carries the pinned version string —
+ * checked against `basename`, never the full path: `dir` is always
+ * `.../versions/grok/<version>/home/.grok/downloads`, so the version string
+ * is already a substring of every path in that directory regardless of the
+ * actual filename. The original `ls "$dir"/grok-* | grep -i "$version"`
+ * matched on the full line and so matched every candidate unconditionally,
+ * silently degrading to "whatever sorts first" — the versioned-home half of
+ * RUSH-2459, distinct from (and compounding) the missing-match fallback bug
+ * below.
+ *
+ * Grok self-updates its binary in place while running under the shim, so a
+ * version-home's downloads dir can accumulate several `grok-*` files whose
+ * names have drifted away from the version-home's pinned version — when no
+ * filename carries it, never trust whatever the directory listing returns
+ * first (RUSH-2459: a stale, unrelated 99-byte wrapper script matching the
+ * `grok-*` naming pattern sorted before the real ~127MB self-updated binary
+ * and was silently exec'd). Instead, reject anything under
+ * MIN_GROK_BINARY_BYTES — comfortably above any wrapper/alias artifact,
+ * comfortably below a real compiled binary — and among the survivors, pick
+ * the most recently modified: the file grok's self-updater actually wrote
+ * last. Mirrors the TS implementation, `resolveGrokFallbackBinary` in
+ * versions.ts (which reads bare filenames via `fs.readdirSync` and so never
+ * had the full-path-match bug).
+ */
+const GROK_RESOLVE_BINARY_FN = `_resolve_grok_binary() {
+  local dir="$1" version_hint="$2"
+  local candidate base size mtime
+  for candidate in "$dir"/grok-*; do
+    [ -f "$candidate" ] || continue
+    base=$(basename "$candidate")
+    case "$base" in
+      *"$version_hint"*) printf '%s\\n' "$candidate"; return ;;
+    esac
+  done
+  local min_bytes=1000000
+  local best="" best_mtime=-1
+  for candidate in "$dir"/grok-*; do
+    [ -f "$candidate" ] || continue
+    size=$(wc -c < "$candidate" 2>/dev/null || echo 0)
+    [ "$size" -ge "$min_bytes" ] || continue
+    mtime=$(stat -c %Y "$candidate" 2>/dev/null || stat -f %m "$candidate" 2>/dev/null || echo -1)
+    if [ "$mtime" -gt "$best_mtime" ]; then
+      best_mtime="$mtime"
+      best="$candidate"
+    fi
+  done
+  printf '%s\\n' "$best"
+}`;
 
 function codexShimLaunchArgs(): string {
   return [
@@ -577,27 +645,20 @@ VERSION_DIR="$AGENTS_USER_DIR/.history/versions/$AGENT/$VERSION"
 # for pre-fix installs, the global ~/.grok/downloads), not node_modules. We
 # still use the agents-cli version dir purely for GROK_HOME isolation.
 if [ "$AGENT" = "grok" ]; then
+${GROK_RESOLVE_BINARY_FN}
   # Check the versioned home first — this is where the binary lands when the
   # installer runs with GROK_HOME set (i.e. via the shim or a correct
   # \`agents add grok\`), or when grok self-updates from within the shim.
   GROK_DOWNLOADS="$VERSION_DIR/home/.grok/downloads"
   if [ -d "$GROK_DOWNLOADS" ]; then
-    # Prefer a binary whose filename contains the exact version
-    BINARY=$(ls "$GROK_DOWNLOADS"/grok-* 2>/dev/null | grep -i "$VERSION" | head -1)
-    if [ -z "$BINARY" ]; then
-      # Fallback to the "current" grok binary (symlink or latest)
-      BINARY=$(ls "$GROK_DOWNLOADS"/grok-* 2>/dev/null | head -1)
-    fi
+    BINARY=$(_resolve_grok_binary "$GROK_DOWNLOADS" "$VERSION")
   fi
   # Fall back to the global grok home (binary installed without GROK_HOME set,
   # e.g. an earlier \`agents add grok@latest\` before this resolution fix).
   if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
     GROK_DOWNLOADS="$HOME/.grok/downloads"
     if [ -d "$GROK_DOWNLOADS" ]; then
-      BINARY=$(ls "$GROK_DOWNLOADS"/grok-* 2>/dev/null | grep -i "$VERSION" | head -1)
-      if [ -z "$BINARY" ]; then
-        BINARY=$(ls "$GROK_DOWNLOADS"/grok-* 2>/dev/null | head -1)
-      fi
+      BINARY=$(_resolve_grok_binary "$GROK_DOWNLOADS" "$VERSION")
     fi
   fi
   if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
@@ -996,8 +1057,22 @@ export function removeShim(agent: AgentId): boolean {
  *        alias failed with "not installed" whenever the binary was staged into
  *        the versioned home (installer run with GROK_HOME set, or grok
  *        self-update under the shim).
+ *  v16 — RUSH-2459: two compounding grok binary-resolution bugs fixed. (1) The
+ *        "exact version match" grep ran against `ls`'s FULL PATH output, and
+ *        the versioned home's own path always contains the version string
+ *        (.../versions/grok/<version>/...), so it matched every candidate
+ *        unconditionally and silently degraded to "whatever ls sorts first" —
+ *        now matched against each candidate's basename instead. (2) When no
+ *        filename genuinely carries the version, the fallback no longer
+ *        trusts whatever sorts first: it rejects any grok-* candidate under
+ *        1MB (real grok binaries are ~100MB+; a stray wrapper/alias script is
+ *        a few hundred bytes) and prefers the most recently modified
+ *        survivor. On yosemite-s0 both bugs fired together: a stale, unrelated
+ *        grok-0.2.118-* file — a 99-byte wrapper that exec'd cursor-agent —
+ *        sorted alphabetically before the real self-updated grok binary and
+ *        was silently launched instead.
  */
-export const VERSIONED_ALIAS_SCHEMA_VERSION = 15;
+export const VERSIONED_ALIAS_SCHEMA_VERSION = 16;
 
 /** Internal marker string used to embed the schema version in versioned alias scripts. */
 const VERSIONED_ALIAS_VERSION_MARKER = 'agents-versioned-alias-version:';
@@ -1127,18 +1202,17 @@ export XDG_CONFIG_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home
     agent === 'grok'
       ? `# Grok ships its native binary in the versioned home's .grok/downloads (or,
 # for pre-fix installs, the global ~/.grok/downloads), not node_modules.
+${GROK_RESOLVE_BINARY_FN}
 GROK_DOWNLOADS="${versionDir}/home/.grok/downloads"
 BINARY=""
 if [ -d "$GROK_DOWNLOADS" ]; then
-  BINARY=$(ls "$GROK_DOWNLOADS"/grok-* 2>/dev/null | grep -i "${version}" | head -1)
-  [ -n "$BINARY" ] || BINARY=$(ls "$GROK_DOWNLOADS"/grok-* 2>/dev/null | head -1)
+  BINARY=$(_resolve_grok_binary "$GROK_DOWNLOADS" "${version}")
 fi
 # Fall back to the global grok home (binary installed without GROK_HOME set).
 if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
   GROK_GLOBAL_DOWNLOADS="$HOME/.grok/downloads"
   if [ -d "$GROK_GLOBAL_DOWNLOADS" ]; then
-    BINARY=$(ls "$GROK_GLOBAL_DOWNLOADS"/grok-* 2>/dev/null | grep -i "${version}" | head -1)
-    [ -n "$BINARY" ] || BINARY=$(ls "$GROK_GLOBAL_DOWNLOADS"/grok-* 2>/dev/null | head -1)
+    BINARY=$(_resolve_grok_binary "$GROK_GLOBAL_DOWNLOADS" "${version}")
   fi
 fi
 # Refuse a PATH match under our own shims dir — it resolves to this alias's

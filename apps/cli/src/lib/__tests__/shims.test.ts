@@ -96,8 +96,8 @@ describe('addShimsToPath', () => {
 });
 
 describe('SHIM_SCHEMA_VERSION', () => {
-  it('is 29 (Muse XDG pin for multi-version isolation)', () => {
-    expect(SHIM_SCHEMA_VERSION).toBe(29);
+  it('is 30 (RUSH-2459: validated grok binary-resolution fallback)', () => {
+    expect(SHIM_SCHEMA_VERSION).toBe(30);
   });
 });
 
@@ -169,7 +169,7 @@ describe('generateShimScript — config-dir env vars', () => {
 describe('generateVersionedAliasScript', () => {
   it('uses ~/.agents/.history for direct alias binary and config paths', () => {
     const script = generateVersionedAliasScript('codex', '0.125.0');
-    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(15);
+    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(16);
     expect(script).toContain('$HOME/.agents/.history/versions/codex/0.125.0');
     expect(script).not.toContain('$HOME/.agents-system/versions/codex/0.125.0');
   });
@@ -230,7 +230,12 @@ describe('generateVersionedAliasScript', () => {
   it('resolves grok for the pinned version', () => {
     const script = generateVersionedAliasScript('grok', '0.1.218');
     expect(script).toContain('$HOME/.grok/downloads');
-    expect(script).toContain('grep -i "0.1.218"');
+    // RUSH-2459: no more raw "grep -i <version>" against ls's full path output
+    // (which always matched, since the versioned home's own path contains the
+    // version string) — resolution now runs through the shared, filename-scoped
+    // _resolve_grok_binary helper, called with the pinned version.
+    expect(script).toContain('_resolve_grok_binary() {');
+    expect(script).toContain('_resolve_grok_binary "$GROK_DOWNLOADS" "0.1.218"');
     expect(script).not.toContain('node_modules/.bin');
   });
 
