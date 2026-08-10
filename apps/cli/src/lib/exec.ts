@@ -33,6 +33,7 @@ import { isTmuxInstalled } from './tmux/binary.js';
 import { shellQuote } from './ssh-exec.js';
 import { resolveClaudeSetupToken } from './claude-account-token.js';
 import { codexEditWritableRoots, codexPolicyArgs } from './codex-policy.js';
+import { applyAddDirs } from './add-dir.js';
 import { applyActiveRulesPresetAtRun } from './rules/run-sync.js';
 
 /**
@@ -1267,20 +1268,22 @@ export function buildExecCommand(options: ExecOptions): string[] {
     }
   }
 
-  // Codex add-dirs are folded into its named edit profile above, including on
-  // resume where the native CLI rejects --add-dir. Claude keeps its native flag.
+  // Project / --add-dir grants. Codex folds them into the named edit profile
+  // above (workspace_roots); resume rejects the native --add-dir flag.
+  // Everything else is strategy-driven in applyAddDirs:
+  //   native-flag  — claude, kimi, cursor (`--add-dir`)
+  //   grok-sandbox — rules + project sandbox profile when sandboxed
+  //   none         — ignored (no multi-root surface)
   //
-  // `~` is expanded HERE, at the consumer, because no shell does it for us: a
-  // forwarded grant crosses the SSH boundary single-quoted (`shellQuote` in
-  // ssh-exec.ts), so the remote login shell leaves `~/…` literal and the harness
-  // resolves it as a directory actually named `~`. Expanding on the side that
-  // runs the harness is what lets one home-relative grant re-root per machine.
-  const addDirs = [...new Set((options.addDirs ?? []).map(expandLocalHome))];
-  if (addDirs.length > 0 && options.agent === 'claude') {
-    for (const dir of addDirs) {
-      cmd.push('--add-dir', dir);
-    }
-  }
+  // `~` is expanded in normalizeAddDirs (via expandLocalHome), because no shell
+  // does it for us: a forwarded grant crosses the SSH boundary single-quoted
+  // (`shellQuote` in ssh-exec.ts), so the remote login shell leaves `~/…`
+  // literal and the harness resolves it as a directory actually named `~`.
+  // Expanding on the side that runs the harness is what lets one home-relative
+  // grant re-root per machine.
+  applyAddDirs(options.agent, cmd, options.addDirs, {
+    cwd: options.cwd ?? process.cwd(),
+  });
 
   // Claude-specific: workflow capability scoping. WORKFLOW.md frontmatter
   // `tools:` / `mcpServers:` is translated to the headless flags that ACTUALLY

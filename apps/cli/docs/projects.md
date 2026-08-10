@@ -136,10 +136,13 @@ team, the project's directory sits **below** `--cwd` and a `--worktree` in the c
 precedence chain — an explicit one still wins — but the grants are attached either
 way, since the siblings are what the project binds, not where the teammate sits.
 
-**Only Claude and Codex consume `--add-dir`.** Claude takes the native flag; Codex
-folds the directories into its `workspace_roots`. Every other harness ignores them,
-so an agent there sees the cwd alone. That is a harness limitation, not a
-configuration mistake.
+**Who consumes the grants.** Claude, Cursor, and Kimi take the native `--add-dir`
+flag. Codex folds the directories into its `workspace_roots` / permission profile.
+Grok injects a short rules note so the model knows the siblings are in scope, and
+— when a non-off OS sandbox is active (`GROK_SANDBOX` / `--sandbox`) — writes a
+project-local `.grok/sandbox.toml` profile (`agents-project`) with those paths as
+`read_write` and selects it. Every other harness has no multi-root surface, so it
+sees the cwd alone. That is a harness limitation, not a configuration mistake.
 
 **A directory missing on this box is skipped, not an error.** A definition binding
 a checkout that only exists on some machines still loads, and the primary cwd still

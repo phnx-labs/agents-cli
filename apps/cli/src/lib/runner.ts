@@ -44,6 +44,7 @@ import { prepareJobHome, buildSpawnEnv, getJobHomePath } from './sandbox.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { createTimer, redactPrompt } from './events.js';
 import { codexEditWritableRoots, codexPolicyArgs } from './codex-policy.js';
+import { applyAddDirs } from './add-dir.js';
 import {
   normalizeMode,
   resolveHeadlessMode,
@@ -499,19 +500,6 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
       if (pmIndex !== -1) cmd.splice(pmIndex, 2, '--dangerously-skip-permissions');
     }
 
-    if (config.allow?.dirs) {
-      for (const dir of config.allow.dirs) {
-        // Reject leading '-' so a routine YAML can't smuggle an argv flag like
-        // `--dangerously-skip-permissions` past the sandbox by hiding it as an
-        // allow.dirs entry.
-        if (dir.startsWith('-')) {
-          throw new Error(`allow.dirs entries must not start with '-': ${JSON.stringify(dir)}`);
-        }
-        const resolved = dir.replace(/^~/, os.homedir());
-        cmd.push('--add-dir', resolved);
-      }
-    }
-
     appendModelAndReasoning(cmd, config);
   }
 
@@ -591,6 +579,21 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
     // edit: default on-request approval + sandbox
 
     appendModelAndReasoning(cmd, config);
+  }
+
+  // allow.dirs → harness-specific grants. Codex is handled in its branch above
+  // (workspace_roots). Claude / Kimi / Cursor take --add-dir; Grok gets rules
+  // (+ sandbox widen when GROK_SANDBOX is on). Reject leading '-' so a routine
+  // YAML can't smuggle an argv flag past the sandbox as an allow.dirs entry.
+  if (config.allow?.dirs?.length && agent !== 'codex') {
+    for (const dir of config.allow.dirs) {
+      if (dir.startsWith('-')) {
+        throw new Error(`allow.dirs entries must not start with '-': ${JSON.stringify(dir)}`);
+      }
+    }
+    applyAddDirs(agent, cmd, config.allow.dirs, {
+      cwd: routineSpawnCwd(config),
+    });
   }
 
   return cmd;
