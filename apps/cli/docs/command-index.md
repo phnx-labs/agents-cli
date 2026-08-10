@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_101 command groups · 577 commands._
+_99 command groups · 575 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -646,18 +646,6 @@ agents pty write <id> <input>    Send keystrokes to the PTY (like typing into th
 
 ```
 agents publish  Generate a skills-index.json for a git repo and push it, making its skills discoverable via agents search/install
-```
-
-## pull — Removed. See `agents repo pull` + `agents sync`.
-
-```
-agents pull [agent]  Removed. See `agents repo pull` + `agents sync`.
-```
-
-## push — Removed. See `agents repo push`.
-
-```
-agents push [alias]  Removed. See `agents repo push`.
 ```
 
 ## reconnect — Re-enter a dropped agent terminal: attach the live pane if it survived, else resume the session
