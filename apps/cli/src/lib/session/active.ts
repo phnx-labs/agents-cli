@@ -1778,6 +1778,15 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<Acti
       });
       exactId = hookRec?.session_id;
     }
+    // RUSH-2501: the hook-sessions index (terminals/sessions/) is populated only
+    // by @agents/session-tracker, which is not deployed on most fleet machines.
+    // The DEPLOYED SessionStart hook writes to state/sessions/<pid>.json instead.
+    // Try that path when the index lookup found nothing, so cursor/grok/kimi/droid
+    // agents (which carry no --session-id argv) can be attributed.
+    if (!exactId) {
+      const stateRec = readStateSessionRecord(pid, entry?.startedAtMs);
+      if (stateRec) exactId = stateRec.session_id;
+    }
     const cwd = cwds[i] ?? entry?.cwd ?? undefined;
     const sessionFile = findSessionFileForKind(kind, cwd, exactId);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;

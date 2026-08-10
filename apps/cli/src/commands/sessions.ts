@@ -92,6 +92,7 @@ import { registerSessionsRenderCommand } from './sessions-render.js';
 import { registerSessionsImportCommand } from './sessions-import.js';
 import { registerSessionsMigrateCommand, registerSessionsMigrationsCommand } from './sessions-migrate.js';
 import { registerSessionsBackfillCommand } from './sessions-backfill.js';
+import { registerSessionsReapCommand } from './sessions-reap.js';
 import { registerSessionsStatsCommand } from './sessions-stats.js';
 import { registerSessionsInsightsCommand } from './insights.js';
 import { registerSessionsOptimizeCommand } from './sessions-optimize.js';
@@ -5827,6 +5828,7 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsMigrateCommand(sessionsCmd);
   registerSessionsMigrationsCommand(sessionsCmd);
   registerSessionsBackfillCommand(sessionsCmd);
+  registerSessionsReapCommand(sessionsCmd);
   registerSessionsStatsCommand(sessionsCmd);
   registerSessionsInsightsCommand(sessionsCmd);
   registerSessionsOptimizeCommand(sessionsCmd);
