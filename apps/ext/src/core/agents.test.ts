@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { describe, test, expect } from 'bun:test';
 import {
   BUILT_IN_AGENTS,
@@ -13,7 +15,7 @@ import {
   extractPlanFromSessionJson,
   planTextToSteps
 } from './agents';
-import { CLAUDE_TITLE, CODEX_TITLE, GEMINI_TITLE, OPENCODE_TITLE, CURSOR_TITLE, SHELL_TITLE } from './utils';
+import { CLAUDE_TITLE, CODEX_TITLE, GEMINI_TITLE, OPENCODE_TITLE, CURSOR_TITLE, SHELL_TITLE, getIconFilename } from './utils';
 import { CLI_AGENT_META, CliAgentId, isCliAgentId } from './agents.cli';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -565,6 +567,48 @@ describe('extension tmux removal — spawn command contract', () => {
       expect(cmd).not.toContain('tmux');
       expect(cmd).not.toContain('agents tmux');
       expect(cmd).not.toContain('\n');
+    }
+  });
+});
+
+describe('agent tab icons', () => {
+  test('every built-in agent resolves an icon that actually ships in assets/', () => {
+    const assetsDir = path.join(import.meta.dir, '..', '..', 'assets');
+    for (const def of BUILT_IN_AGENTS) {
+      const file = getIconFilename(def.title);
+      expect(file, `${def.key}: no icon mapped for title '${def.title}'`).toBeTruthy();
+      expect(file).toBe(def.icon);
+      expect(
+        fs.existsSync(path.join(assetsDir, file!)),
+        `${def.key}: '${file}' is mapped but missing from assets/`,
+      ).toBe(true);
+    }
+  });
+
+  test('launchAgent resolves an iconPath at createTerminal time', () => {
+    // Reproduces the regression from e2bf3f502 (#2534): launchAgent replaced its
+    // openSingleAgent delegation with a bare createTerminal that passed no
+    // iconPath, so every `New <Agent>` tab showed the generic terminal glyph.
+    // iconPath is frozen at createTerminal() time — there is no setter, and shell
+    // adoption only rewrites the internal registry — so if it is not set here it
+    // can never be recovered.
+    const src = readFileSync(resolve(import.meta.dir, '../vscode/extension.ts'), 'utf8');
+    const start = src.indexOf('async function launchAgent');
+    expect(start).toBeGreaterThan(-1);
+    const body = src.slice(start, src.indexOf('\n}', start));
+    expect(body).toContain('createTerminal(');
+    expect(body).toContain('iconPath');
+  });
+
+  test('the icon table is keyed by TITLE, never by the lowercase prefix', () => {
+    // Regression guard. buildIconPath()'s parameter is named `prefix`, but the
+    // lookup table is keyed by TITLE ('CC', 'GK') while def.prefix is the
+    // lowercase id ('cl', 'gk'). Passing a prefix silently yields null, and a
+    // terminal created with a null iconPath keeps the generic glyph forever —
+    // iconPath is frozen at createTerminal() time and has no setter.
+    for (const def of BUILT_IN_AGENTS) {
+      expect(getIconFilename(def.title), `${def.key}: title should resolve`).toBeTruthy();
+      expect(getIconFilename(def.prefix), `${def.key}: prefix must NOT resolve`).toBeNull();
     }
   });
 });

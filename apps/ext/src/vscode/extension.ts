@@ -405,12 +405,42 @@ async function launchAgent(context: vscode.ExtensionContext, opts: LaunchAgentOp
   if (host) command += ` --device ${shquote(host)}`;
   else if (automatic && !opts.local) command += ' --device auto';
   command += ' --strategy balanced --mode auto';
+  // `iconPath` is frozen at createTerminal() time — there is no setter — so the
+  // agent's logo has to be resolved HERE or the tab keeps the generic terminal
+  // glyph forever. Shell adoption (armShellAdoption/adoptShellAsAgent) only
+  // rewrites the internal registry, never the live terminal's icon, so it cannot
+  // repair this after the fact. An automatic launch has no agent to resolve yet.
+  // Tab identity must be established AT createTerminal: iconPath and name are
+  // frozen there (no setter), and AGENT_TERMINAL_ID is the join key the CLI's
+  // `sessions --active` rows carry back — without it the status bar can never
+  // resolve a session id and falls back to a bare agent name. Mirrors what
+  // openSingleAgent and every other creation path already do.
+  const builtIn = opts.agentKey ? getBuiltInByKey(opts.agentKey) : undefined;
+  const agentConfig = builtIn
+    ? createAgentConfig(context.extensionPath, builtIn.title, builtIn.command, builtIn.icon, builtIn.prefix)
+    : null;
+  const terminalId = agentConfig ? terminals.nextId(agentConfig.prefix) : undefined;
+  const cwd = getActiveWorkspaceFolder()?.uri.fsPath;
   const terminal = vscode.window.createTerminal({
-    name: automatic ? 'Agents Auto' : `Agents ${agent}`,
+    name: agentConfig
+      ? buildTerminalTitle(agentConfig.title, undefined, context, null)
+      : 'Agents Auto',
+    iconPath: agentConfig?.iconPath,
     location: { viewColumn: vscode.ViewColumn.Active },
+    env: terminalId
+      ? buildAgentTerminalEnv(terminalId, undefined, cwd, undefined, {
+          scrubSensitive: opts.agentKey !== 'shell',
+          kind: opts.agentKey === 'shell' ? 'shell' : 'agent',
+        })
+      : undefined,
     isTransient: true,
   });
   terminal.show(false);
+  if (agentConfig && terminalId) {
+    const pid = await terminal.processId;
+    terminals.register(terminal, terminalId, agentConfig, pid, context);
+    readiness.registerTerminal(terminal);
+  }
   await sendCommandWhenReady(terminal, command);
 }
 
