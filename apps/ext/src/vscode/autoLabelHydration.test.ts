@@ -26,11 +26,28 @@ describe('RUSH-2411 auto-label-after-remote-hydration wiring', () => {
   });
 
   test('an idless picked-host runner arms a bounded fast poller at launch', () => {
-    // openSingleAgent only mints Claude's id up front; a picked-host Codex is
-    // idless, so it must still arm the poller (fast) to resolve its id + label
-    // without a refocus.
+    // Only Claude's id is minted up front; a picked-host Codex is idless, so it
+    // must still arm the poller (fast) to resolve its id + label without a
+    // refocus. This now lives in registerAgentTerminal, the one sequence BOTH
+    // creation paths share.
     expect(extensionSource).toMatch(
-      /else if \(targetHost && resumeKey\)[\s\S]*?startAutoLabelPollerForTerminal\(terminal, context, \{ fast: true \}\)/,
+      /else if \(host && resumeKey\)[\s\S]*?startAutoLabelPollerForTerminal\(terminal, context, \{ fast: true \}\)/,
+    );
+  });
+
+  test('every agent-terminal creation path goes through the shared registration', () => {
+    // #2534 regressed New <Agent> tabs by open-coding createTerminal in
+    // launchAgent and dropping registration: no icon, no chip, no
+    // AGENT_TERMINAL_ID, and therefore no session id, no label poller, no
+    // persistence across reload, and a dead Copy-Session-Id/Resume/Fork surface.
+    // Both creation paths must delegate to the one helper so they cannot drift
+    // apart again.
+    expect(extensionSource).toMatch(/async function registerAgentTerminal\(/);
+    const launchAgentBody = extensionSource.slice(
+      extensionSource.indexOf('async function launchAgent('),
+    );
+    expect(launchAgentBody.slice(0, launchAgentBody.indexOf('\n}'))).toMatch(
+      /await registerAgentTerminal\(terminal, context, \{/,
     );
   });
 

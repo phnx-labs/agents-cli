@@ -392,6 +392,57 @@ interface LaunchAgentOpts {
   autoHost?: boolean;
 }
 
+/**
+ * Everything a freshly created agent terminal needs beyond `createTerminal`.
+ *
+ * This is the half that #2534 dropped from `launchAgent`: registration is what
+ * makes a tab visible to Copy Session ID / Resume / Handoff / Fork, and what
+ * schedules the persistence that restores it after a window reload. It lives in
+ * one place so the two creation paths cannot drift again.
+ */
+async function registerAgentTerminal(
+  terminal: vscode.Terminal,
+  context: vscode.ExtensionContext,
+  args: {
+    terminalId: string;
+    agentConfig: Omit<AgentConfig, 'count'>;
+    agentKey?: string;
+    sessionId?: string | null;
+    host?: string | null;
+    pinnedVersion?: string | null;
+  }
+): Promise<void> {
+  const { terminalId, agentConfig, agentKey, sessionId, host, pinnedVersion } = args;
+  const pid = await terminal.processId;
+  terminals.register(terminal, terminalId, agentConfig, pid, context);
+  readiness.registerTerminal(terminal);
+
+  const resumeKey = agentKey ? agentKeyFromSession(agentKey) : null;
+  if (resumeKey) {
+    terminals.setAgentType(terminal, resumeKey);
+  }
+  // Stamp the host BEFORE the label poller starts: the poller reads the entry
+  // to decide whether to look the session up locally or over `--host`.
+  if (host) {
+    terminals.setHost(terminal, host);
+  }
+  if (sessionId) {
+    terminals.setSessionId(terminal, sessionId);
+    if (resumeKey) {
+      startAutoLabelPollerForTerminal(terminal, context);
+    }
+  } else if (host && resumeKey) {
+    // Idless remote runner: only Claude's id is minted up front, so a
+    // picked-host Codex launches with none and the local SessionStart watcher
+    // never fires for it. The poller resolves the canonical id from the shared
+    // per-host active map instead (RUSH-2411).
+    startAutoLabelPollerForTerminal(terminal, context, { fast: true });
+  }
+  if (pinnedVersion) {
+    terminals.setVersion(terminal, pinnedVersion);
+  }
+}
+
 async function launchAgent(context: vscode.ExtensionContext, opts: LaunchAgentOpts = {}): Promise<void> {
   let host = opts.host;
   if (opts.pickHost) {
@@ -401,26 +452,31 @@ async function launchAgent(context: vscode.ExtensionContext, opts: LaunchAgentOp
   }
   const automatic = !opts.agentKey;
   const agent = opts.agentKey ?? 'auto';
+  const cwd = getActiveWorkspaceFolder()?.uri.fsPath;
+  const builtIn = opts.agentKey ? getBuiltInByKey(opts.agentKey) : undefined;
   let command = `agents run ${agent} --interactive`;
   if (host) command += ` --device ${shquote(host)}`;
   else if (automatic && !opts.local) command += ' --device auto';
   command += ' --strategy balanced --mode auto';
-  // `iconPath` is frozen at createTerminal() time — there is no setter — so the
-  // agent's logo has to be resolved HERE or the tab keeps the generic terminal
-  // glyph forever. Shell adoption (armShellAdoption/adoptShellAsAgent) only
-  // rewrites the internal registry, never the live terminal's icon, so it cannot
-  // repair this after the fact. An automatic launch has no agent to resolve yet.
+  // The per-agent Default Model and the workspace's bound project are launch
+  // inputs the CLI cannot infer. openSingleAgent passes both; this path dropped
+  // them in #2534, silently ignoring the user's configured model.
+  const defaultModel = builtIn
+    ? settings.getDefaultModel(context, builtIn.key as Parameters<typeof settings.getDefaultModel>[1])
+    : undefined;
+  if (defaultModel) command += ` --model ${shquote(defaultModel)}`;
+  const projectSlug = cwd ? await resolveProjectForCwd(cwd) : undefined;
+  if (projectSlug) command += ` --project ${shquote(projectSlug)}`;
+
   // Tab identity must be established AT createTerminal: iconPath and name are
   // frozen there (no setter), and AGENT_TERMINAL_ID is the join key the CLI's
   // `sessions --active` rows carry back — without it the status bar can never
-  // resolve a session id and falls back to a bare agent name. Mirrors what
-  // openSingleAgent and every other creation path already do.
-  const builtIn = opts.agentKey ? getBuiltInByKey(opts.agentKey) : undefined;
+  // resolve a session id. Shell adoption cannot repair any of it later; it only
+  // rewrites the internal registry, never the live terminal.
   const agentConfig = builtIn
     ? createAgentConfig(context.extensionPath, builtIn.title, builtIn.command, builtIn.icon, builtIn.prefix)
     : null;
   const terminalId = agentConfig ? terminals.nextId(agentConfig.prefix) : undefined;
-  const cwd = getActiveWorkspaceFolder()?.uri.fsPath;
   const terminal = vscode.window.createTerminal({
     name: agentConfig
       ? buildTerminalTitle(agentConfig.title, undefined, context, null)
@@ -437,11 +493,17 @@ async function launchAgent(context: vscode.ExtensionContext, opts: LaunchAgentOp
   });
   terminal.show(false);
   if (agentConfig && terminalId) {
-    const pid = await terminal.processId;
-    terminals.register(terminal, terminalId, agentConfig, pid, context);
-    readiness.registerTerminal(terminal);
+    await registerAgentTerminal(terminal, context, {
+      terminalId,
+      agentConfig,
+      agentKey: opts.agentKey,
+      host,
+    });
   }
   await sendCommandWhenReady(terminal, command);
+  if (opts.agentKey) {
+    readiness.armAgentReady(terminal, {});
+  }
 }
 
 // Terminal readiness detection moved to src/vscode/terminalReadiness.ts.
@@ -1852,38 +1914,15 @@ async function openSingleAgent(
     isTransient: true
   });
 
-  const pid = await terminal.processId;
-  terminals.register(terminal, terminalId, agentConfig, pid, context);
-  readiness.registerTerminal(terminal);
-
   // Track + poll any known harness, not just the prewarm five (#1747).
-  const resumeKey = agentKey ? agentKeyFromSession(agentKey) : null;
-  if (resumeKey) {
-    terminals.setAgentType(terminal, resumeKey);
-  }
-  // Stamp the host BEFORE the label poller starts: the poller reads the entry
-  // to decide whether to look the session up locally or over `--host`.
-  if (targetHost) {
-    terminals.setHost(terminal, targetHost);
-  }
-  if (sessionId) {
-    terminals.setSessionId(terminal, sessionId);
-    if (resumeKey) {
-      startAutoLabelPollerForTerminal(terminal, context);
-    }
-  } else if (targetHost && resumeKey) {
-    // Idless remote runner (e.g. New Codex (Pick Host)): only Claude's id is
-    // minted up front, so a picked-host Codex launches with no session id and
-    // the local SessionStart watcher never fires for it (the agent runs on
-    // <targetHost>). Arm the auto-label lifecycle now anyway: the poller resolves
-    // the canonical id from the shared per-host active map — surviving the
-    // post-launch indexing race via its bounded backoff — then labels, so the tab
-    // goes bare CX -> canonical UUID -> topic title without a refocus (RUSH-2411).
-    startAutoLabelPollerForTerminal(terminal, context, { fast: true });
-  }
-  if (pinnedVersion) {
-    terminals.setVersion(terminal, pinnedVersion);
-  }
+  await registerAgentTerminal(terminal, context, {
+    terminalId,
+    agentConfig,
+    agentKey,
+    sessionId,
+    host: targetHost,
+    pinnedVersion,
+  });
 
   if (command) {
     // Prefix the launch command with `exec` so the shell replaces itself with
