@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 104,
-  "commands": 586,
+  "groups": 105,
+  "commands": 590,
   "root": {
     "name": "agents",
     "path": "",
@@ -13349,6 +13349,94 @@
       "examples": "# Same as: agents send --to owner --text \"…\"\n      agents notify --text \"Build finished — PR #1346 is green\"\n      agents notify \"legacy positional still works\"\n\n      # Override channel for this one ping\n      agents notify --text \"fallback\" --channel desktop --to local\n\n      agents notify --text \"probe\" --dry-run --json",
       "notes": "notify ≡ send --to owner. One delivery stack (lib/channels). Set\n      notify.owner.{channel,to} in agents.yaml once per machine/fleet.\n\n      \n  Planes (do not mix them up):\n    send / notify     - DELIVER a message to a recipient (this command)\n    feed post         - RECORD progress / milestones (optional broadcast may call send)\n    activity          - READ the activity stream (not a send path)\n    message / inject  - CONTROL a running agent (mailbox answer or terminal keystroke)\n\n  --to owner is an address alias for notify.owner in agents.yaml, not a\n  special control path. Agent resume / PTY inject stay on message and\n  sessions inject.",
       "subcommands": []
+    },
+    {
+      "name": "open",
+      "path": "open",
+      "aliases": [],
+      "description": "Resume a session from an agents:// deep link, or register/unregister/status the OS URL-scheme handler.",
+      "args": [
+        {
+          "name": "url",
+          "required": false,
+          "variadic": false,
+          "description": ""
+        }
+      ],
+      "options": [
+        {
+          "flags": "-h, --help",
+          "description": "Show help",
+          "short": "-h",
+          "long": "--help",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "register",
+          "path": "open register",
+          "aliases": [],
+          "description": "Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "status",
+          "path": "open status",
+          "aliases": [],
+          "description": "Report whether the agents:// URL scheme handler is registered.",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "unregister",
+          "path": "open unregister",
+          "aliases": [],
+          "description": "Remove the agents:// URL scheme handler.",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        }
+      ]
     },
     {
       "name": "output",

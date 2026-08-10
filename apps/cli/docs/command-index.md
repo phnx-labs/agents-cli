@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_104 command groups · 586 commands._
+_105 command groups · 590 commands._
 
 ## accounts — Manage durable provider credentials
 
@@ -546,6 +546,15 @@ agents monitors view [name]       Show a monitor’s full YAML config plus its c
 
 ```
 agents notify [text]  Deliver to the owner (alias of send --to owner). Channel + target default from notify.owner in agents.yaml.
+```
+
+## open — Resume a session from an agents:// deep link, or register/unregister/status the OS URL-scheme handler.
+
+```
+agents open [url]       Resume a session from an agents:// deep link, or register/unregister/status the OS URL-scheme handler.
+agents open register    Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).
+agents open status      Report whether the agents:// URL scheme handler is registered.
+agents open unregister  Remove the agents:// URL scheme handler.
 ```
 
 ## output — Productivity rollup — token burn vs shipped output (PRs, commits) across agents
