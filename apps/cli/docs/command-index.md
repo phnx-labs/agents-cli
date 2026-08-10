@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_97 command groups · 571 commands._
+_97 command groups · 568 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -691,32 +691,29 @@ agents roster  Live agent roster (alias of `agents sessions --active`). Who is r
 ## routines — Schedule agents to run on a cron schedule or at a specific time. The daemon starts at install/upgrade and on setup when daemon.enabled is not false; routines add also ensures it is running.
 
 ```
-agents routines                         Schedule agents to run on a cron schedule or at a specific time. The daemon starts at install/upgrade and on setup when daemon.enabled is not false; routines add also ensures it is running.
-agents routines add [nameOrPath]        Create a new routine from a YAML file or inline flags. Starts the scheduler automatically if it is not already running.
-agents routines catchup                 Run any routines that missed their last scheduled fire on demand. The daemon already does this every 5 minutes — use this to force a pass now. Detached: runs in the background under the scheduler.
-agents routines cleanup                 Remove expired one-shot routines that already fired and still have a user-layer YAML file.
-agents routines devices [name]          View or change the devices where a routine is enabled. Without flags, opens an interactive picker (requires a TTY).
-agents routines disable-project [path]  Remove a project from the project-routines allowlist. Use --remove-synced to also delete the user-layer copies.
-agents routines doctor [name]           Check a routine's execution-context and harness readiness. Bare or --all checks every routine; --fix applies safe activation repairs (activate a now-ready paused routine; pause a broken active one).
-agents routines edit [name]             Edit a prefilled routine transactionally; invalid YAML never replaces the live definition.
-agents routines enable-project [path]   Opt a project's .agents/routines/*.yml into daemon firing. Requires explicit approval — project routines never auto-fire from a cloned repo. Materialises copies into ~/.agents/routines/ with source provenance.
-agents routines list                    See all scheduled jobs, when they run next, and their last execution status
-agents routines logs [name]             Show a run’s concise summary — status + extracted report. --full for the raw stdout stream; --run for a specific past run.
-agents routines pause [name]            Temporarily disable a routine. Stops scheduling future runs; enable again with resume.
-agents routines projects                List project roots opted into daemon-fired project routines
-agents routines remove [name]           Delete a routine. Stops scheduling future runs; past execution logs remain on disk.
-agents routines report [name]           Show the extracted report from the most recent execution. Reports are parsed from agent output on completion.
-agents routines resume [name]           Re-enable a paused routine so the daemon schedules it again
-agents routines run [name]              Execute a routine right now in the foreground. Ignores the schedule; useful for testing before enabling.
-agents routines runs [name]             See execution history: run IDs, completion status, and start times (up to last 10 runs)
-agents routines scheduler-logs          Read scheduler log output (for debugging why a routine did not fire). Use --follow to stream.
-agents routines start                   Start the background scheduler. Usually unnecessary — it auto-starts when you add your first routine.
-agents routines stats [name]            Duration + outcome rollup per job: run count, failed, missed, avg/p50/p95 duration
-agents routines status                  Show scheduler status, enabled routines, and when each one fires next.
-agents routines stop                    Stop the background scheduler. Routines will not fire until you start it again.
-agents routines sync [path]             Refresh user-layer copies of opted-in project routines from their .agents/routines/*.yml sources. With no path, syncs every enabled project. Also runs automatically on daemon reload (SIGHUP).
-agents routines view [name]             Show the full YAML configuration for a routine
-agents routines webhook                 Fire trigger-based routines from a single webhook payload (read from --file or stdin). One-shot: matches and fires, then exits.
+agents routines                   Schedule agents to run on a cron schedule or at a specific time. The daemon starts at install/upgrade and on setup when daemon.enabled is not false; routines add also ensures it is running.
+agents routines add [nameOrPath]  Create a new routine from a YAML file or inline flags. Starts the scheduler automatically if it is not already running.
+agents routines catchup           Run any routines that missed their last scheduled fire on demand. The daemon already does this every 5 minutes — use this to force a pass now. Detached: runs in the background under the scheduler.
+agents routines cleanup           Remove expired one-shot routines that already fired and still have a user-layer YAML file.
+agents routines devices [name]    View or change the devices where a routine is enabled. Without flags, opens an interactive picker (requires a TTY).
+agents routines disable [name]    Disable a routine. Stops scheduling future runs; turn it back on with: agents routines enable <name>.
+agents routines doctor [name]     Check a routine's execution-context and harness readiness. Bare or --all checks every routine; --fix applies safe activation repairs (activate a now-ready paused routine; pause a broken active one).
+agents routines edit [name]       Edit a prefilled routine transactionally; invalid YAML never replaces the live definition.
+agents routines enable [name]     Enable a routine so the daemon schedules it. Also materialises a project routine (from the current project or a registered one) on first enable — one step, no separate opt-in.
+agents routines list              See all scheduled jobs, when they run next, and their last execution status
+agents routines logs [name]       Show a run’s concise summary — status + extracted report. --full for the raw stdout stream; --run for a specific past run.
+agents routines remove [name]     Delete a routine. Stops scheduling future runs; past execution logs remain on disk.
+agents routines report [name]     Show the extracted report from the most recent execution. Reports are parsed from agent output on completion.
+agents routines run [name]        Execute a routine right now in the foreground. Ignores the schedule; useful for testing before enabling.
+agents routines runs [name]       See execution history: run IDs, completion status, and start times (up to last 10 runs)
+agents routines scheduler-logs    Read scheduler log output (for debugging why a routine did not fire). Use --follow to stream.
+agents routines start             Start the background scheduler. Usually unnecessary — it auto-starts when you add your first routine.
+agents routines stats [name]      Duration + outcome rollup per job: run count, failed, missed, avg/p50/p95 duration
+agents routines status            Show scheduler status, enabled routines, and when each one fires next.
+agents routines stop              Stop the background scheduler. Routines will not fire until you start it again.
+agents routines sync [path]       Refresh materialised project routines from their .agents/routines/*.yml sources. Definition-only — never changes what is enabled. With no path, refreshes every project you have enabled a routine from. Also runs automatically on daemon reload (SIGHUP).
+agents routines view [name]       Show the full YAML configuration for a routine
+agents routines webhook           Fire trigger-based routines from a single webhook payload (read from --file or stdin). One-shot: matches and fires, then exits.
 ```
 
 ## rules — Control agent behavior by installing persistent instructions and rules

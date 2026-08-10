@@ -1,12 +1,16 @@
 /**
- * Project-level routine opt-in, source tracking, and user-layer sync.
+ * Project routine discovery, source tracking, and user-layer sync.
  *
- * Project YAML under `<project>/.agents/routines/*.yml` is inspection-only by
- * default (a cloned public repo must never auto-fire agent prompts). After an
- * explicit opt-in, routines are materialised into `~/.agents/routines/` with
- * `source:` provenance so the daemon — which only loads user + system layers —
- * can fire them. `syncProjectRoutines` refreshes the user-layer copies when
- * project YAML changes (also invoked on daemon SIGHUP).
+ * Project YAML under `<project>/.agents/routines/*.yml` never fires on its own
+ * (a cloned repo must not auto-run agent prompts). A routine has exactly one
+ * state — enabled or disabled — owned by this device's `meta.deviceRoutines`
+ * list, never by the project YAML's own `enabled:` field. `agents routines
+ * enable <name>` materialises the routine into `~/.agents/routines/` with
+ * `source:` provenance (so the daemon, which loads only user + system layers,
+ * can see it) and flips the device flag on — one action. `discoverProjectRoutines`
+ * surfaces not-yet-materialised routines from the user's registered projects so
+ * `list` shows them as disabled. `syncProjectRoutines` refreshes materialised
+ * copies from their source YAML (also invoked on daemon SIGHUP).
  */
 
 import * as fs from 'fs';
@@ -17,8 +21,6 @@ import { execFileSync } from 'child_process';
 import {
   getProjectAgentsDir,
   getProjectRoutinesDir,
-  readMeta,
-  updateMeta,
   ensureAgentsDir,
 } from './state.js';
 import {
@@ -26,14 +28,12 @@ import {
   type JobSource,
   readJob,
   writeJob,
-  setJobEnabled,
   deleteJob,
   listJobs,
   validateJob,
-  resolveHostStrategy,
 } from './routines.js';
 import { parseOwnerRepoFromRemote } from './registry.js';
-import { machineId } from './machine-id.js';
+import { listProjectDefs, projectDirsAbs } from './projects.js';
 import { isSafeSegmentName } from './paths.js';
 
 /** Expand `~/…` and resolve to an absolute path. */
@@ -56,114 +56,11 @@ export function displayProjectPath(abs: string): string {
   return resolved;
 }
 
-/** Project roots currently opted into daemon firing (absolute paths). */
-export function listEnabledProjectRoots(): string[] {
-  const meta = readMeta();
-  const raw = meta.routines?.projects ?? [];
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const p of raw) {
-    if (typeof p !== 'string' || p.trim() === '') continue;
-    const abs = expandProjectPath(p);
-    if (seen.has(abs)) continue;
-    seen.add(abs);
-    out.push(abs);
-  }
-  return out;
-}
-
-/** True when this project root is on the opt-in allowlist. */
-export function isProjectRoutinesEnabled(projectRoot: string): boolean {
-  const abs = expandProjectPath(projectRoot);
-  return listEnabledProjectRoots().some((p) => p === abs);
-}
-
-/**
- * True when the project's own `agents.yaml` opts into project routines:
- * `routines: { enable: true }`. This is an additional source of opt-in that
- * still requires the project to be present on disk; it does not auto-enable
- * every clone — the project must declare it, and `sync` / `enable-project`
- * still materialises consent into the user layer.
- */
-export function projectAgentsYamlEnablesRoutines(projectRoot: string): boolean {
-  const agentsYaml = path.join(expandProjectPath(projectRoot), 'agents.yaml');
-  if (!fs.existsSync(agentsYaml)) return false;
-  try {
-    const parsed = yaml.parse(fs.readFileSync(agentsYaml, 'utf-8'));
-    if (!parsed || typeof parsed !== 'object') return false;
-    const routines = (parsed as Record<string, unknown>).routines;
-    if (!routines || typeof routines !== 'object') return false;
-    return (routines as Record<string, unknown>).enable === true;
-  } catch {
-    return false;
-  }
-}
-
 /** Resolve the project root (parent of `.agents/`) from a cwd, or null. */
 export function resolveProjectRoot(cwd: string = process.cwd()): string | null {
   const agentsDir = getProjectAgentsDir(cwd);
   if (!agentsDir) return null;
   return path.dirname(agentsDir);
-}
-
-/**
- * Opt a project root into daemon firing. Returns true when newly added,
- * false when it was already enabled.
- */
-export function enableProjectRoutines(projectRoot: string): boolean {
-  const abs = expandProjectPath(projectRoot);
-  const stored = displayProjectPath(abs);
-  let added = false;
-  updateMeta((meta) => {
-    const projects = [...(meta.routines?.projects ?? [])];
-    const already = projects.some((p) => expandProjectPath(p) === abs);
-    if (already) return meta;
-    projects.push(stored);
-    added = true;
-    return {
-      ...meta,
-      routines: {
-        ...(meta.routines ?? {}),
-        projects,
-      },
-    };
-  });
-  return added;
-}
-
-/**
- * Remove a project root from the opt-in allowlist. Optionally deletes the
- * user-layer copies that were materialised from it.
- */
-export function disableProjectRoutines(
-  projectRoot: string,
-  opts: { removeSynced?: boolean } = {},
-): { removed: boolean; deletedJobs: string[] } {
-  const abs = expandProjectPath(projectRoot);
-  let removed = false;
-  updateMeta((meta) => {
-    const projects = meta.routines?.projects ?? [];
-    const next = projects.filter((p) => expandProjectPath(p) !== abs);
-    if (next.length === projects.length) return meta;
-    removed = true;
-    return {
-      ...meta,
-      routines: {
-        ...(meta.routines ?? {}),
-        projects: next,
-      },
-    };
-  });
-
-  const deletedJobs: string[] = [];
-  if (opts.removeSynced) {
-    for (const job of listJobs()) {
-      if (job.source?.kind === 'project' && expandProjectPath(job.source.projectPath) === abs) {
-        if (deleteJob(job.name)) deletedJobs.push(job.name);
-      }
-    }
-  }
-  return { removed, deletedJobs };
 }
 
 /** Git provenance for a project root (best-effort; never throws). */
@@ -238,11 +135,15 @@ export interface SyncProjectResult {
 }
 
 /**
- * Materialise one project's routines into the user layer.
+ * Refresh one project's already-materialised routines from its source YAML.
  * - Overwrites user copies that already carry matching `source.projectPath`
  * - Never clobbers a hand-authored user routine (no source / different source)
  * - Removes user copies from this project whose YAML disappeared
- * - Activates materialized routines on this device without mutating definitions
+ *
+ * Sync NEVER touches the device enable flag: a routine's enabled/disabled state
+ * is owned solely by `meta.deviceRoutines` (via `agents routines enable/disable`),
+ * never by the project YAML's own `enabled:` field. That is what keeps a cloned
+ * repo from auto-firing — refreshing a definition can never turn it on.
  */
 export function syncProjectRoutines(projectRoot: string): SyncProjectResult {
   ensureAgentsDir();
@@ -269,37 +170,42 @@ export function syncProjectRoutines(projectRoot: string): SyncProjectResult {
 
   for (const file of files) {
     seenNames.add(file.name);
+
+    // Refresh only routines the user already materialised from THIS project.
+    // A project file with no existing user-layer copy is "available, not
+    // enabled" — it surfaces via `discoverProjectRoutines` and is materialised
+    // by `agents routines enable <name>`, never auto-pulled by a refresh.
+    const existing = readJob(file.name);
+    if (!existing) continue;
+    const existingSource = existing.source;
+    const fromThisProject = existingSource?.kind === 'project'
+      && expandProjectPath(existingSource.projectPath) === abs;
+    if (!fromThisProject) {
+      result.skipped.push({
+        name: file.name,
+        reason: existingSource
+          ? `user-layer routine already exists from another source (${existingSource.projectPath})`
+          : 'user-layer routine already exists (hand-authored); not overwriting without source match',
+      });
+      continue;
+    }
+
     const job = readProjectJobFile(file.path);
     if (!job) {
       result.errors.push({ name: file.name, error: 'unreadable or invalid YAML' });
       continue;
     }
 
-    const existing = readJob(file.name);
-    if (existing) {
-      const existingSource = existing.source;
-      const fromThisProject = existingSource?.kind === 'project'
-        && expandProjectPath(existingSource.projectPath) === abs;
-      if (!fromThisProject) {
-        result.skipped.push({
-          name: file.name,
-          reason: existingSource
-            ? `user-layer routine already exists from another source (${existingSource.projectPath})`
-            : 'user-layer routine already exists (hand-authored); not overwriting without source match',
-        });
-        continue;
-      }
-      // Preserve user-layer devices pin when project YAML omits it (same overlay
-      // semantics as listJobs project discovery).
-      if (job.devices === undefined && existing.devices && existing.devices.length > 0) {
-        job.devices = existing.devices;
-      }
-      // Carry the original creation stamp across. A sync rebuilds the config
-      // from the PROJECT yaml, which never carries `createdAt`, so without this
-      // every `agents routines sync` would re-stamp it to now — walking the
-      // overdue floor forward and hiding real missed fires for project routines.
-      if (existing.createdAt) job.createdAt = existing.createdAt;
+    // Preserve user-layer devices pin when project YAML omits it (same overlay
+    // semantics as listJobs project discovery).
+    if (job.devices === undefined && existing.devices && existing.devices.length > 0) {
+      job.devices = existing.devices;
     }
+    // Carry the original creation stamp across. A sync rebuilds the config
+    // from the PROJECT yaml, which never carries `createdAt`, so without this
+    // every `agents routines sync` would re-stamp it to now — walking the
+    // overdue floor forward and hiding real missed fires for project routines.
+    if (existing.createdAt) job.createdAt = existing.createdAt;
 
     // Surface repo for list/display when project has a GitHub origin.
     if (git.repo && !job.repo) job.repo = git.repo;
@@ -313,8 +219,9 @@ export function syncProjectRoutines(projectRoot: string): SyncProjectResult {
     }
 
     try {
+      // Refresh the definition only. Enablement lives in meta.deviceRoutines and
+      // is never derived from the project YAML here.
       writeJob(job);
-      setJobEnabled(job.name, job.enabled);
       result.synced.push(file.name);
     } catch (err) {
       result.errors.push({ name: file.name, error: (err as Error).message });
@@ -338,13 +245,23 @@ export interface SyncAllResult {
   missing: string[];
 }
 
+/** Distinct project roots that already have at least one materialised routine. */
+export function materialisedProjectRoots(): string[] {
+  const roots = new Set<string>();
+  for (const job of listJobs()) {
+    if (job.source?.kind === 'project') roots.add(expandProjectPath(job.source.projectPath));
+  }
+  return [...roots];
+}
+
 /**
- * Sync every project root on the user allowlist (`meta.routines.projects`),
- * plus any explicit `extraRoots`. Project `agents.yaml` `routines.enable`
- * alone never opts a path in — enable-project is required.
+ * Refresh every materialised project routine from its source YAML. The set of
+ * roots is derived from what the user has already enabled/materialised (their
+ * `source.projectPath`), not from any allowlist — enabling a routine is the only
+ * thing that brings its project into the refresh set. Also runs on daemon SIGHUP.
  */
 export function syncAllProjectRoutines(opts: { extraRoots?: string[] } = {}): SyncAllResult {
-  const roots = new Set<string>(listEnabledProjectRoots());
+  const roots = new Set<string>(materialisedProjectRoots());
   for (const r of opts.extraRoots ?? []) roots.add(expandProjectPath(r));
 
   const projects: SyncProjectResult[] = [];
@@ -359,22 +276,144 @@ export function syncAllProjectRoutines(opts: { extraRoots?: string[] } = {}): Sy
   return { projects, missing };
 }
 
+/** A project routine available to enable, not yet materialised on this device. */
+export interface DiscoveredProjectRoutine {
+  name: string;
+  projectRoot: string;
+  file: string;
+  /** Display config for `list` (always disabled — enablement is a local act). */
+  config: JobConfig;
+}
+
 /**
- * Discover project routines at cwd for the setup UX. Returns null when no
- * project `.agents/routines` dir exists.
+ * Absolute local checkout roots for every registered project, deduped. This is
+ * the discovery universe for project routines: bounded to projects the user
+ * registered (`agents projects`), never an arbitrary filesystem scan.
  */
-export function discoverProjectRoutinesAt(
+function registeredProjectRoots(): string[] {
+  const roots = new Set<string>();
+  for (const def of listProjectDefs()) {
+    for (const dir of projectDirsAbs(def, { forRemote: false })) {
+      if (dir) roots.add(path.resolve(dir));
+    }
+  }
+  return [...roots];
+}
+
+/**
+ * Project routines from registered projects that are NOT already materialised
+ * in the user layer. These surface in `agents routines list` as disabled rows so
+ * the single enabled/disabled model is visible, and `enable <name>` resolves a
+ * name against them. A routine whose name already exists as a user/system
+ * routine is omitted (that materialised copy is the live one).
+ */
+export function discoverProjectRoutines(): DiscoveredProjectRoutine[] {
+  const materialisedNames = new Set(listJobs().map((j) => j.name));
+  const out: DiscoveredProjectRoutine[] = [];
+  const seen = new Set<string>();
+  for (const root of registeredProjectRoots()) {
+    const files = listProjectRoutineFiles(root).filter(
+      (f) => !materialisedNames.has(f.name) && !seen.has(f.name),
+    );
+    if (files.length === 0) continue;
+    const git = readProjectGitSource(root); // once per root, not per routine
+    for (const file of files) {
+      const job = readProjectJobFile(file.path);
+      if (!job) continue;
+      seen.add(file.name);
+      job.name = file.name;
+      job.source = {
+        kind: 'project',
+        projectPath: expandProjectPath(root),
+        ...(git.repo ? { repo: git.repo } : {}),
+        ...(git.branch ? { branch: git.branch } : {}),
+        ...(git.commit ? { commit: git.commit } : {}),
+      };
+      if (git.repo && !job.repo) job.repo = git.repo;
+      job.enabled = false; // available, not enabled — never inferred from the repo YAML
+      out.push({ name: file.name, projectRoot: expandProjectPath(root), file: file.path, config: job });
+    }
+  }
+  return out;
+}
+
+/**
+ * Resolve a routine name to a project source for `enable <name>`: first the cwd
+ * project, then registered projects. Returns null when the name matches no
+ * project routine, or throws-by-return when it is ambiguous across projects.
+ */
+export function findProjectRoutine(
+  name: string,
   cwd: string = process.cwd(),
-): { projectRoot: string; files: Array<{ name: string; path: string }>; enabled: boolean } | null {
-  const projectRoot = resolveProjectRoot(cwd);
-  if (!projectRoot) return null;
-  const routinesDir = getProjectRoutinesDir(projectRoot);
-  if (!routinesDir || !fs.existsSync(routinesDir)) return null;
-  const files = listProjectRoutineFiles(projectRoot);
-  if (files.length === 0) return null;
-  return {
-    projectRoot,
-    files,
-    enabled: isProjectRoutinesEnabled(projectRoot) || projectAgentsYamlEnablesRoutines(projectRoot),
+): { projectRoot: string; file: string } | { ambiguous: string[] } | null {
+  const cwdRoot = resolveProjectRoot(cwd);
+  if (cwdRoot) {
+    const match = listProjectRoutineFiles(cwdRoot).find((f) => f.name === name);
+    if (match) return { projectRoot: expandProjectPath(cwdRoot), file: match.path };
+  }
+  const hits: Array<{ projectRoot: string; file: string }> = [];
+  const seenRoots = new Set<string>();
+  for (const root of registeredProjectRoots()) {
+    const abs = expandProjectPath(root);
+    if (seenRoots.has(abs)) continue;
+    seenRoots.add(abs);
+    const match = listProjectRoutineFiles(abs).find((f) => f.name === name);
+    if (match) hits.push({ projectRoot: abs, file: match.path });
+  }
+  if (hits.length === 0) return null;
+  if (hits.length > 1) return { ambiguous: hits.map((h) => displayProjectPath(h.projectRoot)) };
+  return hits[0];
+}
+
+/**
+ * Materialise one project routine into the user layer WITHOUT enabling it. The
+ * caller (`agents routines enable`) flips the device flag separately, so a
+ * materialise can never by itself make a routine fire. Returns the written
+ * config, or an error string.
+ */
+export function materialiseProjectRoutine(
+  projectRoot: string,
+  name: string,
+): { job: JobConfig } | { error: string } {
+  ensureAgentsDir();
+  const abs = expandProjectPath(projectRoot);
+  const match = listProjectRoutineFiles(abs).find((f) => f.name === name);
+  if (!match) return { error: `no routine '${name}' under ${displayProjectPath(abs)}/.agents/routines` };
+
+  const job = readProjectJobFile(match.path);
+  if (!job) return { error: `routine '${name}' is unreadable or invalid YAML` };
+
+  const existing = readJob(name);
+  if (existing) {
+    const src = existing.source;
+    const fromThisProject = src?.kind === 'project' && expandProjectPath(src.projectPath) === abs;
+    if (!fromThisProject) {
+      return {
+        error: src
+          ? `a routine named '${name}' already exists from another source (${src.projectPath})`
+          : `a hand-authored routine named '${name}' already exists; rename one before enabling`,
+      };
+    }
+    if (existing.createdAt) job.createdAt = existing.createdAt;
+    if (job.devices === undefined && existing.devices && existing.devices.length > 0) {
+      job.devices = existing.devices;
+    }
+  }
+
+  const git = readProjectGitSource(abs);
+  job.name = name;
+  job.source = {
+    kind: 'project',
+    projectPath: abs,
+    ...(git.repo ? { repo: git.repo } : {}),
+    ...(git.branch ? { branch: git.branch } : {}),
+    ...(git.commit ? { commit: git.commit } : {}),
   };
+  if (git.repo && !job.repo) job.repo = git.repo;
+
+  const errors = validateJob(job);
+  if (errors.length > 0) return { error: errors.join('; ') };
+
+  writeJob(job);
+  return { job };
 }

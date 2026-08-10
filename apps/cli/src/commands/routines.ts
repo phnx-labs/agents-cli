@@ -62,15 +62,15 @@ import type { JobConfig, JobTrigger, LinearTriggerEvent, RunMeta, HostStrategy }
 import { listProjectDefs, isSafeProjectName } from '../lib/projects.js';
 import { evaluateActivationReadinessLive } from '../lib/routine-readiness.js';
 import {
-  discoverProjectRoutinesAt,
-  enableProjectRoutines,
-  disableProjectRoutines,
+  discoverProjectRoutines,
+  findProjectRoutine,
+  materialiseProjectRoutine,
   syncProjectRoutines,
   syncAllProjectRoutines,
-  listEnabledProjectRoots,
   resolveProjectRoot,
   displayProjectPath,
   listProjectRoutineFiles,
+  type DiscoveredProjectRoutine,
 } from '../lib/routines-project.js';
 import { fireWebhookJobs, matchJobsToWebhook, type IncomingWebhook, type WebhookSource } from '../lib/triggers/webhook.js';
 import { getRoutinesDir } from '../lib/state.js';
@@ -505,9 +505,27 @@ export function buildRunsJson(runs: RunMeta[]): Record<string, unknown>[] {
 
 /** Build the exact structured routine rows shared by `routines list --json`
  * and the one-process AGI Menu snapshot. */
+/**
+ * Materialised routines plus project routines discoverable from registered
+ * projects, deduped by name. The discovered ones are always disabled (available
+ * to enable) — this is a DISPLAY-only merge, so `list` shows the full single
+ * enabled/disabled picture. Execution paths (`run`/`catchup`/`webhook`) keep
+ * using `listAllJobs` so an un-materialised project routine can never fire.
+ */
+function listJobsForDisplay(cwd?: string): JobConfig[] {
+  const jobs = listAllJobs(cwd);
+  const seen = new Set(jobs.map((j) => j.name));
+  for (const discovered of discoverProjectRoutines()) {
+    if (seen.has(discovered.name)) continue;
+    seen.add(discovered.name);
+    jobs.push(discovered.config);
+  }
+  return jobs;
+}
+
 export function buildRoutineListJson(): Record<string, unknown>[] {
   try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
-  const jobs = listAllJobs(process.cwd());
+  const jobs = listJobsForDisplay(process.cwd());
   if (jobs.length === 0) return [];
 
   const scheduler = new JobScheduler(async () => {});
@@ -624,6 +642,102 @@ async function pickJob(
 }
 
 /**
+ * Enable a routine on this device. If the name is not yet a user/system routine
+ * but names a project routine (in the current project or a registered one), it
+ * is materialised into the user layer first — one step, no separate opt-in. The
+ * device flag (`meta.deviceRoutines`) is the only thing that turns firing on, so
+ * a project YAML can never enable itself.
+ */
+async function enableRoutineAction(name: string | undefined): Promise<void> {
+  if (!name) {
+    name = await pickJob('Select routine to enable', (job) => !job.enabled, ['agents routines enable <name>']) ?? undefined;
+    if (!name) {
+      const available = discoverProjectRoutines();
+      if (available.length > 0) {
+        console.log(chalk.gray(`Project routines available to enable: ${available.map((r) => r.name).join(', ')}`));
+        console.log(chalk.gray('  Enable one by name: agents routines enable <name>'));
+      }
+      return;
+    }
+  }
+
+  try {
+    // Not a user/system routine yet? Resolve it as a project routine and
+    // materialise it before enabling.
+    if (!readJob(name)) {
+      const found = findProjectRoutine(name);
+      if (!found) {
+        console.log(chalk.red(`No routine named '${name}'.`));
+        const available = discoverProjectRoutines();
+        if (available.length > 0) {
+          console.log(chalk.gray(`  Available project routines: ${available.map((r) => r.name).join(', ')}`));
+        }
+        process.exit(1);
+      }
+      if ('ambiguous' in found) {
+        console.log(chalk.red(`'${name}' is defined in more than one project: ${found.ambiguous.join(', ')}.`));
+        console.log(chalk.gray('  Enable it from inside the project you want, or rename one.'));
+        process.exit(1);
+      }
+      const mat = materialiseProjectRoutine(found.projectRoot, name);
+      if ('error' in mat) {
+        console.log(chalk.red(`Cannot enable '${name}': ${mat.error}`));
+        process.exit(1);
+      }
+      console.log(chalk.gray(`Materialised '${name}' from ${displayProjectPath(found.projectRoot)}`));
+    }
+
+    // Enabling re-runs readiness — it can never bypass a proven blocker. A
+    // blocked routine stays disabled.
+    const job = readJob(name);
+    if (job) {
+      const readiness = await evaluateActivationReadinessLive(job);
+      if (!readiness.ready) {
+        const r = readiness.readiness!;
+        console.log(chalk.red(`Cannot enable '${name}' — not ready: ${r.code}`));
+        console.log(chalk.gray(`  ${r.message}`));
+        if (r.repair) console.log(chalk.gray(`  repair: ${r.repair}`));
+        console.log(chalk.gray(`  fix it, then: agents routines doctor ${name} --fix`));
+        process.exit(1);
+      }
+    }
+    setJobEnabled(name, true);
+    console.log(chalk.green(`Routine '${name}' enabled`));
+    if (isDaemonRunning()) {
+      signalDaemonReload();
+      console.log(chalk.gray('Daemon reloaded'));
+    }
+  } catch (err) {
+    console.log(chalk.red((err as Error).message));
+    process.exit(1);
+  }
+}
+
+/** Disable a routine on this device. Its definition stays; only firing stops. */
+async function disableRoutineAction(name: string | undefined): Promise<void> {
+  if (!name) {
+    name = await pickJob('Select routine to disable', (job) => job.enabled, ['agents routines disable <name>']) ?? undefined;
+    if (!name) return;
+  }
+
+  try {
+    if (!readJob(name)) {
+      console.log(chalk.red(`No routine named '${name}'.`));
+      process.exit(1);
+    }
+    setJobEnabled(name, false);
+    console.log(chalk.green(`Routine '${name}' disabled`));
+    if (isDaemonRunning()) {
+      signalDaemonReload();
+      console.log(chalk.gray('Scheduler reloaded'));
+    }
+  } catch (err) {
+    console.log(chalk.red((err as Error).message));
+    process.exit(1);
+  }
+}
+
+/**
  * Parse a comma-separated devices string, normalize, deduplicate, and validate
  * each entry against the registered fleet. Exits nonzero on empty/whitespace
  * input or unknown devices.
@@ -667,7 +781,7 @@ function runRoutinesList(options: RoutinesListOptions): void {
     return;
   }
   try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
-  const jobs = listAllJobs(process.cwd());
+  const jobs = listJobsForDisplay(process.cwd());
   if (jobs.length === 0) {
     console.log(chalk.gray('No jobs configured'));
     console.log(chalk.gray('  Add a job: agents routines add <path-to-job.yml>'));
@@ -840,7 +954,7 @@ async function runRoutinesBrowser(options: RoutinesListOptions): Promise<void> {
     process.exit(1);
   }
   try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
-  const jobs = listAllJobs(process.cwd());
+  const jobs = listJobsForDisplay(process.cwd());
   if (jobs.length === 0) {
     console.log(chalk.gray('No jobs configured'));
     console.log(chalk.gray('  Add a job: agents routines add <path-to-job.yml>'));
@@ -927,9 +1041,9 @@ export function registerRoutinesCommands(program: Command): void {
       agents routines add drain --schedule "0 3 * * *" --agent claude --placement fleet --prompt "Drain queue"
       agents routines add review --schedule "0 9 * * 1" --agent claude --placement cloud --prompt "Review open PRs"
 
-      # Opt a project's .agents/routines/*.yml into daemon firing (never auto)
-      agents routines enable-project --yes
-      agents routines sync
+      # Enable a routine (materialises a project routine on first enable)
+      agents routines enable security-sweep
+      agents routines disable security-sweep
 
       # List all routines and their next run times
       agents routines list
@@ -1213,7 +1327,7 @@ export function registerRoutinesCommands(program: Command): void {
             // Name the resume explicitly: a paused routine is otherwise a dead
             // end for an agent, which is how the release train sat unregistered
             // (RUSH-2517 / RUSH-2476).
-            console.log(chalk.gray(`  then:   agents routines resume ${config.name}`));
+            console.log(chalk.gray(`  then:   agents routines enable ${config.name}`));
           }
         }
         if (options.json) {
@@ -1319,7 +1433,7 @@ export function registerRoutinesCommands(program: Command): void {
           // Name the resume explicitly: a paused routine is otherwise a dead end
           // for an agent, which is how the release train sat unregistered
           // (RUSH-2517 / RUSH-2476).
-          console.log(chalk.gray(`  then:   agents routines resume ${config.name}`));
+          console.log(chalk.gray(`  then:   agents routines enable ${config.name}`));
         }
         if (options.json) {
           writeJson({
@@ -1465,7 +1579,7 @@ export function registerRoutinesCommands(program: Command): void {
           console.log(chalk.yellow(`Still not ready: ${readiness.readiness.code}`));
           console.log(chalk.gray(`  ${readiness.readiness.message}`));
         } else {
-          console.log(chalk.gray(`  resume it with: agents routines resume ${name}`));
+          console.log(chalk.gray(`  enable it with: agents routines enable ${name}`));
         }
         return;
       }
@@ -2010,63 +2124,19 @@ export function registerRoutinesCommands(program: Command): void {
     });
 
   routinesCmd
-    .command('resume [name]')
-    .description('Re-enable a paused routine so the daemon schedules it again')
+    .command('enable [name]')
+    .aliases(['resume'])
+    .description('Enable a routine so the daemon schedules it. Also materialises a project routine (from the current project or a registered one) on first enable — one step, no separate opt-in.')
     .action(async (name: string | undefined) => {
-      if (!name) {
-        // Only show paused jobs
-        name = await pickJob('Select job to resume', (job) => !job.enabled, ['agents routines resume <name>']) ?? undefined;
-        if (!name) return;
-      }
-
-      try {
-        // Resume re-runs readiness — it can never bypass a proven blocker (the
-        // plan: "resume cannot bypass readiness"). A blocked routine stays paused.
-        const job = readJob(name);
-        if (job) {
-          const readiness = await evaluateActivationReadinessLive(job);
-          if (!readiness.ready) {
-            const r = readiness.readiness!;
-            console.log(chalk.red(`Cannot resume '${name}' — not ready: ${r.code}`));
-            console.log(chalk.gray(`  ${r.message}`));
-            if (r.repair) console.log(chalk.gray(`  repair: ${r.repair}`));
-            console.log(chalk.gray(`  fix it, then: agents routines doctor ${name} --fix`));
-            process.exit(1);
-          }
-        }
-        setJobEnabled(name, true);
-        console.log(chalk.green(`Job '${name}' resumed`));
-        if (isDaemonRunning()) {
-          signalDaemonReload();
-          console.log(chalk.gray('Daemon reloaded'));
-        }
-      } catch (err) {
-        console.log(chalk.red((err as Error).message));
-        process.exit(1);
-      }
+      await enableRoutineAction(name);
     });
 
   routinesCmd
-    .command('pause [name]')
-    .description('Temporarily disable a routine. Stops scheduling future runs; enable again with resume.')
+    .command('disable [name]')
+    .aliases(['pause'])
+    .description('Disable a routine. Stops scheduling future runs; turn it back on with: agents routines enable <name>.')
     .action(async (name: string | undefined) => {
-      if (!name) {
-        // Only show enabled jobs
-        name = await pickJob('Select job to pause', (job) => job.enabled, ['agents routines pause <name>']) ?? undefined;
-        if (!name) return;
-      }
-
-      try {
-        setJobEnabled(name, false);
-        console.log(chalk.green(`Job '${name}' paused`));
-        if (isDaemonRunning()) {
-          signalDaemonReload();
-          console.log(chalk.gray('Scheduler reloaded'));
-        }
-      } catch (err) {
-        console.log(chalk.red((err as Error).message));
-        process.exit(1);
-      }
+      await disableRoutineAction(name);
     });
 
   // Device activation management for a single routine. Each mutation executes
@@ -2280,131 +2350,21 @@ export function registerRoutinesCommands(program: Command): void {
     });
 
   routinesCmd
-    .command('enable-project [path]')
-    .description('Opt a project\'s .agents/routines/*.yml into daemon firing. Requires explicit approval — project routines never auto-fire from a cloned repo. Materialises copies into ~/.agents/routines/ with source provenance.')
-    .option('--yes', 'Skip the interactive confirmation prompt')
-    .option('--json', 'Emit machine-readable JSON')
-    .action(async (projectPath: string | undefined, options: { yes?: boolean; json?: boolean }) => {
-      const root = projectPath
-        ? path.resolve(projectPath)
-        : resolveProjectRoot(process.cwd());
-      if (!root) {
-        console.error(chalk.red('No project .agents/ directory found from the current directory.'));
-        console.error(chalk.gray('Run from inside a project, or pass the project path: agents routines enable-project /path/to/repo'));
-        process.exit(1);
-      }
-      const files = listProjectRoutineFiles(root);
-      if (files.length === 0) {
-        console.error(chalk.red(`No routines found under ${path.join(root, '.agents', 'routines')}`));
-        process.exit(1);
-      }
-
-      if (!options.yes) {
-        if (!isInteractiveTerminal()) {
-          console.error(chalk.red('Refusing to enable project routines non-interactively without --yes.'));
-          console.error(chalk.gray(`Found ${files.length} routine(s) in ${displayProjectPath(root)}. Re-run with --yes to confirm.`));
-          process.exit(1);
-        }
-        try {
-          const { confirm } = await import('@inquirer/prompts');
-          const ok = await confirm({
-            message: `Enable daemon firing for ${files.length} project routine(s) in ${displayProjectPath(root)}?`,
-            default: false,
-          });
-          if (!ok) {
-            console.log(chalk.gray('Cancelled'));
-            return;
-          }
-        } catch (err) {
-          if (isPromptCancelled(err)) {
-            console.log(chalk.gray('Cancelled'));
-            return;
-          }
-          throw err;
-        }
-      }
-
-      const newly = enableProjectRoutines(root);
-      const sync = syncProjectRoutines(root);
-      if (isDaemonRunning()) signalDaemonReload();
-
-      if (options.json) {
-        writeJson({
-          ok: true,
-          projectRoot: root,
-          newlyEnabled: newly,
-          synced: sync.synced,
-          skipped: sync.skipped,
-          removed: sync.removed,
-          errors: sync.errors,
-        });
-        return;
-      }
-
-      console.log(chalk.green(
-        newly
-          ? `Enabled project routines for ${displayProjectPath(root)}`
-          : `Project routines already enabled for ${displayProjectPath(root)}`,
-      ));
-      if (sync.synced.length > 0) {
-        console.log(chalk.gray(`  Synced: ${sync.synced.join(', ')}`));
-      }
-      for (const s of sync.skipped) {
-        console.log(chalk.yellow(`  Skipped ${s.name}: ${s.reason}`));
-      }
-      for (const e of sync.errors) {
-        console.log(chalk.red(`  Error ${e.name}: ${e.error}`));
-      }
-      console.log(chalk.gray('Daemon will fire these after reload. Re-sync later with: agents routines sync'));
-    });
-
-  routinesCmd
-    .command('disable-project [path]')
-    .description('Remove a project from the project-routines allowlist. Use --remove-synced to also delete the user-layer copies.')
-    .option('--remove-synced', 'Delete user-layer routines that were materialised from this project')
-    .option('--json', 'Emit machine-readable JSON')
-    .action(async (projectPath: string | undefined, options: { removeSynced?: boolean; json?: boolean }) => {
-      const root = projectPath
-        ? path.resolve(projectPath)
-        : resolveProjectRoot(process.cwd());
-      if (!root) {
-        console.error(chalk.red('No project .agents/ directory found from the current directory.'));
-        process.exit(1);
-      }
-      const result = disableProjectRoutines(root, { removeSynced: options.removeSynced });
-      if (isDaemonRunning()) signalDaemonReload();
-      if (options.json) {
-        writeJson({ ok: true, projectRoot: root, ...result });
-        return;
-      }
-      if (!result.removed) {
-        console.log(chalk.gray(`Project ${displayProjectPath(root)} was not on the allowlist`));
-      } else {
-        console.log(chalk.green(`Disabled project routines for ${displayProjectPath(root)}`));
-      }
-      if (result.deletedJobs.length > 0) {
-        console.log(chalk.gray(`  Removed user-layer copies: ${result.deletedJobs.join(', ')}`));
-      }
-    });
-
-  routinesCmd
     .command('sync [path]')
-    .description('Refresh user-layer copies of opted-in project routines from their .agents/routines/*.yml sources. With no path, syncs every enabled project. Also runs automatically on daemon reload (SIGHUP).')
+    .description('Refresh materialised project routines from their .agents/routines/*.yml sources. Definition-only — never changes what is enabled. With no path, refreshes every project you have enabled a routine from. Also runs automatically on daemon reload (SIGHUP).')
     .option('--json', 'Emit machine-readable JSON')
     .action(async (projectPath: string | undefined, options: { json?: boolean }) => {
       if (projectPath) {
         const root = path.resolve(projectPath);
-        const isEnabled = listEnabledProjectRoots().some((p) => p === root);
-        if (!isEnabled) {
-          console.error(chalk.red(
-            `Project ${displayProjectPath(root)} is not enabled. Run: agents routines enable-project ${root}`,
-          ));
-          process.exit(1);
-        }
         const sync = syncProjectRoutines(root);
         if (isDaemonRunning()) signalDaemonReload();
         if (options.json) {
           writeJson({ ok: true, ...sync });
+          return;
+        }
+        if (sync.synced.length === 0 && sync.skipped.length === 0 && sync.removed.length === 0 && sync.errors.length === 0) {
+          console.log(chalk.gray(`No enabled routines materialised from ${displayProjectPath(root)}.`));
+          console.log(chalk.gray('  Enable one with: agents routines enable <name>'));
           return;
         }
         printSyncResult(sync);
@@ -2418,50 +2378,14 @@ export function registerRoutinesCommands(program: Command): void {
         return;
       }
       if (all.projects.length === 0 && all.missing.length === 0) {
-        console.log(chalk.gray('No project roots on the routines allowlist.'));
-        console.log(chalk.gray('  Enable one with: agents routines enable-project'));
+        console.log(chalk.gray('No project routines materialised yet.'));
+        console.log(chalk.gray('  Enable one with: agents routines enable <name>'));
         return;
       }
       for (const p of all.projects) printSyncResult(p);
       for (const m of all.missing) {
-        console.log(chalk.yellow(`Missing project root (still on allowlist): ${displayProjectPath(m)}`));
+        console.log(chalk.yellow(`Missing project root for a materialised routine: ${displayProjectPath(m)}`));
       }
-    });
-
-  routinesCmd
-    .command('projects')
-    .description('List project roots opted into daemon-fired project routines')
-    .option('--json', 'Emit machine-readable JSON')
-    .action((options: { json?: boolean }) => {
-      const roots = listEnabledProjectRoots();
-      if (options.json) {
-        writeJson(roots.map((r) => ({
-          path: r,
-          display: displayProjectPath(r),
-          routines: listProjectRoutineFiles(r).map((f) => f.name),
-        })));
-        return;
-      }
-      if (roots.length === 0) {
-        console.log(chalk.gray('No projects enabled. Use: agents routines enable-project'));
-        // Offer a discovery hint for the current project.
-        const discovered = discoverProjectRoutinesAt(process.cwd());
-        if (discovered) {
-          console.log(chalk.gray(
-            `  Found ${discovered.files.length} routine(s) in ${displayProjectPath(discovered.projectRoot)} — enable with: agents routines enable-project`,
-          ));
-        }
-        return;
-      }
-      console.log(chalk.bold('Enabled project routines\n'));
-      for (const r of roots) {
-        const files = listProjectRoutineFiles(r);
-        console.log(`  ${chalk.cyan(displayProjectPath(r))}  ${chalk.gray(`(${files.length} routine${files.length === 1 ? '' : 's'})`)}`);
-        for (const f of files) {
-          console.log(chalk.gray(`    - ${f.name}`));
-        }
-      }
-      console.log();
     });
 
   routinesCmd

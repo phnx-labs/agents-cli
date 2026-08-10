@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 97,
-  "commands": 571,
+  "commands": 568,
   "root": {
     "name": "agents",
     "path": "",
@@ -16686,7 +16686,7 @@
           "negate": false
         }
       ],
-      "examples": "# Cron routine: Claude every weekday at 9 AM (scheduler auto-starts)\n      agents routines add daily-standup --schedule \"0 9 * * 1-5\" --agent claude --prompt \"Draft standup from git log\"\n\n      # One-shot: Codex tomorrow at 2:30 PM, then never again\n      agents routines add hotfix-review --at \"14:30\" --agent codex --prompt \"Review hotfix PR #42\"\n\n      # Create from YAML (for complex routines with multiple settings)\n      agents routines add weekly-report.yml\n\n      # Place the job body on a fleet device / cloud / named host (not --host)\n      agents routines add drain --schedule \"0 3 * * *\" --agent claude --placement fleet --prompt \"Drain queue\"\n      agents routines add review --schedule \"0 9 * * 1\" --agent claude --placement cloud --prompt \"Review open PRs\"\n\n      # Opt a project's .agents/routines/*.yml into daemon firing (never auto)\n      agents routines enable-project --yes\n      agents routines sync\n\n      # List all routines and their next run times\n      agents routines list\n\n      # List routines on a specific device\n      agents routines list --host yosemite-s0\n\n      # Create a routine restricted to specific devices\n      agents routines add nightly --schedule \"0 2 * * *\" --agent claude --prompt \"Summarize today's commits\" --devices yosemite-s0,mac-mini\n\n      # Interactively manage which devices may run a routine\n      agents routines devices nightly\n\n      # Run a routine right now in the foreground (ignores schedule)\n      agents routines run daily-standup\n\n      # Check whether the scheduler is running\n      agents routines status",
+      "examples": "# Cron routine: Claude every weekday at 9 AM (scheduler auto-starts)\n      agents routines add daily-standup --schedule \"0 9 * * 1-5\" --agent claude --prompt \"Draft standup from git log\"\n\n      # One-shot: Codex tomorrow at 2:30 PM, then never again\n      agents routines add hotfix-review --at \"14:30\" --agent codex --prompt \"Review hotfix PR #42\"\n\n      # Create from YAML (for complex routines with multiple settings)\n      agents routines add weekly-report.yml\n\n      # Place the job body on a fleet device / cloud / named host (not --host)\n      agents routines add drain --schedule \"0 3 * * *\" --agent claude --placement fleet --prompt \"Drain queue\"\n      agents routines add review --schedule \"0 9 * * 1\" --agent claude --placement cloud --prompt \"Review open PRs\"\n\n      # Enable a routine (materialises a project routine on first enable)\n      agents routines enable security-sweep\n      agents routines disable security-sweep\n\n      # List all routines and their next run times\n      agents routines list\n\n      # List routines on a specific device\n      agents routines list --host yosemite-s0\n\n      # Create a routine restricted to specific devices\n      agents routines add nightly --schedule \"0 2 * * *\" --agent claude --prompt \"Summarize today's commits\" --devices yosemite-s0,mac-mini\n\n      # Interactively manage which devices may run a routine\n      agents routines devices nightly\n\n      # Run a routine right now in the foreground (ignores schedule)\n      agents routines run daily-standup\n\n      # Check whether the scheduler is running\n      agents routines status",
       "notes": "A routine is a YAML file that schedules an agent invocation. It specifies:\n        - which agent to run (claude, codex, antigravity, ...)\n        - when to run (cron schedule or one-shot time)\n        - what task to give the agent (the prompt)\n        - execution constraints (mode, effort, timeout)\n\n      The always-on agents daemon starts at install/upgrade and on setup (when\n      daemon.enabled is not false). Adding a routine also ensures it is running.\n      Manage it with 'agents routines start|stop|status'.\n\n      Version / credit failover (same semantics as 'agents run'):\n        - Omit 'version:' to let the configured run strategy (default: balanced)\n          pick a healthy install and skip accounts that are out of credits or\n          rate-limited. Pin with 'version: 2.1.x' when you want one install only.\n        - Foreground 'agents routines run' re-dispatches to the next healthy\n          same-agent account when a mid-run rate/usage limit is detected.\n        - Detached/daemon fires use the pre-flight pick only (next tick re-selects).\n        - Diagnostic lines log which account was picked, which were skipped, and\n          each failover hop: look for \"[agents] routine <name>:\" in the run log.\n        - Claude auth: a routine authenticates through the pinned account's own\n          on-disk login (the same one 'agents run claude' uses on this device).\n          The daemon injects no token; if that account's login has expired the\n          run is skipped up front with a re-login hint.",
       "subcommands": [
         {
@@ -17293,37 +17293,21 @@
           "subcommands": []
         },
         {
-          "name": "disable-project",
-          "path": "routines disable-project",
-          "aliases": [],
-          "description": "Remove a project from the project-routines allowlist. Use --remove-synced to also delete the user-layer copies.",
+          "name": "disable",
+          "path": "routines disable",
+          "aliases": [
+            "pause"
+          ],
+          "description": "Disable a routine. Stops scheduling future runs; turn it back on with: agents routines enable <name>.",
           "args": [
             {
-              "name": "path",
+              "name": "name",
               "required": false,
               "variadic": false,
               "description": ""
             }
           ],
           "options": [
-            {
-              "flags": "--remove-synced",
-              "description": "Delete user-layer routines that were materialised from this project",
-              "long": "--remove-synced",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit machine-readable JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
             {
               "flags": "-H, --host <name>",
               "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
@@ -17602,37 +17586,21 @@
           "subcommands": []
         },
         {
-          "name": "enable-project",
-          "path": "routines enable-project",
-          "aliases": [],
-          "description": "Opt a project's .agents/routines/*.yml into daemon firing. Requires explicit approval — project routines never auto-fire from a cloned repo. Materialises copies into ~/.agents/routines/ with source provenance.",
+          "name": "enable",
+          "path": "routines enable",
+          "aliases": [
+            "resume"
+          ],
+          "description": "Enable a routine so the daemon schedules it. Also materialises a project routine (from the current project or a registered one) on first enable — one step, no separate opt-in.",
           "args": [
             {
-              "name": "path",
+              "name": "name",
               "required": false,
               "variadic": false,
               "description": ""
             }
           ],
           "options": [
-            {
-              "flags": "--yes",
-              "description": "Skip the interactive confirmation prompt",
-              "long": "--yes",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit machine-readable JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
             {
               "flags": "-H, --host <name>",
               "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
@@ -17880,154 +17848,6 @@
           "subcommands": []
         },
         {
-          "name": "pause",
-          "path": "routines pause",
-          "aliases": [],
-          "description": "Temporarily disable a routine. Stops scheduling future runs; enable again with resume.",
-          "args": [
-            {
-              "name": "name",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
-              "short": "-H",
-              "long": "--host",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--device <name>",
-              "description": "Alias of --host: run this command on a registered device (from `agents devices`), or `all` to run it across the whole fleet.",
-              "long": "--device",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--remote-cwd <dir>",
-              "description": "Working directory on the host for --host runs. Resolves on the REMOTE host — pass a '$HOME'-relative path (single-quoted so your local shell doesn't expand it) or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you). No effect on 'teams add'.",
-              "long": "--remote-cwd",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--no-tty",
-              "description": "Force non-interactive output for --host runs even from a terminal.",
-              "long": "--no-tty",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
-              "flags": "--any",
-              "description": "With --host <cap> (a capability tag), pick any matching host instead of erroring when several match.",
-              "long": "--any",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "projects",
-          "path": "routines projects",
-          "aliases": [],
-          "description": "List project roots opted into daemon-fired project routines",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Emit machine-readable JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
-              "short": "-H",
-              "long": "--host",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--device <name>",
-              "description": "Alias of --host: run this command on a registered device (from `agents devices`), or `all` to run it across the whole fleet.",
-              "long": "--device",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--remote-cwd <dir>",
-              "description": "Working directory on the host for --host runs. Resolves on the REMOTE host — pass a '$HOME'-relative path (single-quoted so your local shell doesn't expand it) or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you). No effect on 'teams add'.",
-              "long": "--remote-cwd",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--no-tty",
-              "description": "Force non-interactive output for --host runs even from a terminal.",
-              "long": "--no-tty",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
-              "flags": "--any",
-              "description": "With --host <cap> (a capability tag), pick any matching host instead of erroring when several match.",
-              "long": "--any",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
           "name": "remove",
           "path": "routines remove",
           "aliases": [],
@@ -18124,79 +17944,6 @@
               "variadic": false,
               "negate": false
             },
-            {
-              "flags": "-H, --host <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
-              "short": "-H",
-              "long": "--host",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--device <name>",
-              "description": "Alias of --host: run this command on a registered device (from `agents devices`), or `all` to run it across the whole fleet.",
-              "long": "--device",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--remote-cwd <dir>",
-              "description": "Working directory on the host for --host runs. Resolves on the REMOTE host — pass a '$HOME'-relative path (single-quoted so your local shell doesn't expand it) or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you). No effect on 'teams add'.",
-              "long": "--remote-cwd",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--no-tty",
-              "description": "Force non-interactive output for --host runs even from a terminal.",
-              "long": "--no-tty",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
-              "flags": "--any",
-              "description": "With --host <cap> (a capability tag), pick any matching host instead of erroring when several match.",
-              "long": "--any",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "resume",
-          "path": "routines resume",
-          "aliases": [],
-          "description": "Re-enable a paused routine so the daemon schedules it again",
-          "args": [
-            {
-              "name": "name",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
             {
               "flags": "-H, --host <name>",
               "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
@@ -18791,7 +18538,7 @@
           "name": "sync",
           "path": "routines sync",
           "aliases": [],
-          "description": "Refresh user-layer copies of opted-in project routines from their .agents/routines/*.yml sources. With no path, syncs every enabled project. Also runs automatically on daemon reload (SIGHUP).",
+          "description": "Refresh materialised project routines from their .agents/routines/*.yml sources. Definition-only — never changes what is enabled. With no path, refreshes every project you have enabled a routine from. Also runs automatically on daemon reload (SIGHUP).",
           "args": [
             {
               "name": "path",
