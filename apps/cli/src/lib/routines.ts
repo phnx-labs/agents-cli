@@ -1062,7 +1062,16 @@ export function setJobEnabled(name: string, enabled: boolean): void {
 /** Materialize legacy definition state into this device's activation manifest. */
 export function migrateLegacyRoutineActivation(): boolean {
   if (enabledRoutineNames() !== null) return false;
-  const jobs = listJobs();
+  // Legacy activation migration is about preserving FILE-BACKED routines' old
+  // `enabled:`/`devices:` state into the device manifest. Daemon-owned built-ins
+  // (RUSH-2465) are always-enabled and carry no legacy state, so they must NOT
+  // trigger materialization on their own — otherwise a box with zero user
+  // routines (a portable-only migration) would spuriously grow a device manifest
+  // just because the built-ins are present in `listJobs()`. They are seeded into
+  // an already-materialized manifest separately by `addEnabledRoutinesOnUpgrade`
+  // (migrate.ts), so excluding them here keeps built-ins enabled after upgrade
+  // while leaving a routine-less box's manifest uncreated.
+  const jobs = listJobs().filter((job) => !job.builtin);
   if (!jobs.some((job) => job.enabled || Array.isArray(job.devices))) return false;
   replaceEnabledRoutines(
     jobs.filter((job) => job.enabled && jobRunsOnThisDevice(job)).map((job) => job.name),
