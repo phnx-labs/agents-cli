@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>A Cleaner API Surface for artifacts</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header"><div class="header-label">Phoenix Labs / artifacts-cli</div><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">artifacts-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-draft">draft</span></div>
+<h1>A Cleaner API Surface for artifacts</h1>
+<p class="summary">Collapse twelve commands into four by deleting duplicates, folding scaffolders together, and hiding internals — without breaking the ExitPlanMode gate the fleet depends on.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">12 commands become 4<span class="meta-sep" aria-hidden="true">·</span>doctor is a verbatim copy of setup<span class="meta-sep" aria-hidden="true">·</span>chromium was already optional</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/artifacts-cli" target="_blank" rel="noopener">phnx-labs/artifacts-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude-code claude-opus-5</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Owner</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">workstation</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">99432178</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-09</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#proposed-changes"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Risks</a><a href="#files"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Files</a><a href="#sequence"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Sequence</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<p><code>artifacts --help</code> lists <strong>twelve commands</strong>. An agent reading it has to weigh twelve verbs to pick
+the two it actually needs. Several are duplicates of each other, one is a byte-for-byte copy of
+another, and two are internal tools sitting in the front door.</p>
+<p>Five complaints were raised. Three are real; two are about things that are already fine. Checking
+each against the source first, because the fix differs:</p>
+<table>
+<thead>
+<tr>
+<th>Complaint</th>
+<th>Verdict</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>doctor</code> is redundant</td>
+<td><strong>True, 100%</strong></td>
+<td><code>cli.ts:264</code> is <code>.action(() =&gt; runSetup({}))</code> — the same function <code>setup</code> calls at <code>cli.ts:63</code>. Zero doctor-specific code.</td>
+</tr>
+<tr>
+<td><code>compile</code> and <code>decompile</code> are a redundant pair</td>
+<td><strong>False</strong></td>
+<td><code>compile</code> is a Commander alias on <code>render</code> (<code>cli.ts:129</code>). <code>decompile</code> is unrelated: it regex-extracts a base64 blob <code>render</code> embedded in <code>&lt;script id="artifacts-source"&gt;</code> (<code>render.ts:484-491</code>). Not an inverse.</td>
+</tr>
+<tr>
+<td><code>setup</code> sets up nothing</td>
+<td><strong>False</strong></td>
+<td>It writes <code>~/.artifacts/config.json</code>, and that file <strong>is</strong> read at runtime — <code>render.ts:388</code> for <code>fonts.dirs</code>, <code>share.ts:84-89</code> for the share endpoint.</td>
+</tr>
+<tr>
+<td>Chromium is a dependency</td>
+<td><strong>Already false</strong></td>
+<td><code>playwright</code> sits in <code>optionalDependencies</code> (<code>package.json:29-31</code>) and is dynamically imported (<code>pdf.ts:28-33</code>). Never installed unless PDF is requested.</td>
+</tr>
+<tr>
+<td><code>estimate</code> is internal and should be hidden</td>
+<td><strong>True</strong></td>
+<td>Called from exactly one place, <code>cli.ts:115</code>. No other command uses it.</td>
+</tr>
+</tbody></table>
+<aside class="artifact-callout"><strong>One correction that shapes the plan:</strong> a browser cannot write a PDF file non-interactively. <code>open file.html</code> displays it; nothing makes Safari or Chrome save a PDF without a human pressing Cmd-P. So "PDF through the default browser" necessarily means the CLI stops emitting <code>.pdf</code> files — and <code>/output</code> depends on it emitting them.</aside><h2 id="proposed-changes">Proposed Changes</h2>
+<p>Twelve visible commands become four, with three internals still callable but absent from help.</p>
+<figure class="artifact-figure artifact-figure-diagram">
+  <svg class="artifact-diagram" viewBox="0 0 940 430" role="img" aria-label="Twelve commands collapse into four visible commands plus three hidden ones">
+    <text x="150" y="28" text-anchor="middle" fill="#a3a3a3" font-size="16">BEFORE — 12 in --help</text>
+    <text x="770" y="28" text-anchor="middle" fill="#a3a3a3" font-size="16">AFTER — 4 in --help</text>
+
+    <rect x="40" y="45" width="220" height="34" rx="6" fill="#171717" stroke="#f87171"></rect>
+    <text x="150" y="68" text-anchor="middle" fill="#f5f5f5" font-size="16">setup</text>
+    <rect x="40" y="85" width="220" height="34" rx="6" fill="#171717" stroke="#f87171"></rect>
+    <text x="150" y="108" text-anchor="middle" fill="#f5f5f5" font-size="16">init design</text>
+    <rect x="40" y="125" width="220" height="34" rx="6" fill="#171717" stroke="#f87171"></rect>
+    <text x="150" y="148" text-anchor="middle" fill="#f5f5f5" font-size="16">template</text>
+    <rect x="40" y="165" width="220" height="34" rx="6" fill="#171717" stroke="#a3e635"></rect>
+    <text x="150" y="188" text-anchor="middle" fill="#f5f5f5" font-size="16">new</text>
+    <rect x="40" y="205" width="220" height="34" rx="6" fill="#171717" stroke="#a3e635"></rect>
+    <text x="150" y="228" text-anchor="middle" fill="#f5f5f5" font-size="16">check | validate</text>
+    <rect x="40" y="245" width="220" height="34" rx="6" fill="#171717" stroke="#a3e635"></rect>
+    <text x="150" y="268" text-anchor="middle" fill="#f5f5f5" font-size="16">render | compile</text>
+    <rect x="40" y="285" width="220" height="34" rx="6" fill="#171717" stroke="#f87171"></rect>
+    <text x="150" y="308" text-anchor="middle" fill="#f5f5f5" font-size="16">preview</text>
+    <rect x="40" y="325" width="220" height="34" rx="6" fill="#171717" stroke="#fbbf24"></rect>
+    <text x="150" y="348" text-anchor="middle" fill="#f5f5f5" font-size="16">estimate · decompile · pdf</text>
+    <rect x="40" y="365" width="220" height="34" rx="6" fill="#171717" stroke="#f87171"></rect>
+    <text x="150" y="388" text-anchor="middle" fill="#f5f5f5" font-size="16">doctor</text>
+
+    <path d="M260 62 C 380 62, 420 182, 540 182" fill="none" stroke="#38bdf8" stroke-width="2"></path>
+    <path d="M260 102 C 380 102, 420 182, 540 182" fill="none" stroke="#38bdf8" stroke-width="2"></path>
+    <path d="M260 142 C 380 142, 420 182, 540 182" fill="none" stroke="#38bdf8" stroke-width="2"></path>
+    <path d="M260 182 L 540 182" fill="none" stroke="#38bdf8" stroke-width="2"></path>
+    <path d="M260 222 L 540 232" fill="none" stroke="#38bdf8" stroke-width="2"></path>
+    <path d="M260 262 C 380 262, 420 282, 540 282" fill="none" stroke="#38bdf8" stroke-width="2"></path>
+    <path d="M260 302 C 380 302, 420 282, 540 282" fill="none" stroke="#38bdf8" stroke-width="2"></path>
+    <path d="M260 342 C 400 342, 440 372, 540 372" fill="none" stroke="#fbbf24" stroke-width="2" stroke-dasharray="6 4"></path>
+    <path d="M260 382 L 330 400" fill="none" stroke="#f87171" stroke-width="2"></path>
+    <text x="360" y="412" fill="#f87171" font-size="15">deleted</text>
+
+    <rect x="540" y="165" width="330" height="34" rx="6" fill="#171717" stroke="#a3e635"></rect>
+    <text x="705" y="188" text-anchor="middle" fill="#f5f5f5" font-size="16">new  (plan|report|visual|design)</text>
+    <rect x="540" y="215" width="330" height="34" rx="6" fill="#171717" stroke="#a3e635"></rect>
+    <text x="705" y="238" text-anchor="middle" fill="#f5f5f5" font-size="16">check</text>
+    <rect x="540" y="265" width="330" height="34" rx="6" fill="#171717" stroke="#a3e635"></rect>
+    <text x="705" y="288" text-anchor="middle" fill="#f5f5f5" font-size="16">render  [--open]</text>
+    <rect x="540" y="315" width="330" height="34" rx="6" fill="#171717" stroke="#a3e635"></rect>
+    <text x="705" y="338" text-anchor="middle" fill="#f5f5f5" font-size="16">share</text>
+    <rect x="540" y="358" width="330" height="30" rx="6" fill="#0a0a0a" stroke="#fbbf24" stroke-dasharray="6 4"></rect>
+    <text x="705" y="378" text-anchor="middle" fill="#fbbf24" font-size="14">hidden: estimate · decompile · pdf</text>
+  </svg>
+  <figcaption>Red is deleted, green survives, amber stays callable but leaves the help listing.</figcaption>
+</figure><h3>What changes when you run it</h3>
+<table>
+<thead>
+<tr>
+<th>When you run</th>
+<th>Today</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>artifacts render plan.md</code></td>
+<td>writes <code>plan.html</code></td>
+<td>unchanged</td>
+</tr>
+<tr>
+<td><code>artifacts render plan.md --open</code></td>
+<td>not a thing</td>
+<td>writes <code>plan.html</code>, opens it in your default browser</td>
+</tr>
+<tr>
+<td><code>artifacts preview plan.md</code></td>
+<td>renders and opens</td>
+<td>gone — use <code>render --open</code></td>
+</tr>
+<tr>
+<td><code>artifacts render plan.md --format pdf</code></td>
+<td>writes a PDF</td>
+<td>gone — <code>render</code> is HTML-only</td>
+</tr>
+<tr>
+<td><code>artifacts new plan --blank</code></td>
+<td>not a thing</td>
+<td>writes blank <code>plan.template.md</code> (what <code>template</code> did)</td>
+</tr>
+<tr>
+<td><code>artifacts new design</code></td>
+<td>not a thing</td>
+<td>writes <code>DESIGN.md</code> (what <code>init design</code> did)</td>
+</tr>
+<tr>
+<td><code>artifacts template plan</code></td>
+<td>writes <code>plan.template.md</code></td>
+<td>gone — use <code>new plan --blank</code></td>
+</tr>
+<tr>
+<td><code>artifacts init design</code></td>
+<td>writes <code>DESIGN.md</code></td>
+<td>gone — use <code>new design</code></td>
+</tr>
+<tr>
+<td><code>artifacts setup</code> / <code>doctor</code></td>
+<td>config write + prereq check</td>
+<td>gone</td>
+</tr>
+<tr>
+<td><code>artifacts estimate f.md</code></td>
+<td>prints token comparison</td>
+<td>works, hidden from help</td>
+</tr>
+<tr>
+<td><code>artifacts pdf f.md --out f.pdf</code></td>
+<td>writes a PDF</td>
+<td>works, hidden from help</td>
+</tr>
+</tbody></table>
+<h3>Hiding, verified against the pin</h3>
+<p>The repo pins <code>commander@12.1.0</code> (<code>bun.lock:98</code>). At that exact tag, <code>lib/command.js</code> has
+<code>cmd._hidden = !!(opts.noHelp || opts.hidden)</code> and <code>lib/help.js</code> filters <code>visibleCommands</code> on
+<code>!cmd._hidden</code>. <strong>There is no <code>.hidden()</code> instance method at this pin</strong> — that fluent setter landed
+in a later major, so reaching for it fails.</p>
+<p>You suggested an <code>_estimate</code> spelling. Renaming outright would break <code>README.md:173</code> and
+<code>cli.test.ts:172</code>, so each internal keeps its real name <strong>and</strong> gains the underscore as an alias —
+both work, neither shows in help:</p>
+<pre><code>program.command('estimate',  { hidden: true }).alias('_estimate')
+program.command('decompile', { hidden: true }).alias('_decompile')
+program.command('pdf',       { hidden: true }).alias('_pdf')
+</code></pre>
+<h3>Where <code>setup</code>'s two jobs go</h3>
+<p><code>setup</code> does two unrelated things and its config is genuinely read, so each half needs a home.</p>
+<table>
+<thead>
+<tr>
+<th>Half</th>
+<th>Read at</th>
+<th>Destination</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>share.baseUrl</code> and tokens</td>
+<td><code>share.ts:84-89</code></td>
+<td>Already has writers — <code>share setup</code> and <code>share join</code> (<code>cli.ts:245-256</code>). Nothing to do.</td>
+</tr>
+<tr>
+<td><code>fonts.dirs</code></td>
+<td><code>render.ts:388</code></td>
+<td>Keep the read exactly as-is; drop the CLI writer. <strong>Zero code change.</strong></td>
+</tr>
+<tr>
+<td>Chromium readiness check</td>
+<td><code>setup.ts:28-36</code></td>
+<td>Deleted. PDF already self-reports: <code>pdf.ts:29-32</code> throws with the install command.</td>
+</tr>
+</tbody></table>
+<p>The alternative — threading <code>render --fonts-dir</code> through four signatures (<code>cli.ts</code> to
+<code>compileArtifact</code> to <code>renderMarkdown</code>/<code>normalizeHtml</code> to <code>cssFromDesign</code>) — carries one string one
+level deeper and loses configure-once. <code>fonts.ts:37-41</code> already resolves project-relative fonts
+against <code>cwd</code> with no config at all, so <code>fonts.dirs</code> only matters for fonts outside the checkout: a
+rare, once-per-machine line in <code>~/.artifacts/config.json</code>, documented in the README. No env var,
+per the standing convention that configuration belongs in real config.</p>
+<h2 id="public-interface">Public Interface</h2>
+<pre><code>artifacts new plan --out plan.md      # context-filled artifact
+artifacts new plan --blank            # blank plan.template.md
+artifacts new design                  # DESIGN.md
+artifacts check plan.md
+artifacts render plan.md --open       # plan.html next to source, opens in browser
+artifacts share plan.md --expire 30d
+</code></pre>
+<h2 id="validation">Validation</h2>
+<pre><code>bun run test
+
+artifacts --help                                   # exactly 4 commands listed
+artifacts estimate examples/plan.md                # works, absent from help
+artifacts _estimate examples/plan.md               # same, underscore spelling
+artifacts _pdf examples/plan.md --out /tmp/p.pdf --layout poster
+
+cd "$(mktemp -d)"
+artifacts new plan --out plan.md &amp;&amp; artifacts check plan.md
+artifacts render plan.md --open
+</code></pre>
+<p>Then the end-to-end proof, because <code>render</code> and <code>check</code> gate every plan the fleet presents:</p>
+<pre><code>DATE=$(date +%F)
+artifacts render .agents/artifacts/$DATE/plan-smoke.md --format html   # must still exit 0
+grep -c '&lt;svg' .agents/artifacts/$DATE/plan-smoke.html                 # the hook greps for this
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Expected result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>artifacts --help</code></td>
+<td>Four commands, no <code>setup</code>/<code>init</code>/<code>doctor</code>/<code>preview</code>/<code>template</code>/<code>pdf</code></td>
+</tr>
+<tr>
+<td>Hidden internals</td>
+<td><code>estimate</code>, <code>decompile</code>, <code>pdf</code> and their <code>_</code> aliases all exit 0</td>
+</tr>
+<tr>
+<td>ExitPlanMode gate</td>
+<td><code>render --format html</code> still exits 0 during the deprecation window</td>
+</tr>
+<tr>
+<td>Fonts</td>
+<td>A <code>DESIGN.md</code> naming a font file still embeds it, unchanged</td>
+</tr>
+<tr>
+<td><code>share</code></td>
+<td>All five subcommands unchanged</td>
+</tr>
+</tbody></table>
+<h2 id="risks">Risks</h2>
+<p><strong>The one rollout hazard.</strong> The deployed ExitPlanMode hook prints this as the command every agent
+should run (<code>plan-html-reminder.sh:142</code>):</p>
+<pre><code>echo "    artifacts render .agents/artifacts/\$DATE/plan-&lt;slug&gt;.md --format html"
+</code></pre>
+<p>Commander errors on unknown options, so the moment <code>--format</code> is gone, every agent running that line
+gets <code>error: unknown option '--format'</code> and the plan-presentation gate fails — including sessions
+already in flight with a cached hook. So <code>render</code> keeps accepting <code>--format html</code> for one version:</p>
+<table>
+<thead>
+<tr>
+<th>Invocation</th>
+<th>Behavior in 0.3.0</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>--format html</code></td>
+<td>Accepted, no-op, hidden from <code>--help</code></td>
+</tr>
+<tr>
+<td><code>--format pdf</code> or <code>html,pdf</code></td>
+<td>Errors: <code>PDF moved to artifacts _pdf; render is HTML-only.</code></td>
+</tr>
+<tr>
+<td>Either, in 0.4.0</td>
+<td>Removed entirely, noted in CHANGELOG</td>
+</tr>
+</tbody></table>
+<p>This is a deprecation window with a named removal version, not a permanent compatibility branch. It
+also decouples the two changesets, so the CLI can ship before every skill copy catches up instead of
+requiring a fleet-wide flag day.</p>
+<p><strong>Pre-existing bug found while mapping.</strong> <code>cli.ts:25-34</code> has two output-path helpers that disagree:
+<code>defaultOutFor</code> (used by <code>render</code>) writes HTML next to the source, while <code>defaultHtmlOut</code> (used only
+by <code>pdf</code>, <code>cli.ts:218</code>) always writes into <code>.artifacts/</code>. Unifying on <code>defaultOutFor</code> is a one-line
+fix that belongs in this pass, or the inconsistency gets frozen into a now-hidden command.</p>
+<p><strong>Open decision — how far to take PDF.</strong> This plan hides <code>pdf</code> rather than deleting it, which keeps
+<code>/output</code> working. Deleting it outright means dropping <code>src/lib/pdf.ts</code> (83 lines), <code>pdf.test.ts</code>,
+and the <code>playwright</code> optionalDep — but <code>work/commands/output.md:70</code> must switch to HTML-only first,
+since that command's whole job is dropping a PDF in Downloads. Default if nothing is said: hide,
+don't delete.</p>
+<h2 id="files">Files</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>src/cli.ts</code></td>
+<td>The whole edit — delete five command blocks, merge two pairs, add hidden flags and aliases, rewrite <code>addHelpText</code> (<code>cli.ts:47-55</code>)</td>
+</tr>
+<tr>
+<td><code>src/commands/setup.ts</code></td>
+<td>Delete (37 lines); its only callers are <code>cli.ts:63</code> and <code>cli.ts:264</code></td>
+</tr>
+<tr>
+<td><code>src/cli.test.ts</code></td>
+<td>Delete 2 tests (<code>131-143</code>, <code>160-169</code>), rewrite the help assertion (<code>9-19</code>), add <code>new --blank</code> / <code>new design</code> / <code>render --open</code></td>
+</tr>
+<tr>
+<td><code>src/lib/templates.ts</code></td>
+<td>No change — <code>TemplateKind</code> and <code>templateFor</code> untouched by design</td>
+</tr>
+<tr>
+<td><code>src/lib/render.ts</code>, <code>fonts.ts</code>, <code>config.ts</code></td>
+<td>No change</td>
+</tr>
+<tr>
+<td><code>README.md</code>, <code>skills/artifacts/SKILL.md</code>, <code>references/authoring.md</code></td>
+<td>Rewrite for the four-command surface</td>
+</tr>
+<tr>
+<td><code>package.json:3</code>, <code>cli.ts:46</code>, <code>CHANGELOG.md</code></td>
+<td>Bump to <code>0.3.0</code>; both version literals move together — <code>release.sh:37</code> reads only the <code>package.json</code> one</td>
+</tr>
+</tbody></table>
+<h3>Second changeset — fleet consumers</h3>
+<p>Outside this repo, removed commands are referenced by skills, rules, and the live ExitPlanMode hook.</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Line</th>
+<th>Stale reference</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>.system/skills/artifacts/SKILL.md</code></td>
+<td>54, 80, 109, 113, 116</td>
+<td><code>template</code>, <code>--format pdf --layout poster</code>, <code>init design</code>, <code>setup --fonts-dir</code>, <code>estimate</code></td>
+</tr>
+<tr>
+<td><code>.system/skills/artifacts/references/authoring.md</code></td>
+<td>61, 178</td>
+<td><code>template</code>, <code>decompile</code></td>
+</tr>
+<tr>
+<td><code>.system/skills/plan-render/SKILL.md</code></td>
+<td>140</td>
+<td><code>init design</code></td>
+</tr>
+<tr>
+<td><code>.system/skills/visualize/SKILL.md</code></td>
+<td>136</td>
+<td><code>init design</code></td>
+</tr>
+<tr>
+<td><code>.system/rules/subrules/plan-presentation/rule.md</code></td>
+<td>45</td>
+<td><code>artifacts template plan</code></td>
+</tr>
+<tr>
+<td><code>.system/plugins/work/commands/output.md</code></td>
+<td>70</td>
+<td><code>--format html,pdf</code></td>
+</tr>
+</tbody></table>
+<p><code>render</code> and <code>check</code> — the two commands the hook actually gates on
+(<code>plan-html-reminder.sh:142,147</code>) — are unchanged, so the gate keeps working throughout.</p>
+<h2 id="sequence">Sequence</h2>
+<p>Each commit builds and passes <code>bun run test</code> on its own.</p>
+<ol>
+<li><code>refactor: hide estimate, decompile, and pdf from the command list</code></li>
+<li><code>refactor: fold template and init design into the new command</code></li>
+<li><code>feat: add render --open and drop the preview command</code></li>
+<li><code>refactor: make render html-only</code> — keeps <code>--format html</code> as a hidden deprecated no-op</li>
+<li><code>refactor: remove the setup and doctor commands</code> — documents hand-editing <code>fonts.dirs</code> in the same commit so no gap opens</li>
+<li><code>fix: unify html output path between render and pdf</code></li>
+<li><code>docs: rewrite README and artifacts skill for the four-command surface</code></li>
+<li><code>release: bump to 0.3.0</code></li>
+</ol>
+</article>
+<footer class="document-footer">Internal implementation plan</footer>
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGVtcGxhdGU6IHBsYW4udjEKdGl0bGU6IEEgQ2xlYW5lciBBUEkgU3VyZmFjZSBmb3IgYXJ0aWZhY3RzCnN1bW1hcnk6IENvbGxhcHNlIHR3ZWx2ZSBjb21tYW5kcyBpbnRvIGZvdXIgYnkgZGVsZXRpbmcgZHVwbGljYXRlcywgZm9sZGluZyBzY2FmZm9sZGVycyB0b2dldGhlciwgYW5kIGhpZGluZyBpbnRlcm5hbHMg4oCUIHdpdGhvdXQgYnJlYWtpbmcgdGhlIEV4aXRQbGFuTW9kZSBnYXRlIHRoZSBmbGVldCBkZXBlbmRzIG9uLgpoZWFkZXI6IFBob2VuaXggTGFicyAvIGFydGlmYWN0cy1jbGkKZm9vdGVyOiBJbnRlcm5hbCBpbXBsZW1lbnRhdGlvbiBwbGFuCnByb2plY3Q6IGFydGlmYWN0cy1jbGkKY29udGV4dDogQ0xJIEFQSSBzdXJmYWNlIHJlZHVjdGlvbgpyZXBvc2l0b3J5OiBwaG54LWxhYnMvYXJ0aWZhY3RzLWNsaQpicmFuY2g6IG1haW4Kc3RhdHVzOiBkcmFmdApoYXJuZXNzOiBjbGF1ZGUtY29kZQphZ2VudDogY2xhdWRlLW9wdXMtNQpodW1hbjogbXVxc2l0Cmhvc3Q6IHppb24Kc2Vzc2lvbjogIjk5NDMyMTc4IgpkYXRlOiAiMjAyNi0wOC0wOSIKZmFjdHM6CiAgLSAxMiBjb21tYW5kcyBiZWNvbWUgNAogIC0gZG9jdG9yIGlzIGEgdmVyYmF0aW0gY29weSBvZiBzZXR1cAogIC0gY2hyb21pdW0gd2FzIGFscmVhZHkgb3B0aW9uYWwKYXNzZXRzOiBbXQotLS0KCiMjIFB1cnBvc2UKCmBhcnRpZmFjdHMgLS1oZWxwYCBsaXN0cyAqKnR3ZWx2ZSBjb21tYW5kcyoqLiBBbiBhZ2VudCByZWFkaW5nIGl0IGhhcyB0byB3ZWlnaCB0d2VsdmUgdmVyYnMgdG8gcGljawp0aGUgdHdvIGl0IGFjdHVhbGx5IG5lZWRzLiBTZXZlcmFsIGFyZSBkdXBsaWNhdGVzIG9mIGVhY2ggb3RoZXIsIG9uZSBpcyBhIGJ5dGUtZm9yLWJ5dGUgY29weSBvZgphbm90aGVyLCBhbmQgdHdvIGFyZSBpbnRlcm5hbCB0b29scyBzaXR0aW5nIGluIHRoZSBmcm9udCBkb29yLgoKRml2ZSBjb21wbGFpbnRzIHdlcmUgcmFpc2VkLiBUaHJlZSBhcmUgcmVhbDsgdHdvIGFyZSBhYm91dCB0aGluZ3MgdGhhdCBhcmUgYWxyZWFkeSBmaW5lLiBDaGVja2luZwplYWNoIGFnYWluc3QgdGhlIHNvdXJjZSBmaXJzdCwgYmVjYXVzZSB0aGUgZml4IGRpZmZlcnM6Cgp8IENvbXBsYWludCB8IFZlcmRpY3QgfCBFdmlkZW5jZSB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCBgZG9jdG9yYCBpcyByZWR1bmRhbnQgfCAqKlRydWUsIDEwMCUqKiB8IGBjbGkudHM6MjY0YCBpcyBgLmFjdGlvbigoKSA9PiBydW5TZXR1cCh7fSkpYCDigJQgdGhlIHNhbWUgZnVuY3Rpb24gYHNldHVwYCBjYWxscyBhdCBgY2xpLnRzOjYzYC4gWmVybyBkb2N0b3Itc3BlY2lmaWMgY29kZS4gfAp8IGBjb21waWxlYCBhbmQgYGRlY29tcGlsZWAgYXJlIGEgcmVkdW5kYW50IHBhaXIgfCAqKkZhbHNlKiogfCBgY29tcGlsZWAgaXMgYSBDb21tYW5kZXIgYWxpYXMgb24gYHJlbmRlcmAgKGBjbGkudHM6MTI5YCkuIGBkZWNvbXBpbGVgIGlzIHVucmVsYXRlZDogaXQgcmVnZXgtZXh0cmFjdHMgYSBiYXNlNjQgYmxvYiBgcmVuZGVyYCBlbWJlZGRlZCBpbiBgPHNjcmlwdCBpZD0iYXJ0aWZhY3RzLXNvdXJjZSI+YCAoYHJlbmRlci50czo0ODQtNDkxYCkuIE5vdCBhbiBpbnZlcnNlLiB8CnwgYHNldHVwYCBzZXRzIHVwIG5vdGhpbmcgfCAqKkZhbHNlKiogfCBJdCB3cml0ZXMgYH4vLmFydGlmYWN0cy9jb25maWcuanNvbmAsIGFuZCB0aGF0IGZpbGUgKippcyoqIHJlYWQgYXQgcnVudGltZSDigJQgYHJlbmRlci50czozODhgIGZvciBgZm9udHMuZGlyc2AsIGBzaGFyZS50czo4NC04OWAgZm9yIHRoZSBzaGFyZSBlbmRwb2ludC4gfAp8IENocm9taXVtIGlzIGEgZGVwZW5kZW5jeSB8ICoqQWxyZWFkeSBmYWxzZSoqIHwgYHBsYXl3cmlnaHRgIHNpdHMgaW4gYG9wdGlvbmFsRGVwZW5kZW5jaWVzYCAoYHBhY2thZ2UuanNvbjoyOS0zMWApIGFuZCBpcyBkeW5hbWljYWxseSBpbXBvcnRlZCAoYHBkZi50czoyOC0zM2ApLiBOZXZlciBpbnN0YWxsZWQgdW5sZXNzIFBERiBpcyByZXF1ZXN0ZWQuIHwKfCBgZXN0aW1hdGVgIGlzIGludGVybmFsIGFuZCBzaG91bGQgYmUgaGlkZGVuIHwgKipUcnVlKiogfCBDYWxsZWQgZnJvbSBleGFjdGx5IG9uZSBwbGFjZSwgYGNsaS50czoxMTVgLiBObyBvdGhlciBjb21tYW5kIHVzZXMgaXQuIHwKCjxhc2lkZSBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+PHN0cm9uZz5PbmUgY29ycmVjdGlvbiB0aGF0IHNoYXBlcyB0aGUgcGxhbjo8L3N0cm9uZz4gYSBicm93c2VyIGNhbm5vdCB3cml0ZSBhIFBERiBmaWxlIG5vbi1pbnRlcmFjdGl2ZWx5LiA8Y29kZT5vcGVuIGZpbGUuaHRtbDwvY29kZT4gZGlzcGxheXMgaXQ7IG5vdGhpbmcgbWFrZXMgU2FmYXJpIG9yIENocm9tZSBzYXZlIGEgUERGIHdpdGhvdXQgYSBodW1hbiBwcmVzc2luZyBDbWQtUC4gU28gIlBERiB0aHJvdWdoIHRoZSBkZWZhdWx0IGJyb3dzZXIiIG5lY2Vzc2FyaWx5IG1lYW5zIHRoZSBDTEkgc3RvcHMgZW1pdHRpbmcgPGNvZGU+LnBkZjwvY29kZT4gZmlsZXMg4oCUIGFuZCA8Y29kZT4vb3V0cHV0PC9jb2RlPiBkZXBlbmRzIG9uIGl0IGVtaXR0aW5nIHRoZW0uPC9hc2lkZT4KCiMjIFByb3Bvc2VkIENoYW5nZXMKClR3ZWx2ZSB2aXNpYmxlIGNvbW1hbmRzIGJlY29tZSBmb3VyLCB3aXRoIHRocmVlIGludGVybmFscyBzdGlsbCBjYWxsYWJsZSBidXQgYWJzZW50IGZyb20gaGVscC4KCjxmaWd1cmUgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZSBhcnRpZmFjdC1maWd1cmUtZGlhZ3JhbSI+CiAgPHN2ZyBjbGFzcz0iYXJ0aWZhY3QtZGlhZ3JhbSIgdmlld0JveD0iMCAwIDk0MCA0MzAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iVHdlbHZlIGNvbW1hbmRzIGNvbGxhcHNlIGludG8gZm91ciB2aXNpYmxlIGNvbW1hbmRzIHBsdXMgdGhyZWUgaGlkZGVuIG9uZXMiPgogICAgPHRleHQgeD0iMTUwIiB5PSIyOCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2EzYTNhMyIgZm9udC1zaXplPSIxNiI+QkVGT1JFIOKAlCAxMiBpbiAtLWhlbHA8L3RleHQ+CiAgICA8dGV4dCB4PSI3NzAiIHk9IjI4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYTNhM2EzIiBmb250LXNpemU9IjE2Ij5BRlRFUiDigJQgNCBpbiAtLWhlbHA8L3RleHQ+CgogICAgPHJlY3QgeD0iNDAiIHk9IjQ1IiB3aWR0aD0iMjIwIiBoZWlnaHQ9IjM0IiByeD0iNiIgZmlsbD0iIzE3MTcxNyIgc3Ryb2tlPSIjZjg3MTcxIiAvPgogICAgPHRleHQgeD0iMTUwIiB5PSI2OCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Y1ZjVmNSIgZm9udC1zaXplPSIxNiI+c2V0dXA8L3RleHQ+CiAgICA8cmVjdCB4PSI0MCIgeT0iODUiIHdpZHRoPSIyMjAiIGhlaWdodD0iMzQiIHJ4PSI2IiBmaWxsPSIjMTcxNzE3IiBzdHJva2U9IiNmODcxNzEiIC8+CiAgICA8dGV4dCB4PSIxNTAiIHk9IjEwOCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Y1ZjVmNSIgZm9udC1zaXplPSIxNiI+aW5pdCBkZXNpZ248L3RleHQ+CiAgICA8cmVjdCB4PSI0MCIgeT0iMTI1IiB3aWR0aD0iMjIwIiBoZWlnaHQ9IjM0IiByeD0iNiIgZmlsbD0iIzE3MTcxNyIgc3Ryb2tlPSIjZjg3MTcxIiAvPgogICAgPHRleHQgeD0iMTUwIiB5PSIxNDgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmNWY1ZjUiIGZvbnQtc2l6ZT0iMTYiPnRlbXBsYXRlPC90ZXh0PgogICAgPHJlY3QgeD0iNDAiIHk9IjE2NSIgd2lkdGg9IjIyMCIgaGVpZ2h0PSIzNCIgcng9IjYiIGZpbGw9IiMxNzE3MTciIHN0cm9rZT0iI2EzZTYzNSIgLz4KICAgIDx0ZXh0IHg9IjE1MCIgeT0iMTg4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZjVmNWY1IiBmb250LXNpemU9IjE2Ij5uZXc8L3RleHQ+CiAgICA8cmVjdCB4PSI0MCIgeT0iMjA1IiB3aWR0aD0iMjIwIiBoZWlnaHQ9IjM0IiByeD0iNiIgZmlsbD0iIzE3MTcxNyIgc3Ryb2tlPSIjYTNlNjM1IiAvPgogICAgPHRleHQgeD0iMTUwIiB5PSIyMjgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmNWY1ZjUiIGZvbnQtc2l6ZT0iMTYiPmNoZWNrIHwgdmFsaWRhdGU8L3RleHQ+CiAgICA8cmVjdCB4PSI0MCIgeT0iMjQ1IiB3aWR0aD0iMjIwIiBoZWlnaHQ9IjM0IiByeD0iNiIgZmlsbD0iIzE3MTcxNyIgc3Ryb2tlPSIjYTNlNjM1IiAvPgogICAgPHRleHQgeD0iMTUwIiB5PSIyNjgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmNWY1ZjUiIGZvbnQtc2l6ZT0iMTYiPnJlbmRlciB8IGNvbXBpbGU8L3RleHQ+CiAgICA8cmVjdCB4PSI0MCIgeT0iMjg1IiB3aWR0aD0iMjIwIiBoZWlnaHQ9IjM0IiByeD0iNiIgZmlsbD0iIzE3MTcxNyIgc3Ryb2tlPSIjZjg3MTcxIiAvPgogICAgPHRleHQgeD0iMTUwIiB5PSIzMDgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmNWY1ZjUiIGZvbnQtc2l6ZT0iMTYiPnByZXZpZXc8L3RleHQ+CiAgICA8cmVjdCB4PSI0MCIgeT0iMzI1IiB3aWR0aD0iMjIwIiBoZWlnaHQ9IjM0IiByeD0iNiIgZmlsbD0iIzE3MTcxNyIgc3Ryb2tlPSIjZmJiZjI0IiAvPgogICAgPHRleHQgeD0iMTUwIiB5PSIzNDgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmNWY1ZjUiIGZvbnQtc2l6ZT0iMTYiPmVzdGltYXRlIMK3IGRlY29tcGlsZSDCtyBwZGY8L3RleHQ+CiAgICA8cmVjdCB4PSI0MCIgeT0iMzY1IiB3aWR0aD0iMjIwIiBoZWlnaHQ9IjM0IiByeD0iNiIgZmlsbD0iIzE3MTcxNyIgc3Ryb2tlPSIjZjg3MTcxIiAvPgogICAgPHRleHQgeD0iMTUwIiB5PSIzODgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmNWY1ZjUiIGZvbnQtc2l6ZT0iMTYiPmRvY3RvcjwvdGV4dD4KCiAgICA8cGF0aCBkPSJNMjYwIDYyIEMgMzgwIDYyLCA0MjAgMTgyLCA1NDAgMTgyIiBmaWxsPSJub25lIiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMiIgLz4KICAgIDxwYXRoIGQ9Ik0yNjAgMTAyIEMgMzgwIDEwMiwgNDIwIDE4MiwgNTQwIDE4MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjIiIC8+CiAgICA8cGF0aCBkPSJNMjYwIDE0MiBDIDM4MCAxNDIsIDQyMCAxODIsIDU0MCAxODIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzM4YmRmOCIgc3Ryb2tlLXdpZHRoPSIyIiAvPgogICAgPHBhdGggZD0iTTI2MCAxODIgTCA1NDAgMTgyIiBmaWxsPSJub25lIiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMiIgLz4KICAgIDxwYXRoIGQ9Ik0yNjAgMjIyIEwgNTQwIDIzMiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjIiIC8+CiAgICA8cGF0aCBkPSJNMjYwIDI2MiBDIDM4MCAyNjIsIDQyMCAyODIsIDU0MCAyODIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzM4YmRmOCIgc3Ryb2tlLXdpZHRoPSIyIiAvPgogICAgPHBhdGggZD0iTTI2MCAzMDIgQyAzODAgMzAyLCA0MjAgMjgyLCA1NDAgMjgyIiBmaWxsPSJub25lIiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMiIgLz4KICAgIDxwYXRoIGQ9Ik0yNjAgMzQyIEMgNDAwIDM0MiwgNDQwIDM3MiwgNTQwIDM3MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmJiZjI0IiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1kYXNoYXJyYXk9IjYgNCIgLz4KICAgIDxwYXRoIGQ9Ik0yNjAgMzgyIEwgMzMwIDQwMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZjg3MTcxIiBzdHJva2Utd2lkdGg9IjIiIC8+CiAgICA8dGV4dCB4PSIzNjAiIHk9IjQxMiIgZmlsbD0iI2Y4NzE3MSIgZm9udC1zaXplPSIxNSI+ZGVsZXRlZDwvdGV4dD4KCiAgICA8cmVjdCB4PSI1NDAiIHk9IjE2NSIgd2lkdGg9IjMzMCIgaGVpZ2h0PSIzNCIgcng9IjYiIGZpbGw9IiMxNzE3MTciIHN0cm9rZT0iI2EzZTYzNSIgLz4KICAgIDx0ZXh0IHg9IjcwNSIgeT0iMTg4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZjVmNWY1IiBmb250LXNpemU9IjE2Ij5uZXcgIChwbGFufHJlcG9ydHx2aXN1YWx8ZGVzaWduKTwvdGV4dD4KICAgIDxyZWN0IHg9IjU0MCIgeT0iMjE1IiB3aWR0aD0iMzMwIiBoZWlnaHQ9IjM0IiByeD0iNiIgZmlsbD0iIzE3MTcxNyIgc3Ryb2tlPSIjYTNlNjM1IiAvPgogICAgPHRleHQgeD0iNzA1IiB5PSIyMzgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmNWY1ZjUiIGZvbnQtc2l6ZT0iMTYiPmNoZWNrPC90ZXh0PgogICAgPHJlY3QgeD0iNTQwIiB5PSIyNjUiIHdpZHRoPSIzMzAiIGhlaWdodD0iMzQiIHJ4PSI2IiBmaWxsPSIjMTcxNzE3IiBzdHJva2U9IiNhM2U2MzUiIC8+CiAgICA8dGV4dCB4PSI3MDUiIHk9IjI4OCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Y1ZjVmNSIgZm9udC1zaXplPSIxNiI+cmVuZGVyICBbLS1vcGVuXTwvdGV4dD4KICAgIDxyZWN0IHg9IjU0MCIgeT0iMzE1IiB3aWR0aD0iMzMwIiBoZWlnaHQ9IjM0IiByeD0iNiIgZmlsbD0iIzE3MTcxNyIgc3Ryb2tlPSIjYTNlNjM1IiAvPgogICAgPHRleHQgeD0iNzA1IiB5PSIzMzgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmNWY1ZjUiIGZvbnQtc2l6ZT0iMTYiPnNoYXJlPC90ZXh0PgogICAgPHJlY3QgeD0iNTQwIiB5PSIzNTgiIHdpZHRoPSIzMzAiIGhlaWdodD0iMzAiIHJ4PSI2IiBmaWxsPSIjMGEwYTBhIiBzdHJva2U9IiNmYmJmMjQiIHN0cm9rZS1kYXNoYXJyYXk9IjYgNCIgLz4KICAgIDx0ZXh0IHg9IjcwNSIgeT0iMzc4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmJiZjI0IiBmb250LXNpemU9IjE0Ij5oaWRkZW46IGVzdGltYXRlIMK3IGRlY29tcGlsZSDCtyBwZGY8L3RleHQ+CiAgPC9zdmc+CiAgPGZpZ2NhcHRpb24+UmVkIGlzIGRlbGV0ZWQsIGdyZWVuIHN1cnZpdmVzLCBhbWJlciBzdGF5cyBjYWxsYWJsZSBidXQgbGVhdmVzIHRoZSBoZWxwIGxpc3RpbmcuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCiMjIyBXaGF0IGNoYW5nZXMgd2hlbiB5b3UgcnVuIGl0Cgp8IFdoZW4geW91IHJ1biB8IFRvZGF5IHwgQWZ0ZXIgfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgYGFydGlmYWN0cyByZW5kZXIgcGxhbi5tZGAgfCB3cml0ZXMgYHBsYW4uaHRtbGAgfCB1bmNoYW5nZWQgfAp8IGBhcnRpZmFjdHMgcmVuZGVyIHBsYW4ubWQgLS1vcGVuYCB8IG5vdCBhIHRoaW5nIHwgd3JpdGVzIGBwbGFuLmh0bWxgLCBvcGVucyBpdCBpbiB5b3VyIGRlZmF1bHQgYnJvd3NlciB8CnwgYGFydGlmYWN0cyBwcmV2aWV3IHBsYW4ubWRgIHwgcmVuZGVycyBhbmQgb3BlbnMgfCBnb25lIOKAlCB1c2UgYHJlbmRlciAtLW9wZW5gIHwKfCBgYXJ0aWZhY3RzIHJlbmRlciBwbGFuLm1kIC0tZm9ybWF0IHBkZmAgfCB3cml0ZXMgYSBQREYgfCBnb25lIOKAlCBgcmVuZGVyYCBpcyBIVE1MLW9ubHkgfAp8IGBhcnRpZmFjdHMgbmV3IHBsYW4gLS1ibGFua2AgfCBub3QgYSB0aGluZyB8IHdyaXRlcyBibGFuayBgcGxhbi50ZW1wbGF0ZS5tZGAgKHdoYXQgYHRlbXBsYXRlYCBkaWQpIHwKfCBgYXJ0aWZhY3RzIG5ldyBkZXNpZ25gIHwgbm90IGEgdGhpbmcgfCB3cml0ZXMgYERFU0lHTi5tZGAgKHdoYXQgYGluaXQgZGVzaWduYCBkaWQpIHwKfCBgYXJ0aWZhY3RzIHRlbXBsYXRlIHBsYW5gIHwgd3JpdGVzIGBwbGFuLnRlbXBsYXRlLm1kYCB8IGdvbmUg4oCUIHVzZSBgbmV3IHBsYW4gLS1ibGFua2AgfAp8IGBhcnRpZmFjdHMgaW5pdCBkZXNpZ25gIHwgd3JpdGVzIGBERVNJR04ubWRgIHwgZ29uZSDigJQgdXNlIGBuZXcgZGVzaWduYCB8CnwgYGFydGlmYWN0cyBzZXR1cGAgLyBgZG9jdG9yYCB8IGNvbmZpZyB3cml0ZSArIHByZXJlcSBjaGVjayB8IGdvbmUgfAp8IGBhcnRpZmFjdHMgZXN0aW1hdGUgZi5tZGAgfCBwcmludHMgdG9rZW4gY29tcGFyaXNvbiB8IHdvcmtzLCBoaWRkZW4gZnJvbSBoZWxwIHwKfCBgYXJ0aWZhY3RzIHBkZiBmLm1kIC0tb3V0IGYucGRmYCB8IHdyaXRlcyBhIFBERiB8IHdvcmtzLCBoaWRkZW4gZnJvbSBoZWxwIHwKCiMjIyBIaWRpbmcsIHZlcmlmaWVkIGFnYWluc3QgdGhlIHBpbgoKVGhlIHJlcG8gcGlucyBgY29tbWFuZGVyQDEyLjEuMGAgKGBidW4ubG9jazo5OGApLiBBdCB0aGF0IGV4YWN0IHRhZywgYGxpYi9jb21tYW5kLmpzYCBoYXMKYGNtZC5faGlkZGVuID0gISEob3B0cy5ub0hlbHAgfHwgb3B0cy5oaWRkZW4pYCBhbmQgYGxpYi9oZWxwLmpzYCBmaWx0ZXJzIGB2aXNpYmxlQ29tbWFuZHNgIG9uCmAhY21kLl9oaWRkZW5gLiAqKlRoZXJlIGlzIG5vIGAuaGlkZGVuKClgIGluc3RhbmNlIG1ldGhvZCBhdCB0aGlzIHBpbioqIOKAlCB0aGF0IGZsdWVudCBzZXR0ZXIgbGFuZGVkCmluIGEgbGF0ZXIgbWFqb3IsIHNvIHJlYWNoaW5nIGZvciBpdCBmYWlscy4KCllvdSBzdWdnZXN0ZWQgYW4gYF9lc3RpbWF0ZWAgc3BlbGxpbmcuIFJlbmFtaW5nIG91dHJpZ2h0IHdvdWxkIGJyZWFrIGBSRUFETUUubWQ6MTczYCBhbmQKYGNsaS50ZXN0LnRzOjE3MmAsIHNvIGVhY2ggaW50ZXJuYWwga2VlcHMgaXRzIHJlYWwgbmFtZSAqKmFuZCoqIGdhaW5zIHRoZSB1bmRlcnNjb3JlIGFzIGFuIGFsaWFzIOKAlApib3RoIHdvcmssIG5laXRoZXIgc2hvd3MgaW4gaGVscDoKCmBgYHRzCnByb2dyYW0uY29tbWFuZCgnZXN0aW1hdGUnLCAgeyBoaWRkZW46IHRydWUgfSkuYWxpYXMoJ19lc3RpbWF0ZScpCnByb2dyYW0uY29tbWFuZCgnZGVjb21waWxlJywgeyBoaWRkZW46IHRydWUgfSkuYWxpYXMoJ19kZWNvbXBpbGUnKQpwcm9ncmFtLmNvbW1hbmQoJ3BkZicsICAgICAgIHsgaGlkZGVuOiB0cnVlIH0pLmFsaWFzKCdfcGRmJykKYGBgCgojIyMgV2hlcmUgYHNldHVwYCdzIHR3byBqb2JzIGdvCgpgc2V0dXBgIGRvZXMgdHdvIHVucmVsYXRlZCB0aGluZ3MgYW5kIGl0cyBjb25maWcgaXMgZ2VudWluZWx5IHJlYWQsIHNvIGVhY2ggaGFsZiBuZWVkcyBhIGhvbWUuCgp8IEhhbGYgfCBSZWFkIGF0IHwgRGVzdGluYXRpb24gfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgYHNoYXJlLmJhc2VVcmxgIGFuZCB0b2tlbnMgfCBgc2hhcmUudHM6ODQtODlgIHwgQWxyZWFkeSBoYXMgd3JpdGVycyDigJQgYHNoYXJlIHNldHVwYCBhbmQgYHNoYXJlIGpvaW5gIChgY2xpLnRzOjI0NS0yNTZgKS4gTm90aGluZyB0byBkby4gfAp8IGBmb250cy5kaXJzYCB8IGByZW5kZXIudHM6Mzg4YCB8IEtlZXAgdGhlIHJlYWQgZXhhY3RseSBhcy1pczsgZHJvcCB0aGUgQ0xJIHdyaXRlci4gKipaZXJvIGNvZGUgY2hhbmdlLioqIHwKfCBDaHJvbWl1bSByZWFkaW5lc3MgY2hlY2sgfCBgc2V0dXAudHM6MjgtMzZgIHwgRGVsZXRlZC4gUERGIGFscmVhZHkgc2VsZi1yZXBvcnRzOiBgcGRmLnRzOjI5LTMyYCB0aHJvd3Mgd2l0aCB0aGUgaW5zdGFsbCBjb21tYW5kLiB8CgpUaGUgYWx0ZXJuYXRpdmUg4oCUIHRocmVhZGluZyBgcmVuZGVyIC0tZm9udHMtZGlyYCB0aHJvdWdoIGZvdXIgc2lnbmF0dXJlcyAoYGNsaS50c2AgdG8KYGNvbXBpbGVBcnRpZmFjdGAgdG8gYHJlbmRlck1hcmtkb3duYC9gbm9ybWFsaXplSHRtbGAgdG8gYGNzc0Zyb21EZXNpZ25gKSDigJQgY2FycmllcyBvbmUgc3RyaW5nIG9uZQpsZXZlbCBkZWVwZXIgYW5kIGxvc2VzIGNvbmZpZ3VyZS1vbmNlLiBgZm9udHMudHM6MzctNDFgIGFscmVhZHkgcmVzb2x2ZXMgcHJvamVjdC1yZWxhdGl2ZSBmb250cwphZ2FpbnN0IGBjd2RgIHdpdGggbm8gY29uZmlnIGF0IGFsbCwgc28gYGZvbnRzLmRpcnNgIG9ubHkgbWF0dGVycyBmb3IgZm9udHMgb3V0c2lkZSB0aGUgY2hlY2tvdXQ6IGEKcmFyZSwgb25jZS1wZXItbWFjaGluZSBsaW5lIGluIGB+Ly5hcnRpZmFjdHMvY29uZmlnLmpzb25gLCBkb2N1bWVudGVkIGluIHRoZSBSRUFETUUuIE5vIGVudiB2YXIsCnBlciB0aGUgc3RhbmRpbmcgY29udmVudGlvbiB0aGF0IGNvbmZpZ3VyYXRpb24gYmVsb25ncyBpbiByZWFsIGNvbmZpZy4KCiMjIFB1YmxpYyBJbnRlcmZhY2UKCmBgYGJhc2gKYXJ0aWZhY3RzIG5ldyBwbGFuIC0tb3V0IHBsYW4ubWQgICAgICAjIGNvbnRleHQtZmlsbGVkIGFydGlmYWN0CmFydGlmYWN0cyBuZXcgcGxhbiAtLWJsYW5rICAgICAgICAgICAgIyBibGFuayBwbGFuLnRlbXBsYXRlLm1kCmFydGlmYWN0cyBuZXcgZGVzaWduICAgICAgICAgICAgICAgICAgIyBERVNJR04ubWQKYXJ0aWZhY3RzIGNoZWNrIHBsYW4ubWQKYXJ0aWZhY3RzIHJlbmRlciBwbGFuLm1kIC0tb3BlbiAgICAgICAjIHBsYW4uaHRtbCBuZXh0IHRvIHNvdXJjZSwgb3BlbnMgaW4gYnJvd3NlcgphcnRpZmFjdHMgc2hhcmUgcGxhbi5tZCAtLWV4cGlyZSAzMGQKYGBgCgojIyBWYWxpZGF0aW9uCgpgYGBiYXNoCmJ1biBydW4gdGVzdAoKYXJ0aWZhY3RzIC0taGVscCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIyBleGFjdGx5IDQgY29tbWFuZHMgbGlzdGVkCmFydGlmYWN0cyBlc3RpbWF0ZSBleGFtcGxlcy9wbGFuLm1kICAgICAgICAgICAgICAgICMgd29ya3MsIGFic2VudCBmcm9tIGhlbHAKYXJ0aWZhY3RzIF9lc3RpbWF0ZSBleGFtcGxlcy9wbGFuLm1kICAgICAgICAgICAgICAgIyBzYW1lLCB1bmRlcnNjb3JlIHNwZWxsaW5nCmFydGlmYWN0cyBfcGRmIGV4YW1wbGVzL3BsYW4ubWQgLS1vdXQgL3RtcC9wLnBkZiAtLWxheW91dCBwb3N0ZXIKCmNkICIkKG1rdGVtcCAtZCkiCmFydGlmYWN0cyBuZXcgcGxhbiAtLW91dCBwbGFuLm1kICYmIGFydGlmYWN0cyBjaGVjayBwbGFuLm1kCmFydGlmYWN0cyByZW5kZXIgcGxhbi5tZCAtLW9wZW4KYGBgCgpUaGVuIHRoZSBlbmQtdG8tZW5kIHByb29mLCBiZWNhdXNlIGByZW5kZXJgIGFuZCBgY2hlY2tgIGdhdGUgZXZlcnkgcGxhbiB0aGUgZmxlZXQgcHJlc2VudHM6CgpgYGBiYXNoCkRBVEU9JChkYXRlICslRikKYXJ0aWZhY3RzIHJlbmRlciAuYWdlbnRzL2FydGlmYWN0cy8kREFURS9wbGFuLXNtb2tlLm1kIC0tZm9ybWF0IGh0bWwgICAjIG11c3Qgc3RpbGwgZXhpdCAwCmdyZXAgLWMgJzxzdmcnIC5hZ2VudHMvYXJ0aWZhY3RzLyREQVRFL3BsYW4tc21va2UuaHRtbCAgICAgICAgICAgICAgICAgIyB0aGUgaG9vayBncmVwcyBmb3IgdGhpcwpgYGAKCnwgQ2hlY2sgfCBFeHBlY3RlZCByZXN1bHQgfAp8IC0tLSB8IC0tLSB8CnwgYGFydGlmYWN0cyAtLWhlbHBgIHwgRm91ciBjb21tYW5kcywgbm8gYHNldHVwYC9gaW5pdGAvYGRvY3RvcmAvYHByZXZpZXdgL2B0ZW1wbGF0ZWAvYHBkZmAgfAp8IEhpZGRlbiBpbnRlcm5hbHMgfCBgZXN0aW1hdGVgLCBgZGVjb21waWxlYCwgYHBkZmAgYW5kIHRoZWlyIGBfYCBhbGlhc2VzIGFsbCBleGl0IDAgfAp8IEV4aXRQbGFuTW9kZSBnYXRlIHwgYHJlbmRlciAtLWZvcm1hdCBodG1sYCBzdGlsbCBleGl0cyAwIGR1cmluZyB0aGUgZGVwcmVjYXRpb24gd2luZG93IHwKfCBGb250cyB8IEEgYERFU0lHTi5tZGAgbmFtaW5nIGEgZm9udCBmaWxlIHN0aWxsIGVtYmVkcyBpdCwgdW5jaGFuZ2VkIHwKfCBgc2hhcmVgIHwgQWxsIGZpdmUgc3ViY29tbWFuZHMgdW5jaGFuZ2VkIHwKCiMjIFJpc2tzCgoqKlRoZSBvbmUgcm9sbG91dCBoYXphcmQuKiogVGhlIGRlcGxveWVkIEV4aXRQbGFuTW9kZSBob29rIHByaW50cyB0aGlzIGFzIHRoZSBjb21tYW5kIGV2ZXJ5IGFnZW50CnNob3VsZCBydW4gKGBwbGFuLWh0bWwtcmVtaW5kZXIuc2g6MTQyYCk6CgpgYGBzaAplY2hvICIgICAgYXJ0aWZhY3RzIHJlbmRlciAuYWdlbnRzL2FydGlmYWN0cy9cJERBVEUvcGxhbi08c2x1Zz4ubWQgLS1mb3JtYXQgaHRtbCIKYGBgCgpDb21tYW5kZXIgZXJyb3JzIG9uIHVua25vd24gb3B0aW9ucywgc28gdGhlIG1vbWVudCBgLS1mb3JtYXRgIGlzIGdvbmUsIGV2ZXJ5IGFnZW50IHJ1bm5pbmcgdGhhdCBsaW5lCmdldHMgYGVycm9yOiB1bmtub3duIG9wdGlvbiAnLS1mb3JtYXQnYCBhbmQgdGhlIHBsYW4tcHJlc2VudGF0aW9uIGdhdGUgZmFpbHMg4oCUIGluY2x1ZGluZyBzZXNzaW9ucwphbHJlYWR5IGluIGZsaWdodCB3aXRoIGEgY2FjaGVkIGhvb2suIFNvIGByZW5kZXJgIGtlZXBzIGFjY2VwdGluZyBgLS1mb3JtYXQgaHRtbGAgZm9yIG9uZSB2ZXJzaW9uOgoKfCBJbnZvY2F0aW9uIHwgQmVoYXZpb3IgaW4gMC4zLjAgfAp8IC0tLSB8IC0tLSB8CnwgYC0tZm9ybWF0IGh0bWxgIHwgQWNjZXB0ZWQsIG5vLW9wLCBoaWRkZW4gZnJvbSBgLS1oZWxwYCB8CnwgYC0tZm9ybWF0IHBkZmAgb3IgYGh0bWwscGRmYCB8IEVycm9yczogYFBERiBtb3ZlZCB0byBhcnRpZmFjdHMgX3BkZjsgcmVuZGVyIGlzIEhUTUwtb25seS5gIHwKfCBFaXRoZXIsIGluIDAuNC4wIHwgUmVtb3ZlZCBlbnRpcmVseSwgbm90ZWQgaW4gQ0hBTkdFTE9HIHwKClRoaXMgaXMgYSBkZXByZWNhdGlvbiB3aW5kb3cgd2l0aCBhIG5hbWVkIHJlbW92YWwgdmVyc2lvbiwgbm90IGEgcGVybWFuZW50IGNvbXBhdGliaWxpdHkgYnJhbmNoLiBJdAphbHNvIGRlY291cGxlcyB0aGUgdHdvIGNoYW5nZXNldHMsIHNvIHRoZSBDTEkgY2FuIHNoaXAgYmVmb3JlIGV2ZXJ5IHNraWxsIGNvcHkgY2F0Y2hlcyB1cCBpbnN0ZWFkIG9mCnJlcXVpcmluZyBhIGZsZWV0LXdpZGUgZmxhZyBkYXkuCgoqKlByZS1leGlzdGluZyBidWcgZm91bmQgd2hpbGUgbWFwcGluZy4qKiBgY2xpLnRzOjI1LTM0YCBoYXMgdHdvIG91dHB1dC1wYXRoIGhlbHBlcnMgdGhhdCBkaXNhZ3JlZToKYGRlZmF1bHRPdXRGb3JgICh1c2VkIGJ5IGByZW5kZXJgKSB3cml0ZXMgSFRNTCBuZXh0IHRvIHRoZSBzb3VyY2UsIHdoaWxlIGBkZWZhdWx0SHRtbE91dGAgKHVzZWQgb25seQpieSBgcGRmYCwgYGNsaS50czoyMThgKSBhbHdheXMgd3JpdGVzIGludG8gYC5hcnRpZmFjdHMvYC4gVW5pZnlpbmcgb24gYGRlZmF1bHRPdXRGb3JgIGlzIGEgb25lLWxpbmUKZml4IHRoYXQgYmVsb25ncyBpbiB0aGlzIHBhc3MsIG9yIHRoZSBpbmNvbnNpc3RlbmN5IGdldHMgZnJvemVuIGludG8gYSBub3ctaGlkZGVuIGNvbW1hbmQuCgoqKk9wZW4gZGVjaXNpb24g4oCUIGhvdyBmYXIgdG8gdGFrZSBQREYuKiogVGhpcyBwbGFuIGhpZGVzIGBwZGZgIHJhdGhlciB0aGFuIGRlbGV0aW5nIGl0LCB3aGljaCBrZWVwcwpgL291dHB1dGAgd29ya2luZy4gRGVsZXRpbmcgaXQgb3V0cmlnaHQgbWVhbnMgZHJvcHBpbmcgYHNyYy9saWIvcGRmLnRzYCAoODMgbGluZXMpLCBgcGRmLnRlc3QudHNgLAphbmQgdGhlIGBwbGF5d3JpZ2h0YCBvcHRpb25hbERlcCDigJQgYnV0IGB3b3JrL2NvbW1hbmRzL291dHB1dC5tZDo3MGAgbXVzdCBzd2l0Y2ggdG8gSFRNTC1vbmx5IGZpcnN0LApzaW5jZSB0aGF0IGNvbW1hbmQncyB3aG9sZSBqb2IgaXMgZHJvcHBpbmcgYSBQREYgaW4gRG93bmxvYWRzLiBEZWZhdWx0IGlmIG5vdGhpbmcgaXMgc2FpZDogaGlkZSwKZG9uJ3QgZGVsZXRlLgoKIyMgRmlsZXMKCnwgRmlsZSB8IENoYW5nZSB8CnwgLS0tIHwgLS0tIHwKfCBgc3JjL2NsaS50c2AgfCBUaGUgd2hvbGUgZWRpdCDigJQgZGVsZXRlIGZpdmUgY29tbWFuZCBibG9ja3MsIG1lcmdlIHR3byBwYWlycywgYWRkIGhpZGRlbiBmbGFncyBhbmQgYWxpYXNlcywgcmV3cml0ZSBgYWRkSGVscFRleHRgIChgY2xpLnRzOjQ3LTU1YCkgfAp8IGBzcmMvY29tbWFuZHMvc2V0dXAudHNgIHwgRGVsZXRlICgzNyBsaW5lcyk7IGl0cyBvbmx5IGNhbGxlcnMgYXJlIGBjbGkudHM6NjNgIGFuZCBgY2xpLnRzOjI2NGAgfAp8IGBzcmMvY2xpLnRlc3QudHNgIHwgRGVsZXRlIDIgdGVzdHMgKGAxMzEtMTQzYCwgYDE2MC0xNjlgKSwgcmV3cml0ZSB0aGUgaGVscCBhc3NlcnRpb24gKGA5LTE5YCksIGFkZCBgbmV3IC0tYmxhbmtgIC8gYG5ldyBkZXNpZ25gIC8gYHJlbmRlciAtLW9wZW5gIHwKfCBgc3JjL2xpYi90ZW1wbGF0ZXMudHNgIHwgTm8gY2hhbmdlIOKAlCBgVGVtcGxhdGVLaW5kYCBhbmQgYHRlbXBsYXRlRm9yYCB1bnRvdWNoZWQgYnkgZGVzaWduIHwKfCBgc3JjL2xpYi9yZW5kZXIudHNgLCBgZm9udHMudHNgLCBgY29uZmlnLnRzYCB8IE5vIGNoYW5nZSB8CnwgYFJFQURNRS5tZGAsIGBza2lsbHMvYXJ0aWZhY3RzL1NLSUxMLm1kYCwgYHJlZmVyZW5jZXMvYXV0aG9yaW5nLm1kYCB8IFJld3JpdGUgZm9yIHRoZSBmb3VyLWNvbW1hbmQgc3VyZmFjZSB8CnwgYHBhY2thZ2UuanNvbjozYCwgYGNsaS50czo0NmAsIGBDSEFOR0VMT0cubWRgIHwgQnVtcCB0byBgMC4zLjBgOyBib3RoIHZlcnNpb24gbGl0ZXJhbHMgbW92ZSB0b2dldGhlciDigJQgYHJlbGVhc2Uuc2g6MzdgIHJlYWRzIG9ubHkgdGhlIGBwYWNrYWdlLmpzb25gIG9uZSB8CgojIyMgU2Vjb25kIGNoYW5nZXNldCDigJQgZmxlZXQgY29uc3VtZXJzCgpPdXRzaWRlIHRoaXMgcmVwbywgcmVtb3ZlZCBjb21tYW5kcyBhcmUgcmVmZXJlbmNlZCBieSBza2lsbHMsIHJ1bGVzLCBhbmQgdGhlIGxpdmUgRXhpdFBsYW5Nb2RlIGhvb2suCgp8IEZpbGUgfCBMaW5lIHwgU3RhbGUgcmVmZXJlbmNlIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IGAuc3lzdGVtL3NraWxscy9hcnRpZmFjdHMvU0tJTEwubWRgIHwgNTQsIDgwLCAxMDksIDExMywgMTE2IHwgYHRlbXBsYXRlYCwgYC0tZm9ybWF0IHBkZiAtLWxheW91dCBwb3N0ZXJgLCBgaW5pdCBkZXNpZ25gLCBgc2V0dXAgLS1mb250cy1kaXJgLCBgZXN0aW1hdGVgIHwKfCBgLnN5c3RlbS9za2lsbHMvYXJ0aWZhY3RzL3JlZmVyZW5jZXMvYXV0aG9yaW5nLm1kYCB8IDYxLCAxNzggfCBgdGVtcGxhdGVgLCBgZGVjb21waWxlYCB8CnwgYC5zeXN0ZW0vc2tpbGxzL3BsYW4tcmVuZGVyL1NLSUxMLm1kYCB8IDE0MCB8IGBpbml0IGRlc2lnbmAgfAp8IGAuc3lzdGVtL3NraWxscy92aXN1YWxpemUvU0tJTEwubWRgIHwgMTM2IHwgYGluaXQgZGVzaWduYCB8CnwgYC5zeXN0ZW0vcnVsZXMvc3VicnVsZXMvcGxhbi1wcmVzZW50YXRpb24vcnVsZS5tZGAgfCA0NSB8IGBhcnRpZmFjdHMgdGVtcGxhdGUgcGxhbmAgfAp8IGAuc3lzdGVtL3BsdWdpbnMvd29yay9jb21tYW5kcy9vdXRwdXQubWRgIHwgNzAgfCBgLS1mb3JtYXQgaHRtbCxwZGZgIHwKCmByZW5kZXJgIGFuZCBgY2hlY2tgIOKAlCB0aGUgdHdvIGNvbW1hbmRzIHRoZSBob29rIGFjdHVhbGx5IGdhdGVzIG9uCihgcGxhbi1odG1sLXJlbWluZGVyLnNoOjE0MiwxNDdgKSDigJQgYXJlIHVuY2hhbmdlZCwgc28gdGhlIGdhdGUga2VlcHMgd29ya2luZyB0aHJvdWdob3V0LgoKIyMgU2VxdWVuY2UKCkVhY2ggY29tbWl0IGJ1aWxkcyBhbmQgcGFzc2VzIGBidW4gcnVuIHRlc3RgIG9uIGl0cyBvd24uCgoxLiBgcmVmYWN0b3I6IGhpZGUgZXN0aW1hdGUsIGRlY29tcGlsZSwgYW5kIHBkZiBmcm9tIHRoZSBjb21tYW5kIGxpc3RgCjIuIGByZWZhY3RvcjogZm9sZCB0ZW1wbGF0ZSBhbmQgaW5pdCBkZXNpZ24gaW50byB0aGUgbmV3IGNvbW1hbmRgCjMuIGBmZWF0OiBhZGQgcmVuZGVyIC0tb3BlbiBhbmQgZHJvcCB0aGUgcHJldmlldyBjb21tYW5kYAo0LiBgcmVmYWN0b3I6IG1ha2UgcmVuZGVyIGh0bWwtb25seWAg4oCUIGtlZXBzIGAtLWZvcm1hdCBodG1sYCBhcyBhIGhpZGRlbiBkZXByZWNhdGVkIG5vLW9wCjUuIGByZWZhY3RvcjogcmVtb3ZlIHRoZSBzZXR1cCBhbmQgZG9jdG9yIGNvbW1hbmRzYCDigJQgZG9jdW1lbnRzIGhhbmQtZWRpdGluZyBgZm9udHMuZGlyc2AgaW4gdGhlIHNhbWUgY29tbWl0IHNvIG5vIGdhcCBvcGVucwo2LiBgZml4OiB1bmlmeSBodG1sIG91dHB1dCBwYXRoIGJldHdlZW4gcmVuZGVyIGFuZCBwZGZgCjcuIGBkb2NzOiByZXdyaXRlIFJFQURNRSBhbmQgYXJ0aWZhY3RzIHNraWxsIGZvciB0aGUgZm91ci1jb21tYW5kIHN1cmZhY2VgCjguIGByZWxlYXNlOiBidW1wIHRvIDAuMy4wYAo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

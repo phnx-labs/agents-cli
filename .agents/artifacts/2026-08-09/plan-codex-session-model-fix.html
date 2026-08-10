@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Fix missing Codex model info in agents sessions</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-draft">draft</span></div>
+<h1>Fix missing Codex model info in agents sessions</h1>
+<p class="summary">Codex sessions show a blank Model column because the session scanner ignores turn_context events where Codex now stores the model name. This plan adds a fallback parser branch and lands the fix via a proper worktree PR.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Real Codex rollouts store the model in turn_context.payload.model, not session_meta.payload.model.<span class="meta-sep" aria-hidden="true">·</span>applyCodexLine() in apps/cli/src/lib/session/discover.ts currently skips turn_context entirely.<span class="meta-sep" aria-hidden="true">·</span>Claude sessions already show models correctly; Codex should behave the same way.</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">codex-session-model-fix</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Kimi</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Owner</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">worker-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">f956eae8</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-09</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#current-state"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Current State</a><a href="#user-visible-result"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>User-visible Result</a><a href="#proposed-changes"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Validation</a><a href="#execution-plan"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Execution Plan</a><a href="#risks"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<p>Make <code>agents sessions</code> display the correct model for Codex agent sessions. Currently the model column is blank for Codex because the session scanner ignores the <code>turn_context</code> events where Codex now writes per-turn metadata.</p>
+<div class="artifact-callout">
+Codex rollouts put the model name in <code>turn_context.payload.model</code>, not <code>session_meta.payload.model</code>. The scanner must read both.
+</div><h2 id="current-state">Current State</h2>
+<p>For Claude sessions, <code>agents sessions</code> shows the model (e.g., <code>opus-4-8</code>). For Codex sessions the model column is hidden or shows <code>-</code>. Real Codex rollout files look like this:</p>
+<pre><code>{"type":"session_meta", "payload":{"id":"sess-1","cwd":"/repo","cli_version":"0.9.0"}}
+{"type":"turn_context", "payload":{"model":"gpt-5.6-sol","cwd":"/repo"}}
+</code></pre>
+<p>The existing scanner (<code>applyCodexLine</code> in <code>discover.ts</code>) handles <code>session_meta</code>, <code>response_item</code>, and <code>event_msg</code>, but explicitly skips <code>turn_context</code>. So <code>state.model</code> stays undefined and the UI treats the session as having no model metadata.</p>
+<figure>
+<svg viewBox="0 0 800 260" xmlns="http://www.w3.org/2000/svg">
+  <rect width="800" height="260" fill="#0a0a0a"></rect>
+  <text x="40" y="40" fill="#a3e635" font-family="monospace" font-size="18">Codex rollout JSONL → agents sessions</text>
+
+  <rect x="40" y="70" width="330" height="150" rx="8" fill="#1a1a1a" stroke="#ef4444" stroke-width="2"></rect>
+  <text x="70" y="105" fill="#ef4444" font-family="sans-serif" font-size="16" font-weight="bold">BEFORE</text>
+  <text x="70" y="140" fill="#e5e5e5" font-family="monospace" font-size="13">session_meta: id, cwd, ...</text>
+  <text x="70" y="165" fill="#e5e5e5" font-family="monospace" font-size="13">turn_context: model=gpt-5.6-sol</text>
+  <text x="70" y="190" fill="#fca5a5" font-family="monospace" font-size="13">applyCodexLine IGNORES it</text>
+  <text x="70" y="210" fill="#9ca3af" font-family="sans-serif" font-size="13">Result: model = undefined</text>
+
+  <rect x="430" y="70" width="330" height="150" rx="8" fill="#1a1a1a" stroke="#a3e635" stroke-width="2"></rect>
+  <text x="460" y="105" fill="#a3e635" font-family="sans-serif" font-size="16" font-weight="bold">AFTER</text>
+  <text x="460" y="140" fill="#e5e5e5" font-family="monospace" font-size="13">session_meta: id, cwd, ...</text>
+  <text x="460" y="165" fill="#e5e5e5" font-family="monospace" font-size="13">turn_context: model=gpt-5.6-sol</text>
+  <text x="460" y="190" fill="#a3e635" font-family="monospace" font-size="13">applyCodexLine reads it</text>
+  <text x="460" y="210" fill="#9ca3af" font-family="sans-serif" font-size="13">Result: model = gpt-5.6-sol</text>
+
+  <line x1="390" y1="145" x2="410" y2="145" stroke="#6b7280" stroke-width="2"></line>
+  <polygon points="410,145 402,140 402,150" fill="#6b7280"></polygon>
+</svg>
+<figcaption>Before: <code>turn_context</code> is ignored and the model stays blank. After: <code>turn_context</code> is used as a fallback source for model and cwd.</figcaption>
+</figure><h2 id="user-visible-result">User-visible Result</h2>
+<h3><code>agents sessions --agent codex</code> today</h3>
+<p>The <strong>Model</strong> column is omitted entirely for Codex-only pools, or shows <code>-</code> in mixed pools:</p>
+<pre><code>ID        Agent   Model     Topic                          Updated
+────────  ──────  ────────  ─────────────────────────────  ─────────
+sess-abc  claude  opus-4-8  fix flaky exec test            2m ago
+sess-def  codex   -         investigate parser gap         5m ago
+</code></pre>
+<h3><code>agents sessions --agent codex</code> after the fix</h3>
+<p>The scanner populates <code>session.model</code> from <code>turn_context</code>, so the column appears with the real value:</p>
+<pre><code>ID        Agent   Model          Topic                          Updated
+────────  ──────  ─────────────  ─────────────────────────────  ─────────
+sess-abc  claude  opus-4-8       fix flaky exec test            2m ago
+sess-def  codex   gpt-5.6-sol    investigate parser gap         5m ago
+</code></pre>
+<h3>Session preview / picker</h3>
+<p>The picker uses the same <code>model</code> field for the detail pane at the bottom. After the fix, selecting a Codex session will show:</p>
+<pre><code>Model: gpt-5.6-sol
+Agent: codex
+CWD:   /repo
+</code></pre>
+<p>instead of:</p>
+<pre><code>Model: -
+Agent: codex
+CWD:   /repo
+</code></pre>
+<h2 id="proposed-changes">Proposed Changes</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>apps/cli/src/lib/session/discover.ts</code></td>
+<td>Add a <code>turn_context</code> branch in <code>applyCodexLine()</code>.</td>
+</tr>
+<tr>
+<td><code>apps/cli/src/lib/session/__tests__/codex-incremental-parity.test.ts</code></td>
+<td>Add <code>model</code> to parity checks and two new tests.</td>
+</tr>
+</tbody></table>
+<ol>
+<li><p><strong><code>apps/cli/src/lib/session/discover.ts</code></strong> — Add a <code>turn_context</code> branch in <code>applyCodexLine()</code>:</p>
+<pre><code>if (parsed.type === 'turn_context') {
+  const payload = parsed.payload || {};
+  if (!state.model &amp;&amp; typeof payload.model === 'string') state.model = payload.model;
+  if (!state.cwd &amp;&amp; typeof payload.cwd === 'string') state.cwd = payload.cwd;
+  return;
+}
+</code></pre>
+<p><code>session_meta</code> remains authoritative; <code>turn_context</code> is a fallback only.</p>
+</li>
+<li><p><strong><code>apps/cli/src/lib/session/__tests__/codex-incremental-parity.test.ts</code></strong> —</p>
+<ul>
+<li>Add <code>'model'</code> to the <code>expectScanParity</code> field list.</li>
+<li>Add two tests:<ul>
+<li>Model is extracted from <code>turn_context</code> when <code>session_meta</code> omits it.</li>
+<li><code>session_meta.model</code> wins over <code>turn_context.model</code>.</li>
+</ul>
+</li>
+</ul>
+</li>
+<li><p><strong>Repo hygiene</strong> — Move the edits into a proper worktree under <code>.agents/worktrees/codex-session-model-fix/</code>, leaving the main working tree clean.</p>
+</li>
+</ol>
+<h2 id="public-interface">Public Interface</h2>
+<p>No CLI surface changes. <code>agents sessions</code> will simply populate the existing <strong>Model</strong> column for Codex sessions the same way it already does for Claude, Gemini, and others.</p>
+<h2 id="validation">Validation</h2>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Command</th>
+<th>Expected Result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Incremental parity tests</td>
+<td><code>bun test src/lib/session/__tests__/codex-incremental-parity.test.ts --run</code></td>
+<td>11 pass, 0 fail</td>
+</tr>
+<tr>
+<td>Codex parser tests</td>
+<td><code>bun test src/lib/session/__tests__/parse-codex.test.ts --run</code></td>
+<td>9 pass, 0 fail</td>
+</tr>
+<tr>
+<td>No regression on e2e</td>
+<td><code>bun test src/lib/session/__tests__/codex-incremental-scan-e2e.test.ts --run</code></td>
+<td>Same pre-existing failures as before the change</td>
+</tr>
+<tr>
+<td>Live smoke test</td>
+<td><code>agents sessions --agent codex</code></td>
+<td>Model column populated</td>
+</tr>
+</tbody></table>
+<h2 id="execution-plan">Execution Plan</h2>
+<ol>
+<li>Create worktree <code>.agents/worktrees/codex-session-model-fix/</code> from <code>origin/main</code>.</li>
+<li>Apply the current diff into the worktree.</li>
+<li>Restore the main working tree to a clean state.</li>
+<li>Run targeted tests in the worktree:<pre><code>cd apps/cli
+bun test src/lib/session/__tests__/codex-incremental-parity.test.ts src/lib/session/__tests__/parse-codex.test.ts --run
+</code></pre>
+</li>
+<li>Open a PR from the worktree branch <code>codex-session-model-fix</code>.</li>
+<li>Address reviewer comments (subagent reviewer fallback because <code>prix-cloud</code> is paused in #1767).</li>
+<li>Merge on green CI and verify <code>agents sessions --agent codex</code> shows models.</li>
+</ol>
+<h2 id="risks">Risks</h2>
+<ul>
+<li><strong>Per-turn model changes:</strong> <code>turn_context</code> carries per-turn metadata. If Codex ever swaps models mid-session, the first model seen wins. This matches the existing <code>session_meta</code> behavior and is acceptable for a session-list display.</li>
+<li><strong>Pre-existing e2e failure:</strong> <code>codex-incremental-scan-e2e.test.ts</code> already fails in this environment (sessions are not discovered). I will verify it fails identically before and after the change so the fix does not introduce a regression.</li>
+<li><strong>Rollback:</strong> Revert the single <code>applyCodexLine</code> branch and the two added tests.</li>
+</ul>
+<h2 id="tracking">Tracking</h2>
+<ul>
+<li>PR: <em>(to be added once opened)</em></li>
+<li>Related: <code>prix-cloud</code> auto-review paused (#1767); use subagent reviewer fallback.</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGl0bGU6IEZpeCBtaXNzaW5nIENvZGV4IG1vZGVsIGluZm8gaW4gYWdlbnRzIHNlc3Npb25zCnN1bW1hcnk6IENvZGV4IHNlc3Npb25zIHNob3cgYSBibGFuayBNb2RlbCBjb2x1bW4gYmVjYXVzZSB0aGUgc2Vzc2lvbiBzY2FubmVyIGlnbm9yZXMgdHVybl9jb250ZXh0IGV2ZW50cyB3aGVyZSBDb2RleCBub3cgc3RvcmVzIHRoZSBtb2RlbCBuYW1lLiBUaGlzIHBsYW4gYWRkcyBhIGZhbGxiYWNrIHBhcnNlciBicmFuY2ggYW5kIGxhbmRzIHRoZSBmaXggdmlhIGEgcHJvcGVyIHdvcmt0cmVlIFBSLgpzdGF0dXM6IGRyYWZ0CnRyYWNraW5nOiBjb2RleC1zZXNzaW9uLW1vZGVsLWZpeApmYWN0czoKICAtICJSZWFsIENvZGV4IHJvbGxvdXRzIHN0b3JlIHRoZSBtb2RlbCBpbiB0dXJuX2NvbnRleHQucGF5bG9hZC5tb2RlbCwgbm90IHNlc3Npb25fbWV0YS5wYXlsb2FkLm1vZGVsLiIKICAtICJhcHBseUNvZGV4TGluZSgpIGluIGFwcHMvY2xpL3NyYy9saWIvc2Vzc2lvbi9kaXNjb3Zlci50cyBjdXJyZW50bHkgc2tpcHMgdHVybl9jb250ZXh0IGVudGlyZWx5LiIKICAtICJDbGF1ZGUgc2Vzc2lvbnMgYWxyZWFkeSBzaG93IG1vZGVscyBjb3JyZWN0bHk7IENvZGV4IHNob3VsZCBiZWhhdmUgdGhlIHNhbWUgd2F5LiIKLS0tCgojIyBQdXJwb3NlCgpNYWtlIGBhZ2VudHMgc2Vzc2lvbnNgIGRpc3BsYXkgdGhlIGNvcnJlY3QgbW9kZWwgZm9yIENvZGV4IGFnZW50IHNlc3Npb25zLiBDdXJyZW50bHkgdGhlIG1vZGVsIGNvbHVtbiBpcyBibGFuayBmb3IgQ29kZXggYmVjYXVzZSB0aGUgc2Vzc2lvbiBzY2FubmVyIGlnbm9yZXMgdGhlIGB0dXJuX2NvbnRleHRgIGV2ZW50cyB3aGVyZSBDb2RleCBub3cgd3JpdGVzIHBlci10dXJuIG1ldGFkYXRhLgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+CkNvZGV4IHJvbGxvdXRzIHB1dCB0aGUgbW9kZWwgbmFtZSBpbiA8Y29kZT50dXJuX2NvbnRleHQucGF5bG9hZC5tb2RlbDwvY29kZT4sIG5vdCA8Y29kZT5zZXNzaW9uX21ldGEucGF5bG9hZC5tb2RlbDwvY29kZT4uIFRoZSBzY2FubmVyIG11c3QgcmVhZCBib3RoLgo8L2Rpdj4KCiMjIEN1cnJlbnQgU3RhdGUKCkZvciBDbGF1ZGUgc2Vzc2lvbnMsIGBhZ2VudHMgc2Vzc2lvbnNgIHNob3dzIHRoZSBtb2RlbCAoZS5nLiwgYG9wdXMtNC04YCkuIEZvciBDb2RleCBzZXNzaW9ucyB0aGUgbW9kZWwgY29sdW1uIGlzIGhpZGRlbiBvciBzaG93cyBgLWAuIFJlYWwgQ29kZXggcm9sbG91dCBmaWxlcyBsb29rIGxpa2UgdGhpczoKCmBgYGpzb25sCnsidHlwZSI6InNlc3Npb25fbWV0YSIsICJwYXlsb2FkIjp7ImlkIjoic2Vzcy0xIiwiY3dkIjoiL3JlcG8iLCJjbGlfdmVyc2lvbiI6IjAuOS4wIn19CnsidHlwZSI6InR1cm5fY29udGV4dCIsICJwYXlsb2FkIjp7Im1vZGVsIjoiZ3B0LTUuNi1zb2wiLCJjd2QiOiIvcmVwbyJ9fQpgYGAKClRoZSBleGlzdGluZyBzY2FubmVyIChgYXBwbHlDb2RleExpbmVgIGluIGBkaXNjb3Zlci50c2ApIGhhbmRsZXMgYHNlc3Npb25fbWV0YWAsIGByZXNwb25zZV9pdGVtYCwgYW5kIGBldmVudF9tc2dgLCBidXQgZXhwbGljaXRseSBza2lwcyBgdHVybl9jb250ZXh0YC4gU28gYHN0YXRlLm1vZGVsYCBzdGF5cyB1bmRlZmluZWQgYW5kIHRoZSBVSSB0cmVhdHMgdGhlIHNlc3Npb24gYXMgaGF2aW5nIG5vIG1vZGVsIG1ldGFkYXRhLgoKPGZpZ3VyZT4KPHN2ZyB2aWV3Qm94PSIwIDAgODAwIDI2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB3aWR0aD0iODAwIiBoZWlnaHQ9IjI2MCIgZmlsbD0iIzBhMGEwYSIvPgogIDx0ZXh0IHg9IjQwIiB5PSI0MCIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxOCI+Q29kZXggcm9sbG91dCBKU09OTCDihpIgYWdlbnRzIHNlc3Npb25zPC90ZXh0PgoKICA8cmVjdCB4PSI0MCIgeT0iNzAiIHdpZHRoPSIzMzAiIGhlaWdodD0iMTUwIiByeD0iOCIgZmlsbD0iIzFhMWExYSIgc3Ryb2tlPSIjZWY0NDQ0IiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI3MCIgeT0iMTA1IiBmaWxsPSIjZWY0NDQ0IiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNiIgZm9udC13ZWlnaHQ9ImJvbGQiPkJFRk9SRTwvdGV4dD4KICA8dGV4dCB4PSI3MCIgeT0iMTQwIiBmaWxsPSIjZTVlNWU1IiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEzIj5zZXNzaW9uX21ldGE6IGlkLCBjd2QsIC4uLjwvdGV4dD4KICA8dGV4dCB4PSI3MCIgeT0iMTY1IiBmaWxsPSIjZTVlNWU1IiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEzIj50dXJuX2NvbnRleHQ6IG1vZGVsPWdwdC01LjYtc29sPC90ZXh0PgogIDx0ZXh0IHg9IjcwIiB5PSIxOTAiIGZpbGw9IiNmY2E1YTUiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiPmFwcGx5Q29kZXhMaW5lIElHTk9SRVMgaXQ8L3RleHQ+CiAgPHRleHQgeD0iNzAiIHk9IjIxMCIgZmlsbD0iIzljYTNhZiIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiPlJlc3VsdDogbW9kZWwgPSB1bmRlZmluZWQ8L3RleHQ+CgogIDxyZWN0IHg9IjQzMCIgeT0iNzAiIHdpZHRoPSIzMzAiIGhlaWdodD0iMTUwIiByeD0iOCIgZmlsbD0iIzFhMWExYSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI0NjAiIHk9IjEwNSIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTYiIGZvbnQtd2VpZ2h0PSJib2xkIj5BRlRFUjwvdGV4dD4KICA8dGV4dCB4PSI0NjAiIHk9IjE0MCIgZmlsbD0iI2U1ZTVlNSIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyI+c2Vzc2lvbl9tZXRhOiBpZCwgY3dkLCAuLi48L3RleHQ+CiAgPHRleHQgeD0iNDYwIiB5PSIxNjUiIGZpbGw9IiNlNWU1ZTUiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiPnR1cm5fY29udGV4dDogbW9kZWw9Z3B0LTUuNi1zb2w8L3RleHQ+CiAgPHRleHQgeD0iNDYwIiB5PSIxOTAiIGZpbGw9IiNhM2U2MzUiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiPmFwcGx5Q29kZXhMaW5lIHJlYWRzIGl0PC90ZXh0PgogIDx0ZXh0IHg9IjQ2MCIgeT0iMjEwIiBmaWxsPSIjOWNhM2FmIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyI+UmVzdWx0OiBtb2RlbCA9IGdwdC01LjYtc29sPC90ZXh0PgoKICA8bGluZSB4MT0iMzkwIiB5MT0iMTQ1IiB4Mj0iNDEwIiB5Mj0iMTQ1IiBzdHJva2U9IiM2YjcyODAiIHN0cm9rZS13aWR0aD0iMiIvPgogIDxwb2x5Z29uIHBvaW50cz0iNDEwLDE0NSA0MDIsMTQwIDQwMiwxNTAiIGZpbGw9IiM2YjcyODAiLz4KPC9zdmc+CjxmaWdjYXB0aW9uPkJlZm9yZTogPGNvZGU+dHVybl9jb250ZXh0PC9jb2RlPiBpcyBpZ25vcmVkIGFuZCB0aGUgbW9kZWwgc3RheXMgYmxhbmsuIEFmdGVyOiA8Y29kZT50dXJuX2NvbnRleHQ8L2NvZGU+IGlzIHVzZWQgYXMgYSBmYWxsYmFjayBzb3VyY2UgZm9yIG1vZGVsIGFuZCBjd2QuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCiMjIFVzZXItdmlzaWJsZSBSZXN1bHQKCiMjIyBgYWdlbnRzIHNlc3Npb25zIC0tYWdlbnQgY29kZXhgIHRvZGF5CgpUaGUgKipNb2RlbCoqIGNvbHVtbiBpcyBvbWl0dGVkIGVudGlyZWx5IGZvciBDb2RleC1vbmx5IHBvb2xzLCBvciBzaG93cyBgLWAgaW4gbWl4ZWQgcG9vbHM6CgpgYGAKSUQgICAgICAgIEFnZW50ICAgTW9kZWwgICAgIFRvcGljICAgICAgICAgICAgICAgICAgICAgICAgICBVcGRhdGVkCuKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgCAg4pSA4pSA4pSA4pSA4pSA4pSAICDilIDilIDilIDilIDilIDilIDilIDilIAgIOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgCAg4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSACnNlc3MtYWJjICBjbGF1ZGUgIG9wdXMtNC04ICBmaXggZmxha3kgZXhlYyB0ZXN0ICAgICAgICAgICAgMm0gYWdvCnNlc3MtZGVmICBjb2RleCAgIC0gICAgICAgICBpbnZlc3RpZ2F0ZSBwYXJzZXIgZ2FwICAgICAgICAgNW0gYWdvCmBgYAoKIyMjIGBhZ2VudHMgc2Vzc2lvbnMgLS1hZ2VudCBjb2RleGAgYWZ0ZXIgdGhlIGZpeAoKVGhlIHNjYW5uZXIgcG9wdWxhdGVzIGBzZXNzaW9uLm1vZGVsYCBmcm9tIGB0dXJuX2NvbnRleHRgLCBzbyB0aGUgY29sdW1uIGFwcGVhcnMgd2l0aCB0aGUgcmVhbCB2YWx1ZToKCmBgYApJRCAgICAgICAgQWdlbnQgICBNb2RlbCAgICAgICAgICBUb3BpYyAgICAgICAgICAgICAgICAgICAgICAgICAgVXBkYXRlZArilIDilIDilIDilIDilIDilIDilIDilIAgIOKUgOKUgOKUgOKUgOKUgOKUgCAg4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSAICDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIAgIOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgApzZXNzLWFiYyAgY2xhdWRlICBvcHVzLTQtOCAgICAgICBmaXggZmxha3kgZXhlYyB0ZXN0ICAgICAgICAgICAgMm0gYWdvCnNlc3MtZGVmICBjb2RleCAgIGdwdC01LjYtc29sICAgIGludmVzdGlnYXRlIHBhcnNlciBnYXAgICAgICAgICA1bSBhZ28KYGBgCgojIyMgU2Vzc2lvbiBwcmV2aWV3IC8gcGlja2VyCgpUaGUgcGlja2VyIHVzZXMgdGhlIHNhbWUgYG1vZGVsYCBmaWVsZCBmb3IgdGhlIGRldGFpbCBwYW5lIGF0IHRoZSBib3R0b20uIEFmdGVyIHRoZSBmaXgsIHNlbGVjdGluZyBhIENvZGV4IHNlc3Npb24gd2lsbCBzaG93OgoKYGBgCk1vZGVsOiBncHQtNS42LXNvbApBZ2VudDogY29kZXgKQ1dEOiAgIC9yZXBvCmBgYAoKaW5zdGVhZCBvZjoKCmBgYApNb2RlbDogLQpBZ2VudDogY29kZXgKQ1dEOiAgIC9yZXBvCmBgYAoKIyMgUHJvcG9zZWQgQ2hhbmdlcwoKfCBGaWxlIHwgQ2hhbmdlIHwKfC0tLS0tLXwtLS0tLS0tLXwKfCBgYXBwcy9jbGkvc3JjL2xpYi9zZXNzaW9uL2Rpc2NvdmVyLnRzYCB8IEFkZCBhIGB0dXJuX2NvbnRleHRgIGJyYW5jaCBpbiBgYXBwbHlDb2RleExpbmUoKWAuIHwKfCBgYXBwcy9jbGkvc3JjL2xpYi9zZXNzaW9uL19fdGVzdHNfXy9jb2RleC1pbmNyZW1lbnRhbC1wYXJpdHkudGVzdC50c2AgfCBBZGQgYG1vZGVsYCB0byBwYXJpdHkgY2hlY2tzIGFuZCB0d28gbmV3IHRlc3RzLiB8CgoxLiAqKmBhcHBzL2NsaS9zcmMvbGliL3Nlc3Npb24vZGlzY292ZXIudHNgKiog4oCUIEFkZCBhIGB0dXJuX2NvbnRleHRgIGJyYW5jaCBpbiBgYXBwbHlDb2RleExpbmUoKWA6CgogICBgYGB0cwogICBpZiAocGFyc2VkLnR5cGUgPT09ICd0dXJuX2NvbnRleHQnKSB7CiAgICAgY29uc3QgcGF5bG9hZCA9IHBhcnNlZC5wYXlsb2FkIHx8IHt9OwogICAgIGlmICghc3RhdGUubW9kZWwgJiYgdHlwZW9mIHBheWxvYWQubW9kZWwgPT09ICdzdHJpbmcnKSBzdGF0ZS5tb2RlbCA9IHBheWxvYWQubW9kZWw7CiAgICAgaWYgKCFzdGF0ZS5jd2QgJiYgdHlwZW9mIHBheWxvYWQuY3dkID09PSAnc3RyaW5nJykgc3RhdGUuY3dkID0gcGF5bG9hZC5jd2Q7CiAgICAgcmV0dXJuOwogICB9CiAgIGBgYAoKICAgYHNlc3Npb25fbWV0YWAgcmVtYWlucyBhdXRob3JpdGF0aXZlOyBgdHVybl9jb250ZXh0YCBpcyBhIGZhbGxiYWNrIG9ubHkuCgoyLiAqKmBhcHBzL2NsaS9zcmMvbGliL3Nlc3Npb24vX190ZXN0c19fL2NvZGV4LWluY3JlbWVudGFsLXBhcml0eS50ZXN0LnRzYCoqIOKAlAogICAtIEFkZCBgJ21vZGVsJ2AgdG8gdGhlIGBleHBlY3RTY2FuUGFyaXR5YCBmaWVsZCBsaXN0LgogICAtIEFkZCB0d28gdGVzdHM6CiAgICAgLSBNb2RlbCBpcyBleHRyYWN0ZWQgZnJvbSBgdHVybl9jb250ZXh0YCB3aGVuIGBzZXNzaW9uX21ldGFgIG9taXRzIGl0LgogICAgIC0gYHNlc3Npb25fbWV0YS5tb2RlbGAgd2lucyBvdmVyIGB0dXJuX2NvbnRleHQubW9kZWxgLgoKMy4gKipSZXBvIGh5Z2llbmUqKiDigJQgTW92ZSB0aGUgZWRpdHMgaW50byBhIHByb3BlciB3b3JrdHJlZSB1bmRlciBgLmFnZW50cy93b3JrdHJlZXMvY29kZXgtc2Vzc2lvbi1tb2RlbC1maXgvYCwgbGVhdmluZyB0aGUgbWFpbiB3b3JraW5nIHRyZWUgY2xlYW4uCgojIyBQdWJsaWMgSW50ZXJmYWNlCgpObyBDTEkgc3VyZmFjZSBjaGFuZ2VzLiBgYWdlbnRzIHNlc3Npb25zYCB3aWxsIHNpbXBseSBwb3B1bGF0ZSB0aGUgZXhpc3RpbmcgKipNb2RlbCoqIGNvbHVtbiBmb3IgQ29kZXggc2Vzc2lvbnMgdGhlIHNhbWUgd2F5IGl0IGFscmVhZHkgZG9lcyBmb3IgQ2xhdWRlLCBHZW1pbmksIGFuZCBvdGhlcnMuCgojIyBWYWxpZGF0aW9uCgp8IENoZWNrIHwgQ29tbWFuZCB8IEV4cGVjdGVkIFJlc3VsdCB8CnwtLS0tLS0tfC0tLS0tLS0tLXwtLS0tLS0tLS0tLS0tLS0tLXwKfCBJbmNyZW1lbnRhbCBwYXJpdHkgdGVzdHMgfCBgYnVuIHRlc3Qgc3JjL2xpYi9zZXNzaW9uL19fdGVzdHNfXy9jb2RleC1pbmNyZW1lbnRhbC1wYXJpdHkudGVzdC50cyAtLXJ1bmAgfCAxMSBwYXNzLCAwIGZhaWwgfAp8IENvZGV4IHBhcnNlciB0ZXN0cyB8IGBidW4gdGVzdCBzcmMvbGliL3Nlc3Npb24vX190ZXN0c19fL3BhcnNlLWNvZGV4LnRlc3QudHMgLS1ydW5gIHwgOSBwYXNzLCAwIGZhaWwgfAp8IE5vIHJlZ3Jlc3Npb24gb24gZTJlIHwgYGJ1biB0ZXN0IHNyYy9saWIvc2Vzc2lvbi9fX3Rlc3RzX18vY29kZXgtaW5jcmVtZW50YWwtc2Nhbi1lMmUudGVzdC50cyAtLXJ1bmAgfCBTYW1lIHByZS1leGlzdGluZyBmYWlsdXJlcyBhcyBiZWZvcmUgdGhlIGNoYW5nZSB8CnwgTGl2ZSBzbW9rZSB0ZXN0IHwgYGFnZW50cyBzZXNzaW9ucyAtLWFnZW50IGNvZGV4YCB8IE1vZGVsIGNvbHVtbiBwb3B1bGF0ZWQgfAoKIyMgRXhlY3V0aW9uIFBsYW4KCjEuIENyZWF0ZSB3b3JrdHJlZSBgLmFnZW50cy93b3JrdHJlZXMvY29kZXgtc2Vzc2lvbi1tb2RlbC1maXgvYCBmcm9tIGBvcmlnaW4vbWFpbmAuCjIuIEFwcGx5IHRoZSBjdXJyZW50IGRpZmYgaW50byB0aGUgd29ya3RyZWUuCjMuIFJlc3RvcmUgdGhlIG1haW4gd29ya2luZyB0cmVlIHRvIGEgY2xlYW4gc3RhdGUuCjQuIFJ1biB0YXJnZXRlZCB0ZXN0cyBpbiB0aGUgd29ya3RyZWU6CiAgIGBgYGJhc2gKICAgY2QgYXBwcy9jbGkKICAgYnVuIHRlc3Qgc3JjL2xpYi9zZXNzaW9uL19fdGVzdHNfXy9jb2RleC1pbmNyZW1lbnRhbC1wYXJpdHkudGVzdC50cyBzcmMvbGliL3Nlc3Npb24vX190ZXN0c19fL3BhcnNlLWNvZGV4LnRlc3QudHMgLS1ydW4KICAgYGBgCjUuIE9wZW4gYSBQUiBmcm9tIHRoZSB3b3JrdHJlZSBicmFuY2ggYGNvZGV4LXNlc3Npb24tbW9kZWwtZml4YC4KNi4gQWRkcmVzcyByZXZpZXdlciBjb21tZW50cyAoc3ViYWdlbnQgcmV2aWV3ZXIgZmFsbGJhY2sgYmVjYXVzZSBgcHJpeC1jbG91ZGAgaXMgcGF1c2VkIGluICMxNzY3KS4KNy4gTWVyZ2Ugb24gZ3JlZW4gQ0kgYW5kIHZlcmlmeSBgYWdlbnRzIHNlc3Npb25zIC0tYWdlbnQgY29kZXhgIHNob3dzIG1vZGVscy4KCiMjIFJpc2tzCgotICoqUGVyLXR1cm4gbW9kZWwgY2hhbmdlczoqKiBgdHVybl9jb250ZXh0YCBjYXJyaWVzIHBlci10dXJuIG1ldGFkYXRhLiBJZiBDb2RleCBldmVyIHN3YXBzIG1vZGVscyBtaWQtc2Vzc2lvbiwgdGhlIGZpcnN0IG1vZGVsIHNlZW4gd2lucy4gVGhpcyBtYXRjaGVzIHRoZSBleGlzdGluZyBgc2Vzc2lvbl9tZXRhYCBiZWhhdmlvciBhbmQgaXMgYWNjZXB0YWJsZSBmb3IgYSBzZXNzaW9uLWxpc3QgZGlzcGxheS4KLSAqKlByZS1leGlzdGluZyBlMmUgZmFpbHVyZToqKiBgY29kZXgtaW5jcmVtZW50YWwtc2Nhbi1lMmUudGVzdC50c2AgYWxyZWFkeSBmYWlscyBpbiB0aGlzIGVudmlyb25tZW50IChzZXNzaW9ucyBhcmUgbm90IGRpc2NvdmVyZWQpLiBJIHdpbGwgdmVyaWZ5IGl0IGZhaWxzIGlkZW50aWNhbGx5IGJlZm9yZSBhbmQgYWZ0ZXIgdGhlIGNoYW5nZSBzbyB0aGUgZml4IGRvZXMgbm90IGludHJvZHVjZSBhIHJlZ3Jlc3Npb24uCi0gKipSb2xsYmFjazoqKiBSZXZlcnQgdGhlIHNpbmdsZSBgYXBwbHlDb2RleExpbmVgIGJyYW5jaCBhbmQgdGhlIHR3byBhZGRlZCB0ZXN0cy4KCiMjIFRyYWNraW5nCgotIFBSOiAqKHRvIGJlIGFkZGVkIG9uY2Ugb3BlbmVkKSoKLSBSZWxhdGVkOiBgcHJpeC1jbG91ZGAgYXV0by1yZXZpZXcgcGF1c2VkICgjMTc2Nyk7IHVzZSBzdWJhZ2VudCByZXZpZXdlciBmYWxsYmFjay4K"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

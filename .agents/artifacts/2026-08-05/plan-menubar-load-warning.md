@@ -22,7 +22,7 @@ a warm cache instead of the 136s doctor.
 
 ## Context
 
-During a live profiling session, `zion` hit **load average 95 on 18 cores** with
+During a live profiling session, `workstation` hit **load average 95 on 18 cores** with
 nothing in the menu bar warning that a device was overloaded — even though
 agents-cli already computes per-device load and classifies it (`headroom()` →
 `loaded` at ≥75%). The signal exists; it just isn't shown. The user also flagged
@@ -50,7 +50,7 @@ doctor is never on the path:
   </defs>
   <rect x="0" y="0" width="760" height="300" fill="#0d1117"/>
   <rect x="24" y="40" width="200" height="70" rx="8" fill="#161b22" stroke="#22c55e"/>
-  <text x="124" y="70" fill="#e6edf3" font-family="monospace" font-size="13" text-anchor="middle">LOCAL machine (zion)</text>
+  <text x="124" y="70" fill="#e6edf3" font-family="monospace" font-size="13" text-anchor="middle">LOCAL machine (workstation)</text>
   <text x="124" y="92" fill="#8b949e" font-family="monospace" font-size="11" text-anchor="middle">getloadavg() · libc</text>
   <rect x="24" y="150" width="200" height="70" rx="8" fill="#161b22" stroke="#58a6ff"/>
   <text x="124" y="180" fill="#e6edf3" font-family="monospace" font-size="13" text-anchor="middle">REMOTE devices</text>
@@ -60,7 +60,7 @@ doctor is never on the path:
   <text x="390" y="147" fill="#8b949e" font-family="monospace" font-size="11" text-anchor="middle">≥75% = loaded</text>
   <rect x="556" y="95" width="180" height="70" rx="8" fill="#161b22" stroke="#ef4444"/>
   <text x="646" y="120" fill="#e6edf3" font-family="monospace" font-size="12" text-anchor="middle">NEEDS YOU row</text>
-  <text x="646" y="140" fill="#d4a72c" font-family="monospace" font-size="11" text-anchor="middle">⚠ zion — 530%</text>
+  <text x="646" y="140" fill="#d4a72c" font-family="monospace" font-size="11" text-anchor="middle">⚠ workstation — 530%</text>
   <path d="M224,75 L300,110" stroke="#58a6ff" stroke-width="2" fill="none" marker-end="url(#arw)"/>
   <path d="M224,185 L300,150" stroke="#58a6ff" stroke-width="2" fill="none" marker-end="url(#arw)"/>
   <path d="M480,130 L556,130" stroke="#58a6ff" stroke-width="2" fill="none" marker-end="url(#arw)"/>
@@ -73,7 +73,7 @@ doctor is never on the path:
 - **Local machine:** native Swift probe — `getloadavg()` ÷ `hw.ncpu` → load%,
   `host_statistics64` → mem%, classified with `headroom()` thresholds ported to a
   Swift constant (mirrors `devices/health.ts:194-205`). Needed because the live
-  `.fleet-stats.json` lists `zion` as `"reachable": false` with no stats.
+  `.fleet-stats.json` lists `workstation` as `"reachable": false` with no stats.
 - **Remote devices:** `LocalState.loadedDevices()` (mirrors `pendingDevices()`)
   reads `~/.agents/.cache/.fleet-stats.json`, keeps rows that are reachable, fresh
   (`fetchedAt` within a window — the current file has 31h-stale rows), and `loaded`.
@@ -103,15 +103,15 @@ No CLI or config surface changes. Menu-bar-only:
 ## Validation
 
 ```bash
-# build the menu bar, replace the installed app, then drive it on zion
+# build the menu bar, replace the installed app, then drive it on workstation
 swift build -c release            # or the repo's menubar build script
-open the menu on zion (live load) → confirm the "zion — high load N%" ⚠ row
+open the menu on workstation (live load) → confirm the "workstation — high load N%" ⚠ row
 ```
 
 | Check | Pass condition |
 |---|---|
-| Local warning | `zion — high load N%` ⚠ appears in NEEDS YOU; clears when load drops |
-| Remote warning | a fresh `loaded` device (e.g. mac-mini 340%) warns |
+| Local warning | `workstation — high load N%` ⚠ appears in NEEDS YOU; clears when load drops |
+| Remote warning | a fresh `loaded` device (e.g. release-host 340%) warns |
 | Freshness guard | a 31h-stale cache row does NOT warn |
 | Fast path | badge tick spawns no `agents doctor`; menu-open latency unchanged |
 

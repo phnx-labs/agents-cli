@@ -114,7 +114,7 @@
   <div class="meta prov">
     <span class="chip">harness <b>claude</b></span>
     <span class="chip">agent <b>opus-5</b></span>
-    <span class="chip">host <b>yosemite-s0</b></span>
+    <span class="chip">host <b>worker-s0</b></span>
     <span class="chip">session <b>2f3859d9</b></span>
     <span class="chip">date <b>2026-08-03</b></span>
   </div>
@@ -187,7 +187,7 @@ running when the clock strikes.</strong> Everything below follows from where tha
   <rect x="318" y="156" width="286" height="72" rx="9" fill="#1a1113" stroke="#ff6b6b"/>
   <text x="332" y="177" fill="#ff6b6b" font-family="monospace" font-size="11.5">② pin matches no machine</text>
   <text x="332" y="194" fill="#8b938c" font-family="monospace" font-size="10.5">devices: [worker] — but machineId()</text>
-  <text x="332" y="208" fill="#8b938c" font-family="monospace" font-size="10.5">returns yosemite-s1, never "worker"</text>
+  <text x="332" y="208" fill="#8b938c" font-family="monospace" font-size="10.5">returns worker-s1, never "worker"</text>
   <text x="332" y="222" fill="#e7ece8" font-family="monospace" font-size="10.5">→ inert everywhere. silent.</text>
 
   <rect x="620" y="156" width="304" height="72" rx="9" fill="#1a1113" stroke="#ff6b6b"/>
@@ -219,22 +219,22 @@ Each loss is silent: none of them writes anything the listing can show you.</fig
 <table>
 <thead><tr><th>device</th><th>owns</th><th>firing?</th><th>what is actually true</th></tr></thead>
 <tbody>
-<tr><td><span class="tag a">ok</span> <code>yosemite-s0</code></td><td>16</td><td>yes</td>
+<tr><td><span class="tag a">ok</span> <code>worker-s0</code></td><td>16</td><td>yes</td>
   <td>Drains fired 11:00Z and 11:10Z; watchdog every 2 min. Healthy.</td></tr>
-<tr><td><span class="tag d">broken</span> <code>yosemite-s1</code></td><td>10</td><td>fires, every agent run fails</td>
+<tr><td><span class="tag d">broken</span> <code>worker-s1</code></td><td>10</td><td>fires, every agent run fails</td>
   <td>Claude <strong>weekly quota exhausted</strong>, resets Aug 4 07:00. Every agent routine exits 1 with no stated reason.</td></tr>
 <tr><td><span class="tag c">phantom</span> <code>worker</code></td><td>—</td><td>n/a</td>
-  <td>Not a machine. Same hostname, <code>machine-id</code> and runs-dir inode as <code>yosemite-s1</code>.</td></tr>
-<tr><td><span class="tag c">partial</span> <code>zion</code></td><td>5</td><td>yes</td>
+  <td>Not a machine. Same hostname, <code>machine-id</code> and runs-dir inode as <code>worker-s1</code>.</td></tr>
+<tr><td><span class="tag c">partial</span> <code>workstation</code></td><td>5</td><td>yes</td>
   <td>Missed Sunday's <code>weekly-fleet-retro</code> while asleep; detected it, warned, did nothing.</td></tr>
-<tr><td><span class="tag b">pending</span> <code>mac-mini</code></td><td>5</td><td>yes</td>
+<tr><td><span class="tag b">pending</span> <code>release-host</code></td><td>5</td><td>yes</td>
   <td>Its 3 agent routines moved here Aug 1 (Sat). Today is their <em>first weekday</em>. Correctly armed.</td></tr>
 </tbody>
 </table>
 
 <div class="callout">
   <span class="lbl">The headline finding</span>
-  <strong>Nothing regressed overnight.</strong> mac-mini's routines were moved there on Saturday and
+  <strong>Nothing regressed overnight.</strong> release-host's routines were moved there on Saturday and
   have not yet had a weekday. s0's daily-08:00 routines last ran 20 hours ago and today's fire is not
   due until 08:00. The red you saw was quota exhaustion on s1, plus four separate reporting defects.
 </div>
@@ -257,16 +257,16 @@ Each loss is silent: none of them writes anything the listing can show you.</fig
   <td>Stale drop-in pointing at nonexistent <code>agents daemon _run</code>; <code>NRestarts</code> 8,439 on s0, 8,939 on s1</td>
   <td><span class="tag a">fixed today</span></td></tr>
 <tr><td>5</td><td><strong>Missed fires are never recovered</strong></td>
-  <td>zion daemon down 02:03Z→08:23Z; <code>weekly-fleet-retro</code> armed for 04:00:00Z; no run record</td>
+  <td>workstation daemon down 02:03Z→08:23Z; <code>weekly-fleet-retro</code> armed for 04:00:00Z; no run record</td>
   <td><span class="tag c">PR #1773</span></td></tr>
 <tr><td>6</td><td><strong>Status read from the wrong device</strong></td>
-  <td>zion reported s0's routines as failed from July records while s0 had completed them</td>
+  <td>workstation reported s0's routines as failed from July records while s0 had completed them</td>
   <td><span class="tag a">merged #1770</span></td></tr>
 <tr><td>7</td><td><strong>A miss leaves no trace at all</strong></td>
   <td><code>RunMeta.status</code> had no value for it; the row shows the last real run forever</td>
   <td><span class="tag c">PR #1773</span></td></tr>
 <tr><td>8</td><td>Unexplained failures still to triage</td>
-  <td><code>rush-blog-engine</code> since Jul 31; <code>rush-1107-ssl-watch</code> on zion; mac-mini at load 56</td>
+  <td><code>rush-blog-engine</code> since Jul 31; <code>rush-1107-ssl-watch</code> on workstation; release-host at load 56</td>
   <td><span class="tag b">queued</span></td></tr>
 </tbody>
 </table>
@@ -298,9 +298,9 @@ or green where there should be alarm.</p>
 
   <text x="500" y="24" fill="#a3e635" font-family="monospace" font-size="12">WHAT WAS TRUE</text>
   <rect x="500" y="36" width="424" height="182" rx="10" fill="#0e1a12" stroke="#2a3a22"/>
-  <text x="520" y="64" fill="#a3e635" font-family="monospace" font-size="12">✓ completed Aug 2 on yosemite-s0</text>
-  <text x="520" y="86" fill="#a3e635" font-family="monospace" font-size="12">✓ completed Aug 2 on yosemite-s0</text>
-  <text x="520" y="108" fill="#a3e635" font-family="monospace" font-size="12">✓ completed Aug 2 on yosemite-s0</text>
+  <text x="520" y="64" fill="#a3e635" font-family="monospace" font-size="12">✓ completed Aug 2 on worker-s0</text>
+  <text x="520" y="86" fill="#a3e635" font-family="monospace" font-size="12">✓ completed Aug 2 on worker-s0</text>
+  <text x="520" y="108" fill="#a3e635" font-family="monospace" font-size="12">✓ completed Aug 2 on worker-s0</text>
   <text x="520" y="130" fill="#a3e635" font-family="monospace" font-size="12">✓ completed — not due again yet</text>
   <text x="520" y="152" fill="#f5c451" font-family="monospace" font-size="12">◔ moved here Aug 1; 1st weekday today</text>
   <text x="520" y="174" fill="#ff6b6b" font-family="monospace" font-size="12">✕ genuinely missed (laptop asleep)</text>
@@ -345,7 +345,7 @@ fires every new routine on creation.</p>
 
 <h3>Phase 3 — remove the phantom device</h3>
 <p>Either make <code>worker</code> an alias that <code>normalizeHost</code> resolves to
-<code>yosemite-s1</code>, or fail loudly when a pin resolves to no live machine. A routine pinned to a
+<code>worker-s1</code>, or fail loudly when a pin resolves to no live machine. A routine pinned to a
 name no machine answers to must be marked in the listing, never silently inert.</p>
 <p class="lead"><strong>Why:</strong> a pin that matches nothing is the most confusing possible
 failure — the routine looks configured and enabled, and simply never happens.</p>
@@ -400,7 +400,7 @@ the real CLI against an isolated <code>HOME</code>, and these follow that patter
 <tr><td><span class="tag c">fleet eval</span></td><td>Every remaining red is real</td>
   <td>Re-run the per-box sweep; assert each <code>FAILED</code>/<code>OVERDUE</code> has a stated reason and a real cause</td></tr>
 <tr><td><span class="tag c">fleet eval</span></td><td>The system works unattended for a day</td>
-  <td>Tomorrow 08:00: s0's dailies fire, mac-mini's three weekday routines fire at 15:00Z/16:00Z, zion's retro is caught up</td></tr>
+  <td>Tomorrow 08:00: s0's dailies fire, release-host's three weekday routines fire at 15:00Z/16:00Z, workstation's retro is caught up</td></tr>
 </tbody>
 </table>
 
@@ -408,7 +408,7 @@ the real CLI against an isolated <code>HOME</code>, and these follow that patter
 every routine fired unattended proves the <em>system</em> is right.</p>
 
 <div class="foot">
-  claude · opus-5 · yosemite-s0 · session 2f3859d9 · 2026-08-03 &nbsp;·&nbsp; next: go / reshape
+  claude · opus-5 · worker-s0 · session session-id · 2026-08-03 &nbsp;·&nbsp; next: go / reshape
 </div>
 
 </div>

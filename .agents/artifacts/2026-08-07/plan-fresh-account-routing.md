@@ -14,7 +14,7 @@ facts:
 
 ## Purpose
 
-When the user runs **Agents: New Claude**, Factory emits a balanced launch. On zion, every cached Claude usage row was older than the five-minute routing limit, yet agents-cli selected `claude@2.1.219` from a roughly 59-hour-old snapshot reporting 86% weekly usage. Claude then rejected the first prompt because the weekly limit had already been reached.
+When the user runs **Agents: New Claude**, Factory emits a balanced launch. On workstation, every cached Claude usage row was older than the five-minute routing limit, yet agents-cli selected `claude@2.1.219` from a roughly 59-hour-old snapshot reporting 86% weekly usage. Claude then rejected the first prompt because the weekly limit had already been reached.
 
 <div class="artifact-callout"><strong>Behavioral contract:</strong> an initial launch must never choose an account from an unverified usage snapshot. If no fresh candidate exists, agents-cli performs one bounded refresh; if freshness still cannot be established, it exits with the account list and refresh failure instead of guessing.</div>
 

@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Restructure: an `agi` plugin for the CLI surface, and one design front door</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">.agents-system</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-awaiting-go">awaiting-go</span></div>
+<h1>Restructure: an `agi` plugin for the CLI surface, and one design front door</h1>
+<p class="summary">The system repo scatters the agents-CLI capability skills (browser, computer, run, sessions, teams, secrets, devices, monitors, routines, cloud) loose at the top level, and ships three competing &quot;design&quot; front doors. This maps the current landscape and proposes two clean plugins — `agi` (the CLI surface) and a consolidated `design` — plus the one CLI feature the move depends on: skill aliases.
+</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">18 top-level skills in .system/skills; 11 are 'agents &lt;x&gt;' CLI features scattered loose<span class="meta-sep" aria-hidden="true">·</span>3 design front doors: design:design (new), ~/.agents/skills/design (old), create:design (user)<span class="meta-sep" aria-hidden="true">·</span>No skill/command alias exists — only extra-repo alias (rush:*). Moving browser -&gt; agi:browser breaks bare `browser`<span class="meta-sep" aria-hidden="true">·</span>Plugin skills are invoked &lt;plugin&gt;:&lt;skill&gt;; the namespace comes from the plugin, not the skill's name field<span class="meta-sep" aria-hidden="true">·</span>Two repos in play: ~/.agents/.system (this repo) and ~/.agents (user layer); both on main</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/.agents-system" target="_blank" rel="noopener">phnx-labs/.agents-system</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">(no ticket yet — file on approval)</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Owner</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">worker-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">5722473c</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-09</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#proposed-changes"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<p>Two problems, one theme — the capability surface is not organized the way a user (or an
+agent under token pressure) reasons about it.</p>
+<p><strong>1. The agents-CLI capabilities are loose top-level skills.</strong> <code>browser</code>, <code>computer</code>,
+<code>run</code>, <code>sessions</code>, <code>teams</code>, <code>secrets</code>, <code>devices</code>, <code>monitors</code>, <code>routines</code>, <code>cloud</code> are all
+<em>features of one product</em> — the <code>agents</code> CLI (a.k.a. AGI CLI) — but they sit as unrelated
+top-level skills next to authoring tools like <code>mq</code> and <code>plan-render</code>. Nothing says "these
+are all one thing." The meta skill that describes the CLI is itself named <code>agents-cli</code> and
+is a loose skill, not a plugin.</p>
+<p><strong>2. Design has three front doors.</strong> <code>design:design</code> (the new keyless/offline plugin),
+<code>~/.agents/skills/design</code> (the old flat skill), and <code>create:design</code> (in the user <code>create</code>
+plugin) all answer "design something." Two of them carry value the canonical plugin lacks
+(an <code>anticipate</code> mode, an anti-tells catalog), and the canonical one ships <strong>hardcoded
+example files</strong> we now want replaced with live web-inspiration browsing.</p>
+<div class="artifact-callout">
+<strong>The linchpin:</strong> there is <em>no</em> skill/command alias in the CLI today —
+<code>alias</code> exists only for extra repos (<code>rush:*</code>). The moment
+<code>browser</code> moves under an <code>agi</code> plugin it is invoked
+<code>agi:browser</code>, and every bare <code>browser</code> reference (rules, muscle
+memory, other skills) breaks. So the alias/shortcut feature is a <strong>hard
+prerequisite</strong> of the move, and it is an agents-cli <em>code</em> change, not a
+<code>.system</code> edit.
+</div><h2 id="proposed-changes">Proposed Changes</h2>
+<h3>The shape: two clean plugins + one CLI feature</h3>
+<figure>
+<svg viewBox="0 0 920 360" width="100%" role="img" aria-label="Before: scattered top-level skills and three design doors. After: an agi plugin and one design plugin." xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arw" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="currentColor"></path></marker>
+  </defs>
+
+
+  <text x="20" y="22" font-size="13" font-weight="700" fill="#c0392b">BEFORE — scattered</text>
+  <rect x="20" y="34" width="410" height="300" rx="10" fill="none" stroke="#c0392b" stroke-opacity="0.55" stroke-width="1.5"></rect>
+  <text x="38" y="62" font-size="11.5" fill="currentColor">.system/skills/ — loose top-level, unrelated:</text>
+  <g fill="currentColor">
+    <text x="38" y="90">browser    computer    run    sessions</text>
+    <text x="38" y="116">teams    secrets    devices    monitors</text>
+    <text x="38" y="142">routines    cloud    agents-cli</text>
+  </g>
+  <text x="38" y="188" font-size="11.5" fill="currentColor">three competing design front doors:</text>
+  <g fill="currentColor">
+    <text x="38" y="216">design:design   (new plugin)</text>
+    <text x="38" y="242">~/.agents/skills/design   (old flat skill)</text>
+    <text x="38" y="268">create:design   (in the create plugin)</text>
+  </g>
+
+
+  <g>
+    <line x1="440" y1="180" x2="492" y2="180" stroke="currentColor" stroke-width="2" marker-end="url(#arw)"></line>
+    <text x="466" y="170" font-size="11" fill="currentColor" text-anchor="middle">group</text>
+  </g>
+
+
+  <text x="502" y="22" font-size="13" font-weight="700" fill="#2e8b57">AFTER — two plugins + alias</text>
+  <rect x="502" y="34" width="398" height="188" rx="10" fill="none" stroke="#2e8b57" stroke-opacity="0.6" stroke-width="1.5"></rect>
+  <text x="520" y="60" font-size="13" font-weight="700" fill="#2e8b57">agi/  — the CLI surface</text>
+  <g fill="currentColor">
+    <text x="520" y="88">agents*   browser   computer   run</text>
+    <text x="520" y="114">sessions   teams   secrets   devices</text>
+    <text x="520" y="140">monitors   routines   cloud   share?</text>
+  </g>
+  <text x="520" y="176" font-size="11.5" fill="currentColor">alias layer: bare `browser` resolves to agi:browser</text>
+  <text x="520" y="196" font-size="11.5" fill="currentColor">(the new CLI feature this move depends on)</text>
+
+  <rect x="502" y="238" width="398" height="96" rx="10" fill="none" stroke="#2e8b57" stroke-opacity="0.6" stroke-width="1.5"></rect>
+  <text x="520" y="264" font-size="13" font-weight="700" fill="#2e8b57">design/  — one front door</text>
+  <text x="520" y="290" font-size="13.5" fill="currentColor">make · define · judge   + anticipate + anti-tells</text>
+  <text x="520" y="314" font-size="11.5" fill="currentColor">examples/ removed → browse the web live for inspiration</text>
+</svg>
+<figcaption>Loose CLI-feature skills consolidate into an <code>agi</code> plugin behind an alias layer; three design doors collapse into one. <code>share?</code> = an open boundary call (D1).</figcaption>
+</figure><h3>1 · New <code>agi</code> plugin (the CLI surface)</h3>
+<p>Rename the <code>agents-cli</code> skill to <strong><code>agents</code></strong> and make it the flagship of a new
+<code>plugins/agi/</code>. Move the loose CLI-feature skills under it so they read as one product:</p>
+<table>
+<thead>
+<tr>
+<th>Moves under <code>agi/</code></th>
+<th>Invocation today</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>agents-cli</code> (renamed <code>agents</code>)</td>
+<td><code>agents-cli</code></td>
+<td><code>agi:agents</code> (alias: <code>agents</code>)</td>
+</tr>
+<tr>
+<td><code>browser</code></td>
+<td><code>browser</code></td>
+<td><code>agi:browser</code> (alias: <code>browser</code>)</td>
+</tr>
+<tr>
+<td><code>computer</code></td>
+<td><code>computer</code></td>
+<td><code>agi:computer</code> (alias: <code>computer</code>)</td>
+</tr>
+<tr>
+<td><code>run</code>, <code>teams</code>, <code>sessions</code>, <code>cloud</code></td>
+<td>bare</td>
+<td><code>agi:run</code> / <code>agi:teams</code> / <code>agi:sessions</code> / <code>agi:cloud</code></td>
+</tr>
+<tr>
+<td><code>secrets</code>, <code>devices</code>, <code>monitors</code>, <code>routines</code></td>
+<td>bare</td>
+<td><code>agi:secrets</code> / <code>agi:devices</code> / <code>agi:monitors</code> / <code>agi:routines</code></td>
+</tr>
+</tbody></table>
+<p>Stays top-level (not a CLI verb — a separate tool or authoring surface): <code>artifacts</code>,
+<code>plan-render</code>, <code>visualize</code>, <code>mq</code>, <code>tickets</code>, <code>docs</code>, <code>learn</code>. <strong>(Confirm — decision D3.)</strong></p>
+<h3>2 · Skill-alias / shortcut support (agents-cli code)</h3>
+<p>A new resource capability: a skill (or command) declares a short alias so it stays
+reachable by its old bare name after moving into a plugin namespace. Sketch:</p>
+<pre><code># plugins/agi/skills/browser/SKILL.md frontmatter
+name: browser
+plugin: agi          # invoked agi:browser
+aliases: [browser]   # bare `browser` and `/browser` still resolve here
+</code></pre>
+<p>The resolver (<code>apps/cli/src/lib/resources.ts</code> / <code>skills.ts</code>) gains alias-aware lookup, and
+the model-facing skill listing shows the canonical name with its alias. This is what makes
+the whole move non-breaking. It ships on the agents-cli <strong>release train</strong> (merge-only for
+us; the train publishes).</p>
+<h3>3 · One design front door</h3>
+<p>Fold the unique value into <code>plugins/design</code>, then retire the other two doors:</p>
+<table>
+<thead>
+<tr>
+<th>Fold in</th>
+<th>From</th>
+<th>Into</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>anticipate</code> mode (flow dead-ends)</td>
+<td>old <code>skills/design</code> + <code>create:design</code></td>
+<td>new mode <code>anticipate.md</code></td>
+</tr>
+<tr>
+<td>anti-tells catalog (era-specific AI tells)</td>
+<td><code>create:design/design-anti-tells.md</code></td>
+<td>a <code>design-core</code> section (always-on)</td>
+</tr>
+<tr>
+<td>brand (<code>BRAND.md</code>) spec detail</td>
+<td><code>create:design/brand-md-spec.md</code></td>
+<td><code>system</code> mode (or own <code>brand</code> mode — D-brand)</td>
+</tr>
+<tr>
+<td><strong>web-inspiration browsing</strong> (your ask)</td>
+<td>— new</td>
+<td><code>design-core</code>: use the <code>browser</code> skill to screenshot real sites and eyedrop palette/type/layout</td>
+</tr>
+<tr>
+<td>hardcoded <code>examples/</code> (airbnb, intercom, rush)</td>
+<td>old <code>skills/design</code></td>
+<td><strong>removed</strong> — replaced by live browsing</td>
+</tr>
+</tbody></table>
+<p>Then <code>~/.agents/skills/design</code> and <code>create:design</code> are retired (full delete, redirect
+stub, or left alone — <strong>decision D4</strong>).</p>
+<h3>4 · Update the rules/subrules that point at the old names</h3>
+<p>These reference the tool skills and must move to the alias/<code>agi:</code> names:</p>
+<table>
+<thead>
+<tr>
+<th>Subrule</th>
+<th>What references it</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>rules/subrules/tech-stack.md</code></td>
+<td>the "Right tool for the job" table (browser, pty, teams, secrets, mq, tickets)</td>
+</tr>
+<tr>
+<td><code>rules/subrules/foundations.md</code></td>
+<td>F2 ladder ("the <code>browser</code> skill", "<code>agents computer</code>")</td>
+</tr>
+<tr>
+<td><code>rules/subrules/remote-fleet-dispatch.md</code></td>
+<td>devices / hosts</td>
+</tr>
+<tr>
+<td><code>plan-presentation/*</code>, <code>truly-agentic-git-workflow/pr-description-reminder.sh</code></td>
+<td>browser/pty capture references</td>
+</tr>
+</tbody></table>
+<h2 id="public-interface">Public Interface</h2>
+<ul>
+<li><strong>New invocations:</strong> <code>agi:agents</code>, <code>agi:browser</code>, <code>agi:computer</code>, <code>agi:run</code>,
+<code>agi:sessions</code>, <code>agi:teams</code>, <code>agi:secrets</code>, <code>agi:devices</code>, <code>agi:monitors</code>,
+<code>agi:routines</code>, <code>agi:cloud</code> — each with a bare alias preserving today's name.</li>
+<li><strong>Design:</strong> <code>design:design</code> gains <code>anticipate</code>; <code>design-core</code> gains anti-tells + a
+web-inspiration step; <code>examples/</code> removed. <code>design</code>/<code>create:design</code> cease to be doors.</li>
+<li><strong>CLI:</strong> skills/commands may declare <code>aliases: [...]</code> in frontmatter (new).</li>
+</ul>
+<h2 id="validation">Validation</h2>
+<pre><code># after the .system move + alias feature is installed
+agents view claude@all | grep -E 'agi:|design:'      # new namespaces registered
+agents inspect skills | grep -E 'browser|agi'         # alias resolves bare -&gt; agi:browser
+# design plugin no longer ships static examples
+test ! -d ~/.agents/.system/plugins/design/examples &amp;&amp; echo "examples removed OK"
+# rules updated — no stale bare references remain
+grep -rn 'the `browser` skill' ~/.agents/.system/rules/subrules   # expect: alias-aware wording
+</code></pre>
+<p>Plus: README/CHANGELOG updated for every moved resource (the sync-table contract), and each
+moved hook/skill keeps its second edit (plugin README + catalog).</p>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Move <code>browser</code>-&gt;<code>agi:browser</code> <strong>before</strong> alias lands → bare <code>browser</code> breaks fleet-wide</td>
+<td>Sequence: land the alias CLI feature first (it's on the release train), verify installed, then move in <code>.system</code></td>
+</tr>
+<tr>
+<td>Two repos, both on <code>main</code></td>
+<td>Worktree+PR in each (<code>.system</code> and <code>~/.agents</code>); the design retire is a separate <code>~/.agents</code> PR</td>
+</tr>
+<tr>
+<td><code>agi</code> boundary creep (does it swallow <code>sessions</code>/<code>fleet</code>/<code>share</code> plugins? workflow plugins?)</td>
+<td>Decide D1 up front; default to narrow (raw CLI verbs only)</td>
+</tr>
+<tr>
+<td>Aliases collide (two skills want <code>run</code>)</td>
+<td>Alias registry errors on collision; canonical <code>agi:run</code> always unambiguous</td>
+</tr>
+<tr>
+<td>Losing the old design skills' good content</td>
+<td>Fold-map above is explicit; nothing deleted until its value lands in the plugin</td>
+</tr>
+</tbody></table>
+<h2 id="tracking">Tracking</h2>
+<p><strong>Open decisions — your calls before I build (F1 design gate):</strong></p>
+<ul>
+<li><strong>D1 — <code>agi</code> boundary.</strong> Narrow (only the raw CLI-verb skills) vs broad (also absorb the
+existing <code>fleet</code>, <code>share</code>, <code>sessions</code> plugins, since those are <code>agents &lt;x&gt;</code> too). Recommend <strong>narrow</strong>.</li>
+<li><strong>D2 — alias mechanism.</strong> (a) <code>aliases:</code> frontmatter resolved by the CLI (recommend), (b)
+a shortcuts map in <code>agents.yaml</code>, or (c) no CLI change — keep bare names as thin
+top-level stub skills that point to <code>agi:*</code>.</li>
+<li><strong>D3 — what stays top-level.</strong> Confirm <code>artifacts / plan-render / visualize / mq / tickets / docs / learn</code> are <em>not</em> agi (they are authoring/knowledge tools, separate CLIs).</li>
+<li><strong>D4 — design consolidation depth.</strong> Full-retire the two old doors, redirect-stub them,
+or fold-value-only and leave them.</li>
+<li><strong>D-brand — brand mode.</strong> Own <code>brand</code> mode vs part of <code>system</code>.</li>
+<li><strong>Sequencing.</strong> Alias CLI feature (agents-cli, release-train) → then <code>.system</code> <code>agi</code> move
+→ then rules update → then design consolidation. Confirm this order.</li>
+</ul>
+<p><strong>Next step:</strong> on your D1–D4 picks I file the tickets and start with the alias feature (the
+prerequisite), driving each PR to merge.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGl0bGU6ICJSZXN0cnVjdHVyZTogYW4gYGFnaWAgcGx1Z2luIGZvciB0aGUgQ0xJIHN1cmZhY2UsIGFuZCBvbmUgZGVzaWduIGZyb250IGRvb3IiCnN1bW1hcnk6ID4KICBUaGUgc3lzdGVtIHJlcG8gc2NhdHRlcnMgdGhlIGFnZW50cy1DTEkgY2FwYWJpbGl0eSBza2lsbHMgKGJyb3dzZXIsIGNvbXB1dGVyLCBydW4sCiAgc2Vzc2lvbnMsIHRlYW1zLCBzZWNyZXRzLCBkZXZpY2VzLCBtb25pdG9ycywgcm91dGluZXMsIGNsb3VkKSBsb29zZSBhdCB0aGUgdG9wIGxldmVsLAogIGFuZCBzaGlwcyB0aHJlZSBjb21wZXRpbmcgImRlc2lnbiIgZnJvbnQgZG9vcnMuIFRoaXMgbWFwcyB0aGUgY3VycmVudCBsYW5kc2NhcGUgYW5kCiAgcHJvcG9zZXMgdHdvIGNsZWFuIHBsdWdpbnMg4oCUIGBhZ2lgICh0aGUgQ0xJIHN1cmZhY2UpIGFuZCBhIGNvbnNvbGlkYXRlZCBgZGVzaWduYCDigJQgcGx1cwogIHRoZSBvbmUgQ0xJIGZlYXR1cmUgdGhlIG1vdmUgZGVwZW5kcyBvbjogc2tpbGwgYWxpYXNlcy4Kc3RhdHVzOiBhd2FpdGluZy1nbwp0cmFja2luZzogIihubyB0aWNrZXQgeWV0IOKAlCBmaWxlIG9uIGFwcHJvdmFsKSIKZmFjdHM6CiAgLSAiMTggdG9wLWxldmVsIHNraWxscyBpbiAuc3lzdGVtL3NraWxsczsgMTEgYXJlICdhZ2VudHMgPHg+JyBDTEkgZmVhdHVyZXMgc2NhdHRlcmVkIGxvb3NlIgogIC0gIjMgZGVzaWduIGZyb250IGRvb3JzOiBkZXNpZ246ZGVzaWduIChuZXcpLCB+Ly5hZ2VudHMvc2tpbGxzL2Rlc2lnbiAob2xkKSwgY3JlYXRlOmRlc2lnbiAodXNlcikiCiAgLSAiTm8gc2tpbGwvY29tbWFuZCBhbGlhcyBleGlzdHMg4oCUIG9ubHkgZXh0cmEtcmVwbyBhbGlhcyAocnVzaDoqKS4gTW92aW5nIGJyb3dzZXIgLT4gYWdpOmJyb3dzZXIgYnJlYWtzIGJhcmUgYGJyb3dzZXJgIgogIC0gIlBsdWdpbiBza2lsbHMgYXJlIGludm9rZWQgPHBsdWdpbj46PHNraWxsPjsgdGhlIG5hbWVzcGFjZSBjb21lcyBmcm9tIHRoZSBwbHVnaW4sIG5vdCB0aGUgc2tpbGwncyBuYW1lIGZpZWxkIgogIC0gIlR3byByZXBvcyBpbiBwbGF5OiB+Ly5hZ2VudHMvLnN5c3RlbSAodGhpcyByZXBvKSBhbmQgfi8uYWdlbnRzICh1c2VyIGxheWVyKTsgYm90aCBvbiBtYWluIgotLS0KCiMjIFB1cnBvc2UKClR3byBwcm9ibGVtcywgb25lIHRoZW1lIOKAlCB0aGUgY2FwYWJpbGl0eSBzdXJmYWNlIGlzIG5vdCBvcmdhbml6ZWQgdGhlIHdheSBhIHVzZXIgKG9yIGFuCmFnZW50IHVuZGVyIHRva2VuIHByZXNzdXJlKSByZWFzb25zIGFib3V0IGl0LgoKKioxLiBUaGUgYWdlbnRzLUNMSSBjYXBhYmlsaXRpZXMgYXJlIGxvb3NlIHRvcC1sZXZlbCBza2lsbHMuKiogYGJyb3dzZXJgLCBgY29tcHV0ZXJgLApgcnVuYCwgYHNlc3Npb25zYCwgYHRlYW1zYCwgYHNlY3JldHNgLCBgZGV2aWNlc2AsIGBtb25pdG9yc2AsIGByb3V0aW5lc2AsIGBjbG91ZGAgYXJlIGFsbAoqZmVhdHVyZXMgb2Ygb25lIHByb2R1Y3QqIOKAlCB0aGUgYGFnZW50c2AgQ0xJIChhLmsuYS4gQUdJIENMSSkg4oCUIGJ1dCB0aGV5IHNpdCBhcyB1bnJlbGF0ZWQKdG9wLWxldmVsIHNraWxscyBuZXh0IHRvIGF1dGhvcmluZyB0b29scyBsaWtlIGBtcWAgYW5kIGBwbGFuLXJlbmRlcmAuIE5vdGhpbmcgc2F5cyAidGhlc2UKYXJlIGFsbCBvbmUgdGhpbmcuIiBUaGUgbWV0YSBza2lsbCB0aGF0IGRlc2NyaWJlcyB0aGUgQ0xJIGlzIGl0c2VsZiBuYW1lZCBgYWdlbnRzLWNsaWAgYW5kCmlzIGEgbG9vc2Ugc2tpbGwsIG5vdCBhIHBsdWdpbi4KCioqMi4gRGVzaWduIGhhcyB0aHJlZSBmcm9udCBkb29ycy4qKiBgZGVzaWduOmRlc2lnbmAgKHRoZSBuZXcga2V5bGVzcy9vZmZsaW5lIHBsdWdpbiksCmB+Ly5hZ2VudHMvc2tpbGxzL2Rlc2lnbmAgKHRoZSBvbGQgZmxhdCBza2lsbCksIGFuZCBgY3JlYXRlOmRlc2lnbmAgKGluIHRoZSB1c2VyIGBjcmVhdGVgCnBsdWdpbikgYWxsIGFuc3dlciAiZGVzaWduIHNvbWV0aGluZy4iIFR3byBvZiB0aGVtIGNhcnJ5IHZhbHVlIHRoZSBjYW5vbmljYWwgcGx1Z2luIGxhY2tzCihhbiBgYW50aWNpcGF0ZWAgbW9kZSwgYW4gYW50aS10ZWxscyBjYXRhbG9nKSwgYW5kIHRoZSBjYW5vbmljYWwgb25lIHNoaXBzICoqaGFyZGNvZGVkCmV4YW1wbGUgZmlsZXMqKiB3ZSBub3cgd2FudCByZXBsYWNlZCB3aXRoIGxpdmUgd2ViLWluc3BpcmF0aW9uIGJyb3dzaW5nLgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+CjxzdHJvbmc+VGhlIGxpbmNocGluOjwvc3Ryb25nPiB0aGVyZSBpcyA8ZW0+bm88L2VtPiBza2lsbC9jb21tYW5kIGFsaWFzIGluIHRoZSBDTEkgdG9kYXkg4oCUCjxjb2RlPmFsaWFzPC9jb2RlPiBleGlzdHMgb25seSBmb3IgZXh0cmEgcmVwb3MgKDxjb2RlPnJ1c2g6KjwvY29kZT4pLiBUaGUgbW9tZW50Cjxjb2RlPmJyb3dzZXI8L2NvZGU+IG1vdmVzIHVuZGVyIGFuIDxjb2RlPmFnaTwvY29kZT4gcGx1Z2luIGl0IGlzIGludm9rZWQKPGNvZGU+YWdpOmJyb3dzZXI8L2NvZGU+LCBhbmQgZXZlcnkgYmFyZSA8Y29kZT5icm93c2VyPC9jb2RlPiByZWZlcmVuY2UgKHJ1bGVzLCBtdXNjbGUKbWVtb3J5LCBvdGhlciBza2lsbHMpIGJyZWFrcy4gU28gdGhlIGFsaWFzL3Nob3J0Y3V0IGZlYXR1cmUgaXMgYSA8c3Ryb25nPmhhcmQKcHJlcmVxdWlzaXRlPC9zdHJvbmc+IG9mIHRoZSBtb3ZlLCBhbmQgaXQgaXMgYW4gYWdlbnRzLWNsaSA8ZW0+Y29kZTwvZW0+IGNoYW5nZSwgbm90IGEKPGNvZGU+LnN5c3RlbTwvY29kZT4gZWRpdC4KPC9kaXY+CgojIyBQcm9wb3NlZCBDaGFuZ2VzCgojIyMgVGhlIHNoYXBlOiB0d28gY2xlYW4gcGx1Z2lucyArIG9uZSBDTEkgZmVhdHVyZQoKPGZpZ3VyZT4KPHN2ZyB2aWV3Qm94PSIwIDAgOTIwIDM2MCIgd2lkdGg9IjEwMCUiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iQmVmb3JlOiBzY2F0dGVyZWQgdG9wLWxldmVsIHNraWxscyBhbmQgdGhyZWUgZGVzaWduIGRvb3JzLiBBZnRlcjogYW4gYWdpIHBsdWdpbiBhbmQgb25lIGRlc2lnbiBwbHVnaW4uIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxkZWZzPgogICAgPG1hcmtlciBpZD0iYXJ3IiBtYXJrZXJXaWR0aD0iMTAiIG1hcmtlckhlaWdodD0iMTAiIHJlZlg9IjgiIHJlZlk9IjMiIG9yaWVudD0iYXV0byI+PHBhdGggZD0iTTAsMCBMOCwzIEwwLDYgWiIgZmlsbD0iY3VycmVudENvbG9yIi8+PC9tYXJrZXI+CiAgPC9kZWZzPgoKICA8IS0tIEJFRk9SRSBwYW5lbDogcGxhaW4gdGV4dCBsaXN0cywgbm8gZml4ZWQtd2lkdGggY2hpcHMgKHRoZW1lLXNhZmUgdmlhIGN1cnJlbnRDb2xvcikgLS0+CiAgPHRleHQgeD0iMjAiIHk9IjIyIiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSIjYzAzOTJiIj5CRUZPUkUg4oCUIHNjYXR0ZXJlZDwvdGV4dD4KICA8cmVjdCB4PSIyMCIgeT0iMzQiIHdpZHRoPSI0MTAiIGhlaWdodD0iMzAwIiByeD0iMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2MwMzkyYiIgc3Ryb2tlLW9wYWNpdHk9IjAuNTUiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iMzgiIHk9IjYyIiBmb250LXNpemU9IjExLjUiIGZpbGw9ImN1cnJlbnRDb2xvciIgb3BhY2l0eT0iMC42Ij4uc3lzdGVtL3NraWxscy8g4oCUIGxvb3NlIHRvcC1sZXZlbCwgdW5yZWxhdGVkOjwvdGV4dD4KICA8ZyBmb250LXNpemU9IjEzLjUiIGZpbGw9ImN1cnJlbnRDb2xvciI+CiAgICA8dGV4dCB4PSIzOCIgeT0iOTAiPmJyb3dzZXIgICAgY29tcHV0ZXIgICAgcnVuICAgIHNlc3Npb25zPC90ZXh0PgogICAgPHRleHQgeD0iMzgiIHk9IjExNiI+dGVhbXMgICAgc2VjcmV0cyAgICBkZXZpY2VzICAgIG1vbml0b3JzPC90ZXh0PgogICAgPHRleHQgeD0iMzgiIHk9IjE0MiI+cm91dGluZXMgICAgY2xvdWQgICAgYWdlbnRzLWNsaTwvdGV4dD4KICA8L2c+CiAgPHRleHQgeD0iMzgiIHk9IjE4OCIgZm9udC1zaXplPSIxMS41IiBmaWxsPSJjdXJyZW50Q29sb3IiIG9wYWNpdHk9IjAuNiI+dGhyZWUgY29tcGV0aW5nIGRlc2lnbiBmcm9udCBkb29yczo8L3RleHQ+CiAgPGcgZm9udC1zaXplPSIxMy41IiBmaWxsPSJjdXJyZW50Q29sb3IiPgogICAgPHRleHQgeD0iMzgiIHk9IjIxNiI+ZGVzaWduOmRlc2lnbiAgIChuZXcgcGx1Z2luKTwvdGV4dD4KICAgIDx0ZXh0IHg9IjM4IiB5PSIyNDIiPn4vLmFnZW50cy9za2lsbHMvZGVzaWduICAgKG9sZCBmbGF0IHNraWxsKTwvdGV4dD4KICAgIDx0ZXh0IHg9IjM4IiB5PSIyNjgiPmNyZWF0ZTpkZXNpZ24gICAoaW4gdGhlIGNyZWF0ZSBwbHVnaW4pPC90ZXh0PgogIDwvZz4KCiAgPCEtLSBhcnJvdyAtLT4KICA8ZyBjb2xvcj0iIzhiOGZhMyI+CiAgICA8bGluZSB4MT0iNDQwIiB5MT0iMTgwIiB4Mj0iNDkyIiB5Mj0iMTgwIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2FydykiLz4KICAgIDx0ZXh0IHg9IjQ2NiIgeT0iMTcwIiBmb250LXNpemU9IjExIiBmaWxsPSJjdXJyZW50Q29sb3IiIHRleHQtYW5jaG9yPSJtaWRkbGUiPmdyb3VwPC90ZXh0PgogIDwvZz4KCiAgPCEtLSBBRlRFUiBwYW5lbCAtLT4KICA8dGV4dCB4PSI1MDIiIHk9IjIyIiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSIjMmU4YjU3Ij5BRlRFUiDigJQgdHdvIHBsdWdpbnMgKyBhbGlhczwvdGV4dD4KICA8cmVjdCB4PSI1MDIiIHk9IjM0IiB3aWR0aD0iMzk4IiBoZWlnaHQ9IjE4OCIgcng9IjEwIiBmaWxsPSJub25lIiBzdHJva2U9IiMyZThiNTciIHN0cm9rZS1vcGFjaXR5PSIwLjYiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNTIwIiB5PSI2MCIgZm9udC1zaXplPSIxMyIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iIzJlOGI1NyI+YWdpLyAg4oCUIHRoZSBDTEkgc3VyZmFjZTwvdGV4dD4KICA8ZyBmb250LXNpemU9IjEzLjUiIGZpbGw9ImN1cnJlbnRDb2xvciI+CiAgICA8dGV4dCB4PSI1MjAiIHk9Ijg4Ij5hZ2VudHMqICAgYnJvd3NlciAgIGNvbXB1dGVyICAgcnVuPC90ZXh0PgogICAgPHRleHQgeD0iNTIwIiB5PSIxMTQiPnNlc3Npb25zICAgdGVhbXMgICBzZWNyZXRzICAgZGV2aWNlczwvdGV4dD4KICAgIDx0ZXh0IHg9IjUyMCIgeT0iMTQwIj5tb25pdG9ycyAgIHJvdXRpbmVzICAgY2xvdWQgICBzaGFyZT88L3RleHQ+CiAgPC9nPgogIDx0ZXh0IHg9IjUyMCIgeT0iMTc2IiBmb250LXNpemU9IjExLjUiIGZpbGw9ImN1cnJlbnRDb2xvciIgb3BhY2l0eT0iMC42NSI+YWxpYXMgbGF5ZXI6IGJhcmUgYGJyb3dzZXJgIHJlc29sdmVzIHRvIGFnaTpicm93c2VyPC90ZXh0PgogIDx0ZXh0IHg9IjUyMCIgeT0iMTk2IiBmb250LXNpemU9IjExLjUiIGZpbGw9ImN1cnJlbnRDb2xvciIgb3BhY2l0eT0iMC42NSI+KHRoZSBuZXcgQ0xJIGZlYXR1cmUgdGhpcyBtb3ZlIGRlcGVuZHMgb24pPC90ZXh0PgoKICA8cmVjdCB4PSI1MDIiIHk9IjIzOCIgd2lkdGg9IjM5OCIgaGVpZ2h0PSI5NiIgcng9IjEwIiBmaWxsPSJub25lIiBzdHJva2U9IiMyZThiNTciIHN0cm9rZS1vcGFjaXR5PSIwLjYiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNTIwIiB5PSIyNjQiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiMyZThiNTciPmRlc2lnbi8gIOKAlCBvbmUgZnJvbnQgZG9vcjwvdGV4dD4KICA8dGV4dCB4PSI1MjAiIHk9IjI5MCIgZm9udC1zaXplPSIxMy41IiBmaWxsPSJjdXJyZW50Q29sb3IiPm1ha2UgwrcgZGVmaW5lIMK3IGp1ZGdlICAgKyBhbnRpY2lwYXRlICsgYW50aS10ZWxsczwvdGV4dD4KICA8dGV4dCB4PSI1MjAiIHk9IjMxNCIgZm9udC1zaXplPSIxMS41IiBmaWxsPSJjdXJyZW50Q29sb3IiIG9wYWNpdHk9IjAuNjUiPmV4YW1wbGVzLyByZW1vdmVkIOKGkiBicm93c2UgdGhlIHdlYiBsaXZlIGZvciBpbnNwaXJhdGlvbjwvdGV4dD4KPC9zdmc+CjxmaWdjYXB0aW9uPkxvb3NlIENMSS1mZWF0dXJlIHNraWxscyBjb25zb2xpZGF0ZSBpbnRvIGFuIDxjb2RlPmFnaTwvY29kZT4gcGx1Z2luIGJlaGluZCBhbiBhbGlhcyBsYXllcjsgdGhyZWUgZGVzaWduIGRvb3JzIGNvbGxhcHNlIGludG8gb25lLiA8Y29kZT5zaGFyZT88L2NvZGU+ID0gYW4gb3BlbiBib3VuZGFyeSBjYWxsIChEMSkuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCiMjIyAxIMK3IE5ldyBgYWdpYCBwbHVnaW4gKHRoZSBDTEkgc3VyZmFjZSkKClJlbmFtZSB0aGUgYGFnZW50cy1jbGlgIHNraWxsIHRvICoqYGFnZW50c2AqKiBhbmQgbWFrZSBpdCB0aGUgZmxhZ3NoaXAgb2YgYSBuZXcKYHBsdWdpbnMvYWdpL2AuIE1vdmUgdGhlIGxvb3NlIENMSS1mZWF0dXJlIHNraWxscyB1bmRlciBpdCBzbyB0aGV5IHJlYWQgYXMgb25lIHByb2R1Y3Q6Cgp8IE1vdmVzIHVuZGVyIGBhZ2kvYCB8IEludm9jYXRpb24gdG9kYXkgfCBBZnRlciB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCBgYWdlbnRzLWNsaWAgKHJlbmFtZWQgYGFnZW50c2ApIHwgYGFnZW50cy1jbGlgIHwgYGFnaTphZ2VudHNgIChhbGlhczogYGFnZW50c2ApIHwKfCBgYnJvd3NlcmAgfCBgYnJvd3NlcmAgfCBgYWdpOmJyb3dzZXJgIChhbGlhczogYGJyb3dzZXJgKSB8CnwgYGNvbXB1dGVyYCB8IGBjb21wdXRlcmAgfCBgYWdpOmNvbXB1dGVyYCAoYWxpYXM6IGBjb21wdXRlcmApIHwKfCBgcnVuYCwgYHRlYW1zYCwgYHNlc3Npb25zYCwgYGNsb3VkYCB8IGJhcmUgfCBgYWdpOnJ1bmAgLyBgYWdpOnRlYW1zYCAvIGBhZ2k6c2Vzc2lvbnNgIC8gYGFnaTpjbG91ZGAgfAp8IGBzZWNyZXRzYCwgYGRldmljZXNgLCBgbW9uaXRvcnNgLCBgcm91dGluZXNgIHwgYmFyZSB8IGBhZ2k6c2VjcmV0c2AgLyBgYWdpOmRldmljZXNgIC8gYGFnaTptb25pdG9yc2AgLyBgYWdpOnJvdXRpbmVzYCB8CgpTdGF5cyB0b3AtbGV2ZWwgKG5vdCBhIENMSSB2ZXJiIOKAlCBhIHNlcGFyYXRlIHRvb2wgb3IgYXV0aG9yaW5nIHN1cmZhY2UpOiBgYXJ0aWZhY3RzYCwKYHBsYW4tcmVuZGVyYCwgYHZpc3VhbGl6ZWAsIGBtcWAsIGB0aWNrZXRzYCwgYGRvY3NgLCBgbGVhcm5gLiAqKihDb25maXJtIOKAlCBkZWNpc2lvbiBEMy4pKioKCiMjIyAyIMK3IFNraWxsLWFsaWFzIC8gc2hvcnRjdXQgc3VwcG9ydCAoYWdlbnRzLWNsaSBjb2RlKQoKQSBuZXcgcmVzb3VyY2UgY2FwYWJpbGl0eTogYSBza2lsbCAob3IgY29tbWFuZCkgZGVjbGFyZXMgYSBzaG9ydCBhbGlhcyBzbyBpdCBzdGF5cwpyZWFjaGFibGUgYnkgaXRzIG9sZCBiYXJlIG5hbWUgYWZ0ZXIgbW92aW5nIGludG8gYSBwbHVnaW4gbmFtZXNwYWNlLiBTa2V0Y2g6CgpgYGB5YW1sCiMgcGx1Z2lucy9hZ2kvc2tpbGxzL2Jyb3dzZXIvU0tJTEwubWQgZnJvbnRtYXR0ZXIKbmFtZTogYnJvd3NlcgpwbHVnaW46IGFnaSAgICAgICAgICAjIGludm9rZWQgYWdpOmJyb3dzZXIKYWxpYXNlczogW2Jyb3dzZXJdICAgIyBiYXJlIGBicm93c2VyYCBhbmQgYC9icm93c2VyYCBzdGlsbCByZXNvbHZlIGhlcmUKYGBgCgpUaGUgcmVzb2x2ZXIgKGBhcHBzL2NsaS9zcmMvbGliL3Jlc291cmNlcy50c2AgLyBgc2tpbGxzLnRzYCkgZ2FpbnMgYWxpYXMtYXdhcmUgbG9va3VwLCBhbmQKdGhlIG1vZGVsLWZhY2luZyBza2lsbCBsaXN0aW5nIHNob3dzIHRoZSBjYW5vbmljYWwgbmFtZSB3aXRoIGl0cyBhbGlhcy4gVGhpcyBpcyB3aGF0IG1ha2VzCnRoZSB3aG9sZSBtb3ZlIG5vbi1icmVha2luZy4gSXQgc2hpcHMgb24gdGhlIGFnZW50cy1jbGkgKipyZWxlYXNlIHRyYWluKiogKG1lcmdlLW9ubHkgZm9yCnVzOyB0aGUgdHJhaW4gcHVibGlzaGVzKS4KCiMjIyAzIMK3IE9uZSBkZXNpZ24gZnJvbnQgZG9vcgoKRm9sZCB0aGUgdW5pcXVlIHZhbHVlIGludG8gYHBsdWdpbnMvZGVzaWduYCwgdGhlbiByZXRpcmUgdGhlIG90aGVyIHR3byBkb29yczoKCnwgRm9sZCBpbiB8IEZyb20gfCBJbnRvIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IGBhbnRpY2lwYXRlYCBtb2RlIChmbG93IGRlYWQtZW5kcykgfCBvbGQgYHNraWxscy9kZXNpZ25gICsgYGNyZWF0ZTpkZXNpZ25gIHwgbmV3IG1vZGUgYGFudGljaXBhdGUubWRgIHwKfCBhbnRpLXRlbGxzIGNhdGFsb2cgKGVyYS1zcGVjaWZpYyBBSSB0ZWxscykgfCBgY3JlYXRlOmRlc2lnbi9kZXNpZ24tYW50aS10ZWxscy5tZGAgfCBhIGBkZXNpZ24tY29yZWAgc2VjdGlvbiAoYWx3YXlzLW9uKSB8CnwgYnJhbmQgKGBCUkFORC5tZGApIHNwZWMgZGV0YWlsIHwgYGNyZWF0ZTpkZXNpZ24vYnJhbmQtbWQtc3BlYy5tZGAgfCBgc3lzdGVtYCBtb2RlIChvciBvd24gYGJyYW5kYCBtb2RlIOKAlCBELWJyYW5kKSB8CnwgKip3ZWItaW5zcGlyYXRpb24gYnJvd3NpbmcqKiAoeW91ciBhc2spIHwg4oCUIG5ldyB8IGBkZXNpZ24tY29yZWA6IHVzZSB0aGUgYGJyb3dzZXJgIHNraWxsIHRvIHNjcmVlbnNob3QgcmVhbCBzaXRlcyBhbmQgZXllZHJvcCBwYWxldHRlL3R5cGUvbGF5b3V0IHwKfCB+fmhhcmRjb2RlZCBgZXhhbXBsZXMvYCAoYWlyYm5iLCBpbnRlcmNvbSwgcnVzaCl+fiB8IG9sZCBgc2tpbGxzL2Rlc2lnbmAgfCAqKnJlbW92ZWQqKiDigJQgcmVwbGFjZWQgYnkgbGl2ZSBicm93c2luZyB8CgpUaGVuIGB+Ly5hZ2VudHMvc2tpbGxzL2Rlc2lnbmAgYW5kIGBjcmVhdGU6ZGVzaWduYCBhcmUgcmV0aXJlZCAoZnVsbCBkZWxldGUsIHJlZGlyZWN0CnN0dWIsIG9yIGxlZnQgYWxvbmUg4oCUICoqZGVjaXNpb24gRDQqKikuCgojIyMgNCDCtyBVcGRhdGUgdGhlIHJ1bGVzL3N1YnJ1bGVzIHRoYXQgcG9pbnQgYXQgdGhlIG9sZCBuYW1lcwoKVGhlc2UgcmVmZXJlbmNlIHRoZSB0b29sIHNraWxscyBhbmQgbXVzdCBtb3ZlIHRvIHRoZSBhbGlhcy9gYWdpOmAgbmFtZXM6Cgp8IFN1YnJ1bGUgfCBXaGF0IHJlZmVyZW5jZXMgaXQgfAp8IC0tLSB8IC0tLSB8CnwgYHJ1bGVzL3N1YnJ1bGVzL3RlY2gtc3RhY2subWRgIHwgdGhlICJSaWdodCB0b29sIGZvciB0aGUgam9iIiB0YWJsZSAoYnJvd3NlciwgcHR5LCB0ZWFtcywgc2VjcmV0cywgbXEsIHRpY2tldHMpIHwKfCBgcnVsZXMvc3VicnVsZXMvZm91bmRhdGlvbnMubWRgIHwgRjIgbGFkZGVyICgidGhlIGBicm93c2VyYCBza2lsbCIsICJgYWdlbnRzIGNvbXB1dGVyYCIpIHwKfCBgcnVsZXMvc3VicnVsZXMvcmVtb3RlLWZsZWV0LWRpc3BhdGNoLm1kYCB8IGRldmljZXMgLyBob3N0cyB8CnwgYHBsYW4tcHJlc2VudGF0aW9uLypgLCBgdHJ1bHktYWdlbnRpYy1naXQtd29ya2Zsb3cvcHItZGVzY3JpcHRpb24tcmVtaW5kZXIuc2hgIHwgYnJvd3Nlci9wdHkgY2FwdHVyZSByZWZlcmVuY2VzIHwKCiMjIFB1YmxpYyBJbnRlcmZhY2UKCi0gKipOZXcgaW52b2NhdGlvbnM6KiogYGFnaTphZ2VudHNgLCBgYWdpOmJyb3dzZXJgLCBgYWdpOmNvbXB1dGVyYCwgYGFnaTpydW5gLAogIGBhZ2k6c2Vzc2lvbnNgLCBgYWdpOnRlYW1zYCwgYGFnaTpzZWNyZXRzYCwgYGFnaTpkZXZpY2VzYCwgYGFnaTptb25pdG9yc2AsCiAgYGFnaTpyb3V0aW5lc2AsIGBhZ2k6Y2xvdWRgIOKAlCBlYWNoIHdpdGggYSBiYXJlIGFsaWFzIHByZXNlcnZpbmcgdG9kYXkncyBuYW1lLgotICoqRGVzaWduOioqIGBkZXNpZ246ZGVzaWduYCBnYWlucyBgYW50aWNpcGF0ZWA7IGBkZXNpZ24tY29yZWAgZ2FpbnMgYW50aS10ZWxscyArIGEKICB3ZWItaW5zcGlyYXRpb24gc3RlcDsgYGV4YW1wbGVzL2AgcmVtb3ZlZC4gYGRlc2lnbmAvYGNyZWF0ZTpkZXNpZ25gIGNlYXNlIHRvIGJlIGRvb3JzLgotICoqQ0xJOioqIHNraWxscy9jb21tYW5kcyBtYXkgZGVjbGFyZSBgYWxpYXNlczogWy4uLl1gIGluIGZyb250bWF0dGVyIChuZXcpLgoKIyMgVmFsaWRhdGlvbgoKYGBgYmFzaAojIGFmdGVyIHRoZSAuc3lzdGVtIG1vdmUgKyBhbGlhcyBmZWF0dXJlIGlzIGluc3RhbGxlZAphZ2VudHMgdmlldyBjbGF1ZGVAYWxsIHwgZ3JlcCAtRSAnYWdpOnxkZXNpZ246JyAgICAgICMgbmV3IG5hbWVzcGFjZXMgcmVnaXN0ZXJlZAphZ2VudHMgaW5zcGVjdCBza2lsbHMgfCBncmVwIC1FICdicm93c2VyfGFnaScgICAgICAgICAjIGFsaWFzIHJlc29sdmVzIGJhcmUgLT4gYWdpOmJyb3dzZXIKIyBkZXNpZ24gcGx1Z2luIG5vIGxvbmdlciBzaGlwcyBzdGF0aWMgZXhhbXBsZXMKdGVzdCAhIC1kIH4vLmFnZW50cy8uc3lzdGVtL3BsdWdpbnMvZGVzaWduL2V4YW1wbGVzICYmIGVjaG8gImV4YW1wbGVzIHJlbW92ZWQgT0siCiMgcnVsZXMgdXBkYXRlZCDigJQgbm8gc3RhbGUgYmFyZSByZWZlcmVuY2VzIHJlbWFpbgpncmVwIC1ybiAndGhlIGBicm93c2VyYCBza2lsbCcgfi8uYWdlbnRzLy5zeXN0ZW0vcnVsZXMvc3VicnVsZXMgICAjIGV4cGVjdDogYWxpYXMtYXdhcmUgd29yZGluZwpgYGAKClBsdXM6IFJFQURNRS9DSEFOR0VMT0cgdXBkYXRlZCBmb3IgZXZlcnkgbW92ZWQgcmVzb3VyY2UgKHRoZSBzeW5jLXRhYmxlIGNvbnRyYWN0KSwgYW5kIGVhY2gKbW92ZWQgaG9vay9za2lsbCBrZWVwcyBpdHMgc2Vjb25kIGVkaXQgKHBsdWdpbiBSRUFETUUgKyBjYXRhbG9nKS4KCiMjIFJpc2tzCgp8IFJpc2sgfCBNaXRpZ2F0aW9uIHwKfCAtLS0gfCAtLS0gfAp8IE1vdmUgYGJyb3dzZXJgLT5gYWdpOmJyb3dzZXJgICoqYmVmb3JlKiogYWxpYXMgbGFuZHMg4oaSIGJhcmUgYGJyb3dzZXJgIGJyZWFrcyBmbGVldC13aWRlIHwgU2VxdWVuY2U6IGxhbmQgdGhlIGFsaWFzIENMSSBmZWF0dXJlIGZpcnN0IChpdCdzIG9uIHRoZSByZWxlYXNlIHRyYWluKSwgdmVyaWZ5IGluc3RhbGxlZCwgdGhlbiBtb3ZlIGluIGAuc3lzdGVtYCB8CnwgVHdvIHJlcG9zLCBib3RoIG9uIGBtYWluYCB8IFdvcmt0cmVlK1BSIGluIGVhY2ggKGAuc3lzdGVtYCBhbmQgYH4vLmFnZW50c2ApOyB0aGUgZGVzaWduIHJldGlyZSBpcyBhIHNlcGFyYXRlIGB+Ly5hZ2VudHNgIFBSIHwKfCBgYWdpYCBib3VuZGFyeSBjcmVlcCAoZG9lcyBpdCBzd2FsbG93IGBzZXNzaW9uc2AvYGZsZWV0YC9gc2hhcmVgIHBsdWdpbnM/IHdvcmtmbG93IHBsdWdpbnM/KSB8IERlY2lkZSBEMSB1cCBmcm9udDsgZGVmYXVsdCB0byBuYXJyb3cgKHJhdyBDTEkgdmVyYnMgb25seSkgfAp8IEFsaWFzZXMgY29sbGlkZSAodHdvIHNraWxscyB3YW50IGBydW5gKSB8IEFsaWFzIHJlZ2lzdHJ5IGVycm9ycyBvbiBjb2xsaXNpb247IGNhbm9uaWNhbCBgYWdpOnJ1bmAgYWx3YXlzIHVuYW1iaWd1b3VzIHwKfCBMb3NpbmcgdGhlIG9sZCBkZXNpZ24gc2tpbGxzJyBnb29kIGNvbnRlbnQgfCBGb2xkLW1hcCBhYm92ZSBpcyBleHBsaWNpdDsgbm90aGluZyBkZWxldGVkIHVudGlsIGl0cyB2YWx1ZSBsYW5kcyBpbiB0aGUgcGx1Z2luIHwKCiMjIFRyYWNraW5nCgoqKk9wZW4gZGVjaXNpb25zIOKAlCB5b3VyIGNhbGxzIGJlZm9yZSBJIGJ1aWxkIChGMSBkZXNpZ24gZ2F0ZSk6KioKCi0gKipEMSDigJQgYGFnaWAgYm91bmRhcnkuKiogTmFycm93IChvbmx5IHRoZSByYXcgQ0xJLXZlcmIgc2tpbGxzKSB2cyBicm9hZCAoYWxzbyBhYnNvcmIgdGhlCiAgZXhpc3RpbmcgYGZsZWV0YCwgYHNoYXJlYCwgYHNlc3Npb25zYCBwbHVnaW5zLCBzaW5jZSB0aG9zZSBhcmUgYGFnZW50cyA8eD5gIHRvbykuIFJlY29tbWVuZCAqKm5hcnJvdyoqLgotICoqRDIg4oCUIGFsaWFzIG1lY2hhbmlzbS4qKiAoYSkgYGFsaWFzZXM6YCBmcm9udG1hdHRlciByZXNvbHZlZCBieSB0aGUgQ0xJIChyZWNvbW1lbmQpLCAoYikKICBhIHNob3J0Y3V0cyBtYXAgaW4gYGFnZW50cy55YW1sYCwgb3IgKGMpIG5vIENMSSBjaGFuZ2Ug4oCUIGtlZXAgYmFyZSBuYW1lcyBhcyB0aGluCiAgdG9wLWxldmVsIHN0dWIgc2tpbGxzIHRoYXQgcG9pbnQgdG8gYGFnaToqYC4KLSAqKkQzIOKAlCB3aGF0IHN0YXlzIHRvcC1sZXZlbC4qKiBDb25maXJtIGBhcnRpZmFjdHMgLyBwbGFuLXJlbmRlciAvIHZpc3VhbGl6ZSAvIG1xIC8KICB0aWNrZXRzIC8gZG9jcyAvIGxlYXJuYCBhcmUgKm5vdCogYWdpICh0aGV5IGFyZSBhdXRob3Jpbmcva25vd2xlZGdlIHRvb2xzLCBzZXBhcmF0ZSBDTElzKS4KLSAqKkQ0IOKAlCBkZXNpZ24gY29uc29saWRhdGlvbiBkZXB0aC4qKiBGdWxsLXJldGlyZSB0aGUgdHdvIG9sZCBkb29ycywgcmVkaXJlY3Qtc3R1YiB0aGVtLAogIG9yIGZvbGQtdmFsdWUtb25seSBhbmQgbGVhdmUgdGhlbS4KLSAqKkQtYnJhbmQg4oCUIGJyYW5kIG1vZGUuKiogT3duIGBicmFuZGAgbW9kZSB2cyBwYXJ0IG9mIGBzeXN0ZW1gLgotICoqU2VxdWVuY2luZy4qKiBBbGlhcyBDTEkgZmVhdHVyZSAoYWdlbnRzLWNsaSwgcmVsZWFzZS10cmFpbikg4oaSIHRoZW4gYC5zeXN0ZW1gIGBhZ2lgIG1vdmUKICDihpIgdGhlbiBydWxlcyB1cGRhdGUg4oaSIHRoZW4gZGVzaWduIGNvbnNvbGlkYXRpb24uIENvbmZpcm0gdGhpcyBvcmRlci4KCioqTmV4dCBzdGVwOioqIG9uIHlvdXIgRDHigJNENCBwaWNrcyBJIGZpbGUgdGhlIHRpY2tldHMgYW5kIHN0YXJ0IHdpdGggdGhlIGFsaWFzIGZlYXR1cmUgKHRoZQpwcmVyZXF1aXNpdGUpLCBkcml2aW5nIGVhY2ggUFIgdG8gbWVyZ2UuCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

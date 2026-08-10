@@ -127,7 +127,7 @@
   <div class="meta prov">
     <span class="chip">harness: <b>claude</b></span>
     <span class="chip">agent: <b>opus-4.8</b></span>
-    <span class="chip">host: <b>yosemite-s1</b></span>
+    <span class="chip">host: <b>worker-s1</b></span>
     <span class="chip">session: <b>d66e73be</b></span>
     <span class="chip"><b>2026-08-03</b></span>
   </div>
@@ -310,15 +310,15 @@ mailbox for history, not a live wire.</p>
 <svg viewBox="0 0 900 340" role="img" aria-label="Cross-device sync: single-writer R2 prefixes merged by CRDT union on pull">
   <!-- machines -->
   <rect x="40" y="60" width="150" height="52" rx="9" fill="#12160f" stroke="#a3e635"/>
-  <text x="115" y="82" fill="#a3e635" font-size="12.5" text-anchor="middle" font-family="var(--mono)">yosemite-s0</text>
+  <text x="115" y="82" fill="#a3e635" font-size="12.5" text-anchor="middle" font-family="var(--mono)">worker-s0</text>
   <text x="115" y="99" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="var(--mono)">writes its prefix</text>
 
   <rect x="40" y="150" width="150" height="52" rx="9" fill="#12160f" stroke="#a3e635"/>
-  <text x="115" y="172" fill="#a3e635" font-size="12.5" text-anchor="middle" font-family="var(--mono)">yosemite-s1</text>
+  <text x="115" y="172" fill="#a3e635" font-size="12.5" text-anchor="middle" font-family="var(--mono)">worker-s1</text>
   <text x="115" y="189" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="var(--mono)">writes its prefix</text>
 
   <rect x="40" y="240" width="150" height="52" rx="9" fill="#12160f" stroke="#a3e635"/>
-  <text x="115" y="262" fill="#a3e635" font-size="12.5" text-anchor="middle" font-family="var(--mono)">zion (laptop)</text>
+  <text x="115" y="262" fill="#a3e635" font-size="12.5" text-anchor="middle" font-family="var(--mono)">workstation (laptop)</text>
   <text x="115" y="279" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="var(--mono)">writes its prefix</text>
 
   <!-- push arrows (encrypt) -->
@@ -332,7 +332,7 @@ mailbox for history, not a live wire.</p>
   <text x="510" y="112" fill="#e7ece8" font-size="12.5" text-anchor="middle" font-family="var(--mono)">R2 object store</text>
   <text x="510" y="150" fill="#8b938c" font-size="11" text-anchor="middle" font-family="var(--mono)">sessions/s0/…</text>
   <text x="510" y="172" fill="#8b938c" font-size="11" text-anchor="middle" font-family="var(--mono)">sessions/s1/…</text>
-  <text x="510" y="194" fill="#8b938c" font-size="11" text-anchor="middle" font-family="var(--mono)">sessions/zion/…</text>
+  <text x="510" y="194" fill="#8b938c" font-size="11" text-anchor="middle" font-family="var(--mono)">sessions/workstation/…</text>
   <text x="510" y="220" fill="#f5c451" font-size="10.5" text-anchor="middle" font-family="var(--mono)">single-writer prefixes</text>
 
   <!-- pull + merge -->
@@ -693,7 +693,7 @@ was taken of every substantive agent session on two worker boxes — probe runs 
 filtered out.</p>
 
 <div class="stat-row">
-  <div class="stat"><div class="big">109</div><div class="lab">real sessions across yosemite-s0 &amp; s1</div></div>
+  <div class="stat"><div class="big">109</div><div class="lab">real sessions across worker-s0 &amp; s1</div></div>
   <div class="stat"><div class="big">17,006</div><div class="lab">messages exchanged</div></div>
   <div class="stat"><div class="big">4</div><div class="lab">harnesses side by side — claude · codex · grok · kimi</div></div>
   <div class="stat"><div class="big">3 days</div><div class="lab">the observation window</div></div>
@@ -726,7 +726,7 @@ sources, ranked for this topic:</p>
     <tr><td><code>plan-distributed-agent-execution.html</code></td><td>the shared context plane design</td><td><span class="tag b">repo</span> <code>.agents/artifacts/</code></td></tr>
     <tr><td><code>05-sessions.md</code> · <code>06-observability.md</code> · <code>10-monitors.md</code></td><td>the canonical shipped reference for sessions, feed/mailbox, monitors</td><td><span class="tag a">repo</span> <code>apps/cli/docs/</code></td></tr>
     <tr><td><code>agents-cli-architecture.html</code></td><td>the distributed execution core (SSH model)</td><td><span class="tag r">removed</span> was <code>docs/plans/2026-07-30/</code>, deleted in the RUSH-2460 repo-root cleanup</td></tr>
-    <tr><td><code>agents-cli-s0-s1-sessions/</code></td><td>the 109-session work catalog behind §12</td><td><span class="tag c">zion artifacts</span></td></tr>
+    <tr><td><code>agents-cli-s0-s1-sessions/</code></td><td>the 109-session work catalog behind §12</td><td><span class="tag c">workstation artifacts</span></td></tr>
     <tr><td><code>analyze-session-cli-usage.py</code></td><td>the re-runnable miner behind §11 (filter frequency)</td><td><span class="tag a">repo</span> next to this file</td></tr>
   </tbody>
 </table>
@@ -738,7 +738,7 @@ place and travels with the code.</p>
 
 <div class="foot">
   agents-cli · memory &amp; coordination · rendered by plan-render &nbsp;·&nbsp;
-  claude · opus-4.8 · yosemite-s1 · session d66e73be · 2026-08-03 &nbsp;·&nbsp;
+  claude · opus-4.8 · worker-s1 · session session-id · 2026-08-03 &nbsp;·&nbsp;
   every quantitative claim source-grounded · <span style="color:var(--accent)">read the code, not the vibe</span>
 </div>
 

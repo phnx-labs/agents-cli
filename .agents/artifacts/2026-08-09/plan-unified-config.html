@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Unified agents config command barrel</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-draft">draft</span></div>
+<h1>Unified agents config command barrel</h1>
+<p class="summary">Replace five disconnected config trees (defaults run, models tier, devices configure, devices set-interactive, browser profiles set-default) with a single agents config namespace using agent@version as the canonical harness identifier.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Today run defaults live under run.defaults, tier overrides under model.tiers, interactive host under config.interactiveHost, browser profile under defaultBrowserProfile, and device keys under deviceConfig.<span class="meta-sep" aria-hidden="true">·</span>The canonical harness identifier already accepted by parseRunDefaultSelector is agent@version.<span class="meta-sep" aria-hidden="true">·</span>The exec path resolves run defaults and tier overrides in lib/exec.ts before forwarding --model to the harness.</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">unified-config-surface</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Kimi</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Owner</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">worker-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">48ab4d38</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-09</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#current-state"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Current state</a><a href="#proposed-changes"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Risks</a><a href="#implementation-checklist"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Implementation checklist</a></nav><article class="artifact-body"><h1>Plan: Unified <code>agents config</code> Command Barrel</h1>
+<h2 id="purpose">Purpose</h2>
+<p>Replace the fragmented configuration surface of <code>agents-cli</code> — <code>agents defaults run</code>, <code>agents models tier</code>, <code>agents devices set-interactive</code>, <code>agents browser profiles set-default</code>, and <code>agents devices configure</code> — with a single <code>agents config</code> namespace. Every agent/harness reference must use <code>agent@version</code>, and tier overrides must fold into the run-time configuration namespace because tiers are part of how an agent runs.</p>
+<div class="artifact-callout">
+This plan proposes a facade-only change: the YAML storage stays the same; only the CLI surface is consolidated.
+</div><h2 id="current-state">Current state</h2>
+<table>
+<thead>
+<tr>
+<th>What you want</th>
+<th>Command today</th>
+<th>Where it lands in YAML</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Default model for Claude</td>
+<td><code>agents defaults run set 'claude:*' --model ...</code></td>
+<td><code>run.defaults."claude:*".model</code></td>
+</tr>
+<tr>
+<td>What <code>best</code> tier means for Claude</td>
+<td><code>agents models tier set claude best ...</code></td>
+<td><code>model.tiers."claude:*".best</code></td>
+</tr>
+<tr>
+<td>Default permission mode</td>
+<td><code>agents defaults run set 'claude:*' --mode ...</code></td>
+<td><code>run.defaults."claude:*".mode</code></td>
+</tr>
+<tr>
+<td>Device that shows artifacts</td>
+<td><code>agents devices set-interactive ...</code></td>
+<td><code>config.interactiveHost</code></td>
+</tr>
+<tr>
+<td>Default browser profile</td>
+<td><code>agents browser profiles set-default ...</code></td>
+<td><code>defaultBrowserProfile</code> (device doc)</td>
+</tr>
+<tr>
+<td>Max agents on a box</td>
+<td><code>agents devices configure ... --max-agents</code></td>
+<td><code>deviceConfig.maxAgents</code> (device doc)</td>
+</tr>
+</tbody></table>
+<p>This forces users to remember which subsystem owns each knob.</p>
+<h2 id="proposed-changes">Proposed Changes</h2>
+<p>Add <code>agents config list|get|set|unset</code> as the one barrel. The new command translates dotted keys into the existing YAML stores. The old commands remain as thin aliases that print deprecation warnings.</p>
+<p>New files:</p>
+<ul>
+<li><code>apps/cli/src/lib/config-keys.ts</code> — parser and registry for the key grammar.</li>
+<li><code>apps/cli/src/commands/config.ts</code> — registers and implements the command.</li>
+<li><code>apps/cli/src/lib/config-keys.test.ts</code> — unit tests for the parser.</li>
+<li><code>apps/cli/src/commands/config.test.ts</code> — integration tests for the command.</li>
+</ul>
+<p>Modified files:</p>
+<ul>
+<li><code>apps/cli/src/lib/startup/command-registry.ts</code> — add <code>config</code> loader.</li>
+<li><code>apps/cli/src/lib/run-defaults.ts</code> — add helper setters used by the new command.</li>
+<li><code>apps/cli/src/lib/model-tier-overrides.ts</code> — add helper setters used by the new command.</li>
+<li><code>apps/cli/src/commands/defaults.ts</code> — delegate to <code>agents config</code>.</li>
+<li><code>apps/cli/src/commands/models.ts</code> — delegate <code>tier</code> subcommand to <code>agents config</code>.</li>
+<li><code>apps/cli/src/commands/ssh.ts</code> — delegate <code>configure</code> and <code>set-interactive</code> to <code>agents config</code>.</li>
+<li><code>apps/cli/src/commands/browser.ts</code> — delegate <code>profiles set-default</code> to <code>agents config</code>.</li>
+<li><code>apps/cli/AGENTS.md</code>, <code>apps/cli/README.md</code>, <code>openspec/specs/configuration-surface/spec.md</code> — docs.</li>
+</ul>
+<h2 id="public-interface">Public Interface</h2>
+<h3>Commands</h3>
+<pre><code>agents config list [--json]
+agents config get &lt;key&gt;
+agents config set &lt;key&gt; &lt;value&gt;
+agents config unset &lt;key&gt;
+</code></pre>
+<h3>Key grammar</h3>
+<table>
+<thead>
+<tr>
+<th>Key pattern</th>
+<th>Maps to existing YAML</th>
+<th>Scope</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>run.&lt;agent@version&gt;.model</code></td>
+<td><code>run.defaults.&lt;agent:version&gt;.model</code></td>
+<td>central <code>agents.yaml</code></td>
+</tr>
+<tr>
+<td><code>run.&lt;agent@version&gt;.mode</code></td>
+<td><code>run.defaults.&lt;agent:version&gt;.mode</code></td>
+<td>central <code>agents.yaml</code></td>
+</tr>
+<tr>
+<td><code>run.&lt;agent@version&gt;.effort</code></td>
+<td><code>run.defaults.&lt;agent:version&gt;.effort</code></td>
+<td>central <code>agents.yaml</code></td>
+</tr>
+<tr>
+<td><code>run.&lt;agent@version&gt;.tier.&lt;tier&gt;</code></td>
+<td><code>model.tiers.&lt;agent:version&gt;.&lt;tier&gt;</code></td>
+<td>central <code>agents.yaml</code></td>
+</tr>
+<tr>
+<td><code>interactive.host</code></td>
+<td><code>config.interactiveHost</code></td>
+<td>central <code>agents.yaml</code></td>
+</tr>
+<tr>
+<td><code>browser.profile</code></td>
+<td><code>defaultBrowserProfile</code></td>
+<td>device doc</td>
+</tr>
+<tr>
+<td><code>devices.&lt;name&gt;.max-agents</code></td>
+<td><code>deviceConfig.maxAgents</code></td>
+<td>device doc</td>
+</tr>
+<tr>
+<td><code>devices.&lt;name&gt;.scheduler</code></td>
+<td><code>deviceConfig.schedulerEnabled</code></td>
+<td>device doc</td>
+</tr>
+<tr>
+<td><code>devices.&lt;name&gt;.notes</code></td>
+<td><code>deviceConfig.notes</code></td>
+<td>device doc</td>
+</tr>
+<tr>
+<td><code>devices.&lt;name&gt;.browser.profile</code></td>
+<td><code>defaultBrowserProfile</code></td>
+<td>device doc</td>
+</tr>
+</tbody></table>
+<h3>Examples</h3>
+<pre><code># Default model/tier for all Claude versions
+agents config set run.claude@*.model best
+agents config set run.claude@*.model claude-opus-4-8
+
+# Define what each tier resolves to
+agents config set run.claude@*.tier.best claude-opus-4-8
+agents config set run.claude@*.tier.default claude-sonnet-5
+agents config set run.claude@*.tier.cheap claude-haiku-4-5
+
+# Other run-time defaults
+agents config set run.claude@*.mode auto
+agents config set run.claude@*.effort high
+
+# Central and device config
+agents config set interactive.host workstation
+agents config set browser.profile work
+agents config set devices.release-host.max-agents 4
+agents config list
+agents config get run.claude@*.model
+agents config unset run.claude@*.tier.best
+</code></pre>
+<h3>Architecture</h3>
+<svg viewBox="0 0 800 420" xmlns="http://www.w3.org/2000/svg">
+  <rect x="10" y="10" width="780" height="400" fill="#0a0a0a" stroke="#333" stroke-width="2"></rect>
+  <text x="400" y="40" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="18" text-anchor="middle">Before: fragmented command trees</text>
+  <rect x="30" y="70" width="130" height="50" rx="4" fill="#1e293b" stroke="#64748b"></rect>
+  <text x="95" y="100" fill="#e2e8f0" font-family="JetBrains Mono, monospace" font-size="11" text-anchor="middle">defaults run</text>
+  <rect x="180" y="70" width="130" height="50" rx="4" fill="#1e293b" stroke="#64748b"></rect>
+  <text x="245" y="100" fill="#e2e8f0" font-family="JetBrains Mono, monospace" font-size="11" text-anchor="middle">models tier</text>
+  <rect x="330" y="70" width="130" height="50" rx="4" fill="#1e293b" stroke="#64748b"></rect>
+  <text x="395" y="100" fill="#e2e8f0" font-family="JetBrains Mono, monospace" font-size="11" text-anchor="middle">devices set-interactive</text>
+  <rect x="480" y="70" width="130" height="50" rx="4" fill="#1e293b" stroke="#64748b"></rect>
+  <text x="545" y="100" fill="#e2e8f0" font-family="JetBrains Mono, monospace" font-size="11" text-anchor="middle">browser profiles</text>
+  <rect x="630" y="70" width="130" height="50" rx="4" fill="#1e293b" stroke="#64748b"></rect>
+  <text x="695" y="100" fill="#e2e8f0" font-family="JetBrains Mono, monospace" font-size="11" text-anchor="middle">devices configure</text>
+  <line x1="95" y1="120" x2="95" y2="170" stroke="#64748b" stroke-width="2"></line>
+  <line x1="245" y1="120" x2="245" y2="170" stroke="#64748b" stroke-width="2"></line>
+  <line x1="395" y1="120" x2="395" y2="170" stroke="#64748b" stroke-width="2"></line>
+  <line x1="545" y1="120" x2="545" y2="170" stroke="#64748b" stroke-width="2"></line>
+  <line x1="695" y1="120" x2="695" y2="170" stroke="#64748b" stroke-width="2"></line>
+  <rect x="30" y="170" width="740" height="50" rx="4" fill="#334155" stroke="#94a3b8"></rect>
+  <text x="400" y="200" fill="#e2e8f0" font-family="JetBrains Mono, monospace" font-size="12" text-anchor="middle">run.defaults · model.tiers · config.interactiveHost · defaultBrowserProfile · deviceConfig</text>
+
+  <text x="400" y="260" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="18" text-anchor="middle">After: one agents config barrel</text>
+  <rect x="300" y="290" width="200" height="50" rx="4" fill="#14532d" stroke="#a3e635" stroke-width="2"></rect>
+  <text x="400" y="320" fill="#e2e8f0" font-family="JetBrains Mono, monospace" font-size="14" font-weight="bold" text-anchor="middle">agents config</text>
+  <line x1="400" y1="340" x2="400" y2="380" stroke="#a3e635" stroke-width="2"></line>
+  <rect x="30" y="380" width="740" height="20" rx="2" fill="#334155" stroke="#94a3b8"></rect>
+  <text x="400" y="394" fill="#e2e8f0" font-family="JetBrains Mono, monospace" font-size="11" text-anchor="middle">same underlying YAML schema — only the CLI facade changes</text>
+</svg><h3>Data flow</h3>
+<svg viewBox="0 0 800 260" xmlns="http://www.w3.org/2000/svg">
+  <rect x="10" y="10" width="780" height="240" fill="#0a0a0a" stroke="#333" stroke-width="2"></rect>
+  <rect x="40" y="60" width="220" height="50" rx="4" fill="#14532d" stroke="#a3e635" stroke-width="2"></rect>
+  <text x="150" y="90" fill="#e2e8f0" font-family="JetBrains Mono, monospace" font-size="12" text-anchor="middle">agents config set</text>
+  <text x="150" y="105" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="10" text-anchor="middle">run.claude@*.tier.best claude-opus-4-8</text>
+  <line x1="260" y1="85" x2="320" y2="85" stroke="#a3e635" stroke-width="2"></line>
+  <polygon points="320,85 310,80 310,90" fill="#a3e635"></polygon>
+  <rect x="330" y="60" width="160" height="50" rx="4" fill="#1e293b" stroke="#64748b"></rect>
+  <text x="410" y="85" fill="#e2e8f0" font-family="JetBrains Mono, monospace" font-size="11" text-anchor="middle">config-keys.ts</text>
+  <text x="410" y="100" fill="#94a3b8" font-family="JetBrains Mono, monospace" font-size="9" text-anchor="middle">parse key → agent@version</text>
+  <line x1="490" y1="85" x2="550" y2="85" stroke="#a3e635" stroke-width="2"></line>
+  <polygon points="550,85 540,80 540,90" fill="#a3e635"></polygon>
+  <rect x="560" y="60" width="200" height="50" rx="4" fill="#1e293b" stroke="#64748b"></rect>
+  <text x="660" y="85" fill="#e2e8f0" font-family="JetBrains Mono, monospace" font-size="11" text-anchor="middle">model-tier-overrides.ts</text>
+  <text x="660" y="100" fill="#94a3b8" font-family="JetBrains Mono, monospace" font-size="9" text-anchor="middle">write model.tiers</text>
+  <line x1="660" y1="110" x2="660" y2="160" stroke="#64748b" stroke-width="2" stroke-dasharray="4"></line>
+  <rect x="560" y="160" width="200" height="50" rx="4" fill="#334155" stroke="#94a3b8"></rect>
+  <text x="660" y="185" fill="#e2e8f0" font-family="JetBrains Mono, monospace" font-size="11" text-anchor="middle">~/.agents/agents.yaml</text>
+  <text x="660" y="200" fill="#94a3b8" font-family="JetBrains Mono, monospace" font-size="9" text-anchor="middle">model.tiers."claude:*".best</text>
+  <line x1="660" y1="210" x2="660" y2="230" stroke="#64748b" stroke-width="2" stroke-dasharray="4"></line>
+  <text x="660" y="245" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="10" text-anchor="middle">consumed by exec.ts at run time</text>
+</svg><h2 id="validation">Validation</h2>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>How</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Unit tests</td>
+<td><code>lib/config-keys.test.ts</code> covers key parsing, validation, and YAML-path mapping.</td>
+</tr>
+<tr>
+<td>Integration tests</td>
+<td><code>commands/config.test.ts</code> runs the CLI end-to-end in a temp home.</td>
+</tr>
+<tr>
+<td>Backward compatibility</td>
+<td>Existing <code>defaults.test.ts</code>, <code>models.test.ts</code>, and <code>ssh.device-config.test.ts</code> still pass.</td>
+</tr>
+<tr>
+<td>Manual smoke</td>
+<td><code>agents config set run.claude@*.tier.best claude-opus-4-8</code> followed by <code>agents run claude --model best -- /noop</code> resolves to the pinned model.</td>
+</tr>
+<tr>
+<td>Docs</td>
+<td><code>AGENTS.md</code> and <code>README.md</code> updated; openspec spec refreshed.</td>
+</tr>
+</tbody></table>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Old commands break</td>
+<td>Keep them as aliases with deprecation warnings; existing tests guard behavior.</td>
+</tr>
+<tr>
+<td>Key grammar is ambiguous</td>
+<td>Strict parser: agent id must be in <code>AGENTS</code>, version must match <code>VERSION_RE</code>, tier must be one of <code>MODEL_TIERS</code>.</td>
+</tr>
+<tr>
+<td>Project-local overrides surprise users</td>
+<td><code>agents config list</code> shows the effective value <strong>and</strong> its source (user / project file path).</td>
+</tr>
+<tr>
+<td>Mixed-version fleet sees old YAML only</td>
+<td>Storage does not change, so old CLIs continue to read the same data.</td>
+</tr>
+</tbody></table>
+<h2 id="implementation-checklist">Implementation checklist</h2>
+<ul>
+<li> Create <code>apps/cli/src/lib/config-keys.ts</code> with parser and registry.</li>
+<li> Create <code>apps/cli/src/commands/config.ts</code> with <code>list\|get\|set\|unset</code>.</li>
+<li> Register <code>config</code> in <code>command-registry.ts</code>.</li>
+<li> Add helper setters in <code>run-defaults.ts</code> and <code>model-tier-overrides.ts</code>.</li>
+<li> Refactor <code>commands/defaults.ts</code>, <code>commands/models.ts</code>, <code>commands/ssh.ts</code>, <code>commands/browser.ts</code> to delegate.</li>
+<li> Add <code>commands/config.test.ts</code> and <code>lib/config-keys.test.ts</code>.</li>
+<li> Update <code>AGENTS.md</code>, <code>README.md</code>, and openspec spec.</li>
+<li> Run <code>bun run test:remote</code> in <code>apps/cli</code>.</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGl0bGU6IFVuaWZpZWQgYWdlbnRzIGNvbmZpZyBjb21tYW5kIGJhcnJlbApzdW1tYXJ5OiBSZXBsYWNlIGZpdmUgZGlzY29ubmVjdGVkIGNvbmZpZyB0cmVlcyAoZGVmYXVsdHMgcnVuLCBtb2RlbHMgdGllciwgZGV2aWNlcyBjb25maWd1cmUsIGRldmljZXMgc2V0LWludGVyYWN0aXZlLCBicm93c2VyIHByb2ZpbGVzIHNldC1kZWZhdWx0KSB3aXRoIGEgc2luZ2xlIGFnZW50cyBjb25maWcgbmFtZXNwYWNlIHVzaW5nIGFnZW50QHZlcnNpb24gYXMgdGhlIGNhbm9uaWNhbCBoYXJuZXNzIGlkZW50aWZpZXIuCnN0YXR1czogZHJhZnQKdHJhY2tpbmc6IHVuaWZpZWQtY29uZmlnLXN1cmZhY2UKZmFjdHM6CiAgLSAiVG9kYXkgcnVuIGRlZmF1bHRzIGxpdmUgdW5kZXIgcnVuLmRlZmF1bHRzLCB0aWVyIG92ZXJyaWRlcyB1bmRlciBtb2RlbC50aWVycywgaW50ZXJhY3RpdmUgaG9zdCB1bmRlciBjb25maWcuaW50ZXJhY3RpdmVIb3N0LCBicm93c2VyIHByb2ZpbGUgdW5kZXIgZGVmYXVsdEJyb3dzZXJQcm9maWxlLCBhbmQgZGV2aWNlIGtleXMgdW5kZXIgZGV2aWNlQ29uZmlnLiIKICAtICJUaGUgY2Fub25pY2FsIGhhcm5lc3MgaWRlbnRpZmllciBhbHJlYWR5IGFjY2VwdGVkIGJ5IHBhcnNlUnVuRGVmYXVsdFNlbGVjdG9yIGlzIGFnZW50QHZlcnNpb24uIgogIC0gIlRoZSBleGVjIHBhdGggcmVzb2x2ZXMgcnVuIGRlZmF1bHRzIGFuZCB0aWVyIG92ZXJyaWRlcyBpbiBsaWIvZXhlYy50cyBiZWZvcmUgZm9yd2FyZGluZyAtLW1vZGVsIHRvIHRoZSBoYXJuZXNzLiIKLS0tCgojIFBsYW46IFVuaWZpZWQgYGFnZW50cyBjb25maWdgIENvbW1hbmQgQmFycmVsCgojIyBQdXJwb3NlCgpSZXBsYWNlIHRoZSBmcmFnbWVudGVkIGNvbmZpZ3VyYXRpb24gc3VyZmFjZSBvZiBgYWdlbnRzLWNsaWAg4oCUIGBhZ2VudHMgZGVmYXVsdHMgcnVuYCwgYGFnZW50cyBtb2RlbHMgdGllcmAsIGBhZ2VudHMgZGV2aWNlcyBzZXQtaW50ZXJhY3RpdmVgLCBgYWdlbnRzIGJyb3dzZXIgcHJvZmlsZXMgc2V0LWRlZmF1bHRgLCBhbmQgYGFnZW50cyBkZXZpY2VzIGNvbmZpZ3VyZWAg4oCUIHdpdGggYSBzaW5nbGUgYGFnZW50cyBjb25maWdgIG5hbWVzcGFjZS4gRXZlcnkgYWdlbnQvaGFybmVzcyByZWZlcmVuY2UgbXVzdCB1c2UgYGFnZW50QHZlcnNpb25gLCBhbmQgdGllciBvdmVycmlkZXMgbXVzdCBmb2xkIGludG8gdGhlIHJ1bi10aW1lIGNvbmZpZ3VyYXRpb24gbmFtZXNwYWNlIGJlY2F1c2UgdGllcnMgYXJlIHBhcnQgb2YgaG93IGFuIGFnZW50IHJ1bnMuCgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1jYWxsb3V0Ij4KVGhpcyBwbGFuIHByb3Bvc2VzIGEgZmFjYWRlLW9ubHkgY2hhbmdlOiB0aGUgWUFNTCBzdG9yYWdlIHN0YXlzIHRoZSBzYW1lOyBvbmx5IHRoZSBDTEkgc3VyZmFjZSBpcyBjb25zb2xpZGF0ZWQuCjwvZGl2PgoKIyMgQ3VycmVudCBzdGF0ZQoKfCBXaGF0IHlvdSB3YW50IHwgQ29tbWFuZCB0b2RheSB8IFdoZXJlIGl0IGxhbmRzIGluIFlBTUwgfAp8LS0tfC0tLXwtLS18CnwgRGVmYXVsdCBtb2RlbCBmb3IgQ2xhdWRlIHwgYGFnZW50cyBkZWZhdWx0cyBydW4gc2V0ICdjbGF1ZGU6KicgLS1tb2RlbCAuLi5gIHwgYHJ1bi5kZWZhdWx0cy4iY2xhdWRlOioiLm1vZGVsYCB8CnwgV2hhdCBgYmVzdGAgdGllciBtZWFucyBmb3IgQ2xhdWRlIHwgYGFnZW50cyBtb2RlbHMgdGllciBzZXQgY2xhdWRlIGJlc3QgLi4uYCB8IGBtb2RlbC50aWVycy4iY2xhdWRlOioiLmJlc3RgIHwKfCBEZWZhdWx0IHBlcm1pc3Npb24gbW9kZSB8IGBhZ2VudHMgZGVmYXVsdHMgcnVuIHNldCAnY2xhdWRlOionIC0tbW9kZSAuLi5gIHwgYHJ1bi5kZWZhdWx0cy4iY2xhdWRlOioiLm1vZGVgIHwKfCBEZXZpY2UgdGhhdCBzaG93cyBhcnRpZmFjdHMgfCBgYWdlbnRzIGRldmljZXMgc2V0LWludGVyYWN0aXZlIC4uLmAgfCBgY29uZmlnLmludGVyYWN0aXZlSG9zdGAgfAp8IERlZmF1bHQgYnJvd3NlciBwcm9maWxlIHwgYGFnZW50cyBicm93c2VyIHByb2ZpbGVzIHNldC1kZWZhdWx0IC4uLmAgfCBgZGVmYXVsdEJyb3dzZXJQcm9maWxlYCAoZGV2aWNlIGRvYykgfAp8IE1heCBhZ2VudHMgb24gYSBib3ggfCBgYWdlbnRzIGRldmljZXMgY29uZmlndXJlIC4uLiAtLW1heC1hZ2VudHNgIHwgYGRldmljZUNvbmZpZy5tYXhBZ2VudHNgIChkZXZpY2UgZG9jKSB8CgpUaGlzIGZvcmNlcyB1c2VycyB0byByZW1lbWJlciB3aGljaCBzdWJzeXN0ZW0gb3ducyBlYWNoIGtub2IuCgojIyBQcm9wb3NlZCBDaGFuZ2VzCgpBZGQgYGFnZW50cyBjb25maWcgbGlzdHxnZXR8c2V0fHVuc2V0YCBhcyB0aGUgb25lIGJhcnJlbC4gVGhlIG5ldyBjb21tYW5kIHRyYW5zbGF0ZXMgZG90dGVkIGtleXMgaW50byB0aGUgZXhpc3RpbmcgWUFNTCBzdG9yZXMuIFRoZSBvbGQgY29tbWFuZHMgcmVtYWluIGFzIHRoaW4gYWxpYXNlcyB0aGF0IHByaW50IGRlcHJlY2F0aW9uIHdhcm5pbmdzLgoKTmV3IGZpbGVzOgoKLSBgYXBwcy9jbGkvc3JjL2xpYi9jb25maWcta2V5cy50c2Ag4oCUIHBhcnNlciBhbmQgcmVnaXN0cnkgZm9yIHRoZSBrZXkgZ3JhbW1hci4KLSBgYXBwcy9jbGkvc3JjL2NvbW1hbmRzL2NvbmZpZy50c2Ag4oCUIHJlZ2lzdGVycyBhbmQgaW1wbGVtZW50cyB0aGUgY29tbWFuZC4KLSBgYXBwcy9jbGkvc3JjL2xpYi9jb25maWcta2V5cy50ZXN0LnRzYCDigJQgdW5pdCB0ZXN0cyBmb3IgdGhlIHBhcnNlci4KLSBgYXBwcy9jbGkvc3JjL2NvbW1hbmRzL2NvbmZpZy50ZXN0LnRzYCDigJQgaW50ZWdyYXRpb24gdGVzdHMgZm9yIHRoZSBjb21tYW5kLgoKTW9kaWZpZWQgZmlsZXM6CgotIGBhcHBzL2NsaS9zcmMvbGliL3N0YXJ0dXAvY29tbWFuZC1yZWdpc3RyeS50c2Ag4oCUIGFkZCBgY29uZmlnYCBsb2FkZXIuCi0gYGFwcHMvY2xpL3NyYy9saWIvcnVuLWRlZmF1bHRzLnRzYCDigJQgYWRkIGhlbHBlciBzZXR0ZXJzIHVzZWQgYnkgdGhlIG5ldyBjb21tYW5kLgotIGBhcHBzL2NsaS9zcmMvbGliL21vZGVsLXRpZXItb3ZlcnJpZGVzLnRzYCDigJQgYWRkIGhlbHBlciBzZXR0ZXJzIHVzZWQgYnkgdGhlIG5ldyBjb21tYW5kLgotIGBhcHBzL2NsaS9zcmMvY29tbWFuZHMvZGVmYXVsdHMudHNgIOKAlCBkZWxlZ2F0ZSB0byBgYWdlbnRzIGNvbmZpZ2AuCi0gYGFwcHMvY2xpL3NyYy9jb21tYW5kcy9tb2RlbHMudHNgIOKAlCBkZWxlZ2F0ZSBgdGllcmAgc3ViY29tbWFuZCB0byBgYWdlbnRzIGNvbmZpZ2AuCi0gYGFwcHMvY2xpL3NyYy9jb21tYW5kcy9zc2gudHNgIOKAlCBkZWxlZ2F0ZSBgY29uZmlndXJlYCBhbmQgYHNldC1pbnRlcmFjdGl2ZWAgdG8gYGFnZW50cyBjb25maWdgLgotIGBhcHBzL2NsaS9zcmMvY29tbWFuZHMvYnJvd3Nlci50c2Ag4oCUIGRlbGVnYXRlIGBwcm9maWxlcyBzZXQtZGVmYXVsdGAgdG8gYGFnZW50cyBjb25maWdgLgotIGBhcHBzL2NsaS9BR0VOVFMubWRgLCBgYXBwcy9jbGkvUkVBRE1FLm1kYCwgYG9wZW5zcGVjL3NwZWNzL2NvbmZpZ3VyYXRpb24tc3VyZmFjZS9zcGVjLm1kYCDigJQgZG9jcy4KCiMjIFB1YmxpYyBJbnRlcmZhY2UKCiMjIyBDb21tYW5kcwoKYGBgYmFzaAphZ2VudHMgY29uZmlnIGxpc3QgWy0tanNvbl0KYWdlbnRzIGNvbmZpZyBnZXQgPGtleT4KYWdlbnRzIGNvbmZpZyBzZXQgPGtleT4gPHZhbHVlPgphZ2VudHMgY29uZmlnIHVuc2V0IDxrZXk+CmBgYAoKIyMjIEtleSBncmFtbWFyCgp8IEtleSBwYXR0ZXJuIHwgTWFwcyB0byBleGlzdGluZyBZQU1MIHwgU2NvcGUgfAp8LS0tfC0tLXwtLS18CnwgYHJ1bi48YWdlbnRAdmVyc2lvbj4ubW9kZWxgIHwgYHJ1bi5kZWZhdWx0cy48YWdlbnQ6dmVyc2lvbj4ubW9kZWxgIHwgY2VudHJhbCBgYWdlbnRzLnlhbWxgIHwKfCBgcnVuLjxhZ2VudEB2ZXJzaW9uPi5tb2RlYCB8IGBydW4uZGVmYXVsdHMuPGFnZW50OnZlcnNpb24+Lm1vZGVgIHwgY2VudHJhbCBgYWdlbnRzLnlhbWxgIHwKfCBgcnVuLjxhZ2VudEB2ZXJzaW9uPi5lZmZvcnRgIHwgYHJ1bi5kZWZhdWx0cy48YWdlbnQ6dmVyc2lvbj4uZWZmb3J0YCB8IGNlbnRyYWwgYGFnZW50cy55YW1sYCB8CnwgYHJ1bi48YWdlbnRAdmVyc2lvbj4udGllci48dGllcj5gIHwgYG1vZGVsLnRpZXJzLjxhZ2VudDp2ZXJzaW9uPi48dGllcj5gIHwgY2VudHJhbCBgYWdlbnRzLnlhbWxgIHwKfCBgaW50ZXJhY3RpdmUuaG9zdGAgfCBgY29uZmlnLmludGVyYWN0aXZlSG9zdGAgfCBjZW50cmFsIGBhZ2VudHMueWFtbGAgfAp8IGBicm93c2VyLnByb2ZpbGVgIHwgYGRlZmF1bHRCcm93c2VyUHJvZmlsZWAgfCBkZXZpY2UgZG9jIHwKfCBgZGV2aWNlcy48bmFtZT4ubWF4LWFnZW50c2AgfCBgZGV2aWNlQ29uZmlnLm1heEFnZW50c2AgfCBkZXZpY2UgZG9jIHwKfCBgZGV2aWNlcy48bmFtZT4uc2NoZWR1bGVyYCB8IGBkZXZpY2VDb25maWcuc2NoZWR1bGVyRW5hYmxlZGAgfCBkZXZpY2UgZG9jIHwKfCBgZGV2aWNlcy48bmFtZT4ubm90ZXNgIHwgYGRldmljZUNvbmZpZy5ub3Rlc2AgfCBkZXZpY2UgZG9jIHwKfCBgZGV2aWNlcy48bmFtZT4uYnJvd3Nlci5wcm9maWxlYCB8IGBkZWZhdWx0QnJvd3NlclByb2ZpbGVgIHwgZGV2aWNlIGRvYyB8CgojIyMgRXhhbXBsZXMKCmBgYGJhc2gKIyBEZWZhdWx0IG1vZGVsL3RpZXIgZm9yIGFsbCBDbGF1ZGUgdmVyc2lvbnMKYWdlbnRzIGNvbmZpZyBzZXQgcnVuLmNsYXVkZUAqLm1vZGVsIGJlc3QKYWdlbnRzIGNvbmZpZyBzZXQgcnVuLmNsYXVkZUAqLm1vZGVsIGNsYXVkZS1vcHVzLTQtOAoKIyBEZWZpbmUgd2hhdCBlYWNoIHRpZXIgcmVzb2x2ZXMgdG8KYWdlbnRzIGNvbmZpZyBzZXQgcnVuLmNsYXVkZUAqLnRpZXIuYmVzdCBjbGF1ZGUtb3B1cy00LTgKYWdlbnRzIGNvbmZpZyBzZXQgcnVuLmNsYXVkZUAqLnRpZXIuZGVmYXVsdCBjbGF1ZGUtc29ubmV0LTUKYWdlbnRzIGNvbmZpZyBzZXQgcnVuLmNsYXVkZUAqLnRpZXIuY2hlYXAgY2xhdWRlLWhhaWt1LTQtNQoKIyBPdGhlciBydW4tdGltZSBkZWZhdWx0cwphZ2VudHMgY29uZmlnIHNldCBydW4uY2xhdWRlQCoubW9kZSBhdXRvCmFnZW50cyBjb25maWcgc2V0IHJ1bi5jbGF1ZGVAKi5lZmZvcnQgaGlnaAoKIyBDZW50cmFsIGFuZCBkZXZpY2UgY29uZmlnCmFnZW50cyBjb25maWcgc2V0IGludGVyYWN0aXZlLmhvc3QgemlvbgphZ2VudHMgY29uZmlnIHNldCBicm93c2VyLnByb2ZpbGUgd29yawphZ2VudHMgY29uZmlnIHNldCBkZXZpY2VzLm1hYy1taW5pLm1heC1hZ2VudHMgNAphZ2VudHMgY29uZmlnIGxpc3QKYWdlbnRzIGNvbmZpZyBnZXQgcnVuLmNsYXVkZUAqLm1vZGVsCmFnZW50cyBjb25maWcgdW5zZXQgcnVuLmNsYXVkZUAqLnRpZXIuYmVzdApgYGAKCiMjIyBBcmNoaXRlY3R1cmUKCjxzdmcgdmlld0JveD0iMCAwIDgwMCA0MjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPHJlY3QgeD0iMTAiIHk9IjEwIiB3aWR0aD0iNzgwIiBoZWlnaHQ9IjQwMCIgZmlsbD0iIzBhMGEwYSIgc3Ryb2tlPSIjMzMzIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI0MDAiIHk9IjQwIiBmaWxsPSIjYTNlNjM1IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxOCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+QmVmb3JlOiBmcmFnbWVudGVkIGNvbW1hbmQgdHJlZXM8L3RleHQ+CiAgPHJlY3QgeD0iMzAiIHk9IjcwIiB3aWR0aD0iMTMwIiBoZWlnaHQ9IjUwIiByeD0iNCIgZmlsbD0iIzFlMjkzYiIgc3Ryb2tlPSIjNjQ3NDhiIi8+CiAgPHRleHQgeD0iOTUiIHk9IjEwMCIgZmlsbD0iI2UyZThmMCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIHRleHQtYW5jaG9yPSJtaWRkbGUiPmRlZmF1bHRzIHJ1bjwvdGV4dD4KICA8cmVjdCB4PSIxODAiIHk9IjcwIiB3aWR0aD0iMTMwIiBoZWlnaHQ9IjUwIiByeD0iNCIgZmlsbD0iIzFlMjkzYiIgc3Ryb2tlPSIjNjQ3NDhiIi8+CiAgPHRleHQgeD0iMjQ1IiB5PSIxMDAiIGZpbGw9IiNlMmU4ZjAiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5tb2RlbHMgdGllcjwvdGV4dD4KICA8cmVjdCB4PSIzMzAiIHk9IjcwIiB3aWR0aD0iMTMwIiBoZWlnaHQ9IjUwIiByeD0iNCIgZmlsbD0iIzFlMjkzYiIgc3Ryb2tlPSIjNjQ3NDhiIi8+CiAgPHRleHQgeD0iMzk1IiB5PSIxMDAiIGZpbGw9IiNlMmU4ZjAiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5kZXZpY2VzIHNldC1pbnRlcmFjdGl2ZTwvdGV4dD4KICA8cmVjdCB4PSI0ODAiIHk9IjcwIiB3aWR0aD0iMTMwIiBoZWlnaHQ9IjUwIiByeD0iNCIgZmlsbD0iIzFlMjkzYiIgc3Ryb2tlPSIjNjQ3NDhiIi8+CiAgPHRleHQgeD0iNTQ1IiB5PSIxMDAiIGZpbGw9IiNlMmU4ZjAiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5icm93c2VyIHByb2ZpbGVzPC90ZXh0PgogIDxyZWN0IHg9IjYzMCIgeT0iNzAiIHdpZHRoPSIxMzAiIGhlaWdodD0iNTAiIHJ4PSI0IiBmaWxsPSIjMWUyOTNiIiBzdHJva2U9IiM2NDc0OGIiLz4KICA8dGV4dCB4PSI2OTUiIHk9IjEwMCIgZmlsbD0iI2UyZThmMCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIHRleHQtYW5jaG9yPSJtaWRkbGUiPmRldmljZXMgY29uZmlndXJlPC90ZXh0PgogIDxsaW5lIHgxPSI5NSIgeTE9IjEyMCIgeDI9Ijk1IiB5Mj0iMTcwIiBzdHJva2U9IiM2NDc0OGIiIHN0cm9rZS13aWR0aD0iMiIvPgogIDxsaW5lIHgxPSIyNDUiIHkxPSIxMjAiIHgyPSIyNDUiIHkyPSIxNzAiIHN0cm9rZT0iIzY0NzQ4YiIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPGxpbmUgeDE9IjM5NSIgeTE9IjEyMCIgeDI9IjM5NSIgeTI9IjE3MCIgc3Ryb2tlPSIjNjQ3NDhiIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8bGluZSB4MT0iNTQ1IiB5MT0iMTIwIiB4Mj0iNTQ1IiB5Mj0iMTcwIiBzdHJva2U9IiM2NDc0OGIiIHN0cm9rZS13aWR0aD0iMiIvPgogIDxsaW5lIHgxPSI2OTUiIHkxPSIxMjAiIHgyPSI2OTUiIHkyPSIxNzAiIHN0cm9rZT0iIzY0NzQ4YiIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHJlY3QgeD0iMzAiIHk9IjE3MCIgd2lkdGg9Ijc0MCIgaGVpZ2h0PSI1MCIgcng9IjQiIGZpbGw9IiMzMzQxNTUiIHN0cm9rZT0iIzk0YTNiOCIvPgogIDx0ZXh0IHg9IjQwMCIgeT0iMjAwIiBmaWxsPSIjZTJlOGYwIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+cnVuLmRlZmF1bHRzIMK3IG1vZGVsLnRpZXJzIMK3IGNvbmZpZy5pbnRlcmFjdGl2ZUhvc3QgwrcgZGVmYXVsdEJyb3dzZXJQcm9maWxlIMK3IGRldmljZUNvbmZpZzwvdGV4dD4KCiAgPHRleHQgeD0iNDAwIiB5PSIyNjAiIGZpbGw9IiNhM2U2MzUiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjE4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5BZnRlcjogb25lIGFnZW50cyBjb25maWcgYmFycmVsPC90ZXh0PgogIDxyZWN0IHg9IjMwMCIgeT0iMjkwIiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjUwIiByeD0iNCIgZmlsbD0iIzE0NTMyZCIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI0MDAiIHk9IjMyMCIgZmlsbD0iI2UyZThmMCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTQiIGZvbnQtd2VpZ2h0PSJib2xkIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5hZ2VudHMgY29uZmlnPC90ZXh0PgogIDxsaW5lIHgxPSI0MDAiIHkxPSIzNDAiIHgyPSI0MDAiIHkyPSIzODAiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHJlY3QgeD0iMzAiIHk9IjM4MCIgd2lkdGg9Ijc0MCIgaGVpZ2h0PSIyMCIgcng9IjIiIGZpbGw9IiMzMzQxNTUiIHN0cm9rZT0iIzk0YTNiOCIvPgogIDx0ZXh0IHg9IjQwMCIgeT0iMzk0IiBmaWxsPSIjZTJlOGYwIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+c2FtZSB1bmRlcmx5aW5nIFlBTUwgc2NoZW1hIOKAlCBvbmx5IHRoZSBDTEkgZmFjYWRlIGNoYW5nZXM8L3RleHQ+Cjwvc3ZnPgoKIyMjIERhdGEgZmxvdwoKPHN2ZyB2aWV3Qm94PSIwIDAgODAwIDI2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB4PSIxMCIgeT0iMTAiIHdpZHRoPSI3ODAiIGhlaWdodD0iMjQwIiBmaWxsPSIjMGEwYTBhIiBzdHJva2U9IiMzMzMiIHN0cm9rZS13aWR0aD0iMiIvPgogIDxyZWN0IHg9IjQwIiB5PSI2MCIgd2lkdGg9IjIyMCIgaGVpZ2h0PSI1MCIgcng9IjQiIGZpbGw9IiMxNDUzMmQiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iMTUwIiB5PSI5MCIgZmlsbD0iI2UyZThmMCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiPmFnZW50cyBjb25maWcgc2V0PC90ZXh0PgogIDx0ZXh0IHg9IjE1MCIgeT0iMTA1IiBmaWxsPSIjYTNlNjM1IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+cnVuLmNsYXVkZUAqLnRpZXIuYmVzdCBjbGF1ZGUtb3B1cy00LTg8L3RleHQ+CiAgPGxpbmUgeDE9IjI2MCIgeTE9Ijg1IiB4Mj0iMzIwIiB5Mj0iODUiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHBvbHlnb24gcG9pbnRzPSIzMjAsODUgMzEwLDgwIDMxMCw5MCIgZmlsbD0iI2EzZTYzNSIvPgogIDxyZWN0IHg9IjMzMCIgeT0iNjAiIHdpZHRoPSIxNjAiIGhlaWdodD0iNTAiIHJ4PSI0IiBmaWxsPSIjMWUyOTNiIiBzdHJva2U9IiM2NDc0OGIiLz4KICA8dGV4dCB4PSI0MTAiIHk9Ijg1IiBmaWxsPSIjZTJlOGYwIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+Y29uZmlnLWtleXMudHM8L3RleHQ+CiAgPHRleHQgeD0iNDEwIiB5PSIxMDAiIGZpbGw9IiM5NGEzYjgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjkiIHRleHQtYW5jaG9yPSJtaWRkbGUiPnBhcnNlIGtleSDihpIgYWdlbnRAdmVyc2lvbjwvdGV4dD4KICA8bGluZSB4MT0iNDkwIiB5MT0iODUiIHgyPSI1NTAiIHkyPSI4NSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjIiLz4KICA8cG9seWdvbiBwb2ludHM9IjU1MCw4NSA1NDAsODAgNTQwLDkwIiBmaWxsPSIjYTNlNjM1Ii8+CiAgPHJlY3QgeD0iNTYwIiB5PSI2MCIgd2lkdGg9IjIwMCIgaGVpZ2h0PSI1MCIgcng9IjQiIGZpbGw9IiMxZTI5M2IiIHN0cm9rZT0iIzY0NzQ4YiIvPgogIDx0ZXh0IHg9IjY2MCIgeT0iODUiIGZpbGw9IiNlMmU4ZjAiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5tb2RlbC10aWVyLW92ZXJyaWRlcy50czwvdGV4dD4KICA8dGV4dCB4PSI2NjAiIHk9IjEwMCIgZmlsbD0iIzk0YTNiOCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iOSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+d3JpdGUgbW9kZWwudGllcnM8L3RleHQ+CiAgPGxpbmUgeDE9IjY2MCIgeTE9IjExMCIgeDI9IjY2MCIgeTI9IjE2MCIgc3Ryb2tlPSIjNjQ3NDhiIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1kYXNoYXJyYXk9IjQiLz4KICA8cmVjdCB4PSI1NjAiIHk9IjE2MCIgd2lkdGg9IjIwMCIgaGVpZ2h0PSI1MCIgcng9IjQiIGZpbGw9IiMzMzQxNTUiIHN0cm9rZT0iIzk0YTNiOCIvPgogIDx0ZXh0IHg9IjY2MCIgeT0iMTg1IiBmaWxsPSIjZTJlOGYwIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+fi8uYWdlbnRzL2FnZW50cy55YW1sPC90ZXh0PgogIDx0ZXh0IHg9IjY2MCIgeT0iMjAwIiBmaWxsPSIjOTRhM2I4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSI5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5tb2RlbC50aWVycy4iY2xhdWRlOioiLmJlc3Q8L3RleHQ+CiAgPGxpbmUgeDE9IjY2MCIgeTE9IjIxMCIgeDI9IjY2MCIgeTI9IjIzMCIgc3Ryb2tlPSIjNjQ3NDhiIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1kYXNoYXJyYXk9IjQiLz4KICA8dGV4dCB4PSI2NjAiIHk9IjI0NSIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiPmNvbnN1bWVkIGJ5IGV4ZWMudHMgYXQgcnVuIHRpbWU8L3RleHQ+Cjwvc3ZnPgoKIyMgVmFsaWRhdGlvbgoKfCBTdGVwIHwgSG93IHwKfC0tLXwtLS18CnwgVW5pdCB0ZXN0cyB8IGBsaWIvY29uZmlnLWtleXMudGVzdC50c2AgY292ZXJzIGtleSBwYXJzaW5nLCB2YWxpZGF0aW9uLCBhbmQgWUFNTC1wYXRoIG1hcHBpbmcuIHwKfCBJbnRlZ3JhdGlvbiB0ZXN0cyB8IGBjb21tYW5kcy9jb25maWcudGVzdC50c2AgcnVucyB0aGUgQ0xJIGVuZC10by1lbmQgaW4gYSB0ZW1wIGhvbWUuIHwKfCBCYWNrd2FyZCBjb21wYXRpYmlsaXR5IHwgRXhpc3RpbmcgYGRlZmF1bHRzLnRlc3QudHNgLCBgbW9kZWxzLnRlc3QudHNgLCBhbmQgYHNzaC5kZXZpY2UtY29uZmlnLnRlc3QudHNgIHN0aWxsIHBhc3MuIHwKfCBNYW51YWwgc21va2UgfCBgYWdlbnRzIGNvbmZpZyBzZXQgcnVuLmNsYXVkZUAqLnRpZXIuYmVzdCBjbGF1ZGUtb3B1cy00LThgIGZvbGxvd2VkIGJ5IGBhZ2VudHMgcnVuIGNsYXVkZSAtLW1vZGVsIGJlc3QgLS0gL25vb3BgIHJlc29sdmVzIHRvIHRoZSBwaW5uZWQgbW9kZWwuIHwKfCBEb2NzIHwgYEFHRU5UUy5tZGAgYW5kIGBSRUFETUUubWRgIHVwZGF0ZWQ7IG9wZW5zcGVjIHNwZWMgcmVmcmVzaGVkLiB8CgojIyBSaXNrcwoKfCBSaXNrIHwgTWl0aWdhdGlvbiB8CnwtLS18LS0tfAp8IE9sZCBjb21tYW5kcyBicmVhayB8IEtlZXAgdGhlbSBhcyBhbGlhc2VzIHdpdGggZGVwcmVjYXRpb24gd2FybmluZ3M7IGV4aXN0aW5nIHRlc3RzIGd1YXJkIGJlaGF2aW9yLiB8CnwgS2V5IGdyYW1tYXIgaXMgYW1iaWd1b3VzIHwgU3RyaWN0IHBhcnNlcjogYWdlbnQgaWQgbXVzdCBiZSBpbiBgQUdFTlRTYCwgdmVyc2lvbiBtdXN0IG1hdGNoIGBWRVJTSU9OX1JFYCwgdGllciBtdXN0IGJlIG9uZSBvZiBgTU9ERUxfVElFUlNgLiB8CnwgUHJvamVjdC1sb2NhbCBvdmVycmlkZXMgc3VycHJpc2UgdXNlcnMgfCBgYWdlbnRzIGNvbmZpZyBsaXN0YCBzaG93cyB0aGUgZWZmZWN0aXZlIHZhbHVlICoqYW5kKiogaXRzIHNvdXJjZSAodXNlciAvIHByb2plY3QgZmlsZSBwYXRoKS4gfAp8IE1peGVkLXZlcnNpb24gZmxlZXQgc2VlcyBvbGQgWUFNTCBvbmx5IHwgU3RvcmFnZSBkb2VzIG5vdCBjaGFuZ2UsIHNvIG9sZCBDTElzIGNvbnRpbnVlIHRvIHJlYWQgdGhlIHNhbWUgZGF0YS4gfAoKIyMgSW1wbGVtZW50YXRpb24gY2hlY2tsaXN0CgotIFsgXSBDcmVhdGUgYGFwcHMvY2xpL3NyYy9saWIvY29uZmlnLWtleXMudHNgIHdpdGggcGFyc2VyIGFuZCByZWdpc3RyeS4KLSBbIF0gQ3JlYXRlIGBhcHBzL2NsaS9zcmMvY29tbWFuZHMvY29uZmlnLnRzYCB3aXRoIGBsaXN0XHxnZXRcfHNldFx8dW5zZXRgLgotIFsgXSBSZWdpc3RlciBgY29uZmlnYCBpbiBgY29tbWFuZC1yZWdpc3RyeS50c2AuCi0gWyBdIEFkZCBoZWxwZXIgc2V0dGVycyBpbiBgcnVuLWRlZmF1bHRzLnRzYCBhbmQgYG1vZGVsLXRpZXItb3ZlcnJpZGVzLnRzYC4KLSBbIF0gUmVmYWN0b3IgYGNvbW1hbmRzL2RlZmF1bHRzLnRzYCwgYGNvbW1hbmRzL21vZGVscy50c2AsIGBjb21tYW5kcy9zc2gudHNgLCBgY29tbWFuZHMvYnJvd3Nlci50c2AgdG8gZGVsZWdhdGUuCi0gWyBdIEFkZCBgY29tbWFuZHMvY29uZmlnLnRlc3QudHNgIGFuZCBgbGliL2NvbmZpZy1rZXlzLnRlc3QudHNgLgotIFsgXSBVcGRhdGUgYEFHRU5UUy5tZGAsIGBSRUFETUUubWRgLCBhbmQgb3BlbnNwZWMgc3BlYy4KLSBbIF0gUnVuIGBidW4gcnVuIHRlc3Q6cmVtb3RlYCBpbiBgYXBwcy9jbGlgLgo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

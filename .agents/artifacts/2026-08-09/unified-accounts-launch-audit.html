@@ -25,7 +25,7 @@
 <div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span><span class="status-badge status-verified-with-gaps">verified-with-gaps</span></div>
 <h1>Unified accounts launch audit</h1>
 
-<div class="meta" aria-label="Artifact metadata"><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">unified-accounts-durable</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Codex root</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s1</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">019fe983-21b5-7c33-aafc-8ed0cb556c0d</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-09</span></p></div>
+<div class="meta" aria-label="Artifact metadata"><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">unified-accounts-durable</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Codex root</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Owner</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">worker-s1</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">session-id</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-09</span></p></div>
 </section>
 <nav class="toc" aria-label="Artifact sections"><a href="#summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a href="#findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a href="#evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a><a href="#scope-and-migration"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Scope and migration</a><a href="#ship-state"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Ship state</a></nav><article class="artifact-body"><h1>Unified accounts launch audit</h1>
 <h2 id="summary">Summary</h2>
@@ -71,8 +71,8 @@ agents harness add &lt;name&gt; --host &lt;agent&gt; --model &lt;model&gt; --acc
   <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#a3e635"></path></marker></defs>
 </svg><p>Profiles store the account's stable UUID, not its display name. Renaming an account therefore changes what users see without breaking attachments. <code>set-key</code> rotates credential bytes under the same identity.</p>
 <h2 id="evidence">Evidence</h2>
-<p><img src="https://share.agents-cli.sh/muqsitnawaz/agents-cli-unified-accounts-report-e49710fa0e0a6fa8" alt="Rendered launch-audit overview" /></p>
-<p>This screenshot was captured from the rendered report in headless Chrome on zion after the live CLI runs below completed.</p>
+<p><img src="https://share.agents-cli.sh/owner/agents-cli-unified-accounts-report-e49710fa0e0a6fa8" alt="Rendered launch-audit overview" /></p>
+<p>This screenshot was captured from the rendered report in headless Chrome on workstation after the live CLI runs below completed.</p>
 <h3>Installed CLI results</h3>
 <p>Installed artifact under test:</p>
 <pre><code>/home/you/.local/bin/agents
@@ -171,7 +171,7 @@ exit code: 1
 <tr>
 <td>Cursor API key</td>
 <td>Unverified</td>
-<td>Adapter and CLI path implemented; no Cursor key existed locally, on zion, or on mac-mini during the audit</td>
+<td>Adapter and CLI path implemented; no Cursor key existed locally, on workstation, or on release-host during the audit</td>
 </tr>
 <tr>
 <td>Codex + OpenRouter account while ChatGPT OAuth is active</td>

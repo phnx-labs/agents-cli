@@ -315,7 +315,7 @@ agents sessions insights --agent claude --agent codex --json
 agents insights --since 7d
 ```
 
-`sessions insights` is deterministic and offline by default. It caches per-session facets, compares harnesses, and emits an actions table with evidence counts plus shortened sample session ids. `--narrative` is opt-in and receives aggregates only, never raw transcripts. The installed `/sessions-insights` slash command invokes the same CLI source of truth.
+`sessions insights` is deterministic and offline by default. It caches per-session facets, compares harnesses, and emits an actions table with evidence counts plus shortened sample session ids. `--narrative` is opt-in and receives aggregates only, never raw transcripts.
 
 Interactive picker when you're in a terminal. Structured output (`--json`, `--markdown`, filtered by role or turn count) when piped.
 
@@ -1400,7 +1400,7 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 
 Codex `0.117.0+` no longer reads `.codex/prompts/`; agents-cli converts slash commands into skills so they stay invocable as `$name`. OpenCode's plugin-based hook system is on the roadmap; hooks stay `no` until a writer ships.
 
-Slash commands can declare per-agent/version targeting in frontmatter (`agents:`, `since:`, `until:`). Gating applies when syncing from `~/.agents/commands/` (user/system) into version homes — project `.agents/commands/` files are read in place and are not filtered by `agents:`. This repo ships `.agents/commands/version.md` as `/version` for Claude, Codex, Cursor, OpenCode, Copilot, and Grok; Antigravity excluded until verified.
+Slash commands can declare per-agent/version targeting in frontmatter (`agents:`, `since:`, `until:`). Gating applies when syncing from `~/.agents/commands/` (user/system) into version homes — project `.agents/commands/` files are read in place and are not filtered by `agents:`.
 
 ## FAQ
 

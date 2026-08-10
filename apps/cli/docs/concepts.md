@@ -399,5 +399,3 @@ aliases: [deploy, ship]           # alternate names this command also resolves u
 ```
 
 `commandAppliesTo()` in `src/lib/commands.ts` evaluates these fields after the agent-level `commands` / commands-as-skills gate. The check runs on central sync (`~/.agents/commands/` user/system → version home) and on `agents commands install`; project `.agents/commands/` files are discovered in place and are not filtered by `agents:`.
-
-Example: `.agents/commands/version.md` targets Claude, Codex, Cursor, OpenCode, Copilot, and Grok. Cursor receives both an IDE command file and an Agent Skill because cursor-agent does not load the IDE's `.cursor/commands/` files; Antigravity is excluded until harness support is verified.

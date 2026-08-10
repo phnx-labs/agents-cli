@@ -7,7 +7,7 @@
 > The agent stops one step short of done and asks permission for a step it already owns; the user then spends hundreds of prompts chasing the last mile.
 
 - **1,931 of 3,639 (53%)** of agent "?" messages are permission-seeking on an owned step.
-- Corpus: 2505 sessions (1754 zion / 393 yosemite-s0 / 220 yosemite-s1 / 138 mac-mini) · 7425 typed prompts · 3639 agent "?" messages · 1311 `AskUserQuestion` calls.
+- Corpus: 2505 sessions (1754 workstation / 393 worker-s0 / 220 worker-s1 / 138 release-host) · 7425 typed prompts · 3639 agent "?" messages · 1311 `AskUserQuestion` calls.
 
 ### 2. Top dissatisfaction / correction nudges (user prose, with counts)
 
@@ -84,4 +84,4 @@ The July pack and `agents insights` answer the same question ("how do you work /
 Net: one command (`agents insights`) that already does the corpus + grouping + cross-harness work grows the friction facets the July pack proved matter — instead of a bespoke pandas pipeline that has to be re-run by hand and can't see codex.
 
 ---
-*Raw data: `Agent-Interaction-Analysis-2026-07-07` pack (nudges.csv 784 rows, ask_headers.csv 1156 rows, user_themes.csv, agent_q_themes.csv, ask_categories.csv, + `01-analysis.pdf` §1–§6). Live: `agents insights --since 30d --json` and `--by agent`, yosemite-s0, 2026-08-05.*
+*Raw data: `Agent-Interaction-Analysis-2026-07-07` pack (nudges.csv 784 rows, ask_headers.csv 1156 rows, user_themes.csv, agent_q_themes.csv, ask_categories.csv, + `01-analysis.pdf` §1–§6). Live: `agents insights --since 30d --json` and `--by agent`, worker-s0, 2026-08-05.*

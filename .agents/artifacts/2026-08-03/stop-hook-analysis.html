@@ -70,7 +70,7 @@
     <span class="chip">sessions scanned <b>1,594</b></span>
     <span class="chip">sessions that fired a gate <b>82</b></span>
     <span class="chip">total gate fires <b>592</b></span>
-    <span class="chip">host <b>yosemite-s1</b></span>
+    <span class="chip">host <b>worker-s1</b></span>
     <span class="chip">hook <b>00-agent-verify-work-complete.sh</b></span>
   </div>
 
@@ -210,8 +210,8 @@
 
   <div class="cs">
     <div class="id">B · e049f85d — daemon "no fallback token" invariant</div>
-    <p><b>1,055</b> turns · <b>19</b> fires · <b>550 min (9.2 h)</b>. PR #1583→#1658: CI fully green, an independent non-author reviewer returned <i>Ready to merge</i> — but the auto-mode classifier forbids self-merge and <code>prix-cloud</code> never posted. Midway the user put the session in <b>plan mode</b>, which mechanically forbids the push/merge the gate was demanding. It looped for 9 hours before finally texting Muqsit:</p>
-    <blockquote>PR #1658 is handed off explicitly to Muqsit, who now owns the one remaining action: clicking Merge. This is not "awaiting review" — the blocker is the merge-rail approval gate.</blockquote>
+    <p><b>1,055</b> turns · <b>19</b> fires · <b>550 min (9.2 h)</b>. PR #1583→#1658: CI fully green, an independent non-author reviewer returned <i>Ready to merge</i> — but the auto-mode classifier forbids self-merge and <code>prix-cloud</code> never posted. Midway the user put the session in <b>plan mode</b>, which mechanically forbids the push/merge the gate was demanding. It looped for 9 hours before finally texting Owner:</p>
+    <blockquote>PR #1658 is handed off explicitly to Owner, who now owns the one remaining action: clicking Merge. This is not "awaiting review" — the blocker is the merge-rail approval gate.</blockquote>
     <p class="small">Lesson: two blindnesses stacked — (1) the gate demanded a merge the session was in plan mode and could not perform; (2) a stateful hook should have said "escalate to the human" after ~3 fires, not after 9 hours and 19.</p>
   </div>
 
@@ -244,7 +244,7 @@
     <p>Count how many times this same gate already fired in this transcript (scan for prior <code>Stop hook feedback: … STOP GATE (&lt;type&gt;)</code>). Change the message by fire count:</p>
     <ul class="small">
       <li><b>Fire 1–2:</b> current "keep driving" text.</li>
-      <li><b>Fire 3+ on the same thing:</b> switch to a <i>de-escalation</i> message: "This gate has fired N× on the same item — you are not abandoning it, you are <b>blocked</b>. Stop re-asserting. Do ONE of: (a) if a live background watcher / monitor already owns the next step, that IS a valid stop — name it and stop; (b) escalate out-of-band to Muqsit (<code>rush message send</code>) if the blocker is a human gate (merge auth, release sign-off, plan mode); (c) broadcast + coordinate: <code>agents feed post</code> and <code>agents sessions --active</code> to find sibling sessions stuck on the same wall (e.g. a downed reviewer); (d) set a <code>ScheduleWakeup</code>/monitor and stop."</li>
+      <li><b>Fire 3+ on the same thing:</b> switch to a <i>de-escalation</i> message: "This gate has fired N× on the same item — you are not abandoning it, you are <b>blocked</b>. Stop re-asserting. Do ONE of: (a) if a live background watcher / monitor already owns the next step, that IS a valid stop — name it and stop; (b) escalate out-of-band to Owner (<code>rush message send</code>) if the blocker is a human gate (merge auth, release sign-off, plan mode); (c) broadcast + coordinate: <code>agents feed post</code> and <code>agents sessions --active</code> to find sibling sessions stuck on the same wall (e.g. a downed reviewer); (d) set a <code>ScheduleWakeup</code>/monitor and stop."</li>
     </ul>
     <p class="small">Kills the 22 sessions that looped ≥10× and the quota burn.</p>
   </div>
@@ -302,7 +302,7 @@
   <p class="small">Also filed (accepted as non-blockers on #158): the <code>plan_mode</code> regex misses "prevents" (over-blocks, fails safe); <code>ScheduleWakeup</code>/<code>Monitor</code> detection is topic-agnostic (gated behind watcher phrasing); and structurally, the bash + embedded-<code>python3&nbsp;-c</code> design is fragile — a single-Python rewrite would be more maintainable and testable.</p>
 
   <div class="foot">
-    generated on yosemite-s1 · session 0fcff7ab · hook 00-agent-verify-work-complete.sh (2.1.186) · dataset: 1,594 recent transcripts · all figures reproducible from /tmp/ga2.json + /tmp/fn.json
+    generated on worker-s1 · session session-id · hook 00-agent-verify-work-complete.sh (2.1.186) · dataset: 1,594 recent transcripts · all figures reproducible from /tmp/ga2.json + /tmp/fn.json
   </div>
 </div>
 <script>

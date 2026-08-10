@@ -3126,8 +3126,8 @@ Find, browse, and read agent conversation transcripts across Claude, Codex, Gemi
 - Usage: `agents sessions [options] [query] [command]`
 - Flavors:
   - `agents sessions "add auth middleware"`
-  - `agents sessions a1b2c3d4 --markdown`
-  - `agents sessions a1b2c3d4 --include user`
+  - `agents sessions session-id --markdown`
+  - `agents sessions session-id --include user`
   - `agents sessions --active`
 - Flags:
   - `--resolve <selector>` — Resolve one full ID, unique prefix, or keyword query to safe session metadata (requires --json; searches the fleet unless --local)

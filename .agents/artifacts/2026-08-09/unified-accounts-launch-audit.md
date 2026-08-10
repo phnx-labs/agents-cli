@@ -8,8 +8,8 @@ project: agents-cli
 repository: phnx-labs/agents-cli
 harness: codex
 agent: root
-host: yosemite-s1
-session: 019fe983-21b5-7c33-aafc-8ed0cb556c0d
+host: worker-s1
+session: session-id
 ---
 
 # Unified accounts launch audit
@@ -68,9 +68,9 @@ Profiles store the account's stable UUID, not its display name. Renaming an acco
 
 ## Evidence
 
-![Rendered launch-audit overview](https://share.agents-cli.sh/muqsitnawaz/agents-cli-unified-accounts-report-e49710fa0e0a6fa8)
+![Rendered launch-audit overview](https://share.agents-cli.sh/owner/agents-cli-unified-accounts-report-e49710fa0e0a6fa8)
 
-This screenshot was captured from the rendered report in headless Chrome on zion after the live CLI runs below completed.
+This screenshot was captured from the rendered report in headless Chrome on workstation after the live CLI runs below completed.
 
 ### Installed CLI results
 
@@ -140,7 +140,7 @@ exit code: 1
 | Legacy version labels | Pass | Old v1 file is recoverably archived as `accounts.legacy-labels.yaml`; no false credential account is fabricated |
 | Targeted tests | Pass | 73/73 account, command, harness, and runner tests; 54/54 wizard/harness tests |
 | Full canonical remote suite | Pass | 817 files passed; 11,307 tests passed; 109 skipped; exit code 0 |
-| Cursor API key | Unverified | Adapter and CLI path implemented; no Cursor key existed locally, on zion, or on mac-mini during the audit |
+| Cursor API key | Unverified | Adapter and CLI path implemented; no Cursor key existed locally, on workstation, or on release-host during the audit |
 | Codex + OpenRouter account while ChatGPT OAuth is active | Failed | Codex chose its ChatGPT auth and rejected the third-party model with HTTP 400; not counted as supported live proof |
 | Independent staging-key chat | Failed | Key authenticated against OpenRouter's models API, but the Claude chat run hung; primary key was restored |
 

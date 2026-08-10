@@ -1,6 +1,6 @@
 # Design-drift review — 2026-08-03
 
-Nightly scan for **design drift**: new primitives introduced where an existing one should have been reused/extended — overlapping surfaces that work but are messy and hard to improve. Read-only analysis; no code was changed. Each finding names the existing primitive that should have absorbed the new code and a concrete consolidation proposal. Muqsit decides per-issue whether to dispatch a fix — this routine does **not** auto-fix.
+Nightly scan for **design drift**: new primitives introduced where an existing one should have been reused/extended — overlapping surfaces that work but are messy and hard to improve. Read-only analysis; no code was changed. Each finding names the existing primitive that should have absorbed the new code and a concrete consolidation proposal. Owner decides per-issue whether to dispatch a fix — this routine does **not** auto-fix.
 
 - **Window:** merges since `14 days ago` on `origin/main` · **200** PRs · **1273** files changed
 - **Findings:** 11 (ranked, most consolidation value first)

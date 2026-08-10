@@ -62,7 +62,7 @@
   fleet, not a mockup.</p>
 
   <ul class="chips">
-    <li>zion · 1.20.90</li>
+    <li>workstation · 1.20.90</li>
     <li>PR #1765 · merged</li>
     <li>11 hosts upgraded</li>
     <li>2026-08-03</li>
@@ -83,7 +83,7 @@
 
   <figure>
     <svg viewBox="0 0 900 210" role="img" aria-label="Before: 87 process ids collapse into 6 rows. After: 88 rows, one per agent.">
-      <text x="0" y="16" font-family="ui-monospace,monospace" font-size="12" fill="#9a9a9a">BEFORE — yosemite-s0</text>
+      <text x="0" y="16" font-family="ui-monospace,monospace" font-size="12" fill="#9a9a9a">BEFORE — worker-s0</text>
       <g>
         <!-- 87 pids -->
         <g fill="#f87171" opacity="0.75">
@@ -127,18 +127,18 @@
         <text x="0" y="152" font-family="ui-monospace,monospace" font-size="11" fill="#a3e635">88 rows — 84 at pidCount 1</text>
       </g>
     </svg>
-    <figcaption>Measured on yosemite-s0. Each red square is a live pid; each bar is a row you actually see.</figcaption>
+    <figcaption>Measured on worker-s0. Each red square is a live pid; each bar is a row you actually see.</figcaption>
   </figure>
 
   <p>What that looks like on the machine you sit at, after the upgrade:</p>
-<pre>zion — agents 1.20.90
+<pre>workstation — agents 1.20.90
 total rows:        120
 distinct sessionIds: 76
 pidCount histogram:  {1: 111, 2: 8, 3: 1}
 
   2942e114 claude  pids=1 agents-cli
   42a05ecd claude  pids=2 agents-cli   &lt;- this very session, correctly named
-  4b1a7f22 claude  pids=1 muqsit</pre>
+  4b1a7f22 claude  pids=1 Owner</pre>
 
   <div class="callout">
     <strong>Honest caveat.</strong> 41 of those 120 rows still carry no session id. They are
@@ -150,13 +150,13 @@ pidCount histogram:  {1: 111, 2: 8, 3: 1}
   <h2><span class="num">02</span>Cause two — the box holding your session was never dialed</h2>
   <p>With attribution fixed, <code>agents sessions --resolve 2373284d</code> still could not
   find the session you asked me to resume — even though its transcript is sitting on
-  <code>yosemite-s1</code>. The sweep picks peers by the cached Tailscale snapshot, and that
+  <code>worker-s1</code>. The sweep picks peers by the cached Tailscale snapshot, and that
   field is wrong in <em>both</em> directions:</p>
 
   <div class="scroll">
   <table>
     <tr><th>device</th><th>live probe</th><th>cached snapshot</th><th>sweep did</th></tr>
-    <tr><td class="m">yosemite-s1</td><td class="m good">reachable (manual)</td><td class="m bad">absent</td>
+    <tr><td class="m">worker-s1</td><td class="m good">reachable (manual)</td><td class="m bad">absent</td>
         <td class="bad">skipped it — your session invisible</td></tr>
     <tr><td class="m">pinnacles</td><td class="m bad">unreachable</td><td class="m bad">online: true</td>
         <td class="bad">dialed it — false "unreachable"</td></tr>
@@ -176,7 +176,7 @@ pidCount histogram:  {1: 111, 2: 8, 3: 1}
   (<code>deviceHealth.ts:47</code>); the CLI sweep had not.</p>
 
   <div class="foot">
-    claude · session 42a05ecd · zion · agents-cli · 2026-08-03<br>
+    claude · session session-id · workstation · agents-cli · 2026-08-03<br>
     cause one: PR #1765, merged &amp; live on 11 hosts &nbsp;·&nbsp; cause two: fix/sessions-fanout-reachability, in review
   </div>
 </div>

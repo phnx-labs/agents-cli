@@ -11,7 +11,7 @@ repository: phnx-labs/agents-cli
 branch: agents/routine-docs-contract
 harness: claude
 agent: claude-opus-4-8
-host: yosemite-s0
+host: worker-s0
 date: 2026-08-07
 facts:
   - 'Ticket: RUSH-2290'
@@ -19,7 +19,7 @@ facts:
   - 'Runtime change: none in this docs track'
 links:
   - https://linear.app/getrush/issue/RUSH-2290
-  - https://share.agents-cli.sh/muqsitnawaz/agents-cli-routine-reliability-5975559096b19ff4
+  - https://share.agents-cli.sh/owner/agents-cli-routine-reliability-5975559096b19ff4
   - https://github.com/phnx-labs/agents-cli/blob/main/apps/cli/docs/specifications.md
 ---
 

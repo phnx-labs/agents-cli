@@ -99,7 +99,7 @@
 <header class="hero">
   <p class="kicker">agents-cli · feed + escalation · plan</p>
   <h1>An agent that decides it is blocked has<br>no way to <span class="accent">tell you</span></h1>
-  <p class="sub">Session 74a4893f hit a git-guard force-push denial, wrote a careful explanation
+  <p class="sub">Session session-id hit a git-guard force-push denial, wrote a careful explanation
   of what it needed into the chat window, and stopped. You found out an hour later by reading the
   terminal. The mechanism to prevent that already exists — it is broken in five places, each of
   which fails silently.</p>
@@ -112,7 +112,7 @@
   <div class="meta prov">
     <span class="chip">harness <b>claude</b></span>
     <span class="chip">agent <b>opus-5</b></span>
-    <span class="chip">host <b>yosemite-s1</b></span>
+    <span class="chip">host <b>worker-s1</b></span>
     <span class="chip">session <b>df0ab22d</b></span>
     <span class="chip">date <b>2026-08-03</b></span>
   </div>
@@ -262,19 +262,19 @@ message of every session transcript for a needs-you signature.</p>
   <line x1="150" y1="30" x2="150" y2="200" stroke="#26302a"/>
   <line x1="150" y1="200" x2="760" y2="200" stroke="#26302a"/>
 
-  <text x="140" y="55" fill="#8b938c" font-family="monospace" font-size="12" text-anchor="end">zion</text>
+  <text x="140" y="55" fill="#8b938c" font-family="monospace" font-size="12" text-anchor="end">workstation</text>
   <rect x="152" y="40" width="122" height="22" fill="#a3e635" opacity=".85"/>
   <text x="286" y="56" fill="#e7ece8" font-family="monospace" font-size="12">3 / 15  ·  20%</text>
 
-  <text x="140" y="95" fill="#8b938c" font-family="monospace" font-size="12" text-anchor="end">yosemite-s1</text>
+  <text x="140" y="95" fill="#8b938c" font-family="monospace" font-size="12" text-anchor="end">worker-s1</text>
   <rect x="152" y="80" width="91" height="22" fill="#a3e635" opacity=".85"/>
   <text x="286" y="96" fill="#e7ece8" font-family="monospace" font-size="12">7 / 47  ·  15%</text>
 
-  <text x="140" y="135" fill="#8b938c" font-family="monospace" font-size="12" text-anchor="end">yosemite-s0</text>
+  <text x="140" y="135" fill="#8b938c" font-family="monospace" font-size="12" text-anchor="end">worker-s0</text>
   <rect x="152" y="120" width="2" height="22" fill="#8b938c" opacity=".5"/>
   <text x="286" y="136" fill="#8b938c" font-family="monospace" font-size="12">0 / 50  ·  0%   (headless)</text>
 
-  <text x="140" y="175" fill="#8b938c" font-family="monospace" font-size="12" text-anchor="end">yosemite-m0</text>
+  <text x="140" y="175" fill="#8b938c" font-family="monospace" font-size="12" text-anchor="end">worker-m0</text>
   <rect x="152" y="160" width="2" height="22" fill="#8b938c" opacity=".5"/>
   <text x="286" y="176" fill="#8b938c" font-family="monospace" font-size="12">0 / 23  ·  0%   (headless)</text>
 
@@ -290,11 +290,11 @@ worker boxes never block; the boxes you actually sit at block 15–20% of the ti
 
 <p>One of them names the failure outright — session <code>277c1709</code>:</p>
 <blockquote>"<code>rush message send</code> doesn't exist either. No Telegram or iMessage reached
-you this session; I fell back to a desktop notification on zion."</blockquote>
+you this session; I fell back to a desktop notification on workstation."</blockquote>
 
 <p>And agents are already hand-rolling a block channel out of the status channel. A live
 <code>feed post</code> reads:</p>
-<blockquote>"NEEDS MUQSIT: factory-metrics report is in PR #182 … Muqsit owns the merge — I
+<blockquote>"NEEDS Owner: factory-metrics report is in PR #182 … Owner owns the merge — I
 cannot self-approve my own PR. It also needs a one-time decision from him…"</blockquote>
 
 <div class="callout">
@@ -387,7 +387,7 @@ already exist.</p>
   <code>git-guard.sh:53-64</code> already fires
   <code>agents _internal friction --surface guard --id &lt;failureId&gt;</code> on every deny, landing a
   structured record in <code>~/.agents/events.jsonl</code> via <code>emitFriction</code>
-  (<code>lib/events.ts:760-769</code>). The denial that blocked session 74a4893f almost certainly
+  (<code>lib/events.ts:760-769</code>). The denial that blocked session session-id almost certainly
   left a machine-readable trace. Nothing consumes it. The stall guard reads that log, which makes
   the capture precise rather than heuristic.
 </div>
@@ -404,7 +404,7 @@ already exist.</p>
 <h2 id="s6"><span class="n">06</span>Sequencing</h2>
 <table>
   <tr><th></th><th>Repo</th><th>Contents</th></tr>
-  <tr><td><span class="tag a">Day 0</span></td><td><code>muqsitnawaz/.agents</code></td>
+  <tr><td><span class="tag a">Day 0</span></td><td><code>owner/.agents</code></td>
       <td>Sink config (already documented at <code>docs/06-observability.md:704-750</code>, never applied), <code>cli/</code> manifests for rush + openclaw so doctor sees them, <code>owner.md</code> synced fleet-wide. <b>No code.</b></td></tr>
   <tr><td><span class="tag b">PR 1</span></td><td><code>agents-cli</code> + <code>.agents-system</code></td>
       <td>Layers 1–3: the verb, <code>agents notify</code>, broadcast wiring, notify.ts de-hardcoded, the rule, the hook fixes, docs, changelog fragment.</td></tr>
@@ -441,7 +441,7 @@ high-consequence blocks.</p>
 <h3>Decisions I made — redirect me if any is wrong</h3>
 <ul>
   <li><b>PR 1 excludes the menubar.</b> It is a Swift surface I cannot build or eyeball from this
-      Linux box; it needs zion or mac-mini. Say so if you'd rather have click-to-focus in one shot
+      Linux box; it needs workstation or release-host. Say so if you'd rather have click-to-focus in one shot
       and I'll do the whole thing on a Mac.</li>
   <li><b>The Stop gate captures, it does not block.</b> The agents' explanations are already good;
       a third <i>blocking</i> Stop gate on top of the two that exist invites loops.</li>
@@ -450,7 +450,7 @@ high-consequence blocks.</p>
 </ul>
 
 <div class="foot">
-  claude · opus-5 · yosemite-s1 · session df0ab22d · 2026-08-03 · RUSH-2110 &nbsp;·&nbsp; next: go / reshape
+  claude · opus-5 · worker-s1 · session session-id · 2026-08-03 · RUSH-2110 &nbsp;·&nbsp; next: go / reshape
 </div>
 
 </div>

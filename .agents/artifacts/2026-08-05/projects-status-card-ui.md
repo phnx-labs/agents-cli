@@ -13,9 +13,9 @@ tracking: ''
 status: draft
 harness: grok
 agent: grok
-human: muqsit
-host: yosemite-m2
-session: c2a9bb4b
+human: Owner
+host: worker-m2
+session: session-id
 date: '2026-08-05'
 facts:
   - status and view share one body (runProjectCard); named form is the detail mode
@@ -112,16 +112,16 @@ Add a dedicated `hosts` line. Keep the agents roster for harness × status × ti
     <text x="24" y="94" fill="#8b98a5">dead</text>
     <text x="96" y="94" fill="#f5c518">27 finished or lost (27 crashed)</text>
     <text x="24" y="120" fill="#8b98a5">hosts</text>
-    <text x="96" y="120" fill="#7aa2f7">zion</text>
+    <text x="96" y="120" fill="#7aa2f7">workstation</text>
     <text x="140" y="120" fill="#c5d0da">×14</text>
     <text x="190" y="120" fill="#8b98a5">·</text>
-    <text x="210" y="120" fill="#7aa2f7">yosemite-s0</text>
+    <text x="210" y="120" fill="#7aa2f7">worker-s0</text>
     <text x="320" y="120" fill="#c5d0da">×8</text>
     <text x="360" y="120" fill="#8b98a5">·</text>
-    <text x="380" y="120" fill="#7aa2f7">mac-mini</text>
+    <text x="380" y="120" fill="#7aa2f7">release-host</text>
     <text x="460" y="120" fill="#c5d0da">×4</text>
     <text x="500" y="120" fill="#8b98a5">·</text>
-    <text x="520" y="120" fill="#7aa2f7">yosemite-s1</text>
+    <text x="520" y="120" fill="#7aa2f7">worker-s1</text>
     <text x="630" y="120" fill="#c5d0da">×1</text>
     <text x="24" y="146" fill="#8b98a5">agents</text>
     <text x="96" y="146" fill="#c5d0da">claude · running ×15  ·  claude · running · RUSH-2107  ·  grok · running  · +12 more</text>
@@ -142,7 +142,7 @@ Add a dedicated `hosts` line. Keep the agents roster for harness × status × ti
     <text x="24" y="250" fill="#8b98a5">repos</text>
     <text x="96" y="250" fill="#c5d0da">phnx-labs/agents-cli</text>
     <text x="24" y="276" fill="#f5c518">!</text>
-    <text x="48" y="276" fill="#f5c518">yosemite-s0 is 40 commits behind origin/main</text>
+    <text x="48" y="276" fill="#f5c518">worker-s0 is 40 commits behind origin/main</text>
   </g>
 </svg>
 </div>
@@ -158,11 +158,11 @@ Add a dedicated `hosts` line. Keep the agents roster for harness × status × ti
   <rect width="820" height="140" rx="12" fill="#0f1419"/>
   <g font-family="ui-monospace, Menlo, monospace" font-size="13">
     <text x="24" y="36" fill="#8b98a5">agents</text>
-    <text x="96" y="36" fill="#7aa2f7">@zion</text>
+    <text x="96" y="36" fill="#7aa2f7">@workstation</text>
     <text x="160" y="36" fill="#c5d0da">claude · running ×9  ·  claude · idle ×4  ·  grok · running</text>
-    <text x="96" y="64" fill="#7aa2f7">@yosemite-s0</text>
+    <text x="96" y="64" fill="#7aa2f7">@worker-s0</text>
     <text x="220" y="64" fill="#c5d0da">claude · running ×5  ·  claude · idle ×2  ·  claude · input_required</text>
-    <text x="96" y="92" fill="#7aa2f7">@mac-mini</text>
+    <text x="96" y="92" fill="#7aa2f7">@release-host</text>
     <text x="190" y="92" fill="#c5d0da">claude · running ×1  ·  claude · idle ×1  ·  claude · orphaned ×2</text>
     <text x="24" y="124" fill="#6b7785" font-family="ui-sans-serif, system-ui" font-size="11">B: better for “who is on yosemite?”; costs vertical space; only when live spans 2+ hosts</text>
   </g>
@@ -219,8 +219,8 @@ Three label variants for the same data. Recommend **C1**.
     <text x="24" y="36" fill="#8b98a5">repos</text>
     <text x="96" y="36" fill="#c5d0da">phnx-labs/agents-cli</text>
     <text x="24" y="64" fill="#f5c518">!</text>
-    <text x="48" y="64" fill="#f5c518">yosemite-s0 40 behind · mac-mini dirty (3)</text>
-    <text x="48" y="90" fill="#6b7785">agents there will conflict with zion · agents projects status agents-cli --fleet</text>
+    <text x="48" y="64" fill="#f5c518">worker-s0 40 behind · release-host dirty (3)</text>
+    <text x="48" y="90" fill="#6b7785">agents there will conflict with workstation · agents projects status agents-cli --fleet</text>
   </g>
 </svg>
 </div>
@@ -245,7 +245,7 @@ Three label variants for the same data. Recommend **C1**.
     <text x="24" y="86" fill="#8b98a5">dead</text>
     <text x="96" y="86" fill="#f5c518">27 finished or lost (27 crashed)</text>
     <text x="24" y="112" fill="#8b98a5">hosts</text>
-    <text x="96" y="112" fill="#7aa2f7">zion ×14 · yosemite-s0 ×8 · mac-mini ×4 · yosemite-s1 ×1</text>
+    <text x="96" y="112" fill="#7aa2f7">workstation ×14 · worker-s0 ×8 · release-host ×4 · worker-s1 ×1</text>
     <text x="24" y="138" fill="#8b98a5">agents</text>
     <text x="96" y="138" fill="#c5d0da">claude · running ×15  ·  claude · running · RUSH-2107  ·  grok · running  · +12 more</text>
     <text x="24" y="164" fill="#8b98a5">ships</text>
@@ -267,7 +267,7 @@ Three label variants for the same data. Recommend **C1**.
     <text x="210" y="294" fill="#7aa2f7" text-decoration="underline">#1944</text>
     <text x="24" y="320" fill="#8b98a5">repos</text>
     <text x="96" y="320" fill="#c5d0da">phnx-labs/agents-cli</text>
-    <text x="300" y="320" fill="#f5c518">! yosemite-s0 40 behind · mac-mini dirty (3)</text>
+    <text x="300" y="320" fill="#f5c518">! worker-s0 40 behind · release-host dirty (3)</text>
   </g>
   <text x="24" y="348" fill="#6b7785" font-family="ui-sans-serif, system-ui" font-size="11">Ship for both status and view (shared body). Definition block still only on the named form.</text>
 </svg>

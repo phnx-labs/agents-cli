@@ -199,7 +199,7 @@ whole question, so it gets its own diagram.</p>
   <!-- peers -->
   <rect x="640" y="40" width="230" height="70" rx="10" fill="#0e120f" stroke="#26302a"/>
   <text x="755" y="80" fill="#8b938c" font-size="12" text-anchor="middle" font-family="monospace">peer boxes (SSH)</text>
-  <text x="755" y="98" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="monospace">zion, yosemite-m*, …</text>
+  <text x="755" y="98" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="monospace">workstation, worker-m*, …</text>
   <!-- blocks fan out -->
   <path d="M308 118 C 470 118, 500 75, 636 75" stroke="#a3e635" stroke-width="1.6" fill="none" marker-end="url(#arg2)"/>
   <text x="470" y="104" fill="#a3e635" font-size="10.5" font-family="monospace">blocks fan out ✓</text>
@@ -272,8 +272,8 @@ poll each box to know what a headless run is doing. Two findings stand in the wa
 <div class="callout warn">
   <span class="lbl">the gap</span>
   <b>Status posts don't travel.</b> <code>feed post</code> writes to the <b>local-only</b> activity lane, and the
-  feed's SSH fan-out carries only open-<i>blocks</i>. A status posted by a headless agent on <code>yosemite-m3</code>
-  is <b>not</b> visible when you run <code>agents feed</code> on <code>zion</code>. Instructing agents to post is
+  feed's SSH fan-out carries only open-<i>blocks</i>. A status posted by a headless agent on <code>worker-m3</code>
+  is <b>not</b> visible when you run <code>agents feed</code> on <code>workstation</code>. Instructing agents to post is
   <i>necessary but not sufficient</i> — the activity lane also needs fleet fan-out (or posts routed to a
   fleet-visible surface) for the goal to work.
 </div>

@@ -234,9 +234,9 @@ versions is 42 minutes. Here is how that 40 minutes divides, measured per stage.
   <text x="509" y="106" font-family="monospace" font-size="13" fill="#5ad6c0" text-anchor="middle" font-weight="bold">~1 min</text>
   <line x1="574" y1="83" x2="612" y2="83" stroke="#5ad6c0" stroke-width="1.5" marker-end="url(#ar)"/>
 
-  <!-- stage 4 mac-mini -->
+  <!-- stage 4 release-host -->
   <rect x="616" y="40" width="255" height="86" rx="8" fill="#161a18" stroke="#f5c451" stroke-width="1.8"/>
-  <text x="743" y="64" font-family="monospace" font-size="12" fill="#e7ece8" text-anchor="middle">4 · mac-mini home base</text>
+  <text x="743" y="64" font-family="monospace" font-size="12" fill="#e7ece8" text-anchor="middle">4 · release-host home base</text>
   <text x="743" y="81" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">build · sign · notarize · npm publish</text>
   <text x="743" y="99" font-family="monospace" font-size="13" fill="#f5c451" text-anchor="middle" font-weight="bold">26 min</text>
   <text x="743" y="116" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">Apple notary service dominates</text>
@@ -277,7 +277,7 @@ transcripts, timestamped.</p>
 <p>At <code>01:24:23Z</code> on 08-02, session <code>051e16d1</code> ran <code>pgrep -af release.sh</code>
 before firing its own release and found another agent already mid-release on the same version:</p>
 
-<pre><span class="c">// session 051e16d1, 01:24:51Z — its own words</span>
+<pre><span class="c">// session session-id, 01:24:51Z — its own words</span>
 A <span class="k">sibling session</span> (version 2.1.186, PID 458550) is already running the exact
 same release — <span class="s">release.sh 1.20.80 --apply --yes</span>. That's why my run saw a dirty
 tree: the two were racing. Two concurrent releases would clobber each other
@@ -286,7 +286,7 @@ tree: the two were racing. Two concurrent releases would clobber each other
 <p>That agent did the right thing and stood down. It then watched for 30 minutes, and at
 <code>01:56:41Z</code> reported the outcome:</p>
 
-<pre><span class="c">// session 051e16d1, 01:56:41Z</span>
+<pre><span class="c">// session session-id, 01:56:41Z</span>
 PR #1622 <span class="k">merged</span> (01:34:31Z, CI all-green), so 1.20.80 is on main — but the
 sibling's release then <span class="r">failed at the publish gate</span>:
   <span class="r">merged tree != built tree -- refusing to publish (concurrent merge or stray push)</span>
@@ -396,7 +396,7 @@ makes releasing someone's actual job instead of everyone's side quest.</p>
     <path d="M724,118 L762,118" stroke="#5ad6c0" stroke-width="1.5" marker-end="url(#ar)"/>
     <rect x="766" y="86" width="112" height="64" rx="6" fill="#111a11" stroke="#a3e635" stroke-width="1.8"/>
     <text x="822" y="106" font-family="monospace" font-size="10.5" fill="#a3e635" text-anchor="middle">release train</text>
-    <text x="822" y="121" font-family="monospace" font-size="9" fill="#8b938c" text-anchor="middle">routine on mac-mini</text>
+    <text x="822" y="121" font-family="monospace" font-size="9" fill="#8b938c" text-anchor="middle">routine on release-host</text>
     <text x="822" y="135" font-family="monospace" font-size="9" fill="#8b938c" text-anchor="middle">every 4h · holds lease</text>
 
     <path d="M822,150 L822,214" stroke="#a3e635" stroke-width="1.4" marker-end="url(#ar)"/>
@@ -422,7 +422,7 @@ role that owns releasing.</p>
 
 <h3>Layer B — mechanism: an origin-side release lease</h3>
 <p>The lock must live on <code>origin</code>, not on a filesystem — agents run on
-<code>zion</code>, <code>mac-mini</code>, <code>yosemite-s0/s1</code>, and Hetzner boxes, so
+<code>workstation</code>, <code>release-host</code>, <code>worker-s0/s1</code>, and Hetzner boxes, so
 <code>flock</code> cannot see across them. A git ref is an atomic compare-and-swap that every box
 already has credentials for:</p>
 
@@ -440,7 +440,7 @@ that version rather than cut a new one. This is the check that would have preven
 .81 stacking up.</p>
 
 <h3>Layer C — cadence: a scheduled release train</h3>
-<p>Run the release as a routine on <code>mac-mini</code>. It is already the home base: it holds the
+<p>Run the release as a routine on <code>release-host</code>. It is already the home base: it holds the
 Developer ID cert and the npm token, so there is no ssh hop and no Touch ID prompt. The routine
 holds the lease for its whole run, so an agent that tries to release mid-train is refused by
 Layer B rather than by luck.</p>
@@ -476,7 +476,7 @@ retry loop. This alone accounts for a large share of the 39% red rate on release
     <tr><td><span class="tag b">edit</span></td><td><code>apps/cli/scripts/release.sh</code></td><td>Claim/release an origin-side lease around the whole run; refuse to start a new version while an unpublished tag exists.</td></tr>
     <tr><td><span class="tag a">new</span></td><td><code>apps/cli/scripts/release-lease.sh</code></td><td>Claim, renew, release, and reclaim-if-stale the <code>refs/release-lock/*</code> ref. Unit-tested against a real bare repo.</td></tr>
     <tr><td><span class="tag a">new</span></td><td><code>apps/cli/scripts/release-lease.test.ts</code></td><td>Two concurrent claims: exactly one wins. Stale lease reclaim after the TTL. Release on failure via trap.</td></tr>
-    <tr><td><span class="tag a">new</span></td><td>routine <code>release-train</code> on <code>mac-mini</code></td><td>Every 4h: if main &gt; npm or an unpublished tag exists, drive one release to npm, then upgrade the fleet.</td></tr>
+    <tr><td><span class="tag a">new</span></td><td>routine <code>release-train</code> on <code>release-host</code></td><td>Every 4h: if main &gt; npm or an unpublished tag exists, drive one release to npm, then upgrade the fleet.</td></tr>
     <tr><td><span class="tag b">edit</span></td><td><code>.github/workflows/ci.yml</code></td><td>Windows matrix leg: switch the vitest pool so a worker fork crash cannot fail a green suite.</td></tr>
     <tr><td><span class="tag c">keep</span></td><td>crabbox / <code>sandbox.sh</code></td><td>3 minutes for 7,499 tests. Unchanged.</td></tr>
     <tr><td><span class="tag c">keep</span></td><td>tree-match publish guard</td><td>Correct behaviour. It caught a genuinely unsafe publish. Unchanged.</td></tr>
@@ -506,8 +506,8 @@ retry loop. This alone accounts for a large share of the 39% red rate on release
 <table>
   <thead><tr><th>Layer</th><th>PR</th><th>State</th></tr></thead>
   <tbody>
-    <tr><td><b>A</b> — policy: feature agents stop at merge</td><td><a href="https://github.com/muqsitnawaz/.agents/pull/173">muqsitnawaz/.agents#173</a></td><td>open · needs a non-author merge (governance change, no CI or automated reviewer on that repo)</td></tr>
-    <tr><td><b>C</b> — the release-train routine (mac-mini, every 4h)</td><td><a href="https://github.com/muqsitnawaz/.agents/pull/173">muqsitnawaz/.agents#173</a></td><td>same PR as Layer A</td></tr>
+    <tr><td><b>A</b> — policy: feature agents stop at merge</td><td><a href="https://github.com/example-user/.agents/pull/173">owner/.agents#173</a></td><td>open · needs a non-author merge (governance change, no CI or automated reviewer on that repo)</td></tr>
+    <tr><td><b>C</b> — the release-train routine (release-host, every 4h)</td><td><a href="https://github.com/example-user/.agents/pull/173">owner/.agents#173</a></td><td>same PR as Layer A</td></tr>
     <tr><td><b>B</b> — origin-side lease + stuck-tag guard</td><td><a href="https://github.com/phnx-labs/agents-cli/pull/1662">phnx-labs/agents-cli#1662</a></td><td>open · CI green, 28 tests. Review caught a blocking defect (a 45-min TTL with no renewal could have the lease reclaimed mid-release); fixed with renewal + fail-closed <code>verify</code> before merge/tag/publish. A second pass then caught that the fail-closed tag guard was itself fail-open through a process substitution.</td></tr>
     <tr><td><b>D</b> — cross-platform CI is red on <code>main</code></td><td><a href="https://github.com/phnx-labs/agents-cli/issues/1674">agents-cli#1674</a></td><td>diagnosed with a root cause, filed. Blocks every release right now.</td></tr>
     <tr><td>Backlog drain (1.20.80 / .81 / .82)</td><td>—</td><td>blocked on D, and deliberately sequenced after B so the drain itself runs under the lease</td></tr>

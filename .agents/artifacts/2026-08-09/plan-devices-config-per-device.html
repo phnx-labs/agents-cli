@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Device config lives per-device again — with the pin churn root cause fixed</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e8e8e8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e8e8e8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-awaiting-go">awaiting-go</span></div>
+<h1>Device config lives per-device again — with the pin churn root cause fixed</h1>
+<p class="summary">User direction: per-device config belongs at ~/.agents/devices/&lt;name&gt;/ (conflict-free by construction); all-devices config belongs in central agents.yaml. This reverses #2458's central-block storage and fixes the real reason devices/ was gitignored — the auto-written agent pins, not operator config, caused the churn. Pins move to untracked runtime state, the per-device doc becomes operator-config-only and syncs again.
+</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">The command surface (agents devices config) is unchanged; only the storage backend moves, plus a --fleet flag<span class="meta-sep" aria-hidden="true">·</span>Resolution order: built-in default &lt; fleet.defaults.config &lt; per-device config:<span class="meta-sep" aria-hidden="true">·</span>The in-memory Meta shape is untouched — ~140 pin read sites keep working</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">review-pr-2440</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Kimi</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Owner</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">worker-s1</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">9628fb95</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-09</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#proposed-changes"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<p>Three kinds of state were sharing homes badly. Split them so each lives where
+its write pattern belongs:</p>
+<figure>
+<svg viewBox="0 0 780 330" width="100%" role="img" aria-label="Three storage layers: per-device config, fleet defaults, untracked pins">
+  <defs>
+    <marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>
+    </marker>
+  </defs>
+  <g fill="currentColor">
+    <rect x="10" y="40" rx="10" width="240" height="120" fill="currentColor" fill-opacity="0.06" stroke="currentColor" stroke-opacity="0.5"></rect>
+    <text x="26" y="66" font-weight="700">devices/&lt;name&gt;/agents.yaml</text>
+    <text x="26" y="86" font-size="11">config: · routines:</text>
+    <text x="26" y="106" font-size="11" fill="#a3e635">✓ tracked → synced → backed up</text>
+    <text x="26" y="124" font-size="11">one file per device: no conflicts</text>
+    <text x="26" y="142" font-size="11">written by: devices config &lt;name&gt;</text>
+
+    <rect x="270" y="40" rx="10" width="240" height="120" fill="currentColor" fill-opacity="0.06" stroke="currentColor" stroke-opacity="0.5"></rect>
+    <text x="286" y="66" font-weight="700">~/.agents/agents.yaml</text>
+    <text x="286" y="86" font-size="11">fleet.defaults.config</text>
+    <text x="286" y="106" font-size="11" fill="#a3e635">✓ tracked → synced</text>
+    <text x="286" y="124" font-size="11">applies to ALL devices</text>
+    <text x="286" y="142" font-size="11">written by: devices config --fleet</text>
+
+    <rect x="530" y="40" rx="10" width="240" height="120" fill="none" stroke="currentColor" stroke-opacity="0.35" stroke-dasharray="5 4"></rect>
+    <text x="546" y="66" font-weight="700">.history/devices/pins-&lt;host&gt;.json</text>
+    <text x="546" y="86" font-size="11">agent version pins (agents:, isolatedAgents:)</text>
+    <text x="546" y="106" font-size="11" fill="#e2b93d">✗ never tracked — runtime state</text>
+    <text x="546" y="124" font-size="11">auto-written on install/refresh</text>
+    <text x="546" y="142" font-size="11">← the churn that got devices/ ignored</text>
+  </g>
+
+  <text x="10" y="205" font-size="12" font-weight="700" fill="currentColor">Read order for every device key</text>
+  <g fill="currentColor">
+    <rect x="10" y="220" rx="8" width="170" height="44" fill="none" stroke="currentColor" stroke-opacity="0.4"></rect>
+    <text x="24" y="247">built-in default</text>
+    <line x1="184" y1="242" x2="226" y2="242" stroke="currentColor" stroke-width="1.5" marker-end="url(#a4)"></line>
+    <rect x="230" y="220" rx="8" width="200" height="44" fill="none" stroke="currentColor" stroke-opacity="0.4"></rect>
+    <text x="244" y="247">fleet.defaults.config</text>
+    <line x1="434" y1="242" x2="476" y2="242" stroke="currentColor" stroke-width="1.5" marker-end="url(#a4)"></line>
+    <rect x="480" y="220" rx="8" width="230" height="44" fill="currentColor" fill-opacity="0.08" stroke="currentColor" stroke-opacity="0.55"></rect>
+    <text x="494" y="247">devices/&lt;name&gt;/ config:  ← wins</text>
+  </g>
+  <text x="10" y="300" font-size="10.5" fill="currentColor">Figure 1 — operator intent syncs; machine state stays local. The ~/.agents/.gitignore `devices/` rule is deleted once pins move out.</text>
+</svg>
+</figure><div class="artifact-callout">
+The `agents devices config` command — key-value, TTY menu, --json, tombstones —
+ships unchanged from #2458. This PR moves only the storage backend and adds
+`--fleet` for the all-devices layer.
+</div><h2 id="proposed-changes">Proposed Changes</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Change</th>
+<th>Files</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>Pin fields → <code>.history/devices/pins-&lt;host&gt;.json</code>; Meta in-memory shape unchanged</td>
+<td><code>lib/state.ts</code> (writeMetaUnlocked, overlayMachineLocal, currentMetaStamp)</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Device-scope backend → per-device <code>config:</code> + fleet defaults layering; <code>--fleet</code>; effective-value reads with <code>source</code></td>
+<td><code>lib/device-config.ts</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>FleetDefaults.config</code>, inert to reconcile</td>
+<td><code>lib/fleet/types.ts</code>, <code>lib/fleet/manifest.ts</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td>Migration v2: central block → per-device docs; pins extracted (self preserved, peers dropped from tracked files)</td>
+<td><code>lib/devices/config-migration.ts</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td>Shim reads new pins path; <code>--from-pins</code> documented local-only</td>
+<td><code>lib/shims.ts</code>, <code>commands/fleet-capture.ts</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td>Factory reads per-device docs + fleet defaults (tolerant parse kept)</td>
+<td><code>apps/factory/src/core/deviceAutoLaunch.ts</code></td>
+</tr>
+<tr>
+<td>7</td>
+<td>Delete the <code>devices/</code> ignore rule (pins gone → churn cannot recur)</td>
+<td><code>~/.agents/.gitignore</code> (user repo)</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Tests: precedence, --fleet, v2 migration, shim path, Factory fixtures</td>
+<td>next to source</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Docs re-revision + schema + changelog fragment + gen:index</td>
+<td><code>docs/00-concepts.md</code>, schema, README, QUICKSTART</td>
+</tr>
+</tbody></table>
+<h2 id="public-interface">Public Interface</h2>
+<pre><code>agents devices config release-host agents.max-concurrent 4     # → devices/release-host/agents.yaml (synced)
+agents devices config --fleet agents.max-concurrent 2      # → agents.yaml fleet.defaults.config (all devices)
+agents devices config release-host --json                      # effective values + per-key source
+</code></pre>
+<pre><code># ~/.agents/devices/release-host/agents.yaml  (tracked again — operator config only)
+config:
+  maxAgents: 4
+  schedulerEnabled: false
+routines: [nightly-audit]     # per-device enablement stays synced
+
+# ~/.agents/agents.yaml  (central)
+fleet:
+  defaults:
+    config: { maxAgents: 2 }  # every device without its own value
+</code></pre>
+<h2 id="validation">Validation</h2>
+<ul>
+<li>Focused vitest green: device-config layering, migration v2, shim pins, state round-trip, Factory fixtures; existing <code>devices config</code> CLI + tombstone suites unchanged-green.</li>
+<li><code>bunx tsc --noEmit</code> clean (apps/cli, apps/factory); spellcheck + gen:index committed.</li>
+<li>Fleet smoke: <code>devices config release-host agents.max-concurrent 4</code> on workstation → <code>agents repo push</code> → pull on another box → the file is there; pins file never appears in <code>git status</code>.</li>
+</ul>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Second storage migration in two releases</td>
+<td>Idempotent folds; v2 folds v1's store forward; fleet is the only pre-release consumer</td>
+</tr>
+<tr>
+<td><code>--from-pins</code> loses cross-device pins</td>
+<td>Already degraded on gitignored-<code>devices/</code> fleets; documented local-only</td>
+</tr>
+<tr>
+<td>Same peer doc edited on two boxes between pulls</td>
+<td>One file per device makes this rarer than central; git conflicts surface loudly on pull</td>
+</tr>
+<tr>
+<td>Shim pin path regression</td>
+<td><code>shims.device-pins.test.ts</code> updated; central fallback unchanged</td>
+</tr>
+</tbody></table>
+<h2 id="tracking">Tracking</h2>
+<ul>
+<li>New worktree <code>devices-config-per-device</code> off origin/main → PR to main; companion commit to the user <code>~/.agents</code> repo (gitignore).</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGl0bGU6IERldmljZSBjb25maWcgbGl2ZXMgcGVyLWRldmljZSBhZ2FpbiDigJQgd2l0aCB0aGUgcGluIGNodXJuIHJvb3QgY2F1c2UgZml4ZWQKc3VtbWFyeTogPgogIFVzZXIgZGlyZWN0aW9uOiBwZXItZGV2aWNlIGNvbmZpZyBiZWxvbmdzIGF0IH4vLmFnZW50cy9kZXZpY2VzLzxuYW1lPi8KICAoY29uZmxpY3QtZnJlZSBieSBjb25zdHJ1Y3Rpb24pOyBhbGwtZGV2aWNlcyBjb25maWcgYmVsb25ncyBpbiBjZW50cmFsCiAgYWdlbnRzLnlhbWwuIFRoaXMgcmV2ZXJzZXMgIzI0NTgncyBjZW50cmFsLWJsb2NrIHN0b3JhZ2UgYW5kIGZpeGVzIHRoZSByZWFsCiAgcmVhc29uIGRldmljZXMvIHdhcyBnaXRpZ25vcmVkIOKAlCB0aGUgYXV0by13cml0dGVuIGFnZW50IHBpbnMsIG5vdCBvcGVyYXRvcgogIGNvbmZpZywgY2F1c2VkIHRoZSBjaHVybi4gUGlucyBtb3ZlIHRvIHVudHJhY2tlZCBydW50aW1lIHN0YXRlLCB0aGUKICBwZXItZGV2aWNlIGRvYyBiZWNvbWVzIG9wZXJhdG9yLWNvbmZpZy1vbmx5IGFuZCBzeW5jcyBhZ2Fpbi4Kc3RhdHVzOiBhd2FpdGluZy1nbwpmYWN0czoKICAtICJUaGUgY29tbWFuZCBzdXJmYWNlIChhZ2VudHMgZGV2aWNlcyBjb25maWcpIGlzIHVuY2hhbmdlZDsgb25seSB0aGUgc3RvcmFnZSBiYWNrZW5kIG1vdmVzLCBwbHVzIGEgLS1mbGVldCBmbGFnIgogIC0gIlJlc29sdXRpb24gb3JkZXI6IGJ1aWx0LWluIGRlZmF1bHQgPCBmbGVldC5kZWZhdWx0cy5jb25maWcgPCBwZXItZGV2aWNlIGNvbmZpZzoiCiAgLSAiVGhlIGluLW1lbW9yeSBNZXRhIHNoYXBlIGlzIHVudG91Y2hlZCDigJQgfjE0MCBwaW4gcmVhZCBzaXRlcyBrZWVwIHdvcmtpbmciCi0tLQoKIyMgUHVycG9zZQoKVGhyZWUga2luZHMgb2Ygc3RhdGUgd2VyZSBzaGFyaW5nIGhvbWVzIGJhZGx5LiBTcGxpdCB0aGVtIHNvIGVhY2ggbGl2ZXMgd2hlcmUKaXRzIHdyaXRlIHBhdHRlcm4gYmVsb25nczoKCjxmaWd1cmU+Cjxzdmcgdmlld0JveD0iMCAwIDc4MCAzMzAiIHdpZHRoPSIxMDAlIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IlRocmVlIHN0b3JhZ2UgbGF5ZXJzOiBwZXItZGV2aWNlIGNvbmZpZywgZmxlZXQgZGVmYXVsdHMsIHVudHJhY2tlZCBwaW5zIj4KICA8ZGVmcz4KICAgIDxtYXJrZXIgaWQ9ImE0IiB2aWV3Qm94PSIwIDAgMTAgMTAiIHJlZlg9IjkiIHJlZlk9IjUiIG1hcmtlcldpZHRoPSI3IiBtYXJrZXJIZWlnaHQ9IjciIG9yaWVudD0iYXV0by1zdGFydC1yZXZlcnNlIj4KICAgICAgPHBhdGggZD0iTTAsMCBMMTAsNSBMMCwxMCB6IiBmaWxsPSJjdXJyZW50Q29sb3IiLz4KICAgIDwvbWFya2VyPgogIDwvZGVmcz4KICA8ZyBmb250LXNpemU9IjEyIiBmaWxsPSJjdXJyZW50Q29sb3IiPgogICAgPHJlY3QgeD0iMTAiIHk9IjQwIiByeD0iMTAiIHdpZHRoPSIyNDAiIGhlaWdodD0iMTIwIiBmaWxsPSJjdXJyZW50Q29sb3IiIGZpbGwtb3BhY2l0eT0iMC4wNiIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS1vcGFjaXR5PSIwLjUiLz4KICAgIDx0ZXh0IHg9IjI2IiB5PSI2NiIgZm9udC13ZWlnaHQ9IjcwMCI+ZGV2aWNlcy8mbHQ7bmFtZSZndDsvYWdlbnRzLnlhbWw8L3RleHQ+CiAgICA8dGV4dCB4PSIyNiIgeT0iODYiIGZvbnQtc2l6ZT0iMTEiIGZpbGwtb3BhY2l0eT0iMC43Ij5jb25maWc6IMK3IHJvdXRpbmVzOjwvdGV4dD4KICAgIDx0ZXh0IHg9IjI2IiB5PSIxMDYiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNhM2U2MzUiPuKckyB0cmFja2VkIOKGkiBzeW5jZWQg4oaSIGJhY2tlZCB1cDwvdGV4dD4KICAgIDx0ZXh0IHg9IjI2IiB5PSIxMjQiIGZvbnQtc2l6ZT0iMTEiIGZpbGwtb3BhY2l0eT0iMC42Ij5vbmUgZmlsZSBwZXIgZGV2aWNlOiBubyBjb25mbGljdHM8L3RleHQ+CiAgICA8dGV4dCB4PSIyNiIgeT0iMTQyIiBmb250LXNpemU9IjExIiBmaWxsLW9wYWNpdHk9IjAuNiI+d3JpdHRlbiBieTogZGV2aWNlcyBjb25maWcgJmx0O25hbWUmZ3Q7PC90ZXh0PgoKICAgIDxyZWN0IHg9IjI3MCIgeT0iNDAiIHJ4PSIxMCIgd2lkdGg9IjI0MCIgaGVpZ2h0PSIxMjAiIGZpbGw9ImN1cnJlbnRDb2xvciIgZmlsbC1vcGFjaXR5PSIwLjA2IiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLW9wYWNpdHk9IjAuNSIvPgogICAgPHRleHQgeD0iMjg2IiB5PSI2NiIgZm9udC13ZWlnaHQ9IjcwMCI+fi8uYWdlbnRzL2FnZW50cy55YW1sPC90ZXh0PgogICAgPHRleHQgeD0iMjg2IiB5PSI4NiIgZm9udC1zaXplPSIxMSIgZmlsbC1vcGFjaXR5PSIwLjciPmZsZWV0LmRlZmF1bHRzLmNvbmZpZzwvdGV4dD4KICAgIDx0ZXh0IHg9IjI4NiIgeT0iMTA2IiBmb250LXNpemU9IjExIiBmaWxsPSIjYTNlNjM1Ij7inJMgdHJhY2tlZCDihpIgc3luY2VkPC90ZXh0PgogICAgPHRleHQgeD0iMjg2IiB5PSIxMjQiIGZvbnQtc2l6ZT0iMTEiIGZpbGwtb3BhY2l0eT0iMC42Ij5hcHBsaWVzIHRvIEFMTCBkZXZpY2VzPC90ZXh0PgogICAgPHRleHQgeD0iMjg2IiB5PSIxNDIiIGZvbnQtc2l6ZT0iMTEiIGZpbGwtb3BhY2l0eT0iMC42Ij53cml0dGVuIGJ5OiBkZXZpY2VzIGNvbmZpZyAtLWZsZWV0PC90ZXh0PgoKICAgIDxyZWN0IHg9IjUzMCIgeT0iNDAiIHJ4PSIxMCIgd2lkdGg9IjI0MCIgaGVpZ2h0PSIxMjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utb3BhY2l0eT0iMC4zNSIgc3Ryb2tlLWRhc2hhcnJheT0iNSA0Ii8+CiAgICA8dGV4dCB4PSI1NDYiIHk9IjY2IiBmb250LXdlaWdodD0iNzAwIj4uaGlzdG9yeS9kZXZpY2VzL3BpbnMtJmx0O2hvc3QmZ3Q7Lmpzb248L3RleHQ+CiAgICA8dGV4dCB4PSI1NDYiIHk9Ijg2IiBmb250LXNpemU9IjExIiBmaWxsLW9wYWNpdHk9IjAuNyI+YWdlbnQgdmVyc2lvbiBwaW5zIChhZ2VudHM6LCBpc29sYXRlZEFnZW50czopPC90ZXh0PgogICAgPHRleHQgeD0iNTQ2IiB5PSIxMDYiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNlMmI5M2QiPuKclyBuZXZlciB0cmFja2VkIOKAlCBydW50aW1lIHN0YXRlPC90ZXh0PgogICAgPHRleHQgeD0iNTQ2IiB5PSIxMjQiIGZvbnQtc2l6ZT0iMTEiIGZpbGwtb3BhY2l0eT0iMC42Ij5hdXRvLXdyaXR0ZW4gb24gaW5zdGFsbC9yZWZyZXNoPC90ZXh0PgogICAgPHRleHQgeD0iNTQ2IiB5PSIxNDIiIGZvbnQtc2l6ZT0iMTEiIGZpbGwtb3BhY2l0eT0iMC42Ij7ihpAgdGhlIGNodXJuIHRoYXQgZ290IGRldmljZXMvIGlnbm9yZWQ8L3RleHQ+CiAgPC9nPgogIDwhLS0gcmVzb2x1dGlvbiBvcmRlciAtLT4KICA8dGV4dCB4PSIxMCIgeT0iMjA1IiBmb250LXNpemU9IjEyIiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSJjdXJyZW50Q29sb3IiPlJlYWQgb3JkZXIgZm9yIGV2ZXJ5IGRldmljZSBrZXk8L3RleHQ+CiAgPGcgZm9udC1zaXplPSIxMS41IiBmaWxsPSJjdXJyZW50Q29sb3IiPgogICAgPHJlY3QgeD0iMTAiIHk9IjIyMCIgcng9IjgiIHdpZHRoPSIxNzAiIGhlaWdodD0iNDQiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utb3BhY2l0eT0iMC40Ii8+CiAgICA8dGV4dCB4PSIyNCIgeT0iMjQ3Ij5idWlsdC1pbiBkZWZhdWx0PC90ZXh0PgogICAgPGxpbmUgeDE9IjE4NCIgeTE9IjI0MiIgeDI9IjIyNiIgeTI9IjI0MiIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI2E0KSIvPgogICAgPHJlY3QgeD0iMjMwIiB5PSIyMjAiIHJ4PSI4IiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjQ0IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLW9wYWNpdHk9IjAuNCIvPgogICAgPHRleHQgeD0iMjQ0IiB5PSIyNDciPmZsZWV0LmRlZmF1bHRzLmNvbmZpZzwvdGV4dD4KICAgIDxsaW5lIHgxPSI0MzQiIHkxPSIyNDIiIHgyPSI0NzYiIHkyPSIyNDIiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhNCkiLz4KICAgIDxyZWN0IHg9IjQ4MCIgeT0iMjIwIiByeD0iOCIgd2lkdGg9IjIzMCIgaGVpZ2h0PSI0NCIgZmlsbD0iY3VycmVudENvbG9yIiBmaWxsLW9wYWNpdHk9IjAuMDgiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utb3BhY2l0eT0iMC41NSIvPgogICAgPHRleHQgeD0iNDk0IiB5PSIyNDciPmRldmljZXMvJmx0O25hbWUmZ3Q7LyBjb25maWc6ICDihpAgd2luczwvdGV4dD4KICA8L2c+CiAgPHRleHQgeD0iMTAiIHk9IjMwMCIgZm9udC1zaXplPSIxMC41IiBmaWxsPSJjdXJyZW50Q29sb3IiIGZpbGwtb3BhY2l0eT0iMC41NSI+RmlndXJlIDEg4oCUIG9wZXJhdG9yIGludGVudCBzeW5jczsgbWFjaGluZSBzdGF0ZSBzdGF5cyBsb2NhbC4gVGhlIH4vLmFnZW50cy8uZ2l0aWdub3JlIGBkZXZpY2VzL2AgcnVsZSBpcyBkZWxldGVkIG9uY2UgcGlucyBtb3ZlIG91dC48L3RleHQ+Cjwvc3ZnPgo8L2ZpZ3VyZT4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQiIGRhdGEta2luZD0iaW5mbyI+ClRoZSBgYWdlbnRzIGRldmljZXMgY29uZmlnYCBjb21tYW5kIOKAlCBrZXktdmFsdWUsIFRUWSBtZW51LCAtLWpzb24sIHRvbWJzdG9uZXMg4oCUCnNoaXBzIHVuY2hhbmdlZCBmcm9tICMyNDU4LiBUaGlzIFBSIG1vdmVzIG9ubHkgdGhlIHN0b3JhZ2UgYmFja2VuZCBhbmQgYWRkcwpgLS1mbGVldGAgZm9yIHRoZSBhbGwtZGV2aWNlcyBsYXllci4KPC9kaXY+CgojIyBQcm9wb3NlZCBDaGFuZ2VzCgp8ICMgfCBDaGFuZ2UgfCBGaWxlcyB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCAxIHwgUGluIGZpZWxkcyDihpIgYC5oaXN0b3J5L2RldmljZXMvcGlucy08aG9zdD4uanNvbmA7IE1ldGEgaW4tbWVtb3J5IHNoYXBlIHVuY2hhbmdlZCB8IGBsaWIvc3RhdGUudHNgICh3cml0ZU1ldGFVbmxvY2tlZCwgb3ZlcmxheU1hY2hpbmVMb2NhbCwgY3VycmVudE1ldGFTdGFtcCkgfAp8IDIgfCBEZXZpY2Utc2NvcGUgYmFja2VuZCDihpIgcGVyLWRldmljZSBgY29uZmlnOmAgKyBmbGVldCBkZWZhdWx0cyBsYXllcmluZzsgYC0tZmxlZXRgOyBlZmZlY3RpdmUtdmFsdWUgcmVhZHMgd2l0aCBgc291cmNlYCB8IGBsaWIvZGV2aWNlLWNvbmZpZy50c2AgfAp8IDMgfCBgRmxlZXREZWZhdWx0cy5jb25maWdgLCBpbmVydCB0byByZWNvbmNpbGUgfCBgbGliL2ZsZWV0L3R5cGVzLnRzYCwgYGxpYi9mbGVldC9tYW5pZmVzdC50c2AgfAp8IDQgfCBNaWdyYXRpb24gdjI6IGNlbnRyYWwgYmxvY2sg4oaSIHBlci1kZXZpY2UgZG9jczsgcGlucyBleHRyYWN0ZWQgKHNlbGYgcHJlc2VydmVkLCBwZWVycyBkcm9wcGVkIGZyb20gdHJhY2tlZCBmaWxlcykgfCBgbGliL2RldmljZXMvY29uZmlnLW1pZ3JhdGlvbi50c2AgfAp8IDUgfCBTaGltIHJlYWRzIG5ldyBwaW5zIHBhdGg7IGAtLWZyb20tcGluc2AgZG9jdW1lbnRlZCBsb2NhbC1vbmx5IHwgYGxpYi9zaGltcy50c2AsIGBjb21tYW5kcy9mbGVldC1jYXB0dXJlLnRzYCB8CnwgNiB8IEZhY3RvcnkgcmVhZHMgcGVyLWRldmljZSBkb2NzICsgZmxlZXQgZGVmYXVsdHMgKHRvbGVyYW50IHBhcnNlIGtlcHQpIHwgYGFwcHMvZmFjdG9yeS9zcmMvY29yZS9kZXZpY2VBdXRvTGF1bmNoLnRzYCB8CnwgNyB8IERlbGV0ZSB0aGUgYGRldmljZXMvYCBpZ25vcmUgcnVsZSAocGlucyBnb25lIOKGkiBjaHVybiBjYW5ub3QgcmVjdXIpIHwgYH4vLmFnZW50cy8uZ2l0aWdub3JlYCAodXNlciByZXBvKSB8CnwgOCB8IFRlc3RzOiBwcmVjZWRlbmNlLCAtLWZsZWV0LCB2MiBtaWdyYXRpb24sIHNoaW0gcGF0aCwgRmFjdG9yeSBmaXh0dXJlcyB8IG5leHQgdG8gc291cmNlIHwKfCA5IHwgRG9jcyByZS1yZXZpc2lvbiArIHNjaGVtYSArIGNoYW5nZWxvZyBmcmFnbWVudCArIGdlbjppbmRleCB8IGBkb2NzLzAwLWNvbmNlcHRzLm1kYCwgc2NoZW1hLCBSRUFETUUsIFFVSUNLU1RBUlQgfAoKIyMgUHVibGljIEludGVyZmFjZQoKYGBgYmFzaAphZ2VudHMgZGV2aWNlcyBjb25maWcgbWFjLW1pbmkgYWdlbnRzLm1heC1jb25jdXJyZW50IDQgICAgICMg4oaSIGRldmljZXMvbWFjLW1pbmkvYWdlbnRzLnlhbWwgKHN5bmNlZCkKYWdlbnRzIGRldmljZXMgY29uZmlnIC0tZmxlZXQgYWdlbnRzLm1heC1jb25jdXJyZW50IDIgICAgICAjIOKGkiBhZ2VudHMueWFtbCBmbGVldC5kZWZhdWx0cy5jb25maWcgKGFsbCBkZXZpY2VzKQphZ2VudHMgZGV2aWNlcyBjb25maWcgbWFjLW1pbmkgLS1qc29uICAgICAgICAgICAgICAgICAgICAgICMgZWZmZWN0aXZlIHZhbHVlcyArIHBlci1rZXkgc291cmNlCmBgYAoKYGBgeWFtbAojIH4vLmFnZW50cy9kZXZpY2VzL21hYy1taW5pL2FnZW50cy55YW1sICAodHJhY2tlZCBhZ2FpbiDigJQgb3BlcmF0b3IgY29uZmlnIG9ubHkpCmNvbmZpZzoKICBtYXhBZ2VudHM6IDQKICBzY2hlZHVsZXJFbmFibGVkOiBmYWxzZQpyb3V0aW5lczogW25pZ2h0bHktYXVkaXRdICAgICAjIHBlci1kZXZpY2UgZW5hYmxlbWVudCBzdGF5cyBzeW5jZWQKCiMgfi8uYWdlbnRzL2FnZW50cy55YW1sICAoY2VudHJhbCkKZmxlZXQ6CiAgZGVmYXVsdHM6CiAgICBjb25maWc6IHsgbWF4QWdlbnRzOiAyIH0gICMgZXZlcnkgZGV2aWNlIHdpdGhvdXQgaXRzIG93biB2YWx1ZQpgYGAKCiMjIFZhbGlkYXRpb24KCi0gRm9jdXNlZCB2aXRlc3QgZ3JlZW46IGRldmljZS1jb25maWcgbGF5ZXJpbmcsIG1pZ3JhdGlvbiB2Miwgc2hpbSBwaW5zLCBzdGF0ZSByb3VuZC10cmlwLCBGYWN0b3J5IGZpeHR1cmVzOyBleGlzdGluZyBgZGV2aWNlcyBjb25maWdgIENMSSArIHRvbWJzdG9uZSBzdWl0ZXMgdW5jaGFuZ2VkLWdyZWVuLgotIGBidW54IHRzYyAtLW5vRW1pdGAgY2xlYW4gKGFwcHMvY2xpLCBhcHBzL2ZhY3RvcnkpOyBzcGVsbGNoZWNrICsgZ2VuOmluZGV4IGNvbW1pdHRlZC4KLSBGbGVldCBzbW9rZTogYGRldmljZXMgY29uZmlnIG1hYy1taW5pIGFnZW50cy5tYXgtY29uY3VycmVudCA0YCBvbiB6aW9uIOKGkiBgYWdlbnRzIHJlcG8gcHVzaGAg4oaSIHB1bGwgb24gYW5vdGhlciBib3gg4oaSIHRoZSBmaWxlIGlzIHRoZXJlOyBwaW5zIGZpbGUgbmV2ZXIgYXBwZWFycyBpbiBgZ2l0IHN0YXR1c2AuCgojIyBSaXNrcwoKfCBSaXNrIHwgTWl0aWdhdGlvbiB8CnwgLS0tIHwgLS0tIHwKfCBTZWNvbmQgc3RvcmFnZSBtaWdyYXRpb24gaW4gdHdvIHJlbGVhc2VzIHwgSWRlbXBvdGVudCBmb2xkczsgdjIgZm9sZHMgdjEncyBzdG9yZSBmb3J3YXJkOyBmbGVldCBpcyB0aGUgb25seSBwcmUtcmVsZWFzZSBjb25zdW1lciB8CnwgYC0tZnJvbS1waW5zYCBsb3NlcyBjcm9zcy1kZXZpY2UgcGlucyB8IEFscmVhZHkgZGVncmFkZWQgb24gZ2l0aWdub3JlZC1gZGV2aWNlcy9gIGZsZWV0czsgZG9jdW1lbnRlZCBsb2NhbC1vbmx5IHwKfCBTYW1lIHBlZXIgZG9jIGVkaXRlZCBvbiB0d28gYm94ZXMgYmV0d2VlbiBwdWxscyB8IE9uZSBmaWxlIHBlciBkZXZpY2UgbWFrZXMgdGhpcyByYXJlciB0aGFuIGNlbnRyYWw7IGdpdCBjb25mbGljdHMgc3VyZmFjZSBsb3VkbHkgb24gcHVsbCB8CnwgU2hpbSBwaW4gcGF0aCByZWdyZXNzaW9uIHwgYHNoaW1zLmRldmljZS1waW5zLnRlc3QudHNgIHVwZGF0ZWQ7IGNlbnRyYWwgZmFsbGJhY2sgdW5jaGFuZ2VkIHwKCiMjIFRyYWNraW5nCgotIE5ldyB3b3JrdHJlZSBgZGV2aWNlcy1jb25maWctcGVyLWRldmljZWAgb2ZmIG9yaWdpbi9tYWluIOKGkiBQUiB0byBtYWluOyBjb21wYW5pb24gY29tbWl0IHRvIHRoZSB1c2VyIGB+Ly5hZ2VudHNgIHJlcG8gKGdpdGlnbm9yZSkuCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

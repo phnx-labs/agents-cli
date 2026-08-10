@@ -1510,9 +1510,6 @@ limited to shortened session ids; transcript text, credentials, and local paths 
 included. `--narrative` is explicitly opt-in and sends only the aggregate report to the
 coach process.
 
-Agents can invoke the same source of truth through `/sessions-insights`; the slash entry
-is a thin command wrapper, not a second analyzer.
-
 ## Skill/plugin/slash-command usage (`session_resource_usage`)
 
 A separate table, `session_resource_usage(session_id, kind, name, plugin,

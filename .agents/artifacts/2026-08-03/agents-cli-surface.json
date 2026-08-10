@@ -6365,8 +6365,8 @@
       ],
       "examples": [
         "agents sessions \"add auth middleware\"",
-        "agents sessions a1b2c3d4 --markdown",
-        "agents sessions a1b2c3d4 --include user",
+        "agents sessions session-id --markdown",
+        "agents sessions session-id --include user",
         "agents sessions --active",
         "agents sessions --local",
         "agents sessions \"topic\" --all",

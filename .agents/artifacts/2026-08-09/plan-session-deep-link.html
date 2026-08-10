@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Deep link from an artifact back into its session</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">.agents-system</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-awaiting-go">awaiting-go</span></div>
+<h1>Deep link from an artifact back into its session</h1>
+<p class="summary">Rendered plans carry a session in their provenance line, but there is no way back into that session. Make the session a clickable link that reopens the terminal — cursor in the input bar — via a custom agents:// URL scheme, resolving the owning host automatically (workstation to another box).
+</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Reopen key is just the session UUID; agents sessions resume &lt;id&gt; already opens a terminal in the input bar and auto-hops to the owning host.<span class="meta-sep" aria-hidden="true">·</span>A rendered artifact is a sandboxed browser page (file:// or shared https) and cannot spawn a shell — hand off via a registered agents:// scheme.<span class="meta-sep" aria-hidden="true">·</span>artifacts-cli already anchors any provenance part with an href, and the hero is not scheme-sanitized — emitting the link is a small change.<span class="meta-sep" aria-hidden="true">·</span>No agents:// scheme exists today; the only registered scheme is the editor's vscodium://swarmify.swarm-ext.</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/.agents-system" target="_blank" rel="noopener">phnx-labs/.agents-system</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">(no ticket yet — file on approval)</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Owner</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">worker-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">ea353d09</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-09</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#behavior-what-happens-when-you-click"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Behavior — what happens when you click</a><a href="#proposed-changes"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<p>A rendered plan's provenance line shows <code>harness · agent · host · session · date</code>, but
+the <strong>session</strong> value is plain text and dead. There is no path from the artifact back
+to the work. The goal: click a link in the artifact and land <strong>in the input bar of that
+session's terminal</strong>, even when the session lives on a different host than where the
+user sits, in Ghostty or any terminal.</p>
+<div class="artifact-callout">
+<strong>Feasible — with one hard constraint.</strong> The artifact is a sandboxed browser
+document (your screenshot is <code>file:///…</code>), so the link cannot run a shell.
+It must hand off to the OS through a registered <code>agents://</code> URL scheme whose
+handler runs <code>agents sessions resume &lt;id&gt;</code>. Everything past the id already
+exists.
+</div><h2 id="behavior-what-happens-when-you-click">Behavior — what happens when you click</h2>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg viewBox="0 0 920 320" role="img" aria-label="Click flow from artifact to resumed terminal" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#8492aa"></path>
+    </marker>
+  </defs>
+
+  <rect x="20" y="36" width="184" height="90" rx="10" fill="#1b2230" stroke="#5b6b86" stroke-width="1.5"></rect>
+  <text x="112" y="66" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#e7ecf4">Artifact (browser)</text>
+  <text x="112" y="90" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" fill="#9aa7bd">click session link</text>
+  <text x="112" y="108" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" fill="#9aa7bd">agents://session/&lt;id&gt;</text>
+
+  <rect x="258" y="36" width="184" height="90" rx="10" fill="#2a2418" stroke="#a0824e" stroke-width="1.5"></rect>
+  <text x="350" y="66" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#e7ecf4">OS URL handler</text>
+  <text x="350" y="90" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" fill="#c9b48a">"Open agents?" (once)</text>
+  <text x="350" y="108" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" fill="#c9b48a">exec: agents open</text>
+
+  <rect x="496" y="36" width="196" height="90" rx="10" fill="#1b2230" stroke="#5b6b86" stroke-width="1.5"></rect>
+  <text x="594" y="64" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#e7ecf4">agents sessions resume</text>
+  <text x="594" y="88" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" fill="#9aa7bd">resolve owner from id</text>
+  <text x="594" y="106" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" fill="#9aa7bd">focus / recover</text>
+
+  <rect x="726" y="36" width="176" height="90" rx="10" fill="#16281d" stroke="#3f8b5c" stroke-width="1.5"></rect>
+  <text x="814" y="66" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#e7ecf4">Terminal tab</text>
+  <text x="814" y="90" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" fill="#8fd0a5">run auto --resume</text>
+  <text x="814" y="108" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" fill="#8fd0a5">cursor in input bar</text>
+
+  <path d="M204,81 L256,81" fill="none" stroke="#8492aa" stroke-width="1.6" marker-end="url(#ah)"></path>
+  <path d="M442,81 L494,81" fill="none" stroke="#8492aa" stroke-width="1.6" marker-end="url(#ah)"></path>
+  <path d="M692,81 L724,81" fill="none" stroke="#8492aa" stroke-width="1.6" marker-end="url(#ah)"></path>
+
+  <rect x="496" y="206" width="196" height="72" rx="10" fill="#1b2230" stroke="#5b6b86" stroke-width="1.5"></rect>
+  <text x="594" y="236" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#e7ecf4">owning host is another box</text>
+  <text x="594" y="260" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" fill="#9aa7bd">ssh -tt &lt;owner&gt; (PTY)</text>
+  <path d="M594,126 L594,204" fill="none" stroke="#8492aa" stroke-width="1.6" marker-end="url(#ah)"></path>
+  <path d="M692,242 C772,242 814,182 814,128" fill="none" stroke="#8492aa" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ah)"></path>
+  <text x="712" y="196" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#8492aa">cross-host, automatic</text>
+</svg>
+<figcaption>Click hands off to the registered <code>agents://</code> handler; the existing resume engine opens the terminal, hopping to the session's owning host over <code>ssh -tt</code> when it is not this box.</figcaption>
+</figure><ul>
+<li><strong>First click on a machine:</strong> browser shows a one-time "Open agents?" prompt → Allow.</li>
+<li><strong>Terminal opens</strong> on the machine the user sits at (their real terminal), resumes
+interactively, cursor in the input bar.</li>
+<li><strong>Cross-host:</strong> if the session originated elsewhere, the resume transparently
+<code>ssh -tt</code>s to the owning host and resumes there.</li>
+<li><strong>Dead session / gone transcript:</strong> the resume path already handles recover-vs-attach.</li>
+<li><strong>No handler (never-onboarded box, or a browser refusing the scheme):</strong> the artifact
+degrades to a "Copy resume command" affordance — never a dead button.</li>
+</ul>
+<h2 id="proposed-changes">Proposed Changes</h2>
+<p>Two repos. Downstream of the session id, nothing new is needed — the resume engine,
+host resolution, and PTY-over-SSH already exist.</p>
+<h3>agents-cli — register the scheme + a resolver command</h3>
+<ul>
+<li>New <code>agents open &lt;url&gt;</code> (<code>apps/cli/src/commands/open.ts</code>): strictly parse
+<code>agents://session/&lt;uuid&gt;[?host=&lt;machine&gt;]</code>, then call the existing dispatcher
+<code>dispatchSessionLifecycleInPlace(id, host ? [host] : [])</code>. Pass id/host as <strong>argv,
+never interpolated into a shell</strong>.</li>
+<li>New <code>apps/cli/src/lib/deeplink/register.ts</code>, idempotent, wired into
+<code>fleet:onboard</code> / <code>agents sync</code>, per-OS (macOS <code>CFBundleURLTypes</code> app +
+<code>LSSetDefaultHandlerForURLScheme</code>; Linux <code>.desktop</code> + <code>xdg-mime</code>; Windows registry).
+Precedent: <code>apps/cli/src/lib/terminal/backends/vscodium-agent.ts</code>.</li>
+<li><code>agents doctor</code>: check the handler is registered and resolves.</li>
+</ul>
+<h3>artifacts-cli — make the session part a link</h3>
+<ul>
+<li>In <code>artifactMetadata()</code> (<code>src/lib/render.ts</code>), set
+<code>href: agents://session/&lt;fullId&gt;</code> on the session part (the renderer already anchors
+any part with <code>href</code>; the hero is not scheme-sanitized).</li>
+<li>Capture the <strong>full</strong> session id in <code>detectArtifactContext()</code>
+(<code>src/lib/templates.ts:156-182</code>, which truncates to 8 at <code>:179</code>) — short text stays,
+full id goes in the href.</li>
+<li>Trusted-shell "Copy resume command" fallback (same mechanism as the theme toggle at
+<code>src/lib/render.ts:248-269</code>).</li>
+</ul>
+<h3>system repo</h3>
+<ul>
+<li><code>skills/plan-render/template.html:121-127</code>: anchor the <code>session:</code> chip for parity.</li>
+<li><code>skills/artifacts/references/authoring.md</code>: document the scheme.</li>
+<li>Ensure <code>CLAUDE_SESSION_ID</code>/<code>AGENT_SESSION_ID</code> is in the render env (the screenshot
+render had no session chip — the env var was absent).</li>
+<li><code>CHANGELOG.md</code> in both repos.</li>
+</ul>
+<h3>Files</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>apps/cli/src/commands/open.ts</code></td>
+<td>new — parse <code>agents://session/&lt;id&gt;</code>, dispatch resume</td>
+</tr>
+<tr>
+<td><code>apps/cli/src/lib/deeplink/register.ts</code></td>
+<td>new — per-OS handler registration (idempotent)</td>
+</tr>
+<tr>
+<td><code>apps/cli/src/commands/sessions-resume.ts:263-269</code></td>
+<td>reuse <code>dispatchSessionLifecycleInPlace</code></td>
+</tr>
+<tr>
+<td><code>artifacts-cli src/lib/render.ts</code></td>
+<td>set <code>href</code> on session part; shell copy-fallback</td>
+</tr>
+<tr>
+<td><code>artifacts-cli src/lib/templates.ts:156-182</code></td>
+<td>thread full session id into href</td>
+</tr>
+<tr>
+<td><code>skills/plan-render/template.html:121-127</code></td>
+<td>anchor the session chip</td>
+</tr>
+<tr>
+<td><code>skills/artifacts/references/authoring.md</code>, <code>CHANGELOG.md</code> (×2)</td>
+<td>docs</td>
+</tr>
+</tbody></table>
+<h2 id="public-interface">Public Interface</h2>
+<pre><code># New command the scheme handler invokes
+agents open 'agents://session/39a9f321-…-uuid'          # opens the terminal, input bar
+agents open 'agents://session/&lt;id&gt;?host=worker-s1'    # host is a routing hint only
+
+# Emitted link in the artifact hero (renderer anchors any part with an href)
+&lt;a href="agents://session/&lt;full-id&gt;" rel="noopener"&gt;session: session-id&lt;/a&gt;
+</code></pre>
+<h2 id="validation">Validation</h2>
+<pre><code># 1. Scheme resolves locally → terminal opens in the input bar
+open 'agents://session/&lt;a-real-local-session-id&gt;'        # macOS
+xdg-open 'agents://session/&lt;id&gt;'                         # Linux
+
+# 3. Artifact carries the link
+CLAUDE_SESSION_ID=&lt;id&gt; artifacts render plan.md --format html
+grep -o '&lt;a href="agents://session/[^"]*"' plan.html
+
+# 5. Injection guard — must NOT create the file
+agents open 'agents://session/$(touch /tmp/pwned)'; ls /tmp/pwned
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Expected</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local scheme</td>
+<td>terminal tab opens, resumes, cursor in input bar</td>
+</tr>
+<tr>
+<td>Cross-host</td>
+<td>resume <code>ssh -tt</code>s to the owner, resumes there (not locally)</td>
+</tr>
+<tr>
+<td>Artifact link</td>
+<td>HTML contains <code>&lt;a href="agents://session/…"</code></td>
+</tr>
+<tr>
+<td>Fallback</td>
+<td>no handler → "Copy" writes <code>agents sessions resume &lt;id&gt;</code> to clipboard</td>
+</tr>
+<tr>
+<td>Injection</td>
+<td><code>/tmp/pwned</code> absent; non-UUID id rejected</td>
+</tr>
+</tbody></table>
+<h2 id="risks">Risks</h2>
+<ul>
+<li><strong>Handler registration is the real work</strong> and is per-OS; ship idempotent, verify in
+<code>agents doctor</code>, and require <code>agents</code> on the GUI login PATH (note in onboard).</li>
+<li><strong>Scheme-permission prompt</strong> on first click — expected, one-time, acceptable.</li>
+<li><strong>URL parsing is an attack surface</strong> — accept only <code>agents://session/&lt;uuid&gt;</code>, reject
+everything else, pass as argv. Covered by a parser unit test.</li>
+<li><strong>Full session id in a shared artifact</strong> exposes an id that can resume the session;
+resume already requires being on / reaching the owning host over the authed fleet, so
+the id alone is not a remote-exec primitive, but note it for public <code>agents share</code>.</li>
+</ul>
+<h2 id="tracking">Tracking</h2>
+<ul>
+<li>File a ticket on approval; pair it with this plan and the task checklist.</li>
+<li>Alternatives considered (documented, not chosen): a loopback HTTP endpoint on
+<code>agents serve --control</code> (needs a resident server), and reusing the editor
+<code>vscodium://</code> scheme (editor-only, opens in the integrated terminal).</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGl0bGU6ICJEZWVwIGxpbmsgZnJvbSBhbiBhcnRpZmFjdCBiYWNrIGludG8gaXRzIHNlc3Npb24iCnN1bW1hcnk6ID4KICBSZW5kZXJlZCBwbGFucyBjYXJyeSBhIHNlc3Npb24gaW4gdGhlaXIgcHJvdmVuYW5jZSBsaW5lLCBidXQgdGhlcmUgaXMgbm8gd2F5IGJhY2sKICBpbnRvIHRoYXQgc2Vzc2lvbi4gTWFrZSB0aGUgc2Vzc2lvbiBhIGNsaWNrYWJsZSBsaW5rIHRoYXQgcmVvcGVucyB0aGUgdGVybWluYWwg4oCUCiAgY3Vyc29yIGluIHRoZSBpbnB1dCBiYXIg4oCUIHZpYSBhIGN1c3RvbSBhZ2VudHM6Ly8gVVJMIHNjaGVtZSwgcmVzb2x2aW5nIHRoZSBvd25pbmcKICBob3N0IGF1dG9tYXRpY2FsbHkgKHppb24gdG8gYW5vdGhlciBib3gpLgpzdGF0dXM6IGF3YWl0aW5nLWdvCnRyYWNraW5nOiAiKG5vIHRpY2tldCB5ZXQg4oCUIGZpbGUgb24gYXBwcm92YWwpIgpmYWN0czoKICAtICJSZW9wZW4ga2V5IGlzIGp1c3QgdGhlIHNlc3Npb24gVVVJRDsgYWdlbnRzIHNlc3Npb25zIHJlc3VtZSA8aWQ+IGFscmVhZHkgb3BlbnMgYSB0ZXJtaW5hbCBpbiB0aGUgaW5wdXQgYmFyIGFuZCBhdXRvLWhvcHMgdG8gdGhlIG93bmluZyBob3N0LiIKICAtICJBIHJlbmRlcmVkIGFydGlmYWN0IGlzIGEgc2FuZGJveGVkIGJyb3dzZXIgcGFnZSAoZmlsZTovLyBvciBzaGFyZWQgaHR0cHMpIGFuZCBjYW5ub3Qgc3Bhd24gYSBzaGVsbCDigJQgaGFuZCBvZmYgdmlhIGEgcmVnaXN0ZXJlZCBhZ2VudHM6Ly8gc2NoZW1lLiIKICAtICJhcnRpZmFjdHMtY2xpIGFscmVhZHkgYW5jaG9ycyBhbnkgcHJvdmVuYW5jZSBwYXJ0IHdpdGggYW4gaHJlZiwgYW5kIHRoZSBoZXJvIGlzIG5vdCBzY2hlbWUtc2FuaXRpemVkIOKAlCBlbWl0dGluZyB0aGUgbGluayBpcyBhIHNtYWxsIGNoYW5nZS4iCiAgLSAiTm8gYWdlbnRzOi8vIHNjaGVtZSBleGlzdHMgdG9kYXk7IHRoZSBvbmx5IHJlZ2lzdGVyZWQgc2NoZW1lIGlzIHRoZSBlZGl0b3IncyB2c2NvZGl1bTovL3N3YXJtaWZ5LnN3YXJtLWV4dC4iCi0tLQoKIyMgUHVycG9zZQoKQSByZW5kZXJlZCBwbGFuJ3MgcHJvdmVuYW5jZSBsaW5lIHNob3dzIGBoYXJuZXNzIMK3IGFnZW50IMK3IGhvc3Qgwrcgc2Vzc2lvbiDCtyBkYXRlYCwgYnV0CnRoZSAqKnNlc3Npb24qKiB2YWx1ZSBpcyBwbGFpbiB0ZXh0IGFuZCBkZWFkLiBUaGVyZSBpcyBubyBwYXRoIGZyb20gdGhlIGFydGlmYWN0IGJhY2sKdG8gdGhlIHdvcmsuIFRoZSBnb2FsOiBjbGljayBhIGxpbmsgaW4gdGhlIGFydGlmYWN0IGFuZCBsYW5kICoqaW4gdGhlIGlucHV0IGJhciBvZiB0aGF0CnNlc3Npb24ncyB0ZXJtaW5hbCoqLCBldmVuIHdoZW4gdGhlIHNlc3Npb24gbGl2ZXMgb24gYSBkaWZmZXJlbnQgaG9zdCB0aGFuIHdoZXJlIHRoZQp1c2VyIHNpdHMsIGluIEdob3N0dHkgb3IgYW55IHRlcm1pbmFsLgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+CjxzdHJvbmc+RmVhc2libGUg4oCUIHdpdGggb25lIGhhcmQgY29uc3RyYWludC48L3N0cm9uZz4gVGhlIGFydGlmYWN0IGlzIGEgc2FuZGJveGVkIGJyb3dzZXIKZG9jdW1lbnQgKHlvdXIgc2NyZWVuc2hvdCBpcyA8Y29kZT5maWxlOi8vL+KApjwvY29kZT4pLCBzbyB0aGUgbGluayBjYW5ub3QgcnVuIGEgc2hlbGwuCkl0IG11c3QgaGFuZCBvZmYgdG8gdGhlIE9TIHRocm91Z2ggYSByZWdpc3RlcmVkIDxjb2RlPmFnZW50czovLzwvY29kZT4gVVJMIHNjaGVtZSB3aG9zZQpoYW5kbGVyIHJ1bnMgPGNvZGU+YWdlbnRzIHNlc3Npb25zIHJlc3VtZSAmbHQ7aWQmZ3Q7PC9jb2RlPi4gRXZlcnl0aGluZyBwYXN0IHRoZSBpZCBhbHJlYWR5CmV4aXN0cy4KPC9kaXY+CgojIyBCZWhhdmlvciDigJQgd2hhdCBoYXBwZW5zIHdoZW4geW91IGNsaWNrCgo8ZmlndXJlIGNsYXNzPSJhcnRpZmFjdC1maWd1cmUgYXJ0aWZhY3QtZmlndXJlLWRpYWdyYW0gYXJ0aWZhY3QtZmlndXJlLXdpZGUiPgo8c3ZnIHZpZXdCb3g9IjAgMCA5MjAgMzIwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkNsaWNrIGZsb3cgZnJvbSBhcnRpZmFjdCB0byByZXN1bWVkIHRlcm1pbmFsIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxkZWZzPgogICAgPG1hcmtlciBpZD0iYWgiIG1hcmtlcldpZHRoPSI5IiBtYXJrZXJIZWlnaHQ9IjkiIHJlZlg9IjciIHJlZlk9IjMiIG9yaWVudD0iYXV0byI+CiAgICAgIDxwYXRoIGQ9Ik0wLDAgTDcsMyBMMCw2IFoiIGZpbGw9IiM4NDkyYWEiLz4KICAgIDwvbWFya2VyPgogIDwvZGVmcz4KCiAgPHJlY3QgeD0iMjAiIHk9IjM2IiB3aWR0aD0iMTg0IiBoZWlnaHQ9IjkwIiByeD0iMTAiIGZpbGw9IiMxYjIyMzAiIHN0cm9rZT0iIzViNmI4NiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIxMTIiIHk9IjY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZmlsbD0iI2U3ZWNmNCI+QXJ0aWZhY3QgKGJyb3dzZXIpPC90ZXh0PgogIDx0ZXh0IHg9IjExMiIgeT0iOTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzlhYTdiZCI+Y2xpY2sgc2Vzc2lvbiBsaW5rPC90ZXh0PgogIDx0ZXh0IHg9IjExMiIgeT0iMTA4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM5YWE3YmQiPmFnZW50czovL3Nlc3Npb24vJmx0O2lkJmd0OzwvdGV4dD4KCiAgPHJlY3QgeD0iMjU4IiB5PSIzNiIgd2lkdGg9IjE4NCIgaGVpZ2h0PSI5MCIgcng9IjEwIiBmaWxsPSIjMmEyNDE4IiBzdHJva2U9IiNhMDgyNGUiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iMzUwIiB5PSI2NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNlN2VjZjQiPk9TIFVSTCBoYW5kbGVyPC90ZXh0PgogIDx0ZXh0IHg9IjM1MCIgeT0iOTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2M5YjQ4YSI+Ik9wZW4gYWdlbnRzPyIgKG9uY2UpPC90ZXh0PgogIDx0ZXh0IHg9IjM1MCIgeT0iMTA4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjOWI0OGEiPmV4ZWM6IGFnZW50cyBvcGVuPC90ZXh0PgoKICA8cmVjdCB4PSI0OTYiIHk9IjM2IiB3aWR0aD0iMTk2IiBoZWlnaHQ9IjkwIiByeD0iMTAiIGZpbGw9IiMxYjIyMzAiIHN0cm9rZT0iIzViNmI4NiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI1OTQiIHk9IjY0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZmlsbD0iI2U3ZWNmNCI+YWdlbnRzIHNlc3Npb25zIHJlc3VtZTwvdGV4dD4KICA8dGV4dCB4PSI1OTQiIHk9Ijg4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM5YWE3YmQiPnJlc29sdmUgb3duZXIgZnJvbSBpZDwvdGV4dD4KICA8dGV4dCB4PSI1OTQiIHk9IjEwNiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjOWFhN2JkIj5mb2N1cyAvIHJlY292ZXI8L3RleHQ+CgogIDxyZWN0IHg9IjcyNiIgeT0iMzYiIHdpZHRoPSIxNzYiIGhlaWdodD0iOTAiIHJ4PSIxMCIgZmlsbD0iIzE2MjgxZCIgc3Ryb2tlPSIjM2Y4YjVjIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjgxNCIgeT0iNjYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIiBmaWxsPSIjZTdlY2Y0Ij5UZXJtaW5hbCB0YWI8L3RleHQ+CiAgPHRleHQgeD0iODE0IiB5PSI5MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjOGZkMGE1Ij5ydW4gYXV0byAtLXJlc3VtZTwvdGV4dD4KICA8dGV4dCB4PSI4MTQiIHk9IjEwOCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjOGZkMGE1Ij5jdXJzb3IgaW4gaW5wdXQgYmFyPC90ZXh0PgoKICA8cGF0aCBkPSJNMjA0LDgxIEwyNTYsODEiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzg0OTJhYSIgc3Ryb2tlLXdpZHRoPSIxLjYiIG1hcmtlci1lbmQ9InVybCgjYWgpIi8+CiAgPHBhdGggZD0iTTQ0Miw4MSBMNDk0LDgxIiBmaWxsPSJub25lIiBzdHJva2U9IiM4NDkyYWEiIHN0cm9rZS13aWR0aD0iMS42IiBtYXJrZXItZW5kPSJ1cmwoI2FoKSIvPgogIDxwYXRoIGQ9Ik02OTIsODEgTDcyNCw4MSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjODQ5MmFhIiBzdHJva2Utd2lkdGg9IjEuNiIgbWFya2VyLWVuZD0idXJsKCNhaCkiLz4KCiAgPHJlY3QgeD0iNDk2IiB5PSIyMDYiIHdpZHRoPSIxOTYiIGhlaWdodD0iNzIiIHJ4PSIxMCIgZmlsbD0iIzFiMjIzMCIgc3Ryb2tlPSIjNWI2Yjg2IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjU5NCIgeT0iMjM2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZmlsbD0iI2U3ZWNmNCI+b3duaW5nIGhvc3QgaXMgYW5vdGhlciBib3g8L3RleHQ+CiAgPHRleHQgeD0iNTk0IiB5PSIyNjAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzlhYTdiZCI+c3NoIC10dCAmbHQ7b3duZXImZ3Q7IChQVFkpPC90ZXh0PgogIDxwYXRoIGQ9Ik01OTQsMTI2IEw1OTQsMjA0IiBmaWxsPSJub25lIiBzdHJva2U9IiM4NDkyYWEiIHN0cm9rZS13aWR0aD0iMS42IiBtYXJrZXItZW5kPSJ1cmwoI2FoKSIvPgogIDxwYXRoIGQ9Ik02OTIsMjQyIEM3NzIsMjQyIDgxNCwxODIgODE0LDEyOCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjODQ5MmFhIiBzdHJva2Utd2lkdGg9IjEuNiIgc3Ryb2tlLWRhc2hhcnJheT0iNSA0IiBtYXJrZXItZW5kPSJ1cmwoI2FoKSIvPgogIDx0ZXh0IHg9IjcxMiIgeT0iMTk2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzg0OTJhYSI+Y3Jvc3MtaG9zdCwgYXV0b21hdGljPC90ZXh0Pgo8L3N2Zz4KPGZpZ2NhcHRpb24+Q2xpY2sgaGFuZHMgb2ZmIHRvIHRoZSByZWdpc3RlcmVkIDxjb2RlPmFnZW50czovLzwvY29kZT4gaGFuZGxlcjsgdGhlIGV4aXN0aW5nIHJlc3VtZSBlbmdpbmUgb3BlbnMgdGhlIHRlcm1pbmFsLCBob3BwaW5nIHRvIHRoZSBzZXNzaW9uJ3Mgb3duaW5nIGhvc3Qgb3ZlciA8Y29kZT5zc2ggLXR0PC9jb2RlPiB3aGVuIGl0IGlzIG5vdCB0aGlzIGJveC48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKLSAqKkZpcnN0IGNsaWNrIG9uIGEgbWFjaGluZToqKiBicm93c2VyIHNob3dzIGEgb25lLXRpbWUgIk9wZW4gYWdlbnRzPyIgcHJvbXB0IOKGkiBBbGxvdy4KLSAqKlRlcm1pbmFsIG9wZW5zKiogb24gdGhlIG1hY2hpbmUgdGhlIHVzZXIgc2l0cyBhdCAodGhlaXIgcmVhbCB0ZXJtaW5hbCksIHJlc3VtZXMKICBpbnRlcmFjdGl2ZWx5LCBjdXJzb3IgaW4gdGhlIGlucHV0IGJhci4KLSAqKkNyb3NzLWhvc3Q6KiogaWYgdGhlIHNlc3Npb24gb3JpZ2luYXRlZCBlbHNld2hlcmUsIHRoZSByZXN1bWUgdHJhbnNwYXJlbnRseQogIGBzc2ggLXR0YHMgdG8gdGhlIG93bmluZyBob3N0IGFuZCByZXN1bWVzIHRoZXJlLgotICoqRGVhZCBzZXNzaW9uIC8gZ29uZSB0cmFuc2NyaXB0OioqIHRoZSByZXN1bWUgcGF0aCBhbHJlYWR5IGhhbmRsZXMgcmVjb3Zlci12cy1hdHRhY2guCi0gKipObyBoYW5kbGVyIChuZXZlci1vbmJvYXJkZWQgYm94LCBvciBhIGJyb3dzZXIgcmVmdXNpbmcgdGhlIHNjaGVtZSk6KiogdGhlIGFydGlmYWN0CiAgZGVncmFkZXMgdG8gYSAiQ29weSByZXN1bWUgY29tbWFuZCIgYWZmb3JkYW5jZSDigJQgbmV2ZXIgYSBkZWFkIGJ1dHRvbi4KCiMjIFByb3Bvc2VkIENoYW5nZXMKClR3byByZXBvcy4gRG93bnN0cmVhbSBvZiB0aGUgc2Vzc2lvbiBpZCwgbm90aGluZyBuZXcgaXMgbmVlZGVkIOKAlCB0aGUgcmVzdW1lIGVuZ2luZSwKaG9zdCByZXNvbHV0aW9uLCBhbmQgUFRZLW92ZXItU1NIIGFscmVhZHkgZXhpc3QuCgojIyMgYWdlbnRzLWNsaSDigJQgcmVnaXN0ZXIgdGhlIHNjaGVtZSArIGEgcmVzb2x2ZXIgY29tbWFuZAoKLSBOZXcgYGFnZW50cyBvcGVuIDx1cmw+YCAoYGFwcHMvY2xpL3NyYy9jb21tYW5kcy9vcGVuLnRzYCk6IHN0cmljdGx5IHBhcnNlCiAgYGFnZW50czovL3Nlc3Npb24vPHV1aWQ+Wz9ob3N0PTxtYWNoaW5lPl1gLCB0aGVuIGNhbGwgdGhlIGV4aXN0aW5nIGRpc3BhdGNoZXIKICBgZGlzcGF0Y2hTZXNzaW9uTGlmZWN5Y2xlSW5QbGFjZShpZCwgaG9zdCA/IFtob3N0XSA6IFtdKWAuIFBhc3MgaWQvaG9zdCBhcyAqKmFyZ3YsCiAgbmV2ZXIgaW50ZXJwb2xhdGVkIGludG8gYSBzaGVsbCoqLgotIE5ldyBgYXBwcy9jbGkvc3JjL2xpYi9kZWVwbGluay9yZWdpc3Rlci50c2AsIGlkZW1wb3RlbnQsIHdpcmVkIGludG8KICBgZmxlZXQ6b25ib2FyZGAgLyBgYWdlbnRzIHN5bmNgLCBwZXItT1MgKG1hY09TIGBDRkJ1bmRsZVVSTFR5cGVzYCBhcHAgKwogIGBMU1NldERlZmF1bHRIYW5kbGVyRm9yVVJMU2NoZW1lYDsgTGludXggYC5kZXNrdG9wYCArIGB4ZGctbWltZWA7IFdpbmRvd3MgcmVnaXN0cnkpLgogIFByZWNlZGVudDogYGFwcHMvY2xpL3NyYy9saWIvdGVybWluYWwvYmFja2VuZHMvdnNjb2RpdW0tYWdlbnQudHNgLgotIGBhZ2VudHMgZG9jdG9yYDogY2hlY2sgdGhlIGhhbmRsZXIgaXMgcmVnaXN0ZXJlZCBhbmQgcmVzb2x2ZXMuCgojIyMgYXJ0aWZhY3RzLWNsaSDigJQgbWFrZSB0aGUgc2Vzc2lvbiBwYXJ0IGEgbGluawoKLSBJbiBgYXJ0aWZhY3RNZXRhZGF0YSgpYCAoYHNyYy9saWIvcmVuZGVyLnRzYCksIHNldAogIGBocmVmOiBhZ2VudHM6Ly9zZXNzaW9uLzxmdWxsSWQ+YCBvbiB0aGUgc2Vzc2lvbiBwYXJ0ICh0aGUgcmVuZGVyZXIgYWxyZWFkeSBhbmNob3JzCiAgYW55IHBhcnQgd2l0aCBgaHJlZmA7IHRoZSBoZXJvIGlzIG5vdCBzY2hlbWUtc2FuaXRpemVkKS4KLSBDYXB0dXJlIHRoZSAqKmZ1bGwqKiBzZXNzaW9uIGlkIGluIGBkZXRlY3RBcnRpZmFjdENvbnRleHQoKWAKICAoYHNyYy9saWIvdGVtcGxhdGVzLnRzOjE1Ni0xODJgLCB3aGljaCB0cnVuY2F0ZXMgdG8gOCBhdCBgOjE3OWApIOKAlCBzaG9ydCB0ZXh0IHN0YXlzLAogIGZ1bGwgaWQgZ29lcyBpbiB0aGUgaHJlZi4KLSBUcnVzdGVkLXNoZWxsICJDb3B5IHJlc3VtZSBjb21tYW5kIiBmYWxsYmFjayAoc2FtZSBtZWNoYW5pc20gYXMgdGhlIHRoZW1lIHRvZ2dsZSBhdAogIGBzcmMvbGliL3JlbmRlci50czoyNDgtMjY5YCkuCgojIyMgc3lzdGVtIHJlcG8KCi0gYHNraWxscy9wbGFuLXJlbmRlci90ZW1wbGF0ZS5odG1sOjEyMS0xMjdgOiBhbmNob3IgdGhlIGBzZXNzaW9uOmAgY2hpcCBmb3IgcGFyaXR5LgotIGBza2lsbHMvYXJ0aWZhY3RzL3JlZmVyZW5jZXMvYXV0aG9yaW5nLm1kYDogZG9jdW1lbnQgdGhlIHNjaGVtZS4KLSBFbnN1cmUgYENMQVVERV9TRVNTSU9OX0lEYC9gQUdFTlRfU0VTU0lPTl9JRGAgaXMgaW4gdGhlIHJlbmRlciBlbnYgKHRoZSBzY3JlZW5zaG90CiAgcmVuZGVyIGhhZCBubyBzZXNzaW9uIGNoaXAg4oCUIHRoZSBlbnYgdmFyIHdhcyBhYnNlbnQpLgotIGBDSEFOR0VMT0cubWRgIGluIGJvdGggcmVwb3MuCgojIyMgRmlsZXMKCnwgRmlsZSB8IENoYW5nZSB8CnwgLS0tIHwgLS0tIHwKfCBgYXBwcy9jbGkvc3JjL2NvbW1hbmRzL29wZW4udHNgIHwgbmV3IOKAlCBwYXJzZSBgYWdlbnRzOi8vc2Vzc2lvbi88aWQ+YCwgZGlzcGF0Y2ggcmVzdW1lIHwKfCBgYXBwcy9jbGkvc3JjL2xpYi9kZWVwbGluay9yZWdpc3Rlci50c2AgfCBuZXcg4oCUIHBlci1PUyBoYW5kbGVyIHJlZ2lzdHJhdGlvbiAoaWRlbXBvdGVudCkgfAp8IGBhcHBzL2NsaS9zcmMvY29tbWFuZHMvc2Vzc2lvbnMtcmVzdW1lLnRzOjI2My0yNjlgIHwgcmV1c2UgYGRpc3BhdGNoU2Vzc2lvbkxpZmVjeWNsZUluUGxhY2VgIHwKfCBgYXJ0aWZhY3RzLWNsaSBzcmMvbGliL3JlbmRlci50c2AgfCBzZXQgYGhyZWZgIG9uIHNlc3Npb24gcGFydDsgc2hlbGwgY29weS1mYWxsYmFjayB8CnwgYGFydGlmYWN0cy1jbGkgc3JjL2xpYi90ZW1wbGF0ZXMudHM6MTU2LTE4MmAgfCB0aHJlYWQgZnVsbCBzZXNzaW9uIGlkIGludG8gaHJlZiB8CnwgYHNraWxscy9wbGFuLXJlbmRlci90ZW1wbGF0ZS5odG1sOjEyMS0xMjdgIHwgYW5jaG9yIHRoZSBzZXNzaW9uIGNoaXAgfAp8IGBza2lsbHMvYXJ0aWZhY3RzL3JlZmVyZW5jZXMvYXV0aG9yaW5nLm1kYCwgYENIQU5HRUxPRy5tZGAgKMOXMikgfCBkb2NzIHwKCiMjIFB1YmxpYyBJbnRlcmZhY2UKCmBgYGJhc2gKIyBOZXcgY29tbWFuZCB0aGUgc2NoZW1lIGhhbmRsZXIgaW52b2tlcwphZ2VudHMgb3BlbiAnYWdlbnRzOi8vc2Vzc2lvbi8zOWE5ZjMyMS3igKYtdXVpZCcgICAgICAgICAgIyBvcGVucyB0aGUgdGVybWluYWwsIGlucHV0IGJhcgphZ2VudHMgb3BlbiAnYWdlbnRzOi8vc2Vzc2lvbi88aWQ+P2hvc3Q9eW9zZW1pdGUtczEnICAgICMgaG9zdCBpcyBhIHJvdXRpbmcgaGludCBvbmx5CgojIEVtaXR0ZWQgbGluayBpbiB0aGUgYXJ0aWZhY3QgaGVybyAocmVuZGVyZXIgYW5jaG9ycyBhbnkgcGFydCB3aXRoIGFuIGhyZWYpCjxhIGhyZWY9ImFnZW50czovL3Nlc3Npb24vPGZ1bGwtaWQ+IiByZWw9Im5vb3BlbmVyIj5zZXNzaW9uOiAzOWE5ZjMyMTwvYT4KYGBgCgojIyBWYWxpZGF0aW9uCgpgYGBiYXNoCiMgMS4gU2NoZW1lIHJlc29sdmVzIGxvY2FsbHkg4oaSIHRlcm1pbmFsIG9wZW5zIGluIHRoZSBpbnB1dCBiYXIKb3BlbiAnYWdlbnRzOi8vc2Vzc2lvbi88YS1yZWFsLWxvY2FsLXNlc3Npb24taWQ+JyAgICAgICAgIyBtYWNPUwp4ZGctb3BlbiAnYWdlbnRzOi8vc2Vzc2lvbi88aWQ+JyAgICAgICAgICAgICAgICAgICAgICAgICAjIExpbnV4CgojIDMuIEFydGlmYWN0IGNhcnJpZXMgdGhlIGxpbmsKQ0xBVURFX1NFU1NJT05fSUQ9PGlkPiBhcnRpZmFjdHMgcmVuZGVyIHBsYW4ubWQgLS1mb3JtYXQgaHRtbApncmVwIC1vICc8YSBocmVmPSJhZ2VudHM6Ly9zZXNzaW9uL1teIl0qIicgcGxhbi5odG1sCgojIDUuIEluamVjdGlvbiBndWFyZCDigJQgbXVzdCBOT1QgY3JlYXRlIHRoZSBmaWxlCmFnZW50cyBvcGVuICdhZ2VudHM6Ly9zZXNzaW9uLyQodG91Y2ggL3RtcC9wd25lZCknOyBscyAvdG1wL3B3bmVkCmBgYAoKfCBDaGVjayB8IEV4cGVjdGVkIHwKfCAtLS0gfCAtLS0gfAp8IExvY2FsIHNjaGVtZSB8IHRlcm1pbmFsIHRhYiBvcGVucywgcmVzdW1lcywgY3Vyc29yIGluIGlucHV0IGJhciB8CnwgQ3Jvc3MtaG9zdCB8IHJlc3VtZSBgc3NoIC10dGBzIHRvIHRoZSBvd25lciwgcmVzdW1lcyB0aGVyZSAobm90IGxvY2FsbHkpIHwKfCBBcnRpZmFjdCBsaW5rIHwgSFRNTCBjb250YWlucyBgPGEgaHJlZj0iYWdlbnRzOi8vc2Vzc2lvbi/igKYiYCB8CnwgRmFsbGJhY2sgfCBubyBoYW5kbGVyIOKGkiAiQ29weSIgd3JpdGVzIGBhZ2VudHMgc2Vzc2lvbnMgcmVzdW1lIDxpZD5gIHRvIGNsaXBib2FyZCB8CnwgSW5qZWN0aW9uIHwgYC90bXAvcHduZWRgIGFic2VudDsgbm9uLVVVSUQgaWQgcmVqZWN0ZWQgfAoKIyMgUmlza3MKCi0gKipIYW5kbGVyIHJlZ2lzdHJhdGlvbiBpcyB0aGUgcmVhbCB3b3JrKiogYW5kIGlzIHBlci1PUzsgc2hpcCBpZGVtcG90ZW50LCB2ZXJpZnkgaW4KICBgYWdlbnRzIGRvY3RvcmAsIGFuZCByZXF1aXJlIGBhZ2VudHNgIG9uIHRoZSBHVUkgbG9naW4gUEFUSCAobm90ZSBpbiBvbmJvYXJkKS4KLSAqKlNjaGVtZS1wZXJtaXNzaW9uIHByb21wdCoqIG9uIGZpcnN0IGNsaWNrIOKAlCBleHBlY3RlZCwgb25lLXRpbWUsIGFjY2VwdGFibGUuCi0gKipVUkwgcGFyc2luZyBpcyBhbiBhdHRhY2sgc3VyZmFjZSoqIOKAlCBhY2NlcHQgb25seSBgYWdlbnRzOi8vc2Vzc2lvbi88dXVpZD5gLCByZWplY3QKICBldmVyeXRoaW5nIGVsc2UsIHBhc3MgYXMgYXJndi4gQ292ZXJlZCBieSBhIHBhcnNlciB1bml0IHRlc3QuCi0gKipGdWxsIHNlc3Npb24gaWQgaW4gYSBzaGFyZWQgYXJ0aWZhY3QqKiBleHBvc2VzIGFuIGlkIHRoYXQgY2FuIHJlc3VtZSB0aGUgc2Vzc2lvbjsKICByZXN1bWUgYWxyZWFkeSByZXF1aXJlcyBiZWluZyBvbiAvIHJlYWNoaW5nIHRoZSBvd25pbmcgaG9zdCBvdmVyIHRoZSBhdXRoZWQgZmxlZXQsIHNvCiAgdGhlIGlkIGFsb25lIGlzIG5vdCBhIHJlbW90ZS1leGVjIHByaW1pdGl2ZSwgYnV0IG5vdGUgaXQgZm9yIHB1YmxpYyBgYWdlbnRzIHNoYXJlYC4KCiMjIFRyYWNraW5nCgotIEZpbGUgYSB0aWNrZXQgb24gYXBwcm92YWw7IHBhaXIgaXQgd2l0aCB0aGlzIHBsYW4gYW5kIHRoZSB0YXNrIGNoZWNrbGlzdC4KLSBBbHRlcm5hdGl2ZXMgY29uc2lkZXJlZCAoZG9jdW1lbnRlZCwgbm90IGNob3Nlbik6IGEgbG9vcGJhY2sgSFRUUCBlbmRwb2ludCBvbgogIGBhZ2VudHMgc2VydmUgLS1jb250cm9sYCAobmVlZHMgYSByZXNpZGVudCBzZXJ2ZXIpLCBhbmQgcmV1c2luZyB0aGUgZWRpdG9yCiAgYHZzY29kaXVtOi8vYCBzY2hlbWUgKGVkaXRvci1vbmx5LCBvcGVucyBpbiB0aGUgaW50ZWdyYXRlZCB0ZXJtaW5hbCkuCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

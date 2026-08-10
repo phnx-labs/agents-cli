@@ -10,7 +10,7 @@ summary: >-
 status: awaiting-go
 tracking: "RUSH-2476 (gates visibility) · RUSH-2485 (sibling defect) · agents-cli#2517"
 facts:
-  - zion 0 monitors, yosemite-s0 6, yosemite-s1 2 — same fleet, same day
+  - workstation 0 monitors, worker-s0 6, worker-s1 2 — same fleet, same day
   - No enable/disable verb exists; the docs name one that never shipped
   - monitorRunsOnThisDevice returns true for every box when device is unset
   - Syncing definitions is unsafe until ownership is resolved
@@ -22,7 +22,7 @@ facts:
   disagree with that dependency, the whole sequence changes.
 - **`device: auto`.** Deterministic election over the device registry — the one
   genuinely new mechanism here.
-- **The held branch.** `muqsitnawaz/.agents` already has the gitignore fix pushed.
+- **The held branch.** `owner/.agents` already has the gitignore fix pushed.
   It stays unmerged until ownership lands.
 - **`pause`/`resume` must move to a per-device list** (step 4). Once definitions
   sync, pausing on one box would otherwise pause on all of them.
@@ -38,7 +38,7 @@ Plus, earlier: no `enable`/`disable` verb — a shipped monitor should just show
 
 ## Purpose
 
-`agents monitors list` on zion printed **"No monitors configured"** while
+`agents monitors list` on workstation printed **"No monitors configured"** while
 `~/.agents/.system/monitors/pr-merge-on-green.yml` sat on that same disk — the
 built-in that would have merged PR #2485 without a human.
 
@@ -51,7 +51,7 @@ built-in that would have merged PR #2485 without a human.
 | Running state is checked in | **Correctly no** — `.history/monitors/` already excluded |
 | Adding a duplicate warns | **No** — `writeMonitor` overwrites by name, nothing compares arguments |
 
-Result on the fleet: **zion 0, yosemite-s0 6, yosemite-s1 2** — and on one box,
+Result on the fleet: **workstation 0, worker-s0 6, worker-s1 2** — and on one box,
 `open-pr-watch`, `pr-ci-fail`, three stale `pr2222-*` watchers and an agent-added
 lander all polling the same PR queue.
 
@@ -93,15 +93,15 @@ ownership — and that is what makes syncing dangerous.
   <text x="256" y="180" fill="#6b6b6b" font-family="monospace" font-size="10">config.ts:200 -&gt; true</text>
 
   <rect x="410" y="146" width="140" height="48" rx="6" fill="#111" stroke="#f87171" stroke-width="1.5"/>
-  <text x="424" y="166" fill="#d6d6d6" font-family="monospace" font-size="11">zion daemon</text>
+  <text x="424" y="166" fill="#d6d6d6" font-family="monospace" font-size="11">workstation daemon</text>
   <text x="424" y="184" fill="#f87171" font-family="monospace" font-size="10">fires</text>
 
   <rect x="566" y="146" width="150" height="48" rx="6" fill="#111" stroke="#f87171" stroke-width="1.5"/>
-  <text x="580" y="166" fill="#d6d6d6" font-family="monospace" font-size="11">yosemite-s0</text>
+  <text x="580" y="166" fill="#d6d6d6" font-family="monospace" font-size="11">worker-s0</text>
   <text x="580" y="184" fill="#f87171" font-family="monospace" font-size="10">fires</text>
 
   <rect x="732" y="146" width="140" height="48" rx="6" fill="#111" stroke="#f87171" stroke-width="1.5"/>
-  <text x="746" y="166" fill="#d6d6d6" font-family="monospace" font-size="11">mac-mini</text>
+  <text x="746" y="166" fill="#d6d6d6" font-family="monospace" font-size="11">release-host</text>
   <text x="746" y="184" fill="#f87171" font-family="monospace" font-size="10">fires</text>
 
   <circle cx="890" cy="170" r="6" fill="#f87171"><animate attributeName="opacity" values="1;0.2;1" dur="1.5s" repeatCount="indefinite"/></circle>
@@ -115,15 +115,15 @@ ownership — and that is what makes syncing dangerous.
   <text x="256" y="292" fill="#6b6b6b" font-family="monospace" font-size="10">elect over registry</text>
 
   <rect x="410" y="258" width="140" height="48" rx="6" fill="#111" stroke="#404040" stroke-width="1.5"/>
-  <text x="424" y="278" fill="#6b6b6b" font-family="monospace" font-size="11">zion daemon</text>
+  <text x="424" y="278" fill="#6b6b6b" font-family="monospace" font-size="11">workstation daemon</text>
   <text x="424" y="296" fill="#6b6b6b" font-family="monospace" font-size="10">inert</text>
 
   <rect x="566" y="258" width="150" height="48" rx="6" fill="#0f160a" stroke="#a3e635" stroke-width="2"/>
-  <text x="580" y="278" fill="#d6d6d6" font-family="monospace" font-size="11">yosemite-s0</text>
+  <text x="580" y="278" fill="#d6d6d6" font-family="monospace" font-size="11">worker-s0</text>
   <text x="580" y="296" fill="#a3e635" font-family="monospace" font-size="10">OWNER — fires once</text>
 
   <rect x="732" y="258" width="140" height="48" rx="6" fill="#111" stroke="#404040" stroke-width="1.5"/>
-  <text x="746" y="278" fill="#6b6b6b" font-family="monospace" font-size="11">mac-mini</text>
+  <text x="746" y="278" fill="#6b6b6b" font-family="monospace" font-size="11">release-host</text>
   <text x="746" y="296" fill="#6b6b6b" font-family="monospace" font-size="10">inert</text>
 
   <line x1="24" y1="340" x2="896" y2="340" stroke="#262626" stroke-width="1"/>
@@ -144,7 +144,7 @@ ownership — and that is what makes syncing dangerous.
 
 <div class="artifact-grid">
 <div class="artifact-panel">
-<strong>Current — captured on zion</strong>
+<strong>Current — captured on workstation</strong>
 <pre><code>$ agents monitors list
 No monitors configured
 
@@ -154,7 +154,7 @@ Monitor 'dup' added        # silently, beside 3 identical watchers</code></pre>
 <div class="artifact-panel">
 <strong>Proposed — mockup</strong>
 <pre><code>$ agents monitors list
-  pr-merge-on-green  on  (built-in)  owner: yosemite-s0
+  pr-merge-on-green  on  (built-in)  owner: worker-s0
 
 $ agents monitors add dup --poll '&lt;same cmd&gt;' 2m --notify
 Monitor 'open-pr-watch' already watches this exact source
@@ -199,7 +199,7 @@ by varying only the owner.
 Verified against the sync path, and it turns my earlier open question into a
 required step: **`pause`/`resume` become fleet-wide the moment definitions sync.**
 `setMonitorEnabled` (`config.ts:540-543`) mutates `enabled:` in the monitor's own
-yml — local today, shared once synced. So `agents monitors pause X` on zion would
+yml — local today, shared once synced. So `agents monitors pause X` on workstation would
 pause X on every box, and every box would write the same file.
 
 Routines keep activation *out* of the definition, precisely for this:
@@ -276,7 +276,7 @@ one may have fired.
 ## Tracking
 
 - **agents-cli#2517** — duplicate guard, open, CONFLICTING (needs rebase).
-- **muqsitnawaz/.agents** `monitors-track-definitions` — pushed, PR held until ownership lands.
+- **owner/.agents** `monitors-track-definitions` — pushed, PR held until ownership lands.
 - **RUSH-2476** — release train disabled; gates all visibility.
 - **RUSH-2485** — monitor reported healthy, never polled; teammate active.
 

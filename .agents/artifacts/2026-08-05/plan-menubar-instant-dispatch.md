@@ -13,21 +13,21 @@ repository: phnx-labs/agents-cli
 branch: fix/menubar-instant-dispatch
 harness: codex
 agent: root
-human: Muqsit
-host: yosemite-s1
+human: Owner
+host: worker-s1
 session: unavailable
 date: 2026-08-05
 links:
   - "https://github.com/phnx-labs/agents-cli/issues/2051"
 facts:
-  - "zion measured agents sessions --all --limit 40 --json at 1.21 seconds"
+  - "workstation measured agents sessions --all --limit 40 --json at 1.21 seconds"
   - "the current project toggle closes the NSMenu and synthesizes a second status-item click"
   - "Cmd-Shift-O remains the global Quick Dispatch shortcut"
 ---
 
 # Keep the menu open and make Quick Dispatch instant
 
-`agents-cli` · Codex · yosemite-s1 · session unavailable · 2026-08-05
+`agents-cli` · Codex · worker-s1 · session unavailable · 2026-08-05
 
 ## Purpose
 
@@ -79,7 +79,7 @@ Cmd-Shift-O -> MenubarHelper -> PromptPanelController.summon()
 ## Validation
 
 - Run the helper self-tests and prescribed CLI remote suite.
-- Measure hotkey-to-visible and hotkey-to-editor-ready against the real panel on zion.
+- Measure hotkey-to-visible and hotkey-to-editor-ready against the real panel on workstation.
 - Expand and collapse several projects while recording that the same dropdown remains continuously visible.
 - Install the packaged helper, repeat both paths, attach visual proof to the PR, and repeat after release.
 

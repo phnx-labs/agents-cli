@@ -25,7 +25,7 @@
 <div class="kicker">agents-cli<span class="kicker-separator" aria-hidden="true">&middot;</span>agents browser profiles<span class="kicker-separator" aria-hidden="true">&middot;</span>report</div>
 <h1>Browser Profile Sharing — Local Client vs Yosemite Agent</h1>
 <p class="summary">One synced profile definition works on both machines at once, but each machine keeps its own cookie jar — log in once per machine, not once per profile.</p>
-<div class="meta" aria-label="Artifact metadata"><ul class="meta-row meta-row-facts"><li class="chip"><span class="chip-value">1 profile name, synced everywhere</span></li><li class="chip"><span class="chip-value">2 separate cookie jars</span></li><li class="chip"><span class="chip-value">0 lock or port conflicts</span></li><li class="chip"><span class="chip-label">status:</span><span class="chip-value">answered</span></li></ul><ul class="meta-row meta-row-provenance"><li class="chip"><span class="chip-label">repo:</span><span class="chip-value"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span></li><li class="chip"><span class="chip-label">branch:</span><span class="chip-value">main</span></li><li class="chip"><span class="chip-label">human:</span><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="4"/><path d="M3.5 21c.8-4.2 4.2-6.5 8.5-6.5s7.7 2.3 8.5 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>Muqsit</span></li><li class="chip"><span class="chip-label">harness:</span><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5 10 12l-6 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 18.5h8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>kimi</span></li><li class="chip"><span class="chip-label">host:</span><span class="chip-value">yosemite-s1</span></li><li class="chip"><span class="chip-label">session:</span><span class="chip-value">ae51f993</span></li><li class="chip"><span class="chip-value">2026-08-03</span></li></ul></div>
+<div class="meta" aria-label="Artifact metadata"><ul class="meta-row meta-row-facts"><li class="chip"><span class="chip-value">1 profile name, synced everywhere</span></li><li class="chip"><span class="chip-value">2 separate cookie jars</span></li><li class="chip"><span class="chip-value">0 lock or port conflicts</span></li><li class="chip"><span class="chip-label">status:</span><span class="chip-value">answered</span></li></ul><ul class="meta-row meta-row-provenance"><li class="chip"><span class="chip-label">repo:</span><span class="chip-value"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span></li><li class="chip"><span class="chip-label">branch:</span><span class="chip-value">main</span></li><li class="chip"><span class="chip-label">human:</span><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="4"/><path d="M3.5 21c.8-4.2 4.2-6.5 8.5-6.5s7.7 2.3 8.5 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>Owner</span></li><li class="chip"><span class="chip-label">harness:</span><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5 10 12l-6 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 18.5h8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>kimi</span></li><li class="chip"><span class="chip-label">host:</span><span class="chip-value">worker-s1</span></li><li class="chip"><span class="chip-label">session:</span><span class="chip-value">ae51f993</span></li><li class="chip"><span class="chip-value">2026-08-03</span></li></ul></div>
 </section>
 <nav class="toc" aria-label="Artifact sections"><a href="#summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a href="#findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a href="#evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a><a href="#recommendations"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Recommendations</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2>
 <p><strong>Yes — the same browser profile can be used locally and by a remote agent on
@@ -53,33 +53,33 @@ be logged into once.</p>
 </section><h2 id="findings">Findings</h2>
 <figure class="artifact-figure artifact-figure-wide">
 <svg class="artifact-diagram" viewBox="0 0 960 400" role="img" aria-label="Diagram: one synced profile definition fans out to two machines, each with its own chrome-data cookie jar that never syncs.">
-  
+
   <rect x="280" y="20" width="400" height="72" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
   <text x="480" y="46" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#38bdf8">~/.agents/agents.yaml</text>
   <text x="480" y="66" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">browser: profile definitions (name, browser, endpoint)</text>
   <text x="480" y="82" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">syncs with agents repo push/pull</text>
 
-  
+
   <line x1="380" y1="92" x2="240" y2="150" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.7"></line>
   <line x1="580" y1="92" x2="720" y2="150" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.7"></line>
   <text x="270" y="118" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#38bdf8">syncs</text>
   <text x="690" y="118" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#38bdf8">syncs</text>
 
-  
+
   <rect x="40" y="150" width="400" height="96" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
   <text x="240" y="176" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#f59e0b">LOCAL CLIENT (this laptop)</text>
   <text x="240" y="196" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">agents browser start --profile work</text>
   <text x="240" y="214" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">Chrome A · local debug port · local SingletonLock</text>
   <text x="240" y="232" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">resolves "work" from its own synced agents.yaml</text>
 
-  
+
   <rect x="520" y="150" width="400" height="96" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
   <text x="720" y="176" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">YOSEMITE S1 (remote agent)</text>
   <text x="720" y="196" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">agents -H yosemite browser start --profile work</text>
   <text x="720" y="214" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">Chrome B · own debug port · own SingletonLock</text>
   <text x="720" y="232" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">SSH passthrough — runs entirely on Yosemite</text>
 
-  
+
   <rect x="40" y="292" width="400" height="72" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5" opacity="0.85"></rect>
   <text x="240" y="318" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#f59e0b">.cache/browser/work@…/chrome-data/</text>
   <text x="240" y="338" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">cookies + logins · gitignored · log in once here</text>
@@ -88,11 +88,11 @@ be logged into once.</p>
   <text x="720" y="318" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">.cache/browser/work@…/chrome-data/</text>
   <text x="720" y="338" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">cookies + logins · gitignored · log in once here too</text>
 
-  
+
   <line x1="440" y1="328" x2="520" y2="328" stroke="#f43f5e" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.8"></line>
   <text x="480" y="318" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#f43f5e">✕ never syncs</text>
 
-  
+
   <line x1="240" y1="246" x2="240" y2="288" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.7"></line>
   <line x1="720" y1="246" x2="720" y2="288" stroke="#a3e635" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.7"></line>
 </svg>

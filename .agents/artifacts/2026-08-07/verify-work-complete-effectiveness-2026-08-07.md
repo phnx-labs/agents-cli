@@ -8,8 +8,8 @@ project: agents-cli
 repository: phnx-labs/agents-cli
 harness: Codex
 agent: GPT-5
-host: yosemite-s0
-session: 019fdf1d
+host: worker-s0
+session: session-id
 date: 2026-08-07
 facts:
   - 390 logical interventions after deduplication

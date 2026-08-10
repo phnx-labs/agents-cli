@@ -11,7 +11,7 @@ branch: artifact-gp-agents-report
 status: research complete
 harness: cursor
 agent: composer
-host: yosemite-s0
+host: worker-s0
 date: "2026-08-10"
 facts:
   - OpenClaw ~385k stars · Hermes ~225k stars

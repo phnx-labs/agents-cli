@@ -10,7 +10,7 @@ context: agents browser profiles
 repository: phnx-labs/agents-cli
 status: answered
 harness: kimi
-host: yosemite-s1
+host: worker-s1
 facts:
   - 1 profile name, synced everywhere
   - 2 separate cookie jars

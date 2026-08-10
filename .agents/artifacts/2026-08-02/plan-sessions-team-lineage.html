@@ -112,7 +112,7 @@
   <div class="meta prov">
     <span class="chip">harness: <b>claude</b></span>
     <span class="chip">agent: <b>opus-5</b></span>
-    <span class="chip">host: <b>yosemite-s0</b></span>
+    <span class="chip">host: <b>worker-s0</b></span>
     <span class="chip">session: <b>42064bd8</b></span>
     <span class="chip"><b>2026-08-02</b></span>
   </div>
@@ -135,7 +135,7 @@
 spot an orchestrator without expanding anything:</p>
 <pre><span class="c"># agents sessions</span>
 21805f5f  claude  2.1.186  agents-cli   Good question, and the honest…  PR#1628  <span class="k">team:redesign</span>   1h
-1d418ba5  claude  2.1.186  muqsitnawaz  Fix VS Codeium agent auto-lab…  PR#1530                 9h</pre>
+1d418ba5  claude  2.1.186  owner  Fix VS Codeium agent auto-lab…  PR#1530                 9h</pre>
 
 <p>Press <code>c</code> (or pass <code>--teams</code>) and each teammate row names its team and handle
 instead of a bare id, so the 3813 hidden rows stop being anonymous:</p>
@@ -155,7 +155,7 @@ Team:    spawned `redesign` — 4 teammates · 2 working · 1 done · 1 failed
 <span class="c">preview pane, teammate row:</span>
 Team:    redesign · teammate resume-picker (edit) · spawned by 21805f5f</pre>
 
-<p>And <code>agents sessions --device zion</code> opens that same browser — preview pane, hotkeys,
+<p>And <code>agents sessions --device workstation</code> opens that same browser — preview pane, hotkeys,
 search — instead of the flat SSH dump.</p>
 
 <!-- ============ 02 ============ -->
@@ -295,7 +295,7 @@ already opens it. Only one early return stands in the way.</p>
 
   <text x="20" y="26" fill="#ff6b6b" font-size="11.5" font-family="monospace">TODAY</text>
   <rect x="20" y="40" width="150" height="40" rx="8" fill="#161a18" stroke="#26302a"/>
-  <text x="95" y="64" fill="#e7ece8" font-size="11.5" text-anchor="middle" font-family="monospace">--device zion</text>
+  <text x="95" y="64" fill="#e7ece8" font-size="11.5" text-anchor="middle" font-family="monospace">--device workstation</text>
   <path d="M170 60 L214 60" stroke="#ff6b6b" fill="none" marker-end="url(#bad)"/>
   <polygon points="214,60 300,36 386,60 300,84" fill="#1a1010" stroke="#ff6b6b"/>
   <text x="300" y="57" fill="#ff6b6b" font-size="10.5" text-anchor="middle" font-family="monospace">host &amp;&amp; !active</text>
@@ -309,7 +309,7 @@ already opens it. Only one early return stands in the way.</p>
 
   <text x="20" y="136" fill="#a3e635" font-size="11.5" font-family="monospace">PROPOSED</text>
   <rect x="20" y="150" width="150" height="40" rx="8" fill="#161a18" stroke="#26302a"/>
-  <text x="95" y="174" fill="#e7ece8" font-size="11.5" text-anchor="middle" font-family="monospace">--device zion</text>
+  <text x="95" y="174" fill="#e7ece8" font-size="11.5" text-anchor="middle" font-family="monospace">--device workstation</text>
   <path d="M170 170 L214 170" stroke="#a3e635" fill="none" marker-end="url(#a2)"/>
   <polygon points="214,170 310,142 406,170 310,198" fill="#12160f" stroke="#a3e635"/>
   <text x="310" y="166" fill="#a3e635" font-size="10.5" text-anchor="middle" font-family="monospace">browserEligible()</text>
@@ -511,14 +511,14 @@ installed binary — not <code>./bin</code>.</p>
 
 <h3>End-to-end on this fleet</h3>
 <pre><span class="c"># 1. the browser opens, previews render, hotkeys work — screenshot this against your dump</span>
-agents sessions --device zion
+agents sessions --device workstation
 
 <span class="c"># 2. an offline box reads "unreachable", not "no matches"</span>
 agents sessions --device gpu-box
 
 <span class="c"># 3. legacy paths untouched</span>
-agents sessions --device zion --json | jq length
-agents sessions --device zion | head
+agents sessions --device workstation --json | jq length
+agents sessions --device workstation | head
 
 <span class="c"># 4. must NOT fan out to the fleet (watch for per-host stderr lines)</span>
 agents sessions --device $(hostname -s)
@@ -532,7 +532,7 @@ agents sessions --teams --in-team lineage-probe <span class="c"># orchestrator +
 agents teams status --parent-session &lt;this session id&gt;
 
 <span class="c"># 6. the badge crosses the SSH hop — the property the registry approach lacked</span>
-agents sessions --device yosemite-s0 --json | jq <span class="s">'.[].spawnedTeam'</span>
+agents sessions --device worker-s0 --json | jq <span class="s">'.[].spawnedTeam'</span>
 
 <span class="c"># 7. works on history, not just new writes</span>
 agents teams list                              <span class="c"># spawned by populated for a pre-existing team</span></pre>
@@ -547,7 +547,7 @@ agents teams list                              <span class="c"># spawned by popu
 
 <div class="foot">
   agents-cli · plan mode · rendered by plan-render &nbsp;·&nbsp;
-  claude · opus-5 · yosemite-s0 · session 42064bd8 · 2026-08-02 &nbsp;·&nbsp;
+  claude · opus-5 · worker-s0 · session session-id · 2026-08-02 &nbsp;·&nbsp;
   next: <span style="color:var(--accent)">go / reshape</span>
 </div>
 

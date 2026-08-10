@@ -156,7 +156,7 @@
       host each live agent is on, so I know where to attach without guessing.</p>
     <p><b>Independent test:</b> one local + one remote live agent; one command shows distinct hosts.</p>
     <ol>
-      <li><b>Given</b> Claude live on zion and Codex live on mac-mini
+      <li><b>Given</b> Claude live on workstation and Codex live on release-host
         <b>When</b> I run <code>agents sessions --active</code>
         <b>Then</b> each row shows the correct host (not blank / not swapped).</li>
       <li><b>Given</b> no live agents

@@ -172,7 +172,7 @@
     <li><b>"Rollout" is Codex's own native name</b> for its transcript file — not an agents-cli invention, and not a flag you pass. agents-cli only ever <i>reads</i> files that Codex chose to name <code>rollout-…</code>. <span class="cite">discover.ts:1082-1083 · active.ts:364 · watchdog/read.ts:114-115</span></li>
     <li><b>It's always written and required</b> — it's Codex's sole transcript artifact; there is no flag-gated alternative. Each session = one <code>rollout-&lt;iso-ts&gt;-&lt;uuid&gt;.jsonl</code> under a <code>Y/M/D</code> folder.</li>
     <li><b>The uuid is in the filename AND inside the file</b> — discovery reads it from the first-line <code>session_meta.payload.id</code> (<span class="cite">discover.ts:2537</span>); the sync/watchdog paths parse it out of the filename with a UUID regex (<span class="cite">watchdog/read.ts:115</span>).</li>
-    <li><b>Only the titles file is optional</b> — the sibling <code>~/.codex/session_index.jsonl</code> (thread titles) is tolerated-if-absent (<span class="cite">discover.ts:1026-1027</span>); confirmed missing on zion while rollouts still exist.</li>
+    <li><b>Only the titles file is optional</b> — the sibling <code>~/.codex/session_index.jsonl</code> (thread titles) is tolerated-if-absent (<span class="cite">discover.ts:1026-1027</span>); confirmed missing on workstation while rollouts still exist.</li>
     <li><b>Compared to others:</b> it's just Codex's flavor of the same idea — Claude names its file <code>&lt;uuid&gt;.jsonl</code>, Codex names it <code>rollout-…-&lt;uuid&gt;.jsonl</code>. Same JSONL content, different naming/foldering convention chosen by each vendor.</li>
   </ul>
 </section>
@@ -259,7 +259,7 @@
     <li><b>Crash ≠ clean exit is undetectable.</b> There's no exit-code or clean-shutdown marker anywhere in the runtime path — a killed/crashed/powered-off agent is indistinguishable from a graceful quit; it just vanishes. A durable "last-seen + why-gone" would need a persisted state row, which today's design deliberately avoids.</li>
     <li><b>The SessionStart hook would fix the id problem at the source</b> — it's the only way to get an <i>exact</i> id from an agent that mints its own (the agent self-reports it). It's built but unwired/uninstalled; wiring it collapses the id tiers up to Claude's exactness for every hook-supporting harness.</li>
   </ul>
-  <p class="muted" style="font-size:12.5px;margin-top:20px">Verified against <span class="mono">agents-cli</span>: <code>apps/cli/src/lib/{exec.ts, session/pid-registry.ts, session/active.ts, session/state.ts, session/db.ts, session/discover.ts, session/parse.ts, watchdog/read.ts, daemon.ts}</code>, <code>apps/cli/src/commands/sessions.ts</code>, <code>packages/session-tracker/src/{hook.sh, install-hook.ts}</code>. Five parallel source traces, file:line quoted, cross-checked against live state on zion. 2026-07-30.</p>
+  <p class="muted" style="font-size:12.5px;margin-top:20px">Verified against <span class="mono">agents-cli</span>: <code>apps/cli/src/lib/{exec.ts, session/pid-registry.ts, session/active.ts, session/state.ts, session/db.ts, session/discover.ts, session/parse.ts, watchdog/read.ts, daemon.ts}</code>, <code>apps/cli/src/commands/sessions.ts</code>, <code>packages/session-tracker/src/{hook.sh, install-hook.ts}</code>. Five parallel source traces, file:line quoted, cross-checked against live state on workstation. 2026-07-30.</p>
 </section>
 
 </div>

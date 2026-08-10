@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Fold the Claude setup-token into agents accounts, and never sync it to the interactive host</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-awaiting-go">awaiting-go</span></div>
+<h1>Fold the Claude setup-token into agents accounts, and never sync it to the interactive host</h1>
+<p class="summary">The interactive/headless split (shipped 1.22.34) fixed the revocation, but the headless setup-token is an email-keyed secrets bundle bolted beside `agents accounts`, with no fleet sync and no interactive-host protection. Make the account the unit: mint a per-account setup-token, surface it in `agents accounts`, and auto-sync it to worker devices only — the interactive host always stays on its rotating OAuth login.
+</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Interactive vs headless auth already ships (exec.ts:302/424) — this plan does not touch it.<span class="meta-sep" aria-hidden="true">·</span>agents accounts stores only {agent, fingerprint}; setup-token is a separate email-keyed auth bundle.<span class="meta-sep" aria-hidden="true">·</span>No auto-sync of the auth bundle exists; RUSH-2371 unbuilt; no interactiveHost carve-out anywhere.<span class="meta-sep" aria-hidden="true">·</span>Rotating login stays in the version home, never copied; the non-rotating setup-token is a distinct, portable class.</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">review-pr-2440</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">RUSH-2364, RUSH-2371 (RUSH-2395 closed superseded)</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Owner</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">worker-s1</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">63f04fd8</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-09</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#proposed-changes"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Tracking</a><a href="#figure-account-owns-two-credential-classes-sync-reaches-workers-only"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Figure — account owns two credential classes; sync reaches workers only</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<p>Two gaps remain after the interactive/headless auth split:</p>
+<ol>
+<li><strong>The setup-token leg is bolted beside <code>agents accounts</code>, not through it.</strong> <code>agents accounts</code> (<code>account-labels.ts</code>) names an identity by <code>{agent, fingerprint}</code> and holds
+no credential. The headless setup-token lives in a separate <code>auth</code> secrets bundle
+keyed by <em>email</em> (<code>claude-account-token.ts:58</code>). The two only connect indirectly, so
+there is no single "account" object that knows both its interactive login and its
+headless token.</li>
+<li><strong>No fleet sync, and no protection for the interactive host.</strong> Auto-sync of the <code>auth</code>
+bundle (RUSH-2371) does not exist; portability is manual <code>agents secrets export auth --host</code>. Nothing excludes the interactive box — so a future naive sync could place a
+worker credential on the one machine that must always run the rotating OAuth login.</li>
+</ol>
+<p>The intended outcome: an <strong>account</strong> is the unit that owns both credentials — the
+rotating interactive login (stays in its version home, never copied) and an optional
+non-rotating setup-token (mintable, portable to workers). Sync distributes the setup-token
+to worker devices and <strong>never</strong> to <code>config.interactiveHost</code>.</p>
+<h2 id="proposed-changes">Proposed Changes</h2>
+<p><strong>1. Key the setup-token to the account, not the raw email — <code>claude-account-token.ts</code>.</strong>
+Today <code>claudeAccountTokenKey(email)</code> derives <code>CLAUDE_CODE_OAUTH_TOKEN_&lt;EMAIL_SLUG&gt;</code>. Add an
+account-fingerprint-addressed lookup so <code>resolveClaudeSetupToken(home)</code> resolves the token
+via the home's discovered account identity (the same <code>identityFingerprint(agent, accountKey)</code> used by <code>account-labels.ts:16</code>), falling back to the email key for
+already-provisioned tokens. One canonical address per account, no drift.</p>
+<p><strong>2. Surface the token on the account — <code>account-labels.ts</code> / <code>commands/accounts.ts</code>.</strong>
+Extend <code>DiscoveredAccount</code> (the derived, non-persisted shape at <code>account-labels.ts:13</code>)
+with <code>headlessToken: boolean</code> (is a setup-token provisioned for this account's
+fingerprint). Render it in <code>agents accounts</code> / <code>--json</code>. <code>accounts.yaml</code> stays
+fingerprint-only — the token stays in the <code>auth</code> bundle, only its <em>presence</em> is surfaced.</p>
+<p><strong>3. Account-scoped mint command (RUSH-2364) — <code>commands/accounts.ts</code>.</strong> Add <code>agents accounts mint &lt;label&gt;</code> (thin wrapper over the <code>fleet:mint-auth</code> recipe): drive <code>claude setup-token</code>, store the result in the <code>auth</code> bundle under the account's canonical key.
+Replaces the manual recipe with one command bound to a named account.</p>
+<p><strong>4. Auto-sync to workers, excluding the interactive host (RUSH-2371) — new sync path.</strong>
+Distribute the <code>auth</code> bundle's per-account setup-tokens to worker devices. Target set MUST
+exclude <code>config.interactiveHost</code>, mirroring <code>apply.ts:236</code>:
+<code>Object.values(registry).filter(d =&gt; !isControlDevice(d) &amp;&amp; d.name !== interactiveHost)</code>.
+The interactive box is never a sync target — it always runs its own OAuth login.</p>
+<p><strong>5. Credential-class boundary in the spec — <code>docs/specifications.md</code>.</strong> Record that
+EXEC-ACCOUNT-1 ("raw tokens stay in the version home, never copied") governs the
+<strong>rotating</strong> login; the <strong>non-rotating</strong> <code>user:inference</code> setup-token is a distinct,
+explicitly-portable class an account may carry and sync. Keeps the integration legal, not a
+silent violation.</p>
+<h2 id="public-interface">Public Interface</h2>
+<pre><code>agents accounts                     # now shows a per-account "headless token: yes/no" column
+agents accounts mint &lt;label&gt;        # NEW — mint + store a setup-token for a named account
+agents accounts sync                # NEW — push per-account setup-tokens to WORKERS only
+                                    #        (config.interactiveHost is always excluded)
+</code></pre>
+<p>No change to <code>agents run</code>, the interactive/headless split, or <code>agents run --account</code> (which
+already selects a version by live identity, fail-closed).</p>
+<h2 id="validation">Validation</h2>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>How</th>
+<th>Pass condition</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Interactive host excluded</td>
+<td><code>agents accounts sync --json</code> from any box</td>
+<td>target list never contains <code>config.interactiveHost</code></td>
+</tr>
+<tr>
+<td>Interactive run unaffected</td>
+<td>run Claude interactively on the personal box</td>
+<td><code>/status</code> shows the OAuth login, not <code>CLAUDE_CODE_OAUTH_TOKEN</code></td>
+</tr>
+<tr>
+<td>Worker gets the token</td>
+<td><code>agents accounts sync</code> → on a worker <code>agents secrets get auth &lt;KEY&gt;</code></td>
+<td>~108-char setup-token present, no Touch ID</td>
+</tr>
+<tr>
+<td>Account surfaces token</td>
+<td><code>agents accounts --json</code></td>
+<td><code>headlessToken: true</code> for the minted account</td>
+</tr>
+<tr>
+<td>Mint round-trips</td>
+<td><code>agents accounts mint &lt;label&gt;</code> then run headless on a worker</td>
+<td>Claude runs on the minted token</td>
+</tr>
+</tbody></table>
+<p>Unit tests (mock-free, existing file-store seams): the sync target filter excludes
+<code>interactiveHost</code>; <code>resolveClaudeSetupToken</code> resolves via account fingerprint then email
+fallback; <code>DiscoveredAccount.headlessToken</code> reflects a provisioned key. Live proof on this
+fleet: mint for one account, <code>agents accounts sync</code>, confirm every <code>worker</code> reads the token
+and the interactive host (workstation) does not, and its interactive Claude still runs on OAuth.</p>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Bending EXEC-ACCOUNT-1 (accounts never copy credentials)</td>
+<td>Explicit credential-class split in the spec: rotating login never copied; non-rotating setup-token is a distinct portable class.</td>
+</tr>
+<tr>
+<td>Re-keying breaks already-provisioned email-keyed tokens</td>
+<td><code>resolveClaudeSetupToken</code> falls back to the email key; no forced migration.</td>
+</tr>
+<tr>
+<td>Sync places a token on the wrong box</td>
+<td><code>interactiveHost</code> exclusion is unit-tested; sync is worker-only by construction.</td>
+</tr>
+<tr>
+<td>Usage bars still "pending"</td>
+<td>Out of scope — an external Anthropic scope limit (RUSH-2392), not solvable here.</td>
+</tr>
+</tbody></table>
+<h2 id="tracking">Tracking</h2>
+<ul>
+<li><strong>RUSH-2364</strong> — the mint command (change 3).</li>
+<li><strong>RUSH-2371</strong> — auto-sync with the interactive-host carve-out (change 4).</li>
+<li><strong>RUSH-2395</strong> — closed as <strong>superseded</strong> by the shipped interactive/headless split.</li>
+<li><strong>RUSH-2392</strong> — remains open as the tracked reason usage bars can't come from the setup-token.</li>
+<li><strong>Scope fallback:</strong> if a smaller step is preferred, land changes 3 + 4 (mint + carve-out) against the existing email-keyed bundle and defer the accounts re-key (changes 1, 2) to a follow-up.</li>
+</ul>
+<div class="artifact-callout">
+The interactive host is the one box that must always run its own rotating OAuth login —
+it is never a sync target. Workers get the minted, non-rotating setup-token; the account
+is the unit that owns both.
+</div><h2 id="figure-account-owns-two-credential-classes-sync-reaches-workers-only">Figure — account owns two credential classes; sync reaches workers only</h2>
+<svg viewBox="0 0 860 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Account owns a rotating login and a portable setup-token; sync reaches workers only, never the interactive host">
+  <rect x="0" y="0" width="860" height="380" fill="#0a0a0a"></rect>
+
+  <rect x="330" y="24" width="200" height="70" rx="10" fill="#14210a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="430" y="52" text-anchor="middle" fill="#a3e635" font-size="16" font-weight="700">account "work"</text>
+  <text x="430" y="74" text-anchor="middle" fill="#8fae5f" font-size="12">agent + fingerprint (accounts.yaml)</text>
+
+  <rect x="120" y="150" width="290" height="86" rx="10" fill="#1a1205" stroke="#e6a13a" stroke-width="1.5"></rect>
+  <text x="265" y="178" text-anchor="middle" fill="#e6a13a" font-size="14" font-weight="700">rotating OAuth login</text>
+  <text x="265" y="200" text-anchor="middle" fill="#c9932f" font-size="11.5">user:profile · stays in version home</text>
+  <text x="265" y="219" text-anchor="middle" fill="#c9932f" font-size="11.5">NEVER copied · usage bars</text>
+  <rect x="450" y="150" width="290" height="86" rx="10" fill="#0b1a12" stroke="#3ad6a0" stroke-width="1.5"></rect>
+  <text x="595" y="178" text-anchor="middle" fill="#3ad6a0" font-size="14" font-weight="700">setup-token (headless)</text>
+  <text x="595" y="200" text-anchor="middle" fill="#2fb488" font-size="11.5">user:inference · non-rotating</text>
+  <text x="595" y="219" text-anchor="middle" fill="#2fb488" font-size="11.5">mintable · PORTABLE to workers</text>
+
+  <path d="M380 94 L265 150" stroke="#e6a13a" stroke-width="1.5" fill="none"></path>
+  <path d="M480 94 L595 150" stroke="#3ad6a0" stroke-width="1.5" fill="none"></path>
+
+  <rect x="120" y="300" width="290" height="58" rx="10" fill="#1a1205" stroke="#e6a13a" stroke-width="1.5"></rect>
+  <text x="265" y="325" text-anchor="middle" fill="#e6a13a" font-size="13" font-weight="700">interactive host (workstation)</text>
+  <text x="265" y="344" text-anchor="middle" fill="#c9932f" font-size="11">runs OAuth login · NOT a sync target</text>
+  <rect x="450" y="300" width="290" height="58" rx="10" fill="#0b1a12" stroke="#3ad6a0" stroke-width="1.5"></rect>
+  <text x="595" y="325" text-anchor="middle" fill="#3ad6a0" font-size="13" font-weight="700">worker devices (m0..m6, s0..)</text>
+  <text x="595" y="344" text-anchor="middle" fill="#2fb488" font-size="11">receive synced setup-token</text>
+
+  <path d="M265 236 L265 300" stroke="#e6a13a" stroke-width="1.5" fill="none"></path>
+
+  <path d="M595 236 L595 300" stroke="#3ad6a0" stroke-width="2" fill="none" marker-end="url(#a)"></path>
+  <text x="612" y="272" fill="#3ad6a0" font-size="11">sync</text>
+
+  <path d="M470 265 L360 320" stroke="#7a2f2f" stroke-width="1.5" stroke-dasharray="5 4" fill="none"></path>
+  <text x="392" y="286" fill="#c05a5a" font-size="11" font-weight="700">excluded</text>
+  <line x1="405" y1="288" x2="425" y2="300" stroke="#c05a5a" stroke-width="1.5"></line>
+  <line x1="425" y1="288" x2="405" y2="300" stroke="#c05a5a" stroke-width="1.5"></line>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#3ad6a0"></path>
+    </marker>
+  </defs>
+</svg><p><em>Figure: one account owns two credential classes. The rotating login stays put and runs on
+the interactive host; the non-rotating setup-token is minted and synced to workers only —
+the interactive host is explicitly excluded from the sync target set.</em></p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGl0bGU6IEZvbGQgdGhlIENsYXVkZSBzZXR1cC10b2tlbiBpbnRvIGFnZW50cyBhY2NvdW50cywgYW5kIG5ldmVyIHN5bmMgaXQgdG8gdGhlIGludGVyYWN0aXZlIGhvc3QKc3VtbWFyeTogPgogIFRoZSBpbnRlcmFjdGl2ZS9oZWFkbGVzcyBzcGxpdCAoc2hpcHBlZCAxLjIyLjM0KSBmaXhlZCB0aGUgcmV2b2NhdGlvbiwgYnV0IHRoZQogIGhlYWRsZXNzIHNldHVwLXRva2VuIGlzIGFuIGVtYWlsLWtleWVkIHNlY3JldHMgYnVuZGxlIGJvbHRlZCBiZXNpZGUgYGFnZW50cwogIGFjY291bnRzYCwgd2l0aCBubyBmbGVldCBzeW5jIGFuZCBubyBpbnRlcmFjdGl2ZS1ob3N0IHByb3RlY3Rpb24uIE1ha2UgdGhlIGFjY291bnQKICB0aGUgdW5pdDogbWludCBhIHBlci1hY2NvdW50IHNldHVwLXRva2VuLCBzdXJmYWNlIGl0IGluIGBhZ2VudHMgYWNjb3VudHNgLCBhbmQKICBhdXRvLXN5bmMgaXQgdG8gd29ya2VyIGRldmljZXMgb25seSDigJQgdGhlIGludGVyYWN0aXZlIGhvc3QgYWx3YXlzIHN0YXlzIG9uIGl0cwogIHJvdGF0aW5nIE9BdXRoIGxvZ2luLgpzdGF0dXM6IGF3YWl0aW5nLWdvCnRyYWNraW5nOiAiUlVTSC0yMzY0LCBSVVNILTIzNzEgKFJVU0gtMjM5NSBjbG9zZWQgc3VwZXJzZWRlZCkiCmZhY3RzOgogIC0gIkludGVyYWN0aXZlIHZzIGhlYWRsZXNzIGF1dGggYWxyZWFkeSBzaGlwcyAoZXhlYy50czozMDIvNDI0KSDigJQgdGhpcyBwbGFuIGRvZXMgbm90IHRvdWNoIGl0LiIKICAtICJhZ2VudHMgYWNjb3VudHMgc3RvcmVzIG9ubHkge2FnZW50LCBmaW5nZXJwcmludH07IHNldHVwLXRva2VuIGlzIGEgc2VwYXJhdGUgZW1haWwta2V5ZWQgYXV0aCBidW5kbGUuIgogIC0gIk5vIGF1dG8tc3luYyBvZiB0aGUgYXV0aCBidW5kbGUgZXhpc3RzOyBSVVNILTIzNzEgdW5idWlsdDsgbm8gaW50ZXJhY3RpdmVIb3N0IGNhcnZlLW91dCBhbnl3aGVyZS4iCiAgLSAiUm90YXRpbmcgbG9naW4gc3RheXMgaW4gdGhlIHZlcnNpb24gaG9tZSwgbmV2ZXIgY29waWVkOyB0aGUgbm9uLXJvdGF0aW5nIHNldHVwLXRva2VuIGlzIGEgZGlzdGluY3QsIHBvcnRhYmxlIGNsYXNzLiIKLS0tCgojIyBQdXJwb3NlCgpUd28gZ2FwcyByZW1haW4gYWZ0ZXIgdGhlIGludGVyYWN0aXZlL2hlYWRsZXNzIGF1dGggc3BsaXQ6CgoxLiAqKlRoZSBzZXR1cC10b2tlbiBsZWcgaXMgYm9sdGVkIGJlc2lkZSBgYWdlbnRzIGFjY291bnRzYCwgbm90IHRocm91Z2ggaXQuKiogYGFnZW50cwogICBhY2NvdW50c2AgKGBhY2NvdW50LWxhYmVscy50c2ApIG5hbWVzIGFuIGlkZW50aXR5IGJ5IGB7YWdlbnQsIGZpbmdlcnByaW50fWAgYW5kIGhvbGRzCiAgIG5vIGNyZWRlbnRpYWwuIFRoZSBoZWFkbGVzcyBzZXR1cC10b2tlbiBsaXZlcyBpbiBhIHNlcGFyYXRlIGBhdXRoYCBzZWNyZXRzIGJ1bmRsZQogICBrZXllZCBieSAqZW1haWwqIChgY2xhdWRlLWFjY291bnQtdG9rZW4udHM6NThgKS4gVGhlIHR3byBvbmx5IGNvbm5lY3QgaW5kaXJlY3RseSwgc28KICAgdGhlcmUgaXMgbm8gc2luZ2xlICJhY2NvdW50IiBvYmplY3QgdGhhdCBrbm93cyBib3RoIGl0cyBpbnRlcmFjdGl2ZSBsb2dpbiBhbmQgaXRzCiAgIGhlYWRsZXNzIHRva2VuLgoyLiAqKk5vIGZsZWV0IHN5bmMsIGFuZCBubyBwcm90ZWN0aW9uIGZvciB0aGUgaW50ZXJhY3RpdmUgaG9zdC4qKiBBdXRvLXN5bmMgb2YgdGhlIGBhdXRoYAogICBidW5kbGUgKFJVU0gtMjM3MSkgZG9lcyBub3QgZXhpc3Q7IHBvcnRhYmlsaXR5IGlzIG1hbnVhbCBgYWdlbnRzIHNlY3JldHMgZXhwb3J0IGF1dGgKICAgLS1ob3N0YC4gTm90aGluZyBleGNsdWRlcyB0aGUgaW50ZXJhY3RpdmUgYm94IOKAlCBzbyBhIGZ1dHVyZSBuYWl2ZSBzeW5jIGNvdWxkIHBsYWNlIGEKICAgd29ya2VyIGNyZWRlbnRpYWwgb24gdGhlIG9uZSBtYWNoaW5lIHRoYXQgbXVzdCBhbHdheXMgcnVuIHRoZSByb3RhdGluZyBPQXV0aCBsb2dpbi4KClRoZSBpbnRlbmRlZCBvdXRjb21lOiBhbiAqKmFjY291bnQqKiBpcyB0aGUgdW5pdCB0aGF0IG93bnMgYm90aCBjcmVkZW50aWFscyDigJQgdGhlCnJvdGF0aW5nIGludGVyYWN0aXZlIGxvZ2luIChzdGF5cyBpbiBpdHMgdmVyc2lvbiBob21lLCBuZXZlciBjb3BpZWQpIGFuZCBhbiBvcHRpb25hbApub24tcm90YXRpbmcgc2V0dXAtdG9rZW4gKG1pbnRhYmxlLCBwb3J0YWJsZSB0byB3b3JrZXJzKS4gU3luYyBkaXN0cmlidXRlcyB0aGUgc2V0dXAtdG9rZW4KdG8gd29ya2VyIGRldmljZXMgYW5kICoqbmV2ZXIqKiB0byBgY29uZmlnLmludGVyYWN0aXZlSG9zdGAuCgojIyBQcm9wb3NlZCBDaGFuZ2VzCgoqKjEuIEtleSB0aGUgc2V0dXAtdG9rZW4gdG8gdGhlIGFjY291bnQsIG5vdCB0aGUgcmF3IGVtYWlsIOKAlCBgY2xhdWRlLWFjY291bnQtdG9rZW4udHNgLioqClRvZGF5IGBjbGF1ZGVBY2NvdW50VG9rZW5LZXkoZW1haWwpYCBkZXJpdmVzIGBDTEFVREVfQ09ERV9PQVVUSF9UT0tFTl88RU1BSUxfU0xVRz5gLiBBZGQgYW4KYWNjb3VudC1maW5nZXJwcmludC1hZGRyZXNzZWQgbG9va3VwIHNvIGByZXNvbHZlQ2xhdWRlU2V0dXBUb2tlbihob21lKWAgcmVzb2x2ZXMgdGhlIHRva2VuCnZpYSB0aGUgaG9tZSdzIGRpc2NvdmVyZWQgYWNjb3VudCBpZGVudGl0eSAodGhlIHNhbWUgYGlkZW50aXR5RmluZ2VycHJpbnQoYWdlbnQsCmFjY291bnRLZXkpYCB1c2VkIGJ5IGBhY2NvdW50LWxhYmVscy50czoxNmApLCBmYWxsaW5nIGJhY2sgdG8gdGhlIGVtYWlsIGtleSBmb3IKYWxyZWFkeS1wcm92aXNpb25lZCB0b2tlbnMuIE9uZSBjYW5vbmljYWwgYWRkcmVzcyBwZXIgYWNjb3VudCwgbm8gZHJpZnQuCgoqKjIuIFN1cmZhY2UgdGhlIHRva2VuIG9uIHRoZSBhY2NvdW50IOKAlCBgYWNjb3VudC1sYWJlbHMudHNgIC8gYGNvbW1hbmRzL2FjY291bnRzLnRzYC4qKgpFeHRlbmQgYERpc2NvdmVyZWRBY2NvdW50YCAodGhlIGRlcml2ZWQsIG5vbi1wZXJzaXN0ZWQgc2hhcGUgYXQgYGFjY291bnQtbGFiZWxzLnRzOjEzYCkKd2l0aCBgaGVhZGxlc3NUb2tlbjogYm9vbGVhbmAgKGlzIGEgc2V0dXAtdG9rZW4gcHJvdmlzaW9uZWQgZm9yIHRoaXMgYWNjb3VudCdzCmZpbmdlcnByaW50KS4gUmVuZGVyIGl0IGluIGBhZ2VudHMgYWNjb3VudHNgIC8gYC0tanNvbmAuIGBhY2NvdW50cy55YW1sYCBzdGF5cwpmaW5nZXJwcmludC1vbmx5IOKAlCB0aGUgdG9rZW4gc3RheXMgaW4gdGhlIGBhdXRoYCBidW5kbGUsIG9ubHkgaXRzICpwcmVzZW5jZSogaXMgc3VyZmFjZWQuCgoqKjMuIEFjY291bnQtc2NvcGVkIG1pbnQgY29tbWFuZCAoUlVTSC0yMzY0KSDigJQgYGNvbW1hbmRzL2FjY291bnRzLnRzYC4qKiBBZGQgYGFnZW50cwphY2NvdW50cyBtaW50IDxsYWJlbD5gICh0aGluIHdyYXBwZXIgb3ZlciB0aGUgYGZsZWV0Om1pbnQtYXV0aGAgcmVjaXBlKTogZHJpdmUgYGNsYXVkZQpzZXR1cC10b2tlbmAsIHN0b3JlIHRoZSByZXN1bHQgaW4gdGhlIGBhdXRoYCBidW5kbGUgdW5kZXIgdGhlIGFjY291bnQncyBjYW5vbmljYWwga2V5LgpSZXBsYWNlcyB0aGUgbWFudWFsIHJlY2lwZSB3aXRoIG9uZSBjb21tYW5kIGJvdW5kIHRvIGEgbmFtZWQgYWNjb3VudC4KCioqNC4gQXV0by1zeW5jIHRvIHdvcmtlcnMsIGV4Y2x1ZGluZyB0aGUgaW50ZXJhY3RpdmUgaG9zdCAoUlVTSC0yMzcxKSDigJQgbmV3IHN5bmMgcGF0aC4qKgpEaXN0cmlidXRlIHRoZSBgYXV0aGAgYnVuZGxlJ3MgcGVyLWFjY291bnQgc2V0dXAtdG9rZW5zIHRvIHdvcmtlciBkZXZpY2VzLiBUYXJnZXQgc2V0IE1VU1QKZXhjbHVkZSBgY29uZmlnLmludGVyYWN0aXZlSG9zdGAsIG1pcnJvcmluZyBgYXBwbHkudHM6MjM2YDoKYE9iamVjdC52YWx1ZXMocmVnaXN0cnkpLmZpbHRlcihkID0+ICFpc0NvbnRyb2xEZXZpY2UoZCkgJiYgZC5uYW1lICE9PSBpbnRlcmFjdGl2ZUhvc3QpYC4KVGhlIGludGVyYWN0aXZlIGJveCBpcyBuZXZlciBhIHN5bmMgdGFyZ2V0IOKAlCBpdCBhbHdheXMgcnVucyBpdHMgb3duIE9BdXRoIGxvZ2luLgoKKio1LiBDcmVkZW50aWFsLWNsYXNzIGJvdW5kYXJ5IGluIHRoZSBzcGVjIOKAlCBgZG9jcy9zcGVjaWZpY2F0aW9ucy5tZGAuKiogUmVjb3JkIHRoYXQKRVhFQy1BQ0NPVU5ULTEgKCJyYXcgdG9rZW5zIHN0YXkgaW4gdGhlIHZlcnNpb24gaG9tZSwgbmV2ZXIgY29waWVkIikgZ292ZXJucyB0aGUKKipyb3RhdGluZyoqIGxvZ2luOyB0aGUgKipub24tcm90YXRpbmcqKiBgdXNlcjppbmZlcmVuY2VgIHNldHVwLXRva2VuIGlzIGEgZGlzdGluY3QsCmV4cGxpY2l0bHktcG9ydGFibGUgY2xhc3MgYW4gYWNjb3VudCBtYXkgY2FycnkgYW5kIHN5bmMuIEtlZXBzIHRoZSBpbnRlZ3JhdGlvbiBsZWdhbCwgbm90IGEKc2lsZW50IHZpb2xhdGlvbi4KCiMjIFB1YmxpYyBJbnRlcmZhY2UKCmBgYGJhc2gKYWdlbnRzIGFjY291bnRzICAgICAgICAgICAgICAgICAgICAgIyBub3cgc2hvd3MgYSBwZXItYWNjb3VudCAiaGVhZGxlc3MgdG9rZW46IHllcy9ubyIgY29sdW1uCmFnZW50cyBhY2NvdW50cyBtaW50IDxsYWJlbD4gICAgICAgICMgTkVXIOKAlCBtaW50ICsgc3RvcmUgYSBzZXR1cC10b2tlbiBmb3IgYSBuYW1lZCBhY2NvdW50CmFnZW50cyBhY2NvdW50cyBzeW5jICAgICAgICAgICAgICAgICMgTkVXIOKAlCBwdXNoIHBlci1hY2NvdW50IHNldHVwLXRva2VucyB0byBXT1JLRVJTIG9ubHkKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIyAgICAgICAgKGNvbmZpZy5pbnRlcmFjdGl2ZUhvc3QgaXMgYWx3YXlzIGV4Y2x1ZGVkKQpgYGAKCk5vIGNoYW5nZSB0byBgYWdlbnRzIHJ1bmAsIHRoZSBpbnRlcmFjdGl2ZS9oZWFkbGVzcyBzcGxpdCwgb3IgYGFnZW50cyBydW4gLS1hY2NvdW50YCAod2hpY2gKYWxyZWFkeSBzZWxlY3RzIGEgdmVyc2lvbiBieSBsaXZlIGlkZW50aXR5LCBmYWlsLWNsb3NlZCkuCgojIyBWYWxpZGF0aW9uCgp8IENoZWNrIHwgSG93IHwgUGFzcyBjb25kaXRpb24gfAp8LS0tfC0tLXwtLS18CnwgSW50ZXJhY3RpdmUgaG9zdCBleGNsdWRlZCB8IGBhZ2VudHMgYWNjb3VudHMgc3luYyAtLWpzb25gIGZyb20gYW55IGJveCB8IHRhcmdldCBsaXN0IG5ldmVyIGNvbnRhaW5zIGBjb25maWcuaW50ZXJhY3RpdmVIb3N0YCB8CnwgSW50ZXJhY3RpdmUgcnVuIHVuYWZmZWN0ZWQgfCBydW4gQ2xhdWRlIGludGVyYWN0aXZlbHkgb24gdGhlIHBlcnNvbmFsIGJveCB8IGAvc3RhdHVzYCBzaG93cyB0aGUgT0F1dGggbG9naW4sIG5vdCBgQ0xBVURFX0NPREVfT0FVVEhfVE9LRU5gIHwKfCBXb3JrZXIgZ2V0cyB0aGUgdG9rZW4gfCBgYWdlbnRzIGFjY291bnRzIHN5bmNgIOKGkiBvbiBhIHdvcmtlciBgYWdlbnRzIHNlY3JldHMgZ2V0IGF1dGggPEtFWT5gIHwgfjEwOC1jaGFyIHNldHVwLXRva2VuIHByZXNlbnQsIG5vIFRvdWNoIElEIHwKfCBBY2NvdW50IHN1cmZhY2VzIHRva2VuIHwgYGFnZW50cyBhY2NvdW50cyAtLWpzb25gIHwgYGhlYWRsZXNzVG9rZW46IHRydWVgIGZvciB0aGUgbWludGVkIGFjY291bnQgfAp8IE1pbnQgcm91bmQtdHJpcHMgfCBgYWdlbnRzIGFjY291bnRzIG1pbnQgPGxhYmVsPmAgdGhlbiBydW4gaGVhZGxlc3Mgb24gYSB3b3JrZXIgfCBDbGF1ZGUgcnVucyBvbiB0aGUgbWludGVkIHRva2VuIHwKClVuaXQgdGVzdHMgKG1vY2stZnJlZSwgZXhpc3RpbmcgZmlsZS1zdG9yZSBzZWFtcyk6IHRoZSBzeW5jIHRhcmdldCBmaWx0ZXIgZXhjbHVkZXMKYGludGVyYWN0aXZlSG9zdGA7IGByZXNvbHZlQ2xhdWRlU2V0dXBUb2tlbmAgcmVzb2x2ZXMgdmlhIGFjY291bnQgZmluZ2VycHJpbnQgdGhlbiBlbWFpbApmYWxsYmFjazsgYERpc2NvdmVyZWRBY2NvdW50LmhlYWRsZXNzVG9rZW5gIHJlZmxlY3RzIGEgcHJvdmlzaW9uZWQga2V5LiBMaXZlIHByb29mIG9uIHRoaXMKZmxlZXQ6IG1pbnQgZm9yIG9uZSBhY2NvdW50LCBgYWdlbnRzIGFjY291bnRzIHN5bmNgLCBjb25maXJtIGV2ZXJ5IGB3b3JrZXJgIHJlYWRzIHRoZSB0b2tlbgphbmQgdGhlIGludGVyYWN0aXZlIGhvc3QgKHppb24pIGRvZXMgbm90LCBhbmQgaXRzIGludGVyYWN0aXZlIENsYXVkZSBzdGlsbCBydW5zIG9uIE9BdXRoLgoKIyMgUmlza3MKCnwgUmlzayB8IE1pdGlnYXRpb24gfAp8LS0tfC0tLXwKfCBCZW5kaW5nIEVYRUMtQUNDT1VOVC0xIChhY2NvdW50cyBuZXZlciBjb3B5IGNyZWRlbnRpYWxzKSB8IEV4cGxpY2l0IGNyZWRlbnRpYWwtY2xhc3Mgc3BsaXQgaW4gdGhlIHNwZWM6IHJvdGF0aW5nIGxvZ2luIG5ldmVyIGNvcGllZDsgbm9uLXJvdGF0aW5nIHNldHVwLXRva2VuIGlzIGEgZGlzdGluY3QgcG9ydGFibGUgY2xhc3MuIHwKfCBSZS1rZXlpbmcgYnJlYWtzIGFscmVhZHktcHJvdmlzaW9uZWQgZW1haWwta2V5ZWQgdG9rZW5zIHwgYHJlc29sdmVDbGF1ZGVTZXR1cFRva2VuYCBmYWxscyBiYWNrIHRvIHRoZSBlbWFpbCBrZXk7IG5vIGZvcmNlZCBtaWdyYXRpb24uIHwKfCBTeW5jIHBsYWNlcyBhIHRva2VuIG9uIHRoZSB3cm9uZyBib3ggfCBgaW50ZXJhY3RpdmVIb3N0YCBleGNsdXNpb24gaXMgdW5pdC10ZXN0ZWQ7IHN5bmMgaXMgd29ya2VyLW9ubHkgYnkgY29uc3RydWN0aW9uLiB8CnwgVXNhZ2UgYmFycyBzdGlsbCAicGVuZGluZyIgfCBPdXQgb2Ygc2NvcGUg4oCUIGFuIGV4dGVybmFsIEFudGhyb3BpYyBzY29wZSBsaW1pdCAoUlVTSC0yMzkyKSwgbm90IHNvbHZhYmxlIGhlcmUuIHwKCiMjIFRyYWNraW5nCgotICoqUlVTSC0yMzY0Kiog4oCUIHRoZSBtaW50IGNvbW1hbmQgKGNoYW5nZSAzKS4KLSAqKlJVU0gtMjM3MSoqIOKAlCBhdXRvLXN5bmMgd2l0aCB0aGUgaW50ZXJhY3RpdmUtaG9zdCBjYXJ2ZS1vdXQgKGNoYW5nZSA0KS4KLSAqKlJVU0gtMjM5NSoqIOKAlCBjbG9zZWQgYXMgKipzdXBlcnNlZGVkKiogYnkgdGhlIHNoaXBwZWQgaW50ZXJhY3RpdmUvaGVhZGxlc3Mgc3BsaXQuCi0gKipSVVNILTIzOTIqKiDigJQgcmVtYWlucyBvcGVuIGFzIHRoZSB0cmFja2VkIHJlYXNvbiB1c2FnZSBiYXJzIGNhbid0IGNvbWUgZnJvbSB0aGUgc2V0dXAtdG9rZW4uCi0gKipTY29wZSBmYWxsYmFjazoqKiBpZiBhIHNtYWxsZXIgc3RlcCBpcyBwcmVmZXJyZWQsIGxhbmQgY2hhbmdlcyAzICsgNCAobWludCArIGNhcnZlLW91dCkgYWdhaW5zdCB0aGUgZXhpc3RpbmcgZW1haWwta2V5ZWQgYnVuZGxlIGFuZCBkZWZlciB0aGUgYWNjb3VudHMgcmUta2V5IChjaGFuZ2VzIDEsIDIpIHRvIGEgZm9sbG93LXVwLgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+ClRoZSBpbnRlcmFjdGl2ZSBob3N0IGlzIHRoZSBvbmUgYm94IHRoYXQgbXVzdCBhbHdheXMgcnVuIGl0cyBvd24gcm90YXRpbmcgT0F1dGggbG9naW4g4oCUCml0IGlzIG5ldmVyIGEgc3luYyB0YXJnZXQuIFdvcmtlcnMgZ2V0IHRoZSBtaW50ZWQsIG5vbi1yb3RhdGluZyBzZXR1cC10b2tlbjsgdGhlIGFjY291bnQKaXMgdGhlIHVuaXQgdGhhdCBvd25zIGJvdGguCjwvZGl2PgoKIyMgRmlndXJlIOKAlCBhY2NvdW50IG93bnMgdHdvIGNyZWRlbnRpYWwgY2xhc3Nlczsgc3luYyByZWFjaGVzIHdvcmtlcnMgb25seQoKPHN2ZyB2aWV3Qm94PSIwIDAgODYwIDM4MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkFjY291bnQgb3ducyBhIHJvdGF0aW5nIGxvZ2luIGFuZCBhIHBvcnRhYmxlIHNldHVwLXRva2VuOyBzeW5jIHJlYWNoZXMgd29ya2VycyBvbmx5LCBuZXZlciB0aGUgaW50ZXJhY3RpdmUgaG9zdCIgZm9udC1mYW1pbHk9InVpLXNhbnMtc2VyaWYsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiI+CiAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9Ijg2MCIgaGVpZ2h0PSIzODAiIGZpbGw9IiMwYTBhMGEiLz4KICA8IS0tIGFjY291bnQgbm9kZSAtLT4KICA8cmVjdCB4PSIzMzAiIHk9IjI0IiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjcwIiByeD0iMTAiIGZpbGw9IiMxNDIxMGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI0MzAiIHk9IjUyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYTNlNjM1IiBmb250LXNpemU9IjE2IiBmb250LXdlaWdodD0iNzAwIj5hY2NvdW50ICJ3b3JrIjwvdGV4dD4KICA8dGV4dCB4PSI0MzAiIHk9Ijc0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOGZhZTVmIiBmb250LXNpemU9IjEyIj5hZ2VudCArIGZpbmdlcnByaW50IChhY2NvdW50cy55YW1sKTwvdGV4dD4KICA8IS0tIHR3byBjcmVkZW50aWFsIGNsYXNzZXMgLS0+CiAgPHJlY3QgeD0iMTIwIiB5PSIxNTAiIHdpZHRoPSIyOTAiIGhlaWdodD0iODYiIHJ4PSIxMCIgZmlsbD0iIzFhMTIwNSIgc3Ryb2tlPSIjZTZhMTNhIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjI2NSIgeT0iMTc4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZTZhMTNhIiBmb250LXNpemU9IjE0IiBmb250LXdlaWdodD0iNzAwIj5yb3RhdGluZyBPQXV0aCBsb2dpbjwvdGV4dD4KICA8dGV4dCB4PSIyNjUiIHk9IjIwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2M5OTMyZiIgZm9udC1zaXplPSIxMS41Ij51c2VyOnByb2ZpbGUgwrcgc3RheXMgaW4gdmVyc2lvbiBob21lPC90ZXh0PgogIDx0ZXh0IHg9IjI2NSIgeT0iMjE5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYzk5MzJmIiBmb250LXNpemU9IjExLjUiPk5FVkVSIGNvcGllZCDCtyB1c2FnZSBiYXJzPC90ZXh0PgogIDxyZWN0IHg9IjQ1MCIgeT0iMTUwIiB3aWR0aD0iMjkwIiBoZWlnaHQ9Ijg2IiByeD0iMTAiIGZpbGw9IiMwYjFhMTIiIHN0cm9rZT0iIzNhZDZhMCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI1OTUiIHk9IjE3OCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzNhZDZhMCIgZm9udC1zaXplPSIxNCIgZm9udC13ZWlnaHQ9IjcwMCI+c2V0dXAtdG9rZW4gKGhlYWRsZXNzKTwvdGV4dD4KICA8dGV4dCB4PSI1OTUiIHk9IjIwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzJmYjQ4OCIgZm9udC1zaXplPSIxMS41Ij51c2VyOmluZmVyZW5jZSDCtyBub24tcm90YXRpbmc8L3RleHQ+CiAgPHRleHQgeD0iNTk1IiB5PSIyMTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMyZmI0ODgiIGZvbnQtc2l6ZT0iMTEuNSI+bWludGFibGUgwrcgUE9SVEFCTEUgdG8gd29ya2VyczwvdGV4dD4KICA8IS0tIGNvbm5lY3RvcnMgYWNjb3VudCAtPiBjbGFzc2VzIC0tPgogIDxwYXRoIGQ9Ik0zODAgOTQgTDI2NSAxNTAiIHN0cm9rZT0iI2U2YTEzYSIgc3Ryb2tlLXdpZHRoPSIxLjUiIGZpbGw9Im5vbmUiLz4KICA8cGF0aCBkPSJNNDgwIDk0IEw1OTUgMTUwIiBzdHJva2U9IiMzYWQ2YTAiIHN0cm9rZS13aWR0aD0iMS41IiBmaWxsPSJub25lIi8+CiAgPCEtLSBkZXZpY2VzIHJvdyAtLT4KICA8cmVjdCB4PSIxMjAiIHk9IjMwMCIgd2lkdGg9IjI5MCIgaGVpZ2h0PSI1OCIgcng9IjEwIiBmaWxsPSIjMWExMjA1IiBzdHJva2U9IiNlNmExM2EiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iMjY1IiB5PSIzMjUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNlNmExM2EiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSI3MDAiPmludGVyYWN0aXZlIGhvc3QgKHppb24pPC90ZXh0PgogIDx0ZXh0IHg9IjI2NSIgeT0iMzQ0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYzk5MzJmIiBmb250LXNpemU9IjExIj5ydW5zIE9BdXRoIGxvZ2luIMK3IE5PVCBhIHN5bmMgdGFyZ2V0PC90ZXh0PgogIDxyZWN0IHg9IjQ1MCIgeT0iMzAwIiB3aWR0aD0iMjkwIiBoZWlnaHQ9IjU4IiByeD0iMTAiIGZpbGw9IiMwYjFhMTIiIHN0cm9rZT0iIzNhZDZhMCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI1OTUiIHk9IjMyNSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzNhZDZhMCIgZm9udC1zaXplPSIxMyIgZm9udC13ZWlnaHQ9IjcwMCI+d29ya2VyIGRldmljZXMgKG0wLi5tNiwgczAuLik8L3RleHQ+CiAgPHRleHQgeD0iNTk1IiB5PSIzNDQiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMyZmI0ODgiIGZvbnQtc2l6ZT0iMTEiPnJlY2VpdmUgc3luY2VkIHNldHVwLXRva2VuPC90ZXh0PgogIDwhLS0gbG9naW4gLT4gaW50ZXJhY3RpdmUgaG9zdCAoc3RheXMpIC0tPgogIDxwYXRoIGQ9Ik0yNjUgMjM2IEwyNjUgMzAwIiBzdHJva2U9IiNlNmExM2EiIHN0cm9rZS13aWR0aD0iMS41IiBmaWxsPSJub25lIi8+CiAgPCEtLSB0b2tlbiAtPiB3b3JrZXJzIChzeW5jKSAtLT4KICA8cGF0aCBkPSJNNTk1IDIzNiBMNTk1IDMwMCIgc3Ryb2tlPSIjM2FkNmEwIiBzdHJva2Utd2lkdGg9IjIiIGZpbGw9Im5vbmUiIG1hcmtlci1lbmQ9InVybCgjYSkiLz4KICA8dGV4dCB4PSI2MTIiIHk9IjI3MiIgZmlsbD0iIzNhZDZhMCIgZm9udC1zaXplPSIxMSI+c3luYzwvdGV4dD4KICA8IS0tIGV4cGxpY2l0IE5PIGVkZ2UgZnJvbSB0b2tlbiB0byBpbnRlcmFjdGl2ZSBob3N0IC0tPgogIDxwYXRoIGQ9Ik00NzAgMjY1IEwzNjAgMzIwIiBzdHJva2U9IiM3YTJmMmYiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtZGFzaGFycmF5PSI1IDQiIGZpbGw9Im5vbmUiLz4KICA8dGV4dCB4PSIzOTIiIHk9IjI4NiIgZmlsbD0iI2MwNWE1YSIgZm9udC1zaXplPSIxMSIgZm9udC13ZWlnaHQ9IjcwMCI+ZXhjbHVkZWQ8L3RleHQ+CiAgPGxpbmUgeDE9IjQwNSIgeTE9IjI4OCIgeDI9IjQyNSIgeTI9IjMwMCIgc3Ryb2tlPSIjYzA1YTVhIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDxsaW5lIHgxPSI0MjUiIHkxPSIyODgiIHgyPSI0MDUiIHkyPSIzMDAiIHN0cm9rZT0iI2MwNWE1YSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8ZGVmcz4KICAgIDxtYXJrZXIgaWQ9ImEiIHZpZXdCb3g9IjAgMCAxMCAxMCIgcmVmWD0iOCIgcmVmWT0iNSIgbWFya2VyV2lkdGg9IjciIG1hcmtlckhlaWdodD0iNyIgb3JpZW50PSJhdXRvLXN0YXJ0LXJldmVyc2UiPgogICAgICA8cGF0aCBkPSJNMCAwIEwxMCA1IEwwIDEwIHoiIGZpbGw9IiMzYWQ2YTAiLz4KICAgIDwvbWFya2VyPgogIDwvZGVmcz4KPC9zdmc+CgoqRmlndXJlOiBvbmUgYWNjb3VudCBvd25zIHR3byBjcmVkZW50aWFsIGNsYXNzZXMuIFRoZSByb3RhdGluZyBsb2dpbiBzdGF5cyBwdXQgYW5kIHJ1bnMgb24KdGhlIGludGVyYWN0aXZlIGhvc3Q7IHRoZSBub24tcm90YXRpbmcgc2V0dXAtdG9rZW4gaXMgbWludGVkIGFuZCBzeW5jZWQgdG8gd29ya2VycyBvbmx5IOKAlAp0aGUgaW50ZXJhY3RpdmUgaG9zdCBpcyBleHBsaWNpdGx5IGV4Y2x1ZGVkIGZyb20gdGhlIHN5bmMgdGFyZ2V0IHNldC4qCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

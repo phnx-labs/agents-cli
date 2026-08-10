@@ -1,0 +1,816 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Enforcing invariants in agents-cli: why agent-authored changes regress</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e8e8e8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e8e8e8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">visual</span><span class="status-badge status-draft">draft</span></div>
+<h1>Enforcing invariants in agents-cli: why agent-authored changes regress</h1>
+<p class="summary">A design document. Agent-authored changes regress in a narrow, identifiable set of subsystems. This analyzes why, separates four independent causes, and sets out how each class of rule gets enforced — mechanically, at plan review, or at code review — given that the author and the reviewer are both agents.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Status: draft, for review — authored 2026-08-09 from repository evidence<span class="meta-sep" aria-hidden="true">·</span>Primary proposal — a build-time check that the credential access path has one entry point<span class="meta-sep" aria-hidden="true">·</span>Two supporting proposals — requirement identifier uniqueness and status separation<span class="meta-sep" aria-hidden="true">·</span>Evidence base — 4,229 commits over 120 days, 3,609 sessions across three machines</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude-code claude-opus-5</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Owner</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">worker-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">e4cb3b20</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-09</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#story"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Story</a><a href="#figure"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Figure</a><a href="#data"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Data</a></nav><article class="artifact-body"><h2 id="story">Story</h2>
+<h3>1. Context and problem statement</h3>
+<p>agents-cli is developed almost entirely by AI coding agents. The repository governs their work
+through a layered instruction system: a normative specification for six subsystems, ten
+architectural rules in the component memory file, a fourteen-item review contract, and roughly
+57,000 words of fleet-level process guidance injected into every agent's context before it reads
+any code.</p>
+<p>Despite that volume, changes in a narrow set of subsystems regress repeatedly. The pattern is
+concentrated rather than diffuse: over the last 120 days, the share of commits that are fixes or
+reverts is 50% in the daemon and in secrets/keychain, 44% in accounts and authentication, 40% in
+routines, and 38% in usage — against 36% in sessions, the most heavily specified subsystem in the
+repository.</p>
+<p>The natural hypothesis is that instructions are too thin in the affected areas. <strong>The evidence
+does not support that hypothesis, and this document argues against it.</strong> Secrets is one of the
+most thoroughly specified subsystems in the codebase — 56 requirement identifiers, including
+explicit requirements governing interactive authorization prompts — and it has the joint-highest
+regression rate. Adding specification text is therefore unlikely to change the outcome.</p>
+<p>What the affected subsystems share is not a shortage of stated rules. It is that <strong>their rules
+are stated but not mechanically enforced</strong>, and in three cases the rules themselves are
+ambiguous or describe behavior that does not exist yet. This document identifies four independent
+causes, each verified against the code, proposes changes for each, and sets out in §7 how a rule
+in this repository can be enforced at all — given that both the author and the reviewer are
+agents that may not follow instructions.</p>
+<h3>2. Goals and non-goals</h3>
+<p><strong>Goals.</strong> Reduce the regression rate in the credential, daemon, routine and usage subsystems by
+converting stated invariants into mechanically checked ones. Make requirement identifiers usable
+as unambiguous references in review. Make it possible for an implementer to distinguish
+specified-and-implemented behavior from specified-and-intended behavior.</p>
+<p><strong>Non-goals.</strong> This document does not propose new instruction text, new process, or expanded
+review checklists. It does not propose restructuring the credential subsystem, changing the
+keychain access model, or altering the Touch ID authorization policy — the existing policy is
+sound and is not the problem. It does not address subsystems outside the identified cluster.</p>
+<h3>3. Background: how a change is governed today</h3>
+<p>Three tiers of instruction apply to code in this repository, and they differ sharply in force.</p>
+<p><strong>Tier 1, the normative specification</strong> (<code>apps/cli/docs/specifications.md</code>) defines 261
+requirement identifiers across six subsystems — sessions, secrets, agent execution, scheduling,
+routine execution, and the watchdog. Requirements use RFC-2119 keywords, cite the implementing
+<code>file:line</code>, and carry Given/When/Then scenarios intended to map onto tests. A change that
+deviates from a requirement is a defect in either the code or the document, and the document says
+so.</p>
+<p><strong>Tier 2, the architectural rules</strong> (<code>apps/cli/AGENTS.md</code>, "Core design choices") are prose. All
+ten share one structural form: a given decision has exactly one home in the code, and a second
+home is the defect. Capability gating lives only in <code>supports()</code>; legacy path handling only in
+<code>migrate.ts</code>; the choice between native resume and <code>/continue</code> only in <code>resolveSessionRecovery</code>.
+The file states the consequence directly: "Break these and downstream code drifts silently."</p>
+<p><strong>Tier 3 is everything else.</strong> The CLI registers 100 top-level command names across 81 loader
+modules. Six subsystems have a specification. The remainder have, at most, a design document —
+and design documents in this repository are explicitly non-normative. This was verified directly
+rather than taken on the specification's word: <code>hosts.md</code>, <code>teams.md</code> and <code>cloud.md</code> contain zero
+capitalized <code>MUST</code>, <code>SHOULD</code>, or <code>MAY</code> between them, while using lowercase "must" in prose that
+reads as though it binds.</p>
+<div class="artifact-figure artifact-figure-diagram">
+<svg viewBox="0 0 1000 500" role="img" aria-label="Coverage of the command surface across four levels of specification">
+  <text x="0" y="18" fill="#e8e8e8" font-size="15" font-weight="700">Figure 1 — Specification coverage of the command surface</text>
+  <text x="0" y="38" fill="#e8e8e8" font-size="12">100 top-level command names, 81 loader modules, six subsystems under a normative contract.</text>
+
+  <rect x="0" y="60" width="92" height="34" rx="4" fill="#a3e635" fill-opacity="0.85"></rect>
+  <rect x="94" y="60" width="46" height="34" rx="4" fill="#a3e635" fill-opacity="0.38"></rect>
+  <rect x="142" y="60" width="430" height="34" rx="4" fill="#e8e8e8" fill-opacity="0.20"></rect>
+  <rect x="574" y="60" width="426" height="34" rx="4" fill="#e8e8e8" fill-opacity="0.07" stroke="#e8e8e8" stroke-opacity="0.2" stroke-dasharray="4 4"></rect>
+  <text x="6" y="83" fill="#0a0a0a" font-size="11.5" font-weight="700">6 specified</text>
+  <text x="150" y="83" fill="#e8e8e8" font-size="11.5" font-weight="700">documented, not specified</text>
+  <text x="582" y="83" fill="#e8e8e8" font-size="11.5" font-weight="700">unspecified — behavior is whatever the implementation does</text>
+  <text x="94" y="112" fill="#e8e8e8" font-size="10.5">3 governed in part</text>
+
+  <g>
+    <rect x="0" y="140" width="1000" height="84" rx="8" fill="#a3e635" fill-opacity="0.12" stroke="#a3e635" stroke-width="1.5"></rect>
+    <text x="18" y="164" fill="#e8e8e8" font-weight="700">Normative contract exists</text>
+    <text x="18" y="185" fill="#e8e8e8" font-size="11.5" font-family="ui-monospace, monospace">sessions · secrets · run · scheduling singularity · routine execution · watchdog</text>
+    <text x="18" y="206" fill="#e8e8e8" font-size="11">RFC-2119 requirements with Given/When/Then scenarios. A deviation is a defect in the code or the document.</text>
+
+    <rect x="0" y="236" width="1000" height="74" rx="8" fill="#e8e8e8" fill-opacity="0.06" stroke="#e8e8e8" stroke-opacity="0.35" stroke-width="1.5"></rect>
+    <text x="18" y="260" fill="#e8e8e8" font-weight="700">Partially governed — a single requirement reaches the surface</text>
+    <text x="18" y="281" fill="#e8e8e8" font-size="11.5" font-family="ui-monospace, monospace">monitors (SING-5/8/9) · doctor (SEC-17 only) · daemon (SING-1, SING-4a)</text>
+    <text x="18" y="301" fill="#e8e8e8" font-size="11">All other behavior of these commands is unspecified.</text>
+
+    <rect x="0" y="322" width="1000" height="84" rx="8" fill="#e8e8e8" fill-opacity="0.04" stroke="#e8e8e8" stroke-opacity="0.25" stroke-width="1.5"></rect>
+    <text x="18" y="346" fill="#e8e8e8" font-weight="700">Design document only — non-normative</text>
+    <text x="18" y="367" fill="#e8e8e8" font-size="11.5" font-family="ui-monospace, monospace">hosts · teams · cloud · browser · computer · plugins · subagents · workflows · profiles · share · pty · menubar · sync · versions</text>
+    <text x="18" y="389" fill="#f0b429" font-size="11">Verified: zero capitalized MUST/SHOULD/MAY across hosts.md, teams.md and cloud.md. Lowercase "must" appears and does not bind.</text>
+
+    <rect x="0" y="418" width="1000" height="82" rx="8" fill="#e8e8e8" fill-opacity="0.02" stroke="#e8e8e8" stroke-opacity="0.18" stroke-width="1.5" stroke-dasharray="5 4"></rect>
+    <text x="18" y="442" fill="#e8e8e8" font-weight="700">No specification and no design document</text>
+    <text x="18" y="463" fill="#e8e8e8" font-size="11.5" font-family="ui-monospace, monospace">wallet · helper · sync/apply/status · worktree · webhook · funnel · mailboxes · feed · message/send · budget · audit</text>
+    <text x="18" y="485" fill="#e8e8e8" font-size="11">The signed keychain helper — directly adjacent to the credential boundary — sits in this row.</text>
+  </g>
+</svg>
+<p class="artifact-legend">Coverage is uneven by design, but the uncovered set includes surfaces that act on other machines, hold durable state, or sit next to credentials.</p>
+</div><h2 id="figure">Figure</h2>
+<h3>4. Analysis</h3>
+<p>Four causes are separable. They are ordered by how much of the observed regression rate each
+plausibly explains.</p>
+<h4>4.1 An architectural invariant is stated but not enforced</h4>
+<p>The credential subsystem defines a single entry point for reading a keychain item. Requirement
+<code>SEC-13</code> names it explicitly and states that the check happens before any helper process is
+spawned:</p>
+<blockquote>
+<p>This covers raw item reads too, not just bundles: <code>getKeychainToken</code>/<code>getKeychainTokens</code>
+consult <code>assertRawKeychainReadAllowed</code> (<code>lib/secrets/index.ts:877-899</code>) BEFORE any helper
+process is spawned.</p>
+</blockquote>
+<p>A second requirement, <code>SEC-27</code>, places a negative-result memo behind the same function so that a
+polling caller cannot re-raise an interactive authorization sheet every few seconds. Both
+protections are therefore reachable only through <code>getKeychainToken</code>. The design is sound.</p>
+<p>Four non-test modules invoke <code>/usr/bin/security</code> directly and never reach that function:
+<code>lib/agents.ts:1688</code>, <code>lib/usage.ts:3043</code>, <code>lib/auto-dispatch-linear.ts:26</code>, and
+<code>lib/openclaw-keychain.ts:276</code>. On the first two, the only guard is an environment variable,
+<code>AGENTS_NO_KEYCHAIN_PROBE</code>, documented at <code>agents.ts:1686</code> as existing for hermetic tests. The
+third has no guard at all and is reached from <code>linear-project-counts.ts:222</code>, a counting path that
+can execute unattended.</p>
+<div class="artifact-figure artifact-figure-diagram">
+<svg viewBox="0 0 1000 420" role="img" aria-label="The credential read path: one guarded entry point and four modules that bypass it">
+  <text x="0" y="18" fill="#e8e8e8" font-size="15" font-weight="700">Figure 2 — The credential read path</text>
+  <text x="0" y="38" fill="#e8e8e8" font-size="12">The policy checks live at one function. Four modules reach the operating system without traversing it.</text>
+
+  <rect x="330" y="62" width="340" height="66" rx="10" fill="#a3e635" fill-opacity="0.16" stroke="#a3e635" stroke-width="2"></rect>
+  <text x="500" y="88" text-anchor="middle" fill="#e8e8e8" font-size="13" font-weight="700">assertRawKeychainReadAllowed</text>
+  <text x="500" y="109" text-anchor="middle" fill="#e8e8e8" font-size="11" font-family="ui-monospace, monospace">lib/secrets/index.ts:877-899</text>
+  <text x="500" y="124" text-anchor="middle" fill="#e8e8e8" font-size="10.5">SEC-13 headless guard · SEC-27 negative memo</text>
+
+  <rect x="330" y="156" width="340" height="46" rx="10" fill="#e8e8e8" fill-opacity="0.06" stroke="#e8e8e8" stroke-opacity="0.3"></rect>
+  <text x="500" y="176" text-anchor="middle" fill="#e8e8e8" font-size="12" font-weight="700">spawnKeychainHelper → /usr/bin/security</text>
+  <text x="500" y="194" text-anchor="middle" fill="#e8e8e8" font-size="10.5">bounded timeout, SIGKILL, reaper daemon</text>
+  <line x1="500" y1="128" x2="500" y2="156" stroke="#a3e635" stroke-width="1.6"></line>
+
+  <rect x="110" y="62" width="180" height="46" rx="8" fill="#e8e8e8" fill-opacity="0.06" stroke="#e8e8e8" stroke-opacity="0.3"></rect>
+  <text x="200" y="82" text-anchor="middle" fill="#e8e8e8" font-size="11.5" font-weight="700">getKeychainToken</text>
+  <text x="200" y="99" text-anchor="middle" fill="#e8e8e8" font-size="10.5">the intended entry point</text>
+  <line x1="290" y1="85" x2="325" y2="90" stroke="#a3e635" stroke-width="1.6"></line>
+  <polygon points="331,91 320,85 319,95" fill="#a3e635"></polygon>
+
+  <text x="0" y="240" fill="#f0b429" font-size="12.5" font-weight="700">Modules that invoke security(1) directly — no policy check, no memo, no headless guard</text>
+  <g>
+    <text x="0" y="266" fill="#e8e8e8">lib/agents.ts:1688</text>
+    <text x="340" y="266" fill="#e8e8e8">antigravityOsKeyringProbe</text>
+    <text x="0" y="290" fill="#e8e8e8">lib/usage.ts:3043</text>
+    <text x="340" y="290" fill="#e8e8e8">a second copy of the same probe (see usage.ts:3026)</text>
+    <text x="0" y="314" fill="#e8e8e8">lib/auto-dispatch-linear.ts:26</text>
+    <text x="340" y="314" fill="#e8e8e8">unguarded; reached from linear-project-counts.ts:222</text>
+    <text x="0" y="338" fill="#e8e8e8">lib/openclaw-keychain.ts:276</text>
+    <text x="340" y="338" fill="#e8e8e8">stores and reads an item outside the subsystem</text>
+  </g>
+
+  <rect x="0" y="356" width="1000" height="56" rx="8" fill="#f0b429" fill-opacity="0.10" stroke="#f0b429" stroke-opacity="0.5"></rect>
+  <text x="18" y="378" fill="#e8e8e8" font-size="11.5" font-weight="700">Nothing in the build fails when a module takes the lower path, so the invariant holds only while every author remembers it.</text>
+  <text x="18" y="398" fill="#e8e8e8" font-size="11.5">Two review rules already prohibit this — "no duplicate code" and "cross-cutting changes go to the source" — but both are enforced by reviewer attention alone.</text>
+</svg>
+<p class="artifact-legend">The invariant is architecturally correct and textually stated. It is not checkable, so it degrades one call site at a time.</p>
+</div><p>The duplication is self-documented. <code>usage.ts:3026</code> describes its own probe as mirroring the one
+in <code>agents.ts</code>, and the two implementations have already diverged in their arguments — <code>usage.ts</code>
+passes <code>-w</code> to retrieve the value, <code>agents.ts</code> omits it because it only tests existence:</p>
+<pre><code>// apps/cli/src/lib/usage.ts:3026 (comment) and 3040-3046
+//  * the probe command pair mirrors antigravityOsKeyringProbe in agents.ts, with
+if (process.env.AGENTS_NO_KEYCHAIN_PROBE === '1') return null;
+const probe =
+  process.platform === 'darwin'
+    ? { cmd: 'security', args: ['find-generic-password', '-w', '-s', 'gemini', '-a', 'antigravity'] }
+    : process.platform === 'linux'
+      ? { cmd: 'secret-tool', args: ['lookup', 'service', 'gemini', 'username', 'antigravity'] }
+      : null;
+</code></pre>
+<p>The observable consequence is a remediation loop. Twenty-five changes since 2026-05-21 name the
+interactive authorization prompt in their subject line, and the frequency is increasing rather
+than converging: three in May, four in June, six in July, and twelve in the first nine days of
+August. They are distributed across four subsystems — secrets, usage, devices and sync — which is
+what one expects when a policy is enforced at call sites rather than at a boundary. Two of them
+state the generalization explicitly and still did not close it: one is titled "close the same
+headless-prompt gap in the remaining background callers" (2026-07-16), and another, three weeks
+later, "stop background Touch ID prompt storms from raw keychain reads."</p>
+<div class="artifact-figure artifact-figure-diagram">
+<svg viewBox="0 0 1000 340" role="img" aria-label="Changes naming the interactive authorization prompt, by month">
+  <text x="0" y="18" fill="#e8e8e8" font-size="15" font-weight="700">Figure 3 — Remediation frequency for the interactive authorization prompt</text>
+  <text x="0" y="38" fill="#e8e8e8" font-size="12">Changes whose subject line names the prompt. A converging fix would trend down; this trends up.</text>
+
+  <line x1="60" y1="240" x2="900" y2="240" stroke="#e8e8e8" stroke-opacity="0.3"></line>
+  <g>
+    <rect x="120" y="195" width="110" height="45" rx="4" fill="#a3e635" fill-opacity="0.5"></rect>
+    <text x="175" y="186" text-anchor="middle" fill="#e8e8e8" font-weight="700">3</text>
+    <text x="175" y="260" text-anchor="middle" fill="#e8e8e8">May 2026</text>
+
+    <rect x="290" y="180" width="110" height="60" rx="4" fill="#a3e635" fill-opacity="0.55"></rect>
+    <text x="345" y="171" text-anchor="middle" fill="#e8e8e8" font-weight="700">4</text>
+    <text x="345" y="260" text-anchor="middle" fill="#e8e8e8">June</text>
+
+    <rect x="460" y="150" width="110" height="90" rx="4" fill="#f0b429" fill-opacity="0.7"></rect>
+    <text x="515" y="141" text-anchor="middle" fill="#e8e8e8" font-weight="700">6</text>
+    <text x="515" y="260" text-anchor="middle" fill="#e8e8e8">July</text>
+
+    <rect x="630" y="60" width="110" height="180" rx="4" fill="#f0b429" fill-opacity="0.9"></rect>
+    <text x="685" y="51" text-anchor="middle" fill="#e8e8e8" font-weight="700">12</text>
+    <text x="685" y="260" text-anchor="middle" fill="#e8e8e8">Aug 1–9 only</text>
+
+    <text x="770" y="140" fill="#f0b429" font-size="12" font-weight="700">nine days, four times</text>
+    <text x="770" y="160" fill="#f0b429" font-size="12" font-weight="700">June's full-month count</text>
+  </g>
+
+  <text x="0" y="296" fill="#e8e8e8" font-size="11.5">Distribution across subsystems: secrets 18, usage 2, changelog 2, devices 1, sync 1, design 1.</text>
+  <text x="0" y="318" fill="#e8e8e8" font-size="11">Measurement is subject-line matching, so it undercounts silent remediations and is a lower bound.</text>
+</svg>
+<p class="artifact-legend">Frequency is the signal, not any individual change. Each of these was authored believing it addressed the cause.</p>
+</div><h4>4.2 Requirement identifiers are not unique</h4>
+<p>The specification states that identifiers are section-namespaced so that each one is globally
+unique. Five are not. <code>SES-40</code> is defined three times, at lines 296, 481 and 660, with three
+unrelated meanings — account attribution, index authority, and focus/resume routing. <code>SES-38</code> and
+<code>SES-39</code> are each defined twice, as are <code>SING-11</code> and <code>SING-12</code>. The collision is not cosmetic:
+<code>SING-12</code> cites <code>SING-11</code> in its own body, and <code>SING-11</code> now denotes both "a single scheduled fire
+launches a routine at most once" and "at most one daemon is alive per state directory."</p>
+<p>The practical effect is that an instruction of the form "satisfy <code>SES-40</code>" cannot be resolved by
+an implementer, and a review comment citing it cannot be resolved by an author. Both collision
+clusters fall in the daemon and routine subsystems, which are among the highest-regression areas.</p>
+<h4>4.3 Aspirational requirements are formatted identically to implemented ones</h4>
+<p>The specification supports a status marker distinguishing behavior the code exhibits from
+behavior it is intended to exhibit. In the routine execution section, eight of the eleven
+requirements carry <code>[Intended]</code>. The marker appears inline in the identifier line, in the form
+<code>(MUST, [Intended])</code>, which places it in the same visual position as the RFC-2119 keyword and
+makes it easy to overlook — including programmatically, as a regex matching <code>(MUST)</code> will not
+match it.</p>
+<p>An implementer reading that section therefore encounters eleven statements in identical
+grammatical form, of which three describe the system and eight describe a target. Absent careful
+reading, an agent will implement against, or assert conformance to, behavior that does not exist.</p>
+<table>
+<thead>
+<tr>
+<th>Identifier</th>
+<th>Status</th>
+<th>Requirement, abbreviated</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>RT-1</td>
+<td>implemented</td>
+<td><code>projects</code> (plural) is grouping metadata only</td>
+</tr>
+<tr>
+<td>RT-2</td>
+<td><code>[Intended]</code></td>
+<td>The execution anchor is distinct from the plural grouping</td>
+</tr>
+<tr>
+<td>RT-3</td>
+<td><code>[Intended]</code></td>
+<td>The working directory is resolved on the execution target</td>
+</tr>
+<tr>
+<td>RT-4</td>
+<td><code>[Intended]</code></td>
+<td>A <code>command</code> routine (shell body, no agent) must …</td>
+</tr>
+<tr>
+<td>RT-5</td>
+<td><code>[Intended]</code></td>
+<td><code>add</code>/<code>edit</code> verify readiness before accepting a definition</td>
+</tr>
+<tr>
+<td>RT-6</td>
+<td><code>[Intended]</code></td>
+<td>Every attempt is recorded as a <code>RunMeta</code> under <code>.history/runs/</code></td>
+</tr>
+<tr>
+<td>RT-7</td>
+<td><code>[Intended]</code></td>
+<td><code>RunMeta.status</code> distinguishes, at minimum, …</td>
+</tr>
+<tr>
+<td>RT-8</td>
+<td>implemented</td>
+<td><code>repo</code> is an external identity, not a local checkout</td>
+</tr>
+<tr>
+<td>RT-9</td>
+<td><code>[Intended]</code></td>
+<td><code>resume</code> re-runs the readiness check</td>
+</tr>
+<tr>
+<td>RT-10</td>
+<td><code>[Intended]</code></td>
+<td>A raw YAML edit must …</td>
+</tr>
+<tr>
+<td>RT-11</td>
+<td>implemented</td>
+<td>The menu-bar helper consumes state for display only</td>
+</tr>
+</tbody></table>
+<p>Across the whole document, sixteen requirements carry <code>[Intended]</code> and two carry <code>[Drift]</code>. Nine
+of the sixteen are in routine execution.</p>
+<h4>4.4 Coverage gaps adjacent to the credential boundary</h4>
+<p>The specification's own coverage inventory places the signed keychain helper and the wallet in
+the unspecified row, and names them among the five surfaces where the absence is most
+consequential, on the grounds that they "sit directly against the credential boundary that
+§Secrets specifies, without inheriting any of its requirements." The same row contains
+<code>sync</code>/<code>apply</code>/<code>status</code>, which reconcile configuration across every machine.</p>
+<p>This is a real gap, but it is the weakest of the four causes on the evidence available: the
+subsystems with no contract at all (usage at 38%, sync at 34%) regress <em>less</em> than the heavily
+specified secrets subsystem at 50%. Coverage alone does not predict regression, which is the
+central reason this document does not recommend writing more specification as the primary
+remedy.</p>
+<h2 id="data">Data</h2>
+<h3>5. Proposal</h3>
+<h4>5.1 Primary: make the credential entry point structurally singular</h4>
+<p>Add a build-time check asserting that no module outside <code>lib/secrets/</code> invokes the keychain
+binary, implemented as a unit test in the existing suite rather than a lint plugin, so that it
+runs everywhere the suite runs and requires no new tooling.</p>
+<p>The check enumerates source files, excludes <code>lib/secrets/</code>, and fails on any occurrence of
+<code>find-generic-password</code>, <code>add-generic-password</code>, <code>delete-generic-password</code>, or a direct
+<code>/usr/bin/security</code> invocation. It would fail today on the four modules in §4.1, so landing it
+requires routing those call sites through <code>getKeychainToken</code> first — which is the actual work,
+and is bounded: two of the four are the same duplicated probe and collapse into one.</p>
+<p>An explicit allowlist should exist for genuine exceptions, keyed by file and reason, so that an
+intentional exception is a reviewed diff to the allowlist rather than an invisible new call site.</p>
+<p><strong>Why this rather than the alternatives.</strong> Three other options were considered.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Assessment</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Restate the rule in <code>AGENTS.md</code></td>
+<td>Rejected. The rule is already stated twice — in <code>SEC-13</code> and in the "cross-cutting changes go to the source" review rule — and both were violated. Restating an unenforced rule does not change its enforcement</td>
+</tr>
+<tr>
+<td>Add a review-checklist item</td>
+<td>Rejected. The fourteen-item review contract already covers duplicate code and cross-cutting changes. Reviewer attention is the mechanism that has been failing</td>
+</tr>
+<tr>
+<td>Encapsulate at the type level (a branded credential type)</td>
+<td>Deferred. It is stronger than a test, but it constrains only the typed paths; a <code>execFileSync('security', …)</code> call remains reachable. It is a reasonable follow-on, not a substitute</td>
+</tr>
+<tr>
+<td>A unit test asserting one entry point</td>
+<td><strong>Recommended.</strong> Fails deterministically in CI, is cheap to write, requires no new dependency, and its failure message can name the correct entry point directly</td>
+</tr>
+</tbody></table>
+<p><strong>Risks.</strong> The check is textual and can be evaded by constructing the binary name dynamically.
+This is acceptable: the objective is to prevent inadvertent recreation of a second path, not to
+resist a deliberate one. A secondary risk is false positives in documentation strings and test
+fixtures, addressed by scoping to non-test sources and by the allowlist.</p>
+<h4>5.2 Supporting: renumber the five colliding identifiers</h4>
+<p>Assign new identifiers to the duplicate definitions and leave the first definition of each in
+place, so existing citations continue to resolve. Add a test asserting identifier uniqueness so
+that the property is maintained rather than periodically restored — the same structural argument
+as §5.1, applied to the document.</p>
+<p>The choice of which definition keeps the original number affects existing references in review
+history and in code comments, and is a judgment call for the specification's owner rather than
+one to make mechanically.</p>
+<h4>5.3 Supporting: separate intended from implemented behavior</h4>
+<p>Move <code>[Intended]</code> out of the identifier line and into a required trailing status line, and add a
+section-level summary stating how many of the section's requirements are currently implemented.
+An implementer should be able to tell, without reading every requirement body, that eight of the
+eleven routine requirements describe a target.</p>
+<h4>5.4 Explicitly not proposed: additional instruction text</h4>
+<p>Approximately 57,000 words of process guidance already precede every agent's first read of the
+code. None of the four causes above is an absent instruction. Each is an instruction that is
+stated and unenforced, ambiguous, or indistinguishable from an aspiration. Adding text addresses
+none of them and increases the context cost of every agent invocation.</p>
+<h3>6. Measurement, and its limitations</h3>
+<p>The regression rates in §1 are computed by attributing each commit to a subsystem by file path
+and classifying it as remediation when its subject begins with <code>fix</code> or <code>revert</code> or mentions a
+regression. The classifier is deliberately simple and has known biases, stated here so the
+numbers are read correctly.</p>
+<p>A commit touching two subsystems counts for both. Conventional-commit prefixes are author-chosen
+and inconsistently applied, so a fix committed as <code>refactor</code> is not counted. Manual inspection of
+the two largest buckets found the classification sound: all 65 daemon remediations carry a <code>fix</code>
+prefix, and secrets contains exactly one false positive — a test-quarantine commit matched on the
+word "regressions" — giving 135 rather than 136.</p>
+<p>The prompt-remediation count in §4.1 is subject-line matching and is a lower bound: it cannot see
+remediations that did not name the prompt.</p>
+<table>
+<thead>
+<tr>
+<th>Subsystem</th>
+<th>Paths attributed</th>
+<th>Commits</th>
+<th>Remediations</th>
+<th>Rate</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>daemon</td>
+<td><code>lib/daemon</code>, <code>commands/daemon</code>, <code>lib/services</code>, <code>commands/services</code></td>
+<td>129</td>
+<td>65</td>
+<td>50%</td>
+</tr>
+<tr>
+<td>secrets, keychain, helper</td>
+<td><code>lib/secrets</code>, <code>commands/secrets</code>, <code>commands/helper</code>, <code>lib/keychain</code></td>
+<td>272</td>
+<td>135</td>
+<td>50%</td>
+</tr>
+<tr>
+<td>accounts, authentication</td>
+<td><code>lib/rotate</code>, <code>lib/auth</code>, <code>lib/account</code>, <code>commands/accounts</code></td>
+<td>45</td>
+<td>20</td>
+<td>44%</td>
+</tr>
+<tr>
+<td>routines</td>
+<td><code>lib/routine</code>, <code>commands/routine</code></td>
+<td>125</td>
+<td>50</td>
+<td>40%</td>
+</tr>
+<tr>
+<td>usage, limits</td>
+<td><code>lib/usage</code>, <code>commands/view</code>, <code>commands/usage</code></td>
+<td>172</td>
+<td>66</td>
+<td>38%</td>
+</tr>
+<tr>
+<td>sessions (reference)</td>
+<td><code>lib/session</code>, <code>commands/sessions</code></td>
+<td>566</td>
+<td>206</td>
+<td>36%</td>
+</tr>
+</tbody></table>
+<p>One further measurement was tested and discarded. An earlier draft of this analysis proposed that
+the affected subsystems are those whose behavior cannot be asserted in CI, using the density of
+skipped tests as the proxy. Inspection did not support it: of 137 conditional skips in the suite,
+117 are Windows portability guards. Only 20 are conditional on a capability the machine must have — seven macOS-only, five
+requiring the signed keychain helper, four requiring a reachable SSH endpoint, four requiring a
+POSIX shell — and they sit in secrets and hosts, not the daemon. The hypothesis is not disproven
+for secrets and hosts, but the metric that appeared to support it did not measure what it was
+read as measuring.</p>
+<h3>7. What to implement</h3>
+<p>Nothing in this repository is machine-checked against the twenty-four rules it states. This
+section specifies the checks to write, where each one lives, what it reads, and whether it passes
+today. Three existing mechanisms are extended rather than replaced.</p>
+<h4>7.1 What already exists to build on</h4>
+<table>
+<thead>
+<tr>
+<th>Mechanism</th>
+<th>What it does today</th>
+<th>Reused for</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>apps/cli/scripts/verify-command-index.sh</code></td>
+<td>Regenerates the command index into a temp dir and diffs it against the committed copy; fails CI as its own step in <code>tests.yml</code></td>
+<td>The shape of a structural invariant check — a script, a diff, a diagnosable failure message</td>
+</tr>
+<tr>
+<td><code>scripts/ci-scope.ts</code></td>
+<td>Maps changed file paths to CI scope flags (<code>cli</code>, <code>cliDocs</code>, <code>factory</code>, <code>windows</code>); wired into <code>tests.yml</code> and covered by <code>ci-scope.test.ts</code></td>
+<td>Deriving which review questions apply to a given diff</td>
+</tr>
+<tr>
+<td><code>apps/cli/src/lib/subagents-registry.test.ts</code></td>
+<td>Asserts every subagents-capable agent has a registry entry — "no silently half-wired agent"</td>
+<td>The parity checks for hooks, MCP, allowlists and workflows</td>
+</tr>
+<tr>
+<td><code>.github/workflows/secret-scan.yml</code></td>
+<td>Weekly cron over full history, plus <code>workflow_dispatch</code></td>
+<td>The scheduled re-check against the default branch</td>
+</tr>
+</tbody></table>
+<p>The vitest <code>include</code> in <code>apps/cli/vitest.config.ts</code> already covers <code>src/**/*.test.ts</code> and
+<code>scripts/**/*.test.ts</code>, so a structural test needs no configuration change. <code>src/</code> already holds
+repository-wide assertions at the root (<code>index.command-star-routing.test.ts</code>,
+<code>index.spellcheck.test.ts</code>, <code>index.tombstones.test.ts</code>), so the location is established.</p>
+<h4>7.2 The checks to write</h4>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>File to create</th>
+<th>Reads</th>
+<th>Asserts</th>
+<th>Passes today</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td><code>apps/cli/src/lib/secrets/boundary.test.ts</code></td>
+<td>every non-test <code>.ts</code> under <code>apps/cli/src</code>, excluding <code>lib/secrets/</code></td>
+<td>No occurrence of <code>find-generic-password</code>, <code>add-generic-password</code>, <code>delete-generic-password</code>, or a <code>security</code> / <code>/usr/bin/security</code> command argument</td>
+<td><strong>No</strong> — 4 modules (§4.1)</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>apps/cli/scripts/verify-spec-hygiene.ts</code> + <code>.test.ts</code></td>
+<td><code>apps/cli/docs/specifications.md</code></td>
+<td>Each <code>- **ID (KEYWORD).**</code> definition appears exactly once; every cited <code>file:line</code> resolves to an existing path; every requirement carrying <code>[Intended]</code> names a <code>-GAP-</code> entry</td>
+<td><strong>No</strong> — 5 colliding identifiers (§4.2)</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>apps/cli/src/lib/capability-truth.test.ts</code></td>
+<td><code>lib/agents.ts</code> capability table, <code>lib/capabilities.ts</code></td>
+<td>Every capability marked supported for an agent resolves to a registry entry or a write path</td>
+<td>Unknown — run to find out</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>apps/factory/src/vscode/acting-timer.test.ts</code></td>
+<td><code>apps/factory/src/**/*.ts</code></td>
+<td>No <code>setInterval</code> whose callback reaches a spawn, exec, kill, or inject call, except an allowlisted site</td>
+<td><strong>No</strong> — 9 sites, some legitimate (§7.5)</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>apps/cli/src/help-coverage.test.ts</code></td>
+<td><code>COMMAND_LOADERS</code> in <code>lib/startup/command-registry.ts</code></td>
+<td>Every registered top-level name resolves to a module that calls <code>setHelpSections</code></td>
+<td><strong>No</strong> — 58 of 134 modules (§7.5)</td>
+</tr>
+<tr>
+<td>6</td>
+<td>a step in <code>.github/workflows/tests.yml</code></td>
+<td>the PR diff, via <code>ci-scope.ts</code></td>
+<td>A diff touching a user-visible surface adds a file under <code>apps/cli/.changelog/next/</code></td>
+<td>Needs the diff, so it is a CI step rather than a unit test</td>
+</tr>
+</tbody></table>
+<p>Check 1 is the primary proposal from §5.1. It requires routing the four call sites through
+<code>getKeychainToken</code> first — two of the four are the same duplicated probe and collapse into one
+change, so the work is bounded. Check 2 is the same idea applied to the specification instead of
+the code, and is the cheapest first commit: it needs no source changes and fails immediately on a
+defect the repository already has.</p>
+<h4>7.3 The plan requirement</h4>
+<p>Add a required <strong>Contract impact</strong> block to any plan for a code change, with four questions:</p>
+<ol>
+<li>Which requirement identifiers does this change touch? (If none — is the surface unspecified?
+Say so.)</li>
+<li>Which existing function owns each decision this change makes? ("None, I am adding one" is a
+valid answer; not asking is the failure.)</li>
+<li>Which boundaries does it cross — another machine, the OS credential store, a background
+process, another harness?</li>
+<li>How will the effect be verified, and on which machine?</li>
+</ol>
+<p>The value is timing, not content. "I will read the token in <code>usage.ts</code>" is legible in a plan and
+invisible in a diff, where it is six ordinary lines. Question 4 is worth asking at plan time
+specifically: after the code exists, "this can only be proven on macOS with the keychain helper
+installed" becomes a reason to skip the test rather than a reason to arrange the machine.</p>
+<p>Enforcement is a <code>PreToolUse</code> hook on <code>ExitPlanMode</code>, in the same position and form as the
+existing hooks under <code>~/.agents/.system/hooks/pre-tool-use/</code> (<code>git-guard.sh</code> is the working
+example): it inspects the plan text, and exits non-zero naming the missing block. The reviewer
+then checks four short answers against the specification rather than re-deriving them from a diff.</p>
+<h4>7.4 The review checklist</h4>
+<p>Extend <code>scripts/ci-scope.ts</code> with a <code>reviewRules(changedFiles: string[]): string[]</code> export that
+maps changed paths to the rules that can apply, and emit the result where the reviewer will read
+it. Concretely: a diff touching <code>apps/cli/src/lib/secrets/**</code> emits <em>"verify SEC-13 and SEC-27
+remain on the call path"</em>; one touching a registry emits the parity question; one touching a
+documented flag emits the docs and changelog questions. Rules that cannot apply are omitted, not
+restated.</p>
+<p>This replaces handing the reviewer fourteen prose rules plus a diff and asking it to work out
+which apply — the same open-ended task the author just failed. It matters more than usual at the
+moment: the repository's automated reviewer has been disabled since 2026-08-02 (#1767), so the
+non-author review is a subagent, and a subagent given the prose contract fails the same way the
+author did.</p>
+<h4>7.5 Checks that must land as ratchets</h4>
+<p>Two of the six fail on the existing tree for reasons that are partly legitimate, so they land with
+a recorded baseline that new code cannot add to.</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Baseline measured today</th>
+<th>Landing form</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Keychain access confined to <code>lib/secrets/</code></td>
+<td>4 violating modules</td>
+<td>Fix all four, then land as a hard failure — the set is small enough to clear in one change</td>
+</tr>
+<tr>
+<td>Non-trivial commands set <code>setHelpSections</code></td>
+<td>58 of 134 command modules</td>
+<td>Ratchet: the covered count may not decrease</td>
+</tr>
+<tr>
+<td>No acting timer in <code>apps/factory</code></td>
+<td>9 <code>setInterval</code> sites, including a leader-election heartbeat (<code>monitor/leader.ts:73</code>) and a panel refresh (<code>vscode/issuesPanel.vscode.ts:134</code>)</td>
+<td>Ratchet plus a reasoned allowlist; a rendering poll is legitimate, a callback that spawns is not</td>
+</tr>
+</tbody></table>
+<p>A check that fails on arrival with no path to green gets disabled rather than fixed, which is
+worse than not having it.</p>
+<h4>7.6 The scheduled re-check</h4>
+<p>Add a workflow modeled on <code>secret-scan.yml</code> — cron plus <code>workflow_dispatch</code> — running checks 1
+through 5 against the default branch and opening an issue when a new violation appears. This is
+the only check that observes the repository as a whole rather than one change, and it catches
+what merges when CI is skipped or a check is temporarily disabled.</p>
+<h4>7.7 Order of work</h4>
+<ol>
+<li>Check 2 (specification hygiene). No source changes, fails today, demonstrates the mechanism.</li>
+<li>Route the four keychain call sites through <code>getKeychainToken</code>; land check 1 as a hard failure.</li>
+<li>Add the Contract impact block and its <code>ExitPlanMode</code> hook.</li>
+<li>Checks 3, 5, 6, then 4 with its allowlist.</li>
+<li><code>reviewRules()</code> in <code>ci-scope.ts</code>, wired into the reviewer prompt or the subagent brief.</li>
+<li>The scheduled workflow.</li>
+</ol>
+<h4>7.8 What this does not solve</h4>
+<p>An agent that ignores instructions is not made compliant by any of this — it is made detectable.
+Checks 1 through 6 convert nine of the fourteen review rules from instruction-following into build
+failures. The remaining five stay judgment calls: no fallback band-aids, fail loud at boundaries,
+tests exercise the real path, and the two plan-time questions, all decided by a model that can be
+wrong. The expected result is that the mechanized nine stop recurring and the rest continue at
+roughly their current rate.</p>
+<h3>8. Appendix</h3>
+<h4>8.A Reproducing every figure in this document</h4>
+<pre><code>REPO=/home/Owner/src/github.com/example-user/agents-cli &amp;&amp; cd "$REPO"
+
+# §4.2 — identifier collisions
+python3 - &lt;&lt;'EOF'
+import re, collections
+lines=open('apps/cli/docs/specifications.md').read().split('\n')
+seen=collections.defaultdict(list)
+for i,l in enumerate(lines,1):
+    m=re.match(r'^- \*\*((?:SES|SEC|EXEC|SING|RT|WD)-[A-Z]*-?\d+[a-z]?)', l)
+    if m: seen[m.group(1)].append(i)
+print({k:v for k,v in seen.items() if len(v)&gt;1})
+EOF
+
+# §4.1 — modules invoking the keychain binary directly
+git ls-files 'apps/cli/src/**/*.ts' \
+  | xargs grep -n "find-generic-password\|/usr/bin/security" | grep -v test
+
+# §4.1 — remediation frequency for the authorization prompt
+git log -i -E --grep='touch ?id' --date=short --pretty=format:'%ad' | cut -c1-7 | sort | uniq -c
+
+# §4.3 — requirements carrying [Intended], counted as requirements not as strings
+python3 - &lt;&lt;'EOF'
+import re
+s=open('apps/cli/docs/specifications.md').read()
+blocks=[p for p in re.split(r'(?=^- \*\*(?:SES|SEC|EXEC|SING|RT|WD)-)', s, flags=re.M) if p.startswith('- **')]
+intended=[p for p in blocks if '[Intended]' in p.split('\n\n')[0] or re.search(r'Status:[^\n]*\[Intended\]', p)]
+print('requirements:', len(blocks), '| [Intended]:', len(intended), '| naive string count:', s.count('[Intended]'))
+EOF
+
+# §6 — regression rates; edit the path attribution to re-cut
+git log --since='120 days ago' --name-only --pretty=format:'@@%h|%ad|%s' --date=short
+
+# §6 — conditional-skip classification
+git ls-files 'apps/cli/src/**/*.test.ts' | xargs grep -ho "skipIf([^)]*)" | sort | uniq -c | sort -rn
+
+# §3 — the non-normative claim about design documents
+for f in hosts.md teams.md cloud.md; do
+  printf "%-10s MUST=%s SHOULD=%s MAY=%s\n" "$f" \
+    "$(grep -c '\bMUST\b' apps/cli/docs/$f)" \
+    "$(grep -c '\bSHOULD\b' apps/cli/docs/$f)" \
+    "$(grep -c '\bMAY\b' apps/cli/docs/$f)"
+done
+</code></pre>
+<h4>8.B The sessions requirement set, as a reference point for what "specified" means</h4>
+<p>The sessions subsystem carries 74 identifiers — 65 normative requirements and 9 recorded gaps.
+It is included here because it is the repository's own example of a fully specified surface, and
+because §1 uses it as the comparison baseline.</p>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>Count</th>
+<th>Identifiers</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Discovery and harness parsing</td>
+<td>7</td>
+<td>SES-1 … SES-7</td>
+</tr>
+<tr>
+<td>The preview contract</td>
+<td>5</td>
+<td>SES-8, 9, 9a, 10, 11</td>
+</tr>
+<tr>
+<td>Metadata</td>
+<td>8</td>
+<td>SES-12 … 16, 38, 39, 40</td>
+</tr>
+<tr>
+<td>Lifecycle</td>
+<td>9</td>
+<td>SES-17, 18, 18a–c, 19, 20, 21, 41</td>
+</tr>
+<tr>
+<td>Remote, export and import</td>
+<td>7</td>
+<td>SES-22 … 27a</td>
+</tr>
+<tr>
+<td>Index and database</td>
+<td>13</td>
+<td>SES-28 … 37, 42, and the colliding 38/39/40</td>
+</tr>
+<tr>
+<td>Machine-readable output</td>
+<td>9</td>
+<td>SES-IF-1 … IF-4c</td>
+</tr>
+<tr>
+<td>Stream and exit discipline</td>
+<td>2</td>
+<td>SES-IF-5, IF-6</td>
+</tr>
+<tr>
+<td>Cross-platform parity</td>
+<td>1</td>
+<td>SES-CROSS-1</td>
+</tr>
+<tr>
+<td>Compatibility guarantees</td>
+<td>4</td>
+<td>SES-COMPAT-1 … 4</td>
+</tr>
+<tr>
+<td>Recorded gaps</td>
+<td>9</td>
+<td>SES-GAP-1 … 9</td>
+</tr>
+</tbody></table>
+<p>Representative entries: <code>SES-1</code> fixes the twelve-harness discovery set and requires extension
+rather than special-casing; <code>SES-3</code> requires a malformed transcript line to be skipped rather than
+thrown; <code>SES-8</code> requires every list row to render a non-empty preview, with <code>SES-GAP-1</code> recording
+that two renderers share an unguarded path; <code>SES-22</code> requires <code>--host</code> to execute the peer's own
+binary; <code>SES-IF-4</code> fixes <code>SessionEvent.type</code> as a closed nine-value union that downstream tools
+depend on.</p>
+<h4>8.C Evidence base</h4>
+<p>4,229 commits over 120 days in this repository; 3,609 unique agent sessions across workstation (2,002),
+worker-s1 (935) and worker-s0 (604), spanning 2026-04-24 to 2026-08-10; the specification at
+3,084 lines defining 261 identifiers; 710 non-test source modules under <code>apps/cli/src</code>.</p>
+<h4>8.D Corrections to earlier drafts</h4>
+<p>Four claims in earlier drafts of this analysis were withdrawn after verification, recorded here
+because each illustrates the same methodological error — treating a search result as evidence for
+a claim about meaning.</p>
+<table>
+<thead>
+<tr>
+<th>Claim</th>
+<th>Correction</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>usage.ts</code> does not import the secrets module</td>
+<td>It does, at <code>usage.ts:24-28</code>. The original check was a single-line pattern against a multi-line import</td>
+</tr>
+<tr>
+<td>Daemon tests are heavily skipped, so daemon behavior is unverifiable</td>
+<td>All 19 daemon skips are Windows portability guards. The metric did not measure verifiability</td>
+</tr>
+<tr>
+<td>No requirement mentions usage, <code>setup-token</code> or rotation</td>
+<td>No requirement is <em>about</em> them, but eleven requirement bodies mention usage and <code>EXEC-2a</code> constrains the reserved <code>auth</code> environment injection</td>
+</tr>
+<tr>
+<td>Thirty requirements are marked <code>[Intended]</code></td>
+<td>Sixteen requirements carry it. Thirty is the string count, which includes cross-references</td>
+</tr>
+</tbody></table>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHZpc3VhbAp0ZW1wbGF0ZTogdmlzdWFsLnYxCnRpdGxlOiAiRW5mb3JjaW5nIGludmFyaWFudHMgaW4gYWdlbnRzLWNsaTogd2h5IGFnZW50LWF1dGhvcmVkIGNoYW5nZXMgcmVncmVzcyIKc3VtbWFyeTogPi0KICBBIGRlc2lnbiBkb2N1bWVudC4gQWdlbnQtYXV0aG9yZWQgY2hhbmdlcyByZWdyZXNzIGluIGEgbmFycm93LCBpZGVudGlmaWFibGUgc2V0CiAgb2Ygc3Vic3lzdGVtcy4gVGhpcyBhbmFseXplcyB3aHksIHNlcGFyYXRlcyBmb3VyIGluZGVwZW5kZW50IGNhdXNlcywgYW5kIHNldHMgb3V0CiAgaG93IGVhY2ggY2xhc3Mgb2YgcnVsZSBnZXRzIGVuZm9yY2VkIOKAlCBtZWNoYW5pY2FsbHksIGF0IHBsYW4gcmV2aWV3LCBvciBhdCBjb2RlCiAgcmV2aWV3IOKAlCBnaXZlbiB0aGF0IHRoZSBhdXRob3IgYW5kIHRoZSByZXZpZXdlciBhcmUgYm90aCBhZ2VudHMuCnByb2plY3Q6IGFnZW50cy1jbGkKY29udGV4dDogRGVzaWduIGRvYyDigJQgY29udHJhY3QgZW5mb3JjZW1lbnQgYW5kIHJlcXVpcmVtZW50IGh5Z2llbmUKcmVwb3NpdG9yeTogcGhueC1sYWJzL2FnZW50cy1jbGkKYnJhbmNoOiBtYWluCnN0YXR1czogZHJhZnQKaGFybmVzczogY2xhdWRlLWNvZGUKYWdlbnQ6IGNsYXVkZS1vcHVzLTUKaHVtYW46IG11cXNpdApob3N0OiB5b3NlbWl0ZS1zMApzZXNzaW9uOiBlNGNiM2IyMApkYXRlOiAyMDI2LTA4LTA5CmZhY3RzOgogIC0gIlN0YXR1czogZHJhZnQsIGZvciByZXZpZXcg4oCUIGF1dGhvcmVkIDIwMjYtMDgtMDkgZnJvbSByZXBvc2l0b3J5IGV2aWRlbmNlIgogIC0gUHJpbWFyeSBwcm9wb3NhbCDigJQgYSBidWlsZC10aW1lIGNoZWNrIHRoYXQgdGhlIGNyZWRlbnRpYWwgYWNjZXNzIHBhdGggaGFzIG9uZSBlbnRyeSBwb2ludAogIC0gVHdvIHN1cHBvcnRpbmcgcHJvcG9zYWxzIOKAlCByZXF1aXJlbWVudCBpZGVudGlmaWVyIHVuaXF1ZW5lc3MgYW5kIHN0YXR1cyBzZXBhcmF0aW9uCiAgLSBFdmlkZW5jZSBiYXNlIOKAlCA0LDIyOSBjb21taXRzIG92ZXIgMTIwIGRheXMsIDMsNjA5IHNlc3Npb25zIGFjcm9zcyB0aHJlZSBtYWNoaW5lcwotLS0KCiMjIFN0b3J5CgojIyMgMS4gQ29udGV4dCBhbmQgcHJvYmxlbSBzdGF0ZW1lbnQKCmFnZW50cy1jbGkgaXMgZGV2ZWxvcGVkIGFsbW9zdCBlbnRpcmVseSBieSBBSSBjb2RpbmcgYWdlbnRzLiBUaGUgcmVwb3NpdG9yeSBnb3Zlcm5zIHRoZWlyIHdvcmsKdGhyb3VnaCBhIGxheWVyZWQgaW5zdHJ1Y3Rpb24gc3lzdGVtOiBhIG5vcm1hdGl2ZSBzcGVjaWZpY2F0aW9uIGZvciBzaXggc3Vic3lzdGVtcywgdGVuCmFyY2hpdGVjdHVyYWwgcnVsZXMgaW4gdGhlIGNvbXBvbmVudCBtZW1vcnkgZmlsZSwgYSBmb3VydGVlbi1pdGVtIHJldmlldyBjb250cmFjdCwgYW5kIHJvdWdobHkKNTcsMDAwIHdvcmRzIG9mIGZsZWV0LWxldmVsIHByb2Nlc3MgZ3VpZGFuY2UgaW5qZWN0ZWQgaW50byBldmVyeSBhZ2VudCdzIGNvbnRleHQgYmVmb3JlIGl0IHJlYWRzCmFueSBjb2RlLgoKRGVzcGl0ZSB0aGF0IHZvbHVtZSwgY2hhbmdlcyBpbiBhIG5hcnJvdyBzZXQgb2Ygc3Vic3lzdGVtcyByZWdyZXNzIHJlcGVhdGVkbHkuIFRoZSBwYXR0ZXJuIGlzCmNvbmNlbnRyYXRlZCByYXRoZXIgdGhhbiBkaWZmdXNlOiBvdmVyIHRoZSBsYXN0IDEyMCBkYXlzLCB0aGUgc2hhcmUgb2YgY29tbWl0cyB0aGF0IGFyZSBmaXhlcyBvcgpyZXZlcnRzIGlzIDUwJSBpbiB0aGUgZGFlbW9uIGFuZCBpbiBzZWNyZXRzL2tleWNoYWluLCA0NCUgaW4gYWNjb3VudHMgYW5kIGF1dGhlbnRpY2F0aW9uLCA0MCUgaW4Kcm91dGluZXMsIGFuZCAzOCUgaW4gdXNhZ2Ug4oCUIGFnYWluc3QgMzYlIGluIHNlc3Npb25zLCB0aGUgbW9zdCBoZWF2aWx5IHNwZWNpZmllZCBzdWJzeXN0ZW0gaW4gdGhlCnJlcG9zaXRvcnkuCgpUaGUgbmF0dXJhbCBoeXBvdGhlc2lzIGlzIHRoYXQgaW5zdHJ1Y3Rpb25zIGFyZSB0b28gdGhpbiBpbiB0aGUgYWZmZWN0ZWQgYXJlYXMuICoqVGhlIGV2aWRlbmNlCmRvZXMgbm90IHN1cHBvcnQgdGhhdCBoeXBvdGhlc2lzLCBhbmQgdGhpcyBkb2N1bWVudCBhcmd1ZXMgYWdhaW5zdCBpdC4qKiBTZWNyZXRzIGlzIG9uZSBvZiB0aGUKbW9zdCB0aG9yb3VnaGx5IHNwZWNpZmllZCBzdWJzeXN0ZW1zIGluIHRoZSBjb2RlYmFzZSDigJQgNTYgcmVxdWlyZW1lbnQgaWRlbnRpZmllcnMsIGluY2x1ZGluZwpleHBsaWNpdCByZXF1aXJlbWVudHMgZ292ZXJuaW5nIGludGVyYWN0aXZlIGF1dGhvcml6YXRpb24gcHJvbXB0cyDigJQgYW5kIGl0IGhhcyB0aGUgam9pbnQtaGlnaGVzdApyZWdyZXNzaW9uIHJhdGUuIEFkZGluZyBzcGVjaWZpY2F0aW9uIHRleHQgaXMgdGhlcmVmb3JlIHVubGlrZWx5IHRvIGNoYW5nZSB0aGUgb3V0Y29tZS4KCldoYXQgdGhlIGFmZmVjdGVkIHN1YnN5c3RlbXMgc2hhcmUgaXMgbm90IGEgc2hvcnRhZ2Ugb2Ygc3RhdGVkIHJ1bGVzLiBJdCBpcyB0aGF0ICoqdGhlaXIgcnVsZXMKYXJlIHN0YXRlZCBidXQgbm90IG1lY2hhbmljYWxseSBlbmZvcmNlZCoqLCBhbmQgaW4gdGhyZWUgY2FzZXMgdGhlIHJ1bGVzIHRoZW1zZWx2ZXMgYXJlCmFtYmlndW91cyBvciBkZXNjcmliZSBiZWhhdmlvciB0aGF0IGRvZXMgbm90IGV4aXN0IHlldC4gVGhpcyBkb2N1bWVudCBpZGVudGlmaWVzIGZvdXIgaW5kZXBlbmRlbnQKY2F1c2VzLCBlYWNoIHZlcmlmaWVkIGFnYWluc3QgdGhlIGNvZGUsIHByb3Bvc2VzIGNoYW5nZXMgZm9yIGVhY2gsIGFuZCBzZXRzIG91dCBpbiDCpzcgaG93IGEgcnVsZQppbiB0aGlzIHJlcG9zaXRvcnkgY2FuIGJlIGVuZm9yY2VkIGF0IGFsbCDigJQgZ2l2ZW4gdGhhdCBib3RoIHRoZSBhdXRob3IgYW5kIHRoZSByZXZpZXdlciBhcmUKYWdlbnRzIHRoYXQgbWF5IG5vdCBmb2xsb3cgaW5zdHJ1Y3Rpb25zLgoKIyMjIDIuIEdvYWxzIGFuZCBub24tZ29hbHMKCioqR29hbHMuKiogUmVkdWNlIHRoZSByZWdyZXNzaW9uIHJhdGUgaW4gdGhlIGNyZWRlbnRpYWwsIGRhZW1vbiwgcm91dGluZSBhbmQgdXNhZ2Ugc3Vic3lzdGVtcyBieQpjb252ZXJ0aW5nIHN0YXRlZCBpbnZhcmlhbnRzIGludG8gbWVjaGFuaWNhbGx5IGNoZWNrZWQgb25lcy4gTWFrZSByZXF1aXJlbWVudCBpZGVudGlmaWVycyB1c2FibGUKYXMgdW5hbWJpZ3VvdXMgcmVmZXJlbmNlcyBpbiByZXZpZXcuIE1ha2UgaXQgcG9zc2libGUgZm9yIGFuIGltcGxlbWVudGVyIHRvIGRpc3Rpbmd1aXNoCnNwZWNpZmllZC1hbmQtaW1wbGVtZW50ZWQgYmVoYXZpb3IgZnJvbSBzcGVjaWZpZWQtYW5kLWludGVuZGVkIGJlaGF2aW9yLgoKKipOb24tZ29hbHMuKiogVGhpcyBkb2N1bWVudCBkb2VzIG5vdCBwcm9wb3NlIG5ldyBpbnN0cnVjdGlvbiB0ZXh0LCBuZXcgcHJvY2Vzcywgb3IgZXhwYW5kZWQKcmV2aWV3IGNoZWNrbGlzdHMuIEl0IGRvZXMgbm90IHByb3Bvc2UgcmVzdHJ1Y3R1cmluZyB0aGUgY3JlZGVudGlhbCBzdWJzeXN0ZW0sIGNoYW5naW5nIHRoZQprZXljaGFpbiBhY2Nlc3MgbW9kZWwsIG9yIGFsdGVyaW5nIHRoZSBUb3VjaCBJRCBhdXRob3JpemF0aW9uIHBvbGljeSDigJQgdGhlIGV4aXN0aW5nIHBvbGljeSBpcwpzb3VuZCBhbmQgaXMgbm90IHRoZSBwcm9ibGVtLiBJdCBkb2VzIG5vdCBhZGRyZXNzIHN1YnN5c3RlbXMgb3V0c2lkZSB0aGUgaWRlbnRpZmllZCBjbHVzdGVyLgoKIyMjIDMuIEJhY2tncm91bmQ6IGhvdyBhIGNoYW5nZSBpcyBnb3Zlcm5lZCB0b2RheQoKVGhyZWUgdGllcnMgb2YgaW5zdHJ1Y3Rpb24gYXBwbHkgdG8gY29kZSBpbiB0aGlzIHJlcG9zaXRvcnksIGFuZCB0aGV5IGRpZmZlciBzaGFycGx5IGluIGZvcmNlLgoKKipUaWVyIDEsIHRoZSBub3JtYXRpdmUgc3BlY2lmaWNhdGlvbioqIChgYXBwcy9jbGkvZG9jcy9zcGVjaWZpY2F0aW9ucy5tZGApIGRlZmluZXMgMjYxCnJlcXVpcmVtZW50IGlkZW50aWZpZXJzIGFjcm9zcyBzaXggc3Vic3lzdGVtcyDigJQgc2Vzc2lvbnMsIHNlY3JldHMsIGFnZW50IGV4ZWN1dGlvbiwgc2NoZWR1bGluZywKcm91dGluZSBleGVjdXRpb24sIGFuZCB0aGUgd2F0Y2hkb2cuIFJlcXVpcmVtZW50cyB1c2UgUkZDLTIxMTkga2V5d29yZHMsIGNpdGUgdGhlIGltcGxlbWVudGluZwpgZmlsZTpsaW5lYCwgYW5kIGNhcnJ5IEdpdmVuL1doZW4vVGhlbiBzY2VuYXJpb3MgaW50ZW5kZWQgdG8gbWFwIG9udG8gdGVzdHMuIEEgY2hhbmdlIHRoYXQKZGV2aWF0ZXMgZnJvbSBhIHJlcXVpcmVtZW50IGlzIGEgZGVmZWN0IGluIGVpdGhlciB0aGUgY29kZSBvciB0aGUgZG9jdW1lbnQsIGFuZCB0aGUgZG9jdW1lbnQgc2F5cwpzby4KCioqVGllciAyLCB0aGUgYXJjaGl0ZWN0dXJhbCBydWxlcyoqIChgYXBwcy9jbGkvQUdFTlRTLm1kYCwgIkNvcmUgZGVzaWduIGNob2ljZXMiKSBhcmUgcHJvc2UuIEFsbAp0ZW4gc2hhcmUgb25lIHN0cnVjdHVyYWwgZm9ybTogYSBnaXZlbiBkZWNpc2lvbiBoYXMgZXhhY3RseSBvbmUgaG9tZSBpbiB0aGUgY29kZSwgYW5kIGEgc2Vjb25kCmhvbWUgaXMgdGhlIGRlZmVjdC4gQ2FwYWJpbGl0eSBnYXRpbmcgbGl2ZXMgb25seSBpbiBgc3VwcG9ydHMoKWA7IGxlZ2FjeSBwYXRoIGhhbmRsaW5nIG9ubHkgaW4KYG1pZ3JhdGUudHNgOyB0aGUgY2hvaWNlIGJldHdlZW4gbmF0aXZlIHJlc3VtZSBhbmQgYC9jb250aW51ZWAgb25seSBpbiBgcmVzb2x2ZVNlc3Npb25SZWNvdmVyeWAuClRoZSBmaWxlIHN0YXRlcyB0aGUgY29uc2VxdWVuY2UgZGlyZWN0bHk6ICJCcmVhayB0aGVzZSBhbmQgZG93bnN0cmVhbSBjb2RlIGRyaWZ0cyBzaWxlbnRseS4iCgoqKlRpZXIgMyBpcyBldmVyeXRoaW5nIGVsc2UuKiogVGhlIENMSSByZWdpc3RlcnMgMTAwIHRvcC1sZXZlbCBjb21tYW5kIG5hbWVzIGFjcm9zcyA4MSBsb2FkZXIKbW9kdWxlcy4gU2l4IHN1YnN5c3RlbXMgaGF2ZSBhIHNwZWNpZmljYXRpb24uIFRoZSByZW1haW5kZXIgaGF2ZSwgYXQgbW9zdCwgYSBkZXNpZ24gZG9jdW1lbnQg4oCUCmFuZCBkZXNpZ24gZG9jdW1lbnRzIGluIHRoaXMgcmVwb3NpdG9yeSBhcmUgZXhwbGljaXRseSBub24tbm9ybWF0aXZlLiBUaGlzIHdhcyB2ZXJpZmllZCBkaXJlY3RseQpyYXRoZXIgdGhhbiB0YWtlbiBvbiB0aGUgc3BlY2lmaWNhdGlvbidzIHdvcmQ6IGBob3N0cy5tZGAsIGB0ZWFtcy5tZGAgYW5kIGBjbG91ZC5tZGAgY29udGFpbiB6ZXJvCmNhcGl0YWxpemVkIGBNVVNUYCwgYFNIT1VMRGAsIG9yIGBNQVlgIGJldHdlZW4gdGhlbSwgd2hpbGUgdXNpbmcgbG93ZXJjYXNlICJtdXN0IiBpbiBwcm9zZSB0aGF0CnJlYWRzIGFzIHRob3VnaCBpdCBiaW5kcy4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZSBhcnRpZmFjdC1maWd1cmUtZGlhZ3JhbSI+Cjxzdmcgdmlld0JveD0iMCAwIDEwMDAgNTAwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkNvdmVyYWdlIG9mIHRoZSBjb21tYW5kIHN1cmZhY2UgYWNyb3NzIGZvdXIgbGV2ZWxzIG9mIHNwZWNpZmljYXRpb24iPgogIDx0ZXh0IHg9IjAiIHk9IjE4IiBmaWxsPSIjZThlOGU4IiBmb250LXNpemU9IjE1IiBmb250LXdlaWdodD0iNzAwIj5GaWd1cmUgMSDigJQgU3BlY2lmaWNhdGlvbiBjb3ZlcmFnZSBvZiB0aGUgY29tbWFuZCBzdXJmYWNlPC90ZXh0PgogIDx0ZXh0IHg9IjAiIHk9IjM4IiBmaWxsPSIjZThlOGU4IiBvcGFjaXR5PSIwLjYyIiBmb250LXNpemU9IjEyIj4xMDAgdG9wLWxldmVsIGNvbW1hbmQgbmFtZXMsIDgxIGxvYWRlciBtb2R1bGVzLCBzaXggc3Vic3lzdGVtcyB1bmRlciBhIG5vcm1hdGl2ZSBjb250cmFjdC48L3RleHQ+CgogIDxyZWN0IHg9IjAiIHk9IjYwIiB3aWR0aD0iOTIiIGhlaWdodD0iMzQiIHJ4PSI0IiBmaWxsPSIjYTNlNjM1IiBmaWxsLW9wYWNpdHk9IjAuODUiLz4KICA8cmVjdCB4PSI5NCIgeT0iNjAiIHdpZHRoPSI0NiIgaGVpZ2h0PSIzNCIgcng9IjQiIGZpbGw9IiNhM2U2MzUiIGZpbGwtb3BhY2l0eT0iMC4zOCIvPgogIDxyZWN0IHg9IjE0MiIgeT0iNjAiIHdpZHRoPSI0MzAiIGhlaWdodD0iMzQiIHJ4PSI0IiBmaWxsPSIjZThlOGU4IiBmaWxsLW9wYWNpdHk9IjAuMjAiLz4KICA8cmVjdCB4PSI1NzQiIHk9IjYwIiB3aWR0aD0iNDI2IiBoZWlnaHQ9IjM0IiByeD0iNCIgZmlsbD0iI2U4ZThlOCIgZmlsbC1vcGFjaXR5PSIwLjA3IiBzdHJva2U9IiNlOGU4ZTgiIHN0cm9rZS1vcGFjaXR5PSIwLjIiIHN0cm9rZS1kYXNoYXJyYXk9IjQgNCIvPgogIDx0ZXh0IHg9IjYiIHk9IjgzIiBmaWxsPSIjMGEwYTBhIiBmb250LXNpemU9IjExLjUiIGZvbnQtd2VpZ2h0PSI3MDAiPjYgc3BlY2lmaWVkPC90ZXh0PgogIDx0ZXh0IHg9IjE1MCIgeT0iODMiIGZpbGw9IiNlOGU4ZTgiIGZvbnQtc2l6ZT0iMTEuNSIgZm9udC13ZWlnaHQ9IjcwMCI+ZG9jdW1lbnRlZCwgbm90IHNwZWNpZmllZDwvdGV4dD4KICA8dGV4dCB4PSI1ODIiIHk9IjgzIiBmaWxsPSIjZThlOGU4IiBvcGFjaXR5PSIwLjciIGZvbnQtc2l6ZT0iMTEuNSIgZm9udC13ZWlnaHQ9IjcwMCI+dW5zcGVjaWZpZWQg4oCUIGJlaGF2aW9yIGlzIHdoYXRldmVyIHRoZSBpbXBsZW1lbnRhdGlvbiBkb2VzPC90ZXh0PgogIDx0ZXh0IHg9Ijk0IiB5PSIxMTIiIGZpbGw9IiNlOGU4ZTgiIG9wYWNpdHk9IjAuNiIgZm9udC1zaXplPSIxMC41Ij4zIGdvdmVybmVkIGluIHBhcnQ8L3RleHQ+CgogIDxnIGZvbnQtc2l6ZT0iMTIiPgogICAgPHJlY3QgeD0iMCIgeT0iMTQwIiB3aWR0aD0iMTAwMCIgaGVpZ2h0PSI4NCIgcng9IjgiIGZpbGw9IiNhM2U2MzUiIGZpbGwtb3BhY2l0eT0iMC4xMiIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogICAgPHRleHQgeD0iMTgiIHk9IjE2NCIgZmlsbD0iI2U4ZThlOCIgZm9udC13ZWlnaHQ9IjcwMCI+Tm9ybWF0aXZlIGNvbnRyYWN0IGV4aXN0czwvdGV4dD4KICAgIDx0ZXh0IHg9IjE4IiB5PSIxODUiIGZpbGw9IiNlOGU4ZTgiIG9wYWNpdHk9IjAuOCIgZm9udC1zaXplPSIxMS41IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiPnNlc3Npb25zIMK3IHNlY3JldHMgwrcgcnVuIMK3IHNjaGVkdWxpbmcgc2luZ3VsYXJpdHkgwrcgcm91dGluZSBleGVjdXRpb24gwrcgd2F0Y2hkb2c8L3RleHQ+CiAgICA8dGV4dCB4PSIxOCIgeT0iMjA2IiBmaWxsPSIjZThlOGU4IiBvcGFjaXR5PSIwLjY1IiBmb250LXNpemU9IjExIj5SRkMtMjExOSByZXF1aXJlbWVudHMgd2l0aCBHaXZlbi9XaGVuL1RoZW4gc2NlbmFyaW9zLiBBIGRldmlhdGlvbiBpcyBhIGRlZmVjdCBpbiB0aGUgY29kZSBvciB0aGUgZG9jdW1lbnQuPC90ZXh0PgoKICAgIDxyZWN0IHg9IjAiIHk9IjIzNiIgd2lkdGg9IjEwMDAiIGhlaWdodD0iNzQiIHJ4PSI4IiBmaWxsPSIjZThlOGU4IiBmaWxsLW9wYWNpdHk9IjAuMDYiIHN0cm9rZT0iI2U4ZThlOCIgc3Ryb2tlLW9wYWNpdHk9IjAuMzUiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgICA8dGV4dCB4PSIxOCIgeT0iMjYwIiBmaWxsPSIjZThlOGU4IiBmb250LXdlaWdodD0iNzAwIj5QYXJ0aWFsbHkgZ292ZXJuZWQg4oCUIGEgc2luZ2xlIHJlcXVpcmVtZW50IHJlYWNoZXMgdGhlIHN1cmZhY2U8L3RleHQ+CiAgICA8dGV4dCB4PSIxOCIgeT0iMjgxIiBmaWxsPSIjZThlOGU4IiBvcGFjaXR5PSIwLjgiIGZvbnQtc2l6ZT0iMTEuNSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIj5tb25pdG9ycyAoU0lORy01LzgvOSkgwrcgZG9jdG9yIChTRUMtMTcgb25seSkgwrcgZGFlbW9uIChTSU5HLTEsIFNJTkctNGEpPC90ZXh0PgogICAgPHRleHQgeD0iMTgiIHk9IjMwMSIgZmlsbD0iI2U4ZThlOCIgb3BhY2l0eT0iMC42NSIgZm9udC1zaXplPSIxMSI+QWxsIG90aGVyIGJlaGF2aW9yIG9mIHRoZXNlIGNvbW1hbmRzIGlzIHVuc3BlY2lmaWVkLjwvdGV4dD4KCiAgICA8cmVjdCB4PSIwIiB5PSIzMjIiIHdpZHRoPSIxMDAwIiBoZWlnaHQ9Ijg0IiByeD0iOCIgZmlsbD0iI2U4ZThlOCIgZmlsbC1vcGFjaXR5PSIwLjA0IiBzdHJva2U9IiNlOGU4ZTgiIHN0cm9rZS1vcGFjaXR5PSIwLjI1IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogICAgPHRleHQgeD0iMTgiIHk9IjM0NiIgZmlsbD0iI2U4ZThlOCIgZm9udC13ZWlnaHQ9IjcwMCI+RGVzaWduIGRvY3VtZW50IG9ubHkg4oCUIG5vbi1ub3JtYXRpdmU8L3RleHQ+CiAgICA8dGV4dCB4PSIxOCIgeT0iMzY3IiBmaWxsPSIjZThlOGU4IiBvcGFjaXR5PSIwLjgiIGZvbnQtc2l6ZT0iMTEuNSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIj5ob3N0cyDCtyB0ZWFtcyDCtyBjbG91ZCDCtyBicm93c2VyIMK3IGNvbXB1dGVyIMK3IHBsdWdpbnMgwrcgc3ViYWdlbnRzIMK3IHdvcmtmbG93cyDCtyBwcm9maWxlcyDCtyBzaGFyZSDCtyBwdHkgwrcgbWVudWJhciDCtyBzeW5jIMK3IHZlcnNpb25zPC90ZXh0PgogICAgPHRleHQgeD0iMTgiIHk9IjM4OSIgZmlsbD0iI2YwYjQyOSIgb3BhY2l0eT0iMC45NSIgZm9udC1zaXplPSIxMSI+VmVyaWZpZWQ6IHplcm8gY2FwaXRhbGl6ZWQgTVVTVC9TSE9VTEQvTUFZIGFjcm9zcyBob3N0cy5tZCwgdGVhbXMubWQgYW5kIGNsb3VkLm1kLiBMb3dlcmNhc2UgIm11c3QiIGFwcGVhcnMgYW5kIGRvZXMgbm90IGJpbmQuPC90ZXh0PgoKICAgIDxyZWN0IHg9IjAiIHk9IjQxOCIgd2lkdGg9IjEwMDAiIGhlaWdodD0iODIiIHJ4PSI4IiBmaWxsPSIjZThlOGU4IiBmaWxsLW9wYWNpdHk9IjAuMDIiIHN0cm9rZT0iI2U4ZThlOCIgc3Ryb2tlLW9wYWNpdHk9IjAuMTgiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtZGFzaGFycmF5PSI1IDQiLz4KICAgIDx0ZXh0IHg9IjE4IiB5PSI0NDIiIGZpbGw9IiNlOGU4ZTgiIG9wYWNpdHk9IjAuODUiIGZvbnQtd2VpZ2h0PSI3MDAiPk5vIHNwZWNpZmljYXRpb24gYW5kIG5vIGRlc2lnbiBkb2N1bWVudDwvdGV4dD4KICAgIDx0ZXh0IHg9IjE4IiB5PSI0NjMiIGZpbGw9IiNlOGU4ZTgiIG9wYWNpdHk9IjAuNzIiIGZvbnQtc2l6ZT0iMTEuNSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIj53YWxsZXQgwrcgaGVscGVyIMK3IHN5bmMvYXBwbHkvc3RhdHVzIMK3IHdvcmt0cmVlIMK3IHdlYmhvb2sgwrcgZnVubmVsIMK3IG1haWxib3hlcyDCtyBmZWVkIMK3IG1lc3NhZ2Uvc2VuZCDCtyBidWRnZXQgwrcgYXVkaXQ8L3RleHQ+CiAgICA8dGV4dCB4PSIxOCIgeT0iNDg1IiBmaWxsPSIjZThlOGU4IiBvcGFjaXR5PSIwLjYiIGZvbnQtc2l6ZT0iMTEiPlRoZSBzaWduZWQga2V5Y2hhaW4gaGVscGVyIOKAlCBkaXJlY3RseSBhZGphY2VudCB0byB0aGUgY3JlZGVudGlhbCBib3VuZGFyeSDigJQgc2l0cyBpbiB0aGlzIHJvdy48L3RleHQ+CiAgPC9nPgo8L3N2Zz4KPHAgY2xhc3M9ImFydGlmYWN0LWxlZ2VuZCI+Q292ZXJhZ2UgaXMgdW5ldmVuIGJ5IGRlc2lnbiwgYnV0IHRoZSB1bmNvdmVyZWQgc2V0IGluY2x1ZGVzIHN1cmZhY2VzIHRoYXQgYWN0IG9uIG90aGVyIG1hY2hpbmVzLCBob2xkIGR1cmFibGUgc3RhdGUsIG9yIHNpdCBuZXh0IHRvIGNyZWRlbnRpYWxzLjwvcD4KPC9kaXY+CgojIyBGaWd1cmUKCiMjIyA0LiBBbmFseXNpcwoKRm91ciBjYXVzZXMgYXJlIHNlcGFyYWJsZS4gVGhleSBhcmUgb3JkZXJlZCBieSBob3cgbXVjaCBvZiB0aGUgb2JzZXJ2ZWQgcmVncmVzc2lvbiByYXRlIGVhY2gKcGxhdXNpYmx5IGV4cGxhaW5zLgoKIyMjIyA0LjEgQW4gYXJjaGl0ZWN0dXJhbCBpbnZhcmlhbnQgaXMgc3RhdGVkIGJ1dCBub3QgZW5mb3JjZWQKClRoZSBjcmVkZW50aWFsIHN1YnN5c3RlbSBkZWZpbmVzIGEgc2luZ2xlIGVudHJ5IHBvaW50IGZvciByZWFkaW5nIGEga2V5Y2hhaW4gaXRlbS4gUmVxdWlyZW1lbnQKYFNFQy0xM2AgbmFtZXMgaXQgZXhwbGljaXRseSBhbmQgc3RhdGVzIHRoYXQgdGhlIGNoZWNrIGhhcHBlbnMgYmVmb3JlIGFueSBoZWxwZXIgcHJvY2VzcyBpcwpzcGF3bmVkOgoKPiBUaGlzIGNvdmVycyByYXcgaXRlbSByZWFkcyB0b28sIG5vdCBqdXN0IGJ1bmRsZXM6IGBnZXRLZXljaGFpblRva2VuYC9gZ2V0S2V5Y2hhaW5Ub2tlbnNgCj4gY29uc3VsdCBgYXNzZXJ0UmF3S2V5Y2hhaW5SZWFkQWxsb3dlZGAgKGBsaWIvc2VjcmV0cy9pbmRleC50czo4NzctODk5YCkgQkVGT1JFIGFueSBoZWxwZXIKPiBwcm9jZXNzIGlzIHNwYXduZWQuCgpBIHNlY29uZCByZXF1aXJlbWVudCwgYFNFQy0yN2AsIHBsYWNlcyBhIG5lZ2F0aXZlLXJlc3VsdCBtZW1vIGJlaGluZCB0aGUgc2FtZSBmdW5jdGlvbiBzbyB0aGF0IGEKcG9sbGluZyBjYWxsZXIgY2Fubm90IHJlLXJhaXNlIGFuIGludGVyYWN0aXZlIGF1dGhvcml6YXRpb24gc2hlZXQgZXZlcnkgZmV3IHNlY29uZHMuIEJvdGgKcHJvdGVjdGlvbnMgYXJlIHRoZXJlZm9yZSByZWFjaGFibGUgb25seSB0aHJvdWdoIGBnZXRLZXljaGFpblRva2VuYC4gVGhlIGRlc2lnbiBpcyBzb3VuZC4KCkZvdXIgbm9uLXRlc3QgbW9kdWxlcyBpbnZva2UgYC91c3IvYmluL3NlY3VyaXR5YCBkaXJlY3RseSBhbmQgbmV2ZXIgcmVhY2ggdGhhdCBmdW5jdGlvbjoKYGxpYi9hZ2VudHMudHM6MTY4OGAsIGBsaWIvdXNhZ2UudHM6MzA0M2AsIGBsaWIvYXV0by1kaXNwYXRjaC1saW5lYXIudHM6MjZgLCBhbmQKYGxpYi9vcGVuY2xhdy1rZXljaGFpbi50czoyNzZgLiBPbiB0aGUgZmlyc3QgdHdvLCB0aGUgb25seSBndWFyZCBpcyBhbiBlbnZpcm9ubWVudCB2YXJpYWJsZSwKYEFHRU5UU19OT19LRVlDSEFJTl9QUk9CRWAsIGRvY3VtZW50ZWQgYXQgYGFnZW50cy50czoxNjg2YCBhcyBleGlzdGluZyBmb3IgaGVybWV0aWMgdGVzdHMuIFRoZQp0aGlyZCBoYXMgbm8gZ3VhcmQgYXQgYWxsIGFuZCBpcyByZWFjaGVkIGZyb20gYGxpbmVhci1wcm9qZWN0LWNvdW50cy50czoyMjJgLCBhIGNvdW50aW5nIHBhdGggdGhhdApjYW4gZXhlY3V0ZSB1bmF0dGVuZGVkLgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlIGFydGlmYWN0LWZpZ3VyZS1kaWFncmFtIj4KPHN2ZyB2aWV3Qm94PSIwIDAgMTAwMCA0MjAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iVGhlIGNyZWRlbnRpYWwgcmVhZCBwYXRoOiBvbmUgZ3VhcmRlZCBlbnRyeSBwb2ludCBhbmQgZm91ciBtb2R1bGVzIHRoYXQgYnlwYXNzIGl0Ij4KICA8dGV4dCB4PSIwIiB5PSIxOCIgZmlsbD0iI2U4ZThlOCIgZm9udC1zaXplPSIxNSIgZm9udC13ZWlnaHQ9IjcwMCI+RmlndXJlIDIg4oCUIFRoZSBjcmVkZW50aWFsIHJlYWQgcGF0aDwvdGV4dD4KICA8dGV4dCB4PSIwIiB5PSIzOCIgZmlsbD0iI2U4ZThlOCIgb3BhY2l0eT0iMC42MiIgZm9udC1zaXplPSIxMiI+VGhlIHBvbGljeSBjaGVja3MgbGl2ZSBhdCBvbmUgZnVuY3Rpb24uIEZvdXIgbW9kdWxlcyByZWFjaCB0aGUgb3BlcmF0aW5nIHN5c3RlbSB3aXRob3V0IHRyYXZlcnNpbmcgaXQuPC90ZXh0PgoKICA8cmVjdCB4PSIzMzAiIHk9IjYyIiB3aWR0aD0iMzQwIiBoZWlnaHQ9IjY2IiByeD0iMTAiIGZpbGw9IiNhM2U2MzUiIGZpbGwtb3BhY2l0eT0iMC4xNiIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI1MDAiIHk9Ijg4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZThlOGU4IiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iNzAwIj5hc3NlcnRSYXdLZXljaGFpblJlYWRBbGxvd2VkPC90ZXh0PgogIDx0ZXh0IHg9IjUwMCIgeT0iMTA5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZThlOGU4IiBvcGFjaXR5PSIwLjc1IiBmb250LXNpemU9IjExIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiPmxpYi9zZWNyZXRzL2luZGV4LnRzOjg3Ny04OTk8L3RleHQ+CiAgPHRleHQgeD0iNTAwIiB5PSIxMjQiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNlOGU4ZTgiIG9wYWNpdHk9IjAuNjIiIGZvbnQtc2l6ZT0iMTAuNSI+U0VDLTEzIGhlYWRsZXNzIGd1YXJkIMK3IFNFQy0yNyBuZWdhdGl2ZSBtZW1vPC90ZXh0PgoKICA8cmVjdCB4PSIzMzAiIHk9IjE1NiIgd2lkdGg9IjM0MCIgaGVpZ2h0PSI0NiIgcng9IjEwIiBmaWxsPSIjZThlOGU4IiBmaWxsLW9wYWNpdHk9IjAuMDYiIHN0cm9rZT0iI2U4ZThlOCIgc3Ryb2tlLW9wYWNpdHk9IjAuMyIvPgogIDx0ZXh0IHg9IjUwMCIgeT0iMTc2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZThlOGU4IiBmb250LXNpemU9IjEyIiBmb250LXdlaWdodD0iNzAwIj5zcGF3bktleWNoYWluSGVscGVyIOKGkiAvdXNyL2Jpbi9zZWN1cml0eTwvdGV4dD4KICA8dGV4dCB4PSI1MDAiIHk9IjE5NCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2U4ZThlOCIgb3BhY2l0eT0iMC42NSIgZm9udC1zaXplPSIxMC41Ij5ib3VuZGVkIHRpbWVvdXQsIFNJR0tJTEwsIHJlYXBlciBkYWVtb248L3RleHQ+CiAgPGxpbmUgeDE9IjUwMCIgeTE9IjEyOCIgeDI9IjUwMCIgeTI9IjE1NiIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNiIvPgoKICA8cmVjdCB4PSIxMTAiIHk9IjYyIiB3aWR0aD0iMTgwIiBoZWlnaHQ9IjQ2IiByeD0iOCIgZmlsbD0iI2U4ZThlOCIgZmlsbC1vcGFjaXR5PSIwLjA2IiBzdHJva2U9IiNlOGU4ZTgiIHN0cm9rZS1vcGFjaXR5PSIwLjMiLz4KICA8dGV4dCB4PSIyMDAiIHk9IjgyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZThlOGU4IiBmb250LXNpemU9IjExLjUiIGZvbnQtd2VpZ2h0PSI3MDAiPmdldEtleWNoYWluVG9rZW48L3RleHQ+CiAgPHRleHQgeD0iMjAwIiB5PSI5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2U4ZThlOCIgb3BhY2l0eT0iMC42NSIgZm9udC1zaXplPSIxMC41Ij50aGUgaW50ZW5kZWQgZW50cnkgcG9pbnQ8L3RleHQ+CiAgPGxpbmUgeDE9IjI5MCIgeTE9Ijg1IiB4Mj0iMzI1IiB5Mj0iOTAiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjYiLz4KICA8cG9seWdvbiBwb2ludHM9IjMzMSw5MSAzMjAsODUgMzE5LDk1IiBmaWxsPSIjYTNlNjM1Ii8+CgogIDx0ZXh0IHg9IjAiIHk9IjI0MCIgZmlsbD0iI2YwYjQyOSIgZm9udC1zaXplPSIxMi41IiBmb250LXdlaWdodD0iNzAwIj5Nb2R1bGVzIHRoYXQgaW52b2tlIHNlY3VyaXR5KDEpIGRpcmVjdGx5IOKAlCBubyBwb2xpY3kgY2hlY2ssIG5vIG1lbW8sIG5vIGhlYWRsZXNzIGd1YXJkPC90ZXh0PgogIDxnIGZvbnQtc2l6ZT0iMTEuNSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIj4KICAgIDx0ZXh0IHg9IjAiIHk9IjI2NiIgZmlsbD0iI2U4ZThlOCIgb3BhY2l0eT0iMC45Ij5saWIvYWdlbnRzLnRzOjE2ODg8L3RleHQ+CiAgICA8dGV4dCB4PSIzNDAiIHk9IjI2NiIgZmlsbD0iI2U4ZThlOCIgb3BhY2l0eT0iMC43MiI+YW50aWdyYXZpdHlPc0tleXJpbmdQcm9iZTwvdGV4dD4KICAgIDx0ZXh0IHg9IjAiIHk9IjI5MCIgZmlsbD0iI2U4ZThlOCIgb3BhY2l0eT0iMC45Ij5saWIvdXNhZ2UudHM6MzA0MzwvdGV4dD4KICAgIDx0ZXh0IHg9IjM0MCIgeT0iMjkwIiBmaWxsPSIjZThlOGU4IiBvcGFjaXR5PSIwLjcyIj5hIHNlY29uZCBjb3B5IG9mIHRoZSBzYW1lIHByb2JlIChzZWUgdXNhZ2UudHM6MzAyNik8L3RleHQ+CiAgICA8dGV4dCB4PSIwIiB5PSIzMTQiIGZpbGw9IiNlOGU4ZTgiIG9wYWNpdHk9IjAuOSI+bGliL2F1dG8tZGlzcGF0Y2gtbGluZWFyLnRzOjI2PC90ZXh0PgogICAgPHRleHQgeD0iMzQwIiB5PSIzMTQiIGZpbGw9IiNlOGU4ZTgiIG9wYWNpdHk9IjAuNzIiPnVuZ3VhcmRlZDsgcmVhY2hlZCBmcm9tIGxpbmVhci1wcm9qZWN0LWNvdW50cy50czoyMjI8L3RleHQ+CiAgICA8dGV4dCB4PSIwIiB5PSIzMzgiIGZpbGw9IiNlOGU4ZTgiIG9wYWNpdHk9IjAuOSI+bGliL29wZW5jbGF3LWtleWNoYWluLnRzOjI3NjwvdGV4dD4KICAgIDx0ZXh0IHg9IjM0MCIgeT0iMzM4IiBmaWxsPSIjZThlOGU4IiBvcGFjaXR5PSIwLjcyIj5zdG9yZXMgYW5kIHJlYWRzIGFuIGl0ZW0gb3V0c2lkZSB0aGUgc3Vic3lzdGVtPC90ZXh0PgogIDwvZz4KCiAgPHJlY3QgeD0iMCIgeT0iMzU2IiB3aWR0aD0iMTAwMCIgaGVpZ2h0PSI1NiIgcng9IjgiIGZpbGw9IiNmMGI0MjkiIGZpbGwtb3BhY2l0eT0iMC4xMCIgc3Ryb2tlPSIjZjBiNDI5IiBzdHJva2Utb3BhY2l0eT0iMC41Ii8+CiAgPHRleHQgeD0iMTgiIHk9IjM3OCIgZmlsbD0iI2U4ZThlOCIgZm9udC1zaXplPSIxMS41IiBmb250LXdlaWdodD0iNzAwIj5Ob3RoaW5nIGluIHRoZSBidWlsZCBmYWlscyB3aGVuIGEgbW9kdWxlIHRha2VzIHRoZSBsb3dlciBwYXRoLCBzbyB0aGUgaW52YXJpYW50IGhvbGRzIG9ubHkgd2hpbGUgZXZlcnkgYXV0aG9yIHJlbWVtYmVycyBpdC48L3RleHQ+CiAgPHRleHQgeD0iMTgiIHk9IjM5OCIgZmlsbD0iI2U4ZThlOCIgb3BhY2l0eT0iMC43OCIgZm9udC1zaXplPSIxMS41Ij5Ud28gcmV2aWV3IHJ1bGVzIGFscmVhZHkgcHJvaGliaXQgdGhpcyDigJQgIm5vIGR1cGxpY2F0ZSBjb2RlIiBhbmQgImNyb3NzLWN1dHRpbmcgY2hhbmdlcyBnbyB0byB0aGUgc291cmNlIiDigJQgYnV0IGJvdGggYXJlIGVuZm9yY2VkIGJ5IHJldmlld2VyIGF0dGVudGlvbiBhbG9uZS48L3RleHQ+Cjwvc3ZnPgo8cCBjbGFzcz0iYXJ0aWZhY3QtbGVnZW5kIj5UaGUgaW52YXJpYW50IGlzIGFyY2hpdGVjdHVyYWxseSBjb3JyZWN0IGFuZCB0ZXh0dWFsbHkgc3RhdGVkLiBJdCBpcyBub3QgY2hlY2thYmxlLCBzbyBpdCBkZWdyYWRlcyBvbmUgY2FsbCBzaXRlIGF0IGEgdGltZS48L3A+CjwvZGl2PgoKVGhlIGR1cGxpY2F0aW9uIGlzIHNlbGYtZG9jdW1lbnRlZC4gYHVzYWdlLnRzOjMwMjZgIGRlc2NyaWJlcyBpdHMgb3duIHByb2JlIGFzIG1pcnJvcmluZyB0aGUgb25lCmluIGBhZ2VudHMudHNgLCBhbmQgdGhlIHR3byBpbXBsZW1lbnRhdGlvbnMgaGF2ZSBhbHJlYWR5IGRpdmVyZ2VkIGluIHRoZWlyIGFyZ3VtZW50cyDigJQgYHVzYWdlLnRzYApwYXNzZXMgYC13YCB0byByZXRyaWV2ZSB0aGUgdmFsdWUsIGBhZ2VudHMudHNgIG9taXRzIGl0IGJlY2F1c2UgaXQgb25seSB0ZXN0cyBleGlzdGVuY2U6CgpgYGB0cwovLyBhcHBzL2NsaS9zcmMvbGliL3VzYWdlLnRzOjMwMjYgKGNvbW1lbnQpIGFuZCAzMDQwLTMwNDYKLy8gICogdGhlIHByb2JlIGNvbW1hbmQgcGFpciBtaXJyb3JzIGFudGlncmF2aXR5T3NLZXlyaW5nUHJvYmUgaW4gYWdlbnRzLnRzLCB3aXRoCmlmIChwcm9jZXNzLmVudi5BR0VOVFNfTk9fS0VZQ0hBSU5fUFJPQkUgPT09ICcxJykgcmV0dXJuIG51bGw7CmNvbnN0IHByb2JlID0KICBwcm9jZXNzLnBsYXRmb3JtID09PSAnZGFyd2luJwogICAgPyB7IGNtZDogJ3NlY3VyaXR5JywgYXJnczogWydmaW5kLWdlbmVyaWMtcGFzc3dvcmQnLCAnLXcnLCAnLXMnLCAnZ2VtaW5pJywgJy1hJywgJ2FudGlncmF2aXR5J10gfQogICAgOiBwcm9jZXNzLnBsYXRmb3JtID09PSAnbGludXgnCiAgICAgID8geyBjbWQ6ICdzZWNyZXQtdG9vbCcsIGFyZ3M6IFsnbG9va3VwJywgJ3NlcnZpY2UnLCAnZ2VtaW5pJywgJ3VzZXJuYW1lJywgJ2FudGlncmF2aXR5J10gfQogICAgICA6IG51bGw7CmBgYAoKVGhlIG9ic2VydmFibGUgY29uc2VxdWVuY2UgaXMgYSByZW1lZGlhdGlvbiBsb29wLiBUd2VudHktZml2ZSBjaGFuZ2VzIHNpbmNlIDIwMjYtMDUtMjEgbmFtZSB0aGUKaW50ZXJhY3RpdmUgYXV0aG9yaXphdGlvbiBwcm9tcHQgaW4gdGhlaXIgc3ViamVjdCBsaW5lLCBhbmQgdGhlIGZyZXF1ZW5jeSBpcyBpbmNyZWFzaW5nIHJhdGhlcgp0aGFuIGNvbnZlcmdpbmc6IHRocmVlIGluIE1heSwgZm91ciBpbiBKdW5lLCBzaXggaW4gSnVseSwgYW5kIHR3ZWx2ZSBpbiB0aGUgZmlyc3QgbmluZSBkYXlzIG9mCkF1Z3VzdC4gVGhleSBhcmUgZGlzdHJpYnV0ZWQgYWNyb3NzIGZvdXIgc3Vic3lzdGVtcyDigJQgc2VjcmV0cywgdXNhZ2UsIGRldmljZXMgYW5kIHN5bmMg4oCUIHdoaWNoIGlzCndoYXQgb25lIGV4cGVjdHMgd2hlbiBhIHBvbGljeSBpcyBlbmZvcmNlZCBhdCBjYWxsIHNpdGVzIHJhdGhlciB0aGFuIGF0IGEgYm91bmRhcnkuIFR3byBvZiB0aGVtCnN0YXRlIHRoZSBnZW5lcmFsaXphdGlvbiBleHBsaWNpdGx5IGFuZCBzdGlsbCBkaWQgbm90IGNsb3NlIGl0OiBvbmUgaXMgdGl0bGVkICJjbG9zZSB0aGUgc2FtZQpoZWFkbGVzcy1wcm9tcHQgZ2FwIGluIHRoZSByZW1haW5pbmcgYmFja2dyb3VuZCBjYWxsZXJzIiAoMjAyNi0wNy0xNiksIGFuZCBhbm90aGVyLCB0aHJlZSB3ZWVrcwpsYXRlciwgInN0b3AgYmFja2dyb3VuZCBUb3VjaCBJRCBwcm9tcHQgc3Rvcm1zIGZyb20gcmF3IGtleWNoYWluIHJlYWRzLiIKCjxkaXYgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZSBhcnRpZmFjdC1maWd1cmUtZGlhZ3JhbSI+Cjxzdmcgdmlld0JveD0iMCAwIDEwMDAgMzQwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkNoYW5nZXMgbmFtaW5nIHRoZSBpbnRlcmFjdGl2ZSBhdXRob3JpemF0aW9uIHByb21wdCwgYnkgbW9udGgiPgogIDx0ZXh0IHg9IjAiIHk9IjE4IiBmaWxsPSIjZThlOGU4IiBmb250LXNpemU9IjE1IiBmb250LXdlaWdodD0iNzAwIj5GaWd1cmUgMyDigJQgUmVtZWRpYXRpb24gZnJlcXVlbmN5IGZvciB0aGUgaW50ZXJhY3RpdmUgYXV0aG9yaXphdGlvbiBwcm9tcHQ8L3RleHQ+CiAgPHRleHQgeD0iMCIgeT0iMzgiIGZpbGw9IiNlOGU4ZTgiIG9wYWNpdHk9IjAuNjIiIGZvbnQtc2l6ZT0iMTIiPkNoYW5nZXMgd2hvc2Ugc3ViamVjdCBsaW5lIG5hbWVzIHRoZSBwcm9tcHQuIEEgY29udmVyZ2luZyBmaXggd291bGQgdHJlbmQgZG93bjsgdGhpcyB0cmVuZHMgdXAuPC90ZXh0PgoKICA8bGluZSB4MT0iNjAiIHkxPSIyNDAiIHgyPSI5MDAiIHkyPSIyNDAiIHN0cm9rZT0iI2U4ZThlOCIgc3Ryb2tlLW9wYWNpdHk9IjAuMyIvPgogIDxnIGZvbnQtc2l6ZT0iMTEuNSI+CiAgICA8cmVjdCB4PSIxMjAiIHk9IjE5NSIgd2lkdGg9IjExMCIgaGVpZ2h0PSI0NSIgcng9IjQiIGZpbGw9IiNhM2U2MzUiIGZpbGwtb3BhY2l0eT0iMC41Ii8+CiAgICA8dGV4dCB4PSIxNzUiIHk9IjE4NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2U4ZThlOCIgZm9udC13ZWlnaHQ9IjcwMCI+MzwvdGV4dD4KICAgIDx0ZXh0IHg9IjE3NSIgeT0iMjYwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZThlOGU4IiBvcGFjaXR5PSIwLjc1Ij5NYXkgMjAyNjwvdGV4dD4KCiAgICA8cmVjdCB4PSIyOTAiIHk9IjE4MCIgd2lkdGg9IjExMCIgaGVpZ2h0PSI2MCIgcng9IjQiIGZpbGw9IiNhM2U2MzUiIGZpbGwtb3BhY2l0eT0iMC41NSIvPgogICAgPHRleHQgeD0iMzQ1IiB5PSIxNzEiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNlOGU4ZTgiIGZvbnQtd2VpZ2h0PSI3MDAiPjQ8L3RleHQ+CiAgICA8dGV4dCB4PSIzNDUiIHk9IjI2MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2U4ZThlOCIgb3BhY2l0eT0iMC43NSI+SnVuZTwvdGV4dD4KCiAgICA8cmVjdCB4PSI0NjAiIHk9IjE1MCIgd2lkdGg9IjExMCIgaGVpZ2h0PSI5MCIgcng9IjQiIGZpbGw9IiNmMGI0MjkiIGZpbGwtb3BhY2l0eT0iMC43Ii8+CiAgICA8dGV4dCB4PSI1MTUiIHk9IjE0MSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2U4ZThlOCIgZm9udC13ZWlnaHQ9IjcwMCI+NjwvdGV4dD4KICAgIDx0ZXh0IHg9IjUxNSIgeT0iMjYwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZThlOGU4IiBvcGFjaXR5PSIwLjc1Ij5KdWx5PC90ZXh0PgoKICAgIDxyZWN0IHg9IjYzMCIgeT0iNjAiIHdpZHRoPSIxMTAiIGhlaWdodD0iMTgwIiByeD0iNCIgZmlsbD0iI2YwYjQyOSIgZmlsbC1vcGFjaXR5PSIwLjkiLz4KICAgIDx0ZXh0IHg9IjY4NSIgeT0iNTEiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNlOGU4ZTgiIGZvbnQtd2VpZ2h0PSI3MDAiPjEyPC90ZXh0PgogICAgPHRleHQgeD0iNjg1IiB5PSIyNjAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNlOGU4ZTgiIG9wYWNpdHk9IjAuNzUiPkF1ZyAx4oCTOSBvbmx5PC90ZXh0PgoKICAgIDx0ZXh0IHg9Ijc3MCIgeT0iMTQwIiBmaWxsPSIjZjBiNDI5IiBmb250LXNpemU9IjEyIiBmb250LXdlaWdodD0iNzAwIj5uaW5lIGRheXMsIGZvdXIgdGltZXM8L3RleHQ+CiAgICA8dGV4dCB4PSI3NzAiIHk9IjE2MCIgZmlsbD0iI2YwYjQyOSIgZm9udC1zaXplPSIxMiIgZm9udC13ZWlnaHQ9IjcwMCI+SnVuZSdzIGZ1bGwtbW9udGggY291bnQ8L3RleHQ+CiAgPC9nPgoKICA8dGV4dCB4PSIwIiB5PSIyOTYiIGZpbGw9IiNlOGU4ZTgiIG9wYWNpdHk9IjAuOCIgZm9udC1zaXplPSIxMS41Ij5EaXN0cmlidXRpb24gYWNyb3NzIHN1YnN5c3RlbXM6IHNlY3JldHMgMTgsIHVzYWdlIDIsIGNoYW5nZWxvZyAyLCBkZXZpY2VzIDEsIHN5bmMgMSwgZGVzaWduIDEuPC90ZXh0PgogIDx0ZXh0IHg9IjAiIHk9IjMxOCIgZmlsbD0iI2U4ZThlOCIgb3BhY2l0eT0iMC42IiBmb250LXNpemU9IjExIj5NZWFzdXJlbWVudCBpcyBzdWJqZWN0LWxpbmUgbWF0Y2hpbmcsIHNvIGl0IHVuZGVyY291bnRzIHNpbGVudCByZW1lZGlhdGlvbnMgYW5kIGlzIGEgbG93ZXIgYm91bmQuPC90ZXh0Pgo8L3N2Zz4KPHAgY2xhc3M9ImFydGlmYWN0LWxlZ2VuZCI+RnJlcXVlbmN5IGlzIHRoZSBzaWduYWwsIG5vdCBhbnkgaW5kaXZpZHVhbCBjaGFuZ2UuIEVhY2ggb2YgdGhlc2Ugd2FzIGF1dGhvcmVkIGJlbGlldmluZyBpdCBhZGRyZXNzZWQgdGhlIGNhdXNlLjwvcD4KPC9kaXY+CgojIyMjIDQuMiBSZXF1aXJlbWVudCBpZGVudGlmaWVycyBhcmUgbm90IHVuaXF1ZQoKVGhlIHNwZWNpZmljYXRpb24gc3RhdGVzIHRoYXQgaWRlbnRpZmllcnMgYXJlIHNlY3Rpb24tbmFtZXNwYWNlZCBzbyB0aGF0IGVhY2ggb25lIGlzIGdsb2JhbGx5CnVuaXF1ZS4gRml2ZSBhcmUgbm90LiBgU0VTLTQwYCBpcyBkZWZpbmVkIHRocmVlIHRpbWVzLCBhdCBsaW5lcyAyOTYsIDQ4MSBhbmQgNjYwLCB3aXRoIHRocmVlCnVucmVsYXRlZCBtZWFuaW5ncyDigJQgYWNjb3VudCBhdHRyaWJ1dGlvbiwgaW5kZXggYXV0aG9yaXR5LCBhbmQgZm9jdXMvcmVzdW1lIHJvdXRpbmcuIGBTRVMtMzhgIGFuZApgU0VTLTM5YCBhcmUgZWFjaCBkZWZpbmVkIHR3aWNlLCBhcyBhcmUgYFNJTkctMTFgIGFuZCBgU0lORy0xMmAuIFRoZSBjb2xsaXNpb24gaXMgbm90IGNvc21ldGljOgpgU0lORy0xMmAgY2l0ZXMgYFNJTkctMTFgIGluIGl0cyBvd24gYm9keSwgYW5kIGBTSU5HLTExYCBub3cgZGVub3RlcyBib3RoICJhIHNpbmdsZSBzY2hlZHVsZWQgZmlyZQpsYXVuY2hlcyBhIHJvdXRpbmUgYXQgbW9zdCBvbmNlIiBhbmQgImF0IG1vc3Qgb25lIGRhZW1vbiBpcyBhbGl2ZSBwZXIgc3RhdGUgZGlyZWN0b3J5LiIKClRoZSBwcmFjdGljYWwgZWZmZWN0IGlzIHRoYXQgYW4gaW5zdHJ1Y3Rpb24gb2YgdGhlIGZvcm0gInNhdGlzZnkgYFNFUy00MGAiIGNhbm5vdCBiZSByZXNvbHZlZCBieQphbiBpbXBsZW1lbnRlciwgYW5kIGEgcmV2aWV3IGNvbW1lbnQgY2l0aW5nIGl0IGNhbm5vdCBiZSByZXNvbHZlZCBieSBhbiBhdXRob3IuIEJvdGggY29sbGlzaW9uCmNsdXN0ZXJzIGZhbGwgaW4gdGhlIGRhZW1vbiBhbmQgcm91dGluZSBzdWJzeXN0ZW1zLCB3aGljaCBhcmUgYW1vbmcgdGhlIGhpZ2hlc3QtcmVncmVzc2lvbiBhcmVhcy4KCiMjIyMgNC4zIEFzcGlyYXRpb25hbCByZXF1aXJlbWVudHMgYXJlIGZvcm1hdHRlZCBpZGVudGljYWxseSB0byBpbXBsZW1lbnRlZCBvbmVzCgpUaGUgc3BlY2lmaWNhdGlvbiBzdXBwb3J0cyBhIHN0YXR1cyBtYXJrZXIgZGlzdGluZ3Vpc2hpbmcgYmVoYXZpb3IgdGhlIGNvZGUgZXhoaWJpdHMgZnJvbQpiZWhhdmlvciBpdCBpcyBpbnRlbmRlZCB0byBleGhpYml0LiBJbiB0aGUgcm91dGluZSBleGVjdXRpb24gc2VjdGlvbiwgZWlnaHQgb2YgdGhlIGVsZXZlbgpyZXF1aXJlbWVudHMgY2FycnkgYFtJbnRlbmRlZF1gLiBUaGUgbWFya2VyIGFwcGVhcnMgaW5saW5lIGluIHRoZSBpZGVudGlmaWVyIGxpbmUsIGluIHRoZSBmb3JtCmAoTVVTVCwgW0ludGVuZGVkXSlgLCB3aGljaCBwbGFjZXMgaXQgaW4gdGhlIHNhbWUgdmlzdWFsIHBvc2l0aW9uIGFzIHRoZSBSRkMtMjExOSBrZXl3b3JkIGFuZAptYWtlcyBpdCBlYXN5IHRvIG92ZXJsb29rIOKAlCBpbmNsdWRpbmcgcHJvZ3JhbW1hdGljYWxseSwgYXMgYSByZWdleCBtYXRjaGluZyBgKE1VU1QpYCB3aWxsIG5vdAptYXRjaCBpdC4KCkFuIGltcGxlbWVudGVyIHJlYWRpbmcgdGhhdCBzZWN0aW9uIHRoZXJlZm9yZSBlbmNvdW50ZXJzIGVsZXZlbiBzdGF0ZW1lbnRzIGluIGlkZW50aWNhbApncmFtbWF0aWNhbCBmb3JtLCBvZiB3aGljaCB0aHJlZSBkZXNjcmliZSB0aGUgc3lzdGVtIGFuZCBlaWdodCBkZXNjcmliZSBhIHRhcmdldC4gQWJzZW50IGNhcmVmdWwKcmVhZGluZywgYW4gYWdlbnQgd2lsbCBpbXBsZW1lbnQgYWdhaW5zdCwgb3IgYXNzZXJ0IGNvbmZvcm1hbmNlIHRvLCBiZWhhdmlvciB0aGF0IGRvZXMgbm90IGV4aXN0LgoKfCBJZGVudGlmaWVyIHwgU3RhdHVzIHwgUmVxdWlyZW1lbnQsIGFiYnJldmlhdGVkIHwKfC0tLXwtLS18LS0tfAp8IFJULTEgfCBpbXBsZW1lbnRlZCB8IGBwcm9qZWN0c2AgKHBsdXJhbCkgaXMgZ3JvdXBpbmcgbWV0YWRhdGEgb25seSB8CnwgUlQtMiB8IGBbSW50ZW5kZWRdYCB8IFRoZSBleGVjdXRpb24gYW5jaG9yIGlzIGRpc3RpbmN0IGZyb20gdGhlIHBsdXJhbCBncm91cGluZyB8CnwgUlQtMyB8IGBbSW50ZW5kZWRdYCB8IFRoZSB3b3JraW5nIGRpcmVjdG9yeSBpcyByZXNvbHZlZCBvbiB0aGUgZXhlY3V0aW9uIHRhcmdldCB8CnwgUlQtNCB8IGBbSW50ZW5kZWRdYCB8IEEgYGNvbW1hbmRgIHJvdXRpbmUgKHNoZWxsIGJvZHksIG5vIGFnZW50KSBtdXN0IOKApiB8CnwgUlQtNSB8IGBbSW50ZW5kZWRdYCB8IGBhZGRgL2BlZGl0YCB2ZXJpZnkgcmVhZGluZXNzIGJlZm9yZSBhY2NlcHRpbmcgYSBkZWZpbml0aW9uIHwKfCBSVC02IHwgYFtJbnRlbmRlZF1gIHwgRXZlcnkgYXR0ZW1wdCBpcyByZWNvcmRlZCBhcyBhIGBSdW5NZXRhYCB1bmRlciBgLmhpc3RvcnkvcnVucy9gIHwKfCBSVC03IHwgYFtJbnRlbmRlZF1gIHwgYFJ1bk1ldGEuc3RhdHVzYCBkaXN0aW5ndWlzaGVzLCBhdCBtaW5pbXVtLCDigKYgfAp8IFJULTggfCBpbXBsZW1lbnRlZCB8IGByZXBvYCBpcyBhbiBleHRlcm5hbCBpZGVudGl0eSwgbm90IGEgbG9jYWwgY2hlY2tvdXQgfAp8IFJULTkgfCBgW0ludGVuZGVkXWAgfCBgcmVzdW1lYCByZS1ydW5zIHRoZSByZWFkaW5lc3MgY2hlY2sgfAp8IFJULTEwIHwgYFtJbnRlbmRlZF1gIHwgQSByYXcgWUFNTCBlZGl0IG11c3Qg4oCmIHwKfCBSVC0xMSB8IGltcGxlbWVudGVkIHwgVGhlIG1lbnUtYmFyIGhlbHBlciBjb25zdW1lcyBzdGF0ZSBmb3IgZGlzcGxheSBvbmx5IHwKCkFjcm9zcyB0aGUgd2hvbGUgZG9jdW1lbnQsIHNpeHRlZW4gcmVxdWlyZW1lbnRzIGNhcnJ5IGBbSW50ZW5kZWRdYCBhbmQgdHdvIGNhcnJ5IGBbRHJpZnRdYC4gTmluZQpvZiB0aGUgc2l4dGVlbiBhcmUgaW4gcm91dGluZSBleGVjdXRpb24uCgojIyMjIDQuNCBDb3ZlcmFnZSBnYXBzIGFkamFjZW50IHRvIHRoZSBjcmVkZW50aWFsIGJvdW5kYXJ5CgpUaGUgc3BlY2lmaWNhdGlvbidzIG93biBjb3ZlcmFnZSBpbnZlbnRvcnkgcGxhY2VzIHRoZSBzaWduZWQga2V5Y2hhaW4gaGVscGVyIGFuZCB0aGUgd2FsbGV0IGluCnRoZSB1bnNwZWNpZmllZCByb3csIGFuZCBuYW1lcyB0aGVtIGFtb25nIHRoZSBmaXZlIHN1cmZhY2VzIHdoZXJlIHRoZSBhYnNlbmNlIGlzIG1vc3QKY29uc2VxdWVudGlhbCwgb24gdGhlIGdyb3VuZHMgdGhhdCB0aGV5ICJzaXQgZGlyZWN0bHkgYWdhaW5zdCB0aGUgY3JlZGVudGlhbCBib3VuZGFyeSB0aGF0CsKnU2VjcmV0cyBzcGVjaWZpZXMsIHdpdGhvdXQgaW5oZXJpdGluZyBhbnkgb2YgaXRzIHJlcXVpcmVtZW50cy4iIFRoZSBzYW1lIHJvdyBjb250YWlucwpgc3luY2AvYGFwcGx5YC9gc3RhdHVzYCwgd2hpY2ggcmVjb25jaWxlIGNvbmZpZ3VyYXRpb24gYWNyb3NzIGV2ZXJ5IG1hY2hpbmUuCgpUaGlzIGlzIGEgcmVhbCBnYXAsIGJ1dCBpdCBpcyB0aGUgd2Vha2VzdCBvZiB0aGUgZm91ciBjYXVzZXMgb24gdGhlIGV2aWRlbmNlIGF2YWlsYWJsZTogdGhlCnN1YnN5c3RlbXMgd2l0aCBubyBjb250cmFjdCBhdCBhbGwgKHVzYWdlIGF0IDM4JSwgc3luYyBhdCAzNCUpIHJlZ3Jlc3MgKmxlc3MqIHRoYW4gdGhlIGhlYXZpbHkKc3BlY2lmaWVkIHNlY3JldHMgc3Vic3lzdGVtIGF0IDUwJS4gQ292ZXJhZ2UgYWxvbmUgZG9lcyBub3QgcHJlZGljdCByZWdyZXNzaW9uLCB3aGljaCBpcyB0aGUKY2VudHJhbCByZWFzb24gdGhpcyBkb2N1bWVudCBkb2VzIG5vdCByZWNvbW1lbmQgd3JpdGluZyBtb3JlIHNwZWNpZmljYXRpb24gYXMgdGhlIHByaW1hcnkKcmVtZWR5LgoKIyMgRGF0YQoKIyMjIDUuIFByb3Bvc2FsCgojIyMjIDUuMSBQcmltYXJ5OiBtYWtlIHRoZSBjcmVkZW50aWFsIGVudHJ5IHBvaW50IHN0cnVjdHVyYWxseSBzaW5ndWxhcgoKQWRkIGEgYnVpbGQtdGltZSBjaGVjayBhc3NlcnRpbmcgdGhhdCBubyBtb2R1bGUgb3V0c2lkZSBgbGliL3NlY3JldHMvYCBpbnZva2VzIHRoZSBrZXljaGFpbgpiaW5hcnksIGltcGxlbWVudGVkIGFzIGEgdW5pdCB0ZXN0IGluIHRoZSBleGlzdGluZyBzdWl0ZSByYXRoZXIgdGhhbiBhIGxpbnQgcGx1Z2luLCBzbyB0aGF0IGl0CnJ1bnMgZXZlcnl3aGVyZSB0aGUgc3VpdGUgcnVucyBhbmQgcmVxdWlyZXMgbm8gbmV3IHRvb2xpbmcuCgpUaGUgY2hlY2sgZW51bWVyYXRlcyBzb3VyY2UgZmlsZXMsIGV4Y2x1ZGVzIGBsaWIvc2VjcmV0cy9gLCBhbmQgZmFpbHMgb24gYW55IG9jY3VycmVuY2Ugb2YKYGZpbmQtZ2VuZXJpYy1wYXNzd29yZGAsIGBhZGQtZ2VuZXJpYy1wYXNzd29yZGAsIGBkZWxldGUtZ2VuZXJpYy1wYXNzd29yZGAsIG9yIGEgZGlyZWN0CmAvdXNyL2Jpbi9zZWN1cml0eWAgaW52b2NhdGlvbi4gSXQgd291bGQgZmFpbCB0b2RheSBvbiB0aGUgZm91ciBtb2R1bGVzIGluIMKnNC4xLCBzbyBsYW5kaW5nIGl0CnJlcXVpcmVzIHJvdXRpbmcgdGhvc2UgY2FsbCBzaXRlcyB0aHJvdWdoIGBnZXRLZXljaGFpblRva2VuYCBmaXJzdCDigJQgd2hpY2ggaXMgdGhlIGFjdHVhbCB3b3JrLAphbmQgaXMgYm91bmRlZDogdHdvIG9mIHRoZSBmb3VyIGFyZSB0aGUgc2FtZSBkdXBsaWNhdGVkIHByb2JlIGFuZCBjb2xsYXBzZSBpbnRvIG9uZS4KCkFuIGV4cGxpY2l0IGFsbG93bGlzdCBzaG91bGQgZXhpc3QgZm9yIGdlbnVpbmUgZXhjZXB0aW9ucywga2V5ZWQgYnkgZmlsZSBhbmQgcmVhc29uLCBzbyB0aGF0IGFuCmludGVudGlvbmFsIGV4Y2VwdGlvbiBpcyBhIHJldmlld2VkIGRpZmYgdG8gdGhlIGFsbG93bGlzdCByYXRoZXIgdGhhbiBhbiBpbnZpc2libGUgbmV3IGNhbGwgc2l0ZS4KCioqV2h5IHRoaXMgcmF0aGVyIHRoYW4gdGhlIGFsdGVybmF0aXZlcy4qKiBUaHJlZSBvdGhlciBvcHRpb25zIHdlcmUgY29uc2lkZXJlZC4KCnwgT3B0aW9uIHwgQXNzZXNzbWVudCB8CnwtLS18LS0tfAp8IFJlc3RhdGUgdGhlIHJ1bGUgaW4gYEFHRU5UUy5tZGAgfCBSZWplY3RlZC4gVGhlIHJ1bGUgaXMgYWxyZWFkeSBzdGF0ZWQgdHdpY2Ug4oCUIGluIGBTRUMtMTNgIGFuZCBpbiB0aGUgImNyb3NzLWN1dHRpbmcgY2hhbmdlcyBnbyB0byB0aGUgc291cmNlIiByZXZpZXcgcnVsZSDigJQgYW5kIGJvdGggd2VyZSB2aW9sYXRlZC4gUmVzdGF0aW5nIGFuIHVuZW5mb3JjZWQgcnVsZSBkb2VzIG5vdCBjaGFuZ2UgaXRzIGVuZm9yY2VtZW50IHwKfCBBZGQgYSByZXZpZXctY2hlY2tsaXN0IGl0ZW0gfCBSZWplY3RlZC4gVGhlIGZvdXJ0ZWVuLWl0ZW0gcmV2aWV3IGNvbnRyYWN0IGFscmVhZHkgY292ZXJzIGR1cGxpY2F0ZSBjb2RlIGFuZCBjcm9zcy1jdXR0aW5nIGNoYW5nZXMuIFJldmlld2VyIGF0dGVudGlvbiBpcyB0aGUgbWVjaGFuaXNtIHRoYXQgaGFzIGJlZW4gZmFpbGluZyB8CnwgRW5jYXBzdWxhdGUgYXQgdGhlIHR5cGUgbGV2ZWwgKGEgYnJhbmRlZCBjcmVkZW50aWFsIHR5cGUpIHwgRGVmZXJyZWQuIEl0IGlzIHN0cm9uZ2VyIHRoYW4gYSB0ZXN0LCBidXQgaXQgY29uc3RyYWlucyBvbmx5IHRoZSB0eXBlZCBwYXRoczsgYSBgZXhlY0ZpbGVTeW5jKCdzZWN1cml0eScsIOKApilgIGNhbGwgcmVtYWlucyByZWFjaGFibGUuIEl0IGlzIGEgcmVhc29uYWJsZSBmb2xsb3ctb24sIG5vdCBhIHN1YnN0aXR1dGUgfAp8IEEgdW5pdCB0ZXN0IGFzc2VydGluZyBvbmUgZW50cnkgcG9pbnQgfCAqKlJlY29tbWVuZGVkLioqIEZhaWxzIGRldGVybWluaXN0aWNhbGx5IGluIENJLCBpcyBjaGVhcCB0byB3cml0ZSwgcmVxdWlyZXMgbm8gbmV3IGRlcGVuZGVuY3ksIGFuZCBpdHMgZmFpbHVyZSBtZXNzYWdlIGNhbiBuYW1lIHRoZSBjb3JyZWN0IGVudHJ5IHBvaW50IGRpcmVjdGx5IHwKCioqUmlza3MuKiogVGhlIGNoZWNrIGlzIHRleHR1YWwgYW5kIGNhbiBiZSBldmFkZWQgYnkgY29uc3RydWN0aW5nIHRoZSBiaW5hcnkgbmFtZSBkeW5hbWljYWxseS4KVGhpcyBpcyBhY2NlcHRhYmxlOiB0aGUgb2JqZWN0aXZlIGlzIHRvIHByZXZlbnQgaW5hZHZlcnRlbnQgcmVjcmVhdGlvbiBvZiBhIHNlY29uZCBwYXRoLCBub3QgdG8KcmVzaXN0IGEgZGVsaWJlcmF0ZSBvbmUuIEEgc2Vjb25kYXJ5IHJpc2sgaXMgZmFsc2UgcG9zaXRpdmVzIGluIGRvY3VtZW50YXRpb24gc3RyaW5ncyBhbmQgdGVzdApmaXh0dXJlcywgYWRkcmVzc2VkIGJ5IHNjb3BpbmcgdG8gbm9uLXRlc3Qgc291cmNlcyBhbmQgYnkgdGhlIGFsbG93bGlzdC4KCiMjIyMgNS4yIFN1cHBvcnRpbmc6IHJlbnVtYmVyIHRoZSBmaXZlIGNvbGxpZGluZyBpZGVudGlmaWVycwoKQXNzaWduIG5ldyBpZGVudGlmaWVycyB0byB0aGUgZHVwbGljYXRlIGRlZmluaXRpb25zIGFuZCBsZWF2ZSB0aGUgZmlyc3QgZGVmaW5pdGlvbiBvZiBlYWNoIGluCnBsYWNlLCBzbyBleGlzdGluZyBjaXRhdGlvbnMgY29udGludWUgdG8gcmVzb2x2ZS4gQWRkIGEgdGVzdCBhc3NlcnRpbmcgaWRlbnRpZmllciB1bmlxdWVuZXNzIHNvCnRoYXQgdGhlIHByb3BlcnR5IGlzIG1haW50YWluZWQgcmF0aGVyIHRoYW4gcGVyaW9kaWNhbGx5IHJlc3RvcmVkIOKAlCB0aGUgc2FtZSBzdHJ1Y3R1cmFsIGFyZ3VtZW50CmFzIMKnNS4xLCBhcHBsaWVkIHRvIHRoZSBkb2N1bWVudC4KClRoZSBjaG9pY2Ugb2Ygd2hpY2ggZGVmaW5pdGlvbiBrZWVwcyB0aGUgb3JpZ2luYWwgbnVtYmVyIGFmZmVjdHMgZXhpc3RpbmcgcmVmZXJlbmNlcyBpbiByZXZpZXcKaGlzdG9yeSBhbmQgaW4gY29kZSBjb21tZW50cywgYW5kIGlzIGEganVkZ21lbnQgY2FsbCBmb3IgdGhlIHNwZWNpZmljYXRpb24ncyBvd25lciByYXRoZXIgdGhhbgpvbmUgdG8gbWFrZSBtZWNoYW5pY2FsbHkuCgojIyMjIDUuMyBTdXBwb3J0aW5nOiBzZXBhcmF0ZSBpbnRlbmRlZCBmcm9tIGltcGxlbWVudGVkIGJlaGF2aW9yCgpNb3ZlIGBbSW50ZW5kZWRdYCBvdXQgb2YgdGhlIGlkZW50aWZpZXIgbGluZSBhbmQgaW50byBhIHJlcXVpcmVkIHRyYWlsaW5nIHN0YXR1cyBsaW5lLCBhbmQgYWRkIGEKc2VjdGlvbi1sZXZlbCBzdW1tYXJ5IHN0YXRpbmcgaG93IG1hbnkgb2YgdGhlIHNlY3Rpb24ncyByZXF1aXJlbWVudHMgYXJlIGN1cnJlbnRseSBpbXBsZW1lbnRlZC4KQW4gaW1wbGVtZW50ZXIgc2hvdWxkIGJlIGFibGUgdG8gdGVsbCwgd2l0aG91dCByZWFkaW5nIGV2ZXJ5IHJlcXVpcmVtZW50IGJvZHksIHRoYXQgZWlnaHQgb2YgdGhlCmVsZXZlbiByb3V0aW5lIHJlcXVpcmVtZW50cyBkZXNjcmliZSBhIHRhcmdldC4KCiMjIyMgNS40IEV4cGxpY2l0bHkgbm90IHByb3Bvc2VkOiBhZGRpdGlvbmFsIGluc3RydWN0aW9uIHRleHQKCkFwcHJveGltYXRlbHkgNTcsMDAwIHdvcmRzIG9mIHByb2Nlc3MgZ3VpZGFuY2UgYWxyZWFkeSBwcmVjZWRlIGV2ZXJ5IGFnZW50J3MgZmlyc3QgcmVhZCBvZiB0aGUKY29kZS4gTm9uZSBvZiB0aGUgZm91ciBjYXVzZXMgYWJvdmUgaXMgYW4gYWJzZW50IGluc3RydWN0aW9uLiBFYWNoIGlzIGFuIGluc3RydWN0aW9uIHRoYXQgaXMKc3RhdGVkIGFuZCB1bmVuZm9yY2VkLCBhbWJpZ3VvdXMsIG9yIGluZGlzdGluZ3Vpc2hhYmxlIGZyb20gYW4gYXNwaXJhdGlvbi4gQWRkaW5nIHRleHQgYWRkcmVzc2VzCm5vbmUgb2YgdGhlbSBhbmQgaW5jcmVhc2VzIHRoZSBjb250ZXh0IGNvc3Qgb2YgZXZlcnkgYWdlbnQgaW52b2NhdGlvbi4KCiMjIyA2LiBNZWFzdXJlbWVudCwgYW5kIGl0cyBsaW1pdGF0aW9ucwoKVGhlIHJlZ3Jlc3Npb24gcmF0ZXMgaW4gwqcxIGFyZSBjb21wdXRlZCBieSBhdHRyaWJ1dGluZyBlYWNoIGNvbW1pdCB0byBhIHN1YnN5c3RlbSBieSBmaWxlIHBhdGgKYW5kIGNsYXNzaWZ5aW5nIGl0IGFzIHJlbWVkaWF0aW9uIHdoZW4gaXRzIHN1YmplY3QgYmVnaW5zIHdpdGggYGZpeGAgb3IgYHJldmVydGAgb3IgbWVudGlvbnMgYQpyZWdyZXNzaW9uLiBUaGUgY2xhc3NpZmllciBpcyBkZWxpYmVyYXRlbHkgc2ltcGxlIGFuZCBoYXMga25vd24gYmlhc2VzLCBzdGF0ZWQgaGVyZSBzbyB0aGUKbnVtYmVycyBhcmUgcmVhZCBjb3JyZWN0bHkuCgpBIGNvbW1pdCB0b3VjaGluZyB0d28gc3Vic3lzdGVtcyBjb3VudHMgZm9yIGJvdGguIENvbnZlbnRpb25hbC1jb21taXQgcHJlZml4ZXMgYXJlIGF1dGhvci1jaG9zZW4KYW5kIGluY29uc2lzdGVudGx5IGFwcGxpZWQsIHNvIGEgZml4IGNvbW1pdHRlZCBhcyBgcmVmYWN0b3JgIGlzIG5vdCBjb3VudGVkLiBNYW51YWwgaW5zcGVjdGlvbiBvZgp0aGUgdHdvIGxhcmdlc3QgYnVja2V0cyBmb3VuZCB0aGUgY2xhc3NpZmljYXRpb24gc291bmQ6IGFsbCA2NSBkYWVtb24gcmVtZWRpYXRpb25zIGNhcnJ5IGEgYGZpeGAKcHJlZml4LCBhbmQgc2VjcmV0cyBjb250YWlucyBleGFjdGx5IG9uZSBmYWxzZSBwb3NpdGl2ZSDigJQgYSB0ZXN0LXF1YXJhbnRpbmUgY29tbWl0IG1hdGNoZWQgb24gdGhlCndvcmQgInJlZ3Jlc3Npb25zIiDigJQgZ2l2aW5nIDEzNSByYXRoZXIgdGhhbiAxMzYuCgpUaGUgcHJvbXB0LXJlbWVkaWF0aW9uIGNvdW50IGluIMKnNC4xIGlzIHN1YmplY3QtbGluZSBtYXRjaGluZyBhbmQgaXMgYSBsb3dlciBib3VuZDogaXQgY2Fubm90IHNlZQpyZW1lZGlhdGlvbnMgdGhhdCBkaWQgbm90IG5hbWUgdGhlIHByb21wdC4KCnwgU3Vic3lzdGVtIHwgUGF0aHMgYXR0cmlidXRlZCB8IENvbW1pdHMgfCBSZW1lZGlhdGlvbnMgfCBSYXRlIHwKfC0tLXwtLS18LS0tOnwtLS06fC0tLTp8CnwgZGFlbW9uIHwgYGxpYi9kYWVtb25gLCBgY29tbWFuZHMvZGFlbW9uYCwgYGxpYi9zZXJ2aWNlc2AsIGBjb21tYW5kcy9zZXJ2aWNlc2AgfCAxMjkgfCA2NSB8IDUwJSB8Cnwgc2VjcmV0cywga2V5Y2hhaW4sIGhlbHBlciB8IGBsaWIvc2VjcmV0c2AsIGBjb21tYW5kcy9zZWNyZXRzYCwgYGNvbW1hbmRzL2hlbHBlcmAsIGBsaWIva2V5Y2hhaW5gIHwgMjcyIHwgMTM1IHwgNTAlIHwKfCBhY2NvdW50cywgYXV0aGVudGljYXRpb24gfCBgbGliL3JvdGF0ZWAsIGBsaWIvYXV0aGAsIGBsaWIvYWNjb3VudGAsIGBjb21tYW5kcy9hY2NvdW50c2AgfCA0NSB8IDIwIHwgNDQlIHwKfCByb3V0aW5lcyB8IGBsaWIvcm91dGluZWAsIGBjb21tYW5kcy9yb3V0aW5lYCB8IDEyNSB8IDUwIHwgNDAlIHwKfCB1c2FnZSwgbGltaXRzIHwgYGxpYi91c2FnZWAsIGBjb21tYW5kcy92aWV3YCwgYGNvbW1hbmRzL3VzYWdlYCB8IDE3MiB8IDY2IHwgMzglIHwKfCBzZXNzaW9ucyAocmVmZXJlbmNlKSB8IGBsaWIvc2Vzc2lvbmAsIGBjb21tYW5kcy9zZXNzaW9uc2AgfCA1NjYgfCAyMDYgfCAzNiUgfAoKT25lIGZ1cnRoZXIgbWVhc3VyZW1lbnQgd2FzIHRlc3RlZCBhbmQgZGlzY2FyZGVkLiBBbiBlYXJsaWVyIGRyYWZ0IG9mIHRoaXMgYW5hbHlzaXMgcHJvcG9zZWQgdGhhdAp0aGUgYWZmZWN0ZWQgc3Vic3lzdGVtcyBhcmUgdGhvc2Ugd2hvc2UgYmVoYXZpb3IgY2Fubm90IGJlIGFzc2VydGVkIGluIENJLCB1c2luZyB0aGUgZGVuc2l0eSBvZgpza2lwcGVkIHRlc3RzIGFzIHRoZSBwcm94eS4gSW5zcGVjdGlvbiBkaWQgbm90IHN1cHBvcnQgaXQ6IG9mIDEzNyBjb25kaXRpb25hbCBza2lwcyBpbiB0aGUgc3VpdGUsCjExNyBhcmUgV2luZG93cyBwb3J0YWJpbGl0eSBndWFyZHMuIE9ubHkgMjAgYXJlIGNvbmRpdGlvbmFsIG9uIGEgY2FwYWJpbGl0eSB0aGUgbWFjaGluZSBtdXN0IGhhdmUg4oCUIHNldmVuIG1hY09TLW9ubHksIGZpdmUKcmVxdWlyaW5nIHRoZSBzaWduZWQga2V5Y2hhaW4gaGVscGVyLCBmb3VyIHJlcXVpcmluZyBhIHJlYWNoYWJsZSBTU0ggZW5kcG9pbnQsIGZvdXIgcmVxdWlyaW5nIGEKUE9TSVggc2hlbGwg4oCUIGFuZCB0aGV5IHNpdCBpbiBzZWNyZXRzIGFuZCBob3N0cywgbm90IHRoZSBkYWVtb24uIFRoZSBoeXBvdGhlc2lzIGlzIG5vdCBkaXNwcm92ZW4KZm9yIHNlY3JldHMgYW5kIGhvc3RzLCBidXQgdGhlIG1ldHJpYyB0aGF0IGFwcGVhcmVkIHRvIHN1cHBvcnQgaXQgZGlkIG5vdCBtZWFzdXJlIHdoYXQgaXQgd2FzCnJlYWQgYXMgbWVhc3VyaW5nLgoKIyMjIDcuIFdoYXQgdG8gaW1wbGVtZW50CgpOb3RoaW5nIGluIHRoaXMgcmVwb3NpdG9yeSBpcyBtYWNoaW5lLWNoZWNrZWQgYWdhaW5zdCB0aGUgdHdlbnR5LWZvdXIgcnVsZXMgaXQgc3RhdGVzLiBUaGlzCnNlY3Rpb24gc3BlY2lmaWVzIHRoZSBjaGVja3MgdG8gd3JpdGUsIHdoZXJlIGVhY2ggb25lIGxpdmVzLCB3aGF0IGl0IHJlYWRzLCBhbmQgd2hldGhlciBpdCBwYXNzZXMKdG9kYXkuIFRocmVlIGV4aXN0aW5nIG1lY2hhbmlzbXMgYXJlIGV4dGVuZGVkIHJhdGhlciB0aGFuIHJlcGxhY2VkLgoKIyMjIyA3LjEgV2hhdCBhbHJlYWR5IGV4aXN0cyB0byBidWlsZCBvbgoKfCBNZWNoYW5pc20gfCBXaGF0IGl0IGRvZXMgdG9kYXkgfCBSZXVzZWQgZm9yIHwKfC0tLXwtLS18LS0tfAp8IGBhcHBzL2NsaS9zY3JpcHRzL3ZlcmlmeS1jb21tYW5kLWluZGV4LnNoYCB8IFJlZ2VuZXJhdGVzIHRoZSBjb21tYW5kIGluZGV4IGludG8gYSB0ZW1wIGRpciBhbmQgZGlmZnMgaXQgYWdhaW5zdCB0aGUgY29tbWl0dGVkIGNvcHk7IGZhaWxzIENJIGFzIGl0cyBvd24gc3RlcCBpbiBgdGVzdHMueW1sYCB8IFRoZSBzaGFwZSBvZiBhIHN0cnVjdHVyYWwgaW52YXJpYW50IGNoZWNrIOKAlCBhIHNjcmlwdCwgYSBkaWZmLCBhIGRpYWdub3NhYmxlIGZhaWx1cmUgbWVzc2FnZSB8CnwgYHNjcmlwdHMvY2ktc2NvcGUudHNgIHwgTWFwcyBjaGFuZ2VkIGZpbGUgcGF0aHMgdG8gQ0kgc2NvcGUgZmxhZ3MgKGBjbGlgLCBgY2xpRG9jc2AsIGBmYWN0b3J5YCwgYHdpbmRvd3NgKTsgd2lyZWQgaW50byBgdGVzdHMueW1sYCBhbmQgY292ZXJlZCBieSBgY2ktc2NvcGUudGVzdC50c2AgfCBEZXJpdmluZyB3aGljaCByZXZpZXcgcXVlc3Rpb25zIGFwcGx5IHRvIGEgZ2l2ZW4gZGlmZiB8CnwgYGFwcHMvY2xpL3NyYy9saWIvc3ViYWdlbnRzLXJlZ2lzdHJ5LnRlc3QudHNgIHwgQXNzZXJ0cyBldmVyeSBzdWJhZ2VudHMtY2FwYWJsZSBhZ2VudCBoYXMgYSByZWdpc3RyeSBlbnRyeSDigJQgIm5vIHNpbGVudGx5IGhhbGYtd2lyZWQgYWdlbnQiIHwgVGhlIHBhcml0eSBjaGVja3MgZm9yIGhvb2tzLCBNQ1AsIGFsbG93bGlzdHMgYW5kIHdvcmtmbG93cyB8CnwgYC5naXRodWIvd29ya2Zsb3dzL3NlY3JldC1zY2FuLnltbGAgfCBXZWVrbHkgY3JvbiBvdmVyIGZ1bGwgaGlzdG9yeSwgcGx1cyBgd29ya2Zsb3dfZGlzcGF0Y2hgIHwgVGhlIHNjaGVkdWxlZCByZS1jaGVjayBhZ2FpbnN0IHRoZSBkZWZhdWx0IGJyYW5jaCB8CgpUaGUgdml0ZXN0IGBpbmNsdWRlYCBpbiBgYXBwcy9jbGkvdml0ZXN0LmNvbmZpZy50c2AgYWxyZWFkeSBjb3ZlcnMgYHNyYy8qKi8qLnRlc3QudHNgIGFuZApgc2NyaXB0cy8qKi8qLnRlc3QudHNgLCBzbyBhIHN0cnVjdHVyYWwgdGVzdCBuZWVkcyBubyBjb25maWd1cmF0aW9uIGNoYW5nZS4gYHNyYy9gIGFscmVhZHkgaG9sZHMKcmVwb3NpdG9yeS13aWRlIGFzc2VydGlvbnMgYXQgdGhlIHJvb3QgKGBpbmRleC5jb21tYW5kLXN0YXItcm91dGluZy50ZXN0LnRzYCwKYGluZGV4LnNwZWxsY2hlY2sudGVzdC50c2AsIGBpbmRleC50b21ic3RvbmVzLnRlc3QudHNgKSwgc28gdGhlIGxvY2F0aW9uIGlzIGVzdGFibGlzaGVkLgoKIyMjIyA3LjIgVGhlIGNoZWNrcyB0byB3cml0ZQoKfCAjIHwgRmlsZSB0byBjcmVhdGUgfCBSZWFkcyB8IEFzc2VydHMgfCBQYXNzZXMgdG9kYXkgfAp8LS0tfC0tLXwtLS18LS0tfC0tLXwKfCAxIHwgYGFwcHMvY2xpL3NyYy9saWIvc2VjcmV0cy9ib3VuZGFyeS50ZXN0LnRzYCB8IGV2ZXJ5IG5vbi10ZXN0IGAudHNgIHVuZGVyIGBhcHBzL2NsaS9zcmNgLCBleGNsdWRpbmcgYGxpYi9zZWNyZXRzL2AgfCBObyBvY2N1cnJlbmNlIG9mIGBmaW5kLWdlbmVyaWMtcGFzc3dvcmRgLCBgYWRkLWdlbmVyaWMtcGFzc3dvcmRgLCBgZGVsZXRlLWdlbmVyaWMtcGFzc3dvcmRgLCBvciBhIGBzZWN1cml0eWAgLyBgL3Vzci9iaW4vc2VjdXJpdHlgIGNvbW1hbmQgYXJndW1lbnQgfCAqKk5vKiog4oCUIDQgbW9kdWxlcyAowqc0LjEpIHwKfCAyIHwgYGFwcHMvY2xpL3NjcmlwdHMvdmVyaWZ5LXNwZWMtaHlnaWVuZS50c2AgKyBgLnRlc3QudHNgIHwgYGFwcHMvY2xpL2RvY3Mvc3BlY2lmaWNhdGlvbnMubWRgIHwgRWFjaCBgLSAqKklEIChLRVlXT1JEKS4qKmAgZGVmaW5pdGlvbiBhcHBlYXJzIGV4YWN0bHkgb25jZTsgZXZlcnkgY2l0ZWQgYGZpbGU6bGluZWAgcmVzb2x2ZXMgdG8gYW4gZXhpc3RpbmcgcGF0aDsgZXZlcnkgcmVxdWlyZW1lbnQgY2FycnlpbmcgYFtJbnRlbmRlZF1gIG5hbWVzIGEgYC1HQVAtYCBlbnRyeSB8ICoqTm8qKiDigJQgNSBjb2xsaWRpbmcgaWRlbnRpZmllcnMgKMKnNC4yKSB8CnwgMyB8IGBhcHBzL2NsaS9zcmMvbGliL2NhcGFiaWxpdHktdHJ1dGgudGVzdC50c2AgfCBgbGliL2FnZW50cy50c2AgY2FwYWJpbGl0eSB0YWJsZSwgYGxpYi9jYXBhYmlsaXRpZXMudHNgIHwgRXZlcnkgY2FwYWJpbGl0eSBtYXJrZWQgc3VwcG9ydGVkIGZvciBhbiBhZ2VudCByZXNvbHZlcyB0byBhIHJlZ2lzdHJ5IGVudHJ5IG9yIGEgd3JpdGUgcGF0aCB8IFVua25vd24g4oCUIHJ1biB0byBmaW5kIG91dCB8CnwgNCB8IGBhcHBzL2ZhY3Rvcnkvc3JjL3ZzY29kZS9hY3RpbmctdGltZXIudGVzdC50c2AgfCBgYXBwcy9mYWN0b3J5L3NyYy8qKi8qLnRzYCB8IE5vIGBzZXRJbnRlcnZhbGAgd2hvc2UgY2FsbGJhY2sgcmVhY2hlcyBhIHNwYXduLCBleGVjLCBraWxsLCBvciBpbmplY3QgY2FsbCwgZXhjZXB0IGFuIGFsbG93bGlzdGVkIHNpdGUgfCAqKk5vKiog4oCUIDkgc2l0ZXMsIHNvbWUgbGVnaXRpbWF0ZSAowqc3LjUpIHwKfCA1IHwgYGFwcHMvY2xpL3NyYy9oZWxwLWNvdmVyYWdlLnRlc3QudHNgIHwgYENPTU1BTkRfTE9BREVSU2AgaW4gYGxpYi9zdGFydHVwL2NvbW1hbmQtcmVnaXN0cnkudHNgIHwgRXZlcnkgcmVnaXN0ZXJlZCB0b3AtbGV2ZWwgbmFtZSByZXNvbHZlcyB0byBhIG1vZHVsZSB0aGF0IGNhbGxzIGBzZXRIZWxwU2VjdGlvbnNgIHwgKipObyoqIOKAlCA1OCBvZiAxMzQgbW9kdWxlcyAowqc3LjUpIHwKfCA2IHwgYSBzdGVwIGluIGAuZ2l0aHViL3dvcmtmbG93cy90ZXN0cy55bWxgIHwgdGhlIFBSIGRpZmYsIHZpYSBgY2ktc2NvcGUudHNgIHwgQSBkaWZmIHRvdWNoaW5nIGEgdXNlci12aXNpYmxlIHN1cmZhY2UgYWRkcyBhIGZpbGUgdW5kZXIgYGFwcHMvY2xpLy5jaGFuZ2Vsb2cvbmV4dC9gIHwgTmVlZHMgdGhlIGRpZmYsIHNvIGl0IGlzIGEgQ0kgc3RlcCByYXRoZXIgdGhhbiBhIHVuaXQgdGVzdCB8CgpDaGVjayAxIGlzIHRoZSBwcmltYXJ5IHByb3Bvc2FsIGZyb20gwqc1LjEuIEl0IHJlcXVpcmVzIHJvdXRpbmcgdGhlIGZvdXIgY2FsbCBzaXRlcyB0aHJvdWdoCmBnZXRLZXljaGFpblRva2VuYCBmaXJzdCDigJQgdHdvIG9mIHRoZSBmb3VyIGFyZSB0aGUgc2FtZSBkdXBsaWNhdGVkIHByb2JlIGFuZCBjb2xsYXBzZSBpbnRvIG9uZQpjaGFuZ2UsIHNvIHRoZSB3b3JrIGlzIGJvdW5kZWQuIENoZWNrIDIgaXMgdGhlIHNhbWUgaWRlYSBhcHBsaWVkIHRvIHRoZSBzcGVjaWZpY2F0aW9uIGluc3RlYWQgb2YKdGhlIGNvZGUsIGFuZCBpcyB0aGUgY2hlYXBlc3QgZmlyc3QgY29tbWl0OiBpdCBuZWVkcyBubyBzb3VyY2UgY2hhbmdlcyBhbmQgZmFpbHMgaW1tZWRpYXRlbHkgb24gYQpkZWZlY3QgdGhlIHJlcG9zaXRvcnkgYWxyZWFkeSBoYXMuCgojIyMjIDcuMyBUaGUgcGxhbiByZXF1aXJlbWVudAoKQWRkIGEgcmVxdWlyZWQgKipDb250cmFjdCBpbXBhY3QqKiBibG9jayB0byBhbnkgcGxhbiBmb3IgYSBjb2RlIGNoYW5nZSwgd2l0aCBmb3VyIHF1ZXN0aW9uczoKCjEuIFdoaWNoIHJlcXVpcmVtZW50IGlkZW50aWZpZXJzIGRvZXMgdGhpcyBjaGFuZ2UgdG91Y2g/IChJZiBub25lIOKAlCBpcyB0aGUgc3VyZmFjZSB1bnNwZWNpZmllZD8KICAgU2F5IHNvLikKMi4gV2hpY2ggZXhpc3RpbmcgZnVuY3Rpb24gb3ducyBlYWNoIGRlY2lzaW9uIHRoaXMgY2hhbmdlIG1ha2VzPyAoIk5vbmUsIEkgYW0gYWRkaW5nIG9uZSIgaXMgYQogICB2YWxpZCBhbnN3ZXI7IG5vdCBhc2tpbmcgaXMgdGhlIGZhaWx1cmUuKQozLiBXaGljaCBib3VuZGFyaWVzIGRvZXMgaXQgY3Jvc3Mg4oCUIGFub3RoZXIgbWFjaGluZSwgdGhlIE9TIGNyZWRlbnRpYWwgc3RvcmUsIGEgYmFja2dyb3VuZAogICBwcm9jZXNzLCBhbm90aGVyIGhhcm5lc3M/CjQuIEhvdyB3aWxsIHRoZSBlZmZlY3QgYmUgdmVyaWZpZWQsIGFuZCBvbiB3aGljaCBtYWNoaW5lPwoKVGhlIHZhbHVlIGlzIHRpbWluZywgbm90IGNvbnRlbnQuICJJIHdpbGwgcmVhZCB0aGUgdG9rZW4gaW4gYHVzYWdlLnRzYCIgaXMgbGVnaWJsZSBpbiBhIHBsYW4gYW5kCmludmlzaWJsZSBpbiBhIGRpZmYsIHdoZXJlIGl0IGlzIHNpeCBvcmRpbmFyeSBsaW5lcy4gUXVlc3Rpb24gNCBpcyB3b3J0aCBhc2tpbmcgYXQgcGxhbiB0aW1lCnNwZWNpZmljYWxseTogYWZ0ZXIgdGhlIGNvZGUgZXhpc3RzLCAidGhpcyBjYW4gb25seSBiZSBwcm92ZW4gb24gbWFjT1Mgd2l0aCB0aGUga2V5Y2hhaW4gaGVscGVyCmluc3RhbGxlZCIgYmVjb21lcyBhIHJlYXNvbiB0byBza2lwIHRoZSB0ZXN0IHJhdGhlciB0aGFuIGEgcmVhc29uIHRvIGFycmFuZ2UgdGhlIG1hY2hpbmUuCgpFbmZvcmNlbWVudCBpcyBhIGBQcmVUb29sVXNlYCBob29rIG9uIGBFeGl0UGxhbk1vZGVgLCBpbiB0aGUgc2FtZSBwb3NpdGlvbiBhbmQgZm9ybSBhcyB0aGUKZXhpc3RpbmcgaG9va3MgdW5kZXIgYH4vLmFnZW50cy8uc3lzdGVtL2hvb2tzL3ByZS10b29sLXVzZS9gIChgZ2l0LWd1YXJkLnNoYCBpcyB0aGUgd29ya2luZwpleGFtcGxlKTogaXQgaW5zcGVjdHMgdGhlIHBsYW4gdGV4dCwgYW5kIGV4aXRzIG5vbi16ZXJvIG5hbWluZyB0aGUgbWlzc2luZyBibG9jay4gVGhlIHJldmlld2VyCnRoZW4gY2hlY2tzIGZvdXIgc2hvcnQgYW5zd2VycyBhZ2FpbnN0IHRoZSBzcGVjaWZpY2F0aW9uIHJhdGhlciB0aGFuIHJlLWRlcml2aW5nIHRoZW0gZnJvbSBhIGRpZmYuCgojIyMjIDcuNCBUaGUgcmV2aWV3IGNoZWNrbGlzdAoKRXh0ZW5kIGBzY3JpcHRzL2NpLXNjb3BlLnRzYCB3aXRoIGEgYHJldmlld1J1bGVzKGNoYW5nZWRGaWxlczogc3RyaW5nW10pOiBzdHJpbmdbXWAgZXhwb3J0IHRoYXQKbWFwcyBjaGFuZ2VkIHBhdGhzIHRvIHRoZSBydWxlcyB0aGF0IGNhbiBhcHBseSwgYW5kIGVtaXQgdGhlIHJlc3VsdCB3aGVyZSB0aGUgcmV2aWV3ZXIgd2lsbCByZWFkCml0LiBDb25jcmV0ZWx5OiBhIGRpZmYgdG91Y2hpbmcgYGFwcHMvY2xpL3NyYy9saWIvc2VjcmV0cy8qKmAgZW1pdHMgKiJ2ZXJpZnkgU0VDLTEzIGFuZCBTRUMtMjcKcmVtYWluIG9uIHRoZSBjYWxsIHBhdGgiKjsgb25lIHRvdWNoaW5nIGEgcmVnaXN0cnkgZW1pdHMgdGhlIHBhcml0eSBxdWVzdGlvbjsgb25lIHRvdWNoaW5nIGEKZG9jdW1lbnRlZCBmbGFnIGVtaXRzIHRoZSBkb2NzIGFuZCBjaGFuZ2Vsb2cgcXVlc3Rpb25zLiBSdWxlcyB0aGF0IGNhbm5vdCBhcHBseSBhcmUgb21pdHRlZCwgbm90CnJlc3RhdGVkLgoKVGhpcyByZXBsYWNlcyBoYW5kaW5nIHRoZSByZXZpZXdlciBmb3VydGVlbiBwcm9zZSBydWxlcyBwbHVzIGEgZGlmZiBhbmQgYXNraW5nIGl0IHRvIHdvcmsgb3V0CndoaWNoIGFwcGx5IOKAlCB0aGUgc2FtZSBvcGVuLWVuZGVkIHRhc2sgdGhlIGF1dGhvciBqdXN0IGZhaWxlZC4gSXQgbWF0dGVycyBtb3JlIHRoYW4gdXN1YWwgYXQgdGhlCm1vbWVudDogdGhlIHJlcG9zaXRvcnkncyBhdXRvbWF0ZWQgcmV2aWV3ZXIgaGFzIGJlZW4gZGlzYWJsZWQgc2luY2UgMjAyNi0wOC0wMiAoIzE3NjcpLCBzbyB0aGUKbm9uLWF1dGhvciByZXZpZXcgaXMgYSBzdWJhZ2VudCwgYW5kIGEgc3ViYWdlbnQgZ2l2ZW4gdGhlIHByb3NlIGNvbnRyYWN0IGZhaWxzIHRoZSBzYW1lIHdheSB0aGUKYXV0aG9yIGRpZC4KCiMjIyMgNy41IENoZWNrcyB0aGF0IG11c3QgbGFuZCBhcyByYXRjaGV0cwoKVHdvIG9mIHRoZSBzaXggZmFpbCBvbiB0aGUgZXhpc3RpbmcgdHJlZSBmb3IgcmVhc29ucyB0aGF0IGFyZSBwYXJ0bHkgbGVnaXRpbWF0ZSwgc28gdGhleSBsYW5kIHdpdGgKYSByZWNvcmRlZCBiYXNlbGluZSB0aGF0IG5ldyBjb2RlIGNhbm5vdCBhZGQgdG8uCgp8IENoZWNrIHwgQmFzZWxpbmUgbWVhc3VyZWQgdG9kYXkgfCBMYW5kaW5nIGZvcm0gfAp8LS0tfC0tLXwtLS18CnwgS2V5Y2hhaW4gYWNjZXNzIGNvbmZpbmVkIHRvIGBsaWIvc2VjcmV0cy9gIHwgNCB2aW9sYXRpbmcgbW9kdWxlcyB8IEZpeCBhbGwgZm91ciwgdGhlbiBsYW5kIGFzIGEgaGFyZCBmYWlsdXJlIOKAlCB0aGUgc2V0IGlzIHNtYWxsIGVub3VnaCB0byBjbGVhciBpbiBvbmUgY2hhbmdlIHwKfCBOb24tdHJpdmlhbCBjb21tYW5kcyBzZXQgYHNldEhlbHBTZWN0aW9uc2AgfCA1OCBvZiAxMzQgY29tbWFuZCBtb2R1bGVzIHwgUmF0Y2hldDogdGhlIGNvdmVyZWQgY291bnQgbWF5IG5vdCBkZWNyZWFzZSB8CnwgTm8gYWN0aW5nIHRpbWVyIGluIGBhcHBzL2ZhY3RvcnlgIHwgOSBgc2V0SW50ZXJ2YWxgIHNpdGVzLCBpbmNsdWRpbmcgYSBsZWFkZXItZWxlY3Rpb24gaGVhcnRiZWF0IChgbW9uaXRvci9sZWFkZXIudHM6NzNgKSBhbmQgYSBwYW5lbCByZWZyZXNoIChgdnNjb2RlL2lzc3Vlc1BhbmVsLnZzY29kZS50czoxMzRgKSB8IFJhdGNoZXQgcGx1cyBhIHJlYXNvbmVkIGFsbG93bGlzdDsgYSByZW5kZXJpbmcgcG9sbCBpcyBsZWdpdGltYXRlLCBhIGNhbGxiYWNrIHRoYXQgc3Bhd25zIGlzIG5vdCB8CgpBIGNoZWNrIHRoYXQgZmFpbHMgb24gYXJyaXZhbCB3aXRoIG5vIHBhdGggdG8gZ3JlZW4gZ2V0cyBkaXNhYmxlZCByYXRoZXIgdGhhbiBmaXhlZCwgd2hpY2ggaXMKd29yc2UgdGhhbiBub3QgaGF2aW5nIGl0LgoKIyMjIyA3LjYgVGhlIHNjaGVkdWxlZCByZS1jaGVjawoKQWRkIGEgd29ya2Zsb3cgbW9kZWxlZCBvbiBgc2VjcmV0LXNjYW4ueW1sYCDigJQgY3JvbiBwbHVzIGB3b3JrZmxvd19kaXNwYXRjaGAg4oCUIHJ1bm5pbmcgY2hlY2tzIDEKdGhyb3VnaCA1IGFnYWluc3QgdGhlIGRlZmF1bHQgYnJhbmNoIGFuZCBvcGVuaW5nIGFuIGlzc3VlIHdoZW4gYSBuZXcgdmlvbGF0aW9uIGFwcGVhcnMuIFRoaXMgaXMKdGhlIG9ubHkgY2hlY2sgdGhhdCBvYnNlcnZlcyB0aGUgcmVwb3NpdG9yeSBhcyBhIHdob2xlIHJhdGhlciB0aGFuIG9uZSBjaGFuZ2UsIGFuZCBpdCBjYXRjaGVzCndoYXQgbWVyZ2VzIHdoZW4gQ0kgaXMgc2tpcHBlZCBvciBhIGNoZWNrIGlzIHRlbXBvcmFyaWx5IGRpc2FibGVkLgoKIyMjIyA3LjcgT3JkZXIgb2Ygd29yawoKMS4gQ2hlY2sgMiAoc3BlY2lmaWNhdGlvbiBoeWdpZW5lKS4gTm8gc291cmNlIGNoYW5nZXMsIGZhaWxzIHRvZGF5LCBkZW1vbnN0cmF0ZXMgdGhlIG1lY2hhbmlzbS4KMi4gUm91dGUgdGhlIGZvdXIga2V5Y2hhaW4gY2FsbCBzaXRlcyB0aHJvdWdoIGBnZXRLZXljaGFpblRva2VuYDsgbGFuZCBjaGVjayAxIGFzIGEgaGFyZCBmYWlsdXJlLgozLiBBZGQgdGhlIENvbnRyYWN0IGltcGFjdCBibG9jayBhbmQgaXRzIGBFeGl0UGxhbk1vZGVgIGhvb2suCjQuIENoZWNrcyAzLCA1LCA2LCB0aGVuIDQgd2l0aCBpdHMgYWxsb3dsaXN0Lgo1LiBgcmV2aWV3UnVsZXMoKWAgaW4gYGNpLXNjb3BlLnRzYCwgd2lyZWQgaW50byB0aGUgcmV2aWV3ZXIgcHJvbXB0IG9yIHRoZSBzdWJhZ2VudCBicmllZi4KNi4gVGhlIHNjaGVkdWxlZCB3b3JrZmxvdy4KCiMjIyMgNy44IFdoYXQgdGhpcyBkb2VzIG5vdCBzb2x2ZQoKQW4gYWdlbnQgdGhhdCBpZ25vcmVzIGluc3RydWN0aW9ucyBpcyBub3QgbWFkZSBjb21wbGlhbnQgYnkgYW55IG9mIHRoaXMg4oCUIGl0IGlzIG1hZGUgZGV0ZWN0YWJsZS4KQ2hlY2tzIDEgdGhyb3VnaCA2IGNvbnZlcnQgbmluZSBvZiB0aGUgZm91cnRlZW4gcmV2aWV3IHJ1bGVzIGZyb20gaW5zdHJ1Y3Rpb24tZm9sbG93aW5nIGludG8gYnVpbGQKZmFpbHVyZXMuIFRoZSByZW1haW5pbmcgZml2ZSBzdGF5IGp1ZGdtZW50IGNhbGxzOiBubyBmYWxsYmFjayBiYW5kLWFpZHMsIGZhaWwgbG91ZCBhdCBib3VuZGFyaWVzLAp0ZXN0cyBleGVyY2lzZSB0aGUgcmVhbCBwYXRoLCBhbmQgdGhlIHR3byBwbGFuLXRpbWUgcXVlc3Rpb25zLCBhbGwgZGVjaWRlZCBieSBhIG1vZGVsIHRoYXQgY2FuIGJlCndyb25nLiBUaGUgZXhwZWN0ZWQgcmVzdWx0IGlzIHRoYXQgdGhlIG1lY2hhbml6ZWQgbmluZSBzdG9wIHJlY3VycmluZyBhbmQgdGhlIHJlc3QgY29udGludWUgYXQKcm91Z2hseSB0aGVpciBjdXJyZW50IHJhdGUuCgojIyMgOC4gQXBwZW5kaXgKCiMjIyMgOC5BIFJlcHJvZHVjaW5nIGV2ZXJ5IGZpZ3VyZSBpbiB0aGlzIGRvY3VtZW50CgpgYGBiYXNoClJFUE89L2hvbWUvbXVxc2l0L3NyYy9naXRodWIuY29tL211cXNpdG5hd2F6L2FnZW50cy1jbGkgJiYgY2QgIiRSRVBPIgoKIyDCpzQuMiDigJQgaWRlbnRpZmllciBjb2xsaXNpb25zCnB5dGhvbjMgLSA8PCdFT0YnCmltcG9ydCByZSwgY29sbGVjdGlvbnMKbGluZXM9b3BlbignYXBwcy9jbGkvZG9jcy9zcGVjaWZpY2F0aW9ucy5tZCcpLnJlYWQoKS5zcGxpdCgnXG4nKQpzZWVuPWNvbGxlY3Rpb25zLmRlZmF1bHRkaWN0KGxpc3QpCmZvciBpLGwgaW4gZW51bWVyYXRlKGxpbmVzLDEpOgogICAgbT1yZS5tYXRjaChyJ14tIFwqXCooKD86U0VTfFNFQ3xFWEVDfFNJTkd8UlR8V0QpLVtBLVpdKi0/XGQrW2Etel0/KScsIGwpCiAgICBpZiBtOiBzZWVuW20uZ3JvdXAoMSldLmFwcGVuZChpKQpwcmludCh7azp2IGZvciBrLHYgaW4gc2Vlbi5pdGVtcygpIGlmIGxlbih2KT4xfSkKRU9GCgojIMKnNC4xIOKAlCBtb2R1bGVzIGludm9raW5nIHRoZSBrZXljaGFpbiBiaW5hcnkgZGlyZWN0bHkKZ2l0IGxzLWZpbGVzICdhcHBzL2NsaS9zcmMvKiovKi50cycgXAogIHwgeGFyZ3MgZ3JlcCAtbiAiZmluZC1nZW5lcmljLXBhc3N3b3JkXHwvdXNyL2Jpbi9zZWN1cml0eSIgfCBncmVwIC12IHRlc3QKCiMgwqc0LjEg4oCUIHJlbWVkaWF0aW9uIGZyZXF1ZW5jeSBmb3IgdGhlIGF1dGhvcml6YXRpb24gcHJvbXB0CmdpdCBsb2cgLWkgLUUgLS1ncmVwPSd0b3VjaCA/aWQnIC0tZGF0ZT1zaG9ydCAtLXByZXR0eT1mb3JtYXQ6JyVhZCcgfCBjdXQgLWMxLTcgfCBzb3J0IHwgdW5pcSAtYwoKIyDCpzQuMyDigJQgcmVxdWlyZW1lbnRzIGNhcnJ5aW5nIFtJbnRlbmRlZF0sIGNvdW50ZWQgYXMgcmVxdWlyZW1lbnRzIG5vdCBhcyBzdHJpbmdzCnB5dGhvbjMgLSA8PCdFT0YnCmltcG9ydCByZQpzPW9wZW4oJ2FwcHMvY2xpL2RvY3Mvc3BlY2lmaWNhdGlvbnMubWQnKS5yZWFkKCkKYmxvY2tzPVtwIGZvciBwIGluIHJlLnNwbGl0KHInKD89Xi0gXCpcKig/OlNFU3xTRUN8RVhFQ3xTSU5HfFJUfFdEKS0pJywgcywgZmxhZ3M9cmUuTSkgaWYgcC5zdGFydHN3aXRoKCctICoqJyldCmludGVuZGVkPVtwIGZvciBwIGluIGJsb2NrcyBpZiAnW0ludGVuZGVkXScgaW4gcC5zcGxpdCgnXG5cbicpWzBdIG9yIHJlLnNlYXJjaChyJ1N0YXR1czpbXlxuXSpcW0ludGVuZGVkXF0nLCBwKV0KcHJpbnQoJ3JlcXVpcmVtZW50czonLCBsZW4oYmxvY2tzKSwgJ3wgW0ludGVuZGVkXTonLCBsZW4oaW50ZW5kZWQpLCAnfCBuYWl2ZSBzdHJpbmcgY291bnQ6Jywgcy5jb3VudCgnW0ludGVuZGVkXScpKQpFT0YKCiMgwqc2IOKAlCByZWdyZXNzaW9uIHJhdGVzOyBlZGl0IHRoZSBwYXRoIGF0dHJpYnV0aW9uIHRvIHJlLWN1dApnaXQgbG9nIC0tc2luY2U9JzEyMCBkYXlzIGFnbycgLS1uYW1lLW9ubHkgLS1wcmV0dHk9Zm9ybWF0OidAQCVofCVhZHwlcycgLS1kYXRlPXNob3J0CgojIMKnNiDigJQgY29uZGl0aW9uYWwtc2tpcCBjbGFzc2lmaWNhdGlvbgpnaXQgbHMtZmlsZXMgJ2FwcHMvY2xpL3NyYy8qKi8qLnRlc3QudHMnIHwgeGFyZ3MgZ3JlcCAtaG8gInNraXBJZihbXildKikiIHwgc29ydCB8IHVuaXEgLWMgfCBzb3J0IC1ybgoKIyDCpzMg4oCUIHRoZSBub24tbm9ybWF0aXZlIGNsYWltIGFib3V0IGRlc2lnbiBkb2N1bWVudHMKZm9yIGYgaW4gaG9zdHMubWQgdGVhbXMubWQgY2xvdWQubWQ7IGRvCiAgcHJpbnRmICIlLTEwcyBNVVNUPSVzIFNIT1VMRD0lcyBNQVk9JXNcbiIgIiRmIiBcCiAgICAiJChncmVwIC1jICdcYk1VU1RcYicgYXBwcy9jbGkvZG9jcy8kZikiIFwKICAgICIkKGdyZXAgLWMgJ1xiU0hPVUxEXGInIGFwcHMvY2xpL2RvY3MvJGYpIiBcCiAgICAiJChncmVwIC1jICdcYk1BWVxiJyBhcHBzL2NsaS9kb2NzLyRmKSIKZG9uZQpgYGAKCiMjIyMgOC5CIFRoZSBzZXNzaW9ucyByZXF1aXJlbWVudCBzZXQsIGFzIGEgcmVmZXJlbmNlIHBvaW50IGZvciB3aGF0ICJzcGVjaWZpZWQiIG1lYW5zCgpUaGUgc2Vzc2lvbnMgc3Vic3lzdGVtIGNhcnJpZXMgNzQgaWRlbnRpZmllcnMg4oCUIDY1IG5vcm1hdGl2ZSByZXF1aXJlbWVudHMgYW5kIDkgcmVjb3JkZWQgZ2Fwcy4KSXQgaXMgaW5jbHVkZWQgaGVyZSBiZWNhdXNlIGl0IGlzIHRoZSByZXBvc2l0b3J5J3Mgb3duIGV4YW1wbGUgb2YgYSBmdWxseSBzcGVjaWZpZWQgc3VyZmFjZSwgYW5kCmJlY2F1c2UgwqcxIHVzZXMgaXQgYXMgdGhlIGNvbXBhcmlzb24gYmFzZWxpbmUuCgp8IFNlY3Rpb24gfCBDb3VudCB8IElkZW50aWZpZXJzIHwKfC0tLXwtLS06fC0tLXwKfCBEaXNjb3ZlcnkgYW5kIGhhcm5lc3MgcGFyc2luZyB8IDcgfCBTRVMtMSDigKYgU0VTLTcgfAp8IFRoZSBwcmV2aWV3IGNvbnRyYWN0IHwgNSB8IFNFUy04LCA5LCA5YSwgMTAsIDExIHwKfCBNZXRhZGF0YSB8IDggfCBTRVMtMTIg4oCmIDE2LCAzOCwgMzksIDQwIHwKfCBMaWZlY3ljbGUgfCA5IHwgU0VTLTE3LCAxOCwgMThh4oCTYywgMTksIDIwLCAyMSwgNDEgfAp8IFJlbW90ZSwgZXhwb3J0IGFuZCBpbXBvcnQgfCA3IHwgU0VTLTIyIOKApiAyN2EgfAp8IEluZGV4IGFuZCBkYXRhYmFzZSB8IDEzIHwgU0VTLTI4IOKApiAzNywgNDIsIGFuZCB0aGUgY29sbGlkaW5nIDM4LzM5LzQwIHwKfCBNYWNoaW5lLXJlYWRhYmxlIG91dHB1dCB8IDkgfCBTRVMtSUYtMSDigKYgSUYtNGMgfAp8IFN0cmVhbSBhbmQgZXhpdCBkaXNjaXBsaW5lIHwgMiB8IFNFUy1JRi01LCBJRi02IHwKfCBDcm9zcy1wbGF0Zm9ybSBwYXJpdHkgfCAxIHwgU0VTLUNST1NTLTEgfAp8IENvbXBhdGliaWxpdHkgZ3VhcmFudGVlcyB8IDQgfCBTRVMtQ09NUEFULTEg4oCmIDQgfAp8IFJlY29yZGVkIGdhcHMgfCA5IHwgU0VTLUdBUC0xIOKApiA5IHwKClJlcHJlc2VudGF0aXZlIGVudHJpZXM6IGBTRVMtMWAgZml4ZXMgdGhlIHR3ZWx2ZS1oYXJuZXNzIGRpc2NvdmVyeSBzZXQgYW5kIHJlcXVpcmVzIGV4dGVuc2lvbgpyYXRoZXIgdGhhbiBzcGVjaWFsLWNhc2luZzsgYFNFUy0zYCByZXF1aXJlcyBhIG1hbGZvcm1lZCB0cmFuc2NyaXB0IGxpbmUgdG8gYmUgc2tpcHBlZCByYXRoZXIgdGhhbgp0aHJvd247IGBTRVMtOGAgcmVxdWlyZXMgZXZlcnkgbGlzdCByb3cgdG8gcmVuZGVyIGEgbm9uLWVtcHR5IHByZXZpZXcsIHdpdGggYFNFUy1HQVAtMWAgcmVjb3JkaW5nCnRoYXQgdHdvIHJlbmRlcmVycyBzaGFyZSBhbiB1bmd1YXJkZWQgcGF0aDsgYFNFUy0yMmAgcmVxdWlyZXMgYC0taG9zdGAgdG8gZXhlY3V0ZSB0aGUgcGVlcidzIG93bgpiaW5hcnk7IGBTRVMtSUYtNGAgZml4ZXMgYFNlc3Npb25FdmVudC50eXBlYCBhcyBhIGNsb3NlZCBuaW5lLXZhbHVlIHVuaW9uIHRoYXQgZG93bnN0cmVhbSB0b29scwpkZXBlbmQgb24uCgojIyMjIDguQyBFdmlkZW5jZSBiYXNlCgo0LDIyOSBjb21taXRzIG92ZXIgMTIwIGRheXMgaW4gdGhpcyByZXBvc2l0b3J5OyAzLDYwOSB1bmlxdWUgYWdlbnQgc2Vzc2lvbnMgYWNyb3NzIHppb24gKDIsMDAyKSwKeW9zZW1pdGUtczEgKDkzNSkgYW5kIHlvc2VtaXRlLXMwICg2MDQpLCBzcGFubmluZyAyMDI2LTA0LTI0IHRvIDIwMjYtMDgtMTA7IHRoZSBzcGVjaWZpY2F0aW9uIGF0CjMsMDg0IGxpbmVzIGRlZmluaW5nIDI2MSBpZGVudGlmaWVyczsgNzEwIG5vbi10ZXN0IHNvdXJjZSBtb2R1bGVzIHVuZGVyIGBhcHBzL2NsaS9zcmNgLgoKIyMjIyA4LkQgQ29ycmVjdGlvbnMgdG8gZWFybGllciBkcmFmdHMKCkZvdXIgY2xhaW1zIGluIGVhcmxpZXIgZHJhZnRzIG9mIHRoaXMgYW5hbHlzaXMgd2VyZSB3aXRoZHJhd24gYWZ0ZXIgdmVyaWZpY2F0aW9uLCByZWNvcmRlZCBoZXJlCmJlY2F1c2UgZWFjaCBpbGx1c3RyYXRlcyB0aGUgc2FtZSBtZXRob2RvbG9naWNhbCBlcnJvciDigJQgdHJlYXRpbmcgYSBzZWFyY2ggcmVzdWx0IGFzIGV2aWRlbmNlIGZvcgphIGNsYWltIGFib3V0IG1lYW5pbmcuCgp8IENsYWltIHwgQ29ycmVjdGlvbiB8CnwtLS18LS0tfAp8IGB1c2FnZS50c2AgZG9lcyBub3QgaW1wb3J0IHRoZSBzZWNyZXRzIG1vZHVsZSB8IEl0IGRvZXMsIGF0IGB1c2FnZS50czoyNC0yOGAuIFRoZSBvcmlnaW5hbCBjaGVjayB3YXMgYSBzaW5nbGUtbGluZSBwYXR0ZXJuIGFnYWluc3QgYSBtdWx0aS1saW5lIGltcG9ydCB8CnwgRGFlbW9uIHRlc3RzIGFyZSBoZWF2aWx5IHNraXBwZWQsIHNvIGRhZW1vbiBiZWhhdmlvciBpcyB1bnZlcmlmaWFibGUgfCBBbGwgMTkgZGFlbW9uIHNraXBzIGFyZSBXaW5kb3dzIHBvcnRhYmlsaXR5IGd1YXJkcy4gVGhlIG1ldHJpYyBkaWQgbm90IG1lYXN1cmUgdmVyaWZpYWJpbGl0eSB8CnwgTm8gcmVxdWlyZW1lbnQgbWVudGlvbnMgdXNhZ2UsIGBzZXR1cC10b2tlbmAgb3Igcm90YXRpb24gfCBObyByZXF1aXJlbWVudCBpcyAqYWJvdXQqIHRoZW0sIGJ1dCBlbGV2ZW4gcmVxdWlyZW1lbnQgYm9kaWVzIG1lbnRpb24gdXNhZ2UgYW5kIGBFWEVDLTJhYCBjb25zdHJhaW5zIHRoZSByZXNlcnZlZCBgYXV0aGAgZW52aXJvbm1lbnQgaW5qZWN0aW9uIHwKfCBUaGlydHkgcmVxdWlyZW1lbnRzIGFyZSBtYXJrZWQgYFtJbnRlbmRlZF1gIHwgU2l4dGVlbiByZXF1aXJlbWVudHMgY2FycnkgaXQuIFRoaXJ0eSBpcyB0aGUgc3RyaW5nIGNvdW50LCB3aGljaCBpbmNsdWRlcyBjcm9zcy1yZWZlcmVuY2VzIHwK"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

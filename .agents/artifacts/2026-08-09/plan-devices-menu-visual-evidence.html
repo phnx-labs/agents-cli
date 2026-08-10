@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Visual evidence for PR</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-draft">draft</span></div>
+<h1>Visual evidence for PR</h1>
+<p class="summary">PR #2452's Run evidence section referenced local file paths no reviewer can open and showed no image of the menu it changes. This plan builds a branded HTML mock-up of the real new `agents devices --help` output, screenshots it headlessly, publishes it via `agents share`, and fixes the PR body to link the visual. No code changes; the approved diff is untouched.
+</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">The user sits at workstation (macOS, online) — not release-host; deliver visuals there<span class="meta-sep" aria-hidden="true">·</span>PR<span class="meta-sep" aria-hidden="true">·</span>GitHub's API cannot upload comment images; a public share URL is the fleet-sanctioned attachment path</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">review-pr-2440</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Kimi</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Owner</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">worker-s1</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">9628fb95</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-09</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#proposed-changes"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<figure>
+<svg viewBox="0 0 760 260" width="100%" role="img" aria-label="Flow: real help output to HTML mock-up to screenshot to shared link on the PR">
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>
+    </marker>
+  </defs>
+  <g fill="currentColor">
+    <rect x="10" y="90" rx="10" width="150" height="80" fill="none" stroke="currentColor" stroke-opacity="0.4"></rect>
+    <text x="30" y="122" font-weight="700">Real CLI output</text>
+    <text x="30" y="142" font-size="11">devices --help on the</text>
+    <text x="30" y="156" font-size="11">devices-help-menu branch</text>
+
+    <line x1="164" y1="130" x2="206" y2="130" stroke="currentColor" stroke-width="1.6" marker-end="url(#arr2)"></line>
+
+    <rect x="210" y="90" rx="10" width="160" height="80" fill="none" stroke="currentColor" stroke-opacity="0.4"></rect>
+    <text x="228" y="122" font-weight="700">HTML mock-up</text>
+    <text x="228" y="142" font-size="11">terminal chrome, brand</text>
+    <text x="228" y="156" font-size="11">before/after toggle</text>
+
+    <line x1="374" y1="130" x2="416" y2="130" stroke="currentColor" stroke-width="1.6" marker-end="url(#arr2)"></line>
+
+    <rect x="420" y="90" rx="10" width="150" height="80" fill="none" stroke="currentColor" stroke-opacity="0.4"></rect>
+    <text x="438" y="122" font-weight="700">Screenshot</text>
+    <text x="438" y="142" font-size="11">headless chromium,</text>
+    <text x="438" y="156" font-size="11">read back + verified</text>
+
+    <line x1="574" y1="130" x2="616" y2="130" stroke="currentColor" stroke-width="1.6" marker-end="url(#arr2)"></line>
+
+    <rect x="620" y="90" rx="10" width="130" height="80" fill="none" stroke="currentColor" stroke-opacity="0.4"></rect>
+    <text x="638" y="122" font-weight="700">PR #2452</text>
+    <text x="638" y="142" font-size="11">share link replaces</text>
+    <text x="638" y="156" font-size="11">local file paths</text>
+  </g>
+  <text x="10" y="226" font-size="11" fill="currentColor">Figure 1 — the evidence pipeline: what a reviewer sees becomes the actual rendered menu, not a path on someone else's disk.</text>
+</svg>
+</figure><p>The PR body pointed at <code>/home/Owner/...</code> paths — invisible to any reviewer —
+and attached no image of the menu the PR changes. The deliverable is visual
+proof: a faithful, branded render of the real new help output, screenshot, and
+a public URL on the PR.</p>
+<div class="artifact-callout">
+Also correcting a delivery mistake: visuals go to workstation (the machine the user
+sits at), not release-host.
+</div><h2 id="proposed-changes">Proposed Changes</h2>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Artifact</th>
+<th>Tool</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Capture real output</td>
+<td><code>devices --help</code> text from the branch</td>
+<td><code>bun run src/index.ts</code> in the worktree</td>
+</tr>
+<tr>
+<td>Branded mock-up</td>
+<td><code>.agents/artifacts/2026-08-09/devices-help-menu-preview.html</code></td>
+<td>Markdown + <code>artifacts render</code></td>
+</tr>
+<tr>
+<td>Real screenshot</td>
+<td><code>devices-help-menu-preview.png</code> (verified by reading it back)</td>
+<td>headless chromium via repo browser infra</td>
+</tr>
+<tr>
+<td>Public link</td>
+<td>share URL for the self-contained HTML</td>
+<td><code>agents share</code></td>
+</tr>
+<tr>
+<td>PR fix</td>
+<td>body rewrite + comment with the visual</td>
+<td><code>gh pr edit</code> / <code>gh pr comment</code></td>
+</tr>
+</tbody></table>
+<h2 id="public-interface">Public Interface</h2>
+<pre><code># capture, render, screenshot, publish
+bun run src/index.ts devices --help            # real output (branch)
+artifacts render devices-help-menu-preview.md --format html
+agents share .agents/artifacts/2026-08-09/devices-help-menu-preview.html
+gh pr edit 2452 --body-file pr-body.md &amp;&amp; gh pr comment 2452 --body "..."
+</code></pre>
+<h2 id="validation">Validation</h2>
+<ul>
+<li>PNG exists, is non-trivial, and renders correctly when read back.</li>
+<li>Share URL returns 200 and displays the mock-up.</li>
+<li>PR #2452 body contains no <code>/home/Owner</code> paths; the visual comment is posted.</li>
+<li>The preview opens on workstation.</li>
+</ul>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Share pipeline only serves HTML, not PNG</td>
+<td>Embed the screenshot base64 in the HTML so one URL carries everything</td>
+</tr>
+<tr>
+<td>Mock-up accused of being fake</td>
+<td>Content is the verbatim captured output; the capture log ships alongside</td>
+</tr>
+<tr>
+<td>PR body rewrite loses test evidence</td>
+<td>Keep the test-run lines; only the dead local paths are replaced</td>
+</tr>
+</tbody></table>
+<h2 id="tracking">Tracking</h2>
+<ul>
+<li>PR #2452 (diff unchanged; subagent review already APPROVEd). Merge still gated on green CI.</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGl0bGU6IFZpc3VhbCBldmlkZW5jZSBmb3IgUFIgIzI0NTIg4oCUIHJlbmRlciwgc2NyZWVuc2hvdCwgYW5kIGF0dGFjaCB0aGUgbmV3IGRldmljZXMgbWVudQpzdW1tYXJ5OiA+CiAgUFIgIzI0NTIncyBSdW4gZXZpZGVuY2Ugc2VjdGlvbiByZWZlcmVuY2VkIGxvY2FsIGZpbGUgcGF0aHMgbm8gcmV2aWV3ZXIgY2FuCiAgb3BlbiBhbmQgc2hvd2VkIG5vIGltYWdlIG9mIHRoZSBtZW51IGl0IGNoYW5nZXMuIFRoaXMgcGxhbiBidWlsZHMgYSBicmFuZGVkCiAgSFRNTCBtb2NrLXVwIG9mIHRoZSByZWFsIG5ldyBgYWdlbnRzIGRldmljZXMgLS1oZWxwYCBvdXRwdXQsIHNjcmVlbnNob3RzIGl0CiAgaGVhZGxlc3NseSwgcHVibGlzaGVzIGl0IHZpYSBgYWdlbnRzIHNoYXJlYCwgYW5kIGZpeGVzIHRoZSBQUiBib2R5IHRvIGxpbmsKICB0aGUgdmlzdWFsLiBObyBjb2RlIGNoYW5nZXM7IHRoZSBhcHByb3ZlZCBkaWZmIGlzIHVudG91Y2hlZC4Kc3RhdHVzOiBkcmFmdApmYWN0czoKICAtIFRoZSB1c2VyIHNpdHMgYXQgemlvbiAobWFjT1MsIG9ubGluZSkg4oCUIG5vdCBtYWMtbWluaTsgZGVsaXZlciB2aXN1YWxzIHRoZXJlCiAgLSBQUiAjMjQ1MiBhbHJlYWR5IGNhcnJpZXMgYW4gQVBQUk9WRSBzdWJhZ2VudCByZXZpZXc7IG9ubHkgaXRzIGJvZHkvY29tbWVudCBldmlkZW5jZSBpcyBsYWNraW5nCiAgLSBHaXRIdWIncyBBUEkgY2Fubm90IHVwbG9hZCBjb21tZW50IGltYWdlczsgYSBwdWJsaWMgc2hhcmUgVVJMIGlzIHRoZSBmbGVldC1zYW5jdGlvbmVkIGF0dGFjaG1lbnQgcGF0aAotLS0KCiMjIFB1cnBvc2UKCjxmaWd1cmU+Cjxzdmcgdmlld0JveD0iMCAwIDc2MCAyNjAiIHdpZHRoPSIxMDAlIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkZsb3c6IHJlYWwgaGVscCBvdXRwdXQgdG8gSFRNTCBtb2NrLXVwIHRvIHNjcmVlbnNob3QgdG8gc2hhcmVkIGxpbmsgb24gdGhlIFBSIj4KICA8ZGVmcz4KICAgIDxtYXJrZXIgaWQ9ImFycjIiIHZpZXdCb3g9IjAgMCAxMCAxMCIgcmVmWD0iOSIgcmVmWT0iNSIgbWFya2VyV2lkdGg9IjciIG1hcmtlckhlaWdodD0iNyIgb3JpZW50PSJhdXRvLXN0YXJ0LXJldmVyc2UiPgogICAgICA8cGF0aCBkPSJNMCwwIEwxMCw1IEwwLDEwIHoiIGZpbGw9ImN1cnJlbnRDb2xvciIvPgogICAgPC9tYXJrZXI+CiAgPC9kZWZzPgogIDxnIGZvbnQtc2l6ZT0iMTIiIGZpbGw9ImN1cnJlbnRDb2xvciI+CiAgICA8cmVjdCB4PSIxMCIgeT0iOTAiIHJ4PSIxMCIgd2lkdGg9IjE1MCIgaGVpZ2h0PSI4MCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS1vcGFjaXR5PSIwLjQiLz4KICAgIDx0ZXh0IHg9IjMwIiB5PSIxMjIiIGZvbnQtd2VpZ2h0PSI3MDAiPlJlYWwgQ0xJIG91dHB1dDwvdGV4dD4KICAgIDx0ZXh0IHg9IjMwIiB5PSIxNDIiIGZpbGwtb3BhY2l0eT0iMC42NSIgZm9udC1zaXplPSIxMSI+ZGV2aWNlcyAtLWhlbHAgb24gdGhlPC90ZXh0PgogICAgPHRleHQgeD0iMzAiIHk9IjE1NiIgZmlsbC1vcGFjaXR5PSIwLjY1IiBmb250LXNpemU9IjExIj5kZXZpY2VzLWhlbHAtbWVudSBicmFuY2g8L3RleHQ+CgogICAgPGxpbmUgeDE9IjE2NCIgeTE9IjEzMCIgeDI9IjIwNiIgeTI9IjEzMCIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMS42IiBtYXJrZXItZW5kPSJ1cmwoI2FycjIpIi8+CgogICAgPHJlY3QgeD0iMjEwIiB5PSI5MCIgcng9IjEwIiB3aWR0aD0iMTYwIiBoZWlnaHQ9IjgwIiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLW9wYWNpdHk9IjAuNCIvPgogICAgPHRleHQgeD0iMjI4IiB5PSIxMjIiIGZvbnQtd2VpZ2h0PSI3MDAiPkhUTUwgbW9jay11cDwvdGV4dD4KICAgIDx0ZXh0IHg9IjIyOCIgeT0iMTQyIiBmaWxsLW9wYWNpdHk9IjAuNjUiIGZvbnQtc2l6ZT0iMTEiPnRlcm1pbmFsIGNocm9tZSwgYnJhbmQ8L3RleHQ+CiAgICA8dGV4dCB4PSIyMjgiIHk9IjE1NiIgZmlsbC1vcGFjaXR5PSIwLjY1IiBmb250LXNpemU9IjExIj5iZWZvcmUvYWZ0ZXIgdG9nZ2xlPC90ZXh0PgoKICAgIDxsaW5lIHgxPSIzNzQiIHkxPSIxMzAiIHgyPSI0MTYiIHkyPSIxMzAiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjEuNiIgbWFya2VyLWVuZD0idXJsKCNhcnIyKSIvPgoKICAgIDxyZWN0IHg9IjQyMCIgeT0iOTAiIHJ4PSIxMCIgd2lkdGg9IjE1MCIgaGVpZ2h0PSI4MCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS1vcGFjaXR5PSIwLjQiLz4KICAgIDx0ZXh0IHg9IjQzOCIgeT0iMTIyIiBmb250LXdlaWdodD0iNzAwIj5TY3JlZW5zaG90PC90ZXh0PgogICAgPHRleHQgeD0iNDM4IiB5PSIxNDIiIGZpbGwtb3BhY2l0eT0iMC42NSIgZm9udC1zaXplPSIxMSI+aGVhZGxlc3MgY2hyb21pdW0sPC90ZXh0PgogICAgPHRleHQgeD0iNDM4IiB5PSIxNTYiIGZpbGwtb3BhY2l0eT0iMC42NSIgZm9udC1zaXplPSIxMSI+cmVhZCBiYWNrICsgdmVyaWZpZWQ8L3RleHQ+CgogICAgPGxpbmUgeDE9IjU3NCIgeTE9IjEzMCIgeDI9IjYxNiIgeTI9IjEzMCIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMS42IiBtYXJrZXItZW5kPSJ1cmwoI2FycjIpIi8+CgogICAgPHJlY3QgeD0iNjIwIiB5PSI5MCIgcng9IjEwIiB3aWR0aD0iMTMwIiBoZWlnaHQ9IjgwIiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLW9wYWNpdHk9IjAuNCIvPgogICAgPHRleHQgeD0iNjM4IiB5PSIxMjIiIGZvbnQtd2VpZ2h0PSI3MDAiPlBSICMyNDUyPC90ZXh0PgogICAgPHRleHQgeD0iNjM4IiB5PSIxNDIiIGZpbGwtb3BhY2l0eT0iMC42NSIgZm9udC1zaXplPSIxMSI+c2hhcmUgbGluayByZXBsYWNlczwvdGV4dD4KICAgIDx0ZXh0IHg9IjYzOCIgeT0iMTU2IiBmaWxsLW9wYWNpdHk9IjAuNjUiIGZvbnQtc2l6ZT0iMTEiPmxvY2FsIGZpbGUgcGF0aHM8L3RleHQ+CiAgPC9nPgogIDx0ZXh0IHg9IjEwIiB5PSIyMjYiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9ImN1cnJlbnRDb2xvciIgZmlsbC1vcGFjaXR5PSIwLjU1Ij5GaWd1cmUgMSDigJQgdGhlIGV2aWRlbmNlIHBpcGVsaW5lOiB3aGF0IGEgcmV2aWV3ZXIgc2VlcyBiZWNvbWVzIHRoZSBhY3R1YWwgcmVuZGVyZWQgbWVudSwgbm90IGEgcGF0aCBvbiBzb21lb25lIGVsc2UncyBkaXNrLjwvdGV4dD4KPC9zdmc+CjwvZmlndXJlPgoKVGhlIFBSIGJvZHkgcG9pbnRlZCBhdCBgL2hvbWUvbXVxc2l0Ly4uLmAgcGF0aHMg4oCUIGludmlzaWJsZSB0byBhbnkgcmV2aWV3ZXIg4oCUCmFuZCBhdHRhY2hlZCBubyBpbWFnZSBvZiB0aGUgbWVudSB0aGUgUFIgY2hhbmdlcy4gVGhlIGRlbGl2ZXJhYmxlIGlzIHZpc3VhbApwcm9vZjogYSBmYWl0aGZ1bCwgYnJhbmRlZCByZW5kZXIgb2YgdGhlIHJlYWwgbmV3IGhlbHAgb3V0cHV0LCBzY3JlZW5zaG90LCBhbmQKYSBwdWJsaWMgVVJMIG9uIHRoZSBQUi4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQiIGRhdGEta2luZD0id2FybmluZyI+CkFsc28gY29ycmVjdGluZyBhIGRlbGl2ZXJ5IG1pc3Rha2U6IHZpc3VhbHMgZ28gdG8gemlvbiAodGhlIG1hY2hpbmUgdGhlIHVzZXIKc2l0cyBhdCksIG5vdCBtYWMtbWluaS4KPC9kaXY+CgojIyBQcm9wb3NlZCBDaGFuZ2VzCgp8IFN0ZXAgfCBBcnRpZmFjdCB8IFRvb2wgfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgQ2FwdHVyZSByZWFsIG91dHB1dCB8IGBkZXZpY2VzIC0taGVscGAgdGV4dCBmcm9tIHRoZSBicmFuY2ggfCBgYnVuIHJ1biBzcmMvaW5kZXgudHNgIGluIHRoZSB3b3JrdHJlZSB8CnwgQnJhbmRlZCBtb2NrLXVwIHwgYC5hZ2VudHMvYXJ0aWZhY3RzLzIwMjYtMDgtMDkvZGV2aWNlcy1oZWxwLW1lbnUtcHJldmlldy5odG1sYCB8IE1hcmtkb3duICsgYGFydGlmYWN0cyByZW5kZXJgIHwKfCBSZWFsIHNjcmVlbnNob3QgfCBgZGV2aWNlcy1oZWxwLW1lbnUtcHJldmlldy5wbmdgICh2ZXJpZmllZCBieSByZWFkaW5nIGl0IGJhY2spIHwgaGVhZGxlc3MgY2hyb21pdW0gdmlhIHJlcG8gYnJvd3NlciBpbmZyYSB8CnwgUHVibGljIGxpbmsgfCBzaGFyZSBVUkwgZm9yIHRoZSBzZWxmLWNvbnRhaW5lZCBIVE1MIHwgYGFnZW50cyBzaGFyZWAgfAp8IFBSIGZpeCB8IGJvZHkgcmV3cml0ZSArIGNvbW1lbnQgd2l0aCB0aGUgdmlzdWFsIHwgYGdoIHByIGVkaXRgIC8gYGdoIHByIGNvbW1lbnRgIHwKCiMjIFB1YmxpYyBJbnRlcmZhY2UKCmBgYGJhc2gKIyBjYXB0dXJlLCByZW5kZXIsIHNjcmVlbnNob3QsIHB1Ymxpc2gKYnVuIHJ1biBzcmMvaW5kZXgudHMgZGV2aWNlcyAtLWhlbHAgICAgICAgICAgICAjIHJlYWwgb3V0cHV0IChicmFuY2gpCmFydGlmYWN0cyByZW5kZXIgZGV2aWNlcy1oZWxwLW1lbnUtcHJldmlldy5tZCAtLWZvcm1hdCBodG1sCmFnZW50cyBzaGFyZSAuYWdlbnRzL2FydGlmYWN0cy8yMDI2LTA4LTA5L2RldmljZXMtaGVscC1tZW51LXByZXZpZXcuaHRtbApnaCBwciBlZGl0IDI0NTIgLS1ib2R5LWZpbGUgcHItYm9keS5tZCAmJiBnaCBwciBjb21tZW50IDI0NTIgLS1ib2R5ICIuLi4iCmBgYAoKIyMgVmFsaWRhdGlvbgoKLSBQTkcgZXhpc3RzLCBpcyBub24tdHJpdmlhbCwgYW5kIHJlbmRlcnMgY29ycmVjdGx5IHdoZW4gcmVhZCBiYWNrLgotIFNoYXJlIFVSTCByZXR1cm5zIDIwMCBhbmQgZGlzcGxheXMgdGhlIG1vY2stdXAuCi0gUFIgIzI0NTIgYm9keSBjb250YWlucyBubyBgL2hvbWUvbXVxc2l0YCBwYXRoczsgdGhlIHZpc3VhbCBjb21tZW50IGlzIHBvc3RlZC4KLSBUaGUgcHJldmlldyBvcGVucyBvbiB6aW9uLgoKIyMgUmlza3MKCnwgUmlzayB8IE1pdGlnYXRpb24gfAp8IC0tLSB8IC0tLSB8CnwgU2hhcmUgcGlwZWxpbmUgb25seSBzZXJ2ZXMgSFRNTCwgbm90IFBORyB8IEVtYmVkIHRoZSBzY3JlZW5zaG90IGJhc2U2NCBpbiB0aGUgSFRNTCBzbyBvbmUgVVJMIGNhcnJpZXMgZXZlcnl0aGluZyB8CnwgTW9jay11cCBhY2N1c2VkIG9mIGJlaW5nIGZha2UgfCBDb250ZW50IGlzIHRoZSB2ZXJiYXRpbSBjYXB0dXJlZCBvdXRwdXQ7IHRoZSBjYXB0dXJlIGxvZyBzaGlwcyBhbG9uZ3NpZGUgfAp8IFBSIGJvZHkgcmV3cml0ZSBsb3NlcyB0ZXN0IGV2aWRlbmNlIHwgS2VlcCB0aGUgdGVzdC1ydW4gbGluZXM7IG9ubHkgdGhlIGRlYWQgbG9jYWwgcGF0aHMgYXJlIHJlcGxhY2VkIHwKCiMjIFRyYWNraW5nCgotIFBSICMyNDUyIChkaWZmIHVuY2hhbmdlZDsgc3ViYWdlbnQgcmV2aWV3IGFscmVhZHkgQVBQUk9WRWQpLiBNZXJnZSBzdGlsbCBnYXRlZCBvbiBncmVlbiBDSS4K"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

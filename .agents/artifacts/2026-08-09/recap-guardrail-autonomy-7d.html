@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>What actually got safer: 7 days in the agents-cli guardrail layer</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header"><div class="header-label">Fleet systems retrospective</div><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span><span class="status-badge status-final">final</span></div>
+<h1>What actually got safer: 7 days in the agents-cli guardrail layer</h1>
+<p class="summary">The real mechanism behind each week's change — the failure it closed, the code that closed it, and what an agent does differently now. Not a commit list.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">164 commits, Aug 2 -&gt; Aug 9 2026 (+12,980 / -8,002 across 271 files)<span class="meta-sep" aria-hidden="true">·</span>4 guards found silently dead — off for up to 82 days<span class="meta-sep" aria-hidden="true">·</span>one regex quote char had bricked the Stop gate on every macOS session<span class="meta-sep" aria-hidden="true">·</span>agents were retrying single blocked commands 87x / 43x before this week</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/.agents-system" target="_blank" rel="noopener">phnx-labs/.agents-system</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Owner</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">worker-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">1e05df2a</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-09</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a href="#findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a href="#evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a><a href="#recommendations"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Recommendations</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2>
+<p>Last time I handed you six broad buckets and a wall of commit hashes. That was
+useless — the hashes looked like opaque IDs and told you nothing. This is the
+rewrite you asked for: <strong>what was actually broken, what the fix actually does, and
+what an agent does differently now.</strong> Each item ends with a small <code>commits:</code> line —
+those are git short-hashes; run <code>git show &lt;hash&gt;</code> inside <code>.agents-system</code> to read
+the full diff. The IDs are the receipt, not the story.</p>
+<section class="artifact-grid artifact-grid-2">
+  <article class="artifact-stat">
+    <div class="artifact-stat-value">164</div>
+    <div class="artifact-stat-label">commits in 7 days · +12,980 / -8,002 lines · a hardening week, 51 of them fixes</div>
+  </article>
+  <article class="artifact-stat">
+    <div class="artifact-stat-value">4</div>
+    <div class="artifact-stat-label">guards found silently dead — one data-loss guard was off for 82 days and nothing failed</div>
+  </article>
+  <article class="artifact-stat">
+    <div class="artifact-stat-value">87×</div>
+    <div class="artifact-stat-label">times one session retried a single blocked command, because "denied" never said what to do instead</div>
+  </article>
+  <article class="artifact-stat">
+    <div class="artifact-stat-value">434</div>
+    <div class="artifact-stat-label">times the Stop gate fired in loops across 82 sessions — one hit its usage cap mid-loop</div>
+  </article>
+</section><p>The through-line is the same as always: <strong>more autonomy, but only where it stays
+safe.</strong> What changed this week is that a lot of the machinery meant to enforce
+that was quietly not working — and the fixes are specific.</p>
+<h2 id="findings">Findings</h2>
+<h3>The Stop gate was refusing every macOS session — because of one quote character</h3>
+<p><strong>The failure.</strong> The keep-moving Stop gate (the hook that stops an agent from
+quitting with work half-done) had a Python regex embedded in a shell heredoc, and
+the regex character class contained a literal single-quote: <code>[)\]\'\"]</code>. On Linux
+that parses fine. On macOS it does not — every Mac's <code>/bin/bash</code> is <strong>bash 3.2</strong>,
+and bash 3.2 mistracks a lone quote inside a heredoc nested in a <code>$(...)</code>
+substitution. The whole script became unparseable: <code>unexpected EOF while looking for matching ')'</code>.</p>
+<p>Here's the trap: <strong>an unparseable hook still runs, and bash exits 2 on a syntax
+error — and 2 is the exact code the harness reads as "block."</strong> So every Stop on
+every macOS Claude session was mechanically refused, whether or not the work was
+actually done. No Mac session could end. It passed CI because CI runs on Linux
+bash 5, which parses the identical file without complaint.</p>
+<p><strong>The fix.</strong> The two quote characters were replaced with hex escapes —
+<code>[)\]\x27\x22]</code> — so the heredoc body carries no literal quote at all. More
+importantly, a new <code>syntax_test.sh</code> now runs <code>bash -n</code> against <strong>both</strong> the
+system <code>/bin/bash</code> and the PATH bash on every shell hook, so a bash-3.2-only parse
+failure can never ship green off a Linux CI again.</p>
+<p><strong>Now.</strong> The gate parses everywhere, and — a side effect worth noting — the
+task-aware logic it was supposed to run had been dead-on-arrival too (its 8 tests
+had been red since it landed, because the script never parsed). Fixing the quote
+turned the feature on for the first time.</p>
+<p><em>commits: ecb9574 (the fix), 2615e49 (the feature it un-bricked). Read: <code>git show ecb9574</code>.</em></p>
+<h3>Denials now tell the agent what to do instead — so it stops retrying the wall</h3>
+<p><strong>The failure.</strong> When a guard blocked a dangerous command, it printed one line:
+the reason. Nothing else. So the model saw "denied," had no encoded next step, and
+did the only thing it could — <strong>retried the identical blocked command.</strong> The
+measured damage: one session hit the <code>rm.protected-path</code> guard <strong>87 times</strong>;
+another hit <code>git.reset</code> <strong>43 times</strong>. Each retry a wasted turn and wasted quota,
+looping against a wall that was never going to move.</p>
+<p><strong>The fix.</strong> Every denial across <code>git-guard</code>, <code>rm-guard</code>, and
+<code>large-file-add-guard</code> now emits a structured three-line contract instead of a
+bare reason:</p>
+<pre><code>blocked_op: git.reset
+reason: git reset is denied (rewrites history or destroys work).
+do_this_instead: reconcile with `git rebase origin/&lt;default&gt;` (or `git pull
+  --rebase`); never `reset --hard`. Commit instead of stashing; resolve
+  obstacles at the source.
+</code></pre>
+<p><strong>Now.</strong> The next model turn has the safe alternative sitting in context. The
+retry loop breaks because the agent is handed the exit, not just the wall.</p>
+<p><em>commits: a934dd8 (RUSH-2295). Read: <code>git show a934dd8</code>.</em></p>
+<h3>Four guards had been silently dead for up to 82 days</h3>
+<p><strong>The failure.</strong> A hook needs two things to fire: the script, and a <code>hooks:</code> entry
+registering it in <code>agents.yaml</code>. Only the script side was ever tested. So when two
+unrelated commits — one titled <em>"fix pre-commit validator,"</em> one titled <em>"remove
+legacy hook config"</em> — deleted registration lines as collateral, <strong>nothing failed
+loudly.</strong> Each orphaned script kept passing its own isolated test while never
+firing on a live event. The casualties:</p>
+<ul>
+<li><code>expand-promptcuts</code> and <code>expand-bang-commands</code> (your <code>#shortcut</code> and <code>`!cmd`</code> prompt expansions) — dead since <strong>May 13</strong>.</li>
+<li><code>linear-tasks</code> (the sprint board injected at session start) — dead.</li>
+<li><code>large-file-add-guard</code> (<strong>blocks committing files over 5 MiB</strong> — a data-loss guard) — silently off from <strong>June 24 to August 3</strong>.</li>
+</ul>
+<p><strong>The fix.</strong> All four re-registered (<code>agents.yaml</code> went from 13 hooks to 17). And
+the real gap — no test for "am I registered" — is closed: a new
+<code>registration_test.sh</code> walks every hook script and fails unless each one is either
+registered, invoked by a registered script, or explicitly allowlisted. It was
+validated by replaying the exact historical drop and confirming it fails on
+precisely the three scripts that vanished — so it can't pass only against the
+fixed state.</p>
+<p><strong>Now.</strong> A future commit that drops a registration under an innocent-looking
+subject fails the pre-PR gate instead of shipping a dead guard nobody notices for
+months.</p>
+<p><em>commits: 14b3aa2 (re-register), 4cdfc40 (the integrity test, RUSH-2119). Read: <code>git show 4cdfc40</code>.</em></p>
+<h3>The Stop gate stopped looping — and learned to read the checklist</h3>
+<p><strong>The failure.</strong> A fleet audit over ~6 days / 1,594 sessions found the open-PR
+Stop gate fired <strong>434 times across 82 sessions</strong> — 22 sessions looping ≥10×, 7
+looping ≥20×, one burning through its usage limit mid-loop. The gate had no memory
+of how often it had already fired, so a session correctly waiting on a background
+CI watch got re-blocked by the identical "keep driving" text on every single Stop.</p>
+<p><strong>The fix — three moves:</strong></p>
+<ul>
+<li><strong>Stateful de-escalation.</strong> The gate now counts its own prior fires this session (it scans the transcript for the harness's re-injected feedback marker). On the 3rd+ fire on the same item it stops repeating itself and instead surfaces real exits — name the watcher and stop, escalate out-of-band, or set a wakeup and stop.</li>
+<li><strong>Task-aware.</strong> A new <code>todo-progress.py</code> folds every checklist-shaped call — <code>TaskCreate</code>/<code>TaskUpdate</code> and <code>TodoWrite</code>/<code>update_plan</code> — into one count of remaining items. If the agent tries to stop with items still open and no valid reason, it's blocked and told <em>which</em> item to advance next, by name.</li>
+<li><strong>Evidence-gated, not phrase-gated.</strong> "The background watcher owns this" is only accepted if the transcript actually contains a real backgrounded watch or a <code>ScheduleWakeup</code>/<code>Monitor</code> call — prose alone no longer clears the gate.</li>
+</ul>
+<p><strong>And one sharp correction (RUSH-2394).</strong> Backgrounding <code>gh pr checks --watch</code> was
+briefly accepted as that evidence — but for a <strong>headless</strong> agent that watch is a
+child of its own process tree, so it dies the instant the agent exits, stranding
+the PR (seen on real PRs #2334 and #2352). The gate now rejects it and points at
+<code>agents pr land --detach</code>, a lander that runs in its own process group and
+outlives the session.</p>
+<p><strong>Now.</strong> An agent can't quit with a checklist half-done or a PR stranded — but a
+session genuinely blocked or genuinely waiting isn't punished into a quota-burning
+loop either.</p>
+<p><em>commits: 194f62a (de-loop), 2615e49 (task-aware, RUSH-2113), dfa0164 (reject fragile watch, RUSH-2394), 7703e22 (recap before self-exit). Read: <code>git show 194f62a</code>.</em></p>
+<h3>Guards that refuse the two git moves you can't undo</h3>
+<p><strong>The failure — remote branch deletion.</strong> <code>git-guard</code> blocked the <em>local</em>
+<code>git branch -d</code>, but not the remote form. An agent could run
+<code>git push origin --delete &lt;branch&gt;</code> (or the colon-refspec <code>:branch</code>) and it went
+straight through. If that branch held commits nobody had pulled — a colleague's
+in-flight work, or the agent's own unmerged branch — those commits become
+unreachable. Real, hard-to-recover loss.</p>
+<p><strong>The failure — stale worktree base.</strong> <code>main-branch-guard</code> checked the <em>shape</em> of
+a worktree base (is it an <code>origin/*</code> ref?) but never its <em>freshness</em>. An agent
+that hadn't fetched could branch off a week-old <code>origin/main</code>, build on top of code
+a newer merge had already superseded, and only discover it at merge time — or
+worse, open a "fix" that silently reverts someone's newer work.</p>
+<p><strong>The fix.</strong> Remote deletion (<code>push --delete</code> / <code>-d</code> / <code>:refspec</code>) is now denied,
+while <code>gh pr merge --delete-branch</code> — cleanup of an <em>already-merged</em> branch, which
+loses nothing — stays allowed. And a worktree base that resolves to an <code>origin/*</code>
+ref untouched by a fetch in the last <strong>15 minutes</strong> (<code>AGENTS_WORKTREE_FETCH_MAX_AGE_SEC</code>,
+default 900s) is rejected with <em>"run git fetch origin first."</em></p>
+<p><strong>Now.</strong> The dangerous forms fail closed with a named alternative; the safe forms
+stay frictionless. Autonomy stops exactly at irreversible loss.</p>
+<p><em>commits: fce3365 (remote delete), cbf1a28 (stale base). Read: <code>git show fce3365</code>.</em></p>
+<h3>Unattended work has to prove it happened — exit 0 is not evidence</h3>
+<p><strong>The failure.</strong> The single most common failure of an agent running with nobody
+watching is a <strong>silent success</strong>: it hits a wall, explains the wall politely, and
+exits 0 — which the dispatcher counts as done. A whole rule now catalogs seven of
+these, each observed:</p>
+<table>
+<thead>
+<tr>
+<th>What reported success</th>
+<th>What was actually true</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>dispatch <code>exit 0</code></td>
+<td>the agent never got a shell (sandbox died); zero work done</td>
+</tr>
+<tr>
+<td><code>agents notify</code> → <code>ok:true</code></td>
+<td>nothing delivered — credential unreadable headless</td>
+</tr>
+<tr>
+<td>dispatch record <code>"status": "running"</code></td>
+<td>process long dead, box idle</td>
+</tr>
+<tr>
+<td>capability probe passed</td>
+<td>it exercised a different operation class than the job</td>
+</tr>
+<tr>
+<td>a result file read as current</td>
+<td>it was the previous run's leftover output</td>
+</tr>
+<tr>
+<td><code>routines add</code> accepted the YAML</td>
+<td>it silently dropped the <code>devices:</code> pin</td>
+</tr>
+<tr>
+<td>ticket queries "working"</td>
+<td>shared API quota exhausted fleet-wide</td>
+</tr>
+</tbody></table>
+<p><strong>The fix.</strong> New <code>unattended-verification</code> rule: never treat process success as
+task success. Close every unattended unit of work by asserting a postcondition you
+can mechanically check — opened a PR? query it. Merged? confirm it's on
+<code>origin/&lt;default&gt;</code>. Sent a message? confirm the send says <em>delivered</em>, not that the
+CLI returned. A companion rule adds <strong>current-code anchoring</strong>: before diagnosing a
+bug or opening a fix, <code>git fetch</code> and <code>git rev-list --count HEAD..origin/&lt;default&gt;</code>
+— because a real incident had an agent diagnose against a checkout <strong>39 commits
+stale</strong> and open a "fix" that reverted a deliberate newer change. The fix <em>was</em> the
+regression.</p>
+<p><strong>Now.</strong> A dispatched agent is instructed to check the artifact, not the exit
+code, and to say "unverified" with the named gap when it can't — instead of
+rounding a polite wall up to "done."</p>
+<p><em>commits: 25fe42f (assert outcomes), 10d9d30 (current-code anchoring). Read: <code>git show 25fe42f</code>.</em></p>
+<h3>The same guards now actually fire on every harness and OS</h3>
+<p><strong>The failure.</strong> Every guard read Claude's payload shape only — <code>tool_input.command</code>,
+snake_case. Grok sends camelCase (<code>toolInput.command</code>) and names its shell tool
+<code>run_terminal_command</code>, not <code>Bash</code>. So on Grok a guard found no command, assumed
+there was nothing to check, and <strong>waved every git command through</strong> — a fail-open
+guard is worse than no guard, because it looks present. Separately, Windows hooks
+hardcoded <code>python3</code>, which on Windows is often the Microsoft Store stub that does
+nothing, and a timed-out command was killed without its child tree.</p>
+<p><strong>The fix.</strong> Guards now read both field conventions and a wider shell-tool set
+before concluding there's nothing to inspect. Windows prompt hooks select <code>py -3</code>
+(the real launcher) and fall back to a clean no-op if no interpreter works. Timed-out
+Windows commands are killed with <code>taskkill /T /F</code> — the whole tree, not just the
+parent.</p>
+<p><strong>Now.</strong> A git command on Grok is actually inspected; Windows prompt-expansion runs
+against a real interpreter and leaves no orphaned processes.</p>
+<p><em>commits: efc7fef (camel/snake stdin), 9c2f7d4 (Windows launcher), dde472b (tree-kill). Read: <code>git show efc7fef</code>.</em></p>
+<h3>The daemon's hidden timers became real, pinnable routines</h3>
+<p><strong>The failure.</strong> Eight housekeeping jobs — watchdog, device-probe, tmux-reconcile,
+launch-health, fleet-cache-warm, session-cache-warm, usage-refresh, auto-dispatch —
+lived as hardcoded <code>setInterval</code> timers inside the daemon binary: a second,
+unowned scheduler you couldn't list, pause, or pin. The sharp edge was
+<strong>auto-dispatch</strong>: as a hardcoded tick it couldn't be pinned to one box, so every
+daemon on the fleet independently polled the <em>same</em> shared Linear queue with no
+coordination — the same ticket dispatched N times.</p>
+<p><strong>The fix.</strong> All eight ship as declarative <code>command:</code>-mode routines invoking
+<code>agents __daemon-tick &lt;name&gt;</code> on their old cadences — now listable
+(<code>agents routines list</code>), individually pausable, and device-pinnable.
+<code>auto-dispatch</code> can be pinned to a single box so the fleet stops double-firing.</p>
+<p><strong>Now.</strong> The daemon's background work is visible and controllable like any routine,
+and the multi-box Linear stampede has an off switch.</p>
+<p><em>commits: 29c2c18 (RUSH-2353). Read: <code>git show 29c2c18</code>.</em></p>
+<h3>Sessions resume and exit themselves — safely</h3>
+<p><strong>The failure.</strong> Continue/restore/recover logic lived only as slash-command bodies,
+so a harness that supports skills but not commands got nothing. And <code>/done</code>'s
+self-exit inlined a raw <code>kill -TERM $PPID</code>, which the auto-mode permission
+classifier blocked in dispatched runs — so a headless session literally could not
+terminate itself cleanly.</p>
+<p><strong>The fix.</strong> A <code>sessions</code> plugin moves the logic into skills (continue / insights /
+restore), reachable by nearly every harness, with the commands as thin aliases. And
+<code>/self:close</code> is a proper guarded primitive: a read-only <code>ps</code> check first refuses to
+signal an infra parent (sshd/tmux/init), then sends <strong>SIGTERM only</strong> — and the
+permission is allowlisted as the <em>exact string</em> <code>Bash(kill -TERM $PPID)</code>, never a
+general <code>kill</code> allow. It can't target another pid, can't escalate to SIGKILL, and
+lets the harness flush its transcript before exiting.</p>
+<p><strong>Now.</strong> A crashed or dispatched session can be resumed by any harness, and a
+headless agent can end itself cleanly without a stuck permission prompt — without
+opening the door to killing the wrong process.</p>
+<p><em>commits: fd4d352 (sessions plugin), a677cc5 (/self:close). Read: <code>git show a677cc5</code>.</em></p>
+<h2 id="evidence">Evidence</h2>
+<p>Every fix above lands at one of five points in an agent's unattended lifecycle.
+Read left to right: context is injected, the agent works, PreToolUse guards refuse
+irreversible actions, the Stop gate refuses a false or looping finish, then the
+session clears to a clean self-exit.</p>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg viewBox="0 0 1000 250" role="img" aria-label="Agent unattended lifecycle with the guardrail that fires at each stage, from SessionStart through a clean self-exit">
+  <marker id="arw" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+    <path d="M0,0 L9,4.5 L0,9 z" fill="#3a4a5c"></path>
+  </marker>
+  <line x1="70" y1="70" x2="930" y2="70" stroke="#3a4a5c" stroke-width="2" marker-end="url(#arw)"></line>
+
+  <circle cx="90" cy="70" r="7" fill="#26c1b6"></circle>
+  <text x="90" y="46" text-anchor="middle" font-family="monospace" font-size="12" fill="#dfe6ee">SessionStart</text>
+  <text x="90" y="100" text-anchor="middle" font-family="monospace" font-size="10.5" fill="#8a97a6">context injected</text>
+
+  <circle cx="320" cy="70" r="7" fill="#26c1b6"></circle>
+  <text x="320" y="46" text-anchor="middle" font-family="monospace" font-size="12" fill="#dfe6ee">Agent works</text>
+  <text x="320" y="100" text-anchor="middle" font-family="monospace" font-size="10.5" fill="#8a97a6">edits · commits · PR</text>
+
+  <circle cx="560" cy="70" r="7" fill="#d69a34"></circle>
+  <text x="560" y="46" text-anchor="middle" font-family="monospace" font-size="12" fill="#dfe6ee">PreToolUse</text>
+  <text x="560" y="100" text-anchor="middle" font-family="monospace" font-size="10.5" fill="#8a97a6">guards</text>
+
+  <circle cx="790" cy="70" r="7" fill="#d69a34"></circle>
+  <text x="790" y="46" text-anchor="middle" font-family="monospace" font-size="12" fill="#dfe6ee">Stop</text>
+  <text x="790" y="100" text-anchor="middle" font-family="monospace" font-size="10.5" fill="#8a97a6">done means done</text>
+
+  <circle cx="930" cy="70" r="7" fill="#46b47a"></circle>
+  <text x="930" y="46" text-anchor="middle" font-family="monospace" font-size="12" fill="#46b47a">self-exit</text>
+
+  <rect x="24" y="130" width="150" height="72" rx="8" fill="#0f161e" stroke="#2d4052"></rect>
+  <text x="34" y="150" font-family="monospace" font-size="11" fill="#93a4b4">multi-harness stdin</text>
+  <text x="34" y="168" font-family="monospace" font-size="11" fill="#93a4b4">Linear board +</text>
+  <text x="34" y="186" font-family="monospace" font-size="11" fill="#4fd7cd">interactive host</text>
+
+  <rect x="470" y="130" width="182" height="90" rx="8" fill="#0f161e" stroke="#5c4a24"></rect>
+  <text x="480" y="150" font-family="monospace" font-size="11" fill="#e06a63">block del remote branch</text>
+  <text x="480" y="168" font-family="monospace" font-size="11" fill="#e06a63">block stale base (15m)</text>
+  <text x="480" y="186" font-family="monospace" font-size="11" fill="#e06a63">block rm / large-file</text>
+  <text x="480" y="208" font-family="monospace" font-size="11" fill="#4fd7cd">now says: do_this_instead</text>
+
+  <rect x="700" y="130" width="190" height="90" rx="8" fill="#0f161e" stroke="#5c4a24"></rect>
+  <text x="710" y="150" font-family="monospace" font-size="11" fill="#e06a63">block stranded PR</text>
+  <text x="710" y="168" font-family="monospace" font-size="11" fill="#e06a63">block open checklist</text>
+  <text x="710" y="186" font-family="monospace" font-size="11" fill="#46b47a">de-escalate after 3 fires</text>
+  <text x="710" y="208" font-family="monospace" font-size="11" fill="#46b47a">recap before self-exit</text>
+
+  <line x1="90" y1="80" x2="90" y2="130" stroke="#3a4a5c" stroke-width="1.5"></line>
+  <line x1="560" y1="80" x2="560" y2="130" stroke="#5c4a24" stroke-width="1.5"></line>
+  <line x1="790" y1="80" x2="790" y2="130" stroke="#5c4a24" stroke-width="1.5"></line>
+</svg>
+<figcaption>Teal = context that enables · amber = a gate that fires · red = a blocked action · green = cleared to proceed.</figcaption>
+</figure><h2 id="recommendations">Recommendations</h2>
+<p>Nothing here needs you — it's a report. But the pattern points somewhere: the eight
+housekeeping routines now run, yet the daemon <strong>still emits nothing into the unified
+event stream</strong> (RUSH-2439). So an unattended run's progress is a private log silo,
+not a signal the fleet can see — the same "silent success" shape this whole week was
+about, one layer up. That's the next wall worth building.</p>
+</article>
+<footer class="document-footer">.agents-system — the guardrail layer of agents-cli</footer>
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0aXRsZTogIldoYXQgYWN0dWFsbHkgZ290IHNhZmVyOiA3IGRheXMgaW4gdGhlIGFnZW50cy1jbGkgZ3VhcmRyYWlsIGxheWVyIgpzdW1tYXJ5OiAiVGhlIHJlYWwgbWVjaGFuaXNtIGJlaGluZCBlYWNoIHdlZWsncyBjaGFuZ2Ug4oCUIHRoZSBmYWlsdXJlIGl0IGNsb3NlZCwgdGhlIGNvZGUgdGhhdCBjbG9zZWQgaXQsIGFuZCB3aGF0IGFuIGFnZW50IGRvZXMgZGlmZmVyZW50bHkgbm93LiBOb3QgYSBjb21taXQgbGlzdC4iCmhlYWRlcjogIkZsZWV0IHN5c3RlbXMgcmV0cm9zcGVjdGl2ZSIKZm9vdGVyOiAiLmFnZW50cy1zeXN0ZW0g4oCUIHRoZSBndWFyZHJhaWwgbGF5ZXIgb2YgYWdlbnRzLWNsaSIKY29udGV4dDogImd1YXJkcmFpbCAvIGF1dG9ub215IGhhcmRlbmluZyIKcHJvamVjdDogImFnZW50cy1jbGkiCmhhcm5lc3M6IGNsYXVkZQpob3N0OiB5b3NlbWl0ZS1zMApzZXNzaW9uOiAxZTA1ZGYyYQpkYXRlOiAiMjAyNi0wOC0wOSIKc3RhdHVzOiBmaW5hbApmYWN0czoKICAtICIxNjQgY29tbWl0cywgQXVnIDIgLT4gQXVnIDkgMjAyNiAoKzEyLDk4MCAvIC04LDAwMiBhY3Jvc3MgMjcxIGZpbGVzKSIKICAtICI0IGd1YXJkcyBmb3VuZCBzaWxlbnRseSBkZWFkIOKAlCBvZmYgZm9yIHVwIHRvIDgyIGRheXMiCiAgLSAib25lIHJlZ2V4IHF1b3RlIGNoYXIgaGFkIGJyaWNrZWQgdGhlIFN0b3AgZ2F0ZSBvbiBldmVyeSBtYWNPUyBzZXNzaW9uIgogIC0gImFnZW50cyB3ZXJlIHJldHJ5aW5nIHNpbmdsZSBibG9ja2VkIGNvbW1hbmRzIDg3eCAvIDQzeCBiZWZvcmUgdGhpcyB3ZWVrIgotLS0KCiMjIFN1bW1hcnkKCkxhc3QgdGltZSBJIGhhbmRlZCB5b3Ugc2l4IGJyb2FkIGJ1Y2tldHMgYW5kIGEgd2FsbCBvZiBjb21taXQgaGFzaGVzLiBUaGF0IHdhcwp1c2VsZXNzIOKAlCB0aGUgaGFzaGVzIGxvb2tlZCBsaWtlIG9wYXF1ZSBJRHMgYW5kIHRvbGQgeW91IG5vdGhpbmcuIFRoaXMgaXMgdGhlCnJld3JpdGUgeW91IGFza2VkIGZvcjogKip3aGF0IHdhcyBhY3R1YWxseSBicm9rZW4sIHdoYXQgdGhlIGZpeCBhY3R1YWxseSBkb2VzLCBhbmQKd2hhdCBhbiBhZ2VudCBkb2VzIGRpZmZlcmVudGx5IG5vdy4qKiBFYWNoIGl0ZW0gZW5kcyB3aXRoIGEgc21hbGwgYGNvbW1pdHM6YCBsaW5lIOKAlAp0aG9zZSBhcmUgZ2l0IHNob3J0LWhhc2hlczsgcnVuIGBnaXQgc2hvdyA8aGFzaD5gIGluc2lkZSBgLmFnZW50cy1zeXN0ZW1gIHRvIHJlYWQKdGhlIGZ1bGwgZGlmZi4gVGhlIElEcyBhcmUgdGhlIHJlY2VpcHQsIG5vdCB0aGUgc3RvcnkuCgo8c2VjdGlvbiBjbGFzcz0iYXJ0aWZhY3QtZ3JpZCBhcnRpZmFjdC1ncmlkLTIiPgogIDxhcnRpY2xlIGNsYXNzPSJhcnRpZmFjdC1zdGF0Ij4KICAgIDxkaXYgY2xhc3M9ImFydGlmYWN0LXN0YXQtdmFsdWUiPjE2NDwvZGl2PgogICAgPGRpdiBjbGFzcz0iYXJ0aWZhY3Qtc3RhdC1sYWJlbCI+Y29tbWl0cyBpbiA3IGRheXMgwrcgKzEyLDk4MCAvIC04LDAwMiBsaW5lcyDCtyBhIGhhcmRlbmluZyB3ZWVrLCA1MSBvZiB0aGVtIGZpeGVzPC9kaXY+CiAgPC9hcnRpY2xlPgogIDxhcnRpY2xlIGNsYXNzPSJhcnRpZmFjdC1zdGF0Ij4KICAgIDxkaXYgY2xhc3M9ImFydGlmYWN0LXN0YXQtdmFsdWUiPjQ8L2Rpdj4KICAgIDxkaXYgY2xhc3M9ImFydGlmYWN0LXN0YXQtbGFiZWwiPmd1YXJkcyBmb3VuZCBzaWxlbnRseSBkZWFkIOKAlCBvbmUgZGF0YS1sb3NzIGd1YXJkIHdhcyBvZmYgZm9yIDgyIGRheXMgYW5kIG5vdGhpbmcgZmFpbGVkPC9kaXY+CiAgPC9hcnRpY2xlPgogIDxhcnRpY2xlIGNsYXNzPSJhcnRpZmFjdC1zdGF0Ij4KICAgIDxkaXYgY2xhc3M9ImFydGlmYWN0LXN0YXQtdmFsdWUiPjg3JnRpbWVzOzwvZGl2PgogICAgPGRpdiBjbGFzcz0iYXJ0aWZhY3Qtc3RhdC1sYWJlbCI+dGltZXMgb25lIHNlc3Npb24gcmV0cmllZCBhIHNpbmdsZSBibG9ja2VkIGNvbW1hbmQsIGJlY2F1c2UgImRlbmllZCIgbmV2ZXIgc2FpZCB3aGF0IHRvIGRvIGluc3RlYWQ8L2Rpdj4KICA8L2FydGljbGU+CiAgPGFydGljbGUgY2xhc3M9ImFydGlmYWN0LXN0YXQiPgogICAgPGRpdiBjbGFzcz0iYXJ0aWZhY3Qtc3RhdC12YWx1ZSI+NDM0PC9kaXY+CiAgICA8ZGl2IGNsYXNzPSJhcnRpZmFjdC1zdGF0LWxhYmVsIj50aW1lcyB0aGUgU3RvcCBnYXRlIGZpcmVkIGluIGxvb3BzIGFjcm9zcyA4MiBzZXNzaW9ucyDigJQgb25lIGhpdCBpdHMgdXNhZ2UgY2FwIG1pZC1sb29wPC9kaXY+CiAgPC9hcnRpY2xlPgo8L3NlY3Rpb24+CgpUaGUgdGhyb3VnaC1saW5lIGlzIHRoZSBzYW1lIGFzIGFsd2F5czogKiptb3JlIGF1dG9ub215LCBidXQgb25seSB3aGVyZSBpdCBzdGF5cwpzYWZlLioqIFdoYXQgY2hhbmdlZCB0aGlzIHdlZWsgaXMgdGhhdCBhIGxvdCBvZiB0aGUgbWFjaGluZXJ5IG1lYW50IHRvIGVuZm9yY2UKdGhhdCB3YXMgcXVpZXRseSBub3Qgd29ya2luZyDigJQgYW5kIHRoZSBmaXhlcyBhcmUgc3BlY2lmaWMuCgojIyBGaW5kaW5ncwoKIyMjIFRoZSBTdG9wIGdhdGUgd2FzIHJlZnVzaW5nIGV2ZXJ5IG1hY09TIHNlc3Npb24g4oCUIGJlY2F1c2Ugb2Ygb25lIHF1b3RlIGNoYXJhY3RlcgoKKipUaGUgZmFpbHVyZS4qKiBUaGUga2VlcC1tb3ZpbmcgU3RvcCBnYXRlICh0aGUgaG9vayB0aGF0IHN0b3BzIGFuIGFnZW50IGZyb20KcXVpdHRpbmcgd2l0aCB3b3JrIGhhbGYtZG9uZSkgaGFkIGEgUHl0aG9uIHJlZ2V4IGVtYmVkZGVkIGluIGEgc2hlbGwgaGVyZWRvYywgYW5kCnRoZSByZWdleCBjaGFyYWN0ZXIgY2xhc3MgY29udGFpbmVkIGEgbGl0ZXJhbCBzaW5nbGUtcXVvdGU6IGBbKVxdXCdcIl1gLiBPbiBMaW51eAp0aGF0IHBhcnNlcyBmaW5lLiBPbiBtYWNPUyBpdCBkb2VzIG5vdCDigJQgZXZlcnkgTWFjJ3MgYC9iaW4vYmFzaGAgaXMgKipiYXNoIDMuMioqLAphbmQgYmFzaCAzLjIgbWlzdHJhY2tzIGEgbG9uZSBxdW90ZSBpbnNpZGUgYSBoZXJlZG9jIG5lc3RlZCBpbiBhIGAkKC4uLilgCnN1YnN0aXR1dGlvbi4gVGhlIHdob2xlIHNjcmlwdCBiZWNhbWUgdW5wYXJzZWFibGU6IGB1bmV4cGVjdGVkIEVPRiB3aGlsZSBsb29raW5nCmZvciBtYXRjaGluZyAnKSdgLgoKSGVyZSdzIHRoZSB0cmFwOiAqKmFuIHVucGFyc2VhYmxlIGhvb2sgc3RpbGwgcnVucywgYW5kIGJhc2ggZXhpdHMgMiBvbiBhIHN5bnRheAplcnJvciDigJQgYW5kIDIgaXMgdGhlIGV4YWN0IGNvZGUgdGhlIGhhcm5lc3MgcmVhZHMgYXMgImJsb2NrLiIqKiBTbyBldmVyeSBTdG9wIG9uCmV2ZXJ5IG1hY09TIENsYXVkZSBzZXNzaW9uIHdhcyBtZWNoYW5pY2FsbHkgcmVmdXNlZCwgd2hldGhlciBvciBub3QgdGhlIHdvcmsgd2FzCmFjdHVhbGx5IGRvbmUuIE5vIE1hYyBzZXNzaW9uIGNvdWxkIGVuZC4gSXQgcGFzc2VkIENJIGJlY2F1c2UgQ0kgcnVucyBvbiBMaW51eApiYXNoIDUsIHdoaWNoIHBhcnNlcyB0aGUgaWRlbnRpY2FsIGZpbGUgd2l0aG91dCBjb21wbGFpbnQuCgoqKlRoZSBmaXguKiogVGhlIHR3byBxdW90ZSBjaGFyYWN0ZXJzIHdlcmUgcmVwbGFjZWQgd2l0aCBoZXggZXNjYXBlcyDigJQKYFspXF1ceDI3XHgyMl1gIOKAlCBzbyB0aGUgaGVyZWRvYyBib2R5IGNhcnJpZXMgbm8gbGl0ZXJhbCBxdW90ZSBhdCBhbGwuIE1vcmUKaW1wb3J0YW50bHksIGEgbmV3IGBzeW50YXhfdGVzdC5zaGAgbm93IHJ1bnMgYGJhc2ggLW5gIGFnYWluc3QgKipib3RoKiogdGhlCnN5c3RlbSBgL2Jpbi9iYXNoYCBhbmQgdGhlIFBBVEggYmFzaCBvbiBldmVyeSBzaGVsbCBob29rLCBzbyBhIGJhc2gtMy4yLW9ubHkgcGFyc2UKZmFpbHVyZSBjYW4gbmV2ZXIgc2hpcCBncmVlbiBvZmYgYSBMaW51eCBDSSBhZ2Fpbi4KCioqTm93LioqIFRoZSBnYXRlIHBhcnNlcyBldmVyeXdoZXJlLCBhbmQg4oCUIGEgc2lkZSBlZmZlY3Qgd29ydGggbm90aW5nIOKAlCB0aGUKdGFzay1hd2FyZSBsb2dpYyBpdCB3YXMgc3VwcG9zZWQgdG8gcnVuIGhhZCBiZWVuIGRlYWQtb24tYXJyaXZhbCB0b28gKGl0cyA4IHRlc3RzCmhhZCBiZWVuIHJlZCBzaW5jZSBpdCBsYW5kZWQsIGJlY2F1c2UgdGhlIHNjcmlwdCBuZXZlciBwYXJzZWQpLiBGaXhpbmcgdGhlIHF1b3RlCnR1cm5lZCB0aGUgZmVhdHVyZSBvbiBmb3IgdGhlIGZpcnN0IHRpbWUuCgoqY29tbWl0czogZWNiOTU3NCAodGhlIGZpeCksIDI2MTVlNDkgKHRoZSBmZWF0dXJlIGl0IHVuLWJyaWNrZWQpLiBSZWFkOiBgZ2l0IHNob3cgZWNiOTU3NGAuKgoKIyMjIERlbmlhbHMgbm93IHRlbGwgdGhlIGFnZW50IHdoYXQgdG8gZG8gaW5zdGVhZCDigJQgc28gaXQgc3RvcHMgcmV0cnlpbmcgdGhlIHdhbGwKCioqVGhlIGZhaWx1cmUuKiogV2hlbiBhIGd1YXJkIGJsb2NrZWQgYSBkYW5nZXJvdXMgY29tbWFuZCwgaXQgcHJpbnRlZCBvbmUgbGluZToKdGhlIHJlYXNvbi4gTm90aGluZyBlbHNlLiBTbyB0aGUgbW9kZWwgc2F3ICJkZW5pZWQsIiBoYWQgbm8gZW5jb2RlZCBuZXh0IHN0ZXAsIGFuZApkaWQgdGhlIG9ubHkgdGhpbmcgaXQgY291bGQg4oCUICoqcmV0cmllZCB0aGUgaWRlbnRpY2FsIGJsb2NrZWQgY29tbWFuZC4qKiBUaGUKbWVhc3VyZWQgZGFtYWdlOiBvbmUgc2Vzc2lvbiBoaXQgdGhlIGBybS5wcm90ZWN0ZWQtcGF0aGAgZ3VhcmQgKio4NyB0aW1lcyoqOwphbm90aGVyIGhpdCBgZ2l0LnJlc2V0YCAqKjQzIHRpbWVzKiouIEVhY2ggcmV0cnkgYSB3YXN0ZWQgdHVybiBhbmQgd2FzdGVkIHF1b3RhLApsb29waW5nIGFnYWluc3QgYSB3YWxsIHRoYXQgd2FzIG5ldmVyIGdvaW5nIHRvIG1vdmUuCgoqKlRoZSBmaXguKiogRXZlcnkgZGVuaWFsIGFjcm9zcyBgZ2l0LWd1YXJkYCwgYHJtLWd1YXJkYCwgYW5kCmBsYXJnZS1maWxlLWFkZC1ndWFyZGAgbm93IGVtaXRzIGEgc3RydWN0dXJlZCB0aHJlZS1saW5lIGNvbnRyYWN0IGluc3RlYWQgb2YgYQpiYXJlIHJlYXNvbjoKCmBgYApibG9ja2VkX29wOiBnaXQucmVzZXQKcmVhc29uOiBnaXQgcmVzZXQgaXMgZGVuaWVkIChyZXdyaXRlcyBoaXN0b3J5IG9yIGRlc3Ryb3lzIHdvcmspLgpkb190aGlzX2luc3RlYWQ6IHJlY29uY2lsZSB3aXRoIGBnaXQgcmViYXNlIG9yaWdpbi88ZGVmYXVsdD5gIChvciBgZ2l0IHB1bGwKICAtLXJlYmFzZWApOyBuZXZlciBgcmVzZXQgLS1oYXJkYC4gQ29tbWl0IGluc3RlYWQgb2Ygc3Rhc2hpbmc7IHJlc29sdmUKICBvYnN0YWNsZXMgYXQgdGhlIHNvdXJjZS4KYGBgCgoqKk5vdy4qKiBUaGUgbmV4dCBtb2RlbCB0dXJuIGhhcyB0aGUgc2FmZSBhbHRlcm5hdGl2ZSBzaXR0aW5nIGluIGNvbnRleHQuIFRoZQpyZXRyeSBsb29wIGJyZWFrcyBiZWNhdXNlIHRoZSBhZ2VudCBpcyBoYW5kZWQgdGhlIGV4aXQsIG5vdCBqdXN0IHRoZSB3YWxsLgoKKmNvbW1pdHM6IGE5MzRkZDggKFJVU0gtMjI5NSkuIFJlYWQ6IGBnaXQgc2hvdyBhOTM0ZGQ4YC4qCgojIyMgRm91ciBndWFyZHMgaGFkIGJlZW4gc2lsZW50bHkgZGVhZCBmb3IgdXAgdG8gODIgZGF5cwoKKipUaGUgZmFpbHVyZS4qKiBBIGhvb2sgbmVlZHMgdHdvIHRoaW5ncyB0byBmaXJlOiB0aGUgc2NyaXB0LCBhbmQgYSBgaG9va3M6YCBlbnRyeQpyZWdpc3RlcmluZyBpdCBpbiBgYWdlbnRzLnlhbWxgLiBPbmx5IHRoZSBzY3JpcHQgc2lkZSB3YXMgZXZlciB0ZXN0ZWQuIFNvIHdoZW4gdHdvCnVucmVsYXRlZCBjb21taXRzIOKAlCBvbmUgdGl0bGVkICoiZml4IHByZS1jb21taXQgdmFsaWRhdG9yLCIqIG9uZSB0aXRsZWQgKiJyZW1vdmUKbGVnYWN5IGhvb2sgY29uZmlnIiog4oCUIGRlbGV0ZWQgcmVnaXN0cmF0aW9uIGxpbmVzIGFzIGNvbGxhdGVyYWwsICoqbm90aGluZyBmYWlsZWQKbG91ZGx5LioqIEVhY2ggb3JwaGFuZWQgc2NyaXB0IGtlcHQgcGFzc2luZyBpdHMgb3duIGlzb2xhdGVkIHRlc3Qgd2hpbGUgbmV2ZXIKZmlyaW5nIG9uIGEgbGl2ZSBldmVudC4gVGhlIGNhc3VhbHRpZXM6CgotIGBleHBhbmQtcHJvbXB0Y3V0c2AgYW5kIGBleHBhbmQtYmFuZy1jb21tYW5kc2AgKHlvdXIgYCNzaG9ydGN1dGAgYW5kIGBgIGAhY21kYCBgYCBwcm9tcHQgZXhwYW5zaW9ucykg4oCUIGRlYWQgc2luY2UgKipNYXkgMTMqKi4KLSBgbGluZWFyLXRhc2tzYCAodGhlIHNwcmludCBib2FyZCBpbmplY3RlZCBhdCBzZXNzaW9uIHN0YXJ0KSDigJQgZGVhZC4KLSBgbGFyZ2UtZmlsZS1hZGQtZ3VhcmRgICgqKmJsb2NrcyBjb21taXR0aW5nIGZpbGVzIG92ZXIgNSBNaUIqKiDigJQgYSBkYXRhLWxvc3MgZ3VhcmQpIOKAlCBzaWxlbnRseSBvZmYgZnJvbSAqKkp1bmUgMjQgdG8gQXVndXN0IDMqKi4KCioqVGhlIGZpeC4qKiBBbGwgZm91ciByZS1yZWdpc3RlcmVkIChgYWdlbnRzLnlhbWxgIHdlbnQgZnJvbSAxMyBob29rcyB0byAxNykuIEFuZAp0aGUgcmVhbCBnYXAg4oCUIG5vIHRlc3QgZm9yICJhbSBJIHJlZ2lzdGVyZWQiIOKAlCBpcyBjbG9zZWQ6IGEgbmV3CmByZWdpc3RyYXRpb25fdGVzdC5zaGAgd2Fsa3MgZXZlcnkgaG9vayBzY3JpcHQgYW5kIGZhaWxzIHVubGVzcyBlYWNoIG9uZSBpcyBlaXRoZXIKcmVnaXN0ZXJlZCwgaW52b2tlZCBieSBhIHJlZ2lzdGVyZWQgc2NyaXB0LCBvciBleHBsaWNpdGx5IGFsbG93bGlzdGVkLiBJdCB3YXMKdmFsaWRhdGVkIGJ5IHJlcGxheWluZyB0aGUgZXhhY3QgaGlzdG9yaWNhbCBkcm9wIGFuZCBjb25maXJtaW5nIGl0IGZhaWxzIG9uCnByZWNpc2VseSB0aGUgdGhyZWUgc2NyaXB0cyB0aGF0IHZhbmlzaGVkIOKAlCBzbyBpdCBjYW4ndCBwYXNzIG9ubHkgYWdhaW5zdCB0aGUKZml4ZWQgc3RhdGUuCgoqKk5vdy4qKiBBIGZ1dHVyZSBjb21taXQgdGhhdCBkcm9wcyBhIHJlZ2lzdHJhdGlvbiB1bmRlciBhbiBpbm5vY2VudC1sb29raW5nCnN1YmplY3QgZmFpbHMgdGhlIHByZS1QUiBnYXRlIGluc3RlYWQgb2Ygc2hpcHBpbmcgYSBkZWFkIGd1YXJkIG5vYm9keSBub3RpY2VzIGZvcgptb250aHMuCgoqY29tbWl0czogMTRiM2FhMiAocmUtcmVnaXN0ZXIpLCA0Y2RmYzQwICh0aGUgaW50ZWdyaXR5IHRlc3QsIFJVU0gtMjExOSkuIFJlYWQ6IGBnaXQgc2hvdyA0Y2RmYzQwYC4qCgojIyMgVGhlIFN0b3AgZ2F0ZSBzdG9wcGVkIGxvb3Bpbmcg4oCUIGFuZCBsZWFybmVkIHRvIHJlYWQgdGhlIGNoZWNrbGlzdAoKKipUaGUgZmFpbHVyZS4qKiBBIGZsZWV0IGF1ZGl0IG92ZXIgfjYgZGF5cyAvIDEsNTk0IHNlc3Npb25zIGZvdW5kIHRoZSBvcGVuLVBSClN0b3AgZ2F0ZSBmaXJlZCAqKjQzNCB0aW1lcyBhY3Jvc3MgODIgc2Vzc2lvbnMqKiDigJQgMjIgc2Vzc2lvbnMgbG9vcGluZyDiiaUxMMOXLCA3Cmxvb3Bpbmcg4omlMjDDlywgb25lIGJ1cm5pbmcgdGhyb3VnaCBpdHMgdXNhZ2UgbGltaXQgbWlkLWxvb3AuIFRoZSBnYXRlIGhhZCBubyBtZW1vcnkKb2YgaG93IG9mdGVuIGl0IGhhZCBhbHJlYWR5IGZpcmVkLCBzbyBhIHNlc3Npb24gY29ycmVjdGx5IHdhaXRpbmcgb24gYSBiYWNrZ3JvdW5kCkNJIHdhdGNoIGdvdCByZS1ibG9ja2VkIGJ5IHRoZSBpZGVudGljYWwgImtlZXAgZHJpdmluZyIgdGV4dCBvbiBldmVyeSBzaW5nbGUgU3RvcC4KCioqVGhlIGZpeCDigJQgdGhyZWUgbW92ZXM6KioKCi0gKipTdGF0ZWZ1bCBkZS1lc2NhbGF0aW9uLioqIFRoZSBnYXRlIG5vdyBjb3VudHMgaXRzIG93biBwcmlvciBmaXJlcyB0aGlzIHNlc3Npb24gKGl0IHNjYW5zIHRoZSB0cmFuc2NyaXB0IGZvciB0aGUgaGFybmVzcydzIHJlLWluamVjdGVkIGZlZWRiYWNrIG1hcmtlcikuIE9uIHRoZSAzcmQrIGZpcmUgb24gdGhlIHNhbWUgaXRlbSBpdCBzdG9wcyByZXBlYXRpbmcgaXRzZWxmIGFuZCBpbnN0ZWFkIHN1cmZhY2VzIHJlYWwgZXhpdHMg4oCUIG5hbWUgdGhlIHdhdGNoZXIgYW5kIHN0b3AsIGVzY2FsYXRlIG91dC1vZi1iYW5kLCBvciBzZXQgYSB3YWtldXAgYW5kIHN0b3AuCi0gKipUYXNrLWF3YXJlLioqIEEgbmV3IGB0b2RvLXByb2dyZXNzLnB5YCBmb2xkcyBldmVyeSBjaGVja2xpc3Qtc2hhcGVkIGNhbGwg4oCUIGBUYXNrQ3JlYXRlYC9gVGFza1VwZGF0ZWAgYW5kIGBUb2RvV3JpdGVgL2B1cGRhdGVfcGxhbmAg4oCUIGludG8gb25lIGNvdW50IG9mIHJlbWFpbmluZyBpdGVtcy4gSWYgdGhlIGFnZW50IHRyaWVzIHRvIHN0b3Agd2l0aCBpdGVtcyBzdGlsbCBvcGVuIGFuZCBubyB2YWxpZCByZWFzb24sIGl0J3MgYmxvY2tlZCBhbmQgdG9sZCAqd2hpY2gqIGl0ZW0gdG8gYWR2YW5jZSBuZXh0LCBieSBuYW1lLgotICoqRXZpZGVuY2UtZ2F0ZWQsIG5vdCBwaHJhc2UtZ2F0ZWQuKiogIlRoZSBiYWNrZ3JvdW5kIHdhdGNoZXIgb3ducyB0aGlzIiBpcyBvbmx5IGFjY2VwdGVkIGlmIHRoZSB0cmFuc2NyaXB0IGFjdHVhbGx5IGNvbnRhaW5zIGEgcmVhbCBiYWNrZ3JvdW5kZWQgd2F0Y2ggb3IgYSBgU2NoZWR1bGVXYWtldXBgL2BNb25pdG9yYCBjYWxsIOKAlCBwcm9zZSBhbG9uZSBubyBsb25nZXIgY2xlYXJzIHRoZSBnYXRlLgoKKipBbmQgb25lIHNoYXJwIGNvcnJlY3Rpb24gKFJVU0gtMjM5NCkuKiogQmFja2dyb3VuZGluZyBgZ2ggcHIgY2hlY2tzIC0td2F0Y2hgIHdhcwpicmllZmx5IGFjY2VwdGVkIGFzIHRoYXQgZXZpZGVuY2Ug4oCUIGJ1dCBmb3IgYSAqKmhlYWRsZXNzKiogYWdlbnQgdGhhdCB3YXRjaCBpcyBhCmNoaWxkIG9mIGl0cyBvd24gcHJvY2VzcyB0cmVlLCBzbyBpdCBkaWVzIHRoZSBpbnN0YW50IHRoZSBhZ2VudCBleGl0cywgc3RyYW5kaW5nCnRoZSBQUiAoc2VlbiBvbiByZWFsIFBScyAjMjMzNCBhbmQgIzIzNTIpLiBUaGUgZ2F0ZSBub3cgcmVqZWN0cyBpdCBhbmQgcG9pbnRzIGF0CmBhZ2VudHMgcHIgbGFuZCAtLWRldGFjaGAsIGEgbGFuZGVyIHRoYXQgcnVucyBpbiBpdHMgb3duIHByb2Nlc3MgZ3JvdXAgYW5kCm91dGxpdmVzIHRoZSBzZXNzaW9uLgoKKipOb3cuKiogQW4gYWdlbnQgY2FuJ3QgcXVpdCB3aXRoIGEgY2hlY2tsaXN0IGhhbGYtZG9uZSBvciBhIFBSIHN0cmFuZGVkIOKAlCBidXQgYQpzZXNzaW9uIGdlbnVpbmVseSBibG9ja2VkIG9yIGdlbnVpbmVseSB3YWl0aW5nIGlzbid0IHB1bmlzaGVkIGludG8gYSBxdW90YS1idXJuaW5nCmxvb3AgZWl0aGVyLgoKKmNvbW1pdHM6IDE5NGY2MmEgKGRlLWxvb3ApLCAyNjE1ZTQ5ICh0YXNrLWF3YXJlLCBSVVNILTIxMTMpLCBkZmEwMTY0IChyZWplY3QgZnJhZ2lsZSB3YXRjaCwgUlVTSC0yMzk0KSwgNzcwM2UyMiAocmVjYXAgYmVmb3JlIHNlbGYtZXhpdCkuIFJlYWQ6IGBnaXQgc2hvdyAxOTRmNjJhYC4qCgojIyMgR3VhcmRzIHRoYXQgcmVmdXNlIHRoZSB0d28gZ2l0IG1vdmVzIHlvdSBjYW4ndCB1bmRvCgoqKlRoZSBmYWlsdXJlIOKAlCByZW1vdGUgYnJhbmNoIGRlbGV0aW9uLioqIGBnaXQtZ3VhcmRgIGJsb2NrZWQgdGhlICpsb2NhbCoKYGdpdCBicmFuY2ggLWRgLCBidXQgbm90IHRoZSByZW1vdGUgZm9ybS4gQW4gYWdlbnQgY291bGQgcnVuCmBnaXQgcHVzaCBvcmlnaW4gLS1kZWxldGUgPGJyYW5jaD5gIChvciB0aGUgY29sb24tcmVmc3BlYyBgOmJyYW5jaGApIGFuZCBpdCB3ZW50CnN0cmFpZ2h0IHRocm91Z2guIElmIHRoYXQgYnJhbmNoIGhlbGQgY29tbWl0cyBub2JvZHkgaGFkIHB1bGxlZCDigJQgYSBjb2xsZWFndWUncwppbi1mbGlnaHQgd29yaywgb3IgdGhlIGFnZW50J3Mgb3duIHVubWVyZ2VkIGJyYW5jaCDigJQgdGhvc2UgY29tbWl0cyBiZWNvbWUKdW5yZWFjaGFibGUuIFJlYWwsIGhhcmQtdG8tcmVjb3ZlciBsb3NzLgoKKipUaGUgZmFpbHVyZSDigJQgc3RhbGUgd29ya3RyZWUgYmFzZS4qKiBgbWFpbi1icmFuY2gtZ3VhcmRgIGNoZWNrZWQgdGhlICpzaGFwZSogb2YKYSB3b3JrdHJlZSBiYXNlIChpcyBpdCBhbiBgb3JpZ2luLypgIHJlZj8pIGJ1dCBuZXZlciBpdHMgKmZyZXNobmVzcyouIEFuIGFnZW50CnRoYXQgaGFkbid0IGZldGNoZWQgY291bGQgYnJhbmNoIG9mZiBhIHdlZWstb2xkIGBvcmlnaW4vbWFpbmAsIGJ1aWxkIG9uIHRvcCBvZiBjb2RlCmEgbmV3ZXIgbWVyZ2UgaGFkIGFscmVhZHkgc3VwZXJzZWRlZCwgYW5kIG9ubHkgZGlzY292ZXIgaXQgYXQgbWVyZ2UgdGltZSDigJQgb3IKd29yc2UsIG9wZW4gYSAiZml4IiB0aGF0IHNpbGVudGx5IHJldmVydHMgc29tZW9uZSdzIG5ld2VyIHdvcmsuCgoqKlRoZSBmaXguKiogUmVtb3RlIGRlbGV0aW9uIChgcHVzaCAtLWRlbGV0ZWAgLyBgLWRgIC8gYDpyZWZzcGVjYCkgaXMgbm93IGRlbmllZCwKd2hpbGUgYGdoIHByIG1lcmdlIC0tZGVsZXRlLWJyYW5jaGAg4oCUIGNsZWFudXAgb2YgYW4gKmFscmVhZHktbWVyZ2VkKiBicmFuY2gsIHdoaWNoCmxvc2VzIG5vdGhpbmcg4oCUIHN0YXlzIGFsbG93ZWQuIEFuZCBhIHdvcmt0cmVlIGJhc2UgdGhhdCByZXNvbHZlcyB0byBhbiBgb3JpZ2luLypgCnJlZiB1bnRvdWNoZWQgYnkgYSBmZXRjaCBpbiB0aGUgbGFzdCAqKjE1IG1pbnV0ZXMqKiAoYEFHRU5UU19XT1JLVFJFRV9GRVRDSF9NQVhfQUdFX1NFQ2AsCmRlZmF1bHQgOTAwcykgaXMgcmVqZWN0ZWQgd2l0aCAqInJ1biBnaXQgZmV0Y2ggb3JpZ2luIGZpcnN0LiIqCgoqKk5vdy4qKiBUaGUgZGFuZ2Vyb3VzIGZvcm1zIGZhaWwgY2xvc2VkIHdpdGggYSBuYW1lZCBhbHRlcm5hdGl2ZTsgdGhlIHNhZmUgZm9ybXMKc3RheSBmcmljdGlvbmxlc3MuIEF1dG9ub215IHN0b3BzIGV4YWN0bHkgYXQgaXJyZXZlcnNpYmxlIGxvc3MuCgoqY29tbWl0czogZmNlMzM2NSAocmVtb3RlIGRlbGV0ZSksIGNiZjFhMjggKHN0YWxlIGJhc2UpLiBSZWFkOiBgZ2l0IHNob3cgZmNlMzM2NWAuKgoKIyMjIFVuYXR0ZW5kZWQgd29yayBoYXMgdG8gcHJvdmUgaXQgaGFwcGVuZWQg4oCUIGV4aXQgMCBpcyBub3QgZXZpZGVuY2UKCioqVGhlIGZhaWx1cmUuKiogVGhlIHNpbmdsZSBtb3N0IGNvbW1vbiBmYWlsdXJlIG9mIGFuIGFnZW50IHJ1bm5pbmcgd2l0aCBub2JvZHkKd2F0Y2hpbmcgaXMgYSAqKnNpbGVudCBzdWNjZXNzKio6IGl0IGhpdHMgYSB3YWxsLCBleHBsYWlucyB0aGUgd2FsbCBwb2xpdGVseSwgYW5kCmV4aXRzIDAg4oCUIHdoaWNoIHRoZSBkaXNwYXRjaGVyIGNvdW50cyBhcyBkb25lLiBBIHdob2xlIHJ1bGUgbm93IGNhdGFsb2dzIHNldmVuIG9mCnRoZXNlLCBlYWNoIG9ic2VydmVkOgoKfCBXaGF0IHJlcG9ydGVkIHN1Y2Nlc3MgfCBXaGF0IHdhcyBhY3R1YWxseSB0cnVlIHwKfCAtLS0gfCAtLS0gfAp8IGRpc3BhdGNoIGBleGl0IDBgIHwgdGhlIGFnZW50IG5ldmVyIGdvdCBhIHNoZWxsIChzYW5kYm94IGRpZWQpOyB6ZXJvIHdvcmsgZG9uZSB8CnwgYGFnZW50cyBub3RpZnlgIOKGkiBgb2s6dHJ1ZWAgfCBub3RoaW5nIGRlbGl2ZXJlZCDigJQgY3JlZGVudGlhbCB1bnJlYWRhYmxlIGhlYWRsZXNzIHwKfCBkaXNwYXRjaCByZWNvcmQgYCJzdGF0dXMiOiAicnVubmluZyJgIHwgcHJvY2VzcyBsb25nIGRlYWQsIGJveCBpZGxlIHwKfCBjYXBhYmlsaXR5IHByb2JlIHBhc3NlZCB8IGl0IGV4ZXJjaXNlZCBhIGRpZmZlcmVudCBvcGVyYXRpb24gY2xhc3MgdGhhbiB0aGUgam9iIHwKfCBhIHJlc3VsdCBmaWxlIHJlYWQgYXMgY3VycmVudCB8IGl0IHdhcyB0aGUgcHJldmlvdXMgcnVuJ3MgbGVmdG92ZXIgb3V0cHV0IHwKfCBgcm91dGluZXMgYWRkYCBhY2NlcHRlZCB0aGUgWUFNTCB8IGl0IHNpbGVudGx5IGRyb3BwZWQgdGhlIGBkZXZpY2VzOmAgcGluIHwKfCB0aWNrZXQgcXVlcmllcyAid29ya2luZyIgfCBzaGFyZWQgQVBJIHF1b3RhIGV4aGF1c3RlZCBmbGVldC13aWRlIHwKCioqVGhlIGZpeC4qKiBOZXcgYHVuYXR0ZW5kZWQtdmVyaWZpY2F0aW9uYCBydWxlOiBuZXZlciB0cmVhdCBwcm9jZXNzIHN1Y2Nlc3MgYXMKdGFzayBzdWNjZXNzLiBDbG9zZSBldmVyeSB1bmF0dGVuZGVkIHVuaXQgb2Ygd29yayBieSBhc3NlcnRpbmcgYSBwb3N0Y29uZGl0aW9uIHlvdQpjYW4gbWVjaGFuaWNhbGx5IGNoZWNrIOKAlCBvcGVuZWQgYSBQUj8gcXVlcnkgaXQuIE1lcmdlZD8gY29uZmlybSBpdCdzIG9uCmBvcmlnaW4vPGRlZmF1bHQ+YC4gU2VudCBhIG1lc3NhZ2U/IGNvbmZpcm0gdGhlIHNlbmQgc2F5cyAqZGVsaXZlcmVkKiwgbm90IHRoYXQgdGhlCkNMSSByZXR1cm5lZC4gQSBjb21wYW5pb24gcnVsZSBhZGRzICoqY3VycmVudC1jb2RlIGFuY2hvcmluZyoqOiBiZWZvcmUgZGlhZ25vc2luZyBhCmJ1ZyBvciBvcGVuaW5nIGEgZml4LCBgZ2l0IGZldGNoYCBhbmQgYGdpdCByZXYtbGlzdCAtLWNvdW50IEhFQUQuLm9yaWdpbi88ZGVmYXVsdD5gCuKAlCBiZWNhdXNlIGEgcmVhbCBpbmNpZGVudCBoYWQgYW4gYWdlbnQgZGlhZ25vc2UgYWdhaW5zdCBhIGNoZWNrb3V0ICoqMzkgY29tbWl0cwpzdGFsZSoqIGFuZCBvcGVuIGEgImZpeCIgdGhhdCByZXZlcnRlZCBhIGRlbGliZXJhdGUgbmV3ZXIgY2hhbmdlLiBUaGUgZml4ICp3YXMqIHRoZQpyZWdyZXNzaW9uLgoKKipOb3cuKiogQSBkaXNwYXRjaGVkIGFnZW50IGlzIGluc3RydWN0ZWQgdG8gY2hlY2sgdGhlIGFydGlmYWN0LCBub3QgdGhlIGV4aXQKY29kZSwgYW5kIHRvIHNheSAidW52ZXJpZmllZCIgd2l0aCB0aGUgbmFtZWQgZ2FwIHdoZW4gaXQgY2FuJ3Qg4oCUIGluc3RlYWQgb2YKcm91bmRpbmcgYSBwb2xpdGUgd2FsbCB1cCB0byAiZG9uZS4iCgoqY29tbWl0czogMjVmZTQyZiAoYXNzZXJ0IG91dGNvbWVzKSwgMTBkOWQzMCAoY3VycmVudC1jb2RlIGFuY2hvcmluZykuIFJlYWQ6IGBnaXQgc2hvdyAyNWZlNDJmYC4qCgojIyMgVGhlIHNhbWUgZ3VhcmRzIG5vdyBhY3R1YWxseSBmaXJlIG9uIGV2ZXJ5IGhhcm5lc3MgYW5kIE9TCgoqKlRoZSBmYWlsdXJlLioqIEV2ZXJ5IGd1YXJkIHJlYWQgQ2xhdWRlJ3MgcGF5bG9hZCBzaGFwZSBvbmx5IOKAlCBgdG9vbF9pbnB1dC5jb21tYW5kYCwKc25ha2VfY2FzZS4gR3JvayBzZW5kcyBjYW1lbENhc2UgKGB0b29sSW5wdXQuY29tbWFuZGApIGFuZCBuYW1lcyBpdHMgc2hlbGwgdG9vbApgcnVuX3Rlcm1pbmFsX2NvbW1hbmRgLCBub3QgYEJhc2hgLiBTbyBvbiBHcm9rIGEgZ3VhcmQgZm91bmQgbm8gY29tbWFuZCwgYXNzdW1lZAp0aGVyZSB3YXMgbm90aGluZyB0byBjaGVjaywgYW5kICoqd2F2ZWQgZXZlcnkgZ2l0IGNvbW1hbmQgdGhyb3VnaCoqIOKAlCBhIGZhaWwtb3BlbgpndWFyZCBpcyB3b3JzZSB0aGFuIG5vIGd1YXJkLCBiZWNhdXNlIGl0IGxvb2tzIHByZXNlbnQuIFNlcGFyYXRlbHksIFdpbmRvd3MgaG9va3MKaGFyZGNvZGVkIGBweXRob24zYCwgd2hpY2ggb24gV2luZG93cyBpcyBvZnRlbiB0aGUgTWljcm9zb2Z0IFN0b3JlIHN0dWIgdGhhdCBkb2VzCm5vdGhpbmcsIGFuZCBhIHRpbWVkLW91dCBjb21tYW5kIHdhcyBraWxsZWQgd2l0aG91dCBpdHMgY2hpbGQgdHJlZS4KCioqVGhlIGZpeC4qKiBHdWFyZHMgbm93IHJlYWQgYm90aCBmaWVsZCBjb252ZW50aW9ucyBhbmQgYSB3aWRlciBzaGVsbC10b29sIHNldApiZWZvcmUgY29uY2x1ZGluZyB0aGVyZSdzIG5vdGhpbmcgdG8gaW5zcGVjdC4gV2luZG93cyBwcm9tcHQgaG9va3Mgc2VsZWN0IGBweSAtM2AKKHRoZSByZWFsIGxhdW5jaGVyKSBhbmQgZmFsbCBiYWNrIHRvIGEgY2xlYW4gbm8tb3AgaWYgbm8gaW50ZXJwcmV0ZXIgd29ya3MuIFRpbWVkLW91dApXaW5kb3dzIGNvbW1hbmRzIGFyZSBraWxsZWQgd2l0aCBgdGFza2tpbGwgL1QgL0ZgIOKAlCB0aGUgd2hvbGUgdHJlZSwgbm90IGp1c3QgdGhlCnBhcmVudC4KCioqTm93LioqIEEgZ2l0IGNvbW1hbmQgb24gR3JvayBpcyBhY3R1YWxseSBpbnNwZWN0ZWQ7IFdpbmRvd3MgcHJvbXB0LWV4cGFuc2lvbiBydW5zCmFnYWluc3QgYSByZWFsIGludGVycHJldGVyIGFuZCBsZWF2ZXMgbm8gb3JwaGFuZWQgcHJvY2Vzc2VzLgoKKmNvbW1pdHM6IGVmYzdmZWYgKGNhbWVsL3NuYWtlIHN0ZGluKSwgOWMyZjdkNCAoV2luZG93cyBsYXVuY2hlciksIGRkZTQ3MmIgKHRyZWUta2lsbCkuIFJlYWQ6IGBnaXQgc2hvdyBlZmM3ZmVmYC4qCgojIyMgVGhlIGRhZW1vbidzIGhpZGRlbiB0aW1lcnMgYmVjYW1lIHJlYWwsIHBpbm5hYmxlIHJvdXRpbmVzCgoqKlRoZSBmYWlsdXJlLioqIEVpZ2h0IGhvdXNla2VlcGluZyBqb2JzIOKAlCB3YXRjaGRvZywgZGV2aWNlLXByb2JlLCB0bXV4LXJlY29uY2lsZSwKbGF1bmNoLWhlYWx0aCwgZmxlZXQtY2FjaGUtd2FybSwgc2Vzc2lvbi1jYWNoZS13YXJtLCB1c2FnZS1yZWZyZXNoLCBhdXRvLWRpc3BhdGNoIOKAlApsaXZlZCBhcyBoYXJkY29kZWQgYHNldEludGVydmFsYCB0aW1lcnMgaW5zaWRlIHRoZSBkYWVtb24gYmluYXJ5OiBhIHNlY29uZCwKdW5vd25lZCBzY2hlZHVsZXIgeW91IGNvdWxkbid0IGxpc3QsIHBhdXNlLCBvciBwaW4uIFRoZSBzaGFycCBlZGdlIHdhcwoqKmF1dG8tZGlzcGF0Y2gqKjogYXMgYSBoYXJkY29kZWQgdGljayBpdCBjb3VsZG4ndCBiZSBwaW5uZWQgdG8gb25lIGJveCwgc28gZXZlcnkKZGFlbW9uIG9uIHRoZSBmbGVldCBpbmRlcGVuZGVudGx5IHBvbGxlZCB0aGUgKnNhbWUqIHNoYXJlZCBMaW5lYXIgcXVldWUgd2l0aCBubwpjb29yZGluYXRpb24g4oCUIHRoZSBzYW1lIHRpY2tldCBkaXNwYXRjaGVkIE4gdGltZXMuCgoqKlRoZSBmaXguKiogQWxsIGVpZ2h0IHNoaXAgYXMgZGVjbGFyYXRpdmUgYGNvbW1hbmQ6YC1tb2RlIHJvdXRpbmVzIGludm9raW5nCmBhZ2VudHMgX19kYWVtb24tdGljayA8bmFtZT5gIG9uIHRoZWlyIG9sZCBjYWRlbmNlcyDigJQgbm93IGxpc3RhYmxlCihgYWdlbnRzIHJvdXRpbmVzIGxpc3RgKSwgaW5kaXZpZHVhbGx5IHBhdXNhYmxlLCBhbmQgZGV2aWNlLXBpbm5hYmxlLgpgYXV0by1kaXNwYXRjaGAgY2FuIGJlIHBpbm5lZCB0byBhIHNpbmdsZSBib3ggc28gdGhlIGZsZWV0IHN0b3BzIGRvdWJsZS1maXJpbmcuCgoqKk5vdy4qKiBUaGUgZGFlbW9uJ3MgYmFja2dyb3VuZCB3b3JrIGlzIHZpc2libGUgYW5kIGNvbnRyb2xsYWJsZSBsaWtlIGFueSByb3V0aW5lLAphbmQgdGhlIG11bHRpLWJveCBMaW5lYXIgc3RhbXBlZGUgaGFzIGFuIG9mZiBzd2l0Y2guCgoqY29tbWl0czogMjljMmMxOCAoUlVTSC0yMzUzKS4gUmVhZDogYGdpdCBzaG93IDI5YzJjMThgLioKCiMjIyBTZXNzaW9ucyByZXN1bWUgYW5kIGV4aXQgdGhlbXNlbHZlcyDigJQgc2FmZWx5CgoqKlRoZSBmYWlsdXJlLioqIENvbnRpbnVlL3Jlc3RvcmUvcmVjb3ZlciBsb2dpYyBsaXZlZCBvbmx5IGFzIHNsYXNoLWNvbW1hbmQgYm9kaWVzLApzbyBhIGhhcm5lc3MgdGhhdCBzdXBwb3J0cyBza2lsbHMgYnV0IG5vdCBjb21tYW5kcyBnb3Qgbm90aGluZy4gQW5kIGAvZG9uZWAncwpzZWxmLWV4aXQgaW5saW5lZCBhIHJhdyBga2lsbCAtVEVSTSAkUFBJRGAsIHdoaWNoIHRoZSBhdXRvLW1vZGUgcGVybWlzc2lvbgpjbGFzc2lmaWVyIGJsb2NrZWQgaW4gZGlzcGF0Y2hlZCBydW5zIOKAlCBzbyBhIGhlYWRsZXNzIHNlc3Npb24gbGl0ZXJhbGx5IGNvdWxkIG5vdAp0ZXJtaW5hdGUgaXRzZWxmIGNsZWFubHkuCgoqKlRoZSBmaXguKiogQSBgc2Vzc2lvbnNgIHBsdWdpbiBtb3ZlcyB0aGUgbG9naWMgaW50byBza2lsbHMgKGNvbnRpbnVlIC8gaW5zaWdodHMgLwpyZXN0b3JlKSwgcmVhY2hhYmxlIGJ5IG5lYXJseSBldmVyeSBoYXJuZXNzLCB3aXRoIHRoZSBjb21tYW5kcyBhcyB0aGluIGFsaWFzZXMuIEFuZApgL3NlbGY6Y2xvc2VgIGlzIGEgcHJvcGVyIGd1YXJkZWQgcHJpbWl0aXZlOiBhIHJlYWQtb25seSBgcHNgIGNoZWNrIGZpcnN0IHJlZnVzZXMgdG8Kc2lnbmFsIGFuIGluZnJhIHBhcmVudCAoc3NoZC90bXV4L2luaXQpLCB0aGVuIHNlbmRzICoqU0lHVEVSTSBvbmx5Kiog4oCUIGFuZCB0aGUKcGVybWlzc2lvbiBpcyBhbGxvd2xpc3RlZCBhcyB0aGUgKmV4YWN0IHN0cmluZyogYEJhc2goa2lsbCAtVEVSTSAkUFBJRClgLCBuZXZlciBhCmdlbmVyYWwgYGtpbGxgIGFsbG93LiBJdCBjYW4ndCB0YXJnZXQgYW5vdGhlciBwaWQsIGNhbid0IGVzY2FsYXRlIHRvIFNJR0tJTEwsIGFuZApsZXRzIHRoZSBoYXJuZXNzIGZsdXNoIGl0cyB0cmFuc2NyaXB0IGJlZm9yZSBleGl0aW5nLgoKKipOb3cuKiogQSBjcmFzaGVkIG9yIGRpc3BhdGNoZWQgc2Vzc2lvbiBjYW4gYmUgcmVzdW1lZCBieSBhbnkgaGFybmVzcywgYW5kIGEKaGVhZGxlc3MgYWdlbnQgY2FuIGVuZCBpdHNlbGYgY2xlYW5seSB3aXRob3V0IGEgc3R1Y2sgcGVybWlzc2lvbiBwcm9tcHQg4oCUIHdpdGhvdXQKb3BlbmluZyB0aGUgZG9vciB0byBraWxsaW5nIHRoZSB3cm9uZyBwcm9jZXNzLgoKKmNvbW1pdHM6IGZkNGQzNTIgKHNlc3Npb25zIHBsdWdpbiksIGE2NzdjYzUgKC9zZWxmOmNsb3NlKS4gUmVhZDogYGdpdCBzaG93IGE2NzdjYzVgLioKCiMjIEV2aWRlbmNlCgpFdmVyeSBmaXggYWJvdmUgbGFuZHMgYXQgb25lIG9mIGZpdmUgcG9pbnRzIGluIGFuIGFnZW50J3MgdW5hdHRlbmRlZCBsaWZlY3ljbGUuClJlYWQgbGVmdCB0byByaWdodDogY29udGV4dCBpcyBpbmplY3RlZCwgdGhlIGFnZW50IHdvcmtzLCBQcmVUb29sVXNlIGd1YXJkcyByZWZ1c2UKaXJyZXZlcnNpYmxlIGFjdGlvbnMsIHRoZSBTdG9wIGdhdGUgcmVmdXNlcyBhIGZhbHNlIG9yIGxvb3BpbmcgZmluaXNoLCB0aGVuIHRoZQpzZXNzaW9uIGNsZWFycyB0byBhIGNsZWFuIHNlbGYtZXhpdC4KCjxmaWd1cmUgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZSBhcnRpZmFjdC1maWd1cmUtZGlhZ3JhbSBhcnRpZmFjdC1maWd1cmUtd2lkZSI+Cjxzdmcgdmlld0JveD0iMCAwIDEwMDAgMjUwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkFnZW50IHVuYXR0ZW5kZWQgbGlmZWN5Y2xlIHdpdGggdGhlIGd1YXJkcmFpbCB0aGF0IGZpcmVzIGF0IGVhY2ggc3RhZ2UsIGZyb20gU2Vzc2lvblN0YXJ0IHRocm91Z2ggYSBjbGVhbiBzZWxmLWV4aXQiPgogIDxtYXJrZXIgaWQ9ImFydyIgbWFya2VyV2lkdGg9IjkiIG1hcmtlckhlaWdodD0iOSIgcmVmWD0iNyIgcmVmWT0iNC41IiBvcmllbnQ9ImF1dG8iPgogICAgPHBhdGggZD0iTTAsMCBMOSw0LjUgTDAsOSB6IiBmaWxsPSIjM2E0YTVjIi8+CiAgPC9tYXJrZXI+CiAgPGxpbmUgeDE9IjcwIiB5MT0iNzAiIHgyPSI5MzAiIHkyPSI3MCIgc3Ryb2tlPSIjM2E0YTVjIiBzdHJva2Utd2lkdGg9IjIiIG1hcmtlci1lbmQ9InVybCgjYXJ3KSIvPgoKICA8Y2lyY2xlIGN4PSI5MCIgY3k9IjcwIiByPSI3IiBmaWxsPSIjMjZjMWI2Ii8+CiAgPHRleHQgeD0iOTAiIHk9IjQ2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSIjZGZlNmVlIj5TZXNzaW9uU3RhcnQ8L3RleHQ+CiAgPHRleHQgeD0iOTAiIHk9IjEwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMC41IiBmaWxsPSIjOGE5N2E2Ij5jb250ZXh0IGluamVjdGVkPC90ZXh0PgoKICA8Y2lyY2xlIGN4PSIzMjAiIGN5PSI3MCIgcj0iNyIgZmlsbD0iIzI2YzFiNiIvPgogIDx0ZXh0IHg9IjMyMCIgeT0iNDYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNkZmU2ZWUiPkFnZW50IHdvcmtzPC90ZXh0PgogIDx0ZXh0IHg9IjMyMCIgeT0iMTAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEwLjUiIGZpbGw9IiM4YTk3YTYiPmVkaXRzIMK3IGNvbW1pdHMgwrcgUFI8L3RleHQ+CgogIDxjaXJjbGUgY3g9IjU2MCIgY3k9IjcwIiByPSI3IiBmaWxsPSIjZDY5YTM0Ii8+CiAgPHRleHQgeD0iNTYwIiB5PSI0NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2RmZTZlZSI+UHJlVG9vbFVzZTwvdGV4dD4KICA8dGV4dCB4PSI1NjAiIHk9IjEwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMC41IiBmaWxsPSIjOGE5N2E2Ij5ndWFyZHM8L3RleHQ+CgogIDxjaXJjbGUgY3g9Ijc5MCIgY3k9IjcwIiByPSI3IiBmaWxsPSIjZDY5YTM0Ii8+CiAgPHRleHQgeD0iNzkwIiB5PSI0NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2RmZTZlZSI+U3RvcDwvdGV4dD4KICA8dGV4dCB4PSI3OTAiIHk9IjEwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMC41IiBmaWxsPSIjOGE5N2E2Ij5kb25lIG1lYW5zIGRvbmU8L3RleHQ+CgogIDxjaXJjbGUgY3g9IjkzMCIgY3k9IjcwIiByPSI3IiBmaWxsPSIjNDZiNDdhIi8+CiAgPHRleHQgeD0iOTMwIiB5PSI0NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzQ2YjQ3YSI+c2VsZi1leGl0PC90ZXh0PgoKICA8cmVjdCB4PSIyNCIgeT0iMTMwIiB3aWR0aD0iMTUwIiBoZWlnaHQ9IjcyIiByeD0iOCIgZmlsbD0iIzBmMTYxZSIgc3Ryb2tlPSIjMmQ0MDUyIi8+CiAgPHRleHQgeD0iMzQiIHk9IjE1MCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzkzYTRiNCI+bXVsdGktaGFybmVzcyBzdGRpbjwvdGV4dD4KICA8dGV4dCB4PSIzNCIgeT0iMTY4IiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjOTNhNGI0Ij5MaW5lYXIgYm9hcmQgKzwvdGV4dD4KICA8dGV4dCB4PSIzNCIgeT0iMTg2IiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjNGZkN2NkIj5pbnRlcmFjdGl2ZSBob3N0PC90ZXh0PgoKICA8cmVjdCB4PSI0NzAiIHk9IjEzMCIgd2lkdGg9IjE4MiIgaGVpZ2h0PSI5MCIgcng9IjgiIGZpbGw9IiMwZjE2MWUiIHN0cm9rZT0iIzVjNGEyNCIvPgogIDx0ZXh0IHg9IjQ4MCIgeT0iMTUwIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjZTA2YTYzIj5ibG9jayBkZWwgcmVtb3RlIGJyYW5jaDwvdGV4dD4KICA8dGV4dCB4PSI0ODAiIHk9IjE2OCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2UwNmE2MyI+YmxvY2sgc3RhbGUgYmFzZSAoMTVtKTwvdGV4dD4KICA8dGV4dCB4PSI0ODAiIHk9IjE4NiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2UwNmE2MyI+YmxvY2sgcm0gLyBsYXJnZS1maWxlPC90ZXh0PgogIDx0ZXh0IHg9IjQ4MCIgeT0iMjA4IiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjNGZkN2NkIj5ub3cgc2F5czogZG9fdGhpc19pbnN0ZWFkPC90ZXh0PgoKICA8cmVjdCB4PSI3MDAiIHk9IjEzMCIgd2lkdGg9IjE5MCIgaGVpZ2h0PSI5MCIgcng9IjgiIGZpbGw9IiMwZjE2MWUiIHN0cm9rZT0iIzVjNGEyNCIvPgogIDx0ZXh0IHg9IjcxMCIgeT0iMTUwIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjZTA2YTYzIj5ibG9jayBzdHJhbmRlZCBQUjwvdGV4dD4KICA8dGV4dCB4PSI3MTAiIHk9IjE2OCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2UwNmE2MyI+YmxvY2sgb3BlbiBjaGVja2xpc3Q8L3RleHQ+CiAgPHRleHQgeD0iNzEwIiB5PSIxODYiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM0NmI0N2EiPmRlLWVzY2FsYXRlIGFmdGVyIDMgZmlyZXM8L3RleHQ+CiAgPHRleHQgeD0iNzEwIiB5PSIyMDgiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM0NmI0N2EiPnJlY2FwIGJlZm9yZSBzZWxmLWV4aXQ8L3RleHQ+CgogIDxsaW5lIHgxPSI5MCIgeTE9IjgwIiB4Mj0iOTAiIHkyPSIxMzAiIHN0cm9rZT0iIzNhNGE1YyIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8bGluZSB4MT0iNTYwIiB5MT0iODAiIHgyPSI1NjAiIHkyPSIxMzAiIHN0cm9rZT0iIzVjNGEyNCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8bGluZSB4MT0iNzkwIiB5MT0iODAiIHgyPSI3OTAiIHkyPSIxMzAiIHN0cm9rZT0iIzVjNGEyNCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KPC9zdmc+CjxmaWdjYXB0aW9uPlRlYWwgPSBjb250ZXh0IHRoYXQgZW5hYmxlcyDCtyBhbWJlciA9IGEgZ2F0ZSB0aGF0IGZpcmVzIMK3IHJlZCA9IGEgYmxvY2tlZCBhY3Rpb24gwrcgZ3JlZW4gPSBjbGVhcmVkIHRvIHByb2NlZWQuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCiMjIFJlY29tbWVuZGF0aW9ucwoKTm90aGluZyBoZXJlIG5lZWRzIHlvdSDigJQgaXQncyBhIHJlcG9ydC4gQnV0IHRoZSBwYXR0ZXJuIHBvaW50cyBzb21ld2hlcmU6IHRoZSBlaWdodApob3VzZWtlZXBpbmcgcm91dGluZXMgbm93IHJ1biwgeWV0IHRoZSBkYWVtb24gKipzdGlsbCBlbWl0cyBub3RoaW5nIGludG8gdGhlIHVuaWZpZWQKZXZlbnQgc3RyZWFtKiogKFJVU0gtMjQzOSkuIFNvIGFuIHVuYXR0ZW5kZWQgcnVuJ3MgcHJvZ3Jlc3MgaXMgYSBwcml2YXRlIGxvZyBzaWxvLApub3QgYSBzaWduYWwgdGhlIGZsZWV0IGNhbiBzZWUg4oCUIHRoZSBzYW1lICJzaWxlbnQgc3VjY2VzcyIgc2hhcGUgdGhpcyB3aG9sZSB3ZWVrIHdhcwphYm91dCwgb25lIGxheWVyIHVwLiBUaGF0J3MgdGhlIG5leHQgd2FsbCB3b3J0aCBidWlsZGluZy4K"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

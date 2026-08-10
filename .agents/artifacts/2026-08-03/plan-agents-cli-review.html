@@ -105,7 +105,7 @@
   <div class="chips">
     <span class="chip prov">harness · <b>claude</b></span>
     <span class="chip prov">agent · <b>opus-4-8</b></span>
-    <span class="chip prov">host · <b>yosemite-s1</b></span>
+    <span class="chip prov">host · <b>worker-s1</b></span>
     <span class="chip prov">session · <b>27b5c717</b></span>
     <span class="chip prov">date · <b>2026-08-03</b></span>
   </div>
@@ -182,9 +182,9 @@
       <text x="235" y="20" font-size="10" fill="#f87171">~60 ssh</text>
       <g font-size="11">
         <rect x="330" y="20" width="200" height="30" rx="6" fill="none" stroke="#242724"/>
-        <text x="340" y="39">yosemite-s0 · done ✓</text>
+        <text x="340" y="39">worker-s0 · done ✓</text>
         <rect x="330" y="55" width="200" height="30" rx="6" fill="none" stroke="#242724"/>
-        <text x="340" y="74">mac-mini · done ✓</text>
+        <text x="340" y="74">release-host · done ✓</text>
         <rect x="330" y="90" width="200" height="30" rx="6" fill="none" stroke="#242724"/>
         <text x="340" y="109">m1/m3 · done ✓</text>
       </g>
@@ -248,7 +248,7 @@
         <li><span class="em">Cache remote status with a TTL</span> — helps non-local, but a <code>--local</code>
           query should make <span class="em">zero</span> network calls by definition.</li>
       </ul></div>
-    <div class="row"><span class="lbl">FYI</span>This is the single biggest contributor to the "why is zion
+    <div class="row"><span class="lbl">FYI</span>This is the single biggest contributor to the "why is workstation
       slow" question, alongside #Cluster-A background timers below.</div>
   </div>
 
@@ -268,7 +268,7 @@
   </div>
 
   <div class="callout">
-    <p class="h">Also confirmed in this cluster (background load on zion)</p>
+    <p class="h">Also confirmed in this cluster (background load on workstation)</p>
     <p><span class="em">RUSH-2061</span> — every daemon pings the whole fleet every 3 min with no leader
     (N² traffic): <span class="em">still unfixed</span>, real contributor to sluggishness.
     <span class="em">RUSH-2065</span> — remote session gather buffers ~170MB/call unbounded: confirmed.
@@ -307,7 +307,7 @@
       <p>Destination syntax for the enhanced export. Preference?
       <code>agents sessions export --to r2://bucket/path</code> (URI style, extensible to <code>ssh://host</code>)
       vs. <code>--dest r2 --bucket …</code> (explicit flags). I lean URI-style — one flag, and a remote machine
-      becomes <code>--to ssh://mac-mini:~/backups</code> naturally.</p>
+      becomes <code>--to ssh://release-host:~/backups</code> naturally.</p>
     </div>
   </div>
 
@@ -572,12 +572,12 @@
     <ul class="tight">
       <li>#10 <code>hq</code>: I'll confirm the Factory extension doesn't use it before removing (else just hide from help).</li>
       <li>This checkout is behind <code>origin/main</code>; builds base off <code>origin/main</code> so they're current.</li>
-      <li>RUSH-2114 (doctor pile-up) is already fixed; RUSH-2061 (N² fleet probe) is not — a real zion-slowness item worth doing.</li>
+      <li>RUSH-2114 (doctor pile-up) is already fixed; RUSH-2061 (N² fleet probe) is not — a real workstation-slowness item worth doing.</li>
     </ul>
   </div>
 
   <div class="foot">
-    harness claude · agent opus-4-8 · host yosemite-s1 · session 27b5c717 · 2026-08-03 · next: go / reshape
+    harness claude · agent opus-4-8 · host worker-s1 · session session-id · 2026-08-03 · next: go / reshape
   </div>
 </div>
 </body>

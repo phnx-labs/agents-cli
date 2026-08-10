@@ -1,4 +1,4 @@
-# RUSH-2149 — independent baseline (Claude, yosemite-s1)
+# RUSH-2149 — independent baseline (Claude, worker-s1)
 
 Captured 2026-08-05/06 before Codex's persistent-client fix (session `019fd53b`,
 still doing source inspection with `mq` at time of capture — no PR/branch yet).
@@ -8,7 +8,7 @@ n=5 per layer, median reported. All runs against a real, already-open browser ta
 (`agents browser start --profile <p> --task rush2149-bench`) — no cold-start cost
 folded into the medians.
 
-## yosemite-s1 (this host, linux, load avg ~7-9) — no browser installed
+## worker-s1 (this host, linux, load avg ~7-9) — no browser installed
 
 No CDP session possible here (headless box, no chrome/chromium/comet). Measured
 the CLI-boot layer only, which independently confirms the ticket's diagnosis that
@@ -38,12 +38,12 @@ fix needs to eliminate the boot, not just speed up CDP dispatch.
 | `agents browser click --at 10,10` | 368 ms | 363,368,381,358,369 |
 | **screenshot + click loop (2 CLI calls)** | **730 ms** | 740,730,735,717,711 |
 
-agents 1.22.20. Directly comparable in shape to the ticket's zion table (bare node
+agents 1.22.20. Directly comparable in shape to the ticket's workstation table (bare node
 39ms→42ms, `--version` 105ms→143ms, `status` 226ms→266ms) — same layer ordering,
 same conclusion, slightly higher absolute numbers (older CLI build + this box's
-baseline being naturally slower than zion idle).
+baseline being naturally slower than workstation idle).
 
-## zion (macos, load avg ~112-136 — heavily loaded during this run)
+## workstation (macos, load avg ~112-136 — heavily loaded during this run)
 
 | Layer | Median (n=5) | Raw (ms) |
 | --- | --- | --- |
@@ -54,17 +54,17 @@ baseline being naturally slower than zion idle).
 | `agents browser click --at 10,10` | 595 ms | 572,652,767,563,595 |
 | **screenshot + click loop (2 CLI calls)** | **909 ms** | 938,954,909,847,834 |
 
-zion is under real load right now (fleet snapshot at session start: 1058% CPU,
+workstation is under real load right now (fleet snapshot at session start: 1058% CPU,
 confirmed by `uptime` load averages 112-136). Absolute numbers here are inflated
 by host contention, not representative of the ticket's original "warm, idle"
 measurement — kept for the record and because the after-fix run should also land
-on zion for an apples-to-apples same-host comparison, but **pinnacles is the more
+on workstation for an apples-to-apples same-host comparison, but **pinnacles is the more
 credible reference baseline** for the loop shape.
 
 ## Takeaways for the fix
 
 1. Independently reproduces the ticket's core claim: `agents browser status` with
-   **no CDP work and (on yosemite-s1) no daemon at all** still costs ~245-266 ms —
+   **no CDP work and (on worker-s1) no daemon at all** still costs ~245-266 ms —
    confirms the fat is CLI boot + IPC/daemon-probe path, not the CDP op.
 2. The persistent-client fix should be benchmarked on the **same host** as its
    baseline (host load swings the absolute numbers by 2-3x here); pinnacles

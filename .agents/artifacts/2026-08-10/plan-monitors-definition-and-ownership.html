@@ -25,7 +25,7 @@
 <div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-awaiting-go">awaiting-go</span></div>
 <h1>Monitors: definition vs running state, and one trigger per work item</h1>
 <p class="summary">Monitor definitions are gitignored, so every box has a different invisible set of watchers. Track the definitions, keep runtime local, and resolve ownership first — because syncing definitions without ownership multiplies double-fires instead of fixing them.</p>
-<div class="meta" aria-label="Artifact metadata"><p class="facts-line">zion 0 monitors, yosemite-s0 6, yosemite-s1 2 — same fleet, same day<span class="meta-sep" aria-hidden="true">·</span>No enable/disable verb exists; the docs name one that never shipped<span class="meta-sep" aria-hidden="true">·</span>monitorRunsOnThisDevice returns true for every box when device is unset<span class="meta-sep" aria-hidden="true">·</span>Syncing definitions is unsafe until ownership is resolved</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">monitors-duplicate-guard</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">RUSH-2476 (gates visibility) · RUSH-2485 (sibling defect) · agents-cli#2517</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">6b09b0da</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">workstation 0 monitors, worker-s0 6, worker-s1 2 — same fleet, same day<span class="meta-sep" aria-hidden="true">·</span>No enable/disable verb exists; the docs name one that never shipped<span class="meta-sep" aria-hidden="true">·</span>monitorRunsOnThisDevice returns true for every box when device is unset<span class="meta-sep" aria-hidden="true">·</span>Syncing definitions is unsafe until ownership is resolved</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">monitors-duplicate-guard</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">RUSH-2476 (gates visibility) · RUSH-2485 (sibling defect) · agents-cli#2517</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Owner</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">worker-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">6b09b0da</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
 </section>
 <nav class="toc" aria-label="Artifact sections"><a href="#focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a href="#intent"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Intent</a><a href="#purpose"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#current-architecture"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Current architecture</a><a href="#proposed-changes"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#plan"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Plan</a><a href="#validation"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Tracking</a><a href="#resolved-while-planning"><span class="toc-index">11&nbsp;&middot;&nbsp;</span>Resolved while planning</a></nav><article class="artifact-body"><h2 id="focus-for-review">Focus for review</h2>
 <ul>
@@ -33,7 +33,7 @@
 disagree with that dependency, the whole sequence changes.</li>
 <li><strong><code>device: auto</code>.</strong> Deterministic election over the device registry — the one
 genuinely new mechanism here.</li>
-<li><strong>The held branch.</strong> <code>muqsitnawaz/.agents</code> already has the gitignore fix pushed.
+<li><strong>The held branch.</strong> <code>owner/.agents</code> already has the gitignore fix pushed.
 It stays unmerged until ownership lands.</li>
 <li><strong><code>pause</code>/<code>resume</code> must move to a per-device list</strong> (step 4). Once definitions
 sync, pausing on one box would otherwise pause on all of them.</li>
@@ -47,7 +47,7 @@ be warned. So we can prevent double-trigger bugs."</p>
 </blockquote>
 <p>Plus, earlier: no <code>enable</code>/<code>disable</code> verb — a shipped monitor should just show up.</p>
 <h2 id="purpose">Purpose</h2>
-<p><code>agents monitors list</code> on zion printed <strong>"No monitors configured"</strong> while
+<p><code>agents monitors list</code> on workstation printed <strong>"No monitors configured"</strong> while
 <code>~/.agents/.system/monitors/pr-merge-on-green.yml</code> sat on that same disk — the
 built-in that would have merged PR #2485 without a human.</p>
 <table>
@@ -82,7 +82,7 @@ built-in that would have merged PR #2485 without a human.</p>
 <td><strong>No</strong> — <code>writeMonitor</code> overwrites by name, nothing compares arguments</td>
 </tr>
 </tbody></table>
-<p>Result on the fleet: <strong>zion 0, yosemite-s0 6, yosemite-s1 2</strong> — and on one box,
+<p>Result on the fleet: <strong>workstation 0, worker-s0 6, worker-s1 2</strong> — and on one box,
 <code>open-pr-watch</code>, <code>pr-ci-fail</code>, three stale <code>pr2222-*</code> watchers and an agent-added
 lander all polling the same PR queue.</p>
 <div class="artifact-callout">
@@ -119,15 +119,15 @@ ownership — and that is what makes syncing dangerous.</p>
   <text x="256" y="180" fill="#6b6b6b" font-family="monospace" font-size="10">config.ts:200 -&gt; true</text>
 
   <rect x="410" y="146" width="140" height="48" rx="6" fill="#111" stroke="#f87171" stroke-width="1.5"></rect>
-  <text x="424" y="166" fill="#d6d6d6" font-family="monospace" font-size="11">zion daemon</text>
+  <text x="424" y="166" fill="#d6d6d6" font-family="monospace" font-size="11">workstation daemon</text>
   <text x="424" y="184" fill="#f87171" font-family="monospace" font-size="10">fires</text>
 
   <rect x="566" y="146" width="150" height="48" rx="6" fill="#111" stroke="#f87171" stroke-width="1.5"></rect>
-  <text x="580" y="166" fill="#d6d6d6" font-family="monospace" font-size="11">yosemite-s0</text>
+  <text x="580" y="166" fill="#d6d6d6" font-family="monospace" font-size="11">worker-s0</text>
   <text x="580" y="184" fill="#f87171" font-family="monospace" font-size="10">fires</text>
 
   <rect x="732" y="146" width="140" height="48" rx="6" fill="#111" stroke="#f87171" stroke-width="1.5"></rect>
-  <text x="746" y="166" fill="#d6d6d6" font-family="monospace" font-size="11">mac-mini</text>
+  <text x="746" y="166" fill="#d6d6d6" font-family="monospace" font-size="11">release-host</text>
   <text x="746" y="184" fill="#f87171" font-family="monospace" font-size="10">fires</text>
 
   <circle cx="890" cy="170" r="6" fill="#f87171"><animate attributeName="opacity" values="1;0.2;1" dur="1.5s" repeatCount="indefinite"></animate></circle>
@@ -141,15 +141,15 @@ ownership — and that is what makes syncing dangerous.</p>
   <text x="256" y="292" fill="#6b6b6b" font-family="monospace" font-size="10">elect over registry</text>
 
   <rect x="410" y="258" width="140" height="48" rx="6" fill="#111" stroke="#404040" stroke-width="1.5"></rect>
-  <text x="424" y="278" fill="#6b6b6b" font-family="monospace" font-size="11">zion daemon</text>
+  <text x="424" y="278" fill="#6b6b6b" font-family="monospace" font-size="11">workstation daemon</text>
   <text x="424" y="296" fill="#6b6b6b" font-family="monospace" font-size="10">inert</text>
 
   <rect x="566" y="258" width="150" height="48" rx="6" fill="#0f160a" stroke="#a3e635" stroke-width="2"></rect>
-  <text x="580" y="278" fill="#d6d6d6" font-family="monospace" font-size="11">yosemite-s0</text>
+  <text x="580" y="278" fill="#d6d6d6" font-family="monospace" font-size="11">worker-s0</text>
   <text x="580" y="296" fill="#a3e635" font-family="monospace" font-size="10">OWNER — fires once</text>
 
   <rect x="732" y="258" width="140" height="48" rx="6" fill="#111" stroke="#404040" stroke-width="1.5"></rect>
-  <text x="746" y="278" fill="#6b6b6b" font-family="monospace" font-size="11">mac-mini</text>
+  <text x="746" y="278" fill="#6b6b6b" font-family="monospace" font-size="11">release-host</text>
   <text x="746" y="296" fill="#6b6b6b" font-family="monospace" font-size="10">inert</text>
 
   <line x1="24" y1="340" x2="896" y2="340" stroke="#262626" stroke-width="1"></line>
@@ -166,7 +166,7 @@ ownership — and that is what makes syncing dangerous.</p>
 <h3>Behavior</h3>
 <div class="artifact-grid">
 <div class="artifact-panel">
-<strong>Current — captured on zion</strong>
+<strong>Current — captured on workstation</strong>
 <pre><code>$ agents monitors list
 No monitors configured
 
@@ -176,7 +176,7 @@ Monitor 'dup' added        # silently, beside 3 identical watchers</code></pre>
 <div class="artifact-panel">
 <strong>Proposed — mockup</strong>
 <pre><code>$ agents monitors list
-  pr-merge-on-green  on  (built-in)  owner: yosemite-s0
+  pr-merge-on-green  on  (built-in)  owner: worker-s0
 
 $ agents monitors add dup --poll '&lt;same cmd&gt;' 2m --notify
 Monitor 'open-pr-watch' already watches this exact source
@@ -199,7 +199,7 @@ by varying only the owner.</p>
 <p>Verified against the sync path, and it turns my earlier open question into a
 required step: <strong><code>pause</code>/<code>resume</code> become fleet-wide the moment definitions sync.</strong>
 <code>setMonitorEnabled</code> (<code>config.ts:540-543</code>) mutates <code>enabled:</code> in the monitor's own
-yml — local today, shared once synced. So <code>agents monitors pause X</code> on zion would
+yml — local today, shared once synced. So <code>agents monitors pause X</code> on workstation would
 pause X on every box, and every box would write the same file.</p>
 <p>Routines keep activation <em>out</em> of the definition, precisely for this:</p>
 <pre><code>state.ts:830-834  devices/&lt;machine&gt;/agents.yaml — "each machine only ever writes
@@ -287,7 +287,7 @@ one may have fired.</p>
 <h2 id="tracking">Tracking</h2>
 <ul>
 <li><strong>agents-cli#2517</strong> — duplicate guard, open, CONFLICTING (needs rebase).</li>
-<li><strong>muqsitnawaz/.agents</strong> <code>monitors-track-definitions</code> — pushed, PR held until ownership lands.</li>
+<li><strong>owner/.agents</strong> <code>monitors-track-definitions</code> — pushed, PR held until ownership lands.</li>
 <li><strong>RUSH-2476</strong> — release train disabled; gates all visibility.</li>
 <li><strong>RUSH-2485</strong> — monitor reported healthy, never polled; teammate active.</li>
 </ul>

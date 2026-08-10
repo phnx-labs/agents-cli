@@ -8,7 +8,7 @@ project: agents-cli
 repository: phnx-labs/agents-cli
 harness: Codex
 agent: root
-host: zion
+host: workstation
 session: current
 date: 2026-08-06
 facts:

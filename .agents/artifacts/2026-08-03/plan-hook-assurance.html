@@ -91,7 +91,7 @@
   <div class="meta prov">
     <span class="chip">harness: <b>claude</b></span>
     <span class="chip">agent: <b>opus-5</b></span>
-    <span class="chip">host: <b>yosemite-s1</b></span>
+    <span class="chip">host: <b>worker-s1</b></span>
     <span class="chip">session: <b>b0b06be0</b></span>
     <span class="chip"><b>2026-08-03</b></span>
   </div>
@@ -251,13 +251,13 @@ into a red test. Seed the allowlist with the one genuine case,
   <li>Run <code>registration_test.sh</code> against <code>git show 606db6e:agents.yaml</code>
       in a scratch tree — it must FAIL, naming the three dropped hooks.</li>
   <li>Break each guard's parser lookup to an unconditional allow; the fail-closed case must go red.</li>
-  <li><code>bash hooks/run_tests.sh</code> green on this box and on zion.</li>
+  <li><code>bash hooks/run_tests.sh</code> green on this box and on workstation.</li>
   <li>Each guard run with a benign payload produces <b>empty stdout</b>.</li>
 </ul>
 
 <div class="foot">
   agents-system · hook layer · rendered by plan-render &nbsp;·&nbsp;
-  claude · opus-5 · yosemite-s1 · session b0b06be0 · 2026-08-03 &nbsp;·&nbsp;
+  claude · opus-5 · worker-s1 · session session-id · 2026-08-03 &nbsp;·&nbsp;
   next: <span style="color:var(--accent)">go / reshape</span>
 </div>
 

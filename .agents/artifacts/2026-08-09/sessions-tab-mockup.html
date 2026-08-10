@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Factory · Sessions tab — design gate</title>
+<style>
+  /* Real Factory design tokens (design-system.css) — dark theme */
+  :root{
+    --brand:#a3e635; --brand-600:#84cc16; --brand-ring:rgba(163,230,53,0.25);
+    --claude:#a3e635; --codex:#e5e5e5; --kimi:#6f4cff; --droid:#ff6b3d; --antigravity:#5b8def;
+    --st-run:#22C55E; --st-run-glow:rgba(34,197,94,0.5);
+    --st-wait:#D4A72C; --st-wait-glow:rgba(212,167,44,0.45);
+    --st-idle:#6B7280; --st-fail:#EF4444; --st-fail-glow:rgba(239,68,68,0.5);
+    --st-orphan:#c084fc; --st-orphan-glow:rgba(192,132,252,0.5);
+    --r-sm:4px; --r-md:6px; --r-lg:8px; --r-xl:10px;
+    --ds-bg:#0a0a0a; --ds-bg-panel:#141414; --ds-bg-sunken:#050505; --ds-bg-inset:#1a1a1a;
+    --ds-bg-hover:rgba(255,255,255,0.04); --ds-bg-active:rgba(255,255,255,0.07);
+    --ds-border:rgba(255,255,255,0.08); --ds-border-strong:rgba(255,255,255,0.15); --ds-border-subtle:rgba(255,255,255,0.04);
+    --ds-text:#E7E5E4; --ds-text-muted:#A8A29E; --ds-text-dim:#6E6A63; --ds-text-faint:#44403C;
+    --shadow-md:0 1px 3px rgba(0,0,0,.4),0 4px 12px rgba(0,0,0,.5);
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ds-bg);color:var(--ds-text);font-family:var(--sans);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased}
+  a{color:inherit}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 22px 80px}
+  h1{font-size:19px;margin:0 0 4px;letter-spacing:-0.01em}
+  .sub{color:var(--ds-text-muted);font-size:12.5px;margin:0 0 22px;max-width:760px}
+  .kicker{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--brand);margin:0 0 8px}
+  .note{color:var(--ds-text-dim);font-size:11.5px}
+
+  /* ---- faux Factory chrome ---- */
+  .frame{background:var(--ds-bg-panel);border:1px solid var(--ds-border);border-radius:var(--r-xl);overflow:hidden;box-shadow:var(--shadow-md);margin:14px 0 30px}
+  .topbar{display:flex;align-items:center;gap:14px;padding:9px 14px;background:var(--ds-bg-sunken);border-bottom:1px solid var(--ds-border)}
+  .dot3{display:flex;gap:6px}.dot3 i{width:10px;height:10px;border-radius:50%;background:#2a2a2a;display:block}
+  .toptabs{display:flex;gap:2px;font-family:var(--mono);font-size:11px;letter-spacing:.06em}
+  .toptabs span{padding:4px 9px;border-radius:var(--r-sm);color:var(--ds-text-dim)}
+  .toptabs span.on{color:var(--ds-text);background:var(--ds-bg-inset)}
+  .subtabs{display:flex;gap:3px;padding:8px 12px;border-bottom:1px solid var(--ds-border);background:var(--ds-bg-panel);align-items:center}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12px;color:var(--ds-text-muted);border:1px solid transparent;cursor:default}
+  .pill .ct{font-family:var(--mono);font-size:10.5px;color:var(--ds-text-dim);background:var(--ds-bg-inset);padding:0 5px;border-radius:999px}
+  .pill.on{color:#0a0a0a;background:var(--brand);font-weight:600}
+  .pill.on .ct{color:#0a0a0a;background:rgba(0,0,0,.16)}
+  .pill.new{position:relative}
+  .pill.new::after{content:"NEW";position:absolute;top:-8px;right:-10px;font-family:var(--mono);font-size:8px;letter-spacing:.08em;color:var(--brand);background:var(--ds-bg-inset);border:1px solid var(--ds-border);padding:1px 4px;border-radius:3px}
+  .spacer{flex:1}
+
+  /* ---- filter bar ---- */
+  .filters{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--ds-border);flex-wrap:wrap;background:var(--ds-bg-panel)}
+  .chip{font-size:11.5px;padding:3px 9px;border-radius:999px;border:1px solid var(--ds-border);color:var(--ds-text-muted);cursor:default}
+  .chip.on{color:var(--ds-text);border-color:var(--ds-border-strong);background:var(--ds-bg-inset)}
+  .chip .n{font-family:var(--mono);font-size:10px;color:var(--ds-text-dim);margin-left:5px}
+  .chip.orphan.on{border-color:var(--st-orphan);color:#e9d5ff}
+  .sel{font-size:11.5px;padding:3px 9px 3px 8px;border-radius:var(--r-sm);border:1px solid var(--ds-border);background:var(--ds-bg-inset);color:var(--ds-text-muted)}
+  .search{flex:1;min-width:140px;display:flex;align-items:center;gap:6px;padding:3px 9px;border-radius:var(--r-sm);border:1px solid var(--ds-border);background:var(--ds-bg-inset);color:var(--ds-text-dim);font-size:11.5px}
+  .toggle{font-size:11px;color:var(--ds-text-dim);display:flex;align-items:center;gap:6px}
+
+  /* ---- table ---- */
+  .band{display:flex;align-items:center;gap:8px;padding:7px 14px;font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ds-text-dim);background:var(--ds-bg-sunken);border-top:1px solid var(--ds-border-subtle)}
+  .band .cnt{color:var(--ds-text-faint)}
+  .band.recon{color:#e9d5ff}
+  .band.recon .barfill{color:var(--st-orphan)}
+  .band .act{margin-left:auto;font-family:var(--sans);font-size:11px;letter-spacing:0;text-transform:none;color:#0a0a0a;background:var(--brand);padding:2px 9px;border-radius:var(--r-sm);font-weight:600}
+
+  .row{display:grid;grid-template-columns:22px 16px 20px 1fr 190px 84px 66px;align-items:center;gap:10px;padding:7px 14px;border-top:1px solid var(--ds-border-subtle);cursor:default}
+  .row:hover{background:var(--ds-bg-hover)}
+  .row.sel{background:rgba(163,230,53,0.06)}
+  .cb{width:13px;height:13px;border-radius:3px;border:1px solid var(--ds-border-strong);display:block}
+  .cb.on{background:var(--brand);border-color:var(--brand);position:relative}
+  .cb.on::after{content:"";position:absolute;left:3px;top:0.5px;width:4px;height:8px;border:solid #0a0a0a;border-width:0 2px 2px 0;transform:rotate(45deg)}
+  .star{color:var(--ds-text-faint);font-size:14px;line-height:1;cursor:pointer}
+  .star.on{color:#f5c518}
+  .sdot{width:9px;height:9px;border-radius:50%;justify-self:center}
+  .sdot.run{background:var(--st-run);box-shadow:0 0 6px var(--st-run-glow)}
+  .sdot.wait{background:var(--st-wait);box-shadow:0 0 6px var(--st-wait-glow)}
+  .sdot.idle{background:var(--st-idle)}
+  .sdot.orphan{background:var(--st-orphan);box-shadow:0 0 7px var(--st-orphan-glow)}
+  .sdot.fail{background:var(--st-fail);box-shadow:0 0 6px var(--st-fail-glow)}
+  .main{min-width:0;display:flex;align-items:center;gap:8px}
+  .av{width:19px;height:19px;border-radius:5px;display:grid;place-items:center;font-family:var(--mono);font-size:9px;font-weight:700;color:#0a0a0a;flex:none}
+  .av.cc{background:var(--claude)} .av.cx{background:var(--codex);color:#0a0a0a} .av.km{background:var(--kimi);color:#fff} .av.dr{background:var(--droid);color:#fff} .av.ag{background:var(--antigravity);color:#fff}
+  .topic{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ds-text)}
+  .meta{font-size:11px;color:var(--ds-text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--mono)}
+  .meta .proj{color:var(--ds-text-muted)}
+  .badge{font-family:var(--mono);font-size:9.5px;padding:1px 5px;border-radius:3px;border:1px solid var(--ds-border);color:var(--ds-text-dim);margin-left:6px}
+  .badge.rem{border-color:rgba(91,141,239,.4);color:#9dbcff}
+  .age{font-size:11px;color:var(--ds-text-dim);font-family:var(--mono);text-align:right}
+  .age .tps{color:var(--st-run)}
+  .rowact{display:flex;gap:5px;justify-content:flex-end;opacity:.9}
+  .ract{font-size:10.5px;padding:2px 7px;border-radius:var(--r-sm);border:1px solid var(--ds-border);color:var(--ds-text-muted)}
+  .ract.pri{background:var(--brand);color:#0a0a0a;border-color:var(--brand);font-weight:600}
+
+  /* selection action bar */
+  .bulkbar{display:flex;align-items:center;gap:12px;padding:8px 14px;background:var(--ds-bg-inset);border-top:1px solid var(--ds-border)}
+  .bulkbar b{color:var(--brand)}
+  .bulk-btn{margin-left:auto;font-size:11.5px;padding:4px 12px;border-radius:var(--r-sm);background:var(--brand);color:#0a0a0a;font-weight:600}
+  .bulk-ghost{font-size:11.5px;padding:4px 10px;border-radius:var(--r-sm);border:1px solid var(--ds-border);color:var(--ds-text-muted)}
+
+  /* variation comparison */
+  .varhead{display:flex;align-items:baseline;gap:10px;margin:34px 0 4px}
+  .varhead h2{font-size:15px;margin:0}
+  .tag{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;padding:2px 7px;border-radius:999px;text-transform:uppercase}
+  .tag.rec{background:var(--brand);color:#0a0a0a;font-weight:700}
+  .tag.alt{border:1px solid var(--ds-border);color:var(--ds-text-dim)}
+  .tradeoff{color:var(--ds-text-muted);font-size:12px;margin:2px 0 0}
+  .mini{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px}
+  .card{background:var(--ds-bg-panel);border:1px solid var(--ds-border);border-radius:var(--r-lg);overflow:hidden}
+  .card .cap{padding:9px 12px;border-bottom:1px solid var(--ds-border);font-size:12px}
+  .card .cap b{color:var(--ds-text)}
+  .card .cap span{color:var(--ds-text-dim)}
+  /* mini kanban */
+  .kan{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--ds-border-subtle);height:196px}
+  .kcol{background:var(--ds-bg-panel);padding:8px 8px}
+  .kcol h4{font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;margin:0 0 8px;color:var(--ds-text-dim)}
+  .kcol.orphan h4{color:var(--st-orphan)}
+  .kc{background:var(--ds-bg-inset);border:1px solid var(--ds-border);border-radius:var(--r-sm);padding:5px 6px;margin-bottom:6px;font-size:10px;color:var(--ds-text-muted);display:flex;align-items:center;gap:5px}
+  .kc .m{width:6px;height:6px;border-radius:50%;flex:none}
+  /* mini project accordion */
+  .acc{padding:10px 12px}
+  .accrow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:var(--r-sm);background:var(--ds-bg-inset);border:1px solid var(--ds-border);margin-bottom:7px;font-size:11.5px}
+  .accrow .cnt{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ds-text-dim)}
+  .accrow .chev{color:var(--ds-text-faint)}
+  .accsub{display:flex;align-items:center;gap:8px;padding:5px 8px 5px 24px;font-size:11px;color:var(--ds-text-muted)}
+
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin:8px 0 0;font-size:11px;color:var(--ds-text-dim)}
+  .legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+  ul.pts{margin:14px 0 0;padding-left:18px;color:var(--ds-text-muted);font-size:12.5px}
+  ul.pts li{margin:4px 0}
+  ul.pts b{color:var(--ds-text)}
+  .q{margin:30px 0 0;padding:16px 18px;border:1px solid var(--ds-border-strong);border-radius:var(--r-lg);background:var(--ds-bg-panel)}
+  .q h3{margin:0 0 8px;font-size:13.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="kicker">Factory · apps/factory · design gate</p>
+  <h1>A Sessions tab that recovers your work</h1>
+  <p class="sub">You run hundreds of sessions across projects. The machine sleeps, reboots, or drops off Tailscale, and those sessions become <b style="color:#e9d5ff">orphaned</b> (alive but detached) or crashed. The Sessions tab is the one place to see every session you own — local and remote, active and orphaned — and resume any of them in one click, or a whole project's worth at once. It reads the roster Factory already polls, filters entirely client‑side, and virtualizes the list, so hundreds of rows stay instant.</p>
+
+  <!-- ================= VARIATION A — HERO ================= -->
+  <div class="varhead">
+    <h2>Variation A — Dense list, grouped by state</h2>
+    <span class="tag rec">Recommended</span>
+  </div>
+  <p class="tradeoff">Built for the real job: <b>reboot → reconnect everything</b>. Orphaned sessions float to the top with a one‑click Resume‑all; starred pin above them. Scales to hundreds of rows without slowdown.</p>
+
+  <div class="frame">
+    <div class="topbar">
+      <div class="dot3"><i></i><i></i><i></i></div>
+      <div class="toptabs"><span class="on">FLOOR</span><span>BENCH</span><span>PANEL</span></div>
+    </div>
+    <div class="subtabs">
+      <span class="pill">Agents <span class="ct">12</span></span>
+      <span class="pill">Backlog <span class="ct">8</span></span>
+      <span class="pill">Projects <span class="ct">6</span></span>
+      <span class="pill">Hosts <span class="ct">14</span></span>
+      <span class="pill on new">Sessions <span class="ct">221</span></span>
+      <span class="spacer"></span>
+      <span class="pill" style="color:var(--ds-text-dim)">Dispatch ▸</span>
+    </div>
+    <div class="filters">
+      <span class="chip on">All <span class="n">221</span></span>
+      <span class="chip">Active <span class="n">37</span></span>
+      <span class="chip orphan on">Orphaned <span class="n">18</span></span>
+      <span class="chip">Starred <span class="n">5</span></span>
+      <select class="sel"><option>All projects</option></select>
+      <select class="sel"><option>All hosts</option></select>
+      <div class="search">⌕ &nbsp;<span>search topic, repo, id…</span></div>
+      <label class="toggle">group by · <b style="color:var(--ds-text-muted)">state ▾</b></label>
+    </div>
+
+    <!-- STARRED -->
+    <div class="band"><span>★ Starred</span><span class="cnt">2</span></div>
+    <div class="row">
+      <span class="cb"></span><span class="star on">★</span><span class="sdot run"></span>
+      <span class="main"><span class="av cc">CC</span><span class="topic">Refactor secrets broker teardown to reap orphaned watch‑lock helpers</span></span>
+      <span class="meta"><span class="proj">agents‑cli</span> · workstation</span>
+      <span class="age"><span class="tps">62 t/s</span> · 3m</span>
+      <span class="rowact"><span class="ract pri">Focus</span></span>
+    </div>
+    <div class="row">
+      <span class="cb"></span><span class="star on">★</span><span class="sdot idle"></span>
+      <span class="main"><span class="av cx">CX</span><span class="topic">Rush blog: Cybertron launch post + content cadence fix</span></span>
+      <span class="meta"><span class="proj">rush</span> · mac‑mini <span class="badge rem">remote</span></span>
+      <span class="age">1h</span>
+      <span class="rowact"><span class="ract pri">Resume</span></span>
+    </div>
+
+    <!-- NEEDS RECONNECTING -->
+    <div class="band recon"><span>◍ Needs reconnecting</span><span class="cnt">— orphaned or crashed, alive to resume</span><span class="act">Resume all 4</span></div>
+    <div class="row sel">
+      <span class="cb on"></span><span class="star">☆</span><span class="sdot orphan"></span>
+      <span class="main"><span class="av cc">CC</span><span class="topic">Provision a harness credential for a device without handing off login</span></span>
+      <span class="meta"><span class="proj">agents‑cli</span> · workstation</span>
+      <span class="age">14m</span>
+      <span class="rowact"><span class="ract pri">Resume</span></span>
+    </div>
+    <div class="row sel">
+      <span class="cb on"></span><span class="star">☆</span><span class="sdot orphan"></span>
+      <span class="main"><span class="av ag">AG</span><span class="topic">Audit verify‑work‑complete hook effectiveness (PR #2367)</span></span>
+      <span class="meta"><span class="proj">agents‑cli</span> · yosemite‑s0 <span class="badge rem">remote</span></span>
+      <span class="age">52m</span>
+      <span class="rowact"><span class="ract pri">Resume</span></span>
+    </div>
+    <div class="row sel">
+      <span class="cb on"></span><span class="star">☆</span><span class="sdot fail"></span>
+      <span class="main"><span class="av km">KM</span><span class="topic">perf(sessions): non‑resumable upsert consumers on tool‑store.ts</span></span>
+      <span class="meta"><span class="proj">agents‑cli</span> · mac‑mini <span class="badge rem">remote</span></span>
+      <span class="age">2h</span>
+      <span class="rowact"><span class="ract">Resume</span></span>
+    </div>
+    <div class="row">
+      <span class="cb"></span><span class="star">☆</span><span class="sdot orphan"></span>
+      <span class="main"><span class="av dr">DR</span><span class="topic">Fleet cache warm routine → daemon service migration (RUSH‑2451)</span></span>
+      <span class="meta"><span class="proj">agents‑cli</span> · yosemite‑m2 <span class="badge rem">remote</span></span>
+      <span class="age">3h</span>
+      <span class="rowact"><span class="ract">Resume</span></span>
+    </div>
+
+    <!-- ACTIVE -->
+    <div class="band"><span>● Active</span><span class="cnt">37 — working, waiting, idle</span></div>
+    <div class="row">
+      <span class="cb"></span><span class="star">☆</span><span class="sdot wait"></span>
+      <span class="main"><span class="av cc">CC</span><span class="topic">Improve Factory UI: star + resume the sessions surface</span></span>
+      <span class="meta"><span class="proj">agents‑cli</span> · workstation</span>
+      <span class="age" style="color:var(--st-wait)">needs you</span>
+      <span class="rowact"><span class="ract pri">Focus</span></span>
+    </div>
+    <div class="row">
+      <span class="cb"></span><span class="star">☆</span><span class="sdot run"></span>
+      <span class="main"><span class="av cx">CX</span><span class="topic">Landing site OG cards + share preview unfurl</span></span>
+      <span class="meta"><span class="proj">rush</span> · yosemite‑m4 <span class="badge rem">remote</span></span>
+      <span class="age"><span class="tps">44 t/s</span> · 8s</span>
+      <span class="rowact"><span class="ract pri">Focus</span></span>
+    </div>
+    <div class="row">
+      <span class="cb"></span><span class="star">☆</span><span class="sdot idle"></span>
+      <span class="main"><span class="av km">KM</span><span class="topic">artifacts‑cli: poster PDF tag layout + light/dark parity</span></span>
+      <span class="meta"><span class="proj">artifacts‑cli</span> · workstation</span>
+      <span class="age">6m</span>
+      <span class="rowact"><span class="ract">Resume</span></span>
+    </div>
+    <div style="padding:8px 14px;color:var(--ds-text-faint);font-size:11px;font-family:var(--mono);border-top:1px solid var(--ds-border-subtle)">…34 more · virtualized, rendered on scroll</div>
+
+    <!-- BULK BAR -->
+    <div class="bulkbar">
+      <span class="cb on" style="width:13px;height:13px"></span>
+      <span><b>3 sessions</b> selected · 2 orphaned, 1 crashed · across 3 machines</span>
+      <span class="bulk-ghost">Star all</span>
+      <span class="bulk-btn">Resume 3 selected ▸</span>
+    </div>
+  </div>
+
+  <ul class="pts">
+    <li><b>Star</b> — click ☆ on any row; it pins to the Starred band and persists (globalState, like host pins). A pure UI preference — no fleet action, so it's safe under Factory's "no second scheduler" rule.</li>
+    <li><b>Resume</b> — one click routes to the session's <b>owning machine</b> via <code>agents sessions resume &lt;id&gt;</code> (remote sessions get the <code>remote</code> badge and <code>--host</code> automatically). Multi‑select → resume a whole project's worth after a reboot.</li>
+    <li><b>Orphaned + crashed float up</b> under “Needs reconnecting” — the exact set you lost when the machine went off, with Resume‑all.</li>
+    <li><b>No slowdown</b> — reads the roster Factory already polls (<code>agents sessions --active --json</code>); every filter/sort/group is client‑side; the list is virtualized so 221 rows render like 20.</li>
+  </ul>
+  <div class="legend">
+    <span><i style="background:var(--st-run)"></i>working</span>
+    <span><i style="background:var(--st-wait)"></i>waiting (needs you)</span>
+    <span><i style="background:var(--st-idle)"></i>idle</span>
+    <span><i style="background:var(--st-orphan)"></i>orphaned</span>
+    <span><i style="background:var(--st-fail)"></i>crashed</span>
+  </div>
+
+  <!-- ================= ALTERNATES ================= -->
+  <div class="varhead"><h2>Two other directions</h2><span class="tag alt">pick or blend</span></div>
+  <div class="mini">
+    <div class="card">
+      <div class="cap"><b>Variation B — grouped by project</b> <span>· accordions, each project a section</span></div>
+      <div class="acc">
+        <div class="accrow"><span class="chev">▾</span><b>agents‑cli</b> <span class="cnt">14 · 4 orphaned</span></div>
+        <div class="accsub"><span class="sdot orphan" style="width:8px;height:8px"></span> Provision harness credential… <span style="margin-left:auto;color:var(--ds-text-faint);font-family:var(--mono);font-size:10px">Resume</span></div>
+        <div class="accsub"><span class="sdot run" style="width:8px;height:8px"></span> Refactor secrets broker teardown <span style="margin-left:auto;color:var(--ds-text-faint);font-family:var(--mono);font-size:10px">Focus</span></div>
+        <div class="accrow"><span class="chev">▸</span><b>rush</b> <span class="cnt">9 · 2 orphaned</span></div>
+        <div class="accrow"><span class="chev">▸</span><b>artifacts‑cli</b> <span class="cnt">3</span></div>
+      </div>
+      <div class="cap" style="border-top:1px solid var(--ds-border);border-bottom:none"><span>Reads project‑first. Nice when you think per‑repo, but the “reconnect everything after reboot” job spans projects, so orphans hide inside sections.</span></div>
+    </div>
+    <div class="card">
+      <div class="cap"><b>Variation C — status columns (kanban)</b> <span>· triage board</span></div>
+      <div class="kan">
+        <div class="kcol"><h4>Working</h4><div class="kc"><span class="m" style="background:var(--st-run)"></span>secrets broker…</div><div class="kc"><span class="m" style="background:var(--st-run)"></span>OG cards…</div></div>
+        <div class="kcol"><h4>Waiting</h4><div class="kc"><span class="m" style="background:var(--st-wait)"></span>Factory UI star…</div></div>
+        <div class="kcol"><h4>Idle</h4><div class="kc"><span class="m" style="background:var(--st-idle)"></span>poster PDF…</div><div class="kc"><span class="m" style="background:var(--st-idle)"></span>blog post…</div></div>
+        <div class="kcol orphan"><h4>Orphaned</h4><div class="kc"><span class="m" style="background:var(--st-orphan)"></span>credential…</div><div class="kc"><span class="m" style="background:var(--st-orphan)"></span>verify hook…</div><div class="kc"><span class="m" style="background:var(--st-orphan)"></span>cache warm…</div></div>
+      </div>
+      <div class="cap" style="border-top:1px solid var(--ds-border);border-bottom:none"><span>Best glance at “what state is everything in”. But columns waste width, are harder to virtualize at 200+ cards, and multi‑select‑resume is awkward across columns.</span></div>
+    </div>
+  </div>
+
+  <div class="q">
+    <h3>Your call on the direction (everything after is mine to build)</h3>
+    <p class="tradeoff">I recommend <b>A</b> — it's the one shaped around the actual job (reboot → resume everything), the densest, and the safest for performance. A can borrow B's “group by project” as a toggle (shown in the filter bar) so you get both. Tell me: <b>A</b>, <b>A + project group‑by toggle</b>, <b>B</b>, or <b>C</b> — and whether the Starred + “Needs reconnecting” bands feel right.</p>
+    <p class="note" style="margin-top:10px">Once you pick, I build it as a real <code>Sessions</code> center in <code>UnifiedAgentsPane</code> (virtualized list, client‑side filters, wired to the existing <code>togglePin</code> + <code>agents sessions resume</code> paths), verify it in the preview harness against this mockup, and open a PR.</p>
+  </div>
+</div>
+</body>
+</html>
