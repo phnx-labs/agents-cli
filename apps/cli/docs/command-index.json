@@ -14492,6 +14492,15 @@
               "negate": false
             },
             {
+              "flags": "--account <name>",
+              "description": "Attach an existing durable credential account",
+              "long": "--account",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--key-stdin",
               "description": "Read API key from stdin instead of prompting (for scripts/CI)",
               "long": "--key-stdin",
