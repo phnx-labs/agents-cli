@@ -271,7 +271,7 @@ verbatim (not re-rooted). Precedence: `--remote-cwd` > `--project`/`--cwd`.
 registered — the box is ephemeral. One-time provider setup, then run:
 
 ```bash
-agents lease setup                                    # provider creds (hetzner today)
+agents devices lease setup                            # provider creds (hetzner today)
 agents run claude "refactor the auth module" --lease  # cwd must be a git repo
 ```
 
@@ -290,7 +290,7 @@ single warm box. Control the box lifecycle:
 |------|--------|
 | `--fresh` | Always provision a brand-new box (skip the warm-pool reuse); tear down after |
 | `--reuse` | Reuse the most-recently-used warm box if any, else provision fresh (scriptable form of the picker) |
-| `--box <slug>` | Reuse one specific warm box by slug (see `agents lease list`) |
+| `--box <slug>` | Reuse one specific warm box by slug (see `agents devices lease list`) |
 | `--keep-box` | Keep the box after the run instead of stopping it |
 | `--bare` | Skip copying your `~/.agents` setup — a stock box with just the runtime |
 | `--tailscale` / `--no-tailscale` | Join the box to your tailnet (private) vs. force a public-IP lease |
@@ -299,9 +299,9 @@ single warm box. Control the box lifecycle:
 ### Manage leased boxes
 
 ```bash
-agents lease list             # warm boxes you can reuse (--box <slug>)
-agents lease stop <slug>      # stop / release one now
-agents lease gc               # stop expired, idle boxes holding provider quota (safe)
+agents devices lease list             # warm boxes you can reuse (--box <slug>)
+agents devices lease stop <slug>      # stop / release one now
+agents devices lease gc               # stop expired, idle boxes holding provider quota (safe)
 agents devices list --all     # also show ephemeral leased boxes alongside the fleet
 ```
 
