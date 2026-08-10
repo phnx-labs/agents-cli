@@ -1,0 +1,1 @@
+- **Remove top-level pull and push commands.** `agents pull` and `agents push` are no longer registered; use `agents repo pull <alias>` and `agents repo push <alias>` instead. Source: `apps/cli/src/lib/startup/command-registry.ts`.

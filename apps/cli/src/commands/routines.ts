@@ -39,6 +39,7 @@ import {
   getLatestRun,
   getRunDir,
   getJobPath,
+  isCanonicalRoutineSource,
   parseAtTime,
   hasCompletedOneShotRun,
   isOneShotLikeSchedule,
@@ -1209,6 +1210,10 @@ export function registerRoutinesCommands(program: Command): void {
             console.log(chalk.yellow(`Saved paused — not ready to activate: ${r.code}`));
             console.log(chalk.gray(`  ${r.message}`));
             if (r.repair) console.log(chalk.gray(`  repair: ${r.repair}`));
+            // Name the resume explicitly: a paused routine is otherwise a dead
+            // end for an agent, which is how the release train sat unregistered
+            // (RUSH-2517 / RUSH-2476).
+            console.log(chalk.gray(`  then:   agents routines resume ${config.name}`));
           }
         }
         if (options.json) {
@@ -1285,16 +1290,36 @@ export function registerRoutinesCommands(program: Command): void {
           ));
         }
 
-        writeJob(config);
+        // `add <file>` must never rewrite the file the user pointed at. When the
+        // source already IS the canonical routine file — the normal case for a
+        // definition tracked in the git-backed `~/.agents` repo — writeJob would
+        // re-serialize it in place and drop every key the canonical form omits,
+        // including the legacy `devices:` pin, silently corrupting committed
+        // config (RUSH-2517). The definition is already where it belongs; only
+        // activation is left to do. A source from anywhere else is still copied
+        // in, which is the whole point of passing a path.
+        if (!isCanonicalRoutineSource(resolved, config.name)) writeJob(config);
         const deviceMatch = !config.devices || config.devices.map(normalizeHost).includes(normalizeHost(machineId()));
         const readiness = await evaluateActivationReadinessLive(config);
         const activate = config.enabled && deviceMatch && readiness.ready;
         setJobEnabled(config.name, activate);
+        // A `devices:` pin in a hand-authored definition is legacy input: since
+        // RUSH-2392's split (723182bb5) activation lives in each device's
+        // `agents.yaml`, and `add` only ever applies it to THIS box. Say so
+        // rather than let the routine read `Devices: all` on every peer.
+        if (config.devices && config.devices.length > 0 && !options.json) {
+          console.log(chalk.yellow(`'devices:' pins activation on this box only — it is not propagated to peers.`));
+          console.log(chalk.gray(`  pin the fleet with: agents routines devices ${config.name} --set ${config.devices.join(',')}`));
+        }
         if (config.enabled && deviceMatch && !readiness.ready && !options.json) {
           const r = readiness.readiness!;
           console.log(chalk.yellow(`Saved paused — not ready to activate: ${r.code}`));
           console.log(chalk.gray(`  ${r.message}`));
           if (r.repair) console.log(chalk.gray(`  repair: ${r.repair}`));
+          // Name the resume explicitly: a paused routine is otherwise a dead end
+          // for an agent, which is how the release train sat unregistered
+          // (RUSH-2517 / RUSH-2476).
+          console.log(chalk.gray(`  then:   agents routines resume ${config.name}`));
         }
         if (options.json) {
           writeJson({
@@ -1405,13 +1430,45 @@ export function registerRoutinesCommands(program: Command): void {
     .option('--yaml', 'Open the raw YAML in $EDITOR (the current edit surface)')
     .option('--state-to <name>', 'Update the Linear current-state filter before opening the editor')
     .option('--state-from <name>', 'Update the Linear previous-state filter before opening the editor')
-    .action(async (name: string | undefined, options: { stateTo?: string; stateFrom?: string }) => {
+    .option('--cwd <path>', 'Set the execution directory and save, without opening an editor')
+    .option('--project-anchor <name>', 'Set the execution project anchor and save, without opening an editor')
+    .action(async (name: string | undefined, options: { stateTo?: string; stateFrom?: string; cwd?: string; projectAnchor?: string }) => {
       if (!name) {
         name = await pickJob('Select job to edit', undefined, ['agents routines edit <name>']) ?? undefined;
         if (!name) return;
       }
 
       const existing = readJob(name);
+      // Headless context repair. Both readiness blockers print
+      // `agents routines edit <name> --project-anchor <name>  # or --cwd <path>`
+      // as their repair (routine-context.ts:215,334), but neither flag existed
+      // and the only edit surface opened $EDITOR — so an agent could never
+      // follow its own repair hint (RUSH-2517). Applying and saving directly is
+      // what makes that hint true.
+      if (options.cwd !== undefined || options.projectAnchor !== undefined) {
+        if (!existing) {
+          console.error(chalk.red(`Routine '${name}' not found. Create it first: agents routines add ${name} --schedule "..." --agent claude --prompt "..."`));
+          process.exit(1);
+        }
+        if (options.cwd !== undefined) existing.cwd = options.cwd;
+        if (options.projectAnchor !== undefined) existing.project = options.projectAnchor;
+        const errors = validateJob(existing);
+        if (errors.length > 0) {
+          console.error(chalk.red('Validation errors:'));
+          for (const err of errors) console.error(chalk.red(`  - ${err}`));
+          process.exit(1);
+        }
+        writeJob(existing);
+        const readiness = await evaluateActivationReadinessLive(existing);
+        console.log(chalk.green(`Routine '${name}' updated`));
+        if (!readiness.ready && readiness.readiness) {
+          console.log(chalk.yellow(`Still not ready: ${readiness.readiness.code}`));
+          console.log(chalk.gray(`  ${readiness.readiness.message}`));
+        } else {
+          console.log(chalk.gray(`  resume it with: agents routines resume ${name}`));
+        }
+        return;
+      }
       if (existing && (options.stateTo !== undefined || options.stateFrom !== undefined)) {
         if (!existing.trigger || existing.trigger.type !== 'linear_event') {
           console.error(chalk.red(`'${name}' does not have a Linear trigger; --state-to/--state-from only apply to linear triggers`));
