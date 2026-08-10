@@ -24,6 +24,21 @@ function safeRealpath(p: string): string {
   catch { return p; }
 }
 
+/** Whether two path spellings identify the same file. */
+function sameFile(a: string, b: string): boolean {
+  try {
+    const aStat = fs.statSync(a);
+    const bStat = fs.statSync(b);
+    if (aStat.dev === bStat.dev && aStat.ino === bStat.ino) return true;
+  } catch { /* compare their resolved path spellings below */ }
+
+  const aReal = safeRealpath(a);
+  const bReal = safeRealpath(b);
+  return process.platform === 'win32'
+    ? aReal.toLowerCase() === bReal.toLowerCase()
+    : aReal === bReal;
+}
+
 /**
  * Find `agents` installs that are NOT the currently running binary.
  *
@@ -47,7 +62,7 @@ export function detectAgentsBinaryShadows(
   function addIfShadow(candidate: string): void {
     if (seen.has(candidate)) return;
     seen.add(candidate);
-    if (safeRealpath(candidate) === currentReal) return;
+    if (sameFile(candidate, currentReal)) return;
     let version: string | undefined;
     try {
       version = execFileSync(candidate, ['--version'], { encoding: 'utf-8', env: process.env })
@@ -64,7 +79,7 @@ export function detectAgentsBinaryShadows(
       .split(/\r?\n/)
       .map((s) => s.trim())
       .filter(Boolean)[0];
-    if (pathAgents && safeRealpath(pathAgents) !== currentReal) {
+    if (pathAgents && !sameFile(pathAgents, currentReal)) {
       addIfShadow(pathAgents);
     }
   } catch { /* no `agents` resolved on PATH */ }

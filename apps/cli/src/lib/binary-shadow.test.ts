@@ -49,7 +49,7 @@ describe('detectAgentsBinaryShadows', () => {
     try {
       const shadows = detectAgentsBinaryShadows(realAgents, []);
       expect(shadows).toHaveLength(1);
-      expect(shadows[0].path).toBe(shadowAgents);
+      expect(fs.realpathSync(shadows[0].path)).toBe(fs.realpathSync(shadowAgents));
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
