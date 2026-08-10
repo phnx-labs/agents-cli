@@ -84,6 +84,13 @@ process.env.AGENTS_HOOK_SHIMS_DIR = path.join(tmp, 'hook-shims');
 process.env.AGENTS_HOOK_CACHE_DIR = path.join(tmp, 'hook-cache');
 process.env.AGENTS_LOGS_DIR = path.join(tmp, 'logs');
 process.env.AGENTS_PERF_DIR = path.join(tmp, 'perf');
+// Runtime state (~/.agents/.cache/state/) holds the devices-pending sentinels the
+// menu bar renders as "NEW DEVICES". AGENTS_DEVICES_DIR already points the device
+// registry and ignore list at tmp, so under test both read EMPTY — and any path
+// reaching reconcilePendingSentinels then concluded every tailnet node was new and
+// wrote those sentinels into the operator's LIVE dir. Running the suite on a dev
+// machine surfaced all 20 nodes as NEW DEVICES, registered and ignored alike.
+process.env.AGENTS_STATE_DIR = path.join(tmp, 'state');
 
 // Leak tripwire: the REAL events log must not grow while this fork runs.
 // CI-only — on a dev machine live agents append to it concurrently, so the
@@ -99,6 +106,18 @@ const sizeBefore = fs.existsSync(realEventsLog) ? fs.statSync(realEventsLog).siz
 const realDevicesRegistry = path.join(process.env.HOME ?? os.homedir(), '.agents', '.history', 'devices', 'registry.json');
 const devicesRegistryBefore: string | null = fs.existsSync(realDevicesRegistry)
   ? fs.readFileSync(realDevicesRegistry, 'utf-8')
+  : null;
+
+// Leak tripwire: the REAL devices-pending sentinels — the menu bar's "NEW
+// DEVICES" list — must not change while this fork runs. Same CI-only rule as
+// above: a live daemon probe legitimately reconciles this dir every ~3 min on a
+// dev machine. The AGENTS_STATE_DIR pin is the actual fix; this catches a code
+// path that resolves the sentinel dir some other way.
+const realDevicesPending = path.join(
+  process.env.HOME ?? os.homedir(), '.agents', '.cache', 'state', 'devices-pending',
+);
+const devicesPendingBefore: string | null = fs.existsSync(realDevicesPending)
+  ? fs.readdirSync(realDevicesPending).sort().join(',')
   : null;
 
 afterAll(() => {
@@ -121,6 +140,19 @@ afterAll(() => {
           `changed during this test file — a test wrote to it instead of the fork-private ` +
           `AGENTS_DEVICES_DIR. Set AGENTS_DEVICES_DIR (or use the setup default) before ` +
           `importing any state consumer.`,
+        );
+      }
+
+      const pendingAfter = fs.existsSync(realDevicesPending)
+        ? fs.readdirSync(realDevicesPending).sort().join(',')
+        : null;
+      if (pendingAfter !== devicesPendingBefore) {
+        throw new Error(
+          `hermeticity leak: the real devices-pending sentinels (${realDevicesPending}) ` +
+          `changed during this test file — a test wrote the menu bar's "NEW DEVICES" state ` +
+          `instead of the fork-private AGENTS_STATE_DIR. Because AGENTS_DEVICES_DIR makes the ` +
+          `registry and ignore list read EMPTY under test, the leaking path marks every ` +
+          `tailnet node as new and the operator's ignore list appears to have been lost.`,
         );
       }
     }
