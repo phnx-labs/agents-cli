@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 103,
-  "commands": 584,
+  "groups": 101,
+  "commands": 582,
   "root": {
     "name": "agents",
     "path": "",
@@ -15881,81 +15881,6 @@
           "negate": false
         }
       ],
-      "subcommands": []
-    },
-    {
-      "name": "pull",
-      "path": "pull",
-      "aliases": [],
-      "description": "Removed. See `agents repo pull` + `agents sync`.",
-      "args": [
-        {
-          "name": "agent",
-          "required": false,
-          "variadic": false,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "-y, --yes",
-          "description": "(no-op)",
-          "short": "-y",
-          "long": "--yes",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--skip-clis",
-          "description": "(no-op)",
-          "long": "--skip-clis",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "notes": "Removed. Equivalents:\n        agents repo pull <alias>     git pull (system | user | extra)\n        agents sync --local          re-materialize version homes (or: agents sync <agent>)\n        agents setup                 first-time bootstrap",
-      "subcommands": []
-    },
-    {
-      "name": "push",
-      "path": "push",
-      "aliases": [],
-      "description": "Removed. See `agents repo push`.",
-      "args": [
-        {
-          "name": "alias",
-          "required": false,
-          "variadic": false,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "notes": "Removed. Equivalent:\n        agents repo push <alias>     git push (system | user | extra)",
       "subcommands": []
     },
     {

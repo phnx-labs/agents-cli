@@ -104,8 +104,6 @@ export const loadHosts: ModuleLoader = async () => (await import('../../commands
 export const loadLogs: ModuleLoader = async () => (await import('../../commands/logs.js')).registerLogsCommand;
 export const loadEvents: ModuleLoader = async () => (await import('../../commands/events.js')).registerEventsCommand;
 export const loadSsh: ModuleLoader = async () => (await import('../../commands/ssh.js')).registerSshCommands;
-export const loadPull: ModuleLoader = async () => (await import('../../commands/pull.js')).registerPullCommand;
-export const loadPush: ModuleLoader = async () => (await import('../../commands/push.js')).registerPushCommand;
 export const loadRepo: ModuleLoader = async () => (await import('../../commands/repo.js')).registerRepoCommands;
 export const loadSetup: ModuleLoader = async () => (await import('../../commands/setup.js')).registerSetupCommand;
 export const loadUninstall: ModuleLoader = async () => (await import('../../commands/uninstall.js')).registerUninstallCommands;
@@ -254,8 +252,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   // `fleet` is a commander alias of `devices` (see commands/ssh.ts); list it so
   // lazy registration loads the devices tree when the user types `agents fleet`.
   fleet: [loadSsh],
-  pull: [loadPull],
-  push: [loadPush],
   // `repos` is the canonical command name; `repo` remains a convenience alias
   // (see commands/repo.ts). List both so lazy registration loads the tree
   // whichever the user types.

@@ -469,16 +469,15 @@ async function ensureAgentsCli(): Promise<boolean> {
   }
 }
 
-// Setup agent using agents-cli pull command
+// Materialize the agent's resources through agents-cli.
 async function setupWithAgentsCli(agent: AgentCli): Promise<boolean> {
   try {
-    // Run agents pull with --yes to auto-confirm
     const { runAgents } = await import('../core/agentsBin');
-    await runAgents(`pull ${agent} --yes`, { timeout: 120000 });
+    await runAgents(`sync ${agent}`, { timeout: 120000 });
     return true;
   } catch (err) {
     const error = err as Error & { stderr?: string };
-    vscode.window.showErrorMessage(`agents pull failed for ${agent}: ${error.stderr || error.message}`);
+    vscode.window.showErrorMessage(`agents sync failed for ${agent}: ${error.stderr || error.message}`);
     return false;
   }
 }
@@ -541,7 +540,7 @@ async function setupSwarmIntegrationForAgents(
   const failed: string[] = [];
 
   for (const agent of agents) {
-    // Skip agents without CLI installed (agents pull requires the CLI to be present)
+    // Skip agents without CLI installed (agents sync requires the CLI to be present)
     const agentStatus = status.agents[agent];
     if (!agentStatus.cliAvailable) {
       continue;

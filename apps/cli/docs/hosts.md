@@ -648,7 +648,7 @@ mechanism that **already exists** — there is no new "sync engine":
 
 | Layer | How it gets there | Mechanism (today) |
 |---|---|---|
-| **`~/.agents` config** (commands, skills, hooks, memory) | The DotAgents user repo is git-backed — the box runs `agents pull` (or `git pull`). One-time/idempotent bootstrap, **not** a per-dispatch push. | `agents pull` / `agents repo pull`; bootstrapped + verified by `ensureHostReady` / `hosts check` |
+| **`~/.agents` config** (commands, skills, hooks, memory) | The DotAgents user repo is git-backed — the box runs `agents repo pull user` (or `git pull`). One-time/idempotent bootstrap, **not** a per-dispatch push. | `agents repo pull user`; bootstrapped + verified by `ensureHostReady` / `hosts check` |
 | **Working codebase** | Phase 1: committed branch → `git fetch` + checkout on the box (per-repo, caller's `--remote-cwd`/`--branch`). Phase 2: uncommitted working tree → `rsync` over SSH (the differentiator). | per-repo git; rsync (Phase 2) |
 | **Secrets** | Persistent boxes self-auth once via `agents secrets` (keychain). Blank/leased boxes get an on-demand, never-on-disk injection. | `agents secrets export <bundle> --to-ssh --host <t>` (`secrets.ts:1089-1097`, env over ssh stdin) |
 | **Sessions / `.history`** | **Not bulk-copied.** Recall is exposed as a *remote command*, not a file sync (below). | the routines daemon + `agents sessions`; selective `session/sync/` for the rare "make this transcript present" case |
@@ -661,7 +661,7 @@ sync substrate, so the precondition is thin and mostly one-time/cached:
 
 1. **agents-cli present** — `hosts check` already probes `agents --version`; if
    absent, bootstrap (mirror `scripts/sandbox.sh:218-239`).
-2. **Config current** — `agents pull` on the box so `~/.agents` matches (git-backed;
+2. **Config current** — `agents repo pull user` on the box so `~/.agents` matches (git-backed;
    cheap, idempotent).
 3. **Agent installed** — remote `agents view --json` (fallback: `agents list`)
    confirms the requested harness exists. A **concrete version pin**
@@ -852,7 +852,7 @@ just relocates the storm):
 | Scheduling | `src/lib/daemon.ts` (routines scheduler) |
 | Task tracking store | `src/lib/cloud/store.ts` (free-text `provider`, reserved `provider_data`) |
 | Config schema | `src/lib/types.ts` (`Meta`) + `src/lib/state.ts` (`readMeta`) |
-| Config bootstrap on host | `agents pull` (git-backed) + `scripts/sandbox.sh:218-239` |
+| Config bootstrap on host | `agents repo pull user` (git-backed) + `scripts/sandbox.sh:218-239` |
 | Secret injection (on demand) | `src/commands/secrets.ts:1089-1097` (`--to-ssh`, env over ssh stdin) + `SSH_TARGET_RE`/`assertValidSshTarget` (`secrets.ts:189-195`) |
 | Selective transcript replication | `src/lib/session/sync/agents.ts` (per-agent mirror layout, per-session not whole tree) |
 
