@@ -20,7 +20,7 @@ import { spawnSync } from 'child_process';
 import { getBrowserRuntimeDir, getProfileRuntimeDir } from './profiles.js';
 import { formatRelativeTime } from '../session/relative-time.js';
 import type { SessionMeta } from '../session/types.js';
-import { getSessionById } from '../session/db.js';
+import { getSessionById, listBrowserSessionRecords } from '../session/db.js';
 import { listPidSessionEntries } from '../session/pid-registry.js';
 import { loadHookSessionIndex } from '../session/hook-sessions.js';
 import { readRecentActivity } from '../activity.js';
@@ -187,10 +187,17 @@ export function openArtifact(filePath: string): boolean {
 
 // ─── Task-first grouping (RUSH-2407) ───────────────────────────────────────
 
-/** The identity fields this module cares about from a profile's `tasks.json`. */
+/** The identity fields this module cares about for one task. */
 export interface TaskIdentity {
   owner?: string;
   launchId?: string;
+  /**
+   * The agent session that drove the task. Primary identity: it is carried by
+   * every agent process, whereas a launch id is present on a minority of them.
+   * Sourced from the durable `browser_sessions` row, which survives task stop —
+   * `tasks.json` never records it beyond the task's own lifetime (RUSH-2549).
+   */
+  sessionId?: string;
 }
 
 /**
@@ -223,9 +230,40 @@ export function loadTaskIdentities(profile: string): Map<string, TaskIdentity> {
     out.set(name, {
       owner: typeof t.owner === 'string' ? t.owner : undefined,
       launchId: typeof t.launchId === 'string' ? t.launchId : undefined,
+      sessionId: typeof t.sessionId === 'string' ? t.sessionId : undefined,
     });
   }
   return out;
+}
+
+/**
+ * Identity for one profile's tasks, durable copy first.
+ *
+ * `browser_sessions` is the source of truth: it is written at task start and
+ * never deleted, so it answers for tasks that have already stopped — the case
+ * `tasks.json` structurally cannot, since `saveTaskState` rewrites that file
+ * from the LIVE task map. The live file is still merged on top for a task that
+ * is running right now, so a task started by an older CLI (no DB row yet) keeps
+ * whatever identity it does have rather than regressing to nothing.
+ */
+export function loadDurableTaskIdentities(profile: string): Map<string, TaskIdentity> {
+  const merged = new Map<string, TaskIdentity>();
+  for (const record of listBrowserSessionRecords(profile)) {
+    merged.set(record.task, {
+      owner: record.actor,
+      launchId: record.launchId,
+      sessionId: record.sessionId,
+    });
+  }
+  for (const [task, live] of loadTaskIdentities(profile)) {
+    const durable = merged.get(task);
+    merged.set(task, {
+      owner: live.owner ?? durable?.owner,
+      launchId: live.launchId ?? durable?.launchId,
+      sessionId: live.sessionId ?? durable?.sessionId,
+    });
+  }
+  return merged;
 }
 
 /** launchId -> indexed session id, built once from every source that records
@@ -284,6 +322,8 @@ export interface BrowserSessionRow {
   task?: string;
   owner?: string;
   launchId?: string;
+  /** The agent session that drove the task, when one was recorded. */
+  sessionId?: string;
   linkStatus: BrowserSessionLinkStatus;
   linkedSession?: SessionMeta;
   /** Newest first. */
@@ -303,6 +343,7 @@ export function groupIntoRows(
   groups: ProfileArtifacts[],
   taskIdentities: Map<string, Map<string, TaskIdentity>>,
   resolveLaunch?: (launchId: string) => SessionMeta | null,
+  resolveSession?: (sessionId: string) => SessionMeta | null,
 ): BrowserSessionRow[] {
   const rows: BrowserSessionRow[] = [];
   for (const g of groups) {
@@ -321,14 +362,23 @@ export function groupIntoRows(
     for (const [task, artifacts] of byTask) {
       artifacts.sort((a, b) => b.mtimeMs - a.mtimeMs);
       const identity = identities.get(task);
-      const linkedSession = identity?.launchId ? resolveLaunch?.(identity.launchId) ?? null : null;
+      // Session id first: it is the direct answer and the one agents actually
+      // carry. The launchId join stays as the fallback for a task that recorded
+      // only that (an older CLI, or a run whose session id was unset).
+      let linkedSession: SessionMeta | null = null;
+      if (identity?.sessionId && resolveSession) linkedSession = resolveSession(identity.sessionId);
+      if (!linkedSession && identity?.launchId && resolveLaunch) {
+        linkedSession = resolveLaunch(identity.launchId);
+      }
+      const hasIdentityKey = !!(identity?.sessionId || identity?.launchId);
       rows.push({
         kind: 'task',
         profile: g.profile,
         task,
         owner: identity?.owner,
         launchId: identity?.launchId,
-        linkStatus: linkedSession ? 'linked' : identity?.launchId ? 'unresolved' : 'unlinked',
+        sessionId: identity?.sessionId,
+        linkStatus: linkedSession ? 'linked' : hasIdentityKey ? 'unresolved' : 'unlinked',
         linkedSession: linkedSession ?? undefined,
         artifacts,
         counts: countByKind(artifacts),
@@ -356,9 +406,14 @@ export function groupIntoRows(
  *  The interactive picker's data source. */
 export function buildBrowserSessionRows(profile?: string): BrowserSessionRow[] {
   const groups = listBrowserSessions(profile);
-  const taskIdentities = new Map(groups.map((g) => [g.profile, loadTaskIdentities(g.profile)]));
+  const taskIdentities = new Map(groups.map((g) => [g.profile, loadDurableTaskIdentities(g.profile)]));
   const index = buildLaunchSessionIndex();
-  return groupIntoRows(groups, taskIdentities, (launchId) => resolveLaunchSession(index, launchId));
+  return groupIntoRows(
+    groups,
+    taskIdentities,
+    (launchId) => resolveLaunchSession(index, launchId),
+    (sessionId) => getSessionById(sessionId),
+  );
 }
 
 /**

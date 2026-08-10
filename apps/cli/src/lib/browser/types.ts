@@ -89,6 +89,13 @@ export interface Task {
    */
   launchId?: string;
   /**
+   * The agent session that started this task (`$AGENT_SESSION_ID`), forwarded
+   * from the caller at `start`. The durable copy lives in the `browser_sessions`
+   * table, which survives `stop`; this in-memory/tasks.json copy is the live one
+   * (RUSH-2549).
+   */
+  sessionId?: string;
+  /**
    * Per-tab snapshot of the last ref listing captured for that tab
    * (shortId -> {descriptors, opts}). Persisted to tasks.json so a later
    * `click`/`type <ref>` can self-heal a drifted ref — the cached `opts` let
@@ -242,6 +249,18 @@ export interface IPCRequest {
   // on `status`, scopes the listing to the caller's run.
   actor?: string;
   launchId?: string;
+  /**
+   * The calling agent session (`$AGENT_SESSION_ID` / `$AGENTS_SESSION_ID`) —
+   * the id that answers "which agent drove this task" and the one persisted to
+   * `browser_sessions` (RUSH-2549).
+   *
+   * This is the primary identity, not a spare: `launchId` alone was the join
+   * key, and a fleet measurement found it present on only 2 of 5 live agent
+   * processes while a session id was on 5 of 5 — every agent reaching the
+   * browser carries one. It is the same env `stampProvenance()` already reads
+   * for `computer.action` events, so both tool surfaces key on one signal.
+   */
+  sessionId?: string;
 }
 
 /** Subset of IPCResponse describing a recording start result. */

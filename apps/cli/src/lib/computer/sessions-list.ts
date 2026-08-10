@@ -56,7 +56,7 @@
 import { query, truncate, type EventRecord } from '../events.js';
 import { formatRelativeTime } from '../session/relative-time.js';
 import type { SessionMeta } from '../session/types.js';
-import { getSessionById } from '../session/db.js';
+import { getSessionById, listComputerSessionRecords } from '../session/db.js';
 import {
   buildLaunchSessionIndex,
   resolveLaunchSession,
@@ -237,6 +237,46 @@ export function groupIntoComputerRuns(
   return rows;
 }
 
+/**
+ * Add runs the event ledger no longer holds, from the durable
+ * `computer_sessions` table (RUSH-2549).
+ *
+ * The ledger is deliberately bounded — it prunes at 7 days / 50 MiB — so before
+ * this, a run simply disappeared from `agents sessions --computer` on day 8 even
+ * though it had happened and its identity was known. The DB row is metadata
+ * only, so a recovered row carries its identity, timing and action COUNT but no
+ * per-verb breakdown: those individual actions lived in the pruned ledger and
+ * are genuinely gone. It is listed as a real run with an empty `actions` list
+ * rather than silently omitted, and never fabricated back.
+ *
+ * Ledger rows win on collision: while both exist the ledger is richer.
+ */
+function appendPrunedRunsFromDb(rows: ComputerRunRow[]): void {
+  const seen = new Set(rows.map((r) => r.invocationId));
+  for (const record of listComputerSessionRecords()) {
+    if (seen.has(record.invocationId)) continue;
+    const linked = record.sessionId ? getSessionById(record.sessionId) : null;
+    rows.push({
+      pid: 0,
+      invocationId: record.invocationId,
+      task: record.taskPreview,
+      machine: record.machine,
+      machineId: record.machine,
+      bundle: undefined,
+      remoteHost: undefined,
+      agent: undefined,
+      sessionId: record.sessionId,
+      launchId: record.launchId,
+      linkStatus: linked ? 'linked' : (record.sessionId || record.launchId) ? 'unresolved' : 'unlinked',
+      linkedSession: linked ?? undefined,
+      actions: [],
+      counts: {},
+      startMs: record.startedAt,
+      endMs: record.lastActivity ?? record.startedAt,
+    });
+  }
+}
+
 /** Build task-first rows from the real ledger, resolving each row's owning
  *  session against the live indexes. The interactive picker's (and the
  *  flat/`--json` printer's) data source. `machine` narrows to rows whose
@@ -249,6 +289,8 @@ export function buildComputerSessionRows(opts: { limit?: number; machine?: strin
     (sessionId) => getSessionById(sessionId),
     (launchId) => resolveLaunchSession(index, launchId),
   );
+  appendPrunedRunsFromDb(rows);
+  rows.sort((a, b) => b.endMs - a.endMs);
   if (!opts.machine) return rows;
   const q = opts.machine.toLowerCase();
   return rows.filter(

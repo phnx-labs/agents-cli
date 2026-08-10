@@ -246,7 +246,18 @@ directly to that session's canonical digest (prompt, changes, tests, last
 response); one that carried an identity nothing on this machine can index
 shows **unresolved**; a bare terminal invocation with no agent session env at
 all shows **unlinked** — its actions are still listed, there's just no session
-to attribute them to. Search matches task text, machine, target bundle, the
+to attribute them to.
+
+Each invocation's identity is also written to a durable `computer_sessions` row
+in the local session DB. The event ledger is deliberately bounded (7 days /
+50 MiB by default), so once it prunes, a run's individual actions are gone —
+before this, the whole run vanished from the listing with them. It now stays
+listed from that row, carrying identity, timing and a total action count, with
+an empty per-verb breakdown: those actions really are gone, and are never
+reconstructed. The row is metadata only, and the bounded `--task` preview is the
+same text the ledger already stored — no new content is captured.
+
+Search matches task text, machine, target bundle, the
 linked session's agent/topic, or a driven verb; `enter` prints the
 highlighted run's full action list (there's nothing to open — no artifact
 exists per action) and the picker keeps browsing. `--no-interactive` prints

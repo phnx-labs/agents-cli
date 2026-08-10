@@ -10,6 +10,8 @@ export interface BrowserIPCStreamOptions {
   task?: string;
   actor: string;
   launchId?: string;
+  /** Calling agent session, forwarded onto `start` requests (RUSH-2549). */
+  sessionId?: string;
   autoStartDaemon?: boolean;
 }
 
@@ -70,6 +72,7 @@ export async function runBrowserIPCStream(options: BrowserIPCStreamOptions): Pro
           taskName: request.taskName ?? defaultTask,
           actor: request.actor ?? options.actor,
           launchId: request.launchId ?? options.launchId,
+          sessionId: request.sessionId ?? options.sessionId,
         };
       } else if (!request.task && defaultTask) {
         request = { ...request, task: defaultTask };

@@ -240,15 +240,19 @@ agents sessions --computer    # rows survive the 7-day ledger prune
 
 ## Checklist
 
-- [ ] Schema: `browser_sessions` + `computer_sessions` tables, schema-version bump
-- [ ] Forward `AGENT_SESSION_ID` from the caller in `browser.ts` start + stream
-- [ ] Persist the row at task start; remove identity deletion on stop
-- [ ] Persist computer runs from `emitComputerAction` alongside the event emit
-- [ ] Repoint `sessions-list.ts` (browser + computer) at the DB, via `resolvePostIdentity`
-- [ ] Backfill existing capture dirs as rows with NULL session_id
-- [ ] Optional capture offload to `r2.backups`, opt-in
-- [ ] Tests: stopped-then-relisted task resolves its session; run older than the prune still lists
-- [ ] Docs + CHANGELOG
+- [x] Schema: `browser_sessions` + `computer_sessions` tables, schema-version bump (v39)
+- [x] Forward `AGENT_SESSION_ID` from the caller in `browser.ts` start + stream
+- [x] Persist the row at task start; stop no longer deletes identity
+- [x] Persist computer runs from `emitComputerAction` alongside the event emit
+- [x] Repoint `sessions-list.ts` (browser + computer) at the DB
+- [x] Tests: stopped-then-relisted task resolves its session; action counts accumulate
+- [x] Docs + CHANGELOG
+- [ ] Backfill existing capture dirs as rows with NULL session_id — **deferred**, tracked on RUSH-2549
+- [ ] Optional capture offload to `r2.backups` — **deferred**, tracked on RUSH-2549
+
+The two deferred items are additive and independent: neither is needed for a
+finished task to link to its session, which is the bug this closes. Deferring
+them keeps a schema change to every device's DB reviewable in one sitting.
 
 ## Tracking
 

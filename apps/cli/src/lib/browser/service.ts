@@ -46,6 +46,7 @@ import {
 } from './upload.js';
 import { emit } from '../events.js';
 import { resolveActor } from '../actor.js';
+import { recordBrowserSession } from '../session/db.js';
 import { sshExecAsync } from '../ssh-exec.js';
 import type { TargetFilter } from './types.js';
 
@@ -315,12 +316,13 @@ export interface HealInfo {
  * forwarded one.
  */
 export function resolveTaskIdentity(
-  forwarded: { actor?: string; launchId?: string },
+  forwarded: { actor?: string; launchId?: string; sessionId?: string },
   resolveLocalActor: () => string
-): { owner: string; launchId?: string } {
+): { owner: string; launchId?: string; sessionId?: string } {
   return {
     owner: forwarded.actor ?? resolveLocalActor(),
     launchId: forwarded.launchId,
+    sessionId: forwarded.sessionId,
   };
 }
 
@@ -350,6 +352,8 @@ export class BrowserService {
       /** Caller identity, forwarded from the CLI (see IPCRequest.actor/launchId). */
       actor?: string;
       launchId?: string;
+      /** Calling agent session, forwarded from the CLI (see IPCRequest.sessionId). */
+      sessionId?: string;
     } = {}
   ): Promise<{ task: string; name: string; tabId?: string; windowId?: string; profile: string; skill?: ResolvedDomainSkill }> {
     const profile = await getProfile(profileName);
@@ -452,9 +456,13 @@ export class BrowserService {
       createdAt: Date.now(),
       pid: conn.pid,
       // Identity is forwarded from the caller (see resolveTaskIdentity): WHO
-      // (owner) and WHICH run (launchId). Resolving daemon-side would attribute
-      // every task to the shared daemon's actor (the RUSH-2020 bug).
-      ...resolveTaskIdentity({ actor: opts.actor, launchId: opts.launchId }, () => resolveActor().id),
+      // (owner), WHICH run (launchId), and WHICH agent session (sessionId).
+      // Resolving daemon-side would attribute every task to the shared daemon's
+      // actor (the RUSH-2020 bug).
+      ...resolveTaskIdentity(
+        { actor: opts.actor, launchId: opts.launchId, sessionId: opts.sessionId },
+        () => resolveActor().id,
+      ),
     };
 
     // For Electron, get the existing window as the tab
@@ -469,6 +477,22 @@ export class BrowserService {
 
     conn.tasks.set(taskName, task);
     await this.saveTaskState(effectiveProfileName, conn.tasks);
+
+    // Durable identity, written ONCE at start and never deleted (RUSH-2549).
+    // tasks.json above stays live state: `stop` drops the task from that map, so
+    // anything recorded only there is gone the moment the task ends -- which is
+    // why every finished task used to list as "unlinked". This row outlives the
+    // task, the daemon, and a reboot. Metadata only: the capture bytes stay on
+    // disk under capture_dir.
+    recordBrowserSession({
+      task: taskName,
+      profile: effectiveProfileName,
+      sessionId: task.sessionId,
+      launchId: task.launchId,
+      actor: task.owner,
+      startedAt: task.createdAt,
+      captureDir: getProfileSessionsDir(effectiveProfileName, taskName),
+    });
 
     emit('browser.launch', { profile: effectiveProfileName, task: taskName, pid: conn.pid });
     void import('../analytics/usage-db.js').then(({ recordUsage }) => {

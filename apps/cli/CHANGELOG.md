@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- **`agents sessions --browser` / `--computer` now name the agent session that drove the task (RUSH-2549).**
+  Every browser row used to read `unlinked` with `last known owner:
+  UNRESOLVED@<host>`, because task identity lived only in the browser daemon's
+  `tasks.json` — a file rewritten from the LIVE task map, so `agents browser stop`
+  erased the link and a daemon restart emptied it. Identity is now written once at
+  task start to a durable `browser_sessions` row and is never deleted, so a finished
+  task still resolves its session. The link also keys on `AGENT_SESSION_ID` (carried
+  by every agent) in addition to `AGENT_LAUNCH_ID` (measured present on only 2 of 5
+  live agent processes). Computer-use invocations get the same durable
+  `computer_sessions` row, so a run remains listed after the event ledger's 7-day
+  prune drops its actions — that row carries identity, timing and an action count,
+  never the pruned per-verb detail. Both tables are **metadata only**: screenshots,
+  PDFs and recordings stay on disk, referenced by path. Forward-only — captures
+  taken before this shipped cannot be linked retroactively, because their identity
+  was already discarded. Schema v39. Source: `apps/cli/src/lib/session/db.ts`,
+  `apps/cli/src/lib/browser/service.ts`, `apps/cli/src/lib/browser/sessions-list.ts`,
+  `apps/cli/src/lib/computer/sessions-list.ts`, `apps/cli/src/commands/browser.ts`,
+  `apps/cli/src/commands/computer-actions.ts`.
+
 ## 1.22.36
 
 - **`agents cp <src> <dst>` — first-class fleet file transfer (RUSH-2297).** New

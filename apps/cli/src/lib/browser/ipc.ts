@@ -375,6 +375,7 @@ export class BrowserIPCServer {
           skipDomainSkill: request.skipDomainSkill,
           actor: request.actor,
           launchId: request.launchId,
+          sessionId: request.sessionId,
         });
         return {
           ok: true,

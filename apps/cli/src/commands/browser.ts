@@ -729,6 +729,7 @@ function registerTaskCommands(browser: Command): void {
         task: opts.task ?? process.env.AGENTS_BROWSER_TASK,
         actor: resolveActor().id,
         launchId: process.env.AGENT_LAUNCH_ID,
+        sessionId: process.env.AGENT_SESSION_ID || process.env.AGENTS_SESSION_ID,
       });
     });
 
@@ -861,6 +862,11 @@ function registerTaskCommands(browser: Command): void {
         // per-run id exec.ts injects for every harness.
         actor: resolveActor().id,
         launchId: process.env.AGENT_LAUNCH_ID,
+        // The agent session that drove this task — what makes the capture
+        // traceable back to a conversation (RUSH-2549). Sent alongside, not
+        // instead of, launchId: a launch id is absent on most agent processes,
+        // a session id is not.
+        sessionId: process.env.AGENT_SESSION_ID || process.env.AGENTS_SESSION_ID,
       });
 
       if (!response.ok) {

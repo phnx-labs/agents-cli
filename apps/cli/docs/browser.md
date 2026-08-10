@@ -303,14 +303,26 @@ default app), `--json`, `--no-interactive`.
 
 On a real terminal (no `--json`/`--open`/`--no-interactive`), `sessions` opens an
 interactive, **task-first** browser: one row per browser task, newest first —
-not one row per screenshot. A task started with a caller identity (`owner`,
-`launchId` — see `--task`/`AGENT_LAUNCH_ID`) links to the agent session that ran
-it while that task is still live in `tasks.json`; the preview pane then shows
+not one row per screenshot. Each task records the agent session that started it
+(`AGENT_SESSION_ID`, resolved in the calling CLI process — the shared browser
+daemon cannot know it), plus `owner` and `launchId`. That identity is written
+once at task start to a durable `browser_sessions` row in the local session DB
+and is **never deleted**, so a task still links to its session after
+`agents browser stop` and after a daemon restart. The preview pane then shows
 the same digest as `agents sessions` (prompt, changes, tests, last response),
-followed by that task's captures newest-first with filename/age/size. A task
-whose owning run already stopped shows as **unlinked** — its captures are still
-listed and openable, there's just no session to attribute them to. Downloads sit
-in their own row, separate from any task. Search matches task name, profile, the
+followed by that task's captures newest-first with filename/age/size.
+
+A row shows **unresolved** when it recorded an identity this machine cannot
+index (a rotated or peer-owned session), and **unlinked** when no identity was
+recorded at all — captures taken before this shipped, whose identity was
+discarded at stop and cannot be recovered. Either way the captures are still
+listed and openable. Downloads sit in their own row, separate from any task.
+
+The DB row is **metadata only** — task, profile, identity, timing, per-kind
+capture counts, and the capture directory path. The screenshots, PDFs and
+recordings themselves stay on disk under
+`~/.agents/.cache/browser/<profile>/sessions/<task>/`; nothing copies them into
+the database. Search matches task name, profile, the
 linked session's agent/topic, or an artifact filename; `enter` opens the
 highlighted capture directly (or drills into a capture list first when a task
 holds more than one). `--no-interactive` prints the flat per-artifact table
