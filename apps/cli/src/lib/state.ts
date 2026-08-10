@@ -640,7 +640,7 @@ export function getDevicesIgnoredPath(): string { return path.join(getDevicesDir
 export function getDevicesAutoLaunchPath(): string { return path.join(getDevicesDir(), 'auto-launch.json'); }
 
 /** Dir of "pending device" sentinels (~/.agents/.cache/state/devices-pending/) — one empty-ish file per newly-discovered, not-yet-approved tailnet node. Written by the daemon probe, read by the menu-bar helper (mirrors the attention sentinel dir). */
-export function getDevicesPendingDir(): string { return path.join(RUNTIME_STATE_DIR, 'devices-pending'); }
+export function getDevicesPendingDir(): string { return path.join(getRuntimeStateDir(), 'devices-pending'); }
 
 /** Path to cloud dispatch cache (~/.agents/.cache/cloud/). */
 export function getCloudDir(): string { return CLOUD_DIR; }
@@ -676,8 +676,23 @@ export function getPerfDbPath(): string { return path.join(getPerfDir(), 'perf.d
 /** Path to the hook-shim NDJSON spool drained into perf.db on open. */
 export function getPerfSpoolPath(): string { return path.join(getPerfDir(), 'spool.jsonl'); }
 
-/** Path to per-process runtime state (~/.agents/.cache/state/). */
-export function getRuntimeStateDir(): string { return RUNTIME_STATE_DIR; }
+/**
+ * Path to per-process runtime state (~/.agents/.cache/state/).
+ *
+ * `AGENTS_STATE_DIR` redirects it in tests — the same test-isolation escape
+ * hatch as `AGENTS_DEVICES_DIR` / `AGENTS_LOGS_DIR`, and resolved at call time
+ * for the same reason (a suite pins it after this module is imported).
+ *
+ * Without it the suite writes into the operator's LIVE state. Concretely: the
+ * device registry and ignore-list already redirect via `AGENTS_DEVICES_DIR`, so
+ * under test both read empty — and any code path reaching
+ * `reconcilePendingSentinels` then computed "every tailnet node is new" and
+ * wrote those sentinels into the real `devices-pending/`, which is exactly what
+ * the menu bar renders. Running the suite on a dev machine surfaced all 20
+ * tailnet nodes as NEW DEVICES, including registered and explicitly ignored
+ * ones, and looked like the operator's ignore list had been lost.
+ */
+export function getRuntimeStateDir(): string { return process.env.AGENTS_STATE_DIR ?? RUNTIME_STATE_DIR; }
 
 /** Path to companion-extension scratch (~/.agents/.cache/companion/). */
 export function getCompanionDir(): string { return COMPANION_CACHE_DIR; }
