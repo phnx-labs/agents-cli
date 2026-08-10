@@ -484,15 +484,23 @@ export class BrowserService {
     // why every finished task used to list as "unlinked". This row outlives the
     // task, the daemon, and a reboot. Metadata only: the capture bytes stay on
     // disk under capture_dir.
-    recordBrowserSession({
-      task: taskName,
-      profile: effectiveProfileName,
-      sessionId: task.sessionId,
-      launchId: task.launchId,
-      actor: task.owner,
-      startedAt: task.createdAt,
-      captureDir: getProfileSessionsDir(effectiveProfileName, taskName),
-    });
+    // Guarded like `emit` below ("logging should never break the CLI",
+    // events.ts): the browser task is already started and registered. An
+    // unwritable session DB must not turn a working `agents browser start` into
+    // a failure -- the cost of a miss is one unlinked row, not a dead browser.
+    try {
+      recordBrowserSession({
+        task: taskName,
+        profile: effectiveProfileName,
+        sessionId: task.sessionId,
+        launchId: task.launchId,
+        actor: task.owner,
+        startedAt: task.createdAt,
+        captureDir: getProfileSessionsDir(effectiveProfileName, taskName),
+      });
+    } catch {
+      // Recording is best-effort; the task itself is live either way.
+    }
 
     emit('browser.launch', { profile: effectiveProfileName, task: taskName, pid: conn.pid });
     void import('../analytics/usage-db.js').then(({ recordUsage }) => {

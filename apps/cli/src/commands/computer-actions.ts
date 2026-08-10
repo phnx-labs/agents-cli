@@ -475,14 +475,24 @@ export function emitComputerAction(
   // Identity is read from this process's own env, exactly as stampProvenance()
   // does for the event: `agents computer` runs IN the caller's process, so there
   // is no shared daemon to mis-attribute it to (the browser problem).
-  recordComputerSession({
-    invocationId: COMPUTER_INVOCATION_ID,
-    sessionId: process.env.AGENT_SESSION_ID || process.env.AGENTS_SESSION_ID,
-    launchId: process.env.AGENT_LAUNCH_ID,
-    actor: resolveActor().id,
-    actionCount: 1,
-    taskPreview: typeof extra.task === 'string' ? extra.task : undefined,
-  });
+  //
+  // Guarded for the same reason `emit` above guards itself ("logging should
+  // never break the CLI", events.ts): this is a RECORD of the action, not the
+  // action. An unwritable or locked session DB must not stop `agents computer
+  // click` from clicking. The action still happened and its event still landed;
+  // only this row is missed, and the next call re-records the identity.
+  try {
+    recordComputerSession({
+      invocationId: COMPUTER_INVOCATION_ID,
+      sessionId: process.env.AGENT_SESSION_ID || process.env.AGENTS_SESSION_ID,
+      launchId: process.env.AGENT_LAUNCH_ID,
+      actor: resolveActor().id,
+      actionCount: 1,
+      taskPreview: typeof extra.task === 'string' ? extra.task : undefined,
+    });
+  } catch {
+    // Recording is best-effort; the action and its event are already done.
+  }
 }
 
 // Add the shared --pid/--bundle/--host target options to a verb. `--host` routes
