@@ -190,9 +190,11 @@ export function ProjectsPane({ projects, rollups = {}, linearProjects, pickedFol
                       <span className="host-dim">no link</span>
                     )}
                   </div>
-                  <div className="mono" style={{ color: 'var(--ds-text-dim)', fontSize: 11, marginTop: 2 }} title={p.path}>
-                    {truncateMiddle(p.path)}
-                  </div>
+                  {(p.dirs?.length ? p.dirs : [{ slug: p.repoSlug, path: p.path }]).map((d, i) => (
+                    <div key={i} className="mono" style={{ color: 'var(--ds-text-dim)', fontSize: 11, marginTop: 2 }} title={d.path}>
+                      {truncateMiddle(d.path)}{d.slug ? ` · ${d.slug}` : ''}
+                    </div>
+                  ))}
                   <div style={{ color: 'var(--ds-text-faint)', fontSize: 11, marginTop: 2 }}>
                     {rollupLine(rollups[p.name], Date.now())}
                   </div>

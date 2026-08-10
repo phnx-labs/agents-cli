@@ -269,11 +269,17 @@ const dTargets: DispatchTarget[] = [
 
 // Managed-projects mock (5 → the sidebar shows top 3 + a "＋2 more" row).
 const managedProjects: ManagedProject[] = [
-  { id: 'phnx-labs/agents-cli', name: 'agents-cli', path: '/Users/muqsit/src/github.com/phnx-labs/agents-cli', repoSlug: 'phnx-labs/agents-cli', linearProjectId: 'a', linearProjectName: 'Agents CLI', confidence: 'high', source: 'detected' },
-  { id: 'phnx-labs/prix', name: 'prix', path: '/Users/muqsit/src/github.com/phnx-labs/prix', repoSlug: 'phnx-labs/prix', linearProjectId: 'b', linearProjectName: 'Prix', confidence: 'high', source: 'detected' },
-  { id: 'muqsitnawaz/rush', name: 'rush-app', path: '/Users/muqsit/Rush/app', repoSlug: 'muqsitnawaz/rush', linearProjectId: 'c', linearProjectName: 'Rush App', confidence: 'medium', source: 'manual' },
-  { id: 'phnx-labs/rush-cli', name: 'rush-cli', path: '/Users/muqsit/src/github.com/phnx-labs/rush-cli', repoSlug: 'phnx-labs/rush-cli', linearProjectId: 'd', linearProjectName: 'Rush CLI', confidence: 'medium', source: 'detected' },
-  { id: 'scratch-tool', name: 'scratch-tool', path: '/Users/muqsit/tmp/scratch-tool', confidence: 'low', source: 'manual' },
+  // A multi-directory project (RUSH-2487): three repos bound to one project,
+  // each its own row in the Projects pane.
+  { id: 'phnx-labs/agents-cli', name: 'agents-cli', path: '/Users/muqsit/src/github.com/phnx-labs/agents-cli', repoSlug: 'phnx-labs/agents-cli', dirs: [
+    { slug: 'phnx-labs/agents-cli', path: '/Users/muqsit/src/github.com/phnx-labs/agents-cli' },
+    { slug: 'phnx-labs/agents-cli-docs', path: '/Users/muqsit/src/github.com/phnx-labs/agents-cli-docs' },
+    { slug: 'phnx-labs/agents-system', path: '/Users/muqsit/src/github.com/phnx-labs/agents-system' },
+  ], linearProjectId: 'a', linearProjectName: 'Agents CLI', confidence: 'high', source: 'detected' },
+  { id: 'phnx-labs/prix', name: 'prix', path: '/Users/muqsit/src/github.com/phnx-labs/prix', repoSlug: 'phnx-labs/prix', dirs: [{ slug: 'phnx-labs/prix', path: '/Users/muqsit/src/github.com/phnx-labs/prix' }], linearProjectId: 'b', linearProjectName: 'Prix', confidence: 'high', source: 'detected' },
+  { id: 'muqsitnawaz/rush', name: 'rush-app', path: '/Users/muqsit/Rush/app', repoSlug: 'muqsitnawaz/rush', dirs: [{ slug: 'muqsitnawaz/rush', path: '/Users/muqsit/Rush/app' }], linearProjectId: 'c', linearProjectName: 'Rush App', confidence: 'medium', source: 'manual' },
+  { id: 'phnx-labs/rush-cli', name: 'rush-cli', path: '/Users/muqsit/src/github.com/phnx-labs/rush-cli', repoSlug: 'phnx-labs/rush-cli', dirs: [{ slug: 'phnx-labs/rush-cli', path: '/Users/muqsit/src/github.com/phnx-labs/rush-cli' }], linearProjectId: 'd', linearProjectName: 'Rush CLI', confidence: 'medium', source: 'detected' },
+  { id: 'scratch-tool', name: 'scratch-tool', path: '/Users/muqsit/tmp/scratch-tool', dirs: [{ path: '/Users/muqsit/tmp/scratch-tool' }], confidence: 'low', source: 'manual' },
 ]
 const linearProjectList: LinearProjectLite[] = [
   { id: 'a', name: 'Agents CLI' }, { id: 'b', name: 'Prix' }, { id: 'c', name: 'Rush App' }, { id: 'd', name: 'Rush CLI' },

@@ -97,6 +97,7 @@ describe('managedToProjectDef', () => {
       name: 'rush',
       path: path.join(HOME, 'src/rush'),
       repoSlug: 'phnx-labs/rush',
+      dirs: [],
       linearProjectId: 'lin_1',
       linearProjectName: 'Rush',
       autoDispatch: true,
@@ -117,6 +118,7 @@ describe('managedToProjectDef', () => {
         id: 'rush',
         name: 'rush',
         path: path.join(HOME, 'src/rush'),
+        dirs: [],
         confidence: 'high',
         source: 'manual',
       },
@@ -140,6 +142,7 @@ describe('managedToProjectDef', () => {
         id: 'rush',
         name: 'rush',
         path: path.join(HOME, 'src/rush'),
+        dirs: [],
         confidence: 'high',
         source: 'manual',
       },
@@ -157,6 +160,7 @@ describe('managedToProjectDef', () => {
         id: 'rush',
         name: 'rush',
         path: path.join(HOME, 'src/rush'),
+        dirs: [],
         autoDispatch: false,
         confidence: 'high',
         source: 'manual',
@@ -172,7 +176,7 @@ describe('managedToProjectDef', () => {
 
 describe('upsertManagedProject / deleteManagedProject — id safety', () => {
   test('upsert rejects a path-traversal id before shelling out', async () => {
-    const bad = { id: '../secret', name: 'x', path: '/tmp/x', confidence: 'high', source: 'manual' } as Parameters<typeof upsertManagedProject>[0];
+    const bad = { id: '../secret', name: 'x', path: '/tmp/x', dirs: [], confidence: 'high', source: 'manual' } as Parameters<typeof upsertManagedProject>[0];
     await expect(upsertManagedProject(bad)).rejects.toThrow(/Unsafe project id/);
   });
 

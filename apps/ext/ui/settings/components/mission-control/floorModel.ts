@@ -327,14 +327,21 @@ export function computeHostRows(
 export interface ManagedProject {
   id: string                       // stable local id
   name: string                     // label in sidebar + dispatch
-  path: string                     // absolute local folder
-  repoSlug?: string                // "owner/repo"
+  path: string                     // absolute local folder (the FIRST bound directory)
+  repoSlug?: string                // "owner/repo" (the FIRST bound directory's repo)
+  dirs: ManagedProjectDir[]        // every directory bound to this project, root/defaultPath first
   linearProjectId?: string
   linearProjectName?: string       // for the Linear pill
   autoDispatch?: boolean           // opt-in: factory auto-picks delegated Todo tickets (default off)
   maxAgents?: number               // cap on concurrent auto-dispatched agents for this project
   confidence: 'high' | 'medium' | 'low'
   source: 'detected' | 'manual'
+}
+
+/** One directory bound to a project — a repo's checkout, optionally pinned to a monorepo subpath. */
+export interface ManagedProjectDir {
+  slug?: string                    // "owner/repo", when this dir has a bound repo
+  path: string                     // absolute local folder for this dir (subpath already joined in)
 }
 
 /** A Linear project reduced to what the picker needs. */

@@ -259,6 +259,7 @@ describe('buildManagedTargets', () => {
       id: 'x',
       name: 'x',
       path: '/x',
+      dirs: [{ path: '/x' }],
       confidence: 'low',
       source: 'manual',
       ...overrides,

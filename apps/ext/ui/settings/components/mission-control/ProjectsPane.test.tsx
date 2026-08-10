@@ -16,8 +16,8 @@ afterEach(() => {
 describe('ProjectsPane edit interaction', () => {
   test('clicking Edit highlights the row, focuses the folder input, and scrolls the form into view', async () => {
     const projects = [
-      { id: 'a', name: 'Alpha', path: '/alpha', confidence: 'high' as const, source: 'manual' as const },
-      { id: 'b', name: 'Beta', path: '/beta', confidence: 'high' as const, source: 'manual' as const },
+      { id: 'a', name: 'Alpha', path: '/alpha', dirs: [{ path: '/alpha' }], confidence: 'high' as const, source: 'manual' as const },
+      { id: 'b', name: 'Beta', path: '/beta', dirs: [{ path: '/beta' }], confidence: 'high' as const, source: 'manual' as const },
     ]
 
     const rootElement = document.createElement('div')

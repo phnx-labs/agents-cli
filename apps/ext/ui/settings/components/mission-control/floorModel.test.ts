@@ -838,6 +838,7 @@ describe('orderManagedProjects', () => {
     id: name.toLowerCase(),
     name,
     path: `/repos/${name}`,
+    dirs: [{ path: `/repos/${name}` }],
     confidence,
     source: 'manual',
   })

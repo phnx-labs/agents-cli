@@ -73,6 +73,7 @@ describe('ProjectsPane save', () => {
         name: 'agents-cli',
         path: '/repo/agents-cli',
         repoSlug: 'phnx-labs/agents-cli',
+        dirs: [{ slug: 'phnx-labs/agents-cli', path: '/repo/agents-cli' }],
         confidence: 'high' as const,
         source: 'manual' as const,
         autoDispatch: true,

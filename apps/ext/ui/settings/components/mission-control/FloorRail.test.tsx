@@ -46,6 +46,7 @@ function makeProject(overrides: Partial<ManagedProject> = {}): ManagedProject {
     id: 'p1',
     name: 'swarmify',
     path: '/repos/swarmify',
+    dirs: [{ path: '/repos/swarmify' }],
     confidence: 'high',
     source: 'detected',
     ...overrides,
