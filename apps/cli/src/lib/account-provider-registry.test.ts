@@ -27,5 +27,6 @@ describe('account provider adapters', () => {
     expect(provider.connectionEnvFor('codex')).toEqual({
       OPENAI_BASE_URL: 'https://api.deepinfra.com/v1/openai',
     });
+    expect(() => provider.envFor('opencode', 'api-key')).toThrow("cannot authenticate the opencode harness");
   });
 });
