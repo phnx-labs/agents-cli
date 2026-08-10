@@ -766,13 +766,15 @@ describe('registerHooksToSettings - OpenCode', () => {
     // slow Windows CI. With 10ms the timer often fires before the process is
     // live, taskkill fails on a not-yet-running PID, the child then finishes
     // and writes the side-effect — flake: timeout error + sideEffect:true.
-    // 150ms gives spawn room; the side-effect is delayed well past the kill.
+    // 150ms gives spawn room. The side-effect is delayed far past timeout +
+    // the post-kill observation window, so a late kill on a slow runner still
+    // cannot write before we sample sideEffect.
     const homeScopedDir = fs.mkdtempSync(path.join(os.homedir(), '.opencode-hook-test-'));
     const homeAgentsDir = path.join(homeScopedDir, '.agents');
     fs.mkdirSync(path.join(homeAgentsDir, 'hooks'), { recursive: true });
     const scriptPath = path.join(homeAgentsDir, 'hooks', 'slow.js');
     const sideEffectPath = path.join(tmpDir, 'too-late');
-    fs.writeFileSync(scriptPath, `#!/usr/bin/env node\nsetTimeout(() => require("fs").writeFileSync(${JSON.stringify(sideEffectPath)}, ""), 800)\n`, 'utf-8');
+    fs.writeFileSync(scriptPath, `#!/usr/bin/env node\nsetTimeout(() => require("fs").writeFileSync(${JSON.stringify(sideEffectPath)}, ""), 2500)\n`, 'utf-8');
     fs.chmodSync(scriptPath, 0o755);
     const versionHome = path.join(tmpDir, 'home');
     registerHooksToSettings('opencode', versionHome, {
