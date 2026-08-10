@@ -50,6 +50,7 @@ import {
 import { AGENTS, ALL_AGENT_IDS } from '../lib/agents.js';
 import { listInstalledVersions, syncResourcesToVersion } from '../lib/versions.js';
 import type { ResourceProfilePreset } from '../lib/types.js';
+import { findAccount } from '../lib/account-registry.js';
 
 /**
  * Pure helper: builds a Profile from collected wizard inputs. Extracted so the
@@ -115,6 +116,7 @@ export interface AddProfileOptions {
   model?: string;
   baseUrl?: string;
   authProvider?: string;
+  account?: string;
   version?: string;
   keyStdin?: boolean;
   force?: boolean;
@@ -226,6 +228,8 @@ export async function applyFromSecrets(
  */
 export async function addProfile(name: string, opts: AddProfileOptions, label: 'Profile' | 'Harness' = 'Profile'): Promise<void> {
   validateProfileName(name);
+  const account = opts.account ? findAccount(opts.account) : null;
+  if (opts.account && !account) throw new Error(`Unknown account '${opts.account}'.`);
   if (profileExists(name) && !opts.force) {
     throw new Error(`${label} '${name}' already exists. Use --force to overwrite.`);
   }
@@ -259,6 +263,10 @@ export async function addProfile(name: string, opts: AddProfileOptions, label: '
       provider: opts.authProvider,
       authEnvVar,
     });
+    if (account) {
+      profile.account = account.id;
+      profile.provider = account.provider;
+    }
     if (opts.fromSecrets) await applyFromSecrets(profile, opts.fromSecrets, opts.authProvider);
     writeProfile(profile);
     console.log(chalk.green(`${label} '${name}' added — ${host} + ${opts.model}.`));
@@ -279,6 +287,10 @@ export async function addProfile(name: string, opts: AddProfileOptions, label: '
     await ensureProviderToken(preset.provider, preset.signupUrl, opts.keyStdin);
   }
   const profile = profileFromPreset(name, preset, opts.version);
+  if (account) {
+    profile.account = account.id;
+    profile.provider = account.provider;
+  }
   if (opts.fromSecrets) await applyFromSecrets(profile, opts.fromSecrets, opts.authProvider);
   writeProfile(profile);
   console.log(chalk.green(`${label} '${name}' added.`));
@@ -707,6 +719,7 @@ Examples:
     .description('Add a profile. If <name> matches a built-in preset, the preset is applied. Prompts for API key (once per provider).')
     .option('--preset <preset>', 'Use a named preset (defaults to <name> if a preset by that name exists)')
     .option('--version <version>', 'Pin the host CLI version (e.g., 2.1.113)')
+    .option('--account <name>', 'Attach an existing durable credential account')
     .option('--key-stdin', 'Read API key from stdin instead of prompting (for scripts/CI)')
     .option('--force', 'Overwrite an existing profile with the same name')
     .addHelpText('after', '\nTo build a custom harness from a host CLI + model in one shot, use `agents harness add`.\n')
@@ -715,7 +728,7 @@ Examples:
       // device routing (see lib/hosts/passthrough.ts). The host+model one-shot
       // lives on `agents harness add`, which owns its own `--host`.
       try {
-        await addProfile(name, { preset: opts.preset, version: opts.version, keyStdin: opts.keyStdin, force: opts.force }, 'Profile');
+        await addProfile(name, { preset: opts.preset, version: opts.version, account: opts.account, keyStdin: opts.keyStdin, force: opts.force }, 'Profile');
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exit(1);

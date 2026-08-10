@@ -436,14 +436,6 @@ Examples:
           return;
         }
         await addProfile(name!, opts, 'Harness');
-        if (opts.account) {
-          const profile = readProfile(name!);
-          const account = findAccount(opts.account);
-          if (!account) throw new Error(`Unknown account '${opts.account}'.`);
-          profile.account = account.id;
-          profile.provider = account.provider;
-          writeProfile(profile);
-        }
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exit(1);

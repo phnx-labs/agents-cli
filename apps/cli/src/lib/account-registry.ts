@@ -138,6 +138,9 @@ export function resolveCredentialAccount(name: string, host: AgentId, expectedPr
   if (!account) throw new Error(`Unknown account '${name}'.`);
   if (expectedProvider && account.provider !== expectedProvider) throw new Error(`Account '${account.name}' uses provider '${account.provider}', but this harness requires '${expectedProvider}'.`);
   const adapter = getAccountProvider(account.provider);
+  if (account.auth === 'setup-token' && (account.provider !== 'anthropic' || host !== 'claude')) {
+    throw new Error(`Provider '${account.provider}' cannot use a setup-token with the ${host} harness.`);
+  }
   const envVar = account.auth === 'setup-token' ? 'CLAUDE_CODE_OAUTH_TOKEN' : adapter.envFor(host, account.auth);
   if (!hasKeychainToken(account.secretRef)) throw new Error(`Credential for account '${account.name}' is missing on this device. Add it with 'agents accounts set-key ${account.name}'.`);
   return {

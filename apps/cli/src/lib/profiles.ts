@@ -168,6 +168,7 @@ function migrateLegacyProfileAuth(profile: Profile, file: string): void {
   const migratedAccount = findAccount(accountName)!;
   const oldItem = profile.auth.keychainItem;
   profile.account = migratedAccount.id;
+  profile.provider = provider;
   delete profile.auth;
   delete profile.authOptional;
   atomicWriteFileSync(file, yaml.stringify(profile));
