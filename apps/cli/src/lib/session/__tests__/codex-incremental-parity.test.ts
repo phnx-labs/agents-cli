@@ -203,6 +203,20 @@ describe('codex incremental parity — turn_context metadata fallback', () => {
     expect(inc.model).toBe('gpt-5-codex');
     expectScanParity(inc, full);
   });
+
+  it('falls back cwd from turn_context when session_meta omits it', async () => {
+    const chunkA = jsonl([
+      { type: 'session_meta', timestamp: '2026-06-28T00:00:00.000Z', payload: { id: 's' } },
+      { type: 'response_item', timestamp: '2026-06-28T00:01:00.000Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hello' }] } },
+    ]);
+    const chunkB = jsonl([
+      { type: 'turn_context', timestamp: '2026-06-28T00:02:00.000Z', payload: { model: 'gpt-5.6-sol', cwd: '/from-turn' } },
+    ]);
+    const { inc, full } = await replay([chunkA, chunkB]);
+    expect(inc.cwd).toBe('/from-turn');
+    expect(inc.model).toBe('gpt-5.6-sol');
+    expectScanParity(inc, full);
+  });
 });
 
 describe('codex incremental parity — truncation → full reparse', () => {

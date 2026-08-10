@@ -920,10 +920,11 @@ normative — a change that widens/narrows a cell is a spec change.
 ### 8. Given/When/Then scenarios
 
 **GWT-1 — Codex transcript discovered with correct harness + metadata.**
-Given a Codex JSONL at `~/.codex/sessions/**` with a `session_meta` line;
-When `agents sessions` runs; Then it appears with `agent='codex'`, cwd/gitBranch
-from `session_meta`, and `tokenCount` from the last cumulative snapshot priced
-once (`discover.ts:3477-3526`).
+Given a Codex JSONL at `~/.codex/sessions/**` with a `session_meta` line and
+per-turn `turn_context` lines; When `agents sessions` runs; Then it appears with
+`agent='codex'`, cwd/gitBranch from `session_meta`, `model` from `session_meta`
+falling back to `turn_context`, and `tokenCount` from the last cumulative snapshot
+priced once (`discover.ts:3477-3526`, `discover.ts:4242-4253`).
 
 **GWT-2 — Live copy beats backup mirror.**
 Given the same session id in the live root and a `backups/<agent>/<ts>/` mirror;
