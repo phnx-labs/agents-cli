@@ -57,6 +57,11 @@ describe('credential account registry', () => {
     expect(keychain.values.size).toBe(0);
   });
 
+  it('rejects setup tokens on non-Claude harnesses before injection', () => {
+    addAccount('claude-work', 'anthropic', 'setup-token', 'sk-ant-oat01-valid', root);
+    expect(() => resolveCredentialAccount('claude-work', 'codex', undefined, root)).toThrow('cannot use a setup-token with the codex harness');
+  });
+
   it('archives version-bound labels instead of converting them into fake credential accounts', () => {
     fs.writeFileSync(path.join(root, 'accounts.yaml'), 'labels:\n  work:\n    agent: claude\n    fingerprint: abc\n');
     expect(readAccountRegistry(root)).toEqual({ version: 2, accounts: {} });

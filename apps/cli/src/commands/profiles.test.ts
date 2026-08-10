@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as state from '../lib/state.js';
 import { addProfile, applyFromSecrets } from './profiles.js';
-import { readProfile } from '../lib/profiles.js';
+import { readProfile, resolveProfileForRun } from '../lib/profiles.js';
 import { setKeychainBackendForTest, secretsKeychainItem, getKeychainToken, type KeychainBackend } from '../lib/secrets/index.js';
 import { keychainItemName } from '../lib/secrets/profiles.js';
 import { writeBundleWithItems, keychainRef } from '../lib/secrets/bundles.js';
@@ -55,6 +55,7 @@ describe('addProfile — --from-secrets threading (host + model path)', () => {
     const account = findAccount(p.account!);
     expect(account?.provider).toBe('proxy');
     expect(getKeychainToken(account!.secretRef)).toBe('sk-test-secret');
+    expect(resolveProfileForRun('corp').env.ANTHROPIC_AUTH_TOKEN).toBe('sk-test-secret');
   });
 
   it('does not clobber the host\'s own keychain item when --from-secrets is given without --auth-provider', async () => {
@@ -77,7 +78,7 @@ describe('addProfile — --from-secrets threading (host + model path)', () => {
     expect(getKeychainToken(keychainItemName('claude'))).toBe(preExisting);
     // ...and the harness's own auth was attached under the bundle's name instead.
     const p = readProfile('corp');
-    expect(p.provider).toBe('prod');
+    expect(p.provider).toBe('proxy');
     const account = findAccount(p.account!);
     expect(account?.provider).toBe('proxy');
     expect(getKeychainToken(account!.secretRef)).toBe('sk-test-secret');
