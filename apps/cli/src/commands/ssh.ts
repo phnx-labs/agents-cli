@@ -457,7 +457,7 @@ function printFleetResults(
   if (verifications) parts.splice(1, 0, `${notUpgraded} not upgraded`);
   console.log(chalk.gray(parts.join(' · ')));
   if (notUpgraded > 0) {
-    console.log(chalk.yellow('A box that upgraded but still resolves elsewhere runs OLD code — remove the shadowing install (e.g. the `scripts/install.sh` dev build at ~/.local/agents-cli-dev) or reorder PATH.'));
+    console.log(chalk.yellow('A box that upgraded but still resolves elsewhere runs OLD code — remove the stale install that owns the `agents` name on that box, or reorder PATH. `agents doctor` names it.'));
   }
   if (failed > 0 || notUpgraded > 0) process.exitCode = 1;
 }

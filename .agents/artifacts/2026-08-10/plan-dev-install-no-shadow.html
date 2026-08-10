@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Dev builds must never replace the installed `agents` binary</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:5px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-implementing">implementing</span></div>
+<h1>Dev builds must never replace the installed `agents` binary</h1>
+<p class="summary">An agent developing agents-cli currently overwrites or shadows the real `agents` command three different ways, leaving it broken. The dev build moves to its own name, `agents-dev`, and the repo instructions say so.
+</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">scripts/install.sh links the dev build as ~/.local/bin/{agents,ag,browser}<span class="meta-sep" aria-hidden="true">·</span>Those three links are dangling on yosemite-s0 right now<span class="meta-sep" aria-hidden="true">·</span>A worktree build is currently serving the shared daemon (pid 4163347)<span class="meta-sep" aria-hidden="true">·</span>postinstall.js, the path real npm users take, is out of scope</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">dev-install-no-shadow</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">extends RUSH-2431 / RUSH-2446</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">97b64d36</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a href="#intent"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Intent</a><a href="#current-architecture"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Current architecture</a><a href="#purpose"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#proposed-changes"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#plan"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Plan</a><a href="#validation"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="focus-for-review">Focus for review</h2>
+<ul>
+<li><strong>The dev command name.</strong> <code>agents-dev</code> / <code>ag-dev</code>, chosen so PATH order stops
+deciding which code runs. Say if you want a different spelling.</li>
+<li><strong>Dropping <code>browser</code> from the dev link set.</strong> <code>agents-dev browser …</code> covers it,
+and production never claims that name.</li>
+<li><strong>Making the daemon bounce opt-in.</strong> Today <code>install.sh</code> restarts your shared
+routines/secrets daemon onto dev code automatically. That is a hijack you cannot
+see; I want it behind <code>--bounce-daemon</code>.</li>
+<li><strong>Repairing the links already on disk.</strong> The next <code>install.sh</code> run would delete
+the three dangling <code>~/.local/bin</code> entries it created earlier.</li>
+<li><strong>Scope.</strong> Development flow only. <code>postinstall.js</code> is untouched.</li>
+</ul>
+<h2 id="intent">Intent</h2>
+<blockquote>
+<p>"when agents are building the binaries to test the agent CLI, they should not
+replace the global binary installed. they should build it under some path like
+bin or something and install it properly with some dev flag like agents dev …
+otherwise when it writes my binary it causes more problems for me"</p>
+<p>"install.sh … that script should be like install.sh or something like that. We
+should just install it locally, automatically."</p>
+<p>"not the post-install script is the one that runs for our users right? I'm
+talking about like when agents are doing development."</p>
+</blockquote>
+<h2 id="current-architecture">Current architecture</h2>
+<p>Three separate mechanisms let a development build take over the production
+command. Every one is verified against this machine, not inferred.</p>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg viewBox="0 0 900 400" role="img" aria-label="Three paths by which a dev build takes over the production agents command" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#e0663a"></path>
+    </marker>
+    <marker id="ok" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#7a8a99"></path>
+    </marker>
+  </defs>
+
+  <text x="20" y="26" font-family="ui-monospace,monospace" font-size="13" font-weight="700" fill="currentColor">agent developing agents-cli</text>
+
+  <rect x="20" y="44" width="215" height="52" rx="6" fill="none" stroke="#7a8a99" stroke-width="1.5"></rect>
+  <text x="34" y="66" font-family="ui-monospace,monospace" font-size="11.5" fill="currentColor">1. global rule says</text>
+  <text x="34" y="83" font-family="ui-monospace,monospace" font-size="11.5" fill="#e0663a">npm i -g .</text>
+
+  <rect x="20" y="118" width="215" height="52" rx="6" fill="none" stroke="#7a8a99" stroke-width="1.5"></rect>
+  <text x="34" y="140" font-family="ui-monospace,monospace" font-size="11.5" fill="currentColor">2. install.sh links</text>
+  <text x="34" y="157" font-family="ui-monospace,monospace" font-size="11.5" fill="#e0663a">~/.local/bin/agents</text>
+
+  <rect x="20" y="192" width="215" height="52" rx="6" fill="none" stroke="#7a8a99" stroke-width="1.5"></rect>
+  <text x="34" y="214" font-family="ui-monospace,monospace" font-size="11.5" fill="currentColor">3. install.sh bounces</text>
+  <text x="34" y="231" font-family="ui-monospace,monospace" font-size="11.5" fill="#e0663a">the shared daemon</text>
+
+  <line x1="235" y1="70" x2="392" y2="120" stroke="#e0663a" stroke-width="2" marker-end="url(#ar)"></line>
+  <line x1="235" y1="144" x2="392" y2="144" stroke="#e0663a" stroke-width="2" marker-end="url(#ar)"></line>
+  <line x1="235" y1="218" x2="392" y2="262" stroke="#e0663a" stroke-width="2" marker-end="url(#ar)"></line>
+
+  <rect x="400" y="104" width="230" height="80" rx="6" fill="none" stroke="#e0663a" stroke-width="2"></rect>
+  <text x="414" y="128" font-family="ui-monospace,monospace" font-size="12" font-weight="700" fill="#e0663a">the production command</text>
+  <text x="414" y="148" font-family="ui-monospace,monospace" font-size="11.5" fill="currentColor">agents / ag / browser</text>
+  <text x="414" y="168" font-family="ui-monospace,monospace" font-size="11" fill="#7a8a99">overwritten or shadowed</text>
+
+  <rect x="400" y="238" width="230" height="52" rx="6" fill="none" stroke="#e0663a" stroke-width="2"></rect>
+  <text x="414" y="260" font-family="ui-monospace,monospace" font-size="12" font-weight="700" fill="#e0663a">the shared daemon</text>
+  <text x="414" y="278" font-family="ui-monospace,monospace" font-size="11" fill="#7a8a99">secrets · browser · routines</text>
+
+  <line x1="630" y1="144" x2="702" y2="144" stroke="#7a8a99" stroke-width="1.5" marker-end="url(#ok)"></line>
+  <line x1="630" y1="264" x2="702" y2="200" stroke="#7a8a99" stroke-width="1.5" marker-end="url(#ok)"></line>
+
+  <rect x="710" y="118" width="170" height="88" rx="6" fill="none" stroke="#7a8a99" stroke-width="1.5" stroke-dasharray="4 3"></rect>
+  <text x="724" y="142" font-family="ui-monospace,monospace" font-size="12" font-weight="700" fill="currentColor">every other</text>
+  <text x="724" y="160" font-family="ui-monospace,monospace" font-size="12" font-weight="700" fill="currentColor">session on the</text>
+  <text x="724" y="178" font-family="ui-monospace,monospace" font-size="12" font-weight="700" fill="currentColor">fleet</text>
+  <text x="724" y="196" font-family="ui-monospace,monospace" font-size="11" fill="#e0663a">runs broken / stale</text>
+
+  <text x="20" y="330" font-family="ui-monospace,monospace" font-size="11" fill="#7a8a99">Legend:</text>
+  <line x1="80" y1="326" x2="120" y2="326" stroke="#e0663a" stroke-width="2" marker-end="url(#ar)"></line>
+  <text x="128" y="330" font-family="ui-monospace,monospace" font-size="11" fill="#7a8a99">takeover path (this plan removes all three)</text>
+  <line x1="80" y1="352" x2="120" y2="352" stroke="#7a8a99" stroke-width="1.5" marker-end="url(#ok)"></line>
+  <text x="128" y="356" font-family="ui-monospace,monospace" font-size="11" fill="#7a8a99">blast radius</text>
+</svg>
+<figcaption><b>Figure.</b> Three independent takeover paths, one blast radius.</figcaption>
+</figure><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Mechanism</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>The global rule tells every agent to install globally, and this repo carves out no exception</td>
+<td><code>/home/muqsit/.claude/CLAUDE.md:455</code> — <em>"No locally built CLIs. Install globally (<code>npm i -g</code>…)"</em>. npm prefix is <code>/home/muqsit/.local</code>, so <code>npm i -g .</code> lands on the real install.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>install.sh</code> links the dev build under the production names</td>
+<td><code>apps/cli/scripts/install.sh:141-146</code> — <code>for bin in agents ag browser; do ln -sf "$src" "$LINK_DIR/$bin"</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>install.sh</code> restarts the shared daemon pinned to the dev binary</td>
+<td><code>install.sh:196</code> <code>AGENTS_INSTALL_BIN="$LINKED_PATH"</code> → <code>install.sh:205</code> <code>d.startDaemon?.(bin)</code> → <code>apps/cli/src/lib/daemon.ts:1313</code></td>
+</tr>
+</tbody></table>
+<div class="artifact-callout">
+Both AGENTS.md files document path 2 as correct — <code>AGENTS.md:158</code> and
+<code>apps/cli/AGENTS.md:583-585</code> say the dev build is "symlinked into
+<code>$HOME/.local/bin/agents</code>. The npm-installed global is never touched."
+That is true about the npm prefix and false about the command you actually type.
+</div><h3>What that looks like on this box right now</h3>
+<div class="artifact-grid artifact-grid-2">
+<div class="artifact-panel">
+
+**Before — the dev links were dangling**
+
+```console
+$ ls -la ~/.local/bin/agents ~/.local/bin/ag ~/.local/bin/browser
+agents  -&gt; /home/muqsit/.local/agents-cli-dev/bin/agents
+ag      -&gt; /home/muqsit/.local/agents-cli-dev/bin/ag
+browser -&gt; /home/muqsit/.local/agents-cli-dev/bin/browser
+
+$ ls ~/.local/agents-cli-dev/lib/node_modules/@phnx-labs/
+                                     # empty - the dev prefix was cleaned
+
+$ ~/.local/bin/agents --version
+zsh: no such file or directory: /home/muqsit/.local/bin/agents
+
+$ pgrep -af __daemon-run
+4163347 bun .agents/worktrees/rush-2431-binary-shadow/apps/cli/dist/index.js __daemon-run
+```
+
+Any shell that puts `~/.local/bin` first gets a broken `agents`.
+</div>
+
+<div class="artifact-panel">
+
+**After — two names, no collision**
+
+```console
+$ bash scripts/install.sh --skip-tests
+  bin:    /home/muqsit/.local/bin/agents-dev
+  Removed stale dev link: ~/.local/bin/agents -&gt; ~/.local/agents-cli-dev/bin/agents
+  Removed stale dev link: ~/.local/bin/ag     -&gt; ~/.local/agents-cli-dev/bin/ag
+  Removed stale dev link: ~/.local/bin/browser -&gt; ~/.local/agents-cli-dev/bin/browser
+  Shared daemon left on production code (secrets broker, browser IPC, routines).
+  Ready
+  /home/muqsit/.local/bin/agents-dev (0.0.0-dev.41ae41f60-dirty)
+  Run 'agents-dev '. Your installed 'agents' is untouched.
+
+$ ls ~/.local/bin/agents ~/.local/bin/ag ~/.local/bin/browser
+ls: cannot access ...: No such file or directory   # all three gone
+
+$ agents --version
+1.22.35                              # installed CLI, untouched
+
+$ agents-dev --version
+0.0.0-dev.41ae41f60-dirty            # this working tree
+```
+
+PATH position stops mattering. You pick which one runs by typing its name.
+</div>
+</div><h2 id="purpose">Purpose</h2>
+<p>Remove the cause, not just the symptom. RUSH-2431 already shipped the detection
+half — <code>apps/cli/src/lib/binary-shadow.ts</code> ("Detect <code>agents</code> binaries that could
+shadow the currently running CLI") and an <code>agents doctor</code> <code>binary-shadow</code>
+warning. RUSH-2446 added the fleet-rollout probe that refuses to count a
+dev-shadowed box as upgraded (<code>apps/cli/src/lib/devices/rollout-verify.ts:172-177</code>).
+This plan extends that work by removing what those two exist to catch; both stay
+in place as backstops.</p>
+<h2 id="proposed-changes">Proposed Changes</h2>
+<h3><code>apps/cli/scripts/install.sh</code> — link as <code>agents-dev</code>, never <code>agents</code></h3>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  for bin in agents ag browser; do</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  for bin in "${DEV_BINS[@]}"; do</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">    ...</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">    ln -sf "$PREFIX/bin/$bin" "$LINK_DIR/$bin"</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    ln -sf "$PREFIX/bin/$bin" "$LINK_DIR/$bin$DEV_SUFFIX"</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  done</span></span></pre></div><p><code>browser</code> leaves the dev link set entirely: <code>agents-dev browser …</code> reaches the
+same code, and production's <code>~/.local/bin</code> fallback claims only <code>agents</code> and <code>ag</code>
+(<code>apps/cli/scripts/postinstall.js:315</code>), so there is no reason to hold a third
+name.</p>
+<p>The same rename applies at every other site that hardcodes the bin name:</p>
+<table>
+<thead>
+<tr>
+<th>Site</th>
+<th>Now</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>:7-12</code> header comment</td>
+<td>"exposed via <code>$HOME/.local/bin/agents</code>" plus PATH-ordering advice</td>
+<td>exposed as <code>agents-dev</code> / <code>ag-dev</code>; states the script must never touch <code>agents</code>, <code>ag</code>, or <code>browser</code></td>
+</tr>
+<tr>
+<td><code>:69</code> status line</td>
+<td><code>bin: $LINK_DIR/agents</code></td>
+<td><code>bin: $LINK_DIR/agents-dev</code></td>
+</tr>
+<tr>
+<td><code>:132-140</code> MINGW branch</td>
+<td>writes <code>$LINK_DIR/$bin{,.cmd,.ps1}</code></td>
+<td>writes <code>$LINK_DIR/$bin-dev{,.cmd,.ps1}</code> with an embedded marker comment</td>
+</tr>
+<tr>
+<td><code>:152-157</code> macOS Mach-O branch</td>
+<td><code>ln -sf "$NATIVE_BIN" "$LINK_DIR/agents"</code> and <code>…/ag</code></td>
+<td><code>…/agents-dev</code> and <code>…/ag-dev</code></td>
+</tr>
+<tr>
+<td><code>:159-162</code> runnability check</td>
+<td><code>LINKED_PATH="$LINK_DIR/agents"</code></td>
+<td><code>LINKED_PATH="$LINK_DIR/agents-dev"</code></td>
+</tr>
+<tr>
+<td><code>:219-238</code> PATH-precedence warning</td>
+<td>warns when the registry bin dir precedes <code>$LINK_DIR</code></td>
+<td>delete the ordering half; keep only the "<code>$LINK_DIR</code> is not on PATH" case</td>
+</tr>
+</tbody></table>
+<h3>Repair pass, before the new links are created</h3>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">DEV_SHADOW_MARKER='AGENTS_CLI_DEV_SHADOW_LINK'</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> </span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"># Remove ONLY a $LINK_DIR/{agents,ag,browser} entry a PRIOR run of THIS script</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"># created. A real file, or a link pointing anywhere else (registry install,</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"># Homebrew, the user's own alias), is left untouched.</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">cleanup_legacy_shadow() {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  local path="$1" raw</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  if [[ -L "$path" ]]; then</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    # readlink, not [[ -e ]]: -e is false for a DANGLING symlink, which is</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    # exactly the shape left behind when the dev prefix is cleaned.</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    raw=$(readlink "$path") || return 0</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    case "$raw" in</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      "$PREFIX"/*|"$HOME"/.local/agents-cli-dev/*)</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">        rm -f "$path"; dim "  Removed legacy shadow link: $path -&gt; $raw" ;;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    esac</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  elif [[ -f "$path" ]] &amp;&amp; grep -qF "$DEV_SHADOW_MARKER" "$path" 2&gt;/dev/null; then</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    rm -f "$path"; dim "  Removed legacy shadow file: $path"</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  fi</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">}</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">for bin in agents ag browser; do</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  cleanup_legacy_shadow "$LINK_DIR/$bin"</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  cleanup_legacy_shadow "$LINK_DIR/$bin.cmd"</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  cleanup_legacy_shadow "$LINK_DIR/$bin.ps1"</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">done</span></span></pre></div><p>This clears the three dangling entries on yosemite-s0 the next time the script
+runs.</p>
+<h3>Daemon bounce becomes opt-in</h3>
+<p>The docblock at <code>install.sh:186-187</code> justifies the automatic restart on the
+premise that the dev build <em>is</em> what <code>agents</code> resolves to. This change removes
+that premise, so the restart has to stop being automatic:</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">if [[ -z "${CI:-}" &amp;&amp; "${AGENTS_NO_HEAL:-}" != "1" ]]; then</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">if [[ -z "${CI:-}" &amp;&amp; "${AGENTS_NO_HEAL:-}" != "1" &amp;&amp; "$BOUNCE_DAEMON" == true ]]; then</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  INSTALLED_PKG="$PREFIX/lib/node_modules/$PKG_NAME"</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  ...</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">elif [[ -z "${CI:-}" ]]; then</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  dim "  Shared daemon left on production code (secrets broker, browser IPC, routines)."</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  dim "  Pass --bounce-daemon to point it at this dev build - that also affects your"</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  dim "  everyday 'agents', not just agents-dev."</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">fi</span></span></pre></div><h3><code>AGENTS.md</code> (root, canonical — never edit the <code>CLAUDE.md</code> symlink)</h3>
+<p>Amend the entry-points table row at <code>:158</code>, then add a short paragraph under the
+table stating the rule and naming the override it takes over from:</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">| CLI dev install | [`apps/cli/scripts/install.sh`](apps/cli/scripts/install.sh) | side-by-side dev build at `~/.local/agents-cli-dev`, exposed via `~/.local/bin/agents`; does not touch the registry install |</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">| CLI dev install | [`apps/cli/scripts/install.sh`](apps/cli/scripts/install.sh) | side-by-side dev build at `~/.local/agents-cli-dev`, invoked as `agents-dev` (and `ag-dev`); never creates or touches `~/.local/bin/{agents,ag,browser}` |</span></span></pre></div><p>The new paragraph, in substance: in this repo the global "install globally / no
+locally built CLIs" rule does <strong>not</strong> apply to agents-cli itself, because the
+thing being built <em>is</em> the command. To run your changes, use <code>bun run test</code> or
+<code>bun run test:remote</code> for the suite (<code>apps/cli/package.json:58,61</code>), and
+<code>scripts/install.sh</code> then <code>agents-dev …</code> to drive the real CLI. Never <code>npm i -g</code>
+from the working tree. <code>agents doctor</code> reports a <code>binary-shadow</code> finding if
+something has taken the name.</p>
+<h3><code>apps/cli/AGENTS.md</code> (canonical) — correct the false claim</h3>
+<p>Rewrite the "Local dev build" paragraph at <code>:583-585</code> so it matches: installs at
+<code>$HOME/.local/agents-cli-dev/</code>, exposed as <code>agents-dev</code> / <code>ag-dev</code>; the
+production <code>agents</code> command is never created or overwritten; version stamps
+<code>0.0.0-dev.&lt;sha&gt;[-dirty]</code>; the daemon bounce is opt-in.</p>
+<h3>Stale-premise comments — wording only, no logic</h3>
+<p><code>apps/cli/src/lib/devices/rollout-verify.ts:6-10</code> and
+<code>apps/cli/src/commands/ssh.ts:461</code> both name <code>scripts/install.sh</code> as <em>the</em>
+example of a shadowing dev build. Reword to a generic "a stale or legacy install
+pointed <code>agents</code> elsewhere". The probes are name-agnostic (<code>command -v agents</code>)
+and keep working unchanged.</p>
+<h2 id="public-interface">Public Interface</h2>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Before</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Dev command</td>
+<td><code>agents</code> (shadows production)</td>
+<td><code>agents-dev</code></td>
+</tr>
+<tr>
+<td>Dev alias</td>
+<td><code>ag</code> (shadows production)</td>
+<td><code>ag-dev</code></td>
+</tr>
+<tr>
+<td>Dev browser</td>
+<td><code>browser</code> (shadows production)</td>
+<td>removed; use <code>agents-dev browser</code></td>
+</tr>
+<tr>
+<td>Daemon restart</td>
+<td>automatic on every install</td>
+<td>opt-in via <code>--bounce-daemon</code></td>
+</tr>
+<tr>
+<td>Production <code>agents</code> / <code>ag</code> / <code>browser</code></td>
+<td>may be replaced</td>
+<td>never written by <code>install.sh</code></td>
+</tr>
+</tbody></table>
+<pre><code># build + install this working tree, then drive it
+bash apps/cli/scripts/install.sh --skip-tests
+agents-dev sessions --active
+
+# your everyday CLI is unaffected
+agents --version
+</code></pre>
+<h2 id="plan">Plan</h2>
+<div class="checklist"><div class="checklist-head">0 / 10 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Rename the dev links to <code>agents-dev</code> / <code>ag-dev</code> in <code>install.sh</code>; drop <code>browser</code></span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Add the <code>cleanup_legacy_shadow</code> repair pass ahead of link creation</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Gate the daemon bounce behind <code>--bounce-daemon</code>, defaulting off</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Simplify the PATH warning to the "not on PATH" case only</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Update root <code>AGENTS.md</code>: table row plus the never-clobber paragraph</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Correct the "Local dev build" paragraph in <code>apps/cli/AGENTS.md</code></span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Reword the stale premise in <code>rollout-verify.ts</code> and <code>ssh.ts</code></span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Add <code>apps/cli/scripts/install.test.ts</code></span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Add the changelog fragment</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Verify end to end on this box and quote the output</span></li></ul></div>
+<h2 id="validation">Validation</h2>
+<p>New test <code>apps/cli/scripts/install.test.ts</code>, in the style of
+<code>apps/cli/scripts/postinstall.test.ts:41-74</code> — the real script via <code>spawnSync</code>,
+a temp <code>HOME</code>, no mocking:</p>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>Assertion</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Fresh run</td>
+<td><code>~/.local/bin/agents-dev</code> and <code>ag-dev</code> exist and resolve into the dev prefix</td>
+</tr>
+<tr>
+<td>Fresh run</td>
+<td>none of <code>agents</code>, <code>ag</code>, <code>browser</code> is created</td>
+</tr>
+<tr>
+<td>Pre-seeded dangling link into the dev prefix</td>
+<td>removed</td>
+</tr>
+<tr>
+<td>Pre-seeded link to an unrelated decoy</td>
+<td>left byte-identical (mirrors <code>postinstall.test.ts:166-190</code>)</td>
+</tr>
+<tr>
+<td>Default run</td>
+<td>no daemon restart attempted</td>
+</tr>
+<tr>
+<td><code>--bounce-daemon</code></td>
+<td><code>AGENTS_INSTALL_BIN</code> is the <code>agents-dev</code> path</td>
+</tr>
+</tbody></table>
+<p>End to end, on this machine:</p>
+<pre><code>bash apps/cli/scripts/install.sh --skip-tests
+ls -la ~/.local/bin/agents ~/.local/bin/ag ~/.local/bin/browser   # gone
+agents --version                                                  # 1.22.35
+agents-dev --version                                              # 0.0.0-dev.&lt;sha&gt;
+agents doctor                                                     # no binary-shadow
+pgrep -af __daemon-run                                            # no worktree path
+cd apps/cli &amp;&amp; bun run test -- scripts/install.test.ts
+</code></pre>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Muscle memory: sessions and notes that say "run <code>agents</code> after install.sh"</td>
+<td>Both AGENTS.md files change in the same PR; <code>install.sh</code> prints the <code>agents-dev</code> path on completion</td>
+</tr>
+<tr>
+<td>The repair pass deletes a link the user created by hand</td>
+<td>It only removes links whose raw target resolves inside the dev prefix, plus MINGW files carrying the marker; a decoy-target test pins this</td>
+</tr>
+<tr>
+<td>A box already has a dev-shadowed <code>agents</code> and never re-runs <code>install.sh</code></td>
+<td><code>agents doctor</code>'s <code>binary-shadow</code> finding (RUSH-2431) and the rollout probe (RUSH-2446) still catch it</td>
+</tr>
+<tr>
+<td>Someone wants the old auto-bounce behavior</td>
+<td><code>--bounce-daemon</code> keeps it, one flag away, with the blast radius stated</td>
+</tr>
+<tr>
+<td>Stale worktree daemon (pid <code>4163347</code>) predates this change</td>
+<td>Stop it separately during verification; not fixed by the code change alone</td>
+</tr>
+</tbody></table>
+<h2 id="tracking">Tracking</h2>
+<p>Extends RUSH-2431 (<code>binary-shadow</code> detection) and RUSH-2446 (rollout
+verification). No new ticket opened yet — one gets created and paired when this
+plan is approved. <code>apps/cli/scripts/postinstall.js</code> is explicitly out of scope.</p>
+<p>The rendered source lands at <code>.agents/artifacts/2026-08-10/plan-dev-install-no-shadow.md</code>
+in the implementation worktree and ships with the PR.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4Kc3VyZmFjZTogY2xpCnRpdGxlOiBEZXYgYnVpbGRzIG11c3QgbmV2ZXIgcmVwbGFjZSB0aGUgaW5zdGFsbGVkIGBhZ2VudHNgIGJpbmFyeQpzdW1tYXJ5OiA+CiAgQW4gYWdlbnQgZGV2ZWxvcGluZyBhZ2VudHMtY2xpIGN1cnJlbnRseSBvdmVyd3JpdGVzIG9yIHNoYWRvd3MgdGhlIHJlYWwKICBgYWdlbnRzYCBjb21tYW5kIHRocmVlIGRpZmZlcmVudCB3YXlzLCBsZWF2aW5nIGl0IGJyb2tlbi4gVGhlIGRldiBidWlsZCBtb3ZlcwogIHRvIGl0cyBvd24gbmFtZSwgYGFnZW50cy1kZXZgLCBhbmQgdGhlIHJlcG8gaW5zdHJ1Y3Rpb25zIHNheSBzby4Kc3RhdHVzOiBpbXBsZW1lbnRpbmcKdHJhY2tpbmc6ICJleHRlbmRzIFJVU0gtMjQzMSAvIFJVU0gtMjQ0NiIKZmFjdHM6CiAgLSAic2NyaXB0cy9pbnN0YWxsLnNoIGxpbmtzIHRoZSBkZXYgYnVpbGQgYXMgfi8ubG9jYWwvYmluL3thZ2VudHMsYWcsYnJvd3Nlcn0iCiAgLSAiVGhvc2UgdGhyZWUgbGlua3MgYXJlIGRhbmdsaW5nIG9uIHlvc2VtaXRlLXMwIHJpZ2h0IG5vdyIKICAtICJBIHdvcmt0cmVlIGJ1aWxkIGlzIGN1cnJlbnRseSBzZXJ2aW5nIHRoZSBzaGFyZWQgZGFlbW9uIChwaWQgNDE2MzM0NykiCiAgLSAicG9zdGluc3RhbGwuanMsIHRoZSBwYXRoIHJlYWwgbnBtIHVzZXJzIHRha2UsIGlzIG91dCBvZiBzY29wZSIKLS0tCgojIyBGb2N1cyBmb3IgcmV2aWV3CgotICoqVGhlIGRldiBjb21tYW5kIG5hbWUuKiogYGFnZW50cy1kZXZgIC8gYGFnLWRldmAsIGNob3NlbiBzbyBQQVRIIG9yZGVyIHN0b3BzCiAgZGVjaWRpbmcgd2hpY2ggY29kZSBydW5zLiBTYXkgaWYgeW91IHdhbnQgYSBkaWZmZXJlbnQgc3BlbGxpbmcuCi0gKipEcm9wcGluZyBgYnJvd3NlcmAgZnJvbSB0aGUgZGV2IGxpbmsgc2V0LioqIGBhZ2VudHMtZGV2IGJyb3dzZXIg4oCmYCBjb3ZlcnMgaXQsCiAgYW5kIHByb2R1Y3Rpb24gbmV2ZXIgY2xhaW1zIHRoYXQgbmFtZS4KLSAqKk1ha2luZyB0aGUgZGFlbW9uIGJvdW5jZSBvcHQtaW4uKiogVG9kYXkgYGluc3RhbGwuc2hgIHJlc3RhcnRzIHlvdXIgc2hhcmVkCiAgcm91dGluZXMvc2VjcmV0cyBkYWVtb24gb250byBkZXYgY29kZSBhdXRvbWF0aWNhbGx5LiBUaGF0IGlzIGEgaGlqYWNrIHlvdSBjYW5ub3QKICBzZWU7IEkgd2FudCBpdCBiZWhpbmQgYC0tYm91bmNlLWRhZW1vbmAuCi0gKipSZXBhaXJpbmcgdGhlIGxpbmtzIGFscmVhZHkgb24gZGlzay4qKiBUaGUgbmV4dCBgaW5zdGFsbC5zaGAgcnVuIHdvdWxkIGRlbGV0ZQogIHRoZSB0aHJlZSBkYW5nbGluZyBgfi8ubG9jYWwvYmluYCBlbnRyaWVzIGl0IGNyZWF0ZWQgZWFybGllci4KLSAqKlNjb3BlLioqIERldmVsb3BtZW50IGZsb3cgb25seS4gYHBvc3RpbnN0YWxsLmpzYCBpcyB1bnRvdWNoZWQuCgojIyBJbnRlbnQKCj4gIndoZW4gYWdlbnRzIGFyZSBidWlsZGluZyB0aGUgYmluYXJpZXMgdG8gdGVzdCB0aGUgYWdlbnQgQ0xJLCB0aGV5IHNob3VsZCBub3QKPiByZXBsYWNlIHRoZSBnbG9iYWwgYmluYXJ5IGluc3RhbGxlZC4gdGhleSBzaG91bGQgYnVpbGQgaXQgdW5kZXIgc29tZSBwYXRoIGxpa2UKPiBiaW4gb3Igc29tZXRoaW5nIGFuZCBpbnN0YWxsIGl0IHByb3Blcmx5IHdpdGggc29tZSBkZXYgZmxhZyBsaWtlIGFnZW50cyBkZXYg4oCmCj4gb3RoZXJ3aXNlIHdoZW4gaXQgd3JpdGVzIG15IGJpbmFyeSBpdCBjYXVzZXMgbW9yZSBwcm9ibGVtcyBmb3IgbWUiCj4KPiAiaW5zdGFsbC5zaCDigKYgdGhhdCBzY3JpcHQgc2hvdWxkIGJlIGxpa2UgaW5zdGFsbC5zaCBvciBzb21ldGhpbmcgbGlrZSB0aGF0LiBXZQo+IHNob3VsZCBqdXN0IGluc3RhbGwgaXQgbG9jYWxseSwgYXV0b21hdGljYWxseS4iCj4KPiAibm90IHRoZSBwb3N0LWluc3RhbGwgc2NyaXB0IGlzIHRoZSBvbmUgdGhhdCBydW5zIGZvciBvdXIgdXNlcnMgcmlnaHQ/IEknbQo+IHRhbGtpbmcgYWJvdXQgbGlrZSB3aGVuIGFnZW50cyBhcmUgZG9pbmcgZGV2ZWxvcG1lbnQuIgoKIyMgQ3VycmVudCBhcmNoaXRlY3R1cmUKClRocmVlIHNlcGFyYXRlIG1lY2hhbmlzbXMgbGV0IGEgZGV2ZWxvcG1lbnQgYnVpbGQgdGFrZSBvdmVyIHRoZSBwcm9kdWN0aW9uCmNvbW1hbmQuIEV2ZXJ5IG9uZSBpcyB2ZXJpZmllZCBhZ2FpbnN0IHRoaXMgbWFjaGluZSwgbm90IGluZmVycmVkLgoKPGZpZ3VyZSBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlIGFydGlmYWN0LWZpZ3VyZS1kaWFncmFtIGFydGlmYWN0LWZpZ3VyZS13aWRlIj4KPHN2ZyB2aWV3Qm94PSIwIDAgOTAwIDQwMCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJUaHJlZSBwYXRocyBieSB3aGljaCBhIGRldiBidWlsZCB0YWtlcyBvdmVyIHRoZSBwcm9kdWN0aW9uIGFnZW50cyBjb21tYW5kIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxkZWZzPgogICAgPG1hcmtlciBpZD0iYXIiIG1hcmtlcldpZHRoPSI5IiBtYXJrZXJIZWlnaHQ9IjkiIHJlZlg9IjgiIHJlZlk9IjQuNSIgb3JpZW50PSJhdXRvIj4KICAgICAgPHBhdGggZD0iTTAsMCBMOSw0LjUgTDAsOSB6IiBmaWxsPSIjZTA2NjNhIi8+CiAgICA8L21hcmtlcj4KICAgIDxtYXJrZXIgaWQ9Im9rIiBtYXJrZXJXaWR0aD0iOSIgbWFya2VySGVpZ2h0PSI5IiByZWZYPSI4IiByZWZZPSI0LjUiIG9yaWVudD0iYXV0byI+CiAgICAgIDxwYXRoIGQ9Ik0wLDAgTDksNC41IEwwLDkgeiIgZmlsbD0iIzdhOGE5OSIvPgogICAgPC9tYXJrZXI+CiAgPC9kZWZzPgoKICA8dGV4dCB4PSIyMCIgeT0iMjYiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSJjdXJyZW50Q29sb3IiPmFnZW50IGRldmVsb3BpbmcgYWdlbnRzLWNsaTwvdGV4dD4KCiAgPHJlY3QgeD0iMjAiIHk9IjQ0IiB3aWR0aD0iMjE1IiBoZWlnaHQ9IjUyIiByeD0iNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjN2E4YTk5IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjM0IiB5PSI2NiIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEuNSIgZmlsbD0iY3VycmVudENvbG9yIj4xLiBnbG9iYWwgcnVsZSBzYXlzPC90ZXh0PgogIDx0ZXh0IHg9IjM0IiB5PSI4MyIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEuNSIgZmlsbD0iI2UwNjYzYSI+bnBtIGkgLWcgLjwvdGV4dD4KCiAgPHJlY3QgeD0iMjAiIHk9IjExOCIgd2lkdGg9IjIxNSIgaGVpZ2h0PSI1MiIgcng9IjYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzdhOGE5OSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIzNCIgeT0iMTQwIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMS41IiBmaWxsPSJjdXJyZW50Q29sb3IiPjIuIGluc3RhbGwuc2ggbGlua3M8L3RleHQ+CiAgPHRleHQgeD0iMzQiIHk9IjE1NyIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEuNSIgZmlsbD0iI2UwNjYzYSI+fi8ubG9jYWwvYmluL2FnZW50czwvdGV4dD4KCiAgPHJlY3QgeD0iMjAiIHk9IjE5MiIgd2lkdGg9IjIxNSIgaGVpZ2h0PSI1MiIgcng9IjYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzdhOGE5OSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIzNCIgeT0iMjE0IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMS41IiBmaWxsPSJjdXJyZW50Q29sb3IiPjMuIGluc3RhbGwuc2ggYm91bmNlczwvdGV4dD4KICA8dGV4dCB4PSIzNCIgeT0iMjMxIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMS41IiBmaWxsPSIjZTA2NjNhIj50aGUgc2hhcmVkIGRhZW1vbjwvdGV4dD4KCiAgPGxpbmUgeDE9IjIzNSIgeTE9IjcwIiAgeDI9IjM5MiIgeTI9IjEyMCIgc3Ryb2tlPSIjZTA2NjNhIiBzdHJva2Utd2lkdGg9IjIiIG1hcmtlci1lbmQ9InVybCgjYXIpIi8+CiAgPGxpbmUgeDE9IjIzNSIgeTE9IjE0NCIgeDI9IjM5MiIgeTI9IjE0NCIgc3Ryb2tlPSIjZTA2NjNhIiBzdHJva2Utd2lkdGg9IjIiIG1hcmtlci1lbmQ9InVybCgjYXIpIi8+CiAgPGxpbmUgeDE9IjIzNSIgeTE9IjIxOCIgeDI9IjM5MiIgeTI9IjI2MiIgc3Ryb2tlPSIjZTA2NjNhIiBzdHJva2Utd2lkdGg9IjIiIG1hcmtlci1lbmQ9InVybCgjYXIpIi8+CgogIDxyZWN0IHg9IjQwMCIgeT0iMTA0IiB3aWR0aD0iMjMwIiBoZWlnaHQ9IjgwIiByeD0iNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZTA2NjNhIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI0MTQiIHk9IjEyOCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNlMDY2M2EiPnRoZSBwcm9kdWN0aW9uIGNvbW1hbmQ8L3RleHQ+CiAgPHRleHQgeD0iNDE0IiB5PSIxNDgiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjExLjUiIGZpbGw9ImN1cnJlbnRDb2xvciI+YWdlbnRzIC8gYWcgLyBicm93c2VyPC90ZXh0PgogIDx0ZXh0IHg9IjQxNCIgeT0iMTY4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzdhOGE5OSI+b3ZlcndyaXR0ZW4gb3Igc2hhZG93ZWQ8L3RleHQ+CgogIDxyZWN0IHg9IjQwMCIgeT0iMjM4IiB3aWR0aD0iMjMwIiBoZWlnaHQ9IjUyIiByeD0iNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZTA2NjNhIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI0MTQiIHk9IjI2MCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNlMDY2M2EiPnRoZSBzaGFyZWQgZGFlbW9uPC90ZXh0PgogIDx0ZXh0IHg9IjQxNCIgeT0iMjc4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzdhOGE5OSI+c2VjcmV0cyDCtyBicm93c2VyIMK3IHJvdXRpbmVzPC90ZXh0PgoKICA8bGluZSB4MT0iNjMwIiB5MT0iMTQ0IiB4Mj0iNzAyIiB5Mj0iMTQ0IiBzdHJva2U9IiM3YThhOTkiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI29rKSIvPgogIDxsaW5lIHgxPSI2MzAiIHkxPSIyNjQiIHgyPSI3MDIiIHkyPSIyMDAiIHN0cm9rZT0iIzdhOGE5OSIgc3Ryb2tlLXdpZHRoPSIxLjUiIG1hcmtlci1lbmQ9InVybCgjb2spIi8+CgogIDxyZWN0IHg9IjcxMCIgeT0iMTE4IiB3aWR0aD0iMTcwIiBoZWlnaHQ9Ijg4IiByeD0iNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjN2E4YTk5IiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWRhc2hhcnJheT0iNCAzIi8+CiAgPHRleHQgeD0iNzI0IiB5PSIxNDIiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSJjdXJyZW50Q29sb3IiPmV2ZXJ5IG90aGVyPC90ZXh0PgogIDx0ZXh0IHg9IjcyNCIgeT0iMTYwIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iY3VycmVudENvbG9yIj5zZXNzaW9uIG9uIHRoZTwvdGV4dD4KICA8dGV4dCB4PSI3MjQiIHk9IjE3OCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+ZmxlZXQ8L3RleHQ+CiAgPHRleHQgeD0iNzI0IiB5PSIxOTYiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjZTA2NjNhIj5ydW5zIGJyb2tlbiAvIHN0YWxlPC90ZXh0PgoKICA8dGV4dCB4PSIyMCIgeT0iMzMwIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzdhOGE5OSI+TGVnZW5kOjwvdGV4dD4KICA8bGluZSB4MT0iODAiIHkxPSIzMjYiIHgyPSIxMjAiIHkyPSIzMjYiIHN0cm9rZT0iI2UwNjYzYSIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2FyKSIvPgogIDx0ZXh0IHg9IjEyOCIgeT0iMzMwIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzdhOGE5OSI+dGFrZW92ZXIgcGF0aCAodGhpcyBwbGFuIHJlbW92ZXMgYWxsIHRocmVlKTwvdGV4dD4KICA8bGluZSB4MT0iODAiIHkxPSIzNTIiIHgyPSIxMjAiIHkyPSIzNTIiIHN0cm9rZT0iIzdhOGE5OSIgc3Ryb2tlLXdpZHRoPSIxLjUiIG1hcmtlci1lbmQ9InVybCgjb2spIi8+CiAgPHRleHQgeD0iMTI4IiB5PSIzNTYiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjN2E4YTk5Ij5ibGFzdCByYWRpdXM8L3RleHQ+Cjwvc3ZnPgo8ZmlnY2FwdGlvbj48Yj5GaWd1cmUuPC9iPiBUaHJlZSBpbmRlcGVuZGVudCB0YWtlb3ZlciBwYXRocywgb25lIGJsYXN0IHJhZGl1cy48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKfCAjIHwgTWVjaGFuaXNtIHwgRXZpZGVuY2UgfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgMSB8IFRoZSBnbG9iYWwgcnVsZSB0ZWxscyBldmVyeSBhZ2VudCB0byBpbnN0YWxsIGdsb2JhbGx5LCBhbmQgdGhpcyByZXBvIGNhcnZlcyBvdXQgbm8gZXhjZXB0aW9uIHwgYC9ob21lL211cXNpdC8uY2xhdWRlL0NMQVVERS5tZDo0NTVgIOKAlCAqIk5vIGxvY2FsbHkgYnVpbHQgQ0xJcy4gSW5zdGFsbCBnbG9iYWxseSAoYG5wbSBpIC1nYOKApikiKi4gbnBtIHByZWZpeCBpcyBgL2hvbWUvbXVxc2l0Ly5sb2NhbGAsIHNvIGBucG0gaSAtZyAuYCBsYW5kcyBvbiB0aGUgcmVhbCBpbnN0YWxsLiB8CnwgMiB8IGBpbnN0YWxsLnNoYCBsaW5rcyB0aGUgZGV2IGJ1aWxkIHVuZGVyIHRoZSBwcm9kdWN0aW9uIG5hbWVzIHwgYGFwcHMvY2xpL3NjcmlwdHMvaW5zdGFsbC5zaDoxNDEtMTQ2YCDigJQgYGZvciBiaW4gaW4gYWdlbnRzIGFnIGJyb3dzZXI7IGRvIGxuIC1zZiAiJHNyYyIgIiRMSU5LX0RJUi8kYmluImAgfAp8IDMgfCBgaW5zdGFsbC5zaGAgcmVzdGFydHMgdGhlIHNoYXJlZCBkYWVtb24gcGlubmVkIHRvIHRoZSBkZXYgYmluYXJ5IHwgYGluc3RhbGwuc2g6MTk2YCBgQUdFTlRTX0lOU1RBTExfQklOPSIkTElOS0VEX1BBVEgiYCDihpIgYGluc3RhbGwuc2g6MjA1YCBgZC5zdGFydERhZW1vbj8uKGJpbilgIOKGkiBgYXBwcy9jbGkvc3JjL2xpYi9kYWVtb24udHM6MTMxM2AgfAoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+CkJvdGggQUdFTlRTLm1kIGZpbGVzIGRvY3VtZW50IHBhdGggMiBhcyBjb3JyZWN0IOKAlCA8Y29kZT5BR0VOVFMubWQ6MTU4PC9jb2RlPiBhbmQKPGNvZGU+YXBwcy9jbGkvQUdFTlRTLm1kOjU4My01ODU8L2NvZGU+IHNheSB0aGUgZGV2IGJ1aWxkIGlzICJzeW1saW5rZWQgaW50bwo8Y29kZT4kSE9NRS8ubG9jYWwvYmluL2FnZW50czwvY29kZT4uIFRoZSBucG0taW5zdGFsbGVkIGdsb2JhbCBpcyBuZXZlciB0b3VjaGVkLiIKVGhhdCBpcyB0cnVlIGFib3V0IHRoZSBucG0gcHJlZml4IGFuZCBmYWxzZSBhYm91dCB0aGUgY29tbWFuZCB5b3UgYWN0dWFsbHkgdHlwZS4KPC9kaXY+CgojIyMgV2hhdCB0aGF0IGxvb2tzIGxpa2Ugb24gdGhpcyBib3ggcmlnaHQgbm93Cgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1ncmlkIGFydGlmYWN0LWdyaWQtMiI+CjxkaXYgY2xhc3M9ImFydGlmYWN0LXBhbmVsIiBkYXRhLXN0YXRlPSJjdXJyZW50IiBkYXRhLWV2aWRlbmNlPSJjYXB0dXJlIj4KCioqQmVmb3JlIOKAlCB0aGUgZGV2IGxpbmtzIHdlcmUgZGFuZ2xpbmcqKgoKYGBgY29uc29sZQokIGxzIC1sYSB+Ly5sb2NhbC9iaW4vYWdlbnRzIH4vLmxvY2FsL2Jpbi9hZyB+Ly5sb2NhbC9iaW4vYnJvd3NlcgphZ2VudHMgIC0+IC9ob21lL211cXNpdC8ubG9jYWwvYWdlbnRzLWNsaS1kZXYvYmluL2FnZW50cwphZyAgICAgIC0+IC9ob21lL211cXNpdC8ubG9jYWwvYWdlbnRzLWNsaS1kZXYvYmluL2FnCmJyb3dzZXIgLT4gL2hvbWUvbXVxc2l0Ly5sb2NhbC9hZ2VudHMtY2xpLWRldi9iaW4vYnJvd3NlcgoKJCBscyB+Ly5sb2NhbC9hZ2VudHMtY2xpLWRldi9saWIvbm9kZV9tb2R1bGVzL0BwaG54LWxhYnMvCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAjIGVtcHR5IC0gdGhlIGRldiBwcmVmaXggd2FzIGNsZWFuZWQKCiQgfi8ubG9jYWwvYmluL2FnZW50cyAtLXZlcnNpb24KenNoOiBubyBzdWNoIGZpbGUgb3IgZGlyZWN0b3J5OiAvaG9tZS9tdXFzaXQvLmxvY2FsL2Jpbi9hZ2VudHMKCiQgcGdyZXAgLWFmIF9fZGFlbW9uLXJ1bgo0MTYzMzQ3IGJ1biAuYWdlbnRzL3dvcmt0cmVlcy9ydXNoLTI0MzEtYmluYXJ5LXNoYWRvdy9hcHBzL2NsaS9kaXN0L2luZGV4LmpzIF9fZGFlbW9uLXJ1bgpgYGAKCkFueSBzaGVsbCB0aGF0IHB1dHMgYH4vLmxvY2FsL2JpbmAgZmlyc3QgZ2V0cyBhIGJyb2tlbiBgYWdlbnRzYC4KPC9kaXY+Cgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1wYW5lbCIgZGF0YS1zdGF0ZT0icHJvcG9zZWQiIGRhdGEtZXZpZGVuY2U9ImNhcHR1cmUiPgoKKipBZnRlciDigJQgdHdvIG5hbWVzLCBubyBjb2xsaXNpb24qKgoKYGBgY29uc29sZQokIGJhc2ggc2NyaXB0cy9pbnN0YWxsLnNoIC0tc2tpcC10ZXN0cwogIGJpbjogICAgL2hvbWUvbXVxc2l0Ly5sb2NhbC9iaW4vYWdlbnRzLWRldgogIFJlbW92ZWQgc3RhbGUgZGV2IGxpbms6IH4vLmxvY2FsL2Jpbi9hZ2VudHMgLT4gfi8ubG9jYWwvYWdlbnRzLWNsaS1kZXYvYmluL2FnZW50cwogIFJlbW92ZWQgc3RhbGUgZGV2IGxpbms6IH4vLmxvY2FsL2Jpbi9hZyAgICAgLT4gfi8ubG9jYWwvYWdlbnRzLWNsaS1kZXYvYmluL2FnCiAgUmVtb3ZlZCBzdGFsZSBkZXYgbGluazogfi8ubG9jYWwvYmluL2Jyb3dzZXIgLT4gfi8ubG9jYWwvYWdlbnRzLWNsaS1kZXYvYmluL2Jyb3dzZXIKICBTaGFyZWQgZGFlbW9uIGxlZnQgb24gcHJvZHVjdGlvbiBjb2RlIChzZWNyZXRzIGJyb2tlciwgYnJvd3NlciBJUEMsIHJvdXRpbmVzKS4KICBSZWFkeQogIC9ob21lL211cXNpdC8ubG9jYWwvYmluL2FnZW50cy1kZXYgKDAuMC4wLWRldi40MWFlNDFmNjAtZGlydHkpCiAgUnVuICdhZ2VudHMtZGV2IDxhcmdzPicuIFlvdXIgaW5zdGFsbGVkICdhZ2VudHMnIGlzIHVudG91Y2hlZC4KCiQgbHMgfi8ubG9jYWwvYmluL2FnZW50cyB+Ly5sb2NhbC9iaW4vYWcgfi8ubG9jYWwvYmluL2Jyb3dzZXIKbHM6IGNhbm5vdCBhY2Nlc3MgLi4uOiBObyBzdWNoIGZpbGUgb3IgZGlyZWN0b3J5ICAgIyBhbGwgdGhyZWUgZ29uZQoKJCBhZ2VudHMgLS12ZXJzaW9uCjEuMjIuMzUgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAjIGluc3RhbGxlZCBDTEksIHVudG91Y2hlZAoKJCBhZ2VudHMtZGV2IC0tdmVyc2lvbgowLjAuMC1kZXYuNDFhZTQxZjYwLWRpcnR5ICAgICAgICAgICAgIyB0aGlzIHdvcmtpbmcgdHJlZQpgYGAKClBBVEggcG9zaXRpb24gc3RvcHMgbWF0dGVyaW5nLiBZb3UgcGljayB3aGljaCBvbmUgcnVucyBieSB0eXBpbmcgaXRzIG5hbWUuCjwvZGl2Pgo8L2Rpdj4KCiMjIFB1cnBvc2UKClJlbW92ZSB0aGUgY2F1c2UsIG5vdCBqdXN0IHRoZSBzeW1wdG9tLiBSVVNILTI0MzEgYWxyZWFkeSBzaGlwcGVkIHRoZSBkZXRlY3Rpb24KaGFsZiDigJQgYGFwcHMvY2xpL3NyYy9saWIvYmluYXJ5LXNoYWRvdy50c2AgKCJEZXRlY3QgYGFnZW50c2AgYmluYXJpZXMgdGhhdCBjb3VsZApzaGFkb3cgdGhlIGN1cnJlbnRseSBydW5uaW5nIENMSSIpIGFuZCBhbiBgYWdlbnRzIGRvY3RvcmAgYGJpbmFyeS1zaGFkb3dgCndhcm5pbmcuIFJVU0gtMjQ0NiBhZGRlZCB0aGUgZmxlZXQtcm9sbG91dCBwcm9iZSB0aGF0IHJlZnVzZXMgdG8gY291bnQgYQpkZXYtc2hhZG93ZWQgYm94IGFzIHVwZ3JhZGVkIChgYXBwcy9jbGkvc3JjL2xpYi9kZXZpY2VzL3JvbGxvdXQtdmVyaWZ5LnRzOjE3Mi0xNzdgKS4KVGhpcyBwbGFuIGV4dGVuZHMgdGhhdCB3b3JrIGJ5IHJlbW92aW5nIHdoYXQgdGhvc2UgdHdvIGV4aXN0IHRvIGNhdGNoOyBib3RoIHN0YXkKaW4gcGxhY2UgYXMgYmFja3N0b3BzLgoKIyMgUHJvcG9zZWQgQ2hhbmdlcwoKIyMjIGBhcHBzL2NsaS9zY3JpcHRzL2luc3RhbGwuc2hgIOKAlCBsaW5rIGFzIGBhZ2VudHMtZGV2YCwgbmV2ZXIgYGFnZW50c2AKCmBgYGRpZmYKLSAgZm9yIGJpbiBpbiBhZ2VudHMgYWcgYnJvd3NlcjsgZG8KKyAgZm9yIGJpbiBpbiAiJHtERVZfQklOU1tAXX0iOyBkbwogICAgIC4uLgotICAgIGxuIC1zZiAiJFBSRUZJWC9iaW4vJGJpbiIgIiRMSU5LX0RJUi8kYmluIgorICAgIGxuIC1zZiAiJFBSRUZJWC9iaW4vJGJpbiIgIiRMSU5LX0RJUi8kYmluJERFVl9TVUZGSVgiCiAgIGRvbmUKYGBgCgpgYnJvd3NlcmAgbGVhdmVzIHRoZSBkZXYgbGluayBzZXQgZW50aXJlbHk6IGBhZ2VudHMtZGV2IGJyb3dzZXIg4oCmYCByZWFjaGVzIHRoZQpzYW1lIGNvZGUsIGFuZCBwcm9kdWN0aW9uJ3MgYH4vLmxvY2FsL2JpbmAgZmFsbGJhY2sgY2xhaW1zIG9ubHkgYGFnZW50c2AgYW5kIGBhZ2AKKGBhcHBzL2NsaS9zY3JpcHRzL3Bvc3RpbnN0YWxsLmpzOjMxNWApLCBzbyB0aGVyZSBpcyBubyByZWFzb24gdG8gaG9sZCBhIHRoaXJkCm5hbWUuCgpUaGUgc2FtZSByZW5hbWUgYXBwbGllcyBhdCBldmVyeSBvdGhlciBzaXRlIHRoYXQgaGFyZGNvZGVzIHRoZSBiaW4gbmFtZToKCnwgU2l0ZSB8IE5vdyB8IEFmdGVyIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IGA6Ny0xMmAgaGVhZGVyIGNvbW1lbnQgfCAiZXhwb3NlZCB2aWEgYCRIT01FLy5sb2NhbC9iaW4vYWdlbnRzYCIgcGx1cyBQQVRILW9yZGVyaW5nIGFkdmljZSB8IGV4cG9zZWQgYXMgYGFnZW50cy1kZXZgIC8gYGFnLWRldmA7IHN0YXRlcyB0aGUgc2NyaXB0IG11c3QgbmV2ZXIgdG91Y2ggYGFnZW50c2AsIGBhZ2AsIG9yIGBicm93c2VyYCB8CnwgYDo2OWAgc3RhdHVzIGxpbmUgfCBgYmluOiAkTElOS19ESVIvYWdlbnRzYCB8IGBiaW46ICRMSU5LX0RJUi9hZ2VudHMtZGV2YCB8CnwgYDoxMzItMTQwYCBNSU5HVyBicmFuY2ggfCB3cml0ZXMgYCRMSU5LX0RJUi8kYmlueywuY21kLC5wczF9YCB8IHdyaXRlcyBgJExJTktfRElSLyRiaW4tZGV2eywuY21kLC5wczF9YCB3aXRoIGFuIGVtYmVkZGVkIG1hcmtlciBjb21tZW50IHwKfCBgOjE1Mi0xNTdgIG1hY09TIE1hY2gtTyBicmFuY2ggfCBgbG4gLXNmICIkTkFUSVZFX0JJTiIgIiRMSU5LX0RJUi9hZ2VudHMiYCBhbmQgYOKApi9hZ2AgfCBg4oCmL2FnZW50cy1kZXZgIGFuZCBg4oCmL2FnLWRldmAgfAp8IGA6MTU5LTE2MmAgcnVubmFiaWxpdHkgY2hlY2sgfCBgTElOS0VEX1BBVEg9IiRMSU5LX0RJUi9hZ2VudHMiYCB8IGBMSU5LRURfUEFUSD0iJExJTktfRElSL2FnZW50cy1kZXYiYCB8CnwgYDoyMTktMjM4YCBQQVRILXByZWNlZGVuY2Ugd2FybmluZyB8IHdhcm5zIHdoZW4gdGhlIHJlZ2lzdHJ5IGJpbiBkaXIgcHJlY2VkZXMgYCRMSU5LX0RJUmAgfCBkZWxldGUgdGhlIG9yZGVyaW5nIGhhbGY7IGtlZXAgb25seSB0aGUgImAkTElOS19ESVJgIGlzIG5vdCBvbiBQQVRIIiBjYXNlIHwKCiMjIyBSZXBhaXIgcGFzcywgYmVmb3JlIHRoZSBuZXcgbGlua3MgYXJlIGNyZWF0ZWQKCmBgYGRpZmYKK0RFVl9TSEFET1dfTUFSS0VSPSdBR0VOVFNfQ0xJX0RFVl9TSEFET1dfTElOSycKKworIyBSZW1vdmUgT05MWSBhICRMSU5LX0RJUi97YWdlbnRzLGFnLGJyb3dzZXJ9IGVudHJ5IGEgUFJJT1IgcnVuIG9mIFRISVMgc2NyaXB0CisjIGNyZWF0ZWQuIEEgcmVhbCBmaWxlLCBvciBhIGxpbmsgcG9pbnRpbmcgYW55d2hlcmUgZWxzZSAocmVnaXN0cnkgaW5zdGFsbCwKKyMgSG9tZWJyZXcsIHRoZSB1c2VyJ3Mgb3duIGFsaWFzKSwgaXMgbGVmdCB1bnRvdWNoZWQuCitjbGVhbnVwX2xlZ2FjeV9zaGFkb3coKSB7CisgIGxvY2FsIHBhdGg9IiQxIiByYXcKKyAgaWYgW1sgLUwgIiRwYXRoIiBdXTsgdGhlbgorICAgICMgcmVhZGxpbmssIG5vdCBbWyAtZSBdXTogLWUgaXMgZmFsc2UgZm9yIGEgREFOR0xJTkcgc3ltbGluaywgd2hpY2ggaXMKKyAgICAjIGV4YWN0bHkgdGhlIHNoYXBlIGxlZnQgYmVoaW5kIHdoZW4gdGhlIGRldiBwcmVmaXggaXMgY2xlYW5lZC4KKyAgICByYXc9JChyZWFkbGluayAiJHBhdGgiKSB8fCByZXR1cm4gMAorICAgIGNhc2UgIiRyYXciIGluCisgICAgICAiJFBSRUZJWCIvKnwiJEhPTUUiLy5sb2NhbC9hZ2VudHMtY2xpLWRldi8qKQorICAgICAgICBybSAtZiAiJHBhdGgiOyBkaW0gIiAgUmVtb3ZlZCBsZWdhY3kgc2hhZG93IGxpbms6ICRwYXRoIC0+ICRyYXciIDs7CisgICAgZXNhYworICBlbGlmIFtbIC1mICIkcGF0aCIgXV0gJiYgZ3JlcCAtcUYgIiRERVZfU0hBRE9XX01BUktFUiIgIiRwYXRoIiAyPi9kZXYvbnVsbDsgdGhlbgorICAgIHJtIC1mICIkcGF0aCI7IGRpbSAiICBSZW1vdmVkIGxlZ2FjeSBzaGFkb3cgZmlsZTogJHBhdGgiCisgIGZpCit9Citmb3IgYmluIGluIGFnZW50cyBhZyBicm93c2VyOyBkbworICBjbGVhbnVwX2xlZ2FjeV9zaGFkb3cgIiRMSU5LX0RJUi8kYmluIgorICBjbGVhbnVwX2xlZ2FjeV9zaGFkb3cgIiRMSU5LX0RJUi8kYmluLmNtZCIKKyAgY2xlYW51cF9sZWdhY3lfc2hhZG93ICIkTElOS19ESVIvJGJpbi5wczEiCitkb25lCmBgYAoKVGhpcyBjbGVhcnMgdGhlIHRocmVlIGRhbmdsaW5nIGVudHJpZXMgb24geW9zZW1pdGUtczAgdGhlIG5leHQgdGltZSB0aGUgc2NyaXB0CnJ1bnMuCgojIyMgRGFlbW9uIGJvdW5jZSBiZWNvbWVzIG9wdC1pbgoKVGhlIGRvY2Jsb2NrIGF0IGBpbnN0YWxsLnNoOjE4Ni0xODdgIGp1c3RpZmllcyB0aGUgYXV0b21hdGljIHJlc3RhcnQgb24gdGhlCnByZW1pc2UgdGhhdCB0aGUgZGV2IGJ1aWxkICppcyogd2hhdCBgYWdlbnRzYCByZXNvbHZlcyB0by4gVGhpcyBjaGFuZ2UgcmVtb3Zlcwp0aGF0IHByZW1pc2UsIHNvIHRoZSByZXN0YXJ0IGhhcyB0byBzdG9wIGJlaW5nIGF1dG9tYXRpYzoKCmBgYGRpZmYKLWlmIFtbIC16ICIke0NJOi19IiAmJiAiJHtBR0VOVFNfTk9fSEVBTDotfSIgIT0gIjEiIF1dOyB0aGVuCitpZiBbWyAteiAiJHtDSTotfSIgJiYgIiR7QUdFTlRTX05PX0hFQUw6LX0iICE9ICIxIiAmJiAiJEJPVU5DRV9EQUVNT04iID09IHRydWUgXV07IHRoZW4KICAgSU5TVEFMTEVEX1BLRz0iJFBSRUZJWC9saWIvbm9kZV9tb2R1bGVzLyRQS0dfTkFNRSIKICAgLi4uCitlbGlmIFtbIC16ICIke0NJOi19IiBdXTsgdGhlbgorICBkaW0gIiAgU2hhcmVkIGRhZW1vbiBsZWZ0IG9uIHByb2R1Y3Rpb24gY29kZSAoc2VjcmV0cyBicm9rZXIsIGJyb3dzZXIgSVBDLCByb3V0aW5lcykuIgorICBkaW0gIiAgUGFzcyAtLWJvdW5jZS1kYWVtb24gdG8gcG9pbnQgaXQgYXQgdGhpcyBkZXYgYnVpbGQgLSB0aGF0IGFsc28gYWZmZWN0cyB5b3VyIgorICBkaW0gIiAgZXZlcnlkYXkgJ2FnZW50cycsIG5vdCBqdXN0IGFnZW50cy1kZXYuIgogZmkKYGBgCgojIyMgYEFHRU5UUy5tZGAgKHJvb3QsIGNhbm9uaWNhbCDigJQgbmV2ZXIgZWRpdCB0aGUgYENMQVVERS5tZGAgc3ltbGluaykKCkFtZW5kIHRoZSBlbnRyeS1wb2ludHMgdGFibGUgcm93IGF0IGA6MTU4YCwgdGhlbiBhZGQgYSBzaG9ydCBwYXJhZ3JhcGggdW5kZXIgdGhlCnRhYmxlIHN0YXRpbmcgdGhlIHJ1bGUgYW5kIG5hbWluZyB0aGUgb3ZlcnJpZGUgaXQgdGFrZXMgb3ZlciBmcm9tOgoKYGBgZGlmZgotfCBDTEkgZGV2IGluc3RhbGwgfCBbYGFwcHMvY2xpL3NjcmlwdHMvaW5zdGFsbC5zaGBdKGFwcHMvY2xpL3NjcmlwdHMvaW5zdGFsbC5zaCkgfCBzaWRlLWJ5LXNpZGUgZGV2IGJ1aWxkIGF0IGB+Ly5sb2NhbC9hZ2VudHMtY2xpLWRldmAsIGV4cG9zZWQgdmlhIGB+Ly5sb2NhbC9iaW4vYWdlbnRzYDsgZG9lcyBub3QgdG91Y2ggdGhlIHJlZ2lzdHJ5IGluc3RhbGwgfAorfCBDTEkgZGV2IGluc3RhbGwgfCBbYGFwcHMvY2xpL3NjcmlwdHMvaW5zdGFsbC5zaGBdKGFwcHMvY2xpL3NjcmlwdHMvaW5zdGFsbC5zaCkgfCBzaWRlLWJ5LXNpZGUgZGV2IGJ1aWxkIGF0IGB+Ly5sb2NhbC9hZ2VudHMtY2xpLWRldmAsIGludm9rZWQgYXMgYGFnZW50cy1kZXZgIChhbmQgYGFnLWRldmApOyBuZXZlciBjcmVhdGVzIG9yIHRvdWNoZXMgYH4vLmxvY2FsL2Jpbi97YWdlbnRzLGFnLGJyb3dzZXJ9YCB8CmBgYAoKVGhlIG5ldyBwYXJhZ3JhcGgsIGluIHN1YnN0YW5jZTogaW4gdGhpcyByZXBvIHRoZSBnbG9iYWwgImluc3RhbGwgZ2xvYmFsbHkgLyBubwpsb2NhbGx5IGJ1aWx0IENMSXMiIHJ1bGUgZG9lcyAqKm5vdCoqIGFwcGx5IHRvIGFnZW50cy1jbGkgaXRzZWxmLCBiZWNhdXNlIHRoZQp0aGluZyBiZWluZyBidWlsdCAqaXMqIHRoZSBjb21tYW5kLiBUbyBydW4geW91ciBjaGFuZ2VzLCB1c2UgYGJ1biBydW4gdGVzdGAgb3IKYGJ1biBydW4gdGVzdDpyZW1vdGVgIGZvciB0aGUgc3VpdGUgKGBhcHBzL2NsaS9wYWNrYWdlLmpzb246NTgsNjFgKSwgYW5kCmBzY3JpcHRzL2luc3RhbGwuc2hgIHRoZW4gYGFnZW50cy1kZXYg4oCmYCB0byBkcml2ZSB0aGUgcmVhbCBDTEkuIE5ldmVyIGBucG0gaSAtZ2AKZnJvbSB0aGUgd29ya2luZyB0cmVlLiBgYWdlbnRzIGRvY3RvcmAgcmVwb3J0cyBhIGBiaW5hcnktc2hhZG93YCBmaW5kaW5nIGlmCnNvbWV0aGluZyBoYXMgdGFrZW4gdGhlIG5hbWUuCgojIyMgYGFwcHMvY2xpL0FHRU5UUy5tZGAgKGNhbm9uaWNhbCkg4oCUIGNvcnJlY3QgdGhlIGZhbHNlIGNsYWltCgpSZXdyaXRlIHRoZSAiTG9jYWwgZGV2IGJ1aWxkIiBwYXJhZ3JhcGggYXQgYDo1ODMtNTg1YCBzbyBpdCBtYXRjaGVzOiBpbnN0YWxscyBhdApgJEhPTUUvLmxvY2FsL2FnZW50cy1jbGktZGV2L2AsIGV4cG9zZWQgYXMgYGFnZW50cy1kZXZgIC8gYGFnLWRldmA7IHRoZQpwcm9kdWN0aW9uIGBhZ2VudHNgIGNvbW1hbmQgaXMgbmV2ZXIgY3JlYXRlZCBvciBvdmVyd3JpdHRlbjsgdmVyc2lvbiBzdGFtcHMKYDAuMC4wLWRldi48c2hhPlstZGlydHldYDsgdGhlIGRhZW1vbiBib3VuY2UgaXMgb3B0LWluLgoKIyMjIFN0YWxlLXByZW1pc2UgY29tbWVudHMg4oCUIHdvcmRpbmcgb25seSwgbm8gbG9naWMKCmBhcHBzL2NsaS9zcmMvbGliL2RldmljZXMvcm9sbG91dC12ZXJpZnkudHM6Ni0xMGAgYW5kCmBhcHBzL2NsaS9zcmMvY29tbWFuZHMvc3NoLnRzOjQ2MWAgYm90aCBuYW1lIGBzY3JpcHRzL2luc3RhbGwuc2hgIGFzICp0aGUqCmV4YW1wbGUgb2YgYSBzaGFkb3dpbmcgZGV2IGJ1aWxkLiBSZXdvcmQgdG8gYSBnZW5lcmljICJhIHN0YWxlIG9yIGxlZ2FjeSBpbnN0YWxsCnBvaW50ZWQgYGFnZW50c2AgZWxzZXdoZXJlIi4gVGhlIHByb2JlcyBhcmUgbmFtZS1hZ25vc3RpYyAoYGNvbW1hbmQgLXYgYWdlbnRzYCkKYW5kIGtlZXAgd29ya2luZyB1bmNoYW5nZWQuCgojIyBQdWJsaWMgSW50ZXJmYWNlCgp8IFN1cmZhY2UgfCBCZWZvcmUgfCBBZnRlciB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCBEZXYgY29tbWFuZCB8IGBhZ2VudHNgIChzaGFkb3dzIHByb2R1Y3Rpb24pIHwgYGFnZW50cy1kZXZgIHwKfCBEZXYgYWxpYXMgfCBgYWdgIChzaGFkb3dzIHByb2R1Y3Rpb24pIHwgYGFnLWRldmAgfAp8IERldiBicm93c2VyIHwgYGJyb3dzZXJgIChzaGFkb3dzIHByb2R1Y3Rpb24pIHwgcmVtb3ZlZDsgdXNlIGBhZ2VudHMtZGV2IGJyb3dzZXJgIHwKfCBEYWVtb24gcmVzdGFydCB8IGF1dG9tYXRpYyBvbiBldmVyeSBpbnN0YWxsIHwgb3B0LWluIHZpYSBgLS1ib3VuY2UtZGFlbW9uYCB8CnwgUHJvZHVjdGlvbiBgYWdlbnRzYCAvIGBhZ2AgLyBgYnJvd3NlcmAgfCBtYXkgYmUgcmVwbGFjZWQgfCBuZXZlciB3cml0dGVuIGJ5IGBpbnN0YWxsLnNoYCB8CgpgYGBiYXNoCiMgYnVpbGQgKyBpbnN0YWxsIHRoaXMgd29ya2luZyB0cmVlLCB0aGVuIGRyaXZlIGl0CmJhc2ggYXBwcy9jbGkvc2NyaXB0cy9pbnN0YWxsLnNoIC0tc2tpcC10ZXN0cwphZ2VudHMtZGV2IHNlc3Npb25zIC0tYWN0aXZlCgojIHlvdXIgZXZlcnlkYXkgQ0xJIGlzIHVuYWZmZWN0ZWQKYWdlbnRzIC0tdmVyc2lvbgpgYGAKCiMjIFBsYW4KCi0gWyBdIFJlbmFtZSB0aGUgZGV2IGxpbmtzIHRvIGBhZ2VudHMtZGV2YCAvIGBhZy1kZXZgIGluIGBpbnN0YWxsLnNoYDsgZHJvcCBgYnJvd3NlcmAKLSBbIF0gQWRkIHRoZSBgY2xlYW51cF9sZWdhY3lfc2hhZG93YCByZXBhaXIgcGFzcyBhaGVhZCBvZiBsaW5rIGNyZWF0aW9uCi0gWyBdIEdhdGUgdGhlIGRhZW1vbiBib3VuY2UgYmVoaW5kIGAtLWJvdW5jZS1kYWVtb25gLCBkZWZhdWx0aW5nIG9mZgotIFsgXSBTaW1wbGlmeSB0aGUgUEFUSCB3YXJuaW5nIHRvIHRoZSAibm90IG9uIFBBVEgiIGNhc2Ugb25seQotIFsgXSBVcGRhdGUgcm9vdCBgQUdFTlRTLm1kYDogdGFibGUgcm93IHBsdXMgdGhlIG5ldmVyLWNsb2JiZXIgcGFyYWdyYXBoCi0gWyBdIENvcnJlY3QgdGhlICJMb2NhbCBkZXYgYnVpbGQiIHBhcmFncmFwaCBpbiBgYXBwcy9jbGkvQUdFTlRTLm1kYAotIFsgXSBSZXdvcmQgdGhlIHN0YWxlIHByZW1pc2UgaW4gYHJvbGxvdXQtdmVyaWZ5LnRzYCBhbmQgYHNzaC50c2AKLSBbIF0gQWRkIGBhcHBzL2NsaS9zY3JpcHRzL2luc3RhbGwudGVzdC50c2AKLSBbIF0gQWRkIHRoZSBjaGFuZ2Vsb2cgZnJhZ21lbnQKLSBbIF0gVmVyaWZ5IGVuZCB0byBlbmQgb24gdGhpcyBib3ggYW5kIHF1b3RlIHRoZSBvdXRwdXQKCiMjIFZhbGlkYXRpb24KCk5ldyB0ZXN0IGBhcHBzL2NsaS9zY3JpcHRzL2luc3RhbGwudGVzdC50c2AsIGluIHRoZSBzdHlsZSBvZgpgYXBwcy9jbGkvc2NyaXB0cy9wb3N0aW5zdGFsbC50ZXN0LnRzOjQxLTc0YCDigJQgdGhlIHJlYWwgc2NyaXB0IHZpYSBgc3Bhd25TeW5jYCwKYSB0ZW1wIGBIT01FYCwgbm8gbW9ja2luZzoKCnwgQ2FzZSB8IEFzc2VydGlvbiB8CnwgLS0tIHwgLS0tIHwKfCBGcmVzaCBydW4gfCBgfi8ubG9jYWwvYmluL2FnZW50cy1kZXZgIGFuZCBgYWctZGV2YCBleGlzdCBhbmQgcmVzb2x2ZSBpbnRvIHRoZSBkZXYgcHJlZml4IHwKfCBGcmVzaCBydW4gfCBub25lIG9mIGBhZ2VudHNgLCBgYWdgLCBgYnJvd3NlcmAgaXMgY3JlYXRlZCB8CnwgUHJlLXNlZWRlZCBkYW5nbGluZyBsaW5rIGludG8gdGhlIGRldiBwcmVmaXggfCByZW1vdmVkIHwKfCBQcmUtc2VlZGVkIGxpbmsgdG8gYW4gdW5yZWxhdGVkIGRlY295IHwgbGVmdCBieXRlLWlkZW50aWNhbCAobWlycm9ycyBgcG9zdGluc3RhbGwudGVzdC50czoxNjYtMTkwYCkgfAp8IERlZmF1bHQgcnVuIHwgbm8gZGFlbW9uIHJlc3RhcnQgYXR0ZW1wdGVkIHwKfCBgLS1ib3VuY2UtZGFlbW9uYCB8IGBBR0VOVFNfSU5TVEFMTF9CSU5gIGlzIHRoZSBgYWdlbnRzLWRldmAgcGF0aCB8CgpFbmQgdG8gZW5kLCBvbiB0aGlzIG1hY2hpbmU6CgpgYGBiYXNoCmJhc2ggYXBwcy9jbGkvc2NyaXB0cy9pbnN0YWxsLnNoIC0tc2tpcC10ZXN0cwpscyAtbGEgfi8ubG9jYWwvYmluL2FnZW50cyB+Ly5sb2NhbC9iaW4vYWcgfi8ubG9jYWwvYmluL2Jyb3dzZXIgICAjIGdvbmUKYWdlbnRzIC0tdmVyc2lvbiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIyAxLjIyLjM1CmFnZW50cy1kZXYgLS12ZXJzaW9uICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICMgMC4wLjAtZGV2LjxzaGE+CmFnZW50cyBkb2N0b3IgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICMgbm8gYmluYXJ5LXNoYWRvdwpwZ3JlcCAtYWYgX19kYWVtb24tcnVuICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAjIG5vIHdvcmt0cmVlIHBhdGgKY2QgYXBwcy9jbGkgJiYgYnVuIHJ1biB0ZXN0IC0tIHNjcmlwdHMvaW5zdGFsbC50ZXN0LnRzCmBgYAoKIyMgUmlza3MKCnwgUmlzayB8IE1pdGlnYXRpb24gfAp8IC0tLSB8IC0tLSB8CnwgTXVzY2xlIG1lbW9yeTogc2Vzc2lvbnMgYW5kIG5vdGVzIHRoYXQgc2F5ICJydW4gYGFnZW50c2AgYWZ0ZXIgaW5zdGFsbC5zaCIgfCBCb3RoIEFHRU5UUy5tZCBmaWxlcyBjaGFuZ2UgaW4gdGhlIHNhbWUgUFI7IGBpbnN0YWxsLnNoYCBwcmludHMgdGhlIGBhZ2VudHMtZGV2YCBwYXRoIG9uIGNvbXBsZXRpb24gfAp8IFRoZSByZXBhaXIgcGFzcyBkZWxldGVzIGEgbGluayB0aGUgdXNlciBjcmVhdGVkIGJ5IGhhbmQgfCBJdCBvbmx5IHJlbW92ZXMgbGlua3Mgd2hvc2UgcmF3IHRhcmdldCByZXNvbHZlcyBpbnNpZGUgdGhlIGRldiBwcmVmaXgsIHBsdXMgTUlOR1cgZmlsZXMgY2FycnlpbmcgdGhlIG1hcmtlcjsgYSBkZWNveS10YXJnZXQgdGVzdCBwaW5zIHRoaXMgfAp8IEEgYm94IGFscmVhZHkgaGFzIGEgZGV2LXNoYWRvd2VkIGBhZ2VudHNgIGFuZCBuZXZlciByZS1ydW5zIGBpbnN0YWxsLnNoYCB8IGBhZ2VudHMgZG9jdG9yYCdzIGBiaW5hcnktc2hhZG93YCBmaW5kaW5nIChSVVNILTI0MzEpIGFuZCB0aGUgcm9sbG91dCBwcm9iZSAoUlVTSC0yNDQ2KSBzdGlsbCBjYXRjaCBpdCB8CnwgU29tZW9uZSB3YW50cyB0aGUgb2xkIGF1dG8tYm91bmNlIGJlaGF2aW9yIHwgYC0tYm91bmNlLWRhZW1vbmAga2VlcHMgaXQsIG9uZSBmbGFnIGF3YXksIHdpdGggdGhlIGJsYXN0IHJhZGl1cyBzdGF0ZWQgfAp8IFN0YWxlIHdvcmt0cmVlIGRhZW1vbiAocGlkIGA0MTYzMzQ3YCkgcHJlZGF0ZXMgdGhpcyBjaGFuZ2UgfCBTdG9wIGl0IHNlcGFyYXRlbHkgZHVyaW5nIHZlcmlmaWNhdGlvbjsgbm90IGZpeGVkIGJ5IHRoZSBjb2RlIGNoYW5nZSBhbG9uZSB8CgojIyBUcmFja2luZwoKRXh0ZW5kcyBSVVNILTI0MzEgKGBiaW5hcnktc2hhZG93YCBkZXRlY3Rpb24pIGFuZCBSVVNILTI0NDYgKHJvbGxvdXQKdmVyaWZpY2F0aW9uKS4gTm8gbmV3IHRpY2tldCBvcGVuZWQgeWV0IOKAlCBvbmUgZ2V0cyBjcmVhdGVkIGFuZCBwYWlyZWQgd2hlbiB0aGlzCnBsYW4gaXMgYXBwcm92ZWQuIGBhcHBzL2NsaS9zY3JpcHRzL3Bvc3RpbnN0YWxsLmpzYCBpcyBleHBsaWNpdGx5IG91dCBvZiBzY29wZS4KClRoZSByZW5kZXJlZCBzb3VyY2UgbGFuZHMgYXQgYC5hZ2VudHMvYXJ0aWZhY3RzLzIwMjYtMDgtMTAvcGxhbi1kZXYtaW5zdGFsbC1uby1zaGFkb3cubWRgCmluIHRoZSBpbXBsZW1lbnRhdGlvbiB3b3JrdHJlZSBhbmQgc2hpcHMgd2l0aCB0aGUgUFIuCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
