@@ -225,6 +225,19 @@ export const PRESETS: Preset[] = [
       ANTHROPIC_SMALL_FAST_MODEL: 'claude-3-5-haiku-latest',
     },
   },
+  {
+    name: 'deepinfra',
+    description: 'DeepInfra direct API through its OpenAI-compatible endpoint, hosted by Codex.',
+    provider: 'deepinfra',
+    host: 'codex',
+    authEnvVar: 'OPENAI_API_KEY',
+    signupUrl: 'https://deepinfra.com/dash/api_keys',
+    docPath: 'deepinfra',
+    env: {
+      OPENAI_BASE_URL: 'https://api.deepinfra.com/v1/openai',
+      OPENAI_MODEL: 'deepseek-ai/DeepSeek-V3',
+    },
+  },
   // ----- Gateway / enterprise / self-hosted -----
   {
     name: 'proxy',
