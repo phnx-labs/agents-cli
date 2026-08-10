@@ -104,38 +104,43 @@ export async function runLaunchHealthTick(): Promise<void> {
  * status` / `agents devices list` read (PUBLISH-OWN / READ-UNION, RUSH-2061).
  * ~every 3 min.
  */
-export async function runFleetCacheWarmTick(): Promise<void> {
+export async function refreshLocalFleetAuthState(): Promise<{ row: FleetStatusRow; authRows: import('./auth-health.js').AuthProbeRow[] }> {
   const { machineId } = await import('./machine-id.js');
+  const { probeLocalFleetAuth, readFleetAuthRows, writeFleetAuthRows } = await import('./auth-health.js');
+  const { getCliVersion } = await import('./version.js');
   const self = machineId();
   const requestedAt = Date.now();
   const minimumCapturedAt = requestedAt - 2 * 60_000;
   const { withRefreshLease } = await import('./refresh-coordinator.js');
   const { readFleetStatus, publishLocalFleetStatus } = await import('./fleet-status.js');
-  const result = await withRefreshLease<{ row: FleetStatusRow; authRows?: unknown[] }>({
+  return withRefreshLease({
     scope: 'auth',
     key: self,
     readCompleted: () => {
       const row = readFleetStatus()[self];
-      return row ? { row, authRows: undefined } : null;
+      if (!row) return null;
+      return { row, authRows: readFleetAuthRows(self) };
     },
     // During mixed-version rollout the former system routine may still fire.
     // A recent daemon publication is the completed result, not a reason to
     // probe every provider a second time.
     isCompleted: (value) => value.row.capturedAt >= minimumCapturedAt,
     refresh: async () => {
-      const { probeLocalFleetAuth, writeFleetAuthRows } = await import('./auth-health.js');
-      const { getCliVersion } = await import('./version.js');
       const authRows = await probeLocalFleetAuth({ cliVersion: getCliVersion() });
       writeFleetAuthRows(self, authRows);
       const row = await publishLocalFleetStatus(self);
       return { row, authRows };
     },
   });
+}
+
+export async function runFleetCacheWarmTick(): Promise<void> {
+  const result = await refreshLocalFleetAuthState();
   // A waiter receives the already-published fleet row. The auth-row count is
   // available only to the process that performed the provider probes.
   const row = result.row;
-  const authCount = result.authRows?.length ?? 0;
-  console.log(`fleet cache warm: ${authCount} auth row(s) refreshed, ${row.agents.running} running agent(s) on ${self}`);
+  const authCount = result.authRows.length;
+  console.log(`fleet cache warm: ${authCount} auth row(s) refreshed, ${row.agents.running} running agent(s) on ${row.host}`);
 }
 
 /**
@@ -164,8 +169,11 @@ export async function runUsageRefreshTick(): Promise<void> {
     writeUsageCache: writeClaudeUsageCache,
     backoffUntil: usageRateLimitedUntil,
   });
+  const { listProfiles } = await import('./profiles.js');
+  const { refreshDueByokUsage } = await import('./byok-usage.js');
+  const byok = await refreshDueByokUsage(listProfiles());
   console.log(
-    `usage refresh: ${r.refreshed} refreshed, ${r.failed} failed, ${r.skippedNotDue} not-due, ${r.skippedBackoff} backed-off, ${r.skippedCap} capped`,
+    `usage refresh: ${r.refreshed} refreshed, ${r.failed} failed, ${r.skippedNotDue} not-due, ${r.skippedBackoff} backed-off, ${r.skippedCap} capped; BYOK ${byok.refreshed} refreshed, ${byok.skipped} not-due`,
   );
 }
 

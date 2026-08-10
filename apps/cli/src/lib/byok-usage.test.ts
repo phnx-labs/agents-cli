@@ -7,6 +7,8 @@ import {
   setByokFetchForTest,
   resetByokCacheForTest,
   setByokCachePathForTest,
+  refreshDueByokUsage,
+  BYOK_REFRESH_INTERVAL_MS,
 } from './byok-usage.js';
 import { setKeychainBackendForTest, type KeychainBackend } from './secrets/index.js';
 import type { Profile } from './profiles.js';
@@ -179,5 +181,19 @@ describe('getByokUsageForHarness', () => {
     await getByokUsageForHarness(makeProfile(), { forceRefresh: true });
     await getByokUsageForHarness(makeProfile(), { forceRefresh: true });
     expect(calls).toBe(2);
+  });
+
+  it('lets the daemon refresh due BYOK snapshots while ordinary reads stay cache-only', async () => {
+    keychain.set(KEYCHAIN_ITEM, 'sk-or-test');
+    let calls = 0;
+    setByokFetchForTest(async () => {
+      calls++;
+      return { ok: true, status: 200, json: async () => OR_SUCCESS } as Response;
+    });
+    const now = Date.now();
+    expect(await refreshDueByokUsage([makeProfile()], now)).toEqual({ refreshed: 1, skipped: 0 });
+    expect((await getByokUsageForHarness(makeProfile()))?.budget?.usedUsd).toBe(2.5);
+    expect(await refreshDueByokUsage([makeProfile()], now + BYOK_REFRESH_INTERVAL_MS - 1)).toEqual({ refreshed: 0, skipped: 1 });
+    expect(calls).toBe(1);
   });
 });

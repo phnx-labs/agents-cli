@@ -328,6 +328,27 @@ export function readAuthHealth(host: string, agent: AgentId | string, version: s
   return readAuthHealthCache()[authCacheKey(host, agent, version)] ?? null;
 }
 
+/** Reconstruct one host's published probe rows for a lease waiter/CLI reader. */
+export function readFleetAuthRows(host: string): AuthProbeRow[] {
+  const prefix = `${host}:`;
+  const rows: AuthProbeRow[] = [];
+  for (const [key, health] of Object.entries(readAuthHealthCache())) {
+    if (!key.startsWith(prefix)) continue;
+    const identity = key.slice(prefix.length);
+    const separator = identity.indexOf(':');
+    if (separator <= 0) continue;
+    const agent = identity.slice(0, separator);
+    if (!ALL_AGENT_IDS.includes(agent as AgentId)) continue;
+    rows.push({
+      agent: agent as AgentId,
+      version: identity.slice(separator + 1),
+      account: health.account,
+      health,
+    });
+  }
+  return rows;
+}
+
 /**
  * Merge entries into the cache. An incoming `error` verdict (a network blip,
  * not a server rejection) is indeterminate, so it must NOT clobber a prior

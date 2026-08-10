@@ -68,6 +68,12 @@ function writeCacheEntry(key: string, entry: CacheEntry): void {
   });
 }
 
+function byokCacheKey(profile: Profile): string {
+  return createHash('sha256').update(`${profile.provider}\0${profile.auth?.keychainItem ?? ''}`).digest('hex');
+}
+
+export const BYOK_REFRESH_INTERVAL_MS = 5 * 60_000;
+
 export function setByokCachePathForTest(value: string | null): string | null {
   const previous = cachePathOverride;
   cachePathOverride = value;
@@ -167,7 +173,7 @@ export async function getByokUsageForHarness(
   if (!profile.provider || !hasByokProvider(profile.provider) || !profile.auth) return null;
   const keychainItem = profile.auth.keychainItem;
   const provider = BYOK_REGISTRY[profile.provider];
-  const cacheKey = createHash('sha256').update(`${profile.provider}\0${keychainItem}`).digest('hex');
+  const cacheKey = byokCacheKey(profile);
   const cached = readCache()[cacheKey];
   if (!opts?.forceRefresh) return cached?.result ?? { budget: null, error: 'stale' };
 
@@ -184,4 +190,30 @@ export async function getByokUsageForHarness(
       return entry;
     },
   }).then((entry) => entry.result);
+}
+
+/** Refresh each configured BYOK credential when its daemon-owned snapshot is due. */
+export async function refreshDueByokUsage(
+  profiles: Profile[],
+  now = Date.now(),
+): Promise<{ refreshed: number; skipped: number }> {
+  const due = new Map<string, Profile>();
+  for (const profile of profiles) {
+    if (!profile.provider || !profile.auth || !hasByokProvider(profile.provider)) continue;
+    due.set(byokCacheKey(profile), profile);
+  }
+
+  let refreshed = 0;
+  let skipped = 0;
+  const cache = readCache();
+  for (const [key, profile] of due) {
+    const entry = cache[key];
+    if (entry && now - entry.fetchedAt < BYOK_REFRESH_INTERVAL_MS) {
+      skipped += 1;
+      continue;
+    }
+    await getByokUsageForHarness(profile, { forceRefresh: true });
+    refreshed += 1;
+  }
+  return { refreshed, skipped };
 }
