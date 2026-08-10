@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agents devices config — three-layer storage (PR evidence)</title>
+<style>
+  :root { color-scheme: dark; } * { box-sizing: border-box; }
+  body { margin: 0; background: #0a0a0a; color: #d4d4d4; font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 48px 24px 64px; }
+  header, .tabs, .term, footer { max-width: 1080px; width: 100%; }
+  h1 { font-size: 22px; margin: 0 0 6px; color: #fafafa; font-weight: 650; }
+  h1 .lime { color: #a3e635; }
+  header p { margin: 0 0 4px; color: #8a8a8a; font-size: 14px; line-height: 1.55; }
+  header code, footer code { color: #a3e635; background: #161616; padding: 1px 6px; border-radius: 4px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; }
+  .tabs { display: flex; gap: 8px; margin-top: 22px; }
+  .tab { font: 600 13px Inter, system-ui, sans-serif; color: #8a8a8a; background: #141414; border: 1px solid #262626; border-bottom: none; border-radius: 10px 10px 0 0; padding: 9px 16px; cursor: pointer; }
+  .tab.active { color: #0a0a0a; background: #a3e635; border-color: #a3e635; }
+  .term { background: #111113; border: 1px solid #262626; border-radius: 0 12px 12px 12px; overflow: hidden; box-shadow: 0 24px 64px rgba(0,0,0,.55); }
+  .term-bar { display: flex; align-items: center; gap: 8px; background: #1a1a1d; padding: 10px 14px; border-bottom: 1px solid #262626; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; } .dot.r { background: #ff5f57; } .dot.y { background: #febc2e; } .dot.g { background: #28c840; }
+  .term-title { margin-left: 10px; font: 12px 'JetBrains Mono', ui-monospace, monospace; color: #6b6b6b; }
+  pre { margin: 0; padding: 20px 22px; overflow-x: auto; font: 13px/1.55 'JetBrains Mono', ui-monospace, Menlo, monospace; color: #c9c9c9; white-space: pre; }
+  .hd { color: #fafafa; font-weight: 700; } .run { color: #fafafa; }
+  .key { color: #a3e635; } .cm { color: #6f7d4a; font-style: italic; } .dim { color: #7a7a7a; }
+  .ok { color: #a3e635; } .warn { color: #e2b93d; }
+  .pane { display: none; } .pane.active { display: block; }
+  footer { margin-top: 18px; color: #6b6b6b; font-size: 12.5px; line-height: 1.6; }
+</style></head><body>
+<header>
+  <h1><span class="lime">agents devices config</span> — three-layer storage</h1>
+  <p>Per-device settings live at <code>~/.agents/devices/&lt;name&gt;/agents.yaml</code> (tracked — conflict-free by construction, backed up with the repo). All-devices settings live in central <code>agents.yaml</code> → <code>fleet.defaults.config</code> via <code>--fleet</code>. Auto-written agent pins — the churn that got <code>devices/</code> gitignored — move to untracked runtime state, so the per-device doc can sync again.</p>
+</header>
+<div class="tabs">
+  <button class="tab active" data-pane="layers">The three layers</button>
+  <button class="tab" data-pane="smoke">Real run — device beats fleet</button>
+  <button class="tab" data-pane="help">devices config --help</button>
+</div>
+<div class="term">
+  <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">zsh — agents devices config</span></div>
+  <pre class="pane active" id="layers"><span class="cm"># the three layers — each where its write pattern belongs</span>
+<span class="key">~/.agents/devices/&lt;name&gt;/agents.yaml</span>   <span class="dim">config: · routines:</span>        <span class="ok">tracked → syncs → backed up</span>
+<span class="key">~/.agents/agents.yaml</span>                      <span class="dim">fleet.defaults.config</span>          <span class="ok">tracked → applies to ALL devices</span>
+<span class="key">~/.agents/.history/devices/pins-&lt;host&gt;.json</span> <span class="dim">agent version pins</span>             <span class="warn">never tracked — no more churn</span>
+
+<span class="cm"># read order for every device key</span>
+built-in default  →  <span class="key">fleet.defaults.config</span>  →  <span class="key">devices/&lt;name&gt;/ config:</span>  <span class="dim">← wins</span></pre>
+  <pre class="pane" id="smoke">$ <span class="run">agents devices config --fleet agents.max-concurrent 2</span>
+Set agents.max-concurrent = 2 as the fleet-wide default.
+ 
+$ <span class="run">agents devices config mac-mini agents.max-concurrent 4</span>
+Set agents.max-concurrent = 4 on 'mac-mini'.
+ 
+$ <span class="run">agents devices config mac-mini agents.max-concurrent --json</span>
+{
+  "device": "mac-mini",
+  "key": "agents.max-concurrent",
+  "value": 4,
+  "source": "<span class="key">device</span>"
+}
+ 
+<span class="cm"># ~/.agents/devices/mac-mini/agents.yaml  (tracked → syncs → backed up)</span>
+<span class="key">config</span>:
+  <span class="key">maxAgents</span>: 4
+ 
+<span class="cm"># ~/.agents/agents.yaml  (central)</span>
+<span class="key">fleet</span>:
+  devices:
+    {}
+  <span class="key">defaults</span>:
+    <span class="key">config</span>:
+      <span class="key">maxAgents</span>: 2
+ 
+<span class="cm"># pins: agents use claude@2.1.219 writes runtime state, never the repo:</span>
+registry.json</pre>
+  <pre class="pane" id="help">$ agents devices config --help
+<span class="hd">Usage: agents devices config [options] [name] [key] [value...]</span>
+ 
+Get, set, or unset a device’s settings (scheduler, agent cap, ssh overrides,
+auto-launch, notes). Bare opens an interactive settings menu (TTY) or prints the
+resolved config (piped). Per-device values live in the tracked
+devices/&lt;name&gt;/agents.yaml config: block; --fleet targets the fleet-wide
+<span class="key">defaults</span> (central fleet.defaults.config) every device inherits unless it
+overrides the key.
+ 
+<span class="hd">Examples:</span>
+  <span class="run">agents devices config mac-mini                            </span><span class="cm"># settings menu (TTY) / print config (piped)</span>
+  <span class="run">agents devices config mac-mini agents.max-concurrent 4    </span><span class="cm"># cap concurrent agents on mac-mini</span>
+  <span class="run">agents devices config mac-mini scheduler.enabled off      </span><span class="cm"># no routines firing there</span>
+  <span class="run">agents devices config mac-mini scheduler.enabled          </span><span class="cm"># read the effective value back</span>
+  <span class="run">agents devices config mac-mini scheduler.enabled --unset  </span><span class="cm"># inherit the fleet default again</span>
+  <span class="run">agents devices config --fleet scheduler.enabled off       </span><span class="cm"># fleet-wide default (all devices)</span>
+  <span class="run">agents devices config --fleet agents.max-concurrent 2     </span><span class="cm"># every box caps at 2 unless it overrides</span>
+  <span class="run">agents devices config --fleet                             </span><span class="cm"># print the fleet defaults layer</span>
+  <span class="run">agents devices config mac-mini notes "runs the releases"  </span><span class="cm"># append an operator note</span>
+  <span class="run">agents devices config win-mini ssh.auth password          </span><span class="cm"># password auth…</span>
+  <span class="run">agents devices config win-mini ssh.bundle muqsit          </span><span class="cm"># …from this secrets bundle</span>
+  <span class="run">agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519</span>
+  <span class="run">agents devices config mac-mini auto-launch.enabled off    </span><span class="cm"># exclude from Factory auto-launch</span>
+  <span class="run">agents devices config mac-mini auto-launch.preferred on   </span><span class="cm"># boost in auto-launch ranking</span>
+  <span class="run">agents devices config zion interactive.host zion          </span><span class="cm"># user scope: where agents show YOU artifacts</span>
+  <span class="run">agents devices config mac-mini --json                     </span><span class="cm"># machine-readable, per-key source</span>
+ 
+<span class="hd">Options:</span>
+  --fleet     target the fleet-wide defaults layer instead of a device (first
+              positional is the key)
+  --unset     reset the key at that layer (a device key then inherits the fleet
+              default)
+  --json      output machine-readable JSON (each key carries its source: device
+              | fleet | default)
+  -h, --help  Show help
+ 
+<span class="hd">Notes:</span>
+  Keys: agents.max-concurrent, scheduler.enabled, daemon.enabled,
+  watchdog.enabled, browser.remote-control, browser.profile, notes,
+  ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,
+  ssh.identity-file, platform (windows|linux|macos|unknown),
+  auto-launch.enabled, auto-launch.preferred — plus the user-scope
+  <span class="key">interactive.host</span> (stored centrally; the device name is syntax only).
+ 
+  Three layers, read in order — built-in default &lt; fleet default
+  (--fleet, central fleet.defaults.config) &lt; per-device value
+  (devices/&lt;name&gt;/agents.yaml config:). Both files are tracked and sync
+  with 'agents repo push/pull'; per-device files are conflict-free because
+  each machine writes only its own folder. --unset removes the value at
+  the targeted layer, so a device key falls back to the fleet default.
+ 
+  Booleans take on/off (or true/false). 'notes' appends one entry per
+  invocation. ssh.* / platform / user overlay the discovered registry
+  profile at dial time. scheduler.enabled / daemon.enabled take effect
+  when the daemon reloads or restarts on that device.
+ 
+  The retired subcommands still work and forward here: configure, note,
+  set, set-interactive, enable, disable, prefer, unprefer.</pre>
+</div>
+<footer>
+  "Real run" is verbatim branch output against a throwaway HOME: the fleet default lands in central <code>agents.yaml</code>, the device value in the per-device doc, and the effective read reports <code>"source": "device"</code>. Migration v2 folds the #2458 central block forward and extracts pins to <code>.history/devices/pins-&lt;host&gt;.json</code>.
+</footer>
+<script>
+  document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === t));
+    document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('active', p.id === t.dataset.pane));
+  }));
+</script>
+</body></html>
