@@ -30,6 +30,7 @@ function isWindowsSensitive(file: string): boolean {
     || file.startsWith('apps/cli/src/lib/hooks/')
     || file.startsWith('apps/cli/src/lib/platform/')
     || /^apps\/cli\/src\/lib\/shims[^/]*\.ts$/.test(file)
+    || /^apps\/cli\/src\/lib\/binary-shadow(\.test)?\.ts$/.test(file)
     || file.startsWith('apps/cli/hooks/')
     || file.startsWith('apps/cli/src/lib/hosts/');
 }
