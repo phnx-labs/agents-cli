@@ -142,7 +142,9 @@ export interface LinearJobTrigger {
   teamKey?: string;
   /** Required issue label name. */
   label?: string;
-  /** Current Linear state name that must match (e.g. `Plan`). */
+  /** Fire on a transition INTO this Linear state (e.g. `Plan`): the current state
+   *  must match AND the delivery's `updatedFrom` must record a state change, so a
+   *  later edit that leaves the issue in this state does not re-fire (RUSH-2539). */
   stateTo?: string;
   /** Previous Linear state name that must match (e.g. `Triage`). */
   stateFrom?: string;

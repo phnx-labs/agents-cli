@@ -455,8 +455,11 @@ Handlers support the same filters as routine triggers:
 - Linear: `teamKey`, `label`, `stateTo`, `stateFrom`.
 - GitHub: `repo`, `branch`, `label`.
 
-`stateTo` matches the current Linear state name (`payload.data.state.name`);
-`stateFrom` matches the previous state (`payload.updatedFrom.state.name`).
+`stateTo` matches a **transition into** that state, not merely sitting in it: the
+current state (`payload.data.state.name`) must equal the value AND this delivery's
+`updatedFrom` must record a state change (`payload.updatedFrom.state` or
+`payload.updatedFrom.stateId`), so a later edit that leaves the state unchanged does
+not re-fire. `stateFrom` matches the previous state (`payload.updatedFrom.state.name`).
 
 #### Actions
 
