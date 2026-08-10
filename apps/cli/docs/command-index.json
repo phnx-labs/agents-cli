@@ -26699,6 +26699,15 @@
               "negate": false
             },
             {
+              "flags": "--confirm",
+              "description": "Proceed even when the base checkout/repo is behind origin/main (a stale repo otherwise blocks the add)",
+              "long": "--confirm",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--json",
               "description": "Output machine-readable JSON",
               "long": "--json",

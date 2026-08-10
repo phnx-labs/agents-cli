@@ -110,6 +110,48 @@ export async function localDefaultBranch(gitRoot: string): Promise<string> {
 }
 
 /**
+ * How many commits the checkout at `repoDir` is behind freshly-fetched
+ * `origin/<default>` — the staleness the `teams add` guard checks before pointing
+ * a team at a repo.
+ *
+ * Fetches `origin` FIRST, on purpose: the exact failure this guards (a team
+ * pointed at a repo "without fetching first" — a 71-commit-stale s1 checkout in
+ * the real incident) leaves the remote-tracking ref itself stale, so a naive
+ * `HEAD..origin/<default>` reads 0 and hides the drift. After the fetch the count
+ * is against the true remote.
+ *
+ * Resolves the placement root with {@link getMainRepoRoot} (the same root a
+ * teammate worktree forks from), so the count is exactly "how far behind main the
+ * base your teammates build on is". Returns null when `repoDir` isn't a git repo,
+ * origin is unreachable, or git errors — the caller treats null as "can't tell,
+ * don't block".
+ */
+export async function commitsBehindDefault(
+  repoDir: string,
+): Promise<{ behind: number; base: string } | null> {
+  const gitRoot = await getMainRepoRoot(repoDir).catch(() => null);
+  if (!gitRoot) return null;
+  try {
+    await execFileAsync('git', ['fetch', 'origin'], { cwd: gitRoot });
+  } catch {
+    return null; // offline / no origin — can't assess staleness, don't block a team.
+  }
+  const base = await localDefaultBranch(gitRoot);
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['rev-list', '--count', `HEAD..origin/${base}`],
+      { cwd: gitRoot },
+    );
+    const behind = parseInt(stdout.trim(), 10);
+    if (!Number.isFinite(behind)) return null;
+    return { behind, base };
+  } catch {
+    return null; // no origin/<default> tracking ref, detached probe, etc.
+  }
+}
+
+/**
  * Create a new git worktree for a teammate, branched off the freshly-fetched
  * default branch. Fetches `origin` first and bases the branch on
  * `origin/<default>` so a stale local checkout cannot fork teammates off old

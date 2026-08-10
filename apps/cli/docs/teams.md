@@ -140,7 +140,35 @@ remote home for you.
 | `--cloud <provider>` | Dispatch to cloud backend: `rush` \| `codex` \| `factory` |
 | `--repo <owner/repo>` | GitHub repository (required for `--cloud rush`) |
 | `--branch <name>` | Target branch for cloud dispatch |
+| `--confirm` | Proceed even when the base checkout/repo is behind `origin/main`. Without it, a stale base [blocks the add](#stale-repo-guard). |
 | `--json` | Machine-readable JSON |
+
+### Stale-repo guard
+
+Before a teammate is bound to a repo, `teams add` fetches `origin` and checks how
+far behind `origin/<default>` the **base checkout** is — the local `--cwd` (default
+current directory) for a local teammate, or the repo provisioned on the box for a
+`--device` teammate. If it is behind, the add is **refused** with a sync command,
+because a team started on stale code reasons and builds against a tree that has
+already moved on (the real trigger: a 71-commit-stale checkout on another box that
+nobody had fetched):
+
+```
+This checkout (/repo) is 71 commits behind origin/main. A team started here would
+build on stale code — bring it up to date with remote main first:
+  git -C /repo merge --ff-only origin/main
+Then re-run `agents teams add wave …`, or pass --confirm to start on the stale repo anyway.
+```
+
+Sync the base to `origin/main` and re-run, or pass `--confirm` to start against it
+anyway (you then get a one-line advisory instead of a block). The check **fetches
+first** on purpose: a checkout nobody fetched has a stale remote-tracking ref, so a
+naive `HEAD..origin/main` would read 0 and hide the drift. An offline / unreachable
+/ non-git base can't be assessed and never blocks; cloud teammates clone fresh in
+the provider and are skipped. This is independent of the [worktree base
+freshness](#base-freshness) below — a `--worktree` teammate still forks off a
+freshly-fetched `origin/<default>` regardless, but the guard flags the base you
+pointed the team at so you keep it in sync.
 
 ### `teams start` options
 
@@ -248,6 +276,7 @@ The `--after` flag enforces temporal ordering. Without `--after`, both
 teammates start on wave 1 and race. Without a boundary contract, they race
 invisibly — the contract makes the race explicit so you can cut it correctly.
 
+<a id="base-freshness"></a>
 ### Worktrees and isolation
 
 When hard filesystem isolation is required, use git worktrees:
@@ -270,7 +299,10 @@ which case the worktree is kept and reported.
 | **remote** (`--device host`) | the host's **freshly-fetched `origin/<default>`** (`createRemoteWorktree` fetches first) — same base policy as local. |
 
 So the pre-flight for a **local** worktree team is: fast-forward your checkout to
-the default branch first. A remote team handles this itself.
+the default branch first. A remote team handles this itself. The
+[stale-repo guard](#stale-repo-guard) now enforces this pre-flight — it blocks a
+`teams add` whose base checkout is behind `origin/<default>` until you sync or pass
+`--confirm`.
 
 **Where a local worktree lands.** A new teammate worktree always resolves to
 `<main-repo-root>/.agents/worktrees/<name>` — the MAIN checkout's root, never

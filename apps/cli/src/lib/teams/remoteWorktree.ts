@@ -120,6 +120,36 @@ export function createRemoteWorktree(target: string, repoPath: string, worktreeN
   return worktreePath;
 }
 
+/**
+ * How many commits the host checkout at `repoPath` is behind `origin/<default>` —
+ * the remote analog of the local {@link commitsBehindDefault} staleness probe, and
+ * the exact case from the incident this guard exists for (a distributed team
+ * pointed at a 71-commit-stale checkout on another box).
+ *
+ * `ensureRemoteRepo` already fetched `origin` when it provisioned/reused the
+ * checkout right before this runs, so the remote-tracking ref is fresh and this
+ * reads it WITHOUT a second fetch: resolve the default branch, then
+ * `rev-list --count HEAD..origin/<default>`. Returns null on any git/ssh error
+ * (unreachable host, non-repo path) — the caller treats null as "can't tell,
+ * don't block".
+ */
+export function remoteCommitsBehindDefault(
+  target: string,
+  repoPath: string,
+  opts: RemoteSshOptions = {},
+): { behind: number; base: string } | null {
+  assertValidSshTarget(target);
+  try {
+    const base = remoteDefaultBranch(target, repoPath, opts);
+    const raw = remoteGit(target, repoPath, ['rev-list', '--count', `HEAD..origin/${base}`], 30000, opts);
+    const behind = parseInt(raw, 10);
+    if (!Number.isFinite(behind)) return null;
+    return { behind, base };
+  } catch {
+    return null;
+  }
+}
+
 // Team-name → repos-dir slug: same allowlist a worktree name uses, so it lands
 // safely in a path (`~/.agents/repos/<slug>`) with no shell metacharacters.
 const SLUG_RE = /[^A-Za-z0-9_-]/g;

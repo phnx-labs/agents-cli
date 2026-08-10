@@ -64,6 +64,7 @@ import {
 import { setHelpSections } from '../lib/help.js';
 import {
   createWorktree,
+  commitsBehindDefault,
   isGitRepo,
   hasUncommittedChanges,
   removeWorktree,
@@ -76,7 +77,7 @@ import { sshTargetFor } from '../lib/hosts/types.js';
 import { ensureHostReady } from '../lib/hosts/ready.js';
 import { remoteShellFor } from '../lib/hosts/remote-cmd.js';
 import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
-import { remoteWorktreeDirty, removeRemoteWorktree, ensureRemoteRepo } from '../lib/teams/remoteWorktree.js';
+import { remoteWorktreeDirty, removeRemoteWorktree, ensureRemoteRepo, remoteCommitsBehindDefault } from '../lib/teams/remoteWorktree.js';
 import { getRemoteUrl } from '../lib/git.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { isVersionInstalled, resolveVersion, resolveVersionAlias, resolveVersionAliasLoose } from '../lib/versions.js';
@@ -425,6 +426,78 @@ function warnOrphanWorktree(baseCwd: string, name: string, reason: string): void
         `&& git -C ${baseCwd} branch -D agents/${name}\n`,
     ),
   );
+}
+
+/** Pluralize a commit count: "1 commit" / "3 commits". */
+function commitsWord(behind: number): string {
+  return `${behind} commit${behind === 1 ? '' : 's'}`;
+}
+
+/**
+ * The blocking message when `teams add` is pointed at a stale checkout. Pure so
+ * the guidance is pinned by tests (mirrors `remoteCwdOnAddError`): it MUST name
+ * how far behind, tell the caller to sync with remote main, and mention `--confirm`
+ * as the override.
+ */
+export function staleRepoError(params: {
+  team: string;
+  where: string;
+  behind: number;
+  base: string;
+  sync: string;
+}): string {
+  return (
+    `${params.where} is ${commitsWord(params.behind)} behind origin/${params.base}. ` +
+    `A team started here would build on stale code — bring it up to date with remote main first:\n` +
+    `  ${params.sync}\n` +
+    `Then re-run \`agents teams add ${params.team} …\`, or pass --confirm to start on the stale repo anyway.`
+  );
+}
+
+/**
+ * Guard against pointing a team at a stale checkout. Before a teammate is bound
+ * to a repo, this fetches origin and counts how far behind `origin/<default>` the
+ * base checkout is (the local cwd, or the repo provisioned on a `--device` host).
+ * If it is behind and the caller did NOT pass `--confirm`, the add is refused with
+ * {@link staleRepoError} — because a team started on stale code reasons and builds
+ * against a tree that has already moved on (the 71-commit-stale s1 checkout
+ * incident). With `--confirm` it prints a one-line advisory and proceeds.
+ *
+ * A `null` behind-count (offline, non-repo, unreachable host) is "can't tell" and
+ * never blocks — this is a freshness nudge, not a hard prerequisite.
+ */
+async function assertRepoFreshOrConfirm(params: {
+  team: string;
+  confirm: boolean;
+  json: boolean;
+  local?: string;
+  remote?: { target: string; repoPath: string; host: string; extraSshArgs: string[] };
+}): Promise<void> {
+  const { team, confirm, json } = params;
+  const res = params.remote
+    ? remoteCommitsBehindDefault(params.remote.target, params.remote.repoPath, {
+        extraSshArgs: params.remote.extraSshArgs,
+      })
+    : params.local
+      ? await commitsBehindDefault(params.local)
+      : null;
+  if (!res || res.behind <= 0) return;
+
+  const where = params.remote
+    ? `The repo on ${params.remote.host} (${params.remote.repoPath})`
+    : `This checkout (${params.local})`;
+  const sync = params.remote
+    ? `agents ssh ${params.remote.host} 'git -C ${params.remote.repoPath} merge --ff-only origin/${res.base}'`
+    : `git -C ${params.local} merge --ff-only origin/${res.base}`;
+
+  if (confirm) {
+    process.stderr.write(
+      chalk.yellow(`⚠ ${where} is ${commitsWord(res.behind)} behind origin/${res.base}; starting anyway (--confirm).\n`),
+    );
+    return;
+  }
+
+  dieFriction('teams', 'repo-stale', staleRepoError({ team, where, behind: res.behind, base: res.base, sync }), 1, { json });
 }
 
 /**
@@ -1624,12 +1697,13 @@ export function registerTeamsCommands(program: Command): void {
     .option('--repo <owner/repo>', 'GitHub repository (required for --cloud rush)')
     .option('--branch <name>', 'Target git branch for cloud dispatch')
     .option('--force', "Skip the advisory 'may not be signed in' / 'account throttled' warnings")
+    .option('--confirm', 'Proceed even when the base checkout/repo is behind origin/main (a stale repo otherwise blocks the add)')
     .option('--json', 'Output machine-readable JSON')
     .action(async (team: string, teammate: string, task: string, opts: {
       name?: string; mode: string; effort: string; model?: string; env: string[];
       cwd?: string; worktree?: string; after?: string; json?: boolean;
       taskType?: string; cloud?: string; host?: string; device?: string; repo?: string; branch?: string; force?: boolean;
-      remoteCwd?: string;
+      confirm?: boolean; remoteCwd?: string;
     }) => {
       // `--remote-cwd` rides the shared --host option family but is never read by
       // `teams add` (placement, not routing). Fail loud with guidance rather than
@@ -1701,6 +1775,7 @@ export function registerTeamsCommands(program: Command): void {
       let hostName: string | null = null;
       let hostTarget: string | null = null;
       let hostRepoPath: string | null = null;
+      let hostExtraSshArgs: string[] = [];
       if (explicitDevice && explicitDevice.toLowerCase() !== machineId()) {
         if (cloudProviderId) {
           dieFriction('teams', 'device-cloud-mutually-exclusive', `--device and --cloud are mutually exclusive (two different remote backends). Pick one.`);
@@ -1757,9 +1832,12 @@ export function registerTeamsCommands(program: Command): void {
         if (!effectiveRepo && (await isGitRepo(process.cwd()))) {
           effectiveRepo = (await getRemoteUrl(process.cwd())) ?? '';
         }
+        // Capture the ssh args ensureRemoteRepo uses so the staleness probe below
+        // reaches the host with the same identity.
+        hostExtraSshArgs = host.identityFile ? ['-i', host.identityFile, '-o', 'IdentitiesOnly=yes'] : [];
         try {
           hostRepoPath = ensureRemoteRepo(hostTarget!, effectiveRepo, team, {
-            extraSshArgs: host.identityFile ? ['-i', host.identityFile, '-o', 'IdentitiesOnly=yes'] : [],
+            extraSshArgs: hostExtraSshArgs,
           });
         } catch (err) {
           dieFriction(
@@ -1851,6 +1929,25 @@ export function registerTeamsCommands(program: Command): void {
         await mgr.validateAddPreconditions(team, opts.name ?? null, after);
       } catch (err) {
         dieFriction('teams', 'add-precondition-failed', (err as Error).message);
+      }
+
+      // Stale-repo guard: refuse to point a team at a checkout behind origin/main
+      // unless --confirm. A cloud teammate clones fresh in the provider, so it has
+      // no local/remote checkout to assess — skip it there.
+      if (!cloudProviderId) {
+        if (hostName) {
+          await assertRepoFreshOrConfirm({
+            team,
+            confirm: Boolean(opts.confirm),
+            json: isJsonMode(opts),
+            remote: { target: hostTarget!, repoPath: hostRepoPath!, host: hostName, extraSshArgs: hostExtraSshArgs },
+          });
+        } else {
+          const base = sharedWorktree ?? opts.cwd ?? process.cwd();
+          if (await isGitRepo(base)) {
+            await assertRepoFreshOrConfirm({ team, confirm: Boolean(opts.confirm), json: isJsonMode(opts), local: base });
+          }
+        }
       }
 
       // Track a worktree WE create in this add so a later failure (dep race,

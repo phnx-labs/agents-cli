@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createWorktree, localDefaultBranch, removeWorktree, worktreeCheckoutExists, worktreeExists } from './worktree.js';
+import { commitsBehindDefault, createWorktree, localDefaultBranch, removeWorktree, worktreeCheckoutExists, worktreeExists } from './worktree.js';
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', ['-c', 'user.email=t@t.dev', '-c', 'user.name=t', ...args], {
@@ -201,5 +201,84 @@ describe('createWorktree base freshness', () => {
     it('rejects invalid worktree names', async () => {
       await expect(worktreeExists(clone, '../evil')).rejects.toThrow(/Invalid worktree name/);
     });
+  });
+});
+
+// The staleness the `teams add --confirm` guard checks. The load-bearing property
+// is fetch-first: a checkout "pointed at without fetching first" has a STALE
+// remote-tracking ref, so a naive HEAD..origin/main reads 0 and hides the drift —
+// commitsBehindDefault must fetch and report the TRUE behind count (the real
+// 71-commit-stale s1 incident).
+describe('commitsBehindDefault', () => {
+  let tmp: string;
+  let bare: string;
+  let clone: string;
+
+  beforeEach(() => {
+    tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-behind-')));
+    bare = path.join(tmp, 'remote.git');
+    clone = path.join(tmp, 'clone');
+
+    git(tmp, ['init', '--bare', bare]);
+    const seed = path.join(tmp, 'seed');
+    git(tmp, ['clone', bare, seed]);
+    git(seed, ['checkout', '-b', 'main']);
+    fs.writeFileSync(path.join(seed, 'base.txt'), 'A\n');
+    git(seed, ['add', 'base.txt']);
+    git(seed, ['commit', '-m', 'A']);
+    git(seed, ['push', '-u', 'origin', 'main']);
+    git(bare, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+
+    git(tmp, ['clone', bare, clone]);
+    try {
+      git(clone, ['remote', 'set-head', 'origin', '--auto']);
+    } catch {
+      // some git versions need the bare HEAD already set (done above)
+    }
+  }, 60_000);
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  // Advance origin/main with a second push (main moved on the remote after the clone).
+  function advanceOrigin(): void {
+    const seed2 = path.join(tmp, 'seed2');
+    git(tmp, ['clone', bare, seed2]);
+    fs.writeFileSync(path.join(seed2, 'newer.txt'), 'fresh\n');
+    git(seed2, ['add', 'newer.txt']);
+    git(seed2, ['commit', '-m', 'C-on-origin']);
+    git(seed2, ['push', 'origin', 'main']);
+  }
+
+  it('reports 0 behind for an up-to-date clone', async () => {
+    const res = await commitsBehindDefault(clone);
+    expect(res).toEqual({ behind: 0, base: 'main' });
+  });
+
+  it('reports the TRUE behind count even when the local tracking ref is stale (fetches first)', async () => {
+    advanceOrigin();
+    // The clone has NOT fetched, so its origin/main tracking ref is still pre-C:
+    // a check that skipped the fetch would read 0 and miss the drift.
+    const staleView = git(clone, ['rev-list', '--count', 'HEAD..origin/main']);
+    expect(staleView).toBe('0');
+
+    const res = await commitsBehindDefault(clone);
+    expect(res).toEqual({ behind: 1, base: 'main' });
+  });
+
+  it('reports 0 behind when the local checkout is AHEAD of origin (unpushed commits)', async () => {
+    fs.writeFileSync(path.join(clone, 'local-only.txt'), 'B\n');
+    git(clone, ['add', 'local-only.txt']);
+    git(clone, ['commit', '-m', 'B-local-only']);
+    // HEAD..origin/main = commits on origin not in HEAD = 0; ahead is not behind.
+    const res = await commitsBehindDefault(clone);
+    expect(res).toEqual({ behind: 0, base: 'main' });
+  });
+
+  it('returns null for a directory that is not a git repo', async () => {
+    const plain = path.join(tmp, 'not-a-repo');
+    fs.mkdirSync(plain);
+    expect(await commitsBehindDefault(plain)).toBeNull();
   });
 });
