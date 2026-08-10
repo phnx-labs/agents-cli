@@ -458,12 +458,25 @@ SSH access (§7); rendering sessions that no harness produced.
     fan-out preserves their foreign `machine`), so a THIRD box sees a shim that
     is not its own. The box to reach for the process is `sessionProcessHost`
     (`offloadedFrom ?? machine`), never `machine` alone.
-  - **Scope: host-dispatched runs only.** The correction is driven by the index
-    row `agents run --host/--device` writes (`lib/hosts/session-index.ts`).
-    Remote **teams teammates** are not covered — `listTeamsActive` sets no
-    `machine` and nothing registers an index row for them — so a
-    `--device`-pinned teammate is still attributed to the orchestrator. Named as
-    SES-GAP-10 rather than silently claimed.
+  - **Remote teams teammates are covered too.** A `teams add --device <peer>`
+    teammate executes on `<peer>` but gets no host-dispatch index row, so the
+    fold above cannot reach it. `listTeamsActive` (`lib/session/active.ts`)
+    instead folds the teammate record's own `AgentProcess.hostName` into
+    `machine = normalizeHost(hostName)` and `offloadedFrom = <orchestrator>`
+    whenever the teammate runs on a box other than this one — the same shape a
+    `run --device` row gets, so `--device <orchestrator>` no longer lists a
+    teammate executing on a peer (was SES-GAP-10, RUSH-2486). A teammate pinned
+    to this box (or an unpinned local one) is left unattributed for the
+    self-stamp.
+  - **The pool listing agrees with the live view.** `queryIndexedSessions`
+    (`lib/session/discover.ts`) MUST keep the machine an offloaded run recorded
+    on its empty-file index row (`registerHostSession`) rather than re-deriving
+    it from the transcript path — `machineForSessionFile('')` falls back to THIS
+    box, which re-attributed the dispatcher's own pool row to itself and split it
+    from the executing peer's fan-out row, so `agents sessions <id>` read as
+    "ambiguous (2 sessions)" for a live offloaded run (RUSH-2486 / criterion 2 of
+    RUSH-2479). The path derivation still owns live-home files and synced
+    mirrors, whose recorded machine already equals it.
 - **SES-24 (MUST).** `agents sessions export --encrypt` MUST seal each
   transcript body client-side with AES-256-GCM (fresh IV) before it leaves the
   machine, and `agents sessions import` MUST decrypt before writing it to the
@@ -960,15 +973,16 @@ normative — a change that widens/narrows a cell is a spec change.
   evidence when its source file is gone mid-backfill (`tool-index.ts`
   `ensureToolIndex` on a `statSync` throw, reached via `agents sessions backfill`);
   SES-40 removed the purge only from the `querySessions` read path.
-- **SES-GAP-10.** SES-23a's execution-host attribution covers only
-  **host-dispatched runs** (`agents run --host/--device`), because it is driven by
-  the index row `registerHostSession` / `registerInteractiveHostSession` write
-  (`lib/hosts/session-index.ts:55,134`). A **remote teams teammate**
-  (`agents teams add … --device <peer>`) gets no such row and `listTeamsActive`
-  (`lib/session/active.ts`) never sets `machine`, so the orchestrator's
-  self-stamp claims it: `--device <orchestrator>` still lists a teammate
-  executing on the peer. Closing it means folding `AgentProcess`'s host
-  placement in `listTeamsActive` the same way.
+- **SES-GAP-10 (resolved, RUSH-2486).** SES-23a's execution-host attribution now
+  covers **remote teams teammates** as well as host-dispatched runs. A
+  `agents teams add … --device <peer>` teammate still gets no index row, so
+  `listTeamsActive` (`lib/session/active.ts`) folds the teammate record's own
+  `AgentProcess.hostName` into `machine` + `offloadedFrom` directly — the same
+  shape `foldExecutionMachine` gives a `run --device` row — so the orchestrator's
+  self-stamp no longer claims a teammate executing on a peer. The sibling
+  false-ambiguous resume (the empty-file index row's recorded machine being
+  clobbered by the path derivation in `queryIndexedSessions`) is fixed in the
+  same change; see the SES-23a "pool listing agrees with the live view" bullet.
 ---
 
 ### 8. Given/When/Then scenarios

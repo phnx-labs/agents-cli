@@ -898,6 +898,16 @@ host recorded at dispatch (`lib/hosts/session-index.ts`) and marks it
 `--device <peer>`, **not** under `--device <dispatcher>` (RUSH-2479, contract
 SES-23a).
 
+A **remote teams teammate** (`agents teams add … --device <peer>`) is attributed
+the same way, even though it has no host-dispatch index row: `listTeamsActive`
+folds the teammate record's own `hostName` into `machine` + `offloadedFrom`
+directly, so a `--device`-pinned teammate lists under the box it runs on, not the
+orchestrator that spawned it (RUSH-2486, closing SES-GAP-10). The pool listing
+agrees: `queryIndexedSessions` keeps the execution host an offloaded run recorded
+on its empty-file row instead of re-deriving this box from the (empty) path, so
+`agents sessions <id>` on a live offloaded run resolves to one row rather than
+reading as "ambiguous (2 sessions)" (RUSH-2486, RUSH-2479 criterion 2).
+
 `machine` answers "where does the agent execute" — which is what the scope,
 preview routing, and resume ownership need. It is not "where is the process I
 would attach to": for an offloaded run the shim's pid, tmux pane, and terminal
