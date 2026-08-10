@@ -28,15 +28,15 @@
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://github.com/NousResearch/hermes-agent" title="Hermes Agent"><img src="assets/harnesses/hermes.png" height="32" alt="Hermes Agent" /></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://x.ai" title="Grok Build (xAI)"><strong>Grok</strong></a>
+  <a href="https://x.ai" title="Grok Build (xAI)"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/harnesses/grok.png"><img src="assets/harnesses/grok-light.png" height="32" alt="Grok Build" /></picture></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://factory.ai" title="Factory AI Droid"><strong>Droid</strong></a>
+  <a href="https://factory.ai" title="Factory AI Droid"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/harnesses/droid.png"><img src="assets/harnesses/droid-light.png" height="32" alt="Factory AI Droid" /></picture></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://dev.meta.ai/docs/muse-code" title="Meta Muse Code"><strong>Muse</strong></a>
+  <a href="https://dev.meta.ai/docs/muse-code" title="Meta Muse Code"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/harnesses/muse.svg"><img src="assets/harnesses/muse-light.svg" height="32" alt="Meta Muse Code" /></picture></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://omp.sh" title="Oh My Pi"><strong>Pi</strong></a>
+  <a href="https://omp.sh" title="Oh My Pi"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/harnesses/pi.svg"><img src="assets/harnesses/pi-light.svg" height="32" alt="Oh My Pi" /></picture></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://docs.warp.dev/reference/cli" title="Warp Agent CLI (Oz)"><strong>Warp</strong></a>
+  <a href="https://docs.warp.dev/reference/cli" title="Warp Agent CLI (Oz)"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/harnesses/warp.svg"><img src="assets/harnesses/warp-light.svg" height="32" alt="Warp Agent CLI" /></picture></a>
 </p>
 
 https://agents-cli.sh/demo.mp4
