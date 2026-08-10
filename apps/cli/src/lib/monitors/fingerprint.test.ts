@@ -115,3 +115,27 @@ describe('findDuplicateMonitor', () => {
     expect(findDuplicateMonitor(lander, existing)).toBe('open-pr-watch');
   });
 });
+
+/**
+ * A monitor can arrive from arbitrary YAML (`agents monitors add ./watcher.yml`).
+ * `validateMonitor` checks named fields; the fingerprint walks the whole object
+ * graph — so a recursive anchor is valid to one and cyclic to the other.
+ */
+describe('hostile input from a YAML file', () => {
+  it('does not blow the stack on a recursive anchor', () => {
+    const source: any = { type: 'poll', command: 'x', interval: '2m' };
+    source.self = source;
+    const cyclic = { name: 'c', source, condition: { mode: 'on-change' }, action: { type: 'notify' } } as any;
+    expect(() => monitorFingerprint(cyclic)).not.toThrow();
+    // And it is still deterministic, not just non-throwing.
+    expect(monitorFingerprint(cyclic)).toBe(monitorFingerprint(cyclic));
+  });
+
+  it('distinguishes two different Dates instead of collapsing both to {}', () => {
+    const at = (iso: string) =>
+      ({ name: 'd', source: { type: 'poll', command: 'x', interval: '2m', when: new Date(iso) },
+         condition: { mode: 'on-change' }, action: { type: 'notify' } }) as any;
+    expect(monitorFingerprint(at('2026-01-01T00:00:00Z')))
+      .not.toBe(monitorFingerprint(at('2026-06-01T00:00:00Z')));
+  });
+});

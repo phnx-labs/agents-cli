@@ -28,15 +28,35 @@
 import { createHash } from 'crypto';
 import type { MonitorConfig } from './config.js';
 
-/** Stable JSON: object keys sorted, so key order in the YAML cannot change the hash. */
-function stable(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stable);
+/**
+ * Stable JSON: object keys sorted, so key order in the YAML cannot change the hash.
+ *
+ * Cycle-safe by construction. A monitor can arrive from arbitrary YAML
+ * (`agents monitors add ./watcher.yml`), and a recursive anchor produces a
+ * genuinely cyclic object that `validateMonitor` accepts — it checks named
+ * fields, while this walks the whole graph. Without the seen-set the recursion
+ * blew the stack before `JSON.stringify` could raise its own circular-structure
+ * error, turning a bad input into a stack trace instead of a clear refusal.
+ *
+ * A `Date` is serialized to its ISO string rather than falling into the object
+ * branch, where every Date collapsed to `{}` and two different timestamps
+ * fingerprinted identically.
+ */
+function stable(value: unknown, seen: WeakSet<object> = new WeakSet()): unknown {
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) {
+    if (seen.has(value)) return '[circular]';
+    seen.add(value);
+    return value.map((v) => stable(v, seen));
+  }
   if (value && typeof value === 'object') {
+    if (seen.has(value)) return '[circular]';
+    seen.add(value);
     const out: Record<string, unknown> = {};
     for (const key of Object.keys(value as Record<string, unknown>).sort()) {
       const v = (value as Record<string, unknown>)[key];
       if (v === undefined) continue;
-      out[key] = stable(v);
+      out[key] = stable(v, seen);
     }
     return out;
   }
