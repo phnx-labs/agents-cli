@@ -2,7 +2,7 @@
 
 How agents-cli syncs resources (commands, skills, hooks, memory, MCP, permissions) between central storage, project workspaces, and version homes.
 
-For the conceptual model — what a DotAgents repo is, what resources are, and how layered resolution works — see [00-concepts.md](00-concepts.md).
+For the conceptual model — what a DotAgents repo is, what resources are, and how layered resolution works — see [concepts.md](concepts.md).
 
 ## Resource Types
 
@@ -106,7 +106,7 @@ themselves.
 
 ## Sync Targets: Version Selectors and Repo Scoping
 
-`agents sync` accepts the full [agent-spec vocabulary](01-version-management.md#agent-spec-resolution)
+`agents sync` accepts the full [agent-spec vocabulary](version-management.md#agent-spec-resolution)
 plus an optional repo scope:
 
 ```bash

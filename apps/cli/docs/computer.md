@@ -379,4 +379,4 @@ screenshot `origin`/`scale` instead, and gate keystrokes with
 
 - [docs/browser.md](browser.md) — drive real browsers via CDP; part of the automation triad
 - [docs/pty.md](pty.md) — drive REPLs and TUI programs from an agent; part of the automation triad
-- [docs/00-concepts.md](00-concepts.md) — DotAgents repos, resource resolution model
+- [docs/concepts.md](concepts.md) — DotAgents repos, resource resolution model

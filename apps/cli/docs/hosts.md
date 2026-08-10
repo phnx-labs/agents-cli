@@ -9,9 +9,9 @@
 > by the forwarding contract (`RUN_OPTION_FORWARDING`,
 > `src/lib/hosts/remote-cmd.ts`) — forwarded, rejected loud, or local-only;
 > nothing silently drops at the SSH boundary. This document is
-> the design rationale; see [00-concepts.md](00-concepts.md#devices--hosts) for
+> the design rationale; see [concepts.md](concepts.md#devices--hosts) for
 > the concept overview and how hosts relate to the Tailscale-backed
-> `agents devices` registry, and [09-ssh-transport.md](09-ssh-transport.md) for
+> `agents devices` registry, and [ssh-transport.md](ssh-transport.md) for
 > the shared, multiplexed SSH transport every `--host` command rides.
 
 `agents hosts` lets you run any agent (`claude`, `codex`, `droid`, …) on any of
@@ -20,7 +20,7 @@ by name from a small local registry, over plain SSH, with no central service to
 run or pay for.
 
 **Placement** (where the body runs) is one model shared with lease, cloud, and
-routines — see [00-concepts.md § Placement](00-concepts.md#placement). On
+routines — see [concepts.md § Placement](concepts.md#placement). On
 `agents run`, prefer `--where`; the older flags remain aliases:
 
 ```
@@ -75,7 +75,7 @@ harness exits nonzero naming each harness's exclusion reason and the earliest
 window reset; zero healthy accounts within the picked harness exits nonzero
 with `agents: no healthy <agent> account under strategy '<strategy>' — excluded:
 …; earliest window resets <iso-time>. Use --strategy pinned to force the
-default.` (the Factory watchdog tail-detects this text for rotate cooldowns).
+default.` (the daemon watchdog tail-detects this text for rotate cooldowns).
 `--session-id` keeps its claude-only semantics — honored when auto picks
 claude, ignored with a stderr note otherwise.
 
@@ -708,7 +708,7 @@ handoff), `agents sessions migrate` (shipped since this doc was written) ships
 **that one session** selectively over the direct SSH transport
 (`resolveExplicitTargets` + `ssh-exec`) — never the whole tree, and no R2/CRDT
 substrate (that background-sync mechanism this doc originally cited has since
-been removed; see [05-sessions.md](05-sessions.md#migration-relocate-a-live-session)).
+been removed; see [sessions.md](sessions.md#migration-relocate-a-live-session)).
 
 ## Phase 2 — session handoff (the differentiator)
 

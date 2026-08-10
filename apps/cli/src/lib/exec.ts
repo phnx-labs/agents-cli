@@ -18,6 +18,7 @@ import { isTierToken, resolveTier } from './model-tiers.js';
 import { emitStart, createTimer, redactPrompt, redactArgs } from './events.js';
 import { sanitizeProcessEnv } from './secrets/bundles.js';
 import { resolveActor, actorEnv } from './actor.js';
+import { expandLocalHome } from './project-root.js';
 import { getShimsDir, getHistoryDir, getUserAgentsDir, getRuntimeStateDir } from './state.js';
 import { resolveCodexHome } from './codex-home.js';
 import { readCodexConfiguredModel } from './shims.js';
@@ -1130,7 +1131,10 @@ export function buildExecCommand(options: ExecOptions): string[] {
   }
   if (options.agent === 'codex') {
     const policyMode = resolvedMode === 'plan' || resolvedMode === 'skip' ? resolvedMode : 'edit';
-    const writableRoots = [...codexEditWritableRoots(options.cwd ?? process.cwd()), ...(options.addDirs ?? [])];
+    const writableRoots = [
+      ...codexEditWritableRoots(options.cwd ?? process.cwd()),
+      ...(options.addDirs ?? []).map(expandLocalHome),
+    ];
     cmd.push(...codexPolicyArgs(policyMode, writableRoots));
   } else if (resumeSpec && 'subcommand' in resumeSpec) {
     if (resolvedMode === 'skip') {
@@ -1265,7 +1269,13 @@ export function buildExecCommand(options: ExecOptions): string[] {
 
   // Codex add-dirs are folded into its named edit profile above, including on
   // resume where the native CLI rejects --add-dir. Claude keeps its native flag.
-  const addDirs = [...new Set(options.addDirs ?? [])];
+  //
+  // `~` is expanded HERE, at the consumer, because no shell does it for us: a
+  // forwarded grant crosses the SSH boundary single-quoted (`shellQuote` in
+  // ssh-exec.ts), so the remote login shell leaves `~/…` literal and the harness
+  // resolves it as a directory actually named `~`. Expanding on the side that
+  // runs the harness is what lets one home-relative grant re-root per machine.
+  const addDirs = [...new Set((options.addDirs ?? []).map(expandLocalHome))];
   if (addDirs.length > 0 && options.agent === 'claude') {
     for (const dir of addDirs) {
       cmd.push('--add-dir', dir);

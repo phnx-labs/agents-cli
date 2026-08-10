@@ -12680,7 +12680,7 @@
             },
             {
               "flags": "--device <name>",
-              "description": "OWNER (not body placement) — the single machine that evaluates + fires (exactly-once). See docs/00-concepts.md#placement.",
+              "description": "OWNER (not body placement) — the single machine that evaluates + fires (exactly-once). See docs/concepts.md#placement.",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -14793,8 +14793,8 @@
           "negate": false
         }
       ],
-      "examples": "agents projects import --from-linear  # the projects you actually track\n      agents projects add rush --repo phnx-labs/rush --path apps/web\n      agents projects list                 # definitions only (no session scan)\n      agents projects list --with-agents   # opt-in local active counts\n      agents projects list --json          # machine-readable defs (AGI EXT uses this)\n      echo '{...}' | agents projects save --json  # create/update one def from stdin\n      agents projects rm rush --json       # machine-readable delete\n      agents projects status              # every project, across the whole fleet\n      agents projects status rush         # one project (same body as view/show)\n      agents projects view rush           # alias of status <name>\n      agents projects status --device s0  # scope to one device (or --devices a,b,c)\n      agents projects link rush --linear  # bind the Linear project (auto-suggest)\n      agents run --project rush           # land an agent in the project",
-      "notes": "Definitions are hand-editable YAML in ~/.agents/projects/ and sync across\n      machines with 'agents push/pull'. AGI EXT reads and writes only through\n      these commands — never ~/.agents/factory/projects.json.",
+      "examples": "agents projects import --from-linear  # the projects you actually track\n      agents projects add rush --repo phnx-labs/rush --path apps/web\n      agents projects add rush --root ~/src/rush --dir ~/src/rush-infra  # bind another dir\n      agents projects set rush --add-dir ~/.agents/.system  # bind one more\n      agents projects set rush --rm-dir ~/src/rush-infra    # unbind it again\n      agents projects list                 # definitions only (no session scan)\n      agents projects list --with-agents   # opt-in local active counts\n      agents projects list --json          # machine-readable defs (AGI EXT uses this)\n      echo '{...}' | agents projects save --json  # create/update one def from stdin\n      agents projects rm rush --json       # machine-readable delete\n      agents projects status              # every project, across the whole fleet\n      agents projects status rush         # one project (same body as view/show)\n      agents projects view rush           # alias of status <name>\n      agents projects status --device s0  # scope to one device (or --devices a,b,c)\n      agents projects link rush --linear  # bind the Linear project (auto-suggest)\n      agents run --project rush           # land an agent in the project",
+      "notes": "Definitions are hand-editable YAML in ~/.agents/projects/ and sync across\n      machines with 'agents repo push user' / 'agents repo pull user'. AGI EXT\n      reads and writes only through these commands — never\n      ~/.agents/factory/projects.json.\n\n      A project may bind several directories ('--dir' / '--add-dir'). The cwd an\n      agent lands in is 'defaultPath' (else 'root') — set it with --root/--path,\n      not with --dir. Every bound directory other than that cwd rides along as\n      an --add-dir grant, which only Claude and Codex consume.",
       "subcommands": [
         {
           "name": "add",
@@ -14835,6 +14835,15 @@
               "required": true,
               "optional": false,
               "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--dir <path...>",
+              "description": "A directory this project binds; slug read from its origin. Repeatable",
+              "long": "--dir",
+              "required": true,
+              "optional": false,
+              "variadic": true,
               "negate": false
             },
             {
@@ -15185,6 +15194,35 @@
               "required": true,
               "optional": false,
               "variadic": true,
+              "negate": false
+            },
+            {
+              "flags": "--add-dir <path>",
+              "description": "Bind another directory to this project; repeatable",
+              "long": "--add-dir",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": []
+            },
+            {
+              "flags": "--rm-dir <path>",
+              "description": "Unbind a directory from this project; repeatable",
+              "long": "--rm-dir",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": []
+            },
+            {
+              "flags": "--slug <owner/repo>",
+              "description": "Slug for a single --add-dir whose origin cannot be read",
+              "long": "--slug",
+              "required": true,
+              "optional": false,
+              "variadic": false,
               "negate": false
             },
             {
@@ -17081,7 +17119,7 @@
             },
             {
               "flags": "--run-on <name>",
-              "description": "BODY placement: execute the job body on this machine over SSH (registered host, device, capability tag, or user@host). Sets hostStrategy=host. Same model as agents run --where device:<name> (docs/00-concepts.md#placement).",
+              "description": "BODY placement: execute the job body on this machine over SSH (registered host, device, capability tag, or user@host). Sets hostStrategy=host. Same model as agents run --where device:<name> (docs/concepts.md#placement).",
               "long": "--run-on",
               "required": true,
               "optional": false,
@@ -19900,7 +19938,7 @@
         },
         {
           "flags": "--where <spec>",
-          "description": "Where this run's body executes (one placement door): local | device:<name> | auto | lease[:backend] | cloud[:provider]. Expands to --host/--lease/--cloud. Do not combine with those flags. See docs/00-concepts.md#placement.",
+          "description": "Where this run's body executes (one placement door): local | device:<name> | auto | lease[:backend] | cloud[:provider]. Expands to --host/--lease/--cloud. Do not combine with those flags. See docs/concepts.md#placement.",
           "long": "--where",
           "required": true,
           "optional": false,
@@ -26913,6 +26951,15 @@
               "flags": "--repo <urlOrPath>",
               "description": "How each remote (--device) teammate gets the code — ONE git URL/path for the whole team (existing checkout reused, else cloned). A team is single-repo; for work across repos, make one team per repo. Defaults to this checkout origin.",
               "long": "--repo",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--project <slug>",
+              "description": "Work this team on a defined project: its primary directory is each local teammate's base cwd, its other directories become --add-dir grants",
+              "long": "--project",
               "required": true,
               "optional": false,
               "variadic": false,

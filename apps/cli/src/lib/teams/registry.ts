@@ -35,6 +35,12 @@ export interface TeamMeta {
    * `origin` at create time. Used by `ensureRemoteRepo` to provision the repo.
    */
   repo?: string;
+  /**
+   * The project (`agents projects`) this team works on. Its primary directory
+   * is a local teammate's base cwd when neither `--cwd` nor a worktree gives
+   * one, and its other bound directories become `--add-dir` grants.
+   */
+  project?: string;
 }
 
 /** Map of team name to team metadata. */
@@ -128,6 +134,8 @@ export interface CreateTeamOptions {
   devices?: string[];
   /** How each device gets the code (git URL to clone, or a path on the host). */
   repo?: string;
+  /** The `agents projects` project this team works on. */
+  project?: string;
 }
 
 /** Create a new team. Throws if a team with the same name already exists. */
@@ -148,6 +156,7 @@ export async function createTeam(name: string, options?: CreateTeamOptions): Pro
       ...(options?.useWorktree ? { use_worktree: options.useWorktree } : {}),
       ...(options?.devices && options.devices.length ? { devices: options.devices } : {}),
       ...(options?.repo ? { repo: options.repo } : {}),
+      ...(options?.project ? { project: options.project } : {}),
     };
     reg[name] = m;
     await saveTeams(reg);

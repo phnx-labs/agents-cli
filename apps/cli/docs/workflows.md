@@ -8,7 +8,7 @@ A workflow is a directory containing a `WORKFLOW.md` file with YAML frontmatter 
 
 Run a workflow with `agents run <workflow-name> [prompt]`. The workflow name replaces the agent argument in the normal `agents run` invocation. The frontmatter controls which model is used, which tools are available, which MCP servers are connected, and which secrets are injected. If the workflow writes files or posts comments, pass `--mode edit` or `--mode full` — the default `--mode plan` will deadlock at `ExitPlanMode`.
 
-For the layered resolution model that governs `project > user > system` precedence, see [02-resource-sync.md](02-resource-sync.md).
+For the layered resolution model that governs `project > user > system` precedence, see [resource-sync.md](resource-sync.md).
 
 ## Architecture
 
@@ -180,7 +180,7 @@ agents workflows remove code-review
 
 ## See Also
 
-- [02-resource-sync.md](02-resource-sync.md) — layered resolution: project workflows override user workflows override system
+- [resource-sync.md](resource-sync.md) — layered resolution: project workflows override user workflows override system
 - [docs/subagents.md](subagents.md) — subagent definitions that workflows orchestrate
 - [docs/plugins.md](plugins.md) — plugin bundles that workflows can include
 - [docs/hooks.md](hooks.md) — hooks that fire on workflow lifecycle events

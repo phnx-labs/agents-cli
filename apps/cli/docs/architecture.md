@@ -3,7 +3,7 @@
 How the parts fit together: **two application layers** (the `agents` CLI and the
 AGI EXT), **two meanings of "session"** (a transcript vs a live identity),
 and the on-disk stores that connect them. Read this once and the rest of the docs
-(`05-sessions.md`, `06-observability.md`, `teams.md`) slot into place.
+(`sessions.md`, `observability.md`, `teams.md`) slot into place.
 
 Everything here is read from source — file references are `path:line` at the time of
 writing; treat them as pointers, not guarantees.
@@ -56,7 +56,7 @@ confusion in this codebase.
 | **Where** | agent-native files → indexed in `sessions.db` | `terminals/*/<pid>.json` cache files |
 | **Read by** | `agents sessions` (the CLI) | the CLI (`--active`) and the extension |
 | **Lifetime** | durable (survives reboot) | ephemeral (deleted with the pid) |
-| **Covered in** | [05-sessions.md](05-sessions.md) | §3 below |
+| **Covered in** | [sessions.md](sessions.md) | §3 below |
 
 The **transcript** side is a SQLite index (`~/.agents/.history/sessions/sessions.db`,
 `SCHEMA_VERSION` in [`src/lib/session/db.ts`](../src/lib/session/db.ts)) with a
@@ -72,7 +72,7 @@ tracks its `agents/main/wire.jsonl` offset + the additive counters.) Grok is not
 incremental — it reads a whole `summary.json`, not an append-only JSONL.
 Both paths share one reducer per scanner, so the incremental row is identical to a full reparse.
 Listing is a DB read; only opening one session fully re-parses its transcript.
-Detail in [05-sessions.md](05-sessions.md).
+Detail in [sessions.md](sessions.md).
 
 The **live identity** side is the rest of this document.
 
@@ -197,7 +197,7 @@ long it must live and how it's read back:
 There is **one** audit event implementation, split into local-date files and
 file-locked because many processes append concurrently. It is the single choke
 point for "who did what" — see
-[06-observability.md](06-observability.md).
+[observability.md](observability.md).
 
 ---
 
@@ -218,7 +218,7 @@ function — on purpose.
   `pickLeastLoaded`) picks a pinned host → the only host in the pool → the host
   running the **fewest teammates** (a count, not real CPU/memory) → this machine.
 
-Detail in [teams.md](teams.md); the SSH transport is [09-ssh-transport.md](09-ssh-transport.md).
+Detail in [teams.md](teams.md); the SSH transport is [ssh-transport.md](ssh-transport.md).
 
 ---
 
@@ -281,15 +281,15 @@ uniformly across harnesses.
 
 This is deliberately simple and correct; the "compute once, subscribe" direction (a
 resident process that parses each file once and emits only what changed) is the
-optimization pattern tracked in [99-optimizations.md](99-optimizations.md). Describe
+optimization pattern tracked in [optimizations.md](optimizations.md). Describe
 current behavior against this doc; that file owns the proposals.
 
 ---
 
 ## Related
 
-- [00-concepts.md](00-concepts.md) — DotAgents repos, resources, resolution, version homes
-- [05-sessions.md](05-sessions.md) — the transcript index in depth
-- [06-observability.md](06-observability.md) — events, feed, mailboxes, cost
-- [teams.md](teams.md) · [hosts.md](hosts.md) · [09-ssh-transport.md](09-ssh-transport.md)
+- [concepts.md](concepts.md) — DotAgents repos, resources, resolution, version homes
+- [sessions.md](sessions.md) — the transcript index in depth
+- [observability.md](observability.md) — events, feed, mailboxes, cost
+- [teams.md](teams.md) · [hosts.md](hosts.md) · [ssh-transport.md](ssh-transport.md)
 - [`packages/session-tracker/README.md`](../../../packages/session-tracker/README.md) — the live-state writer (hook)

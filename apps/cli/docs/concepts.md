@@ -86,7 +86,7 @@ Each installed agent CLI version gets an isolated **version home** — a directo
 
 When you run `claude` (via the shim), agents-cli reads `agents.yaml`, resolves the version, and sets `HOME` to the matching version home before exec-ing the binary. The agent sees only its version-specific config — no bleed between versions.
 
-See [01-version-management.md](01-version-management.md) for install and switching details, and [02-resource-sync.md](02-resource-sync.md) for how resources are synced into version homes.
+See [version-management.md](version-management.md) for install and switching details, and [resource-sync.md](resource-sync.md) for how resources are synced into version homes.
 
 ---
 
@@ -104,7 +104,7 @@ detail in [architecture.md](architecture.md).
 ## Two kinds of "session"
 
 "Session" names two unrelated things. A **transcript** is the conversation on disk,
-indexed in `sessions.db` and read by `agents sessions` (see [05-sessions.md](05-sessions.md)).
+indexed in `sessions.db` and read by `agents sessions` (see [sessions.md](sessions.md)).
 A **live identity** is which running pid is which session right now, held in per-pid
 cache files and read by `--active` and the extension. The transcript is durable; the
 identity is ephemeral. [architecture.md](architecture.md) covers both, including the
@@ -155,7 +155,7 @@ spawn instead of rotating to another identity.
 
 Usage and authentication health are device-local read models owned by the
 agents-cli daemon. Every ordinary consumer (`agents run`, `view`, `versions`,
-`teams`, device inventory, and Factory) reads the same persisted snapshots and
+`teams`, device inventory, and the ext) reads the same persisted snapshots and
 never calls a provider or scans usage logs on its render path. The daemon
 considers usage every 60 seconds (each account retains its provider-aware due
 time and backoff) and authentication every three minutes. `agents usage

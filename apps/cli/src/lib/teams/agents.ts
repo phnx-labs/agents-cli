@@ -634,6 +634,13 @@ export class AgentProcess {
   // Worktree isolation: when non-null, this teammate runs in its own git worktree.
   worktreeName: string | null = null;
   worktreePath: string | null = null;
+  // The team's `--project`, if it has one. Stored as the NAME, not as resolved
+  // directories: an unpinned teammate on a `--devices` pool is placed at LAUNCH
+  // (maybeSchedulePlacement), so grants resolved at add time would carry this
+  // box's absolute paths onto whatever host the scheduler later picked — and
+  // would already have dropped any directory that exists only there. Resolving
+  // per launch is what makes local and remote placement both correct.
+  project: string | null = null;
   // Distributed teams: when hostName is non-null, this teammate runs on another
   // machine over SSH (the "remote-host" backend), not as a local process. These
   // are set post-construction (like startTime/pid) — placement config at add
@@ -1143,6 +1150,7 @@ export class AgentProcess {
       cloud_branch: this.cloudBranch,
       worktree_name: this.worktreeName,
       worktree_path: this.worktreePath,
+      project: this.project,
       host_name: this.hostName,
       host_target: this.hostTarget,
       host_identity_file: this.hostIdentityFile,
@@ -1284,6 +1292,8 @@ export class AgentProcess {
       agent.remoteLog = meta.remote_log || null;
       agent.remoteExit = meta.remote_exit || null;
       agent.remoteLogOffset = typeof meta.remote_log_offset === 'number' ? meta.remote_log_offset : 0;
+      // The team's project. Absent on every teammate added before `--project`.
+      agent.project = typeof meta.project === 'string' ? meta.project : null;
       return agent;
     } catch (err) {
       // The file exists but is not valid JSON (or fails a constructor
@@ -1542,6 +1552,36 @@ export class AgentProcess {
  * MCP server path leaves it null (cloud teammates aren't dispatched from MCP).
  */
 export type CloudDispatchFn = (agent: AgentProcess) => Promise<{ cloudSessionId: string }>;
+
+/**
+ * The directories, beyond its cwd, a teammate may reach because of the team's
+ * `--project`. Resolved at LAUNCH, from the project name on the record.
+ *
+ * Resolving here rather than at `teams add` is load-bearing for a pooled team:
+ * an unpinned teammate has no host until `maybeSchedulePlacement` runs, so add
+ * time cannot know whether to produce absolute local paths or `~/…` — and the
+ * local form would additionally have dropped any directory that exists only on
+ * the host it later landed on.
+ *
+ * A project that no longer resolves (renamed, definition deleted) yields no
+ * grants rather than failing the launch: the teammate still gets its cwd.
+ */
+async function resolveTeammateGrants(
+  agent: AgentProcess,
+  opts: { forRemote: boolean },
+): Promise<string[]> {
+  if (!agent.project) return [];
+  try {
+    const { resolveProjectDirs } = await import('../project-root.js');
+    const { extraDirs } = await resolveProjectDirs(agent.project, opts);
+    return extraDirs;
+  } catch (err) {
+    // Degrading is deliberate, but silently degrading is not: a teammate that
+    // lost its grants to a renamed or deleted definition should leave a trace.
+    debug(`teammate ${agent.agentId}: project '${agent.project}' did not resolve, no grants: ${(err as Error).message}`);
+    return [];
+  }
+}
 
 interface ResumeLogTransaction {
   agent: AgentProcess;
@@ -1948,6 +1988,7 @@ export class AgentManager {
     hostName: string | null = null,
     hostTarget: string | null = null,
     repoPath: string | null = null,
+    project: string | null = null,
   ): Promise<AgentProcess> {
     await this.initialize();
     const resolvedMode = resolveMode(mode, this.defaultMode);
@@ -2044,6 +2085,10 @@ export class AgentManager {
     agent.hostName = hostName;
     agent.hostTarget = hostTarget;
     agent.repoPath = repoPath;
+    // Must be set BEFORE the launch below — this method launches inline for a
+    // teammate with no unmet --after deps, so assigning it after spawn()
+    // returns would miss the only launch that matters.
+    agent.project = project;
 
     const agentDir = await agent.getAgentDir();
     try {
@@ -2222,6 +2267,7 @@ export class AgentManager {
       agent.version,
       agent.profileName,
       resume,
+      await resolveTeammateGrants(agent, { forRemote: false }),
     );
 
     debug(`Launching ${agent.agentType} agent ${agent.agentId} [${agent.mode}]${resume ? ' (resume)' : ''}: ${cmd.slice(0, 3).join(' ')}...`);
@@ -2370,6 +2416,14 @@ export class AgentManager {
       agent.profileName,
       resume,
     );
+    // Project grants for a remote teammate, resolved HERE rather than at add
+    // time: an unpinned teammate only learns its host from the scheduler, which
+    // runs at launch. `forRemote: true` keeps them `~/…` and skips this box's
+    // existence check — the host has its own checkouts. The remote `agents run`
+    // expands `~` against the host's HOME before handing it to the harness.
+    for (const dir of await resolveTeammateGrants(agent, { forRemote: true })) {
+      if (dir !== remoteCwd) forwardedArgs.push('--add-dir', dir);
+    }
 
     let dispatchedTask: Awaited<ReturnType<typeof dispatchAgentsCommand>>['task'] | null = null;
     let resumeLog: ResumeLogTransaction | null = null;
@@ -2758,6 +2812,7 @@ export class AgentManager {
     version: string | null = null,
     profileName: string | null = null,
     resume?: { id: string; message: string },
+    addDirs: string[] = [],
   ): string[] {
     // Route through getAgentsInvocation so a teammate launched by the compiled
     // standalone binary (#315) doesn't relaunch as `agents /$bunfs/root/agents …`
@@ -2782,6 +2837,14 @@ export class AgentManager {
     // Claude: grant access to the teammate's working directory.
     if (agentType === 'claude' && cwd) {
       cmd.push('--add-dir', cwd);
+    }
+
+    // The team's project directories, beyond the one the teammate sits in.
+    // `agents run` re-dedupes, but skipping cwd here keeps the launch line
+    // readable. Codex folds these into its workspace_roots; other harnesses
+    // ignore --add-dir entirely.
+    for (const dir of new Set(addDirs)) {
+      if (dir !== cwd) cmd.push('--add-dir', dir);
     }
 
     // Codex's workspace-write sandbox blocks writes outside cwd. Factory

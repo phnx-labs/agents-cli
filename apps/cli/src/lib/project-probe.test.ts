@@ -172,6 +172,28 @@ describe('workspaceTargetsForDef', () => {
     })).toEqual(['~/src/rush', '~/src/rush-infra']);
   });
 
+  it('anchors on root, NOT defaultPath — a monorepo subproject probes its checkout', () => {
+    // The probe asks "is this checkout clean / behind?", which is a
+    // whole-repository question. Anchoring on defaultPath would probe
+    // ~/src/rush/apps/web — not a git root — and report every monorepo
+    // subproject on the fleet as missing or errored.
+    expect(workspaceTargetsForDef({
+      name: 'rush-web',
+      root: '~/src/rush',
+      defaultPath: '~/src/rush/apps/web',
+    })).toEqual(['~/src/rush']);
+  });
+
+  it('does NOT join repos[].subpath — the probe wants the repo root', () => {
+    // subpath names the directory an agent working this project cares about;
+    // git status still has to run against the checkout that contains it.
+    expect(workspaceTargetsForDef({
+      name: 'rush',
+      root: '~/src/rush',
+      repos: [{ slug: 'phnx-labs/rush-infra', path: '~/src/rush-infra', subpath: 'deploy' }],
+    })).toEqual(['~/src/rush', '~/src/rush-infra']);
+  });
+
   it('returns an empty list when the def carries no on-disk paths', () => {
     expect(workspaceTargetsForDef({ name: 'x', repo: 'a/b' })).toEqual([]);
   });

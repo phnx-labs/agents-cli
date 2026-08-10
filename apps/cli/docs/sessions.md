@@ -1678,7 +1678,7 @@ B. --host fan-out (8 synthetic peers, 60ms/call): best 68.2ms
 
 For comparison, [`scripts/bench-ssh.mjs`](../scripts/bench-ssh.mjs) measures
 the real-network-latency side of the shared SSH transport against a live
-fleet host (see [Optimizations §OPT-02](99-optimizations.md#opt-02-ssh-transport--one-multiplexed-engine));
+fleet host (see [Optimizations §OPT-02](optimizations.md#opt-02-ssh-transport--one-multiplexed-engine));
 `sessions-active-perf.ts` is its CI-safe counterpart for the sessions
 fan-out specifically.
 

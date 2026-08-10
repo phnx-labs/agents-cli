@@ -3,7 +3,7 @@
 How agents-cli keeps a managed agent runnable when its install goes bad — detecting, surfacing, and repairing a broken binary instead of dying with a cryptic error.
 
 > This covers the *runtime integrity* of agent CLIs agents-cli installs. For the
-> normal install/pin/switch mechanics see [Version management](01-version-management.md).
+> normal install/pin/switch mechanics see [Version management](version-management.md).
 
 ## The failure it fixes
 
@@ -38,7 +38,7 @@ Two things made this nasty before self-healing:
    which *is* present. So the broken version got recorded as installed, pinned as
    the default, and picked to run.
 2. **The crash was invisible.** Interactive runs are wrapped in tmux
-   (see [Entrypoints & Loops](07-entrypoints-and-loops.md)); the `pane-died`
+   (see [Entrypoints & Loops](entrypoints-and-loops.md)); the `pane-died`
    hook detached the client the instant the agent exited, leaving only a bare
    `[detached (from session …)]` with no error text.
 

@@ -8,7 +8,7 @@ Hooks are shell scripts in `~/.agents/hooks/` that fire when an agent crosses a 
 
 All declared predicates AND together at fire time: every predicate in the `matches:` block must pass, or the script is skipped. An empty `matches:` block always passes.
 
-Hooks are separate from plugin-bundled hooks (which use a `hooks/hooks.json` inside the plugin directory). Central hooks in `~/.agents/hooks/` follow the same layered resolution as every other resource: project overrides user overrides system. See [02-resource-sync.md](02-resource-sync.md) for the full resolution model.
+Hooks are separate from plugin-bundled hooks (which use a `hooks/hooks.json` inside the plugin directory). Central hooks in `~/.agents/hooks/` follow the same layered resolution as every other resource: project overrides user overrides system. See [resource-sync.md](resource-sync.md) for the full resolution model.
 
 ## Architecture
 
@@ -204,7 +204,7 @@ lifecycle hook with nothing to gate, cache, or filter by tool) is the only kind
 that never shows up here; add `matches:`/`matcher:`/`cache:` to opt it in, then
 resync.
 
-See also [`06-observability.md`](./06-observability.md) for the `agents perf`
+See also [`observability.md`](./observability.md) for the `agents perf`
 summary (`commands`, `run`, multi-section default).
 
 
@@ -393,7 +393,7 @@ agents hooks remove post-edit --agents claude
 
 ## See Also
 
-- [02-resource-sync.md](02-resource-sync.md) — hooks participate in the same layered resource sync as commands, skills, and rules
+- [resource-sync.md](resource-sync.md) — hooks participate in the same layered resource sync as commands, skills, and rules
 - [docs/plugins.md](plugins.md) — plugins can bundle hooks alongside skills and MCP servers
 - [docs/workflows.md](workflows.md) — workflow lifecycle events that hooks can observe
 - [docs/subagents.md](subagents.md) — subagent definitions that parent agents dispatch to

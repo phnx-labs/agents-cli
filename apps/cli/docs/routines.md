@@ -1128,7 +1128,7 @@ landed guarantee for the catch-up path is the atomic `mkdir` claim below (a `mis
 record's run directory is a test-and-set). The reliability plan (RUSH-2290) extends
 the same idea to the primary scheduled path: one atomic claim on the occupancy
 identity `(routine, scheduledFor)` before dispatch, kept separate from the
-active-run claim that prevents self-overlap (`SING-11`, `SING-12`, `SING-13`).
+active-run claim that prevents self-overlap (`SING-13`, `SING-15`, `SING-16`).
 
 ## Catching up a missed fire
 

@@ -1,6 +1,6 @@
 # SSH transport — one multiplexed engine (design decision)
 
-> Status: **accepted** · Related: [hosts.md](hosts.md), [99-optimizations.md](99-optimizations.md#opt-02-ssh-transport--one-multiplexed-engine), [00-concepts.md](00-concepts.md#devices--hosts)
+> Status: **accepted** · Related: [hosts.md](hosts.md), [optimizations.md](optimizations.md#opt-02-ssh-transport--one-multiplexed-engine), [concepts.md](concepts.md#devices--hosts)
 
 A design record for *how `agents` talks to remote machines over SSH*. Every
 remote surface — `run --host`, `view/usage/cost/doctor/inspect/list/sync --host`,
