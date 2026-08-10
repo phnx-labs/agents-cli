@@ -2,23 +2,27 @@
  * One-time migration: fold per-device config from the legacy stores into the
  * central `fleet.devices.<name>.config` block of `~/.agents/agents.yaml`.
  *
+ * Only SHARED-visibility keys move — the ones a peer reads. Machine-visibility
+ * keys (see lib/config-machine-keys.ts) stay in the per-device doc, which is
+ * exactly where the machine-local read path now looks for them.
+ *
  * Legacy sources (both pre-unification):
  *   - `~/.agents/devices/<name>/agents.yaml` — the `config:` map and the
  *     top-level `defaultBrowserProfile:` field. Agent pins (`agents:`,
- *     `isolatedAgents:`) and `routines:` STAY in the per-device doc — only
- *     operator config moves.
+ *     `isolatedAgents:`), `routines:`, and machine-visibility config STAY in the
+ *     per-device doc — only shared operator config moves.
  *   - `~/.agents/.history/devices/auto-launch.json` — AGI EXT auto-launch
  *     enabled/preferred flags, becoming `autoLaunchEnabled` /
  *     `autoLaunchPreferred` config keys.
  *
- * Order is crash-safe: the central block is written FIRST, then the legacy
- * stores are stripped. A crash in between re-folds on the next run, and the
- * central-wins merge makes that a no-op. Idempotent — after a successful run
- * neither source holds config, so re-running is a cheap existence check.
+ * The fold is ADDITIVE: the central block is written and the legacy stores are
+ * left exactly as they were, so a box still on the previous CLI keeps reading
+ * what it always read. The central-wins merge makes a re-run a byte no-op.
  *
- * Invoked from three places so every install converges regardless of entry
- * point: `runMigration()` (fresh / sentinel-less installs), daemon boot, and
- * the first `lib/device-config.ts` read/write in a process.
+ * Invoked only from a lifecycle entry point — `runMigration()` (fresh installs)
+ * and daemon boot. It must NEVER hang off a config read or write: agents.yaml is
+ * tracked and shared by the whole fleet, so a migration on the read path lets an
+ * ordinary `agents config get` dirty it on every machine.
  */
 
 import * as fs from 'fs';
@@ -30,6 +34,7 @@ import {
   updateMeta,
 } from '../state.js';
 import { loadDevicesSync } from './registry.js';
+import { MACHINE_LOCAL_YAML_KEYS } from '../config-machine-keys.js';
 import type { FleetDeviceOverride, FleetManifest } from '../fleet/types.js';
 
 /** Config folded out of one legacy store, keyed by device name. */
@@ -99,6 +104,19 @@ function collectDeviceDocFolds(devicesRoot: string): { folds: ConfigFolds; docs:
     }
     if (typeof doc.defaultBrowserProfile === 'string') {
       config.defaultBrowserProfile = doc.defaultBrowserProfile;
+    }
+    // Machine-visibility keys are NOT folded. Two reasons, both load-bearing:
+    //
+    //  1. They already live exactly where they belong. `config:` in this doc is
+    //     the machine-local store the new read path uses (state.ts overlays it
+    //     as `deviceConfig`), so folding would only copy them into the shared
+    //     file this whole change exists to keep clean.
+    //  2. Copying a PEER's would be a leak. `browserRemoteControl` is a consent
+    //     flag gating whether other machines may drive that box's browser;
+    //     hoisting one box's opt-in into the synced file spreads it to the fleet.
+    //     Each machine keeps its own, in its own doc.
+    for (const key of Object.keys(config)) {
+      if (MACHINE_LOCAL_YAML_KEYS.has(key)) delete config[key];
     }
     if (Object.keys(config).length === 0) continue;
     mergeFold(folds, entry.name, config);
