@@ -65,6 +65,15 @@ const ADAPTERS = new Map<string, AccountProviderAdapter>([
     { claude: 'ANTHROPIC_AUTH_TOKEN', codex: 'OPENAI_API_KEY', opencode: 'OPENROUTER_API_KEY' },
     { claude: { ANTHROPIC_BASE_URL: 'https://openrouter.ai/api' }, codex: { OPENAI_BASE_URL: 'https://openrouter.ai/api/v1' } },
   )],
+  ['deepinfra', fixed(
+    'deepinfra',
+    ['api-key'],
+    { codex: 'OPENAI_API_KEY', opencode: 'OPENAI_API_KEY' },
+    {
+      codex: { OPENAI_BASE_URL: 'https://api.deepinfra.com/v1/openai' },
+      opencode: { OPENAI_BASE_URL: 'https://api.deepinfra.com/v1/openai' },
+    },
+  )],
   ['openai', fixed('openai', ['api-key'], { codex: 'OPENAI_API_KEY', opencode: 'OPENAI_API_KEY' }, {}, { codex: 'OPENAI_BASE_URL', opencode: 'OPENAI_BASE_URL' })],
   ['xai', fixed('xai', ['api-key'], { grok: 'XAI_API_KEY', claude: 'ANTHROPIC_AUTH_TOKEN' })],
   ['google', fixed('google', ['api-key'], { gemini: 'GEMINI_API_KEY', antigravity: 'ANTIGRAVITY_API_KEY' })],
