@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 103,
-  "commands": 579,
+  "commands": 581,
   "root": {
     "name": "agents",
     "path": "",
@@ -47,12 +47,12 @@
       "name": "accounts",
       "path": "accounts",
       "aliases": [],
-      "description": "Browse and name signed-in harness accounts",
+      "description": "Manage durable provider credentials",
       "args": [],
       "options": [
         {
           "flags": "--json",
-          "description": "Machine-readable discovered accounts",
+          "description": "Machine-readable account metadata",
           "long": "--json",
           "required": false,
           "optional": false,
@@ -70,19 +70,80 @@
           "negate": false
         }
       ],
-      "examples": "agents accounts\nagents accounts name work\nagents accounts name work --from claude@2.1.220\nagents run claude --account work",
-      "notes": "First run the harness and complete its normal login. A label names one provider account; every matching installed version is discovered automatically. OAuth credentials are never copied or shared.",
+      "examples": "agents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts inspect work --json\nagents run claude --account work",
+      "notes": "Accounts are durable credentials, independent of agent versions. Native OAuth login remains managed by the harness and is not copied or renamed by agents-cli.",
       "subcommands": [
         {
-          "name": "list",
-          "path": "accounts list",
+          "name": "add",
+          "path": "accounts add",
           "aliases": [],
-          "description": "Alias for accounts",
-          "args": [],
+          "description": "Add a durable API key, setup token, or bearer token",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--provider <provider>",
+              "description": "Credential provider (anthropic, bedrock, cursor, foundry, google, litellm, ollama, openai, opencode, openrouter, proxy, truefoundry, vllm, xai)",
+              "long": "--provider",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--auth <type>",
+              "description": "Credential type: api-key | setup-token | bearer-token",
+              "long": "--auth",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--from-secrets <bundle:key>",
+              "description": "Import from an existing agents secrets entry",
+              "long": "--from-secrets",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "inspect",
+          "path": "accounts inspect",
+          "aliases": [],
+          "description": "Show safe account metadata",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
           "options": [
             {
               "flags": "--json",
-              "description": "Machine-readable discovered accounts",
+              "description": "Machine-readable output",
               "long": "--json",
               "required": false,
               "optional": false,
@@ -103,24 +164,17 @@
           "subcommands": []
         },
         {
-          "name": "name",
-          "path": "accounts name",
+          "name": "list",
+          "path": "accounts list",
           "aliases": [],
-          "description": "Name one signed-in account; matching installed versions are found automatically",
-          "args": [
-            {
-              "name": "label",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
+          "description": "List credential accounts",
+          "args": [],
           "options": [
             {
-              "flags": "--from <agent@version>",
-              "description": "Non-interactive identity source",
-              "long": "--from",
-              "required": true,
+              "flags": "--json",
+              "description": "Machine-readable account metadata",
+              "long": "--json",
+              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -142,10 +196,10 @@
           "name": "remove",
           "path": "accounts remove",
           "aliases": [],
-          "description": "Remove a saved account label",
+          "description": "Remove an account and its device-local credential",
           "args": [
             {
-              "name": "label",
+              "name": "name",
               "required": true,
               "variadic": false,
               "description": ""
@@ -169,7 +223,7 @@
           "name": "rename",
           "path": "accounts rename",
           "aliases": [],
-          "description": "Rename a saved account label",
+          "description": "Rename an account without changing its stable id",
           "args": [
             {
               "name": "old",
@@ -185,6 +239,42 @@
             }
           ],
           "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "set-key",
+          "path": "accounts set-key",
+          "aliases": [],
+          "description": "Rotate an account credential without changing its identity",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--from-secrets <bundle:key>",
+              "description": "Import from an existing agents secrets entry",
+              "long": "--from-secrets",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -8293,8 +8383,17 @@
               "negate": false
             },
             {
+              "flags": "--account <name>",
+              "description": "Default durable credential account",
+              "long": "--account",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--auth-provider <provider>",
-              "description": "Attach a keychain-backed API key under this provider (for private endpoints)",
+              "description": "Removed: use agents accounts add, then --account",
               "long": "--auth-provider",
               "required": true,
               "optional": false,
@@ -8321,7 +8420,7 @@
             },
             {
               "flags": "--from-secrets <bundle>[:<key>]",
-              "description": "Copy a value from an agents secrets bundle into this harness's own keychain item, once (not a live link)",
+              "description": "Removed: import the value with agents accounts add, then use --account",
               "long": "--from-secrets",
               "required": true,
               "optional": true,
@@ -8392,8 +8491,17 @@
               "negate": false
             },
             {
+              "flags": "--account <name>",
+              "description": "Change the default durable credential account",
+              "long": "--account",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--auth-provider <provider>",
-              "description": "Repoint auth at a different provider (keychain-backed)",
+              "description": "Removed: use agents accounts add, then --account",
               "long": "--auth-provider",
               "required": true,
               "optional": false,
@@ -8429,7 +8537,7 @@
             },
             {
               "flags": "--from-secrets <bundle>[:<key>]",
-              "description": "Copy a value from an agents secrets bundle into this harness's own keychain item, once (not a live link)",
+              "description": "Removed: import the value with agents accounts add, then use --account",
               "long": "--from-secrets",
               "required": true,
               "optional": true,
@@ -8497,8 +8605,17 @@
               "negate": false
             },
             {
+              "flags": "--account <name>",
+              "description": "Default durable credential account",
+              "long": "--account",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--auth-provider <provider>",
-              "description": "Attach a keychain-backed API key under this provider",
+              "description": "Removed: use agents accounts add, then --account",
               "long": "--auth-provider",
               "required": true,
               "optional": false,
@@ -8525,7 +8642,7 @@
             },
             {
               "flags": "--from-secrets <bundle>[:<key>]",
-              "description": "Copy a value from an agents secrets bundle into this harness's own keychain item, once (not a live link)",
+              "description": "Removed: import the value with agents accounts add, then use --account",
               "long": "--from-secrets",
               "required": true,
               "optional": true,
@@ -19669,8 +19786,8 @@
           "negate": false
         },
         {
-          "flags": "--account <label>",
-          "description": "Run a healthy installed version currently signed into this named account (never falls back to another identity)",
+          "flags": "--account <name>",
+          "description": "Use this durable provider credential for the run",
           "long": "--account",
           "required": true,
           "optional": false,
@@ -29107,15 +29224,6 @@
           "negate": false
         },
         {
-          "flags": "--account <label>",
-          "description": "Disambiguate by signed-in account when several installations match",
-          "long": "--account",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
           "flags": "--json",
           "description": "Machine-readable result",
           "long": "--json",
@@ -29135,8 +29243,8 @@
           "negate": false
         }
       ],
-      "examples": "agents update list claude\nagents update claude@2.0.65\nagents update claude@2.0.65 --to 2.1.220\nagents update claude --account work\nagents update claude@2.0.65 --json",
-      "notes": "An installation keeps its name for life; only the release inside it moves. That is why a default, a project pin, a routine version, or a profile that names claude@2.0.65 keeps working after you update it. The selector matches either the installation name or the release it currently carries — when two installations share a release, name one or pass --account <label> (see: agents accounts). The new release is fetched and launched before it replaces the working one, so a bad release leaves your agent running.",
+      "examples": "agents update list claude\nagents update claude@2.0.65\nagents update claude@2.0.65 --to 2.1.220\nagents update claude@2.0.65 --json",
+      "notes": "An installation keeps its name for life; only the release inside it moves. That is why a default, a project pin, a routine version, or a profile that names claude@2.0.65 keeps working after you update it. The selector matches either the installation name or the release it currently carries — when two installations share a release, select one by its installation name. The new release is fetched and launched before it replaces the working one, so a bad release leaves your agent running.",
       "subcommands": [
         {
           "name": "list",

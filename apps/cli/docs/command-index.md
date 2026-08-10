@@ -14,16 +14,18 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_103 command groups · 579 commands._
+_103 command groups · 581 commands._
 
-## accounts — Browse and name signed-in harness accounts
+## accounts — Manage durable provider credentials
 
 ```
-agents accounts                     Browse and name signed-in harness accounts
-agents accounts list                Alias for accounts
-agents accounts name <label>        Name one signed-in account; matching installed versions are found automatically
-agents accounts remove <label>      Remove a saved account label
-agents accounts rename <old> <new>  Rename a saved account label
+agents accounts                     Manage durable provider credentials
+agents accounts add <name>          Add a durable API key, setup token, or bearer token
+agents accounts inspect <name>      Show safe account metadata
+agents accounts list                List credential accounts
+agents accounts remove <name>       Remove an account and its device-local credential
+agents accounts rename <old> <new>  Rename an account without changing its stable id
+agents accounts set-key <name>      Rotate an account credential without changing its identity
 ```
 
 ## add — Download and install agent CLI versions. Enables subsidized API usage through managed binaries.
