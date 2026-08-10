@@ -2413,9 +2413,12 @@ nothing but its own view cache.
   (`lib/watchdog/rotate.ts`). `agents daemon` is the user-facing runtime
   surface for this singular process (`start`/`stop`/`restart`/`reload`/
   `status`/`services`/`logs`/`doctor`, `commands/daemon.ts`) — it observes and
-  controls the one daemon SING-1 requires, never a second one. The watchdog,
-  device-probe, tmux-reconcile, launch-health, fleet-cache-warm,
-  session-cache-warm, usage-refresh, and auto-dispatch ticks (RUSH-2353) were
+  controls the one daemon SING-1 requires, never a second one. Usage and
+  authentication health are first-party account state and run as one in-process
+  daemon service (`lib/account-state-service.ts`); explicit CLI refreshes enter
+  the same cross-process per-account lease (`lib/refresh-coordinator.ts`). The
+  watchdog, device-probe, tmux-reconcile, launch-health, session-cache-warm, and
+  auto-dispatch ticks (RUSH-2353) were
   formerly hardcoded `setInterval`s inside `runDaemon()` — a second, unowned
   scheduling path duplicating what routines already provide (declaration, run
   history, pause, device pin). They are now **daemon-owned built-in routines**
@@ -2428,6 +2431,17 @@ nothing but its own view cache.
   run-tracked/pausable/device-pinnable, but no longer shipped from the
   `gh:phnx-labs/.agents-system` config repo every install pulls (only
   `check-updates` remains a system routine there).
+- **SING-1a (MUST).** Ordinary usage/auth consumers MUST be cache-only. This
+  includes routing (`agents run` and teams), `view`, `versions`, `usage`, device
+  inventory, and UI consumers. A missing snapshot MUST render as stale or
+  unavailable and MUST NOT trigger provider HTTP, credential refresh, or a local
+  transcript scan. The daemon and an explicit user refresh are the only
+  collectors, and both MUST use the same device-wide account lease.
+- **SING-1b (MUST NOT).** OAuth credential files and refresh tokens MUST NOT be
+  copied between devices. Each device uses the harness-native login flow;
+  cross-device state is limited to safe account labels, auth verdicts, and usage
+  snapshots. Named API-key/setup-token/bearer accounts retain device-local secret
+  material and synchronized metadata.
 - **SING-2 (MUST NOT).** A UI surface (apps/factory, the menubar app, the iOS app)
   MUST NOT own a timer, watcher, or loop that detects a condition and performs a
   fleet-affecting action. Detection and decision MUST live in the CLI, which holds

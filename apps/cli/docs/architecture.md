@@ -222,7 +222,23 @@ Detail in [teams.md](teams.md); the SSH transport is [09-ssh-transport.md](09-ss
 
 ---
 
-## 7. Live state is computed on demand
+## 7. Account state is daemon-owned; session detail is computed on demand
+
+Usage and auth health are exceptions to on-demand computation. The daemon starts
+one `account-state-service` per state directory: it refreshes persisted usage
+snapshots and authentication verdicts, while command and UI readers only render
+those files. Explicit `--refresh` calls use the same device-wide lease keyed by
+provider account, so separate `agents` processes cannot duplicate a provider
+request. The lease owner atomically publishes the snapshot; waiters re-read it.
+Local-log sources such as Codex and Grok follow the same rule because a render
+loop repeatedly scanning transcripts is still duplicate collection.
+
+Native OAuth credentials are deliberately outside this shared read model. They
+are minted and refreshed by the harness on each device; agents-cli publishes only
+the resulting safe health/account metadata. Durable API keys, setup tokens, and
+bearer tokens use the named account registry and each device's credential store.
+
+### Session detail remains computed on demand
 
 `agents sessions --active` re-derives state on every call — it re-reads the **tail**
 of each live transcript, infers `working` / `waiting_input` / `idle`, and computes
