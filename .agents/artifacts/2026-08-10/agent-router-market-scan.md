@@ -3,6 +3,9 @@ kind: report
 title: Agent Router — Market Scan
 surface: cli
 kicker: agents-cli · who else is building meta-harness routing
+human: redacted
+host: redacted
+session: redacted
 ---
 
 # Agent Router — Market Scan
@@ -37,8 +40,8 @@ the strongest validation signal in this scan — and the tightest deadline.
   gateways (LiteLLM/Portkey) at L1 and classifier models (RouteLLM, Arch/plano) for
   prompt→model scoring.
 - **YC shipped a structural competitor to the whole harness layer**, not just the
-  router: QM (MIT, July 31 2026) — pluggable agent drivers + scopes + keychains +
-  crons + skills grants. 13k stars in 10 days.
+  router: QM (MIT, announced 2026-07-31, repo created 2026-07-29) — pluggable agent
+  drivers + scopes + keychains + crons + skills grants. 12,955 stars in 12 days.
 - **Cost-routing skepticism is the loudest counter-argument in public.** The
   best-attended HN thread on router products (216 pts) is mostly developers arguing
   routing *loses* money via cache misses and retry loops.
@@ -88,7 +91,7 @@ one.
 | Tool | Stars | Created | Overlap with the spec |
 |---|---|---|---|
 | **[Claudexor](https://github.com/razzant/claudexor)** | 400 | 2026-06-05 | **Near-total.** Multi-harness control plane (Claude Code, Codex, Cursor, OpenCode); quota-aware rotation across multiple Claude/Codex subscriptions; native-CLI execution; SSH remote hosts; credentials never leave their machine |
-| [QM (Y Combinator)](https://github.com/yc-software/qm) | 12,955 | 2026-07-31 | Harness layer, not router: pluggable drivers (Claude Code, OpenCode, Codex, Pi) + scopes, keychains, crons, skills grants, admin policy. MIT |
+| [QM (Y Combinator)](https://github.com/yc-software/qm) | 12,955 | 2026-07-29 | Harness layer, not router: pluggable drivers (Claude Code, OpenCode, Codex, Pi) + scopes, keychains, crons, skills grants, admin policy. MIT |
 | OMK | — | 2026 | "Provider-neutral CLI control plane for coding agents" |
 | [vibe-kanban](https://github.com/BloopAI/vibe-kanban) | 27,736 | 2025 | Task board over agents — *placement*, not scored routing. **No push since April** |
 | Superset (YC S26) | — | 2026 | Terminal that coordinates parallel agent sessions |
@@ -161,7 +164,7 @@ shareable, task-typed router that layers project > user > system is a genuinely
 new surface, and it is the least-built part of the spec.
 
 **Timing is the risk.** Claudexor went 0 → 400 stars and shipped this entire
-feature set in ten weeks; QM took 13k stars in ten days. The L3 window is open now
+feature set in ten weeks; QM took 12,955 stars in 12 days. The L3 window is open now
 and will not stay open.
 
 ## Evidence
