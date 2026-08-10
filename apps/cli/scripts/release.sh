@@ -486,6 +486,40 @@ route_home_base_phase() {
   fi
 }
 
+# ----- Signing home-base preflight (fail fast BEFORE any mutation) -----
+# The privileged phase above (build + sign + notarize + npm publish) only runs at
+# the very END of the release, AFTER the PR is merged and the tag pushed. If the
+# resolved home base cannot sign -- the documented "mac-mini is down, use
+# --device zion" fallback on a box that was never provisioned as a signing home
+# base -- that failure lands after the two irreversible acts, leaving a
+# tagged-but-UNPUBLISHED release (RUSH-2535: npm stuck at 1.22.35 with v1.22.36
+# tagged). This runs the readiness probe ON the home base (inline if we ARE it,
+# else the same `agents ssh` hop route_home_base_phase uses) and aborts here --
+# before the crabbox/PR/merge/tag phases -- when the box is not provisioned. The
+# probe is read-only (scripts/signing-home-base-probe.sh: no git/gh/npm
+# mutations), so this hop can never itself advance the release.
+assert_signing_home_base() {
+  local out rc probe="scripts/signing-home-base-probe.sh"
+  bold "Preflight: verifying $RELEASE_HOME_BASE is a provisioned signing home base..."
+  if $ON_HOME_BASE; then
+    out="$(bash "$probe" 2>&1)"; rc=$?
+  elif command -v agents >/dev/null 2>&1; then
+    # Ship THIS worktree's fresh probe over stdin and run it in the home base's
+    # own checkout dir, so its git rev-parse resolves that box's provisionprofile.
+    # Piping (bash -s) -- not invoking a remote path -- because the home base's
+    # on-disk checkout may predate this script (route_home_base_phase makes the
+    # same choice for the same reason). Snippet on stdin; $HOME expands remotely.
+    out="$(agents ssh "$RELEASE_HOME_BASE" -- 'cd $HOME/src/github.com/muqsitnawaz/agents-cli && bash -s' < "$probe" 2>&1)"; rc=$?
+  else
+    out="$(ssh "$RELEASE_HOME_BASE" 'cd $HOME/src/github.com/muqsitnawaz/agents-cli && bash -s' < "$probe" 2>&1)"; rc=$?
+  fi
+  if [[ "$rc" != "0" ]]; then
+    printf '%s\n' "$out" | sed 's/^/  /' >&2
+    die "device $RELEASE_HOME_BASE is not a provisioned signing home base (missing provisionprofile/cert/notarytool creds) -- releases can only sign on a provisioned Mac; pass --device <provisioned-mac> or bring mac-mini online. Provisioning a new home base is RUSH-2541."
+  fi
+  phase_ok "$RELEASE_HOME_BASE is a provisioned signing home base"
+}
+
 # ----- Validate version bump -----
 # Compare against current published latest of the canonical package.
 PHNX_LATEST="$(npm view "$PHNX_PKG" version 2>/dev/null || true)"
@@ -998,6 +1032,14 @@ wait_for_ci_green() {
   (( problem == 0 )) || die "CI not all-green on PR #$pr -- PR left OPEN. Fix on a normal PR to $DEFAULT_BRANCH, then re-run this script."
   green "CI all-green on PR #$pr."
 }
+
+# Verify the home base can actually sign BEFORE any mutation. Reached only past
+# the already-published short-circuit (that path just tags a shipped version and
+# never signs), so both remaining paths -- a catch-up publish and a brand-new
+# release -- are gated here, before the crabbox tests, the PR, the merge, or the
+# tag. Without this an unprovisioned --device fallback merges + tags and then dies
+# at the sign step, exactly the RUSH-2535 tagged-but-unpublished trap.
+assert_signing_home_base
 
 # A prior normal release run can merge its PR and then fail before publishing.
 # Re-running must reuse the exact CI-tested release tree — never treat a manual

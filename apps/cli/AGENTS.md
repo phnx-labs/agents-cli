@@ -614,7 +614,7 @@ that the caller be on a clean `main`:
 ```bash
 scripts/release.sh <version>                      # dry-run: bump, type-check, tarball preview, detected state
 scripts/release.sh <version> --apply              # tests on a crabbox -> PR + CI -> merge + tag -> build/sign/publish on the home base (mac-mini)
-scripts/release.sh <version> --apply --device zion  # same, but sign/publish on zion (use when mac-mini is offline)
+scripts/release.sh <version> --apply --device <mac>  # sign/publish on <mac> when mac-mini is down -- <mac> must ALREADY be a provisioned signing home base (see below)
 ```
 
 The release has **three self-selected homes** and prints a `[n/6]` phase tracker,
@@ -628,11 +628,29 @@ each phase labeled with the box it runs on and a ✓/✗ result:
 
 The home base is a Mac that holds the Developer ID cert + npm publish rights.
 It defaults to `mac-mini` and is overridable with **`--device <name>`** (alias
-`--host`) — pass `--device zion` to drive the release from another capable Mac
-when mac-mini is down. Not an env var: a flag with a default. The macOS-only
-sign/notarize + the npm tarball's signed binaries mean the home base must be a
-Mac; a Linux worker can *drive* the release but not be the home base. The
-crabbox is **not** hardcoded.
+`--host`) to drive the release from another Mac when mac-mini is down. Not an env
+var: a flag with a default. The macOS-only sign/notarize + the npm tarball's
+signed binaries mean the home base must be a Mac; a Linux worker can *drive* the
+release but not be the home base. The crabbox is **not** hardcoded.
+
+**A `--device` fallback must ALREADY be a provisioned signing home base — it is
+not turnkey.** Signing + notarizing + publishing needs, on that box: the
+`Developer ID Application` identity in a *headless-unlockable* keychain
+(`rush-signing.keychain-db` + `~/Library/Application Support/rush/signing.kcpass`,
+the pass file that lets a headless SSH release unlock it — a cert that only appears
+after an interactive login does **not** count), and the `apple.com` (notarytool)
+and `npmjs.com` (publish token) secrets bundles. A box like `zion` typically has a
+Developer ID cert in its *login* keychain but none of the headless plumbing, so it
+cannot sign a release. Passing `--device zion` there used to run the whole flow —
+merge the PR, push the tag — and only fail at the sign step, leaving a
+tagged-but-**unpublished** release (RUSH-2535; npm stuck at 1.22.35 with `v1.22.36`
+tagged). `release.sh` now **preflights the resolved home base BEFORE any mutation**
+([`scripts/signing-home-base-probe.sh`](scripts/signing-home-base-probe.sh), run on
+that box over `agents ssh`): an unprovisioned `--device` aborts at `[1/6]` with the
+exact gap, before the crabbox/PR/merge/tag phases, so a mac-mini outage no longer
+risks a half-finished release. Provisioning a *new* signing home base (seeding the
+keychain, the pass files, and the secrets bundles) is tracked by **RUSH-2541** — do
+that first, then `--device <that-mac>` works.
 
 **The caller checkout is never mutated or gated.** `release.sh` immediately
 fetches origin and re-enters the release from a detached, release-owned worktree
