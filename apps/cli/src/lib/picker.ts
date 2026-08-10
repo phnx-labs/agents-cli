@@ -39,8 +39,12 @@ export interface PickerConfig<T> {
   message: string;
   /** Optional dim hint line rendered directly under the header (above the rows). */
   subtitle?: string;
-  items: T[];
-  filter: (query: string) => T[];
+  /**
+   * The row pool. A {@link Separator} entry renders as a non-selectable divider
+   * (used for group headers) — navigation skips it and it is never returned.
+   */
+  items: Array<T | Separator>;
+  filter: (query: string) => Array<T | Separator>;
   labelFor: (item: T, query: string) => string;
   buildPreview?: (item: T) => string;
   shortIdFor?: (item: T) => string;
@@ -229,19 +233,42 @@ export function itemPicker<T>(config: PickerConfig<T>): Promise<PickedItem<T> | 
 
     const results = useMemo(() => {
       const filtered = cfg.filter(searchTerm).slice(0, 50);
-      return filtered.map<Choice<T>>((item) => ({
-        value: item,
-        label: cfg.labelFor(item, searchTerm),
-      }));
+      return filtered.map<Choice<T> | Separator>((item) =>
+        Separator.isSeparator(item)
+          ? item
+          : { value: item, label: cfg.labelFor(item, searchTerm) },
+      );
     }, [searchTerm]);
+
+    // A row is selectable unless it is a divider (Separator). Navigation and the
+    // initial cursor skip dividers, and enter never resolves one.
+    const isSelectable = (i: number): boolean =>
+      i >= 0 && i < results.length && !Separator.isSeparator(results[i]);
+    const firstSelectable = (): number => {
+      for (let i = 0; i < results.length; i++) if (isSelectable(i)) return i;
+      return -1;
+    };
+    const nextSelectable = (from: number, dir: 1 | -1): number => {
+      if (results.length === 0) return -1;
+      let i = from;
+      for (let n = 0; n < results.length; n++) {
+        i = (i + dir + results.length) % results.length;
+        if (isSelectable(i)) return i;
+      }
+      return -1;
+    };
 
     const [active, setActive] = useState(0);
 
+    // Keep the cursor on a selectable row: after a filter change the old index can
+    // land past the end or on a divider, so snap to the first selectable row.
     useEffect(() => {
-      if (active >= results.length) setActive(0);
+      if (!isSelectable(active)) setActive(firstSelectable());
     }, [results]);
 
-    const selected = results[active];
+    const activeRow = results[active];
+    const selected =
+      activeRow && !Separator.isSeparator(activeRow) ? (activeRow as Choice<T>) : undefined;
 
     useKeypress((key, rl) => {
       if (isEnterKey(key)) {
@@ -260,17 +287,15 @@ export function itemPicker<T>(config: PickerConfig<T>): Promise<PickedItem<T> | 
 
       if (isUpKey(key)) {
         rl.clearLine(0);
-        if (results.length > 0) {
-          setActive((active - 1 + results.length) % results.length);
-        }
+        const target = nextSelectable(active, -1);
+        if (target >= 0) setActive(target);
         return;
       }
 
       if (isDownKey(key)) {
         rl.clearLine(0);
-        if (results.length > 0) {
-          setActive((active + 1) % results.length);
-        }
+        const target = nextSelectable(active, 1);
+        if (target >= 0) setActive(target);
         return;
       }
 

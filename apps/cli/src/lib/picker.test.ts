@@ -364,3 +364,103 @@ describe('hotkeyToken', () => {
     expect(shifted.name).toBe('r');
   });
 });
+
+/**
+ * Group dividers: an itemPicker fed Separator rows renders them as non-selectable
+ * headers. The cursor never rests on one — it starts below a leading divider, and
+ * up/down navigation jumps over one — so enter always resolves a real row. This is
+ * what lets the routines browser show project/device group headers inline (RUSH-2503).
+ */
+describe('itemPicker group separators', () => {
+  const pickerUrl = pathToFileURL(path.resolve('src/lib/picker.ts')).href;
+
+  /** Spawn a tiny itemPicker program, send keys once its first frame lands, and read `PICKED:<id>`. */
+  async function drivePicker(programBody: string, keysAfterFirstFrame: string): Promise<string> {
+    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', programBody], {
+      cols: 80,
+      rows: 24,
+      cwd: process.cwd(),
+      env: { ...process.env, TERM: 'xterm-256color' },
+    });
+    return await new Promise<string>((resolve, reject) => {
+      let captured = '';
+      let sentKeys = false;
+      const timeout = setTimeout(() => {
+        child.kill();
+        reject(new Error(`picker did not resolve:\n${stripVTControlCharacters(captured)}`));
+      }, 10_000);
+      child.onData((data) => {
+        captured += data;
+        // First frame renders the group header; only then are the rows on screen.
+        if (!sentKeys && captured.includes('Group A')) {
+          sentKeys = true;
+          child.write(keysAfterFirstFrame);
+        }
+        if (!captured.includes('PICKED:')) return;
+        clearTimeout(timeout);
+        child.kill();
+        resolve(stripVTControlCharacters(captured));
+      });
+    });
+  }
+
+  it('starts the cursor below a leading divider and enter selects the first real row', async () => {
+    const program = `
+      import { itemPicker } from ${JSON.stringify(pickerUrl)};
+      import { Separator } from '@inquirer/core';
+      const rows = [new Separator('Group A'), { id: 'a' }, { id: 'b' }];
+      const r = await itemPicker({
+        message: 'Pick:',
+        items: rows,
+        filter: () => rows,
+        labelFor: (it) => 'row ' + it.id,
+      });
+      console.log('PICKED:' + (r ? r.item.id : 'null'));
+    `;
+    const out = await drivePicker(program, '\r');
+    expect(out).toContain('Group A');
+    expect(out).toContain('PICKED:a');
+  });
+
+  it('skips a divider between rows so down-arrow never lands on it', async () => {
+    const program = `
+      import { itemPicker } from ${JSON.stringify(pickerUrl)};
+      import { Separator } from '@inquirer/core';
+      const rows = [{ id: 'a' }, new Separator('Group B'), { id: 'b' }];
+      const r = await itemPicker({
+        message: 'Pick:',
+        items: rows,
+        filter: () => rows,
+        labelFor: (it) => 'row ' + it.id,
+      });
+      console.log('PICKED:' + (r ? r.item.id : 'null'));
+    `;
+    // Header text differs, so wait on the always-present 'row a' frame instead.
+    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', program], {
+      cols: 80,
+      rows: 24,
+      cwd: process.cwd(),
+      env: { ...process.env, TERM: 'xterm-256color' },
+    });
+    const out = await new Promise<string>((resolve, reject) => {
+      let captured = '';
+      let sent = false;
+      const timeout = setTimeout(() => {
+        child.kill();
+        reject(new Error(`picker did not resolve:\n${stripVTControlCharacters(captured)}`));
+      }, 10_000);
+      child.onData((data) => {
+        captured += data;
+        if (!sent && captured.includes('row a')) {
+          sent = true;
+          child.write('\x1b[B\r'); // down (skips the divider), then enter
+        }
+        if (!captured.includes('PICKED:')) return;
+        clearTimeout(timeout);
+        child.kill();
+        resolve(stripVTControlCharacters(captured));
+      });
+    });
+    expect(out).toContain('PICKED:b');
+  });
+});

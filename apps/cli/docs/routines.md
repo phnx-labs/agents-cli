@@ -102,6 +102,8 @@ What happens on enable/sync:
 
 `agents routines list` groups terminal output by effective device/host scope so it is clear what runs on the current machine, the fleet, cloud, named devices, and named hosts. Use `agents routines list --flat` for the legacy single table, or `--json` for the flat machine-readable payload. Project-sourced routines still show the source repo (and `@branch` when known) in the Repo column; `--json` includes `source`, `sourceRepo`, `sourceBranch`, `hostStrategy`, `oneShot`, and `expired`.
 
+The bare `agents routines` command (no subcommand) opens an **interactive browser** on a terminal — a filterable, grouped picker (built on the same picker primitive as `agents sessions`). The project/device group headers render as inline dividers, typing filters the rows (keeping only groups with a match), and the detail pane / drilling into a routine shows four blocks: Definition, Next fire, Recent runs, and Stats. It falls back to the static `agents routines list` output — byte-for-byte — under `--json` or in any non-interactive shell (a pipe, the menu bar, CI), and `--flat` keeps the legacy table. Separately, `agents inspect <target> --routines` lists routine *definitions* (name, last run, devices, schedule) through the inspect resource view; add a name to drill into one.
+
 A project may also declare `routines: { enable: true }` in its own `agents.yaml` as a documentation signal; daemon firing still requires the explicit `enable-project` allowlist step so consent is materialised into the user layer.
 
 ### Host placement strategy

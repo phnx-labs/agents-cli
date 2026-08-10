@@ -1891,3 +1891,51 @@ describeRoutines('routines list --json projects and projectGroup fields', () => 
     }
   });
 });
+
+// The bare `agents routines` command (RUSH-2503): on a TTY it opens the interactive
+// browser, but with --json or in a non-interactive shell it MUST reproduce the
+// static `routines list` output byte-for-byte. spawnSync gives the child no TTY, so
+// these exercise the static fall-through path.
+describeRoutines('bare routines command routing', () => {
+  it('bare `routines --json` matches `routines list --json` byte-for-byte', () => {
+    const home = makeHome({ jobs: [baseJob, { ...baseJob, name: 'other-job', projects: ['*'] }] });
+    try {
+      const bare = run(home, ['--json']);
+      const list = run(home, ['list', '--json']);
+      expect(bare.status, bare.stderr).toBe(0);
+      expect(list.status, list.stderr).toBe(0);
+      expect(bare.stdout).toBe(list.stdout);
+      // And it is real JSON, not the table.
+      expect(() => JSON.parse(bare.stdout.trim())).not.toThrow();
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('bare `routines` in a non-interactive shell prints the static list, not the browser', () => {
+    const home = makeHome({ jobs: [baseJob] });
+    try {
+      const bare = run(home, []);
+      const list = run(home, ['list']);
+      expect(bare.status, bare.stderr).toBe(0);
+      // Same rendered table as `routines list`.
+      expect(bare.stdout).toBe(list.stdout);
+      expect(bare.stdout).toContain('Scheduled Jobs');
+      expect(bare.stdout).toContain('test-job');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('bare `routines --flat` stays on the static flat table', () => {
+    const home = makeHome({ jobs: [baseJob] });
+    try {
+      const bare = run(home, ['--flat']);
+      const list = run(home, ['list', '--flat']);
+      expect(bare.status, bare.stderr).toBe(0);
+      expect(bare.stdout).toBe(list.stdout);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});

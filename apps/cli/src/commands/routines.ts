@@ -80,6 +80,8 @@ import { JobScheduler } from '../lib/scheduler.js';
 import { detectOverdueJobs } from '../lib/overdue.js';
 import { runCatchup } from '../lib/catchup.js';
 import { isInteractiveTerminal, requireInteractiveSelection } from './utils.js';
+import { itemPicker } from '../lib/picker.js';
+import { Separator } from '@inquirer/core';
 import { setHelpSections } from '../lib/help.js';
 import { loadDevices, loadDevicesSync } from '../lib/devices/registry.js';
 import type { DeviceRegistry } from '../lib/devices/registry.js';
@@ -643,6 +645,258 @@ async function parseAndValidateDevices(raw: string): Promise<string[]> {
   return names;
 }
 
+interface RoutinesListOptions {
+  json?: boolean;
+  groupBy?: string;
+  flat?: boolean;
+}
+
+/**
+ * The static routines table. Shared verbatim by `agents routines list` and the
+ * non-interactive fall-through of the bare `agents routines` command, so both emit
+ * byte-identical `--json` and text output.
+ */
+function runRoutinesList(options: RoutinesListOptions): void {
+  if (options.groupBy && options.groupBy !== 'device' && options.groupBy !== 'project') {
+    console.error(chalk.red(`Unsupported --group-by '${options.groupBy}'. Use: project (default) or device`));
+    process.exit(1);
+  }
+  if (options.json) {
+    process.stdout.write(JSON.stringify(buildRoutineListJson()) + '\n');
+    return;
+  }
+  try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
+  const jobs = listAllJobs(process.cwd());
+  if (jobs.length === 0) {
+    console.log(chalk.gray('No jobs configured'));
+    console.log(chalk.gray('  Add a job: agents routines add <path-to-job.yml>'));
+    return;
+  }
+
+  const scheduler = new JobScheduler(async () => {});
+  scheduler.loadAll();
+
+  // Build a quick lookup: which jobs are currently overdue?
+  const overdueSet = new Set<string>();
+  try {
+    for (const j of detectOverdueJobs()) overdueSet.add(j.name);
+  } catch {
+    // Best-effort indicator; never block the list on detection errors.
+  }
+
+  console.log(chalk.bold('Scheduled Jobs\n'));
+
+  // OSC 8 hyperlink helper — renders as a clickable link in supporting terminals.
+  // Guarded on process.stdout.isTTY so that piped/redirected output never
+  // contains raw ESC ] 8 ;; ... BEL escape sequences.
+  const link = (label: string, url: string | null): string =>
+    url && process.stdout.isTTY ? `\x1b]8;;${url}\x07${label}\x1b]8;;\x07` : label;
+
+  const now = new Date();
+  if (options.flat) {
+    renderRoutineRows({ jobs, scheduler, overdueSet, link, now });
+  } else if (options.groupBy === 'device') {
+    let registry: DeviceRegistry = {};
+    try {
+      registry = loadDevicesSync();
+    } catch (err) {
+      console.error(chalk.yellow(`Could not read device registry: ${(err as Error).message}`));
+    }
+    const groups = groupRoutineJobsByDevice(jobs, registry);
+    for (const group of groups) {
+      console.log(chalk.bold(`\n${group.title}`));
+      renderRoutineRows({ jobs: group.jobs, scheduler, overdueSet, link, now, local: group.local });
+    }
+    if (groups.some((group) => !group.local)) {
+      console.log();
+      console.log(chalk.gray('  Last Status is per-device: rows under another device show "-" — read it there with: agents routines list --device <name>'));
+    }
+  } else {
+    // Default: group by project
+    const knownProjectNames = new Set(listProjectDefs().map((p) => p.name));
+    const groups = groupRoutineJobsByProject(jobs, knownProjectNames);
+    for (const group of groups) {
+      console.log(chalk.bold(`\n${group.title}`));
+      renderRoutineRows({ jobs: group.jobs, scheduler, overdueSet, link, now });
+    }
+  }
+
+  if (overdueSet.size > 0) {
+    console.log();
+    console.log(chalk.yellow(`  ${overdueSet.size} routine(s) overdue — catch up with: agents routines catchup`));
+  }
+
+  scheduler.stopAll();
+  console.log();
+}
+
+/** True when a routine matches the browser's live filter query. */
+function routineMatchesQuery(job: JobConfig, q: string): boolean {
+  const kind = job.command ? 'command' : job.workflow ? `wf:${job.workflow}` : job.agent ?? '';
+  return [job.name, kind, fireConditionLabel(job), (job.projects ?? []).join(' ')]
+    .join(' ')
+    .toLowerCase()
+    .includes(q);
+}
+
+/** One compact routine row for the browser list: name · kind · schedule · next · last. */
+function routineBrowserRow(
+  job: JobConfig,
+  scheduler: JobScheduler,
+  overdueSet: Set<string>,
+  now: Date,
+): string {
+  const kind = job.command ? 'command' : job.workflow ? `wf:${job.workflow}` : job.agent ?? '?';
+  const name = job.name.length > 24 ? job.name.slice(0, 23) + '…' : job.name.padEnd(24);
+  const enabled = job.enabled === false ? chalk.gray('paused') : chalk.green('on');
+  const latest = localLatestRun(job);
+  const last = latest
+    ? latest.status === 'completed'
+      ? chalk.green('ok')
+      : latest.status === 'failed' || latest.status === 'timeout'
+        ? chalk.red(latest.status)
+        : chalk.yellow(latest.status)
+    : chalk.gray('—');
+  const next = overdueSet.has(job.name)
+    ? chalk.yellow('overdue')
+    : chalk.gray(nextRunLabel(job, scheduler, now));
+  return `${chalk.bold(name)} ${chalk.cyan(kind.padEnd(12))} ${enabled.padEnd(6)} ${chalk.gray(scheduleLabel(job)).padEnd(24)} next ${next} · last ${last}`;
+}
+
+/**
+ * The four-block routine detail — Definition, Next fire, Recent runs, Stats — shown
+ * both live in the picker's preview pane and, in full, when a routine is selected.
+ */
+function buildRoutineDetail(job: JobConfig, scheduler: JobScheduler, now: Date): string {
+  const lines: string[] = [];
+
+  // 1. Definition
+  lines.push(chalk.bold.underline('Definition'));
+  const kind = job.command
+    ? `command: ${job.command}`
+    : job.workflow
+      ? `workflow: ${job.workflow}`
+      : `agent: ${job.agent ?? '?'}`;
+  lines.push(`  ${kind}`);
+  lines.push(`  schedule: ${fireConditionLabel(job)}${isOneShotRoutine(job) ? ' (one-shot)' : ''}`);
+  const devices = devicesWithRoutineEnabled(job.name);
+  lines.push(`  devices: ${devices.length > 0 ? devices.join(', ') : chalk.gray('none (paused)')}`);
+  if (job.timezone) lines.push(`  timezone: ${job.timezone}`);
+  if (job.repo) lines.push(`  repo: ${job.repo}`);
+  if (job.prompt) {
+    const oneLine = job.prompt.replace(/\s+/g, ' ').trim();
+    lines.push(`  prompt: ${oneLine.length > 120 ? oneLine.slice(0, 119) + '…' : oneLine}`);
+  }
+
+  // 2. Next fire
+  lines.push('');
+  lines.push(chalk.bold.underline('Next fire'));
+  const nextDate = nextRunForDisplay(job, scheduler);
+  lines.push(`  ${nextRunLabel(job, scheduler, now)}${nextDate ? chalk.gray(`  (${nextDate.toISOString()})`) : ''}`);
+
+  // 3. Recent runs (most recent last, like `routines runs`)
+  lines.push('');
+  lines.push(chalk.bold.underline('Recent runs'));
+  const runs = listRuns(job.name).slice(-5);
+  if (runs.length === 0) {
+    lines.push(chalk.gray('  no runs yet'));
+  } else {
+    for (const run of runs) {
+      const status = run.status === 'completed'
+        ? chalk.green(run.status)
+        : run.status === 'failed' || run.status === 'timeout'
+          ? chalk.red(run.status)
+          : chalk.yellow(run.status);
+      const dur = run.completedAt ? ` ${formatRunDuration(run.startedAt, run.completedAt)}` : '';
+      lines.push(`  ${run.startedAt}  ${status}${dur}`);
+    }
+  }
+
+  // 4. Stats
+  lines.push('');
+  lines.push(chalk.bold.underline('Stats'));
+  const stats = routineStats(job.name);
+  if (stats.count === 0) {
+    lines.push(chalk.gray('  no completed runs'));
+  } else {
+    lines.push(`  runs ${stats.count} · failed ${stats.failed} · missed ${stats.missed}`);
+    lines.push(`  avg ${stats.avgMs}ms · p50 ${stats.p50}ms · p95 ${stats.p95}ms`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Interactive routines browser behind the bare `agents routines` command on a TTY.
+ * Reuses {@link itemPicker}, keeping the project/device group headers as inline
+ * dividers, with a live four-block detail pane and a full drill-in on select.
+ */
+async function runRoutinesBrowser(options: RoutinesListOptions): Promise<void> {
+  try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
+  const jobs = listAllJobs(process.cwd());
+  if (jobs.length === 0) {
+    console.log(chalk.gray('No jobs configured'));
+    console.log(chalk.gray('  Add a job: agents routines add <path-to-job.yml>'));
+    return;
+  }
+
+  const scheduler = new JobScheduler(async () => {});
+  scheduler.loadAll();
+  try {
+    const now = new Date();
+    const overdueSet = new Set<string>();
+    try {
+      for (const j of detectOverdueJobs()) overdueSet.add(j.name);
+    } catch { /* best-effort indicator */ }
+
+    // Group with the same headers the static list uses, so the picker's dividers
+    // read identically to `routines list`.
+    let groups: RoutineListGroup[];
+    if (options.groupBy === 'device') {
+      let registry: DeviceRegistry = {};
+      try { registry = loadDevicesSync(); } catch { /* headers still render without state */ }
+      groups = groupRoutineJobsByDevice(jobs, registry);
+    } else {
+      const knownProjectNames = new Set(listProjectDefs().map((p) => p.name));
+      groups = groupRoutineJobsByProject(jobs, knownProjectNames);
+    }
+
+    const filter = (query: string): Array<JobConfig | Separator> => {
+      const q = query.trim().toLowerCase();
+      const rows: Array<JobConfig | Separator> = [];
+      for (const group of groups) {
+        const matched = q ? group.jobs.filter((j) => routineMatchesQuery(j, q)) : group.jobs;
+        if (matched.length === 0) continue;
+        rows.push(new Separator(chalk.bold(`── ${group.title} ──`)));
+        rows.push(...matched);
+      }
+      return rows;
+    };
+
+    const picked = await itemPicker<JobConfig>({
+      message: 'Routines',
+      subtitle: chalk.gray('type to filter · ↑↓ navigate · space toggles detail · ⏎ open'),
+      items: filter(''),
+      filter,
+      labelFor: (job) => routineBrowserRow(job, scheduler, overdueSet, now),
+      buildPreview: (job) => buildRoutineDetail(job, scheduler, now),
+      shortIdFor: (job) => job.name,
+      pageSize: 15,
+      enterHint: 'open',
+      emptyMessage: 'No routines match.',
+    });
+
+    if (picked) {
+      // Drill-in: print the full, untruncated four-block detail for the selection.
+      console.log();
+      console.log(chalk.bold(picked.item.name));
+      console.log(buildRoutineDetail(picked.item, scheduler, now));
+    }
+  } finally {
+    scheduler.stopAll();
+  }
+}
+
 /** Register the `agents routines` command tree. */
 export function registerRoutinesCommands(program: Command): void {
   const routinesCmd = program
@@ -714,88 +968,34 @@ export function registerRoutinesCommands(program: Command): void {
     `,
   });
 
+  // Bare `agents routines`: a HIDDEN default subcommand carries the bare-command's
+  // own --json/--group-by/--flat. It must be a subcommand rather than options on the
+  // parent `routines`, because commander binds a same-named PARENT option first and
+  // would shadow the identical --json on every sibling (`add`/`run`/`runs`/`list`/…).
+  // On a TTY it opens the interactive browser; with --json, --flat, or in a
+  // non-interactive shell it prints the exact static `routines list` output.
+  routinesCmd
+    .command('browse', { isDefault: true, hidden: true })
+    .description('Interactive routines browser (the default for a bare `agents routines`)')
+    .option('--json', 'Emit machine-readable JSON instead of the browser (matches `routines list --json`)')
+    .option('--group-by <field>', 'Group by field: project (default) or device', 'project')
+    .option('--flat', 'Print the legacy flat table instead of the interactive browser')
+    .action(async (options: RoutinesListOptions) => {
+      if (options.json || options.flat || !isInteractiveTerminal()) {
+        runRoutinesList(options);
+        return;
+      }
+      await runRoutinesBrowser(options);
+    });
+
   routinesCmd
     .command('list')
     .description('See all scheduled jobs, when they run next, and their last execution status')
     .option('--json', 'Emit machine-readable JSON instead of the table (used by the menu bar helper)')
     .option('--group-by <field>', 'Group output by field: project (default) or device', 'project')
     .option('--flat', 'Print the legacy flat table instead of grouped sections')
-    .action((options: { json?: boolean; groupBy?: string; flat?: boolean }) => {
-      if (options.groupBy && options.groupBy !== 'device' && options.groupBy !== 'project') {
-        console.error(chalk.red(`Unsupported --group-by '${options.groupBy}'. Use: project (default) or device`));
-        process.exit(1);
-      }
-      if (options.json) {
-        process.stdout.write(JSON.stringify(buildRoutineListJson()) + '\n');
-        return;
-      }
-      try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
-      const jobs = listAllJobs(process.cwd());
-      if (jobs.length === 0) {
-        if (options.json) {
-          process.stdout.write('[]\n');
-          return;
-        }
-        console.log(chalk.gray('No jobs configured'));
-        console.log(chalk.gray('  Add a job: agents routines add <path-to-job.yml>'));
-        return;
-      }
-
-      const scheduler = new JobScheduler(async () => {});
-      scheduler.loadAll();
-
-      // Build a quick lookup: which jobs are currently overdue?
-      const overdueSet = new Set<string>();
-      try {
-        for (const j of detectOverdueJobs()) overdueSet.add(j.name);
-      } catch {
-        // Best-effort indicator; never block the list on detection errors.
-      }
-
-      console.log(chalk.bold('Scheduled Jobs\n'));
-
-      // OSC 8 hyperlink helper — renders as a clickable link in supporting terminals.
-      // Guarded on process.stdout.isTTY so that piped/redirected output never
-      // contains raw ESC ] 8 ;; ... BEL escape sequences.
-      const link = (label: string, url: string | null): string =>
-        url && process.stdout.isTTY ? `\x1b]8;;${url}\x07${label}\x1b]8;;\x07` : label;
-
-      const now = new Date();
-      if (options.flat) {
-        renderRoutineRows({ jobs, scheduler, overdueSet, link, now });
-      } else if (options.groupBy === 'device') {
-        let registry: DeviceRegistry = {};
-        try {
-          registry = loadDevicesSync();
-        } catch (err) {
-          console.error(chalk.yellow(`Could not read device registry: ${(err as Error).message}`));
-        }
-        const groups = groupRoutineJobsByDevice(jobs, registry);
-        for (const group of groups) {
-          console.log(chalk.bold(`\n${group.title}`));
-          renderRoutineRows({ jobs: group.jobs, scheduler, overdueSet, link, now, local: group.local });
-        }
-        if (groups.some((group) => !group.local)) {
-          console.log();
-          console.log(chalk.gray('  Last Status is per-device: rows under another device show "-" — read it there with: agents routines list --device <name>'));
-        }
-      } else {
-        // Default: group by project
-        const knownProjectNames = new Set(listProjectDefs().map((p) => p.name));
-        const groups = groupRoutineJobsByProject(jobs, knownProjectNames);
-        for (const group of groups) {
-          console.log(chalk.bold(`\n${group.title}`));
-          renderRoutineRows({ jobs: group.jobs, scheduler, overdueSet, link, now });
-        }
-      }
-
-      if (overdueSet.size > 0) {
-        console.log();
-        console.log(chalk.yellow(`  ${overdueSet.size} routine(s) overdue — catch up with: agents routines catchup`));
-      }
-
-      scheduler.stopAll();
-      console.log();
+    .action((options: RoutinesListOptions) => {
+      runRoutinesList(options);
     });
 
   routinesCmd
