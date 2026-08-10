@@ -145,24 +145,37 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
     const classifiable = (comm: string | undefined): boolean =>
       !!comm && /^claude/.test(path.basename(comm));
 
+    // RUSH-2508: sample the holder's comm in LOCKSTEP with each scan attempt, and
+    // only skip when no attempt ever ran against a classifiable holder.
+    //
+    // `ps -o comm=` on Linux reports the THREAD name, and node renames its main
+    // thread a beat after boot — measured on Node 24 it flips to `MainThread`
+    // within a second, while Node 22 keeps `claude`. That rules out both simpler
+    // gates: sampling BEFORE the scan proves nothing (the value can flip before
+    // the scan reads it), and sampling AFTER `waitFor` exhausts its deadline
+    // proves less than nothing — the poll always burns its full 10s on a miss, by
+    // which point comm has flipped whatever the cause, so a REAL regression in the
+    // RUSH-2384 recovery path would report `skipped` instead of failing. A test
+    // that cannot fail is worse than a deleted one.
+    //
+    // Bracketing each attempt is what makes the distinction sound: if the holder
+    // was classifiable both immediately before and immediately after a scan that
+    // still missed it, the scan owed us that row and the failure is real.
     let rows: Awaited<ReturnType<typeof listUnattributedActive>> = [];
+    let lastComm: string | undefined;
+    let missedWhileClassifiable = false;
     const hit = await waitFor(async () => {
+      const before = commOf();
       clearActiveScanCachesForTest();
       rows = await listUnattributedActive(new Set());
-      return rows.find((r) => r.sessionId === UUID || r.pid === pid);
+      const found = rows.find((r) => r.sessionId === UUID || r.pid === pid);
+      lastComm = commOf();
+      if (!found && classifiable(before) && classifiable(lastComm)) missedWhileClassifiable = true;
+      return found;
     });
 
-    // RUSH-2508: read the holder's comm AFTER the scan, not before. `ps -o comm=`
-    // on Linux reports the THREAD name, and node renames its main thread a beat
-    // after boot — measured on Node 24 it flips to `MainThread` within a second,
-    // while Node 22 keeps `claude`. Sampling before the scan therefore proves
-    // nothing: the value can be `claude` at the check and `MainThread` by the
-    // time the scan reads it, which is exactly how `build (ubuntu-latest, 24)`
-    // failed with an EMPTY row set while ubuntu-22, macOS and Windows passed. If
-    // the holder is no longer classifiable, the scan is right to omit it and
-    // there is nothing left for this case to assert.
-    if (!hit && !classifiable(commOf())) {
-      ctx.skip(`ps reports comm='${commOf() ?? '<unreadable>'}' for the holder, not an agent name — see RUSH-2508`);
+    if (!hit && !missedWhileClassifiable) {
+      ctx.skip(`ps reports comm='${lastComm ?? '<unreadable>'}' for the holder, not an agent name — see RUSH-2508`);
       return;
     }
     expect(hit, `expected active row for ${UUID} / pid ${pid}; got ${rows.map((r) => `${r.pid}:${r.sessionId}`).join(', ')}`).toBeDefined();
