@@ -416,4 +416,25 @@ describeDaemon('agents daemon', () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
+  it('does not accuse a live daemon whose entry path contains spaces', async () => {
+    const home = makeHome();
+    // `ps` renders the path unquoted, so the tokenizer splits it and the
+    // second-to-last token is a relative fragment. The absolute-path guard is
+    // what keeps a HEALTHY daemon on such a path from being reported.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents stale space-'));
+    const sub = path.join(dir, 'sub');
+    fs.mkdirSync(sub, { recursive: true });
+    const script = path.join(sub, 'index.js');
+    fs.writeFileSync(script, 'setInterval(() => {}, 1e9);\n');
+    const child = spawn(process.execPath, [script, '__daemon-run'], { stdio: 'ignore' });
+    await new Promise((r) => setTimeout(r, 200));
+    try {
+      const payload = JSON.parse(run(home, ['status', '--json']).stdout);
+      expect(payload.staleBinaries.some((s: { pid: number }) => s.pid === child.pid)).toBe(false);
+    } finally {
+      try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* gone */ }
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
 });

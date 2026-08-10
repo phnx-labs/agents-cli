@@ -86,6 +86,14 @@ interface DaemonProcess {
  * __daemon-run` yields the code blob, which of course does not exist on disk.
  * Requiring absoluteness keeps a non-path token from being reported as deleted
  * code, the same false-positive class RUSH-2368 had to correct for duplicates.
+ *
+ * That guard also covers an entry path containing SPACES, which `ps` renders
+ * unquoted and the tokenizer therefore splits: `/tmp/ghost space/sub/index.js`
+ * yields `space/sub/index.js`, not absolute, so a healthy daemon on such a path
+ * is never accused (verified live). The cost is a false NEGATIVE — a genuinely
+ * deleted entry containing a space is not reported either. That is the safe
+ * direction to fail: missing one detection is a silence we already lived with,
+ * whereas telling someone to `kill` a healthy shared daemon is a new harm.
  */
 function entryIsGone(p: DaemonProcess): boolean {
   return p.entry !== null && path.isAbsolute(p.entry) && !p.entryExists;
