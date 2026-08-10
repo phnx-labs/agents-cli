@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_104 command groups · 585 commands._
+_104 command groups · 583 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -461,7 +461,6 @@ agents mailboxes gc    Run a liveness sweep: archive pending messages in dead bo
 agents mcp                                 Connect agents to external tools via Model Context Protocol servers
 agents mcp add <name> [command_or_url...]  Add an MCP server to the manifest (run "agents mcp register" afterward to apply)
 agents mcp list [agent]                    Show which MCP servers are registered and which agent versions they are synced to
-agents mcp register [name]                 Apply MCP servers from manifest to agent config files
 agents mcp remove [name]                   Unregister an MCP server from agents (interactive picker if no name given)
 agents mcp trust                           Trust this project so its .agents/mcp/ servers may be registered and spawned
 agents mcp untrust                         Revoke MCP trust for this project (its .agents/mcp/ servers stop auto-applying)
@@ -475,7 +474,6 @@ agents memory                Manage portable agent memory (facts, preferences, p
 agents memory add <name>     Add or overwrite a user-layer memory fact
 agents memory list           List memory facts from project, user, and system layers
 agents memory remove <name>  Remove a user-layer memory fact
-agents memory sync [agent]   Copy canonical memory into capable agent version homes
 agents memory view <name>    Print a memory fact (winning layer)
 ```
 
@@ -594,7 +592,6 @@ agents plugins marketplaces install [target]  Redirects to 'agents repo install'
 agents plugins marketplaces remove [target]   Redirects to 'agents repo remove' — marketplaces follow repos
 agents plugins marketplaces rm [target]       Redirects to 'agents repo rm' — marketplaces follow repos
 agents plugins remove [name]                  Unsync a plugin from all agent versions and optionally delete its source directory
-agents plugins sync <name> [agent]            Apply a plugin to an agent. Syncs every installed version (pass agent@version to target one).
 agents plugins update [name]                  Re-pull a plugin from its original source and re-sync to all versions
 ```
 
@@ -716,6 +713,7 @@ agents repos list [alias]        Show all repos with resource-level sync (skills
 agents repos pull [alias] [url]  Pull updates. Aliases: "system" (~/.agents/.system/), "user" (~/.agents/), or any registered extra. No arg pulls all. Pass a git URL to git-back a not-yet-cloned user repo: "agents repo pull user <url>".
 agents repos push [alias]        Commit and push the user repo or a user-owned extra. Refuses to push the system repo.
 agents repos remove <alias>      Unregister an extra repo. Managed clones are deleted; external paths are kept.
+agents repos sync <alias>        Git-sync a repo: pull (and push for user/extras). Aliases: "system", "user", or a registered extra.
 agents repos view [name]         Show one repo's contents: git state and per-kind resource counts. Omit the name for an interactive picker.
 ```
 
