@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 96,
-  "commands": 565,
+  "commands": 568,
   "root": {
     "name": "agents",
     "path": "",
@@ -6390,7 +6390,7 @@
           "name": "services",
           "path": "daemon services",
           "aliases": [],
-          "description": "The two hosted services (secrets broker, browser IPC): bound state, socket path, and health. See sibling `daemon funnel` for public ingress.",
+          "description": "The hosted services: health, bound state, socket path, and per-service toggles.",
           "args": [],
           "options": [
             {
@@ -6413,7 +6413,91 @@
               "negate": false
             }
           ],
-          "subcommands": []
+          "subcommands": [
+            {
+              "name": "disable",
+              "path": "daemon services disable",
+              "aliases": [],
+              "description": "Disable a daemon service.",
+              "args": [
+                {
+                  "name": "service",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "enable",
+              "path": "daemon services enable",
+              "aliases": [],
+              "description": "Enable a daemon service.",
+              "args": [
+                {
+                  "name": "service",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "list",
+              "path": "daemon services list",
+              "aliases": [],
+              "description": "List every daemon service and whether it is enabled.",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "Emit as JSON",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            }
+          ]
         },
         {
           "name": "start",

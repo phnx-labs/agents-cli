@@ -962,4 +962,21 @@ describe('secrets unlock when the broker is disabled', () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(process.platform !== 'darwin')('status reports broker disabled without starting anything', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-secrets-disabled-status-'));
+    try {
+      fs.mkdirSync(path.join(home, '.agents', '.system'), { recursive: true });
+      spawnSync('git', ['init', '--quiet'], { cwd: path.join(home, '.agents', '.system'), encoding: 'utf-8' });
+      fs.mkdirSync(path.join(home, '.agents', 'daemon'), { recursive: true });
+      fs.writeFileSync(path.join(home, '.agents', 'daemon', 'services.yaml'), 'services:\n  secrets-broker: false\n', 'utf-8');
+
+      const res = runSecrets(home, ['status']);
+      expect(res.status).toBe(0);
+      expect(res.stderr + res.stdout).toContain('broker: disabled');
+      expect(res.stderr + res.stdout).toContain('agents daemon services enable secrets-broker');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
 });

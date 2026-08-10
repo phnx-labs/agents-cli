@@ -1266,6 +1266,11 @@ export async function runDaemon(): Promise<void> {
       const was = servicesConfig.services[id] !== false;
       const now = reloadedEnabled(id);
       if (was !== now) {
+        // scheduler and monitors are re-evaluated live later in this handler,
+        // so don't tell the user they need a restart for those.
+        if (id === 'scheduler' || (id === 'monitors' && !now)) {
+          continue;
+        }
         log('INFO', `Service '${id}' toggled ${now ? 'on' : 'off'} — restart daemon to apply`);
       }
     }
