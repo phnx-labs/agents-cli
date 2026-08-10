@@ -13,6 +13,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
+import { BUILTIN_ROUTINE_NAMES } from '../lib/builtin-routines.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const require = createRequire(import.meta.url);
@@ -104,8 +105,16 @@ describeDaemon('agents daemon', () => {
     expect(payload.daemonEnabled).toBe(true);
     expect(payload.services.secretsBroker).toHaveProperty('reachable', false);
     expect(payload.services.browserIpc).toHaveProperty('bound', false);
+    // The daemon now OWNS the housekeeping ticks as built-in routines (the lowest
+    // definition layer), so even a fresh install with nothing on disk carries them.
+    // Assert against the built-in count, not a hardcoded number, so it can't drift
+    // from builtin-routines.ts (same drift-guard as builtin-routines.test.ts).
     expect(payload.scheduler).toEqual(
-      expect.objectContaining({ routineCount: 0, enabledCount: 0, failingCount: 0 }),
+      expect.objectContaining({
+        routineCount: BUILTIN_ROUTINE_NAMES.length,
+        enabledCount: BUILTIN_ROUTINE_NAMES.length,
+        failingCount: 0,
+      }),
     );
   });
 
