@@ -70,10 +70,12 @@ export interface ResolvedResource {
    * Alternate names this resource declares in its frontmatter `aliases:`, which
    * {@link resolveResource} matches in addition to the canonical name. Lazily
    * read from disk on first access and memoized, so listing resources never pays
-   * for it unless a caller inspects an alias. Empty for kinds that don't support
-   * aliases (only `skills` and `commands` do) and for resources that declare none.
+   * for it unless a caller inspects an alias. `undefined` when the resource
+   * declares none (or for a kind that doesn't support aliases — only `skills` and
+   * `commands` do), mirroring {@link snapshotSha} so a strict `toEqual` on a
+   * ResolvedResource ignores the absent field.
    */
-  readonly aliases: string[];
+  readonly aliases: string[] | undefined;
 }
 
 /**
@@ -92,6 +94,7 @@ function withProvenance(
   base: { name: string; path: string; source: string; repoRoot: string },
   kind: ResourceKind,
 ): ResolvedResource {
+  let aliasesComputed = false;
   let aliasesCache: string[] | undefined;
   return {
     ...base,
@@ -99,7 +102,13 @@ function withProvenance(
       return resolveSnapshotSha(base.repoRoot);
     },
     get aliases() {
-      if (aliasesCache === undefined) aliasesCache = resourceAliases(kind, base.path);
+      if (!aliasesComputed) {
+        const found = resourceAliases(kind, base.path);
+        // Undefined (not []) when none, so a strict toEqual on a ResolvedResource
+        // ignores it — the same convention snapshotSha uses.
+        aliasesCache = found.length > 0 ? found : undefined;
+        aliasesComputed = true;
+      }
       return aliasesCache;
     },
   };

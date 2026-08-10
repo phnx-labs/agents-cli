@@ -360,9 +360,11 @@ describe('resource aliases (RUSH-2504)', () => {
 
     expect(result.status, result.stderr).toBe(0);
     const parsed = JSON.parse(result.stdout).sort((a, b) => a.name.localeCompare(b.name));
+    // `aliases` is undefined (not []) when a resource declares none, mirroring
+    // snapshotSha — so JSON.stringify drops the key for the alias-less skill.
     expect(parsed).toEqual([
       { name: 'browser', aliases: ['web'] },
-      { name: 'plain', aliases: [] },
+      { name: 'plain' },
     ]);
   });
 });
