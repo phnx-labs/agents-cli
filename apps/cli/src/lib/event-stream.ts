@@ -13,12 +13,17 @@
  */
 import { query, type EventRecord, type EventType, type EventLevel, levelFor } from './events.js';
 import { readActivityAsEventRecords } from './activity.js';
+import { applyFamilies, type EventFamily } from './event-families.js';
 
 export interface UnifiedQuery {
   startDate?: Date;
   endDate?: Date;
   eventTypes?: EventType[];
+  /** Drop these event kinds after read (used by --exclude commands / runs). */
+  excludeEventTypes?: EventType[];
   level?: EventLevel;
+  /** Drop this level (used by --exclude security). */
+  excludeLevel?: EventLevel;
   agent?: string;
   /** Only events stamped with this session id (payload `sessionId`, the provenance floor). */
   sessionId?: string;
@@ -33,6 +38,9 @@ export interface UnifiedQuery {
   includeActivity?: boolean;
   /** Override the activity dir (tests). */
   activityRoot?: string;
+  /** Sessions-style family filters (resolved via applyFamilies). */
+  includeFamilies?: EventFamily[];
+  excludeFamilies?: EventFamily[];
 }
 
 /** Apply the same filters query() applies, to an activity-derived record. */
@@ -44,7 +52,10 @@ function matches(r: EventRecord, q: UnifiedQuery): boolean {
   if (q.startDate && !Number.isNaN(ms) && ms < q.startDate.getTime()) return false;
   if (!Number.isNaN(ms) && ms > endMs) return false;
   if (q.eventTypes && !q.eventTypes.includes(r.event)) return false;
-  if (q.level && (r.level ?? levelFor(r.event)) !== q.level) return false;
+  if (q.excludeEventTypes?.includes(r.event)) return false;
+  const lvl = r.level ?? levelFor(r.event);
+  if (q.level && lvl !== q.level) return false;
+  if (q.excludeLevel && lvl === q.excludeLevel) return false;
   if (q.agent && r.agent !== q.agent) return false;
   if (q.sessionId && r.sessionId !== q.sessionId) return false;
   if (q.bundle && r.bundle !== q.bundle) return false;
@@ -63,9 +74,20 @@ function matches(r: EventRecord, q: UnifiedQuery): boolean {
  * eventTypes for activity, eventTypes/module/bundle for ops — so the top-N is
  * exact for those filters).
  */
-export function readUnifiedEvents(q: UnifiedQuery = {}): EventRecord[] {
+export function readUnifiedEvents(raw: UnifiedQuery = {}): EventRecord[] {
+  const q = applyFamilies(raw);
+
   // `bundle` is filtered inside query()'s scan (before its limit cutoff) so a
   // matching-bundle record older than the newest-`limit` window is not dropped.
+  // Over-fetch when we will post-filter excludeEventTypes / excludeLevel so the
+  // top-N is still meaningful after drops.
+  const needsPost = Boolean(q.excludeEventTypes?.length || q.excludeLevel);
+  const fetchLimit = q.limit === undefined
+    ? undefined
+    : needsPost
+      ? Math.min(q.limit * 4, q.limit + 500)
+      : q.limit;
+
   const ops = query({
     startDate: q.startDate,
     endDate: q.endDate,
@@ -77,14 +99,18 @@ export function readUnifiedEvents(q: UnifiedQuery = {}): EventRecord[] {
     command: q.command,
     module: q.module,
     bundle: q.bundle,
-    limit: q.limit,
-  });
+    limit: fetchLimit,
+  }).filter((r) => matches(r, q));
 
-  if (q.includeActivity === false) return ops;
+  if (q.includeActivity === false) {
+    return typeof q.limit === 'number' ? ops.slice(0, q.limit) : ops;
+  }
 
   // Activity events always stamp module: 'activity'. A non-activity module
   // filter can never match them — skip the activity scan entirely.
-  if (q.module != null && q.module !== 'activity') return ops;
+  if (q.module != null && q.module !== 'activity') {
+    return typeof q.limit === 'number' ? ops.slice(0, q.limit) : ops;
+  }
 
   // Push eventTypes into the activity reader so `limit` is applied AFTER the
   // event-type filter (readRecentActivity already does this for `events`).
@@ -94,7 +120,7 @@ export function readUnifiedEvents(q: UnifiedQuery = {}): EventRecord[] {
   // run via matches() for fields activity.ts does not pre-filter.
   const acts = readActivityAsEventRecords({
     sinceMs: q.startDate?.getTime(),
-    limit: q.limit,
+    limit: fetchLimit,
     root: q.activityRoot,
     events: q.eventTypes,
   }).filter((r) => matches(r, q));

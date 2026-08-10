@@ -72,7 +72,7 @@ describe('logs audit subcommand data path', () => {
       encoding: 'utf-8',
     });
 
-    const events = run(['events', '--audit', '--module', 'alias-fixture', '--json']);
+    const events = run(['events', '--include', 'ops', '--module', 'alias-fixture', '--json']);
     const logs = run(['logs', 'audit', '--module', 'alias-fixture', '--json']);
 
     expect(events.status).toBe(0);

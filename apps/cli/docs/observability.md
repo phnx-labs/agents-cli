@@ -11,8 +11,9 @@ whose *consumer* and *axis* match your question, not whichever you remember firs
 
 | Command | Role (one line) | Source | Consumer |
 |---|---|---|---|
-| **`events`** | **Raw unified event stream = the ops trail.** Everything: secrets access, command invocations, version/skill/mcp/team ops, browser events, plus agent milestones. `--follow` to tail, `--audit` for ops-only. `agents logs audit` is a compatibility alias backed by this same reader. | dated `events/*.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
-| **`audit`** | **Tamper-evident run-dispatch chain** (hash-chained exec log). Not the same as `events`. | `~/.agents` audit log | Governance / CI verify |
+| **`events`** | **The one timeline.** Ops (secrets, keychain, daemon, browser, computer, command.*, teams, …) + agent activity + run-dispatch outcomes (`run.dispatched`). Filter with `--include`/`--exclude` families (`ops`, `activity`, `commands`, `runs`, `security`). | dated `events/*.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
+| **`audit`** | **Thin alias of `events --include runs`.** Legacy hash-chain file is verify-only for old history. | same events engine | Governance / quick run list |
+| **`logs`** | **Thin alias of `events`.** Subcommands `audit`/`stats`/`rotate` re-dispatch. Content lives on `sessions` / `hosts logs`. | same events engine | Muscle-memory |
 | **`perf`** | **Latency rollups.** p50/p99 for hooks, CLI commands, and `agent.run` timings. Indexed SQLite — not a full scan of the audit log. Not popularity, not behaviour. | `~/.agents/.cache/perf/perf.db` (disposable) | Humans optimizing boot/run cost + `--json` |
 | **`insights`** | **How work looks — one verb, two engines.** Bare = behavioural report (transcript content, account split). `insights mix` / recipes = cheap counters (harness/model/token/secrets). Former top-level `agents trends` is a deprecated alias of the mix tree only. | behaviour: `sessions.db` + `session_insights`; mix: `sessions.db` + `usage.db` | Human + `--json` |
 | **`feed`** / **`inbox`** | **Needs-you inbox + status posts.** Open blocks (decisions agents are waiting on) + `feed post` milestones. `inbox` ≡ `feed`. Scope with `--project`. | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
@@ -50,7 +51,7 @@ Thin second names for the product jobs — **no store merge**:
 | What did agents post? | `agents timeline` | `agents feed --filter updates` |
 | Who is live? | `agents roster` | `agents sessions --active` |
 
-Do **not** alias `audit` to `events` — `agents audit` is already the run-dispatch chain.
+`agents audit` and `agents logs` **are** aliases of `events` (with default family filters). Do not re-introduce a second store or query path.
 
 ### Delivery vs record vs control (RUSH-2123)
 
@@ -198,12 +199,9 @@ run, secrets access, version installs — as a structured JSONL line at
 `0600`). Each local calendar day has its own directory. At 10 MiB that day's
 active file rotates losslessly to `events.1.jsonl.gz`; older segments shift to
 `events.2.jsonl.gz`, `events.3.jsonl.gz`, and so on. Automatic cleanup keeps at
-most seven days and 50 MiB per machine. `agents logs rotate --days <n>
---max-mb <n>` applies both limits immediately.
+most seven days and 50 MiB per machine. `agents events rotate --days <n> --max-mb <n>` applies both limits immediately.
 
-`agents events` is the canonical reader. `agents logs audit` registers the same
-options and invokes the same handler with audit-only mode forced, preserving the
-older spelling without a second query, renderer, or follow implementation.
+`agents events` is the canonical reader. `agents logs` and `agents audit` are thin aliases (same handler, default family filters).
 
 The recording is a single choke point — a commander `preAction`/`postAction`
 hook on the root program ([`src/index.ts`](../src/index.ts)) emits `command.start`
@@ -393,54 +391,34 @@ never written to the log** — only names and counts. Note the event log has a
 7-day retention (older daily files are pruned), so export what you need for
 long-term records.
 
-### Audit Viewer (`agents logs audit`)
-
-`agents events --audit` is the canonical operational-audit reader. `agents logs
-audit` is a compatibility alias wired to that same option registration and
-handler, so the two spellings cannot drift:
+### Event timeline filters and aliases
 
 ```bash
-agents logs audit                          # recent operational events (newest 50)
-agents logs audit --level audit            # security-relevant only
-agents logs audit --module teams           # team lifecycle events
-agents logs audit --command "secrets get"  # by command path prefix
-agents logs audit --caller claude-code      # only commands invoked by Claude Code
-agents logs audit --event mcp.add         # by typed event (repeatable)
-agents logs audit --since 7d --json       # machine-readable, last 7 days
-agents logs audit --follow                # live tail of today's log
+agents events                              # full stream
+agents events --exclude commands           # drop command.start/end noise
+agents events --include ops                # operational only
+agents events --include runs               # dispatched-run outcomes
+agents events --include security           # audit-level (secrets, daemon, …)
+agents events --module secrets --bundle share
+agents events -f                           # live tail
+agents events stats [--since 7d]
+agents events rotate [--days 7] [--max-mb 50]
+
+# Thin aliases (same engine)
+agents audit                               # ≡ events --include runs
+agents logs                                # ≡ events
+agents logs audit                          # ≡ events --include ops
+agents logs stats                          # ≡ events stats
+agents logs rotate                         # ≡ events rotate
 ```
 
-Events are classified by level:
-
-| Level | Meaning | Examples |
-|---|---|---|
-| `audit` | Security-relevant | `secrets.get`, `secrets.reveal`, `teams.create`, `teams.disband`, `cloud.dispatch` |
-| `warn` | Warnings | `warn` events |
-| `info` | Informational | `info`, `command.start`, `command.end`, `mcp.add` |
-| `debug` | Diagnostic | `debug` events |
-
-Every record includes the environment-derived `caller` identity, so the audit
-trail answers which agent or human surface invoked the command rather than which
-TypeScript source file happened to emit it. Filter with `--caller`.
-
-#### Aggregate Statistics
+Session transcripts and host-task stdout are **not** the events product:
 
 ```bash
-agents logs stats                  # breakdown by level, event, module, user
-agents logs stats --since 30d      # last 30 days
-agents logs stats --json           # machine-readable
+agents sessions <id>
+agents hosts logs <task-id>
 ```
 
-#### Log Rotation
-
-Each local day writes beneath `~/.agents/.history/events/YYYY-MM-DD/`. Files
-exceeding 10 MiB rotate to numbered gzip segments without overwriting an earlier
-segment. Cleanup runs automatically, retaining at most seven days and 50 MiB per
-machine. Apply different limits immediately with:
-
-```bash
-agents logs rotate                           # seven days and 50 MiB
-agents logs rotate --days 3 --max-mb 25      # explicit age and size limits
 ```
 
 The `query()` API reads every dated active JSONL file and numbered gzip segment
@@ -1622,3 +1600,4 @@ running process owns this session?" without re-parsing state.
 - [Sessions](./sessions.md) — the `sessions` subsystem in depth
 - Cloud dispatch (`agents cloud --help`)
 - Team DAGs (`agents teams --help`)
+

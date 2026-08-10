@@ -837,10 +837,10 @@ historical text that merely resembles a version selector. An explicit
 `--agent <agent@version>` can still filter indexed history after that installed
 version has been removed.
 
-`agents sessions tail` and `agents logs -f <id>` render compact live lines by
+`agents sessions tail` (and `agents hosts logs -f <id>` for host tasks) render compact live lines by
 default, even when stdout is piped. They show messages, tool calls, elided tool
 results, and errors; thinking, usage, init, and result metadata are hidden. Use
-`agents sessions tail --json` for the raw JSONL stream, or `agents logs -f --full`
+`agents sessions tail --json` for the raw JSONL stream, or `agents hosts logs -f --full`
 for the raw transcript follow.
 
 ### Shareable Markdown (`sessions render`)
@@ -1684,7 +1684,7 @@ fan-out specifically.
 
 ## Related
 
-- `agents logs [id]` — one viewer over both a run's log **and** its session transcript: resolves a host-dispatch task (`agents run --host`) or a session by id/`--session`, filters by `--host`/`--agent`/`--version`, and `-f` follows a live one (a session tail is `agents sessions tail` under the hood, claude/codex only). See [Hosts](hosts.md).
+- `agents sessions <id>` / `agents sessions tail` — session transcript content. Host-dispatch stdout: `agents hosts logs <id>`. The event timeline is `agents events` (aliases: `agents logs`, `agents audit`). See [Hosts](hosts.md) and [Observability](observability.md).
 - `agents sessions <id> --artifacts` — list files created/modified in a session
 - `agents teams status` — session state for team-coordinated runs
 - `agents cloud logs <id>` — for remote cloud dispatches (different subsystem)

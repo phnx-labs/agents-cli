@@ -210,8 +210,9 @@ agents run claude "..." --host gpu-box --no-follow       # detach
 
 agents hosts ps          # list dispatched runs
 agents hosts stop <id>   # terminate a hung/detached run (alias: kill)
-agents logs --host gpu-box   # pick one and view its log
-agents logs <id> -f          # re-attach to a running one and follow
+agents hosts logs --host gpu-box   # pick a host-dispatch run
+agents hosts logs <id> -f        # follow a host-task log
+agents sessions <id>             # session transcript
 ```
 
 Run options follow a strict forwarding contract on `--host` runs — nothing
@@ -233,8 +234,7 @@ Hosts are also a task backend (`agents cloud run "…" --host <name>` — see th
 `cloud` skill) and a routines placement target (`agents routines add …
 --run-on <name>` — see the `routines` skill).
 
-`agents logs [id]` is the unified viewer over both host-dispatch runs and local
-session transcripts; `agents hosts logs <id>` is the host-only equivalent.
+`agents hosts logs <id>` shows host-dispatch stdout; `agents sessions <id>` shows a session transcript. `agents logs` is an alias of `agents events` (timeline).
 `agents hosts stop <id>` (alias `kill`) terminates the remote process group from
 this machine without deleting the remote log.
 

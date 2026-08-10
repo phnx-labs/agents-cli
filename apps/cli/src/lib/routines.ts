@@ -1028,7 +1028,12 @@ export function serializeJob(output: Record<string, unknown>, existingText: stri
     if (!(key in output)) doc.delete(key);
   }
 
-  return doc.toString();
+  // `flowCollectionPadding: false` keeps a re-serialized flow sequence in the
+  // committed no-padding form (`[a, b]`, not `[ a, b ]`). Routine YAML lives in
+  // the same git-backed `~/.agents` repo as agents.yaml, so the same emitter
+  // padding would leave the tracked file dirty and block `agents repo pull`
+  // fleet-wide (RUSH-2505). Node styles are otherwise preserved.
+  return doc.toString({ flowCollectionPadding: false });
 }
 
 /** Delete a job config file by name. Returns true if the file existed. */

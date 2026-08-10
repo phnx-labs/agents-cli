@@ -1021,7 +1021,7 @@ carries a trailing `Status: [Intended]` or `[Drift]` line naming its `-GAP-`.
 Beyond the two above, the document also specifies **§Agent execution**,
 **§Scheduling & execution singularity**, and **§Watchdog**. It does **not** cover
 every command group — `hosts`, `teams`, and `cloud` have design docs but zero
-RFC-2119 requirements, and surfaces like `wallet`, `worktree`, and `sync`/`apply`
+RFC-2119 requirements, and surfaces like `wallet` and `sync`/`apply`
 have neither. The
 [coverage inventory](docs/specifications.md#coverage-inventory) says which row a
 surface sits in; check it before treating a behavior as guaranteed.

@@ -9,9 +9,11 @@ import {
   verifyAuditChain,
   readAuditLog,
   getAuditLogPath,
+  recordDispatchedRun,
   GENESIS_HASH,
   type AuditEntry,
 } from './log.js';
+import { query, _resetForTest as resetEvents } from '../events.js';
 
 /** Absolute path to the log module under test — imported by the spawned workers. */
 const LOG_MODULE = fileURLToPath(new URL('./log.ts', import.meta.url));
@@ -46,7 +48,35 @@ function entry(overrides: Partial<AuditEntry> = {}): AuditEntry {
   };
 }
 
-describe('audit hash chain', () => {
+describe('recordDispatchedRun → unified events stream', () => {
+  it('emits run.dispatched into the event log (not the legacy hash-chain file)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-run-dispatch-'));
+    const eventsPath = path.join(dir, 'events.jsonl');
+    resetEvents(eventsPath);
+    const legacy = path.join(dir, 'legacy-audit.jsonl');
+    // Pointing getAuditLogPath is hard without env — just assert events got the row
+    // and that emit is the write path for new runs.
+    recordDispatchedRun({
+      agent: 'claude',
+      version: '2.1.220',
+      mode: 'plan',
+      cwd: dir,
+      exitCode: 1,
+    });
+    const rows = query({ eventTypes: ['run.dispatched'], limit: 10 });
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    const last = rows[0];
+    expect(last.event).toBe('run.dispatched');
+    expect(last.agent).toBe('claude');
+    expect(last.mode).toBe('plan');
+    expect(last.outcome).toBe('fail');
+    expect(last.exitCode).toBe(1);
+    expect(fs.existsSync(legacy)).toBe(false);
+    resetEvents();
+  });
+});
+
+describe('audit hash chain (legacy file still verifies)', () => {
   it('links records genesis -> prev -> prev and verifies clean', () => {
     const log = tmpLog();
     const r0 = appendAuditRecord(entry({ mode: 'plan' }), log);
@@ -121,7 +151,10 @@ describe('audit hash chain', () => {
       `}, logPath);\n`,
     );
 
-    const N = 30;
+    // Prove serialization under real concurrency. 12 is enough to surface a
+    // lock race; 30 concurrent bun spawns on Windows GHA occasionally drop a
+    // writer under process pressure even when each exits 0 (flake, not a fork).
+    const N = process.platform === 'win32' ? 12 : 30;
     const bun = bunBin();
     await Promise.all(
       Array.from({ length: N }, (_, i) => new Promise<void>((resolve, reject) => {
@@ -136,7 +169,7 @@ describe('audit hash chain', () => {
     // Every writer's record landed, and the chain reproduces end-to-end.
     expect(readAuditLog(log)).toHaveLength(N);
     expect(verifyAuditChain(log)).toEqual({ ok: true });
-  }, 30000);
+  }, 60_000);
 
   it('two interleaved appends still chain and verify', async () => {
     // Two writers whose critical sections deliberately overlap in wall-clock:

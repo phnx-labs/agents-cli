@@ -732,14 +732,31 @@ describe('sameGitRemote (adopt-existing repo matching)', () => {
 describe('resolveGitHubUsername', () => {
   let prevEnv: string | undefined;
   let prevHome: string | undefined;
+  let prevUserProfile: string | undefined;
+  let prevGitConfigGlobal: string | undefined;
+  let prevPath: string | undefined;
   let tmpHome: string;
 
   beforeEach(() => {
     prevEnv = process.env.AGENTS_SHARE_GITHUB_USER;
     delete process.env.AGENTS_SHARE_GITHUB_USER;
     prevHome = process.env.HOME;
+    prevUserProfile = process.env.USERPROFILE;
+    prevGitConfigGlobal = process.env.GIT_CONFIG_GLOBAL;
+    prevPath = process.env.PATH;
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-git-user-'));
+    // Pin every place git / Node look for "home" so --global never touches the
+    // real profile (Windows uses USERPROFILE; concurrent GHA jobs otherwise
+    // race the runner's .gitconfig and hang).
     process.env.HOME = tmpHome;
+    process.env.USERPROFILE = tmpHome;
+    process.env.GIT_CONFIG_GLOBAL = path.join(tmpHome, '.gitconfig');
+    // Drop gh from PATH so the async resolver cannot hang on a rate-limited
+    // `gh api user` before falling through to git config.
+    process.env.PATH = (prevPath ?? '')
+      .split(path.delimiter)
+      .filter((p) => p && !/[/\\]gh[/\\]?$|GitHub CLI/i.test(p))
+      .join(path.delimiter);
   });
 
   afterEach(() => {
@@ -747,6 +764,12 @@ describe('resolveGitHubUsername', () => {
     else process.env.AGENTS_SHARE_GITHUB_USER = prevEnv;
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
+    if (prevGitConfigGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = prevGitConfigGlobal;
+    if (prevPath === undefined) delete process.env.PATH;
+    else process.env.PATH = prevPath;
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
@@ -756,10 +779,14 @@ describe('resolveGitHubUsername', () => {
   });
 
   it('reads github.user from git config when env is unset', async () => {
-    execFileSync('git', ['config', '--global', 'github.user', 'gitconfig-user']);
+    execFileSync('git', ['config', '--global', 'github.user', 'gitconfig-user'], {
+      env: process.env,
+      timeout: 10_000,
+    });
     expect(resolveGitHubUsernameSync()).toBe('gitconfig-user');
+    // With gh stripped from PATH, async falls through to the same git config.
     expect(await resolveGitHubUsername()).toBe('gitconfig-user');
-  });
+  }, 15_000);
 
   it('returns null when no source can resolve the username', () => {
     expect(resolveGitHubUsernameSync()).toBeNull();

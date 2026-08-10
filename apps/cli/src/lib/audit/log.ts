@@ -1,29 +1,12 @@
 /**
- * Cross-agent, tamper-evident audit log of every dispatched run (issue #347).
+ * Run-dispatch recording (issue #347) — now a thin write into the unified
+ * event stream (`emit('run.dispatched', …)`). The historical hash-chained file
+ * at `~/.agents/.history/audit/log.jsonl` is still readable via
+ * `readAuditLog` / `verifyAuditChain` for pre-unification history; new runs do
+ * NOT append there. Operators list run outcomes with:
  *
- * Every run that reaches the single dispatch chokepoint in `agents run`
- * (src/commands/exec.ts) appends ONE record here. Records form a hash chain:
- * each record embeds the previous record's `hash` as `prevHash`, and its own
- * `hash` is `sha256(canonicalJSON(record-without-hash))`. Because `prevHash`
- * is part of the hashed payload, rewriting or reordering any record breaks the
- * chain from that point forward — `verifyAuditChain()` reports the first index
- * that fails to reproduce.
- *
- * Storage is append-only JSONL under the durable-runtime bucket
- * (`~/.agents/.history/audit/log.jsonl`), one record per line. `.history/` is
- * machine-local, gitignored, and NEVER synced by `agents repo push/pull` — so
- * the `repo` field (a git remote url that can embed an access token) never
- * lands in a version-controlled DotAgents repo, and a cross-machine pull can't
- * splice a foreign chain into this one. The write path is deliberately cheap
- * and non-fatal: a logging failure must never crash a run (see
- * `recordDispatchedRun`). Concurrent writers (parallel teams/routines dispatch)
- * are serialized by an advisory lock file so the chain never forks — see
- * `appendAuditRecord`.
- *
- * Governance context: this is the evidence trail an operator needs to answer
- * "which agent, at which version, ran against which repo, and did it succeed?"
- * — the kind of automated-decision logging the EU AI Act (Art. 12) expects of
- * high-risk systems, kept tamper-evident so the log itself can be trusted.
+ *   agents events --include runs
+ *   agents audit                 # alias of the above
  */
 
 import * as fs from 'fs';
@@ -32,6 +15,7 @@ import { spawnSync } from 'child_process';
 import { sha256 } from '../staleness/fingerprint.js';
 import { getHistoryDir } from '../state.js';
 import { ensureLockTarget, withFileLock } from '../fs-atomic.js';
+import { emit } from '../events.js';
 
 /** First record's `prevHash` — a fixed anchor so the chain has a root. */
 export const GENESIS_HASH = 'GENESIS';
@@ -178,9 +162,9 @@ function repoLabel(cwd: string): string {
 }
 
 /**
- * Record ONE dispatched run at the single exec chokepoint. Non-fatal by
- * contract: any failure is caught and warned, never thrown — an audit-log
- * hiccup must not crash a run that already finished.
+ * Record ONE dispatched run at the single exec chokepoint into the unified
+ * event stream. Non-fatal by contract: any failure is caught and warned, never
+ * thrown — a log hiccup must not crash a run that already finished.
  */
 export function recordDispatchedRun(run: {
   agent:    string;
@@ -190,16 +174,19 @@ export function recordDispatchedRun(run: {
   exitCode: number;
 }): void {
   try {
-    appendAuditRecord({
-      ts:      new Date().toISOString(),
-      agent:   run.agent,
+    const outcome = run.exitCode === 0 ? 'ok' : 'fail';
+    emit('run.dispatched', {
+      module: 'run',
+      agent: run.agent,
       version: run.version,
-      repo:    repoLabel(run.cwd),
-      mode:    run.mode,
-      outcome: run.exitCode === 0 ? 'ok' : 'fail',
-      exit:    run.exitCode,
+      mode: run.mode,
+      repo: repoLabel(run.cwd),
+      cwd: run.cwd,
+      outcome,
+      exitCode: run.exitCode,
+      status: outcome,
     });
   } catch (err) {
-    process.stderr.write(`[agents] audit log write failed: ${(err as Error).message}\n`);
+    process.stderr.write(`[agents] run.dispatched emit failed: ${(err as Error).message}\n`);
   }
 }

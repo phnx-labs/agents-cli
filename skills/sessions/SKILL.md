@@ -76,8 +76,8 @@ agents sessions tail <session-id>
 # Or the unified viewer: resolves a session id OR a host-dispatch run (from
 # `agents run --host`), and -f follows either (a session tail here is
 # `sessions tail` under the hood)
-agents logs <id>          # show the transcript / run log
-agents logs <id> -f       # follow a live one
+agents sessions <id>     # show the transcript
+agents sessions tail <id> # follow a live one (claude/codex)
 ```
 
 ## Cost & Duration

@@ -530,6 +530,27 @@ describe('feed store', () => {
     expect(fs.readFileSync(path.join(userDir, 'hooks', '10-feed-publish.py'), 'utf-8')).toBe(FEED_PUBLISH_HOOK_SCRIPT);
   });
 
+  it('preserves committed flow-sequence formatting (no [ a, b ] padding) so ~/.agents pulls are not blocked (RUSH-2505)', () => {
+    const userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-padding-'));
+    fs.mkdirSync(userDir, { recursive: true });
+    const agentsYaml = path.join(userDir, 'agents.yaml');
+    // The committed form uses unpadded flow sequences. The yaml emitter defaults
+    // to padded output, so re-writing this file used to flip [claude] -> [ claude ]
+    // and leave the git-backed ~/.agents tree permanently dirty, blocking pulls.
+    const committed = 'hooks:\n  notify-owner:\n    command: [agents, notify, "{message}"]\n    agents: [claude, codex]\n    events: [Stop]\n    script: notify.sh\n';
+    fs.writeFileSync(agentsYaml, committed);
+    expect(ensureFeedPublishHook(userDir)).toEqual({ installed: true });
+    const updated = fs.readFileSync(agentsYaml, 'utf-8');
+    // The pre-existing flow sequences must round-trip byte-identically — no padding.
+    expect(updated).toContain('command: [agents, notify, "{message}"]');
+    expect(updated).toContain('agents: [claude, codex]');
+    expect(updated).toContain('events: [Stop]');
+    expect(updated).not.toMatch(/\[ /);
+    expect(updated).not.toMatch(/ \]/);
+    // And the hooks were still added (semantics intact).
+    expect(updated).toContain('feed-publish:');
+  });
+
   it('installs feed hooks for codex as well as claude (RUSH-2039)', () => {
     const userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-codex-install-'));
     expect(ensureFeedPublishHook(userDir)).toEqual({ installed: true });

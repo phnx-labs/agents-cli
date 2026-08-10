@@ -255,7 +255,7 @@ class AgentPanelProvider implements vscode.WebviewViewProvider {
         void this.refresh();
         return;
       case 'runQuickAction':
-        await this.runQuickAction(msg.action, msg.terminalId, msg.workspaceRoot, msg.url);
+        await this.runQuickAction(msg.action, msg.terminalId, msg.url);
         return;
       case 'sendQuickPrompt':
         await this.sendQuickPrompt(msg.promptId, msg.terminalId);
@@ -275,7 +275,6 @@ class AgentPanelProvider implements vscode.WebviewViewProvider {
   private async runQuickAction(
     action: string,
     terminalId: string | undefined,
-    workspaceRoot: string | undefined,
     url: string | undefined,
   ): Promise<void> {
     const entry = terminalId ? terminals.getById(terminalId) : undefined;
@@ -295,18 +294,6 @@ class AgentPanelProvider implements vscode.WebviewViewProvider {
       return true;
     };
     switch (action) {
-      case 'cleanup': {
-        // `agents worktree prune` scans .history/worktrees/ *under a repo root*,
-        // not inside an individual worktree — so always pass the workspace root,
-        // never the active terminal's worktree path.
-        const root = workspaceRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (!root) {
-          vscode.window.showInformationMessage('No workspace root for cleanup.');
-          return;
-        }
-        await runInShellTerminal(`agents worktree prune --root ${shellQuote(root)}`);
-        return;
-      }
       case 'openPr':
         if (typeof url === 'string') {
           openExternalUrl(url);
@@ -1822,11 +1809,6 @@ async function runInShellTerminal(command: string): Promise<void> {
   });
   terminal.show(true);
   terminal.sendText(command);
-}
-
-function shellQuote(arg: string): string {
-  if (/^[A-Za-z0-9_./-]+$/.test(arg)) return arg;
-  return "'" + arg.replace(/'/g, "'\\''") + "'";
 }
 
 function randomNonce(): string {

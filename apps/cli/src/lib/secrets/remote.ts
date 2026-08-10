@@ -23,8 +23,36 @@ import { sshTargetFor } from '../hosts/types.js';
 import { buildRemoteAgentsInvocation } from '../hosts/remote-cmd.js';
 import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { isLoaderOrInterpreterEnv } from './bundles.js';
+import { isHostPinned, hostKeyCheckingOpts } from '../devices/known-hosts.js';
 
 const REMOTE_TIMEOUT_MS = 30_000;
+
+/** The host part of an ssh target (`user@host` -> `host`) for known_hosts matching. */
+function hostKeyLookupName(target: string): string {
+  return target.split('@').pop() ?? target;
+}
+
+/**
+ * SSH options for a SECRET-carrying transport (RUSH-2527). Every `agents secrets
+ * --host` operation moves credential bytes — over ssh stdin (push) or ssh stdout
+ * (resolve/read-back) — so it MUST NOT ride the shared `accept-new` baseline
+ * against the user's own `~/.ssh/known_hosts` with a reusable control socket.
+ * Two hardenings over that baseline, matching the posture the `--copy-creds`
+ * dispatch already uses (`hosts/dispatch.ts` -> `hostKeyCheckingOpts`):
+ *
+ *   - **Managed pinned host keys.** Verify against the CLI-owned known_hosts
+ *     store (`known-hosts.ts`), not `~/.ssh/known_hosts`. A CHANGED key on a
+ *     known host is refused (`StrictHostKeyChecking` `yes` once pinned,
+ *     `accept-new` — which still refuses a changed key, only learns a genuinely
+ *     new one — before that). So a machine-in-the-middle swapping a pinned host's
+ *     key can never receive or return a secret.
+ *   - **No multiplex reuse.** `multiplex: false` — a credential channel never
+ *     leaves a persistent `ControlMaster` socket lingering (60s `ControlPersist`)
+ *     that any other `agents` invocation to that host would silently reuse.
+ */
+export function credentialTransportSshOpts(target: string): { hostKeyOpts: string[]; multiplex: false } {
+  return { hostKeyOpts: hostKeyCheckingOpts(isHostPinned(hostKeyLookupName(target))), multiplex: false };
+}
 
 /**
  * Trust boundary for a remote-resolved env map. A peer's `secrets export` output
@@ -130,14 +158,24 @@ export function splitBundleRef(ref: string): { bundle: string; host?: string } {
 export function remoteSecretsRaw(
   target: string,
   args: string[],
-  opts: { tty?: boolean; input?: string; osLookupName?: string } = {},
+  opts: { tty?: boolean; input?: string; osLookupName?: string; secret?: boolean } = {},
 ): SshExecResult {
   const remoteCmd = buildRemoteAgentsInvocation(['secrets', ...args], undefined, osForTarget(target, opts.osLookupName));
+  // A secret-bearing call (`secret: true`) pins the managed host key and refuses
+  // to multiplex — see `credentialTransportSshOpts` (RUSH-2527). A `-tt` session
+  // (a remote reveal/passphrase prompt) additionally allocates a PTY and never
+  // multiplexes, and it COMPOSES with the secret posture: a `view --reveal` over
+  // `--host` both prompts AND streams the plaintext value back over ssh stdout,
+  // so it needs the managed host-key pin too — `tty` must not short-circuit past
+  // `secret`. A plain browse `list` passes neither and keeps the shared baseline.
+  const posture = opts.secret ? credentialTransportSshOpts(target) : {};
+  const conn = opts.tty
+    ? { ...posture, extraSshArgs: ['-tt'], multiplex: false as const }
+    : posture;
   return sshExec(target, remoteCmd, {
     timeoutMs: REMOTE_TIMEOUT_MS,
     input: opts.input,
-    extraSshArgs: opts.tty ? ['-tt'] : undefined,
-    multiplex: opts.tty ? false : undefined,
+    ...conn,
   });
 }
 
@@ -156,7 +194,10 @@ export function remoteSecretsRaw(
  */
 export function remoteSecretsStream(target: string, args: string[], opts: { osLookupName?: string } = {}): number {
   const remoteCmd = buildRemoteAgentsInvocation(['secrets', ...args], undefined, osForTarget(target, opts.osLookupName));
-  return sshStream(target, remoteCmd, { tty: true });
+  // `unlock --host` carries the remote bundle's passphrase to the destination over
+  // this interactive channel, so it is secret-bearing: pin the managed host key
+  // (a changed key is refused) and never multiplex (RUSH-2527).
+  return sshStream(target, remoteCmd, { tty: true, ...credentialTransportSshOpts(target) });
 }
 
 /**
@@ -183,8 +224,12 @@ export async function remoteResolveEnv(
     undefined,
     osForTarget(target, opts.osLookupName),
   );
+  // Resolving a remote bundle streams its plaintext values back over ssh stdout,
+  // so this read is secret-bearing: pin the managed host key and never leave a
+  // reusable control master to the source (RUSH-2527, `credentialTransportSshOpts`).
   const res: SshExecResult = sshExec(target, remoteCmd, {
     timeoutMs: REMOTE_TIMEOUT_MS,
+    ...credentialTransportSshOpts(target),
   });
 
   if (res.code !== 0) {
@@ -374,14 +419,21 @@ export function verifyRemoteKeychainPush(
   target: string,
   bundle: string,
   pushedKeys: string[],
-  opts: { osLookupName?: string } = {},
+  opts: { osLookupName?: string; secret?: boolean } = {},
 ): RemoteKeychainWriteVerification {
   const remoteCmd = buildRemoteAgentsInvocation(
     ['secrets', 'export', bundle, '--plaintext', '--format', 'json'],
     undefined,
     osForTarget(target, opts.osLookupName),
   );
-  const res: SshExecResult = sshExec(target, remoteCmd, { timeoutMs: REMOTE_TIMEOUT_MS });
+  // This read-back streams the just-pushed plaintext over ssh stdout, so it is
+  // as secret-bearing as the push itself — the push path passes `secret: true`
+  // so it too pins the managed host key and leaves no reusable control master to
+  // the destination (RUSH-2527).
+  const res: SshExecResult = sshExec(target, remoteCmd, {
+    timeoutMs: REMOTE_TIMEOUT_MS,
+    ...(opts.secret ? credentialTransportSshOpts(target) : {}),
+  });
   if (res.code !== 0) {
     const why = res.timedOut ? 'timed out' : res.code === null ? 'ssh failed' : `exit ${res.code}`;
     const stderr = `${why}${(res.stderr || res.stdout || '').trim() ? `: ${(res.stderr || res.stdout).trim()}` : ''}`;

@@ -32,6 +32,7 @@ import { reapTerminalRoutineProcesses } from './routine-process-cleanup.js';
 import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC, SUBSYSTEM_DAEMON_START } from './daemon-health.js';
 import { startAccountStateService } from './account-state-service.js';
 import { runFleetCacheWarmTick, runUsageRefreshTick } from './daemon-ticks.js';
+import { emit } from './events.js';
 
 const PID_FILE = 'daemon.pid';
 const LIFETIME_FILE = 'daemon.lifetime';
@@ -568,6 +569,22 @@ export function log(level: string, message: string): void {
   const entry = { ts: new Date().toISOString(), level: level.toUpperCase(), message: redactSecrets(message) };
   fs.appendFileSync(logPath, JSON.stringify(entry) + '\n', 'utf-8');
   try { fs.chmodSync(logPath, 0o600); } catch { /* best effort */ }
+  // Mirror into the unified event stream so `agents events --module daemon` sees
+  // always-on process lifecycle the same way secrets/browser/computer do.
+  // Fail soft — the daemon log file remains the primary sink for `daemon logs`.
+  try {
+    const lvl = level.toUpperCase();
+    const event =
+      lvl === 'ERROR' || lvl === 'FATAL' ? 'daemon.error' as const
+      : lvl === 'START' || /starting|started/i.test(message) ? 'daemon.start' as const
+      : lvl === 'STOP' || /stopping|stopped|shutting down/i.test(message) ? 'daemon.stop' as const
+      : 'daemon.info' as const;
+    emit(event, {
+      module: 'daemon',
+      detail: redactSecrets(message).slice(0, 500),
+      status: lvl,
+    });
+  } catch { /* never crash the daemon on event-log failure */ }
 }
 
 /** Main daemon loop: load jobs, schedule crons, monitor runs, and handle signals. */

@@ -1,14 +1,14 @@
 /**
- * `agents audit` — inspect the tamper-evident audit log of dispatched runs.
+ * `agents audit` — thin alias of `agents events --include runs`.
  *
- * Every run that reaches the exec dispatch chokepoint appends one hash-chained
- * record (see src/lib/audit/log.ts). This command walks that chain:
+ * New run-dispatch outcomes land in the unified event stream as `run.dispatched`
+ * (see lib/audit/log.ts::recordDispatchedRun). This command does not own a
+ * separate store or query path — it only sets the default family filter.
  *
- *   agents audit verify   Confirm the chain is intact; report the first break.
- *   agents audit list     Print recent records (newest last).
- *
- * `verify` exits non-zero when the chain is broken so it can gate CI / governance
- * checks.
+ *   agents audit              ≡ agents events --include runs
+ *   agents audit list         ≡ same
+ *   agents audit verify       walks the legacy hash-chain file if present
+ *                             (pre-unification history only)
  */
 
 import type { Command } from 'commander';
@@ -17,67 +17,73 @@ import {
   verifyAuditChain,
   readAuditLog,
   getAuditLogPath,
-  type AuditRecord,
 } from '../lib/audit/log.js';
-
-interface ListOptions {
-  limit?: string;
-  json?: boolean;
-}
-
-function renderRow(r: AuditRecord, i: number): string {
-  const idx = chalk.gray(String(i).padStart(4));
-  const time = chalk.gray(r.ts.slice(0, 19).replace('T', ' '));
-  const who = `${r.agent}@${r.version}`.padEnd(20);
-  const outcome = r.outcome === 'ok' ? chalk.green('ok  ') : chalk.red('fail');
-  const mode = chalk.cyan(r.mode.padEnd(6));
-  return `${idx}  ${time}  ${who} ${mode} ${outcome} exit=${r.exit}  ${r.repo}`;
-}
+import { addEventsReadOptions, runEventsCommand, type EventsOptions } from './events.js';
 
 export function registerAuditCommands(program: Command): void {
-  const audit = program
-    .command('audit')
-    .description('Inspect the tamper-evident audit log of dispatched runs');
-
-  audit
-    .command('verify')
-    .description('Walk the hash chain and report OK or the first broken index')
-    .option('--json', 'Output the result as JSON')
-    .action((options: { json?: boolean }) => {
-      const result = verifyAuditChain();
-      if (options.json) {
-        console.log(JSON.stringify(result));
-        process.exit(result.ok ? 0 : 1);
-      }
-      if (result.ok) {
-        const n = readAuditLog().length;
-        console.log(chalk.green(`✓ audit chain intact — ${n} record(s) verified`));
-        console.log(chalk.gray(`  ${getAuditLogPath()}`));
-        process.exit(0);
-      }
-      console.error(chalk.red(`✗ audit chain BROKEN at record #${result.brokenAt}`));
-      console.error(chalk.gray(`  ${getAuditLogPath()}`));
-      process.exit(1);
+  const audit = addEventsReadOptions(
+    program
+      .command('audit')
+      .description('Alias of `agents events --include runs` — dispatched-run outcomes'),
+    false,
+  )
+    .addHelpText('after', `
+Examples:
+  agents audit                         Same as: agents events --include runs
+  agents audit --since 7d --json
+  agents audit list                    Muscle-memory alias of bare audit
+  agents audit verify                  Legacy hash-chain file only (if present)
+`)
+    .action((_options: EventsOptions, command: Command) => {
+      const opts = command.optsWithGlobals() as EventsOptions;
+      // Bare audit defaults to --include runs unless the user already set families.
+      if (!opts.include && !opts.exclude) opts.include = 'runs';
+      return runEventsCommand(opts);
     });
 
   audit
     .command('list')
-    .description('Print recent audit records (oldest-first)')
-    .option('--limit <n>', 'Max records to show (default 50)', '50')
-    .option('--json', 'Output raw records as JSON')
-    .action((options: ListOptions) => {
-      const all = readAuditLog();
+    .description('Alias of `agents audit` / `agents events --include runs`')
+    .action((_options: EventsOptions, command: Command) => {
+      const parent = command.parent;
+      const opts = {
+        ...(parent?.optsWithGlobals?.() ?? {}),
+        ...(command.optsWithGlobals?.() ?? {}),
+        include: 'runs',
+      } as EventsOptions;
+      return runEventsCommand(opts);
+    });
+
+  audit
+    .command('verify')
+    .description('Walk the legacy hash-chain file (pre-unification history only)')
+    .option('--json', 'Output the result as JSON')
+    .action((options: { json?: boolean }) => {
+      const logPath = getAuditLogPath();
+      const records = readAuditLog(logPath);
+      if (records.length === 0) {
+        if (options.json) {
+          console.log(JSON.stringify({ ok: true, legacy: true, records: 0, note: 'no legacy audit chain; new runs use events --include runs' }));
+          process.exit(0);
+        }
+        console.log(chalk.green('✓ no legacy audit chain present'));
+        console.log(chalk.gray('  New run outcomes: agents events --include runs'));
+        console.log(chalk.gray(`  (looked for ${logPath})`));
+        process.exit(0);
+      }
+      const result = verifyAuditChain(logPath);
       if (options.json) {
-        console.log(JSON.stringify(all, null, 2));
-        return;
+        console.log(JSON.stringify({ ...result, legacy: true, records: records.length }));
+        process.exit(result.ok ? 0 : 1);
       }
-      if (all.length === 0) {
-        console.log(chalk.gray('No audit records yet.'));
-        return;
+      if (result.ok) {
+        console.log(chalk.green(`✓ legacy audit chain intact — ${records.length} record(s) verified`));
+        console.log(chalk.gray(`  ${logPath}`));
+        console.log(chalk.gray('  New runs use the events stream: agents events --include runs'));
+        process.exit(0);
       }
-      const limit = Math.max(1, parseInt(options.limit ?? '50', 10) || 50);
-      const start = Math.max(0, all.length - limit);
-      for (let i = start; i < all.length; i++) console.log(renderRow(all[i], i));
-      console.log(chalk.gray(`\n${all.length} record(s). Log: ${getAuditLogPath()}`));
+      console.error(chalk.red(`✗ legacy audit chain BROKEN at record #${result.brokenAt}`));
+      console.error(chalk.gray(`  ${logPath}`));
+      process.exit(1);
     });
 }

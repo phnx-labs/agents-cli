@@ -27,6 +27,7 @@ import {
   verifyRemoteKeychainPush,
   keychainWriteFailureMessage,
   buildRemoteFileImportCommand,
+  credentialTransportSshOpts,
 } from './remote.js';
 import { readAndResolveBundleEnv } from './bundles.js';
 
@@ -159,10 +160,16 @@ function isPowershellTarget(host: string): boolean {
 export type PushTransport =
   /** No supported command exists for this pair — fail loud, never a wrong path. */
   | { kind: 'refuse'; message: string }
-  /** A command sent over the raw ssh engine, with the .env on stdin. */
-  | { kind: 'ssh'; remoteCmd: string; input: string }
-  /** The OS-aware `agents secrets` wrapper, the READ inverse's own path. */
-  | { kind: 'remote-secrets'; args: string[]; input: string };
+  /**
+   * A command sent over the raw ssh engine, with the .env on stdin. `multiplex`
+   * is always `false`: a push ships credential bytes, so its connection must not
+   * reuse — or leave behind — a persistent authenticated control master to the
+   * destination the way the default fan-out connections do (RUSH-2527). This
+   * mirrors the `--copy-creds` dispatch posture (`multiplex: !opts.copyCreds`).
+   */
+  | { kind: 'ssh'; remoteCmd: string; input: string; multiplex: false }
+  /** The OS-aware `agents secrets` wrapper, the READ inverse's own path. Never multiplexed — see the `ssh` kind. */
+  | { kind: 'remote-secrets'; args: string[]; input: string; multiplex: false };
 
 /** Choose the transport for one push. Pure: registry read in, plan out. */
 export function planPushTransport(
@@ -183,7 +190,7 @@ export function planPushTransport(
       passphrase: opts.passphrase ?? '',
       force: opts.force,
     });
-    return { kind: 'ssh', remoteCmd, input };
+    return { kind: 'ssh', remoteCmd, input, multiplex: false };
   }
   if (powershell) {
     // Keychain on a Windows target: the `agents.ps1` shim doesn't forward
@@ -195,6 +202,7 @@ export function planPushTransport(
       kind: 'ssh',
       remoteCmd: buildWindowsStdinImportCommand(bundle, { force: opts.force }),
       input: resolved.dotenv,
+      multiplex: false,
     };
   }
   // Keychain on a POSIX target: OS-aware wrapping + the hardened ssh engine
@@ -204,6 +212,7 @@ export function planPushTransport(
     kind: 'remote-secrets',
     args: ['import', bundle, '--from', '-', ...(opts.force ? ['--force'] : [])],
     input: resolved.dotenv,
+    multiplex: false,
   };
 }
 
@@ -225,9 +234,15 @@ export function pushResolvedBundleToHost(
 
   const plan = planPushTransport(resolved, bundle, host, opts);
   if (plan.kind === 'refuse') return fail(plan.message);
+  // Every ssh below rides the credential-transport posture: the managed host key
+  // is pinned (a changed key is refused) and the connection never reuses or
+  // leaves a persistent authenticated control master to the destination
+  // (RUSH-2527, `credentialTransportSshOpts`). The plan's `multiplex: false` is
+  // the raw-`ssh` branch's half of that; the `remote-secrets` branch and the
+  // read-back/policy/literal follow-ups pass `secret: true` for the same posture.
   const res: SshExecResult = plan.kind === 'ssh'
-    ? sshExec(host, plan.remoteCmd, { input: plan.input })
-    : remoteSecretsRaw(host, plan.args, { input: plan.input, osLookupName: host });
+    ? sshExec(host, plan.remoteCmd, { input: plan.input, hostKeyOpts: credentialTransportSshOpts(host).hostKeyOpts, multiplex: plan.multiplex })
+    : remoteSecretsRaw(host, plan.args, { input: plan.input, osLookupName: host, secret: true });
 
   if (res.code === null) {
     return fail(res.stderr.trim() || (res.timedOut ? 'ssh timed out' : 'ssh failed'));
@@ -245,7 +260,7 @@ export function pushResolvedBundleToHost(
   // metadata-only bundle that breaks later with "stored item not found". The
   // file backend is headless-readable by construction, so it is skipped.
   if (opts.remoteBackend === 'keychain') {
-    const verdict = verifyRemoteKeychainPush(host, bundle, Object.keys(resolved.env), { osLookupName: host });
+    const verdict = verifyRemoteKeychainPush(host, bundle, Object.keys(resolved.env), { osLookupName: host, secret: true });
     if (!verdict.ok) {
       return fail(verdict.kind === 'locked-keychain'
         ? keychainWriteFailureMessage(host, bundle, verdict.reason)
@@ -254,7 +269,7 @@ export function pushResolvedBundleToHost(
   }
 
   if (opts.policyNever) {
-    const policy = remoteSecretsRaw(host, ['policy', bundle, 'never', '--i-understand'], { osLookupName: host });
+    const policy = remoteSecretsRaw(host, ['policy', bundle, 'never', '--i-understand'], { osLookupName: host, secret: true });
     if (policy.code !== 0) {
       const msg = (policy.stderr || policy.stdout || '').trim();
       return fail(`pushed '${bundle}' but could not set remote policy never${msg ? `: ${msg}` : ''}`);
@@ -262,12 +277,12 @@ export function pushResolvedBundleToHost(
   }
 
   for (const step of planLiteralRestoration(bundle, opts.literalValues)) {
-    const removed = remoteSecretsRaw(host, step.removeArgs, { osLookupName: host });
+    const removed = remoteSecretsRaw(host, step.removeArgs, { osLookupName: host, secret: true });
     if (removed.code !== 0) {
       const msg = (removed.stderr || removed.stdout || '').trim();
       return fail(`pushed '${bundle}' but could not replace transported ${step.key}${msg ? `: ${msg}` : ''}`);
     }
-    const literal = remoteSecretsRaw(host, step.addArgs, { osLookupName: host });
+    const literal = remoteSecretsRaw(host, step.addArgs, { osLookupName: host, secret: true });
     if (literal.code !== 0) {
       const msg = (literal.stderr || literal.stdout || '').trim();
       return fail(`pushed '${bundle}' but could not preserve literal ${step.key}${msg ? `: ${msg}` : ''}`);

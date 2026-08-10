@@ -115,11 +115,11 @@ agents run claude "..." --host gpu-box --no-follow        # detach
 
 agents hosts ps              # list dispatched runs and their status
 agents hosts stop <id>       # terminate a hung/detached run (alias: kill)
-agents logs --host gpu-box   # pick a run on that host and view its log
-agents logs <id> -f          # re-attach to a running one and follow
+agents hosts logs --host gpu-box   # pick a run on that host
+agents hosts logs <id> -f        # follow a host-task log
 ```
 
-`agents logs [id]` is the unified viewer — it resolves a host-dispatch run OR a
+`agents hosts logs <id>` shows host-dispatch output; `agents events` (alias `agents logs`) is the timeline.
 local session by id, filters with `--host`/`--agent`/`--version`, and `-f`
 follows a live one. `agents hosts logs <id>` is the host-only equivalent.
 `agents hosts stop <id>` SIGTERMs the remote process group from this machine and

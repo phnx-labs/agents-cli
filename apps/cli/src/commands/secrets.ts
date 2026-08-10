@@ -568,8 +568,14 @@ export function importBundleFromFile(
  * session (run sequentially) so a remote Touch-ID / passphrase prompt can
  * surface (e.g. `view --reveal`); otherwise hosts are queried in parallel.
  * Exits non-zero if any host fails.
+ *
+ * `secret` marks a browse that streams plaintext VALUES back (`view --reveal`)
+ * rather than only key names (`list`, masked `view`). A secret browse rides the
+ * credential-transport posture — managed host-key pinning + no multiplex — so a
+ * revealed value can't be intercepted on an unpinned/multiplexed connection
+ * (RUSH-2527). It composes with `tty`: `view --reveal` at a terminal is both.
  */
-async function browseRemote(targets: string[], args: string[], tty: boolean): Promise<void> {
+async function browseRemote(targets: string[], args: string[], tty: boolean, secret = false): Promise<void> {
   const multi = targets.length > 1;
   let failures = 0;
   const render = (name: string, res: SshExecResult) => {
@@ -587,11 +593,11 @@ async function browseRemote(targets: string[], args: string[], tty: boolean): Pr
   if (tty) {
     for (const t of targets) {
       const target = await resolveHostSshTarget(t);
-      render(t, remoteSecretsRaw(target, args, { tty: true, osLookupName: t }));
+      render(t, remoteSecretsRaw(target, args, { tty: true, osLookupName: t, secret }));
     }
   } else {
     const resolved = await Promise.all(targets.map(async (t) => ({ name: t, target: await resolveHostSshTarget(t) })));
-    const results = resolved.map(({ name, target }) => remoteSecretsRaw(target, args, { osLookupName: name }));
+    const results = resolved.map(({ name, target }) => remoteSecretsRaw(target, args, { osLookupName: name, secret }));
     targets.forEach((t, i) => render(t, results[i]));
   }
   if (failures > 0) process.exit(1);
@@ -1377,7 +1383,10 @@ export function registerSecretsCommands(program: Command): void {
           // (and the remote's "--reveal in a non-TTY needs --plaintext" gate is
           // satisfied) — only when this side is itself interactive.
           const tty = Boolean(opts.reveal) && Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY);
-          await browseRemote(targets, args, tty);
+          // `--reveal` streams the plaintext value back over ssh stdout — a
+          // secret-bearing read that must pin the host key and not multiplex,
+          // whether it runs on the interactive (tty) or `--plaintext` non-tty path.
+          await browseRemote(targets, args, tty, Boolean(opts.reveal));
           return;
         }
         const resolvedName = name ?? (await pickBundleName('view'));

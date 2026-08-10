@@ -232,6 +232,24 @@ describe('ensureActivityLogHook', () => {
     expect(yaml).toContain('activity-log-result');
     expect(yaml).toContain('ExitPlanMode|Task');
   });
+
+  it('preserves committed flow-sequence formatting (no [ a, b ] padding) so ~/.agents pulls are not blocked (RUSH-2505)', () => {
+    const userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-padding-'));
+    fs.mkdirSync(userDir, { recursive: true });
+    const agentsYaml = path.join(userDir, 'agents.yaml');
+    // The committed form uses unpadded flow sequences; the emitter defaults to
+    // padded output, which used to dirty the git-backed ~/.agents tree.
+    const committed = 'hooks:\n  notify-owner:\n    command: [agents, notify, "{message}"]\n    agents: [claude, codex]\n    events: [Stop]\n    script: notify.sh\n';
+    fs.writeFileSync(agentsYaml, committed);
+    expect(ensureActivityLogHook(userDir)).toEqual({ installed: true });
+    const updated = fs.readFileSync(agentsYaml, 'utf-8');
+    expect(updated).toContain('command: [agents, notify, "{message}"]');
+    expect(updated).toContain('agents: [claude, codex]');
+    expect(updated).toContain('events: [Stop]');
+    expect(updated).not.toMatch(/\[ /);
+    expect(updated).not.toMatch(/ \]/);
+    expect(updated).toContain('activity-log-intent');
+  });
 });
 
 describe('ACTIVITY_LOG_HOOK_SCRIPT generated registries (#1889)', () => {

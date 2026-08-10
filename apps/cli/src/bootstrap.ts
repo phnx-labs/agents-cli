@@ -279,7 +279,7 @@ Run and dispatch:
   webhook                         Receive signed GitHub/Linear webhooks for trigger routines
   daemon funnel                   Expose a webhook receiver through Tailscale Funnel
   sessions                        Browse, search, and replay past runs (live-search in TTY; grouped by workspace)
-  logs [id]                       Show a run's log — host-dispatch task or session; -f to follow
+  logs                            Alias of events (timeline). Content: sessions / hosts logs
   browser                         Automate a browser — navigate, click, screenshot, console, network
   pty                             Drive interactive terminal programs (REPLs, TUIs) via a persistent PTY session
 
@@ -287,8 +287,8 @@ Observe (read the fleet — no store merge; aliases point at the real readers):
   feed / inbox                    Needs-you inbox (open blocks waiting on you)
   timeline                        Agent progress stream (= feed --filter updates)
   roster                          Live agents (= sessions --active)
-  events                          Unified ops + activity event trail
-  audit                           Tamper-evident run-dispatch log (not events)
+  events                          Unified event trail (ops + activity + runs)
+  audit                           Alias of events --include runs
   snapshot                        One-process inventory + active sessions poll
   status                          Sync/drift only (not the live fleet snapshot)
 

@@ -2013,7 +2013,10 @@ function migrateHumans(): void {
         notifyNode.delete('owner');
         if (notifyNode.items.length === 0) doc.delete('notify');
       }
-      fs.writeFileSync(agentsYamlPath, String(doc), 'utf-8');
+      // `flowCollectionPadding: false` keeps committed flow sequences unpadded
+      // (`[a, b]`, not `[ a, b ]`) so re-emitting agents.yaml here does not dirty
+      // the synced ~/.agents tree and block pulls (RUSH-2505).
+      fs.writeFileSync(agentsYamlPath, doc.toString({ flowCollectionPadding: false }), 'utf-8');
     } catch { /* best-effort — leave the old key if we can't rewrite */ }
   }
 }

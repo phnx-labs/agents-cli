@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_97 command groups · 567 commands._
+_96 command groups · 565 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -52,12 +52,12 @@ agents alias remove <name>              Delete an alias shim
 agents apply  Reconcile the fleet to a declared profile: install agents, sync config, propagate login.
 ```
 
-## audit — Inspect the tamper-evident audit log of dispatched runs
+## audit — Alias of `agents events --include runs` — dispatched-run outcomes
 
 ```
-agents audit         Inspect the tamper-evident audit log of dispatched runs
-agents audit list    Print recent audit records (oldest-first)
-agents audit verify  Walk the hash chain and report OK or the first broken index
+agents audit         Alias of `agents events --include runs` — dispatched-run outcomes
+agents audit list    Alias of `agents audit` / `agents events --include runs`
+agents audit verify  Walk the legacy hash-chain file (pre-unification history only)
 ```
 
 ## bench — Run the same task across agent and model cells, with isolated fixtures and durable JSON results.
@@ -270,11 +270,13 @@ agents devices update [version]                Roll out agents-cli to every onli
 agents doctor [target]  Diagnose CLI availability, sync status, and resource divergence (optionally for a specific agent[@version]).
 ```
 
-## events — Read the unified event stream (operational + agent activity)
+## events — Read the unified event stream (ops + activity + run dispatch)
 
 ```
-agents events       Read the unified event stream (operational + agent activity)
-agents events emit  Record events produced outside this process (reads JSONL on stdin)
+agents events         Read the unified event stream (ops + activity + run dispatch)
+agents events emit    Record events produced outside this process (reads JSONL on stdin)
+agents events rotate  Apply event retention and the storage ceiling immediately
+agents events stats   Show aggregate event statistics
 ```
 
 ## feed — Operator inbox + agent status posts (aliases: inbox = needs-you; timeline = --filter updates)
@@ -411,13 +413,13 @@ agents login  Unlock synced secrets for this shell session
 agents logout  Forget the cached synced-secrets key
 ```
 
-## logs — Show a run log, audit trail, or stats. Subcommands: audit, stats, rotate.
+## logs — Alias of `agents events`. Pass an id to see the content redirect.
 
 ```
-agents logs [id]    Show a run log, audit trail, or stats. Subcommands: audit, stats, rotate.
-agents logs audit   Alias for `agents events --audit`
-agents logs rotate  Apply event retention and the storage ceiling immediately
-agents logs stats   Show aggregate audit statistics
+agents logs [id]    Alias of `agents events`. Pass an id to see the content redirect.
+agents logs audit   Alias of `agents events --include ops`
+agents logs rotate  Alias of `agents events rotate`
+agents logs stats   Alias of `agents events stats`
 ```
 
 ## mailboxes — Fleet comms — boxes, live cross-box traffic, threads, and routes across the agent mailbox spool
@@ -1061,13 +1063,4 @@ agents workflows add [source]   Install workflows from a source (GitHub, local) 
 agents workflows list [agent]   Show installed workflows and which agent versions they are synced to
 agents workflows remove [name]  Remove a workflow from version homes (interactive picker if no name given)
 agents workflows view [name]    Read workflow details (description, subagents, model, MCP)
-```
-
-## worktree — Provision, release, and prune per-terminal git worktrees for agent isolation.
-
-```
-agents worktree                          Provision, release, and prune per-terminal git worktrees for agent isolation.
-agents worktree provision <terminal-id>  Create (or reuse) an isolated worktree for an agent terminal. Prints the absolute path.
-agents worktree prune                    Try to release every agent worktree under .agents/worktrees/. Skips dirty or unpushed ones.
-agents worktree release <terminal-id>    Remove the worktree if clean and the branch is merged or has no unpushed commits.
 ```

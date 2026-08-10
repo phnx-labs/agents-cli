@@ -605,11 +605,6 @@
           "default": ".assets",
           "description": "Folder for storing images and attachments from the markdown editor"
         },
-        "agents.worktreePerTerminal": {
-          "type": "boolean",
-          "default": false,
-          "description": "Each new agent terminal (Cmd+Shift+A/B/H/V/J/K) starts in its own git worktree at <repo>/.history/worktrees/<terminal-id> on branch agent/<terminal-id>. Isolates parallel agents so they cannot see or overwrite each other's uncommitted work. Requires agents-cli with `agents worktree` support. Off by default."
-        },
         "agents.disableAutopush": {
           "type": "boolean",
           "default": false,

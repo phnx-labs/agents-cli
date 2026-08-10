@@ -860,9 +860,12 @@ describeExec('buildExecCommand', () => {
     it('expands a ~ grant for codex workspace roots too', () => {
       const home = process.env.HOME ?? os.homedir();
       const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'edit', addDirs: ['~/.agents/.system'] }));
-      // inlineWorkspaceRoots uses JSON.stringify, so Windows backslashes are
-      // doubled in the TOML key (C:\Users\… → "C:\\Users\\…").
-      expect(cmd.join(' ')).toContain(`${JSON.stringify(path.join(home, '.agents/.system'))} = true`);
+      // Codex folds addDirs into a TOML workspace_roots map; Windows paths are
+      // written with doubled backslashes (TOML string escapes). Match the form
+      // actually emitted rather than the raw path.join string.
+      const expanded = path.join(home, '.agents/.system');
+      const inToml = process.platform === 'win32' ? expanded.replace(/\\/g, '\\\\') : expanded;
+      expect(cmd.join(' ')).toContain(`"${inToml}" = true`);
       expect(cmd.join(' ')).not.toContain('"~/.agents/.system"');
     });
 

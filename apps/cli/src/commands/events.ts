@@ -1,24 +1,24 @@
 /**
- * `agents events` — read the unified event stream.
+ * `agents events` — read the unified event stream (the one ops/timeline product).
  *
- * One stream over BOTH operational events (`~/.agents/.history/events/YYYY-MM-DD/`: every
- * `agents <module> <cmd>` invocation plus typed events like secrets access,
- * version installs) AND agent-semantic events (the per-session activity logs:
- * plans, PRs, worktrees, sub-agents, artifacts). Each is stamped with who ran
- * it and from where. This is the audit trail for "who accessed a secret /
- * created a team" AND the activity trail for "what did the agents just do".
+ * One stream over BOTH operational events (`~/.agents/.history/events/YYYY-MM-DD/`:
+ * every `agents <module> <cmd>` invocation plus typed events like secrets access,
+ * browser/computer, daemon lifecycle, version installs) AND agent-semantic events
+ * (per-session activity: plans, PRs, worktrees, sub-agents, artifacts). Run-dispatch
+ * outcomes land here as `run.dispatched` (readable via `--include runs`).
  *
- * Filter by `--module` (top-level group, e.g. teams; `activity` for agent
- * events), `--command` (path prefix), `--event` (typed event), `--agent`, and
- * `--since`. `--audit` restricts to operational events only. `--follow` tails
- * today's operational log live.
+ * `agents audit` and `agents logs` are thin aliases of this command.
+ *
+ * Filter with sessions-style `--include` / `--exclude` families (ops, activity,
+ * commands, runs, security) plus field filters (`--module`, `--event`, …).
  */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
-import { getLogsPath, type EventRecord, type EventType, type EventLevel } from '../lib/events.js';
+import { getLogsPath, stats, rotate, type EventRecord, type EventType, type EventLevel } from '../lib/events.js';
 import { readUnifiedEvents } from '../lib/event-stream.js';
+import { parseFamilyList, EVENT_FAMILIES, type EventFamily } from '../lib/event-families.js';
 import { ingestBatch } from '../lib/events-ingest.js';
 import { setHelpSections } from '../lib/help.js';
 
@@ -63,7 +63,10 @@ export interface EventsOptions {
   limit?: string;
   json?: boolean;
   follow?: boolean;
+  /** @deprecated Prefer --include ops / --exclude activity */
   audit?: boolean;
+  include?: string;
+  exclude?: string;
 }
 
 /** Parse `--since`: relative offsets (30s/5m/2h/7d/4w) or an ISO/absolute date. */
@@ -100,6 +103,11 @@ function detailFor(r: EventRecord): string {
   if (typeof r.bundle === 'string') bits.push(`bundle=${r.bundle}`);
   if (typeof r.skill === 'string') bits.push(`skill=${r.skill}`);
   if (typeof r.version === 'string') bits.push(`v=${r.version}`);
+  // run.dispatched (and similar) — mode / outcome / exit / repo are the audit line.
+  if (typeof r.mode === 'string') bits.push(`mode=${r.mode}`);
+  if (typeof r.outcome === 'string') bits.push(`outcome=${r.outcome}`);
+  if (typeof r.exitCode === 'number') bits.push(`exit=${r.exitCode}`);
+  if (typeof r.repo === 'string') bits.push(chalk.gray(r.repo));
   if (typeof r.profile === 'string') bits.push(`profile=${r.profile}`);
   if (typeof r.error === 'string') bits.push(chalk.red(r.error));
   return bits.join(' ');
@@ -202,9 +210,11 @@ function registerEmitSubcommand(events: Command): void {
 /** Add the one canonical event-reader option surface to a command or alias. */
 export function addEventsReadOptions(command: Command, includeAuditFlag: boolean = true): Command {
   command
-    .option('--module <name>', 'Only events from this group (e.g. teams, secrets, activity)')
+    .option('--include <families>', `Only these families (comma-sep): ${EVENT_FAMILIES.join(', ')}`)
+    .option('--exclude <families>', `Drop these families (comma-sep): ${EVENT_FAMILIES.join(', ')}`)
+    .option('--module <name>', 'Only events from this group (e.g. teams, secrets, activity, daemon, browser)')
     .option('--command <path>', 'Only this command path — prefix match (e.g. "teams create")')
-    .option('--event <type>', 'Only this typed event (repeatable, e.g. secrets.get, secrets.unlocked, pr.opened)', collect, [])
+    .option('--event <type>', 'Only this typed event (repeatable, e.g. secrets.get, run.dispatched, pr.opened)', collect, [])
     .option('--agent <name>', 'Only events tagged with this agent')
     .option('--caller <kind>', 'Only this caller kind (claude-code, codex, gemini, cursor, terminal, script)')
     .option('--level <level>', 'Only this level: audit, warn, info, debug')
@@ -214,11 +224,13 @@ export function addEventsReadOptions(command: Command, includeAuditFlag: boolean
     .option('--limit <n>', 'Max records to show; 0 for no cap (default 50)', '50')
     .option('--json', 'Output raw records as JSON')
     .option('-f, --follow', "Tail today's operational log live");
-  if (includeAuditFlag) command.option('--audit', 'Operational events only (skip agent activity)');
+  if (includeAuditFlag) {
+    command.option('--audit', 'Deprecated: operational events only — prefer --include ops or --exclude activity');
+  }
   return command;
 }
 
-/** Canonical reader used by both `agents events` and `agents logs audit`. */
+/** Canonical reader used by `agents events`, `agents audit`, and `agents logs`. */
 export async function runEventsCommand(options: EventsOptions, forceAudit: boolean = false): Promise<void> {
   if (options.follow) {
     await followLog();
@@ -227,14 +239,27 @@ export async function runEventsCommand(options: EventsOptions, forceAudit: boole
 
   let limit: number | undefined;
   let startDate: Date | undefined;
+  let includeFamilies: EventFamily[] | undefined;
+  let excludeFamilies: EventFamily[] | undefined;
   try {
     limit = resolveEventsLimit(options.limit);
     startDate = options.since ? parseSince(options.since) : undefined;
+    if (options.include && options.exclude) {
+      throw new Error('--include and --exclude are mutually exclusive');
+    }
+    if (options.include) includeFamilies = parseFamilyList(options.include, '--include');
+    if (options.exclude) excludeFamilies = parseFamilyList(options.exclude, '--exclude');
   } catch (err) {
     console.error(chalk.red((err as Error).message));
     process.exitCode = 2;
     return;
   }
+
+  // --audit / forceAudit = ops-only when no family flags. Families own the
+  // source selection via applyFamilies — never override includeActivity after.
+  const includeActivity = (includeFamilies !== undefined || excludeFamilies !== undefined)
+    ? true
+    : !(forceAudit || options.audit);
 
   const fetched = readUnifiedEvents({
     startDate,
@@ -247,7 +272,9 @@ export async function runEventsCommand(options: EventsOptions, forceAudit: boole
     command: options.command,
     module: options.module,
     limit: limit === undefined ? undefined : limit + 1,
-    includeActivity: !(forceAudit || options.audit),
+    includeActivity,
+    includeFamilies,
+    excludeFamilies,
   });
   const { records, truncated } = capRecords(fetched, limit);
   const capNote = `Showing the newest ${limit} — more events matched. Pass --limit 0 for all.`;
@@ -268,31 +295,120 @@ export async function runEventsCommand(options: EventsOptions, forceAudit: boole
   if (truncated) console.log(chalk.yellow(capNote));
 }
 
+function humanBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function levelColor(level: string): string {
+  if (level === 'audit') return chalk.magenta(level);
+  if (level === 'warn') return chalk.yellow(level);
+  if (level === 'debug') return chalk.gray(level);
+  return chalk.blue(level);
+}
+
+/** Shared by `events stats` and the `logs stats` alias. */
+export async function runEventsStats(opts: { since?: string; json?: boolean }): Promise<void> {
+  let days = 7;
+  if (opts.since) {
+    try {
+      const d = parseSince(opts.since);
+      days = Math.max(1, Math.ceil((Date.now() - d.getTime()) / 86_400_000));
+    } catch (err) {
+      console.error(chalk.red((err as Error).message));
+      process.exitCode = 2;
+      return;
+    }
+  }
+  const s = stats({ days });
+  if (opts.json) {
+    console.log(JSON.stringify(s, null, 2));
+    return;
+  }
+  console.log(chalk.bold(`Event statistics (last ${days} day${days === 1 ? '' : 's'})\n`));
+  console.log(`  Total events:  ${s.totalEvents}`);
+  console.log(`  Log files:     ${s.fileCount} (${humanBytes(s.totalBytes)})`);
+  console.log(`  Log path:      ${chalk.gray(getLogsPath())}`);
+  if (Object.keys(s.byLevel).length) {
+    console.log(chalk.bold('\n  By level:'));
+    for (const [k, v] of Object.entries(s.byLevel).sort((a, b) => b[1] - a[1])) {
+      console.log(`    ${levelColor(k).padEnd(20)} ${v}`);
+    }
+  }
+  if (Object.keys(s.byEvent).length) {
+    console.log(chalk.bold('\n  By event (top 15):'));
+    for (const [k, v] of Object.entries(s.byEvent).sort((a, b) => b[1] - a[1]).slice(0, 15)) {
+      console.log(`    ${chalk.cyan(k).padEnd(30)} ${v}`);
+    }
+  }
+  if (Object.keys(s.byModule).length) {
+    console.log(chalk.bold('\n  By module:'));
+    for (const [k, v] of Object.entries(s.byModule).sort((a, b) => b[1] - a[1])) {
+      console.log(`    ${k.padEnd(20)} ${v}`);
+    }
+  }
+  console.log();
+}
+
 export function registerEventsCommand(program: Command): void {
   const events = addEventsReadOptions(program
     .command('events')
-    .description('Read the unified event stream (operational + agent activity)'))
+    .description('Read the unified event stream (ops + activity + run dispatch)'))
     .addHelpText('after', `
 Examples:
   agents events                          Everything — ops + agent activity
-  agents events --module activity        Agent activity only (plans / PRs / worktrees)
-  agents events --audit                  Operational events only (secrets / teams / ...)
-  agents events --event pr.opened --since 7d
+  agents events --exclude commands       Drop CLI command.start/end noise
+  agents events --include runs           Dispatched-run outcomes (was audit list)
+  agents events --include activity       Agent milestones only
+  agents events --include ops            Operational events only
+  agents events --include security       Audit-level (secrets, command.*, daemon, …)
   agents events --module secrets         Every secret accessed or revealed
   agents events --module secrets --bundle share
-                                         Every read of the share bundle (which agent, which session)
-  agents events --bundle share --session <id>
-                                         Trace one session's reads of a bundle
+  agents events --event pr.opened --since 7d
   agents events -f                       Live tail (operational)
-  agents events --event pr.opened --since 30d --limit 0 --json
-                                         Every match — use --limit 0 whenever you
-                                         aggregate, or you rank only the newest 50`)
+  agents events stats
+  agents events rotate --days 7
+
+  agents audit                           Alias of: events --include runs
+  agents logs                            Alias of: events`)
     .action((_options: EventsOptions, command: Command) =>
       runEventsCommand(command.optsWithGlobals() as EventsOptions));
 
   // `events` both reads (its own action, above) and writes (this subcommand) —
   // the same shape as `feed` / `feed post`.
   registerEmitSubcommand(events);
+
+  events
+    .command('stats')
+    .description('Show aggregate event statistics')
+    .option('--since <time>', 'Window size (e.g. 7d, 30d; default 7d)')
+    .option('--json', 'Output stats as JSON')
+    .action(async (opts: { since?: string; json?: boolean }) => runEventsStats(opts));
+
+  events
+    .command('rotate')
+    .description('Apply event retention and the storage ceiling immediately')
+    .option('--days <n>', 'Retention period in days (default 7)', '7')
+    .option('--max-mb <n>', 'Total event storage ceiling in MiB (default 50)', '50')
+    .action((opts: { days?: string; maxMb?: string }) => runEventsRotate(opts));
+}
+
+/** Shared by `events rotate` and the `logs rotate` alias. */
+export function runEventsRotate(opts: { days?: string; maxMb?: string }): void {
+  const days = Math.max(1, parseInt(opts.days ?? '7', 10) || 7);
+  const maxMb = Math.max(1, parseInt(opts.maxMb ?? '50', 10) || 50);
+  const result = rotate(days, maxMb * 1024 * 1024);
+  const removed = result.removedByAge + result.removedBySize;
+  if (removed > 0) {
+    console.log(
+      `Removed ${removed} event file${removed === 1 ? '' : 's'} ` +
+      `(${result.removedByAge} by age, ${result.removedBySize} by size); ` +
+      `reclaimed ${humanBytes(result.bytesReclaimed)}.`,
+    );
+  } else {
+    console.log(chalk.gray(`No event files removed (retention ${days} days, ceiling ${maxMb} MiB).`));
+  }
 }
 
 /** commander repeatable-option collector. */

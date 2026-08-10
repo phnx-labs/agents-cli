@@ -62,18 +62,36 @@ describe('degraded run governance mode', () => {
       // test does (commands/routines.test.ts:19-26,75). `--import` needs a module
       // specifier, not a bare path, or Windows dies on ERR_UNSUPPORTED_ESM_URL_SCHEME.
       const tsxImport = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
+      // Vitest setup pins AGENTS_EVENTS_PATH to a fork-local sink; clear it so the
+      // child writes under HOME (same pattern as tests/events-audit.test.ts).
+      // New runs emit run.dispatched there — not the legacy audit/log.jsonl chain.
+      const eventsPath = path.join(root, 'events.jsonl');
       const result = spawnSync(
         'node',
         ['--import', tsxImport, path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'antigravity', 'probe', '--mode', 'plan', '--quiet', '--cwd', root],
         {
           cwd: path.resolve(import.meta.dirname, '..', '..'),
-          env: { ...process.env, HOME: root, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}` },
+          env: {
+            ...process.env,
+            HOME: root,
+            PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`,
+            AGENTS_EVENTS_PATH: eventsPath,
+          },
           encoding: 'utf8',
         },
       );
       expect(result.status, result.stderr).toBe(0);
-      const lines = fs.readFileSync(path.join(root, '.agents', '.history', 'audit', 'log.jsonl'), 'utf8').trim().split('\n');
-      expect(JSON.parse(lines.at(-1)!)).toMatchObject({ agent: 'antigravity', mode: 'edit', outcome: 'ok', exit: 0 });
+      expect(fs.existsSync(eventsPath), `missing events at ${eventsPath}; stderr=${result.stderr}`).toBe(true);
+      const rows = fs.readFileSync(eventsPath, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+      const dispatched = rows.filter((r) => r.event === 'run.dispatched' && r.agent === 'antigravity');
+      expect(dispatched.length, `events: ${JSON.stringify(rows.slice(-5))}`).toBeGreaterThanOrEqual(1);
+      // Antigravity has no plan mode — resolved writable mode must be edit.
+      expect(dispatched.at(-1)).toMatchObject({
+        agent: 'antigravity',
+        mode: 'edit',
+        outcome: 'ok',
+        exitCode: 0,
+      });
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

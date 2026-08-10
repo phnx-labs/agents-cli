@@ -1,0 +1,8 @@
+- **One event engine: `events` is the source of truth; `audit` and `logs` are aliases.** The unified event stream already covered ops + agent activity; run-dispatch outcomes now land there too as `run.dispatched` (written from the same exec chokepoint that used to append the separate hash-chained `~/.agents/.history/audit/log.jsonl`). New CLI surface:
+  - `agents events --include` / `--exclude` families: `ops`, `activity`, `commands`, `runs`, `security` (sessions-style, mutually exclusive).
+  - `agents events --exclude commands` drops high-churn `command.start`/`command.end` noise.
+  - `agents events --include runs` lists dispatched-run outcomes (what `audit list` used to show).
+  - `agents events stats` / `agents events rotate` own housekeeping (moved off the logs tree as the canonical home).
+  - `agents audit` ≡ `events --include runs`; `agents audit list` same; `agents audit verify` still walks a *legacy* hash-chain file if present, else reports clean and points at the events stream.
+  - `agents logs` ≡ `events`; `logs audit` ≡ `events --include ops`; `logs stats`/`rotate` re-dispatch. A bare `logs <id>` redirects to `sessions` / `hosts logs` for content.
+  - Coverage: secrets/keychain (`secrets.*`), browser, computer, daemon lifecycle (`daemon.start`/`stop`/`error`/`info` mirrored from the daemon log), plus every module already covered by the CLI `command.start`/`command.end` choke point. Source: `apps/cli/src/lib/event-families.ts`, `event-stream.ts`, `events.ts`, `audit/log.ts`, `daemon.ts`, `commands/events.ts`, `commands/audit.ts`, `commands/logs.ts`.
