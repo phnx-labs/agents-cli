@@ -12,7 +12,7 @@ import type { AgentId } from '../types.js';
 export type { AgentId };
 /** Resource origin. Precedence (highest first): project > user > plugin > system. */
 export type Layer = 'system' | 'user' | 'project' | 'plugin';
-export type ResourceKind = 'command' | 'hook' | 'skill' | 'rule' | 'mcp' | 'permission' | 'subagent' | 'workflow' | 'memory';
+export type ResourceKind = 'command' | 'hook' | 'skill' | 'rule' | 'mcp' | 'permission' | 'subagent' | 'workflow' | 'memory' | 'plugin';
 
 /** A resolved resource with its origin layer. */
 export interface ResolvedItem<T> {

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 104,
-  "commands": 586,
+  "commands": 583,
   "root": {
     "name": "agents",
     "path": "",
@@ -11462,53 +11462,6 @@
           "subcommands": []
         },
         {
-          "name": "register",
-          "path": "mcp register",
-          "aliases": [],
-          "description": "Apply MCP servers from manifest to agent config files",
-          "args": [
-            {
-              "name": "name",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-a, --agents <list>",
-              "description": "Override manifest targets: claude, codex@0.116.0",
-              "short": "-a",
-              "long": "--agents",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-y, --yes",
-              "description": "Auto-install any missing agent versions without prompting",
-              "short": "-y",
-              "long": "--yes",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
           "name": "remove",
           "path": "mcp remove",
           "aliases": [],
@@ -11725,43 +11678,6 @@
             }
           ],
           "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "sync",
-          "path": "memory sync",
-          "aliases": [],
-          "description": "Copy canonical memory into capable agent version homes",
-          "args": [
-            {
-              "name": "agent",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-a, --agent <agent>",
-              "description": "Limit to one agent (or agent@version)",
-              "short": "-a",
-              "long": "--agent",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -14098,48 +14014,6 @@
               "flags": "--keep-source",
               "description": "Keep the directory at ~/.agents/plugins/<name> (only unsync from agents)",
               "long": "--keep-source",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "sync",
-          "path": "plugins sync",
-          "aliases": [],
-          "description": "Apply a plugin to an agent. Syncs every installed version (pass agent@version to target one).",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "agent",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--allow-exec-surfaces",
-              "description": "Enable the plugin even when it ships hooks/, .mcp.json, bin/, scripts/, settings.json, or permissions/",
-              "long": "--allow-exec-surfaces",
               "required": false,
               "optional": false,
               "variadic": false,
@@ -16738,6 +16612,33 @@
             "rm"
           ],
           "description": "Unregister an extra repo. Managed clones are deleted; external paths are kept.",
+          "args": [
+            {
+              "name": "alias",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "sync",
+          "path": "repos sync",
+          "aliases": [],
+          "description": "Git-sync a repo: pull (and push for user/extras). Aliases: \"system\", \"user\", or a registered extra.",
           "args": [
             {
               "name": "alias",
@@ -24584,46 +24485,6 @@
           "subcommands": []
         },
         {
-          "name": "reap",
-          "path": "sessions reap",
-          "aliases": [],
-          "description": "Kill tmux sessions whose panes are all dead.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Emit a JSON result object instead of human output.",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--socket <path>",
-              "description": "Path to the tmux server socket (default: agents helper socket).",
-              "long": "--socket",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# Reap dead sessions interactively\nagents sessions reap\n\n# JSON output (for scripts)\nagents sessions reap --json",
-          "notes": "Sessions stay open after their process exits because `remain-on-exit on` is set\nso the harness can inspect exit status. This command cleans them up on demand.\n\nSafety: sessions with at least one live pane are never touched.",
-          "subcommands": []
-        },
-        {
           "name": "reconnect",
           "path": "sessions reconnect",
           "aliases": [],
@@ -26471,7 +26332,7 @@
         },
         {
           "flags": "--agent-version <version>",
-          "description": "Version to sync into (legacy form; prefer \"agent@version\")",
+          "description": "Version to sync into (legacy form; prefer \"agent@version\" or --version)",
           "long": "--agent-version",
           "required": true,
           "optional": false,
@@ -26547,6 +26408,26 @@
           "defaultValue": false
         },
         {
+          "flags": "--dry-run",
+          "description": "Show what would be synced without making any changes",
+          "long": "--dry-run",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false,
+          "defaultValue": false
+        },
+        {
+          "flags": "--allow-exec-surfaces",
+          "description": "Allow syncing plugin exec surfaces (scripts, binaries) — off by default for safety",
+          "long": "--allow-exec-surfaces",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false,
+          "defaultValue": false
+        },
+        {
           "flags": "--json",
           "description": "Emit machine-readable JSON (also accepted so fleet fan-out via --host all can parse each peer)",
           "long": "--json",
@@ -26595,6 +26476,105 @@
           "variadic": false,
           "negate": false,
           "defaultValue": false
+        },
+        {
+          "flags": "--plugin [names]",
+          "description": "Sync only plugins (bare = all; comma-separated names to filter)",
+          "long": "--plugin",
+          "required": false,
+          "optional": true,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--command [names]",
+          "description": "Sync only commands (bare = all; comma-separated names to filter)",
+          "long": "--command",
+          "required": false,
+          "optional": true,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--skill [names]",
+          "description": "Sync only skills (bare = all; comma-separated names to filter)",
+          "long": "--skill",
+          "required": false,
+          "optional": true,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--hook [names]",
+          "description": "Sync only hooks (bare = all; comma-separated names to filter)",
+          "long": "--hook",
+          "required": false,
+          "optional": true,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--subagent [names]",
+          "description": "Sync only subagents (bare = all; comma-separated names to filter)",
+          "long": "--subagent",
+          "required": false,
+          "optional": true,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--permission [names]",
+          "description": "Sync only permissions (bare = all; comma-separated names to filter)",
+          "long": "--permission",
+          "required": false,
+          "optional": true,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--mcp [names]",
+          "description": "Sync only MCP servers (bare = all; comma-separated names to filter)",
+          "long": "--mcp",
+          "required": false,
+          "optional": true,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--workflow [names]",
+          "description": "Sync only workflows (bare = all; comma-separated names to filter)",
+          "long": "--workflow",
+          "required": false,
+          "optional": true,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--rule [names]",
+          "description": "Sync only the rules/memory file (maps to the \"memory\" key — the whole file is always recompiled, individual names are not filtered)",
+          "long": "--rule",
+          "required": false,
+          "optional": true,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--memory",
+          "description": "Sync only the rules/memory file (alias of --rule with no name filter)",
+          "long": "--memory",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--version <spec>",
+          "description": "Agent version or selector: @latest, @oldest, @pinned (= @default), @all, or a concrete x.y.z. \"all\" targets every installed version non-interactively.",
+          "long": "--version",
+          "required": true,
+          "optional": false,
+          "variadic": false,
+          "negate": false
         },
         {
           "flags": "-h, --help",

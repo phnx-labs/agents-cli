@@ -617,18 +617,6 @@ Examples:
       }
     });
 
-  // `hooks sync` is gone — sync runs automatically when the agent launches.
-  hooksCmd
-    .command('sync', { hidden: true })
-    .allowUnknownOption()
-    .allowExcessArguments()
-    .action(() => {
-      console.error(chalk.red('"agents hooks sync" is gone.'));
-      console.error(chalk.gray('Sync runs automatically when you launch the agent.'));
-      console.error(chalk.gray('To remove orphans, use:  agents prune cleanup hooks'));
-      process.exit(1);
-    });
-
   // `hooks prune` moved to the top-level `agents prune cleanup` command.
   hooksCmd
     .command('prune', { hidden: true })

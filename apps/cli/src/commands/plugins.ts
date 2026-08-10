@@ -355,10 +355,11 @@ Examples:
       console.log();
     });
 
-  // agents plugins sync <name> [agent]
+  // Deprecated: superseded by `agents sync --plugin <name>`. Kept as a warned,
+  // functional alias so old muscle-memory and scripts don't break.
   pluginsCmd
-    .command('sync <name> [agent]')
-    .description('Apply a plugin to an agent. Syncs every installed version (pass agent@version to target one).')
+    .command('sync <name> [agent]', { hidden: true })
+    .description('Deprecated — use `agents sync --plugin <name>` instead.')
     .option('--allow-exec-surfaces', 'Enable the plugin even when it ships hooks/, .mcp.json, bin/, scripts/, settings.json, or permissions/')
     .addHelpText('after', `
 Examples:
@@ -375,6 +376,8 @@ Examples:
   agents plugins sync hivemind claude --allow-exec-surfaces
 `)
     .action(async (name: string, agentArg: string | undefined, options: { allowExecSurfaces?: boolean }) => {
+      console.warn(chalk.yellow('`agents plugins sync` is deprecated — use `agents sync --plugin` instead:'));
+      console.warn(chalk.gray(`  agents sync --plugin ${name}`));
       const plugin = getPlugin(name);
       if (!plugin) {
         console.log(chalk.red(`Plugin '${name}' not found`));

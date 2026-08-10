@@ -38,17 +38,20 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
    by us and never copied across devices. It stays on the box that minted it and
    refreshes itself there.
 
-3. **The only credential agents-cli manages is a deliberate setup-token.** A
-   long-lived, **non-rotating** OAuth setup-token / device-login token / API key
+3. **The only credential agents-cli manages is a deliberate, durable credential.** A
+   long-lived, **non-rotating** OAuth setup-token / API key / bearer token
    (`claude setup-token`, `OPENAI_API_KEY`, `XAI_API_KEY`, `FACTORY_API_KEY`, …).
    Valid until explicitly revoked → **safe to reuse on many devices, no repeated
    logouts, no revocation cascade.** That safety property is the whole reason it, and
    only it, is shareable.
 
-4. **Setup-tokens live file-based, in a reserved "auth" bundle.** They are stored in
-   the **file-based** secrets mechanism (never the OS keychain), under a reserved
-   bundle name (the `auth` bundle), and synced across the fleet by the existing
-   file-based secrets sync. No Touch ID, because no keychain ACL.
+4. **Shipped (RUSH-2470): each provider account is its own named `agents secrets`
+   bundle, not one reserved bundle.** `agents accounts add <name> --provider <p>
+   --auth <type>` creates a bundle named after the account, with secrets policy
+   `never` set unconditionally — never the OS keychain's biometry ACL, so reading
+   it raises no Touch ID prompt. There is no shared "auth" bundle name; a user can
+   hold as many named accounts as they need, and only the accounts they explicitly
+   `agents accounts sync <name> --device <device>` cross the fleet.
 
 5. **Usage and account views read the setup-token**, not the interactive login —
    and never a prompting keychain read. Caveat (RUSH-2392): Anthropic's
@@ -68,23 +71,26 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
 | ingredient | where | shared across fleet? | why safe |
 |---|---|---|---|
 | Interactive OAuth login | the box that minted it, in its own config home / the harness's own keychain item | **No — never touched by us** | rotates/revokes on cross-use; leaving it alone is the fix |
-| Setup-token (API key / long-lived OAuth) | file-based `auth` secrets bundle | **Yes — synced** | non-rotating, revoke-only; reuse never invalidates another holder |
+| Setup-token / API key (durable) | a named `agents accounts add` bundle, secrets policy `never` | **Yes — synced, explicitly** | non-rotating, revoke-only; reuse never invalidates another holder |
 | daemon / CLI | — | — | hold nothing |
 
-The only thing that crosses the fleet is the reserved `auth` bundle (file-based
-setup-tokens the user deliberately placed). Nothing rotating is ever copied.
+The only thing that crosses the fleet is a provider account bundle the user
+deliberately created with `agents accounts add` and explicitly pushed with
+`agents accounts sync <name> --device <device>`. Nothing rotating is ever copied.
 
 ## How each surface changes
 
 - **`agents apply`** stops copying login files. `FLEET_AUTH_FILES` loses its copy
   role; the `push-login` / `--recv-auth` login-materialize path is removed. Per
   agent per box `apply` surfaces: "logged in" / "log in on this box" (interactive or
-  `agents fleet login`) / "seed the `auth` bundle" — driven by whether the box has
-  its own login or a declared setup-token, never by agent identity.
+  `agents fleet login`) / "add or sync a provider account (`agents accounts add` /
+  `sync`)" — driven by whether the box has its own login or a declared account
+  bundle, never by agent identity.
 - **`agents fleet login`** (per-box device-code over SSH, writes the credential on
   the box, never transports it) stays as the per-machine login path. Onboarding a
-  new device seeds the reserved `auth` bundle instead of copying logins.
-- **`ag view` / usage** (`usage.ts`) reads the setup-token from the file-based `auth`
+  new device syncs the needed provider account bundle (`agents accounts sync`)
+  instead of copying logins.
+- **`ag view` / usage** (`usage.ts`) reads the setup-token from its named account
   bundle. It never reads the harness's ACL-bound keychain login. No no-ACL cache of
   the interactive token is needed because the interactive token is never read.
   When Anthropic returns 403 `user:profile` on that token, the probe sets
@@ -119,7 +125,7 @@ Resolved open items:
 - **Kimi has no env-var auth** (config.toml only) — a real limitation; its
   file-based OAuth login stays per-box, no shareable token.
 - **Droid**: `FACTORY_API_KEY` is real but agents-cli wires nothing — a gap to
-  close if we want droid in the `auth` bundle.
+  close if we want droid selectable as an `agents accounts` provider.
 
 ## The Touch ID fix (concrete)
 
@@ -127,30 +133,36 @@ Only the **token-acquisition step** changes — no endpoint/header change (the u
 endpoint takes any `sk-ant-oat01-` bearer, `usage.ts:624,957`):
 
 - In `loadClaudeOauth` (and its callers `probeClaudeStatus` / `getClaudeUsageInfo`,
-  `usage.ts:604,938`), **resolve `CLAUDE_CODE_OAUTH_TOKEN` from the file-based `auth`
-  bundle (or env) BEFORE the keychain read** (`usage.ts:1348-1353`). If a setup-token
-  is present → use it as the bearer and skip `getKeychainToken` entirely → no
-  `/usr/bin/security` call → no Touch ID.
+  `usage.ts:604,938`), **resolve `CLAUDE_CODE_OAUTH_TOKEN` from the named account
+  bundle (or env) BEFORE the keychain-ACL read** (`usage.ts:1348-1353`). If a
+  setup-token is present → use it as the bearer and skip `getKeychainToken`
+  entirely → no ACL-gated `/usr/bin/security` call → no Touch ID.
 - Same for the daemon's every-3-min `probeLocalFleetAuth` (`auth-health.ts:391-410`)
-  — the real storm source — so its warm loop reads the file-based setup-token, never
-  the keychain.
-- The setup-token lives in a **file-based** bundle (`--backend file`,
-  `~/.agents/.cache/secrets/`, no biometry). Populated by the user OR **self-minted**
-  by the agent (`claude setup-token` via pty + computer-use), stored file-backed.
+  — the real storm source — so its warm loop reads the account bundle's
+  setup-token, never the ACL-bound keychain login.
+- The setup-token lives in a bundle written by `agents accounts add`, which
+  always sets secrets policy `never` — a no-biometry-ACL item (keychain on
+  macOS, the platform default elsewhere), never the harness's own ACL'd login.
+  Populated by the user OR **self-minted** by the agent (`claude setup-token`
+  via pty + computer-use).
 
 ## Migration (priority order — Touch ID first, it's the live pain)
 
 1. Daemon holds nothing (done, #1583).
-2. **Claude usage/probe read the file-based setup-token, not the keychain** → kills
-   the Touch ID storm. Self-mint + store the setup-token per account file-based.
-   **Enforcement landed:** `loadClaudeOauth`'s `accessTokenCache` path
-   (`usage.ts`) now returns `null` when no setup-token is provisioned instead of
-   falling through to the interactive keychain / `.credentials.json` — so the
-   daemon's usage (~60s) and auth-health (~3min) warms can never read or transmit
-   the interactive OAuth login (the transitional fallback + its no-ACL cache are
-   removed). An unprovisioned account reads as `unconfigured` (benign for
-   rotation) and shows "usage pending"; seed a setup-token to restore usage.
+2. **Claude usage/probe read the account bundle's setup-token, not the ACL'd
+   keychain login** → kills the Touch ID storm. Self-mint + store the setup-token
+   per account. **Enforcement landed:** `loadClaudeOauth`'s `accessTokenCache`
+   path (`usage.ts`) now returns `null` when no setup-token is provisioned
+   instead of falling through to the interactive keychain / `.credentials.json`
+   — so the daemon's usage (~60s) and auth-health (~3min) warms can never read
+   or transmit the interactive OAuth login (the transitional fallback + its
+   no-ACL cache are removed). An unprovisioned account reads as `unconfigured`
+   (benign for rotation) and shows "usage pending"; seed a setup-token to
+   restore usage.
 3. `apply` stops copying rotating login files (Gap B).
-4. Reserved file-based `auth` bundle + fleet sync (via `vault.age`/`secrets
-   push-pull`, not `apply`) — onboarding + headless.
+4. **Shipped (RUSH-2470):** `agents accounts add <name>` creates a named,
+   policy-`never` bundle per account; `agents accounts sync <name> --device
+   <device>` copies it explicitly to a worker device (encrypted file backend on
+   Linux, Credential Manager on Windows). No reserved bundle name — every
+   account the user creates is independently named and independently synced.
 5. Fleet upgrade + verify **zero Touch ID** on a real macOS box (the proof).

@@ -487,18 +487,6 @@ Examples:
       }
     });
 
-  // `commands sync` is gone — sync runs automatically when the agent launches.
-  commandsCmd
-    .command('sync', { hidden: true })
-    .allowUnknownOption()
-    .allowExcessArguments()
-    .action(() => {
-      console.error(chalk.red('"agents commands sync" is gone.'));
-      console.error(chalk.gray('Sync runs automatically when you launch the agent.'));
-      console.error(chalk.gray('To remove orphans, use:  agents prune cleanup commands'));
-      process.exit(1);
-    });
-
   // `commands prune` moved to the top-level `agents prune cleanup` command.
   commandsCmd
     .command('prune', { hidden: true })
