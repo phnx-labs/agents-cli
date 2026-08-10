@@ -64,7 +64,7 @@ exit        0
 <h2 id="authenticated-model-result">Authenticated model result</h2>
 <p>The final acceptance run used the existing <code>deepseek</code> custom harness, not the disposable key. <code>agents harness view deepseek</code> resolved it to Claude + <code>deepseek/deepseek-chat-v3-0324</code> through OpenRouter with account <code>legacy-openrouter-45a642fc</code>. The installed feature then performed a real provider request:</p>
 <pre><code>$ agents run deepseek "Reply with exactly: ACCOUNT_E2E_OK" --mode plan --timeout 2m
-[agents] using the encrypted file store at /home/muqsit/.agents/.cache/secrets
+[agents] using the encrypted file store at /home/you/.agents/.cache/secrets
 Resolved custom harness 'deepseek' -&gt; claude
 [agents] strategy balanced ignored: custom harness pins its own version/auth
 Running: claude@2.1.219 --permission-mode plan --print ...
