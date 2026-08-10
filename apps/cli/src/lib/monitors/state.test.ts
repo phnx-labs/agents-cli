@@ -8,6 +8,9 @@ import {
   recordFireTime,
   writeFireRecord,
   listFires,
+  readLiveness,
+  recordCheck,
+  markDroughtNotified,
   getMonitorHistoryDir,
 } from './state.js';
 import type { MonitorEvent } from './config.js';
@@ -89,6 +92,62 @@ describe('recordFireTime', () => {
     const times = recordFireTime(NAME, now, 60_000); // 60s window
     // The 120s-old entry is pruned; the 10s-old one and now remain.
     expect(times).toEqual([now - 10_000, now]);
+  });
+});
+
+describe('liveness heartbeat (RUSH-2485)', () => {
+  it('is null until the engine records a check', () => {
+    expect(readLiveness(NAME)).toBeNull();
+  });
+
+  it('records a check and increments checkCount on each poll', () => {
+    recordCheck(NAME, '2026-03-01T00:00:00.000Z');
+    let live = readLiveness(NAME);
+    expect(live!.checkCount).toBe(1);
+    expect(live!.lastCheckedAt).toBe('2026-03-01T00:00:00.000Z');
+    expect(live!.consecutiveErrors).toBe(0);
+    expect(live!.lastError).toBeUndefined();
+
+    recordCheck(NAME, '2026-03-01T00:01:00.000Z');
+    live = readLiveness(NAME);
+    expect(live!.checkCount).toBe(2);
+    expect(live!.lastCheckedAt).toBe('2026-03-01T00:01:00.000Z');
+  });
+
+  it('does NOT write change-detection state — a polled-but-never-matched monitor still has no state.json', () => {
+    recordCheck(NAME, '2026-03-01T00:00:00.000Z');
+    // This is the core bug: heartbeat present, but the monitor never fired, so
+    // change-detection state must remain absent (not conflated with the poll).
+    expect(readLiveness(NAME)).not.toBeNull();
+    expect(readState(NAME)).toBeNull();
+  });
+
+  it('accumulates consecutive errors and clears them on a good poll', () => {
+    recordCheck(NAME, '2026-03-01T00:00:00.000Z', 'boom');
+    recordCheck(NAME, '2026-03-01T00:01:00.000Z', 'boom');
+    let live = readLiveness(NAME);
+    expect(live!.consecutiveErrors).toBe(2);
+    expect(live!.lastError).toBe('boom');
+
+    recordCheck(NAME, '2026-03-01T00:02:00.000Z'); // success
+    live = readLiveness(NAME);
+    expect(live!.consecutiveErrors).toBe(0);
+    expect(live!.lastError).toBeUndefined();
+    expect(live!.checkCount).toBe(3); // count still advances
+  });
+
+  it('keeps the drought marker across failures and drops it on recovery', () => {
+    recordCheck(NAME, '2026-03-01T00:00:00.000Z', 'boom');
+    markDroughtNotified(NAME, '2026-03-01T00:00:05.000Z');
+    expect(readLiveness(NAME)!.droughtNotifiedAt).toBe('2026-03-01T00:00:05.000Z');
+
+    // Another failure preserves the marker (so we don't re-notify).
+    recordCheck(NAME, '2026-03-01T00:01:00.000Z', 'boom');
+    expect(readLiveness(NAME)!.droughtNotifiedAt).toBe('2026-03-01T00:00:05.000Z');
+
+    // A good poll clears it, so a fresh drought can escalate again.
+    recordCheck(NAME, '2026-03-01T00:02:00.000Z');
+    expect(readLiveness(NAME)!.droughtNotifiedAt).toBeUndefined();
   });
 });
 

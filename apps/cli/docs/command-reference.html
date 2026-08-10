@@ -2520,6 +2520,7 @@ same bundle with &#39;agents sessions import --from-r2&#39;.</p></article>
       agents sessions focus --local - space toggles a session, enter opens the selected set; a single check + enter opens just one.
       - with no selector/filter, the picker shows the live fleet. an id focuses directly; agent@version and text selectors always show the preview picker.
       - a living tmux pane is joined (a second client, no fork). dead/missing panes recover on the origin device: exact healthy origin uses native resume; otherwise a healthy version of the same harness receives /continue &lt;id&gt;.
+      - an id/identity selector resolves across the whole reachable fleet on its own — you do not need --device to focus a session that lives on another box (same as resume/preview). --device only narrows the browsable picker and the agent/version resolution.
       - --host/--device and the sessions-browser filters compose. latest/oldest resolve against each selected device&#39;s installed versions.
       lifecycle siblings (not synonyms):
         focus              attach if alive, otherwise recover (default &quot;take me there&quot;)
@@ -2545,6 +2546,7 @@ same bundle with &#39;agents sessions import --from-r2&#39;.</p></article>
       agents sessions focus --local</code></pre><h4>Notes</h4><p class="notes">- space toggles a session, enter opens the selected set; a single check + enter opens just one.
       - With no selector/filter, the picker shows the live fleet. An id focuses directly; agent@version and text selectors always show the preview picker.
       - A living tmux pane is JOINED (a second client, no fork). Dead/missing panes recover on the origin device: exact healthy origin uses native resume; otherwise a healthy version of the same harness receives /continue &lt;id&gt;.
+      - An id/identity selector resolves across the whole reachable fleet on its own — you do NOT need --device to focus a session that lives on another box (same as resume/preview). --device only narrows the browsable picker and the agent/version resolution.
       - --host/--device and the sessions-browser filters compose. latest/oldest resolve against each selected device&#39;s installed versions.
       Lifecycle siblings (not synonyms):
         focus              attach if alive, otherwise recover (default &quot;take me there&quot;)

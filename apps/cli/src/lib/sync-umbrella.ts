@@ -160,7 +160,7 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
     const { runDeviceSync } = await import('./devices/sync.js');
     const { reconcilePendingSentinels } = await import('./devices/pending.js');
     const dev = await runDeviceSync({ soft: true, mode: 'refresh' });
-    if (dev.ok) reconcilePendingSentinels(dev.pending);
+    if (dev.ok) await reconcilePendingSentinels(dev.pending);
     result.devices = { synced: dev.synced, pending: dev.pending.length, skipped: !dev.ok };
     if (dev.ok) {
       log(`devices: ${dev.synced} refreshed${dev.pending.length ? `, ${dev.pending.length} new pending` : ''}`);

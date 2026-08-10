@@ -16,12 +16,7 @@ import { createRequire } from 'module';
 import { buildRunsJson, groupRoutineJobsByProject } from './routines.js';
 import type { JobConfig } from '../lib/routines.js';
 import type { RunMeta } from '../lib/routines.js';
-import { BUILTIN_ROUTINE_NAMES } from '../lib/builtin-routines.js';
 
-/** Device-activation entries excluding the always-present daemon-owned built-ins (RUSH-2465). */
-function nonBuiltinDeviceRoutines(home: string, device: string): string[] {
-  return readDeviceRoutines(home, device).filter((n) => !BUILTIN_ROUTINE_NAMES.includes(n));
-}
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const require = createRequire(import.meta.url);
@@ -144,45 +139,6 @@ describeRoutines('routines edit transaction', () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toContain('Routine not saved');
       expect(fs.readFileSync(routinePath, 'utf-8')).toBe(before);
-    } finally {
-      fs.rmSync(home, { recursive: true, force: true });
-    }
-  });
-});
-
-// RUSH-2465: `agents routines edit <builtin>` materializes a real file from the
-// built-in JobConfig, which carries the synthesized `builtin: true`. That marker
-// must never reach the persisted file, or the now-file-backed routine would read
-// as a built-in forever (overdue/catch-up silently disabled, false `(built-in)` tag).
-describeRoutines('routines edit never persists the synthesized builtin marker', () => {
-  it('materializing a built-in via edit (save unmodified) writes a file with no builtin field', () => {
-    const home = makeHome({ registry: { 'yosemite-s0': registry['yosemite-s0'] } });
-    const editor = path.join(home, 'noop-editor.sh');
-    fs.writeFileSync(editor, '#!/bin/sh\ntrue\n', { mode: 0o755 }); // leave the pre-fill unchanged
-    const routinePath = path.join(home, '.agents', 'routines', 'watchdog.yml');
-    try {
-      const res = run(home, ['edit', 'watchdog'], { EDITOR: editor, AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
-      expect(res.status).toBe(0);
-      expect(fs.existsSync(routinePath)).toBe(true);
-      const raw = fs.readFileSync(routinePath, 'utf-8');
-      expect(raw).not.toContain('builtin');
-      expect(yaml.parse(raw).builtin).toBeUndefined();
-    } finally {
-      fs.rmSync(home, { recursive: true, force: true });
-    }
-  });
-
-  it('strips a hand-added builtin:true from the saved buffer (defense in depth)', () => {
-    const home = makeHome({ registry: { 'yosemite-s0': registry['yosemite-s0'] } });
-    const editor = path.join(home, 'inject-editor.sh');
-    // Append a bogus marker to whatever was pre-filled, simulating a hand edit.
-    fs.writeFileSync(editor, '#!/bin/sh\nprintf "\\nbuiltin: true\\n" >> "$1"\n', { mode: 0o755 });
-    const routinePath = path.join(home, '.agents', 'routines', 'tmux-reconcile.yml');
-    try {
-      const res = run(home, ['edit', 'tmux-reconcile'], { EDITOR: editor, AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
-      expect(res.status).toBe(0);
-      const raw = fs.readFileSync(routinePath, 'utf-8');
-      expect(raw).not.toContain('builtin');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -462,9 +418,8 @@ describeRoutines('routines devices --set normalizes mixed case and FQDN duplicat
       expect(doc).not.toBeNull();
       expect(doc!.devices).toEqual(['yosemite-s0']);
       // First materialization of an empty manifest seeds every currently-enabled
-      // routine so nothing is silently disabled — that legitimately includes the
-      // daemon-owned built-ins (RUSH-2465); assert on the non-built-in activation.
-      expect(nonBuiltinDeviceRoutines(home, 'yosemite-s0')).toEqual(['test-job']);
+      // routine so nothing is silently disabled.
+      expect(readDeviceRoutines(home, 'yosemite-s0')).toEqual(['test-job']);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

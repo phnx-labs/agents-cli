@@ -246,8 +246,9 @@ describe.skipIf(process.platform === 'win32')('generateSystemdUnit', () => {
   it('puts the agents shim dir ahead of the Node dir so a stale agents in the Node prefix cannot shadow it (RUSH-2431)', () => {
     // A shim installed OUTSIDE the Node bin dir — the ~/.local/bin global-install
     // shape. The Node dir must still be present (for the shim's shebang), but the
-    // agents shim dir has to lead so `agents __daemon-tick ...` resolves the same
-    // binary the daemon is running, not a stale install inside the Node prefix.
+    // agents shim dir has to lead so a `command` routine's bare `agents ...`
+    // resolves the same binary the daemon is running, not a stale install in the
+    // Node prefix.
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-shim-'));
     const shimDir = path.join(tmpDir, 'local-bin');
     fs.mkdirSync(shimDir, { recursive: true });

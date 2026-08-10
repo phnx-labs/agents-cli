@@ -33,12 +33,37 @@
  * Linear line mid-session when the request budget ran out.
  */
 
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getCacheDir } from './state.js';
 
 /** Matches `SKILL_INDEX_TTL_MS` (`lib/registry.ts`) — the repo's TTL convention. */
 export const LINEAR_CACHE_TTL_MS = 10 * 60_000;
+
+/**
+ * Resolve the Linear API key from the `LINEAR_API_KEY` env var, falling back to
+ * the macOS keychain generic-password `linear-api-key` (how the rest of the
+ * stack stores it). Null if none is resolvable. The shared resolver for every
+ * Linear-touching surface (project counts, session discovery).
+ */
+export function resolveLinearApiKey(): string | null {
+  const fromEnv = process.env.LINEAR_API_KEY?.trim();
+  if (fromEnv) return fromEnv;
+  if (process.platform === 'darwin') {
+    try {
+      const out = execFileSync('security', ['find-generic-password', '-s', 'linear-api-key', '-w'], {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const key = out.trim();
+      if (key) return key;
+    } catch {
+      // not in keychain — fall through
+    }
+  }
+  return null;
+}
 
 const CACHE_SUBDIR = 'linear-projects';
 /** Sits beside the per-project files; its own file, so it cannot be clobbered by them. */
@@ -52,10 +77,10 @@ interface CacheEntry<T> {
 }
 
 /**
- * Where the snapshot lives. `AGENTS_LINEAR_CACHE_PATH` overrides the directory,
- * mirroring `AGENTS_FACTORY_PROJECTS_PATH` (`auto-dispatch.ts`) — `getCacheDir()`
- * resolves `HOME` once at module load, so a test that swaps `process.env.HOME`
- * afterwards would otherwise read and WRITE the developer's real cache.
+ * Where the snapshot lives. `AGENTS_LINEAR_CACHE_PATH` overrides the directory.
+ * `getCacheDir()` resolves `HOME` once at module load, so a test that swaps
+ * `process.env.HOME` afterwards would otherwise read and WRITE the developer's
+ * real cache.
  */
 function cacheDir(): string {
   return process.env.AGENTS_LINEAR_CACHE_PATH ?? path.join(getCacheDir(), CACHE_SUBDIR);

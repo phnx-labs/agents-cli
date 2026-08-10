@@ -612,8 +612,9 @@ no variables to set, no Touch ID, no hand-moved credentials, and no requirement
 that the caller be on a clean `main`:
 
 ```bash
-scripts/release.sh <version>          # dry-run: bump, type-check, tarball preview, detected state
-scripts/release.sh <version> --apply  # tests on a crabbox -> PR + CI -> merge + tag -> build/sign/publish on the home base
+scripts/release.sh <version>                      # dry-run: bump, type-check, tarball preview, detected state
+scripts/release.sh <version> --apply              # tests on a crabbox -> PR + CI -> merge + tag -> build/sign/publish on the home base (mac-mini)
+scripts/release.sh <version> --apply --device zion  # same, but sign/publish on zion (use when mac-mini is offline)
 ```
 
 The release has **three self-selected homes** and prints a `[n/6]` phase tracker,
@@ -623,10 +624,15 @@ each phase labeled with the box it runs on and a ✓/✗ result:
 |---|---|---|
 | Orchestrate: bump, changelog, PR, tag | a detached worktree on the box you invoked it on | fresh `origin/<default>` under `.agents/worktrees/release-v<version>-<pid>` |
 | CI / tests (Linux) | a **crabbox** workspace (Hetzner Linux VM) | [`scripts/sandbox.sh`](scripts/sandbox.sh) reclaims an available warm box and syncs into `~/workspaces/<repo>-<task>`; it warms capacity only when the shared pool has none — **dynamic, never a hardcoded or release-exclusive instance** |
-| Build, sign+notarize, npm publish, computer-helper | the **home base** | one hardcoded constant `RELEASE_HOME_BASE="mac-mini"` in `release.sh`; the script detects if it's already there (`scutil --get LocalHostName` / `hostname -s`), else reaches it over `ssh` |
+| Build, sign+notarize, npm publish, computer-helper | a **Mac home base** | `--device <name>` in `release.sh`, defaulting to `mac-mini`; the script detects if it's already there (`scutil --get LocalHostName` / `hostname -s`), else reaches it over `ssh` |
 
-`mac-mini` is the only hardcoded machine name (it holds the Developer ID cert +
-npm publish rights). The crabbox is **not** hardcoded.
+The home base is a Mac that holds the Developer ID cert + npm publish rights.
+It defaults to `mac-mini` and is overridable with **`--device <name>`** (alias
+`--host`) — pass `--device zion` to drive the release from another capable Mac
+when mac-mini is down. Not an env var: a flag with a default. The macOS-only
+sign/notarize + the npm tarball's signed binaries mean the home base must be a
+Mac; a Linux worker can *drive* the release but not be the home base. The
+crabbox is **not** hardcoded.
 
 **The caller checkout is never mutated or gated.** `release.sh` immediately
 fetches origin and re-enters the release from a detached, release-owned worktree
@@ -751,8 +757,8 @@ already-versioned package.
 **`scripts/remote-sign-mac.sh` is no longer on the release path.** The privileged
 phase builds signed artifacts directly on the home base. The script remains only
 for the narrow case of building + pulling back JUST the signed macOS artifacts from
-another Mac (no publish); it too is zero-config, targeting the same hardcoded
-`RELEASE_HOME_BASE` with no env knobs or fleet discovery.
+another Mac (no publish); it takes the same `--device <name>` flag as `release.sh`
+(default `mac-mini`), with no other env knobs or fleet discovery.
 
 **Provisioning the `apple.com` bundle on a headless sign host.** A Linux-driven
 release offloads macOS signing to a sign host over SSH, which needs the `apple.com`

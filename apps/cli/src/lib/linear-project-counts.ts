@@ -5,7 +5,7 @@
  * `agents projects link <name> --linear`), the card shows one outcome line —
  * `12/30 done · 5 in progress` — counted from the Linear GraphQL API by state
  * TYPE (triage / backlog / unstarted / started / completed / canceled), never
- * hardcoded state names, same convention as `auto-dispatch-linear.ts`.
+ * hardcoded state names.
  *
  * The same fetch also yields the **next milestone** — the earliest-dated
  * milestone with unfinished issues — because each issue node carries its
@@ -28,8 +28,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { resolveLinearApiKey } from './auto-dispatch-linear.js';
-import { isRateLimited, noteRateLimited, parseRateLimitReset, readCached, writeCached } from './linear-cache.js';
+import { isRateLimited, noteRateLimited, parseRateLimitReset, readCached, writeCached, resolveLinearApiKey } from './linear-cache.js';
 
 const LINEAR_API = 'https://api.linear.app/graphql';
 /** Overall budget across all pages — the card must never hang on Linear. */
