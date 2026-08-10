@@ -420,7 +420,10 @@ run:
 | `action` | Webhook action (e.g. `update`, `opened`, `labeled`). |
 | `run` | One-of `agent`, `workflow`, or `command`, plus an optional `prompt` and `env`. |
 | `host` | Where the action executes: a device name, `fleet`, or `fleet/<platform>`. Omitted runs locally. |
-| `routine` | Name of a routine to delegate to instead of `run`. |
+| `project` | Named `agents projects` execution anchor — a dispatched `agent`/`workflow` run lands in that project's base directory (so it has a repo checkout to edit). Ignored by `run.command`. |
+| `cwd` | Portable execution directory for the dispatched run. Relative resolves under `project`, otherwise the target's `$HOME`. |
+| `mode` | Permission mode for a dispatched `agent`/`workflow` run: `plan`, `edit`, `auto` (default), `skip`, or `full`. |
+| `routine` | Name of a routine to delegate to instead of `run`. `project`/`cwd`/`mode` set here override the routine's own. |
 
 #### Filters
 

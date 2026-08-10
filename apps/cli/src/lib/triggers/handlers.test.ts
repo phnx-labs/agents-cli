@@ -478,6 +478,40 @@ describe('handler config layer', () => {
       expect(dispatched[0].name).toBe('plan-routine');
     });
 
+    it('overrides a delegated routine project/cwd/mode with the handler values', async () => {
+      writeRoutine('anchored-routine', {
+        name: 'anchored-routine',
+        schedule: '0 9 * * *',
+        agent: 'claude',
+        prompt: 'go',
+        project: 'other-project',
+        cwd: 'pkg/a',
+        mode: 'plan',
+      });
+      const handler: import('./handlers.js').WebhookHandler = {
+        name: 'override-handler',
+        source: 'linear',
+        routine: 'anchored-routine',
+        project: 'agents-cli',
+        cwd: 'apps/cli',
+        mode: 'skip',
+      };
+      const dispatched: JobConfig[] = [];
+      await handlerMod.executeHandler(handler, linearWebhook(), {
+        dispatchRoutine: async (config) => {
+          dispatched.push(config);
+          return {
+            jobName: config.name, runId: 'run-override', agent: 'claude', pid: 1,
+            status: 'running', startedAt: new Date().toISOString(),
+            completedAt: null, exitCode: null,
+          };
+        },
+      });
+      expect(dispatched[0].project).toBe('agents-cli');
+      expect(dispatched[0].cwd).toBe('apps/cli');
+      expect(dispatched[0].mode).toBe('skip');
+    });
+
     it('emits webhook.handler.start and webhook.handler.end events', async () => {
       const handler: import('./handlers.js').WebhookHandler = {
         name: 'event-handler',
