@@ -10,18 +10,27 @@ status: complete
 
 The macOS menu bar's **NEW DEVICES (20)** section was listing ~20 tailnet
 nodes as unapproved — most of them already-registered fleet machines — and
-"Ignore" appeared not to stick. Two separate things were going on:
+"Ignore" appeared not to stick. Both symptoms trace to **one bug**: the
+daemon's pending-sentinel writer, `reconcilePendingSentinels`, filtered
+incoming candidates against the ignore-list only, never against the
+registered device roster. A process whose registry view was
+redirected/empty (a hermetic test run) could still write to the live
+sentinel directory the menu bar polls — from that process's point of view,
+*every* tailnet node looked unknown, so it rewrote a "new" sentinel for
+names that were already registered **and** for names the user had already
+ignored, since that write path never consulted the real ignore-list either.
+That is why a device the user had just dismissed could still resurface: not
+because the dismissal failed to save, but because a later, unrelated write
+overwrote the sentinel without checking what was already dismissed.
 
-1. **Real bug (fixed):** the daemon's pending-sentinel writer,
-   `reconcilePendingSentinels`, filtered incoming candidates against the
-   ignore-list only, never against the registered device roster. A process
-   whose registry view was redirected/empty (a hermetic test run) could still
-   write to the live sentinel directory the menu bar polls, marking every
-   tailnet node — including already-registered fleet boxes — as "new."
-2. **Not a bug:** the ignore-list itself was persisting correctly the whole
-   time. The apparent failure came from checking
-   `~/.agents/devices/ignored.json` (empty/unused) instead of the real path,
-   `~/.agents/.history/devices/ignored.json`.
+Separately: the CLI's actual ignore-list persistence was never broken. It
+lives at `~/.agents/.history/devices/ignored.json` (confirmed present,
+populated, and correctly maintained throughout) — no production code path
+reads or writes any other location for it. An earlier pass of this
+investigation checked a different, unrelated path
+(`~/.agents/devices/<machine>/`, which exists for per-machine version pins,
+not ignores) and concluded the ignore-list was missing; that was an
+investigator error, not a CLI defect.
 
 The fix is merged to `main` (PR #2615, commit `d940ddb0c`), tested, documented,
 and the immediate symptom has already been remediated live on the affected
@@ -74,10 +83,10 @@ machines ahead of the next scheduled release.
   <path d="M150,140 V110" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)" fill="none"/>
   <path d="M280,185 H330" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)" fill="none"/>
 
-  <text x="20" y="290" font-size="13" font-weight="600">Result: real, already-registered fleet boxes get written as "new" sentinels — and nothing removes them, because they were never actually ignored, just wrongly classified.</text>
+  <text x="20" y="290" font-size="13" font-weight="600">Result: registered AND already-ignored boxes get rewritten as "new" sentinels — the ignore action itself never failed, an unrelated later write just clobbered it.</text>
 </svg>
 
-### Root cause 1 — pending-sentinel pollution
+### Root cause — pending-sentinel pollution explains both symptoms
 
 `reconcilePendingSentinels` (`apps/cli/src/lib/devices/pending.ts`) built its
 "still pending" set by subtracting only the persisted ignore-list, never the
@@ -86,23 +95,33 @@ registered roster. A test/hermetic process that redirects
 **live** `~/.agents/.cache/state/devices-pending/` directory — that path is
 governed by a separate override (`AGENTS_STATE_DIR` / `getRuntimeStateDir()`)
 that isn't redirected by the same env var. From that process's point of view
-every tailnet node looked unregistered, so it wrote a sentinel for all of
-them, including real, already-registered fleet boxes. Once written, nothing
-removed those sentinels — the devices genuinely weren't on the ignore-list,
-they were simply misclassified as new.
+every tailnet node looked unregistered *and* undismissed, so it rewrote a
+sentinel for all of them: already-registered fleet boxes appeared as "new,"
+and — critically — a device the user had *just ignored* could also be
+rewritten as "new" by this same unrelated write, since that write path never
+consulted the real ignore-list at all. Nothing about the user's ignore action
+failed; a later, unrelated write simply clobbered the sentinel it had cleared.
 
-### Root cause 2 — "Ignore didn't persist" was a false alarm
+A companion daemon-level gap made this worse: on a soft-fail probe tick (no
+live tailscale), the pre-fix code returned immediately without pruning
+anything, so any polluted sentinels could sit for a full 3-minute interval
+before the next clean tick had a chance to self-heal them.
+
+### The ignore-list itself was never broken
 
 `agents devices ignore <name>` (`apps/cli/src/commands/ssh.ts:1170-1177`)
 correctly calls `removeDevice` -> `addIgnored` -> `clearPendingSentinel`. The
 ignore-list's real path is resolved by `getDevicesDir()`
 (`apps/cli/src/lib/state.ts`), which returns
-`path.join(HISTORY_DIR, 'devices')` — i.e. **`~/.agents/.history/devices/`**,
-not `~/.agents/devices/`. Checking the latter (which is empty/unused) made
-ignoring look broken. On the affected machine, the real ignore-list file
-exists and is populated with ~10 dismissed personal/test devices, most recent
-update within the hour of investigation. Ignores were persisting correctly the
-whole time.
+`path.join(HISTORY_DIR, 'devices')` — **`~/.agents/.history/devices/`**. On
+the affected machine, the real ignore-list file exists and is populated with
+~10 dismissed personal/test devices, most recently updated within the hour of
+this investigation — confirming persistence worked correctly the whole time.
+(An earlier pass of this investigation checked
+`~/.agents/devices/<machine>/`, a directory that exists for a different,
+unrelated purpose — per-machine version pins — and mistook its absence there
+for a missing ignore-list. No production code reads or writes the ignore-list
+at that path; this was investigator error, not a CLI defect.)
 
 ### Which of the 20 were real vs. test/ephemeral
 
@@ -149,16 +168,22 @@ commit `d940ddb0c`, `fix(devices): stop NEW DEVICES listing registered/ignored b
 |---|---|---|
 | Pending sentinel count on the affected machine | 20 | **0** |
 | Device registry entries | 30 (14 test/phantom) | **16** real devices |
-| Ignore-list ("didn't persist" claim) | Checked wrong path -> looked empty | Real path confirmed populated and correctly persisted throughout |
+| Ignore-list correctness | Correctly populated the whole time (never actually broken) | Confirmed via direct read, unaffected by the fix |
 
 ### Independent verification
 
 Two blind subagent reviews (separate contexts, no shared conclusions, each
-reasoning only from source) independently reached the same root cause: the
+reasoning only from source) independently confirmed the core mechanism: the
 choke point `reconcilePendingSentinels` filtered only against the ignore-list,
-never the registered roster, and the "ignore didn't persist" complaint traced
-to checking the wrong on-disk path rather than a real persistence failure.
-Both quoted the same file:line evidence cited above.
+never the registered roster. One reviewer went further and empirically
+reproduced the bug — reverted the fix in a scratch worktree, reran the new
+test, and confirmed it fails exactly as predicted (`expected ['newbox', 'zion']
+to deeply equal ['newbox']`) — and additionally established that no
+production code path reads or writes the ignore-list at any location other
+than `~/.agents/.history/devices/ignored.json`, which this report's final
+draft now reflects: the ignore-list was never actually broken, and its
+apparent reappearance is explained by the same pollution mechanism, not a
+separate wrong-path bug.
 
 ## Recommendations
 
