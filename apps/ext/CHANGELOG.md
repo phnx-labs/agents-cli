@@ -6,6 +6,16 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+## [0.9.319] - 2026-08-10
+
+- **Marketplace icon is now the agents-cli brand mark.** The listing used a
+  pink/orange gradient "A" on white, which matched nothing on
+  [agents-cli.sh](https://agents-cli.sh). It is now the site's own mark — the
+  lime `#a3e635` tile with the near-black lowercase `a`, rendered from the same
+  `favicon.svg` the website ships — as `assets/logo.png`. `assets/agents.png` is
+  unchanged and still backs the shell/custom-agent tab chips, so no in-editor
+  icon moved.
+
 - **`New <Agent>` tabs get their identity back — logo, chip, session id, labels,
   and the commands that depend on them.** `launchAgent` had been rewritten to a
   bare `createTerminal`, which dropped the whole post-create sequence: every

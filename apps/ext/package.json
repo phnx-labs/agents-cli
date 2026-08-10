@@ -3,10 +3,10 @@
   "displayName": "Agents",
   "publisher": "swarmify",
   "description": "Run Claude, Codex, Antigravity, Cursor, and other coding agents from one IDE workspace.",
-  "version": "0.9.315",
+  "version": "0.9.319",
   "license": "MIT",
   "author": "Muqsit Nawaz <dev@muqsitnawaz.com>",
-  "icon": "assets/agents.png",
+  "icon": "assets/logo.png",
   "galleryBanner": {
     "color": "#0a0a0a",
     "theme": "dark"
