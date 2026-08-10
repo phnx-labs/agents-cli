@@ -292,11 +292,14 @@ agents bench results --json</code></pre><h4>Notes</h4><p class="notes">Task defi
       agents config set run.claude@2.1.45.model claude-opus-4-8
       agents config set run.claude@*.mode auto
       agents config set interactive.host zion
+      agents config set usage.primary-host zion
       agents config set browser.profile work
       agents config set project.root ~/src/github.com/&lt;you&gt;
       agents config set devices.mac-mini.max-agents 4
       agents config get run.claude@*.model
+      agents config get usage.primary-host
       agents config unset run.claude@*.tier.best
+      agents config unset usage.primary-host
       agents config list every agent/harness reference uses agent@version. use * for all versions.
       tier overrides are part of the run namespace: run.&lt;agent@version&gt;.tier.&lt;tier&gt;.
       project root is auto-inferred from the current git repository when unset."><div class="command-head"><h3><code>agents config</code></h3></div><p>Get, set, list, and unset run defaults, tier overrides, the projects root, and device options.</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code>agents config set run.claude@*.model best
@@ -304,11 +307,14 @@ agents bench results --json</code></pre><h4>Notes</h4><p class="notes">Task defi
       agents config set run.claude@2.1.45.model claude-opus-4-8
       agents config set run.claude@*.mode auto
       agents config set interactive.host zion
+      agents config set usage.primary-host zion
       agents config set browser.profile work
       agents config set project.root ~/src/github.com/&lt;you&gt;
       agents config set devices.mac-mini.max-agents 4
       agents config get run.claude@*.model
+      agents config get usage.primary-host
       agents config unset run.claude@*.tier.best
+      agents config unset usage.primary-host
       agents config list</code></pre><h4>Notes</h4><p class="notes">Every agent/harness reference uses agent@version. Use * for all versions.
       Tier overrides are part of the run namespace: run.&lt;agent@version&gt;.tier.&lt;tier&gt;.
       Project root is auto-inferred from the current Git repository when unset.</p></article>
