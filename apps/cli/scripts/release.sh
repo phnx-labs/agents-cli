@@ -450,7 +450,14 @@ git -C "\$REPO_ROOT" worktree add --quiet --detach "\$WT" "v$1" \\
 # of REPO_ROOT's local working-tree state, so recover the blob from THAT ref
 # rather than trusting whatever happens to be checked out on REPO_ROOT's disk.
 mkdir -p "\$WT/apps/cli/bin"
-DEFAULT_BRANCH="\$(git -C "\$REPO_ROOT" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
+# Guarded with \`|| true\`, NOT a bare assignment: under this snippet's own
+# \`set -euo pipefail\` (top of this heredoc), symbolic-ref returning non-zero --
+# the normal state of a checkout bootstrapped via \`init && remote add && fetch\`
+# rather than \`clone\`, i.e. plausibly a brand-new fleet home base -- trips
+# errexit on the assignment itself and kills the phase silently, before the
+# very next line's "main" fallback ever runs. Same anti-pattern, same fix
+# assert_signing_home_base above already uses for this reason.
+DEFAULT_BRANCH="\$(git -C "\$REPO_ROOT" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')" || true
 [ -n "\$DEFAULT_BRANCH" ] || DEFAULT_BRANCH="main"
 if [ -f "\$WT/apps/cli/bin/embedded.provisionprofile" ]; then
   : # already in the tagged tree -- nothing to seed

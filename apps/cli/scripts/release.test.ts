@@ -185,4 +185,45 @@ describe('release.sh: home-base provisionprofile seed recovers from origin (RUSH
     expect(run.stderr).toContain('embedded.provisionprofile not found');
     expect(run.stderr).not.toContain('Generate at developer.apple.com'); // the old, misleading advice
   });
+
+  it('does not die under set -e when the home base checkout has no refs/remotes/origin/HEAD', () => {
+    // A checkout bootstrapped via `init && remote add && fetch` -- plausibly how
+    // a BRAND NEW fleet home base first gets a checkout, exactly RUSH-2541's
+    // target box -- never populates refs/remotes/origin/HEAD the way `git clone`
+    // does. `git symbolic-ref --quiet --short refs/remotes/origin/HEAD` then
+    // exits non-zero, and under this snippet's `set -euo pipefail` a bare
+    // `DEFAULT_BRANCH="$(...)"` assignment on that failure trips errexit and
+    // kills the WHOLE home-base phase silently -- before even the "main"
+    // fallback on the next line runs -- regardless of whether the profile was
+    // otherwise recoverable. The other two tests above always clone, which
+    // always sets origin/HEAD, so they cannot reach this failure mode.
+    const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'rel-snippet-origin-nohead-'));
+    git(remote, 'init', '--quiet', '-b', 'main');
+    git(remote, 'config', 'user.email', 'test@example.com');
+    git(remote, 'config', 'user.name', 'test');
+    fs.mkdirSync(path.join(remote, 'apps/cli/bin'), { recursive: true });
+    fs.writeFileSync(path.join(remote, 'apps/cli/package.json'), JSON.stringify({ version: '1.2.3' }));
+    fs.writeFileSync(path.join(remote, 'apps/cli/bin/embedded.provisionprofile'), 'PROFILE-BYTES');
+    git(remote, 'add', '-A');
+    git(remote, 'commit', '--quiet', '-m', 'v1.2.3 tree, profile already in it');
+    git(remote, 'tag', 'v1.2.3');
+
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rel-snippet-homebase-nohead-'));
+    fs.mkdirSync(repoRoot, { recursive: true });
+    git(repoRoot, 'init', '--quiet');
+    git(repoRoot, 'remote', 'add', 'origin', remote);
+    git(repoRoot, 'fetch', '--quiet', 'origin');
+    expect(() => git(repoRoot, 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD')).toThrow();
+
+    const gen = spawnSync('bash', ['-c', `${FUNC_SRC}\nhome_base_wt_snippet "1.2.3"`], {
+      encoding: 'utf-8',
+      env: { ...process.env, RELEASE_HOME_BASE: 'test-home-base' },
+    });
+    expect(gen.status, gen.stderr).toBe(0);
+
+    const seedOnly = `${gen.stdout.split('cd "$WT/apps/cli"')[0]}\ncat "$WT/apps/cli/bin/embedded.provisionprofile"`;
+    const run = spawnSync('bash', ['-c', seedOnly], { cwd: repoRoot, encoding: 'utf-8' });
+    expect(run.status, `${run.stdout}\n${run.stderr}`).toBe(0);
+    expect(run.stdout).toContain('PROFILE-BYTES');
+  });
 });
