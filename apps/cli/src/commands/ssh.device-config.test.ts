@@ -65,13 +65,18 @@ describe('devices config', () => {
     const set = run(['devices', 'config', 'mac-mini', 'agents.max-concurrent', '4']);
     expect(set.status, set.stderr).toBe(0);
     expect(set.stdout).toContain('agents.max-concurrent = 4');
-    expect(run(['devices', 'config', 'mac-mini', 'scheduler.enabled', 'off']).status).toBe(0);
+    // scheduler.enabled is machine-local: only mac-mini reads it, so it cannot
+    // be set from here at all. The refusal names the ssh form to use instead.
+    const peerMachineKey = run(['devices', 'config', 'mac-mini', 'scheduler.enabled', 'off']);
+    expect(peerMachineKey.status).toBe(1);
+    expect(peerMachineKey.stderr).toContain('machine-local');
 
     const central = centralDoc();
     expect(central).toContain('fleet:');
     expect(central).toContain('mac-mini:');
     expect(central).toContain('maxAgents: 4');
-    expect(central).toContain('schedulerEnabled: false');
+    // ...and it never reached the fleet-shared file.
+    expect(central).not.toContain('schedulerEnabled');
 
     const got = run(['devices', 'config', 'mac-mini', 'agents.max-concurrent', '--json']);
     expect(got.status).toBe(0);
@@ -119,7 +124,7 @@ describe('devices config', () => {
 
     expect(run(['devices', 'config', 'mac-mini', 'agents.max-concurrent', 'four']).status).toBe(1);
     expect(run(['devices', 'config', 'mac-mini', 'agents.max-concurrent', '0']).status).toBe(1);
-    const badBool = run(['devices', 'config', 'mac-mini', 'scheduler.enabled', 'maybe']);
+    const badBool = run(['devices', 'config', 'mac-mini', 'auto-launch.enabled', 'maybe']);
     expect(badBool.status).toBe(1);
     expect(badBool.stderr).toContain('on/off');
     const unknown = run(['devices', 'config', 'mac-mini', 'nope.nope', '1']);
@@ -150,25 +155,28 @@ describe('retired-subcommand tombstones', () => {
     guardedHome();
     addDevice('mac-mini', 'muqsit@192.0.2.2');
 
-    const set = run(['devices', 'configure', 'mac-mini', '--max-agents', '4', '--scheduler', 'off']);
+    const set = run(['devices', 'configure', 'mac-mini', '--max-agents', '4']);
     expect(set.status, set.stderr).toBe(0);
     expect(set.stderr).toContain('Deprecated');
     expect(set.stderr).toContain('devices config');
     expect(set.stdout).not.toContain('Deprecated');
     expect(set.stdout).toContain('agents.max-concurrent = 4');
 
+    // `--scheduler` against a PEER is refused now that scheduler.enabled is
+    // machine-local — the tombstone forwards to config, which rejects it.
+    const peerScheduler = run(['devices', 'configure', 'mac-mini', '--scheduler', 'off']);
+    expect(peerScheduler.status).toBe(1);
+    expect(peerScheduler.stderr).toContain('machine-local');
+
     const central = centralDoc();
     expect(central).toContain('maxAgents: 4');
-    expect(central).toContain('schedulerEnabled: false');
+    expect(central).not.toContain('schedulerEnabled');
 
     const got = run(['devices', 'configure', 'mac-mini', '--json']);
     expect(got.status).toBe(0);
     const parsed = JSON.parse(got.stdout);
     expect(parsed.device).toBe('mac-mini');
-    expect(parsed.config).toMatchObject({
-      'agents.max-concurrent': 4,
-      'scheduler.enabled': false,
-    });
+    expect(parsed.config).toMatchObject({ 'agents.max-concurrent': 4 });
 
     const show = run(['devices', 'configure', 'mac-mini']);
     expect(show.status).toBe(0);

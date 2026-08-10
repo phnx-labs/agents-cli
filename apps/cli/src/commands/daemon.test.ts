@@ -134,11 +134,18 @@ describeDaemon('agents daemon', () => {
     expect(payload.state).toBe('disabled');
     expect(payload.daemonEnabled).toBe(false);
 
-    // Persisted to disk, not just in-process — a fresh CLI invocation (the
-    // status call above) reads it back from the central fleet.devices block.
+    // Persisted to disk, not just in-process — the status call above is a fresh
+    // CLI invocation that read it back. It lands in THIS machine's own doc, not
+    // the fleet-shared agents.yaml: the kill switch is machine-local, so syncing
+    // it would disable the daemon on every box that pulls.
+    // The doc is keyed by this machine's id, which the test does not pin — read
+    // whichever device dir the CLI created rather than hardcoding a name.
+    const devicesDir = path.join(home, '.agents', 'devices');
+    const [machineDir] = fs.readdirSync(devicesDir);
+    const localDoc = fs.readFileSync(path.join(devicesDir, machineDir, 'agents.yaml'), 'utf-8');
+    expect(localDoc).toContain('daemonEnabled: false');
     const central = fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8');
-    expect(central).toContain('daemonEnabled: false');
-    expect(central).toContain('fleet:');
+    expect(central).not.toContain('daemonEnabled');
   });
 
   it('enable clears the kill switch again', () => {

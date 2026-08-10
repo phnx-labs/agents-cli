@@ -29,12 +29,22 @@ afterEach(() => {
 });
 
 describe('decideFire — every mode', () => {
-  it('always fires', () => {
+  it('fires on every non-empty observation', () => {
     const m = monitor({ name: uniq('every'), condition: { mode: 'every' } });
     const d = decideFire(m, { raw: 'anything' });
     expect(d.fire).toBe(true);
     expect(d.event).not.toBeNull();
     expect(d.persist).toBe(false);
+  });
+
+  it('does NOT fire on an empty or whitespace-only observation (RUSH-2488)', () => {
+    const m = monitor({ name: uniq('every-empty'), condition: { mode: 'every' } });
+    for (const raw of ['', '   ', '\n', ' \t\n ']) {
+      const d = decideFire(m, { raw });
+      expect(d.fire).toBe(false);
+      expect(d.event).toBeNull();
+      expect(d.persist).toBe(false);
+    }
   });
 });
 

@@ -23,6 +23,7 @@ import {
   listSessions,
   paneExitStatus,
   prepareSessionForResume,
+  reapDeadTmuxPanes,
   reconcileSessionHooks,
   sendKeys,
   setSessionHook,
@@ -431,6 +432,53 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     // The non-run session was never touched (no marker stamped).
     const r = await runTmux({ socket, args: ['show-options', '-v', '-t', 'user-made', '@ag_hook_schema'], throwOnError: false });
     expect(r.stdout.trim()).toBe('');
+  });
+});
+
+describe.skipIf(skipReason)('reapDeadTmuxPanes', () => {
+  let socket: string;
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-tmux-reap-'));
+    socket = path.join(tempDir, 'test.sock');
+  });
+
+  afterEach(async () => {
+    await killAll(socket).catch(() => {});
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('returns empty result when no server is running', async () => {
+    const result = await reapDeadTmuxPanes(socket);
+    expect(result.reaped).toBe(0);
+    expect(result.sessions).toEqual([]);
+  });
+
+  it('reaps a session whose only pane is dead', async () => {
+    // Create a session that exits immediately.
+    const { name } = await createSession({ name: 'dead-reap-test', cmd: 'true', socket });
+    // Wait for the pane to die.
+    const pane = (
+      await runTmux({ socket, args: ['list-panes', '-t', `=${name}`, '-F', '#{pane_id}'], throwOnError: false })
+    ).stdout.trim().split('\n')[0];
+    await waitForExitStatus(pane, socket, 8000);
+
+    const result = await reapDeadTmuxPanes(socket);
+    expect(result.reaped).toBeGreaterThanOrEqual(1);
+    expect(result.sessions).toContain(name);
+    // Session must be gone.
+    expect(await hasSession(name, socket)).toBe(false);
+  });
+
+  it('does NOT reap a session with a live pane', async () => {
+    // Create a long-running session.
+    const { name } = await createSession({ name: 'alive-reap-test', cmd: 'sleep 60', socket });
+
+    const result = await reapDeadTmuxPanes(socket);
+    expect(result.sessions).not.toContain(name);
+    // Session must still exist.
+    expect(await hasSession(name, socket)).toBe(true);
   });
 });
 

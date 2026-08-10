@@ -30,7 +30,7 @@ import {
 import { findBrowserPath, findFirstInstalledBrowser, isPortInUse } from './chrome.js';
 import type { BrowserProfile } from './types.js';
 import type { BrowserProfileConfig } from '../types.js';
-import { readMeta, writeMeta } from '../state.js';
+import { readMeta, writeMeta, updateMeta } from '../state.js';
 import { machineId } from '../machine-id.js';
 
 /** The configured default profile, fixtured where it really lives: this machine's
@@ -244,6 +244,17 @@ describe('profile YAML round-trip', () => {
   // writeMeta(config) and getProfile/listProfiles run configToProfile(config).
   // Round-tripping through that pair is the production code path.
   beforeEach(() => {
+  // Profile writes go through updateMeta (read-under-lock) rather than a bare
+  // writeMeta, so a concurrent write is not clobbered. Its real semantics are
+  // exactly readMeta + writeMeta, so delegate — each test's own writeMeta store
+  // wiring then keeps working as before.
+  vi.mocked(updateMeta).mockImplementation((updates: any) => {
+    const meta = vi.mocked(readMeta)() as any;
+    const next = typeof updates === 'function' ? updates(meta) : { ...meta, ...updates };
+    vi.mocked(writeMeta)(next);
+    return next;
+  });
+
     vi.clearAllMocks();
   });
 
@@ -376,10 +387,12 @@ describe('ensureDefaultBrowserProfile', () => {
   });
 
   it('auto-picks the first installed browser and persists a default profile', async () => {
-    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: {} };
+    const store: { browser: Record<string, BrowserProfileConfig>; deviceBrowser?: Record<string, BrowserProfileConfig> } =
+      { browser: {} };
     vi.mocked(readMeta).mockImplementation(() => store as any);
     vi.mocked(writeMeta).mockImplementation((meta: any) => {
       store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
     });
     vi.mocked(isPortInUse).mockReturnValue(false);
 
@@ -389,7 +402,11 @@ describe('ensureDefaultBrowserProfile', () => {
     expect(profile.browser).toBe('chrome');
     expect(profile.binary).toBe('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
     expect(profile.endpoints).toEqual(['cdp://127.0.0.1:9222']);
-    expect(store.browser.default.browser).toBe('chrome');
+    // The auto default is machine-specific — an absolute binary path plus a port
+    // picked by probing THIS box — so it lands in the per-machine map and never
+    // in the fleet-shared one.
+    expect(store.deviceBrowser!.default.browser).toBe('chrome');
+    expect(store.browser.default).toBeUndefined();
   });
 
   it('reuses an existing default profile instead of overwriting it', async () => {
@@ -417,10 +434,14 @@ describe('ensureDefaultBrowserProfile', () => {
       binary: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
       endpoints: ['cdp://127.0.0.1:9222'],
     };
-    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: { default: stale } };
+    // The stale copy arrived from another machine via the SHARED map — that is
+    // exactly how a macOS-written default reaches a Linux box.
+    const store: { browser: Record<string, BrowserProfileConfig>; deviceBrowser?: Record<string, BrowserProfileConfig> } =
+      { browser: { default: stale } };
     vi.mocked(readMeta).mockImplementation(() => store as any);
     vi.mocked(writeMeta).mockImplementation((meta: any) => {
       store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
     });
     // The stale binary isn't launchable here → findBrowserPath throws for it.
     vi.mocked(findBrowserPath).mockImplementationOnce(() => {
@@ -433,7 +454,10 @@ describe('ensureDefaultBrowserProfile', () => {
     expect(profile.name).toBe('default');
     expect(profile.browser).toBe('chrome');
     expect(findFirstInstalledBrowser).toHaveBeenCalled();
-    expect(store.browser.default.browser).toBe('chrome');
+    // Regenerated into THIS machine's own map. The shared copy is left alone, so
+    // the two boxes stop overwriting each other's binary path on every launch.
+    expect(store.deviceBrowser!.default.browser).toBe('chrome');
+    expect(store.browser.default.binary).toBe(stale.binary);
   });
 
   it("falls back to auto-detect when the configured default can't launch here", async () => {

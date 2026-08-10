@@ -234,6 +234,66 @@ export async function killAll(socket?: string): Promise<number> {
   return count;
 }
 
+/** Result returned by {@link reapDeadTmuxPanes}. */
+export interface ReapDeadPanesResult {
+  /** Number of tmux sessions killed. */
+  reaped: number;
+  /** Names of reaped sessions. */
+  sessions: string[];
+  /** Human-readable lines describing each reap, for log output. */
+  details: string[];
+}
+
+/**
+ * Kill every tmux session whose panes are ALL dead (`pane_dead=1`).
+ *
+ * Dead panes accumulate because `remain-on-exit on` is intentionally set
+ * per-pane so the harness can inspect exit status. Without a periodic sweep
+ * they pile up indefinitely — e.g. 48 of 127 sessions dead on yosemite-s0
+ * (RUSH-2501).
+ *
+ * Safety invariant: a session with ANY live pane (`pane_dead=0`) is never
+ * touched. Only all-dead sessions are reaped.
+ */
+export async function reapDeadTmuxPanes(socket?: string): Promise<ReapDeadPanesResult> {
+  const sock = socket ?? getDefaultSocketPath();
+  const result: ReapDeadPanesResult = { reaped: 0, sessions: [], details: [] };
+  if (!fs.existsSync(sock)) return result;
+
+  const res = await runTmux({
+    socket: sock,
+    args: ['list-panes', '-a', '-F', '#{pane_id}\t#{session_name}\t#{pane_dead}'],
+    throwOnError: false,
+  });
+  // Nonzero exit means no server or no sessions — nothing to reap.
+  if (res.code !== 0) return result;
+
+  // Group dead-flags by session name.
+  const sessionFlags = new Map<string, boolean[]>();
+  for (const raw of res.stdout.split('\n')) {
+    const parts = raw.trim().split('\t');
+    const name = parts[1];
+    if (!name) continue;
+    const dead = parts[2]?.trim() === '1';
+    if (!sessionFlags.has(name)) sessionFlags.set(name, []);
+    sessionFlags.get(name)!.push(dead);
+  }
+
+  // Kill only sessions where every pane is dead.
+  for (const [name, flags] of sessionFlags) {
+    if (flags.length === 0 || !flags.every(d => d)) continue;
+    try {
+      await killSession(name, sock);
+      result.reaped++;
+      result.sessions.push(name);
+      result.details.push(`killed ${name} (${flags.length} dead pane${flags.length === 1 ? '' : 's'})`);
+    } catch {
+      // Best-effort: session may already be gone by the time we hit it.
+    }
+  }
+  return result;
+}
+
 /**
  * Map every pane id (`%N`) on a socket to its `session:window.pane` attach
  * target, in one batched `tmux list-panes -a` call. `%116 -> main:2.0` is a

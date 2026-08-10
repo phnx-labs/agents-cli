@@ -68,6 +68,7 @@ import {
   getRemoteUrl,
   sameGitRemote,
   displayHomePath,
+  syncRepoGit,
 } from '../lib/git.js';
 import { DEFAULT_SYSTEM_REPO } from '../lib/types.js';
 import type { AgentId, ExtraRepoConfig } from '../lib/types.js';
@@ -1259,6 +1260,47 @@ export function registerRepoCommands(program: Command): void {
           // A failed repo must fail the command. Without this, `agents fleet run
           // "agents repo push user"` reported ok across a fleet that pushed
           // nothing — the silence that hid RUSH-2056. Matches commands/sync.ts.
+          process.exitCode = 1;
+        }
+      }
+    });
+
+  // agents repo sync <name> — git-level sync for a single DotAgents repo.
+  // Replaces the git portion of the old `agents sync <repo>` verb.
+  // Semantics: system is pull-only (push: false); user and enabled extras push.
+  repoCmd
+    .command('sync <alias>')
+    .description('Git-sync a repo: pull (and push for user/extras). Aliases: "system", "user", or a registered extra.')
+    .addHelpText('after', `
+Examples:
+  # Pull the system repo (read-only mirror)
+  agents repo sync system
+
+  # Pull and push the user repo
+  agents repo sync user
+
+  # Sync a registered extra
+  agents repo sync work
+`)
+    .action(async (alias: string) => {
+      const targets = collectRepoTargets(alias);
+      if (!targets) {
+        process.exitCode = 1;
+        return;
+      }
+      for (const t of targets) {
+        if (!fs.existsSync(t.dir) || !isGitRepo(t.dir)) {
+          console.log(chalk.yellow(`  ${t.alias}: not a git repo, skipping`));
+          continue;
+        }
+        const push = t.alias !== 'system';
+        const spinner = ora(`Syncing ${formatRepoTarget(t.alias, t.dir)}...`).start();
+        const result = await syncRepoGit(t.dir, { push });
+        if (result.success) {
+          const pushed = result.pushed ? ' (pushed)' : '';
+          spinner.succeed(`${formatRepoTarget(t.alias, t.dir)}: ${result.commit}${pushed}`);
+        } else {
+          spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${result.error}`);
           process.exitCode = 1;
         }
       }

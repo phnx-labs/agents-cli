@@ -2798,36 +2798,95 @@ function resourceSourceMap(kind: SelectableKind, cwd: string, available: Availab
 }
 
 /**
- * Build a ResourceSelection scoped to a single DotAgent repo (`system`,
- * `user`, `project`, or an extra-repo alias). Every resource kind is filtered
- * to the entries whose source layer matches `repo`, reusing the same
- * name→source maps and `source:*` pattern expansion the persisted-pattern
- * sync path uses. Passing the result as an explicit `selection` means the sync
- * touches only that repo's resources — no orphan-sweep of the other layers.
+ * Build a ResourceSelection from source-pattern expansion and an optional
+ * per-kind name filter. Both dimensions are optional and compose:
  *
- * `memory` is set to `'all'`, NOT `[]`: the composed rules-memory file is a
- * merge of ALL layers, so scoping the sync to a single repo must still
- * recompile it in the same pass (RUSH-1354). Leaving it out — or using the
- * `[]` skip-sentinel — silently strands the memory file at its old content
- * whenever a repo-scoped sync runs after a rules change. `'all'` makes
- * `syncResourcesToVersion` recompose from every layer via the active preset,
- * exactly as an unscoped full reconcile does.
+ *   patterns only   → resources from those source layers (all matching names)
+ *   kindFilter only → only those specific kinds / names, no source restriction
+ *   both combined   → patterns scope the source layer; kindFilter further
+ *                     limits which names within each kind are included
+ *
+ * Typical callers:
+ *   `--repo system`   → buildSelection(['system:*'])
+ *   `--plugin`        → buildSelection([], { plugins: 'all' })
+ *   `--plugin fleet`  → buildSelection([], { plugins: ['fleet'] })
+ *   no flags          → buildSelection([]) → full selection
+ *
+ * Memory (`kindFilter.memory`):
+ *   - Always `'all'` when patterns are active (repo scope must recompile the
+ *     composed file from all layers, RUSH-1354).
+ *   - `'all'` when `kindFilter.memory` is set (--rule / --memory flag).
+ *   - Absent (skipped) when kindFilter is given but does not include memory,
+ *     so `--plugin fleet` does NOT trigger a memory recompile.
+ *   - `'all'` when no kindFilter is given (full sync includes everything).
  */
-export function buildRepoScopedSelection(repo: string, cwd: string = process.cwd()): ResourceSelection {
-  const patterns = [`${repo}:*`];
-  const available = getAvailableResources(cwd);
-  const selection: ResourceSelection = {};
+export function buildSelection(
+  patterns: string[],
+  kindFilter?: ResourceSelection,
+  cwd: string = process.cwd(),
+): ResourceSelection {
+  const hasPatterns = patterns.length > 0;
+  const hasKindFilter = kindFilter !== undefined;
 
-  const kinds: SelectableKind[] = ['commands', 'skills', 'hooks', 'subagents', 'permissions', 'mcp', 'plugins', 'workflows'];
-  for (const kind of kinds) {
-    const names = expandPatterns(patterns, resourceSourceMap(kind, cwd, available));
-    if (names.length > 0) selection[kind] = names;
+  // Fast path: no restrictions → sync every kind
+  if (!hasPatterns && !hasKindFilter) {
+    return {
+      commands: 'all', skills: 'all', hooks: 'all',
+      subagents: 'all', permissions: 'all', mcp: 'all',
+      plugins: 'all', workflows: 'all', memory: 'all',
+    };
   }
 
-  // Recompile the memory file from all layers even under a repo scope — it is
-  // composed, not a per-repo artifact (see skipMemory below and RUSH-1354).
-  selection.memory = 'all';
+  const selection: ResourceSelection = {};
+  const allKinds: SelectableKind[] = [
+    'commands', 'skills', 'hooks', 'subagents',
+    'permissions', 'mcp', 'plugins', 'workflows',
+  ];
+  const available = hasPatterns ? getAvailableResources(cwd) : undefined;
+
+  for (const kind of allKinds) {
+    const filterVal = kindFilter?.[kind];
+
+    // When a kind filter is active, skip kinds not listed in it
+    if (hasKindFilter && filterVal === undefined) continue;
+
+    if (hasPatterns) {
+      const sourceMap = resourceSourceMap(kind, cwd, available!);
+      const patternNames = expandPatterns(patterns, sourceMap);
+      if (patternNames.length === 0) continue;
+
+      if (!filterVal || filterVal === 'all') {
+        selection[kind] = patternNames;
+      } else {
+        // Intersect pattern-expanded names with the caller's name filter
+        const filterSet = new Set(filterVal as string[]);
+        const intersected = patternNames.filter(n => filterSet.has(n));
+        if (intersected.length > 0) selection[kind] = intersected;
+      }
+    } else {
+      // Kind filter only — no pattern restriction; use the filter value directly
+      selection[kind] = filterVal === 'all' || !filterVal ? 'all' : (filterVal as string[]);
+    }
+  }
+
+  // Memory is always 'all' when patterns are active (RUSH-1354), when the
+  // memory/rule flag was given, or when no kind filter restricts what is synced.
+  const memoryRequested = hasPatterns || kindFilter?.memory !== undefined || !hasKindFilter;
+  if (memoryRequested) selection.memory = 'all';
+
   return selection;
+}
+
+/**
+ * Build a ResourceSelection scoped to a single DotAgent repo (`system`,
+ * `user`, `project`, or an extra-repo alias). Delegates to `buildSelection`
+ * so the source-map and pattern-expansion logic stays in one place.
+ *
+ * `memory` is always `'all'`: the composed rules-memory file spans all layers
+ * and must be recompiled in the same pass (RUSH-1354).
+ */
+export function buildRepoScopedSelection(repo: string, cwd: string = process.cwd()): ResourceSelection {
+  return buildSelection([`${repo}:*`], undefined, cwd);
 }
 
 /**
@@ -2878,7 +2937,7 @@ export function mergeRepoScopedSelections(repos: string[], cwd: string = process
  *
  * For Gemini: commands are converted from markdown to TOML.
  */
-export function syncResourcesToVersion(agent: AgentId, version: string, selection?: ResourceSelection, options: { projectDir?: string; cwd?: string; force?: boolean; available?: AvailableResources; prune?: boolean } = {}): SyncResult {
+export function syncResourcesToVersion(agent: AgentId, version: string, selection?: ResourceSelection, options: { projectDir?: string; cwd?: string; force?: boolean; available?: AvailableResources; prune?: boolean; allowExecSurfaces?: boolean } = {}): SyncResult {
   if (isAgentHardDeprecated(agent)) {
     return { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [], pruned: { commands: [], skills: [] } };
   }
@@ -3329,10 +3388,24 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     }
   }
 
-  // Sync plugins — dispatch through WRITERS.plugins.
+  // Sync plugins — dispatch through WRITERS.plugins (or directly via
+  // syncPluginToVersion when allowExecSurfaces is requested, since WriteArgs
+  // has no channel for that option).
   if (pluginsToSync.length > 0 && pluginsWriter) {
-    const r = pluginsWriter.write({ version, versionHome, selection: pluginsToSync, cwd });
-    result.plugins.push(...r.synced);
+    if (options.allowExecSurfaces) {
+      const allPlugins = discoverPlugins();
+      cleanOrphanedPluginSkills(agent, versionHome, new Set(allPlugins.map(p => p.name)));
+      const pluginMap = new Map(allPlugins.map(p => [p.name, p]));
+      for (const name of pluginsToSync) {
+        const plugin = pluginMap.get(name);
+        if (!plugin || !pluginSupportsAgent(plugin, agent)) continue;
+        const r = syncPluginToVersion(plugin, agent, versionHome, { version, allowExecSurfaces: true });
+        if (r.success) result.plugins.push(name);
+      }
+    } else {
+      const r = pluginsWriter.write({ version, versionHome, selection: pluginsToSync, cwd });
+      result.plugins.push(...r.synced);
+    }
   }
 
   // Sync workflows — dispatch through WRITERS.workflows.

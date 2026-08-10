@@ -673,9 +673,11 @@ Examples:
       console.log();
     });
 
+  // Deprecated: superseded by `agents sync --mcp`. Kept as a warned, functional
+  // alias so old muscle-memory and scripts don't break.
   mcpCmd
-    .command('register [name]')
-    .description('Apply MCP servers from manifest to agent config files')
+    .command('register [name]', { hidden: true })
+    .description('Deprecated — use `agents sync --mcp` instead.')
     .option('-a, --agents <list>', 'Override manifest targets: claude, codex@0.116.0')
     .option('-y, --yes', 'Auto-install any missing agent versions without prompting')
     .addHelpText('after', `
@@ -690,6 +692,9 @@ Examples:
   agents mcp register --agents codex@0.116.0
 `)
     .action(async (name: string | undefined, options) => {
+      console.warn(chalk.yellow('`agents mcp register` is deprecated — use `agents sync --mcp` instead:'));
+      console.warn(chalk.gray('  all servers:     agents sync --mcp'));
+      console.warn(chalk.gray('  specific server: agents sync --mcp <name>'));
       const localPath = getUserAgentsDir();
       const manifest = readManifest(localPath);
 

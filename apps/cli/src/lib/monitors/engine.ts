@@ -96,6 +96,15 @@ export function decideFire(monitor: MonitorConfig, observation: Observation): Fi
   const dedupeKey = cond.dedupeKey;
 
   if (cond.mode === 'every') {
+    // Fire on every tick that carries a real observation. An empty (or
+    // whitespace-only) observation means "nothing to report": firing an action
+    // with an empty {event} is never useful, and skipping it lets a poll whose
+    // command yields no rows (e.g. no mergeable PR) stay silent while still
+    // re-firing every tick the set is non-empty — the retry semantics a
+    // silently-failed action dispatch needs (RUSH-2488).
+    if (raw.trim() === '') {
+      return { fire: false, value: raw, dedupeKey, persist: false, event: null };
+    }
     return {
       fire: true,
       value: raw,

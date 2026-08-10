@@ -109,11 +109,21 @@ describe('migrateDeviceConfigToCentral', () => {
     const { migrateDeviceConfigToCentral, getConfigValue, readMeta } = await freshModules();
     migrateDeviceConfigToCentral();
 
-    // Central block carries the folded config for both devices.
+    // Central carries the SHARED-visibility config — the keys peers read.
     expect(getConfigValue('agents.max-concurrent', { device: 'mac-mini' }).value).toBe(4);
     expect(getConfigValue('notes', { device: 'mac-mini' }).value).toEqual(['runs the releases']);
-    expect(getConfigValue('browser.profile', { device: 'mac-mini' }).value).toBe('comet-local');
+
+    // Machine-visibility keys are NOT folded: mac-mini's browser profile stays in
+    // mac-mini's own doc, and is not even readable from here. Folding a peer's
+    // would put one box's settings — including the browserRemoteControl consent
+    // flag — into the file the whole fleet syncs.
+    expect(readCentral()).not.toContain('defaultBrowserProfile');
+    expect(() => getConfigValue('browser.profile', { device: 'mac-mini' })).toThrow(/machine-local/);
+
+    // This machine's own machine-local key still resolves — it is read straight
+    // from its device doc, which is where it already lived.
     expect(getConfigValue('scheduler.enabled').value).toBe(false); // self (testbox)
+    expect(readCentral()).not.toContain('schedulerEnabled');
 
     // The fold is ADDITIVE: the legacy source is left exactly as it was. A box
     // still on the previous CLI reads that doc, so deleting it mid-rollout would

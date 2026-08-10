@@ -72,6 +72,8 @@ const SELF_HEAL_TICK_MS = 6 * 60 * 60_000;
 const SELF_HEAL_KICKOFF_MS = 30_000;
 const BROKER_SELF_HEAL_TICK_MS = 60_000;
 const KEYCHAIN_REAP_TICK_MS = 5 * 60_000;
+// RUSH-2501: reap tmux sessions whose panes are all dead every 5 minutes.
+const DEAD_PANE_REAP_TICK_MS = 5 * 60_000;
 const STATE_DIR_CHECK_TICK_MS = 60_000;
 // Watchdog nudges this host's own stalled sessions; device-probe refreshes
 // registered devices' reachability and surfaces newly appeared tailnet nodes.
@@ -649,6 +651,7 @@ export function warnEphemeralDaemonRoot(resolveBin: () => string = getAgentsBinP
 // by the next timer fire before the previous one finishes.
 let healing = false;
 let reapingKeychain = false;
+let reapingDeadPanes = false;
 
 /**
  * Resource self-heal: fill missing resources, repair invalid manifests, and
@@ -697,6 +700,29 @@ async function runKeychainReap(): Promise<void> {
     log('ERROR', `Keychain reaper failed: ${(err as Error).message}`);
   } finally {
     reapingKeychain = false;
+  }
+}
+
+/**
+ * RUSH-2501: kill tmux sessions on the helper socket whose panes are ALL dead.
+ * Runs every DEAD_PANE_REAP_TICK_MS (5 min). The daemon is the single executor
+ * so no UI surface can race it.
+ */
+async function runDeadPaneReap(): Promise<void> {
+  if (reapingDeadPanes) return;
+  reapingDeadPanes = true;
+  try {
+    const { reapDeadTmuxPanes } = await import('./tmux/session.js');
+    const { getDefaultSocketPath } = await import('./tmux/paths.js');
+    const result = await reapDeadTmuxPanes(getDefaultSocketPath());
+    if (result.reaped > 0) {
+      log('INFO', `Dead-pane reaper: reaped ${result.reaped} session(s)`);
+      for (const d of result.details) log('INFO', `  ${d}`);
+    }
+  } catch (err) {
+    log('ERROR', `Dead-pane reaper failed: ${(err as Error).message}`);
+  } finally {
+    reapingDeadPanes = false;
   }
 }
 
@@ -1108,6 +1134,11 @@ export async function runDaemon(): Promise<void> {
   // so no UI surface can race it. See runKeychainReap above.
   const keychainReapInterval = setInterval(() => { void runKeychainReap(); }, KEYCHAIN_REAP_TICK_MS);
 
+  // RUSH-2501: reap tmux sessions whose panes are all dead. Runs on the same
+  // 5-min cadence as the keychain reaper. Daemon-only (single executor).
+  void runDeadPaneReap(); // kick-off on startup so the backlog clears immediately
+  const deadPaneReapInterval = setInterval(() => { void runDeadPaneReap(); }, DEAD_PANE_REAP_TICK_MS);
+
   // RUSH-2367: self-terminate if this daemon's own state dir has been removed
   // out from under it — the shape of a leaked test-fixture daemon whose /tmp
   // HOME was deleted by its test's own cleanup while the process itself
@@ -1209,6 +1240,7 @@ export async function runDaemon(): Promise<void> {
     clearTimeout(healKickoff);
     clearInterval(brokerSelfHealInterval);
     clearInterval(keychainReapInterval);
+    clearInterval(deadPaneReapInterval);
     clearInterval(stateDirCheckInterval);
     try {
       if (fs.readFileSync(lifetimePath, 'utf-8') === lifetimeToken) fs.unlinkSync(lifetimePath);
