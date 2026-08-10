@@ -37,7 +37,7 @@ import {
   type MonitorWebhookSource,
 } from '../lib/monitors/config.js';
 import { formatRelativeTime } from '../lib/session/relative-time.js';
-import { evaluateMonitorOnce } from '../lib/monitors/engine.js';
+import { evaluateMonitorOnce, POLL_SOURCE_TYPES } from '../lib/monitors/engine.js';
 import { listFires, readState, readLiveness, type MonitorLiveness } from '../lib/monitors/state.js';
 import { listRuns, getLatestRun, getRunDir } from '../lib/routines.js';
 import { getMonitorsDir } from '../lib/state.js';
@@ -172,7 +172,7 @@ function ensureDaemonRunning(): void {
  * booting — but it is surfaced so a dead engine can never masquerade as healthy.
  */
 async function assertEnginePickup(monitor: MonitorConfig): Promise<void> {
-  const pollSource = ['command', 'poll', 'poll-http', 'file', 'device'].includes(monitor.source.type);
+  const pollSource = POLL_SOURCE_TYPES.has(monitor.source.type);
   if (!monitor.enabled || !monitorRunsOnThisDevice(monitor) || !pollSource) return; // nothing to assert here
   const before = readLiveness(monitor.name);
   const baseline = before?.checkCount ?? 0;

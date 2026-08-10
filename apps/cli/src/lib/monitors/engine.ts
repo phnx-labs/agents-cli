@@ -46,7 +46,7 @@ const DEFAULT_INTERVAL_MS = 60_000;
  */
 const DROUGHT_THRESHOLD = 5;
 /** Poll-model source types the engine actually evaluates on a cadence; ws/webhook are push-only and inert here. */
-const POLL_SOURCE_TYPES = new Set(['command', 'poll', 'poll-http', 'file', 'device']);
+export const POLL_SOURCE_TYPES = new Set(['command', 'poll', 'poll-http', 'file', 'device']);
 
 /**
  * Whether a monitor's liveness has crossed into a drought worth notifying the
