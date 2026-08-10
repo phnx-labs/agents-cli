@@ -5288,8 +5288,11 @@ export function metadataResolveOutcome(
   // claim that prefixes cannot collide — they can, which is why the `ambiguous`
   // branch below still exists for peers that DID answer:
   //   - refusing costs 100% of lookups on any fleet with a permanently offline
-  //     device (9 of them here), to avoid a <=2^-32-per-pair prefix collision
-  //     that ALSO has to land on the one box that did not answer;
+  //     device (9 of them here), to avoid a prefix collision that ALSO has to
+  //     land on the one box that did not answer. Rate depends on the id type:
+  //     a UUIDv4 short id is unique in practice, while a time-ordered
+  //     UUIDv7/ULID prefix is largely a timestamp and collides much more
+  //     readily (see deriveShortId in session/db.ts);
   //   - `isUniqueEnoughSelector` keeps this off keyword-shaped queries, so a
   //     6-char word like `facade` or `decade` is not treated as an identifier.
   // A label stays fail-closed at any length: labels are free-form and collide by

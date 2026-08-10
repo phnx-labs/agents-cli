@@ -229,10 +229,17 @@ SSH access (§7); rendering sessions that no harness produced.
   *Accepted risk, amended 2026-08-10.* This requirement previously made every
   short prefix fail closed whenever any peer was unavailable. On a fleet with a
   permanently offline registered device that voids 100% of short-id lookups —
-  measured at 9 offline devices — to guard a prefix collision that is at most
-  2^-32 per pair **and** must land specifically on a peer that did not answer.
-  Collisions among peers that DID answer are still reported: they produce two
-  candidates and surface through the `ambiguous` outcome, which is unchanged.
+  measured at 9 offline devices — to guard a collision that must ALSO land
+  specifically on a peer that did not answer. The collision rate is **not**
+  uniform across id types, and the difference matters: a random UUIDv4 short id
+  is unique in practice, but the first 48 bits of a **time-ordered** id
+  (UUIDv7/ULID) are a millisecond timestamp, so sessions minted in one tight
+  window — a `teams` fan-out, a swarm — share an 8-hex prefix far more readily.
+  `session/db.ts` (`deriveShortId`, "only time-ordered ids ever collide") already
+  treats that as expected and resolves it by most-recently-active. Collisions
+  among peers that DID answer are still reported: they produce two candidates and
+  surface through the `ambiguous` outcome, which is unchanged, so the residual
+  risk is confined to a time-ordered collision hiding on the unanswered peer.
   RUSH-2203's early-exit rule is also unchanged and stays full-UUID-only
   (`isDefinitiveMatch`), because that cancels a sweep still in flight, where a
   silent peer is still expected to answer.
