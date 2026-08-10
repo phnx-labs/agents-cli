@@ -42,6 +42,7 @@ import { SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD } from './sync-commands.js';
 import { MAX_LEASE_MS, MIN_LEASE_MS } from './lease.js';
 import { selectLeasedEnv, type SecretLease } from './lease.js';
 import { emitSecretAudit } from './audit.js';
+import { isDaemonServiceEnabled } from '../daemon-services.js';
 
 // Re-exported so callers already reaching for agent.js keep one obvious home for
 // the scope vocabulary; the definitions live in the leaf module scope.ts because
@@ -55,6 +56,15 @@ const PROTOCOL_VERSION = 3;
 
 /** Default lifetime of an unlocked bundle when `--ttl` is not given. */
 export const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d
+
+/**
+ * Whether the secrets broker service is enabled in the daemon service config.
+ * Off-darwin this is irrelevant (the broker is never used), but the helper is
+ * kept synchronous and safe everywhere so callers can fail loud without a prompt.
+ */
+export function isSecretsBrokerEnabled(): boolean {
+  return isDaemonServiceEnabled('secrets-broker');
+}
 
 /**
  * Reserved store-key prefix for the `secrets list` metadata snapshot cache.
@@ -1081,6 +1091,7 @@ function syncClient(sub: string[], timeout: number): SpawnSyncReturns<string> | 
  * (soft — caller falls through to the real keychain). macOS only.
  */
 export function agentGetSync(name: string, harness: string = GLOBAL_HARNESS): { bundle: SecretsBundle; env: Record<string, string>; lease?: SecretLease } | null {
+  if (!isSecretsBrokerEnabled()) return null;
   if (!agentSocketExists()) return null;
   const r = syncClient([SYNC_GET_CMD, name, harness], SYNC_GET_TIMEOUT_MS);
   if (!r || r.status !== 0 || !r.stdout) return null;
@@ -1323,6 +1334,7 @@ export function agentAutoLoadSync(
   snapshotAt?: number,
 ): void {
   if (!onDarwin()) return;
+  if (!isSecretsBrokerEnabled()) return;
   const payload = JSON.stringify({ name, bundle, env, ttlMs, harness, lease, snapshotAt });
   // Broker actually LISTENING → deterministic synchronous warm (bounded; the read
   // already paid a Touch ID, so <1s here is invisible). We gate on a real liveness
@@ -1445,6 +1457,7 @@ export async function agentPing(): Promise<{ reachable: boolean; cliVersion?: st
  */
 export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
   if (!onDarwin()) return false;
+  if (!isSecretsBrokerEnabled()) return false;
 
   // Self-heal: if a broker is reachable but running pre-upgrade code (its
   // reported version != the version on disk now), tear it down so the paths

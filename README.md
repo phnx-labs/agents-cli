@@ -1094,11 +1094,21 @@ agents daemon restart        # stop then start
 agents daemon disable        # persist daemon.enabled: false -- nothing auto-starts it
 agents daemon enable         # clear the kill switch
 
-agents daemon reload         # SIGHUP -- reload jobs, re-evaluate scheduler.enabled, no restart
-agents daemon services       # just the two hosted services (secrets broker, browser IPC)
+agents daemon reload                        # SIGHUP -- reload jobs, re-evaluate scheduler.enabled, no restart
+agents daemon services                      # list every toggleable service and its current state
+agents daemon services enable secrets-broker
+agents daemon services disable browser-ipc  # stop hosting browser IPC without stopping the daemon
 agents daemon logs -f --level warn --since 1h
-agents daemon doctor         # one-shot health check; non-zero exit on problems
+agents daemon doctor                        # one-shot health check; non-zero exit on problems
 ```
+
+Each hosted responsibility (secrets broker, browser IPC, scheduler, monitors,
+watchdog, device probe, self-heal, keychain reap, account-state refresh,
+state-dir checks) is an independent toggle in `~/.agents/daemon/services.yaml`.
+`agents daemon services list` shows every service; `enable|disable <id>` flips
+one. Missing keys default to enabled, so upgrades are no-ops. Most services take
+effect on the next daemon start; scheduler and monitor engine also re-evaluate
+on `SIGHUP reload`.
 
 There is no `agents daemon jobs` -- scheduled work is always `agents routines`
 (see `agents routines stats` for per-routine failure detail). `disable` is a

@@ -120,6 +120,9 @@ const TEAMS_DIR = path.join(USER_AGENTS_DIR, 'teams');
 // Named project definitions (the layer above the --project convention). Sibling
 // of ROUTINES_DIR/TEAMS_DIR: hand-editable YAML, synced across machines by push/pull.
 const PROJECTS_DIR = path.join(USER_AGENTS_DIR, 'projects');
+// Daemon service toggles and persistent daemon config. Top-level config/definitions
+// dir like routines/webhooks; runtime state (pid/heartbeat/logs) stays in .cache.
+const DAEMON_CONFIG_DIR = path.join(USER_AGENTS_DIR, 'daemon');
 
 // History bucket (durable).
 const SESSIONS_DIR = path.join(HISTORY_DIR, 'sessions');
@@ -465,6 +468,9 @@ export function getRoutinesDir(): string { return process.env.AGENTS_ROUTINES_DI
 
 /** Path to named project definitions (~/.agents/projects/). */
 export function getProjectsDir(): string { return process.env.AGENTS_PROJECTS_DIR ?? PROJECTS_DIR; }
+
+/** Path to daemon config directory (~/.agents/daemon/). Holds service toggles. */
+export function getDaemonConfigDir(): string { return process.env.AGENTS_DAEMON_CONFIG_DIR ?? DAEMON_CONFIG_DIR; }
 
 /**
  * Path to webhook handler YAML definitions (~/.agents/webhooks/). Handlers are

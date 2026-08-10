@@ -41,6 +41,13 @@ import {
   SUBSYSTEM_DAEMON_START,
   type SubsystemHealth,
 } from '../lib/daemon-health.js';
+import {
+  DAEMON_SERVICE_IDS,
+  type DaemonServiceId,
+  listDaemonServiceStates,
+  setDaemonServiceEnabled,
+  getDaemonServicesConfigPath,
+} from '../lib/daemon-services.js';
 import { listJobs, getLatestRun } from '../lib/routines.js';
 import { JobScheduler } from '../lib/scheduler.js';
 import { followFile } from '../lib/log-follow.js';
@@ -843,13 +850,69 @@ export function registerDaemonCommand(program: Command): void {
       console.log(ok ? chalk.green('Daemon reloaded') : chalk.yellow('Reload signal not delivered (unsupported on this platform, or the daemon just exited)'));
     });
 
-  cmd.command('services')
-    .description('The two hosted services (secrets broker, browser IPC): bound state, socket path, and health. See sibling `daemon funnel` for public ingress.')
+  const servicesCmd = cmd
+    .command('services')
+    .description('The hosted services: health, bound state, socket path, and per-service toggles.')
     .option('--json', 'Emit as JSON')
     .action(async (opts, command) => {
       await runServices({ json: command.optsWithGlobals().json === true });
     });
 
+  servicesCmd
+    .command('list')
+    .description('List every daemon service and whether it is enabled.')
+    .option('--json', 'Emit as JSON')
+    .action(async (opts, command) => {
+      const json = command.optsWithGlobals().json === true;
+      const states = listDaemonServiceStates();
+      if (json) {
+        console.log(JSON.stringify(states.map((s) => ({
+          id: s.id,
+          title: s.title,
+          enabled: s.enabled,
+          description: s.description,
+        })), null, 2));
+        return;
+      }
+      console.log(chalk.bold('Daemon services'));
+      for (const s of states) {
+        const state = s.enabled ? chalk.green('enabled') : chalk.gray('disabled');
+        console.log(`  ${s.id.padEnd(18)} ${state}`);
+        console.log(`    ${chalk.gray(s.description)}`);
+      }
+      console.log(chalk.gray(`\nConfig: ${getDaemonServicesConfigPath()}`));
+      console.log(chalk.gray('Changes take effect on the next daemon reload or restart.'));
+    });
+
+  servicesCmd
+    .command('enable <service>')
+    .description('Enable a daemon service.')
+    .action((service: string) => {
+      if (!DAEMON_SERVICE_IDS.includes(service as DaemonServiceId)) {
+        console.error(chalk.red(`Unknown service '${service}'. Run 'agents daemon services list' for valid services.`));
+        process.exit(1);
+      }
+      setDaemonServiceEnabled(service as DaemonServiceId, true);
+      console.log(chalk.green(`Enabled '${service}'.`));
+      if (isDaemonRunning()) {
+        console.log(chalk.gray('Run `agents daemon reload` (or restart) to apply.'));
+      }
+    });
+
+  servicesCmd
+    .command('disable <service>')
+    .description('Disable a daemon service.')
+    .action((service: string) => {
+      if (!DAEMON_SERVICE_IDS.includes(service as DaemonServiceId)) {
+        console.error(chalk.red(`Unknown service '${service}'. Run 'agents daemon services list' for valid services.`));
+        process.exit(1);
+      }
+      setDaemonServiceEnabled(service as DaemonServiceId, false);
+      console.log(chalk.green(`Disabled '${service}'.`));
+      if (isDaemonRunning()) {
+        console.log(chalk.gray('Run `agents daemon reload` (or restart) to apply.'));
+      }
+    });
   registerFunnelCommand(cmd);
 
   cmd.command('logs')

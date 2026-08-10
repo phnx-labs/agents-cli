@@ -110,6 +110,7 @@ import {
   runAgentLoadFromStdin,
   runSecretsAgent,
   uninstallSecretsAgentService,
+  isSecretsBrokerEnabled,
 } from '../lib/secrets/agent.js';
 import { saveSession, deleteBundleSessions, deleteAllSessions } from '../lib/secrets/session-store.js';
 import { getCliVersionFresh } from '../lib/version.js';
@@ -2748,6 +2749,10 @@ Examples:
         process.exit(1);
       }
       const expiresAt = Date.now() + ttlMs;
+      if (!isSecretsBrokerEnabled()) {
+        console.error(chalk.red('Secrets broker is disabled — re-enable with \'agents daemon services enable secrets-broker\'.'));
+        process.exit(1);
+      }
       if (!(await ensureAgentRunning())) {
         console.error(chalk.red('Could not start the secrets broker.'));
         process.exit(1);
@@ -2860,6 +2865,10 @@ Examples:
     .action(async () => {
       if (process.platform !== 'darwin') {
         console.log(chalk.gray('secrets-agent is macOS-only.'));
+        return;
+      }
+      if (!isSecretsBrokerEnabled()) {
+        console.log(chalk.yellow('broker: disabled — re-enable with \'agents daemon services enable secrets-broker\''));
         return;
       }
       const ping = await agentPing();
@@ -2986,6 +2995,9 @@ Examples:
       if (process.platform !== 'darwin') {
         console.error(chalk.red('The secrets broker is macOS-only.'));
         process.exit(1);
+      }
+      if (!isSecretsBrokerEnabled()) {
+        console.error(chalk.yellow('Secrets broker is disabled — the daemon will start but will not host the broker. Re-enable with \'agents daemon services enable secrets-broker\'.'));
       }
       process.stdout.write(chalk.gray('Starting the daemon…\n'));
       ensureDaemonStarted();

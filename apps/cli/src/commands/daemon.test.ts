@@ -216,6 +216,82 @@ describeDaemon('agents daemon', () => {
     expect(typeof payload.browserIpc.socketPath).toBe('string');
   });
 
+  /** Run `agents secrets <args>` against an isolated HOME. */
+  function runSecrets(home: string, args: string[]): ReturnType<typeof spawnSync> {
+    return spawnSync('node', ['--import', TSX_IMPORT, CLI_ENTRYPOINT, 'secrets', ...args], {
+      cwd: REPO_ROOT,
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        AGENTS_SKIP_MIGRATION: '1',
+        AGENTS_NO_AUTOPULL: '1',
+        AGENTS_CLI_DISABLE_AUTO_UPDATE: '1',
+        AGENTS_DAEMON_DIR: path.join(home, '.agents', '.cache', 'helpers', 'daemon'),
+      },
+      encoding: 'utf-8',
+      timeout: 30_000,
+    });
+  }
+
+  it('secrets broker disabled surfaces in agents secrets status on macOS', () => {
+    if (process.platform !== 'darwin') return;
+    const home = makeHome();
+    run(home, ['services', 'disable', 'secrets-broker']);
+    const status = runSecrets(home, ['status']);
+    expect(status.status).toBe(0);
+    expect(status.stdout).toContain('disabled');
+    expect(status.stdout).toContain('agents daemon services enable secrets-broker');
+  });
+
+  it('services list shows every service enabled by default', () => {
+    const res = run(makeHome(), ['services', 'list']);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain('secrets-broker');
+    expect(res.stdout).toContain('scheduler');
+    expect(res.stdout).toContain('enabled');
+  });
+
+  it('services disable writes the config and services list reflects it', () => {
+    const home = makeHome();
+    const disable = run(home, ['services', 'disable', 'secrets-broker']);
+    expect(disable.status).toBe(0);
+    expect(disable.stdout).toContain("Disabled 'secrets-broker'");
+
+    const list = run(home, ['services', 'list', '--json']);
+    expect(list.status).toBe(0);
+    const services = JSON.parse(list.stdout) as Array<{ id: string; enabled: boolean }>;
+    const broker = services.find((s) => s.id === 'secrets-broker');
+    expect(broker).toBeDefined();
+    expect(broker!.enabled).toBe(false);
+
+    const cfgPath = path.join(home, '.agents', 'daemon', 'services.yaml');
+    expect(fs.readFileSync(cfgPath, 'utf-8')).toContain('secrets-broker: false');
+  });
+
+  it('services enable re-enables a disabled service', () => {
+    const home = makeHome();
+    run(home, ['services', 'disable', 'secrets-broker']);
+    const enable = run(home, ['services', 'enable', 'secrets-broker']);
+    expect(enable.status).toBe(0);
+    expect(enable.stdout).toContain("Enabled 'secrets-broker'");
+
+    const list = run(home, ['services', 'list', '--json']);
+    const services = JSON.parse(list.stdout) as Array<{ id: string; enabled: boolean }>;
+    expect(services.find((s) => s.id === 'secrets-broker')!.enabled).toBe(true);
+  });
+
+  it('services enable|disable reject unknown service ids', () => {
+    const home = makeHome();
+    const enable = run(home, ['services', 'enable', 'not-a-service']);
+    expect(enable.status).toBe(1);
+    expect(enable.stderr + enable.stdout).toContain("Unknown service 'not-a-service'");
+
+    const disable = run(home, ['services', 'disable', 'not-a-service']);
+    expect(disable.status).toBe(1);
+    expect(disable.stderr + disable.stdout).toContain("Unknown service 'not-a-service'");
+  });
+
   it('logs reports no matching lines when no daemon has ever logged', () => {
     const res = run(makeHome(), ['logs']);
     expect(res.status).toBe(0);

@@ -226,10 +226,24 @@ agents daemon funnel up <host>      Expose a localhost webhook receiver through 
 agents daemon logs                  Read the daemon's own log (lifecycle + subsystem errors — not routine run output).
 agents daemon reload                Send SIGHUP to reload jobs and re-evaluate the scheduler.enabled gate, without a restart.
 agents daemon restart               Stop then start the daemon.
-agents daemon services              The two hosted services (secrets broker, browser IPC): bound state, socket path, and health. See sibling `daemon funnel` for public ingress.
+agents daemon services              Health/status of the two hosted services (secrets broker, browser IPC) plus their bound state and socket path. See sibling `daemon funnel` for public ingress.
+agents daemon services disable <id> Disable a service in ~/.agents/daemon/services.yaml. The running daemon stops hosting it on next start (most services) or on SIGHUP reload (scheduler/monitors).
+agents daemon services enable <id>  Re-enable a service in ~/.agents/daemon/services.yaml.
+agents daemon services list         Print every toggleable service, its default state, and its current on/off state from ~/.agents/daemon/services.yaml.
 agents daemon start                 Start the daemon. Bypasses daemon.enabled — this is the deliberate override.
 agents daemon status                Identity (state/pid/uptime/binary), duplicate daemons, daemons running deleted code, and per-service health.
 agents daemon stop                  Stop the daemon.
+```
+
+## defaults — Manage default options for agents-cli commands
+
+```
+agents defaults                       Manage default options for agents-cli commands
+agents defaults project-root [path]   Show or set the projects root for `agents run --project` (auto-inferred when unset)
+agents defaults run                   Manage selector-based defaults for `agents run`
+agents defaults run list              List configured run defaults
+agents defaults run set <selector>    Set defaults for an agent/version selector
+agents defaults run unset <selector>  Remove defaults for a given selector
 ```
 
 ## devices — Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale. Alias: fleet.

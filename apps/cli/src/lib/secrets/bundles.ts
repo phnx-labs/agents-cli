@@ -58,7 +58,7 @@ import { emit } from '../events.js';
 import { emitSecretAudit } from './audit.js';
 import { readMeta, getHelpersDir } from '../state.js';
 import { assertNameActiveInResourceProfile, filterNamesForActiveResourceProfile } from '../resource-profiles.js';
-import { agentGetSync, agentAutoLoadSync, agentGetMetaSync, agentAutoLoadMetaSync, agentEvictSync, secretsAgentAutoEnabled, secretsHoldMs } from './agent.js';
+import { agentGetSync, agentAutoLoadSync, agentGetMetaSync, agentAutoLoadMetaSync, agentEvictSync, secretsAgentAutoEnabled, secretsHoldMs, isSecretsBrokerEnabled } from './agent.js';
 import { GLOBAL_HARNESS } from './scope.js';
 import { resolveSession, deleteSession } from './session-store.js';
 import { createHash } from 'node:crypto';
@@ -1563,6 +1563,16 @@ export function readAndResolveBundleEnv(
         `never raises a Touch ID sheet on its own.`
       );
     }
+  }
+
+  // If the secrets broker is explicitly disabled and this bundle would otherwise
+  // fall through to a keychain read (Touch ID prompt), fail loud now. Never-policy
+  // bundles are verified below and remain silent; vault/file backends are unaffected.
+  if (backend === 'keychain' && !isSecretsBrokerEnabled() && process.env.AGENTS_SECRETS_NO_AGENT !== '1') {
+    throw new Error(
+      `Secrets broker is disabled — re-enable with 'agents daemon services enable secrets-broker'. ` +
+      `If you meant to read directly from the keychain, set AGENTS_SECRETS_NO_AGENT=1.`
+    );
   }
 
   if (backend === 'vault') assertVaultBackendUsable(name);

@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Per-service toggles for agents daemon</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:5px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-approved">approved</span></div>
+<h1>Per-service toggles for agents daemon</h1>
+<p class="summary">Add independent enable/disable toggles for every daemon-hosted service, make the secrets broker disableable with a clear error, and expose the toggles through agents daemon services enable|disable &lt;service&gt;.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">feat/daemon-services</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">RUSH-XXXX</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Kimi</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">141ec99e</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#current-state-after-pulling-latest-main"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Current state (after pulling latest main)</a><a href="#proposed-changes"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<p><code>agents daemon</code> already exists on <code>main</code> (RUSH-2354): it has <code>status</code>, <code>start</code>, <code>stop</code>, <code>restart</code>, <code>enable</code>, <code>disable</code>, <code>reload</code>, <code>services</code>, <code>logs</code>, and <code>doctor</code>. What is missing is independent control of the services the daemon hosts.</p>
+<p>The daemon currently runs all of these unconditionally:</p>
+<ul>
+<li>secrets broker (+ broker self-heal)</li>
+<li>routines scheduler + catchup</li>
+<li>monitor engine</li>
+<li>browser IPC server</li>
+<li>self-heal registry</li>
+<li>keychain reap</li>
+<li>account-state service (usage refresh + fleet-status publish)</li>
+<li>watchdog</li>
+<li>device probe</li>
+<li>state-dir self-check</li>
+</ul>
+<p>When the secrets broker misbehaves and causes a Touch ID storm, there is no kill switch. This change adds a per-service toggle so any hosted service can be disabled, and callers get a clear error instead of a silent fallback.</p>
+<figure class="artifact-figure artifact-figure-diagram">
+<svg viewBox="0 0 720 320" xmlns="http://www.w3.org/2000/svg">
+  <rect x="20" y="20" width="680" height="280" rx="8" fill="#0a0a0a" stroke="#333" stroke-width="2"></rect>
+  <text x="360" y="52" text-anchor="middle" fill="#e5e5e5" font-size="18" font-weight="bold">Proposed: each daemon service is independently toggleable</text>
+  <rect x="60" y="90" width="180" height="60" rx="4" fill="#14532d" stroke="#4ade80" stroke-width="2"></rect>
+  <text x="150" y="115" text-anchor="middle" fill="#dcfce7" font-size="14" font-weight="bold">services.yaml</text>
+  <text x="150" y="138" text-anchor="middle" fill="#86efac" font-size="12">~/.agents/daemon/</text>
+  <polygon points="250,120 290,120 280,110 290,120 280,130" fill="#a3e635"></polygon>
+  <line x1="240" y1="120" x2="290" y2="120" stroke="#a3e635" stroke-width="2"></line>
+  <rect x="320" y="90" width="180" height="60" rx="4" fill="#1e293b" stroke="#475569" stroke-width="1"></rect>
+  <text x="410" y="115" text-anchor="middle" fill="#e2e8f0" font-size="14" font-weight="bold">runDaemon()</text>
+  <text x="410" y="138" text-anchor="middle" fill="#94a3b8" font-size="12">read config, gate services</text>
+  <line x1="500" y1="120" x2="550" y2="120" stroke="#a3e635" stroke-width="2"></line>
+  <polygon points="550,120 590,120 580,110 590,120 580,130" fill="#a3e635"></polygon>
+  <rect x="600" y="90" width="80" height="60" rx="4" fill="#1e293b" stroke="#475569" stroke-width="1"></rect>
+  <text x="640" y="125" text-anchor="middle" fill="#e2e8f0" font-size="13">Service N</text>
+  <rect x="320" y="180" width="360" height="90" rx="4" fill="#1e293b" stroke="#475569" stroke-width="1"></rect>
+  <text x="360" y="210" fill="#e2e8f0" font-size="13">Disabled service path (e.g. secrets-broker)</text>
+  <text x="360" y="235" fill="#fca5a5" font-size="12">Caller sees: "secrets broker is disabled —</text>
+  <text x="360" y="255" fill="#fca5a5" font-size="12">re-enable with 'agents daemon services enable secrets-broker'"</text>
+</svg>
+<figcaption>Figure 1: Config-driven service gating and clear disabled-service errors.</figcaption>
+</figure><p class="artifact-callout"><strong>Load-bearing takeaway:</strong> Disabling a service must stop the daemon from running it and must make callers fail with an actionable message — never silently fall back to Touch ID or another worse path.</p>
+
+<h2 id="current-state-after-pulling-latest-main">Current state (after pulling latest main)</h2>
+<ul>
+<li><code>apps/cli/src/commands/daemon.ts</code> — full daemon command tree already exists.</li>
+<li><code>apps/cli/src/commands/daemon.test.ts</code> — tests exist.</li>
+<li><code>apps/cli/src/lib/daemon.ts</code> — <code>runDaemon()</code> starts all services unconditionally.</li>
+<li><code>apps/cli/src/lib/device-config.ts</code> — <code>daemon.enabled</code> and <code>scheduler.enabled</code> already exist as device-config gates.</li>
+<li>Recent refactor <code>dd2043848</code> (RUSH-2495) removed the maintenance-routine layer; watchdog and device-probe are now plain daemon timers.</li>
+</ul>
+<h2 id="proposed-changes">Proposed Changes</h2>
+<h3>1. Add a service config file and loader</h3>
+<p>Create <code>apps/cli/src/lib/daemon-services.ts</code>:</p>
+<ul>
+<li>Stable service IDs.</li>
+<li>Human titles + descriptions.</li>
+<li>Config path: <code>~/.agents/daemon/services.yaml</code>.</li>
+<li>Helpers: <code>readDaemonServicesConfig()</code>, <code>isDaemonServiceEnabled(id)</code>, <code>setDaemonServiceEnabled(id, enabled)</code>.</li>
+</ul>
+<p>Initial catalog (all default to <code>true</code>):</p>
+<pre><code>services:
+  secrets-broker: true
+  scheduler: true
+  monitors: true
+  browser-ipc: true
+  self-heal: true
+  keychain-reap: true
+  account-state: true
+  watchdog: true
+  device-probe: true
+  state-dir-check: true
+</code></pre>
+<p>Only explicit <code>false</code> disables. Missing file or missing key means enabled.</p>
+<h3>2. Extend <code>agents daemon services</code> with enable/disable</h3>
+<p>Add subcommands:</p>
+<pre><code>agents daemon services list           # existing + toggle state
+agents daemon services enable &lt;id&gt;
+agents daemon services disable &lt;id&gt;
+</code></pre>
+<p>Keep <code>agents daemon services</code> (no args) as the health-only view.</p>
+<h3>3. Gate services inside <code>runDaemon()</code></h3>
+<p>Read the service config at startup. For each disabled service:</p>
+<ul>
+<li>Skip its initialization.</li>
+<li>Skip its timer/interval.</li>
+<li>Skip its self-heal loop.</li>
+</ul>
+<p>On <code>SIGHUP</code> reload, apply scheduler and secrets-broker toggles immediately where feasible; for other services, log that a restart is required to apply a toggle change.</p>
+<h3>4. Make secrets broker disablement fail loudly</h3>
+<p>When <code>secrets-broker</code> is disabled:</p>
+<ul>
+<li>Daemon does not call <code>startHostedBroker()</code> and does not run <code>runBrokerSelfHeal()</code>.</li>
+<li>The secrets fast-path client reads the service config. If disabled, it returns a disabled verdict.</li>
+<li><code>agents secrets</code> commands surface: <code>Secrets broker is disabled — re-enable with 'agents daemon services enable secrets-broker'</code>.</li>
+<li>This prevents the Touch ID fallback storm.</li>
+</ul>
+<h2 id="public-interface">Public Interface</h2>
+<h3>New commands</h3>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>agents daemon services list</code></td>
+<td>Lists every hosted service, its enabled/disabled state, and description.</td>
+</tr>
+<tr>
+<td><code>agents daemon services enable &lt;id&gt;</code></td>
+<td>Enables a service.</td>
+</tr>
+<tr>
+<td><code>agents daemon services disable &lt;id&gt;</code></td>
+<td>Disables a service.</td>
+</tr>
+</tbody></table>
+<h3>Config file</h3>
+<p><code>~/.agents/daemon/services.yaml</code> holds per-service booleans.</p>
+<h3>Disabled-service error</h3>
+<p>For secrets broker specifically:</p>
+<pre><code>Secrets broker is disabled — re-enable with 'agents daemon services enable secrets-broker'
+</code></pre>
+<h2 id="validation">Validation</h2>
+<ul>
+<li>Unit tests for <code>lib/daemon-services.ts</code>: defaults, read/write toggles, unknown IDs ignored.</li>
+<li>Tests for <code>agents daemon services list|enable|disable</code>.</li>
+<li>Test that disabling <code>secrets-broker</code> makes <code>agents secrets</code> fail with the expected message.</li>
+<li>Existing <code>daemon.test.ts</code> and <code>routines.test.ts</code> still pass.</li>
+<li>Run <code>bun run test:remote</code> or local suite and fix failures.</li>
+</ul>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A service is accidentally disabled by default.</td>
+<td>Default every known service to <code>true</code>; only explicit <code>false</code> disables.</td>
+</tr>
+<tr>
+<td>Secrets broker disabled state leaks to non-daemon paths.</td>
+<td>Check config inside <code>ensureAgentRunning()</code>; align with <code>AGENTS_SECRETS_NO_AGENT=1</code>.</td>
+</tr>
+<tr>
+<td><code>__daemon-run</code> behavior changes.</td>
+<td>Only gate what happens after <code>runDaemon()</code> starts.</td>
+</tr>
+<tr>
+<td>Single-instance guarantee breaks.</td>
+<td>Do not touch <code>claimDaemonInstance()</code>, locks, pid file, or heartbeat logic.</td>
+</tr>
+<tr>
+<td>Watchdog/device-probe toggle confusion with existing device-config flags.</td>
+<td>Keep existing <code>watchdog.enabled</code> as the activity gate; the service toggle controls whether the timer runs at all.</td>
+</tr>
+</tbody></table>
+<h2 id="tracking">Tracking</h2>
+<div class="checklist"><div class="checklist-head">0 / 8 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Add <code>getDaemonConfigDir()</code> path helper in <code>state.ts</code>.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Create <code>lib/daemon-services.ts</code> catalog + config loader.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Extend <code>commands/daemon.ts</code> with <code>services enable|disable|list</code>.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Gate services in <code>runDaemon()</code>.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Wire secrets-broker disabled check into <code>lib/secrets/agent.ts</code> and <code>commands/secrets.ts</code>.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Update tests.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Update docs and CHANGELOG.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Run tests and verify.</span></li></ul></div>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGVtcGxhdGU6IHBsYW4udjEKdGl0bGU6IFBlci1zZXJ2aWNlIHRvZ2dsZXMgZm9yIGFnZW50cyBkYWVtb24Kc3VtbWFyeTogQWRkIGluZGVwZW5kZW50IGVuYWJsZS9kaXNhYmxlIHRvZ2dsZXMgZm9yIGV2ZXJ5IGRhZW1vbi1ob3N0ZWQgc2VydmljZSwgbWFrZSB0aGUgc2VjcmV0cyBicm9rZXIgZGlzYWJsZWFibGUgd2l0aCBhIGNsZWFyIGVycm9yLCBhbmQgZXhwb3NlIHRoZSB0b2dnbGVzIHRocm91Z2ggYWdlbnRzIGRhZW1vbiBzZXJ2aWNlcyBlbmFibGV8ZGlzYWJsZSA8c2VydmljZT4uCnN0YXR1czogYXBwcm92ZWQKdHJhY2tpbmc6IFJVU0gtWFhYWAotLS0KCiMjIFB1cnBvc2UKCmBhZ2VudHMgZGFlbW9uYCBhbHJlYWR5IGV4aXN0cyBvbiBgbWFpbmAgKFJVU0gtMjM1NCk6IGl0IGhhcyBgc3RhdHVzYCwgYHN0YXJ0YCwgYHN0b3BgLCBgcmVzdGFydGAsIGBlbmFibGVgLCBgZGlzYWJsZWAsIGByZWxvYWRgLCBgc2VydmljZXNgLCBgbG9nc2AsIGFuZCBgZG9jdG9yYC4gV2hhdCBpcyBtaXNzaW5nIGlzIGluZGVwZW5kZW50IGNvbnRyb2wgb2YgdGhlIHNlcnZpY2VzIHRoZSBkYWVtb24gaG9zdHMuCgpUaGUgZGFlbW9uIGN1cnJlbnRseSBydW5zIGFsbCBvZiB0aGVzZSB1bmNvbmRpdGlvbmFsbHk6CgotIHNlY3JldHMgYnJva2VyICgrIGJyb2tlciBzZWxmLWhlYWwpCi0gcm91dGluZXMgc2NoZWR1bGVyICsgY2F0Y2h1cAotIG1vbml0b3IgZW5naW5lCi0gYnJvd3NlciBJUEMgc2VydmVyCi0gc2VsZi1oZWFsIHJlZ2lzdHJ5Ci0ga2V5Y2hhaW4gcmVhcAotIGFjY291bnQtc3RhdGUgc2VydmljZSAodXNhZ2UgcmVmcmVzaCArIGZsZWV0LXN0YXR1cyBwdWJsaXNoKQotIHdhdGNoZG9nCi0gZGV2aWNlIHByb2JlCi0gc3RhdGUtZGlyIHNlbGYtY2hlY2sKCldoZW4gdGhlIHNlY3JldHMgYnJva2VyIG1pc2JlaGF2ZXMgYW5kIGNhdXNlcyBhIFRvdWNoIElEIHN0b3JtLCB0aGVyZSBpcyBubyBraWxsIHN3aXRjaC4gVGhpcyBjaGFuZ2UgYWRkcyBhIHBlci1zZXJ2aWNlIHRvZ2dsZSBzbyBhbnkgaG9zdGVkIHNlcnZpY2UgY2FuIGJlIGRpc2FibGVkLCBhbmQgY2FsbGVycyBnZXQgYSBjbGVhciBlcnJvciBpbnN0ZWFkIG9mIGEgc2lsZW50IGZhbGxiYWNrLgoKPGZpZ3VyZSBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlIGFydGlmYWN0LWZpZ3VyZS1kaWFncmFtIj4KPHN2ZyB2aWV3Qm94PSIwIDAgNzIwIDMyMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB4PSIyMCIgeT0iMjAiIHdpZHRoPSI2ODAiIGhlaWdodD0iMjgwIiByeD0iOCIgZmlsbD0iIzBhMGEwYSIgc3Ryb2tlPSIjMzMzIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSIzNjAiIHk9IjUyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZTVlNWU1IiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iYm9sZCI+UHJvcG9zZWQ6IGVhY2ggZGFlbW9uIHNlcnZpY2UgaXMgaW5kZXBlbmRlbnRseSB0b2dnbGVhYmxlPC90ZXh0PgogIDxyZWN0IHg9IjYwIiB5PSI5MCIgd2lkdGg9IjE4MCIgaGVpZ2h0PSI2MCIgcng9IjQiIGZpbGw9IiMxNDUzMmQiIHN0cm9rZT0iIzRhZGU4MCIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iMTUwIiB5PSIxMTUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNkY2ZjZTciIGZvbnQtc2l6ZT0iMTQiIGZvbnQtd2VpZ2h0PSJib2xkIj5zZXJ2aWNlcy55YW1sPC90ZXh0PgogIDx0ZXh0IHg9IjE1MCIgeT0iMTM4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjODZlZmFjIiBmb250LXNpemU9IjEyIj5+Ly5hZ2VudHMvZGFlbW9uLzwvdGV4dD4KICA8cG9seWdvbiBwb2ludHM9IjI1MCwxMjAgMjkwLDEyMCAyODAsMTEwIDI5MCwxMjAgMjgwLDEzMCIgZmlsbD0iI2EzZTYzNSIvPgogIDxsaW5lIHgxPSIyNDAiIHkxPSIxMjAiIHgyPSIyOTAiIHkyPSIxMjAiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHJlY3QgeD0iMzIwIiB5PSI5MCIgd2lkdGg9IjE4MCIgaGVpZ2h0PSI2MCIgcng9IjQiIGZpbGw9IiMxZTI5M2IiIHN0cm9rZT0iIzQ3NTU2OSIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgPHRleHQgeD0iNDEwIiB5PSIxMTUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNlMmU4ZjAiIGZvbnQtc2l6ZT0iMTQiIGZvbnQtd2VpZ2h0PSJib2xkIj5ydW5EYWVtb24oKTwvdGV4dD4KICA8dGV4dCB4PSI0MTAiIHk9IjEzOCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk0YTNiOCIgZm9udC1zaXplPSIxMiI+cmVhZCBjb25maWcsIGdhdGUgc2VydmljZXM8L3RleHQ+CiAgPGxpbmUgeDE9IjUwMCIgeTE9IjEyMCIgeDI9IjU1MCIgeTI9IjEyMCIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjIiLz4KICA8cG9seWdvbiBwb2ludHM9IjU1MCwxMjAgNTkwLDEyMCA1ODAsMTEwIDU5MCwxMjAgNTgwLDEzMCIgZmlsbD0iI2EzZTYzNSIvPgogIDxyZWN0IHg9IjYwMCIgeT0iOTAiIHdpZHRoPSI4MCIgaGVpZ2h0PSI2MCIgcng9IjQiIGZpbGw9IiMxZTI5M2IiIHN0cm9rZT0iIzQ3NTU2OSIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgPHRleHQgeD0iNjQwIiB5PSIxMjUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNlMmU4ZjAiIGZvbnQtc2l6ZT0iMTMiPlNlcnZpY2UgTjwvdGV4dD4KICA8cmVjdCB4PSIzMjAiIHk9IjE4MCIgd2lkdGg9IjM2MCIgaGVpZ2h0PSI5MCIgcng9IjQiIGZpbGw9IiMxZTI5M2IiIHN0cm9rZT0iIzQ3NTU2OSIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgPHRleHQgeD0iMzYwIiB5PSIyMTAiIGZpbGw9IiNlMmU4ZjAiIGZvbnQtc2l6ZT0iMTMiPkRpc2FibGVkIHNlcnZpY2UgcGF0aCAoZS5nLiBzZWNyZXRzLWJyb2tlcik8L3RleHQ+CiAgPHRleHQgeD0iMzYwIiB5PSIyMzUiIGZpbGw9IiNmY2E1YTUiIGZvbnQtc2l6ZT0iMTIiPkNhbGxlciBzZWVzOiAic2VjcmV0cyBicm9rZXIgaXMgZGlzYWJsZWQg4oCUPC90ZXh0PgogIDx0ZXh0IHg9IjM2MCIgeT0iMjU1IiBmaWxsPSIjZmNhNWE1IiBmb250LXNpemU9IjEyIj5yZS1lbmFibGUgd2l0aCAnYWdlbnRzIGRhZW1vbiBzZXJ2aWNlcyBlbmFibGUgc2VjcmV0cy1icm9rZXInIjwvdGV4dD4KPC9zdmc+CjxmaWdjYXB0aW9uPkZpZ3VyZSAxOiBDb25maWctZHJpdmVuIHNlcnZpY2UgZ2F0aW5nIGFuZCBjbGVhciBkaXNhYmxlZC1zZXJ2aWNlIGVycm9ycy48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKPHAgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQiPjxzdHJvbmc+TG9hZC1iZWFyaW5nIHRha2Vhd2F5Ojwvc3Ryb25nPiBEaXNhYmxpbmcgYSBzZXJ2aWNlIG11c3Qgc3RvcCB0aGUgZGFlbW9uIGZyb20gcnVubmluZyBpdCBhbmQgbXVzdCBtYWtlIGNhbGxlcnMgZmFpbCB3aXRoIGFuIGFjdGlvbmFibGUgbWVzc2FnZSDigJQgbmV2ZXIgc2lsZW50bHkgZmFsbCBiYWNrIHRvIFRvdWNoIElEIG9yIGFub3RoZXIgd29yc2UgcGF0aC48L3A+CgojIyBDdXJyZW50IHN0YXRlIChhZnRlciBwdWxsaW5nIGxhdGVzdCBtYWluKQoKLSBgYXBwcy9jbGkvc3JjL2NvbW1hbmRzL2RhZW1vbi50c2Ag4oCUIGZ1bGwgZGFlbW9uIGNvbW1hbmQgdHJlZSBhbHJlYWR5IGV4aXN0cy4KLSBgYXBwcy9jbGkvc3JjL2NvbW1hbmRzL2RhZW1vbi50ZXN0LnRzYCDigJQgdGVzdHMgZXhpc3QuCi0gYGFwcHMvY2xpL3NyYy9saWIvZGFlbW9uLnRzYCDigJQgYHJ1bkRhZW1vbigpYCBzdGFydHMgYWxsIHNlcnZpY2VzIHVuY29uZGl0aW9uYWxseS4KLSBgYXBwcy9jbGkvc3JjL2xpYi9kZXZpY2UtY29uZmlnLnRzYCDigJQgYGRhZW1vbi5lbmFibGVkYCBhbmQgYHNjaGVkdWxlci5lbmFibGVkYCBhbHJlYWR5IGV4aXN0IGFzIGRldmljZS1jb25maWcgZ2F0ZXMuCi0gUmVjZW50IHJlZmFjdG9yIGBkZDIwNDM4NDhgIChSVVNILTI0OTUpIHJlbW92ZWQgdGhlIG1haW50ZW5hbmNlLXJvdXRpbmUgbGF5ZXI7IHdhdGNoZG9nIGFuZCBkZXZpY2UtcHJvYmUgYXJlIG5vdyBwbGFpbiBkYWVtb24gdGltZXJzLgoKIyMgUHJvcG9zZWQgQ2hhbmdlcwoKIyMjIDEuIEFkZCBhIHNlcnZpY2UgY29uZmlnIGZpbGUgYW5kIGxvYWRlcgoKQ3JlYXRlIGBhcHBzL2NsaS9zcmMvbGliL2RhZW1vbi1zZXJ2aWNlcy50c2A6CgotIFN0YWJsZSBzZXJ2aWNlIElEcy4KLSBIdW1hbiB0aXRsZXMgKyBkZXNjcmlwdGlvbnMuCi0gQ29uZmlnIHBhdGg6IGB+Ly5hZ2VudHMvZGFlbW9uL3NlcnZpY2VzLnlhbWxgLgotIEhlbHBlcnM6IGByZWFkRGFlbW9uU2VydmljZXNDb25maWcoKWAsIGBpc0RhZW1vblNlcnZpY2VFbmFibGVkKGlkKWAsIGBzZXREYWVtb25TZXJ2aWNlRW5hYmxlZChpZCwgZW5hYmxlZClgLgoKSW5pdGlhbCBjYXRhbG9nIChhbGwgZGVmYXVsdCB0byBgdHJ1ZWApOgoKYGBgeWFtbApzZXJ2aWNlczoKICBzZWNyZXRzLWJyb2tlcjogdHJ1ZQogIHNjaGVkdWxlcjogdHJ1ZQogIG1vbml0b3JzOiB0cnVlCiAgYnJvd3Nlci1pcGM6IHRydWUKICBzZWxmLWhlYWw6IHRydWUKICBrZXljaGFpbi1yZWFwOiB0cnVlCiAgYWNjb3VudC1zdGF0ZTogdHJ1ZQogIHdhdGNoZG9nOiB0cnVlCiAgZGV2aWNlLXByb2JlOiB0cnVlCiAgc3RhdGUtZGlyLWNoZWNrOiB0cnVlCmBgYAoKT25seSBleHBsaWNpdCBgZmFsc2VgIGRpc2FibGVzLiBNaXNzaW5nIGZpbGUgb3IgbWlzc2luZyBrZXkgbWVhbnMgZW5hYmxlZC4KCiMjIyAyLiBFeHRlbmQgYGFnZW50cyBkYWVtb24gc2VydmljZXNgIHdpdGggZW5hYmxlL2Rpc2FibGUKCkFkZCBzdWJjb21tYW5kczoKCmBgYAphZ2VudHMgZGFlbW9uIHNlcnZpY2VzIGxpc3QgICAgICAgICAgICMgZXhpc3RpbmcgKyB0b2dnbGUgc3RhdGUKYWdlbnRzIGRhZW1vbiBzZXJ2aWNlcyBlbmFibGUgPGlkPgphZ2VudHMgZGFlbW9uIHNlcnZpY2VzIGRpc2FibGUgPGlkPgpgYGAKCktlZXAgYGFnZW50cyBkYWVtb24gc2VydmljZXNgIChubyBhcmdzKSBhcyB0aGUgaGVhbHRoLW9ubHkgdmlldy4KCiMjIyAzLiBHYXRlIHNlcnZpY2VzIGluc2lkZSBgcnVuRGFlbW9uKClgCgpSZWFkIHRoZSBzZXJ2aWNlIGNvbmZpZyBhdCBzdGFydHVwLiBGb3IgZWFjaCBkaXNhYmxlZCBzZXJ2aWNlOgoKLSBTa2lwIGl0cyBpbml0aWFsaXphdGlvbi4KLSBTa2lwIGl0cyB0aW1lci9pbnRlcnZhbC4KLSBTa2lwIGl0cyBzZWxmLWhlYWwgbG9vcC4KCk9uIGBTSUdIVVBgIHJlbG9hZCwgYXBwbHkgc2NoZWR1bGVyIGFuZCBzZWNyZXRzLWJyb2tlciB0b2dnbGVzIGltbWVkaWF0ZWx5IHdoZXJlIGZlYXNpYmxlOyBmb3Igb3RoZXIgc2VydmljZXMsIGxvZyB0aGF0IGEgcmVzdGFydCBpcyByZXF1aXJlZCB0byBhcHBseSBhIHRvZ2dsZSBjaGFuZ2UuCgojIyMgNC4gTWFrZSBzZWNyZXRzIGJyb2tlciBkaXNhYmxlbWVudCBmYWlsIGxvdWRseQoKV2hlbiBgc2VjcmV0cy1icm9rZXJgIGlzIGRpc2FibGVkOgoKLSBEYWVtb24gZG9lcyBub3QgY2FsbCBgc3RhcnRIb3N0ZWRCcm9rZXIoKWAgYW5kIGRvZXMgbm90IHJ1biBgcnVuQnJva2VyU2VsZkhlYWwoKWAuCi0gVGhlIHNlY3JldHMgZmFzdC1wYXRoIGNsaWVudCByZWFkcyB0aGUgc2VydmljZSBjb25maWcuIElmIGRpc2FibGVkLCBpdCByZXR1cm5zIGEgZGlzYWJsZWQgdmVyZGljdC4KLSBgYWdlbnRzIHNlY3JldHNgIGNvbW1hbmRzIHN1cmZhY2U6IGBTZWNyZXRzIGJyb2tlciBpcyBkaXNhYmxlZCDigJQgcmUtZW5hYmxlIHdpdGggJ2FnZW50cyBkYWVtb24gc2VydmljZXMgZW5hYmxlIHNlY3JldHMtYnJva2VyJ2AuCi0gVGhpcyBwcmV2ZW50cyB0aGUgVG91Y2ggSUQgZmFsbGJhY2sgc3Rvcm0uCgojIyBQdWJsaWMgSW50ZXJmYWNlCgojIyMgTmV3IGNvbW1hbmRzCgp8IENvbW1hbmQgfCBCZWhhdmlvciB8CnwtLS18LS0tfAp8IGBhZ2VudHMgZGFlbW9uIHNlcnZpY2VzIGxpc3RgIHwgTGlzdHMgZXZlcnkgaG9zdGVkIHNlcnZpY2UsIGl0cyBlbmFibGVkL2Rpc2FibGVkIHN0YXRlLCBhbmQgZGVzY3JpcHRpb24uIHwKfCBgYWdlbnRzIGRhZW1vbiBzZXJ2aWNlcyBlbmFibGUgPGlkPmAgfCBFbmFibGVzIGEgc2VydmljZS4gfAp8IGBhZ2VudHMgZGFlbW9uIHNlcnZpY2VzIGRpc2FibGUgPGlkPmAgfCBEaXNhYmxlcyBhIHNlcnZpY2UuIHwKCiMjIyBDb25maWcgZmlsZQoKYH4vLmFnZW50cy9kYWVtb24vc2VydmljZXMueWFtbGAgaG9sZHMgcGVyLXNlcnZpY2UgYm9vbGVhbnMuCgojIyMgRGlzYWJsZWQtc2VydmljZSBlcnJvcgoKRm9yIHNlY3JldHMgYnJva2VyIHNwZWNpZmljYWxseToKCmBgYApTZWNyZXRzIGJyb2tlciBpcyBkaXNhYmxlZCDigJQgcmUtZW5hYmxlIHdpdGggJ2FnZW50cyBkYWVtb24gc2VydmljZXMgZW5hYmxlIHNlY3JldHMtYnJva2VyJwpgYGAKCiMjIFZhbGlkYXRpb24KCi0gVW5pdCB0ZXN0cyBmb3IgYGxpYi9kYWVtb24tc2VydmljZXMudHNgOiBkZWZhdWx0cywgcmVhZC93cml0ZSB0b2dnbGVzLCB1bmtub3duIElEcyBpZ25vcmVkLgotIFRlc3RzIGZvciBgYWdlbnRzIGRhZW1vbiBzZXJ2aWNlcyBsaXN0fGVuYWJsZXxkaXNhYmxlYC4KLSBUZXN0IHRoYXQgZGlzYWJsaW5nIGBzZWNyZXRzLWJyb2tlcmAgbWFrZXMgYGFnZW50cyBzZWNyZXRzYCBmYWlsIHdpdGggdGhlIGV4cGVjdGVkIG1lc3NhZ2UuCi0gRXhpc3RpbmcgYGRhZW1vbi50ZXN0LnRzYCBhbmQgYHJvdXRpbmVzLnRlc3QudHNgIHN0aWxsIHBhc3MuCi0gUnVuIGBidW4gcnVuIHRlc3Q6cmVtb3RlYCBvciBsb2NhbCBzdWl0ZSBhbmQgZml4IGZhaWx1cmVzLgoKIyMgUmlza3MKCnwgUmlzayB8IE1pdGlnYXRpb24gfAp8LS0tfC0tLXwKfCBBIHNlcnZpY2UgaXMgYWNjaWRlbnRhbGx5IGRpc2FibGVkIGJ5IGRlZmF1bHQuIHwgRGVmYXVsdCBldmVyeSBrbm93biBzZXJ2aWNlIHRvIGB0cnVlYDsgb25seSBleHBsaWNpdCBgZmFsc2VgIGRpc2FibGVzLiB8CnwgU2VjcmV0cyBicm9rZXIgZGlzYWJsZWQgc3RhdGUgbGVha3MgdG8gbm9uLWRhZW1vbiBwYXRocy4gfCBDaGVjayBjb25maWcgaW5zaWRlIGBlbnN1cmVBZ2VudFJ1bm5pbmcoKWA7IGFsaWduIHdpdGggYEFHRU5UU19TRUNSRVRTX05PX0FHRU5UPTFgLiB8CnwgYF9fZGFlbW9uLXJ1bmAgYmVoYXZpb3IgY2hhbmdlcy4gfCBPbmx5IGdhdGUgd2hhdCBoYXBwZW5zIGFmdGVyIGBydW5EYWVtb24oKWAgc3RhcnRzLiB8CnwgU2luZ2xlLWluc3RhbmNlIGd1YXJhbnRlZSBicmVha3MuIHwgRG8gbm90IHRvdWNoIGBjbGFpbURhZW1vbkluc3RhbmNlKClgLCBsb2NrcywgcGlkIGZpbGUsIG9yIGhlYXJ0YmVhdCBsb2dpYy4gfAp8IFdhdGNoZG9nL2RldmljZS1wcm9iZSB0b2dnbGUgY29uZnVzaW9uIHdpdGggZXhpc3RpbmcgZGV2aWNlLWNvbmZpZyBmbGFncy4gfCBLZWVwIGV4aXN0aW5nIGB3YXRjaGRvZy5lbmFibGVkYCBhcyB0aGUgYWN0aXZpdHkgZ2F0ZTsgdGhlIHNlcnZpY2UgdG9nZ2xlIGNvbnRyb2xzIHdoZXRoZXIgdGhlIHRpbWVyIHJ1bnMgYXQgYWxsLiB8CgojIyBUcmFja2luZwoKLSBbIF0gQWRkIGBnZXREYWVtb25Db25maWdEaXIoKWAgcGF0aCBoZWxwZXIgaW4gYHN0YXRlLnRzYC4KLSBbIF0gQ3JlYXRlIGBsaWIvZGFlbW9uLXNlcnZpY2VzLnRzYCBjYXRhbG9nICsgY29uZmlnIGxvYWRlci4KLSBbIF0gRXh0ZW5kIGBjb21tYW5kcy9kYWVtb24udHNgIHdpdGggYHNlcnZpY2VzIGVuYWJsZXxkaXNhYmxlfGxpc3RgLgotIFsgXSBHYXRlIHNlcnZpY2VzIGluIGBydW5EYWVtb24oKWAuCi0gWyBdIFdpcmUgc2VjcmV0cy1icm9rZXIgZGlzYWJsZWQgY2hlY2sgaW50byBgbGliL3NlY3JldHMvYWdlbnQudHNgIGFuZCBgY29tbWFuZHMvc2VjcmV0cy50c2AuCi0gWyBdIFVwZGF0ZSB0ZXN0cy4KLSBbIF0gVXBkYXRlIGRvY3MgYW5kIENIQU5HRUxPRy4KLSBbIF0gUnVuIHRlc3RzIGFuZCB2ZXJpZnkuCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
