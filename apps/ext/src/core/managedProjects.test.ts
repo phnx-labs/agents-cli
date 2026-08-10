@@ -88,6 +88,37 @@ describe('defToManaged', () => {
     expect(m.id).toBe('');
     expect(m.name).toBe('');
   });
+
+  test('dirs: root comes first, then each repos[].path with its subpath joined in', () => {
+    const m = defToManaged({
+      name: 'rush',
+      root: '~/src/rush',
+      repos: [
+        { slug: 'phnx-labs/rush' }, // no path — no dir of its own (see project-repo.ts docblock)
+        { slug: 'phnx-labs/rush-web', path: '~/src/rush-web' },
+        { slug: 'phnx-labs/rush-api', path: '~/src/rush-api', subpath: 'apps/api' },
+      ],
+    });
+    expect(m.dirs).toEqual([
+      { slug: 'phnx-labs/rush', path: path.join(HOME, 'src/rush') },
+      { slug: 'phnx-labs/rush-web', path: path.join(HOME, 'src/rush-web') },
+      { slug: 'phnx-labs/rush-api', path: path.join(HOME, 'src/rush-api/apps/api') },
+    ]);
+  });
+
+  test('dirs: a repos[].path that resolves to the same absolute path as root is deduped', () => {
+    const m = defToManaged({
+      name: 'rush',
+      root: '~/src/rush',
+      repos: [{ slug: 'phnx-labs/rush', path: '~/src/rush' }],
+    });
+    expect(m.dirs).toEqual([{ slug: 'phnx-labs/rush', path: path.join(HOME, 'src/rush') }]);
+  });
+
+  test('dirs: no root/defaultPath yields only the repos[].path entries', () => {
+    const m = defToManaged({ name: 'rush', repos: [{ slug: 'phnx-labs/rush', path: '~/src/rush' }] });
+    expect(m.dirs).toEqual([{ slug: 'phnx-labs/rush', path: path.join(HOME, 'src/rush') }]);
+  });
 });
 
 describe('managedToProjectDef', () => {
