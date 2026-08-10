@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync, existsSync } from 'fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import simpleGit from 'simple-git';
@@ -65,22 +65,36 @@ describe('pullRepo', () => {
     expect(after).toBe(before);
   });
 
-  it('refuses to pull when working tree has uncommitted changes', async () => {
-    // Create a dirty working tree
+  // REVERSED deliberately. These asserted that ANY dirt refuses the pull — the
+  // behavior that stranded merged changes on every box carrying an unrelated
+  // local edit (a modified agents.yaml, a machine-local dotfile). pullRepo now
+  // shares `dirtyTreeRefusal` with syncRepoGit: it fast-forwards past dirt the
+  // incoming commits do not touch, and refuses only when they do.
+  it('pulls past uncommitted changes the incoming commits do not touch', async () => {
     writeFileSync(join(LOCAL_DIR, 'dirty.txt'), 'uncommitted change');
 
     const result = await pullRepo(LOCAL_DIR);
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('Blocked by local changes');
+
+    expect(result.success).toBe(true);
+    // The unrelated local work survives the pull.
+    expect(readFileSync(join(LOCAL_DIR, 'dirty.txt'), 'utf8')).toBe('uncommitted change');
   });
 
-  it('refuses to pull when tracked files are modified', async () => {
-    // Modify a tracked file
+  it('refuses when an incoming commit touches the modified tracked file', async () => {
+    // Upstream edits README.md ...
+    writeFileSync(join(REMOTE_DIR, 'README.md'), '# Upstream edit\n');
+    const remoteGit = simpleGit(REMOTE_DIR);
+    await remoteGit.add('.');
+    await remoteGit.commit('upstream edits README');
+    // ... and so does the local tree, uncommitted.
     writeFileSync(join(LOCAL_DIR, 'README.md'), '# Modified');
 
     const result = await pullRepo(LOCAL_DIR);
+
     expect(result.success).toBe(false);
     expect(result.error).toContain('Blocked by local changes');
+    expect(result.error).toContain('README.md');
+    expect(readFileSync(join(LOCAL_DIR, 'README.md'), 'utf8')).toBe('# Modified');
   });
 
   // REVERSED deliberately (RUSH-2056). This asserted that divergence alone
