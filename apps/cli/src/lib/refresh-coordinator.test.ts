@@ -21,7 +21,7 @@ describe('withRefreshLease', () => {
     const worker = path.join(import.meta.dirname, 'testdata', 'refresh-coordinator-worker.ts');
 
     await Promise.all(Array.from({ length: 4 }, () => new Promise<void>((resolve, reject) => {
-      const child = spawn(process.execPath, [worker, dir, resultPath, countPath, 'claude:account-a'], { stdio: 'pipe' });
+      const child = spawn(process.execPath, ['--import', 'tsx', worker, dir, resultPath, countPath, 'claude:account-a'], { stdio: 'pipe' });
       let stderr = '';
       child.stderr.on('data', (chunk) => { stderr += String(chunk); });
       child.on('error', reject);
