@@ -716,7 +716,7 @@
         },
         {
           "flags": "--module <name>",
-          "description": "Only events from this group (e.g. teams, secrets, activity, daemon, browser)",
+          "description": "Only events from this group (e.g. teams, secrets, activity, daemon, routine, watchdog, browser)",
           "long": "--module",
           "required": true,
           "optional": false,
@@ -7954,7 +7954,7 @@
         },
         {
           "flags": "--module <name>",
-          "description": "Only events from this group (e.g. teams, secrets, activity, daemon, browser)",
+          "description": "Only events from this group (e.g. teams, secrets, activity, daemon, routine, watchdog, browser)",
           "long": "--module",
           "required": true,
           "optional": false,
@@ -10940,7 +10940,7 @@
         },
         {
           "flags": "--module <name>",
-          "description": "Only events from this group (e.g. teams, secrets, activity, daemon, browser)",
+          "description": "Only events from this group (e.g. teams, secrets, activity, daemon, routine, watchdog, browser)",
           "long": "--module",
           "required": true,
           "optional": false,
@@ -11097,7 +11097,7 @@
             },
             {
               "flags": "--module <name>",
-              "description": "Only events from this group (e.g. teams, secrets, activity, daemon, browser)",
+              "description": "Only events from this group (e.g. teams, secrets, activity, daemon, routine, watchdog, browser)",
               "long": "--module",
               "required": true,
               "optional": false,

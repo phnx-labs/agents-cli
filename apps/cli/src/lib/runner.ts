@@ -42,7 +42,7 @@ import type { AgentId } from './types.js';
 import { shortCodexHome } from './codex-home.js';
 import { prepareJobHome, buildSpawnEnv, getJobHomePath } from './sandbox.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
-import { createTimer, redactPrompt } from './events.js';
+import { createTimer, redactPrompt, emitRoutineEnd } from './events.js';
 import { codexEditWritableRoots, codexPolicyArgs } from './codex-policy.js';
 import {
   normalizeMode,
@@ -1830,10 +1830,12 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
     const target = resolvePlacementTarget(config);
     if (target.mode === 'host') {
       const { meta } = await executeJobOnHost({ ...config, host: target.host }, { detached: true }, attempt);
+      if (meta.status !== 'running') emitRoutineEnd(meta);
       return meta;
     }
     if (target.mode === 'cloud') {
       const { meta } = await executeJobOnCloud(config, { detached: true }, attempt);
+      if (meta.status !== 'running') emitRoutineEnd(meta);
       return meta;
     }
   }
@@ -2255,6 +2257,7 @@ function finalizeHostRun(meta: RunMeta): void {
       { completedAt: healed.finishedAt ?? undefined },
     );
     writeRunMeta(meta);
+    emitRoutineEnd(meta);
   } catch { /* unreachable host or unreadable sidecar — retry next sweep */ }
 }
 
@@ -2351,6 +2354,7 @@ export function monitorRunningJobs(): void {
           terminateRoutineTree(meta.pid);
           finalizeRunMeta(meta, 'timeout', null, { errorMessage: 'exceeded configured timeout' });
           writeRunMeta(meta);
+          emitRoutineEnd(meta);
           if (!isCommandRun) {
             extractAndSaveReport(stdoutPath, meta.agent!, runDirPath);
             archiveRoutineTranscripts(meta, runDirPath);
@@ -2376,6 +2380,7 @@ export function monitorRunningJobs(): void {
             }
           }
           writeRunMeta(meta);
+          emitRoutineEnd(meta);
 
           if (!isCommandRun) {
             extractAndSaveReport(stdoutPath, meta.agent!, runDirPath);
