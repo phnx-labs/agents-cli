@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Unified accounts launch audit</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span><span class="status-badge status-verified-with-gaps">verified-with-gaps</span></div>
+<h1>Unified accounts launch audit</h1>
+
+<div class="meta" aria-label="Artifact metadata"><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">unified-accounts-durable</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Codex root</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s1</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">019fe983-21b5-7c33-aafc-8ed0cb556c0d</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-09</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a href="#findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a href="#evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a><a href="#scope-and-migration"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Scope and migration</a><a href="#ship-state"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Ship state</a></nav><article class="artifact-body"><h1>Unified accounts launch audit</h1>
+<h2 id="summary">Summary</h2>
+<p>The original account-label design was not launched. This implementation replaces it with durable credential accounts: a person creates a named API key, Anthropic setup token, or bearer token once, then attaches that stable account identity to native agents, custom harnesses, profiles, and routines.</p>
+<blockquote>
+<p><strong>Verdict:</strong> The corrected account model works end-to-end for Anthropic setup tokens and for one OpenRouter API-key account reused by both Claude and OpenCode. Account rename and key rotation preserve the stable account ID. A missing device-local credential fails before an agent starts. Cursor API-key wiring is implemented but could not be live-tested because no Cursor API key was available on the three devices checked. Codex with an existing ChatGPT OAuth login rejected the third-party model; that path is not counted as verified.</p>
+</blockquote>
+<h2 id="findings">Findings</h2>
+<h3>Public interface</h3>
+<pre><code>agents accounts
+agents accounts add &lt;name&gt; --provider &lt;provider&gt; \
+  --auth &lt;api-key|setup-token|bearer-token&gt; \
+  [--from-secrets bundle:key]
+agents accounts set-key &lt;name&gt; [--from-secrets bundle:key]
+agents accounts inspect &lt;name&gt; [--json]
+agents accounts rename &lt;old&gt; &lt;new&gt;
+agents accounts remove &lt;name&gt;
+
+agents run &lt;agent&gt; --account &lt;name&gt;
+agents harness add &lt;name&gt; --host &lt;agent&gt; --model &lt;model&gt; --account &lt;name&gt;
+</code></pre>
+<p>There is no <code>accounts name ... --from claude@version</code> command. Native OAuth remains owned by each harness; <code>accounts</code> is for explicit long-lived credentials.</p>
+<h3>What is stored</h3>
+<svg viewBox="0 0 980 270" role="img" aria-label="Account metadata and device keychain flow" xmlns="http://www.w3.org/2000/svg">
+  <rect x="20" y="30" width="260" height="190" rx="18" fill="#111827" stroke="#a3e635" stroke-width="3"></rect>
+  <text x="45" y="70" fill="#a3e635" font-size="22" font-family="monospace">accounts.yaml</text>
+  <text x="45" y="110" fill="#f8fafc" font-size="18" font-family="sans-serif">stable UUID</text>
+  <text x="45" y="140" fill="#f8fafc" font-size="18" font-family="sans-serif">name + provider</text>
+  <text x="45" y="170" fill="#f8fafc" font-size="18" font-family="sans-serif">auth type + secret ref</text>
+  <text x="45" y="200" fill="#94a3b8" font-size="16" font-family="sans-serif">never the credential bytes</text>
+  <path d="M290 125 H430" stroke="#a3e635" stroke-width="4" marker-end="url(#arrow)"></path>
+  <rect x="440" y="30" width="220" height="190" rx="18" fill="#111827" stroke="#38bdf8" stroke-width="3"></rect>
+  <text x="468" y="70" fill="#38bdf8" font-size="22" font-family="monospace">device store</text>
+  <text x="468" y="118" fill="#f8fafc" font-size="18" font-family="sans-serif">encrypted credential</text>
+  <text x="468" y="150" fill="#f8fafc" font-size="18" font-family="sans-serif">keyed by stable UUID</text>
+  <text x="468" y="190" fill="#94a3b8" font-size="16" font-family="sans-serif">device-local by design</text>
+  <path d="M670 125 H790" stroke="#38bdf8" stroke-width="4" marker-end="url(#arrow)"></path>
+  <rect x="800" y="30" width="160" height="190" rx="18" fill="#111827" stroke="#f8fafc" stroke-width="3"></rect>
+  <text x="825" y="75" fill="#f8fafc" font-size="21" font-family="monospace">agent run</text>
+  <text x="825" y="120" fill="#f8fafc" font-size="18" font-family="sans-serif">Claude</text>
+  <text x="825" y="150" fill="#f8fafc" font-size="18" font-family="sans-serif">OpenCode</text>
+  <text x="825" y="180" fill="#f8fafc" font-size="18" font-family="sans-serif">Cursor</text>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#a3e635"></path></marker></defs>
+</svg><p>Profiles store the account's stable UUID, not its display name. Renaming an account therefore changes what users see without breaking attachments. <code>set-key</code> rotates credential bytes under the same identity.</p>
+<h2 id="evidence">Evidence</h2>
+<p><img src="https://share.agents-cli.sh/muqsitnawaz/agents-cli-unified-accounts-report-e49710fa0e0a6fa8" alt="Rendered launch-audit overview" /></p>
+<p>This screenshot was captured from the rendered report in headless Chrome on zion after the live CLI runs below completed.</p>
+<h3>Installed CLI results</h3>
+<p>Installed artifact under test:</p>
+<pre><code>/home/muqsit/.local/bin/agents
+0.0.0-dev.a6ed79873-dirty
+</code></pre>
+<h3>One API-key account, two agent types</h3>
+<pre><code>$ agents run claude "Reply with exactly NATIVE_ACCOUNT_OK" \
+    --account openrouter-primary --model qwen/qwen3-coder-next --mode plan
+NATIVE_ACCOUNT_OK
+
+$ agents run opencode@1.16.0 "Reply with exactly NATIVE_OPENCODE_ACCOUNT_OK" \
+    --account openrouter-primary --model openrouter/qwen/qwen3-coder-next --mode plan
+NATIVE_OPENCODE_ACCOUNT_OK
+</code></pre>
+<p>The account adapter supplied the host-specific key variable. For Claude it also supplied OpenRouter's Anthropic-compatible base URL; OpenCode selected the OpenRouter provider from the model identifier.</p>
+<h3>Setup token</h3>
+<pre><code>$ agents run claude ... --account claude-automation
+SETUP_TOKEN_OK
+</code></pre>
+<p>Anthropic setup tokens are validated for the <code>sk-ant-oat01-</code> shape and injected as <code>CLAUDE_CODE_OAUTH_TOKEN</code> only for Claude.</p>
+<h3>Rename and rotation preserve identity</h3>
+<pre><code>$ agents accounts rename openrouter-primary openrouter-renamed
+$ agents harness view account-proof-claude
+Account:  openrouter-renamed
+$ agents accounts rename openrouter-renamed openrouter-primary
+stable_id=true
+
+$ agents accounts set-key openrouter-primary --from-secrets openrouter.ai:OPENROUTER_API_KEY
+ROTATION_STABLE_OK
+</code></pre>
+<h3>Missing credential fails before spawn</h3>
+<pre><code>$ agents run account-proof-claude "Reply with exactly SHOULD_NOT_START" --mode plan
+Credential for account 'openrouter-primary' is missing on this device.
+Add it with 'agents accounts set-key openrouter-primary'.
+exit code: 1
+</code></pre>
+<h3>Verification matrix</h3>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Result</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>API key account creation/import</td>
+<td>Pass</td>
+<td>Safe metadata inspection reports <code>secretPresent: true</code>; raw key is absent from YAML</td>
+</tr>
+<tr>
+<td>One account → Claude</td>
+<td>Pass</td>
+<td><code>NATIVE_ACCOUNT_OK</code></td>
+</tr>
+<tr>
+<td>Same account → OpenCode</td>
+<td>Pass</td>
+<td><code>NATIVE_OPENCODE_ACCOUNT_OK</code></td>
+</tr>
+<tr>
+<td>Anthropic setup token → Claude</td>
+<td>Pass</td>
+<td><code>SETUP_TOKEN_OK</code></td>
+</tr>
+<tr>
+<td>Key rotation, stable identity</td>
+<td>Pass</td>
+<td>ID unchanged; post-rotation run returned <code>ROTATION_STABLE_OK</code></td>
+</tr>
+<tr>
+<td>Rename, stable harness attachment</td>
+<td>Pass</td>
+<td>Harness immediately displayed the new name; ID unchanged</td>
+</tr>
+<tr>
+<td>Missing credential on another device/home</td>
+<td>Pass</td>
+<td>Exit 1 before spawn with exact <code>set-key</code> recovery command</td>
+</tr>
+<tr>
+<td>Legacy version labels</td>
+<td>Pass</td>
+<td>Old v1 file is recoverably archived as <code>accounts.legacy-labels.yaml</code>; no false credential account is fabricated</td>
+</tr>
+<tr>
+<td>Targeted tests</td>
+<td>Pass</td>
+<td>73/73 account, command, harness, and runner tests; 54/54 wizard/harness tests</td>
+</tr>
+<tr>
+<td>Cursor API key</td>
+<td>Unverified</td>
+<td>Adapter and CLI path implemented; no Cursor key existed locally, on zion, or on mac-mini during the audit</td>
+</tr>
+<tr>
+<td>Codex + OpenRouter account while ChatGPT OAuth is active</td>
+<td>Failed</td>
+<td>Codex chose its ChatGPT auth and rejected the third-party model with HTTP 400; not counted as supported live proof</td>
+</tr>
+<tr>
+<td>Independent staging-key chat</td>
+<td>Failed</td>
+<td>Key authenticated against OpenRouter's models API, but the Claude chat run hung; primary key was restored</td>
+</tr>
+</tbody></table>
+<h2 id="scope-and-migration">Scope and migration</h2>
+<ul>
+<li>Legacy <code>agents harness ... --auth-provider/--from-secrets</code> flags now fail with the concrete replacement: create an account, then pass <code>--account</code>.</li>
+<li>The interactive harness wizard selects an existing compatible account instead of copying credentials into a harness.</li>
+<li>Existing profile-owned credentials migrate on first resolution into a stable account, then the profile stores the account ID.</li>
+<li><code>agents update --account</code> was removed because installation labels and credential accounts are different concepts.</li>
+<li>Local and routine launches resolve the credential before spawn. Remote/cloud/lease account forwarding is rejected because credentials are device-local; the destination must have the same account credential installed.</li>
+</ul>
+<h2 id="ship-state">Ship state</h2>
+<p>The implementation and this report are prepared on the <code>unified-accounts-durable</code> worktree for RUSH-2402. The evidence above is from the installed development build, not a released npm package. The <code>agents-cli</code> release train owns publishing after merge.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0aXRsZTogVW5pZmllZCBhY2NvdW50cyBsYXVuY2ggYXVkaXQKc3VidGl0bGU6IER1cmFibGUgY3JlZGVudGlhbHMgYXR0YWNoZWQgdG8gYWdlbnQgdHlwZXMsIHZlcmlmaWVkIGFnYWluc3QgdGhlIGluc3RhbGxlZCBkZXZlbG9wbWVudCBDTEkKc3RhdHVzOiB2ZXJpZmllZC13aXRoLWdhcHMKZGF0ZTogMjAyNi0wOC0wOQpwcm9qZWN0OiBhZ2VudHMtY2xpCnJlcG9zaXRvcnk6IHBobngtbGFicy9hZ2VudHMtY2xpCmhhcm5lc3M6IGNvZGV4CmFnZW50OiByb290Cmhvc3Q6IHlvc2VtaXRlLXMxCnNlc3Npb246IDAxOWZlOTgzLTIxYjUtN2MzMy1hYWZjLThlZDBjYjU1NmMwZAotLS0KCiMgVW5pZmllZCBhY2NvdW50cyBsYXVuY2ggYXVkaXQKCiMjIFN1bW1hcnkKClRoZSBvcmlnaW5hbCBhY2NvdW50LWxhYmVsIGRlc2lnbiB3YXMgbm90IGxhdW5jaGVkLiBUaGlzIGltcGxlbWVudGF0aW9uIHJlcGxhY2VzIGl0IHdpdGggZHVyYWJsZSBjcmVkZW50aWFsIGFjY291bnRzOiBhIHBlcnNvbiBjcmVhdGVzIGEgbmFtZWQgQVBJIGtleSwgQW50aHJvcGljIHNldHVwIHRva2VuLCBvciBiZWFyZXIgdG9rZW4gb25jZSwgdGhlbiBhdHRhY2hlcyB0aGF0IHN0YWJsZSBhY2NvdW50IGlkZW50aXR5IHRvIG5hdGl2ZSBhZ2VudHMsIGN1c3RvbSBoYXJuZXNzZXMsIHByb2ZpbGVzLCBhbmQgcm91dGluZXMuCgo+ICoqVmVyZGljdDoqKiBUaGUgY29ycmVjdGVkIGFjY291bnQgbW9kZWwgd29ya3MgZW5kLXRvLWVuZCBmb3IgQW50aHJvcGljIHNldHVwIHRva2VucyBhbmQgZm9yIG9uZSBPcGVuUm91dGVyIEFQSS1rZXkgYWNjb3VudCByZXVzZWQgYnkgYm90aCBDbGF1ZGUgYW5kIE9wZW5Db2RlLiBBY2NvdW50IHJlbmFtZSBhbmQga2V5IHJvdGF0aW9uIHByZXNlcnZlIHRoZSBzdGFibGUgYWNjb3VudCBJRC4gQSBtaXNzaW5nIGRldmljZS1sb2NhbCBjcmVkZW50aWFsIGZhaWxzIGJlZm9yZSBhbiBhZ2VudCBzdGFydHMuIEN1cnNvciBBUEkta2V5IHdpcmluZyBpcyBpbXBsZW1lbnRlZCBidXQgY291bGQgbm90IGJlIGxpdmUtdGVzdGVkIGJlY2F1c2Ugbm8gQ3Vyc29yIEFQSSBrZXkgd2FzIGF2YWlsYWJsZSBvbiB0aGUgdGhyZWUgZGV2aWNlcyBjaGVja2VkLiBDb2RleCB3aXRoIGFuIGV4aXN0aW5nIENoYXRHUFQgT0F1dGggbG9naW4gcmVqZWN0ZWQgdGhlIHRoaXJkLXBhcnR5IG1vZGVsOyB0aGF0IHBhdGggaXMgbm90IGNvdW50ZWQgYXMgdmVyaWZpZWQuCgojIyBGaW5kaW5ncwoKIyMjIFB1YmxpYyBpbnRlcmZhY2UKCmBgYHNoCmFnZW50cyBhY2NvdW50cwphZ2VudHMgYWNjb3VudHMgYWRkIDxuYW1lPiAtLXByb3ZpZGVyIDxwcm92aWRlcj4gXAogIC0tYXV0aCA8YXBpLWtleXxzZXR1cC10b2tlbnxiZWFyZXItdG9rZW4+IFwKICBbLS1mcm9tLXNlY3JldHMgYnVuZGxlOmtleV0KYWdlbnRzIGFjY291bnRzIHNldC1rZXkgPG5hbWU+IFstLWZyb20tc2VjcmV0cyBidW5kbGU6a2V5XQphZ2VudHMgYWNjb3VudHMgaW5zcGVjdCA8bmFtZT4gWy0tanNvbl0KYWdlbnRzIGFjY291bnRzIHJlbmFtZSA8b2xkPiA8bmV3PgphZ2VudHMgYWNjb3VudHMgcmVtb3ZlIDxuYW1lPgoKYWdlbnRzIHJ1biA8YWdlbnQ+IC0tYWNjb3VudCA8bmFtZT4KYWdlbnRzIGhhcm5lc3MgYWRkIDxuYW1lPiAtLWhvc3QgPGFnZW50PiAtLW1vZGVsIDxtb2RlbD4gLS1hY2NvdW50IDxuYW1lPgpgYGAKClRoZXJlIGlzIG5vIGBhY2NvdW50cyBuYW1lIC4uLiAtLWZyb20gY2xhdWRlQHZlcnNpb25gIGNvbW1hbmQuIE5hdGl2ZSBPQXV0aCByZW1haW5zIG93bmVkIGJ5IGVhY2ggaGFybmVzczsgYGFjY291bnRzYCBpcyBmb3IgZXhwbGljaXQgbG9uZy1saXZlZCBjcmVkZW50aWFscy4KCiMjIyBXaGF0IGlzIHN0b3JlZAoKPHN2ZyB2aWV3Qm94PSIwIDAgOTgwIDI3MCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJBY2NvdW50IG1ldGFkYXRhIGFuZCBkZXZpY2Uga2V5Y2hhaW4gZmxvdyIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB4PSIyMCIgeT0iMzAiIHdpZHRoPSIyNjAiIGhlaWdodD0iMTkwIiByeD0iMTgiIGZpbGw9IiMxMTE4MjciIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIzIi8+CiAgPHRleHQgeD0iNDUiIHk9IjcwIiBmaWxsPSIjYTNlNjM1IiBmb250LXNpemU9IjIyIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIj5hY2NvdW50cy55YW1sPC90ZXh0PgogIDx0ZXh0IHg9IjQ1IiB5PSIxMTAiIGZpbGw9IiNmOGZhZmMiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIj5zdGFibGUgVVVJRDwvdGV4dD4KICA8dGV4dCB4PSI0NSIgeT0iMTQwIiBmaWxsPSIjZjhmYWZjIiBmb250LXNpemU9IjE4IiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiI+bmFtZSArIHByb3ZpZGVyPC90ZXh0PgogIDx0ZXh0IHg9IjQ1IiB5PSIxNzAiIGZpbGw9IiNmOGZhZmMiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIj5hdXRoIHR5cGUgKyBzZWNyZXQgcmVmPC90ZXh0PgogIDx0ZXh0IHg9IjQ1IiB5PSIyMDAiIGZpbGw9IiM5NGEzYjgiIGZvbnQtc2l6ZT0iMTYiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIj5uZXZlciB0aGUgY3JlZGVudGlhbCBieXRlczwvdGV4dD4KICA8cGF0aCBkPSJNMjkwIDEyNSBINDMwIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iNCIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiLz4KICA8cmVjdCB4PSI0NDAiIHk9IjMwIiB3aWR0aD0iMjIwIiBoZWlnaHQ9IjE5MCIgcng9IjE4IiBmaWxsPSIjMTExODI3IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMyIvPgogIDx0ZXh0IHg9IjQ2OCIgeT0iNzAiIGZpbGw9IiMzOGJkZjgiIGZvbnQtc2l6ZT0iMjIiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiPmRldmljZSBzdG9yZTwvdGV4dD4KICA8dGV4dCB4PSI0NjgiIHk9IjExOCIgZmlsbD0iI2Y4ZmFmYyIgZm9udC1zaXplPSIxOCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiPmVuY3J5cHRlZCBjcmVkZW50aWFsPC90ZXh0PgogIDx0ZXh0IHg9IjQ2OCIgeT0iMTUwIiBmaWxsPSIjZjhmYWZjIiBmb250LXNpemU9IjE4IiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiI+a2V5ZWQgYnkgc3RhYmxlIFVVSUQ8L3RleHQ+CiAgPHRleHQgeD0iNDY4IiB5PSIxOTAiIGZpbGw9IiM5NGEzYjgiIGZvbnQtc2l6ZT0iMTYiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIj5kZXZpY2UtbG9jYWwgYnkgZGVzaWduPC90ZXh0PgogIDxwYXRoIGQ9Ik02NzAgMTI1IEg3OTAiIHN0cm9rZT0iIzM4YmRmOCIgc3Ryb2tlLXdpZHRoPSI0IiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPgogIDxyZWN0IHg9IjgwMCIgeT0iMzAiIHdpZHRoPSIxNjAiIGhlaWdodD0iMTkwIiByeD0iMTgiIGZpbGw9IiMxMTE4MjciIHN0cm9rZT0iI2Y4ZmFmYyIgc3Ryb2tlLXdpZHRoPSIzIi8+CiAgPHRleHQgeD0iODI1IiB5PSI3NSIgZmlsbD0iI2Y4ZmFmYyIgZm9udC1zaXplPSIyMSIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSI+YWdlbnQgcnVuPC90ZXh0PgogIDx0ZXh0IHg9IjgyNSIgeT0iMTIwIiBmaWxsPSIjZjhmYWZjIiBmb250LXNpemU9IjE4IiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiI+Q2xhdWRlPC90ZXh0PgogIDx0ZXh0IHg9IjgyNSIgeT0iMTUwIiBmaWxsPSIjZjhmYWZjIiBmb250LXNpemU9IjE4IiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiI+T3BlbkNvZGU8L3RleHQ+CiAgPHRleHQgeD0iODI1IiB5PSIxODAiIGZpbGw9IiNmOGZhZmMiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIj5DdXJzb3I8L3RleHQ+CiAgPGRlZnM+PG1hcmtlciBpZD0iYXJyb3ciIHZpZXdCb3g9IjAgMCAxMCAxMCIgcmVmWD0iOSIgcmVmWT0iNSIgbWFya2VyV2lkdGg9IjciIG1hcmtlckhlaWdodD0iNyIgb3JpZW50PSJhdXRvLXN0YXJ0LXJldmVyc2UiPjxwYXRoIGQ9Ik0gMCAwIEwgMTAgNSBMIDAgMTAgeiIgZmlsbD0iI2EzZTYzNSIvPjwvbWFya2VyPjwvZGVmcz4KPC9zdmc+CgpQcm9maWxlcyBzdG9yZSB0aGUgYWNjb3VudCdzIHN0YWJsZSBVVUlELCBub3QgaXRzIGRpc3BsYXkgbmFtZS4gUmVuYW1pbmcgYW4gYWNjb3VudCB0aGVyZWZvcmUgY2hhbmdlcyB3aGF0IHVzZXJzIHNlZSB3aXRob3V0IGJyZWFraW5nIGF0dGFjaG1lbnRzLiBgc2V0LWtleWAgcm90YXRlcyBjcmVkZW50aWFsIGJ5dGVzIHVuZGVyIHRoZSBzYW1lIGlkZW50aXR5LgoKIyMgRXZpZGVuY2UKCiFbUmVuZGVyZWQgbGF1bmNoLWF1ZGl0IG92ZXJ2aWV3XShodHRwczovL3NoYXJlLmFnZW50cy1jbGkuc2gvbXVxc2l0bmF3YXovYWdlbnRzLWNsaS11bmlmaWVkLWFjY291bnRzLXJlcG9ydC1lNDk3MTBmYTBlMGE2ZmE4KQoKVGhpcyBzY3JlZW5zaG90IHdhcyBjYXB0dXJlZCBmcm9tIHRoZSByZW5kZXJlZCByZXBvcnQgaW4gaGVhZGxlc3MgQ2hyb21lIG9uIHppb24gYWZ0ZXIgdGhlIGxpdmUgQ0xJIHJ1bnMgYmVsb3cgY29tcGxldGVkLgoKIyMjIEluc3RhbGxlZCBDTEkgcmVzdWx0cwoKSW5zdGFsbGVkIGFydGlmYWN0IHVuZGVyIHRlc3Q6CgpgYGB0ZXh0Ci9ob21lL211cXNpdC8ubG9jYWwvYmluL2FnZW50cwowLjAuMC1kZXYuYTZlZDc5ODczLWRpcnR5CmBgYAoKIyMjIE9uZSBBUEkta2V5IGFjY291bnQsIHR3byBhZ2VudCB0eXBlcwoKYGBgdGV4dAokIGFnZW50cyBydW4gY2xhdWRlICJSZXBseSB3aXRoIGV4YWN0bHkgTkFUSVZFX0FDQ09VTlRfT0siIFwKICAgIC0tYWNjb3VudCBvcGVucm91dGVyLXByaW1hcnkgLS1tb2RlbCBxd2VuL3F3ZW4zLWNvZGVyLW5leHQgLS1tb2RlIHBsYW4KTkFUSVZFX0FDQ09VTlRfT0sKCiQgYWdlbnRzIHJ1biBvcGVuY29kZUAxLjE2LjAgIlJlcGx5IHdpdGggZXhhY3RseSBOQVRJVkVfT1BFTkNPREVfQUNDT1VOVF9PSyIgXAogICAgLS1hY2NvdW50IG9wZW5yb3V0ZXItcHJpbWFyeSAtLW1vZGVsIG9wZW5yb3V0ZXIvcXdlbi9xd2VuMy1jb2Rlci1uZXh0IC0tbW9kZSBwbGFuCk5BVElWRV9PUEVOQ09ERV9BQ0NPVU5UX09LCmBgYAoKVGhlIGFjY291bnQgYWRhcHRlciBzdXBwbGllZCB0aGUgaG9zdC1zcGVjaWZpYyBrZXkgdmFyaWFibGUuIEZvciBDbGF1ZGUgaXQgYWxzbyBzdXBwbGllZCBPcGVuUm91dGVyJ3MgQW50aHJvcGljLWNvbXBhdGlibGUgYmFzZSBVUkw7IE9wZW5Db2RlIHNlbGVjdGVkIHRoZSBPcGVuUm91dGVyIHByb3ZpZGVyIGZyb20gdGhlIG1vZGVsIGlkZW50aWZpZXIuCgojIyMgU2V0dXAgdG9rZW4KCmBgYHRleHQKJCBhZ2VudHMgcnVuIGNsYXVkZSAuLi4gLS1hY2NvdW50IGNsYXVkZS1hdXRvbWF0aW9uClNFVFVQX1RPS0VOX09LCmBgYAoKQW50aHJvcGljIHNldHVwIHRva2VucyBhcmUgdmFsaWRhdGVkIGZvciB0aGUgYHNrLWFudC1vYXQwMS1gIHNoYXBlIGFuZCBpbmplY3RlZCBhcyBgQ0xBVURFX0NPREVfT0FVVEhfVE9LRU5gIG9ubHkgZm9yIENsYXVkZS4KCiMjIyBSZW5hbWUgYW5kIHJvdGF0aW9uIHByZXNlcnZlIGlkZW50aXR5CgpgYGB0ZXh0CiQgYWdlbnRzIGFjY291bnRzIHJlbmFtZSBvcGVucm91dGVyLXByaW1hcnkgb3BlbnJvdXRlci1yZW5hbWVkCiQgYWdlbnRzIGhhcm5lc3MgdmlldyBhY2NvdW50LXByb29mLWNsYXVkZQpBY2NvdW50OiAgb3BlbnJvdXRlci1yZW5hbWVkCiQgYWdlbnRzIGFjY291bnRzIHJlbmFtZSBvcGVucm91dGVyLXJlbmFtZWQgb3BlbnJvdXRlci1wcmltYXJ5CnN0YWJsZV9pZD10cnVlCgokIGFnZW50cyBhY2NvdW50cyBzZXQta2V5IG9wZW5yb3V0ZXItcHJpbWFyeSAtLWZyb20tc2VjcmV0cyBvcGVucm91dGVyLmFpOk9QRU5ST1VURVJfQVBJX0tFWQpST1RBVElPTl9TVEFCTEVfT0sKYGBgCgojIyMgTWlzc2luZyBjcmVkZW50aWFsIGZhaWxzIGJlZm9yZSBzcGF3bgoKYGBgdGV4dAokIGFnZW50cyBydW4gYWNjb3VudC1wcm9vZi1jbGF1ZGUgIlJlcGx5IHdpdGggZXhhY3RseSBTSE9VTERfTk9UX1NUQVJUIiAtLW1vZGUgcGxhbgpDcmVkZW50aWFsIGZvciBhY2NvdW50ICdvcGVucm91dGVyLXByaW1hcnknIGlzIG1pc3Npbmcgb24gdGhpcyBkZXZpY2UuCkFkZCBpdCB3aXRoICdhZ2VudHMgYWNjb3VudHMgc2V0LWtleSBvcGVucm91dGVyLXByaW1hcnknLgpleGl0IGNvZGU6IDEKYGBgCgojIyMgVmVyaWZpY2F0aW9uIG1hdHJpeAoKfCBQYXRoIHwgUmVzdWx0IHwgRXZpZGVuY2UgfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgQVBJIGtleSBhY2NvdW50IGNyZWF0aW9uL2ltcG9ydCB8IFBhc3MgfCBTYWZlIG1ldGFkYXRhIGluc3BlY3Rpb24gcmVwb3J0cyBgc2VjcmV0UHJlc2VudDogdHJ1ZWA7IHJhdyBrZXkgaXMgYWJzZW50IGZyb20gWUFNTCB8CnwgT25lIGFjY291bnQg4oaSIENsYXVkZSB8IFBhc3MgfCBgTkFUSVZFX0FDQ09VTlRfT0tgIHwKfCBTYW1lIGFjY291bnQg4oaSIE9wZW5Db2RlIHwgUGFzcyB8IGBOQVRJVkVfT1BFTkNPREVfQUNDT1VOVF9PS2AgfAp8IEFudGhyb3BpYyBzZXR1cCB0b2tlbiDihpIgQ2xhdWRlIHwgUGFzcyB8IGBTRVRVUF9UT0tFTl9PS2AgfAp8IEtleSByb3RhdGlvbiwgc3RhYmxlIGlkZW50aXR5IHwgUGFzcyB8IElEIHVuY2hhbmdlZDsgcG9zdC1yb3RhdGlvbiBydW4gcmV0dXJuZWQgYFJPVEFUSU9OX1NUQUJMRV9PS2AgfAp8IFJlbmFtZSwgc3RhYmxlIGhhcm5lc3MgYXR0YWNobWVudCB8IFBhc3MgfCBIYXJuZXNzIGltbWVkaWF0ZWx5IGRpc3BsYXllZCB0aGUgbmV3IG5hbWU7IElEIHVuY2hhbmdlZCB8CnwgTWlzc2luZyBjcmVkZW50aWFsIG9uIGFub3RoZXIgZGV2aWNlL2hvbWUgfCBQYXNzIHwgRXhpdCAxIGJlZm9yZSBzcGF3biB3aXRoIGV4YWN0IGBzZXQta2V5YCByZWNvdmVyeSBjb21tYW5kIHwKfCBMZWdhY3kgdmVyc2lvbiBsYWJlbHMgfCBQYXNzIHwgT2xkIHYxIGZpbGUgaXMgcmVjb3ZlcmFibHkgYXJjaGl2ZWQgYXMgYGFjY291bnRzLmxlZ2FjeS1sYWJlbHMueWFtbGA7IG5vIGZhbHNlIGNyZWRlbnRpYWwgYWNjb3VudCBpcyBmYWJyaWNhdGVkIHwKfCBUYXJnZXRlZCB0ZXN0cyB8IFBhc3MgfCA3My83MyBhY2NvdW50LCBjb21tYW5kLCBoYXJuZXNzLCBhbmQgcnVubmVyIHRlc3RzOyA1NC81NCB3aXphcmQvaGFybmVzcyB0ZXN0cyB8CnwgQ3Vyc29yIEFQSSBrZXkgfCBVbnZlcmlmaWVkIHwgQWRhcHRlciBhbmQgQ0xJIHBhdGggaW1wbGVtZW50ZWQ7IG5vIEN1cnNvciBrZXkgZXhpc3RlZCBsb2NhbGx5LCBvbiB6aW9uLCBvciBvbiBtYWMtbWluaSBkdXJpbmcgdGhlIGF1ZGl0IHwKfCBDb2RleCArIE9wZW5Sb3V0ZXIgYWNjb3VudCB3aGlsZSBDaGF0R1BUIE9BdXRoIGlzIGFjdGl2ZSB8IEZhaWxlZCB8IENvZGV4IGNob3NlIGl0cyBDaGF0R1BUIGF1dGggYW5kIHJlamVjdGVkIHRoZSB0aGlyZC1wYXJ0eSBtb2RlbCB3aXRoIEhUVFAgNDAwOyBub3QgY291bnRlZCBhcyBzdXBwb3J0ZWQgbGl2ZSBwcm9vZiB8CnwgSW5kZXBlbmRlbnQgc3RhZ2luZy1rZXkgY2hhdCB8IEZhaWxlZCB8IEtleSBhdXRoZW50aWNhdGVkIGFnYWluc3QgT3BlblJvdXRlcidzIG1vZGVscyBBUEksIGJ1dCB0aGUgQ2xhdWRlIGNoYXQgcnVuIGh1bmc7IHByaW1hcnkga2V5IHdhcyByZXN0b3JlZCB8CgojIyBTY29wZSBhbmQgbWlncmF0aW9uCgotIExlZ2FjeSBgYWdlbnRzIGhhcm5lc3MgLi4uIC0tYXV0aC1wcm92aWRlci8tLWZyb20tc2VjcmV0c2AgZmxhZ3Mgbm93IGZhaWwgd2l0aCB0aGUgY29uY3JldGUgcmVwbGFjZW1lbnQ6IGNyZWF0ZSBhbiBhY2NvdW50LCB0aGVuIHBhc3MgYC0tYWNjb3VudGAuCi0gVGhlIGludGVyYWN0aXZlIGhhcm5lc3Mgd2l6YXJkIHNlbGVjdHMgYW4gZXhpc3RpbmcgY29tcGF0aWJsZSBhY2NvdW50IGluc3RlYWQgb2YgY29weWluZyBjcmVkZW50aWFscyBpbnRvIGEgaGFybmVzcy4KLSBFeGlzdGluZyBwcm9maWxlLW93bmVkIGNyZWRlbnRpYWxzIG1pZ3JhdGUgb24gZmlyc3QgcmVzb2x1dGlvbiBpbnRvIGEgc3RhYmxlIGFjY291bnQsIHRoZW4gdGhlIHByb2ZpbGUgc3RvcmVzIHRoZSBhY2NvdW50IElELgotIGBhZ2VudHMgdXBkYXRlIC0tYWNjb3VudGAgd2FzIHJlbW92ZWQgYmVjYXVzZSBpbnN0YWxsYXRpb24gbGFiZWxzIGFuZCBjcmVkZW50aWFsIGFjY291bnRzIGFyZSBkaWZmZXJlbnQgY29uY2VwdHMuCi0gTG9jYWwgYW5kIHJvdXRpbmUgbGF1bmNoZXMgcmVzb2x2ZSB0aGUgY3JlZGVudGlhbCBiZWZvcmUgc3Bhd24uIFJlbW90ZS9jbG91ZC9sZWFzZSBhY2NvdW50IGZvcndhcmRpbmcgaXMgcmVqZWN0ZWQgYmVjYXVzZSBjcmVkZW50aWFscyBhcmUgZGV2aWNlLWxvY2FsOyB0aGUgZGVzdGluYXRpb24gbXVzdCBoYXZlIHRoZSBzYW1lIGFjY291bnQgY3JlZGVudGlhbCBpbnN0YWxsZWQuCgojIyBTaGlwIHN0YXRlCgpUaGUgaW1wbGVtZW50YXRpb24gYW5kIHRoaXMgcmVwb3J0IGFyZSBwcmVwYXJlZCBvbiB0aGUgYHVuaWZpZWQtYWNjb3VudHMtZHVyYWJsZWAgd29ya3RyZWUgZm9yIFJVU0gtMjQwMi4gVGhlIGV2aWRlbmNlIGFib3ZlIGlzIGZyb20gdGhlIGluc3RhbGxlZCBkZXZlbG9wbWVudCBidWlsZCwgbm90IGEgcmVsZWFzZWQgbnBtIHBhY2thZ2UuIFRoZSBgYWdlbnRzLWNsaWAgcmVsZWFzZSB0cmFpbiBvd25zIHB1Ymxpc2hpbmcgYWZ0ZXIgbWVyZ2UuCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
