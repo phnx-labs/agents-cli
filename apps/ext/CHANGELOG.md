@@ -8,6 +8,10 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [0.9.315] - 2026-08-10
 
+- **Launch Warp with the right command.** The Warp agent's `cliCommand` was still the
+  legacy `oz`; it now matches the CLI's canonical `warp` (with `oz` kept as an alias),
+  so launching Warp from the extension resolves correctly.
+
 - **Launch-health sweep no longer pins the machine.** The 60s fleet health sweep used to
   spawn one `agents view <agent> --host <box>` subprocess for **every (agent × host) pair**
   — on a ~12-device fleet that is ~120 concurrent node + SSH probes per tick — with no

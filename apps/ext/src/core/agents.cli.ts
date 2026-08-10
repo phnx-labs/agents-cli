@@ -64,7 +64,7 @@ export const CLI_AGENT_META: Record<CliAgentId, CliAgentMeta> = {
   hermes: { name: 'Hermes', cliCommand: 'hermes' },
   pi: { name: 'Pi', cliCommand: 'omp' },
   muse: { name: 'Muse', cliCommand: 'muse' },
-  warp: { name: 'Warp', cliCommand: 'oz' },
+  warp: { name: 'Warp', cliCommand: 'warp' },
 };
 
 /** Type guard against the CLI agent id set. */
