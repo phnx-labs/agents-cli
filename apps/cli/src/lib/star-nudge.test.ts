@@ -13,10 +13,16 @@ import { fileURLToPath } from 'url';
 const savedHome = process.env.HOME;
 const savedCI = process.env.CI;
 const savedOptOut = process.env.AGENTS_NO_NUDGE;
+const savedStateDir = process.env.AGENTS_STATE_DIR;
 const savedTTY = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
 
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-nudge-test-'));
 process.env.HOME = TMP_HOME;
+// The nudge sentinel lives under getRuntimeStateDir(), which honors
+// AGENTS_STATE_DIR ahead of HOME — and tests/setup.ts pins that fork-wide. Point
+// it back at this file's own HOME so the sentinel lands where these cases assert,
+// and so the per-case `raceHome` override below still isolates.
+process.env.AGENTS_STATE_DIR = path.join(TMP_HOME, '.agents', '.cache', 'state');
 delete process.env.CI;
 delete process.env.AGENTS_NO_NUDGE;
 
@@ -29,6 +35,8 @@ beforeAll(async () => {
 
 afterAll(() => {
   if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+  if (savedStateDir === undefined) delete process.env.AGENTS_STATE_DIR;
+  else process.env.AGENTS_STATE_DIR = savedStateDir;
   if (savedCI === undefined) delete process.env.CI; else process.env.CI = savedCI;
   if (savedOptOut === undefined) delete process.env.AGENTS_NO_NUDGE; else process.env.AGENTS_NO_NUDGE = savedOptOut;
   if (savedTTY) Object.defineProperty(process.stdout, 'isTTY', savedTTY);
@@ -118,7 +126,16 @@ describe('maybeShowStarNudge is race-safe across concurrent processes', () => {
     const runChild = () =>
       new Promise<string>((resolve, reject) => {
         const child = spawn(tsxBin, [fixture], {
-          env: { ...process.env, HOME: raceHome, CI: '', AGENTS_NO_NUDGE: '' },
+          env: {
+            ...process.env,
+            HOME: raceHome,
+            // Must travel with HOME: AGENTS_STATE_DIR outranks it, so inheriting
+            // the parent's value would point every child at the outer test's
+            // sentinel — which already exists, so no child would ever print.
+            AGENTS_STATE_DIR: path.join(raceHome, '.agents', '.cache', 'state'),
+            CI: '',
+            AGENTS_NO_NUDGE: '',
+          },
         });
         let out = '';
         child.stdout.on('data', (d) => { out += d.toString(); });

@@ -44,7 +44,14 @@ describe('shouldSurfaceShimNotice (persistent, once per condition)', () => {
     `;
     const out = execFileSync('bun', ['-e', script], {
       cwd: process.cwd(),
-      env: { ...process.env, HOME: home },
+      // AGENTS_STATE_DIR must travel with HOME — it outranks HOME in
+      // getRuntimeStateDir(), and tests/setup.ts pins it fork-wide, so inheriting
+      // the parent's value would put the marker outside this planted HOME.
+      env: {
+        ...process.env,
+        HOME: home,
+        AGENTS_STATE_DIR: path.join(home, '.agents', '.cache', 'state'),
+      },
       stdio: ['ignore', 'pipe', 'inherit'],
     }).toString('utf-8');
     return JSON.parse(out);
