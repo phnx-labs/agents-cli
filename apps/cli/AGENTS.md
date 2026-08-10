@@ -140,7 +140,7 @@ reliability contract — context resolution, readiness/pause-on-blocker, single-
 `(routine, scheduledFor)` claim distinct from the active-run claim, and the
 `blocked`/`skipped` run statuses — is normative in
 [`docs/specifications.md` §Routine execution & readiness](docs/specifications.md#routine-execution--readiness)
-(RT-1..RT-11) and §Scheduling & execution singularity (SING-11..SING-13); much of it
+(RT-1..RT-11) and §Scheduling & execution singularity (SING-13, SING-15, SING-16); much of it
 is `[Intended]` (RUSH-2290), and each requirement marks landed vs intended.
 
 Routine execution context is separate from grouping and repository identity.
@@ -457,8 +457,8 @@ src/
     hooks.ts           # hooks.yaml parser + per-agent registrar
     hooks/match.ts     # `matches:` predicate evaluator
     browser/           # browser daemon service + existing CDP connection pool; ipc.ts owns one-shot and persistent socket clients, stream.ts owns the NDJSON action loop
-    monitors/          # `agents monitors` — event-triggered watchers (source→condition→action); native state-diff store; MonitorEngine runs in the daemon beside the cron scheduler. See docs/10-monitors.md
-    projects.ts        # `agents projects` — named multi-repo project defs (~/.agents/projects/*.yaml) layered above the --project convention (resolveProjectRef in project-root.ts); project-status.ts rolls live sessions + merged PRs + artifacts into the progress card. Beta-gated. See docs/11-projects.md
+    monitors/          # `agents monitors` — event-triggered watchers (source→condition→action); native state-diff store; MonitorEngine runs in the daemon beside the cron scheduler. See docs/monitors.md
+    projects.ts        # `agents projects` — named multi-repo project defs (~/.agents/projects/*.yaml) layered above the --project convention (resolveProjectRef in project-root.ts); project-status.ts rolls live sessions + merged PRs + artifacts into the progress card. Beta-gated. See docs/projects.md
     migrate.ts         # One-shot idempotent migrations
     session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents sessions stats` + `sessions backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger); `claude-accounts.ts` attributes each Claude transcript to the account that produced it (account_key) and `insights.ts` extracts the cached multi-harness friction/correction/automation facets behind `agents sessions insights` (`agents insights` alias)
     terminal/          # Terminal launch engine — tab/split in iTerm/Ghostty/tmux/Terminal.app, local or --host;
@@ -580,9 +580,22 @@ at the commit already gated on the release branch). CI runs from `apps/cli` via
 remote browser launch/stop). Gated on `AGENTS_TEST_WIN_HOST=<registered device>`;
 both suites skip cleanly when the var is unset, so CI needs no Windows runner.
 
-**Local dev build:** `scripts/install.sh --skip-tests` builds the working tree and
-installs at `$HOME/.local/agents-cli-dev/`, symlinked into `$HOME/.local/bin/agents`.
-The npm-installed global is never touched. Version stamps as `0.0.0-dev.<sha>[-dirty]`.
+**Local dev build:** `scripts/install.sh --skip-tests` builds the working tree,
+installs it at `$HOME/.local/agents-cli-dev/`, and exposes it as
+`$HOME/.local/bin/agents-dev` (plus `ag-dev`). Drive it by name — `agents-dev
+sessions --active`. Version stamps as `0.0.0-dev.<sha>[-dirty]`.
+
+The production command is never created or overwritten: the script must not write
+`$HOME/.local/bin/{agents,ag,browser}`, and it deletes any such link an older
+revision of itself left pointing into the dev prefix (including a dangling one,
+which is what a cleaned dev prefix leaves behind). A dev build that answered to
+`agents` made PATH order decide which code ran — see the root
+[AGENTS.md](../../AGENTS.md) §Never install a dev build over the user's `agents`.
+
+The routines daemon is **shared** (secrets broker, browser IPC, scheduler), so
+the install leaves it on production code. `--bounce-daemon` restarts it onto the
+dev build when you need that, and says plainly that it changes what the user's
+everyday `agents` talks to.
 
 **Bin entrypoints need `chmod 755`.** [`scripts/build.sh`](scripts/build.sh) chmods
 every `package.json#bin` entry after `tsc` emits. Newer npm preserves tarball file
@@ -1016,9 +1029,9 @@ been closed stays as a `(resolved)` entry so references never dangle.
 
 [`docs/`](docs/README.md) is the source-grounded reference. Start with
 [`architecture.md`](docs/architecture.md) for the CLI/extension layering and the
-session mechanisms, then [`00-concepts.md`](docs/00-concepts.md) for the resource
+session mechanisms, then [`concepts.md`](docs/concepts.md) for the resource
 model. The normative contract
 ([`specifications.md`](docs/specifications.md)) sits
-alongside the reference docs ([05-sessions.md](docs/05-sessions.md),
+alongside the reference docs ([sessions.md](docs/sessions.md),
 [secrets.md](docs/secrets.md)) — read the spec for the guarantee, the reference
 for the how-to.

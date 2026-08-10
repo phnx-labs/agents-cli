@@ -24,8 +24,16 @@ function safeRealpath(p: string): string {
   catch { return p; }
 }
 
-/** Whether two path spellings identify the same file. */
-function sameFile(a: string, b: string): boolean {
+/**
+ * Whether two path spellings identify the same file.
+ *
+ * Two spellings of one file rarely compare equal on Windows: `realpathSync` does
+ * not expand 8.3 short names, so a path rooted at `os.tmpdir()`
+ * (`C:\Users\RUNNER~1\...` on a GitHub runner) never matches the long form
+ * (`C:\Users\runneradmin\...`) that `where` reports. Compare by device+inode
+ * first and fall back to case-insensitive resolved spellings.
+ */
+export function sameFile(a: string, b: string): boolean {
   try {
     const aStat = fs.statSync(a);
     const bStat = fs.statSync(b);

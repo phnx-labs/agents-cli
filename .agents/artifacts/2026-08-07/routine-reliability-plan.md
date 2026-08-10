@@ -140,7 +140,7 @@ terminal states.
 This docs track (RUSH-2290) lands the normative contract only — no runtime change:
 
 - `apps/cli/docs/specifications.md` — new §Routine execution & readiness (RT-1..RT-11, RT-GAP-1); SING-11..SING-13 + SING-GAP-3.
-- `apps/cli/docs/03-routines.md` — user-facing execution-context/readiness/status docs.
+- `apps/cli/docs/routines.md` — user-facing execution-context/readiness/status docs.
 - `README.md` §Routines, `apps/cli/AGENTS.md` invariant #7, `apps/cli/.changelog/next/RUSH-2290.md`.
 - Companion `phnx-labs/.agents-system` audited: no consumer teaches a contradicted shape (no change needed).
 

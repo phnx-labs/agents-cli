@@ -201,4 +201,4 @@ agents pty write $SID "\x03"
 
 - [docs/browser.md](browser.md) — drive real browsers via CDP; part of the automation triad
 - [docs/computer.md](computer.md) — drive native macOS apps via Accessibility; part of the automation triad
-- [docs/00-concepts.md](00-concepts.md) — DotAgents repos, resource resolution model
+- [docs/concepts.md](concepts.md) — DotAgents repos, resource resolution model

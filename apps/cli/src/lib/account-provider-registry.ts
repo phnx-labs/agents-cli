@@ -7,6 +7,13 @@ export interface AccountProviderAdapter {
   authKinds: readonly AccountAuthKind[];
   envFor(host: AgentId, kind: AccountAuthKind): string;
   connectionEnvFor(host: AgentId): Record<string, string>;
+  /**
+   * The env var a per-account BASE_URL override should be written to for this
+   * host, or null when the provider has no endpoint env on that host. Derived
+   * from the provider's own connection env so the base-url key lives in one
+   * place instead of being re-guessed by callers.
+   */
+  baseUrlEnvFor(host: AgentId): string | null;
   validate(kind: AccountAuthKind, value: string): void;
 }
 
@@ -19,6 +26,7 @@ function fixed(
   authKinds: readonly AccountAuthKind[],
   envByHost: Partial<Record<AgentId, string>>,
   connectionEnvByHost: Partial<Record<AgentId, Record<string, string>>> = {},
+  baseUrlEnvByHost: Partial<Record<AgentId, string>> = {},
   validate?: (kind: AccountAuthKind, value: string) => void,
 ): AccountProviderAdapter {
   return {
@@ -33,6 +41,10 @@ function fixed(
     connectionEnvFor(host) {
       return connectionEnvByHost[host] ?? {};
     },
+    baseUrlEnvFor(host) {
+      const connection = connectionEnvByHost[host] ?? {};
+      return baseUrlEnvByHost[host] ?? Object.keys(connection).find(key => key.endsWith('_BASE_URL')) ?? null;
+    },
     validate(kind, value) {
       nonEmpty(provider, kind, value);
       validate?.(kind, value);
@@ -41,7 +53,7 @@ function fixed(
 }
 
 const ADAPTERS = new Map<string, AccountProviderAdapter>([
-  ['anthropic', fixed('anthropic', ['api-key', 'setup-token'], { claude: 'ANTHROPIC_API_KEY' }, {}, (kind, value) => {
+  ['anthropic', fixed('anthropic', ['api-key', 'setup-token'], { claude: 'ANTHROPIC_API_KEY' }, {}, {}, (kind, value) => {
     if (kind === 'setup-token' && !value.startsWith('sk-ant-oat01-')) {
       throw new Error('Anthropic setup tokens must start with sk-ant-oat01-.');
     }
@@ -53,17 +65,17 @@ const ADAPTERS = new Map<string, AccountProviderAdapter>([
     { claude: 'ANTHROPIC_AUTH_TOKEN', codex: 'OPENAI_API_KEY', opencode: 'OPENROUTER_API_KEY' },
     { claude: { ANTHROPIC_BASE_URL: 'https://openrouter.ai/api' }, codex: { OPENAI_BASE_URL: 'https://openrouter.ai/api/v1' } },
   )],
-  ['openai', fixed('openai', ['api-key'], { codex: 'OPENAI_API_KEY', opencode: 'OPENAI_API_KEY' })],
+  ['openai', fixed('openai', ['api-key'], { codex: 'OPENAI_API_KEY', opencode: 'OPENAI_API_KEY' }, {}, { codex: 'OPENAI_BASE_URL', opencode: 'OPENAI_BASE_URL' })],
   ['xai', fixed('xai', ['api-key'], { grok: 'XAI_API_KEY', claude: 'ANTHROPIC_AUTH_TOKEN' })],
   ['google', fixed('google', ['api-key'], { gemini: 'GEMINI_API_KEY', antigravity: 'ANTIGRAVITY_API_KEY' })],
   ['opencode', fixed('opencode', ['api-key'], { opencode: 'OPENCODE_API_KEY' })],
-  ['proxy', fixed('proxy', ['api-key', 'bearer-token'], { claude: 'ANTHROPIC_AUTH_TOKEN', codex: 'OPENAI_API_KEY' })],
-  ['truefoundry', fixed('truefoundry', ['api-key', 'bearer-token'], { claude: 'ANTHROPIC_AUTH_TOKEN' })],
+  ['proxy', fixed('proxy', ['api-key', 'bearer-token'], { claude: 'ANTHROPIC_AUTH_TOKEN', codex: 'OPENAI_API_KEY' }, {}, { claude: 'ANTHROPIC_BASE_URL', codex: 'OPENAI_BASE_URL' })],
+  ['truefoundry', fixed('truefoundry', ['api-key', 'bearer-token'], { claude: 'ANTHROPIC_AUTH_TOKEN' }, {}, { claude: 'ANTHROPIC_BASE_URL' })],
   ['bedrock', fixed('bedrock', ['bearer-token'], { claude: 'AWS_BEARER_TOKEN_BEDROCK' })],
   ['foundry', fixed('foundry', ['api-key'], { claude: 'ANTHROPIC_FOUNDRY_API_KEY' })],
-  ['litellm', fixed('litellm', ['api-key', 'bearer-token'], { claude: 'ANTHROPIC_AUTH_TOKEN', codex: 'OPENAI_API_KEY' })],
-  ['vllm', fixed('vllm', ['api-key', 'bearer-token'], { claude: 'ANTHROPIC_AUTH_TOKEN', codex: 'OPENAI_API_KEY' })],
-  ['ollama', fixed('ollama', ['api-key'], { codex: 'OPENAI_API_KEY' })],
+  ['litellm', fixed('litellm', ['api-key', 'bearer-token'], { claude: 'ANTHROPIC_AUTH_TOKEN', codex: 'OPENAI_API_KEY' }, {}, { claude: 'ANTHROPIC_BASE_URL', codex: 'OPENAI_BASE_URL' })],
+  ['vllm', fixed('vllm', ['api-key', 'bearer-token'], { claude: 'ANTHROPIC_AUTH_TOKEN', codex: 'OPENAI_API_KEY' }, {}, { claude: 'ANTHROPIC_BASE_URL', codex: 'OPENAI_BASE_URL' })],
+  ['ollama', fixed('ollama', ['api-key'], { codex: 'OPENAI_API_KEY' }, {}, { codex: 'OPENAI_BASE_URL' })],
 ]);
 
 export function getAccountProvider(provider: string): AccountProviderAdapter {

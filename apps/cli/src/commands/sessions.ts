@@ -2273,7 +2273,7 @@ export async function renderSessionPreview(
   }
   if (outcome.kind === 'partial') {
     console.error(chalk.red(`Partial session resolution: ${outcome.failedPeers.join(', ')} did not answer.`));
-    console.error(chalk.gray('No preview was rendered because the short ID may be ambiguous on an unreachable peer.'));
+    console.error(chalk.gray('Nothing matched on the reachable fleet, so the session may live on a peer that did not answer.'));
     process.exitCode = 2;
     return;
   }
@@ -5184,6 +5184,11 @@ const FULL_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
  * the wrong session (whichever peer replied first). Labels therefore stay
  * all-settle so a cross-machine label conflict surfaces as an ambiguity, and a
  * short-id PREFIX stays all-settle for the same reason (RUSH-2203).
+ *
+ * This is about cancelling a sweep that is still IN FLIGHT, where a peer that
+ * has not answered yet is still expected to. It is deliberately stricter than
+ * `isUniqueEnoughSelector`, which decides what to do once the sweep is OVER and
+ * a peer has definitively not answered — see SES-9a.
  */
 export function isDefinitiveMatch(session: SessionMeta, selector: string): boolean {
   return FULL_SESSION_ID_RE.test(selector) && session.id.toLowerCase() === selector.trim().toLowerCase();
@@ -5280,9 +5285,31 @@ export function toolSearchForwardedArgs(argv: string[], hosts: string[]): string
   return args;
 }
 
-/** Resolution fails closed for prefixes/keywords when a peer did not answer.
- * A full UUID is globally unique, so one exact hit is sufficient even when an
- * unrelated registered device is offline. */
+/** Width of the short id the CLI prints everywhere (`SessionMeta.shortId`):
+ * 8 hex chars / 32 bits. A selector shorter than this is treated as a keyword,
+ * not an identifier. */
+const SHORT_SESSION_ID_WIDTH = 8;
+
+/**
+ * Whether a selector names ONE session precisely enough to resolve from the
+ * reachable fleet alone when some peer did not answer (SES-9a).
+ *
+ * Deliberately stricter than `looksLikeSessionId`, which accepts any 6+ char
+ * `[0-9a-f-]` run and so matches ordinary words (`facade`, `decade`, `beaded`).
+ * Those are keywords a user typed as a search, not identifiers, and they must
+ * keep waiting for every peer.
+ */
+export function isUniqueEnoughSelector(selector: string): boolean {
+  const trimmed = selector.trim();
+  if (isCompleteSessionId(trimmed)) return true;
+  return /^[0-9a-f-]+$/i.test(trimmed)
+    && trimmed.replace(/-/g, '').length >= SHORT_SESSION_ID_WIDTH;
+}
+
+/** Resolution fails closed for keywords and labels when a peer did not answer.
+ * An id-shaped selector at least `SHORT_SESSION_ID_WIDTH` hex chars wide (or a
+ * complete id) resolves from a single reachable hit even when an unrelated
+ * registered device is offline — see SES-9a for the accepted collision risk. */
 export function metadataResolveOutcome(
   localMatches: SessionMeta[],
   remote: { sessions: SessionMeta[]; unreachable: string[] },
@@ -5293,14 +5320,24 @@ export function metadataResolveOutcome(
   // selector would discard alias suffixes such as c1f3d813 because the native
   // UUID intentionally has a different prefix.
   const candidates = fleetCandidatesByQuery([...localMatches, ...remote.sessions], selector, true);
-  // A full UUID is globally unique, so one exact hit resolves even when an
-  // unrelated registered device is offline. A label is NOT globally unique — a
-  // distinct session may carry the same label on an unreachable peer — so it
-  // stays fail-closed: a unique label auto-resumes only once every peer has
-  // answered (candidates.length === 1 below), and an unreachable peer forces
-  // `partial` rather than guessing. (RUSH-2203: early-exit is UUID-only for the
-  // same reason — see isDefinitiveMatch.)
-  if (FULL_SESSION_ID_RE.test(selector) && candidates.length === 1 && candidates[0].id.toLowerCase() === selector.toLowerCase()) {
+  // One hit on the REACHABLE fleet resolves a precise-enough id selector even
+  // when a peer is offline (SES-9a). This is a deliberate, bounded trade, not a
+  // claim that prefixes cannot collide — they can, which is why the `ambiguous`
+  // branch below still exists for peers that DID answer:
+  //   - refusing costs 100% of lookups on any fleet with a permanently offline
+  //     device (9 of them here), to avoid a prefix collision that ALSO has to
+  //     land on the one box that did not answer. Rate depends on the id type:
+  //     a UUIDv4 short id is unique in practice, while a time-ordered
+  //     UUIDv7/ULID prefix is largely a timestamp and collides much more
+  //     readily (see deriveShortId in session/db.ts);
+  //   - `isUniqueEnoughSelector` keeps this off keyword-shaped queries, so a
+  //     6-char word like `facade` or `decade` is not treated as an identifier.
+  // A label stays fail-closed at any length: labels are free-form and collide by
+  // design, so one hit there really is a guess.
+  // (RUSH-2203's early-exit stays UUID-only — see isDefinitiveMatch — because
+  // that cancels the sweep mid-flight, where a peer that has not answered YET is
+  // still expected to answer. Here the sweep is already over.)
+  if (isUniqueEnoughSelector(selector) && candidates.length === 1) {
     return { kind: 'resolved', session: candidates[0].hits[0].session };
   }
   if (remote.unreachable.length > 0) return { kind: 'partial', failedPeers: remote.unreachable };

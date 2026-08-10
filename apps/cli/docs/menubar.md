@@ -237,7 +237,7 @@ One rule shapes the menu: **attention floats up, context groups down.**
   does not dismiss and synthetically reopen the dropdown.
   Focusing an agent row opens a **side submenu (›)** whose first item is
   **▶ Focus session** — it lands you in that session, attaching locally or SSHing
-  to the box that owns it (`agents sessions focus`, the same call Factory's Focus
+  to the box that owns it (`agents sessions focus`, the same call the ext's Focus
   button makes), so it works for a session here or on any fleet peer. Below it,
   richer detail and **linkable actions**: work title (and open URL if the title
   contains one), local/remote + surface, clickable cwd, Linear ticket, GitHub PR,
@@ -493,7 +493,7 @@ notification argument can never become an open-anything primitive), and
 `routines:list` opens the runs folder. The Node side lives in
 `src/lib/menubar/notify-desktop.ts` (routing), `src/lib/routine-notify.ts`
 (routine start/finish content + anti-spam threshold; see
-[routines.md](03-routines.md#desktop-notifications)), and `src/lib/run-notify.ts`
+[routines.md](routines.md#desktop-notifications)), and `src/lib/run-notify.ts`
 (the `agents run --notify` finish notice).
 
 **Two images: the app on the left, the agent on the right.** macOS draws the

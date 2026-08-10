@@ -10,7 +10,7 @@ Subagents are one of three patterns for specialization. Plugins can bundle subag
 
 **How an agent's subagents are stored is declared once, declaratively.** Two things gate a subagent integration: the `subagents` capability flag on `AgentConfig` (`src/lib/agents.ts`) is the *version gate*, and a single entry in the **subagent-target registry** (`src/lib/subagents-registry.ts`, `SUBAGENT_TARGETS`) is the *shape* — target dir, file/dir layout, transform, ownership marker. All install / list / detect / orphan / remove logic is generic over that table, so adding a standard integration is one registry entry, not near-identical `else if (agent === '...')` arms across the writer, detector, and `subagents.ts`. A test pins `Object.keys(SUBAGENT_TARGETS)` to `capableAgents('subagents')` so the two can never drift.
 
-For the sync model that governs how subagents reach version homes, see [02-resource-sync.md](02-resource-sync.md).
+For the sync model that governs how subagents reach version homes, see [resource-sync.md](resource-sync.md).
 
 ## Architecture
 
@@ -161,7 +161,7 @@ agents subagents remove code-reviewer --yes
 
 ## See Also
 
-- [02-resource-sync.md](02-resource-sync.md) — resource resolution and sync to version homes
+- [resource-sync.md](resource-sync.md) — resource resolution and sync to version homes
 - [docs/workflows.md](workflows.md) — workflows that declare `allowedAgents` to orchestrate subagents
 - [docs/plugins.md](plugins.md) — plugins that bundle subagent definitions alongside skills and hooks
 - [docs/hooks.md](hooks.md) — hooks that fire on subagent lifecycle events

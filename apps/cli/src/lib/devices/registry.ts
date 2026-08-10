@@ -148,7 +148,7 @@ export function isDialableDevice(d: DeviceProfile): boolean {
   // every session on that box unresolvable from any other machine.
   //
   // So: no tailscale block at all is unknown-not-offline (the rule `ssh.ts`
-  // renderDeviceTable and Factory's `isDeviceOnline` already use, so the picker
+  // renderDeviceTable and the ext's `isDeviceOnline` already use, so the picker
   // and the sweep agree on who exists), and a positive probe rescues a device
   // whose snapshot says offline. The cost of dialing a box that is actually
   // asleep is one ConnectTimeout — the pre-existing behaviour, not a regression.

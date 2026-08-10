@@ -427,4 +427,4 @@ agents browser done
 
 - [docs/pty.md](pty.md) — drive REPLs and TUI programs from an agent; part of the automation triad
 - [docs/computer.md](computer.md) — drive native macOS apps via Accessibility; part of the automation triad
-- [docs/00-concepts.md](00-concepts.md) — DotAgents repos, resource resolution model
+- [docs/concepts.md](concepts.md) — DotAgents repos, resource resolution model

@@ -523,7 +523,7 @@ agents teams list --json
 ## Budget Guardrails
 
 Teammates **inherit the project's budget caps** (see
-[docs/06-observability.md](./06-observability.md#budget-guardrails-agents-budget)).
+[docs/observability.md](./observability.md#budget-guardrails-agents-budget)).
 Before each teammate launches, its estimated cost is projected onto current
 spend; under `on_exceed: block`, a teammate that would breach `per_run`,
 `per_day`, `per_agent`, or `per_project` is **refused** and the spawn fails with
@@ -552,6 +552,6 @@ budget:
 
 ## See Also
 
-- [docs/00-concepts.md](./00-concepts.md) — DotAgents repos, resource resolution model
-- [docs/06-observability.md](./06-observability.md) — `agents teams list --json` as a fleet observability source
+- [docs/concepts.md](./concepts.md) — DotAgents repos, resource resolution model
+- [docs/observability.md](./observability.md) — `agents teams list --json` as a fleet observability source
 - [docs/cloud.md](./cloud.md) — cloud dispatch (`--cloud rush|codex|factory` on `teams add`)

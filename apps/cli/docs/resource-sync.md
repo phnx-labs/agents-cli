@@ -1,0 +1,385 @@
+# Resource Sync
+
+How agents-cli syncs resources (commands, skills, hooks, memory, MCP, permissions) between central storage, project workspaces, and version homes.
+
+For the conceptual model — what a DotAgents repo is, what resources are, and how layered resolution works — see [concepts.md](concepts.md).
+
+## Resource Types
+
+| Resource | Source layers (resolved project > user > system) | Target Location | Sync Method |
+|----------|-----------------|----------------------|-------------|
+| Commands | `<project>/.agents/commands/*.md` › `~/.agents/commands/*.md` › `~/.agents-system/commands/*.md` | Project sources: `<project>/.{agent}/{commandsSubdir}/`; user/system: `<version-home>/.{agent}/{commandsSubdir}/` | Copy (command-skill conversion where required) |
+| Skills | `…/.agents/skills/{name}/` (same layering) | Project sources: `<project>/.{agent}/skills/`; user/system: `<version-home>/.{agent}/skills/` | Copy |
+| Hooks | `…/.agents/hooks/*.sh` (same layering) | `.{agent}/hooks/` | Symlink |
+| Rules | `…/.agents/rules/AGENTS.md` (same layering) | `.{agent}/{instructionsFile}` | Symlink |
+| MCP | `…/.agents/mcp/*.yaml` (same layering) | `.{agent}/settings.json` | Merge into JSON |
+| Permissions | `…/.agents/permissions/groups/*.yaml` (same layering) | Agent-native config (`settings.json`, TOML, YAML, or `.rules`) | Convert + merge |
+| Plugins | `…/.agents/plugins/{name}/` (same layering) | Agent-native plugin or extension directory | Copy + native manifest/registration |
+
+`resolveResource(kind, name)` returns the single winner; `listResources(kind)` returns the union with `source: 'project' \| 'user' \| 'system'`. Same name in a higher layer overrides lower layers; otherwise everything unions.
+
+### Extra repos
+
+Users can register additional DotAgent repos via `agents repo add <source>`. Extras clone into `~/.agents-system/.repos/<alias>/` and ship the same layout (`skills/`, `commands/`, `hooks/`, `rules/`). They participate as an additional layer below the user repo and above the system repo. Registrations live in `meta.extraRepos` in `~/.agents/agents.yaml`.
+
+## Memory File Mapping
+
+Central `AGENTS.md` maps to agent-specific filenames:
+
+```
+~/.agents/rules/AGENTS.md  ───▶  ~/.claude/CLAUDE.md
+                            ───▶  ~/.codex/AGENTS.md
+                            ───▶  ~/.gemini/antigravity-cli/AGENTS.md
+                            ───▶  ~/.cursor/.cursorrules
+                            ───▶  ~/.opencode/OPENCODE.md
+                            ───▶  ~/.grok/AGENTS.md
+```
+
+Symlinks in `~/.agents/rules/`:
+```
+AGENTS.md       # Real file (source of truth)
+CLAUDE.md -> AGENTS.md
+GEMINI.md -> AGENTS.md     # Legacy only; Gemini sync is hard-deprecated.
+```
+
+## Sync Detection
+
+Sync state is derived, not stored. Three set operations over the filesystem:
+
+```
+available = contents of scoped .agents/{commands,skills,hooks,memory,mcp,permissions}
+synced    = files in <version home> plus project-managed files in <project>/.{agent}/
+new       = available - synced
+```
+
+```
+┌──────────────────────────────┬────────────────────────────────┬─────────────────────────────────┐
+│ Function                     │ Reads                          │ Returns                         │
+├──────────────────────────────┼────────────────────────────────┼─────────────────────────────────┤
+│ getAvailableResources()      │ ~/.agents/*/                   │ { commands: string[],           │
+│                              │ (skip symlinks in memory/)     │   skills: string[],             │
+│                              │                                │   hooks: string[],              │
+│                              │                                │   memory: string[], ... }       │
+├──────────────────────────────┼────────────────────────────────┼─────────────────────────────────┤
+│ getActuallySyncedResources   │ <version home>/.{agent}/*/     │ same shape                      │
+│   (agent, version)           │ (readlink each entry, match    │                                 │
+│                              │  against ~/.agents/)           │                                 │
+│                              │ memory: file content compare   │                                 │
+├──────────────────────────────┼────────────────────────────────┼─────────────────────────────────┤
+│ getNewResources(...)         │ both above                     │ available − synced (per type)   │
+└──────────────────────────────┴────────────────────────────────┴─────────────────────────────────┘
+```
+
+## Sync Flow
+
+```
+agents use claude@2.0.65
+           │
+           ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  1. getNewResources(claude, 2.0.65)                                 │
+│     └─ Returns: { commands: [foo], skills: [], memory: [AGENTS] }  │
+│                                                                     │
+│  2. If new resources found, prompt user                             │
+│     └─ "2 commands, 1 memory file available. Sync now?"            │
+│                                                                     │
+│  3. syncResourcesToVersion(claude, 2.0.65)                          │
+│     └─ Refreshes project resources in <project>/.claude/            │
+│     └─ Copies user/system resources into the version home           │
+│     └─ Records sync manifests for skip-fast staleness checks        │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+Project-scope commands, skills, subagents, and workflows are never copied into a
+global version home. They are refreshed into the current workspace's agent
+directory (`.claude/`, `.codex/`, `.cursor/`, `.opencode/`, etc.) with an
+ownership manifest at `.<agent>/.agents-managed.json`. On each refresh,
+agents-cli removes only the paths listed in that manifest, then copies current
+project resources. If a destination exists after manifest-owned paths are
+removed, it is yours: agents-cli leaves it exactly as it is and reports it once
+per sync as a single grouped line (`Kept 6 of your own files in
+.claude/commands: debug.md, doc-gaps.md, image-nbp.md, +3 more`) rather than one
+warning per file. The
+generated `.<agent>/` directory is intentionally not auto-added to `.gitignore`;
+projects that do not want to commit generated agent resources should ignore it
+themselves.
+
+## Sync Targets: Version Selectors and Repo Scoping
+
+`agents sync` accepts the full [agent-spec vocabulary](version-management.md#agent-spec-resolution)
+plus an optional repo scope:
+
+```bash
+agents sync claude              # the resolved default version (interactive preview in a TTY)
+agents sync claude@all          # every installed Claude version
+agents sync claude@all system   # scope to one DotAgent repo: system | user | project | <alias>
+agents sync claude --repo user  # same, via the flag form
+agents sync --json              # machine-readable umbrella result (also used by --host all)
+agents sync --host all          # fan out umbrella sync across every registered device
+```
+
+A repo scope reconciles **only** that layer's resources into the target
+version(s), leaving the other layers' already-synced resources untouched. Bare
+`agents sync` (no agent) runs the umbrella verb — fetch remote state, then
+reconcile every installed agent. `--json` emits a single JSON object on stdout
+(and forces non-interactive mode); the fleet fan-out path (`--host all` /
+`--device all`) injects `--json` on each peer so the roster can parse results.
+
+## Pruning: resources removed from source disappear from version homes
+
+A reconcile deletes as well as installs. When a **command** or **skill** is
+**removed from a DotAgent repo**, `agents sync` removes its stale copy from each
+version home — so a deleted resource disappears from the `/` menu the same way an
+added one appears, without hand-deleting files. This runs on the repo-scope and
+`@all` reconcile forms:
+
+```bash
+agents sync claude@all system   # reconcile system repo into every claude — prunes what system no longer ships
+agents sync claude system       # same, one version
+```
+
+A pruned resource is reported under a `Pruned from claude@<version> (removed from
+source)` block, and the `--json` payload carries a `pruned: { commands, skills }`
+field.
+
+Pruning is **manifest-bounded**, so it never over-deletes:
+
+- **Only agents-installed resources are candidates.** The prune set is
+  `(names the last full sync recorded in the manifest) − (names still in source
+  across ALL layers)`, intersected with what is currently in the home. A file you
+  hand-authored into `~/.claude/…` was never recorded, so it is never touched.
+- **No cross-layer deletion.** The "still in source" set spans every layer, so a
+  system command removed from `~/.agents/.system` while a same-named **user**
+  command still exists is kept — it is still provided by a layer.
+- **No manifest → no deletion (fail loud).** With no sync manifest yet (no prior
+  full sync established a baseline), the reconcile prints a one-line notice and
+  prunes nothing rather than guessing. A later `agents sync <agent>` full sync
+  writes the baseline, after which prune works.
+
+Every harness prunes: a native command file (Claude, Grok, Cursor), a
+command-as-skill dir (Codex ≥ 0.117, Kimi), and a Goose recipe are each removed
+through the same writer that installed them. Kinds synced as a wholesale rewrite
+(rules, permissions) or with their own reconciliation (plugins, via
+`cleanOrphanedPluginSkills`) do not need this pass. **Hooks are out of scope
+here** — pruning a hook must also GC its `settings.json`/`hooks.json`
+registration (a Windows-portable-path surface), tracked in **RUSH-2456**; hook
+files stay reconciled by the in-write orphan sweep (`versions.ts`, gated on
+`hooksToSync > 0`). See [`src/lib/staleness/prune.ts`](../src/lib/staleness/prune.ts).
+
+## MCP Servers: Per-Agent JSON Write
+
+MCP is the one resource that isn't symlinked. Each agent stores MCP server
+lists in its own settings file with its own key shape, so sync writes them
+directly into the agent's config.
+
+```
+Source: ~/.agents/mcp/*.yaml       Per-agent destinations:
+
+┌────────────────────┐             Agy     → <home>/.gemini/antigravity-cli/mcp_config.json
+│ github.yaml        │                      · key: mcpServers.<name> = {command,args,env}
+│ ───────            │
+│ name: github       │                      · key: mcpServers.<name> = {command,args,env}
+│ transport: stdio   │             Cursor  → <home>/.cursor/mcp.json
+│ command: npx ...   │                      · key: mcpServers.<name> = {command,args,env}
+│ args: [...]        │             Claude  → CLI: `claude mcp add ...`
+│ env: { ... }       │                      (claude owns its own settings)
+└────────────────────┘             Codex   → CLI: `codex mcp add ...`
+                                            · HTTP transport not supported
+                                   OpenCode → <home>/.config/opencode/config.toml
+                                            · key: mcp.<name> (TOML)
+                                   Grok    → <home>/.grok/config.toml
+                                            · key: mcp_servers.<name> (TOML)
+                                   Hermes  → <home>/.hermes/config.yaml
+                                            · key: mcp_servers.<name> (YAML)
+```
+
+Behavior rules, per `src/lib/mcp.ts`:
+
+1. **Read existing, set by name, write back.** For JSON-backed agents such as
+   Cursor:
+
+   ```
+   config = JSON.parse(fs.readFileSync(settings.json)) || {}
+   config.mcpServers[server.name] = { command, args, env }  // or { url }
+   fs.writeFileSync(settings.json, JSON.stringify(config, null, 2))
+   ```
+
+   User-owned top-level keys (theme, editor settings, etc.) are preserved
+   because the merge only touches `mcpServers`.
+
+2. **No ownership tracking.** There's no `_agents_managed` marker. If a user
+   hand-edits `mcpServers.github`, the next sync silently overwrites it with
+   the YAML's values.
+
+3. **Source delete ≠ destination clean.** `removeMcpServerConfig(name)`
+   (`mcp.ts:381`) only unlinks the YAML file. The matching entry in each
+   agent's settings stays until manually removed.
+
+4. **Claude and Codex delegate.** Instead of editing settings.json directly,
+   agents-cli invokes `claude mcp add` / `codex mcp add` (`mcp.ts:169-186`).
+   Those commands own the merge. Benefit: agent-internal validation runs.
+   Cost: write failures surface as `execSync` errors, not structured results.
+
+## Permissions: Per-Agent Format Conversion
+
+Permissions take a different path: collected into a canonical `PermissionSet`,
+then converted per agent into that agent's native format. Not a JSON merge —
+a format rewrite.
+
+```
+~/.agents/permissions/groups/                     Canonical                    Per-agent native
+*.yaml                                            PermissionSet
+
+┌─────────────────────┐                       ┌──────────────────┐          Claude (JSON):
+│ read-only.yaml      │                       │ allow: [         │          { permissions: {
+│ ───────             │ loadPermission-       │   "Read",        │              allow: [...],
+│ allow: [Read, Grep] │ ─Groups()──────────▶  │   "Grep",        │              deny:  [...]
+│ deny:  [Write]      │ concat per group      │   "Bash(git *)"  │            }}
+│                     │                       │ ],               │
+│ git-safe.yaml       │                       │ deny: [          │          OpenCode (JSONC/JSON):
+│ ───────             │                       │   "Write"        │          { "permission": {
+│ allow: [Bash(git *)]│                       │ ],               │              "bash": {
+│                     │                       │ additional-      │                "git *": "allow",
+│ 99-deny.yaml ──────▶│ rules go to deny      │   Directories:   │                "rm *": "deny"
+│ allow: [Bash(rm *)] │ (naming convention)   │   [...]          │              }}}
+└─────────────────────┘                       └──────────────────┘          Codex (Starlark file):
+                                                                            agents-deny.rules
+                                                                            (generated text)
+```
+
+Group-to-permission-set is concatenation with one naming convention:
+groups ending in `-deny` (e.g. `99-deny.yaml`) contribute to `deny` even
+though their YAML lists appear under `allow`
+(`permissions.ts:230-235`).
+
+Per-agent conversion is lossy in both directions:
+
+- Claude's native format is closest to canonical — near 1:1 passthrough
+  (`permissions.ts:362-369`).
+- OpenCode 1.1.1+ maps `Bash(pattern)` rules into the `permission.bash`
+  `allow`/`deny` map in `~/.config/opencode/opencode.jsonc` (or `.json`) for
+  user scope, or project-root `opencode.jsonc` (or `.json`). Non-bash rules are
+  dropped.
+- Codex (>= 0.138.0) writes `approval_policy` and `sandbox_mode` to
+  `.codex/config.toml`, plus `sandbox_workspace_write.network_access=true` when
+  web tools are allowed. It also writes a platform-resolved baseline of
+  `sandbox_workspace_write.writable_roots` — the regenerable toolchain caches
+  (`~/.cargo`, `~/.npm`, `~/go`, `~/.cache` / `~/Library/Caches`, …) so a
+  `workspace-write` run can build/test/install without escalating to
+  danger-full-access; credential dirs (`~/.ssh`, `~/.aws`, `~/.config`) are
+  excluded, and any roots the user set are unioned in, not clobbered
+  (`permissions.ts`: `codexDefaultWritableRoots`, `mergeCodexSandboxWrite`).
+  Native launches then apply the managed `agents-plan` or `agents-edit` named
+  permission profile at runtime. This keeps network independent from filesystem
+  access: plan is read-only with network, while edit adds the workspace,
+  `~/.agents`, the cache baseline above, and caller-supplied writable roots. The
+  runtime profile uses `approval_policy="on-request"`; only explicit `skip`
+  bypasses approvals and sandboxing.
+  Deny rules are emitted as Starlark to a generated `agents-deny.rules` file
+  (`permissions.ts:38-56`).
+- Kiro 2.8.0+ maps canonical shell, filesystem, and web rules into v3
+  capability rules under `.kiro/settings/permissions.yaml`. Existing user
+  rules are preserved when managed rules are merged.
+- Goose maps canonical tool families into `.config/goose/permission.yaml`
+  `user.always_allow` / `user.never_allow` entries using the Goose Developer
+  extension tool names. Existing non-managed permission categories and
+  unrelated user tool entries are preserved.
+- OpenClaw gates at tool granularity only, so only **blanket** (whole-tool)
+  rules map into `~/.openclaw/openclaw.json` `tools.alsoAllow` (allow) /
+  `tools.deny` (deny): `bash → exec`, `read → read`, `write`/`edit → write`,
+  `webfetch → web_fetch`, `websearch → web_search`. Sub-command/path/domain
+  rules (`Bash(git:*)`, `Write(secrets/**)`, `WebFetch(domain:x)`) have no
+  tool-level equivalent and are skipped. The absolute `tools.allow` list is
+  never touched, and all other keys (`mcp`, `exec`, `agents`, …) are preserved.
+- Hermes maps canonical Bash allow rules to `~/.hermes/config.yaml`
+  `command_allowlist` and Bash deny rules to `approvals.deny`, preserving
+  sibling YAML keys like `mcp_servers` and `hooks`. Hermes has command-glob
+  persistence only; session-scoped `/tools` toggles are not written.
+## Plugins: Synthetic Marketplace + Exec-Surface Gate
+
+Plugins bundle skills, commands, hooks, MCP servers, settings, and permissions
+under a single `.claude-plugin/plugin.json` manifest. Sync copies the bundle
+into each capable version home and writes the agent-native registration:
+Claude-style harnesses use the synthetic `agents-cli` marketplace, and Goose
+receives the bundle under `.agents/plugins/<name>/`.
+
+```
+Source: ~/.agents/plugins/<name>/        Per-version destination:
+
+┌──────────────────────────────┐         <version-home>/.claude/plugins/
+│ .claude-plugin/plugin.json   │         ├── known_marketplaces.json
+│ skills/<name>/SKILL.md       │         │     └ "agents-cli" → marketplaces/agents-cli
+│ commands/*.md                │         ├── marketplaces/agents-cli/
+│ hooks/hooks.json   ◄─ exec   │         │   ├── .claude-plugin/marketplace.json
+│ .mcp.json          ◄─ exec   │         │   │     └ synthesized: lists every
+│ bin/, scripts/     ◄─ exec   │         │   │       discovered plugin
+│ settings.json      ◄─ exec   │         │   └── plugins/<name>/  ← copy
+│ permissions/       ◄─ exec   │         └── settings.json
+└──────────────────────────────┘               └ enabledPlugins["<name>@agents-cli"] = true
+```
+
+Behavior rules, per `src/lib/plugins.ts:379` and `src/lib/plugin-marketplace.ts`:
+
+1. **Discovery requires a valid manifest.** `discoverPlugins()`
+   (`plugins.ts:61`) scans `~/.agents/plugins/<dir>/` and only accepts entries
+   with a parseable `.claude-plugin/plugin.json` containing `name` and
+   `version`. Directories without the manifest are silently skipped.
+
+2. **Copy, not symlink.** Unlike commands/skills/hooks/rules, plugins are
+   copied via `copyPluginToMarketplace()` (`plugin-marketplace.ts`). The copy
+   pre-expands `${user_config.*}` placeholders against the per-plugin
+   `.user-config.json` so each version sees its resolved values. `${CLAUDE_PLUGIN_ROOT}`
+   and `${CLAUDE_PLUGIN_DATA}` are left for Claude to expand at runtime.
+
+   Full refresh also treats trusted plugin `skills/<name>/` directories as
+   authoritative sources for top-level materialized skill homes. That reconciles
+   older homes that still have a legacy `.<agent>/skills/<name>/` copy of a
+   plugin-only skill, and prunes stale top-level skill dirs whose source no
+   longer exists.
+
+3. **Synthetic marketplace per version.** `syncMarketplaceManifest()` writes a
+   `marketplace.json` listing every discovered plugin, and
+   `registerMarketplace()` adds `agents-cli` to `known_marketplaces.json` so
+   Claude treats it as installed (not a remote git source). This is what
+   makes `claude plugin enable <name>@agents-cli` work without contacting a
+   remote.
+
+4. **Exec-surface gate.** Plugins shipping `hooks/`, `.mcp.json`, `bin/`,
+   `scripts/`, non-permissions `settings.json`, or `permissions/` are
+   *installed* (copied + marketplace registered) but *not enabled* unless the
+   caller passes `allowExecSurfaces: true`. `enablePluginInSettings()`
+   (`plugin-marketplace.ts:196`) short-circuits without flipping
+   `enabledPlugins[<name>@agents-cli]` to `true`. The user-facing flag is
+   `--allow-exec-surfaces` on both `agents plugins install` and
+   `agents plugins sync`. The gate's purpose is to prevent unattended sync
+   flows (e.g., `agents use claude@<v>`) from silently arming third-party
+   code on every session.
+
+5. **Capability gating.** Only agents where `supports(agent, 'plugins', version)`
+   passes participate (`capableAgents('plugins')` in `src/lib/agents.ts`). Plugins
+   can additionally declare `agents: [...]` in their manifest to narrow further;
+   `pluginSupportsAgent()` (`plugins.ts:179`) intersects both lists.
+
+6. **Codex command-to-skill fallback.** Codex `>= 0.117.0` dropped
+   command support; for those versions, plugin `commands/*.md` are
+   converted to skills prefixed with `<plugin>-<command>`
+   (`plugins.ts:444-453`) so they remain reachable as `$<plugin>-<command>`.
+
+7. **Source delete ≠ destination clean — but skills get swept.**
+   `cleanOrphanedPluginSkills()` (`plugins.ts:866`) runs every sync and
+   removes plugin-owned skill dirs whose parent plugin no longer exists in
+   `~/.agents/plugins/`. The marketplace copy itself isn't pruned until
+   `agents plugins remove <name>` runs explicitly.
+
+## Key Functions
+
+| Function | File | Purpose |
+|----------|------|---------|
+| `getAvailableResources()` | versions.ts | List central resources |
+| `getActuallySyncedResources()` | versions.ts | Check what's synced to version |
+| `getNewResources()` | versions.ts | Diff available vs synced |
+| `syncResourcesToVersion()` | versions.ts | Create symlinks in version home |
+| `pruneRemovedResources()` | staleness/prune.ts | Remove version-home resources deleted from source (manifest-bounded) |
+| `markdownToToml()` | convert.ts | Legacy command TOML conversion helper |
+| `syncWorkflowToGooseRecipe()` | workflows.ts | Convert workflows into Goose recipes and subrecipes |
+| `transformWorkflowForOpenClaw()` | workflows.ts | Convert workflows into Lobster `.lobster` files |

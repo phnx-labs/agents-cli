@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>agents-cli Design Constraints</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:5px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header"><div class="header-label">Phoenix Labs / agents-cli</div><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span><span class="status-badge status-current-code-audit">current-code audit</span></div>
+<h1>agents-cli Design Constraints</h1>
+<p class="summary">A searchable map of the invariants governing sessions, secrets, daemon, teams, run, and routines, including what is current, intended, drifting, or undocumented.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">6 critical subsystems audited<span class="meta-sep" aria-hidden="true">·</span>Sessions, secrets, and run have normative contracts<span class="meta-sep" aria-hidden="true">·</span>Teams is documented but not normatively specified<span class="meta-sep" aria-hidden="true">·</span>Routine readiness remains substantially intended</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Codex</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">019fe9a6</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a href="#contract-coverage"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Contract coverage</a><a href="#findings"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Findings</a><a href="#parse-and-persist-once-then-consume-deltas"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Parse and persist once—then consume deltas</a><a href="#durable-facts-are-separate-from-live-state"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Durable facts are separate from live state</a><a href="#one-funnel-deterministic-inputs"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>One funnel, deterministic inputs</a><a href="#named-drift"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Named drift</a><a href="#strong-design-weak-contract-status"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Strong design, weak contract status</a><a href="#minimum-normative-contract-teams-still-needs"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Minimum normative contract teams still needs</a><a href="#current-guarantees"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Current guarantees</a><a href="#intended-but-not-implemented"><span class="toc-index">11&nbsp;&middot;&nbsp;</span>Intended but not implemented</a><a href="#evidence"><span class="toc-index">12&nbsp;&middot;&nbsp;</span>Evidence</a><a href="#priority-gaps"><span class="toc-index">13&nbsp;&middot;&nbsp;</span>Priority gaps</a><a href="#bottom-line"><span class="toc-index">14&nbsp;&middot;&nbsp;</span>Bottom line</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2>
+<p>This report distinguishes implemented guarantees from intended architecture and descriptive-only documentation across the six most important state and execution subsystems.</p>
+<h3>The operating model</h3>
+<p>The design is built around three separations: durable facts versus live state, one execution funnel versus many callers, and one scheduler versus many control surfaces.</p>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg class="artifact-diagram" viewBox="0 0 1080 430" role="img" aria-label="Architecture map connecting durable state, execution funnels, and scheduling ownership">
+  <rect x="25" y="25" width="1030" height="380" rx="14" fill="#090c0f" stroke="#303840" stroke-width="1.5"></rect>
+  <text x="55" y="62" font-family="JetBrains Mono, monospace" font-size="12" fill="#a3e635">DURABLE FACTS</text>
+  <rect x="55" y="82" width="265" height="112" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="75" y="112" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">Sessions DB</text>
+  <text x="75" y="138" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">metadata · parser continuation</text>
+  <text x="75" y="158" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">FTS content · archived sessions</text>
+  <text x="75" y="178" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">headless · teammate · routine transcripts</text>
+
+  <text x="407" y="62" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bdf8">ONE EXECUTION FUNNEL</text>
+  <rect x="407" y="82" width="265" height="112" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="427" y="112" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">agents run</text>
+  <text x="427" y="138" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">sanitize → resolve → isolate</text>
+  <text x="427" y="158" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">spawn → audit exactly once</text>
+  <text x="427" y="178" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">local · SSH · fallback · routine</text>
+
+  <text x="760" y="62" font-family="JetBrains Mono, monospace" font-size="12" fill="#f59e0b">ONE SCHEDULER</text>
+  <rect x="760" y="82" width="265" height="112" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+  <text x="780" y="112" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">CLI daemon</text>
+  <text x="780" y="138" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">slot claims · no overlap</text>
+  <text x="780" y="158" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">routine history · adoption</text>
+  <text x="780" y="178" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">UIs render and request only</text>
+
+  <path d="M320 138 L407 138" stroke="#38bdf8" stroke-width="2" stroke-dasharray="5 5" opacity="0.8"></path>
+  <path d="M672 138 L760 138" stroke="#38bdf8" stroke-width="2" stroke-dasharray="5 5" opacity="0.8"></path>
+
+  <rect x="55" y="245" width="215" height="100" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="75" y="276" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">Sessions</text>
+  <text x="75" y="301" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">every agent transcript indexed</text>
+  <text x="75" y="321" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">origin + parent/run links retained</text>
+
+  <rect x="305" y="245" width="215" height="100" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="325" y="276" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">Secrets</text>
+  <text x="325" y="301" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">metadata ≠ protected value</text>
+  <text x="325" y="321" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">broker cache ≠ authority</text>
+
+  <rect x="555" y="245" width="215" height="100" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="575" y="276" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">Team ledger</text>
+  <text x="575" y="301" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">DAG · task · process state</text>
+  <text x="575" y="321" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">links to teammate session ids</text>
+
+  <rect x="805" y="245" width="220" height="100" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+  <text x="825" y="276" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">Routine run ledger</text>
+  <text x="825" y="301" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">attempts incl. no-session outcomes</text>
+  <text x="825" y="321" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">links to archived session ids</text>
+</svg>
+<figcaption>Read left to right: durable data feeds the common execution funnel; the daemon exclusively decides when autonomous work runs.</figcaption>
+</figure><div class="artifact-callout"><strong>Search tip:</strong> use the browser’s Find command for an invariant id such as <code>SES-5</code>, <code>EXEC-18</code>, <code>SING-1</code>, or <code>RT-5</code>.</div><h3>Where headless, team, and routine executions go</h3>
+<table>
+<thead>
+<tr>
+<th>Execution</th>
+<th>Durable session record</th>
+<th>Additional ledger</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Plain or headless <code>agents run</code></td>
+<td>The harness transcript is discovered and indexed in <code>sessions.db</code> like an interactive session</td>
+<td>Dispatch/audit events</td>
+</tr>
+<tr>
+<td>Team teammate</td>
+<td>Its own harness transcript is indexed as a session with team-origin metadata and a parent orchestrator link</td>
+<td>Team registry and teammate <code>meta.json</code> retain DAG/task/process state</td>
+</tr>
+<tr>
+<td>Agent/workflow routine</td>
+<td>Its transcript is archived beneath the routine run and indexed as a session with <code>routineName</code> + <code>routineRunId</code></td>
+<td><code>RunMeta</code> retains the attempt outcome</td>
+</tr>
+<tr>
+<td>Command-only, blocked, skipped, or missed routine</td>
+<td>No session exists because no agent conversation occurred</td>
+<td><code>RunMeta</code> is the canonical record</td>
+</tr>
+</tbody></table>
+<p>Team-origin sessions are stored but excluded from the ordinary historical listing unless the teams filter is enabled. Use <code>agents sessions --teams</code>; live teammates are also surfaced by <code>agents sessions --active</code> with <code>context: teams</code>.</p>
+<h2 id="contract-coverage">Contract coverage</h2>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Status</th>
+<th>What callers can rely on</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Sessions</td>
+<td>Normative</td>
+<td>RFC-2119 contract plus scenarios and implementation citations</td>
+</tr>
+<tr>
+<td>Secrets</td>
+<td>Normative</td>
+<td>Storage, prompt, materialization, broker, and audit boundaries</td>
+</tr>
+<tr>
+<td>Run</td>
+<td>Normative with named drift</td>
+<td>One execution funnel; ACP and some version isolation deviate</td>
+</tr>
+<tr>
+<td>Daemon</td>
+<td>Partly normative</td>
+<td>Scheduler ownership and lifecycle invariants; status/health largely unspecified</td>
+</tr>
+<tr>
+<td>Routines</td>
+<td>Mixed</td>
+<td>Scheduling and run history are current; readiness/context is mostly intended</td>
+</tr>
+<tr>
+<td>Teams</td>
+<td>Descriptive only</td>
+<td>Strong design documentation, but no normative <code>TEAM-*</code> contract</td>
+</tr>
+</tbody></table>
+<p>Source: <a href="../../../apps/cli/docs/specifications.md#coverage-inventory"><code>apps/cli/docs/specifications.md</code>, coverage inventory</a>.</p>
+<h2 id="findings">Findings</h2>
+<h3>1. Sessions</h3>
+<h2 id="parse-and-persist-once-then-consume-deltas">Parse and persist once—then consume deltas</h2>
+<p>The correct invariant is not “a transcript is literally parsed only once.” It is:</p>
+<blockquote>
+<p>Parse the existing transcript on cold discovery, persist its derived row plus parser continuation, and thereafter fold only appended complete records. Reparse from byte zero only when the continuation is unsafe.</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Invariant</th>
+<th>Status</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Unchanged directories and files are served from SQLite without reparsing</td>
+<td>Current</td>
+<td><a href="../../../apps/cli/docs/05-sessions.md"><code>05-sessions.md:115</code></a></td>
+</tr>
+<tr>
+<td>Claude, Codex, and Kimi resume from persisted byte offsets and accumulators</td>
+<td>Current</td>
+<td><a href="../../../apps/cli/docs/05-sessions.md"><code>05-sessions.md:278</code></a></td>
+</tr>
+<tr>
+<td>Incremental output must equal a from-scratch parse</td>
+<td><code>SES-5</code>, Current</td>
+<td><a href="../../../apps/cli/docs/specifications.md"><code>specifications.md:180</code></a></td>
+</tr>
+<tr>
+<td>Unterminated JSONL tails are deferred, preventing partial/double application</td>
+<td><code>SES-5</code>, Current</td>
+<td><a href="../../../apps/cli/docs/05-sessions.md"><code>05-sessions.md:295</code></a></td>
+</tr>
+<tr>
+<td>Claude/Codex first-event identity is rechecked before trusting continuation</td>
+<td><code>SES-5</code>, Current</td>
+<td><a href="../../../apps/cli/src/lib/session/discover.ts"><code>discover.ts:4007</code></a></td>
+</tr>
+<tr>
+<td>A malformed line is skipped; an unknown format fails loudly</td>
+<td><code>SES-3/4</code>, Current</td>
+<td><a href="../../../apps/cli/docs/specifications.md"><code>specifications.md:173</code></a></td>
+</tr>
+</tbody></table>
+<h2 id="durable-facts-are-separate-from-live-state">Durable facts are separate from live state</h2>
+<table>
+<thead>
+<tr>
+<th>Invariant</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Transcript-derived preview data is cached by source mtime and size</td>
+<td>Current</td>
+</tr>
+<tr>
+<td>Live working/waiting state is fetched separately and expires within 15 seconds</td>
+<td>Current</td>
+</tr>
+<tr>
+<td>Empty rescans cannot clobber a better stored label</td>
+<td><code>SES-14</code>, Current</td>
+</tr>
+<tr>
+<td>PID liveness must guard against PID reuse</td>
+<td><code>SES-17</code>, Current</td>
+</tr>
+<tr>
+<td>File-gone sessions with indexed user content remain archived and render from the DB</td>
+<td>Current, RUSH-2436</td>
+</tr>
+</tbody></table>
+<p>Evidence: <a href="../../../apps/cli/docs/05-sessions.md"><code>05-sessions.md:137</code></a>, <a href="../../../apps/cli/docs/05-sessions.md"><code>05-sessions.md:194</code></a>, and <a href="../../../apps/cli/docs/specifications.md"><code>specifications.md:262</code></a>.</p>
+<h3>2. Secrets</h3>
+<table>
+<thead>
+<tr>
+<th>Invariant</th>
+<th>Status</th>
+<th>Consequence</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Bundle metadata is separate from protected values</td>
+<td><code>SEC-4</code>, Current</td>
+<td>Enumeration cannot trigger biometric reads</td>
+</tr>
+<tr>
+<td>Every command occupies exactly one materialization boundary</td>
+<td><code>SEC-6</code>, Current</td>
+<td>A code path cannot “sometimes” expose plaintext</td>
+</tr>
+<tr>
+<td>Injection reaches only the child environment, never stdout or argv</td>
+<td><code>SEC-7/8a</code>, Current</td>
+<td>Agents do not ingest secrets into context/transcripts</td>
+</tr>
+<tr>
+<td>Agent and detached execution are broker-only</td>
+<td><code>SEC-13/13a</code>, Current</td>
+<td>Automation cannot spontaneously raise Touch ID</td>
+</tr>
+<tr>
+<td>Only explicit interactive reveal/run commands may prompt</td>
+<td><code>SEC-13b</code>, Current</td>
+<td>Prompt authority follows user intent</td>
+</tr>
+<tr>
+<td>A broker miss is a normal cache miss, not an error or prompt</td>
+<td><code>SEC-14</code>, Current</td>
+<td>The broker is a cache, not the credential authority</td>
+</tr>
+<tr>
+<td>Auditing has one value-free write path and attributes the requester</td>
+<td><code>SEC-26/28</code>, Current</td>
+<td>Broker/daemon identity cannot replace session identity</td>
+</tr>
+</tbody></table>
+<p>Evidence: <a href="../../../apps/cli/docs/specifications.md"><code>specifications.md:1090</code></a> through the Secrets requirements.</p>
+<h3>3. Run</h3>
+<h2 id="one-funnel-deterministic-inputs">One funnel, deterministic inputs</h2>
+<table>
+<thead>
+<tr>
+<th>Invariant</th>
+<th>Status</th>
+<th>Consequence</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Every ordinary invocation reaches <code>buildExecCommand</code> + <code>buildExecEnv</code> + spawn</td>
+<td><code>EXEC-18</code>, Current</td>
+<td>Teams, routines, loops, fallback, and SSH do not invent engines</td>
+</tr>
+<tr>
+<td>Ambient loader/interpreter hijack variables are stripped</td>
+<td><code>EXEC-1</code>, Current</td>
+<td>The parent shell cannot silently subvert the child</td>
+</tr>
+<tr>
+<td>Env precedence is profile → share → secrets → explicit <code>--env</code></td>
+<td><code>EXEC-5/6</code>, Current</td>
+<td>Configuration resolution is deterministic</td>
+</tr>
+<tr>
+<td>Secret bundle resolution is atomic before spawn</td>
+<td><code>EXEC-9</code>, Current</td>
+<td>No partially credentialed child launches</td>
+</tr>
+<tr>
+<td>Every finalized run records exactly one dispatch audit</td>
+<td><code>EXEC-21</code>, Current</td>
+<td>One governance chokepoint</td>
+</tr>
+<tr>
+<td>Modes are resolved against harness capabilities</td>
+<td><code>EXEC-22</code>, Current</td>
+<td>Unsupported modes fail or use documented degradation</td>
+</tr>
+<tr>
+<td>Remote dispatch re-executes <code>agents run</code> on the target</td>
+<td><code>EXEC-30</code>, Current</td>
+<td>Remote execution retains the same engine</td>
+</tr>
+<tr>
+<td>Actor provenance crosses SSH</td>
+<td><code>EXEC-31</code>, Current</td>
+<td>Attribution survives placement</td>
+</tr>
+<tr>
+<td>Remote secret values never enter the command line</td>
+<td><code>EXEC-33/39</code>, Current</td>
+<td>No argv/shell leakage</td>
+</tr>
+<tr>
+<td>Remote <code>~</code>/<code>$HOME</code> cwd resolves on the remote machine</td>
+<td><code>EXEC-35</code>, Current</td>
+<td>No local-home path corruption</td>
+</tr>
+<tr>
+<td><code>--no-follow</code> reports dispatch, not completion</td>
+<td><code>EXEC-36</code>, Current</td>
+<td>Detached success is not mistaken for task success</td>
+</tr>
+</tbody></table>
+<p>Evidence: <a href="../../../apps/cli/docs/specifications.md"><code>specifications.md:1700</code></a>.</p>
+<h2 id="named-drift">Named drift</h2>
+<div class="artifact-callout artifact-callout-warn"><strong>Version isolation:</strong> several registered harnesses do not receive a complete per-version configuration directory from <code>buildExecEnv</code>. This is explicitly marked <code>[Drift]</code> under <code>EXEC-16</code>.</div><div class="artifact-callout artifact-callout-warn"><strong>ACP:</strong> <code>--acp</code> bypasses the normal env builder, losing sanitization, provenance, mailbox/session wiring, runtime labeling, and version pinning. This is explicitly marked <code>[Drift]</code> under <code>EXEC-19/20</code>.</div><h3>4. Daemon and scheduler ownership</h3>
+<table>
+<thead>
+<tr>
+<th>Invariant</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Every fleet-affecting capability has exactly one scheduler and executor</td>
+<td><code>SING-1</code>, Current</td>
+</tr>
+<tr>
+<td>UIs cannot own autonomous acting timers/watchers</td>
+<td><code>SING-2</code>, Current</td>
+</tr>
+<tr>
+<td>UI-owned actions expose narrow endpoints; the CLI retains the trigger</td>
+<td><code>SING-3</code>, Current</td>
+</tr>
+<tr>
+<td>Scheduled slots have deterministic UTC identities and atomic claims</td>
+<td><code>SING-5b</code>, Current</td>
+</tr>
+<tr>
+<td>A routine cannot overlap itself across entry points</td>
+<td><code>SING-5c</code>, Current</td>
+</tr>
+<tr>
+<td>Run metadata exists before pre-spawn work</td>
+<td><code>SING-5e</code>, Current</td>
+</tr>
+<tr>
+<td>Shared-input jobs require an owner, atomic item claim, or proven idempotency</td>
+<td><code>SING-9</code>, Current</td>
+</tr>
+<tr>
+<td>Detached children survive takeover and are adopted from persisted state</td>
+<td><code>SING-11a</code>, Current</td>
+</tr>
+<tr>
+<td>Stop verifies that owned resources were actually released</td>
+<td><code>SING-12/12a</code>, Current</td>
+</tr>
+<tr>
+<td>Restart supervision is bounded</td>
+<td><code>SING-14</code>, Current</td>
+</tr>
+</tbody></table>
+<p>Evidence: <a href="../../../apps/cli/docs/specifications.md"><code>specifications.md:2377</code></a>.</p>
+<div class="artifact-callout artifact-callout-warn"><strong>Coverage gap:</strong> daemon scheduler ownership is normative, but <code>agents daemon status</code>, services, health rendering, and doctor behavior do not have their own command contract.</div><h3>5. Teams</h3>
+<h2 id="strong-design-weak-contract-status">Strong design, weak contract status</h2>
+<table>
+<thead>
+<tr>
+<th>Invariant described today</th>
+<th>Why it matters</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Team and teammate state persists on disk</td>
+<td>A supervisor restart cannot erase DAG progress</td>
+</tr>
+<tr>
+<td>One orchestrator drains the DAG, including distributed teams</td>
+<td>Remote workers do not independently schedule waves</td>
+</tr>
+<tr>
+<td>Names, dependencies, and cycles validate before worktree creation</td>
+<td>Invalid DAGs leave no branch debris</td>
+</tr>
+<tr>
+<td>Editing teammates receive explicit ownership boundaries</td>
+<td>Parallelism does not become invisible file contention</td>
+</tr>
+<tr>
+<td>Worktrees branch from freshly fetched <code>origin/&lt;default&gt;</code> locally and remotely</td>
+<td>Every teammate begins from the current shared baseline</td>
+</tr>
+<tr>
+<td>Failed creation is transactional</td>
+<td>Retrying the same teammate name works</td>
+</tr>
+<tr>
+<td>Cleanup fails closed when ownership is uncertain</td>
+<td>Recoverable leftovers beat deleted work</td>
+</tr>
+<tr>
+<td><code>meta.json</code> writes are atomic</td>
+<td>Process death cannot leave torn state</td>
+</tr>
+<tr>
+<td>No eligible remote device means a loud failure, not implicit local placement</td>
+<td>Placement intent is preserved</td>
+</tr>
+<tr>
+<td>One team has one repository</td>
+<td>Cross-repo work uses explicit team boundaries</td>
+</tr>
+<tr>
+<td>Pending dependency-blocked teammates are not reaped</td>
+<td>Waiting is a durable state, not inactivity</td>
+</tr>
+</tbody></table>
+<p>Evidence: <a href="../../../apps/cli/docs/teams.md"><code>teams.md</code></a>, especially <a href="../../../apps/cli/docs/teams.md#boundary-contracts">boundary contracts</a>, <a href="../../../apps/cli/docs/teams.md#worktrees-and-isolation">worktree isolation</a>, and <a href="../../../apps/cli/docs/teams.md#distributed-teams">distributed teams</a>.</p>
+<div class="artifact-callout artifact-callout-danger"><strong>Missing contract:</strong> these behaviors are descriptive documentation. There is no normative <code>TEAM-*</code> section with RFC-2119 guarantees and Given/When/Then scenarios.</div><h2 id="minimum-normative-contract-teams-still-needs">Minimum normative contract teams still needs</h2>
+<ol>
+<li>Durable and atomic state transitions.</li>
+<li>DAG validation and supervisor restart recovery.</li>
+<li>Fresh-base worktree isolation.</li>
+<li>Transactional add and fail-closed cleanup.</li>
+<li>Remote placement without silent fallback.</li>
+<li>A distinction between process completion and delivered/merged work.</li>
+<li>Exactly one supervisor per team.</li>
+</ol>
+<h3>6. Routines</h3>
+<h2 id="current-guarantees">Current guarantees</h2>
+<table>
+<thead>
+<tr>
+<th>Invariant</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>The daemon is the only automatic scheduler</td>
+<td><code>SING-1/5</code>, Current</td>
+</tr>
+<tr>
+<td>Slot claims and no-overlap prevent duplicate execution</td>
+<td><code>SING-5b/5c</code>, Current</td>
+</tr>
+<tr>
+<td><code>projects[]</code> is grouping metadata only</td>
+<td><code>RT-1</code>, Current</td>
+</tr>
+<tr>
+<td>Routine run history—not sessions—is the canonical attempt ledger</td>
+<td><code>RT-6</code>, Current portion</td>
+</tr>
+<tr>
+<td><code>repo</code> is external identity/provenance, never a local cwd</td>
+<td><code>RT-8</code>, Current</td>
+</tr>
+<tr>
+<td>Menu-bar routine views remain read-only schedulingly</td>
+<td><code>RT-11</code>, Current</td>
+</tr>
+</tbody></table>
+<h2 id="intended-but-not-implemented">Intended but not implemented</h2>
+<table>
+<thead>
+<tr>
+<th>Target invariant</th>
+<th>Status today</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Singular project execution anchor separate from grouping tags</td>
+<td><code>RT-2</code>, Intended</td>
+</tr>
+<tr>
+<td>Resolve cwd on the actual execution target</td>
+<td><code>RT-3</code>, Intended</td>
+</tr>
+<tr>
+<td>Agent/workflow bodies cannot silently default to home</td>
+<td><code>RT-4</code>, Intended</td>
+</tr>
+<tr>
+<td>Add/edit proves cwd, trust, and authenticated readiness before activation</td>
+<td><code>RT-5</code>, Intended</td>
+</tr>
+<tr>
+<td>Proven blockers save the routine paused with stable machine-readable codes</td>
+<td><code>RT-5</code>, Intended</td>
+</tr>
+<tr>
+<td>Resume reruns readiness and cannot bypass a blocker</td>
+<td><code>RT-9</code>, Intended</td>
+</tr>
+<tr>
+<td>Raw YAML edits validate then atomically replace</td>
+<td><code>RT-10</code>, Intended</td>
+</tr>
+<tr>
+<td>Run statuses distinguish <code>blocked</code> and <code>skipped</code> from <code>failed</code></td>
+<td><code>RT-7</code>, Intended portion</td>
+</tr>
+</tbody></table>
+<p>Evidence: <a href="../../../apps/cli/docs/specifications.md"><code>specifications.md:2771</code></a> and the explicit <a href="../../../apps/cli/docs/specifications.md">known gaps</a>.</p>
+<h2 id="evidence">Evidence</h2>
+<p>The findings were checked against the current normative specification, subsystem design documents, and the scanner/database implementation. The linked source locations throughout the report are the evidence index; the primary sources are:</p>
+<ul>
+<li><a href="../../../apps/cli/docs/specifications.md"><code>apps/cli/docs/specifications.md</code></a></li>
+<li><a href="../../../apps/cli/docs/05-sessions.md"><code>apps/cli/docs/05-sessions.md</code></a></li>
+<li><a href="../../../apps/cli/docs/teams.md"><code>apps/cli/docs/teams.md</code></a></li>
+<li><a href="../../../apps/cli/src/lib/session/discover.ts"><code>apps/cli/src/lib/session/discover.ts</code></a></li>
+<li><a href="../../../apps/cli/src/lib/session/db.ts"><code>apps/cli/src/lib/session/db.ts</code></a></li>
+</ul>
+<h2 id="priority-gaps">Priority gaps</h2>
+<table>
+<thead>
+<tr>
+<th>Priority</th>
+<th>Gap</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>Routine readiness and target-side context resolution</td>
+<td>A scheduled definition can appear valid and fail only after firing</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Normative teams contract</td>
+<td>Durable DAG/worktree behaviors are important but not protected as caller guarantees</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Run ACP funnel parity</td>
+<td>A named bypass loses core environment and provenance guarantees</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Complete per-version run isolation</td>
+<td>Some harnesses remain account/config global despite the broader isolation principle</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Daemon status and health contract</td>
+<td>Scheduler ownership is specified; operational observability is not</td>
+</tr>
+</tbody></table>
+<h2 id="bottom-line">Bottom line</h2>
+<ul>
+<li><strong>Sessions:</strong> compute durable metadata incrementally and store it; recompute only live state or changed transcript deltas.</li>
+<li><strong>Secrets:</strong> metadata, values, broker cache, materialization, and audit identity remain separate layers.</li>
+<li><strong>Run:</strong> every caller uses one sanitized, isolated, auditable execution funnel.</li>
+<li><strong>Daemon:</strong> one owner schedules and executes autonomous actions.</li>
+<li><strong>Teams:</strong> durable DAG plus isolated worktrees, but the guarantees need promotion from prose to a normative contract.</li>
+<li><strong>Routines:</strong> the scheduling core is real; readiness, execution anchoring, and honest blocked/skipped outcomes are still target architecture.</li>
+</ul>
+</article>
+<footer class="document-footer">Architecture and contract audit</footer>
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0aXRsZTogYWdlbnRzLWNsaSBEZXNpZ24gQ29uc3RyYWludHMKc3VtbWFyeTogQSBzZWFyY2hhYmxlIG1hcCBvZiB0aGUgaW52YXJpYW50cyBnb3Zlcm5pbmcgc2Vzc2lvbnMsIHNlY3JldHMsIGRhZW1vbiwgdGVhbXMsIHJ1biwgYW5kIHJvdXRpbmVzLCBpbmNsdWRpbmcgd2hhdCBpcyBjdXJyZW50LCBpbnRlbmRlZCwgZHJpZnRpbmcsIG9yIHVuZG9jdW1lbnRlZC4KaGVhZGVyOiBQaG9lbml4IExhYnMgLyBhZ2VudHMtY2xpCmZvb3RlcjogQXJjaGl0ZWN0dXJlIGFuZCBjb250cmFjdCBhdWRpdApwcm9qZWN0OiBhZ2VudHMtY2xpCnJlcG9zaXRvcnk6IHBobngtbGFicy9hZ2VudHMtY2xpCnN0YXR1czogY3VycmVudC1jb2RlIGF1ZGl0CmRhdGU6ICIyMDI2LTA4LTEwIgpmYWN0czoKICAtIDYgY3JpdGljYWwgc3Vic3lzdGVtcyBhdWRpdGVkCiAgLSBTZXNzaW9ucywgc2VjcmV0cywgYW5kIHJ1biBoYXZlIG5vcm1hdGl2ZSBjb250cmFjdHMKICAtIFRlYW1zIGlzIGRvY3VtZW50ZWQgYnV0IG5vdCBub3JtYXRpdmVseSBzcGVjaWZpZWQKICAtIFJvdXRpbmUgcmVhZGluZXNzIHJlbWFpbnMgc3Vic3RhbnRpYWxseSBpbnRlbmRlZAotLS0KCiMjIFN1bW1hcnkKClRoaXMgcmVwb3J0IGRpc3Rpbmd1aXNoZXMgaW1wbGVtZW50ZWQgZ3VhcmFudGVlcyBmcm9tIGludGVuZGVkIGFyY2hpdGVjdHVyZSBhbmQgZGVzY3JpcHRpdmUtb25seSBkb2N1bWVudGF0aW9uIGFjcm9zcyB0aGUgc2l4IG1vc3QgaW1wb3J0YW50IHN0YXRlIGFuZCBleGVjdXRpb24gc3Vic3lzdGVtcy4KCiMjIyBUaGUgb3BlcmF0aW5nIG1vZGVsCgpUaGUgZGVzaWduIGlzIGJ1aWx0IGFyb3VuZCB0aHJlZSBzZXBhcmF0aW9uczogZHVyYWJsZSBmYWN0cyB2ZXJzdXMgbGl2ZSBzdGF0ZSwgb25lIGV4ZWN1dGlvbiBmdW5uZWwgdmVyc3VzIG1hbnkgY2FsbGVycywgYW5kIG9uZSBzY2hlZHVsZXIgdmVyc3VzIG1hbnkgY29udHJvbCBzdXJmYWNlcy4KCjxmaWd1cmUgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZSBhcnRpZmFjdC1maWd1cmUtZGlhZ3JhbSBhcnRpZmFjdC1maWd1cmUtd2lkZSI+CjxzdmcgY2xhc3M9ImFydGlmYWN0LWRpYWdyYW0iIHZpZXdCb3g9IjAgMCAxMDgwIDQzMCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJBcmNoaXRlY3R1cmUgbWFwIGNvbm5lY3RpbmcgZHVyYWJsZSBzdGF0ZSwgZXhlY3V0aW9uIGZ1bm5lbHMsIGFuZCBzY2hlZHVsaW5nIG93bmVyc2hpcCI+CiAgPHJlY3QgeD0iMjUiIHk9IjI1IiB3aWR0aD0iMTAzMCIgaGVpZ2h0PSIzODAiIHJ4PSIxNCIgZmlsbD0iIzA5MGMwZiIgc3Ryb2tlPSIjMzAzODQwIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjU1IiB5PSI2MiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNhM2U2MzUiPkRVUkFCTEUgRkFDVFM8L3RleHQ+CiAgPHJlY3QgeD0iNTUiIHk9IjgyIiB3aWR0aD0iMjY1IiBoZWlnaHQ9IjExMiIgcng9IjgiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI3NSIgeT0iMTEyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2M4YzhjOCI+U2Vzc2lvbnMgREI8L3RleHQ+CiAgPHRleHQgeD0iNzUiIHk9IjEzOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPm1ldGFkYXRhIMK3IHBhcnNlciBjb250aW51YXRpb248L3RleHQ+CiAgPHRleHQgeD0iNzUiIHk9IjE1OCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPkZUUyBjb250ZW50IMK3IGFyY2hpdmVkIHNlc3Npb25zPC90ZXh0PgogIDx0ZXh0IHg9Ijc1IiB5PSIxNzgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5oZWFkbGVzcyDCtyB0ZWFtbWF0ZSDCtyByb3V0aW5lIHRyYW5zY3JpcHRzPC90ZXh0PgoKICA8dGV4dCB4PSI0MDciIHk9IjYyIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzM4YmRmOCI+T05FIEVYRUNVVElPTiBGVU5ORUw8L3RleHQ+CiAgPHJlY3QgeD0iNDA3IiB5PSI4MiIgd2lkdGg9IjI2NSIgaGVpZ2h0PSIxMTIiIHJ4PSI4IiBmaWxsPSIjMGUxNDE4IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNDI3IiB5PSIxMTIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYzhjOGM4Ij5hZ2VudHMgcnVuPC90ZXh0PgogIDx0ZXh0IHg9IjQyNyIgeT0iMTM4IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+c2FuaXRpemUg4oaSIHJlc29sdmUg4oaSIGlzb2xhdGU8L3RleHQ+CiAgPHRleHQgeD0iNDI3IiB5PSIxNTgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5zcGF3biDihpIgYXVkaXQgZXhhY3RseSBvbmNlPC90ZXh0PgogIDx0ZXh0IHg9IjQyNyIgeT0iMTc4IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+bG9jYWwgwrcgU1NIIMK3IGZhbGxiYWNrIMK3IHJvdXRpbmU8L3RleHQ+CgogIDx0ZXh0IHg9Ijc2MCIgeT0iNjIiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSIjZjU5ZTBiIj5PTkUgU0NIRURVTEVSPC90ZXh0PgogIDxyZWN0IHg9Ijc2MCIgeT0iODIiIHdpZHRoPSIyNjUiIGhlaWdodD0iMTEyIiByeD0iOCIgZmlsbD0iIzE2MTIwYSIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9Ijc4MCIgeT0iMTEyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2M4YzhjOCI+Q0xJIGRhZW1vbjwvdGV4dD4KICA8dGV4dCB4PSI3ODAiIHk9IjEzOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPnNsb3QgY2xhaW1zIMK3IG5vIG92ZXJsYXA8L3RleHQ+CiAgPHRleHQgeD0iNzgwIiB5PSIxNTgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5yb3V0aW5lIGhpc3RvcnkgwrcgYWRvcHRpb248L3RleHQ+CiAgPHRleHQgeD0iNzgwIiB5PSIxNzgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5VSXMgcmVuZGVyIGFuZCByZXF1ZXN0IG9ubHk8L3RleHQ+CgogIDxwYXRoIGQ9Ik0zMjAgMTM4IEw0MDcgMTM4IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWRhc2hhcnJheT0iNSA1IiBvcGFjaXR5PSIwLjgiLz4KICA8cGF0aCBkPSJNNjcyIDEzOCBMNzYwIDEzOCIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1kYXNoYXJyYXk9IjUgNSIgb3BhY2l0eT0iMC44Ii8+CgogIDxyZWN0IHg9IjU1IiB5PSIyNDUiIHdpZHRoPSIyMTUiIGhlaWdodD0iMTAwIiByeD0iOCIgZmlsbD0iIzBmMTYwYSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9Ijc1IiB5PSIyNzYiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYzhjOGM4Ij5TZXNzaW9uczwvdGV4dD4KICA8dGV4dCB4PSI3NSIgeT0iMzAxIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+ZXZlcnkgYWdlbnQgdHJhbnNjcmlwdCBpbmRleGVkPC90ZXh0PgogIDx0ZXh0IHg9Ijc1IiB5PSIzMjEiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5vcmlnaW4gKyBwYXJlbnQvcnVuIGxpbmtzIHJldGFpbmVkPC90ZXh0PgoKICA8cmVjdCB4PSIzMDUiIHk9IjI0NSIgd2lkdGg9IjIxNSIgaGVpZ2h0PSIxMDAiIHJ4PSI4IiBmaWxsPSIjMGYxNjBhIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iMzI1IiB5PSIyNzYiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYzhjOGM4Ij5TZWNyZXRzPC90ZXh0PgogIDx0ZXh0IHg9IjMyNSIgeT0iMzAxIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+bWV0YWRhdGEg4omgIHByb3RlY3RlZCB2YWx1ZTwvdGV4dD4KICA8dGV4dCB4PSIzMjUiIHk9IjMyMSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmJyb2tlciBjYWNoZSDiiaAgYXV0aG9yaXR5PC90ZXh0PgoKICA8cmVjdCB4PSI1NTUiIHk9IjI0NSIgd2lkdGg9IjIxNSIgaGVpZ2h0PSIxMDAiIHJ4PSI4IiBmaWxsPSIjMGUxNDE4IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNTc1IiB5PSIyNzYiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYzhjOGM4Ij5UZWFtIGxlZGdlcjwvdGV4dD4KICA8dGV4dCB4PSI1NzUiIHk9IjMwMSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPkRBRyDCtyB0YXNrIMK3IHByb2Nlc3Mgc3RhdGU8L3RleHQ+CiAgPHRleHQgeD0iNTc1IiB5PSIzMjEiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5saW5rcyB0byB0ZWFtbWF0ZSBzZXNzaW9uIGlkczwvdGV4dD4KCiAgPHJlY3QgeD0iODA1IiB5PSIyNDUiIHdpZHRoPSIyMjAiIGhlaWdodD0iMTAwIiByeD0iOCIgZmlsbD0iIzE2MTIwYSIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjgyNSIgeT0iMjc2IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2M4YzhjOCI+Um91dGluZSBydW4gbGVkZ2VyPC90ZXh0PgogIDx0ZXh0IHg9IjgyNSIgeT0iMzAxIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+YXR0ZW1wdHMgaW5jbC4gbm8tc2Vzc2lvbiBvdXRjb21lczwvdGV4dD4KICA8dGV4dCB4PSI4MjUiIHk9IjMyMSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmxpbmtzIHRvIGFyY2hpdmVkIHNlc3Npb24gaWRzPC90ZXh0Pgo8L3N2Zz4KPGZpZ2NhcHRpb24+UmVhZCBsZWZ0IHRvIHJpZ2h0OiBkdXJhYmxlIGRhdGEgZmVlZHMgdGhlIGNvbW1vbiBleGVjdXRpb24gZnVubmVsOyB0aGUgZGFlbW9uIGV4Y2x1c2l2ZWx5IGRlY2lkZXMgd2hlbiBhdXRvbm9tb3VzIHdvcmsgcnVucy48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+PHN0cm9uZz5TZWFyY2ggdGlwOjwvc3Ryb25nPiB1c2UgdGhlIGJyb3dzZXLigJlzIEZpbmQgY29tbWFuZCBmb3IgYW4gaW52YXJpYW50IGlkIHN1Y2ggYXMgPGNvZGU+U0VTLTU8L2NvZGU+LCA8Y29kZT5FWEVDLTE4PC9jb2RlPiwgPGNvZGU+U0lORy0xPC9jb2RlPiwgb3IgPGNvZGU+UlQtNTwvY29kZT4uPC9kaXY+CgojIyMgV2hlcmUgaGVhZGxlc3MsIHRlYW0sIGFuZCByb3V0aW5lIGV4ZWN1dGlvbnMgZ28KCnwgRXhlY3V0aW9uIHwgRHVyYWJsZSBzZXNzaW9uIHJlY29yZCB8IEFkZGl0aW9uYWwgbGVkZ2VyIHwKfC0tLXwtLS18LS0tfAp8IFBsYWluIG9yIGhlYWRsZXNzIGBhZ2VudHMgcnVuYCB8IFRoZSBoYXJuZXNzIHRyYW5zY3JpcHQgaXMgZGlzY292ZXJlZCBhbmQgaW5kZXhlZCBpbiBgc2Vzc2lvbnMuZGJgIGxpa2UgYW4gaW50ZXJhY3RpdmUgc2Vzc2lvbiB8IERpc3BhdGNoL2F1ZGl0IGV2ZW50cyB8CnwgVGVhbSB0ZWFtbWF0ZSB8IEl0cyBvd24gaGFybmVzcyB0cmFuc2NyaXB0IGlzIGluZGV4ZWQgYXMgYSBzZXNzaW9uIHdpdGggdGVhbS1vcmlnaW4gbWV0YWRhdGEgYW5kIGEgcGFyZW50IG9yY2hlc3RyYXRvciBsaW5rIHwgVGVhbSByZWdpc3RyeSBhbmQgdGVhbW1hdGUgYG1ldGEuanNvbmAgcmV0YWluIERBRy90YXNrL3Byb2Nlc3Mgc3RhdGUgfAp8IEFnZW50L3dvcmtmbG93IHJvdXRpbmUgfCBJdHMgdHJhbnNjcmlwdCBpcyBhcmNoaXZlZCBiZW5lYXRoIHRoZSByb3V0aW5lIHJ1biBhbmQgaW5kZXhlZCBhcyBhIHNlc3Npb24gd2l0aCBgcm91dGluZU5hbWVgICsgYHJvdXRpbmVSdW5JZGAgfCBgUnVuTWV0YWAgcmV0YWlucyB0aGUgYXR0ZW1wdCBvdXRjb21lIHwKfCBDb21tYW5kLW9ubHksIGJsb2NrZWQsIHNraXBwZWQsIG9yIG1pc3NlZCByb3V0aW5lIHwgTm8gc2Vzc2lvbiBleGlzdHMgYmVjYXVzZSBubyBhZ2VudCBjb252ZXJzYXRpb24gb2NjdXJyZWQgfCBgUnVuTWV0YWAgaXMgdGhlIGNhbm9uaWNhbCByZWNvcmQgfAoKVGVhbS1vcmlnaW4gc2Vzc2lvbnMgYXJlIHN0b3JlZCBidXQgZXhjbHVkZWQgZnJvbSB0aGUgb3JkaW5hcnkgaGlzdG9yaWNhbCBsaXN0aW5nIHVubGVzcyB0aGUgdGVhbXMgZmlsdGVyIGlzIGVuYWJsZWQuIFVzZSBgYWdlbnRzIHNlc3Npb25zIC0tdGVhbXNgOyBsaXZlIHRlYW1tYXRlcyBhcmUgYWxzbyBzdXJmYWNlZCBieSBgYWdlbnRzIHNlc3Npb25zIC0tYWN0aXZlYCB3aXRoIGBjb250ZXh0OiB0ZWFtc2AuCgojIyBDb250cmFjdCBjb3ZlcmFnZQoKfCBTdXJmYWNlIHwgU3RhdHVzIHwgV2hhdCBjYWxsZXJzIGNhbiByZWx5IG9uIHwKfC0tLXwtLS18LS0tfAp8IFNlc3Npb25zIHwgTm9ybWF0aXZlIHwgUkZDLTIxMTkgY29udHJhY3QgcGx1cyBzY2VuYXJpb3MgYW5kIGltcGxlbWVudGF0aW9uIGNpdGF0aW9ucyB8CnwgU2VjcmV0cyB8IE5vcm1hdGl2ZSB8IFN0b3JhZ2UsIHByb21wdCwgbWF0ZXJpYWxpemF0aW9uLCBicm9rZXIsIGFuZCBhdWRpdCBib3VuZGFyaWVzIHwKfCBSdW4gfCBOb3JtYXRpdmUgd2l0aCBuYW1lZCBkcmlmdCB8IE9uZSBleGVjdXRpb24gZnVubmVsOyBBQ1AgYW5kIHNvbWUgdmVyc2lvbiBpc29sYXRpb24gZGV2aWF0ZSB8CnwgRGFlbW9uIHwgUGFydGx5IG5vcm1hdGl2ZSB8IFNjaGVkdWxlciBvd25lcnNoaXAgYW5kIGxpZmVjeWNsZSBpbnZhcmlhbnRzOyBzdGF0dXMvaGVhbHRoIGxhcmdlbHkgdW5zcGVjaWZpZWQgfAp8IFJvdXRpbmVzIHwgTWl4ZWQgfCBTY2hlZHVsaW5nIGFuZCBydW4gaGlzdG9yeSBhcmUgY3VycmVudDsgcmVhZGluZXNzL2NvbnRleHQgaXMgbW9zdGx5IGludGVuZGVkIHwKfCBUZWFtcyB8IERlc2NyaXB0aXZlIG9ubHkgfCBTdHJvbmcgZGVzaWduIGRvY3VtZW50YXRpb24sIGJ1dCBubyBub3JtYXRpdmUgYFRFQU0tKmAgY29udHJhY3QgfAoKU291cmNlOiBbYGFwcHMvY2xpL2RvY3Mvc3BlY2lmaWNhdGlvbnMubWRgLCBjb3ZlcmFnZSBpbnZlbnRvcnldKC4uLy4uLy4uL2FwcHMvY2xpL2RvY3Mvc3BlY2lmaWNhdGlvbnMubWQjY292ZXJhZ2UtaW52ZW50b3J5KS4KCiMjIEZpbmRpbmdzCgojIyMgMS4gU2Vzc2lvbnMKCiMjIFBhcnNlIGFuZCBwZXJzaXN0IG9uY2XigJR0aGVuIGNvbnN1bWUgZGVsdGFzCgpUaGUgY29ycmVjdCBpbnZhcmlhbnQgaXMgbm90IOKAnGEgdHJhbnNjcmlwdCBpcyBsaXRlcmFsbHkgcGFyc2VkIG9ubHkgb25jZS7igJ0gSXQgaXM6Cgo+IFBhcnNlIHRoZSBleGlzdGluZyB0cmFuc2NyaXB0IG9uIGNvbGQgZGlzY292ZXJ5LCBwZXJzaXN0IGl0cyBkZXJpdmVkIHJvdyBwbHVzIHBhcnNlciBjb250aW51YXRpb24sIGFuZCB0aGVyZWFmdGVyIGZvbGQgb25seSBhcHBlbmRlZCBjb21wbGV0ZSByZWNvcmRzLiBSZXBhcnNlIGZyb20gYnl0ZSB6ZXJvIG9ubHkgd2hlbiB0aGUgY29udGludWF0aW9uIGlzIHVuc2FmZS4KCnwgSW52YXJpYW50IHwgU3RhdHVzIHwgRXZpZGVuY2UgfAp8LS0tfC0tLXwtLS18CnwgVW5jaGFuZ2VkIGRpcmVjdG9yaWVzIGFuZCBmaWxlcyBhcmUgc2VydmVkIGZyb20gU1FMaXRlIHdpdGhvdXQgcmVwYXJzaW5nIHwgQ3VycmVudCB8IFtgMDUtc2Vzc2lvbnMubWQ6MTE1YF0oLi4vLi4vLi4vYXBwcy9jbGkvZG9jcy8wNS1zZXNzaW9ucy5tZCkgfAp8IENsYXVkZSwgQ29kZXgsIGFuZCBLaW1pIHJlc3VtZSBmcm9tIHBlcnNpc3RlZCBieXRlIG9mZnNldHMgYW5kIGFjY3VtdWxhdG9ycyB8IEN1cnJlbnQgfCBbYDA1LXNlc3Npb25zLm1kOjI3OGBdKC4uLy4uLy4uL2FwcHMvY2xpL2RvY3MvMDUtc2Vzc2lvbnMubWQpIHwKfCBJbmNyZW1lbnRhbCBvdXRwdXQgbXVzdCBlcXVhbCBhIGZyb20tc2NyYXRjaCBwYXJzZSB8IGBTRVMtNWAsIEN1cnJlbnQgfCBbYHNwZWNpZmljYXRpb25zLm1kOjE4MGBdKC4uLy4uLy4uL2FwcHMvY2xpL2RvY3Mvc3BlY2lmaWNhdGlvbnMubWQpIHwKfCBVbnRlcm1pbmF0ZWQgSlNPTkwgdGFpbHMgYXJlIGRlZmVycmVkLCBwcmV2ZW50aW5nIHBhcnRpYWwvZG91YmxlIGFwcGxpY2F0aW9uIHwgYFNFUy01YCwgQ3VycmVudCB8IFtgMDUtc2Vzc2lvbnMubWQ6Mjk1YF0oLi4vLi4vLi4vYXBwcy9jbGkvZG9jcy8wNS1zZXNzaW9ucy5tZCkgfAp8IENsYXVkZS9Db2RleCBmaXJzdC1ldmVudCBpZGVudGl0eSBpcyByZWNoZWNrZWQgYmVmb3JlIHRydXN0aW5nIGNvbnRpbnVhdGlvbiB8IGBTRVMtNWAsIEN1cnJlbnQgfCBbYGRpc2NvdmVyLnRzOjQwMDdgXSguLi8uLi8uLi9hcHBzL2NsaS9zcmMvbGliL3Nlc3Npb24vZGlzY292ZXIudHMpIHwKfCBBIG1hbGZvcm1lZCBsaW5lIGlzIHNraXBwZWQ7IGFuIHVua25vd24gZm9ybWF0IGZhaWxzIGxvdWRseSB8IGBTRVMtMy80YCwgQ3VycmVudCB8IFtgc3BlY2lmaWNhdGlvbnMubWQ6MTczYF0oLi4vLi4vLi4vYXBwcy9jbGkvZG9jcy9zcGVjaWZpY2F0aW9ucy5tZCkgfAoKIyMgRHVyYWJsZSBmYWN0cyBhcmUgc2VwYXJhdGUgZnJvbSBsaXZlIHN0YXRlCgp8IEludmFyaWFudCB8IFN0YXR1cyB8CnwtLS18LS0tfAp8IFRyYW5zY3JpcHQtZGVyaXZlZCBwcmV2aWV3IGRhdGEgaXMgY2FjaGVkIGJ5IHNvdXJjZSBtdGltZSBhbmQgc2l6ZSB8IEN1cnJlbnQgfAp8IExpdmUgd29ya2luZy93YWl0aW5nIHN0YXRlIGlzIGZldGNoZWQgc2VwYXJhdGVseSBhbmQgZXhwaXJlcyB3aXRoaW4gMTUgc2Vjb25kcyB8IEN1cnJlbnQgfAp8IEVtcHR5IHJlc2NhbnMgY2Fubm90IGNsb2JiZXIgYSBiZXR0ZXIgc3RvcmVkIGxhYmVsIHwgYFNFUy0xNGAsIEN1cnJlbnQgfAp8IFBJRCBsaXZlbmVzcyBtdXN0IGd1YXJkIGFnYWluc3QgUElEIHJldXNlIHwgYFNFUy0xN2AsIEN1cnJlbnQgfAp8IEZpbGUtZ29uZSBzZXNzaW9ucyB3aXRoIGluZGV4ZWQgdXNlciBjb250ZW50IHJlbWFpbiBhcmNoaXZlZCBhbmQgcmVuZGVyIGZyb20gdGhlIERCIHwgQ3VycmVudCwgUlVTSC0yNDM2IHwKCkV2aWRlbmNlOiBbYDA1LXNlc3Npb25zLm1kOjEzN2BdKC4uLy4uLy4uL2FwcHMvY2xpL2RvY3MvMDUtc2Vzc2lvbnMubWQpLCBbYDA1LXNlc3Npb25zLm1kOjE5NGBdKC4uLy4uLy4uL2FwcHMvY2xpL2RvY3MvMDUtc2Vzc2lvbnMubWQpLCBhbmQgW2BzcGVjaWZpY2F0aW9ucy5tZDoyNjJgXSguLi8uLi8uLi9hcHBzL2NsaS9kb2NzL3NwZWNpZmljYXRpb25zLm1kKS4KCiMjIyAyLiBTZWNyZXRzCgp8IEludmFyaWFudCB8IFN0YXR1cyB8IENvbnNlcXVlbmNlIHwKfC0tLXwtLS18LS0tfAp8IEJ1bmRsZSBtZXRhZGF0YSBpcyBzZXBhcmF0ZSBmcm9tIHByb3RlY3RlZCB2YWx1ZXMgfCBgU0VDLTRgLCBDdXJyZW50IHwgRW51bWVyYXRpb24gY2Fubm90IHRyaWdnZXIgYmlvbWV0cmljIHJlYWRzIHwKfCBFdmVyeSBjb21tYW5kIG9jY3VwaWVzIGV4YWN0bHkgb25lIG1hdGVyaWFsaXphdGlvbiBib3VuZGFyeSB8IGBTRUMtNmAsIEN1cnJlbnQgfCBBIGNvZGUgcGF0aCBjYW5ub3Qg4oCcc29tZXRpbWVz4oCdIGV4cG9zZSBwbGFpbnRleHQgfAp8IEluamVjdGlvbiByZWFjaGVzIG9ubHkgdGhlIGNoaWxkIGVudmlyb25tZW50LCBuZXZlciBzdGRvdXQgb3IgYXJndiB8IGBTRUMtNy84YWAsIEN1cnJlbnQgfCBBZ2VudHMgZG8gbm90IGluZ2VzdCBzZWNyZXRzIGludG8gY29udGV4dC90cmFuc2NyaXB0cyB8CnwgQWdlbnQgYW5kIGRldGFjaGVkIGV4ZWN1dGlvbiBhcmUgYnJva2VyLW9ubHkgfCBgU0VDLTEzLzEzYWAsIEN1cnJlbnQgfCBBdXRvbWF0aW9uIGNhbm5vdCBzcG9udGFuZW91c2x5IHJhaXNlIFRvdWNoIElEIHwKfCBPbmx5IGV4cGxpY2l0IGludGVyYWN0aXZlIHJldmVhbC9ydW4gY29tbWFuZHMgbWF5IHByb21wdCB8IGBTRUMtMTNiYCwgQ3VycmVudCB8IFByb21wdCBhdXRob3JpdHkgZm9sbG93cyB1c2VyIGludGVudCB8CnwgQSBicm9rZXIgbWlzcyBpcyBhIG5vcm1hbCBjYWNoZSBtaXNzLCBub3QgYW4gZXJyb3Igb3IgcHJvbXB0IHwgYFNFQy0xNGAsIEN1cnJlbnQgfCBUaGUgYnJva2VyIGlzIGEgY2FjaGUsIG5vdCB0aGUgY3JlZGVudGlhbCBhdXRob3JpdHkgfAp8IEF1ZGl0aW5nIGhhcyBvbmUgdmFsdWUtZnJlZSB3cml0ZSBwYXRoIGFuZCBhdHRyaWJ1dGVzIHRoZSByZXF1ZXN0ZXIgfCBgU0VDLTI2LzI4YCwgQ3VycmVudCB8IEJyb2tlci9kYWVtb24gaWRlbnRpdHkgY2Fubm90IHJlcGxhY2Ugc2Vzc2lvbiBpZGVudGl0eSB8CgpFdmlkZW5jZTogW2BzcGVjaWZpY2F0aW9ucy5tZDoxMDkwYF0oLi4vLi4vLi4vYXBwcy9jbGkvZG9jcy9zcGVjaWZpY2F0aW9ucy5tZCkgdGhyb3VnaCB0aGUgU2VjcmV0cyByZXF1aXJlbWVudHMuCgojIyMgMy4gUnVuCgojIyBPbmUgZnVubmVsLCBkZXRlcm1pbmlzdGljIGlucHV0cwoKfCBJbnZhcmlhbnQgfCBTdGF0dXMgfCBDb25zZXF1ZW5jZSB8CnwtLS18LS0tfC0tLXwKfCBFdmVyeSBvcmRpbmFyeSBpbnZvY2F0aW9uIHJlYWNoZXMgYGJ1aWxkRXhlY0NvbW1hbmRgICsgYGJ1aWxkRXhlY0VudmAgKyBzcGF3biB8IGBFWEVDLTE4YCwgQ3VycmVudCB8IFRlYW1zLCByb3V0aW5lcywgbG9vcHMsIGZhbGxiYWNrLCBhbmQgU1NIIGRvIG5vdCBpbnZlbnQgZW5naW5lcyB8CnwgQW1iaWVudCBsb2FkZXIvaW50ZXJwcmV0ZXIgaGlqYWNrIHZhcmlhYmxlcyBhcmUgc3RyaXBwZWQgfCBgRVhFQy0xYCwgQ3VycmVudCB8IFRoZSBwYXJlbnQgc2hlbGwgY2Fubm90IHNpbGVudGx5IHN1YnZlcnQgdGhlIGNoaWxkIHwKfCBFbnYgcHJlY2VkZW5jZSBpcyBwcm9maWxlIOKGkiBzaGFyZSDihpIgc2VjcmV0cyDihpIgZXhwbGljaXQgYC0tZW52YCB8IGBFWEVDLTUvNmAsIEN1cnJlbnQgfCBDb25maWd1cmF0aW9uIHJlc29sdXRpb24gaXMgZGV0ZXJtaW5pc3RpYyB8CnwgU2VjcmV0IGJ1bmRsZSByZXNvbHV0aW9uIGlzIGF0b21pYyBiZWZvcmUgc3Bhd24gfCBgRVhFQy05YCwgQ3VycmVudCB8IE5vIHBhcnRpYWxseSBjcmVkZW50aWFsZWQgY2hpbGQgbGF1bmNoZXMgfAp8IEV2ZXJ5IGZpbmFsaXplZCBydW4gcmVjb3JkcyBleGFjdGx5IG9uZSBkaXNwYXRjaCBhdWRpdCB8IGBFWEVDLTIxYCwgQ3VycmVudCB8IE9uZSBnb3Zlcm5hbmNlIGNob2tlcG9pbnQgfAp8IE1vZGVzIGFyZSByZXNvbHZlZCBhZ2FpbnN0IGhhcm5lc3MgY2FwYWJpbGl0aWVzIHwgYEVYRUMtMjJgLCBDdXJyZW50IHwgVW5zdXBwb3J0ZWQgbW9kZXMgZmFpbCBvciB1c2UgZG9jdW1lbnRlZCBkZWdyYWRhdGlvbiB8CnwgUmVtb3RlIGRpc3BhdGNoIHJlLWV4ZWN1dGVzIGBhZ2VudHMgcnVuYCBvbiB0aGUgdGFyZ2V0IHwgYEVYRUMtMzBgLCBDdXJyZW50IHwgUmVtb3RlIGV4ZWN1dGlvbiByZXRhaW5zIHRoZSBzYW1lIGVuZ2luZSB8CnwgQWN0b3IgcHJvdmVuYW5jZSBjcm9zc2VzIFNTSCB8IGBFWEVDLTMxYCwgQ3VycmVudCB8IEF0dHJpYnV0aW9uIHN1cnZpdmVzIHBsYWNlbWVudCB8CnwgUmVtb3RlIHNlY3JldCB2YWx1ZXMgbmV2ZXIgZW50ZXIgdGhlIGNvbW1hbmQgbGluZSB8IGBFWEVDLTMzLzM5YCwgQ3VycmVudCB8IE5vIGFyZ3Yvc2hlbGwgbGVha2FnZSB8CnwgUmVtb3RlIGB+YC9gJEhPTUVgIGN3ZCByZXNvbHZlcyBvbiB0aGUgcmVtb3RlIG1hY2hpbmUgfCBgRVhFQy0zNWAsIEN1cnJlbnQgfCBObyBsb2NhbC1ob21lIHBhdGggY29ycnVwdGlvbiB8CnwgYC0tbm8tZm9sbG93YCByZXBvcnRzIGRpc3BhdGNoLCBub3QgY29tcGxldGlvbiB8IGBFWEVDLTM2YCwgQ3VycmVudCB8IERldGFjaGVkIHN1Y2Nlc3MgaXMgbm90IG1pc3Rha2VuIGZvciB0YXNrIHN1Y2Nlc3MgfAoKRXZpZGVuY2U6IFtgc3BlY2lmaWNhdGlvbnMubWQ6MTcwMGBdKC4uLy4uLy4uL2FwcHMvY2xpL2RvY3Mvc3BlY2lmaWNhdGlvbnMubWQpLgoKIyMgTmFtZWQgZHJpZnQKCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQgYXJ0aWZhY3QtY2FsbG91dC13YXJuIj48c3Ryb25nPlZlcnNpb24gaXNvbGF0aW9uOjwvc3Ryb25nPiBzZXZlcmFsIHJlZ2lzdGVyZWQgaGFybmVzc2VzIGRvIG5vdCByZWNlaXZlIGEgY29tcGxldGUgcGVyLXZlcnNpb24gY29uZmlndXJhdGlvbiBkaXJlY3RvcnkgZnJvbSA8Y29kZT5idWlsZEV4ZWNFbnY8L2NvZGU+LiBUaGlzIGlzIGV4cGxpY2l0bHkgbWFya2VkIDxjb2RlPltEcmlmdF08L2NvZGU+IHVuZGVyIDxjb2RlPkVYRUMtMTY8L2NvZGU+LjwvZGl2PgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCBhcnRpZmFjdC1jYWxsb3V0LXdhcm4iPjxzdHJvbmc+QUNQOjwvc3Ryb25nPiA8Y29kZT4tLWFjcDwvY29kZT4gYnlwYXNzZXMgdGhlIG5vcm1hbCBlbnYgYnVpbGRlciwgbG9zaW5nIHNhbml0aXphdGlvbiwgcHJvdmVuYW5jZSwgbWFpbGJveC9zZXNzaW9uIHdpcmluZywgcnVudGltZSBsYWJlbGluZywgYW5kIHZlcnNpb24gcGlubmluZy4gVGhpcyBpcyBleHBsaWNpdGx5IG1hcmtlZCA8Y29kZT5bRHJpZnRdPC9jb2RlPiB1bmRlciA8Y29kZT5FWEVDLTE5LzIwPC9jb2RlPi48L2Rpdj4KCiMjIyA0LiBEYWVtb24gYW5kIHNjaGVkdWxlciBvd25lcnNoaXAKCnwgSW52YXJpYW50IHwgU3RhdHVzIHwKfC0tLXwtLS18CnwgRXZlcnkgZmxlZXQtYWZmZWN0aW5nIGNhcGFiaWxpdHkgaGFzIGV4YWN0bHkgb25lIHNjaGVkdWxlciBhbmQgZXhlY3V0b3IgfCBgU0lORy0xYCwgQ3VycmVudCB8CnwgVUlzIGNhbm5vdCBvd24gYXV0b25vbW91cyBhY3RpbmcgdGltZXJzL3dhdGNoZXJzIHwgYFNJTkctMmAsIEN1cnJlbnQgfAp8IFVJLW93bmVkIGFjdGlvbnMgZXhwb3NlIG5hcnJvdyBlbmRwb2ludHM7IHRoZSBDTEkgcmV0YWlucyB0aGUgdHJpZ2dlciB8IGBTSU5HLTNgLCBDdXJyZW50IHwKfCBTY2hlZHVsZWQgc2xvdHMgaGF2ZSBkZXRlcm1pbmlzdGljIFVUQyBpZGVudGl0aWVzIGFuZCBhdG9taWMgY2xhaW1zIHwgYFNJTkctNWJgLCBDdXJyZW50IHwKfCBBIHJvdXRpbmUgY2Fubm90IG92ZXJsYXAgaXRzZWxmIGFjcm9zcyBlbnRyeSBwb2ludHMgfCBgU0lORy01Y2AsIEN1cnJlbnQgfAp8IFJ1biBtZXRhZGF0YSBleGlzdHMgYmVmb3JlIHByZS1zcGF3biB3b3JrIHwgYFNJTkctNWVgLCBDdXJyZW50IHwKfCBTaGFyZWQtaW5wdXQgam9icyByZXF1aXJlIGFuIG93bmVyLCBhdG9taWMgaXRlbSBjbGFpbSwgb3IgcHJvdmVuIGlkZW1wb3RlbmN5IHwgYFNJTkctOWAsIEN1cnJlbnQgfAp8IERldGFjaGVkIGNoaWxkcmVuIHN1cnZpdmUgdGFrZW92ZXIgYW5kIGFyZSBhZG9wdGVkIGZyb20gcGVyc2lzdGVkIHN0YXRlIHwgYFNJTkctMTFhYCwgQ3VycmVudCB8CnwgU3RvcCB2ZXJpZmllcyB0aGF0IG93bmVkIHJlc291cmNlcyB3ZXJlIGFjdHVhbGx5IHJlbGVhc2VkIHwgYFNJTkctMTIvMTJhYCwgQ3VycmVudCB8CnwgUmVzdGFydCBzdXBlcnZpc2lvbiBpcyBib3VuZGVkIHwgYFNJTkctMTRgLCBDdXJyZW50IHwKCkV2aWRlbmNlOiBbYHNwZWNpZmljYXRpb25zLm1kOjIzNzdgXSguLi8uLi8uLi9hcHBzL2NsaS9kb2NzL3NwZWNpZmljYXRpb25zLm1kKS4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQgYXJ0aWZhY3QtY2FsbG91dC13YXJuIj48c3Ryb25nPkNvdmVyYWdlIGdhcDo8L3N0cm9uZz4gZGFlbW9uIHNjaGVkdWxlciBvd25lcnNoaXAgaXMgbm9ybWF0aXZlLCBidXQgPGNvZGU+YWdlbnRzIGRhZW1vbiBzdGF0dXM8L2NvZGU+LCBzZXJ2aWNlcywgaGVhbHRoIHJlbmRlcmluZywgYW5kIGRvY3RvciBiZWhhdmlvciBkbyBub3QgaGF2ZSB0aGVpciBvd24gY29tbWFuZCBjb250cmFjdC48L2Rpdj4KCiMjIyA1LiBUZWFtcwoKIyMgU3Ryb25nIGRlc2lnbiwgd2VhayBjb250cmFjdCBzdGF0dXMKCnwgSW52YXJpYW50IGRlc2NyaWJlZCB0b2RheSB8IFdoeSBpdCBtYXR0ZXJzIHwKfC0tLXwtLS18CnwgVGVhbSBhbmQgdGVhbW1hdGUgc3RhdGUgcGVyc2lzdHMgb24gZGlzayB8IEEgc3VwZXJ2aXNvciByZXN0YXJ0IGNhbm5vdCBlcmFzZSBEQUcgcHJvZ3Jlc3MgfAp8IE9uZSBvcmNoZXN0cmF0b3IgZHJhaW5zIHRoZSBEQUcsIGluY2x1ZGluZyBkaXN0cmlidXRlZCB0ZWFtcyB8IFJlbW90ZSB3b3JrZXJzIGRvIG5vdCBpbmRlcGVuZGVudGx5IHNjaGVkdWxlIHdhdmVzIHwKfCBOYW1lcywgZGVwZW5kZW5jaWVzLCBhbmQgY3ljbGVzIHZhbGlkYXRlIGJlZm9yZSB3b3JrdHJlZSBjcmVhdGlvbiB8IEludmFsaWQgREFHcyBsZWF2ZSBubyBicmFuY2ggZGVicmlzIHwKfCBFZGl0aW5nIHRlYW1tYXRlcyByZWNlaXZlIGV4cGxpY2l0IG93bmVyc2hpcCBib3VuZGFyaWVzIHwgUGFyYWxsZWxpc20gZG9lcyBub3QgYmVjb21lIGludmlzaWJsZSBmaWxlIGNvbnRlbnRpb24gfAp8IFdvcmt0cmVlcyBicmFuY2ggZnJvbSBmcmVzaGx5IGZldGNoZWQgYG9yaWdpbi88ZGVmYXVsdD5gIGxvY2FsbHkgYW5kIHJlbW90ZWx5IHwgRXZlcnkgdGVhbW1hdGUgYmVnaW5zIGZyb20gdGhlIGN1cnJlbnQgc2hhcmVkIGJhc2VsaW5lIHwKfCBGYWlsZWQgY3JlYXRpb24gaXMgdHJhbnNhY3Rpb25hbCB8IFJldHJ5aW5nIHRoZSBzYW1lIHRlYW1tYXRlIG5hbWUgd29ya3MgfAp8IENsZWFudXAgZmFpbHMgY2xvc2VkIHdoZW4gb3duZXJzaGlwIGlzIHVuY2VydGFpbiB8IFJlY292ZXJhYmxlIGxlZnRvdmVycyBiZWF0IGRlbGV0ZWQgd29yayB8CnwgYG1ldGEuanNvbmAgd3JpdGVzIGFyZSBhdG9taWMgfCBQcm9jZXNzIGRlYXRoIGNhbm5vdCBsZWF2ZSB0b3JuIHN0YXRlIHwKfCBObyBlbGlnaWJsZSByZW1vdGUgZGV2aWNlIG1lYW5zIGEgbG91ZCBmYWlsdXJlLCBub3QgaW1wbGljaXQgbG9jYWwgcGxhY2VtZW50IHwgUGxhY2VtZW50IGludGVudCBpcyBwcmVzZXJ2ZWQgfAp8IE9uZSB0ZWFtIGhhcyBvbmUgcmVwb3NpdG9yeSB8IENyb3NzLXJlcG8gd29yayB1c2VzIGV4cGxpY2l0IHRlYW0gYm91bmRhcmllcyB8CnwgUGVuZGluZyBkZXBlbmRlbmN5LWJsb2NrZWQgdGVhbW1hdGVzIGFyZSBub3QgcmVhcGVkIHwgV2FpdGluZyBpcyBhIGR1cmFibGUgc3RhdGUsIG5vdCBpbmFjdGl2aXR5IHwKCkV2aWRlbmNlOiBbYHRlYW1zLm1kYF0oLi4vLi4vLi4vYXBwcy9jbGkvZG9jcy90ZWFtcy5tZCksIGVzcGVjaWFsbHkgW2JvdW5kYXJ5IGNvbnRyYWN0c10oLi4vLi4vLi4vYXBwcy9jbGkvZG9jcy90ZWFtcy5tZCNib3VuZGFyeS1jb250cmFjdHMpLCBbd29ya3RyZWUgaXNvbGF0aW9uXSguLi8uLi8uLi9hcHBzL2NsaS9kb2NzL3RlYW1zLm1kI3dvcmt0cmVlcy1hbmQtaXNvbGF0aW9uKSwgYW5kIFtkaXN0cmlidXRlZCB0ZWFtc10oLi4vLi4vLi4vYXBwcy9jbGkvZG9jcy90ZWFtcy5tZCNkaXN0cmlidXRlZC10ZWFtcykuCgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1jYWxsb3V0IGFydGlmYWN0LWNhbGxvdXQtZGFuZ2VyIj48c3Ryb25nPk1pc3NpbmcgY29udHJhY3Q6PC9zdHJvbmc+IHRoZXNlIGJlaGF2aW9ycyBhcmUgZGVzY3JpcHRpdmUgZG9jdW1lbnRhdGlvbi4gVGhlcmUgaXMgbm8gbm9ybWF0aXZlIDxjb2RlPlRFQU0tKjwvY29kZT4gc2VjdGlvbiB3aXRoIFJGQy0yMTE5IGd1YXJhbnRlZXMgYW5kIEdpdmVuL1doZW4vVGhlbiBzY2VuYXJpb3MuPC9kaXY+CgojIyBNaW5pbXVtIG5vcm1hdGl2ZSBjb250cmFjdCB0ZWFtcyBzdGlsbCBuZWVkcwoKMS4gRHVyYWJsZSBhbmQgYXRvbWljIHN0YXRlIHRyYW5zaXRpb25zLgoyLiBEQUcgdmFsaWRhdGlvbiBhbmQgc3VwZXJ2aXNvciByZXN0YXJ0IHJlY292ZXJ5LgozLiBGcmVzaC1iYXNlIHdvcmt0cmVlIGlzb2xhdGlvbi4KNC4gVHJhbnNhY3Rpb25hbCBhZGQgYW5kIGZhaWwtY2xvc2VkIGNsZWFudXAuCjUuIFJlbW90ZSBwbGFjZW1lbnQgd2l0aG91dCBzaWxlbnQgZmFsbGJhY2suCjYuIEEgZGlzdGluY3Rpb24gYmV0d2VlbiBwcm9jZXNzIGNvbXBsZXRpb24gYW5kIGRlbGl2ZXJlZC9tZXJnZWQgd29yay4KNy4gRXhhY3RseSBvbmUgc3VwZXJ2aXNvciBwZXIgdGVhbS4KCiMjIyA2LiBSb3V0aW5lcwoKIyMgQ3VycmVudCBndWFyYW50ZWVzCgp8IEludmFyaWFudCB8IFN0YXR1cyB8CnwtLS18LS0tfAp8IFRoZSBkYWVtb24gaXMgdGhlIG9ubHkgYXV0b21hdGljIHNjaGVkdWxlciB8IGBTSU5HLTEvNWAsIEN1cnJlbnQgfAp8IFNsb3QgY2xhaW1zIGFuZCBuby1vdmVybGFwIHByZXZlbnQgZHVwbGljYXRlIGV4ZWN1dGlvbiB8IGBTSU5HLTViLzVjYCwgQ3VycmVudCB8CnwgYHByb2plY3RzW11gIGlzIGdyb3VwaW5nIG1ldGFkYXRhIG9ubHkgfCBgUlQtMWAsIEN1cnJlbnQgfAp8IFJvdXRpbmUgcnVuIGhpc3RvcnnigJRub3Qgc2Vzc2lvbnPigJRpcyB0aGUgY2Fub25pY2FsIGF0dGVtcHQgbGVkZ2VyIHwgYFJULTZgLCBDdXJyZW50IHBvcnRpb24gfAp8IGByZXBvYCBpcyBleHRlcm5hbCBpZGVudGl0eS9wcm92ZW5hbmNlLCBuZXZlciBhIGxvY2FsIGN3ZCB8IGBSVC04YCwgQ3VycmVudCB8CnwgTWVudS1iYXIgcm91dGluZSB2aWV3cyByZW1haW4gcmVhZC1vbmx5IHNjaGVkdWxpbmdseSB8IGBSVC0xMWAsIEN1cnJlbnQgfAoKIyMgSW50ZW5kZWQgYnV0IG5vdCBpbXBsZW1lbnRlZAoKfCBUYXJnZXQgaW52YXJpYW50IHwgU3RhdHVzIHRvZGF5IHwKfC0tLXwtLS18CnwgU2luZ3VsYXIgcHJvamVjdCBleGVjdXRpb24gYW5jaG9yIHNlcGFyYXRlIGZyb20gZ3JvdXBpbmcgdGFncyB8IGBSVC0yYCwgSW50ZW5kZWQgfAp8IFJlc29sdmUgY3dkIG9uIHRoZSBhY3R1YWwgZXhlY3V0aW9uIHRhcmdldCB8IGBSVC0zYCwgSW50ZW5kZWQgfAp8IEFnZW50L3dvcmtmbG93IGJvZGllcyBjYW5ub3Qgc2lsZW50bHkgZGVmYXVsdCB0byBob21lIHwgYFJULTRgLCBJbnRlbmRlZCB8CnwgQWRkL2VkaXQgcHJvdmVzIGN3ZCwgdHJ1c3QsIGFuZCBhdXRoZW50aWNhdGVkIHJlYWRpbmVzcyBiZWZvcmUgYWN0aXZhdGlvbiB8IGBSVC01YCwgSW50ZW5kZWQgfAp8IFByb3ZlbiBibG9ja2VycyBzYXZlIHRoZSByb3V0aW5lIHBhdXNlZCB3aXRoIHN0YWJsZSBtYWNoaW5lLXJlYWRhYmxlIGNvZGVzIHwgYFJULTVgLCBJbnRlbmRlZCB8CnwgUmVzdW1lIHJlcnVucyByZWFkaW5lc3MgYW5kIGNhbm5vdCBieXBhc3MgYSBibG9ja2VyIHwgYFJULTlgLCBJbnRlbmRlZCB8CnwgUmF3IFlBTUwgZWRpdHMgdmFsaWRhdGUgdGhlbiBhdG9taWNhbGx5IHJlcGxhY2UgfCBgUlQtMTBgLCBJbnRlbmRlZCB8CnwgUnVuIHN0YXR1c2VzIGRpc3Rpbmd1aXNoIGBibG9ja2VkYCBhbmQgYHNraXBwZWRgIGZyb20gYGZhaWxlZGAgfCBgUlQtN2AsIEludGVuZGVkIHBvcnRpb24gfAoKRXZpZGVuY2U6IFtgc3BlY2lmaWNhdGlvbnMubWQ6Mjc3MWBdKC4uLy4uLy4uL2FwcHMvY2xpL2RvY3Mvc3BlY2lmaWNhdGlvbnMubWQpIGFuZCB0aGUgZXhwbGljaXQgW2tub3duIGdhcHNdKC4uLy4uLy4uL2FwcHMvY2xpL2RvY3Mvc3BlY2lmaWNhdGlvbnMubWQpLgoKIyMgRXZpZGVuY2UKClRoZSBmaW5kaW5ncyB3ZXJlIGNoZWNrZWQgYWdhaW5zdCB0aGUgY3VycmVudCBub3JtYXRpdmUgc3BlY2lmaWNhdGlvbiwgc3Vic3lzdGVtIGRlc2lnbiBkb2N1bWVudHMsIGFuZCB0aGUgc2Nhbm5lci9kYXRhYmFzZSBpbXBsZW1lbnRhdGlvbi4gVGhlIGxpbmtlZCBzb3VyY2UgbG9jYXRpb25zIHRocm91Z2hvdXQgdGhlIHJlcG9ydCBhcmUgdGhlIGV2aWRlbmNlIGluZGV4OyB0aGUgcHJpbWFyeSBzb3VyY2VzIGFyZToKCi0gW2BhcHBzL2NsaS9kb2NzL3NwZWNpZmljYXRpb25zLm1kYF0oLi4vLi4vLi4vYXBwcy9jbGkvZG9jcy9zcGVjaWZpY2F0aW9ucy5tZCkKLSBbYGFwcHMvY2xpL2RvY3MvMDUtc2Vzc2lvbnMubWRgXSguLi8uLi8uLi9hcHBzL2NsaS9kb2NzLzA1LXNlc3Npb25zLm1kKQotIFtgYXBwcy9jbGkvZG9jcy90ZWFtcy5tZGBdKC4uLy4uLy4uL2FwcHMvY2xpL2RvY3MvdGVhbXMubWQpCi0gW2BhcHBzL2NsaS9zcmMvbGliL3Nlc3Npb24vZGlzY292ZXIudHNgXSguLi8uLi8uLi9hcHBzL2NsaS9zcmMvbGliL3Nlc3Npb24vZGlzY292ZXIudHMpCi0gW2BhcHBzL2NsaS9zcmMvbGliL3Nlc3Npb24vZGIudHNgXSguLi8uLi8uLi9hcHBzL2NsaS9zcmMvbGliL3Nlc3Npb24vZGIudHMpCgojIyBQcmlvcml0eSBnYXBzCgp8IFByaW9yaXR5IHwgR2FwIHwgUmVhc29uIHwKfC0tLXwtLS18LS0tfAp8IDEgfCBSb3V0aW5lIHJlYWRpbmVzcyBhbmQgdGFyZ2V0LXNpZGUgY29udGV4dCByZXNvbHV0aW9uIHwgQSBzY2hlZHVsZWQgZGVmaW5pdGlvbiBjYW4gYXBwZWFyIHZhbGlkIGFuZCBmYWlsIG9ubHkgYWZ0ZXIgZmlyaW5nIHwKfCAyIHwgTm9ybWF0aXZlIHRlYW1zIGNvbnRyYWN0IHwgRHVyYWJsZSBEQUcvd29ya3RyZWUgYmVoYXZpb3JzIGFyZSBpbXBvcnRhbnQgYnV0IG5vdCBwcm90ZWN0ZWQgYXMgY2FsbGVyIGd1YXJhbnRlZXMgfAp8IDMgfCBSdW4gQUNQIGZ1bm5lbCBwYXJpdHkgfCBBIG5hbWVkIGJ5cGFzcyBsb3NlcyBjb3JlIGVudmlyb25tZW50IGFuZCBwcm92ZW5hbmNlIGd1YXJhbnRlZXMgfAp8IDQgfCBDb21wbGV0ZSBwZXItdmVyc2lvbiBydW4gaXNvbGF0aW9uIHwgU29tZSBoYXJuZXNzZXMgcmVtYWluIGFjY291bnQvY29uZmlnIGdsb2JhbCBkZXNwaXRlIHRoZSBicm9hZGVyIGlzb2xhdGlvbiBwcmluY2lwbGUgfAp8IDUgfCBEYWVtb24gc3RhdHVzIGFuZCBoZWFsdGggY29udHJhY3QgfCBTY2hlZHVsZXIgb3duZXJzaGlwIGlzIHNwZWNpZmllZDsgb3BlcmF0aW9uYWwgb2JzZXJ2YWJpbGl0eSBpcyBub3QgfAoKIyMgQm90dG9tIGxpbmUKCi0gKipTZXNzaW9uczoqKiBjb21wdXRlIGR1cmFibGUgbWV0YWRhdGEgaW5jcmVtZW50YWxseSBhbmQgc3RvcmUgaXQ7IHJlY29tcHV0ZSBvbmx5IGxpdmUgc3RhdGUgb3IgY2hhbmdlZCB0cmFuc2NyaXB0IGRlbHRhcy4KLSAqKlNlY3JldHM6KiogbWV0YWRhdGEsIHZhbHVlcywgYnJva2VyIGNhY2hlLCBtYXRlcmlhbGl6YXRpb24sIGFuZCBhdWRpdCBpZGVudGl0eSByZW1haW4gc2VwYXJhdGUgbGF5ZXJzLgotICoqUnVuOioqIGV2ZXJ5IGNhbGxlciB1c2VzIG9uZSBzYW5pdGl6ZWQsIGlzb2xhdGVkLCBhdWRpdGFibGUgZXhlY3V0aW9uIGZ1bm5lbC4KLSAqKkRhZW1vbjoqKiBvbmUgb3duZXIgc2NoZWR1bGVzIGFuZCBleGVjdXRlcyBhdXRvbm9tb3VzIGFjdGlvbnMuCi0gKipUZWFtczoqKiBkdXJhYmxlIERBRyBwbHVzIGlzb2xhdGVkIHdvcmt0cmVlcywgYnV0IHRoZSBndWFyYW50ZWVzIG5lZWQgcHJvbW90aW9uIGZyb20gcHJvc2UgdG8gYSBub3JtYXRpdmUgY29udHJhY3QuCi0gKipSb3V0aW5lczoqKiB0aGUgc2NoZWR1bGluZyBjb3JlIGlzIHJlYWw7IHJlYWRpbmVzcywgZXhlY3V0aW9uIGFuY2hvcmluZywgYW5kIGhvbmVzdCBibG9ja2VkL3NraXBwZWQgb3V0Y29tZXMgYXJlIHN0aWxsIHRhcmdldCBhcmNoaXRlY3R1cmUuCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

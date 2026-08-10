@@ -100,7 +100,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     type: 'int',
     description:
       'Cap on concurrent agents on this device. What counts toward it depends on the consumer: ' +
-      'Factory auto-launch counts device-wide running agents; teams placement counts the team’s own roster on the device.',
+      'AGI EXT auto-launch counts device-wide running agents; teams placement counts the team’s own roster on the device.',
     validate: (v) => ((v as number) >= 1 ? null : 'agents.max-concurrent must be >= 1.'),
   },
   {
@@ -204,7 +204,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     scope: 'device',
     type: 'bool',
     defaultValue: true,
-    description: 'Whether Factory auto-launch may pick this device (default on).',
+    description: 'Whether AGI EXT auto-launch may pick this device (default on).',
   },
   {
     name: 'auto-launch.preferred',
@@ -212,7 +212,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     scope: 'device',
     type: 'bool',
     defaultValue: false,
-    description: 'Boost this device in Factory auto-launch ranking (default off).',
+    description: 'Boost this device in AGI EXT auto-launch ranking (default off).',
   },
 ];
 
@@ -389,7 +389,7 @@ export function unsetConfigValue(name: string, opts?: ConfigTarget): void {
 
 // ─── Auto-launch preferences (Factory auto-host selection) ────────────────────
 
-/** A device's auto-launch flags, as read by Factory's launch ranking. */
+/** A device's auto-launch flags, as read by the ext's launch ranking. */
 export interface AutoLaunchPreference {
   enabled?: boolean;
   preferred?: boolean;
@@ -424,7 +424,7 @@ export function setAutoLaunchPreferred(name: string, preferred: boolean): void {
 }
 
 /** Every device's auto-launch flags, keyed by device name (set flags only) —
- * the shape Factory's launch ranking consumes. */
+ * the shape the ext's launch ranking consumes. */
 export function loadAutoLaunchPreferences(): Record<string, AutoLaunchPreference> {
   ensureDeviceConfigMigrated();
   const devices = readMeta().fleet?.devices;

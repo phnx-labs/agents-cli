@@ -217,7 +217,7 @@ describe('isDialableDevice', () => {
   });
 
   it('treats a never-probed manual device as unknown-not-offline, so it is still dialed', () => {
-    // Matches ssh.ts renderDeviceTable and Factory's isDeviceOnline: offline only
+    // Matches ssh.ts renderDeviceTable and the ext's isDeviceOnline: offline only
     // when a tailscale block SAYS offline. Without this, a manual device stays
     // invisible to the sweep until something happens to probe it — the same class
     // of bug as yosemite-s1 above, just before the first probe.

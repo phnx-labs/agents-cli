@@ -5,7 +5,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 export interface CiScope {
   cli: boolean;
   cliDocs: boolean;
-  factory: boolean;
+  ext: boolean;
   sessionTracker: boolean;
   windows: boolean;
 }
@@ -30,6 +30,7 @@ function isWindowsSensitive(file: string): boolean {
     || file.startsWith('apps/cli/src/lib/hooks/')
     || file.startsWith('apps/cli/src/lib/platform/')
     || /^apps\/cli\/src\/lib\/shims[^/]*\.ts$/.test(file)
+    || /^apps\/cli\/src\/lib\/binary-shadow(\.test)?\.ts$/.test(file)
     || file.startsWith('apps/cli/hooks/')
     || file.startsWith('apps/cli/src/lib/hosts/');
 }
@@ -38,7 +39,7 @@ export function classifyCiScope(files: readonly string[]): CiScope {
   const scope: CiScope = {
     cli: false,
     cliDocs: false,
-    factory: false,
+    ext: false,
     sessionTracker: false,
     windows: false,
   };
@@ -48,7 +49,7 @@ export function classifyCiScope(files: readonly string[]): CiScope {
       return {
         cli: true,
         cliDocs: true,
-        factory: true,
+        ext: true,
         sessionTracker: true,
         windows: true,
       };
@@ -63,7 +64,7 @@ export function classifyCiScope(files: readonly string[]): CiScope {
       if (isWindowsSensitive(file)) scope.windows = true;
     }
 
-    if (file.startsWith('apps/factory/')) scope.factory = true;
+    if (file.startsWith('apps/ext/')) scope.ext = true;
     if (file.startsWith('packages/session-tracker/')) scope.sessionTracker = true;
   }
 
@@ -74,7 +75,7 @@ export function formatGitHubOutputs(scope: CiScope): string {
   return [
     `cli=${scope.cli}`,
     `cli_docs=${scope.cliDocs}`,
-    `factory=${scope.factory}`,
+    `ext=${scope.ext}`,
     `session_tracker=${scope.sessionTracker}`,
     `windows=${scope.windows}`,
   ].join('\n') + '\n';

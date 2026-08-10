@@ -659,7 +659,7 @@ function repairAgentConfigSymlinks(): void {
 /**
  * Repair self-referential agent binary symlinks.
  *
- * Some installScript-based agents — notably Factory's `droid`, whose installer
+ * Some installScript-based agents — notably Factory.ai's `droid`, whose installer
  * drops a standalone native binary at ~/.local/bin/droid — were registered at
  * install time by resolving the post-install binary with `which <cli>`. Because
  * ~/.agents/.cache/shims sits ahead of ~/.local/bin on PATH, `which` could

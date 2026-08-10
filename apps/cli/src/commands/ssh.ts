@@ -457,7 +457,7 @@ function printFleetResults(
   if (verifications) parts.splice(1, 0, `${notUpgraded} not upgraded`);
   console.log(chalk.gray(parts.join(' · ')));
   if (notUpgraded > 0) {
-    console.log(chalk.yellow('A box that upgraded but still resolves elsewhere runs OLD code — remove the shadowing install (e.g. the `scripts/install.sh` dev build at ~/.local/agents-cli-dev) or reorder PATH.'));
+    console.log(chalk.yellow('A box that upgraded but still resolves elsewhere runs OLD code — remove the stale install that owns the `agents` name on that box, or reorder PATH. `agents doctor` names it.'));
   }
   if (failed > 0 || notUpgraded > 0) process.exitCode = 1;
 }
@@ -818,7 +818,7 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
 // process, then SSH each peer's `devices harnesses --local --json` worker.
 // ---------------------------------------------------------------------------
 
-interface HarnessInventoryOpts {
+export interface HarnessInventoryOpts {
   agents?: AgentId[];
   devices?: string[];
   refresh?: boolean;
@@ -917,7 +917,7 @@ async function runDevicesHarnesses(opts: HarnessInventoryOpts): Promise<void> {
   else for (const line of renderHarnessMatrix(results)) console.log(line);
 }
 
-async function runDevicesAccounts(opts: HarnessInventoryOpts): Promise<void> {
+export async function runDevicesAccounts(opts: HarnessInventoryOpts): Promise<void> {
   if (opts.local) {
     const rows = await collectLocalHarnessInventory({ agents: opts.agents, refresh: opts.refresh });
     if (opts.json) console.log(JSON.stringify({ host: machineId(), accounts: groupByAccount(rows) }));
@@ -1363,7 +1363,7 @@ function registerDevicesCommands(program: Command): void {
       agents devices config win-mini ssh.auth password          # password auth…
       agents devices config win-mini ssh.bundle muqsit          # …from this secrets bundle
       agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519
-      agents devices config mac-mini auto-launch.enabled off    # exclude from Factory auto-launch
+      agents devices config mac-mini auto-launch.enabled off    # exclude from AGI EXT auto-launch
       agents devices config mac-mini auto-launch.preferred on   # boost in auto-launch ranking
       agents devices config zion interactive.host zion          # user scope: where agents show YOU artifacts
       agents devices config mac-mini --json                     # machine-readable
@@ -1401,7 +1401,7 @@ function registerDevicesCommands(program: Command): void {
         await mustGetDevice(name);
         // Back to the default (enabled) = remove the key.
         await runDevicesConfig(name, 'auto-launch.enabled', [], { unset: true, quiet: true });
-        console.log(chalk.green(`Enabled '${name}'`) + chalk.gray(' for Factory auto-launch.'));
+        console.log(chalk.green(`Enabled '${name}'`) + chalk.gray(' for AGI EXT auto-launch.'));
       } catch (err: any) {
         console.error(chalk.red(err.message));
         process.exit(1);
@@ -1415,7 +1415,7 @@ function registerDevicesCommands(program: Command): void {
         configTombstoneNotice('disable <name>', 'config <name> auto-launch.enabled off');
         await mustGetDevice(name);
         await runDevicesConfig(name, 'auto-launch.enabled', ['off'], { quiet: true });
-        console.log(chalk.green(`Disabled '${name}'`) + chalk.gray(' for Factory auto-launch.'));
+        console.log(chalk.green(`Disabled '${name}'`) + chalk.gray(' for AGI EXT auto-launch.'));
       } catch (err: any) {
         console.error(chalk.red(err.message));
         process.exit(1);
@@ -1429,7 +1429,7 @@ function registerDevicesCommands(program: Command): void {
         configTombstoneNotice('prefer <name>', 'config <name> auto-launch.preferred on');
         await mustGetDevice(name);
         await runDevicesConfig(name, 'auto-launch.preferred', ['on'], { quiet: true });
-        console.log(chalk.green(`Preferred '${name}'`) + chalk.gray(' for Factory auto-launch.'));
+        console.log(chalk.green(`Preferred '${name}'`) + chalk.gray(' for AGI EXT auto-launch.'));
       } catch (err: any) {
         console.error(chalk.red(err.message));
         process.exit(1);
@@ -1444,7 +1444,7 @@ function registerDevicesCommands(program: Command): void {
         await mustGetDevice(name);
         // Back to the default (not preferred) = remove the key.
         await runDevicesConfig(name, 'auto-launch.preferred', [], { unset: true, quiet: true });
-        console.log(chalk.green(`No longer preferring '${name}'`) + chalk.gray(' for Factory auto-launch.'));
+        console.log(chalk.green(`No longer preferring '${name}'`) + chalk.gray(' for AGI EXT auto-launch.'));
       } catch (err: any) {
         console.error(chalk.red(err.message));
         process.exit(1);
@@ -1564,7 +1564,7 @@ function registerDevicesCommands(program: Command): void {
     const names = Object.keys(reg).sort();
     const interactiveHost = getConfigValue('interactive.host').value as string | undefined;
     if (opts.json) {
-      // Registry + central config block, always fast — the Factory extension
+      // Registry + central config block, always fast — AGI EXT
       // polls this path. Each row is the EFFECTIVE profile (registry overlaid
       // with the central ssh.*/platform/user config) and carries its
       // device-scope `config` (maxAgents, schedulerEnabled, notes, ssh*,
@@ -1928,10 +1928,11 @@ Examples:
 
 After each upgrade the rollout asks the box what \`agents\` resolves to and what
 version that copy reports. A box that upgraded with exit 0 but still resolves to
-another install — most often the \`scripts/install.sh\` dev build at
-~/.local/agents-cli-dev, which sits earlier on PATH than the npm global — is
-reported \`stale\` with its resolved path, counted as NOT upgraded, and makes the
-command exit non-zero. Remove the shadowing install or reorder PATH on that box.
+another install — a stale copy in a second node prefix, a Homebrew shim, or a
+hand-made link that sits earlier on PATH than the npm global — is reported
+\`stale\` with its resolved path, counted as NOT upgraded, and makes the command
+exit non-zero. Remove the install that owns the name, or reorder PATH on that
+box; \`agents doctor\` names it.
 
 A box whose probe cannot answer (no POSIX shell, e.g. Windows) is reported
 \`unverified\` rather than counted as a success.

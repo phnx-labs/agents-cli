@@ -8,6 +8,7 @@ import { readProfile, resolveProfileForRun } from '../lib/profiles.js';
 import { setKeychainBackendForTest, secretsKeychainItem, getKeychainToken, type KeychainBackend } from '../lib/secrets/index.js';
 import { keychainItemName } from '../lib/secrets/profiles.js';
 import { writeBundleWithItems, keychainRef } from '../lib/secrets/bundles.js';
+import { _resetFileStoreForTest } from '../lib/secrets/filestore.js';
 import { addAccount, findAccount } from '../lib/account-registry.js';
 
 let TEST_ROOT: string;
@@ -27,11 +28,15 @@ class MemoryKeychain implements KeychainBackend {
 }
 
 let prevBackend: ReturnType<typeof setKeychainBackendForTest>;
+let previousMetaIndex: string | undefined;
 
 beforeEach(() => {
   TEST_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'profiles-cmd-test-'));
   USER_DIR = path.join(TEST_ROOT, '.agents');
   fs.mkdirSync(path.join(USER_DIR, 'profiles'), { recursive: true });
+  previousMetaIndex = process.env.AGENTS_SECRETS_META_INDEX_FILE;
+  process.env.AGENTS_SECRETS_META_INDEX_FILE = path.join(TEST_ROOT, 'bundle-index.json');
+  _resetFileStoreForTest({ fileDir: path.join(TEST_ROOT, 'secrets'), passphrase: 'profiles-test' });
   vi.spyOn(state, 'getUserAgentsDir').mockReturnValue(USER_DIR);
   vi.spyOn(console, 'log').mockImplementation(() => {});
   prevBackend = setKeychainBackendForTest(new MemoryKeychain());
@@ -43,6 +48,9 @@ beforeEach(() => {
 
 afterEach(() => {
   setKeychainBackendForTest(prevBackend);
+  _resetFileStoreForTest();
+  if (previousMetaIndex === undefined) delete process.env.AGENTS_SECRETS_META_INDEX_FILE;
+  else process.env.AGENTS_SECRETS_META_INDEX_FILE = previousMetaIndex;
   vi.restoreAllMocks();
   fs.rmSync(TEST_ROOT, { recursive: true, force: true });
 });

@@ -54,7 +54,7 @@ list unless `--provider` is given. Both surfaces call the shared dispatch core
 (`executeCloudDispatch` in `src/lib/cloud/dispatch.ts` via
 `src/commands/run-cloud.ts`), so tracking, streaming, and the budget
 kill-switch are identical to `agents cloud run`. See
-[00-concepts.md#placement](00-concepts.md#placement) for the placement model.
+[concepts.md#placement](concepts.md#placement) for the placement model.
 
 ### Pre-provisioned targets (env / computer)
 
@@ -360,7 +360,7 @@ agents cloud run "benchmark three JSON parsers and report the fastest" --agent a
 ## Budget Guardrails
 
 Cloud dispatches **inherit the local project's budget caps** (see
-[docs/06-observability.md](./06-observability.md#budget-guardrails-agents-budget)).
+[docs/observability.md](./observability.md#budget-guardrails-agents-budget)).
 Before a run is POSTed, its estimated cost is projected onto current spend;
 under `on_exceed: block`, a dispatch that would breach a cap is **refused
 client-side** with a `[budget] BLOCKED cloud dispatch …` error — the run never
@@ -380,6 +380,6 @@ planned follow-up.
 
 ## See Also
 
-- [docs/00-concepts.md](./00-concepts.md) — DotAgents repos, resource kinds, `agents.yaml` structure
-- [docs/06-observability.md](./06-observability.md) — `agents cloud list --json` as a fleet observability source
+- [docs/concepts.md](./concepts.md) — DotAgents repos, resource kinds, `agents.yaml` structure
+- [docs/observability.md](./observability.md) — `agents cloud list --json` as a fleet observability source
 - [docs/teams.md](./teams.md) — use `--cloud rush|codex|factory` on `agents teams add` to dispatch cloud teammates from a DAG

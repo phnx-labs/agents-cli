@@ -1,8 +1,8 @@
 /**
  * Tests for the canonical watchdog.log writer (watchdog-brain-v2).
  *
- * The Factory Floor card reads this JSONL feed with the parser in
- * apps/factory/src/core/watchdogLog.ts. No cross-app import is allowed, so these
+ * The Fleet card reads this JSONL feed with the parser in
+ * apps/ext/src/core/watchdogLog.ts. No cross-app import is allowed, so these
  * tests pin the SHAPE that reader consumes: one JSON object per line, a numeric
  * `ts`, a known `kind`, a string `message`, and the optional context fields —
  * plus the line-cap trim so the file never grows unbounded.

@@ -147,6 +147,7 @@ export const OWN_HOST_COMMANDS = new Set([
   'feed',
   'computer',
   'secrets',
+  'accounts', // `accounts sync --device` names the destination, not remote routing
   'logs',
   'hosts',
   'ssh',

@@ -71,7 +71,7 @@ export interface DetectedTicket {
 
 /**
  * Detect per-session rate-limit / usage-limit signals in assistant or error
- * text (RUSH-1523). Matches the same shapes Factory's prewarm detectBlockingPrompt
+ * text (RUSH-1523). Matches the same shapes the ext's prewarm detectBlockingPrompt
  * uses, plus common Claude/Codex/Gemini limit strings.
  */
 export function detectRateLimited(text?: string): boolean {
@@ -117,7 +117,7 @@ export interface SessionState {
   plan?: string;
   /**
    * Live plan progress from the most recent `TodoWrite` (RUSH-1380). Present when
-   * the session has written a todo list; drives the Factory Floor N/M pill +
+   * the session has written a todo list; drives the Fleet N/M pill +
    * checklist, notably for remote/device-dispatched agents with no local stream.
    */
   todos?: TodoProgress;

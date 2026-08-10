@@ -56,7 +56,7 @@ export type MilestoneEvent =
   /** Deliberate agent-authored progress post (`agents feed post`). */
   | 'status.posted'
   /**
-   * An agent terminal spawned from the Factory VS Code extension. A milestone
+   * An agent terminal spawned from AGI EXT, the VS Code extension. A milestone
    * because it is the BIRTH of a session — it carries the sessionId and the
    * terminalId that every later event on that session joins through, the same
    * way `subagent.spawned` roots a sub-agent. Written out of process by

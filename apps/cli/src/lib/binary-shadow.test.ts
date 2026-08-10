@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { detectAgentsBinaryShadows } from './binary-shadow.js';
+import { detectAgentsBinaryShadows, sameFile } from './binary-shadow.js';
 
 describe('detectAgentsBinaryShadows', () => {
   const savedPath = process.env.PATH;
@@ -49,7 +49,7 @@ describe('detectAgentsBinaryShadows', () => {
     try {
       const shadows = detectAgentsBinaryShadows(realAgents, []);
       expect(shadows).toHaveLength(1);
-      expect(fs.realpathSync(shadows[0].path)).toBe(fs.realpathSync(shadowAgents));
+      expect(sameFile(shadows[0].path, shadowAgents)).toBe(true);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

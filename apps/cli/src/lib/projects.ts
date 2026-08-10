@@ -427,7 +427,7 @@ function isUnder(child: string, parent: string): boolean {
  * with `expandLocalHome` and resolved, so this matches sessions whose cwd shares
  * this machine's home layout. A session recorded on a different-home machine
  * (`/Users/x/…` vs `/home/x/…`) will not match until the fleet-wide,
- * home-relative variant lands (see the deferred item in docs/11-projects.md).
+ * home-relative variant lands (see the deferred item in docs/projects.md).
  */
 export function projectNameForCwd(cwd: string | undefined, defs: ProjectDef[]): string | undefined {
   if (!cwd) return undefined;

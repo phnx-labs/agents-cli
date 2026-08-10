@@ -104,7 +104,7 @@ export function formatFocusCount(n: number): string {
  * One scannable focus line: path + count, with a single unit trailer so the
  * bare integer is never mistaken for commits or minutes.
  *
- *   apps/cli/src 2.3k  ·  apps/cli/docs 302  ·  apps/factory/src 245  file-touches (7d)
+ *   apps/cli/src 2.3k  ·  apps/cli/docs 302  ·  apps/ext/src 245  file-touches (7d)
  */
 export function formatFocusAreas(areas: FocusArea[], windowDays: number): string {
   if (areas.length === 0) return '';

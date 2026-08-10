@@ -3,7 +3,7 @@
  *
  * Computes a rolling tokens-per-second readout from a session transcript's raw
  * content. This is the single source of truth for the throughput number the
- * Factory Floor shows next to a running agent — the extension used to carry its
+ * Fleet shows next to a running agent — the extension used to carry its
  * own copy of this math (`computeOutputTokensPerSec`); it now reads `tokPerSec`
  * straight off `agents sessions --active --json` instead (issue #741).
  */

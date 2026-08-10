@@ -80,6 +80,12 @@ export interface PushBundleOptions {
   passphrase?: string;
   /** Label for the audit trail — `export --host` vs `fleet apply`. */
   operation: string;
+  /** Preserve an automation account's permanent prompt-free policy remotely. */
+  policyNever?: boolean;
+  /** Permit a human-invoked push to read locally without requiring the agent broker. */
+  agentOnly?: boolean;
+  /** Non-secret literals whose bundle value kind must survive the dotenv transport. */
+  literalValues?: Record<string, string>;
 }
 
 export interface PushBundleResult {
@@ -89,6 +95,21 @@ export interface PushBundleResult {
   keyCount: number;
   /** One line for the caller to render. Never contains a secret value. */
   message: string;
+}
+
+export interface LiteralRestorePlan {
+  key: string;
+  removeArgs: string[];
+  addArgs: string[];
+}
+
+/** Preserve the literal-vs-secret schema that dotenv transport cannot encode. */
+export function planLiteralRestoration(bundle: string, literalValues: Record<string, string> = {}): LiteralRestorePlan[] {
+  return Object.entries(literalValues).map(([key, value]) => ({
+    key,
+    removeArgs: ['remove', bundle, key, '--yes'],
+    addArgs: ['add', bundle, key, '--value', value],
+  }));
 }
 
 /**
@@ -232,6 +253,27 @@ export function pushResolvedBundleToHost(
     }
   }
 
+  if (opts.policyNever) {
+    const policy = remoteSecretsRaw(host, ['policy', bundle, 'never', '--i-understand'], { osLookupName: host });
+    if (policy.code !== 0) {
+      const msg = (policy.stderr || policy.stdout || '').trim();
+      return fail(`pushed '${bundle}' but could not set remote policy never${msg ? `: ${msg}` : ''}`);
+    }
+  }
+
+  for (const step of planLiteralRestoration(bundle, opts.literalValues)) {
+    const removed = remoteSecretsRaw(host, step.removeArgs, { osLookupName: host });
+    if (removed.code !== 0) {
+      const msg = (removed.stderr || removed.stdout || '').trim();
+      return fail(`pushed '${bundle}' but could not replace transported ${step.key}${msg ? `: ${msg}` : ''}`);
+    }
+    const literal = remoteSecretsRaw(host, step.addArgs, { osLookupName: host });
+    if (literal.code !== 0) {
+      const msg = (literal.stderr || literal.stdout || '').trim();
+      return fail(`pushed '${bundle}' but could not preserve literal ${step.key}${msg ? `: ${msg}` : ''}`);
+    }
+  }
+
   const remoteMsg = (res.stdout || '').trim().split('\n').map((l) => l.trim()).filter(Boolean).pop();
   return {
     ok: true,
@@ -248,5 +290,5 @@ export function pushBundleToHost(
   host: string,
   opts: PushBundleOptions,
 ): PushBundleResult {
-  return pushResolvedBundleToHost(resolveBundleForPush(bundle, opts.operation), bundle, host, opts);
+  return pushResolvedBundleToHost(resolveBundleForPush(bundle, opts.operation, { agentOnly: opts.agentOnly }), bundle, host, opts);
 }
