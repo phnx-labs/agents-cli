@@ -188,6 +188,15 @@ function linearTriggerMatches(trigger: LinearJobTrigger, webhook: IncomingWebhoo
     const data = webhook.payload.data as Record<string, unknown> | undefined;
     const current = (data?.state as Record<string, unknown> | undefined)?.name;
     if (current !== trigger.stateTo) return false;
+    // RUSH-2539: `stateTo` is a TRANSITION predicate, not a current-state one.
+    // Linear carries the prior value of each changed field in `updatedFrom`, so a
+    // real state change has `updatedFrom.state` (this codebase's shape) or
+    // `updatedFrom.stateId` (Linear's scalar). With neither, this Issue/update
+    // touched something else while the issue merely still sits in `stateTo` —
+    // matching there re-fires on every later edit (RUSH-1459 got 11 duplicate
+    // plan comments).
+    const updatedTo = webhook.payload.updatedFrom as Record<string, unknown> | undefined;
+    if (!updatedTo || (updatedTo.state === undefined && updatedTo.stateId === undefined)) return false;
   }
   if (trigger.stateFrom) {
     const updatedFrom = webhook.payload.updatedFrom as Record<string, unknown> | undefined;

@@ -165,6 +165,28 @@ describe('handler config layer', () => {
       expect(handlerMod.handlerMatchesWebhook(handler, wrongFrom)).toBe(false);
     });
 
+    it('does not re-fire a stateTo handler on a later non-state update (RUSH-2539)', () => {
+      // The live `linear` handler: fire when an issue MOVES to Plan, no stateFrom.
+      const handler: import('./handlers.js').WebhookHandler = {
+        name: 'plan-handler',
+        source: 'linear',
+        event: 'Issue',
+        action: 'update',
+        stateTo: 'Plan',
+        run: { agent: 'claude' },
+      };
+      // A real transition INTO Plan — updatedFrom carries the prior state — matches.
+      expect(handlerMod.handlerMatchesWebhook(handler, linearWebhook())).toBe(true);
+      // Linear's scalar shape (updatedFrom.stateId) also counts as a transition.
+      expect(handlerMod.handlerMatchesWebhook(handler, linearWebhook({ updatedFrom: { stateId: 'old-state-id' } }))).toBe(true);
+      // Issue still sits in Plan but THIS delivery changed something else (a label,
+      // a description): updatedFrom carries no state — must NOT match, or the planner
+      // re-fires on every later edit (RUSH-1459 accumulated 11 duplicate comments).
+      expect(handlerMod.handlerMatchesWebhook(handler, linearWebhook({ updatedFrom: { labelIds: ['x'] } }))).toBe(false);
+      // An update with no changed-field record at all — must NOT match.
+      expect(handlerMod.handlerMatchesWebhook(handler, linearWebhook({ updatedFrom: undefined }))).toBe(false);
+    });
+
     it('matches Linear teamKey and label filters', () => {
       const handler: import('./handlers.js').WebhookHandler = {
         name: 'rush-agent',

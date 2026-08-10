@@ -200,6 +200,27 @@ describe('matchJobsToWebhook', () => {
     expect(jobMatchesWebhook(linear, wrongFrom)).toBe(false);
   });
 
+  it('does not re-fire a stateTo trigger on a later non-state update (RUSH-2539)', () => {
+    const linear = job({
+      name: 'linear-plan',
+      trigger: { type: 'linear_event', event: 'Issue', action: 'update', stateTo: 'Plan' },
+    });
+    // A real transition into Plan (updatedFrom carries the prior state) matches.
+    expect(jobMatchesWebhook(linear, linearIssueWebhook(['agent']))).toBe(true);
+    // Linear's scalar updatedFrom.stateId also counts as a transition.
+    const viaStateId = linearIssueWebhook(['agent']);
+    viaStateId.payload.updatedFrom = { stateId: 'old-state-id' };
+    expect(jobMatchesWebhook(linear, viaStateId)).toBe(true);
+    // A non-state edit while the issue still sits in Plan must NOT match.
+    const nonState = linearIssueWebhook(['agent']);
+    nonState.payload.updatedFrom = { labelIds: ['x'] };
+    expect(jobMatchesWebhook(linear, nonState)).toBe(false);
+    // No updatedFrom at all must NOT match.
+    const noUpdatedFrom = linearIssueWebhook(['agent']);
+    delete (noUpdatedFrom.payload as Record<string, unknown>).updatedFrom;
+    expect(jobMatchesWebhook(linear, noUpdatedFrom)).toBe(false);
+  });
+
   it('reads labels from the flat webhook array, not a {nodes} connection', () => {
     // Regression: Linear webhook bodies send `data.labels` as a flat array.
     // Reading `.nodes` (the GraphQL connection shape) made every --label filter
