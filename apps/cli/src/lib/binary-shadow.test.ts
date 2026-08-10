@@ -49,7 +49,13 @@ describe('detectAgentsBinaryShadows', () => {
     try {
       const shadows = detectAgentsBinaryShadows(realAgents, []);
       expect(shadows).toHaveLength(1);
+<<<<<<< HEAD
       expect(sameFile(shadows[0].path, shadowAgents)).toBe(true);
+=======
+      const resolved = fs.statSync(shadows[0].path);
+      const expected = fs.statSync(shadowAgents);
+      expect({ dev: resolved.dev, ino: resolved.ino }).toEqual({ dev: expected.dev, ino: expected.ino });
+>>>>>>> 8963b6a28 (test(cli): compare Windows shadow aliases by file identity)
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
