@@ -1928,10 +1928,11 @@ Examples:
 
 After each upgrade the rollout asks the box what \`agents\` resolves to and what
 version that copy reports. A box that upgraded with exit 0 but still resolves to
-another install — most often the \`scripts/install.sh\` dev build at
-~/.local/agents-cli-dev, which sits earlier on PATH than the npm global — is
-reported \`stale\` with its resolved path, counted as NOT upgraded, and makes the
-command exit non-zero. Remove the shadowing install or reorder PATH on that box.
+another install — a stale copy in a second node prefix, a Homebrew shim, or a
+hand-made link that sits earlier on PATH than the npm global — is reported
+\`stale\` with its resolved path, counted as NOT upgraded, and makes the command
+exit non-zero. Remove the install that owns the name, or reorder PATH on that
+box; \`agents doctor\` names it.
 
 A box whose probe cannot answer (no POSIX shell, e.g. Windows) is reported
 \`unverified\` rather than counted as a success.

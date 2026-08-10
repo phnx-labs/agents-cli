@@ -158,10 +158,17 @@ mkdir -p "$LINK_DIR"
 DEV_SHADOW_MARKER='AGENTS_CLI_DEV_SHADOW_LINK'
 
 # Remove a $LINK_DIR entry that a PRIOR run of THIS script created under a
-# production name. Only two things qualify: a symlink whose target points into
-# the dev prefix, and a wrapper file carrying our marker. A real binary, or a
-# link pointing anywhere else (the registry install, Homebrew, the user's own
-# alias), is left exactly as it is.
+# production name. Two shapes qualify, one per platform:
+#
+#   POSIX   a symlink whose target points into the dev prefix.
+#   Windows a regular wrapper file that execs into the dev prefix. Older
+#           revisions wrote these with NO marker (they hardcoded the
+#           `agents-cli-dev` path), so recognizing them by content is the only
+#           thing that works -- a marker-only check silently repaired nothing on
+#           the one platform where the shadow is a file rather than a link.
+#
+# A real binary, or a link/wrapper pointing anywhere else (the registry install,
+# Homebrew, the user's own alias), is left exactly as it is.
 cleanup_legacy_shadow() {
   local path="$1" raw
   if [[ -L "$path" ]]; then
@@ -175,7 +182,8 @@ cleanup_legacy_shadow() {
         dim "  Removed stale dev link: $path -> $raw"
         ;;
     esac
-  elif [[ -f "$path" ]] && grep -qF "$DEV_SHADOW_MARKER" "$path" 2>/dev/null; then
+  elif [[ -f "$path" ]] &&
+       grep -qE "$DEV_SHADOW_MARKER|agents-cli-dev" "$path" 2>/dev/null; then
     rm -f "$path"
     dim "  Removed stale dev wrapper: $path"
   fi
@@ -287,7 +295,22 @@ fi
 
 green "  Ready"
 dim   "  $LINKED_PATH ($LINKED_VER)"
-dim   "  Run 'agents$DEV_SUFFIX <args>'. Your installed 'agents' is untouched."
+
+# The cleanup above may have removed the only thing answering to `agents` on this
+# box. postinstall.js short-circuits its own ~/.local/bin link when `agents`
+# already resolves on the login PATH (`scripts/postinstall.js:311`), so on a box
+# where npm's global bin dir is not on that PATH, the dev shadow was what
+# satisfied that probe and npm never wrote a link of its own. Removing the shadow
+# is still right -- but say so instead of claiming `agents` is untouched.
+if command -v agents >/dev/null 2>&1; then
+  dim "  Run 'agents$DEV_SUFFIX <args>'. Your installed 'agents' is untouched."
+else
+  echo
+  yellow "  'agents' does not resolve on this PATH."
+  yellow "  A dev shadow was standing in for the registry install here. Restore it with:"
+  echo   "      npm install -g @phnx-labs/agents-cli"
+  yellow "  (or add npm's global bin dir to PATH). 'agents$DEV_SUFFIX' is unaffected."
+fi
 
 # The dev build has its own name, so PATH ORDER no longer matters -- only whether
 # $LINK_DIR is reachable at all.

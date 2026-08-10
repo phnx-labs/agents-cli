@@ -127,6 +127,50 @@ describe.skipIf(process.platform === 'win32')('install.sh dev bin naming', () =>
     expect(result.stdout).toContain('Removed stale dev link');
   });
 
+  it('removes a marker-less wrapper FILE that execs into the dev prefix', () => {
+    const home = makeTempHome();
+    const root = stagePackageTree();
+    fs.mkdirSync(linkDir(home), { recursive: true });
+
+    // Exactly what the pre-rename MINGW branch wrote: a regular file, no marker,
+    // recognizable only by the dev-prefix path baked into its body. The cleanup
+    // loop is platform-independent, so this pins the Windows repair on Linux too.
+    const wrapper = path.join(linkDir(home), 'agents');
+    fs.writeFileSync(
+      wrapper,
+      '#!/usr/bin/env bash\nexec "$HOME/.local/agents-cli-dev/agents" "$@"\n',
+      { mode: 0o755 },
+    );
+    fs.writeFileSync(
+      path.join(linkDir(home), 'agents.cmd'),
+      '@"%USERPROFILE%\\.local\\agents-cli-dev\\agents.cmd" %*\r\n',
+    );
+
+    const result = runInstall(root, home);
+    expect(result.status, result.stderr).toBe(0);
+
+    expect(fs.existsSync(wrapper)).toBe(false);
+    expect(fs.existsSync(path.join(linkDir(home), 'agents.cmd'))).toBe(false);
+    expect(result.stdout).toContain('Removed stale dev wrapper');
+  });
+
+  it('leaves a wrapper FILE that does not reference the dev prefix untouched', () => {
+    const home = makeTempHome();
+    const root = stagePackageTree();
+    fs.mkdirSync(linkDir(home), { recursive: true });
+
+    // A hand-rolled launcher for the registry install: same name, same shape,
+    // different target. Content-matching must not sweep this up.
+    const wrapper = path.join(linkDir(home), 'agents');
+    const body = '#!/usr/bin/env bash\nexec "$HOME/.nvm/versions/node/v22/bin/agents" "$@"\n';
+    fs.writeFileSync(wrapper, body, { mode: 0o755 });
+
+    const result = runInstall(root, home);
+    expect(result.status, result.stderr).toBe(0);
+
+    expect(fs.readFileSync(wrapper, 'utf-8')).toBe(body);
+  });
+
   it('leaves a production `agents` link that points outside the dev prefix untouched', () => {
     const home = makeTempHome();
     const root = stagePackageTree();
