@@ -189,6 +189,29 @@ describe.skipIf(process.platform === 'win32')('install.sh dev bin naming', () =>
     expect(fs.readlinkSync(link)).toBe(decoyTarget);
   });
 
+  it('names a daemon service manifest still pointing at a link it removed', () => {
+    const home = makeTempHome();
+    const root = stagePackageTree();
+    fs.mkdirSync(linkDir(home), { recursive: true });
+    fs.symlinkSync(path.join(devPrefix(home), 'bin', 'agents'), path.join(linkDir(home), 'agents'));
+
+    // What an earlier revision's daemon bounce recorded: the service ExecStart
+    // pinned to the dev shadow. Removing the shadow leaves it dangling, and the
+    // daemon then dies on its next restart rather than at install time.
+    const unitDir = path.join(home, '.config', 'systemd', 'user');
+    fs.mkdirSync(unitDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(unitDir, 'agents-daemon.service'),
+      `[Service]\nExecStart="/usr/bin/node" "${path.join(linkDir(home), 'agents')}" "__daemon-run"\n`,
+    );
+
+    const result = runInstall(root, home);
+    expect(result.status, result.stderr).toBe(0);
+
+    expect(result.stdout).toContain('agents daemon restart');
+    expect(result.stdout).toContain('agents-daemon.service');
+  });
+
   it('leaves the shared daemon on production code unless --bounce-daemon is passed', () => {
     const home = makeTempHome();
     const root = stagePackageTree();

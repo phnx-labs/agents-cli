@@ -189,11 +189,36 @@ cleanup_legacy_shadow() {
   fi
 }
 
+CLEANED_ANY=false
 for bin in "${PRODUCTION_BINS[@]}"; do
-  cleanup_legacy_shadow "$LINK_DIR/$bin"
-  cleanup_legacy_shadow "$LINK_DIR/$bin.cmd"
-  cleanup_legacy_shadow "$LINK_DIR/$bin.ps1"
+  for candidate in "$LINK_DIR/$bin" "$LINK_DIR/$bin.cmd" "$LINK_DIR/$bin.ps1"; do
+    [[ -e "$candidate" || -L "$candidate" ]] || continue
+    cleanup_legacy_shadow "$candidate"
+    [[ -e "$candidate" || -L "$candidate" ]] || CLEANED_ANY=true
+  done
 done
+
+# A long-running service may have been pinned to a link we just removed. An
+# earlier revision of this script bounced the shared routines daemon onto the dev
+# build and recorded THAT path in the service manifest, so the daemon keeps
+# running from memory but dies on its next restart -- silently taking the
+# scheduler, secrets broker, and browser IPC with it. Name it and hand over the
+# one command that repoints the manifest; do not restart a shared service the
+# caller did not ask us to touch.
+if $CLEANED_ANY; then
+  for manifest in \
+    "$HOME/.config/systemd/user/agents-daemon.service" \
+    "$HOME/Library/LaunchAgents/com.phnx-labs.agents-daemon.plist"
+  do
+    [[ -f "$manifest" ]] || continue
+    grep -qF "$LINK_DIR/agents" "$manifest" 2>/dev/null || continue
+    echo
+    yellow "  The agents daemon service still points at $LINK_DIR/agents, which was"
+    yellow "  just removed ($manifest)."
+    yellow "  It runs until the next restart, then fails. Repoint it with:"
+    echo   "      agents daemon restart"
+  done
+fi
 
 if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]]; then
   for bin in "${DEV_BINS[@]}"; do
