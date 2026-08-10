@@ -361,6 +361,21 @@ cd apps/cli && bun run test -- scripts/install.test.ts
 | Someone wants the old auto-bounce behavior | `--bounce-daemon` keeps it, one flag away, with the blast radius stated |
 | Stale worktree daemon (pid `4163347`) predates this change | Stop it separately during verification; not fixed by the code change alone |
 
+## What the plan missed
+
+Kept honest: three things this plan did not anticipate, each found by the
+non-author review or by running the change on a real box.
+
+| Found by | What the plan got wrong |
+| --- | --- |
+| Review, round 1 | The Windows repair was designed around a marker embedded in the wrapper files. The **pre-rename** MINGW branch wrote its wrappers with no marker at all — it hardcoded the `agents-cli-dev` path — so on the one platform where the shadow is a file rather than a symlink, the repair matched nothing while the docs claimed it was unconditional. Fixed by matching the dev-prefix reference in the file body. |
+| Verifying on this box | Removing the shadow left the **systemd unit's `ExecStart` dangling** — it had been pinned to `~/.local/bin/agents` by an earlier revision's daemon bounce. `systemctl` read `active` because the daemon runs from memory; the failure was scheduled for the next restart, when the scheduler, secrets broker, and browser IPC would have gone down silently. The cleanup now checks both manifest formats and prints `agents daemon restart`. |
+| Review, round 2 | That new check matched `$LINK_DIR/agents` as a substring, which **also matches `$LINK_DIR/agents-dev`** — so a box with a healthy `--bounce-daemon` manifest plus one stale link was told to restart a working daemon. Fixed by matching the exact removed path, terminated. |
+
+The pattern in all three: the change was correct in the case it was designed for
+and wrong in a neighbouring case, and only a run or an adversarial read surfaced
+it. Every behavior fix now carries a mutation-checked test.
+
 ## Tracking
 
 Extends RUSH-2431 (`binary-shadow` detection) and RUSH-2446 (rollout
