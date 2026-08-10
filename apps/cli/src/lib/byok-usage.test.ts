@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   getByokUsageForHarness,
+  renderByokBar,
   setByokFetchForTest,
   resetByokCacheForTest,
   setByokCachePathForTest,
@@ -153,6 +154,24 @@ describe('getByokUsageForHarness', () => {
       usedUsd: 3,
       usedPercent: 30,
     });
+  });
+
+  it('renders DeepInfra prepaid credit when no spending limit is configured', async () => {
+    addAccount('deepinfra-prepaid', 'deepinfra', 'api-key', 'di-prepaid', cacheDir);
+    setByokFetchForTest(makeFetch({ stripe_balance: -12, recent: 3, limit: null }));
+    const result = await getByokUsageForHarness(makeProfile({
+      host: { agent: 'codex' },
+      provider: 'deepinfra',
+      account: 'deepinfra-prepaid',
+      auth: undefined,
+    }), { forceRefresh: true });
+    expect(result?.budget).toMatchObject({
+      limitUsd: null,
+      remainingUsd: 12,
+      usedUsd: 3,
+      usedPercent: null,
+    });
+    expect(renderByokBar(result!)).toContain('$12.00 credit, $3.00 used (no spending limit)');
   });
 
   it('treats limit:null as an unlimited key', async () => {
