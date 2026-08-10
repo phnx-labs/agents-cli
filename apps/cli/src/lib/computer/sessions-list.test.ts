@@ -364,10 +364,13 @@ describe('listComputerActions + buildComputerSessionRows (real event log)', () =
     _resetForTest(eventsPath());
     expect(listComputerActions()).toEqual([]);
     // An empty ledger contributes no rows OF ITS OWN. Any row still present came
-    // from the durable computer_sessions table, and every such row is a recovered
-    // one — it carries no ledger actions (RUSH-2549).
+    // from the durable computer_sessions table, and every such row is a RECOVERED
+    // one — identified by carrying recoveredActionCount (RUSH-2549). Asserting
+    // on `actions.length === 0` instead would be vacuous: appendPrunedRunsFromDb
+    // hardcodes `actions: []`, so that can never fail. A ledger row leaking in
+    // here would have recoveredActionCount undefined, and this catches it.
     expect(() => buildComputerSessionRows()).not.toThrow();
-    expect(buildComputerSessionRows().every((r) => r.actions.length === 0)).toBe(true);
+    expect(buildComputerSessionRows().every((r) => r.recoveredActionCount !== undefined)).toBe(true);
   });
 
   it('the --machine filter narrows to rows on a matching hostname/remote host', () => {

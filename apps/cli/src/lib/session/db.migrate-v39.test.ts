@@ -15,14 +15,20 @@ process.env.USERPROFILE = TEST_HOME;
  *
  * The upgrade is driven the way production drives it, not by hand-writing an
  * older schema: open the DB (current schema), drop the two new tables, stamp
- * `user_version = 38`, close, reopen. `getDB` then replays exactly what a real
+ * the recorded version back to 38, close, reopen. `getDB` then replays what a real
  * pre-v39 machine replays — `db.exec(SCHEMA)` followed by `migrateSchema(38)`.
  *
- * Two things have to be true afterwards. The tables and their indexes must
- * exist, and an UPGRADED database must end up identical to a FRESH one — a
- * column present in `SCHEMA` but missing from the v39 migration block (or the
- * reverse) is invisible until a query fails on exactly one person's machine.
- * The migration is purely additive, so an existing session row survives.
+ * What this can and cannot prove, stated honestly. `getDB` runs
+ * `db.exec(SCHEMA)` UNCONDITIONALLY (db.ts:1221) before it reads the recorded
+ * version, and v39 adds only new tables — so `SCHEMA` has already created them
+ * by the time `migrateSchema` runs, and the v39 block's `CREATE TABLE IF NOT
+ * EXISTS` is an idempotent backstop rather than the thing that does the work.
+ * That makes a fresh-vs-upgraded COLUMN comparison tautological here (both
+ * sides are `SCHEMA`'s output), unlike v36/v38 where the block does an
+ * `ALTER TABLE` / rebuild that `SCHEMA` cannot express — so no such assertion
+ * is made. What IS asserted is real: upgrading a v38 database yields both
+ * tables and their indexes, stamps the new version, preserves existing rows,
+ * and produces tables that actually accept a write.
  */
 const { getSessionsDir } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
@@ -38,14 +44,8 @@ const {
 
 const TOOL_TABLES = ['browser_sessions', 'computer_sessions'] as const;
 
-/** Column names for a table, sorted — the comparison unit for schema drift. */
-function columnsOf(table: string): string[] {
-  return (getDB().prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
-    .map((c) => c.name)
-    .sort();
-}
-
-// A fresh, fully-migrated database: capture what the tables SHOULD look like.
+// Seed a session row on the fully-migrated database, so the rewind below has
+// pre-existing data whose survival the migration must not disturb.
 const transcript = path.join(TEST_HOME, 'pre-v39.jsonl');
 fs.writeFileSync(transcript, '');
 upsertSession(
@@ -58,8 +58,6 @@ upsertSession(
   } as unknown as Parameters<typeof upsertSession>[0],
   'a session indexed before v39 shipped',
 );
-const freshColumns = Object.fromEntries(TOOL_TABLES.map((t) => [t, columnsOf(t)]));
-
 // Rewind to v38: drop what v39 adds, stamp the old version, reopen.
 // The version lives in the `meta` table (db.ts:1224 reads
 // `SELECT value FROM meta WHERE key = 'schema_version'`), NOT the sqlite
@@ -106,12 +104,6 @@ describe('db migration v38 -> v39 (durable tool sessions, RUSH-2549)', () => {
       .all() as Array<{ name: string }>).map((r) => r.name);
     expect(indexes).toContain('idx_browser_sessions_session');
     expect(indexes).toContain('idx_computer_sessions_session');
-  });
-
-  it('an upgraded database has the SAME columns as a fresh one (no schema drift)', () => {
-    for (const t of TOOL_TABLES) {
-      expect(columnsOf(t), `${t} drifted between SCHEMA and the v39 migration`).toEqual(freshColumns[t]);
-    }
   });
 
   it('the migrated tables accept a write and read it back', () => {

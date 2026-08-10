@@ -20,7 +20,7 @@ import { spawnSync } from 'child_process';
 import { getBrowserRuntimeDir, getProfileRuntimeDir } from './profiles.js';
 import { formatRelativeTime } from '../session/relative-time.js';
 import type { SessionMeta } from '../session/types.js';
-import { getSessionById, listBrowserSessionRecords } from '../session/db.js';
+import { getSessionById, listBrowserSessionRecords, pruneToolSessions } from '../session/db.js';
 import { listPidSessionEntries } from '../session/pid-registry.js';
 import { loadHookSessionIndex } from '../session/hook-sessions.js';
 import { readRecentActivity } from '../activity.js';
@@ -405,6 +405,11 @@ export function groupIntoRows(
  *  reading `tasks.json` and resolving launchIds against the live indexes.
  *  The interactive picker's data source. */
 export function buildBrowserSessionRows(profile?: string): BrowserSessionRow[] {
+  // Retention runs from BOTH listing paths, not just the computer one: a box
+  // that uses `agents browser` and never runs `agents sessions --computer`
+  // would otherwise never sweep either table. Best-effort — a read-only DB
+  // must not break a listing.
+  try { pruneToolSessions(); } catch { /* listing must not fail on retention */ }
   const groups = listBrowserSessions(profile);
   const taskIdentities = new Map(groups.map((g) => [g.profile, loadDurableTaskIdentities(g.profile)]));
   const index = buildLaunchSessionIndex();

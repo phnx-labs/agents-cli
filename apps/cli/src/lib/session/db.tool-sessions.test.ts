@@ -135,6 +135,33 @@ describe('browser task identity survives the task (RUSH-2549)', () => {
   });
 });
 
+describe('recovering runs past the read limit (RUSH-2549 review follow-up)', () => {
+  it('returns the OLD complement, not the newest N the caller already has', () => {
+    // The recovery caller already holds every recent invocation from the event
+    // ledger and discards anything it has seen. A newest-N read therefore hands
+    // it only rows it will throw away, and returns nothing usable once the table
+    // exceeds the limit — silently restoring the day-8 disappearance this whole
+    // feature removes. Bounding by "older than the ledger reaches" is what makes
+    // recovery work on exactly the busy boxes that need it.
+    const base = 1_700_000_000_000;
+    for (let i = 0; i < 10; i++) {
+      recordComputerSession({ invocationId: `bounded-${i}`, startedAt: base + i * 1000 });
+    }
+    const ledgerOldest = base + 7 * 1000; // the ledger still holds the newest three
+
+    const newestOnly = listComputerSessionRecords({ limit: 3 })
+      .map((r) => r.invocationId);
+    const complement = listComputerSessionRecords({ limit: 3, startedBeforeMs: ledgerOldest })
+      .map((r) => r.invocationId);
+
+    // A bare newest-N read hands back exactly what the ledger already covers.
+    expect(newestOnly).toEqual(['bounded-9', 'bounded-8', 'bounded-7']);
+    // The complement read hands back what the ledger CANNOT: the older tail.
+    expect(complement).toEqual(['bounded-6', 'bounded-5', 'bounded-4']);
+    for (const id of complement) expect(newestOnly).not.toContain(id);
+  });
+});
+
 describe('computer-use invocation metadata outlives the event ledger (RUSH-2549)', () => {
   it('accumulates action_count across the many calls one invocation makes', () => {
     const invocationId = 'inv-abc-123';

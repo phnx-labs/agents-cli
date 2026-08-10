@@ -4036,16 +4036,26 @@ function toStoredBrowserSession(row: BrowserSessionRow): StoredBrowserSession {
   };
 }
 
-/** Stored browser tasks, newest first, bounded; optionally scoped to one profile. */
+/**
+ * Stored browser tasks, newest first; optionally scoped to one profile.
+ *
+ * A PROFILE-SCOPED read is deliberately unbounded. These rows are the identity
+ * for capture dirs that still exist on disk, and dropping the oldest ones would
+ * silently regress exactly those tasks to `unlinked` — the symptom this whole
+ * change removes, reappearing at a higher threshold. The row count is already
+ * bounded by the tasks that profile has ever run, and each row is a short
+ * metadata record. Only the unscoped read (every profile, used for overviews)
+ * takes a ceiling, since that one has no natural bound.
+ */
 export function listBrowserSessionRecords(
   profile?: string,
   opts: { limit?: number } = {},
 ): StoredBrowserSession[] {
   const db = getDB();
-  const limit = opts.limit ?? TOOL_SESSION_LIST_LIMIT;
   const rows = (profile
-    ? db.prepare(`SELECT * FROM browser_sessions WHERE profile = ? ORDER BY started_at DESC LIMIT ?`).all(profile, limit)
-    : db.prepare(`SELECT * FROM browser_sessions ORDER BY started_at DESC LIMIT ?`).all(limit)) as BrowserSessionRow[];
+    ? db.prepare(`SELECT * FROM browser_sessions WHERE profile = ? ORDER BY started_at DESC`).all(profile)
+    : db.prepare(`SELECT * FROM browser_sessions ORDER BY started_at DESC LIMIT ?`)
+      .all(opts.limit ?? TOOL_SESSION_LIST_LIMIT)) as BrowserSessionRow[];
   return rows.map(toStoredBrowserSession);
 }
 
@@ -4119,12 +4129,24 @@ export function pruneToolSessions(maxAgeDays: number = TOOL_SESSION_MAX_AGE_DAYS
  * returns, so an unbounded read would dump the entire table on every call.
  */
 export function listComputerSessionRecords(
-  opts: { limit?: number } = {},
+  opts: { limit?: number; startedBeforeMs?: number } = {},
 ): StoredComputerSession[] {
   const db = getDB();
-  const rows = db
-    .prepare(`SELECT * FROM computer_sessions ORDER BY started_at DESC LIMIT ?`)
-    .all(opts.limit ?? TOOL_SESSION_LIST_LIMIT) as ComputerSessionRow[];
+  const limit = opts.limit ?? TOOL_SESSION_LIST_LIMIT;
+  // `startedBeforeMs` selects the COMPLEMENT of the caller's other source
+  // rather than the newest N. The caller that recovers pruned runs already
+  // holds every recent invocation from the event ledger and discards any row
+  // it has seen — so a bare newest-N read hands it 2000 rows it is guaranteed
+  // to throw away, and returns nothing at all once the table passes that size.
+  // Bounding by "older than the ledger reaches" truncates the TAIL of
+  // recoverable history instead of deleting all of it.
+  const rows = (opts.startedBeforeMs === undefined
+    ? db
+      .prepare(`SELECT * FROM computer_sessions ORDER BY started_at DESC LIMIT ?`)
+      .all(limit)
+    : db
+      .prepare(`SELECT * FROM computer_sessions WHERE started_at < ? ORDER BY started_at DESC LIMIT ?`)
+      .all(opts.startedBeforeMs, limit)) as ComputerSessionRow[];
   return rows.map((row) => ({
     invocationId: row.invocation_id,
     sessionId: row.session_id ?? undefined,

@@ -268,7 +268,19 @@ export function groupIntoComputerRuns(
  */
 function appendPrunedRunsFromDb(rows: ComputerRunRow[], limit?: number): void {
   const seen = new Set(rows.map((r) => r.invocationId));
-  for (const record of listComputerSessionRecords({ limit })) {
+  // Ask the DB for what the ledger CANNOT still hold — everything older than
+  // the oldest action the ledger returned. Reading the newest N instead is
+  // self-defeating: those are precisely the rows `seen` discards, so once the
+  // table exceeds the read limit the recovery returns nothing and history
+  // disappears past the ledger window again — the exact bug this recovery
+  // exists to prevent. With no ledger rows at all there is nothing to exclude,
+  // so every stored row is recoverable.
+  const startedBeforeMs = rows.length > 0
+    ? Math.min(...rows.map((r) => r.startMs))
+    : undefined;
+  for (const record of listComputerSessionRecords({ limit, startedBeforeMs })) {
+    // Still deduped: the ledger's oldest row and a DB row can share a boundary
+    // timestamp, and a caller may pass rows from a wider window than it read.
     if (seen.has(record.invocationId)) continue;
     const linked = record.sessionId ? getSessionById(record.sessionId) : null;
     rows.push({
