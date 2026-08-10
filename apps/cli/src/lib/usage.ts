@@ -1796,7 +1796,7 @@ function deleteCachedClaudeOauth(service: string): void {
  * a file-based setup-token and, when none is provisioned, gets `null` — it never
  * reads Claude Code's interactive login (transmitting that ACL-bound OAuth token
  * to Anthropic's API is what gets it revoked; see the branch body and
- * docs/design/credential-management.md). It is OFF by default so full-credential
+ * docs/credential-management.md). It is OFF by default so full-credential
  * callers that refresh (`isClaudeAuthValid` -> `getClaudeAccessToken`) or export
  * the full blob (`readClaudeCredentialsBlob` for Rush Cloud dispatch) still read
  * the interactive login.
@@ -1831,7 +1831,7 @@ export async function loadClaudeOauth(
     // interactive credential used programmatically, which Anthropic flags and
     // revokes (the fleet-wide-logout class, RUSH-1822), and which violates the
     // invariant that the interactive/rotating login is untouchable
-    // (docs/design/credential-management.md). Report unprovisioned (-> probe
+    // (docs/credential-management.md). Report unprovisioned (-> probe
     // token 'missing' -> auth-health 'unconfigured', benign for rotation); seed a
     // setup-token via the mint-auth path to restore usage/probe for the account.
     return null;

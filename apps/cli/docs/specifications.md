@@ -16,7 +16,7 @@ mandatory, not optional.
 This doc holds the **contracts** (the guarantees). The per-feature reference docs
 — [`05-sessions.md`](05-sessions.md), [`secrets.md`](secrets.md),
 [`architecture.md`](architecture.md), [`08-secrets-agent-process-model.md`](08-secrets-agent-process-model.md),
-[`../../../docs/design/secrets-trust-boundaries.md`](../../../docs/design/secrets-trust-boundaries.md)
+[`secrets-trust-boundaries.md`](secrets-trust-boundaries.md)
 — hold the **implementation-level detail and how-to**. Read the spec for the
 guarantee, the reference for the mechanism.
 
@@ -1123,7 +1123,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
 
 - **SEC-6 (MUST).** Every command MUST be on exactly one side of the
   materialization boundary **by construction** — there is no "sometimes"
-  (`../../../docs/design/secrets-trust-boundaries.md:28-29`). The classification
+  (`secrets-trust-boundaries.md:28-29`). The classification
   in §4.2 is normative.
 - **SEC-7 (MUST).** The injection path MUST place resolved values only in the
   child process env, never on this process's stdout: `agents secrets exec` and
@@ -1132,7 +1132,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
 - **SEC-8 (MUST).** The master passphrase MUST be stripped from every injected
   child env: `buildSecretsExecEnv` deletes `AGENTS_SECRETS_PASSPHRASE` before
   spawn (`commands/secrets.ts:369-376`, quoted in
-  `../../../docs/design/secrets-trust-boundaries.md:61-65`).
+  `secrets-trust-boundaries.md:61-65`).
 - **SEC-8a (MUST).** A resolved secret value MUST NOT reach any process's
   command line. SEC-7 keeps values out of stdout and SEC-8 strips the master
   passphrase, but the tmux launch path put the ENTIRE exec env — every resolved
@@ -1444,7 +1444,7 @@ NEVER prompts.
 
 Rule of thumb (normative): **if `--plaintext`, `--reveal`, or `get` appears in an
 agent's transcript, a key entered the agent's context there.** Injection and MCP
-do not (`../../../docs/design/secrets-trust-boundaries.md:110-111`).
+do not (`secrets-trust-boundaries.md:110-111`).
 
 #### 4.3 stdout / stderr / exit discipline
 

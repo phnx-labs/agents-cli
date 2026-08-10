@@ -44,7 +44,8 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [Model tiers](model-tiers.md) | `--model cheap\|default\|best\|ultra` on `run` / `teams` — per-harness cost tiers, the provider ranking mechanism, and the `agents models` tier map. Permission modes (`--mode`) are listed with `agents modes [agent[@version]]` (same discovery shape). |
 | [Secrets](secrets.md) | Keychain-backed env-var bundles. Inject into runs via `agents run --secrets <name>`. 1Password import/export, encrypted push/pull. |
 | [Secrets-agent process model](08-secrets-agent-process-model.md) | Design decision: fold the secrets broker into a hardened, always-on daemon — make the host reliable enough to carry the critical service rather than routing around it. |
-| [Secrets trust boundaries](../../../docs/design/secrets-trust-boundaries.md) | Design record: the plaintext data-flow — exactly which commands inject into a child process vs materialize a value into the agent's context/transcript. |
+| [Secrets trust boundaries](secrets-trust-boundaries.md) | Design record: the plaintext data-flow — exactly which commands inject into a child process vs materialize a value into the agent's context/transcript. |
+| [Credential management](credential-management.md) | Design record: the fleet auth model — the interactive/rotating login is untouchable, only a deliberate setup-token is shareable across devices, and the per-harness Touch ID fix. |
 
 ## Orchestration
 

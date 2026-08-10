@@ -33,7 +33,6 @@ packages/
   session-tracker/  @agents/session-tracker — SessionStart hook that WRITES live-session state
   agi-cli/          @phnx-labs/agi-cli — DEPRECATED alias; re-exports the canonical @phnx-labs/agents-cli
   swarmify-mirror/  legacy npm-redirect stub (@companion/agents-cli → @phnx-labs/agents-cli)
-docs/         Repo-root design notes (docs/design/); the full CLI design reference is apps/cli/docs/ (start: apps/cli/docs/architecture.md)
 assets/ demo/ website/   Brand, launch demo, landing (repo-root, not shipped in any tarball)
 ```
 
@@ -173,7 +172,7 @@ or the repo root so the tree stays clean. What's committed vs gitignored is deli
 |---|---|---|
 | `.agents/worktrees/<slug>/` | ignored | PR-bound worktrees, one per change (see [§Conventions](#conventions-repo-wide)) |
 | `.agents/scratch/` | ignored | throwaway working files |
-| `.agents/plans/` | ignored | internal implementation plans (not shipped) |
+| `.agents/plans/` | ignored | the **only** location for generated implementation plans (not a docs/ subtree, not shipped) |
 | `.agents/artifacts/` | ignored | generated outputs, incl. a scratch rendered HTML plan |
 | `.agents/skills/`, `.agents/commands/` | committed | project skills + slash commands |
 | `.agents/reports/` | committed | durable reports meant to be kept/shared |
