@@ -2792,7 +2792,7 @@ a machine-wide process sweep.)
   systemd, or a background-adjacent caller attempts to restart it, **THEN** the
   service-manager burst limit and `ensureDaemonStarted` circuit breaker stop rapid
   retries after a bounded number of consecutive failures (SING-14).
-- **GIVEN** a user disables a fleet-affecting capability from the Factory palette,
+- **GIVEN** a user disables a fleet-affecting capability from the ext's command palette,
   **WHEN** the command completes, **THEN** the CLI's config is the state that
   changed (`agents watchdog rotate off`), and the daemon, the menubar, and every
   other surface observe the same off state.
@@ -3134,7 +3134,7 @@ not the watchdog's.
   watchdog agree on which sessions are addressable (no duplicate weaker resolver).
 - **WD-16 (MUST).** When no addressable split exists, the tick MUST fall back (mailbox or
   headless `--resume`) or refuse-and-flag — it MUST NOT silently claim delivery.
-- **WD-17 (MUST).** Every decision MUST be appended to `watchdog.log` in the Factory event
+- **WD-17 (MUST).** Every decision MUST be appended to `watchdog.log` in the ext event
   shape, with persisted transcript context bounded so it cannot consume the audit window
   (`lib/watchdog/log.ts`).
 

@@ -155,7 +155,7 @@ spawn instead of rotating to another identity.
 
 Usage and authentication health are device-local read models owned by the
 agents-cli daemon. Every ordinary consumer (`agents run`, `view`, `versions`,
-`teams`, device inventory, and Factory) reads the same persisted snapshots and
+`teams`, device inventory, and the ext) reads the same persisted snapshots and
 never calls a provider or scans usage logs on its render path. The daemon
 considers usage every 60 seconds (each account retains its provider-aware due
 time and backoff) and authentication every three minutes. `agents usage
