@@ -32,7 +32,7 @@ function runDispatchDiagnostic(debug: boolean): ReturnType<typeof spawnSync> {
   return spawnSync('bun', [
     '-e',
     "import { buildRunForwardedArgs } from './apps/cli/src/lib/hosts/dispatch.ts'; " +
-      "buildRunForwardedArgs({ agent: 'grok', prompt: 'rotate sk-live-prompt', mode: 'auto', " +
+      "buildRunForwardedArgs({ agent: 'grok', prompt: '--token=sk-live-prompt', mode: 'auto', " +
       "env: ['API_TOKEN=sk-live-env'], passthroughArgs: ['--api-key', 'sk-live-arg'] });",
   ], { cwd: REPO_ROOT, env, encoding: 'utf8' });
 }

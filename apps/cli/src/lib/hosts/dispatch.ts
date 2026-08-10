@@ -37,7 +37,7 @@ export { deriveMirroredCwd, homeRemainder, remoteCdPrefix };
 export function logForwardedArgs(kind: string, agent: string, version: string | undefined, args: string[]): void {
   if (!process.env.AGENTS_DISPATCH_DEBUG) return;
   const safeArgs = [...args];
-  if (safeArgs[0] === 'run' && safeArgs[2] && !safeArgs[2].startsWith('--')) {
+  if (safeArgs[0] === 'run' && safeArgs[2] && (kind === 'headless' || !safeArgs[2].startsWith('--'))) {
     safeArgs[2] = '<prompt>';
   }
   for (let i = 0; i < safeArgs.length; i++) {
