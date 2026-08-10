@@ -55,7 +55,12 @@ function stagePackageTree(): string {
   return root;
 }
 
-function runInstall(root: string, home: string, extraArgs: string[] = []) {
+function runInstall(
+  root: string,
+  home: string,
+  extraArgs: string[] = [],
+  extraEnv: Record<string, string | undefined> = {},
+) {
   const env: Record<string, string | undefined> = {
     ...process.env,
     HOME: home,
@@ -63,6 +68,7 @@ function runInstall(root: string, home: string, extraArgs: string[] = []) {
     // The daemon bounce is opt-in, but keep CI semantics explicit either way.
     CI: undefined,
     AGENTS_NO_HEAL: undefined,
+    ...extraEnv,
   };
   for (const key of Object.keys(env)) {
     if (env[key] === undefined) delete env[key];
@@ -210,6 +216,62 @@ describe.skipIf(process.platform === 'win32')('install.sh dev bin naming', () =>
 
     expect(result.stdout).toContain('agents daemon restart');
     expect(result.stdout).toContain('agents-daemon.service');
+  });
+
+  it('does not warn when the manifest points at agents-dev and only a sibling was removed', () => {
+    const home = makeTempHome();
+    const root = stagePackageTree();
+    fs.mkdirSync(linkDir(home), { recursive: true });
+
+    // A leftover `browser` shadow gets cleaned, but the manifest was pinned by a
+    // --bounce-daemon run to agents-dev, which is healthy and untouched. A bare
+    // substring test for "<linkdir>/agents" also matches "<linkdir>/agents-dev",
+    // which would send the user to restart a working shared daemon.
+    fs.symlinkSync(
+      path.join(devPrefix(home), 'bin', 'browser'),
+      path.join(linkDir(home), 'browser'),
+    );
+    const unitDir = path.join(home, '.config', 'systemd', 'user');
+    fs.mkdirSync(unitDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(unitDir, 'agents-daemon.service'),
+      `[Service]\nExecStart="/usr/bin/node" "${path.join(linkDir(home), 'agents-dev')}" "__daemon-run"\n`,
+    );
+
+    const result = runInstall(root, home);
+    expect(result.status, result.stderr).toBe(0);
+
+    // The stale browser link is still cleaned up...
+    expect(result.stdout).toContain('Removed stale dev link');
+    // ...but nothing claims the daemon's target was removed.
+    expect(result.stdout).not.toContain('agents daemon restart');
+  });
+
+  it('tells you how to restore `agents` when it no longer resolves', () => {
+    const home = makeTempHome();
+    const root = stagePackageTree();
+
+    // The real PATH minus every directory that provides an `agents` -- keeps
+    // node/npm/git/coreutils available while reproducing the state a box is left
+    // in when the dev shadow was the only thing answering to that name
+    // (postinstall.js:311 skips writing its own link when `agents` resolves).
+    const pathWithoutAgents = (process.env.PATH ?? '')
+      .split(path.delimiter)
+      .filter((dir) => dir && !fs.existsSync(path.join(dir, 'agents')))
+      .join(path.delimiter);
+    expect(
+      spawnSync('/bin/sh', ['-c', 'command -v agents'], {
+        env: { PATH: pathWithoutAgents },
+        encoding: 'utf-8',
+      }).stdout,
+    ).toBe('');
+
+    const result = runInstall(root, home, [], { PATH: pathWithoutAgents });
+    expect(result.status, result.stderr).toBe(0);
+
+    expect(result.stdout).toContain("'agents' does not resolve on this PATH");
+    expect(result.stdout).toContain('npm install -g @phnx-labs/agents-cli');
+    expect(result.stdout).not.toContain("Your installed 'agents' is untouched");
   });
 
   it('leaves the shared daemon on production code unless --bounce-daemon is passed', () => {

@@ -189,12 +189,12 @@ cleanup_legacy_shadow() {
   fi
 }
 
-CLEANED_ANY=false
+REMOVED_LINKS=()
 for bin in "${PRODUCTION_BINS[@]}"; do
   for candidate in "$LINK_DIR/$bin" "$LINK_DIR/$bin.cmd" "$LINK_DIR/$bin.ps1"; do
     [[ -e "$candidate" || -L "$candidate" ]] || continue
     cleanup_legacy_shadow "$candidate"
-    [[ -e "$candidate" || -L "$candidate" ]] || CLEANED_ANY=true
+    [[ -e "$candidate" || -L "$candidate" ]] || REMOVED_LINKS+=("$candidate")
   done
 done
 
@@ -205,20 +205,29 @@ done
 # scheduler, secrets broker, and browser IPC with it. Name it and hand over the
 # one command that repoints the manifest; do not restart a shared service the
 # caller did not ask us to touch.
-if $CLEANED_ANY; then
-  for manifest in \
-    "$HOME/.config/systemd/user/agents-daemon.service" \
-    "$HOME/Library/LaunchAgents/com.phnx-labs.agents-daemon.plist"
-  do
-    [[ -f "$manifest" ]] || continue
-    grep -qF "$LINK_DIR/agents" "$manifest" 2>/dev/null || continue
+#
+# Match the EXACT path we removed, terminated. A bare substring test for
+# "$LINK_DIR/agents" also matches "$LINK_DIR/agents-dev", so a box that ran
+# --bounce-daemon (healthy manifest, pointing at agents-dev) plus any one stale
+# link would be told to restart a working daemon. Both manifest formats delimit
+# the path -- systemd quotes it, launchd wraps it in <string> -- so two fixed
+# string tests are enough and need no regex escaping of $LINK_DIR.
+for manifest in \
+  "$HOME/.config/systemd/user/agents-daemon.service" \
+  "$HOME/Library/LaunchAgents/com.phnx-labs.agents-daemon.plist"
+do
+  [[ -f "$manifest" ]] || continue
+  for removed in ${REMOVED_LINKS[@]+"${REMOVED_LINKS[@]}"}; do
+    grep -qF "$removed\"" "$manifest" 2>/dev/null ||
+      grep -qF "$removed<" "$manifest" 2>/dev/null || continue
     echo
-    yellow "  The agents daemon service still points at $LINK_DIR/agents, which was"
+    yellow "  The agents daemon service still points at $removed, which was"
     yellow "  just removed ($manifest)."
     yellow "  It runs until the next restart, then fails. Repoint it with:"
     echo   "      agents daemon restart"
+    break
   done
-fi
+done
 
 if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]]; then
   for bin in "${DEV_BINS[@]}"; do
