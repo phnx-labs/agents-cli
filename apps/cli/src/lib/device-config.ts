@@ -2,14 +2,23 @@
  * Device/user config keys — typed read/write over the central agents.yaml store.
  *
  * One registry (`CONFIG_KEYS`) maps each CLI dotted name to where it lives:
- *   - user scope   → central `~/.agents/agents.yaml` under `config:` (syncs
- *                    fleet-wide via `agents repo push/pull`)
- *   - device scope → central `~/.agents/agents.yaml` under
- *                    `fleet.devices.<name>.config` — the ONE store for
- *                    per-device operator settings. Central means a setting is
- *                    readable/writable from any box, syncs with the repo, and
- *                    is backed up with it. Names and non-secret values only
- *                    (a secrets-bundle NAME is fine; a credential never is).
+ *   - user scope     → central `~/.agents/agents.yaml` under `config:` (syncs
+ *                      fleet-wide via `agents repo push/pull`)
+ *   - device scope   → split by `visibility`, which asks WHO READS IT:
+ *       · `shared`   → central `fleet.devices.<name>.config`, because a PEER
+ *                      reads it (the ssh keys and platform to dial the box,
+ *                      agents.max-concurrent for placement, auto-launch and
+ *                      notes for fleet views). Names and non-secret values only
+ *                      (a secrets-bundle NAME is fine; a credential never is).
+ *       · `machine`  → the owning box's own doc, never the shared file, because
+ *                      nothing off-box reads it (browser.profile,
+ *                      browser.remote-control, scheduler.enabled,
+ *                      daemon.enabled).
+ *
+ * That split exists because "central for everything" put 13 machines on one
+ * tracked path and they stopped being able to pull. `browser.remote-control` is
+ * also a consent flag — syncing one box's opt-in to the rest was a security bug,
+ * not just churn.
  *
  * The device registry (`~/.agents/.history/devices/registry.json`) stays the
  * DISCOVERY cache (address, tailscale snapshot, reachability); the profile
@@ -32,16 +41,34 @@ import { fleetDevicesMapForWrite, migrateDeviceConfigToCentral } from './devices
 /** Which tier of the agents.yaml store a key lives in. */
 export type ConfigScope = 'user' | 'device';
 
+/**
+ * For a device-scope key: WHO READS IT, which is what decides where it is stored.
+ *
+ * - `shared`  — a PEER reads it, so it must be visible fleet-wide and lives in the
+ *   tracked `fleet.devices.<name>.config`. `ssh.*` and `platform` are the
+ *   load-bearing cases: machine A resolves them to build the ssh target for B
+ *   (`lib/devices/resolve-profile.ts`), so it cannot ask B for them.
+ * - `machine` — only the owning box ever reads it, so it belongs in that box's
+ *   own gitignored doc and must never reach the fleet-shared file. Storing these
+ *   centrally is what makes 13 machines write one tracked path.
+ *
+ * Declaring this is MANDATORY for a device-scope key — the union below makes
+ * omitting it a compile error, mirroring how `META_KEY_SCOPE` (lib/state.ts) uses
+ * an exhaustive `Record<keyof Meta, ...>`. Before this, a new key picked its home
+ * by hand with no signal, which is how operator config drifted into the shared
+ * file twice.
+ */
+export type ConfigVisibility = 'shared' | 'machine';
+
 /** Value type of a config key — drives validation and `--json` rendering. */
 export type ConfigType = 'string' | 'int' | 'bool' | 'string-list';
 
-/** One known config key. */
-export interface ConfigKeySpec {
+/** Fields every key carries, regardless of scope. */
+interface ConfigKeySpecBase {
   /** CLI dotted name, e.g. `interactive.host`. */
   name: string;
   /** camelCase key under the YAML config block. */
   yamlKey: string;
-  scope: ConfigScope;
   type: ConfigType;
   /** One-line description for help/list output. */
   description: string;
@@ -50,6 +77,14 @@ export interface ConfigKeySpec {
   /** Extra validation beyond the type check; return an error string or null. */
   validate?: (value: unknown) => string | null;
 }
+
+/**
+ * One known config key. A device-scope key MUST declare its `visibility`; a
+ * user-scope key has none (it is fleet-wide by definition).
+ */
+export type ConfigKeySpec =
+  | (ConfigKeySpecBase & { scope: 'user'; visibility?: never })
+  | (ConfigKeySpecBase & { scope: 'device'; visibility: ConfigVisibility });
 
 /** A key with its resolved value and the layer that set it. */
 export interface ConfigEntry {
@@ -89,6 +124,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     name: 'browser.profile',
     yamlKey: 'defaultBrowserProfile',
     scope: 'device',
+    visibility: 'machine',
     type: 'string',
     description:
       'Browser profile `agents browser start` resolves to without --profile (set via `agents browser profiles set-default`).',
@@ -97,6 +133,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     name: 'agents.max-concurrent',
     yamlKey: 'maxAgents',
     scope: 'device',
+    visibility: 'shared',
     type: 'int',
     description:
       'Cap on concurrent agents on this device. What counts toward it depends on the consumer: ' +
@@ -107,6 +144,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     name: 'scheduler.enabled',
     yamlKey: 'schedulerEnabled',
     scope: 'device',
+    visibility: 'machine',
     type: 'bool',
     defaultValue: true,
     description: 'Whether the routines scheduler (daemon) may fire on this device.',
@@ -115,6 +153,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     name: 'daemon.enabled',
     yamlKey: 'daemonEnabled',
     scope: 'device',
+    visibility: 'machine',
     type: 'bool',
     defaultValue: true,
     description:
@@ -127,6 +166,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     name: 'watchdog.enabled',
     yamlKey: 'watchdogEnabled',
     scope: 'device',
+    visibility: 'shared',
     type: 'bool',
     defaultValue: false,
     description: 'Whether the daemon runs the watchdog pass on this device.',
@@ -135,6 +175,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     name: 'browser.remote-control',
     yamlKey: 'browserRemoteControl',
     scope: 'device',
+    visibility: 'machine',
     type: 'bool',
     defaultValue: false,
     description:
@@ -145,6 +186,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     name: 'notes',
     yamlKey: 'notes',
     scope: 'device',
+    visibility: 'shared',
     type: 'string-list',
     description: 'Free-form operator notes about this device (one entry per `agents devices config <name> notes <text>`).',
   },
@@ -152,6 +194,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     name: 'ssh.user',
     yamlKey: 'sshUser',
     scope: 'device',
+    visibility: 'shared',
     type: 'string',
     description: 'SSH login user for the device — overrides the registry profile’s user at dial time.',
   },
@@ -159,6 +202,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     name: 'ssh.auth',
     yamlKey: 'sshAuth',
     scope: 'device',
+    visibility: 'shared',
     type: 'string',
     description: 'SSH auth method: `key` (ssh agent / on-disk keys) or `password` (pulled from a secrets bundle).',
     validate: (v) =>
@@ -170,6 +214,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     name: 'ssh.bundle',
     yamlKey: 'sshBundle',
     scope: 'device',
+    visibility: 'shared',
     type: 'string',
     description: 'Secrets bundle holding the SSH password (for ssh.auth=password). A bundle NAME — never a secret value.',
   },
@@ -177,6 +222,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     name: 'ssh.bundle-key',
     yamlKey: 'sshBundleKey',
     scope: 'device',
+    visibility: 'shared',
     type: 'string',
     description: "Key within the bundle whose value is the password (default 'password').",
   },
@@ -184,6 +230,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     name: 'ssh.identity-file',
     yamlKey: 'sshIdentityFile',
     scope: 'device',
+    visibility: 'shared',
     type: 'string',
     description: 'Explicit private-key path for key auth (passed to OpenSSH with IdentitiesOnly=yes).',
   },
@@ -191,6 +238,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     name: 'platform',
     yamlKey: 'platform',
     scope: 'device',
+    visibility: 'shared',
     type: 'string',
     description: 'OS family of the device — picks PowerShell vs POSIX on the remote end. Overrides the discovered platform.',
     validate: (v) =>
@@ -202,6 +250,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     name: 'auto-launch.enabled',
     yamlKey: 'autoLaunchEnabled',
     scope: 'device',
+    visibility: 'shared',
     type: 'bool',
     defaultValue: true,
     description: 'Whether AGI EXT auto-launch may pick this device (default on).',
@@ -210,6 +259,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     name: 'auto-launch.preferred',
     yamlKey: 'autoLaunchPreferred',
     scope: 'device',
+    visibility: 'shared',
     type: 'bool',
     defaultValue: false,
     description: 'Boost this device in AGI EXT auto-launch ranking (default off).',
@@ -306,6 +356,22 @@ function targetDevice(opts?: ConfigTarget): string {
   return opts?.device ?? machineId();
 }
 
+/**
+ * A machine-visibility key is only ever readable for THIS box, because it lives
+ * in this box's own gitignored doc. Asking for a peer's value is a mistake with a
+ * concrete fix, so say so rather than silently returning this machine's answer
+ * for another machine — that would make `agents devices config <peer>
+ * browser.remote-control` look like it reported the peer's consent state.
+ */
+function assertLocalTarget(spec: ConfigKeySpec, device: string): void {
+  if (spec.scope !== 'device' || spec.visibility !== 'machine') return;
+  if (device === machineId()) return;
+  throw new Error(
+    `${spec.name} is machine-local, so it can only be read or set on the device itself.\n` +
+    `Run it on ${device}, e.g.: agents ssh ${device} 'agents config ${spec.name} <value>'`,
+  );
+}
+
 /** Get one config key's value and the layer that set it. */
 export function getConfigValue(name: string, opts?: ConfigTarget): ConfigEntry {
   const spec = configKeySpec(name);
@@ -313,7 +379,17 @@ export function getConfigValue(name: string, opts?: ConfigTarget): ConfigEntry {
     const value = readMeta().config?.[spec.yamlKey];
     return { spec, value, layer: value !== undefined ? 'user' : undefined };
   }
-  const value = readDeviceConfigValues(targetDevice(opts))[spec.yamlKey];
+  const device = targetDevice(opts);
+  assertLocalTarget(spec, device);
+  if (spec.visibility === 'machine') {
+    // This machine's own doc, never the synced file. Fall back to the central
+    // block so a value written by an older CLI is still honored until the
+    // operator prunes it (the migration is additive and leaves it in place).
+    const local = readMeta().deviceConfig?.[spec.yamlKey];
+    const value = local !== undefined ? local : readDeviceConfigValues(device)[spec.yamlKey];
+    return { spec, value, layer: value !== undefined ? 'device' : undefined };
+  }
+  const value = readDeviceConfigValues(device)[spec.yamlKey];
   return { spec, value, layer: value !== undefined ? 'device' : undefined };
 }
 
@@ -373,7 +449,13 @@ export function setConfigValue(name: string, value: unknown, opts?: ConfigTarget
     updateMeta((m) => ({ ...m, config: { ...m.config, [spec.yamlKey]: value } }));
     return;
   }
-  setInCentralBlock(targetDevice(opts), spec, value);
+  const device = targetDevice(opts);
+  assertLocalTarget(spec, device);
+  if (spec.visibility === 'machine') {
+    updateMeta((m) => ({ ...m, deviceConfig: { ...m.deviceConfig, [spec.yamlKey]: value } }));
+    return;
+  }
+  setInCentralBlock(device, spec, value);
 }
 
 /** Unset a config key — restores default behavior. No-op when already unset. */
@@ -388,7 +470,21 @@ export function unsetConfigValue(name: string, opts?: ConfigTarget): void {
     });
     return;
   }
-  unsetInCentralBlock(targetDevice(opts), spec);
+  const device = targetDevice(opts);
+  assertLocalTarget(spec, device);
+  if (spec.visibility === 'machine') {
+    updateMeta((m) => {
+      if (!m.deviceConfig || !(spec.yamlKey in m.deviceConfig)) return m;
+      const next = { ...m.deviceConfig };
+      delete next[spec.yamlKey];
+      return { ...m, deviceConfig: Object.keys(next).length > 0 ? next : undefined };
+    });
+    // Also clear any copy an older CLI left centrally, so the unset is not
+    // shadowed by the fallback read above.
+    unsetInCentralBlock(device, spec);
+    return;
+  }
+  unsetInCentralBlock(device, spec);
 }
 
 // ─── Auto-launch preferences (Factory auto-host selection) ────────────────────
