@@ -6,6 +6,17 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Launch-health sweep no longer pins the machine.** The 60s fleet health sweep used to
+  spawn one `agents view <agent> --host <box>` subprocess for **every (agent × host) pair**
+  — on a ~12-device fleet that is ~120 concurrent node + SSH probes per tick — with no
+  concurrency cap and no guard against a fire-and-forget sweep stacking on a still-draining
+  one, which drove CPU to a runaway load (100–447) and starved the UI. The sweep now makes
+  **one batched `agents view --host <box> --json` call per host** (deriving every agent's
+  usable-version flag from that single payload, the remote analog of the existing local
+  batching), **bounds the per-device fan-out** to a small concurrency pool, and
+  **singleflights** so overlapping ticks can't pile a second full sweep on top. A
+  ~120-process burst becomes ~12 pooled, deduped calls. Fixes phnx-labs/agents-cli#2469.
+
 - **New Sessions tab — see and recover every session you own.** A dense, virtualized
   Sessions surface is now the first subtab on the Floor (before Agents). It lists every
   session across projects — local and remote, active and **orphaned** — and its whole

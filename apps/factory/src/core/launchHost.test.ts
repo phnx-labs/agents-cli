@@ -10,6 +10,8 @@ import {
   resolveBalancePool,
   DeviceLoad,
   VersionHealth,
+  parseAgentVersionsByAgent,
+  computeUsableAgents,
 } from './launchHost';
 
 test('pickLeastBusyDevice: returns null when nothing is online', () => {
@@ -315,4 +317,62 @@ test('pickBestHost: all devices SSH-unreachable (online:false) → returns null 
       { name: 'b', online: false, running: 0 },
     ]),
   ).toBeNull();
+});
+
+// #2469: the launch-health sweep now makes ONE `agents view --host <host> --json`
+// call per host and derives every agent's usable flag from that single payload,
+// instead of one `view <agent> --host` subprocess per (agent, host) pair. These
+// pin the parse + reduce that make the single-call form correct.
+
+test('parseAgentVersionsByAgent: whole-host array → by-agent version map', () => {
+  const raw = JSON.stringify([
+    { agent: 'claude', versions: [{ signedIn: true, usageStatus: 'available' }] },
+    { agent: 'codex', versions: [{ signedIn: false }] },
+  ]);
+  expect(parseAgentVersionsByAgent(raw)).toEqual({
+    claude: [{ signedIn: true, usageStatus: 'available' }],
+    codex: [{ signedIn: false }],
+  });
+});
+
+test('parseAgentVersionsByAgent: a single {agent,versions} object (one-agent host) is accepted, not just arrays', () => {
+  const raw = JSON.stringify({ agent: 'grok', versions: [{ signedIn: true }] });
+  expect(parseAgentVersionsByAgent(raw)).toEqual({ grok: [{ signedIn: true }] });
+});
+
+test('parseAgentVersionsByAgent: malformed / empty input yields {} (probe failure is unusable, never a throw)', () => {
+  expect(parseAgentVersionsByAgent('not json')).toEqual({});
+  expect(parseAgentVersionsByAgent('')).toEqual({});
+  expect(parseAgentVersionsByAgent('null')).toEqual({});
+  // entries missing agent/versions are dropped, not partially kept
+  expect(parseAgentVersionsByAgent(JSON.stringify([{ agent: 'x' }, { versions: [] }]))).toEqual({});
+});
+
+test('computeUsableAgents: one signed-in non-throttled version = usable; throttled/signed-out/absent = not', () => {
+  const byAgent: Record<string, VersionHealth[]> = {
+    claude: [{ signedIn: true, usageStatus: 'available' }],
+    codex: [{ signedIn: true, usageStatus: 'rate_limited' }],
+    grok: [{ signedIn: false }],
+  };
+  // 'kimi' is absent from the map (not installed / probe failed) — must be false.
+  expect(computeUsableAgents(byAgent, ['claude', 'codex', 'grok', 'kimi'])).toEqual({
+    claude: true,
+    codex: false,
+    grok: false,
+    kimi: false,
+  });
+});
+
+test('computeUsableAgents: batched map for all keys matches per-agent deviceHasUsableVersion (behavior parity with the old fan-out)', () => {
+  const byAgent: Record<string, VersionHealth[]> = {
+    claude: [{ signedIn: false }, { signedIn: true, usageStatus: 'available' }],
+    codex: [{ signedIn: true, usageStatus: 'out_of_credits' }],
+  };
+  const keys = ['claude', 'codex', 'gemini'];
+  const batched = computeUsableAgents(byAgent, keys);
+  // The old code computed each cell as deviceHasUsableVersion(versionsForThatAgent);
+  // the batched path must produce the identical per-key result.
+  for (const k of keys) {
+    expect(batched[k]).toBe(deviceHasUsableVersion(byAgent[k] ?? []));
+  }
 });

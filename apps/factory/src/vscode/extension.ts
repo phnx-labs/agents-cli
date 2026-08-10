@@ -15,7 +15,7 @@ import * as git from './git.vscode';
 import { AgentSettings, hasLoginEnabled, PromptEntry, QUICK_LAUNCH_SLOT_KEYS, getQuickLaunchSlot, QuickLaunchSlot, QuickLaunchSlotKey } from '../core/settings';
 import { listRegisteredDevices, countRunningAgents, fetchDeviceStats, probeReachable } from './deviceHealth.vscode';
 import { normalizeHost } from '../core/remoteSessions';
-import { pickBestHost, cappedOutDevices, noHostReason, deviceHasUsableVersion, resolveBalancePool, DeviceLoad } from '../core/launchHost';
+import { pickBestHost, cappedOutDevices, noHostReason, deviceHasUsableVersion, resolveBalancePool, DeviceLoad, VersionHealth, parseAgentVersionsByAgent, computeUsableAgents } from '../core/launchHost';
 import {
   LAUNCH_HEALTH_KEY,
   LAUNCH_HISTORY_KEY,
@@ -34,7 +34,7 @@ import { startWatchdogBridge } from '../mcp/watchdog-bridge';
 import { ensureWatchdogMcpInstalled } from '../mcp/watchdogInstall';
 import * as notifications from './notifications.vscode';
 import * as terminals from './terminals.vscode';
-import { fetchLocalSessions, fetchRemoteSessionLabelSource, fetchSessionIdentity, fetchRecapSessions, LOCAL_LABEL, LOCAL_MACHINE_ID } from './remoteSessions.vscode';
+import { fetchLocalSessions, fetchRemoteSessionLabelSource, fetchSessionIdentity, fetchRecapSessions, LOCAL_LABEL, LOCAL_MACHINE_ID, mapWithConcurrency } from './remoteSessions.vscode';
 import * as sessionTracker from './sessionTracker';
 import { runRecapHeadless, isRecapSupported } from './recap.vscode';
 import { buildAgentTerminalEnv } from '../core/terminals';
@@ -370,12 +370,40 @@ const AUTO_HOST_AGENT_KEYS = new Set(
   BUILT_IN_AGENTS.filter((agent) => agent.key !== 'shell' && agent.key !== 'droid').map((agent) => agent.key),
 );
 
+// Cap concurrent per-device probes in the launch-health sweep. Each online device
+// fires 3 shell-outs (stats + running + one batched `view --host`), so a fleet of
+// N devices ran up to N*3 concurrent node+SSH processes at once — an unbounded
+// fan-out that pinned CPU to a runaway load (phnx-labs/agents-cli#2469). A small
+// pool keeps the sweep's peak process count flat regardless of fleet size.
+const LAUNCH_HEALTH_PROBE_CONCURRENCY = 4;
+
+// Fetch EVERY installed agent's version health from a host in ONE
+// `agents view --host <host> --json` call (the whole-host form returns an array
+// of { agent, versions }). This is the remote analog of fetchAgentInventories'
+// local batching: the launch-health sweep needs the usable-version flag for all
+// AUTO_HOST_AGENT_KEYS on each host, and one call answers for every agent instead
+// of spawning one `view <agent> --host` subprocess per agent — the per-(agent,host)
+// fan-out that pinned CPU (phnx-labs/agents-cli#2469).
+async function fetchHostAgentVersions(host: string): Promise<Record<string, VersionHealth[]>> {
+  const { runAgents } = await import('../core/agentsBin');
+  try {
+    const { stdout } = await runAgents(`view --host ${shquote(host)} --json`, {
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 15_000,
+    });
+    return parseAgentVersionsByAgent(stdout);
+  } catch {
+    return {};
+  }
+}
+
 async function refreshLaunchHealthCache(context: vscode.ExtensionContext): Promise<void> {
   const devices = await listRegisteredDevices();
   const localName = normalizeHost(os.hostname());
-  const health = await Promise.all(devices
-    .filter((device) => normalizeHost(device.name) !== localName)
-    .map(async (device) => {
+  const targets = devices.filter((device) => normalizeHost(device.name) !== localName);
+  // Bounded fan-out: at most LAUNCH_HEALTH_PROBE_CONCURRENCY devices probed at once
+  // (each is 3 shell-outs) so the sweep can't spawn a fleet-sized process storm.
+  const health = await mapWithConcurrency(targets, LAUNCH_HEALTH_PROBE_CONCURRENCY, async (device) => {
       if (!device.online) {
         return {
           name: device.name,
@@ -386,10 +414,12 @@ async function refreshLaunchHealthCache(context: vscode.ExtensionContext): Promi
           fetchedAt: Date.now(),
         };
       }
-      const [stats, running, usable] = await Promise.all([
+      const [stats, running, hostAgents] = await Promise.all([
         fetchDeviceStats(device.host, { isLocal: false }),
         countRunningAgents(device.name, { isLocal: false }),
-        Promise.all([...AUTO_HOST_AGENT_KEYS].map(async (agentKey) => [agentKey, await hostHasUsableVersion(device.name, agentKey)] as const)),
+        // ONE `view --host` call answers the usable-version question for every
+        // agent, replacing the per-(agent,host) subprocess fan-out (#2469).
+        fetchHostAgentVersions(device.name),
       ]);
       return {
         name: device.name,
@@ -400,15 +430,24 @@ async function refreshLaunchHealthCache(context: vscode.ExtensionContext): Promi
         running: running ?? 0,
         loadAvg1: stats.loadAvg1,
         memPercent: stats.memPercent,
-        usableAgents: Object.fromEntries(usable),
+        usableAgents: computeUsableAgents(hostAgents, [...AUTO_HOST_AGENT_KEYS]),
         fetchedAt: stats.fetchedAt,
       };
-    }));
+    });
   await context.globalState.update(LAUNCH_HEALTH_KEY, { devices: health, refreshedAt: Date.now() } satisfies LaunchHealthCache);
 }
 
+// Singleflight guard: only one fleet sweep may run at a time. The 60s timer,
+// startup warm-up, and post-launch refresh all call this; without the guard an
+// overdue sweep (slow SSH on an already-loaded box) got a fresh full sweep piled
+// on top every tick, compounding to runaway load (phnx-labs/agents-cli#2469).
+// Overlapping callers are dropped — the in-flight sweep updates the cache shortly.
+let launchHealthInflight: Promise<void> | null = null;
 function refreshLaunchHealthCacheInBackground(context: vscode.ExtensionContext): void {
-  void refreshLaunchHealthCache(context).catch((err) => console.error('[launchAgent] health-cache refresh failed:', err));
+  if (launchHealthInflight) return;
+  launchHealthInflight = refreshLaunchHealthCache(context)
+    .catch((err) => console.error('[launchAgent] health-cache refresh failed:', err))
+    .finally(() => { launchHealthInflight = null; });
 }
 
 function resolveCachedAutoHost(context: vscode.ExtensionContext, agentKey: string): string | undefined {

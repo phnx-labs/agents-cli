@@ -58,6 +58,51 @@ export function deviceHasUsableVersion(versions: VersionHealth[]): boolean {
   );
 }
 
+/**
+ * Parse `agents view --host <host> --json` (the whole-host form, no agent arg)
+ * into a by-agent map of version health. That form returns an array of
+ * `{ agent, versions }` (a single object for a one-agent host); malformed input
+ * yields an empty map. This is the batched analog of parsing one
+ * `view <agent> --host` response per agent — it lets the launch-health sweep make
+ * ONE CLI call per host instead of one per (agent, host) pair, the fleet-wide
+ * fan-out that pinned CPU (phnx-labs/agents-cli#2469).
+ */
+export function parseAgentVersionsByAgent(rawJson: string): Record<string, VersionHealth[]> {
+  let data: unknown;
+  try {
+    data = JSON.parse(rawJson);
+  } catch {
+    return {};
+  }
+  const entries = Array.isArray(data) ? data : [data];
+  const out: Record<string, VersionHealth[]> = {};
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as { agent?: unknown; versions?: unknown };
+    if (typeof e.agent !== 'string' || !Array.isArray(e.versions)) continue;
+    out[e.agent] = e.versions.filter((v): v is VersionHealth => !!v && typeof v === 'object');
+  }
+  return out;
+}
+
+/**
+ * Reduce a by-agent version map (see parseAgentVersionsByAgent) to the
+ * usable-version flag the launch-health cache stores per agent. An agent absent
+ * from the map (not installed on the host, or the probe failed) is reported
+ * unusable — matching the old per-agent probe, whose failure returned an empty
+ * version list.
+ */
+export function computeUsableAgents(
+  byAgent: Record<string, VersionHealth[]>,
+  agentKeys: string[],
+): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const key of agentKeys) {
+    out[key] = deviceHasUsableVersion(byAgent[key] ?? []);
+  }
+  return out;
+}
+
 // Pick the least-busy online device — fewest running agents, ties broken by
 // input order (first declared wins), offline devices skipped. Returns null when
 // no candidate is online, so the caller can fall back to the local machine.
