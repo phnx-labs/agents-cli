@@ -34,10 +34,14 @@ export { deriveMirroredCwd, homeRemainder, remoteCdPrefix };
  * Diagnostic helper for RUSH-2441: log the requested agent and initial remote
  * `agents run` argv without changing normal command output.
  */
-function logForwardedArgs(kind: string, agent: string, version: string | undefined, args: string[]): void {
+export function logForwardedArgs(kind: string, agent: string, version: string | undefined, args: string[]): void {
   if (!process.env.AGENTS_DISPATCH_DEBUG) return;
+  const safeArgs = [...args];
+  if (safeArgs[0] === 'run' && safeArgs[2] && !safeArgs[2].startsWith('--')) {
+    safeArgs[2] = '<prompt>';
+  }
   process.stderr.write(
-    `[dispatch:${kind}] agent=${agent}${version ? `@${version}` : ''} args=${JSON.stringify(args)}\n`,
+    `[dispatch:${kind}] agent=${agent}${version ? `@${version}` : ''} args=${JSON.stringify(safeArgs)}\n`,
   );
 }
 
@@ -472,7 +476,6 @@ export interface DispatchOptions {
 export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
   const agentArg = opts.version ? `${opts.agent}@${opts.version}` : opts.agent;
   const args = ['run', agentArg, opts.prompt, '--quiet'];
-  logForwardedArgs('headless', opts.agent, opts.version, args);
   if (opts.mode) args.push('--mode', opts.mode);
   if (opts.model) args.push('--model', opts.model);
   // 'auto' is the remote default — forwarding it would only add noise.
@@ -499,6 +502,7 @@ export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
   else if (opts.sessionId) args.push('--session-id', opts.sessionId);
   if (opts.emitSessionId) args.push('--emit-session-id');
   if (opts.passthroughArgs && opts.passthroughArgs.length > 0) args.push('--', ...opts.passthroughArgs);
+  logForwardedArgs('headless', opts.agent, opts.version, args);
   return args;
 }
 
@@ -556,7 +560,6 @@ export interface InteractiveDispatchOptions {
 export function buildInteractiveRunForwardedArgs(opts: InteractiveDispatchOptions): string[] {
   const agentArg = opts.version ? `${opts.agent}@${opts.version}` : opts.agent;
   const args = ['run', agentArg];
-  logForwardedArgs('interactive', opts.agent, opts.version, args);
   if (opts.prompt && opts.forceInteractive) args.push(opts.prompt);
   if (opts.forceInteractive) args.push('--interactive');
   if (opts.mode) args.push('--mode', opts.mode);
@@ -581,6 +584,7 @@ export function buildInteractiveRunForwardedArgs(opts: InteractiveDispatchOption
   if (opts.passthroughArgs && opts.passthroughArgs.length > 0) {
     args.push('--', ...opts.passthroughArgs);
   }
+  logForwardedArgs('interactive', opts.agent, opts.version, args);
   return args;
 }
 

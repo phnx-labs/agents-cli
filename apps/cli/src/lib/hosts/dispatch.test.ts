@@ -23,6 +23,34 @@ import { resetActorCache } from '../actor.js';
 import type { HostTask } from './tasks.js';
 
 const LOCAL_HOME = process.env.HOME ?? os.homedir();
+const REPO_ROOT = path.resolve(import.meta.dirname, '../../../../..');
+
+function runDispatchDiagnostic(debug: boolean): ReturnType<typeof spawnSync> {
+  const env = { ...process.env };
+  if (debug) env.AGENTS_DISPATCH_DEBUG = '1';
+  else delete env.AGENTS_DISPATCH_DEBUG;
+  return spawnSync('bun', [
+    '-e',
+    "import { buildRunForwardedArgs } from './apps/cli/src/lib/hosts/dispatch.ts'; " +
+      "buildRunForwardedArgs({ agent: 'grok', prompt: 'rotate sk-live-secret', mode: 'auto' });",
+  ], { cwd: REPO_ROOT, env, encoding: 'utf8' });
+}
+
+describe('dispatch diagnostics', () => {
+  it('redacts the headless prompt while retaining the complete forwarded argv', () => {
+    const result = runDispatchDiagnostic(true);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain('[dispatch:headless] agent=grok');
+    expect(result.stderr).toContain('["run","grok","<prompt>","--quiet","--mode","auto"]');
+    expect(result.stderr).not.toContain('sk-live-secret');
+  });
+
+  it('emits no diagnostic when AGENTS_DISPATCH_DEBUG is unset', () => {
+    const result = runDispatchDiagnostic(false);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+  });
+});
 
 function decodeWindows(command: string): string {
   const encoded = command.match(/-EncodedCommand (\S+)$/)?.[1];
