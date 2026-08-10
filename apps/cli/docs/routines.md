@@ -252,6 +252,20 @@ Raw YAML editing is transactional: `agents routines edit <name> --yaml` edits a
 temporary copy, then parses and validates it before replacing the live definition.
 Invalid YAML leaves the prior definition and activation untouched.
 
+Set a routine's execution anchor **without** opening `$EDITOR` — the headless
+repair for a `routine has no project or cwd` readiness block:
+
+```bash
+agents routines edit morning-briefing --project-anchor acme-app --cwd src/github.com/acme/app
+agents routines edit morning-briefing --cwd ""   # clear the field
+```
+
+This patches only `project`/`cwd`, preserving every other node in the definition
+byte-for-byte (it never restyles the file or drops `devices:`/`enabled:`). Adding
+a definition that already lives in the routines dir with `agents routines add
+<file>` likewise leaves that tracked file untouched and only materializes its
+activation — the definition is the source of truth, not something `add` rewrites.
+
 ### One-Shot Jobs
 
 ```bash

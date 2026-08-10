@@ -1031,6 +1031,37 @@ export function serializeJob(output: Record<string, unknown>, existingText: stri
   return doc.toString();
 }
 
+/**
+ * Patch only the execution-anchor fields (`project` / `cwd`) of an existing
+ * user-layer routine definition, preserving every other node byte-for-byte.
+ *
+ * Unlike `writeJob`, this never strips `devices:`/`enabled:` and never restyles
+ * untouched scalars — it edits just the keys given via the format-preserving
+ * `serializeJob` path. This is the headless repair a `routine has no project or
+ * cwd` readiness block points at (RUSH-2517): it lets an agent supply the
+ * execution directory without opening `$EDITOR` and without corrupting the
+ * git-tracked definition. Passing `null` for a field clears it.
+ */
+export function updateJobExecutionAnchor(
+  name: string,
+  fields: { project?: string | null; cwd?: string | null },
+): void {
+  const filePath = getJobPath(name);
+  if (!filePath) throw new Error(`Job '${name}' has no user-layer definition to edit`);
+  const existingText = fs.readFileSync(filePath, 'utf-8');
+  const parsed = yaml.parse(existingText);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`Routine definition at ${filePath} is not a YAML map`);
+  }
+  const output: Record<string, unknown> = { ...(parsed as Record<string, unknown>) };
+  for (const key of ['project', 'cwd'] as const) {
+    if (fields[key] === undefined) continue;
+    if (fields[key] === null || fields[key] === '') delete output[key];
+    else output[key] = fields[key];
+  }
+  atomicWriteFileSync(filePath, serializeJob(output, existingText));
+}
+
 /** Delete a job config file by name. Returns true if the file existed. */
 export function deleteJob(name: string): boolean {
   const jobsDir = getRoutinesDir();

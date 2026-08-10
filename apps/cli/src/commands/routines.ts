@@ -33,6 +33,7 @@ import {
   readJob,
   validateJob,
   writeJob,
+  updateJobExecutionAnchor,
   setJobEnabled,
   listRuns,
   routineStats,
@@ -1285,7 +1286,18 @@ export function registerRoutinesCommands(program: Command): void {
           ));
         }
 
-        writeJob(config);
+        // A definition is a git-tracked source file; adding it MUST NOT rewrite
+        // it (design: routine definitions are immutable; activation lives in the
+        // device file). When the source path IS already the canonical definition
+        // in the routines dir, skip the write — writeJob would reformat it and
+        // strip `devices:`/`enabled:`, corrupting committed config and silently
+        // promoting a pinned routine fleet-wide (RUSH-2517). An external source
+        // is copied in as a new definition, leaving the user's file untouched.
+        const routinesDir = path.resolve(getRoutinesDir());
+        const sourceIsTrackedDefinition =
+          path.resolve(path.dirname(resolved)) === routinesDir &&
+          (path.basename(resolved) === `${name}.yml` || path.basename(resolved) === `${name}.yaml`);
+        if (!sourceIsTrackedDefinition) writeJob(config);
         const deviceMatch = !config.devices || config.devices.map(normalizeHost).includes(normalizeHost(machineId()));
         const readiness = await evaluateActivationReadinessLive(config);
         const activate = config.enabled && deviceMatch && readiness.ready;
@@ -1403,12 +1415,53 @@ export function registerRoutinesCommands(program: Command): void {
     .command('edit [name]')
     .description('Edit a prefilled routine transactionally; invalid YAML never replaces the live definition.')
     .option('--yaml', 'Open the raw YAML in $EDITOR (the current edit surface)')
+    .option('--project-anchor <name>', 'Set the singular EXECUTION anchor headlessly (no $EDITOR); the named project whose base directory the run lands in. Pass "" to clear.')
+    .option('--cwd <path>', 'Set the portable execution directory headlessly (no $EDITOR). Relative values resolve under --project-anchor or the target $HOME. Pass "" to clear.')
     .option('--state-to <name>', 'Update the Linear current-state filter before opening the editor')
     .option('--state-from <name>', 'Update the Linear previous-state filter before opening the editor')
-    .action(async (name: string | undefined, options: { stateTo?: string; stateFrom?: string }) => {
+    .action(async (name: string | undefined, options: { stateTo?: string; stateFrom?: string; projectAnchor?: string; cwd?: string }) => {
       if (!name) {
         name = await pickJob('Select job to edit', undefined, ['agents routines edit <name>']) ?? undefined;
         if (!name) return;
+      }
+
+      // Headless execution-anchor edit: set project/cwd and re-evaluate activation
+      // without opening $EDITOR. This is the repair a "routine has no project or
+      // cwd" readiness block points at (RUSH-2517), so an agent can unblock a
+      // paused routine non-interactively. It patches only those keys, preserving
+      // the rest of the definition (never strips devices:/enabled:).
+      if (options.projectAnchor !== undefined || options.cwd !== undefined) {
+        if (!getJobPath(name)) {
+          console.error(chalk.red(`'${name}' has no user-layer definition to edit`));
+          process.exit(1);
+        }
+        if (options.projectAnchor !== undefined && options.projectAnchor !== '') {
+          if (!isSafeProjectName(options.projectAnchor)) {
+            console.error(chalk.red(`Invalid project name "${options.projectAnchor}": must start with a letter or digit, contain only letters, digits, dots, hyphens, or underscores`));
+            process.exit(1);
+          }
+        }
+        updateJobExecutionAnchor(name, {
+          ...(options.projectAnchor !== undefined ? { project: options.projectAnchor || null } : {}),
+          ...(options.cwd !== undefined ? { cwd: options.cwd || null } : {}),
+        });
+        const job = readJob(name);
+        if (!job) {
+          console.error(chalk.red(`'${name}' could not be re-read after the edit`));
+          process.exit(1);
+        }
+        const readiness = await evaluateActivationReadinessLive(job);
+        if (!readiness.ready) setJobEnabled(job.name, false);
+        console.log(chalk.green(`Job '${name}' updated${readiness.ready ? '' : ' (still paused — not ready)'}`));
+        if (!readiness.ready && readiness.readiness) {
+          console.log(chalk.gray(`  ${readiness.readiness.code}: ${readiness.readiness.message}`));
+          if (readiness.readiness.repair) console.log(chalk.gray(`  repair: ${readiness.readiness.repair}`));
+        }
+        if (isDaemonRunning()) {
+          signalDaemonReload();
+          console.log(chalk.gray('Daemon reloaded'));
+        }
+        return;
       }
 
       const existing = readJob(name);

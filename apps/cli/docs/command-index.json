@@ -17732,6 +17732,24 @@
               "negate": false
             },
             {
+              "flags": "--project-anchor <name>",
+              "description": "Set the singular EXECUTION anchor headlessly (no $EDITOR); the named project whose base directory the run lands in. Pass \"\" to clear.",
+              "long": "--project-anchor",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--cwd <path>",
+              "description": "Set the portable execution directory headlessly (no $EDITOR). Relative values resolve under --project-anchor or the target $HOME. Pass \"\" to clear.",
+              "long": "--cwd",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--state-to <name>",
               "description": "Update the Linear current-state filter before opening the editor",
               "long": "--state-to",

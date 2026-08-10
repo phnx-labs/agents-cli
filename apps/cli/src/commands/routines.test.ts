@@ -1939,3 +1939,76 @@ describeRoutines('bare routines command routing', () => {
     }
   });
 });
+
+describeRoutines('routines add does not rewrite a tracked definition (RUSH-2517)', () => {
+  it('leaves a routines-dir source file byte-identical and keeps devices:', () => {
+    const job = {
+      name: 'release-train',
+      schedule: '0 */4 * * *',
+      agent: 'claude',
+      devices: ['yosemite-s0'],
+      prompt: 'ship it',
+    };
+    const home = makeHome({ jobs: [job], registry });
+    const file = path.join(home, '.agents', 'routines', 'release-train.yml');
+    const before = fs.readFileSync(file, 'utf-8');
+    try {
+      // Adding a definition that already lives in the routines dir must not
+      // rewrite it. Before the fix, writeJob reformatted the file and stripped
+      // devices:, corrupting committed config and promoting the routine fleet-wide.
+      const res = run(home, ['add', file], { AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
+      expect(res.status, res.stderr).toBe(0);
+      const after = fs.readFileSync(file, 'utf-8');
+      expect(after).toBe(before);
+      expect(yaml.parse(after).devices).toEqual(['yosemite-s0']);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describeRoutines('routines edit --project-anchor/--cwd patches headlessly (RUSH-2517)', () => {
+  it('sets cwd without $EDITOR and preserves devices: and other fields', () => {
+    const job = {
+      name: 'anchored',
+      schedule: '0 9 * * *',
+      agent: 'claude',
+      devices: ['zion'],
+      prompt: 'hello',
+    };
+    const home = makeHome({ jobs: [job], registry });
+    const file = path.join(home, '.agents', 'routines', 'anchored.yml');
+    try {
+      const res = run(home, ['edit', 'anchored', '--cwd', '/srv/work'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
+      expect(res.status, res.stderr).toBe(0);
+      const doc = yaml.parse(fs.readFileSync(file, 'utf-8'));
+      expect(doc.cwd).toBe('/srv/work');
+      expect(doc.devices).toEqual(['zion']);
+      expect(doc.prompt).toBe('hello');
+      expect(doc.schedule).toBe('0 9 * * *');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('clears cwd when passed an empty value', () => {
+    const job = {
+      name: 'anchored2',
+      schedule: '0 9 * * *',
+      agent: 'claude',
+      cwd: '/old/path',
+      prompt: 'hello',
+    };
+    const home = makeHome({ jobs: [job], registry });
+    const file = path.join(home, '.agents', 'routines', 'anchored2.yml');
+    try {
+      const res = run(home, ['edit', 'anchored2', '--cwd', ''], { AGENTS_SYNC_MACHINE_ID: 'zion' });
+      expect(res.status, res.stderr).toBe(0);
+      const doc = yaml.parse(fs.readFileSync(file, 'utf-8'));
+      expect(doc.cwd).toBeUndefined();
+      expect(doc.prompt).toBe('hello');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
