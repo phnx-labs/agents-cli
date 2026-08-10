@@ -83,8 +83,10 @@ describe('device-scope keys (central fleet.devices.<name>.config block)', () => 
     expect(central).toContain('fleet:');
     expect(central).toContain('testbox:');
     expect(central).toContain('maxAgents: 4');
-    expect(central).toContain('schedulerEnabled: false');
     expect(central).toContain('- runs the releases');
+    // scheduler.enabled is machine-visibility: only this box reads it, so it
+    // stays in this box's own doc and never enters the synced file.
+    expect(central).not.toContain('schedulerEnabled');
     // Device scope never lands in the user-scope config: block.
     expect(central).not.toContain('interactiveHost');
 
@@ -109,7 +111,8 @@ describe('device-scope keys (central fleet.devices.<name>.config block)', () => 
     expect(central).toContain('mac-mini:');
     expect(central).toContain('maxAgents: 2');
     expect(central).toContain('- do not reboot');
-    // No per-device doc is created anywhere.
+    // Both are shared-visibility, so a peer's values live centrally and no
+    // per-device doc is needed for them.
     expect(fs.existsSync(path.join(TMP, '.agents', 'devices'))).toBe(false);
 
     expect(getConfigValue('agents.max-concurrent', { device: 'mac-mini' }).value).toBe(2);
@@ -118,7 +121,7 @@ describe('device-scope keys (central fleet.devices.<name>.config block)', () => 
     unsetConfigValue('agents.max-concurrent', { device: 'mac-mini' });
     expect(getConfigValue('agents.max-concurrent', { device: 'mac-mini' }).value).toBeUndefined();
     // Unsetting a key that was never set is a no-op — no block created.
-    unsetConfigValue('scheduler.enabled', { device: 'ghost' });
+    unsetConfigValue('agents.max-concurrent', { device: 'ghost' });
     expect(readCentral()).not.toContain('ghost');
   });
 
@@ -126,12 +129,14 @@ describe('device-scope keys (central fleet.devices.<name>.config block)', () => 
     writeCentral('fleet:\n  devices:\n    mac-mini:\n      agents:\n        - claude@latest\n');
     const { setConfigValue, getConfigValue } = await freshModules();
 
-    setConfigValue('scheduler.enabled', false, { device: 'mac-mini' });
+    // A shared-visibility key, because a peer's machine-local key is refused by
+    // design — the point here is that the write preserves sibling fields.
+    setConfigValue('agents.max-concurrent', 3, { device: 'mac-mini' });
 
     const central = readCentral();
     expect(central).toContain('- claude@latest');
-    expect(central).toContain('schedulerEnabled: false');
-    expect(getConfigValue('scheduler.enabled', { device: 'mac-mini' }).value).toBe(false);
+    expect(central).toContain('maxAgents: 3');
+    expect(getConfigValue('agents.max-concurrent', { device: 'mac-mini' }).value).toBe(3);
   });
 
   it('upgrades fleet.devices: all to an explicit roster map on a config write', async () => {
@@ -172,23 +177,26 @@ describe('device-scope keys (central fleet.devices.<name>.config block)', () => 
   it('drops the fleet block entirely when an unset empties a block it created', async () => {
     const { setConfigValue, unsetConfigValue } = await freshModules();
 
-    setConfigValue('scheduler.enabled', false, { device: 'mac-mini' });
+    setConfigValue('agents.max-concurrent', 2, { device: 'mac-mini' });
     expect(readCentral()).toContain('fleet:');
 
-    unsetConfigValue('scheduler.enabled', { device: 'mac-mini' });
+    unsetConfigValue('agents.max-concurrent', { device: 'mac-mini' });
     expect(readCentral()).not.toContain('fleet:');
   });
 });
 
-describe('browser.profile is a device-scope key in the central block', () => {
-  it('set/get/unset land under fleet.devices.<self>.config.defaultBrowserProfile', async () => {
+describe('browser.profile is machine-local', () => {
+  it('set/get/unset land in this machine\'s own doc, never the synced file', async () => {
     const { setConfigValue, getConfigValue, unsetConfigValue } = await freshModules();
 
     setConfigValue('browser.profile', 'comet-local');
 
-    const central = readCentral();
-    expect(central).toContain('defaultBrowserProfile: comet-local');
-    expect(central).toContain('testbox:');
+    // Nothing off-box resolves another machine's default browser profile, so it
+    // belongs in the gitignored per-machine doc — keeping it out of the file all
+    // 13 machines share.
+    const localPath = path.join(TMP, '.agents', 'devices', 'testbox', 'agents.yaml');
+    expect(fs.readFileSync(localPath, 'utf-8')).toContain('defaultBrowserProfile: comet-local');
+    expect(readCentral()).not.toContain('defaultBrowserProfile');
 
     const got = getConfigValue('browser.profile');
     expect(got.value).toBe('comet-local');
@@ -196,7 +204,6 @@ describe('browser.profile is a device-scope key in the central block', () => {
 
     unsetConfigValue('browser.profile');
     expect(getConfigValue('browser.profile').value).toBeUndefined();
-    expect(readCentral()).not.toContain('defaultBrowserProfile');
   });
 });
 
@@ -316,9 +323,12 @@ describe('scheduler gate (scheduler.enabled=false on this device)', () => {
     );
   });
 
-  it('a peer device’s scheduler.enabled does not gate this machine', async () => {
+  it('cannot be set for a peer at all — it is machine-local', async () => {
     const { isSchedulerEnabled, setConfigValue } = await freshModules();
-    setConfigValue('scheduler.enabled', false, { device: 'mac-mini' });
+    // Previously this was settable for a peer and simply ignored locally. Now it
+    // is refused outright, so a peer's value can never gate this machine.
+    expect(() => setConfigValue('scheduler.enabled', false, { device: 'mac-mini' }))
+      .toThrow(/machine-local/);
     expect(isSchedulerEnabled()).toBe(true);
   });
 });
@@ -367,5 +377,105 @@ describe('auto-launch accessors', () => {
     setAutoLaunchPreferred('mac-mini', false);
     expect(loadAutoLaunchPreferences()).toEqual({});
     expect(readCentral()).not.toContain('autoLaunch');
+  });
+});
+
+describe('every device-scope key declares who reads it', () => {
+  /**
+   * The discriminated union already makes a missing `visibility` a COMPILE
+   * error. This is the runtime backstop plus the record of intent: a key's tier
+   * decides whether it lands in the fleet-shared agents.yaml or the owning box's
+   * own doc, and getting it wrong is how operator config drifted into the shared
+   * file twice (once for agent pins, once for device config).
+   */
+  it('assigns a valid visibility to every device key, and none to user keys', async () => {
+    const { CONFIG_KEYS } = await freshModules();
+    for (const spec of CONFIG_KEYS) {
+      if (spec.scope === 'device') {
+        expect(['shared', 'machine'], `${spec.name} must declare a visibility`).toContain(spec.visibility);
+      } else {
+        expect(spec.visibility, `${spec.name} is user-scope and must not declare one`).toBeUndefined();
+      }
+    }
+  });
+
+  it('keeps the self-read keys machine-local — browser.remote-control is a consent flag', async () => {
+    const { CONFIG_KEYS } = await freshModules();
+    const vis = (name: string) => CONFIG_KEYS.find((s: { name: string }) => s.name === name)?.visibility;
+
+    // Nothing off-box reads these; storing them centrally syncs one machine's
+    // choice to the rest. For browser.remote-control that is a security bug —
+    // the flag gates whether OTHER machines may drive this box's browser.
+    for (const name of ['browser.remote-control', 'browser.profile', 'scheduler.enabled', 'daemon.enabled']) {
+      expect(vis(name), `${name} must be machine-local`).toBe('machine');
+    }
+
+    // A peer resolves these BEFORE it can dial the box, so they cannot be
+    // machine-local — there is no way to ask the box for them first.
+    for (const name of ['ssh.user', 'ssh.auth', 'platform', 'agents.max-concurrent']) {
+      expect(vis(name), `${name} is read by peers and must be shared`).toBe('shared');
+    }
+  });
+});
+
+describe('machine-visibility keys never reach the fleet-shared file', () => {
+  it('writes browser.remote-control to the local doc, not agents.yaml', async () => {
+    const { setConfigValue, getConfigValue } = await freshModules();
+
+    setConfigValue('browser.remote-control', true);
+
+    // The consent flag gates whether OTHER machines may drive this box's
+    // browser. It lands in this machine's gitignored doc; if it reached the
+    // synced agents.yaml, one box's opt-in would propagate to the fleet on pull.
+    expect(readCentral()).not.toContain('browserRemoteControl');
+    const localDoc = fs.readFileSync(
+      path.join(TMP, '.agents', 'devices', 'testbox', 'agents.yaml'), 'utf-8',
+    );
+    expect(localDoc).toContain('browserRemoteControl: true');
+    expect(getConfigValue('browser.remote-control').value).toBe(true);
+  });
+
+  it('still writes a shared key centrally so peers can read it', async () => {
+    const { setConfigValue } = await freshModules();
+    setConfigValue('ssh.user', 'muqsit', { device: 'mac-mini' });
+    // A peer resolves ssh.user BEFORE it can dial mac-mini, so this one must
+    // stay in the synced file.
+    expect(readCentral()).toContain('sshUser: muqsit');
+  });
+
+  it('refuses to read or set a machine-local key for a peer, and names the fix', async () => {
+    const { getConfigValue, setConfigValue } = await freshModules();
+    expect(() => getConfigValue('browser.remote-control', { device: 'mac-mini' }))
+      .toThrow(/machine-local/);
+    expect(() => setConfigValue('browser.remote-control', true, { device: 'mac-mini' }))
+      .toThrow(/agents ssh mac-mini/);
+  });
+
+  it('honors a value an older CLI left centrally until it is overwritten', async () => {
+    // The migration is additive, so a pre-upgrade central value must keep working
+    // rather than silently reverting to the default on the first read.
+    fs.mkdirSync(path.join(TMP, '.agents'), { recursive: true });
+    fs.writeFileSync(
+      path.join(TMP, '.agents', 'agents.yaml'),
+      'fleet:\n  devices:\n    testbox:\n      config:\n        browserRemoteControl: true\n',
+    );
+    const { getConfigValue } = await freshModules();
+    expect(getConfigValue('browser.remote-control').value).toBe(true);
+  });
+});
+
+describe('the machine-local key leaf stays pinned to the registry', () => {
+  it('MACHINE_LOCAL_YAML_KEYS equals the machine-visibility keys in CONFIG_KEYS', async () => {
+    // devices/config-migration.ts cannot import CONFIG_KEYS (device-config imports
+    // it, so that would cycle), so the set is duplicated in a zero-dep leaf. This
+    // is the pin that stops the two drifting — a new machine-visibility key that
+    // is not added to the leaf would still be folded into the shared file.
+    const { CONFIG_KEYS } = await freshModules();
+    const { MACHINE_LOCAL_YAML_KEYS } = await import('./config-machine-keys.js');
+    const fromRegistry = CONFIG_KEYS
+      .filter((s: { scope: string; visibility?: string }) => s.scope === 'device' && s.visibility === 'machine')
+      .map((s: { yamlKey: string }) => s.yamlKey)
+      .sort();
+    expect([...MACHINE_LOCAL_YAML_KEYS].sort()).toEqual(fromRegistry);
   });
 });
