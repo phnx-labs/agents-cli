@@ -139,6 +139,7 @@ exit code: 1
 | Missing credential on another device/home | Pass | Exit 1 before spawn with exact `set-key` recovery command |
 | Legacy version labels | Pass | Old v1 file is recoverably archived as `accounts.legacy-labels.yaml`; no false credential account is fabricated |
 | Targeted tests | Pass | 73/73 account, command, harness, and runner tests; 54/54 wizard/harness tests |
+| Full canonical remote suite | Pass | 817 files passed; 11,307 tests passed; 109 skipped; exit code 0 |
 | Cursor API key | Unverified | Adapter and CLI path implemented; no Cursor key existed locally, on zion, or on mac-mini during the audit |
 | Codex + OpenRouter account while ChatGPT OAuth is active | Failed | Codex chose its ChatGPT auth and rejected the third-party model with HTTP 400; not counted as supported live proof |
 | Independent staging-key chat | Failed | Key authenticated against OpenRouter's models API, but the Claude chat run hung; primary key was restored |
