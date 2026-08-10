@@ -71,8 +71,8 @@ From the docs and source:
 - **Cross-machine durability**: opt-in R2 + CRDT G-Set transcript sync in `src/lib/session/sync/crdt.ts:73-117` and `src/lib/session/sync/sync.ts:85-149` — single-writer prefixes, client-side AES-256-GCM, idempotent union.
 - **Remote execution**: `agents run --host` re-executes `agents run` on the target; progress via offset-tracked transcript tail; teams dispatch over SSH with DAG scheduling and sentinel files. See `apps/cli/docs/teams.md` and `src/lib/hosts/progress.ts`.
 - **Auth / identity**: SSH access == ownership; no separate identity layer. Secrets stay in OS keychain / encrypted vault. See `apps/cli/docs/specifications.md` §Secrets.
-- **Indexing**: incremental scanner with dir-ledger, FTS5 BM25 search, and incremental continuation for Claude/Codex/Kimi. See `apps/cli/docs/05-sessions.md` and `src/lib/session/discover.ts`.
-- **SSH transport**: multiplexed by default, keepalive, host-key pinning. See `apps/cli/docs/09-ssh-transport.md` and `src/lib/ssh-exec.ts`.
+- **Indexing**: incremental scanner with dir-ledger, FTS5 BM25 search, and incremental continuation for Claude/Codex/Kimi. See `apps/cli/docs/sessions.md` and `src/lib/session/discover.ts`.
+- **SSH transport**: multiplexed by default, keepalive, host-key pinning. See `apps/cli/docs/ssh-transport.md` and `src/lib/ssh-exec.ts`.
 
 In short, agents-cli is a **user-owned, multi-device, self-hosted, SSH-based** version of the cloud agent platforms above. The differentiator is that each person controls their own machines and there is no central broker; the gap is the shared context plane. The multi-tenant, sandboxed cloud counterpart lives in Prix Factory (`@../agents/prix/factory`), not in agents-cli.
 

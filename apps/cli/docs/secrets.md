@@ -879,6 +879,6 @@ the old passphrase in its environment must be restarted afterward.
 
 - [`specifications.md` §Secrets](specifications.md#secrets) — **the normative contract** (requirements + Given/When/Then + parity matrix); read it for the guarantees this how-to implements
 - [`secrets-trust-boundaries.md`](secrets-trust-boundaries.md) — the plaintext data-flow: which commands inject vs materialize
-- `docs/00-concepts.md` — DotAgents repos and resource model
+- `docs/concepts.md` — DotAgents repos and resource model
 - `docs/profiles.md` — provider API keys for non-default models
-- `docs/03-routines.md` — scheduled jobs with sandboxed permissions (secrets are dropped from the sandbox env by default)
+- `docs/routines.md` — scheduled jobs with sandboxed permissions (secrets are dropped from the sandbox env by default)

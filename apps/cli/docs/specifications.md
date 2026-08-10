@@ -14,8 +14,8 @@ breaks fleet fan-out; a secret that materializes into an agent's transcript).
 mandatory, not optional.
 
 This doc holds the **contracts** (the guarantees). The per-feature reference docs
-— [`05-sessions.md`](05-sessions.md), [`secrets.md`](secrets.md),
-[`architecture.md`](architecture.md), [`08-secrets-agent-process-model.md`](08-secrets-agent-process-model.md),
+— [`sessions.md`](sessions.md), [`secrets.md`](secrets.md),
+[`architecture.md`](architecture.md), [`secrets-agent-process-model.md`](secrets-agent-process-model.md),
 [`secrets-trust-boundaries.md`](secrets-trust-boundaries.md)
 — hold the **implementation-level detail and how-to**. Read the spec for the
 guarantee, the reference for the mechanism.
@@ -74,14 +74,14 @@ row its surface sits in.
 |---|---|---|
 | **Specified here** | `sessions`, `secrets`, `run`, the scheduling/executor singularity, **routine execution & readiness**, `watchdog` | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
 | **Governed in part** | `monitors`, `doctor`, `daemon` | One requirement reaches them, no command contract does. `monitors` is bound by [§Scheduling & execution singularity](#scheduling--execution-singularity) (SING-5, SING-8, SING-9) — who may schedule and execute it. `doctor` is bound by SEC-17 for one behavior only: warning on a credential-shaped var in a shell rc file. `daemon` is bound by SING-1 (it IS the singular scheduler/executor) and SING-4a (the `daemon.enabled` kill switch); its status/health rendering (`agents daemon status`/`services`/`doctor`) carries no requirement of its own. Everything else these commands do is unspecified. |
-| **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `pty`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | A design doc describes the mechanism — [hosts.md](hosts.md), [teams.md](teams.md), [cloud.md](cloud.md), [02-resource-sync.md](02-resource-sync.md), [01-version-management.md](01-version-management.md), … — but states **no** requirements. Verified: `hosts.md`, `teams.md` and `cloud.md` contain **zero capitalized RFC-2119 keywords**. `hosts.md` and `teams.md` do use lowercase "must" in prose ("the remote run must be bounded", `hosts.md:124`; "you must declare what each one owns", `teams.md:207`) — which reads normative but is not, per this document's own capitalization rule. That is exactly the trap: treat those docs as explanation, never as a contract. |
+| **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `pty`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | A design doc describes the mechanism — [hosts.md](hosts.md), [teams.md](teams.md), [cloud.md](cloud.md), [resource-sync.md](resource-sync.md), [version-management.md](version-management.md), … — but states **no** requirements. Verified: `hosts.md`, `teams.md` and `cloud.md` contain **zero capitalized RFC-2119 keywords**. `hosts.md` and `teams.md` do use lowercase "must" in prose ("the remote run must be bounded", `hosts.md:124`; "you must declare what each one owns", `teams.md:207`) — which reads normative but is not, per this document's own capitalization rule. That is exactly the trap: treat those docs as explanation, never as a contract. |
 | **Unspecified** | `wallet`, `helper`, `sync`/`apply`/`status`, `worktree`, `webhook`, `funnel`, `mailboxes`, `feed`, `message`/`send`, `budget`, `audit`, and the remaining groups | Neither a spec nor a design doc. Behavior is whatever the code does today; nothing here entitles a caller to it. |
 
 **Where the absence bites hardest.** These act on other machines, hold durable
 state, or sit next to credentials, and have no normative contract today:
 
 1. **`hosts` / `ssh` / `devices`** (`commands/hosts.ts`, `commands/ssh.ts`) — dispatches
-   arbitrary agent runs to other machines over SSH. [09-ssh-transport.md](09-ssh-transport.md)
+   arbitrary agent runs to other machines over SSH. [ssh-transport.md](ssh-transport.md)
    and [hosts.md](hosts.md) describe the transport; no requirement pins it. Individual
    SSH guarantees are stated piecemeal inside the specified sections (SES-CROSS-1,
    SEC-CROSS-1, the `--host` requirements in [§Agent execution](#agent-execution)),
@@ -106,7 +106,7 @@ one of the other rows rather than leaving it unlisted.
 
 This is the **contract** for `agents sessions`: what a human, an agent, or a
 downstream tool is entitled to rely on, stated as testable requirements — not a
-how-to (that is [05-sessions.md](05-sessions.md)). It exists because features
+how-to (that is [sessions.md](sessions.md)). It exists because features
 have regressed by quietly deviating from an unwritten contract (a new harness
 parser that throws on a malformed line; a renderer that drops the preview; a
 `--json` shape change that breaks fleet fan-out). When code and this spec
@@ -166,7 +166,7 @@ SSH access (§7); rendering sessions that no harness produced.
   its parser + `dispatchAgentScan` arm), not special-case a caller.
 - **SES-2 (MUST).** Each harness's transcript location + on-disk format is fixed
   and MUST be parsed from its native shape (JSONL / single-JSON / SQLite / CLI
-  stdout) as tabled in [05-sessions.md](05-sessions.md#architecture) and
+  stdout) as tabled in [sessions.md](sessions.md#architecture) and
   `lib/session/discover.ts` / `lib/session/parse.ts`. Roots MUST include the live
   home, every version-home, and backup mirrors, deduped by realpath, **live root
   scanned first** (`lib/session/discover.ts:772-787,1092-1093`).
@@ -257,7 +257,7 @@ SSH access (§7); rendering sessions that no harness produced.
 - **SES-12 (MUST).** `agents sessions <id> --json` and `--json` listing MUST emit
   the `SessionMeta` shape (`lib/session/types.ts:85-192`). The field set, its
   derivation, and whether each is always populated is the table in
-  [05-sessions.md](05-sessions.md#sessionmeta-list-output) — that table is
+  [sessions.md](sessions.md#sessionmeta-list-output) — that table is
   normative for field names.
 - **SES-13 (MUST).** "Where the session started" is carried by **three distinct
   axes**, and consumers MUST NOT expect a single `origin` field to hold all of it:
@@ -399,9 +399,9 @@ SSH access (§7); rendering sessions that no harness produced.
 - **SES-20 (MUST).** `migrate` MUST NOT kill the source before the transcript is
   on the target and its session is confirmed live
   (`commands/sessions-migrate.ts:590-593`; the invariant also stated at
-  [05-sessions.md](05-sessions.md):476-477). A non-native-resumable harness MUST
+  [sessions.md](sessions.md):476-477). A non-native-resumable harness MUST
   transparently fall back to rehydrate, never a silent skip
-  ([05-sessions.md](05-sessions.md):471-474).
+  ([sessions.md](sessions.md):471-474).
 - **SES-21 (MUST).** `fork` MUST copy the transcript under a fresh UUID (git-branch
   semantics), leaving the original untouched, and MUST refuse harnesses it can't
   yet handle with a clear message (Claude-only in v1)
@@ -783,7 +783,7 @@ SSH access (§7); rendering sessions that no harness produced.
 The command surface (bare `sessions [query]`, `preview`, `tail`, `sync`, `resume`, `focus`,
 `detach`, `attach`, `inject`, `export`, `import`, `migrate`/`relocate`,
 `migrations`, `backfill tools`, `fork`) with flags is the reference in
-[05-sessions.md](05-sessions.md); this spec governs the guarantees behind it.
+[sessions.md](sessions.md); this spec governs the guarantees behind it.
 
 #### 4.2 Machine-readable output (STABLE — agents depend on these)
 
@@ -791,7 +791,7 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `sync`, `resume
   `SessionMeta` (`serializeSessionsJson`, `commands/sessions.ts:695-701,1272`);
   `sessions <id> --json` MUST emit `{ session, events }` (a bare event array is
   the pre-1.20.51 shape — consumers read `output.events`,
-  [05-sessions.md](05-sessions.md):142-147). The fleet browser itself shells peers
+  [sessions.md](sessions.md):142-147). The fleet browser itself shells peers
   with `sessions --all --json --limit 500` (`commands/sessions-browser.ts:219`),
   so the array shape is load-bearing across the fleet.
 - **SES-IF-2 (MUST).** `sessions --active --json` MUST emit `ActiveSession[]` with
@@ -926,7 +926,7 @@ normative — a change that widens/narrows a cell is a spec change.
 - **SES-COMPAT-4 (MUST).** On the streaming path, `--host` forwards every other flag
   verbatim to the peer's same-version binary; the SSH target MUST stay validated
   against `SSH_TARGET_RE` to block argv-flag smuggling
-  ([05-sessions.md](05-sessions.md):277). The interactive one-host browser
+  ([sessions.md](sessions.md):277). The interactive one-host browser
   (SES-22) is the documented exception: it asks each peer a fixed
   `sessions --all --json --limit 500` (plus `--since`/`--teams`), so `--limit`,
   `--unmanaged`, and `--no-live` do not reach the peer there
@@ -940,7 +940,7 @@ normative — a change that widens/narrows a cell is a spec change.
 - Not a transcript **writer** — sessions are produced by the harnesses +
   `packages/session-tracker`; this tool only reads/indexes/renders.
 - No identity layer beyond SSH: "if you can `ssh <host>`, you own the box"
-  ([05-sessions.md](05-sessions.md):277-278).
+  ([sessions.md](sessions.md):277-278).
 
 **Known gaps (implemented-vs-intended drift to fix, not to hide):**
 - **SES-GAP-1.** `flatSessionRow` (`--flat`) and the picker's `formatPickerLabel`
@@ -975,9 +975,9 @@ normative — a change that widens/narrows a cell is a spec change.
 - **SES-GAP-6.** Whole-**file** JSON parse failure is inconsistent: Gemini throws
   (and `parseSession` has no outer catch), while Hermes/Antigravity degrade to
   `[]` (`lib/session/parse.ts:143-169,691-696`). Standardize on degrade-to-empty.
-- **SES-GAP-7 (resolved).** [05-sessions.md](05-sessions.md) once hardcoded schema
+- **SES-GAP-7 (resolved).** [sessions.md](sessions.md) once hardcoded schema
   version 13 while the code had moved on; it now cites the `SCHEMA_VERSION`
-  constant directly ([05-sessions.md](05-sessions.md):1184), and
+  constant directly ([sessions.md](sessions.md):1184), and
   `lib/session/db.ts`'s header comment carries the real path
   (`~/.agents/.history/sessions/sessions.db`). The standing rule is the point: any
   hardcoded schema number in prose drifts — cite the constant.
@@ -1642,7 +1642,7 @@ normative — a change that widens or narrows a cell is a spec change.
   work: either reserve the name in the secrets layer (and fail loud on a
   non-file backend) or drop the convention.
 - **SEC-GAP-4.** The broker's per-request capability-token auth (SEC-18) is not
-  reflected in `secrets.md` / `08-secrets-agent-process-model.md`, which still
+  reflected in `secrets.md` / `secrets-agent-process-model.md`, which still
   describe only the same-UID/socket-permission model.
 - **SEC-GAP-5 (closed by this change).** Changing a bundle's tier to `never` rewrote
   only the metadata item (`writeBundle`), leaving the value items' biometry ACL in
@@ -1978,7 +1978,7 @@ schema (`--json` passes through each agent's native stream format).
 - **EXEC-15 (clarifying note).** `buildExecEnv` MUST NOT set the raw `HOME`
   var for any agent — no `result.HOME = …` exists anywhere in `lib/exec.ts`.
   Isolation is realized purely through the agent-specific config-dir vars in
-  EXEC-14. This is narrower than `docs/00-concepts.md:87`'s framing ("sets
+  EXEC-14. This is narrower than `docs/concepts.md:87`'s framing ("sets
   `HOME` to the matching version home before exec-ing the binary") — that
   claim describes the generated **bash shim** script's own inline exports
   (`lib/shims.ts:280-330`), a separate code path from `buildExecEnv`, and even
@@ -2365,7 +2365,7 @@ and host/lease dispatch (`--host`/`--device`/`--remote-cwd`/`--no-follow`/
 
 **Known gaps (implemented-vs-intended drift to fix, not to paper over):**
 - **EXEC-GAP-1.** `buildExecEnv` isolates only 4 of 16 registered agents
-  (EXEC-16). `docs/00-concepts.md:87` reads as if `HOME` itself were swapped
+  (EXEC-16). `docs/concepts.md:87` reads as if `HOME` itself were swapped
   for every shimmed launch ("sets HOME to the matching version home before
   exec-ing the binary"); no literal `HOME=` assignment exists anywhere in
   the run engine (EXEC-15), and the doc's own claim is imprecise even for
@@ -2615,7 +2615,7 @@ nothing but its own view cache.
   the catch-up path: `claimMissedFire` (`lib/catchup.ts`) creates the run directory
   with a non-recursive `mkdir` — an atomic test-and-set — so the losing caller reports
   `already claimed by the scheduler` and never spawns a second agent
-  (`docs/03-routines.md` §Catching up a missed fire). Status: **Current** for the
+  (`docs/routines.md` §Catching up a missed fire). Status: **Current** for the
   catch-up/overlap path (the `missed`-record claim), **[Intended]** for the primary
   scheduled dispatch path (see SING-GAP-3): today the forward-timer dispatch has no
   durable per-slot claim of its own, so two live schedulers evaluating one occurrence
@@ -2888,7 +2888,7 @@ a machine-wide process sweep.)
 The normative contract for **how a routine resolves its execution context, proves it
 is runnable, and records what happened** — the reliability half of routines, distinct
 from the scheduling-singularity half above (who may fire them). The how-it-works
-companion is [03-routines.md](03-routines.md). Requirement keywords
+companion is [routines.md](routines.md). Requirement keywords
 **MUST / MUST NOT / SHOULD / MAY** are per RFC 2119; scenarios are Given/When/Then.
 
 Most of this section is the target contract from the routine reliability plan
@@ -2905,7 +2905,7 @@ readiness/context fields RT-1..RT-8 describe.
 - **RT-1 (MUST).** `projects` (plural) is **grouping metadata only**: it organises a
   routine under a project group in `agents routines list` and the menu bar and MUST
   NOT affect scheduling or execution — the special value `["*"]` means "all defined
-  projects" (`lib/routines.ts` `normalizeProjects`; `docs/03-routines.md` §Project
+  projects" (`lib/routines.ts` `normalizeProjects`; `docs/routines.md` §Project
   tagging, "Tagging is **metadata-only**"). `projects[]` MUST NOT be silently promoted
   into an execution context. Status: **Current**.
 - **RT-2 (MUST, [Intended]).** A routine's **execution anchor** is a distinct singular
@@ -2981,7 +2981,7 @@ readiness/context fields RT-1..RT-8 describe.
   untrusted sandbox, dead account, dispatch failure) still owns a terminal run that is
   visible in `agents routines runs`, even though it has no session. Status: **Current**
   for run-first history (`missed`/`failed` runs exist with no session,
-  `docs/03-routines.md` §Run State Machine); **[Intended]** for the pre-session
+  `docs/routines.md` §Run State Machine); **[Intended]** for the pre-session
   readiness-failure runs (RT-5) and the menu History surface that renders them.
 - **RT-7 (MUST, [Intended]).** `RunMeta.status` MUST distinguish, at minimum:
   `running`, `completed`, `failed` (the body ran and errored), `timeout`, `missed`

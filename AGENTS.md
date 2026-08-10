@@ -56,7 +56,7 @@ cross-package imports except the CLI resolving the native helpers by relative pa
 
 What agents-cli actually is: one engine that installs the **resources** an agent needs,
 **runs** the agent, and extends it with real-world **tools**, **sessions**, **teams**, and
-other **machines**. Deep reference: [`apps/cli/docs/00-concepts.md`](apps/cli/docs/00-concepts.md)
+other **machines**. Deep reference: [`apps/cli/docs/concepts.md`](apps/cli/docs/concepts.md)
 and [`architecture.md`](apps/cli/docs/architecture.md).
 
 - **Resources** — the typed things an agent needs, one kind per subdirectory of a
@@ -366,7 +366,7 @@ prose. Voice is direct-developer: verb + artifact, no marketing claims — close
 
 [`apps/cli/docs/`](apps/cli/docs/README.md) is the source-grounded reference. Start
 with [`architecture.md`](apps/cli/docs/architecture.md) for the CLI/extension layering
-and the session mechanisms, then [`00-concepts.md`](apps/cli/docs/00-concepts.md) for
+and the session mechanisms, then [`concepts.md`](apps/cli/docs/concepts.md) for
 the resource model and resolution semantics of the CLI.
 
 **Normative contract.** The major subsystems carry a source-of-truth spec

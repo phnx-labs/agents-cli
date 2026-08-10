@@ -5,7 +5,7 @@ orchestrate. This is not OpenSpec/Spec Kit marketing — it is the missing layer
 **this** stack’s loop: HTML plans + technical design + unit tests.
 
 Related: [Specifications](specifications.md) (normative subsystem contracts) ·
-[Landscape](04-landscape.md) · plan-render skill (HTML plans)
+[Landscape](landscape.md) · plan-render skill (HTML plans)
 
 **Browser-friendly examples:** [product-acceptance-user-stories.html](../../../.agents/artifacts/2026-08-04/product-acceptance-user-stories.html)
 (bad vs good stories, three full Product cards, regression pack).

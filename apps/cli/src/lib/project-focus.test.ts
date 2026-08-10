@@ -5,7 +5,7 @@ describe('focusBucket', () => {
   it('buckets to three levels, which is where a monorepo becomes legible', () => {
     expect(focusBucket('apps/cli/src/lib/projects.ts')).toBe('apps/cli/src');
     expect(focusBucket('apps/ext/src/core/tasks.ts')).toBe('apps/ext/src');
-    expect(focusBucket('apps/cli/docs/11-projects.md')).toBe('apps/cli/docs');
+    expect(focusBucket('apps/cli/docs/projects.md')).toBe('apps/cli/docs');
   });
 
   it('keeps shallow files visible instead of dropping them', () => {

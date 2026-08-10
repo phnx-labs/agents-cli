@@ -69,7 +69,7 @@ agents run <agent> [prompt] --cloud [--provider <id>] [--repo <owner/repo>]...
   (dispatch and exit, print the task id + follow-up commands), `--json`.
 - `--where cloud[:provider]` — added to the placement-door spec as the exact
   equivalent of `--cloud` / `--cloud --provider <provider>`
-  (`docs/00-concepts.md#placement` updated in the implementing PR).
+  (`docs/concepts.md#placement` updated in the implementing PR).
 
 ### Semantics
 
@@ -111,7 +111,7 @@ agents run <agent> [prompt] --cloud [--provider <id>] [--repo <owner/repo>]...
   (claude→rush, codex→codex, cursor→cursor, droid→factory, antigravity→antigravity), the
   unsupported-agent error, each placement-conflict rejection, `--where cloud`
   equivalence. Next to source per repo convention.
-- Docs: `apps/cli/docs/` run reference + `docs/00-concepts.md#placement`,
+- Docs: `apps/cli/docs/` run reference + `docs/concepts.md#placement`,
   README feature list, CHANGELOG entry.
 
 ## Follow-ups (not in this spec)

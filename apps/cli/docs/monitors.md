@@ -6,7 +6,7 @@ A **monitor** watches a SOURCE, detects a CONDITION change, and fires an ACTION.
 > `Monitor : routines :: event-triggered : time-triggered` — one daemon, one
 > dispatch seam. The monitor owns only the source → condition → action layer;
 > everything below it (spawning the agent, device placement, run history, the
-> daemon lifecycle) is the [routines](03-routines.md) backbone, reused verbatim.
+> daemon lifecycle) is the [routines](routines.md) backbone, reused verbatim.
 
 ## The three-part model
 

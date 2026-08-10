@@ -221,7 +221,7 @@ key, drag, scroll, launch, screenshot, …) are two more: `query()`/`readUnified
 accept a `sessionId` filter so a consumer can ask "did session X touch the
 browser/computer" as a scoped read instead of grepping the whole log — this is
 what the sessions index's `usedBrowser`/`usedComputer` columns are built on
-(see [05-sessions.md](05-sessions.md)).
+(see [sessions.md](sessions.md)).
 
 Every record carries **attribution** computed once per process
 ([`src/lib/events.ts`](../src/lib/events.ts)):
@@ -494,7 +494,7 @@ agents doctor --check --devices  # gate every registered device
 
 > The former standalone `agents check` (the CI gate) and `agents resources` (the
 > merged cross-layer resource table) are gone: `check` is now `doctor --check`, and
-> the merged table is now [`agents view --merged`](00-concepts.md). One command per
+> the merged table is now [`agents view --merged`](concepts.md). One command per
 > responsibility, no overlap.
 
 ### Prioritized findings (bare `agents doctor`, RUSH-2069)
@@ -1274,7 +1274,7 @@ logic changes, so a new metric never reports stale numbers beside fresh ones.
 
 ### Scope and limits
 
-- **Account attribution is Claude-only** (see [05-sessions.md](05-sessions.md)). Other
+- **Account attribution is Claude-only** (see [sessions.md](sessions.md)). Other
   harnesses group under `unattributed:<agent>`.
 - **Sessions under 2 messages or 1 minute are excluded**, matching `/insights` so the
   two reports count comparable populations. The excluded count is always printed.
@@ -1619,6 +1619,6 @@ running process owns this session?" without re-parsing state.
 
 ## Related
 
-- [Sessions](./05-sessions.md) — the `sessions` subsystem in depth
+- [Sessions](./sessions.md) — the `sessions` subsystem in depth
 - Cloud dispatch (`agents cloud --help`)
 - Team DAGs (`agents teams --help`)

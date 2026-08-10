@@ -931,7 +931,7 @@ export interface Meta {
    * operator's config rather than an integration compiled into this CLI. When
    * this is unset/empty, an important-level post falls back to `notify.owner`
    * implicitly (RUSH-2123) — see lib/feed-broadcast.ts and
-   * docs/06-observability.md.
+   * docs/observability.md.
    */
   feed?: {
     broadcast?: FeedBroadcastConfig;

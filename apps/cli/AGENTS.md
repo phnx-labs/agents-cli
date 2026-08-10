@@ -457,8 +457,8 @@ src/
     hooks.ts           # hooks.yaml parser + per-agent registrar
     hooks/match.ts     # `matches:` predicate evaluator
     browser/           # browser daemon service + existing CDP connection pool; ipc.ts owns one-shot and persistent socket clients, stream.ts owns the NDJSON action loop
-    monitors/          # `agents monitors` — event-triggered watchers (source→condition→action); native state-diff store; MonitorEngine runs in the daemon beside the cron scheduler. See docs/10-monitors.md
-    projects.ts        # `agents projects` — named multi-repo project defs (~/.agents/projects/*.yaml) layered above the --project convention (resolveProjectRef in project-root.ts); project-status.ts rolls live sessions + merged PRs + artifacts into the progress card. Beta-gated. See docs/11-projects.md
+    monitors/          # `agents monitors` — event-triggered watchers (source→condition→action); native state-diff store; MonitorEngine runs in the daemon beside the cron scheduler. See docs/monitors.md
+    projects.ts        # `agents projects` — named multi-repo project defs (~/.agents/projects/*.yaml) layered above the --project convention (resolveProjectRef in project-root.ts); project-status.ts rolls live sessions + merged PRs + artifacts into the progress card. Beta-gated. See docs/projects.md
     migrate.ts         # One-shot idempotent migrations
     session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents sessions stats` + `sessions backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger); `claude-accounts.ts` attributes each Claude transcript to the account that produced it (account_key) and `insights.ts` extracts the cached multi-harness friction/correction/automation facets behind `agents sessions insights` (`agents insights` alias)
     terminal/          # Terminal launch engine — tab/split in iTerm/Ghostty/tmux/Terminal.app, local or --host;
@@ -1029,9 +1029,9 @@ been closed stays as a `(resolved)` entry so references never dangle.
 
 [`docs/`](docs/README.md) is the source-grounded reference. Start with
 [`architecture.md`](docs/architecture.md) for the CLI/extension layering and the
-session mechanisms, then [`00-concepts.md`](docs/00-concepts.md) for the resource
+session mechanisms, then [`concepts.md`](docs/concepts.md) for the resource
 model. The normative contract
 ([`specifications.md`](docs/specifications.md)) sits
-alongside the reference docs ([05-sessions.md](docs/05-sessions.md),
+alongside the reference docs ([sessions.md](docs/sessions.md),
 [secrets.md](docs/secrets.md)) — read the spec for the guarantee, the reference
 for the how-to.

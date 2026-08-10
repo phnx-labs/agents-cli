@@ -316,7 +316,7 @@ agents insights --since 7d
 
 Interactive picker when you're in a terminal. Structured output (`--json`, `--markdown`, filtered by role or turn count) when piped.
 
-Backed by a SQLite + FTS5 index at `~/.agents/.history/sessions/sessions.db` with incremental scanning -- warm reads in ~100ms. Tool-call evidence is redacted and bounded before it is cached; repeated `--query` clauses must match distinct calls in one session. Tool queries read SQLite only: `agents sessions backfill tools` performs the one-time historical parse, while normal incremental scans index new and changed sessions. The index stores ordered static Bash program sites, so `--count` reports occurrences, containing tool calls, and distinct sessions without reparsing. `--fleet` executes one origin partition per device, so synced mirrors cannot duplicate compact evidence or counts returned over SSH; transcript bodies stay on their origin machine. This uses relational SQLite rows and literal FTS5 only, with no embeddings, vector database, or model calls. External tools can consume `--json` output as a programmatic observability layer; see [docs/05-sessions.md](apps/cli/docs/05-sessions.md) for the schemas and [docs/06-observability.md](apps/cli/docs/06-observability.md) for the consumption patterns.
+Backed by a SQLite + FTS5 index at `~/.agents/.history/sessions/sessions.db` with incremental scanning -- warm reads in ~100ms. Tool-call evidence is redacted and bounded before it is cached; repeated `--query` clauses must match distinct calls in one session. Tool queries read SQLite only: `agents sessions backfill tools` performs the one-time historical parse, while normal incremental scans index new and changed sessions. The index stores ordered static Bash program sites, so `--count` reports occurrences, containing tool calls, and distinct sessions without reparsing. `--fleet` executes one origin partition per device, so synced mirrors cannot duplicate compact evidence or counts returned over SSH; transcript bodies stay on their origin machine. This uses relational SQLite rows and literal FTS5 only, with no embeddings, vector database, or model calls. External tools can consume `--json` output as a programmatic observability layer; see [docs/sessions.md](apps/cli/docs/sessions.md) for the schemas and [docs/observability.md](apps/cli/docs/observability.md) for the consumption patterns.
 
 ### Live state, and catching up fast
 
@@ -656,9 +656,9 @@ email) and naming which harnesses use it — the fast way to see which accounts 
 and healthy across every machine. Scope either with `--agents <csv>` / `--device <csv>`, and
 add `--json` for the machine-readable per-host rows.
 
-**Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH and feed one host pool: devices appear in `agents hosts list` and capability routing without a second enrollment. On `--host` runs every `agents run` option is either forwarded (`--effort --env --timeout --loop …`), rejected loud (`--secrets` never crosses SSH implicitly), or consumed locally — nothing silently drops. See [docs/00-concepts.md](apps/cli/docs/00-concepts.md#devices--hosts).
+**Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH and feed one host pool: devices appear in `agents hosts list` and capability routing without a second enrollment. On `--host` runs every `agents run` option is either forwarded (`--effort --env --timeout --loop …`), rejected loud (`--secrets` never crosses SSH implicitly), or consumed locally — nothing silently drops. See [docs/concepts.md](apps/cli/docs/concepts.md#devices--hosts).
 
-Every `--host` command rides one multiplexed SSH engine, tuned for driving a fleet from a small laptop: the first call to a machine opens a control socket and every later call reuses it (no repeat TCP+auth handshake), connections carry keepalive so a dropped link dies in ~45 s instead of zombying, and following a remote run polls in a single round-trip per cycle. Measured against a Tailscale-relayed host: repeated calls **~6–7× faster**, dispatch readiness **~2×**, and the follow loop **~21× faster with 50% fewer local ssh spawns**. Design: [docs/09-ssh-transport.md](apps/cli/docs/09-ssh-transport.md) · reproduce: `node scripts/bench-ssh.mjs <host>`.
+Every `--host` command rides one multiplexed SSH engine, tuned for driving a fleet from a small laptop: the first call to a machine opens a control socket and every later call reuses it (no repeat TCP+auth handshake), connections carry keepalive so a dropped link dies in ~45 s instead of zombying, and following a remote run polls in a single round-trip per cycle. Measured against a Tailscale-relayed host: repeated calls **~6–7× faster**, dispatch readiness **~2×**, and the follow loop **~21× faster with 50% fewer local ssh spawns**. Design: [docs/ssh-transport.md](apps/cli/docs/ssh-transport.md) · reproduce: `node scripts/bench-ssh.mjs <host>`.
 
 ---
 
@@ -683,7 +683,7 @@ agents teams status auth-feature    # Who's working, what they changed, what the
 
 Teammates run detached -- close your terminal, they keep working. Check in with `teams status`, glance at a teammate's summary with `teams logs <name>` (add `--full` for the raw output), clean up with `teams disband`.
 
-Team state is observable via `agents teams list --json` / `agents teams status --json` (compact by default; add `--verbose` for the full per-teammate shape). External tools join it with `sessions --json` (teammates get `isTeamOrigin: true`) and `cloud list --json` (for `--cloud` teammates) to build a unified fleet view. See [docs/06-observability.md](apps/cli/docs/06-observability.md).
+Team state is observable via `agents teams list --json` / `agents teams status --json` (compact by default; add `--verbose` for the full per-teammate shape). External tools join it with `sessions --json` (teammates get `isTeamOrigin: true`) and `cloud list --json` (for `--cloud` teammates) to build a unified fleet view. See [docs/observability.md](apps/cli/docs/observability.md).
 
 ---
 
@@ -1198,9 +1198,9 @@ Two repos with the same shape, different roles:
 
 **Resource resolution:** When syncing resources (commands, skills, rules, hooks, MCP, permissions), the order is **project > user > system**. A `.agents/` directory at project root wins, then `~/.agents/`, then `~/.agents-system/`. Same-named resources higher in the chain override lower ones; everything else unions in. Run `agents view --merged` to see the effective skills, commands, MCP servers, hooks, rules, plugins, workflows, and subagents, with each row tagged by its winning layer.
 
-See [docs/00-concepts.md](apps/cli/docs/00-concepts.md) for the full mental model: DotAgents repos, resource kinds, and how resolution works end-to-end.
+See [docs/concepts.md](apps/cli/docs/concepts.md) for the full mental model: DotAgents repos, resource kinds, and how resolution works end-to-end.
 
-Other useful commands: `agents doctor` checks CLI availability and resource sync drift, `agents usage` shows available quota/rate-limit data for installed agents, `agents budget` shows cross-vendor spend caps and current spend-to-cap (and enforces pre-flight estimates + a hard-cap kill-switch on every run — see [docs/06-observability.md](apps/cli/docs/06-observability.md#budget-guardrails-agents-budget)), `agents import` adopts an existing unmanaged install, `agents trash` lists and restores soft-deleted version directories, and `agents subagents` installs reusable subagent definitions for parent-agent workflows.
+Other useful commands: `agents doctor` checks CLI availability and resource sync drift, `agents usage` shows available quota/rate-limit data for installed agents, `agents budget` shows cross-vendor spend caps and current spend-to-cap (and enforces pre-flight estimates + a hard-cap kill-switch on every run — see [docs/observability.md](apps/cli/docs/observability.md#budget-guardrails-agents-budget)), `agents import` adopts an existing unmanaged install, `agents trash` lists and restores soft-deleted version directories, and `agents subagents` installs reusable subagent definitions for parent-agent workflows.
 
 ---
 
@@ -1323,7 +1323,7 @@ By default, secrets sync via iCloud Keychain to your other Macs. With `--no-iclo
 
 ## Compatibility
 
-Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/agents.ts](apps/cli/src/lib/agents.ts) (`capabilities`); gates use `supports(agent, cap, version)` from [src/lib/capabilities.ts](apps/cli/src/lib/capabilities.ts). Full matrix also in [docs/00-concepts.md](apps/cli/docs/00-concepts.md).
+Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/agents.ts](apps/cli/src/lib/agents.ts) (`capabilities`); gates use `supports(agent, cap, version)` from [src/lib/capabilities.ts](apps/cli/src/lib/capabilities.ts). Full matrix also in [docs/concepts.md](apps/cli/docs/concepts.md).
 
 > **Gemini CLI is hard-deprecated.** Google retired it for free, Pro, and Ultra tiers on **June 18, 2026** (announced at Google I/O 2026); the `gemini` command no longer serves requests on those tiers. agents-cli keeps the legacy `gemini` id only so old sessions/config can still be read. `agents add gemini`, `agents import gemini`, and `agents sync gemini` fail and point to **Antigravity CLI** (`antigravity`), Google's official successor — see [the transition notice](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/).
 
@@ -1474,7 +1474,7 @@ cd agents-cli/apps/cli
 bun install && bun run build && bun test
 ```
 
-Commands in [`apps/cli/src/commands/`](apps/cli/src/commands/), libraries in [`apps/cli/src/lib/`](apps/cli/src/lib/), tests as `*.test.ts` under vitest. [CLAUDE.md](CLAUDE.md) has the full style guide. [docs/04-landscape.md](apps/cli/docs/04-landscape.md) covers the competitive landscape.
+Commands in [`apps/cli/src/commands/`](apps/cli/src/commands/), libraries in [`apps/cli/src/lib/`](apps/cli/src/lib/), tests as `*.test.ts` under vitest. [CLAUDE.md](CLAUDE.md) has the full style guide. [docs/landscape.md](apps/cli/docs/landscape.md) covers the competitive landscape.
 
 ## License
 

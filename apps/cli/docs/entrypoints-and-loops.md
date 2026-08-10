@@ -2,7 +2,7 @@
 
 The unifying model behind plugins, workflows, routines, and loops: two axes — one for packaging, one for invocation.
 
-> **Status: design direction.** The resources-vs-entrypoints split (see [00-concepts.md](00-concepts.md)) is current. The unification below — plugins packaging workflows, per-routine plugin scoping, unified `run` dispatch — is proposed and only partly implemented. **The `loop` block ships** (`agents run --loop` + `--resume-checkpoint`, issue #332): the driver, the four guard fields, and harness-level checkpoint/resume are live. The [Today vs. proposed](#today-vs-proposed) table marks each item.
+> **Status: design direction.** The resources-vs-entrypoints split (see [concepts.md](concepts.md)) is current. The unification below — plugins packaging workflows, per-routine plugin scoping, unified `run` dispatch — is proposed and only partly implemented. **The `loop` block ships** (`agents run --loop` + `--resume-checkpoint`, issue #332): the driver, the four guard fields, and harness-level checkpoint/resume are live. The [Today vs. proposed](#today-vs-proposed) table marks each item.
 
 ---
 
@@ -182,8 +182,8 @@ Resume reuses the checkpoint's loop config but lets the resume command **raise**
 
 ## See Also
 
-- [00-concepts.md](00-concepts.md) — resource kinds, the resources-vs-entrypoints split, layered resolution
+- [concepts.md](concepts.md) — resource kinds, the resources-vs-entrypoints split, layered resolution
 - [plugins.md](plugins.md) — the package: manifest, exec-surface gate, sync
 - [workflows.md](workflows.md) — the heaviest entrypoint kind
 - [subagents.md](subagents.md) — the middle entrypoint kind
-- [03-routines.md](03-routines.md) — scheduled invocation with sandboxed permissions
+- [routines.md](routines.md) — scheduled invocation with sandboxed permissions

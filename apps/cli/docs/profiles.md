@@ -67,7 +67,7 @@ agents harness edit spark --version ""
 agents harness edit deepseek --fallback-model deepseek/deepseek-chat-v3
 ```
 
-`edit` takes the same override flags as `fork` (`--model`, `--base-url`, `--account`, `--version`, `--description`) plus one edit-only flag, `--fallback-model`, for `Profile.fallback_model` (see [`03-routines.md`](03-routines.md) and the fallback cascade in `runWithFallback`). Unlike `fork`, `edit` never rewrites `forkedFrom` to point at itself.
+`edit` takes the same override flags as `fork` (`--model`, `--base-url`, `--account`, `--version`, `--description`) plus one edit-only flag, `--fallback-model`, for `Profile.fallback_model` (see [`routines.md`](routines.md) and the fallback cascade in `runWithFallback`). Unlike `fork`, `edit` never rewrites `forkedFrom` to point at itself.
 
 Giving zero flags **in a terminal** now opens the same interactive wizard `add`/`fork` use, pre-filled with the harness's current values (`agents harness edit deepseek` with no flags). It walks each editable field — model, endpoint, auth, version, fallback, description — and writes only what you change; leaving every prompt at its default is a no-op. Fields the host can't carry are shown disabled with a reason: a host with no custom-endpoint slot (anything but claude/codex) skips the base-URL prompt, and a self-updating host (grok/droid/antigravity/cursor/hermes/muse/kiro/goose) skips the version pin, rather than silently accepting a value a run would drop. Giving zero flags **without** a terminal stays a no-op error naming the available ones, so scripts are unchanged.
 
@@ -229,7 +229,7 @@ description: Local Llama 3.3  # string, optional — shown in `profiles list` an
 host:
   agent: claude                # AgentId, required — which CLI binary to spawn
                                # One of: claude, codex, cursor, opencode, grok, antigravity
-                               # (gemini is hard-deprecated — see 00-concepts.md)
+                               # (gemini is hard-deprecated — see concepts.md)
   version: 2.1.113             # string, optional — pin this host CLI version
 
 env:                           # Record<string, string>, required (may be empty {})
@@ -387,8 +387,8 @@ tears it down after the run.
 
 ## See Also
 
-- `docs/00-concepts.md` — DotAgents repos, resource resolution order
-- `docs/02-resource-sync.md` — how profiles sync across machines
+- `docs/concepts.md` — DotAgents repos, resource resolution order
+- `docs/resource-sync.md` — how profiles sync across machines
 - `docs/secrets.md` — inject secrets bundles into agent runs
 
 ## Per-provider guides
