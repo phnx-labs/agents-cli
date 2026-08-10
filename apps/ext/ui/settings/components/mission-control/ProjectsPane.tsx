@@ -131,11 +131,16 @@ export function ProjectsPane({ projects, rollups = {}, linearProjects, pickedFol
       id = `${stem}-${n}`
     }
     const linear = linearProjects.find((l) => l.id === linearProjectId) ?? null
+    // The form only edits the primary directory (path/repoSlug); any additional
+    // bound directories from `base.dirs` (RUSH-2487) are carried through
+    // untouched — there's no UI yet to edit those.
+    const extraDirs = base?.dirs?.slice(1) ?? []
     onSave({
       id,
       name: name.trim(),
       path: path.trim(),
       repoSlug: repoSlug.trim() || undefined,
+      dirs: [{ slug: repoSlug.trim() || undefined, path: path.trim() }, ...extraDirs],
       linearProjectId: linear?.id,
       linearProjectName: linear?.name,
       // Preserve host-owned dispatch caps on edit — the form does not edit them.
