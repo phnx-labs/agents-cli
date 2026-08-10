@@ -4,7 +4,7 @@ Read this first, then dive into [`architecture.md`](architecture.md) or the per-
 
 ## 1. What agents-cli actually does
 
-One engine installs the **resources** an agent needs, **runs** the agent, and extends it with tools, sessions, teams, and machines. Deep reference: [`00-concepts.md`](00-concepts.md).
+One engine installs the **resources** an agent needs, **runs** the agent, and extends it with tools, sessions, teams, and machines. Deep reference: [`concepts.md`](concepts.md).
 
 ## 2. The three DotAgents repos (resolution order matters)
 
@@ -40,10 +40,10 @@ Source: [`src/lib/versions.ts`](../src/lib/versions.ts), [`src/lib/exec.ts`](../
 |---|---|---|
 | What | conversation on disk | which running **pid** is which session right now |
 | Where | agent-native files → `sessions.db` | `~/.agents/.cache/terminals/by-pid/<pid>.json` + `sessions/<pid>.json` |
-| Read by | `agents sessions` | `agents sessions --active`, Factory extension |
+| Read by | `agents sessions` | `agents sessions --active`, AGI EXT |
 | Lifetime | durable | ephemeral (pid dies → file is stale) |
 
-Details: [`architecture.md`](architecture.md) §2–4, [`05-sessions.md`](05-sessions.md).
+Details: [`architecture.md`](architecture.md) §2–4, [`sessions.md`](sessions.md).
 
 ## 7. One execution path
 

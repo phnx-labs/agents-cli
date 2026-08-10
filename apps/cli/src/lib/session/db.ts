@@ -30,7 +30,7 @@ const DB_PATH = getSessionsDbPath();
 
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
- * then has to chase (docs/05-sessions.md calls the constant the source of truth). */
+ * then has to chase (docs/sessions.md calls the constant the source of truth). */
 export const SCHEMA_VERSION = 38;
 
 /**

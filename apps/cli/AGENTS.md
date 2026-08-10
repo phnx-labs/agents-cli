@@ -140,7 +140,7 @@ reliability contract — context resolution, readiness/pause-on-blocker, single-
 `(routine, scheduledFor)` claim distinct from the active-run claim, and the
 `blocked`/`skipped` run statuses — is normative in
 [`docs/specifications.md` §Routine execution & readiness](docs/specifications.md#routine-execution--readiness)
-(RT-1..RT-11) and §Scheduling & execution singularity (SING-11..SING-13); much of it
+(RT-1..RT-11) and §Scheduling & execution singularity (SING-13, SING-15, SING-16); much of it
 is `[Intended]` (RUSH-2290), and each requirement marks landed vs intended.
 
 Routine execution context is separate from grouping and repository identity.
@@ -457,8 +457,8 @@ src/
     hooks.ts           # hooks.yaml parser + per-agent registrar
     hooks/match.ts     # `matches:` predicate evaluator
     browser/           # browser daemon service + existing CDP connection pool; ipc.ts owns one-shot and persistent socket clients, stream.ts owns the NDJSON action loop
-    monitors/          # `agents monitors` — event-triggered watchers (source→condition→action); native state-diff store; MonitorEngine runs in the daemon beside the cron scheduler. See docs/10-monitors.md
-    projects.ts        # `agents projects` — named multi-repo project defs (~/.agents/projects/*.yaml) layered above the --project convention (resolveProjectRef in project-root.ts); project-status.ts rolls live sessions + merged PRs + artifacts into the progress card. Beta-gated. See docs/11-projects.md
+    monitors/          # `agents monitors` — event-triggered watchers (source→condition→action); native state-diff store; MonitorEngine runs in the daemon beside the cron scheduler. See docs/monitors.md
+    projects.ts        # `agents projects` — named multi-repo project defs (~/.agents/projects/*.yaml) layered above the --project convention (resolveProjectRef in project-root.ts); project-status.ts rolls live sessions + merged PRs + artifacts into the progress card. Beta-gated. See docs/projects.md
     migrate.ts         # One-shot idempotent migrations
     session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents sessions stats` + `sessions backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger); `claude-accounts.ts` attributes each Claude transcript to the account that produced it (account_key) and `insights.ts` extracts the cached multi-harness friction/correction/automation facets behind `agents sessions insights` (`agents insights` alias)
     terminal/          # Terminal launch engine — tab/split in iTerm/Ghostty/tmux/Terminal.app, local or --host;
@@ -580,9 +580,22 @@ at the commit already gated on the release branch). CI runs from `apps/cli` via
 remote browser launch/stop). Gated on `AGENTS_TEST_WIN_HOST=<registered device>`;
 both suites skip cleanly when the var is unset, so CI needs no Windows runner.
 
-**Local dev build:** `scripts/install.sh --skip-tests` builds the working tree and
-installs at `$HOME/.local/agents-cli-dev/`, symlinked into `$HOME/.local/bin/agents`.
-The npm-installed global is never touched. Version stamps as `0.0.0-dev.<sha>[-dirty]`.
+**Local dev build:** `scripts/install.sh --skip-tests` builds the working tree,
+installs it at `$HOME/.local/agents-cli-dev/`, and exposes it as
+`$HOME/.local/bin/agents-dev` (plus `ag-dev`). Drive it by name — `agents-dev
+sessions --active`. Version stamps as `0.0.0-dev.<sha>[-dirty]`.
+
+The production command is never created or overwritten: the script must not write
+`$HOME/.local/bin/{agents,ag,browser}`, and it deletes any such link an older
+revision of itself left pointing into the dev prefix (including a dangling one,
+which is what a cleaned dev prefix leaves behind). A dev build that answered to
+`agents` made PATH order decide which code ran — see the root
+[AGENTS.md](../../AGENTS.md) §Never install a dev build over the user's `agents`.
+
+The routines daemon is **shared** (secrets broker, browser IPC, scheduler), so
+the install leaves it on production code. `--bounce-daemon` restarts it onto the
+dev build when you need that, and says plainly that it changes what the user's
+everyday `agents` talks to.
 
 **Bin entrypoints need `chmod 755`.** [`scripts/build.sh`](scripts/build.sh) chmods
 every `package.json#bin` entry after `tsc` emits. Newer npm preserves tarball file
@@ -599,8 +612,9 @@ no variables to set, no Touch ID, no hand-moved credentials, and no requirement
 that the caller be on a clean `main`:
 
 ```bash
-scripts/release.sh <version>          # dry-run: bump, type-check, tarball preview, detected state
-scripts/release.sh <version> --apply  # tests on a crabbox -> PR + CI -> merge + tag -> build/sign/publish on the home base
+scripts/release.sh <version>                      # dry-run: bump, type-check, tarball preview, detected state
+scripts/release.sh <version> --apply              # tests on a crabbox -> PR + CI -> merge + tag -> build/sign/publish on the home base (mac-mini)
+scripts/release.sh <version> --apply --device zion  # same, but sign/publish on zion (use when mac-mini is offline)
 ```
 
 The release has **three self-selected homes** and prints a `[n/6]` phase tracker,
@@ -610,10 +624,15 @@ each phase labeled with the box it runs on and a ✓/✗ result:
 |---|---|---|
 | Orchestrate: bump, changelog, PR, tag | a detached worktree on the box you invoked it on | fresh `origin/<default>` under `.agents/worktrees/release-v<version>-<pid>` |
 | CI / tests (Linux) | a **crabbox** workspace (Hetzner Linux VM) | [`scripts/sandbox.sh`](scripts/sandbox.sh) reclaims an available warm box and syncs into `~/workspaces/<repo>-<task>`; it warms capacity only when the shared pool has none — **dynamic, never a hardcoded or release-exclusive instance** |
-| Build, sign+notarize, npm publish, computer-helper | the **home base** | one hardcoded constant `RELEASE_HOME_BASE="mac-mini"` in `release.sh`; the script detects if it's already there (`scutil --get LocalHostName` / `hostname -s`), else reaches it over `ssh` |
+| Build, sign+notarize, npm publish, computer-helper | a **Mac home base** | `--device <name>` in `release.sh`, defaulting to `mac-mini`; the script detects if it's already there (`scutil --get LocalHostName` / `hostname -s`), else reaches it over `ssh` |
 
-`mac-mini` is the only hardcoded machine name (it holds the Developer ID cert +
-npm publish rights). The crabbox is **not** hardcoded.
+The home base is a Mac that holds the Developer ID cert + npm publish rights.
+It defaults to `mac-mini` and is overridable with **`--device <name>`** (alias
+`--host`) — pass `--device zion` to drive the release from another capable Mac
+when mac-mini is down. Not an env var: a flag with a default. The macOS-only
+sign/notarize + the npm tarball's signed binaries mean the home base must be a
+Mac; a Linux worker can *drive* the release but not be the home base. The
+crabbox is **not** hardcoded.
 
 **The caller checkout is never mutated or gated.** `release.sh` immediately
 fetches origin and re-enters the release from a detached, release-owned worktree
@@ -738,8 +757,8 @@ already-versioned package.
 **`scripts/remote-sign-mac.sh` is no longer on the release path.** The privileged
 phase builds signed artifacts directly on the home base. The script remains only
 for the narrow case of building + pulling back JUST the signed macOS artifacts from
-another Mac (no publish); it too is zero-config, targeting the same hardcoded
-`RELEASE_HOME_BASE` with no env knobs or fleet discovery.
+another Mac (no publish); it takes the same `--device <name>` flag as `release.sh`
+(default `mac-mini`), with no other env knobs or fleet discovery.
 
 **Provisioning the `apple.com` bundle on a headless sign host.** A Linux-driven
 release offloads macOS signing to a sign host over SSH, which needs the `apple.com`
@@ -1016,9 +1035,9 @@ been closed stays as a `(resolved)` entry so references never dangle.
 
 [`docs/`](docs/README.md) is the source-grounded reference. Start with
 [`architecture.md`](docs/architecture.md) for the CLI/extension layering and the
-session mechanisms, then [`00-concepts.md`](docs/00-concepts.md) for the resource
+session mechanisms, then [`concepts.md`](docs/concepts.md) for the resource
 model. The normative contract
 ([`specifications.md`](docs/specifications.md)) sits
-alongside the reference docs ([05-sessions.md](docs/05-sessions.md),
+alongside the reference docs ([sessions.md](docs/sessions.md),
 [secrets.md](docs/secrets.md)) — read the spec for the guarantee, the reference
 for the how-to.

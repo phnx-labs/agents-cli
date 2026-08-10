@@ -22,10 +22,10 @@
 # pulls the signed bundles back into THIS worktree's apps/cli/bin/ so
 # `bun run build` (presence-gated) can package them.
 #
-# ZERO CONFIG: there are no environment variables. The one machine name is the
-# hardcoded home base (RELEASE_HOME_BASE), the same constant release.sh uses --
-# no sign-host / secret-host overrides, no force-remote knob, no fleet discovery,
-# no interactive-Mac fallback.
+# NO ENV VARS: the sign host defaults to mac-mini (matching release.sh) and is
+# overridable only with `--device <name>` (alias `--host`) -- a flag, never
+# ambient config. No secret-host override, no force-remote knob, no fleet
+# discovery, no auto-failover.
 #
 # The home base must have: a Developer ID identity in rush-signing.keychain-db,
 # the kcpass + secrets.pass files under ~/Library/Application Support/rush/, the
@@ -33,12 +33,26 @@
 # APPLE_TEAM_ID), and — for the keychain helper only — bin/embedded.provisionprofile
 # (rsynced from here if present locally, otherwise the host's own copy is used).
 #
-# Usage: scripts/remote-sign-mac.sh
+# Usage: scripts/remote-sign-mac.sh [--device <name>]
 set -euo pipefail
 
-# The one hardcoded machine name (matches release.sh's RELEASE_HOME_BASE). It is
-# a constant, not an env var -- nobody sets anything to sign.
-readonly RELEASE_HOME_BASE="mac-mini"
+# The Mac that builds + signs, matching release.sh: mac-mini by default,
+# overridable with `--device <name>` (alias `--host`). A flag with a default,
+# never an env var.
+readonly RELEASE_HOME_BASE_DEFAULT="mac-mini"
+DEVICE=""
+expect_device=false
+for arg in "$@"; do
+  if $expect_device; then DEVICE="$arg"; expect_device=false; continue; fi
+  case "$arg" in
+    --device|--host) expect_device=true ;;
+    --device=*|--host=*) DEVICE="${arg#*=}" ;;
+    -h|--help) printf '%s\n' "usage: scripts/remote-sign-mac.sh [--device <name>]"; exit 0 ;;
+    *) printf 'error: unexpected argument: %s\n' "$arg" >&2; exit 1 ;;
+  esac
+done
+$expect_device && { printf 'error: --device needs a machine name\n' >&2; exit 1; }
+readonly RELEASE_HOME_BASE="${DEVICE:-$RELEASE_HOME_BASE_DEFAULT}"
 
 # apps/cli in THIS worktree (script lives in apps/cli/scripts/).
 LOCAL_CLI="$(cd "$(dirname "$0")/.." && pwd)"

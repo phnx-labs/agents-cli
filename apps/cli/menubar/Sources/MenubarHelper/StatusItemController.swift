@@ -69,7 +69,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // row and the global chord summon the SAME panel — one panel means an
     // interrupted capture is restored whichever way you come back to it.
     let promptController = PromptPanelController()
-    // Factory Floor status palette (design-system.css). Brand green is accent /
+    // Fleet status palette (design-system.css). Brand green is accent /
     // selection only — never a status. running/idle/waiting/failed are the four
     // status colors, shared with the full dashboard so this reads as its quick view.
     private let brand = NSColor(srgbRed: 0xa3 / 255.0, green: 0xe6 / 255.0, blue: 0x35 / 255.0, alpha: 1) // #a3e635
@@ -965,7 +965,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         // ── Primary action ────────────────────────────────────────────────
         // Land in this session — attaches locally, or SSHes to its owning box
-        // (`agents sessions focus`, the same call Factory's Focus button uses), so
+        // (`agents sessions focus`, the same call the ext's Focus button uses), so
         // it works whether the session is here or on a fleet peer. First so the one
         // thing you usually want is under the cursor.
         if let sid = s.sessionId, !sid.isEmpty {

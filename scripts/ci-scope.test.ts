@@ -46,7 +46,7 @@ describe('classifyCiScope', () => {
     expect(classifyCiScope(['apps/cli/src/lib/state.ts'])).toEqual({
       cli: true,
       cliDocs: false,
-      factory: false,
+      ext: false,
       sessionTracker: false,
       windows: false,
     });
@@ -59,7 +59,7 @@ describe('classifyCiScope', () => {
     ])).toEqual({
       cli: false,
       cliDocs: true,
-      factory: false,
+      ext: false,
       sessionTracker: false,
       windows: false,
     });
@@ -69,12 +69,12 @@ describe('classifyCiScope', () => {
     expect(classifyCiScope([
       'apps/cli/src/index.ts',
       'apps/cli/README.md',
-      'apps/factory/src/extension.ts',
+      'apps/ext/src/extension.ts',
       'packages/session-tracker/src/index.ts',
     ])).toEqual({
       cli: true,
       cliDocs: true,
-      factory: true,
+      ext: true,
       sessionTracker: true,
       windows: false,
     });
@@ -108,7 +108,7 @@ describe('classifyCiScope', () => {
       expect(classifyCiScope([file])).toEqual({
         cli: true,
         cliDocs: true,
-        factory: true,
+        ext: true,
         sessionTracker: true,
         windows: true,
       });
@@ -119,7 +119,7 @@ describe('classifyCiScope', () => {
     expect(classifyCiScope(['website/app/page.tsx', 'apps/ios/README.md'])).toEqual({
       cli: false,
       cliDocs: false,
-      factory: false,
+      ext: false,
       sessionTracker: false,
       windows: false,
     });
@@ -132,7 +132,7 @@ test('the executable writes GitHub outputs from NUL-delimited git paths', () => 
   try {
     const proc = Bun.spawnSync({
       cmd: ['bun', join(import.meta.dir, 'ci-scope.ts'), output],
-      stdin: Buffer.from('apps/factory/src/extension.ts\0apps/cli/docs/README.md\0'),
+      stdin: Buffer.from('apps/ext/src/extension.ts\0apps/cli/docs/README.md\0'),
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -140,7 +140,7 @@ test('the executable writes GitHub outputs from NUL-delimited git paths', () => 
     expect(readFileSync(output, 'utf8')).toBe(formatGitHubOutputs({
       cli: false,
       cliDocs: true,
-      factory: true,
+      ext: true,
       sessionTracker: false,
       windows: false,
     }));
@@ -162,9 +162,9 @@ test('changedFilesBetween ignores changes made only on the updated base branch',
     const mergeBase = git(repo, 'rev-parse', 'HEAD');
 
     git(repo, 'worktree', 'add', '-b', 'pr-head', headWorktree, mergeBase);
-    writeFixture(headWorktree, 'apps/factory/src/extension.ts');
-    git(headWorktree, 'add', 'apps/factory/src/extension.ts');
-    git(headWorktree, 'commit', '-m', 'factory change');
+    writeFixture(headWorktree, 'apps/ext/src/extension.ts');
+    git(headWorktree, 'add', 'apps/ext/src/extension.ts');
+    git(headWorktree, 'commit', '-m', 'ext change');
     const head = git(headWorktree, 'rev-parse', 'HEAD');
 
     writeFixture(repo, 'apps/cli/src/lib/base-only.ts');
@@ -173,7 +173,7 @@ test('changedFilesBetween ignores changes made only on the updated base branch',
     const updatedBase = git(repo, 'rev-parse', 'HEAD');
 
     expect(changedFilesBetween(updatedBase, head, repo)).toEqual([
-      'apps/factory/src/extension.ts',
+      'apps/ext/src/extension.ts',
     ]);
   } finally {
     rmSync(dir, { recursive: true, force: true });

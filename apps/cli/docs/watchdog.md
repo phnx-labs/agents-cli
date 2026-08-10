@@ -128,7 +128,7 @@ the active-session list before the new TUI is live — and persists at
 `exiting → launching → awaiting-tui → replaying → done | failed`. A post-loop sweep
 advances in-flight rotates whose session left the active list. All rotate activity
 (rotate start / done / failed / skip) is appended to the shared `watchdog.log` as
-`rotate`-kind events, so the Factory Floor status card keeps working unchanged.
+`rotate`-kind events, so the Fleet status card keeps working unchanged.
 
 Rotate is **on by default**. `agents watchdog rotate on|off` writes `watchdog.rotate`
 in `~/.agents/agents.yaml` (re-read per tick) and is rotate-only — nudging is

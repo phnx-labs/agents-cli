@@ -47,7 +47,7 @@ jobs:
           git -C "$HOMEBREW_TAP_REPO" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Install agents-dbg dependencies
-        run: bash apps/factory/app/scripts/install.sh
+        run: bash apps/ext/app/scripts/install.sh
 
       - name: Release agents-dbg
         run: |

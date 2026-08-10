@@ -648,10 +648,10 @@ describe('the severity rubric matches the code (docs cannot drift from behavior)
     expect(misplaced(critical, warning)).toEqual([]);
   });
 
-  it('the docs/06-observability.md rubric puts every kind in the right bucket', () => {
+  it('the docs/observability.md rubric puts every kind in the right bucket', () => {
     // A THIRD rubric — missed by the previous version of this test, and stale for
     // the same three days. Every prose copy of the severities gets pinned.
-    const doc = read('../../../docs/06-observability.md');
+    const doc = read('../../../docs/observability.md');
     const start = doc.indexOf('**Severity rubric**');
     expect(start).toBeGreaterThan(-1);
     const rubric = doc.slice(start, start + 1400);

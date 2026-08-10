@@ -5,7 +5,7 @@ orchestrate. This is not OpenSpec/Spec Kit marketing — it is the missing layer
 **this** stack’s loop: HTML plans + technical design + unit tests.
 
 Related: [Specifications](specifications.md) (normative subsystem contracts) ·
-[Landscape](04-landscape.md) · plan-render skill (HTML plans)
+[Landscape](landscape.md) · plan-render skill (HTML plans)
 
 **Browser-friendly examples:** [product-acceptance-user-stories.html](../../../.agents/artifacts/2026-08-04/product-acceptance-user-stories.html)
 (bad vs good stories, three full Product cards, regression pack).
@@ -138,7 +138,7 @@ agents <cmd> …
 |---|---|
 | “As a user I want better sessions so I can be productive.” | Role + specific command/UI + observable outcome + independent test |
 | Scenarios that restate the implementation | Scenarios a second agent could implement without re-asking you |
-| No must-not-break | Explicit adjacent surfaces (JSON, flags, Factory, menubar) |
+| No must-not-break | Explicit adjacent surfaces (JSON, flags, AGI EXT, menubar) |
 | “tests pass” as proof | Named proof command whose **output** is quoted |
 
 ---
@@ -163,7 +163,7 @@ host each live agent is on, so I know where to attach without guessing.
 
 3. **Given** the same live set  
    **When** I run `agents sessions --active --json`  
-   **Then** each object includes a stable `host` field Factory Floor can parse.
+   **Then** each object includes a stable `host` field Fleet can parse.
 
 **Must not break:** preview one-liner; empty vs error exit codes; JSON field renames without COMPAT.
 

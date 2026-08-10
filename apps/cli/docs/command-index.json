@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 104,
-  "commands": 581,
+  "commands": 585,
   "root": {
     "name": "agents",
     "path": "",
@@ -47,13 +47,22 @@
       "name": "accounts",
       "path": "accounts",
       "aliases": [],
-      "description": "Manage durable provider credentials",
+      "description": "Browse native logins and manage provider account bundles",
       "args": [],
       "options": [
         {
           "flags": "--json",
           "description": "Machine-readable account metadata",
           "long": "--json",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--fleet",
+          "description": "Show harness-native signed-in identities across reachable devices",
+          "long": "--fleet",
           "required": false,
           "optional": false,
           "variadic": false,
@@ -70,8 +79,8 @@
           "negate": false
         }
       ],
-      "examples": "agents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts inspect work --json\nagents run claude --account work",
-      "notes": "Accounts are durable credentials, independent of agent versions. Native OAuth login remains managed by the harness and is not copied or renamed by agents-cli.",
+      "examples": "agents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts inspect work --json\nagents accounts set-default claude work\nagents accounts sync work --device yosemite-s0\nagents run claude --account work",
+      "notes": "Provider accounts are durable credentials independent of agent versions. Harness-native auth remains managed by each harness and is not copied or renamed by agents-cli.",
       "subcommands": [
         {
           "name": "add",
@@ -106,6 +115,15 @@
               "negate": false
             },
             {
+              "flags": "--base-url <url>",
+              "description": "Optional endpoint override stored with the account",
+              "long": "--base-url",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--from-secrets <bundle:key>",
               "description": "Import from an existing agents secrets entry",
               "long": "--from-secrets",
@@ -114,6 +132,33 @@
               "variadic": false,
               "negate": false
             },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "clear-default",
+          "path": "accounts clear-default",
+          "aliases": [],
+          "description": "Return a harness to native login or balanced account selection",
+          "args": [
+            {
+              "name": "agent",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -253,6 +298,39 @@
           "subcommands": []
         },
         {
+          "name": "set-default",
+          "path": "accounts set-default",
+          "aliases": [],
+          "description": "Use a provider account for a harness when --account is omitted",
+          "args": [
+            {
+              "name": "agent",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
           "name": "set-key",
           "path": "accounts set-key",
           "aliases": [],
@@ -271,6 +349,51 @@
               "description": "Import from an existing agents secrets entry",
               "long": "--from-secrets",
               "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "sync",
+          "path": "accounts sync",
+          "aliases": [],
+          "description": "Copy one provider account bundle to a worker device",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--device <device>",
+              "description": "Destination device or SSH host",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--force",
+              "description": "Replace matching keys on the destination",
+              "long": "--force",
+              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -5842,7 +5965,7 @@
           "negate": false
         }
       ],
-      "examples": "# Identity, duplicates, and per-service health in one view\n      agents daemon status\n\n      # Machine-readable status (for scripts / Factory)\n      agents daemon status --json\n\n      # Start / stop / restart the daemon process\n      agents daemon start\n      agents daemon stop\n      agents daemon restart\n\n      # Persist the daemon off — nothing auto-starts it until re-enabled\n      agents daemon disable\n      agents daemon enable\n\n      # Reload config (SIGHUP) without restarting — picks up routine/scheduler-gate changes\n      agents daemon reload\n\n      # Just the two hosted services (secrets broker, browser IPC)\n      agents daemon services\n\n      # Tail the daemon's own log, warnings and up, from the last hour\n      agents daemon logs -f --level warn --since 1h\n\n      # One-shot health check for scripts (non-zero exit on problems)\n      agents daemon doctor",
+      "examples": "# Identity, duplicates, and per-service health in one view\n      agents daemon status\n\n      # Machine-readable status (for scripts / AGI EXT)\n      agents daemon status --json\n\n      # Start / stop / restart the daemon process\n      agents daemon start\n      agents daemon stop\n      agents daemon restart\n\n      # Persist the daemon off — nothing auto-starts it until re-enabled\n      agents daemon disable\n      agents daemon enable\n\n      # Reload config (SIGHUP) without restarting — picks up routine/scheduler-gate changes\n      agents daemon reload\n\n      # Just the two hosted services (secrets broker, browser IPC)\n      agents daemon services\n\n      # Tail the daemon's own log, warnings and up, from the last hour\n      agents daemon logs -f --level warn --since 1h\n\n      # One-shot health check for scripts (non-zero exit on problems)\n      agents daemon doctor",
       "notes": "There is no 'agents daemon jobs' — scheduled work is 'agents routines',\n      always. Use 'agents routines stats' for per-routine failure detail.\n\n      'disable' is a persisted kill switch: it stops routines/add,\n      routines/start, routines/catchup, and webhook triggers from auto-starting\n      the daemon (daemon.enabled: false in ~/.agents/devices/<host>/agents.yaml).\n      'agents daemon start' still starts it explicitly, same as\n      'systemctl start' on a disabled unit.",
       "subcommands": [
         {
@@ -6659,7 +6782,7 @@
               "negate": false
             }
           ],
-          "examples": "agents devices config mac-mini                            # settings menu (TTY) / print config (piped)\n      agents devices config mac-mini agents.max-concurrent 4    # cap concurrent agents\n      agents devices config mac-mini scheduler.enabled off      # no routines firing there\n      agents devices config mac-mini scheduler.enabled          # read one key back\n      agents devices config mac-mini scheduler.enabled --unset  # back to the default\n      agents devices config mac-mini notes \"runs the releases\"  # append an operator note\n      agents devices config win-mini ssh.auth password          # password auth…\n      agents devices config win-mini ssh.bundle muqsit          # …from this secrets bundle\n      agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519\n      agents devices config mac-mini auto-launch.enabled off    # exclude from Factory auto-launch\n      agents devices config mac-mini auto-launch.preferred on   # boost in auto-launch ranking\n      agents devices config zion interactive.host zion          # user scope: where agents show YOU artifacts\n      agents devices config mac-mini --json                     # machine-readable",
+          "examples": "agents devices config mac-mini                            # settings menu (TTY) / print config (piped)\n      agents devices config mac-mini agents.max-concurrent 4    # cap concurrent agents\n      agents devices config mac-mini scheduler.enabled off      # no routines firing there\n      agents devices config mac-mini scheduler.enabled          # read one key back\n      agents devices config mac-mini scheduler.enabled --unset  # back to the default\n      agents devices config mac-mini notes \"runs the releases\"  # append an operator note\n      agents devices config win-mini ssh.auth password          # password auth…\n      agents devices config win-mini ssh.bundle muqsit          # …from this secrets bundle\n      agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519\n      agents devices config mac-mini auto-launch.enabled off    # exclude from AGI EXT auto-launch\n      agents devices config mac-mini auto-launch.preferred on   # boost in auto-launch ranking\n      agents devices config zion interactive.host zion          # user scope: where agents show YOU artifacts\n      agents devices config mac-mini --json                     # machine-readable",
           "notes": "Keys: agents.max-concurrent, scheduler.enabled, daemon.enabled,\n      watchdog.enabled, browser.remote-control, browser.profile, notes,\n      ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,\n      ssh.identity-file, platform (windows|linux|macos|unknown),\n      auto-launch.enabled, auto-launch.preferred — plus the user-scope\n      interactive.host (stored centrally; the device name is syntax only).\n\n      Booleans take on/off (or true/false). 'notes' appends one entry per\n      invocation. Values land in ~/.agents/agents.yaml under\n      fleet.devices.<name>.config and sync with 'agents repo push/pull'.\n      ssh.* / platform / user overlay the discovered registry profile at dial\n      time. scheduler.enabled / daemon.enabled take effect when the daemon\n      reloads or restarts on that device.\n\n      The retired subcommands still work and forward here: configure, note,\n      set, set-interactive, enable, disable, prefer, unprefer.",
           "subcommands": []
         },
@@ -12557,7 +12680,7 @@
             },
             {
               "flags": "--device <name>",
-              "description": "OWNER (not body placement) — the single machine that evaluates + fires (exactly-once). See docs/00-concepts.md#placement.",
+              "description": "OWNER (not body placement) — the single machine that evaluates + fires (exactly-once). See docs/concepts.md#placement.",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -14670,8 +14793,8 @@
           "negate": false
         }
       ],
-      "examples": "agents projects import --from-linear  # the projects you actually track\n      agents projects add rush --repo phnx-labs/rush --path apps/web\n      agents projects list                 # definitions only (no session scan)\n      agents projects list --with-agents   # opt-in local active counts\n      agents projects list --json          # machine-readable defs (Factory uses this)\n      echo '{...}' | agents projects save --json  # create/update one def from stdin\n      agents projects rm rush --json       # machine-readable delete\n      agents projects status              # every project, across the whole fleet\n      agents projects status rush         # one project (same body as view/show)\n      agents projects view rush           # alias of status <name>\n      agents projects status --device s0  # scope to one device (or --devices a,b,c)\n      agents projects link rush --linear  # bind the Linear project (auto-suggest)\n      agents run --project rush           # land an agent in the project",
-      "notes": "Definitions are hand-editable YAML in ~/.agents/projects/ and sync across\n      machines with 'agents push/pull'. Factory reads and writes only through\n      these commands — never ~/.agents/factory/projects.json.",
+      "examples": "agents projects import --from-linear  # the projects you actually track\n      agents projects add rush --repo phnx-labs/rush --path apps/web\n      agents projects add rush --root ~/src/rush --dir ~/src/rush-infra  # bind another dir\n      agents projects set rush --add-dir ~/.agents/.system  # bind one more\n      agents projects set rush --rm-dir ~/src/rush-infra    # unbind it again\n      agents projects list                 # definitions only (no session scan)\n      agents projects list --with-agents   # opt-in local active counts\n      agents projects list --json          # machine-readable defs (AGI EXT uses this)\n      echo '{...}' | agents projects save --json  # create/update one def from stdin\n      agents projects rm rush --json       # machine-readable delete\n      agents projects status              # every project, across the whole fleet\n      agents projects status rush         # one project (same body as view/show)\n      agents projects view rush           # alias of status <name>\n      agents projects status --device s0  # scope to one device (or --devices a,b,c)\n      agents projects link rush --linear  # bind the Linear project (auto-suggest)\n      agents run --project rush           # land an agent in the project",
+      "notes": "Definitions are hand-editable YAML in ~/.agents/projects/ and sync across\n      machines with 'agents repo push user' / 'agents repo pull user'. AGI EXT\n      reads and writes only through these commands — never\n      ~/.agents/factory/projects.json.\n\n      A project may bind several directories ('--dir' / '--add-dir'). The cwd an\n      agent lands in is 'defaultPath' (else 'root') — set it with --root/--path,\n      not with --dir. Every bound directory other than that cwd rides along as\n      an --add-dir grant, which only Claude and Codex consume.",
       "subcommands": [
         {
           "name": "add",
@@ -14712,6 +14835,15 @@
               "required": true,
               "optional": false,
               "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--dir <path...>",
+              "description": "A directory this project binds; slug read from its origin. Repeatable",
+              "long": "--dir",
+              "required": true,
+              "optional": false,
+              "variadic": true,
               "negate": false
             },
             {
@@ -14777,6 +14909,42 @@
             }
           ],
           "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "for-cwd",
+          "path": "projects for-cwd",
+          "aliases": [],
+          "description": "Resolve a directory to its defined project name (root or a repos[].path/subpath match). Defaults to the current directory.",
+          "args": [
+            {
+              "name": "cwd",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Machine-readable output: {\"name\": string | null}",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -15026,6 +15194,35 @@
               "required": true,
               "optional": false,
               "variadic": true,
+              "negate": false
+            },
+            {
+              "flags": "--add-dir <path>",
+              "description": "Bind another directory to this project; repeatable",
+              "long": "--add-dir",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": []
+            },
+            {
+              "flags": "--rm-dir <path>",
+              "description": "Unbind a directory from this project; repeatable",
+              "long": "--rm-dir",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": []
+            },
+            {
+              "flags": "--slug <owner/repo>",
+              "description": "Slug for a single --add-dir whose origin cannot be read",
+              "long": "--slug",
+              "required": true,
+              "optional": false,
+              "variadic": false,
               "negate": false
             },
             {
@@ -16922,7 +17119,7 @@
             },
             {
               "flags": "--run-on <name>",
-              "description": "BODY placement: execute the job body on this machine over SSH (registered host, device, capability tag, or user@host). Sets hostStrategy=host. Same model as agents run --where device:<name> (docs/00-concepts.md#placement).",
+              "description": "BODY placement: execute the job body on this machine over SSH (registered host, device, capability tag, or user@host). Sets hostStrategy=host. Same model as agents run --where device:<name> (docs/concepts.md#placement).",
               "long": "--run-on",
               "required": true,
               "optional": false,
@@ -19741,7 +19938,7 @@
         },
         {
           "flags": "--where <spec>",
-          "description": "Where this run's body executes (one placement door): local | device:<name> | auto | lease[:backend] | cloud[:provider]. Expands to --host/--lease/--cloud. Do not combine with those flags. See docs/00-concepts.md#placement.",
+          "description": "Where this run's body executes (one placement door): local | device:<name> | auto | lease[:backend] | cloud[:provider]. Expands to --host/--lease/--cloud. Do not combine with those flags. See docs/concepts.md#placement.",
           "long": "--where",
           "required": true,
           "optional": false,
@@ -23278,7 +23475,7 @@
             }
           ],
           "examples": "# Focus a session directly (attach a living pane, otherwise recover it)\n      agents sessions focus a1b2c3d4\n\n      # Multi-select live sessions; each opens as a tab in this terminal\n      agents sessions focus\n\n      # Scope the picker to one device's orphaned sessions\n      agents sessions focus --orphan --device yosemite-s0\n\n      # Resolve latest on yosemite-s0, then pick from that version's sessions\n      agents sessions focus claude@latest --device yosemite-s0\n\n      # Attach only — refuse if nothing is joinable (old sessions go)\n      agents sessions focus a1b2c3d4 --attach-only\n\n      # Pick from live sessions on this machine only\n      agents sessions focus --local",
-          "notes": "- space toggles a session, enter opens the selected set; a single check + enter opens just one.\n      - With no selector/filter, the picker shows the live fleet. An id focuses directly; agent@version and text selectors always show the preview picker.\n      - A living tmux pane is JOINED (a second client, no fork). Dead/missing panes recover on the origin device: exact healthy origin uses native resume; otherwise a healthy version of the same harness receives /continue <id>.\n      - --host/--device and the sessions-browser filters compose. latest/oldest resolve against each selected device's installed versions.\n      Lifecycle siblings (not synonyms):\n        focus              attach if alive, otherwise recover (default \"take me there\")\n        focus --attach-only  attach only; never fork (replaces go)\n        detach / attach    interactive ↔ headless presence\n        resume             multi-select history → tabs\n        run --resume       single scripted continue",
+          "notes": "- space toggles a session, enter opens the selected set; a single check + enter opens just one.\n      - With no selector/filter, the picker shows the live fleet. An id focuses directly; agent@version and text selectors always show the preview picker.\n      - A living tmux pane is JOINED (a second client, no fork). Dead/missing panes recover on the origin device: exact healthy origin uses native resume; otherwise a healthy version of the same harness receives /continue <id>.\n      - An id/identity selector resolves across the whole reachable fleet on its own — you do NOT need --device to focus a session that lives on another box (same as resume/preview). --device only narrows the browsable picker and the agent/version resolution.\n      - --host/--device and the sessions-browser filters compose. latest/oldest resolve against each selected device's installed versions.\n      Lifecycle siblings (not synonyms):\n        focus              attach if alive, otherwise recover (default \"take me there\")\n        focus --attach-only  attach only; never fork (replaces go)\n        detach / attach    interactive ↔ headless presence\n        resume             multi-select history → tabs\n        run --resume       single scripted continue",
           "subcommands": []
         },
         {
@@ -25894,7 +26091,7 @@
           "negate": false
         }
       ],
-      "examples": "# One-shot inventory + local active sessions (JSON)\n      agents snapshot --json\n\n      # Same, plus open feed blocks for needs-you polls\n      agents snapshot --json --with-feed\n\n      # Fleet-wide active sessions (matches sessions --active scope)\n      agents snapshot --json --all-hosts\n\n      # Inventory for one harness only (Factory-style usage poll)\n      agents snapshot --json --agent claude\n\n      # Run the whole snapshot on another device\n      agents snapshot --json --host yosemite-s0",
+      "examples": "# One-shot inventory + local active sessions (JSON)\n      agents snapshot --json\n\n      # Same, plus open feed blocks for needs-you polls\n      agents snapshot --json --with-feed\n\n      # Fleet-wide active sessions (matches sessions --active scope)\n      agents snapshot --json --all-hosts\n\n      # Inventory for one harness only (an AGI EXT-style usage poll)\n      agents snapshot --json --agent claude\n\n      # Run the whole snapshot on another device\n      agents snapshot --json --host yosemite-s0",
       "subcommands": []
     },
     {
@@ -26754,6 +26951,15 @@
               "flags": "--repo <urlOrPath>",
               "description": "How each remote (--device) teammate gets the code — ONE git URL/path for the whole team (existing checkout reused, else cloned). A team is single-repo; for work across repos, make one team per repo. Defaults to this checkout origin.",
               "long": "--repo",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--project <slug>",
+              "description": "Work this team on a defined project: its primary directory is each local teammate's base cwd, its other directories become --add-dir grants",
+              "long": "--project",
               "required": true,
               "optional": false,
               "variadic": false,

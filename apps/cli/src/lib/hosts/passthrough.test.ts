@@ -59,6 +59,7 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
 
   it('falls through for OWN_HOST commands (secrets owns its --host)', async () => {
     expect(await maybeRunOnHost('secrets', ['secrets', 'list', '--host', 'mac'])).toBe(false);
+    expect(await maybeRunOnHost('accounts', ['accounts', 'sync', 'work', '--device', 'mac'])).toBe(false);
   });
 
   it('leaves feed host lists to the command-level fleet aggregator', async () => {

@@ -284,13 +284,101 @@ describe('resolveRoutineLaunch (RUSH-1016 — pin + failover chain)', () => {
     expect(plan.chain).toEqual([{ agent: 'claude', version: '2.1.0' }]);
   });
 
-  it('a missing durable account fails before version selection', async () => {
-    const error = await resolveRoutineLaunch(
-      baseJob({ name: 'ghost-account', account: 'missing', agent: 'claude' }),
+  it('resolves a legacy login-email account pin to its installed version', async () => {
+    const plan = await resolveRoutineLaunch(
+      baseJob({ name: 'oauth-account', account: 'person@example.com', agent: 'claude' }),
       process.cwd(),
-      { resolveCredentialAccount: () => { throw new Error("Unknown account 'missing'."); } },
-    ).then(() => null, value => value as Error);
-    expect(error?.message).toBe("Unknown account 'missing'.");
+      {
+        findCredentialAccount: () => false,
+        resolveCredentialAccount: () => { throw new Error('provider default must not preflight'); },
+        resolveAccountVersion: async () => '2.1.9',
+        readMeta: () => ({ accounts: { defaults: { claude: 'unavailable-provider-default' } } }),
+      },
+    );
+    expect(plan).toEqual({
+      chain: [{ agent: 'claude', version: '2.1.9' }],
+      rotation: null,
+      pinned: true,
+      forwardAccount: false,
+    });
+  });
+
+  it('fails closed instead of rotating when a native account pin is unavailable', async () => {
+    let strategyCalled = false;
+    const error = await resolveRoutineLaunch(
+      baseJob({ name: 'missing-native', account: 'person@example.com', agent: 'claude' }),
+      process.cwd(),
+      {
+        findCredentialAccount: () => false,
+        resolveAccountVersion: async () => null,
+        resolveRunVersion: async () => {
+          strategyCalled = true;
+          return { version: '2.1.219', rotation: null };
+        },
+      },
+    ).then(() => null, (cause: unknown) => cause as Error);
+
+    expect(error?.message).toContain("account 'person@example.com' is not signed in");
+    expect(error?.message).toContain('refusing to rotate');
+    expect(strategyCalled).toBe(false);
+  });
+
+  it('does not forward a native identity through the durable --account resume path', async () => {
+    const config = baseJob({
+      name: 'native-resume',
+      account: 'person@example.com',
+      agent: 'claude',
+      resume: 'sess-1',
+    });
+    const launch = await resolveRoutineLaunch(config, process.cwd(), {
+      findCredentialAccount: () => false,
+      resolveAccountVersion: async () => '2.1.9',
+    });
+
+    expect(buildJobCommand(config, 'continue', launch.forwardAccount !== false)).toEqual([
+      'agents', 'run', 'claude', '--resume', 'sess-1', 'continue', '--mode', 'plan',
+    ]);
+  });
+
+  it('rejects a version pin that does not own the requested native identity', async () => {
+    const error = await resolveRoutineLaunch(
+      baseJob({
+        name: 'wrong-native-version',
+        account: 'person@example.com',
+        agent: 'claude',
+        version: '2.1.0',
+      }),
+      process.cwd(),
+      {
+        findCredentialAccount: () => false,
+        resolveAccountVersion: async () => '2.1.9',
+      },
+    ).then(() => null, (cause: unknown) => cause as Error);
+
+    expect(error?.message).toContain('signed in at claude@2.1.9, not pinned claude@2.1.0');
+  });
+
+  it('accepts a version pin only when that version owns the native identity', async () => {
+    const plan = await resolveRoutineLaunch(
+      baseJob({
+        name: 'matching-native-version',
+        account: 'person@example.com',
+        agent: 'claude',
+        version: '2.1.9',
+      }),
+      process.cwd(),
+      {
+        findCredentialAccount: () => false,
+        resolveAccountVersion: async () => '2.1.9',
+      },
+    );
+
+    expect(plan).toEqual({
+      chain: [{ agent: 'claude', version: '2.1.9' }],
+      rotation: null,
+      pinned: true,
+      forwardAccount: false,
+    });
   });
 });
 

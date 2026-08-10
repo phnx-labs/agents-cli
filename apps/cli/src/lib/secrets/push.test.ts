@@ -51,7 +51,7 @@ afterAll(() => {
   fs.rmSync(TEST_DEVICES_DIR, { recursive: true, force: true });
 });
 
-const { pushResolvedBundleToHost, planPushTransport, bundleEnvToDotenv, resolveBundleForPush } = await import('./push.js');
+const { pushResolvedBundleToHost, planPushTransport, planLiteralRestoration, bundleEnvToDotenv, resolveBundleForPush } = await import('./push.js');
 const { writeBundleWithItems } = await import('./bundles.js');
 const { secretsKeychainItem, setKeychainBackendForTest } = await import('./index.js');
 type KeychainBackend = import('./index.js').KeychainBackend;
@@ -155,6 +155,23 @@ describe('planPushTransport — which transport a backend/OS pair selects', () =
     expect(t.remoteCmd).not.toContain('push-test-passphrase');
     expect(t.remoteCmd).toContain('IFS= read -r AGENTS_SECRETS_PASSPHRASE');
     expect(t.input).toBe(`push-test-passphrase\n${RESOLVED.dotenv}`);
+  });
+});
+
+describe('planLiteralRestoration', () => {
+  it('replaces transported account metadata with non-secret literal values', () => {
+    expect(planLiteralRestoration('work', { ACCOUNT_ID: 'id-1', PROVIDER: 'openrouter' })).toEqual([
+      {
+        key: 'ACCOUNT_ID',
+        removeArgs: ['remove', 'work', 'ACCOUNT_ID', '--yes'],
+        addArgs: ['add', 'work', 'ACCOUNT_ID', '--value', 'id-1'],
+      },
+      {
+        key: 'PROVIDER',
+        removeArgs: ['remove', 'work', 'PROVIDER', '--yes'],
+        addArgs: ['add', 'work', 'PROVIDER', '--value', 'openrouter'],
+      },
+    ]);
   });
 });
 

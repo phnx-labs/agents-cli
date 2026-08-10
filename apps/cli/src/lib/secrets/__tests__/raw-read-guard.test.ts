@@ -17,7 +17,7 @@ import {
 
 /**
  * The raw-read storm guard (index.ts `assertRawKeychainReadAllowed`) — the fix
- * for background processes (the Factory extension host's `agents view` poll,
+ * for background processes (AGI EXT host's `agents view` poll,
  * daemons, cron) raising Touch ID sheets on the interactive user's screen:
  * 167 sheets in one day, each one a TTY-less keychain read nobody could answer.
  *

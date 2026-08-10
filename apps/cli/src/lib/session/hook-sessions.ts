@@ -17,8 +17,8 @@
  * This module lets `sessions --active` reconcile a `ps`-discovered pid to that
  * authoritative id. It is deliberately a small hand-rolled reader — the CLI does
  * NOT import the session-tracker package (a separate, workspace-less package;
- * see packages/session-tracker/CLAUDE.md) — mirroring the Factory extension's own
- * hand-copied reader in apps/factory/src/core/liveSession.ts. It only READS the
+ * see packages/session-tracker/CLAUDE.md) — mirroring AGI EXT's own
+ * hand-copied reader in apps/ext/src/core/liveSession.ts. It only READS the
  * existing dir/schema; it never writes or moves anything, so it is safe across a
  * fleet where old hooks and a new CLI coexist.
  *

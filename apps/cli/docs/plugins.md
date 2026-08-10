@@ -8,7 +8,7 @@ A plugin is a directory in `~/.agents/plugins/` containing a `.claude-plugin/plu
 
 Only agents with `plugins: true` (or a version-gated `since`) in the capability matrix participate — today Claude, OpenClaw, Antigravity, Grok, Kimi, Cursor, Goose, Droid, and Codex >= 0.128.0 (`capableAgents('plugins')` in `src/lib/agents.ts`). Plugins can narrow further by declaring `agents: [...]` in their manifest. Plugins that ship executable surfaces (hooks, `.mcp.json`, `bin/`, `scripts/`, `settings.json`, `permissions/`) require explicit consent via `--allow-exec-surfaces` to be enabled after installation.
 
-For the layered resource model that governs plugin resolution, see [02-resource-sync.md](02-resource-sync.md).
+For the layered resource model that governs plugin resolution, see [resource-sync.md](resource-sync.md).
 
 ## Architecture
 
@@ -189,7 +189,7 @@ agents plugins remove rush-toolkit --keep-source
 
 ## See Also
 
-- [02-resource-sync.md](02-resource-sync.md) — how plugins participate in the layered resource sync model
+- [resource-sync.md](resource-sync.md) — how plugins participate in the layered resource sync model
 - [docs/subagents.md](subagents.md) — subagent definitions that plugins can bundle
 - [docs/hooks.md](hooks.md) — hook manifests that plugins can ship
 - [docs/workflows.md](workflows.md) — workflow bundles that can reference plugins

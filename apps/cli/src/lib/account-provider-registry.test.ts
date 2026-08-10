@@ -11,4 +11,11 @@ describe('account provider adapters', () => {
   it('fails loud for an incompatible provider and host', () => {
     expect(() => getAccountProvider('cursor').envFor('claude', 'api-key')).toThrow("cannot authenticate the claude harness");
   });
+
+  it('derives the base-url override env from the provider connection env', () => {
+    expect(getAccountProvider('openrouter').baseUrlEnvFor('claude')).toBe('ANTHROPIC_BASE_URL');
+    expect(getAccountProvider('openrouter').baseUrlEnvFor('codex')).toBe('OPENAI_BASE_URL');
+    // A provider with no endpoint env on that host has nothing to override.
+    expect(getAccountProvider('cursor').baseUrlEnvFor('cursor')).toBeNull();
+  });
 });

@@ -52,7 +52,7 @@ count — and those facts are lost the moment the process exits unless we persis
 
 ### Cross-surface active-session cache (RUSH-2062)
 
-`session-cache.ts` is the daemon-warmed shared snapshot menubar / Factory /
+`session-cache.ts` is the daemon-warmed shared snapshot menubar / ext /
 watchdog / CLI read so they do not each re-fan-out a full gather. The daemon
 publishes **this host only** every ~15s (`publishLocalActiveSessions` from
 `daemon.ts`); `gatherActiveSessions` is cache-first for unscoped local/fleet

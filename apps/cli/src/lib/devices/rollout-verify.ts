@@ -5,11 +5,15 @@
  * `exit 0` alone ({@link ../devices/fleet.js runFleet}, `fleet.ts:262`), rendered
  * as `ok  exit 0` (`commands/ssh.ts:416`). That exit code says the npm global was
  * upgraded — it says nothing about **which copy `agents` resolves to on that
- * box**. On a dev box `scripts/install.sh` puts a side-by-side build at
- * `~/.local/agents-cli-dev` and points `~/.local/bin/agents` at it
- * (`scripts/install.sh:38,138`), which is earlier on PATH than the npm global.
- * The upgrade then succeeds, the rollout prints `ok`, and every `agents` command
- * on that box still runs the old dev code (RUSH-2446).
+ * box**. Any install earlier on PATH than the npm global — a stale copy in
+ * another node prefix, a Homebrew shim, a hand-made symlink — keeps winning the
+ * name after the upgrade. The upgrade then succeeds, the rollout prints `ok`,
+ * and every `agents` command on that box still runs the old code (RUSH-2446).
+ *
+ * `scripts/install.sh` used to be the usual culprit, linking its side-by-side
+ * dev build over `~/.local/bin/agents`; it now publishes `agents-dev` instead and
+ * cleans up the links it left. This probe stays as the general backstop — it is
+ * name-based (`command -v agents`), so it catches every other cause too.
  *
  * So the rollout asks each box one more question after upgrading: what does
  * `agents` resolve to here, and what version does it report? A box whose

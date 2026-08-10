@@ -844,6 +844,26 @@ describeExec('buildExecCommand', () => {
       expect(cmd[indices[1] + 1]).toBe('/b');
     });
 
+    it('expands a ~ grant, because no shell will (claude)', () => {
+      // A grant forwarded to a host crosses SSH single-quoted, so the remote
+      // login shell never expands `~` — claude would then resolve it as a
+      // directory literally named `~` and the grant would be a silent no-op.
+      // Expansion has to happen on the side that runs the harness.
+      const home = process.env.HOME ?? os.homedir();
+      const cmd = buildExecCommand(opts({ agent: 'claude', addDirs: ['~/.agents/.system'] }));
+      const i = cmd.indexOf('--add-dir');
+      expect(i).toBeGreaterThan(-1);
+      expect(cmd[i + 1]).toBe(path.join(home, '.agents/.system'));
+      expect(cmd[i + 1].startsWith('~')).toBe(false);
+    });
+
+    it('expands a ~ grant for codex workspace roots too', () => {
+      const home = process.env.HOME ?? os.homedir();
+      const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'edit', addDirs: ['~/.agents/.system'] }));
+      expect(cmd.join(' ')).toContain(`"${path.join(home, '.agents/.system')}" = true`);
+      expect(cmd.join(' ')).not.toContain('"~/.agents/.system"');
+    });
+
     it('codex edit folds addDirs into the named workspace profile', () => {
       const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'edit', addDirs: ['/a'] }));
       expect(cmd).not.toContain('--add-dir');

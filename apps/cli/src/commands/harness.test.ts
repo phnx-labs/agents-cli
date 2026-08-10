@@ -10,20 +10,28 @@ import { setKeychainBackendForTest, secretsKeychainItem, getKeychainToken, type 
 import { keychainItemName } from '../lib/secrets/profiles.js';
 import { writeBundleWithItems, keychainRef } from '../lib/secrets/bundles.js';
 import { addAccount, findAccount } from '../lib/account-registry.js';
+import { _resetFileStoreForTest } from '../lib/secrets/filestore.js';
 
 let TEST_ROOT: string;
 let USER_DIR: string;
+let previousMetaIndex: string | undefined;
 
 beforeEach(() => {
   TEST_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-test-'));
   USER_DIR = path.join(TEST_ROOT, '.agents');
   fs.mkdirSync(path.join(USER_DIR, 'profiles'), { recursive: true });
+  previousMetaIndex = process.env.AGENTS_SECRETS_META_INDEX_FILE;
+  process.env.AGENTS_SECRETS_META_INDEX_FILE = path.join(TEST_ROOT, 'bundle-index.json');
+  _resetFileStoreForTest({ fileDir: path.join(TEST_ROOT, 'secrets'), passphrase: 'harness-test' });
   vi.spyOn(state, 'getUserAgentsDir').mockReturnValue(USER_DIR);
   vi.spyOn(console, 'log').mockImplementation(() => {});
 });
 
 afterEach(() => {
   setKeychainBackendForTest(null);
+  _resetFileStoreForTest();
+  if (previousMetaIndex === undefined) delete process.env.AGENTS_SECRETS_META_INDEX_FILE;
+  else process.env.AGENTS_SECRETS_META_INDEX_FILE = previousMetaIndex;
   vi.restoreAllMocks();
   fs.rmSync(TEST_ROOT, { recursive: true, force: true });
 });

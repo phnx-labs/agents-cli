@@ -27,13 +27,41 @@ import {
   writeState,
   recordFireTime,
   writeFireRecord,
+  recordCheck,
+  readLiveness,
+  markDroughtNotified,
 } from './state.js';
 import { dispatchAction, type DispatchResult } from './dispatch.js';
+import { sendToOwner } from '../notify.js';
 
 /** How often the engine wakes to check which monitors are due. */
 const TICK_MS = 5_000;
 /** Default evaluation cadence for sources that carry no explicit interval. */
 const DEFAULT_INTERVAL_MS = 60_000;
+/**
+ * Consecutive failed polls before the engine escalates a drought to the owner.
+ * A monitor that looks healthy (enabled, daemon up) but whose source errors
+ * every poll does no real work — the "every signal reads healthy while zero work
+ * happened" failure RUSH-2485 is about. One notification per drought.
+ */
+const DROUGHT_THRESHOLD = 5;
+/** Poll-model source types the engine actually evaluates on a cadence; ws/webhook are push-only and inert here. */
+export const POLL_SOURCE_TYPES = new Set(['command', 'poll', 'poll-http', 'file', 'device']);
+
+/**
+ * Whether a monitor's liveness has crossed into a drought worth notifying the
+ * owner about: enough consecutive failed checks, and not already notified for
+ * this drought. Pure so the branch is unit-testable without a real notify.
+ */
+export function shouldEscalateDrought(liveness: MonitorLivenessLike): boolean {
+  return liveness.consecutiveErrors >= DROUGHT_THRESHOLD && !liveness.droughtNotifiedAt;
+}
+
+/** The liveness fields the drought predicate reads. */
+interface MonitorLivenessLike {
+  consecutiveErrors: number;
+  droughtNotifiedAt?: string;
+}
 
 /** The fire/no-fire decision for one observation, plus what to persist. */
 export interface FireDecision {
@@ -185,22 +213,82 @@ export class MonitorEngine {
     }
   }
 
-  private async runMonitor(monitor: MonitorConfig): Promise<void> {
+  /**
+   * Evaluate one monitor once and record the outcome. Public so the daemon tick
+   * and tests drive the exact same path. A "failed check" is an evaluation that
+   * produced no observation, threw, OR fired an action that failed — all three
+   * are "the monitor ran and accomplished nothing", the drought signal. A poll
+   * that observes and either fires cleanly or matches nothing is a success and
+   * resets the streak.
+   */
+  async runMonitor(monitor: MonitorConfig): Promise<void> {
+    // Push-only sources (ws/webhook) deliver through subscribe, not this loop —
+    // they return null from evaluate by design, so they have no poll to record.
+    const isPollSource = POLL_SOURCE_TYPES.has(monitor.source.type);
+    if (!isPollSource) return;
+    const checkedAt = new Date().toISOString();
+    let checkError: string | undefined;
     try {
-      const { observation, decision } = await evaluateMonitorOnce(monitor);
-      if (!observation || !decision) return;
-      if (decision.fire && decision.event) {
-        await this.fire(monitor, decision, decision.event);
-      } else if (decision.persist) {
-        // Silent baseline / no-change: record the value so we don't re-fire.
-        writeState(monitor.name, decision.value, decision.dedupeKey);
+      const observation = await evaluateSource(monitor.source);
+      if (!observation) {
+        checkError = 'source produced no observation';
+      } else {
+        const decision = decideFire(monitor, observation);
+        if (decision.fire && decision.event) {
+          const result = await this.fire(monitor, decision, decision.event);
+          if (!result.ok) checkError = `action ${result.kind} failed: ${result.error ?? 'unknown'}`;
+        } else if (decision.persist) {
+          // Silent baseline / no-change: record the value so we don't re-fire.
+          writeState(monitor.name, decision.value, decision.dedupeKey);
+        }
       }
     } catch (err) {
-      this.logFn('ERROR', `monitor '${monitor.name}' evaluation failed: ${(err as Error).message}`);
+      checkError = (err as Error).message;
+      this.logFn('ERROR', `monitor '${monitor.name}' evaluation failed: ${checkError}`);
+    }
+    this.afterCheck(monitor, checkedAt, checkError);
+  }
+
+  /**
+   * Record the poll heartbeat and, on a sustained failure streak, escalate a
+   * drought to the owner exactly once. The heartbeat is what makes a
+   * polling-but-not-matching monitor visibly distinct from one the engine never
+   * touched (RUSH-2485); the streak is what turns "every poll fails and the owner
+   * never hears about it" into one notification.
+   */
+  private afterCheck(monitor: MonitorConfig, checkedAt: string, error?: string): void {
+    const liveness = recordCheck(monitor.name, checkedAt, error);
+    if (error && shouldEscalateDrought(liveness)) {
+      void this.escalateDrought(monitor, liveness.consecutiveErrors, error);
     }
   }
 
-  private async fire(monitor: MonitorConfig, decision: FireDecision, event: MonitorEvent): Promise<void> {
+  /** Notify the owner that an enabled monitor has failed N checks in a row and done nothing. */
+  private async escalateDrought(
+    monitor: MonitorConfig,
+    consecutiveErrors: number,
+    error: string,
+  ): Promise<void> {
+    const at = new Date().toISOString();
+    // Stamp the marker BEFORE the send so a slow/failing notify can't re-fire the
+    // drought on the next tick; recordCheck clears it on the first good check.
+    markDroughtNotified(monitor.name, at);
+    const text =
+      `Monitor '${monitor.name}' has failed ${consecutiveErrors} checks in a row and accomplished nothing. ` +
+      `Last error: ${error}`;
+    try {
+      const result = await sendToOwner(text);
+      this.logFn(
+        result.ok ? 'WARN' : 'ERROR',
+        `monitor '${monitor.name}' drought (${consecutiveErrors} failed checks) → notify owner` +
+          (result.ok ? '' : ` FAILED: ${result.error}`),
+      );
+    } catch (err) {
+      this.logFn('ERROR', `monitor '${monitor.name}' drought notify threw: ${(err as Error).message}`);
+    }
+  }
+
+  private async fire(monitor: MonitorConfig, decision: FireDecision, event: MonitorEvent): Promise<DispatchResult> {
     const now = Date.now();
     let fireTimes: number[] | undefined;
 
@@ -222,7 +310,9 @@ export class MonitorEngine {
           `monitor '${monitor.name}' exceeded rate limit (${monitor.rateLimit.max}/${monitor.rateLimit.per}) — auto-paused`,
         );
         this.loadAll();
-        return;
+        // An auto-pause is a deliberate stop, not a failed action — don't let it
+        // feed the drought streak (the monitor is now disabled anyway).
+        return { kind: monitor.action.type, ok: true };
       }
     }
 
@@ -247,5 +337,6 @@ export class MonitorEngine {
         (result.runId ? ` (run: ${result.runId})` : '') +
         (result.ok ? '' : ` FAILED: ${result.error}`),
     );
+    return result;
   }
 }

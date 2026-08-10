@@ -14,8 +14,8 @@ breaks fleet fan-out; a secret that materializes into an agent's transcript).
 mandatory, not optional.
 
 This doc holds the **contracts** (the guarantees). The per-feature reference docs
-— [`05-sessions.md`](05-sessions.md), [`secrets.md`](secrets.md),
-[`architecture.md`](architecture.md), [`08-secrets-agent-process-model.md`](08-secrets-agent-process-model.md),
+— [`sessions.md`](sessions.md), [`secrets.md`](secrets.md),
+[`architecture.md`](architecture.md), [`secrets-agent-process-model.md`](secrets-agent-process-model.md),
 [`secrets-trust-boundaries.md`](secrets-trust-boundaries.md)
 — hold the **implementation-level detail and how-to**. Read the spec for the
 guarantee, the reference for the mechanism.
@@ -74,14 +74,14 @@ row its surface sits in.
 |---|---|---|
 | **Specified here** | `sessions`, `secrets`, `run`, the scheduling/executor singularity, **routine execution & readiness**, `watchdog` | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
 | **Governed in part** | `monitors`, `doctor`, `daemon` | One requirement reaches them, no command contract does. `monitors` is bound by [§Scheduling & execution singularity](#scheduling--execution-singularity) (SING-5, SING-8, SING-9) — who may schedule and execute it. `doctor` is bound by SEC-17 for one behavior only: warning on a credential-shaped var in a shell rc file. `daemon` is bound by SING-1 (it IS the singular scheduler/executor) and SING-4a (the `daemon.enabled` kill switch); its status/health rendering (`agents daemon status`/`services`/`doctor`) carries no requirement of its own. Everything else these commands do is unspecified. |
-| **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `pty`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | A design doc describes the mechanism — [hosts.md](hosts.md), [teams.md](teams.md), [cloud.md](cloud.md), [02-resource-sync.md](02-resource-sync.md), [01-version-management.md](01-version-management.md), … — but states **no** requirements. Verified: `hosts.md`, `teams.md` and `cloud.md` contain **zero capitalized RFC-2119 keywords**. `hosts.md` and `teams.md` do use lowercase "must" in prose ("the remote run must be bounded", `hosts.md:124`; "you must declare what each one owns", `teams.md:207`) — which reads normative but is not, per this document's own capitalization rule. That is exactly the trap: treat those docs as explanation, never as a contract. |
+| **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `pty`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | A design doc describes the mechanism — [hosts.md](hosts.md), [teams.md](teams.md), [cloud.md](cloud.md), [resource-sync.md](resource-sync.md), [version-management.md](version-management.md), … — but states **no** requirements. Verified: `hosts.md`, `teams.md` and `cloud.md` contain **zero capitalized RFC-2119 keywords**. `hosts.md` and `teams.md` do use lowercase "must" in prose ("the remote run must be bounded", `hosts.md:124`; "you must declare what each one owns", `teams.md:207`) — which reads normative but is not, per this document's own capitalization rule. That is exactly the trap: treat those docs as explanation, never as a contract. |
 | **Unspecified** | `wallet`, `helper`, `sync`/`apply`/`status`, `worktree`, `webhook`, `funnel`, `mailboxes`, `feed`, `message`/`send`, `budget`, `audit`, and the remaining groups | Neither a spec nor a design doc. Behavior is whatever the code does today; nothing here entitles a caller to it. |
 
 **Where the absence bites hardest.** These act on other machines, hold durable
 state, or sit next to credentials, and have no normative contract today:
 
 1. **`hosts` / `ssh` / `devices`** (`commands/hosts.ts`, `commands/ssh.ts`) — dispatches
-   arbitrary agent runs to other machines over SSH. [09-ssh-transport.md](09-ssh-transport.md)
+   arbitrary agent runs to other machines over SSH. [ssh-transport.md](ssh-transport.md)
    and [hosts.md](hosts.md) describe the transport; no requirement pins it. Individual
    SSH guarantees are stated piecemeal inside the specified sections (SES-CROSS-1,
    SEC-CROSS-1, the `--host` requirements in [§Agent execution](#agent-execution)),
@@ -106,7 +106,7 @@ one of the other rows rather than leaving it unlisted.
 
 This is the **contract** for `agents sessions`: what a human, an agent, or a
 downstream tool is entitled to rely on, stated as testable requirements — not a
-how-to (that is [05-sessions.md](05-sessions.md)). It exists because features
+how-to (that is [sessions.md](sessions.md)). It exists because features
 have regressed by quietly deviating from an unwritten contract (a new harness
 parser that throws on a malformed line; a renderer that drops the preview; a
 `--json` shape change that breaks fleet fan-out). When code and this spec
@@ -166,7 +166,7 @@ SSH access (§7); rendering sessions that no harness produced.
   its parser + `dispatchAgentScan` arm), not special-case a caller.
 - **SES-2 (MUST).** Each harness's transcript location + on-disk format is fixed
   and MUST be parsed from its native shape (JSONL / single-JSON / SQLite / CLI
-  stdout) as tabled in [05-sessions.md](05-sessions.md#architecture) and
+  stdout) as tabled in [sessions.md](sessions.md#architecture) and
   `lib/session/discover.ts` / `lib/session/parse.ts`. Roots MUST include the live
   home, every version-home, and backup mirrors, deduped by realpath, **live root
   scanned first** (`lib/session/discover.ts:772-787,1092-1093`).
@@ -257,7 +257,7 @@ SSH access (§7); rendering sessions that no harness produced.
 - **SES-12 (MUST).** `agents sessions <id> --json` and `--json` listing MUST emit
   the `SessionMeta` shape (`lib/session/types.ts:85-192`). The field set, its
   derivation, and whether each is always populated is the table in
-  [05-sessions.md](05-sessions.md#sessionmeta-list-output) — that table is
+  [sessions.md](sessions.md#sessionmeta-list-output) — that table is
   normative for field names.
 - **SES-13 (MUST).** "Where the session started" is carried by **three distinct
   axes**, and consumers MUST NOT expect a single `origin` field to hold all of it:
@@ -295,7 +295,7 @@ SSH access (§7); rendering sessions that no harness produced.
   Status: `[Intended]` — coverage is uneven today (the live path forces
   non-Codex→Claude, and no harness populates `costUsd`); the shortfall is
   SES-GAP-2.
-- **SES-38 (MUST).** A Claude session MUST be attributed to the account that
+- **SES-44 (MUST).** A Claude session MUST be attributed to the account that
   produced *it*, never to one account resolved once per process. Attribution is a
   pure function of the transcript's `file_path` and its recorded `version` — no
   per-file I/O, no dependence on the transcript still existing — resolved in
@@ -310,11 +310,11 @@ SSH access (§7); rendering sessions that no harness produced.
   recorded version — the file's location is what proves which config dir was used.
   Attribution is implemented for Claude only; other harnesses MUST report a NULL
   `account_key` rather than a guessed one.
-- **SES-39 (MUST).** Grouping MUST key on the org-scoped `account_key`
+- **SES-45 (MUST).** Grouping MUST key on the org-scoped `account_key`
   (`claude:org=<uuid>`), never on the email: two orgs under one email (a Team seat
   and a personal Max plan) are separate rate-limit buckets, the same invariant
   `candidateIdentity` enforces in `lib/rotate.ts`. `account` is display-only.
-- **SES-40 (MUST).** A session whose account cannot be established MUST surface as
+- **SES-46 (MUST).** A session whose account cannot be established MUST surface as
   `unattributed:<reason>`, with distinct reasons in distinct buckets, and MUST NOT
   be dropped or folded into a real account. This includes retired homes that are
   signed out, backup mirrors (no `.claude.json`), versions whose retired snapshots
@@ -399,9 +399,9 @@ SSH access (§7); rendering sessions that no harness produced.
 - **SES-20 (MUST).** `migrate` MUST NOT kill the source before the transcript is
   on the target and its session is confirmed live
   (`commands/sessions-migrate.ts:590-593`; the invariant also stated at
-  [05-sessions.md](05-sessions.md):476-477). A non-native-resumable harness MUST
+  [sessions.md](sessions.md):476-477). A non-native-resumable harness MUST
   transparently fall back to rehydrate, never a silent skip
-  ([05-sessions.md](05-sessions.md):471-474).
+  ([sessions.md](sessions.md):471-474).
 - **SES-21 (MUST).** `fork` MUST copy the transcript under a fresh UUID (git-branch
   semantics), leaving the original untouched, and MUST refuse harnesses it can't
   yet handle with a clear message (Claude-only in v1)
@@ -479,12 +479,25 @@ SSH access (§7); rendering sessions that no harness produced.
     fan-out preserves their foreign `machine`), so a THIRD box sees a shim that
     is not its own. The box to reach for the process is `sessionProcessHost`
     (`offloadedFrom ?? machine`), never `machine` alone.
-  - **Scope: host-dispatched runs only.** The correction is driven by the index
-    row `agents run --host/--device` writes (`lib/hosts/session-index.ts`).
-    Remote **teams teammates** are not covered — `listTeamsActive` sets no
-    `machine` and nothing registers an index row for them — so a
-    `--device`-pinned teammate is still attributed to the orchestrator. Named as
-    SES-GAP-10 rather than silently claimed.
+  - **Remote teams teammates are covered too.** A `teams add --device <peer>`
+    teammate executes on `<peer>` but gets no host-dispatch index row, so the
+    fold above cannot reach it. `listTeamsActive` (`lib/session/active.ts`)
+    instead folds the teammate record's own `AgentProcess.hostName` into
+    `machine = normalizeHost(hostName)` and `offloadedFrom = <orchestrator>`
+    whenever the teammate runs on a box other than this one — the same shape a
+    `run --device` row gets, so `--device <orchestrator>` no longer lists a
+    teammate executing on a peer (was SES-GAP-10, RUSH-2486). A teammate pinned
+    to this box (or an unpinned local one) is left unattributed for the
+    self-stamp.
+  - **The pool listing agrees with the live view.** `queryIndexedSessions`
+    (`lib/session/discover.ts`) MUST keep the machine an offloaded run recorded
+    on its empty-file index row (`registerHostSession`) rather than re-deriving
+    it from the transcript path — `machineForSessionFile('')` falls back to THIS
+    box, which re-attributed the dispatcher's own pool row to itself and split it
+    from the executing peer's fan-out row, so `agents sessions <id>` read as
+    "ambiguous (2 sessions)" for a live offloaded run (RUSH-2486 / criterion 2 of
+    RUSH-2479). The path derivation still owns live-home files and synced
+    mirrors, whose recorded machine already equals it.
 - **SES-24 (MUST).** `agents sessions export --encrypt` MUST seal each
   transcript body client-side with AES-256-GCM (fresh IV) before it leaves the
   machine, and `agents sessions import` MUST decrypt before writing it to the
@@ -538,7 +551,7 @@ SSH access (§7); rendering sessions that no harness produced.
 - **SES-30 (MUST).** One malformed row's constraint failure MUST NOT roll back the
   batch and MUST NOT stamp that row's ledger entry, so it is retried next scan
   (self-healing) (`lib/session/db.ts:975-982,1035-1039`).
-- **SES-40 (MUST).** The local index MUST be authoritative for a session's
+- **SES-47 (MUST).** The local index MUST be authoritative for a session's
   user-turn content: a session whose transcript file is gone from disk but whose
   `session_text` `content` still holds its user turns MUST remain listable and
   renderable, not dropped (RUSH-2436). `querySessions` and `topSessionsByCost`
@@ -770,7 +783,7 @@ SSH access (§7); rendering sessions that no harness produced.
 The command surface (bare `sessions [query]`, `preview`, `tail`, `sync`, `resume`, `focus`,
 `detach`, `attach`, `inject`, `export`, `import`, `migrate`/`relocate`,
 `migrations`, `backfill tools`, `fork`) with flags is the reference in
-[05-sessions.md](05-sessions.md); this spec governs the guarantees behind it.
+[sessions.md](sessions.md); this spec governs the guarantees behind it.
 
 #### 4.2 Machine-readable output (STABLE — agents depend on these)
 
@@ -778,7 +791,7 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `sync`, `resume
   `SessionMeta` (`serializeSessionsJson`, `commands/sessions.ts:695-701,1272`);
   `sessions <id> --json` MUST emit `{ session, events }` (a bare event array is
   the pre-1.20.51 shape — consumers read `output.events`,
-  [05-sessions.md](05-sessions.md):142-147). The fleet browser itself shells peers
+  [sessions.md](sessions.md):142-147). The fleet browser itself shells peers
   with `sessions --all --json --limit 500` (`commands/sessions-browser.ts:219`),
   so the array shape is load-bearing across the fleet.
 - **SES-IF-2 (MUST).** `sessions --active --json` MUST emit `ActiveSession[]` with
@@ -913,7 +926,7 @@ normative — a change that widens/narrows a cell is a spec change.
 - **SES-COMPAT-4 (MUST).** On the streaming path, `--host` forwards every other flag
   verbatim to the peer's same-version binary; the SSH target MUST stay validated
   against `SSH_TARGET_RE` to block argv-flag smuggling
-  ([05-sessions.md](05-sessions.md):277). The interactive one-host browser
+  ([sessions.md](sessions.md):277). The interactive one-host browser
   (SES-22) is the documented exception: it asks each peer a fixed
   `sessions --all --json --limit 500` (plus `--since`/`--teams`), so `--limit`,
   `--unmanaged`, and `--no-live` do not reach the peer there
@@ -927,7 +940,7 @@ normative — a change that widens/narrows a cell is a spec change.
 - Not a transcript **writer** — sessions are produced by the harnesses +
   `packages/session-tracker`; this tool only reads/indexes/renders.
 - No identity layer beyond SSH: "if you can `ssh <host>`, you own the box"
-  ([05-sessions.md](05-sessions.md):277-278).
+  ([sessions.md](sessions.md):277-278).
 
 **Known gaps (implemented-vs-intended drift to fix, not to hide):**
 - **SES-GAP-1.** `flatSessionRow` (`--flat`) and the picker's `formatPickerLabel`
@@ -962,9 +975,9 @@ normative — a change that widens/narrows a cell is a spec change.
 - **SES-GAP-6.** Whole-**file** JSON parse failure is inconsistent: Gemini throws
   (and `parseSession` has no outer catch), while Hermes/Antigravity degrade to
   `[]` (`lib/session/parse.ts:143-169,691-696`). Standardize on degrade-to-empty.
-- **SES-GAP-7 (resolved).** [05-sessions.md](05-sessions.md) once hardcoded schema
+- **SES-GAP-7 (resolved).** [sessions.md](sessions.md) once hardcoded schema
   version 13 while the code had moved on; it now cites the `SCHEMA_VERSION`
-  constant directly ([05-sessions.md](05-sessions.md):1184), and
+  constant directly ([sessions.md](sessions.md):1184), and
   `lib/session/db.ts`'s header comment carries the real path
   (`~/.agents/.history/sessions/sessions.db`). The standing rule is the point: any
   hardcoded schema number in prose drifts — cite the constant.
@@ -972,7 +985,7 @@ normative — a change that widens/narrows a cell is a spec change.
   older CLI opening a DB written by a newer one silently proceeds instead of
   failing safe (`lib/session/db.ts` schema gate). The "fail safe on newer DB"
   guarantee is aspirational until a guard is added.
-- **SES-GAP-9.** The archived-vs-phantom discriminator (SES-40) is *content
+- **SES-GAP-9.** The archived-vs-phantom discriminator (SES-47) is *content
   presence*, not supersession detection. A file-gone row keeps `archived` iff its
   `session_text` content is non-empty; there is no signal for "this session's
   content now lives under another current row." For real harnesses this is a
@@ -983,16 +996,17 @@ normative — a change that widens/narrows a cell is a spec change.
   Relatedly, the tool-index **backfill** path still purges an archived session's
   evidence when its source file is gone mid-backfill (`tool-index.ts`
   `ensureToolIndex` on a `statSync` throw, reached via `agents sessions backfill`);
-  SES-40 removed the purge only from the `querySessions` read path.
-- **SES-GAP-10.** SES-23a's execution-host attribution covers only
-  **host-dispatched runs** (`agents run --host/--device`), because it is driven by
-  the index row `registerHostSession` / `registerInteractiveHostSession` write
-  (`lib/hosts/session-index.ts:55,134`). A **remote teams teammate**
-  (`agents teams add … --device <peer>`) gets no such row and `listTeamsActive`
-  (`lib/session/active.ts`) never sets `machine`, so the orchestrator's
-  self-stamp claims it: `--device <orchestrator>` still lists a teammate
-  executing on the peer. Closing it means folding `AgentProcess`'s host
-  placement in `listTeamsActive` the same way.
+  SES-47 removed the purge only from the `querySessions` read path.
+- **SES-GAP-10 (resolved, RUSH-2486).** SES-23a's execution-host attribution now
+  covers **remote teams teammates** as well as host-dispatched runs. A
+  `agents teams add … --device <peer>` teammate still gets no index row, so
+  `listTeamsActive` (`lib/session/active.ts`) folds the teammate record's own
+  `AgentProcess.hostName` into `machine` + `offloadedFrom` directly — the same
+  shape `foldExecutionMachine` gives a `run --device` row — so the orchestrator's
+  self-stamp no longer claims a teammate executing on a peer. The sibling
+  false-ambiguous resume (the empty-file index row's recorded machine being
+  clobbered by the path derivation in `queryIndexedSessions`) is fixed in the
+  same change; see the SES-23a "pool listing agrees with the live view" bullet.
 ---
 
 ### 8. Given/When/Then scenarios
@@ -1628,7 +1642,7 @@ normative — a change that widens or narrows a cell is a spec change.
   work: either reserve the name in the secrets layer (and fail loud on a
   non-file backend) or drop the convention.
 - **SEC-GAP-4.** The broker's per-request capability-token auth (SEC-18) is not
-  reflected in `secrets.md` / `08-secrets-agent-process-model.md`, which still
+  reflected in `secrets.md` / `secrets-agent-process-model.md`, which still
   describe only the same-UID/socket-permission model.
 - **SEC-GAP-5 (closed by this change).** Changing a bundle's tier to `never` rewrote
   only the metadata item (`writeBundle`), leaving the value items' biometry ACL in
@@ -1795,13 +1809,18 @@ Credential account selection adds three requirements to that funnel:
   (`lib/account-registry.ts`).
 - **EXEC-ACCOUNT-2 (MUST).** Accounts MUST be created from durable API keys,
   setup tokens, or bearer tokens. A harness version's native OAuth login MUST
-  NOT define account identity (`commands/accounts.ts`).
+  NOT be converted into a provider account or copied between devices; it remains
+  a distinct, device-local native identity (`commands/accounts.ts`).
 - **EXEC-ACCOUNT-3 (MUST).** `agents run --account <name>`, profile `account:`,
-  and routine `account:` MUST use the same provider adapter and fail before spawn
-  when the provider cannot authenticate the host or the credential is absent on
-  the execution device (`lib/account-registry.ts`; `commands/exec.ts`;
-  `lib/profiles.ts`; `lib/runner.ts`). Explicit `--env` remains the final env
-  override. Cloud and lease placement MUST reject device-local accounts.
+  and a routine `account:` that names a provider bundle MUST use the same provider
+  adapter and fail before spawn when the provider cannot authenticate the host or
+  the credential is absent on the execution device. A routine `account:` that
+  names a harness-native identity MUST instead pin the installed version home that
+  owns it and fail before spawn when that identity is unavailable; it MUST NOT
+  rotate or forward the native identity through the provider-account path
+  (`lib/account-registry.ts`; `commands/exec.ts`; `lib/profiles.ts`;
+  `lib/runner.ts`). Explicit `--env` remains the final env override. Cloud and
+  lease placement MUST reject device-local accounts.
 
 Requirement keywords **MUST / MUST NOT / SHOULD / MAY** are used per
 [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119). Every requirement cites the
@@ -1959,7 +1978,7 @@ schema (`--json` passes through each agent's native stream format).
 - **EXEC-15 (clarifying note).** `buildExecEnv` MUST NOT set the raw `HOME`
   var for any agent — no `result.HOME = …` exists anywhere in `lib/exec.ts`.
   Isolation is realized purely through the agent-specific config-dir vars in
-  EXEC-14. This is narrower than `docs/00-concepts.md:87`'s framing ("sets
+  EXEC-14. This is narrower than `docs/concepts.md:87`'s framing ("sets
   `HOME` to the matching version home before exec-ing the binary") — that
   claim describes the generated **bash shim** script's own inline exports
   (`lib/shims.ts:280-330`), a separate code path from `buildExecEnv`, and even
@@ -2346,7 +2365,7 @@ and host/lease dispatch (`--host`/`--device`/`--remote-cwd`/`--no-follow`/
 
 **Known gaps (implemented-vs-intended drift to fix, not to paper over):**
 - **EXEC-GAP-1.** `buildExecEnv` isolates only 4 of 16 registered agents
-  (EXEC-16). `docs/00-concepts.md:87` reads as if `HOME` itself were swapped
+  (EXEC-16). `docs/concepts.md:87` reads as if `HOME` itself were swapped
   for every shimmed launch ("sets HOME to the matching version home before
   exec-ing the binary"); no literal `HOME=` assignment exists anywhere in
   the run engine (EXEC-15), and the doc's own claim is imprecise even for
@@ -2480,7 +2499,7 @@ nothing but its own view cache.
 - **Executor** — whatever performs the action once decided.
 - **Thin wrapper** — a UI surface whose only relationships to a fleet-affecting
   capability are (a) rendering its state, and (b) invoking the CLI command that
-  controls it (`apps/factory/AGENTS.md`, the root `AGENTS.md` §Core concepts).
+  controls it (`apps/ext/AGENTS.md`, the root `AGENTS.md` §Core concepts).
 
 ### 3. Requirements
 
@@ -2520,11 +2539,11 @@ nothing but its own view cache.
   cross-device state is limited to safe account labels, auth verdicts, and usage
   snapshots. Named API-key/setup-token/bearer accounts retain device-local secret
   material and synchronized metadata.
-- **SING-2 (MUST NOT).** A UI surface (apps/factory, the menubar app, the iOS app)
+- **SING-2 (MUST NOT).** A UI surface (apps/ext, the menubar app, the iOS app)
   MUST NOT own a timer, watcher, or loop that detects a condition and performs a
   fleet-affecting action. Detection and decision MUST live in the CLI, which holds
   the first-party state (sessions.db, usage snapshots, the device registry).
-  Canonical violation: the Factory watchdog rotate loop (2026-08-03) racing the
+  Canonical violation: the ext watchdog rotate loop (2026-08-03) racing the
   daemon's view of account health; canonical fix: PR #1914, which deleted it.
 - **SING-3 (MUST).** Where an action needs a UI-owned surface (typing into an editor
   tab, opening a tab), the UI MUST expose a narrow endpoint the CLI drives — the
@@ -2586,9 +2605,9 @@ nothing but its own view cache.
 - **SING-7 (SHOULD).** Multi-instance safety SHOULD be structural, not by
   convention: pid-claimed singletons for daemon loops (the daemon's claim), leader
   election with lease handoff for any remaining UI-side coordination protocol
-  (apps/factory `src/monitor/leader.ts` — presence fan-out only, not task
+  (apps/ext `src/monitor/leader.ts` — presence fan-out only, not task
   execution), and idempotent effects so a redelivery is a no-op.
-- **SING-11 (MUST).** A single scheduled fire MUST launch a routine at most once,
+- **SING-15 (MUST).** A single scheduled fire MUST launch a routine at most once,
   even when the same UTC occurrence is evaluated by more than one timer callback,
   a restart replays `loadAll()` (`lib/scheduler.ts`), or a manual `catchup` overlaps
   the daemon pass. Uniqueness MUST be a structural claim on the occurrence identity
@@ -2596,12 +2615,12 @@ nothing but its own view cache.
   the catch-up path: `claimMissedFire` (`lib/catchup.ts`) creates the run directory
   with a non-recursive `mkdir` — an atomic test-and-set — so the losing caller reports
   `already claimed by the scheduler` and never spawns a second agent
-  (`docs/03-routines.md` §Catching up a missed fire). Status: **Current** for the
+  (`docs/routines.md` §Catching up a missed fire). Status: **Current** for the
   catch-up/overlap path (the `missed`-record claim), **[Intended]** for the primary
   scheduled dispatch path (see SING-GAP-3): today the forward-timer dispatch has no
   durable per-slot claim of its own, so two live schedulers evaluating one occurrence
   is prevented by the pid-file singleton (SING-5), not by an occurrence claim.
-- **SING-12 (MUST).** The slot claim (SING-11 — "may this occurrence dispatch?") and
+- **SING-16 (MUST).** The slot claim (SING-15 — "may this occurrence dispatch?") and
   the active-run claim (SING-13 — "is an instance of this routine already running?")
   MUST be distinct guards: a routine that overlaps itself (a long run still executing
   when the next slot arrives) is a different condition from one occurrence firing
@@ -2773,14 +2792,14 @@ a machine-wide process sweep.)
   systemd, or a background-adjacent caller attempts to restart it, **THEN** the
   service-manager burst limit and `ensureDaemonStarted` circuit breaker stop rapid
   retries after a bounded number of consecutive failures (SING-14).
-- **GIVEN** a user disables a fleet-affecting capability from the Factory palette,
+- **GIVEN** a user disables a fleet-affecting capability from the ext's command palette,
   **WHEN** the command completes, **THEN** the CLI's config is the state that
   changed (`agents watchdog rotate off`), and the daemon, the menubar, and every
   other surface observe the same off state.
-- **GIVEN** a limited session lives in a Factory editor tab, **WHEN** the daemon
+- **GIVEN** a limited session lives in an AGI EXT editor tab, **WHEN** the daemon
   rotates it, **THEN** the daemon drives the extension's `/inject` endpoint to act
   in that tab — the extension performs no detection or decision of its own.
-- **GIVEN** a contributor adds a `setInterval` in apps/factory, **WHEN** the
+- **GIVEN** a contributor adds a `setInterval` in apps/ext, **WHEN** the
   callback performs anything beyond read-only rendering, **THEN** code review MUST
   flag it under the root `AGENTS.md` §Code review conventions ("No second
   scheduler") and the action MUST move to the CLI before merge.
@@ -2804,16 +2823,16 @@ a machine-wide process sweep.)
   the same ticket. It is now the shipped `auto-dispatch` system routine, which
   satisfies SING-9(a) via an owner pin: `agents routines devices auto-dispatch --set
   <device>`.
-- **SING-GAP-1.** The Factory monitor leader/follower protocol
-  (apps/factory `src/monitor/`) still coordinates presence fan-out inside the
+- **SING-GAP-1.** The AGI EXT monitor leader/follower protocol
+  (apps/ext `src/monitor/`) still coordinates presence fan-out inside the
   extension with its own election. It performs no fleet-affecting action today
   (post-#1914 it broadcasts read-side snapshots only), so it satisfies SING-2, but
   it is a second coordination fabric where the daemon's presence tracking
   (`lib/session/presence.ts`) would be the singular home. Informative; a future
   consolidation SHOULD retire it in the daemon's favor.
 - **SING-GAP-3 (RUSH-2290).** The primary scheduled-dispatch path has no durable
-  per-occurrence claim of its own (SING-11 [Intended]), the slot claim and the
-  active-run claim are not yet separated (SING-12 [Intended]), and self-overlap does
+  per-occurrence claim of its own (SING-15 [Intended]), the slot claim and the
+  active-run claim are not yet separated (SING-16 [Intended]), and self-overlap does
   not yet record a `skipped` run (SING-13 [Intended]). The catch-up path's atomic
   `mkdir` claim (`lib/catchup.ts`) already makes a *missed* fire at-most-once, and the
   daemon pid singleton (SING-5) prevents two schedulers, but a single scheduler that
@@ -2869,7 +2888,7 @@ a machine-wide process sweep.)
 The normative contract for **how a routine resolves its execution context, proves it
 is runnable, and records what happened** — the reliability half of routines, distinct
 from the scheduling-singularity half above (who may fire them). The how-it-works
-companion is [03-routines.md](03-routines.md). Requirement keywords
+companion is [routines.md](routines.md). Requirement keywords
 **MUST / MUST NOT / SHOULD / MAY** are per RFC 2119; scenarios are Given/When/Then.
 
 Most of this section is the target contract from the routine reliability plan
@@ -2886,7 +2905,7 @@ readiness/context fields RT-1..RT-8 describe.
 - **RT-1 (MUST).** `projects` (plural) is **grouping metadata only**: it organises a
   routine under a project group in `agents routines list` and the menu bar and MUST
   NOT affect scheduling or execution — the special value `["*"]` means "all defined
-  projects" (`lib/routines.ts` `normalizeProjects`; `docs/03-routines.md` §Project
+  projects" (`lib/routines.ts` `normalizeProjects`; `docs/routines.md` §Project
   tagging, "Tagging is **metadata-only**"). `projects[]` MUST NOT be silently promoted
   into an execution context. Status: **Current**.
 - **RT-2 (MUST, [Intended]).** A routine's **execution anchor** is a distinct singular
@@ -2962,11 +2981,11 @@ readiness/context fields RT-1..RT-8 describe.
   untrusted sandbox, dead account, dispatch failure) still owns a terminal run that is
   visible in `agents routines runs`, even though it has no session. Status: **Current**
   for run-first history (`missed`/`failed` runs exist with no session,
-  `docs/03-routines.md` §Run State Machine); **[Intended]** for the pre-session
+  `docs/routines.md` §Run State Machine); **[Intended]** for the pre-session
   readiness-failure runs (RT-5) and the menu History surface that renders them.
 - **RT-7 (MUST, [Intended]).** `RunMeta.status` MUST distinguish, at minimum:
   `running`, `completed`, `failed` (the body ran and errored), `timeout`, `missed`
-  (a scheduled fire the daemon never got to — SING-11), `blocked` (readiness failed,
+  (a scheduled fire the daemon never got to — SING-15), `blocked` (readiness failed,
   no body ran — RT-5), and `skipped` (the routine was already running, self-overlap —
   SING-13). `blocked` and `failed` MUST NOT be collapsed: a routine that never ran
   because its account was dead is a different operational state from one whose body
@@ -3115,7 +3134,7 @@ not the watchdog's.
   watchdog agree on which sessions are addressable (no duplicate weaker resolver).
 - **WD-16 (MUST).** When no addressable split exists, the tick MUST fall back (mailbox or
   headless `--resume`) or refuse-and-flag — it MUST NOT silently claim delivery.
-- **WD-17 (MUST).** Every decision MUST be appended to `watchdog.log` in the Factory event
+- **WD-17 (MUST).** Every decision MUST be appended to `watchdog.log` in the ext event
   shape, with persisted transcript context bounded so it cannot consume the audit window
   (`lib/watchdog/log.ts`).
 

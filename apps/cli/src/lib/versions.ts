@@ -1071,7 +1071,7 @@ export function getBinaryPath(agent: AgentId, version: string): string {
     return path.join(grokDownloads, `grok-${version}`);
   }
   if (agent === 'droid') {
-    // Factory's installer drops a standalone native binary (no npm package,
+    // Factory.ai's installer drops a standalone native binary (no npm package,
     // nothing in node_modules/.bin). The binary is global, not per-version —
     // config isolation rides the ~/.factory symlink switch, not a separate
     // binary per version. Install location is platform-specific:

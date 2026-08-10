@@ -849,6 +849,10 @@ export interface ActorConfig {
 
 /** Top-level structure of ~/.agents/.system/agents.yaml -- the CLI's persistent state. */
 export interface Meta {
+  /** Preferred provider account per harness. Explicit --account wins. */
+  accounts?: {
+    defaults?: Partial<Record<AgentId, string>>;
+  };
   agents?: Partial<Record<AgentId, string>>;
   /**
    * Per-agent preferred ISOLATED version — which copy a bare `agents run <agent>`
@@ -927,7 +931,7 @@ export interface Meta {
    * operator's config rather than an integration compiled into this CLI. When
    * this is unset/empty, an important-level post falls back to `notify.owner`
    * implicitly (RUSH-2123) — see lib/feed-broadcast.ts and
-   * docs/06-observability.md.
+   * docs/observability.md.
    */
   feed?: {
     broadcast?: FeedBroadcastConfig;

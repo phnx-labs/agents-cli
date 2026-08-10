@@ -372,7 +372,7 @@ agents run claude "..." --yes
 
 Caps are **cross-vendor**: one `per_project` / `per_day` cap spans Claude,
 Codex, Gemini, and every other agent the CLI dispatches. View and set them with
-`agents budget`. Full reference: [docs/06-observability.md](../../docs/06-observability.md#budget-guardrails-agents-budget).
+`agents budget`. Full reference: [docs/observability.md](../../docs/observability.md#budget-guardrails-agents-budget).
 
 ## Grant access to extra directories (Claude only)
 

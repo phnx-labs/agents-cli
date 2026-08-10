@@ -53,7 +53,7 @@ export interface ViewingIn {
  * BOTH "no client attached" and "could not locate the pane", so the pane's resolved
  * `tmuxTarget` is what separates them: without it there is no evidence of absence,
  * only absence of evidence. Claiming `'detached'` there would invent an orphaned
- * session — and a consumer acts on that claim (Factory's picker pre-ticks every
+ * session — and a consumer acts on that claim (the ext's picker pre-ticks every
  * detached row for rescue), so the wrong answer resumes a session nobody asked for.
  *
  * Shared by the `--active` row renderer and the `--json` serializer so a machine

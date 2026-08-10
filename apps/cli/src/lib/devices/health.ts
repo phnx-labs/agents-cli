@@ -8,7 +8,7 @@
  * of blocking the whole table.
  *
  * The parsers are pure and unit-tested (health.test.ts). They mirror the ones in
- * the Factory extension (apps/factory/src/core/deviceHealth.ts) — kept as a
+ * AGI EXT (apps/ext/src/core/deviceHealth.ts) — kept as a
  * separate copy on purpose: the CLI does not import across packages.
  */
 

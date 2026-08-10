@@ -17,10 +17,10 @@ import { AGENTS, agentConfigDirName, findInPath } from './agents.js';
 import { createLink } from './platform/index.js';
 import { foldLegacySystemRepo, copyDirSkipExisting } from './migrate-fold.js';
 export { foldLegacySystemRepo } from './migrate-fold.js';
-import { migrateLegacyRoutineActivation, setJobEnabled, listJobs, validateJob } from './routines.js';
-import { addEnabledRoutinesOnUpgrade, enabledRoutineNames, replaceEnabledRoutines } from './routine-activation.js';
+import { migrateLegacyRoutineActivation, listJobs, validateJob } from './routines.js';
+import { setConfigValue } from './device-config.js';
+import { enabledRoutineNames, replaceEnabledRoutines } from './routine-activation.js';
 import { evaluateActivationReadiness } from './routine-readiness.js';
-import { DAEMON_TICK_ROUTINE_NAMES } from './daemon-ticks.js';
 import { migrateDeviceConfigToCentral } from './devices/config-migration.js';
 
 const HOME = process.env.HOME ?? os.homedir();
@@ -659,7 +659,7 @@ function repairAgentConfigSymlinks(): void {
 /**
  * Repair self-referential agent binary symlinks.
  *
- * Some installScript-based agents — notably Factory's `droid`, whose installer
+ * Some installScript-based agents — notably Factory.ai's `droid`, whose installer
  * drops a standalone native binary at ~/.local/bin/droid — were registered at
  * install time by resolving the post-install binary with `which <cli>`. Because
  * ~/.agents/.cache/shims sits ahead of ~/.local/bin on PATH, `which` could
@@ -1865,35 +1865,37 @@ export function pauseUnreadyEnabledRoutines(): void {
 }
 
 /**
- * Fold the legacy watchdog enable sentinel into the watchdog routine.
+ * Fold the legacy watchdog enable sentinel into the `watchdog.enabled` config.
  *
  * The always-on watchdog used to be gated by a presence sentinel at
- * `<runtime-state>/watchdog/enabled`; it is now a daemon routine. A user who had
- * run `agents watchdog enable` under the old build has that file on disk — without
- * this, upgrading would silently drop them back to OFF (the always-on nudge just
- * stops), the worst failure mode for a "survives reboots" feature. If the sentinel
- * exists, ensure the `watchdog` routine exists AND is enabled, then delete the
- * sentinel so this runs exactly once. If ensuring the routine fails, the sentinel
- * is left in place so a later run retries rather than silently losing the opt-in.
+ * `<runtime-state>/watchdog/enabled`; it is now a daemon-owned timer (RUSH-2495)
+ * gated by the `watchdog.enabled` device-config flag — the same flag
+ * `agents watchdog enable` writes. A user who had run `agents watchdog enable`
+ * under the old build has that file on disk; without this, upgrading would
+ * silently drop them back to OFF (the nudge just stops), the worst failure mode
+ * for a "survives reboots" feature. If the sentinel exists, set
+ * `watchdog.enabled: true`, then delete the sentinel so this runs exactly once.
+ * If setting it fails, the sentinel is left in place so a later run retries
+ * rather than silently losing the opt-in.
  *
- * Both seams are injectable so the migration is unit-testable without touching the
- * real routines dir (and without racing the routine module's own tests).
+ * The setter seam is injectable so the migration is unit-testable without
+ * touching the real device config.
  */
-export function migrateWatchdogSentinelToRoutine(
+export function migrateWatchdogSentinelToConfig(
   sentinelPath: string = path.join(CACHE_DIR, 'state', 'watchdog', 'enabled'),
-  enable: (name: string, enabled: boolean) => void = setJobEnabled,
+  enable: (value: boolean) => void = (value) => setConfigValue('watchdog.enabled', value),
 ): void {
   if (!fs.existsSync(sentinelPath)) return;
   try {
-    enable('watchdog', true);
+    enable(true);
   } catch (err) {
     console.error(
-      `watchdog sentinel migration: could not create the routine (${(err as Error).message}); leaving the sentinel for a later retry`,
+      `watchdog sentinel migration: could not set watchdog.enabled (${(err as Error).message}); leaving the sentinel for a later retry`,
     );
     return;
   }
   try { fs.rmSync(sentinelPath); } catch { /* already gone */ }
-  console.error('Migrated watchdog: legacy enable sentinel → watchdog routine (kept enabled)');
+  console.error('Migrated watchdog: legacy enable sentinel → watchdog.enabled config (kept enabled)');
 }
 
 /**
@@ -2195,14 +2197,10 @@ export async function runMigration(): Promise<void> {
   // Fold legacy host-placement `remoteCwd` into the canonical portable `cwd`.
   migrateRoutineRemoteCwdToCwd();
   migrateLegacyRoutineActivation();
-  // These routines replace daemon timers that were always active. Devices with
-  // an existing activation manifest must retain that behavior after upgrade.
-  addEnabledRoutinesOnUpgrade(DAEMON_TICK_ROUTINE_NAMES);
 
-  // Fold the legacy watchdog enable sentinel into the watchdog routine so a user
-  // who opted in under the old build stays opted in after upgrading. After the
-  // routine rewrites above so the routines dir is in its canonical shape.
-  migrateWatchdogSentinelToRoutine();
+  // Fold the legacy watchdog enable sentinel into `watchdog.enabled` config so a
+  // user who opted in under the old build stays opted in after upgrading.
+  migrateWatchdogSentinelToConfig();
   // Deactivate any routine whose execution context no longer resolves ready, so
   // an anchor-less agent/workflow routine cannot keep firing-and-failing after the
   // fold (RUSH-2290). Runs AFTER the tick/watchdog routines are added so those

@@ -176,7 +176,7 @@ Reply to a teammate (or answer a `feed` block) with `agents message <id> "…"` 
 ## Budget Guardrails
 
 Teammates **inherit the project's budget caps** from `agents.yaml` (see
-[docs/06-observability.md](../../docs/06-observability.md#budget-guardrails-agents-budget)).
+[docs/observability.md](../../docs/observability.md#budget-guardrails-agents-budget)).
 Before each teammate launches, its estimated cost is projected onto current
 spend; under `on_exceed: block`, a teammate that would breach a cap is
 **refused** (the spawn fails with `[budget] BLOCKED teammate …`). Caps are

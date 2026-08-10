@@ -1,9 +1,9 @@
 # Architecture
 
 How the parts fit together: **two application layers** (the `agents` CLI and the
-Factory extension), **two meanings of "session"** (a transcript vs a live identity),
+AGI EXT), **two meanings of "session"** (a transcript vs a live identity),
 and the on-disk stores that connect them. Read this once and the rest of the docs
-(`05-sessions.md`, `06-observability.md`, `teams.md`) slot into place.
+(`sessions.md`, `observability.md`, `teams.md`) slot into place.
 
 Everything here is read from source — file references are `path:line` at the time of
 writing; treat them as pointers, not guarantees.
@@ -18,8 +18,8 @@ writing; treat them as pointers, not guarantees.
   state and every mechanism: the SQLite transcript index, `sessions` / `teams` /
   `run` / `cloud`, the CLI-side pid→id registry, the audit log, and the SSH fan-out
   to peer machines.
-- **`apps/factory` — the Factory VS Code extension. A consumer.** It spawns agent
-  terminals as tabs and renders the Factory Floor dashboard, but it holds **no data
+- **`apps/ext` — AGI EXT, the VS Code extension. A consumer.** It spawns agent
+  terminals as tabs and renders the Fleet dashboard, but it holds **no data
   models of its own** beyond the live-session state file. For "what's running", it
   shells out to the CLI (`agents sessions --active --json`) and reshapes the JSON.
 
@@ -27,7 +27,7 @@ writing; treat them as pointers, not guarantees.
 flowchart LR
   subgraph machine["one machine"]
     CLI["apps/cli — the agents CLI<br/><b>the framework</b><br/>sessions index · teams · run · cloud<br/>pid-registry · events.jsonl · SSH fan-out"]
-    FAC["apps/factory — Factory extension<br/><b>a consumer</b><br/>terminal tabs · Factory Floor<br/>file-watcher · watchdog socket"]
+    FAC["apps/ext — AGI EXT<br/><b>a consumer</b><br/>terminal tabs · Fleet<br/>file-watcher · watchdog socket"]
     CLI -- "exposes: agents sessions --active --json" --> FAC
   end
   CLI --> DB[("sessions.db<br/>SQLite + FTS5")]
@@ -40,8 +40,8 @@ The important consequence: **the CLI is where the mechanisms live**, so a change
 how live state is computed (or cached) benefits every consumer — a terminal, the
 extension, another machine — at once. The extension is a thin reshaping layer.
 
-> The Factory extension is a **separate product** with its own publish identity
-> (publisher `swarmify`, name `swarm-ext`). See [`apps/factory/AGENTS.md`](../../factory/AGENTS.md).
+> AGI EXT is a **separate product** with its own publish identity
+> (publisher `swarmify`, name `swarm-ext`). See [`apps/ext/AGENTS.md`](../../ext/AGENTS.md).
 
 ---
 
@@ -56,7 +56,7 @@ confusion in this codebase.
 | **Where** | agent-native files → indexed in `sessions.db` | `terminals/*/<pid>.json` cache files |
 | **Read by** | `agents sessions` (the CLI) | the CLI (`--active`) and the extension |
 | **Lifetime** | durable (survives reboot) | ephemeral (deleted with the pid) |
-| **Covered in** | [05-sessions.md](05-sessions.md) | §3 below |
+| **Covered in** | [sessions.md](sessions.md) | §3 below |
 
 The **transcript** side is a SQLite index (`~/.agents/.history/sessions/sessions.db`,
 `SCHEMA_VERSION` in [`src/lib/session/db.ts`](../src/lib/session/db.ts)) with a
@@ -72,7 +72,7 @@ tracks its `agents/main/wire.jsonl` offset + the additive counters.) Grok is not
 incremental — it reads a whole `summary.json`, not an append-only JSONL.
 Both paths share one reducer per scanner, so the incremental row is identical to a full reparse.
 Listing is a DB read; only opening one session fully re-parses its transcript.
-Detail in [05-sessions.md](05-sessions.md).
+Detail in [sessions.md](sessions.md).
 
 The **live identity** side is the rest of this document.
 
@@ -118,7 +118,7 @@ sequenceDiagram
   terminal, which the CLI never launched — for harnesses that expose a hook.
 
 **Reader split:** the CLI reads `by-pid/`; the **extension** reads `sessions/`
-(`apps/factory/src/core/liveSession.ts`). Same pid→id data, two writers, two readers.
+(`apps/ext/src/core/liveSession.ts`). Same pid→id data, two writers, two readers.
 The join key already exists — the hook records `terminal_id` / `launch_id` from the
 env the launcher sets (`AGENT_TERMINAL_ID`, `AGENT_LAUNCH_ID`) — so the two files can
 be merged behind one path later; today both exist because neither subsumes the other
@@ -197,7 +197,7 @@ long it must live and how it's read back:
 There is **one** audit event implementation, split into local-date files and
 file-locked because many processes append concurrently. It is the single choke
 point for "who did what" — see
-[06-observability.md](06-observability.md).
+[observability.md](observability.md).
 
 ---
 
@@ -218,7 +218,7 @@ function — on purpose.
   `pickLeastLoaded`) picks a pinned host → the only host in the pool → the host
   running the **fewest teammates** (a count, not real CPU/memory) → this machine.
 
-Detail in [teams.md](teams.md); the SSH transport is [09-ssh-transport.md](09-ssh-transport.md).
+Detail in [teams.md](teams.md); the SSH transport is [ssh-transport.md](ssh-transport.md).
 
 ---
 
@@ -244,8 +244,8 @@ bearer tokens use the named account registry and each device's credential store.
 of each live transcript, infers `working` / `waiting_input` / `idle`, and computes
 tokens/sec ([`src/lib/session/active.ts`](../src/lib/session/active.ts),
 `readSessionTailWithRaw` → `inferSessionState` → `computeTokPerSec`). There is no
-resident cache: each call pays the recompute, and the Factory extension polls it
-(local sessions ~3s, remote peers ~45s, `apps/factory/ui/.../UnifiedAgentsPane.tsx`).
+resident cache: each call pays the recompute, and AGI EXT polls it
+(local sessions ~3s, remote peers ~45s, `apps/ext/ui/.../UnifiedAgentsPane.tsx`).
 Other machines are reached by running the same command over SSH per peer.
 
 ### Coarse status is honest, not guessed
@@ -281,15 +281,15 @@ uniformly across harnesses.
 
 This is deliberately simple and correct; the "compute once, subscribe" direction (a
 resident process that parses each file once and emits only what changed) is the
-optimization pattern tracked in [99-optimizations.md](99-optimizations.md). Describe
+optimization pattern tracked in [optimizations.md](optimizations.md). Describe
 current behavior against this doc; that file owns the proposals.
 
 ---
 
 ## Related
 
-- [00-concepts.md](00-concepts.md) — DotAgents repos, resources, resolution, version homes
-- [05-sessions.md](05-sessions.md) — the transcript index in depth
-- [06-observability.md](06-observability.md) — events, feed, mailboxes, cost
-- [teams.md](teams.md) · [hosts.md](hosts.md) · [09-ssh-transport.md](09-ssh-transport.md)
+- [concepts.md](concepts.md) — DotAgents repos, resources, resolution, version homes
+- [sessions.md](sessions.md) — the transcript index in depth
+- [observability.md](observability.md) — events, feed, mailboxes, cost
+- [teams.md](teams.md) · [hosts.md](hosts.md) · [ssh-transport.md](ssh-transport.md)
 - [`packages/session-tracker/README.md`](../../../packages/session-tracker/README.md) — the live-state writer (hook)

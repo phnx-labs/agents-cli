@@ -37,7 +37,7 @@ import {
   resolveHostStrategy,
 } from './routines.js';
 import type { ResolvedExecutionContext, PlacementMode } from './routine-context.js';
-import { getRunsDir, getUserAgentsDir } from './state.js';
+import { getRunsDir, getUserAgentsDir, readMeta } from './state.js';
 import type { AgentId } from './types.js';
 import { shortCodexHome } from './codex-home.js';
 import { prepareJobHome, buildSpawnEnv, getJobHomePath } from './sandbox.js';
@@ -450,14 +450,14 @@ export function routineSpawnCwd(
 }
 
 /** Build the full CLI argv for executing a job, applying mode, model, and permission flags. */
-export function buildJobCommand(config: JobConfig, resolvedPrompt: string): string[] {
+export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwardAccount = true): string[] {
   // Workflow branch: delegate to `agents run <workflow>` which handles subagent
   // injection, WORKFLOW.md orchestration, and model selection via frontmatter.
   // appendModelAndReasoning is intentionally skipped — the workflow frontmatter
   // owns model selection. No --timeout flag: the runner enforces its own SIGTERM/SIGKILL.
   if (config.workflow) {
     const cmd = ['agents', 'run', config.workflow, resolvedPrompt, '--mode', config.mode];
-    if (config.account) cmd.push('--account', config.account);
+    if (config.account && forwardAccount) cmd.push('--account', config.account);
     return cmd;
   }
 
@@ -472,7 +472,7 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
   // it, not a fresh, context-less agent that would refuse an "opaque" instruction.
   if (config.resume) {
     const cmd = ['agents', 'run', agent, '--resume', config.resume, resolvedPrompt, '--mode', config.mode];
-    if (config.account) cmd.push('--account', config.account);
+    if (config.account && forwardAccount) cmd.push('--account', config.account);
     return cmd;
   }
 
@@ -806,9 +806,9 @@ function shSingleQuote(s: string): string {
 /**
  * Build a POSIX shell function that forwards `agents <sub...>` to the SAME binary
  * currently running. Command routines shell out to the bare name `agents`
- * (`agents __daemon-tick usage-refresh`); without this, the routine resolves
- * `agents` through its inherited PATH, which can pick up a stale install in an
- * nvm/system Node prefix that shadows the current binary (RUSH-2431).
+ * (e.g. `agents repo pull system`); without this, the routine resolves `agents`
+ * through its inherited PATH, which can pick up a stale install in an nvm/system
+ * Node prefix that shadows the current binary (RUSH-2431).
  *
  * Uses getCliLaunch so the relaunch is correct for both JS installs
  * (`node <entry> <sub...>`) and compiled standalone binaries (`<bin> <sub...>`).
@@ -861,6 +861,8 @@ export interface RoutineLaunchPlan {
   rotation: RotateResult | null;
   /** True when `config.version` pinned the target (no rotation). */
   pinned: boolean;
+  /** False when `account` names a harness-native login rather than a durable credential. */
+  forwardAccount?: boolean;
 }
 
 /**
@@ -877,6 +879,9 @@ export async function resolveRoutineLaunch(
   cwd: string = process.cwd(),
   deps: {
     resolveRunVersion?: typeof resolveRunVersion;
+    resolveAccountVersion?: typeof resolveAccountVersion;
+    findCredentialAccount?: (name: string) => boolean;
+    readMeta?: typeof readMeta;
     resolveCredentialAccount?: (name: string, host: AgentId) => { env: Record<string, string> };
   } = {},
 ): Promise<RoutineLaunchPlan> {
@@ -887,9 +892,34 @@ export async function resolveRoutineLaunch(
   // resolveRoutineLaunch is only called for agent jobs (workflow returns above;
   // command jobs branch out of execute*Job before reaching this).
   const agent = config.agent!;
-  if (config.account) {
-    const { resolveCredentialAccount } = await import('./account-registry.js');
-    (deps.resolveCredentialAccount ?? resolveCredentialAccount)(config.account, agent);
+  const { findAccount, resolveAccountSelection, resolveCredentialAccount } = await import('./account-registry.js');
+  const explicitCredential = config.account
+    ? (deps.findCredentialAccount?.(config.account) ?? (deps.resolveCredentialAccount !== undefined || findAccount(config.account) !== null))
+    : false;
+  const selectedCredential = config.account
+    ? (explicitCredential ? config.account : undefined)
+    : resolveAccountSelection(undefined, agent, (deps.readMeta ?? readMeta)());
+  if (selectedCredential) {
+    (deps.resolveCredentialAccount ?? resolveCredentialAccount)(selectedCredential, agent);
+  }
+  if (config.account && !explicitCredential) {
+    const accountVersion = await (deps.resolveAccountVersion ?? resolveAccountVersion)(agent, config.account);
+    if (accountVersion) {
+      if (config.version && config.version !== accountVersion) {
+        throw new Error(
+          `Routine '${config.name}' account '${config.account}' is signed in at ${agent}@${accountVersion}, not pinned ${agent}@${config.version}.`,
+        );
+      }
+      return {
+        chain: [{ agent, version: config.version ?? accountVersion }],
+        rotation: null,
+        pinned: true,
+        forwardAccount: false,
+      };
+    }
+    throw new Error(
+      `Routine '${config.name}' account '${config.account}' is not signed in for ${agent}; refusing to rotate to another account.`,
+    );
   }
   if (config.version) {
     const version = config.version;
@@ -902,6 +932,7 @@ export async function resolveRoutineLaunch(
       chain: [{ agent, version }],
       rotation: null,
       pinned: true,
+      ...(config.account ? { forwardAccount: explicitCredential } : {}),
     };
   }
 
@@ -1259,9 +1290,12 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   // Use 'claude' as the effective agent for report extraction and metadata when workflow is set.
   // (command jobs branched out earlier, so config.agent is set on the non-workflow path.)
   const effectiveAgent: AgentId = config.workflow ? 'claude' : config.agent!;
-  if (config.account && !dispatchesViaAgentsRun(config)) {
-    const { resolveCredentialAccount } = await import('./account-registry.js');
-    Object.assign(baseEnv, resolveCredentialAccount(config.account, effectiveAgent).env);
+  if (!dispatchesViaAgentsRun(config)) {
+    const { findAccount, resolveAccountSelection, resolveCredentialAccount } = await import('./account-registry.js');
+    const selectedAccount = config.account && !findAccount(config.account)
+      ? undefined
+      : resolveAccountSelection(config.account, effectiveAgent, readMeta());
+    if (selectedAccount) Object.assign(baseEnv, resolveCredentialAccount(selectedAccount, effectiveAgent).env);
   }
 
   const meta: RunMeta = {
@@ -1353,7 +1387,7 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
 
   // Single-shot path: build the command once, then walk the launch chain on
   // rate/usage-limit failures (same detectRateLimit patterns as agents run).
-  const baseCmd = buildJobCommand(config, resolvedPrompt);
+  const baseCmd = buildJobCommand(config, resolvedPrompt, launch.forwardAccount !== false);
   const stdoutPath = path.join(runDir, 'stdout.log');
   // Truncate the log for a clean run; failover attempts append.
   fs.writeFileSync(stdoutPath, '', { mode: 0o600 });
@@ -1827,7 +1861,7 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
   });
 
   const resolvedPrompt = resolveJobPrompt(config);
-  let cmd = buildJobCommand(config, resolvedPrompt);
+  let cmd = buildJobCommand(config, resolvedPrompt, launch.forwardAccount !== false);
   // workflow AND resume dispatch through `agents run` — never binary-pin them (pinning
   // rewrites cmd[0] to the agent binary → broken `<binary> run …`).
   if (!dispatchesViaAgentsRun(config) && version && config.agent) {
@@ -1854,9 +1888,12 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
       : { ...process.env } as Record<string, string>,
     config,
   );
-  if (config.account && !dispatchesViaAgentsRun(config)) {
-    const { resolveCredentialAccount } = await import('./account-registry.js');
-    Object.assign(baseEnv, resolveCredentialAccount(config.account, config.agent!).env);
+  if (!dispatchesViaAgentsRun(config)) {
+    const { findAccount, resolveAccountSelection, resolveCredentialAccount } = await import('./account-registry.js');
+    const selectedAccount = config.account && !findAccount(config.account)
+      ? undefined
+      : resolveAccountSelection(config.account, config.agent!, readMeta());
+    if (selectedAccount) Object.assign(baseEnv, resolveCredentialAccount(selectedAccount, config.agent!).env);
   }
   const spawnEnv = dispatchesViaAgentsRun(config)
     ? (() => {

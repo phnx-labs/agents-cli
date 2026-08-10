@@ -70,7 +70,7 @@ export interface PlacementTeam {
  * device name to its `agents.max-concurrent` cap (from the device doc — read
  * locally via `readMaxConcurrentCaps`, never probed over SSH). Teams counts
  * the team's OWN roster against the cap (device-global counting would need an
- * SSH probe per candidate — out of the hot path; Factory auto-launch is the
+ * SSH probe per candidate — out of the hot path; AGI EXT auto-launch is the
  * device-wide counter). Only the least-loaded AUTO-PICK (cascade step 3)
  * honors caps: an explicit pin or a pool of one is the user's own choice and
  * is never second-guessed.

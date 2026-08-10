@@ -4,21 +4,31 @@
 # the registry-installed `agents` command.
 #
 # The dev install lives at its own prefix (default: $HOME/.local/agents-cli-dev)
-# and is exposed via $HOME/.local/bin/agents. Your registry-installed
-# `agents` at $(npm root -g)/.bin/agents is NOT touched.
+# and is exposed as $HOME/.local/bin/agents-dev (plus `ag-dev`). Run it by name:
 #
-# To use the dev build, put $HOME/.local/bin on PATH ahead of the registry
-# bin dir (e.g. before nvm's bin in your shell rc). To revert, drop the
-# entry from PATH or `npm install -g @phnx-labs/agents-cli@latest` to overwrite.
+#   agents-dev sessions --active     # this working tree
+#   agents      sessions --active    # your installed CLI, untouched
 #
-# Version of the dev build is `0.0.0-dev.<sha>[-dirty]` so `agents --version`
-# tells you immediately which one is on PATH.
+# This script MUST NEVER create, overwrite, or point at $HOME/.local/bin/agents,
+# `ag`, or `browser`. Those names belong to the registry install alone. A dev
+# build that answers to `agents` makes PATH order decide which code runs, and a
+# cleaned dev prefix leaves the production command dangling -- so the dev build
+# gets its own name instead. Any such shadow link a PREVIOUS run of this script
+# left behind is removed on the next run.
+#
+# Version of the dev build is `0.0.0-dev.<sha>[-dirty]`, so `agents-dev --version`
+# always tells you which commit you are driving.
 #
 # Usage: scripts/install.sh [--skip-build] [--skip-tests] [--prefix <dir>]
+#                           [--bounce-daemon]
 #
 #   --skip-build      reuse existing dist/ instead of rebuilding
 #   --skip-tests      skip the test suite (forwarded to build)
 #   --prefix <dir>    install prefix (default: $HOME/.local/agents-cli-dev)
+#   --bounce-daemon   restart a running routines daemon onto this dev build.
+#                     Off by default: the daemon is shared (secrets broker,
+#                     browser IPC, routines), so pointing it at a dev build
+#                     changes what your everyday `agents` talks to.
 
 set -euo pipefail
 
@@ -35,16 +45,27 @@ die() { red "  Error: $*"; exit 1; }
 
 SKIP_BUILD=false
 SKIP_TESTS=false
+BOUNCE_DAEMON=false
 PREFIX="$HOME/.local/agents-cli-dev"
 LINK_DIR="$HOME/.local/bin"
+
+# The dev build answers to these names. `agents`, `ag`, and `browser` are
+# deliberately absent -- see the header.
+DEV_BINS=(agents ag)
+DEV_SUFFIX="-dev"
+
+# Names this script must never leave pointing at the dev prefix. `browser` is
+# here because older revisions of this script linked it.
+PRODUCTION_BINS=(agents ag browser)
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-build) SKIP_BUILD=true; shift ;;
     --skip-tests) SKIP_TESTS=true; shift ;;
+    --bounce-daemon) BOUNCE_DAEMON=true; shift ;;
     --prefix) PREFIX="$2"; shift 2 ;;
     -h|--help)
-      sed -n '3,22p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '3,32p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) die "unknown flag: $1" ;;
   esac
@@ -54,7 +75,7 @@ command -v npm >/dev/null || die "npm not found"
 command -v node >/dev/null || die "node not found"
 
 # Dev version keyed to the current commit so two installs from different
-# commits are distinguishable. Bin name stays stable (`agents`).
+# commits are distinguishable. Bin name stays stable (`agents-dev`).
 SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "local")
 DIRTY=""
 if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then DIRTY="-dirty"; fi
@@ -66,7 +87,7 @@ PKG_NAME=$(node -p "require('./package.json').name")
 bold "Dev install"
 echo "  $PKG_NAME ($REGISTRY_VERSION -> $DEV_VERSION)"
 echo "  prefix: $PREFIX"
-echo "  bin:    $LINK_DIR/agents"
+echo "  bin:    $LINK_DIR/agents$DEV_SUFFIX"
 echo
 
 if ! $SKIP_BUILD; then
@@ -80,8 +101,10 @@ fi
 
 # Stage a copy of the package with the dev version. We don't mutate the
 # working-tree package.json because that would dirty the tree mid-iteration
-# and confuse later builds. Keep the original `bin` names (`agents`, `ag`,
-# `browser`) so the dev install behaves identically to the registry release.
+# and confuse later builds. The package's own `bin` names (`agents`, `ag`,
+# `browser`) are kept as-is INSIDE $PREFIX so the dev install behaves
+# identically to the registry release; only the links published into $LINK_DIR
+# are renamed, so nothing on PATH collides with the registry install.
 STAGE_DIR=$(mktemp -d)
 trap 'rm -rf "$STAGE_DIR"' EXIT
 
@@ -125,24 +148,104 @@ npm install -g "$TARBALL" \
   --ignore-scripts \
   >/dev/null
 
-# Symlink the dev bins into a stable location ($HOME/.local/bin) without
-# touching anything in the registry-install prefix. The dev binary is named
-# `agents` -- to use it instead of the registry one, put $LINK_DIR ahead of
-# the registry bin dir on PATH.
+# Publish the dev bins into a stable location ($HOME/.local/bin) under their own
+# names, so the dev build can never win or lose a PATH-ordering race against the
+# registry install. Nothing in the registry-install prefix is touched.
 mkdir -p "$LINK_DIR"
+
+# Marker embedded in the Windows wrapper scripts. Those are regular files, not
+# symlinks, so the cleanup below cannot recognize them by their link target.
+DEV_SHADOW_MARKER='AGENTS_CLI_DEV_SHADOW_LINK'
+
+# Remove a $LINK_DIR entry that a PRIOR run of THIS script created under a
+# production name. Two shapes qualify, one per platform:
+#
+#   POSIX   a symlink whose target points into the dev prefix.
+#   Windows a regular wrapper file that execs into the dev prefix. Older
+#           revisions wrote these with NO marker (they hardcoded the
+#           `agents-cli-dev` path), so recognizing them by content is the only
+#           thing that works -- a marker-only check silently repaired nothing on
+#           the one platform where the shadow is a file rather than a link.
+#
+# A real binary, or a link/wrapper pointing anywhere else (the registry install,
+# Homebrew, the user's own alias), is left exactly as it is.
+cleanup_legacy_shadow() {
+  local path="$1" raw
+  if [[ -L "$path" ]]; then
+    # readlink, not `[[ -e ]]`: -e is FALSE for a dangling symlink, and dangling
+    # is precisely the state left behind once the dev prefix is cleaned -- the
+    # shape that makes `agents` fail with "no such file or directory".
+    raw=$(readlink "$path") || return 0
+    case "$raw" in
+      "$PREFIX"/*|"$HOME"/.local/agents-cli-dev/*)
+        rm -f "$path"
+        dim "  Removed stale dev link: $path -> $raw"
+        ;;
+    esac
+  elif [[ -f "$path" ]] &&
+       grep -qE "$DEV_SHADOW_MARKER|agents-cli-dev" "$path" 2>/dev/null; then
+    rm -f "$path"
+    dim "  Removed stale dev wrapper: $path"
+  fi
+}
+
+REMOVED_LINKS=()
+for bin in "${PRODUCTION_BINS[@]}"; do
+  for candidate in "$LINK_DIR/$bin" "$LINK_DIR/$bin.cmd" "$LINK_DIR/$bin.ps1"; do
+    [[ -e "$candidate" || -L "$candidate" ]] || continue
+    cleanup_legacy_shadow "$candidate"
+    [[ -e "$candidate" || -L "$candidate" ]] || REMOVED_LINKS+=("$candidate")
+  done
+done
+
+# A long-running service may have been pinned to a link we just removed. An
+# earlier revision of this script bounced the shared routines daemon onto the dev
+# build and recorded THAT path in the service manifest, so the daemon keeps
+# running from memory but dies on its next restart -- silently taking the
+# scheduler, secrets broker, and browser IPC with it. Name it and hand over the
+# one command that repoints the manifest; do not restart a shared service the
+# caller did not ask us to touch.
+#
+# Match the EXACT path we removed, terminated. A bare substring test for
+# "$LINK_DIR/agents" also matches "$LINK_DIR/agents-dev", so a box that ran
+# --bounce-daemon (healthy manifest, pointing at agents-dev) plus any one stale
+# link would be told to restart a working daemon. Both manifest formats delimit
+# the path -- systemd quotes it, launchd wraps it in <string> -- so two fixed
+# string tests are enough and need no regex escaping of $LINK_DIR.
+for manifest in \
+  "$HOME/.config/systemd/user/agents-daemon.service" \
+  "$HOME/Library/LaunchAgents/com.phnx-labs.agents-daemon.plist"
+do
+  [[ -f "$manifest" ]] || continue
+  for removed in ${REMOVED_LINKS[@]+"${REMOVED_LINKS[@]}"}; do
+    grep -qF "$removed\"" "$manifest" 2>/dev/null ||
+      grep -qF "$removed<" "$manifest" 2>/dev/null || continue
+    echo
+    yellow "  The agents daemon service still points at $removed, which was"
+    yellow "  just removed ($manifest)."
+    yellow "  It runs until the next restart, then fails. Repoint it with:"
+    echo   "      agents daemon restart"
+    break
+  done
+done
+
 if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]]; then
-  for bin in agents ag browser; do
+  for bin in "${DEV_BINS[@]}"; do
     [[ -e "$PREFIX/$bin.cmd" ]] || continue
-    printf '@"%%USERPROFILE%%\\.local\\agents-cli-dev\\%s.cmd" %%*\r\n' "$bin" > "$LINK_DIR/$bin.cmd"
-    printf '& "$HOME\\.local\\agents-cli-dev\\%s.ps1" @args\r\n' "$bin" > "$LINK_DIR/$bin.ps1"
-    printf '#!/usr/bin/env bash\nexec "$HOME/.local/agents-cli-dev/%s" "$@"\n' "$bin" > "$LINK_DIR/$bin"
-    chmod +x "$LINK_DIR/$bin"
+    dev="$bin$DEV_SUFFIX"
+    printf ':: %s\r\n@"%%USERPROFILE%%\\.local\\agents-cli-dev\\%s.cmd" %%*\r\n' \
+      "$DEV_SHADOW_MARKER" "$bin" > "$LINK_DIR/$dev.cmd"
+    printf '# %s\r\n& "$HOME\\.local\\agents-cli-dev\\%s.ps1" @args\r\n' \
+      "$DEV_SHADOW_MARKER" "$bin" > "$LINK_DIR/$dev.ps1"
+    printf '#!/usr/bin/env bash\n# %s\nexec "$HOME/.local/agents-cli-dev/%s" "$@"\n' \
+      "$DEV_SHADOW_MARKER" "$bin" > "$LINK_DIR/$dev"
+    chmod +x "$LINK_DIR/$dev"
   done
 else
-  for bin in agents ag browser; do
+  for bin in "${DEV_BINS[@]}"; do
     src="$PREFIX/bin/$bin"
     [[ -e "$src" ]] || continue
-    ln -sf "$src" "$LINK_DIR/$bin"
+    ln -sf "$src" "$LINK_DIR/$bin$DEV_SUFFIX"
   done
 fi
 
@@ -151,14 +254,14 @@ fi
 # unsigned or wrong-arch artifact must not brick the dev install.
 NATIVE_BIN="$PREFIX/lib/node_modules/$PKG_NAME/dist/bin/agents"
 if [[ "$(uname)" == "Darwin" && -x "$NATIVE_BIN" ]] && "$NATIVE_BIN" --version >/dev/null 2>&1; then
-  ln -sf "$NATIVE_BIN" "$LINK_DIR/agents"
-  ln -sf "$NATIVE_BIN" "$LINK_DIR/ag"
-  dim "  Linked agents/ag to the standalone binary (dist/bin/agents)"
+  ln -sf "$NATIVE_BIN" "$LINK_DIR/agents$DEV_SUFFIX"
+  ln -sf "$NATIVE_BIN" "$LINK_DIR/ag$DEV_SUFFIX"
+  dim "  Linked agents$DEV_SUFFIX/ag$DEV_SUFFIX to the standalone binary (dist/bin/agents)"
 fi
 
 # Confirm the dev binary is runnable.
-LINKED_PATH="$LINK_DIR/agents"
-[[ -e "$LINKED_PATH" ]] || die "agents not installed at $LINKED_PATH"
+LINKED_PATH="$LINK_DIR/agents$DEV_SUFFIX"
+[[ -e "$LINKED_PATH" ]] || die "agents$DEV_SUFFIX not installed at $LINKED_PATH"
 LINKED_VER=$("$LINKED_PATH" --version 2>/dev/null | head -1 || echo "?")
 
 # Install the signed macOS Keychain helper to its stable user path. The dev
@@ -182,10 +285,17 @@ fi
 #
 # Match postinstall.js healLongRunningProcesses: only when a daemon is
 # already running (never start one the user didn't want), best-effort and
-# non-fatal, skipped in CI and when AGENTS_NO_HEAL=1. Pin the restart to
-# the just-linked binary so the service manifest records this install, not
-# a registry path that happens to be earlier on PATH.
-if [[ -z "${CI:-}" && "${AGENTS_NO_HEAL:-}" != "1" ]]; then
+# non-fatal, skipped in CI and when AGENTS_NO_HEAL=1.
+#
+# OPT-IN (--bounce-daemon), because the daemon is SHARED. It hosts the secrets
+# broker, browser IPC, and the routines scheduler for the whole machine, and the
+# restart pins it to whichever binary is passed. Doing that automatically would
+# leave every `agents secrets`, `agents browser`, and scheduled routine served by
+# a working-tree build while `agents` itself still looks untouched -- an invisible
+# takeover, and the same class of problem the dev bin rename fixes. Earlier
+# revisions justified the automatic restart on the premise that the dev build IS
+# what `agents` resolves to; that premise no longer holds.
+if [[ -z "${CI:-}" && "${AGENTS_NO_HEAL:-}" != "1" && "$BOUNCE_DAEMON" == true ]]; then
   INSTALLED_PKG="$PREFIX/lib/node_modules/$PKG_NAME"
   if [[ -f "$INSTALLED_PKG/dist/lib/daemon.js" ]]; then
     dim "  Reloading daemon onto this build (if running)"
@@ -211,25 +321,35 @@ if [[ -z "${CI:-}" && "${AGENTS_NO_HEAL:-}" != "1" ]]; then
       }
     ' || true
   fi
+elif [[ -z "${CI:-}" ]]; then
+  dim "  Shared daemon left on production code (secrets broker, browser IPC, routines)."
+  dim "  Pass --bounce-daemon to point it at this dev build -- that changes what your"
+  dim "  everyday 'agents' talks to, not just agents$DEV_SUFFIX."
 fi
 
 green "  Ready"
 dim   "  $LINKED_PATH ($LINKED_VER)"
 
-# Remind the user about PATH precedence if the dev bin dir isn't first.
+# The cleanup above may have removed the only thing answering to `agents` on this
+# box. postinstall.js short-circuits its own ~/.local/bin link when `agents`
+# already resolves on the login PATH (`scripts/postinstall.js:311`), so on a box
+# where npm's global bin dir is not on that PATH, the dev shadow was what
+# satisfied that probe and npm never wrote a link of its own. Removing the shadow
+# is still right -- but say so instead of claiming `agents` is untouched.
+if command -v agents >/dev/null 2>&1; then
+  dim "  Run 'agents$DEV_SUFFIX <args>'. Your installed 'agents' is untouched."
+else
+  echo
+  yellow "  'agents' does not resolve on this PATH."
+  yellow "  A dev shadow was standing in for the registry install here. Restore it with:"
+  echo   "      npm install -g @phnx-labs/agents-cli"
+  yellow "  (or add npm's global bin dir to PATH). 'agents$DEV_SUFFIX' is unaffected."
+fi
+
+# The dev build has its own name, so PATH ORDER no longer matters -- only whether
+# $LINK_DIR is reachable at all.
 case ":$PATH:" in
-  *":$LINK_DIR:"*)
-    # Detect if the registry bin dir comes earlier than $LINK_DIR.
-    REGISTRY_BIN=$(dirname "$(npm root -g 2>/dev/null)/../bin/agents" 2>/dev/null || echo "")
-    if [[ -n "$REGISTRY_BIN" ]] && [[ -e "$REGISTRY_BIN/agents" ]]; then
-      LINK_POS=$(echo ":$PATH:" | awk -v t=":$LINK_DIR:" '{print index($0, t)}')
-      REG_POS=$(echo ":$PATH:" | awk -v t=":$REGISTRY_BIN:" '{print index($0, t)}')
-      if [[ $REG_POS -gt 0 ]] && [[ $REG_POS -lt $LINK_POS ]]; then
-        yellow "  Note: registry bin dir ($REGISTRY_BIN) precedes $LINK_DIR on PATH."
-        yellow "  Reorder your shell rc so $LINK_DIR comes first to invoke the dev build."
-      fi
-    fi
-    ;;
+  *":$LINK_DIR:"*) : ;;
   *)
     echo
     yellow "  $LINK_DIR is not on PATH. Add this to your shell rc:"

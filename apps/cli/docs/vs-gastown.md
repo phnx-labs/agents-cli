@@ -13,7 +13,7 @@ sit *above* Claude Code / Codex / Gemini. Neither is “another coding agent.”
 | Users choosing tools | Know which problem each product actually solves |
 | Anyone confused by Gas Town vocabulary | Glossary + parallels under the lore |
 
-Related: [Landscape](04-landscape.md) · [Teams](teams.md) · [Hooks](hooks.md) · [Sessions](05-sessions.md)
+Related: [Landscape](landscape.md) · [Teams](teams.md) · [Hooks](hooks.md) · [Sessions](sessions.md)
 
 ---
 
@@ -43,7 +43,7 @@ Grok, Droid, and others as **interchangeable surfaces**:
 5. Session index across harnesses and devices
 6. Fleet (SSH devices/hosts), multi-cloud dispatch, secrets, routines, monitors
 7. Real-world tools: `browser`, `computer`
-8. Factory VS Code extension as a consumer of the same CLI state
+8. AGI EXT VS Code extension as a consumer of the same CLI state
 
 ### Gas Town
 
@@ -76,7 +76,7 @@ people already hand-managing many agents (Yegge’s “Stage 6–7”).
 | **Merge story** | PR + CI + human / non-author review | Refinery merge queue |
 | **Durability** | Session resume / continue / session-recall | Work hook + GUPP + handoff + seance |
 | **Health / stuck** | `sessions --active`, monitors, watchdog | Witness, Deacon, Dogs, Boot |
-| **UI** | CLI, menu bar, Factory IDE | tmux, `gt feed`, web dashboard |
+| **UI** | CLI, menu bar, AGI EXT | tmux, `gt feed`, web dashboard |
 | **Harness breadth** | First-class multi-harness | Multi-runtime, Claude-centric |
 | **Fleet / remote** | Devices, hosts, SSH, multi-cloud | Wasteland federation (emerging); remote evolving |
 | **Learning cost** | Layered surface area, progressive | High dialect (roles + MEOW + Beads) |
@@ -103,7 +103,7 @@ people already hand-managing many agents (Yegge’s “Stage 6–7”).
  multi-cloud dispatch                 Refinery merge queue
  devices + SSH fabric                 GUPP work-hook propulsion
  browser + computer                   patrol agents (Witness/Deacon)
- Factory VS Code                      tmux factory as primary UI
+ AGI EXT (VS Code)                    tmux factory as primary UI
 ```
 
 **Unfair comparisons:** scoring agents-cli on “Refinery quality,” or Gas Town on
@@ -123,7 +123,7 @@ equivalents.
 | One managed project | Rig | git repo + `agents run` cwd |
 | Human operator | Overseer | You (no special identity object) |
 | Coordinator agent | Mayor | You + `agents run` / optional orchestrator agent |
-| Long-lived interactive agents | Crew | Interactive `agents run` / Factory tabs |
+| Long-lived interactive agents | Crew | Interactive `agents run` / AGI EXT tabs |
 | Ephemeral parallel workers | Polecats | `teams` teammates + worktrees |
 | Issue / work ledger | **Beads** (git-backed) | Linear / GitHub Issues (external) |
 | Feature / delivery batch | Convoy | Ticket + team + PR(s) |
@@ -136,7 +136,7 @@ equivalents.
 | Background supervisor | Deacon + Boot + Dogs | Daemon / routines / monitors / watchdog |
 | Merge queue | Refinery | PR + CI + human/reviewer merge |
 | Resume after context death | Handoff + GUPP + seance | Sessions resume / continue / session-recall |
-| Activity dashboard | `gt feed`, web dashboard | `sessions --active`, menu bar, Factory Floor |
+| Activity dashboard | `gt feed`, web dashboard | `sessions --active`, menu bar, Fleet |
 
 ---
 
@@ -283,7 +283,7 @@ human-in-the-loop control.
 
 | User want | agents-cli surface |
 |---|---|
-| Don’t hand-manage 10 tabs | `teams`, `sessions --active`, Factory Floor |
+| Don’t hand-manage 10 tabs | `teams`, `sessions --active`, Fleet |
 | Work outlives chat | Tickets + session resume (gap: no Beads-class in-repo ledger) |
 | Parallel workers + isolation | Worktrees / teams Owns boundaries |
 | Keep moving when stuck | monitors, watchdog, feed |
@@ -335,7 +335,7 @@ Primary product materials:
 
 - [Gas Town README](https://github.com/gastownhall/gastown)
 - [Welcome to Gas Town — Steve Yegge](https://steve-yegge.medium.com/welcome-to-gas-town-4f25ee16dd04)
-- agents-cli docs: this tree, especially [teams](teams.md), [hooks](hooks.md), [sessions](05-sessions.md), [landscape](04-landscape.md)
+- agents-cli docs: this tree, especially [teams](teams.md), [hooks](hooks.md), [sessions](sessions.md), [landscape](landscape.md)
 
 Sentiment / field reports (non-exhaustive; views are the authors’):
 

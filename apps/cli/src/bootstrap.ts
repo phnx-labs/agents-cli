@@ -3,7 +3,7 @@
  *
  * RUSH-2335: `src/index.ts` is a slim shell that statically imports only the
  * leaf `lib/secrets/sync-commands.js` so `__secrets-*` / `__vault-age-helper` /
- * `__shim` / `__daemon-run` / `__daemon-tick` can exit without evaluating the
+ * `__shim` / `__daemon-run` can exit without evaluating the
  * commander + self-update + command-registry graph (~140ms saved per
  * synchronous broker read). Everything below that shell lands here via
  * `await import('./bootstrap.js')`.
@@ -768,7 +768,7 @@ function registerResourcesTombstoneCommand(p: Command): void {
 
 /**
  * Removed `hq` command — the JSON bridge for the interactive Agents HQ floor
- * (`agents hq floor --json`). No UI ever consumed it (apps/factory has zero
+ * (`agents hq floor --json`). No UI ever consumed it (apps/ext has zero
  * references) and it had no external users, so it is gone with no replacement.
  * Kept as a hidden tombstone so a stale invocation gets a clear message and a
  * non-zero exit instead of commander's raw "unknown command".

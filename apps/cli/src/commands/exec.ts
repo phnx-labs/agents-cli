@@ -16,7 +16,7 @@ import type { DetectedRuntime } from '../lib/crabbox/runtimes.js';
 import type { ResolvedRunDefaults } from '../lib/run-defaults.js';
 import { setHelpSections } from '../lib/help.js';
 import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
-import { getUserAgentsDir } from '../lib/state.js';
+import { getUserAgentsDir, readMeta } from '../lib/state.js';
 import type { CrabboxBox } from '../lib/crabbox/cli.js';
 import { parseLoopInterval } from '../lib/loop.js';
 import type { RotateResult } from '../lib/rotate.js';
@@ -588,9 +588,14 @@ export async function runWorkflowForEach(
  * the directory and is mutually exclusive with `--cwd`/`--remote-cwd`; both the
  * main dispatch and the `--terminal` handoff need the same answer, so the rule
  * and its error live here once instead of in two places that can drift.
+ *
+ * A project that binds several directories also contributes the ones it is not
+ * landing in as `--add-dir` grants, so an agent on a multi-repo project can
+ * actually reach the sibling checkouts. Only Claude and Codex consume those
+ * grants; other harnesses ignore them.
  */
 async function resolveRunCwd(
-  options: Pick<ExecCommandActionOptions, 'cwd' | 'project' | 'remoteCwd'>,
+  options: Pick<ExecCommandActionOptions, 'cwd' | 'project' | 'remoteCwd' | 'addDir'>,
   opts: { forRemote: boolean },
 ): Promise<string | undefined> {
   if (!options.project) return options.cwd;
@@ -598,9 +603,18 @@ async function resolveRunCwd(
     console.error(chalk.red('Pass --project alone — not with --cwd or --remote-cwd.'));
     process.exit(1);
   }
-  const { resolveProjectRef } = await import('../lib/project-root.js');
+  const { resolveProjectDirs } = await import('../lib/project-root.js');
   try {
-    return await resolveProjectRef(options.project, { forRemote: opts.forRemote });
+    const { cwd, extraDirs } = await resolveProjectDirs(options.project, {
+      forRemote: opts.forRemote,
+    });
+    // Explicit --add-dir values keep their position; a directory the project
+    // already contributes is not passed twice.
+    if (extraDirs.length > 0) {
+      const seen = new Set(options.addDir ?? []);
+      options.addDir = [...(options.addDir ?? []), ...extraDirs.filter((d) => !seen.has(d))];
+    }
+    return cwd;
   } catch (err) {
     console.error(chalk.red((err as Error).message));
     process.exit(1);
@@ -821,7 +835,7 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--where <spec>',
-      'Where this run\'s body executes (one placement door): local | device:<name> | auto | lease[:backend] | cloud[:provider]. Expands to --host/--lease/--cloud. Do not combine with those flags. See docs/00-concepts.md#placement.',
+      'Where this run\'s body executes (one placement door): local | device:<name> | auto | lease[:backend] | cloud[:provider]. Expands to --host/--lease/--cloud. Do not combine with those flags. See docs/concepts.md#placement.',
     )
     .option(
       '--host <name>',
@@ -1051,7 +1065,7 @@ export function registerRunCommand(program: Command): void {
 
       // Placement: --where expands into --host / --lease / --cloud before any
       // dispatch. One door for "where does the body run?" — old flags remain
-      // aliases. See lib/placement.ts and docs/00-concepts.md#placement.
+      // aliases. See lib/placement.ts and docs/concepts.md#placement.
       {
         const { placementFromRunFlags, expandPlacementToRunFlags, PlacementError } =
           await import('../lib/placement.js');
@@ -2566,13 +2580,15 @@ export function registerRunCommand(program: Command): void {
 
       version = resolveVersionAlias(agent, version);
 
-      if (options.account) {
+      const { resolveAccountSelection } = await import('../lib/account-registry.js');
+      const configuredAccount = resolveAccountSelection(options.account, agent, readMeta(), { useDefault: !fromProfile });
+      if (configuredAccount) {
         if (options.cloud || options.provider || options.lease) {
           console.error(chalk.red('--account selects a device-local credential and cannot be combined with cloud or lease placement.'));
           process.exit(1);
         }
         const { resolveCredentialAccount } = await import('../lib/account-registry.js');
-        try { accountEnv = resolveCredentialAccount(options.account, agent, profileProvider).env; }
+        try { accountEnv = resolveCredentialAccount(configuredAccount, agent, profileProvider).env; }
         catch (err) { console.error(chalk.red((err as Error).message)); process.exit(1); }
       }
 
@@ -2746,7 +2762,7 @@ export function registerRunCommand(program: Command): void {
       // the bare primary still resolves through the strategy — otherwise every
       // `agents run claude --fallback codex` run lands on the pinned default
       // account and account rotation silently stops (the gh-monitor heal bug).
-      if (!accountPickerRequested && !options.account && (strategy !== 'pinned' || options.balanced || explicitStrategy)) {
+      if (!accountPickerRequested && !configuredAccount && (strategy !== 'pinned' || options.balanced || explicitStrategy)) {
         if (version) {
           process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: version ${version} is pinned\n`));
         } else if (fromProfile) {

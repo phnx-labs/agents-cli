@@ -355,6 +355,94 @@ export function projectBasePath(def: ProjectDef, forRemote: boolean): string | u
   return forRemote ? base : expandLocalHome(base);
 }
 
+/**
+ * Every directory a project binds, ordered: `primary` first, then each
+ * `repos[]` entry that carries a local `path` (joined with its `subpath`).
+ * Deduped by resolved path, so a repo row pointing at the primary collapses.
+ *
+ * The repos[] walk and the dedupe are shared; the three things the two callers
+ * genuinely disagree on are parameters rather than guesses, because collapsing
+ * them would change one caller's meaning:
+ *
+ * - **primary** — spawning anchors on the cwd an agent lands in
+ *   (`defaultPath ?? root`); probing anchors on `root`, so a monorepo
+ *   subproject still probes its checkout rather than its subdirectory.
+ * - **keepMissing** — probing KEEPS a missing directory, because reporting
+ *   `✗ missing` across the fleet is the whole job. A local spawn drops it: a
+ *   grant for a path that is not on this box is noise the harness rejects.
+ * - **joinSubpath** — a spawn grants the subdirectory the project declares it
+ *   cares about; a probe wants the repo root, since git status is a
+ *   whole-checkout question.
+ */
+function projectDirList(
+  def: ProjectDef,
+  opts: {
+    primary: string | undefined;
+    forRemote: boolean;
+    keepMissing: boolean;
+    joinSubpath: boolean;
+  },
+): string[] {
+  const raw = [
+    opts.primary,
+    ...(def.repos ?? []).map((r) => {
+      if (!r.path) return undefined;
+      if (!opts.joinSubpath || !r.subpath) return r.path;
+      return `${r.path.replace(/\/+$/, '')}/${r.subpath.replace(/^\/+/, '')}`;
+    }),
+  ].filter((p): p is string => typeof p === 'string' && p.length > 0);
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of raw) {
+    // Dedupe on the absolute local path so `~/src/x` and an already-expanded
+    // `/home/me/src/x` in a hand-edited def collapse to one entry.
+    const abs = path.resolve(expandLocalHome(p));
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    if (!opts.keepMissing && !fs.existsSync(abs)) continue;
+    out.push(opts.forRemote ? toHomeRelative(abs) : abs);
+  }
+  return out;
+}
+
+/**
+ * The directories `projects status` probes across the fleet: the repo root plus
+ * every bound checkout, home-relative so each host re-roots them, and including
+ * directories absent here so a peer can still answer `✗ missing` for them.
+ */
+export function projectProbeTargets(def: ProjectDef): string[] {
+  return projectDirList(def, {
+    primary: def.root,
+    forRemote: true,
+    keepMissing: true,
+    joinSubpath: false,
+  });
+}
+
+/**
+ * The directories an agent spawned on this project should reach: the cwd first
+ * (`resolveDefinedProjectPath`, so cwd behavior is unchanged), then every other
+ * bound repo. `forRemote` keeps them `~/…` so the remote shell re-roots them at
+ * its own `$HOME`; locally they are absolute and filtered to what exists.
+ *
+ * Callers pass the resolved primary so a `--project slug@worktree` run grants
+ * the sibling repos alongside the worktree it actually landed in.
+ */
+export function projectDirsAbs(
+  def: ProjectDef,
+  opts: { forRemote: boolean; primary?: string },
+): string[] {
+  return projectDirList(def, {
+    primary: opts.primary ?? projectBasePath(def, opts.forRemote),
+    forRemote: opts.forRemote,
+    // A remote spawn must not be filtered by THIS box's filesystem: the target
+    // host has its own checkouts, and a dir missing here may well be there.
+    keepMissing: opts.forRemote,
+    joinSubpath: true,
+  });
+}
+
 /** A project plus its repo root as an absolute local path, for cwd matching. */
 interface ProjectRootAbs {
   name: string;
@@ -427,7 +515,7 @@ function isUnder(child: string, parent: string): boolean {
  * with `expandLocalHome` and resolved, so this matches sessions whose cwd shares
  * this machine's home layout. A session recorded on a different-home machine
  * (`/Users/x/…` vs `/home/x/…`) will not match until the fleet-wide,
- * home-relative variant lands (see the deferred item in docs/11-projects.md).
+ * home-relative variant lands (see the deferred item in docs/projects.md).
  */
 export function projectNameForCwd(cwd: string | undefined, defs: ProjectDef[]): string | undefined {
   if (!cwd) return undefined;
