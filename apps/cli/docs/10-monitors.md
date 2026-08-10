@@ -31,7 +31,8 @@ A **monitor** watches a SOURCE, detects a CONDITION change, and fires an ACTION.
     cert-issued.yml
   .history/monitors/
     ci-red/
-      state.json                       # last-seen value/hash + fire bookkeeping
+      state.json                       # last-seen value/hash + fire bookkeeping (written only on fire/baseline)
+      liveness.json                    # per-poll heartbeat: lastCheckedAt, checkCount, lastError (written EVERY poll)
       fires/<id>/event.json            # fire history
 ```
 
@@ -82,7 +83,8 @@ rateLimit:                   # firehose guard — auto-pause if exceeded
 ## Commands
 
 ```bash
-# Create (auto-starts the daemon, like routines)
+# Create (auto-starts the daemon; then WAITS for the engine's first poll and
+# reports whether it was actually picked up — config acceptance is not "running")
 agents monitors add ci-red \
   --poll 'gh pr checks 1119 --json name,bucket' 30s --match fail \
   --run claude --prompt 'CI failed on #1119: {event}. Diagnose and fix.' \
@@ -93,8 +95,8 @@ agents monitors add cert-issued \
   --poll-http 'https://secure.ssl.com/team/.../co-ec1l5dgjofa' 8h \
   --match issued --notify telegram --device zion
 
-agents monitors list                  # all monitors, source, action, owner, last fire
-agents monitors view <name>           # full config + current watched-state + recent fires
+agents monitors list                  # all monitors, source, action, owner, liveness (checked Nx / never polled / STALLED / fired)
+agents monitors view <name>           # full config + liveness + current watched-state + recent fires
 agents monitors test <name>           # DRY-RUN: evaluate once, print event + would-fire (no action)
 agents monitors edit <name>           # $EDITOR on the YAML
 agents monitors logs <name>           # action run logs (run actions; reuses routines run history)
@@ -174,6 +176,46 @@ Emitted event
 (dry run — no action taken, no state written)
 ```
 
+## Liveness & health (is it actually polling?)
+
+A monitor can be enabled, owned by this box, and listed as `on` while the engine
+never touches it — and until it fires nothing on disk proved otherwise, because
+change-detection `state.json` is written **only** on a fire or a baseline. A
+`--match` monitor that polled steadily but matched nothing therefore showed
+`state: null`, indistinguishable from a monitor the engine never ran (RUSH-2485).
+
+The engine now writes a **liveness heartbeat** (`liveness.json`) on **every**
+poll — fire or not, match or not — so "never checked" is visibly distinct from
+"checked N times, not matching":
+
+```
+agents monitors list
+  ci-red      on  poll: gh pr checks 1119 … @30s
+                  [match] → run claude   owner: yosemite-s0   checked 42x · last 12 sec ago · no match yet
+  cert-issued on  poll-http: … @8h
+                  [match] → notify       owner: zion          never polled          <- yellow: engine hasn't touched it
+  stale-one   on  poll: … @60s
+                  [on-change] → notify   owner: yosemite-s0   STALLED — last poll 2 hours ago   <- red
+```
+
+- **`never polled`** (yellow) — the engine has no heartbeat for it. If it persists
+  after a few seconds, the daemon didn't pick it up: `agents routines status`.
+- **`checked Nx · last <ago> · no match yet`** — alive and polling, condition just
+  hasn't matched. This is the state that used to look dead.
+- **`STALLED — last poll <ago>`** (red) — an enabled, locally-owned monitor whose
+  last poll is more than three intervals behind. The engine has stopped checking it
+  (dead engine, wedged source) even though it's still marked `on`.
+- **`checked Nx · error: <msg>`** (red) — the source is erroring every poll.
+
+`agents monitors view <name>` shows the same under a **Liveness** block
+(`last checked`, `checks`, `last error`), and both commands expose it in `--json`
+as `lastCheckedAt`, `checkCount`, `lastError`, `consecutiveErrors`, and `stalled`.
+
+**Drought escalation.** After **5 consecutive failed checks** — a source that
+errors every poll, or an action that fails every fire — the engine notifies the
+owner **once** that the monitor is doing nothing (the streak clears, and can
+escalate again, on the first good check).
+
 ## Fleet / device semantics (pin-to-one, v1)
 
 - `--device <name>` = the owner. Only that machine's daemon evaluates and fires.
@@ -208,7 +250,10 @@ and monitor→monitor chaining are also out of scope for v1.
 | `validateMonitor()` | lib/monitors/config.ts | Hand-rolled config validation |
 | `writeMonitor()` / `readMonitor()` | lib/monitors/config.ts | Persist monitor config |
 | `monitorRunsOnThisDevice()` | lib/monitors/config.ts | Owner-device eligibility gate |
-| `hasChanged()` / `writeState()` | lib/monitors/state.ts | Native state-diff store |
+| `hasChanged()` / `writeState()` | lib/monitors/state.ts | Native state-diff store (fire/baseline only) |
+| `recordCheck()` / `readLiveness()` | lib/monitors/state.ts | Per-poll liveness heartbeat (every poll) |
+| `MonitorEngine.runMonitor()` | lib/monitors/engine.ts | One poll: evaluate → decide → fire → record heartbeat |
+| `shouldEscalateDrought()` | lib/monitors/engine.ts | Drought predicate: notify owner after N failed checks |
 | `evaluateSource()` | lib/monitors/sources/index.ts | Source-type → evaluator |
 | `decideFire()` | lib/monitors/engine.ts | Apply the condition to an observation |
 | `dispatchAction()` | lib/monitors/dispatch.ts | Fire the action via executeJobDetached / notify / POST |
