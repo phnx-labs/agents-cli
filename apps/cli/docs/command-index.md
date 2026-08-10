@@ -14,16 +14,18 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_104 command groups · 584 commands._
+_104 command groups · 586 commands._
 
-## accounts — Browse and name signed-in harness accounts
+## accounts — Manage durable provider credentials
 
 ```
-agents accounts                     Browse and name signed-in harness accounts
-agents accounts list                Alias for accounts
-agents accounts name <label>        Name one signed-in account; matching installed versions are found automatically
-agents accounts remove <label>      Remove a saved account label
-agents accounts rename <old> <new>  Rename a saved account label
+agents accounts                     Manage durable provider credentials
+agents accounts add <name>          Add a durable API key, setup token, or bearer token
+agents accounts inspect <name>      Show safe account metadata
+agents accounts list                List credential accounts
+agents accounts remove <name>       Remove an account and its device-local credential
+agents accounts rename <old> <new>  Rename an account without changing its stable id
+agents accounts set-key <name>      Rotate an account credential without changing its identity
 ```
 
 ## add — Download and install agent CLI versions. Enables subsidized API usage through managed binaries.
@@ -112,7 +114,7 @@ agents browser sessions                       Browse a profile's captured screen
 agents browser set                            Set browser emulation options
 agents browser set device <device-name>       Emulate a device (iPhone 14, iPad, MacBook Pro)
 agents browser set viewport <width> <height>  Set viewport size
-agents browser start                          Start a browser task. Pass --profile <name>; omit to use your configured default (`agents browser profiles set-default`), else auto-pick an installed Chromium-family browser.
+agents browser start                          Start a browser task. Pass --profile <name>; omit to use your configured default (`agents config set browser.profile <name>`), else auto-pick an installed Chromium-family browser.
 agents browser status                         Show running browser tasks
 agents browser stop                           Stop a browser task and close its tabs; with --profile, detach the whole profile (close browser + drop cached connection)
 agents browser stream                         Keep one process and daemon IPC socket open; read NDJSON requests from stdin and write NDJSON responses

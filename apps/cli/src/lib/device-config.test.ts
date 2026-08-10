@@ -235,7 +235,7 @@ describe('scheduler gate (scheduler.enabled=false on this device)', () => {
     setConfigValue('scheduler.enabled', false);
     expect(() => assertSchedulerEnabled()).toThrow(/scheduler\.enabled=false/);
     expect(() => assertSchedulerEnabled()).toThrow(
-      /agents devices configure testbox --scheduler on/,
+      /agents config set devices\.testbox\.scheduler on/,
     );
   });
 

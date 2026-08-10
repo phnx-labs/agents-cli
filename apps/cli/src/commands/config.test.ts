@@ -107,6 +107,16 @@ describe('config command', () => {
     expect(getOut).toContain('(unset)');
   });
 
+  it('lists browser.profile once for this machine', () => {
+    runAgents(home, ['config', 'set', 'browser.profile', 'work']);
+    const listOut = runAgents(home, ['config', 'list']);
+    // Count how many times the top-level key appears; the self device must not
+    // duplicate it as devices.<self>.browser.profile.
+    const matches = listOut.match(/browser\.profile/g) ?? [];
+    expect(matches.length).toBe(1);
+    expect(listOut).not.toMatch(/devices\.[\w-]+\.browser\.profile/);
+  });
+
   it('rejects unknown keys', () => {
     expect(() => runAgents(home, ['config', 'get', 'foo.bar'])).toThrow(/Unknown config scope/);
   });

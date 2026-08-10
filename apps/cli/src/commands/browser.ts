@@ -251,7 +251,7 @@ function registerProfilesCommands(browser: Command): void {
           console.log(`Default browser profile (this machine): ${current}`);
         } else {
           console.log('No default browser profile set. `agents browser start` auto-detects an installed Chromium-family browser.');
-          console.log('Set one with: agents browser profiles set-default <name>');
+          console.log('Set one with: agents config set browser.profile <name>');
         }
         return;
       }
@@ -509,7 +509,7 @@ function registerProfilesCommands(browser: Command): void {
       if (getConfiguredDefaultProfileName() === name) {
         console.error(
           `warning: "${name}" was this machine's default browser profile; ` +
-          `\`agents browser start\` will auto-detect until you run: agents browser profiles set-default <name>`
+          `\`agents browser start\` will auto-detect until you run: agents config set browser.profile <name>`
         );
       }
     });
@@ -757,7 +757,7 @@ function registerTaskCommands(browser: Command): void {
 
   browser
     .command('start')
-    .description('Start a browser task. Pass --profile <name>; omit to use your configured default (`agents browser profiles set-default`), else auto-pick an installed Chromium-family browser.')
+    .description('Start a browser task. Pass --profile <name>; omit to use your configured default (`agents config set browser.profile <name>`), else auto-pick an installed Chromium-family browser.')
     .option('-p, --profile <name>', 'Browser profile to use (omit to use the configured default, else auto-pick an installed Chromium-family browser)')
     .option(TASK_OPTION_FLAG, 'Task name (auto-generated if omitted)')
     .option('-e, --endpoint <name>', 'Endpoint preset (defaults to the profile\'s default)')

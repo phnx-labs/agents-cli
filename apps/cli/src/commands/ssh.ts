@@ -1355,7 +1355,7 @@ function registerDevicesCommands(program: Command): void {
       next 'agents repo push/pull'. Unset keys keep today's behavior.
       --scheduler takes effect when the daemon reloads or restarts on that
       device ('agents routines start' / the reload a 'routines add' sends).
-      For the default browser profile use 'agents browser profiles set-default
+      For the default browser profile use 'agents config set browser.profile
       <name>'; for free-form text use 'agents devices note'.
       User-level keys such as interactive.host live in ~/.agents/agents.yaml and
       sync fleet-wide; use --inherited to see them in this device view.

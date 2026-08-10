@@ -52,9 +52,6 @@ interface ConfigListOptions {
   device?: string;
 }
 
-interface ConfigSetOptions {
-  device?: string;
-}
 
 /** Parse a boolean value the same way `agents devices configure` does. */
 function parseBool(value: string, key: string): boolean {
@@ -274,6 +271,9 @@ function* listDeviceConfigEntries(device: string): Generator<{ key: string; valu
         key = `${prefix}notes`;
         break;
       case 'browser.profile':
+        // The self device's default browser profile is already surfaced as the
+        // top-level `browser.profile` key; skip it here to avoid duplication.
+        if (device === machineId()) continue;
         key = `${prefix}browser.profile`;
         break;
       default:

@@ -367,7 +367,7 @@ export function assertSchedulerEnabled(): void {
   if (isSchedulerEnabled()) return;
   throw new Error(
     `The routines scheduler is disabled on this device (scheduler.enabled=false in ~/.agents/devices/${machineId()}/agents.yaml). ` +
-      `Re-enable with: agents devices configure ${machineId()} --scheduler on`,
+      `Re-enable with: agents config set devices.${machineId()}.scheduler on`,
   );
 }
 
