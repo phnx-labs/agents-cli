@@ -12,14 +12,25 @@ describe('detectAgentsBinaryShadows', () => {
   });
 
   function withSystemPath(tmpDir: string): string {
-    // Keep the system `which` binary available.
-    return `${tmpDir}${path.delimiter}/usr/bin${path.delimiter}/bin`;
+    // Keep the platform resolver (`which` / `where`) available.
+    return `${tmpDir}${path.delimiter}${savedPath ?? ''}`;
+  }
+
+  function binaryPath(tmpDir: string, name: string): string {
+    return path.join(tmpDir, process.platform === 'win32' ? `${name}.cmd` : name);
+  }
+
+  function writeBinary(file: string, output: string): void {
+    const contents = process.platform === 'win32'
+      ? `@echo off\r\necho ${output}\r\n`
+      : `#!/bin/sh\necho ${output}\n`;
+    fs.writeFileSync(file, contents, { mode: 0o755 });
   }
 
   it('returns empty when only the current agents binary exists', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-shadow-one-'));
-    const agents = path.join(tmpDir, 'agents');
-    fs.writeFileSync(agents, '#!/bin/sh\necho current\n', { mode: 0o755 });
+    const agents = binaryPath(tmpDir, 'agents');
+    writeBinary(agents, 'current');
     process.env.PATH = withSystemPath(tmpDir);
     try {
       expect(detectAgentsBinaryShadows(agents, [])).toEqual([]);
@@ -30,10 +41,10 @@ describe('detectAgentsBinaryShadows', () => {
 
   it('detects a shadowing binary earlier on PATH', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-shadow-path-'));
-    const realAgents = path.join(tmpDir, 'real-agents');
-    const shadowAgents = path.join(tmpDir, 'agents');
-    fs.writeFileSync(realAgents, '#!/bin/sh\necho real\n', { mode: 0o755 });
-    fs.writeFileSync(shadowAgents, '#!/bin/sh\necho shadow\n', { mode: 0o755 });
+    const realAgents = binaryPath(tmpDir, 'real-agents');
+    const shadowAgents = binaryPath(tmpDir, 'agents');
+    writeBinary(realAgents, 'real');
+    writeBinary(shadowAgents, 'shadow');
     process.env.PATH = withSystemPath(tmpDir);
     try {
       const shadows = detectAgentsBinaryShadows(realAgents, []);
@@ -46,12 +57,12 @@ describe('detectAgentsBinaryShadows', () => {
 
   it('detects a latent shadow in a well-known install directory', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-shadow-wellknown-'));
-    const realAgents = path.join(tmpDir, 'agents');
+    const realAgents = binaryPath(tmpDir, 'agents');
     const shadowDir = path.join(tmpDir, 'extra-bin');
-    const shadowAgents = path.join(shadowDir, 'agents');
-    fs.writeFileSync(realAgents, '#!/bin/sh\necho real\n', { mode: 0o755 });
+    const shadowAgents = binaryPath(shadowDir, 'agents');
+    writeBinary(realAgents, 'real');
     fs.mkdirSync(shadowDir, { recursive: true });
-    fs.writeFileSync(shadowAgents, '#!/bin/sh\necho shadow\n', { mode: 0o755 });
+    writeBinary(shadowAgents, 'shadow');
     process.env.PATH = withSystemPath(tmpDir);
     try {
       const shadows = detectAgentsBinaryShadows(realAgents, [shadowDir]);
