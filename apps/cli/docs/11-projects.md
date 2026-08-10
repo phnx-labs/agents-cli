@@ -60,7 +60,7 @@ integrations:                   # external context, surfaced in `projects show`
     label: "design docs"
 linear:
   projectId: a1b2c3d4-…
-  name: "Rush"                  # display name (used by Factory Floor / feeds)
+  name: "Rush"                  # display name (used by Fleet / feeds)
 dispatch:
   enabled: true                 # opt into auto-dispatch from Linear
   maxAgents: 3                  # cap on concurrent auto-dispatched agents
@@ -77,8 +77,8 @@ dispatch:
 | `contexts[]` | `{path, purpose}` described starting points — indexed anchors for agents. |
 | `goals[]` | `{objective, measure}` the OKR-shaped outcomes a project serves — a project may have several. The objective is the "why"; `measure` is the optional key result. Milestones (pulled from Linear) are the dated checkpoints toward them. |
 | `integrations[]` | `{kind, url, label}` external context sources. |
-| `linear` | `{projectId, url, name}` — reuses the existing Linear path. `name` is a display label (shown in Factory Floor and the activity feed); the other two are set by `agents projects link`. |
-| `dispatch` | `{enabled, maxAgents, provider, host}` — auto-dispatch settings read by `agents __auto-dispatch` and by the Factory Floor dispatch panel. All subfields are optional. `enabled: true` opts the project into auto-dispatch; `provider` optionally pins a `agents cloud` backend (`rush`, `codex`, `factory`, `host`, …), otherwise the delegated agent's native cloud backend is used; `host` selects a named fleet device when `provider: host`. |
+| `linear` | `{projectId, url, name}` — reuses the existing Linear path. `name` is a display label (shown in Fleet and the activity feed); the other two are set by `agents projects link`. |
+| `dispatch` | `{enabled, maxAgents, provider, host}` — auto-dispatch settings read by `agents __auto-dispatch` and by the Fleet dispatch panel. All subfields are optional. `enabled: true` opts the project into auto-dispatch; `provider` optionally pins a `agents cloud` backend (`rush`, `codex`, `factory`, `host`, …), otherwise the delegated agent's native cloud backend is used; `host` selects a named fleet device when `provider: host`. |
 
 ## Resolution — definition first, convention fallback
 
@@ -261,12 +261,12 @@ A local workspace probe always feeds this footer (cheap, no SSH). The full per-h
 | --- | --- |
 | `agents projects list [--json] [--with-agents]` | All defined projects (root, repo, …). Definitions only by default — zero session scan / SSH. `--with-agents` is an explicit opt-in for **local** active counts only. |
 | `agents projects add <name>` | Scaffold `<name>.yaml`; infers `root` + origin slug from the current repo. Flags: `--root`, `--path`, `--repo`, `--context path:purpose`, `--goal objective:measure`, `--linear`. |
-| `agents projects save --json` | Create or update one project from a complete `ProjectDef` JSON object on stdin; validates against the canonical schema, writes atomically under `~/.agents/projects/`, prints the saved definition as JSON. Used by Factory (and any other machine client). |
+| `agents projects save --json` | Create or update one project from a complete `ProjectDef` JSON object on stdin; validates against the canonical schema, writes atomically under `~/.agents/projects/`, prints the saved definition as JSON. Used by the ext (and any other machine client). |
 | `agents projects view <name>` / `show` | Alias of `status <name>`: full card, every milestone, stored definition. |
 | `agents projects edit <name>` | Open the YAML in `$EDITOR`. |
 | `agents projects status [name] [--json] [--window N] [--no-remote] [--device name...] [--devices a,b,c]` (aliases `view`, `show`) | Progress card for every project across the whole fleet (per-device workspace drift over SSH), or one named project. Named form also prints every milestone and the stored definition. `--device`/`--devices` scopes the fan-out to a subset. |
 | `agents projects link <name> --linear [query]` | Bind a Linear project into the def (`linear.projectId` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. |
-| `agents projects import --from-linear` | Import the workspace's Linear projects (via the `linear` CLI) as definitions. See [Importing](#importing--from-linear). There is no Factory import path — `~/.agents/factory/projects.json` is never read. |
+| `agents projects import --from-linear` | Import the workspace's Linear projects (via the `linear` CLI) as definitions. See [Importing](#importing--from-linear). There is no ext import path — `~/.agents/factory/projects.json` is never read. |
 | `agents projects set <name> [--repo\|--root\|--path\|--description\|--goal objective:measure]` | Change one field, preserving every other. `--goal` (repeatable) replaces the goals list. Use this rather than `add --force`, which rebuilds the definition from flags alone. |
 | `agents projects rm <name> [--json]` | Delete the definition (never touches the repo). `--json` prints `{ ok, name, removed }` (or `{ ok: false, name, error }` on failure). |
 

@@ -891,7 +891,7 @@ machines rather than adding to it.
 
 **Cross-surface cache (RUSH-2062).** The default path is cache-first against a
 daemon-warmed snapshot (`src/lib/session/session-cache.ts`, ~15s freshness). The
-daemon publishes this host's local active set on a short tick; menubar, Factory,
+daemon publishes this host's local active set on a short tick; menubar, the ext,
 watchdog, and CLI share it instead of each re-running the full gather. Live status
 stays inside that short window (`forceRefresh` / `AGENTS_SESSIONS_FORCE_REFRESH=1`
 re-gathers). Immutable identity fields are memoized by transcript mtime and never
@@ -1107,7 +1107,7 @@ agents sessions d3470b57-2af6-4c11-b1de-3fab94f43603
     device registered with `address.via: "manual"` never gets a Tailscale peer entry, so
     its `online` is permanently `undefined`; the old strict `online === true` test
     skipped it forever and made every session on that box unresolvable from elsewhere.
-    This matches `ssh.ts` `renderDeviceTable` and Factory's `isDeviceOnline`, so the
+    This matches `ssh.ts` `renderDeviceTable` and the ext's `isDeviceOnline`, so the
     picker and the sweep agree on who exists.
   - A **positive** live SSH probe (`DeviceProfile.reachability`, RUSH-1965) additionally
     rescues a device whose snapshot says offline.
@@ -1161,7 +1161,7 @@ fails loud and names the manual branch — start a fresh agent and seed it with
 `focus`/`resume` — the session-lifecycle axis — and route through the same
 version-pinned `agents run --resume` path everything else uses, so they are
 agent-agnostic (native resume for Claude/Codex, `/continue` replay for the rest),
-not a per-agent special case. (In the Factory extension: **Agents: Detach**
+not a per-agent special case. (In AGI EXT: **Agents: Detach**
 `Cmd/Ctrl+K B`, **Agents: Attach** `Cmd/Ctrl+K A`.)
 
 - **detach**: stop the interactive process (kill the tmux session when tmux-hosted,
@@ -1237,7 +1237,7 @@ The two signals behind them:
   provably cannot occur in the one free-text field that is not last;
   `pane_current_path` (which may contain `:`) is queried last and its tail rejoined.
 - **The IDE window heartbeat** — the `at` stamp on each window's slice of
-  `live-terminals.json`. The Factory extension force-republishes every 4 minutes, so a
+  `live-terminals.json`. AGI EXT force-republishes every 4 minutes, so a
   slice older than `HOST_HEARTBEAT_STALE_MS` (10 minutes, the same window the extension
   uses to GC a dead peer) means that window is gone.
 

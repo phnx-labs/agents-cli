@@ -11,7 +11,7 @@
 #
 # Flags:
 #   --confirm              Actually publish. Without it, this is a dry run.
-#   --skip-build           Reuse existing apps/factory/app/release artifacts.
+#   --skip-build           Reuse existing apps/ext/app/release artifacts.
 #   --skip-tests           Pass through to the build script.
 #   --arch <arch>          macOS arch: arm64, x64, universal (default: universal).
 #   --tap-repo <path>      Existing homebrew tap checkout.
@@ -24,7 +24,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_DIR="$ROOT/apps/factory/app"
+APP_DIR="$ROOT/apps/ext/app"
 
 die() { echo "Error: $1" >&2; exit 1; }
 info() { echo "$1"; }
@@ -92,7 +92,7 @@ echo "  version:    $VERSION"
 echo "  tag:        $TAG"
 echo "  repo:       $REPO"
 echo "  arch:       $ARCH"
-echo "  build:      $([[ $SKIP_BUILD -eq 1 ]] && echo "skip" || echo "run apps/factory/app/scripts/build.sh")"
+echo "  build:      $([[ $SKIP_BUILD -eq 1 ]] && echo "skip" || echo "run apps/ext/app/scripts/build.sh")"
 echo "  release:    $([[ $RELEASE_EXISTS -eq 1 ]] && echo "exists, upload with --clobber" || echo "create")"
 echo "  tap:        $([[ $SKIP_TAP -eq 1 ]] && echo "skip" || echo "update muqsitnawaz/tap")"
 echo "  installer:  curl -fsSL $INSTALL_URL | sh"

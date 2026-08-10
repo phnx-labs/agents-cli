@@ -145,7 +145,7 @@
                   "maxAgents": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "Cap on concurrent agents (agents.max-concurrent). Factory auto-launch counts device-wide running agents; teams placement counts the team's roster on the device."
+                    "description": "Cap on concurrent agents (agents.max-concurrent). AGI EXT auto-launch counts device-wide running agents; teams placement counts the team's roster on the device."
                   },
                   "schedulerEnabled": {
                     "type": "boolean",
@@ -200,11 +200,11 @@
                   },
                   "autoLaunchEnabled": {
                     "type": "boolean",
-                    "description": "Whether Factory auto-launch may pick this device (auto-launch.enabled; default on)."
+                    "description": "Whether AGI EXT auto-launch may pick this device (auto-launch.enabled; default on)."
                   },
                   "autoLaunchPreferred": {
                     "type": "boolean",
-                    "description": "Boost this device in Factory auto-launch ranking (auto-launch.preferred; default off)."
+                    "description": "Boost this device in AGI EXT auto-launch ranking (auto-launch.preferred; default off)."
                   }
                 }
               }

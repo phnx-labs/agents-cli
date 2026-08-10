@@ -95,8 +95,8 @@ See [01-version-management.md](01-version-management.md) for install and switchi
 agents-cli is two application-layer surfaces over one shared set of on-disk state.
 **`apps/cli`** (the `agents` / `ag` CLI) is the framework: it owns the SQLite session
 index, `sessions` / `teams` / `run` / `cloud`, the pid→id registry, the audit log,
-and the SSH fan-out to peers. **`apps/factory`** (the Factory VS Code extension) is a
-consumer: it spawns agent terminals and renders the Factory Floor, but for live state
+and the SSH fan-out to peers. **`apps/ext`** (AGI EXT, the VS Code extension) is a
+consumer: it spawns agent terminals and renders the Fleet, but for live state
 it shells out to `agents sessions --active --json` and reshapes the JSON — it holds no
 data models of its own. Fix a mechanism in the CLI and every consumer benefits. Full
 detail in [architecture.md](architecture.md).
@@ -182,7 +182,7 @@ routines scheduler from starting on that device — `routines add` skips the
 auto-start with the reason, `routines start` refuses, and a running daemon
 re-evaluates the gate on every SIGHUP reload, so flipping the key never needs a
 daemon restart. `agents.max-concurrent` feeds host ranking, and what counts
-toward it depends on the consumer: Factory auto-launch counts device-wide
+toward it depends on the consumer: AGI EXT auto-launch counts device-wide
 running agents, while teams placement counts the team's own roster on the
 device (local teammates included); a capped device is excluded from auto-pick
 with a stated reason, and an all-capped pool fails loud. Setup asks instead of

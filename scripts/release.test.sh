@@ -10,11 +10,11 @@ grep -q "agents-dbg-v0.1.0" /tmp/agents-dbg-release-dry-run.out
 
 node <<'NODE'
 const fs = require('fs');
-const pkg = JSON.parse(fs.readFileSync('apps/factory/app/package.json', 'utf8'));
+const pkg = JSON.parse(fs.readFileSync('apps/ext/app/package.json', 'utf8'));
 const repository = pkg.repository;
 const url = typeof repository === 'string' ? repository : repository?.url;
 if (!url || !url.includes('github.com/phnx-labs/agents-cli')) {
-  throw new Error('apps/factory/app/package.json must declare repository metadata so electron-builder works from git worktrees');
+  throw new Error('apps/ext/app/package.json must declare repository metadata so electron-builder works from git worktrees');
 }
 NODE
 

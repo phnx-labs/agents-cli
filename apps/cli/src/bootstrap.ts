@@ -768,7 +768,7 @@ function registerResourcesTombstoneCommand(p: Command): void {
 
 /**
  * Removed `hq` command — the JSON bridge for the interactive Agents HQ floor
- * (`agents hq floor --json`). No UI ever consumed it (apps/factory has zero
+ * (`agents hq floor --json`). No UI ever consumed it (apps/ext has zero
  * references) and it had no external users, so it is gone with no replacement.
  * Kept as a hidden tombstone so a stale invocation gets a clear message and a
  * non-zero exit instead of commander's raw "unknown command".

@@ -136,7 +136,7 @@ remote home for you.
 | `--worktree <name>` | Run in a dedicated git worktree (requires `--enable-worktrees` on the team) |
 | `--device <host>` | Distributed teams: run THIS teammate on `<host>` (alias `--host`). Works with or without a team pool. `<host>` may also be `auto` (RUSH-2185) to affinity-pick a device the same way `agents run --device auto` does — a pick that lands on this machine just runs the teammate locally, same as omitting `--device`. See [Distributed teams](#distributed-teams). |
 | `--after <names>` | Comma-separated teammate names to wait for before starting |
-| `--task-type <type>` | Factory label: `plan` \| `implement` \| `test` \| `review` \| `bugfix` \| `docs` |
+| `--task-type <type>` | Fleet label: `plan` \| `implement` \| `test` \| `review` \| `bugfix` \| `docs` |
 | `--cloud <provider>` | Dispatch to cloud backend: `rush` \| `codex` \| `factory` |
 | `--repo <owner/repo>` | GitHub repository (required for `--cloud rush`) |
 | `--branch <name>` | Target branch for cloud dispatch |

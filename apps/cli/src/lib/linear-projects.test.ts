@@ -6,7 +6,7 @@ import {
   type LinearProjectLite,
 } from './linear-projects.js';
 
-// Matcher cases ported from apps/factory/src/core/linearProjects.test.ts
+// Matcher cases ported from apps/ext/src/core/linearProjects.test.ts
 // (bun:test → vitest); the two modules are kept in sync by hand.
 
 describe('normalizeProjectKey', () => {

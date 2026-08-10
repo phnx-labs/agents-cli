@@ -1,7 +1,7 @@
 # Architecture
 
 How the parts fit together: **two application layers** (the `agents` CLI and the
-Factory extension), **two meanings of "session"** (a transcript vs a live identity),
+AGI EXT), **two meanings of "session"** (a transcript vs a live identity),
 and the on-disk stores that connect them. Read this once and the rest of the docs
 (`05-sessions.md`, `06-observability.md`, `teams.md`) slot into place.
 
@@ -18,8 +18,8 @@ writing; treat them as pointers, not guarantees.
   state and every mechanism: the SQLite transcript index, `sessions` / `teams` /
   `run` / `cloud`, the CLI-side pid→id registry, the audit log, and the SSH fan-out
   to peer machines.
-- **`apps/factory` — the Factory VS Code extension. A consumer.** It spawns agent
-  terminals as tabs and renders the Factory Floor dashboard, but it holds **no data
+- **`apps/ext` — AGI EXT, the VS Code extension. A consumer.** It spawns agent
+  terminals as tabs and renders the Fleet dashboard, but it holds **no data
   models of its own** beyond the live-session state file. For "what's running", it
   shells out to the CLI (`agents sessions --active --json`) and reshapes the JSON.
 
@@ -27,7 +27,7 @@ writing; treat them as pointers, not guarantees.
 flowchart LR
   subgraph machine["one machine"]
     CLI["apps/cli — the agents CLI<br/><b>the framework</b><br/>sessions index · teams · run · cloud<br/>pid-registry · events.jsonl · SSH fan-out"]
-    FAC["apps/factory — Factory extension<br/><b>a consumer</b><br/>terminal tabs · Factory Floor<br/>file-watcher · watchdog socket"]
+    FAC["apps/ext — AGI EXT<br/><b>a consumer</b><br/>terminal tabs · Fleet<br/>file-watcher · watchdog socket"]
     CLI -- "exposes: agents sessions --active --json" --> FAC
   end
   CLI --> DB[("sessions.db<br/>SQLite + FTS5")]
@@ -40,8 +40,8 @@ The important consequence: **the CLI is where the mechanisms live**, so a change
 how live state is computed (or cached) benefits every consumer — a terminal, the
 extension, another machine — at once. The extension is a thin reshaping layer.
 
-> The Factory extension is a **separate product** with its own publish identity
-> (publisher `swarmify`, name `swarm-ext`). See [`apps/factory/AGENTS.md`](../../factory/AGENTS.md).
+> AGI EXT is a **separate product** with its own publish identity
+> (publisher `swarmify`, name `swarm-ext`). See [`apps/ext/AGENTS.md`](../../ext/AGENTS.md).
 
 ---
 
@@ -118,7 +118,7 @@ sequenceDiagram
   terminal, which the CLI never launched — for harnesses that expose a hook.
 
 **Reader split:** the CLI reads `by-pid/`; the **extension** reads `sessions/`
-(`apps/factory/src/core/liveSession.ts`). Same pid→id data, two writers, two readers.
+(`apps/ext/src/core/liveSession.ts`). Same pid→id data, two writers, two readers.
 The join key already exists — the hook records `terminal_id` / `launch_id` from the
 env the launcher sets (`AGENT_TERMINAL_ID`, `AGENT_LAUNCH_ID`) — so the two files can
 be merged behind one path later; today both exist because neither subsumes the other
@@ -228,8 +228,8 @@ Detail in [teams.md](teams.md); the SSH transport is [09-ssh-transport.md](09-ss
 of each live transcript, infers `working` / `waiting_input` / `idle`, and computes
 tokens/sec ([`src/lib/session/active.ts`](../src/lib/session/active.ts),
 `readSessionTailWithRaw` → `inferSessionState` → `computeTokPerSec`). There is no
-resident cache: each call pays the recompute, and the Factory extension polls it
-(local sessions ~3s, remote peers ~45s, `apps/factory/ui/.../UnifiedAgentsPane.tsx`).
+resident cache: each call pays the recompute, and AGI EXT polls it
+(local sessions ~3s, remote peers ~45s, `apps/ext/ui/.../UnifiedAgentsPane.tsx`).
 Other machines are reached by running the same command over SSH per peer.
 
 ### Coarse status is honest, not guessed

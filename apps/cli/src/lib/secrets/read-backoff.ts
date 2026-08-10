@@ -2,7 +2,7 @@
  * Negative memo for failed/cancelled macOS keychain reads (the "back-off").
  *
  * A cancelled Touch ID sheet is the user saying "not now" — but a polling
- * caller (the Factory extension host's `agents view` loop, a watch script)
+ * caller (AGI EXT host's `agents view` loop, a watch script)
  * retries the same read a few seconds later and pops the sheet again, forever.
  * The headless guard (index.ts `assertRawKeychainReadAllowed`) covers the
  * no-TTY case; this memo covers a context that CAN prompt but just had its

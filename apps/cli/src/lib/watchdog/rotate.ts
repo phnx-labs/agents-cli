@@ -7,13 +7,13 @@
  * weekly limit · resets …"), the daemon watchdog rotates it instead of nudging:
  *
  *   1. DETECT  — classifyTailForRotate() matches the tail against the limit
- *      patterns (ported from apps/factory/src/core/autoRotate.ts) and parses the
+ *      patterns (ported from apps/ext/src/core/autoRotate.ts) and parses the
  *      `resets <time>` clause when present.
  *   2. GATE    — defaultRotateGate() runs the SAME first-party selection
  *      `agents run auto` would (collectHarnessCandidates + pickHarnessWeighted,
  *      ../rotate.ts). Zero healthy → ONE `rotate` skip event per cooldown window
  *      and the terminal is left untouched. No `agents view` subprocess anywhere.
- *   3. RELAUNCH — the per-harness exit sequence (ported from apps/factory
+ *   3. RELAUNCH — the per-harness exit sequence (ported from apps/ext
  *      prewarm.ts PREWARM_CONFIGS) is injected, then
  *      `agents run auto --interactive --session-id <uuid>`.
  *   4. REPLAY   — when the new session's TUI is live (bounded wait, default
@@ -46,7 +46,7 @@ import { resolveWatchdogSessionPath } from './read.js';
 
 /**
  * Agent-reported hard-limit texts, matched against a session transcript tail.
- * Ported verbatim from apps/factory/src/core/autoRotate.ts RATE_LIMIT_PATTERNS —
+ * Ported verbatim from apps/ext/src/core/autoRotate.ts RATE_LIMIT_PATTERNS —
  * kept specific on purpose: a transcript carries prose, so a loose "rate limit"
  * match would rotate terminals whose agent merely DISCUSSED limits. The first
  * two patterns cover the weekly/session variants, including claude's
@@ -82,7 +82,7 @@ export function classifyTailForRotate(tailLines: string[], nowMs: number): Rotat
 
 /**
  * Parse the `resets <time>` clause of a limit line into an epoch-ms horizon.
- * Ported from apps/factory/src/core/autoRotate.ts parseResetTimeMs (behavior
+ * Ported from apps/ext/src/core/autoRotate.ts parseResetTimeMs (behavior
  * verbatim): the ISO form (milliseconds + Z) is matched EXPLICITLY and first —
  * a generic capture stops at the milliseconds dot and drops the Z, which makes
  * Date.parse read LOCAL time (the suppression would end hours off). Time-of-day
@@ -159,7 +159,7 @@ function nextOccurrenceMs(
 // --- exit sequences ------------------------------------------------------------
 
 /**
- * Clean-exit key sequences per harness, ported verbatim from apps/factory
+ * Clean-exit key sequences per harness, ported verbatim from apps/ext
  * prewarm.ts PREWARM_CONFIGS. Injected as RAW BYTES with no trailing Enter — a
  * literal \x03 written to the pty IS Ctrl+C (SIGINT), \x1b IS Esc. claude's Ink
  * TUI needs the Esc first to leave any open mode before the interrupt pair.
@@ -184,7 +184,7 @@ export function exitSequenceFor(agent: string): string[] {
 /**
  * The rotate relaunch, typed into the same tab: full auto — the CLI resolves
  * host (affinity) → harness (cross-harness headroom) → account (balanced) and
- * exits nonzero when every layer is exhausted. Ported from apps/factory
+ * exits nonzero when every layer is exhausted. Ported from apps/ext
  * autoRotate.ts buildAutoRotateLaunchCommand. A terminal on a REMOTE device
  * rotates ON that device (`--host`); a local terminal omits it. `--session-id`
  * is honored only when the CLI picks claude (existing claude-only semantics)

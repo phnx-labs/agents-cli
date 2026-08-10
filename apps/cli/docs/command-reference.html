@@ -329,7 +329,7 @@ agents bench results --json</code></pre><h4>Notes</h4><p class="notes">Task defi
 <article id="daemon" data-search="daemon daemon  the always-on daemon: secrets broker, browser ipc, watchdog, and the routines scheduler. bare `agents daemon` shows status. --json emit as json -h, --help show help # identity, duplicates, and per-service health in one view
       agents daemon status
 
-      # machine-readable status (for scripts / factory)
+      # machine-readable status (for scripts / agi ext)
       agents daemon status --json
 
       # start / stop / restart the daemon process
@@ -361,7 +361,7 @@ agents bench results --json</code></pre><h4>Notes</h4><p class="notes">Task defi
       &#39;systemctl start&#39; on a disabled unit."><div class="command-head"><h3><code>agents daemon</code></h3></div><p>The always-on daemon: secrets broker, browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--json</code></td><td>Emit as JSON</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Identity, duplicates, and per-service health in one view
       agents daemon status
 
-      # Machine-readable status (for scripts / Factory)
+      # Machine-readable status (for scripts / AGI EXT)
       agents daemon status --json
 
       # Start / stop / restart the daemon process
@@ -491,7 +491,7 @@ email) into a single row. Use `agents devices harnesses` for the per-install vie
       agents devices config win-mini ssh.auth password          # password auth…
       agents devices config win-mini ssh.bundle muqsit          # …from this secrets bundle
       agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519
-      agents devices config mac-mini auto-launch.enabled off    # exclude from factory auto-launch
+      agents devices config mac-mini auto-launch.enabled off    # exclude from agi ext auto-launch
       agents devices config mac-mini auto-launch.preferred on   # boost in auto-launch ranking
       agents devices config zion interactive.host zion          # user scope: where agents show you artifacts
       agents devices config mac-mini --json                     # machine-readable keys: agents.max-concurrent, scheduler.enabled, daemon.enabled,
@@ -518,7 +518,7 @@ email) into a single row. Use `agents devices harnesses` for the per-install vie
       agents devices config win-mini ssh.auth password          # password auth…
       agents devices config win-mini ssh.bundle muqsit          # …from this secrets bundle
       agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519
-      agents devices config mac-mini auto-launch.enabled off    # exclude from Factory auto-launch
+      agents devices config mac-mini auto-launch.enabled off    # exclude from AGI EXT auto-launch
       agents devices config mac-mini auto-launch.preferred on   # boost in auto-launch ranking
       agents devices config zion interactive.host zion          # user scope: where agents show YOU artifacts
       agents devices config mac-mini --json                     # machine-readable</code></pre><h4>Notes</h4><p class="notes">Keys: agents.max-concurrent, scheduler.enabled, daemon.enabled,
@@ -1204,7 +1204,7 @@ Use `agents devices accounts` for the same data grouped by account.</p></article
       agents projects add rush --repo phnx-labs/rush --path apps/web
       agents projects list                 # definitions only (no session scan)
       agents projects list --with-agents   # opt-in local active counts
-      agents projects list --json          # machine-readable defs (factory uses this)
+      agents projects list --json          # machine-readable defs (agi ext uses this)
       echo &#39;{...}&#39; | agents projects save --json  # create/update one def from stdin
       agents projects rm rush --json       # machine-readable delete
       agents projects status              # every project, across the whole fleet
@@ -1213,12 +1213,12 @@ Use `agents devices accounts` for the same data grouped by account.</p></article
       agents projects status --device s0  # scope to one device (or --devices a,b,c)
       agents projects link rush --linear  # bind the linear project (auto-suggest)
       agents run --project rush           # land an agent in the project definitions are hand-editable yaml in ~/.agents/projects/ and sync across
-      machines with &#39;agents push/pull&#39;. factory reads and writes only through
+      machines with &#39;agents push/pull&#39;. agi ext reads and writes only through
       these commands — never ~/.agents/factory/projects.json."><div class="command-head"><h3><code>agents projects</code></h3></div><p>Named multi-repo projects with a progress rollup.</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code>agents projects import --from-linear  # the projects you actually track
       agents projects add rush --repo phnx-labs/rush --path apps/web
       agents projects list                 # definitions only (no session scan)
       agents projects list --with-agents   # opt-in local active counts
-      agents projects list --json          # machine-readable defs (Factory uses this)
+      agents projects list --json          # machine-readable defs (AGI EXT uses this)
       echo &#39;{...}&#39; | agents projects save --json  # create/update one def from stdin
       agents projects rm rush --json       # machine-readable delete
       agents projects status              # every project, across the whole fleet
@@ -1227,7 +1227,7 @@ Use `agents devices accounts` for the same data grouped by account.</p></article
       agents projects status --device s0  # scope to one device (or --devices a,b,c)
       agents projects link rush --linear  # bind the Linear project (auto-suggest)
       agents run --project rush           # land an agent in the project</code></pre><h4>Notes</h4><p class="notes">Definitions are hand-editable YAML in ~/.agents/projects/ and sync across
-      machines with &#39;agents push/pull&#39;. Factory reads and writes only through
+      machines with &#39;agents push/pull&#39;. AGI EXT reads and writes only through
       these commands — never ~/.agents/factory/projects.json.</p></article>
 <article id="projects-add" data-search="add projects add  define a project. infers root and repo from the current git repo when not given. name  --root &lt;path&gt; repo / monorepo root (defaults to the current git repo root) --path &lt;subdir&gt; default cwd for agents (a monorepo subdir) --repo &lt;owner/repo&gt; primary github slug (defaults to the origin remote) --context &lt;path:purpose...&gt; a described starting point; repeatable --goal &lt;objective:measure...&gt; an outcome the project serves; repeatable --linear &lt;url-or-id&gt; linear project url or id --force overwrite an existing definition -h, --help show help  "><div class="command-head"><h3><code>agents projects add &lt;name&gt;</code></h3></div><p>Define a project. Infers root and repo from the current git repo when not given.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;name&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--root &lt;path&gt;</code></td><td>Repo / monorepo root (defaults to the current git repo root)</td><td></td><td></td></tr><tr><td><code>--path &lt;subdir&gt;</code></td><td>Default cwd for agents (a monorepo subdir)</td><td></td><td></td></tr><tr><td><code>--repo &lt;owner/repo&gt;</code></td><td>Primary GitHub slug (defaults to the origin remote)</td><td></td><td></td></tr><tr><td><code>--context &lt;path:purpose...&gt;</code></td><td>A described starting point; repeatable</td><td></td><td></td></tr><tr><td><code>--goal &lt;objective:measure...&gt;</code></td><td>An outcome the project serves; repeatable</td><td></td><td></td></tr><tr><td><code>--linear &lt;url-or-id&gt;</code></td><td>Linear project URL or id</td><td></td><td></td></tr><tr><td><code>--force</code></td><td>Overwrite an existing definition</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
 <article id="projects-edit" data-search="edit projects edit  open the project yaml in $editor (it is hand-editable regardless). name  -h, --help show help  "><div class="command-head"><h3><code>agents projects edit &lt;name&gt;</code></h3></div><p>Open the project YAML in $EDITOR (it is hand-editable regardless).</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;name&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
@@ -3237,7 +3237,7 @@ with an explicit note. Use --no-redact only for local output that will not be sh
       # fleet-wide active sessions (matches sessions --active scope)
       agents snapshot --json --all-hosts
 
-      # inventory for one harness only (factory-style usage poll)
+      # inventory for one harness only (an agi ext-style usage poll)
       agents snapshot --json --agent claude
 
       # run the whole snapshot on another device
@@ -3250,7 +3250,7 @@ with an explicit note. Use --no-redact only for local output that will not be sh
       # Fleet-wide active sessions (matches sessions --active scope)
       agents snapshot --json --all-hosts
 
-      # Inventory for one harness only (Factory-style usage poll)
+      # Inventory for one harness only (an AGI EXT-style usage poll)
       agents snapshot --json --agent claude
 
       # Run the whole snapshot on another device

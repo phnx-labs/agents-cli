@@ -22,7 +22,7 @@ jobs:
     outputs:
       cli: ${{ steps.scope.outputs.cli }}
       cli_docs: ${{ steps.scope.outputs.cli_docs }}
-      factory: ${{ steps.scope.outputs.factory }}
+      ext: ${{ steps.scope.outputs.ext }}
       session_tracker: ${{ steps.scope.outputs.session_tracker }}
       windows: ${{ steps.scope.outputs.windows }}
     steps:
@@ -110,20 +110,20 @@ jobs:
       - name: Verify the command index is up to date
         run: bash scripts/verify-command-index.sh
 
-  factory:
+  ext:
     needs: scope
-    if: needs.scope.outputs.factory == 'true'
+    if: needs.scope.outputs.ext == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: apps/factory
+        working-directory: apps/ext
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - run: bun install --frozen-lockfile
       - run: bun install --frozen-lockfile
-        working-directory: apps/factory/ui
+        working-directory: apps/ext/ui
       - run: bun run compile
 
   session-tracker:
@@ -166,7 +166,7 @@ jobs:
       - run: bun run test
 
   test:
-    needs: [scope, cli-preflight, cli-test-shard, cli-docs, factory, session-tracker, windows]
+    needs: [scope, cli-preflight, cli-test-shard, cli-docs, ext, session-tracker, windows]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -179,8 +179,8 @@ jobs:
           CLI_TEST_RESULT: ${{ needs.cli-test-shard.result }}
           DOCS_EXPECTED: ${{ needs.scope.outputs.cli_docs }}
           DOCS_RESULT: ${{ needs.cli-docs.result }}
-          FACTORY_EXPECTED: ${{ needs.scope.outputs.factory }}
-          FACTORY_RESULT: ${{ needs.factory.result }}
+          EXT_EXPECTED: ${{ needs.scope.outputs.ext }}
+          EXT_RESULT: ${{ needs.ext.result }}
           SESSION_TRACKER_EXPECTED: ${{ needs.scope.outputs.session_tracker }}
           SESSION_TRACKER_RESULT: ${{ needs.session-tracker.result }}
           WINDOWS_EXPECTED: ${{ needs.scope.outputs.windows }}
@@ -208,7 +208,7 @@ jobs:
           check_result "cli-preflight" "$CLI_EXPECTED" "$CLI_PREFLIGHT_RESULT"
           check_result "cli-test-shard" "$CLI_EXPECTED" "$CLI_TEST_RESULT"
           check_result "cli-docs" "$DOCS_EXPECTED" "$DOCS_RESULT"
-          check_result "factory" "$FACTORY_EXPECTED" "$FACTORY_RESULT"
+          check_result "ext" "$EXT_EXPECTED" "$EXT_RESULT"
           check_result "session-tracker" "$SESSION_TRACKER_EXPECTED" "$SESSION_TRACKER_RESULT"
           check_result "windows" "$WINDOWS_EXPECTED" "$WINDOWS_RESULT"
           echo "all affected component checks green"

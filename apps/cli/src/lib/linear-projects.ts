@@ -6,7 +6,7 @@
 // key so they compare equal, and matchLinearProject() binds a repo/folder to the
 // Linear project the user most likely means.
 //
-// Ported from apps/factory/src/core/linearProjects.ts (no cross-package imports —
+// Ported from apps/ext/src/core/linearProjects.ts (no cross-package imports —
 // repo rule); keep the two in sync. The matcher half is PURE so it unit-tests
 // without a live `linear` binary; the `linear projects --json` shell-out lives at
 // the bottom (listLinearProjects) and fails LOUD — it's behind an explicit user

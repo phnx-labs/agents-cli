@@ -7,7 +7,7 @@
  *     top-level `defaultBrowserProfile:` field. Agent pins (`agents:`,
  *     `isolatedAgents:`) and `routines:` STAY in the per-device doc — only
  *     operator config moves.
- *   - `~/.agents/.history/devices/auto-launch.json` — Factory auto-launch
+ *   - `~/.agents/.history/devices/auto-launch.json` — AGI EXT auto-launch
  *     enabled/preferred flags, becoming `autoLaunchEnabled` /
  *     `autoLaunchPreferred` config keys.
  *

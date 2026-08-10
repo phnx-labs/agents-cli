@@ -747,7 +747,7 @@ def main():
         # tool_input) but carries no questions -- Codex is asking to run a tool,
         # not asking the operator a multiple-choice question. Publish it as a
         # notification-kind approval block naming the tool so the feed and the
-        # phone notifier can surface it, and so the Factory extension can bridge
+        # phone notifier can surface it, and so AGI EXT can bridge
         # it to a VS Code notification.
         tool_name = payload.get("tool_name") or "a tool"
         tool_input = payload.get("tool_input", {})

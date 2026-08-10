@@ -4,7 +4,7 @@ import { FOCUS_LIMIT, focusBucket, rankFocusAreas, formatFocusCount, formatFocus
 describe('focusBucket', () => {
   it('buckets to three levels, which is where a monorepo becomes legible', () => {
     expect(focusBucket('apps/cli/src/lib/projects.ts')).toBe('apps/cli/src');
-    expect(focusBucket('apps/factory/src/core/tasks.ts')).toBe('apps/factory/src');
+    expect(focusBucket('apps/ext/src/core/tasks.ts')).toBe('apps/ext/src');
     expect(focusBucket('apps/cli/docs/11-projects.md')).toBe('apps/cli/docs');
   });
 
@@ -32,12 +32,12 @@ describe('rankFocusAreas', () => {
   it('ranks by touches, descending', () => {
     const files = [
       ...Array(5).fill('apps/cli/src/a.ts'),
-      ...Array(2).fill('apps/factory/src/b.ts'),
+      ...Array(2).fill('apps/ext/src/b.ts'),
       'apps/cli/docs/c.md',
     ];
     expect(rankFocusAreas(files)).toEqual([
       { path: 'apps/cli/src', touches: 5 },
-      { path: 'apps/factory/src', touches: 2 },
+      { path: 'apps/ext/src', touches: 2 },
       { path: 'apps/cli/docs', touches: 1 },
     ]);
   });

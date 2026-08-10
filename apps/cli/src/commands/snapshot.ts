@@ -120,7 +120,7 @@ export function registerSnapshotCommand(program: Command): void {
       # Fleet-wide active sessions (matches sessions --active scope)
       agents snapshot --json --all-hosts
 
-      # Inventory for one harness only (Factory-style usage poll)
+      # Inventory for one harness only (an AGI EXT-style usage poll)
       agents snapshot --json --agent claude
 
       # Run the whole snapshot on another device

@@ -544,7 +544,7 @@ export function registerDaemonCommand(program: Command): void {
       # Identity, duplicates, and per-service health in one view
       agents daemon status
 
-      # Machine-readable status (for scripts / Factory)
+      # Machine-readable status (for scripts / AGI EXT)
       agents daemon status --json
 
       # Start / stop / restart the daemon process

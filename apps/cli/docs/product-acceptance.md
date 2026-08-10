@@ -163,7 +163,7 @@ host each live agent is on, so I know where to attach without guessing.
 
 3. **Given** the same live set  
    **When** I run `agents sessions --active --json`  
-   **Then** each object includes a stable `host` field Factory Floor can parse.
+   **Then** each object includes a stable `host` field Fleet can parse.
 
 **Must not break:** preview one-liner; empty vs error exit codes; JSON field renames without COMPAT.
 

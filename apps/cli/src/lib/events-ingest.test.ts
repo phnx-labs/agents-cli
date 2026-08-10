@@ -76,7 +76,7 @@ describe('routing between the two stores', () => {
     const written = JSON.parse(fs.readFileSync(path.join(activityRoot, 'abc-123.jsonl'), 'utf-8').trim());
     expect(written.event).toBe('factory.launch');
     expect(written.tier).toBe('milestone');
-    // terminalId is Factory's join key onto the CLI's pid registry — it must survive.
+    // terminalId is the ext's join key onto the CLI's pid registry — it must survive.
     expect(written.terminalId).toBe('CC-3');
     expect(written.mailboxId).toBe('abc-123'); // defaults to sessionId
     // The operational log stays empty for a routed milestone.

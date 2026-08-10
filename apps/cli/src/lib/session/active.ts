@@ -225,7 +225,7 @@ export interface ActiveSession {
   activity?: SessionActivity;
   /**
    * Output-token throughput (tokens/sec) over a rolling 60s window, from the
-   * transcript tail. The number the Factory Floor shows next to a running agent;
+   * transcript tail. The number the Fleet shows next to a running agent;
    * absent when no transcript is resolvable or the agent format reports no usage.
    */
   tokPerSec?: number;
@@ -241,7 +241,7 @@ export interface ActiveSession {
   plan?: string;
   /**
    * Live plan progress from the most recent `TodoWrite` (RUSH-1380): the checklist
-   * items + a done/total tally + the current step. The Factory Floor renders this
+   * items + a done/total tally + the current step. The Fleet renders this
    * as an N/M pill + checklist for every session — including remote and
    * device-dispatched agents that have no local tool-call stream to parse.
    */

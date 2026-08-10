@@ -43,7 +43,7 @@ Grok, Droid, and others as **interchangeable surfaces**:
 5. Session index across harnesses and devices
 6. Fleet (SSH devices/hosts), multi-cloud dispatch, secrets, routines, monitors
 7. Real-world tools: `browser`, `computer`
-8. Factory VS Code extension as a consumer of the same CLI state
+8. AGI EXT VS Code extension as a consumer of the same CLI state
 
 ### Gas Town
 
@@ -136,7 +136,7 @@ equivalents.
 | Background supervisor | Deacon + Boot + Dogs | Daemon / routines / monitors / watchdog |
 | Merge queue | Refinery | PR + CI + human/reviewer merge |
 | Resume after context death | Handoff + GUPP + seance | Sessions resume / continue / session-recall |
-| Activity dashboard | `gt feed`, web dashboard | `sessions --active`, menu bar, Factory Floor |
+| Activity dashboard | `gt feed`, web dashboard | `sessions --active`, menu bar, Fleet |
 
 ---
 
@@ -283,7 +283,7 @@ human-in-the-loop control.
 
 | User want | agents-cli surface |
 |---|---|
-| Don’t hand-manage 10 tabs | `teams`, `sessions --active`, Factory Floor |
+| Don’t hand-manage 10 tabs | `teams`, `sessions --active`, Fleet |
 | Work outlives chat | Tickets + session resume (gap: no Beads-class in-repo ledger) |
 | Parallel workers + isolation | Worktrees / teams Owns boundaries |
 | Keep moving when stuck | monitors, watchdog, feed |

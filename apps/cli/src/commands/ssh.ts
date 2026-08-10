@@ -1366,7 +1366,7 @@ function registerDevicesCommands(program: Command): void {
       agents devices config win-mini ssh.auth password          # password auth…
       agents devices config win-mini ssh.bundle muqsit          # …from this secrets bundle
       agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519
-      agents devices config mac-mini auto-launch.enabled off    # exclude from Factory auto-launch
+      agents devices config mac-mini auto-launch.enabled off    # exclude from AGI EXT auto-launch
       agents devices config mac-mini auto-launch.preferred on   # boost in auto-launch ranking
       agents devices config zion interactive.host zion          # user scope: where agents show YOU artifacts
       agents devices config mac-mini --json                     # machine-readable
@@ -1404,7 +1404,7 @@ function registerDevicesCommands(program: Command): void {
         await mustGetDevice(name);
         // Back to the default (enabled) = remove the key.
         await runDevicesConfig(name, 'auto-launch.enabled', [], { unset: true, quiet: true });
-        console.log(chalk.green(`Enabled '${name}'`) + chalk.gray(' for Factory auto-launch.'));
+        console.log(chalk.green(`Enabled '${name}'`) + chalk.gray(' for AGI EXT auto-launch.'));
       } catch (err: any) {
         console.error(chalk.red(err.message));
         process.exit(1);
@@ -1418,7 +1418,7 @@ function registerDevicesCommands(program: Command): void {
         configTombstoneNotice('disable <name>', 'config <name> auto-launch.enabled off');
         await mustGetDevice(name);
         await runDevicesConfig(name, 'auto-launch.enabled', ['off'], { quiet: true });
-        console.log(chalk.green(`Disabled '${name}'`) + chalk.gray(' for Factory auto-launch.'));
+        console.log(chalk.green(`Disabled '${name}'`) + chalk.gray(' for AGI EXT auto-launch.'));
       } catch (err: any) {
         console.error(chalk.red(err.message));
         process.exit(1);
@@ -1432,7 +1432,7 @@ function registerDevicesCommands(program: Command): void {
         configTombstoneNotice('prefer <name>', 'config <name> auto-launch.preferred on');
         await mustGetDevice(name);
         await runDevicesConfig(name, 'auto-launch.preferred', ['on'], { quiet: true });
-        console.log(chalk.green(`Preferred '${name}'`) + chalk.gray(' for Factory auto-launch.'));
+        console.log(chalk.green(`Preferred '${name}'`) + chalk.gray(' for AGI EXT auto-launch.'));
       } catch (err: any) {
         console.error(chalk.red(err.message));
         process.exit(1);
@@ -1447,7 +1447,7 @@ function registerDevicesCommands(program: Command): void {
         await mustGetDevice(name);
         // Back to the default (not preferred) = remove the key.
         await runDevicesConfig(name, 'auto-launch.preferred', [], { unset: true, quiet: true });
-        console.log(chalk.green(`No longer preferring '${name}'`) + chalk.gray(' for Factory auto-launch.'));
+        console.log(chalk.green(`No longer preferring '${name}'`) + chalk.gray(' for AGI EXT auto-launch.'));
       } catch (err: any) {
         console.error(chalk.red(err.message));
         process.exit(1);
@@ -1567,7 +1567,7 @@ function registerDevicesCommands(program: Command): void {
     const names = Object.keys(reg).sort();
     const interactiveHost = getConfigValue('interactive.host').value as string | undefined;
     if (opts.json) {
-      // Registry + central config block, always fast — the Factory extension
+      // Registry + central config block, always fast — AGI EXT
       // polls this path. Each row is the EFFECTIVE profile (registry overlaid
       // with the central ssh.*/platform/user config) and carries its
       // device-scope `config` (maxAgents, schedulerEnabled, notes, ssh*,

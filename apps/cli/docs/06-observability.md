@@ -19,7 +19,7 @@ whose *consumer* and *axis* match your question, not whichever you remember firs
 | **`timeline`** | **Progress stream only.** Alias of `feed --filter updates` — deliberate posts, not tool noise. | same as feed updates lane | Humans + `--json` |
 | **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
 | **`sessions`** / **`roster`** | **Live agent roster + transcripts.** `roster` ≡ `sessions --active`. Browse/read past transcripts under `sessions`. `sessions stats` = skill/slash invocation leaderboard. | live pid/transcript probe + `sessions.db` | Human + `--json` |
-| **`snapshot`** | **One-process poll.** Inventory + active sessions (+ optional feed/sync). Not `status` (sync-only). | view + active + optional feed | Machines / Factory |
+| **`snapshot`** | **One-process poll.** Inventory + active sessions (+ optional feed/sync). Not `status` (sync-only). | view + active + optional feed | Machines / the ext |
 
 ### Why `insights` owns mix (and `trends` does not)
 
@@ -85,7 +85,7 @@ soft-join later.
 
 **Writing from outside the CLI — `agents events emit`.** In-process code calls
 `emit()` or `appendActivityEvent()` directly, but the producers that most need to
-record events are not agents-cli processes at all (the Factory VS Code extension
+record events are not agents-cli processes at all (AGI EXT, the VS Code extension
 host, a shell guard, any external tool). They pipe JSONL — one JSON object per
 line — into `agents events emit --source <name>`:
 
@@ -229,9 +229,9 @@ Every record carries **attribution** computed once per process
 - `osUser` — the OS account that ran it.
 - `transport` — `local`, or `ssh` when `$SSH_CONNECTION` is present.
 - `sshClientIp` — the remote client IP when over SSH.
-- `caller` — `claude-code`, a Factory terminal agent (`claude`, `codex`,
+- `caller` — `claude-code`, an ext terminal agent (`claude`, `codex`,
   `gemini`, `cursor`, …), `terminal`, or `script`.
-- `session` — the short Factory session id when one is present.
+- `session` — the short ext session id when one is present.
 
 So "was this agent started on the host by a remote user?" is answerable for any
 event, not just runs. The write is a synchronous single-line append (durable
@@ -692,7 +692,7 @@ Each source answers a different question:
 
 `agents sessions --active --json` includes `attachments` for prompt-side
 screenshots and files when the source transcript carries a local path. Each entry
-contains `path`, `name`, `mediaType`, and `sizeBytes` so consumers such as Factory
+contains `path`, `name`, `mediaType`, and `sizeBytes` so consumers such as the ext
 can render thumbnails and open the original attachment without re-reading the raw
 agent transcript.
 

@@ -390,7 +390,7 @@ agents sessions detach a1b2c3d4     # go headless in the background, keep workin
 agents sessions attach a1b2c3d4     # resume it interactively, right here
 ```
 
-Both are agent-agnostic -- they route through the same `agents run --resume` path (native resume for Claude/Codex, `/continue` replay for the rest). `agents sessions --active` shows each session's **owner** (the human who launched it, resolved from the tailnet identity, or `-` for an unresolved local run) and its `presence` -- `attached` (you're watching it), `background` (running headless), or `parked` (its background run finished) -- so the menu bar and Factory show who is running what, and where. In the Factory extension, **Agents: Detach** (`Cmd/Ctrl+K B`) and **Agents: Attach** (`Cmd/Ctrl+K A`) do the same over the focused terminal.
+Both are agent-agnostic -- they route through the same `agents run --resume` path (native resume for Claude/Codex, `/continue` replay for the rest). `agents sessions --active` shows each session's **owner** (the human who launched it, resolved from the tailnet identity, or `-` for an unresolved local run) and its `presence` -- `attached` (you're watching it), `background` (running headless), or `parked` (its background run finished) -- so the menu bar and AGI EXT show who is running what, and where. In AGI EXT, **Agents: Detach** (`Cmd/Ctrl+K B`) and **Agents: Attach** (`Cmd/Ctrl+K A`) do the same over the focused terminal.
 
 ---
 
@@ -1076,7 +1076,7 @@ one always-on daemon per device. `agents daemon` is its runtime surface:
 
 ```bash
 agents daemon                # identity + duplicates + per-service health (same as status)
-agents daemon status --json  # machine-readable, for scripts / Factory
+agents daemon status --json  # machine-readable, for scripts / AGI EXT
 
 agents daemon start          # start it (bypasses daemon.enabled -- the deliberate override)
 agents daemon stop           # stop it
@@ -1476,9 +1476,9 @@ Agents are defined in [src/lib/agents.ts](apps/cli/src/lib/agents.ts) -- each is
 | Path | What |
 |---|---|
 | [`apps/cli`](apps/cli) | **The CLI** (this README) — version management, config sync, sessions, teams, cloud, browser, computer, secrets. |
-| [`apps/factory`](apps/factory) | **Factory** — a VS Code extension that spawns agent terminals as tabs and adds the Factory Floor dashboard. A separate product with its own publish identity. |
+| [`apps/ext`](apps/ext) | **AGI EXT** — a VS Code extension that spawns agent terminals as tabs and adds the Fleet dashboard. A separate product with its own publish identity. |
 | [`native/computer-mac`](native/computer-mac) · [`native/computer-win`](native/computer-win) | Native backends behind `agents computer` — Swift (macOS Accessibility + screen capture) and C#/.NET (Windows UI Automation). |
-| [`packages/session-tracker`](packages/session-tracker) | The `SessionStart` hook that writes live-session state the **Factory extension** reads back (`apps/factory/src/core/liveSession.ts`) — not the CLI, which reads transcripts. |
+| [`packages/session-tracker`](packages/session-tracker) | The `SessionStart` hook that writes live-session state **AGI EXT** reads back (`apps/ext/src/core/liveSession.ts`) — not the CLI, which reads transcripts. |
 
 ## Contributing
 

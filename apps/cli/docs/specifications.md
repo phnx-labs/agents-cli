@@ -2402,7 +2402,7 @@ nothing but its own view cache.
 - **Executor** — whatever performs the action once decided.
 - **Thin wrapper** — a UI surface whose only relationships to a fleet-affecting
   capability are (a) rendering its state, and (b) invoking the CLI command that
-  controls it (`apps/factory/AGENTS.md`, the root `AGENTS.md` §Core concepts).
+  controls it (`apps/ext/AGENTS.md`, the root `AGENTS.md` §Core concepts).
 
 ### 3. Requirements
 
@@ -2428,11 +2428,11 @@ nothing but its own view cache.
   run-tracked/pausable/device-pinnable, but no longer shipped from the
   `gh:phnx-labs/.agents-system` config repo every install pulls (only
   `check-updates` remains a system routine there).
-- **SING-2 (MUST NOT).** A UI surface (apps/factory, the menubar app, the iOS app)
+- **SING-2 (MUST NOT).** A UI surface (apps/ext, the menubar app, the iOS app)
   MUST NOT own a timer, watcher, or loop that detects a condition and performs a
   fleet-affecting action. Detection and decision MUST live in the CLI, which holds
   the first-party state (sessions.db, usage snapshots, the device registry).
-  Canonical violation: the Factory watchdog rotate loop (2026-08-03) racing the
+  Canonical violation: the ext watchdog rotate loop (2026-08-03) racing the
   daemon's view of account health; canonical fix: PR #1914, which deleted it.
 - **SING-3 (MUST).** Where an action needs a UI-owned surface (typing into an editor
   tab, opening a tab), the UI MUST expose a narrow endpoint the CLI drives — the
@@ -2494,7 +2494,7 @@ nothing but its own view cache.
 - **SING-7 (SHOULD).** Multi-instance safety SHOULD be structural, not by
   convention: pid-claimed singletons for daemon loops (the daemon's claim), leader
   election with lease handoff for any remaining UI-side coordination protocol
-  (apps/factory `src/monitor/leader.ts` — presence fan-out only, not task
+  (apps/ext `src/monitor/leader.ts` — presence fan-out only, not task
   execution), and idempotent effects so a redelivery is a no-op.
 - **SING-11 (MUST).** A single scheduled fire MUST launch a routine at most once,
   even when the same UTC occurrence is evaluated by more than one timer callback,
@@ -2685,10 +2685,10 @@ a machine-wide process sweep.)
   **WHEN** the command completes, **THEN** the CLI's config is the state that
   changed (`agents watchdog rotate off`), and the daemon, the menubar, and every
   other surface observe the same off state.
-- **GIVEN** a limited session lives in a Factory editor tab, **WHEN** the daemon
+- **GIVEN** a limited session lives in an AGI EXT editor tab, **WHEN** the daemon
   rotates it, **THEN** the daemon drives the extension's `/inject` endpoint to act
   in that tab — the extension performs no detection or decision of its own.
-- **GIVEN** a contributor adds a `setInterval` in apps/factory, **WHEN** the
+- **GIVEN** a contributor adds a `setInterval` in apps/ext, **WHEN** the
   callback performs anything beyond read-only rendering, **THEN** code review MUST
   flag it under the root `AGENTS.md` §Code review conventions ("No second
   scheduler") and the action MUST move to the CLI before merge.
@@ -2712,8 +2712,8 @@ a machine-wide process sweep.)
   the same ticket. It is now the shipped `auto-dispatch` system routine, which
   satisfies SING-9(a) via an owner pin: `agents routines devices auto-dispatch --set
   <device>`.
-- **SING-GAP-1.** The Factory monitor leader/follower protocol
-  (apps/factory `src/monitor/`) still coordinates presence fan-out inside the
+- **SING-GAP-1.** The AGI EXT monitor leader/follower protocol
+  (apps/ext `src/monitor/`) still coordinates presence fan-out inside the
   extension with its own election. It performs no fleet-affecting action today
   (post-#1914 it broadcasts read-side snapshots only), so it satisfies SING-2, but
   it is a second coordination fabric where the daemon's presence tracking

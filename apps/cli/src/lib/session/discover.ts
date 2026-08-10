@@ -1041,7 +1041,7 @@ export function getAgentSessionDirs(agent: string, subdir: string): string[] {
  * The (agent, subdir) pairs `discoverSessions` walks for JSONL transcripts —
  * the single source of truth for which directories hold live session files.
  * `getSessionRoots` expands each pair to its concrete directories so a consumer
- * (the Factory extension's fs.watch, see issue #741) can configure its watcher
+ * (AGI EXT's fs.watch, see issue #741) can configure its watcher
  * from the CLI instead of hardcoding `~/.claude|.codex|.gemini`. Adding a new
  * on-disk agent here makes every consumer watch it automatically.
  */

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { dedupeBySession } from './active.js';
 import type { ActiveSession } from './active.js';
 
-// Regression for the "Factory Floor is flooded with identical .openclaw rows" bug.
+// Regression for the "Fleet is flooded with identical .openclaw rows" bug.
 // An OpenClaw gateway on mac-mini spawns N `codex` worker processes. The process
 // scan (listUnattributedActive) picks each one up, but none carries a session id,
 // transcript file, or cloud handle — so every worker used to skip dedupe entirely

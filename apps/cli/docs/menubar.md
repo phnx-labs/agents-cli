@@ -237,7 +237,7 @@ One rule shapes the menu: **attention floats up, context groups down.**
   does not dismiss and synthetically reopen the dropdown.
   Focusing an agent row opens a **side submenu (›)** whose first item is
   **▶ Focus session** — it lands you in that session, attaching locally or SSHing
-  to the box that owns it (`agents sessions focus`, the same call Factory's Focus
+  to the box that owns it (`agents sessions focus`, the same call the ext's Focus
   button makes), so it works for a session here or on any fleet peer. Below it,
   richer detail and **linkable actions**: work title (and open URL if the title
   contains one), local/remote + surface, clickable cwd, Linear ticket, GitHub PR,

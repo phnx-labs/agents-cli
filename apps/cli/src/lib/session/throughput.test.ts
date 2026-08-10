@@ -3,7 +3,7 @@ import { computeTokPerSec } from './throughput.js';
 
 /**
  * `computeTokPerSec` is the CLI's single source of truth for the live
- * output-token throughput the Factory Floor shows (issue #741 folded the
+ * output-token throughput the Fleet shows (issue #741 folded the
  * extension's parallel `computeOutputTokensPerSec` copy into here). These lock
  * the per-format token accounting and the rolling-window cutoff, since a drift
  * here silently mis-reports every running agent's speed.
