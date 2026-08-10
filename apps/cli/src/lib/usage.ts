@@ -556,7 +556,7 @@ async function fetchLiveUsageDeduped(
         fileOnly,
       });
 
-      if (usage.snapshot?.source === 'live') {
+      if (usage.snapshot) {
         if (!usage.snapshot.capturedAt || usage.snapshot.capturedAt.getTime() <= previousCapturedAt) {
           usage.snapshot.capturedAt = new Date(previousCapturedAt + 1);
         }

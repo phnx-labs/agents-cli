@@ -370,6 +370,56 @@ describe('readOnly — the `agents run` routing hot path never blocks on the net
   });
 });
 
+describe('explicit refresh publication', () => {
+  let cacheDir: string;
+  let home: string;
+  let prevPath: string | null;
+
+  beforeEach(() => {
+    cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-usage-publish-'));
+    home = path.join(cacheDir, 'home');
+    fs.mkdirSync(path.join(home, '.grok', 'logs'), { recursive: true });
+    prevPath = setClaudeUsageCachePathForTest(path.join(cacheDir, 'usage.json'));
+  });
+
+  afterEach(() => {
+    setClaudeUsageCachePathForTest(prevPath);
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+  });
+
+  it('publishes a local-log snapshot for the next cache-only reader', async () => {
+    const now = Date.now();
+    fs.writeFileSync(path.join(home, '.grok', 'logs', 'unified.jsonl'), JSON.stringify({
+      ts: new Date(now - 60 * 60_000).toISOString(),
+      msg: 'billing: fetched credits config',
+      ctx: {
+        config: {
+          creditUsagePercent: 37,
+          currentPeriod: {
+            type: 'USAGE_PERIOD_TYPE_WEEKLY',
+            start: new Date(now - 24 * 60 * 60_000).toISOString(),
+            end: new Date(now + 6 * 24 * 60 * 60_000).toISOString(),
+          },
+        },
+        subscriptionTier: 'SuperGrok Heavy',
+      },
+    }) + '\n');
+
+    const input = {
+      agentId: 'grok' as const,
+      home,
+      cliVersion: null,
+      info: { usageKey: 'grok:user=publication-test' } as AccountInfo,
+    };
+    const refreshed = await getUsageInfoForIdentity(input, { forceRefresh: true });
+    const cached = await getUsageInfoForIdentity(input);
+
+    expect(refreshed.snapshot?.source).toBe('last_seen');
+    expect(cached.snapshot?.windows.find((window) => window.key === 'week')?.usedPercent).toBe(37);
+    expect(cached.error).toBeNull();
+  });
+});
+
 describe('a Claude usage read reports WHY it produced no snapshot', () => {
   // Both of these returned `error: null` before, which is what let an account
   // nobody could read render exactly like a healthy one: the caller fell back to
