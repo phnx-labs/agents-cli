@@ -6076,6 +6076,8 @@
           "negate": false
         }
       ],
+      "examples": "Discover & register:\n        agents devices sync            # pick which tailscale nodes to keep (TTY)\n        agents devices sync --yes      # register all non-ignored nodes\n        agents devices ignore ipad165  # dismiss a node so it's never re-suggested\n\n      Inspect:\n        agents devices list            # what's registered (★ = interactive host)\n        agents devices status          # live reachability + load\n        agents devices ping            # quick liveness probe\n\n      Configure a device:\n        agents devices set-interactive zion   # where agents show YOU artifacts\n        agents devices configure mac-mini --max-agents 4 --scheduler off\n        agents devices note mac-mini \"runs the releases — don't reboot\"\n        agents devices set win-mini --auth password --bundle muqsit\n        agents devices set worker --auth key --identity-file ~/.ssh/worker_ed25519\n        agents devices render --write  # write ~/.ssh/config.d/agents include\n\n      Factory auto-launch:\n        agents devices prefer mac-mini   # boost in auto-launch ranking\n        agents devices disable zion      # exclude from auto-launch\n\n      Fleet operations:\n        agents fleet update              # roll out latest agents-cli everywhere\n        agents fleet run uname -a        # run a command on every online device",
+      "notes": "`agents fleet` is an alias for `agents devices` — same subcommands.",
       "subcommands": [
         {
           "name": "accounts",

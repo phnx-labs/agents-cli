@@ -384,7 +384,55 @@ agents bench results --json</code></pre><h4>Notes</h4><p class="notes">Task defi
 <article id="defaults-run-list" data-search="list defaults run list  list configured run defaults -h, --help show help  "><div class="command-head"><h3><code>agents defaults run list</code></h3></div><p>List configured run defaults</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
 <article id="defaults-run-set" data-search="set defaults run set  set defaults for an agent/version selector selector  --mode &lt;mode&gt; default mode: plan, edit, auto, skip. &#39;full&#39; accepted as alias for skip. --model &lt;model&gt; default model or model alias, forwarded via --model --effort &lt;effort&gt; default reasoning effort: low, medium, high, xhigh, max, or auto -h, --help show help  "><div class="command-head"><h3><code>agents defaults run set &lt;selector&gt;</code></h3></div><p>Set defaults for an agent/version selector</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;selector&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--mode &lt;mode&gt;</code></td><td>Default mode: plan, edit, auto, skip. &#39;full&#39; accepted as alias for skip.</td><td></td><td></td></tr><tr><td><code>--model &lt;model&gt;</code></td><td>Default model or model alias, forwarded via --model</td><td></td><td></td></tr><tr><td><code>--effort &lt;effort&gt;</code></td><td>Default reasoning effort: low, medium, high, xhigh, max, or auto</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
 <article id="defaults-run-unset" data-search="unset defaults run unset  remove defaults for an agent/version selector selector  -h, --help show help  "><div class="command-head"><h3><code>agents defaults run unset &lt;selector&gt;</code></h3></div><p>Remove defaults for an agent/version selector</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;selector&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
-<article id="devices" data-search="devices devices fleet registry of ssh device profiles (platform, user, address, auth), self-populated from tailscale. alias: fleet. -h, --help show help  "><div class="command-head"><h3><code>agents devices</code></h3><span class="meta">Aliases: fleet</span></div><p>Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale. Alias: fleet.</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
+<article id="devices" data-search="devices devices fleet registry of ssh device profiles (platform, user, address, auth), self-populated from tailscale. alias: fleet. -h, --help show help discover &amp; register:
+        agents devices sync            # pick which tailscale nodes to keep (tty)
+        agents devices sync --yes      # register all non-ignored nodes
+        agents devices ignore ipad165  # dismiss a node so it&#39;s never re-suggested
+
+      inspect:
+        agents devices list            # what&#39;s registered (★ = interactive host)
+        agents devices status          # live reachability + load
+        agents devices ping            # quick liveness probe
+
+      configure a device:
+        agents devices set-interactive zion   # where agents show you artifacts
+        agents devices configure mac-mini --max-agents 4 --scheduler off
+        agents devices note mac-mini &quot;runs the releases — don&#39;t reboot&quot;
+        agents devices set win-mini --auth password --bundle muqsit
+        agents devices set worker --auth key --identity-file ~/.ssh/worker_ed25519
+        agents devices render --write  # write ~/.ssh/config.d/agents include
+
+      factory auto-launch:
+        agents devices prefer mac-mini   # boost in auto-launch ranking
+        agents devices disable zion      # exclude from auto-launch
+
+      fleet operations:
+        agents fleet update              # roll out latest agents-cli everywhere
+        agents fleet run uname -a        # run a command on every online device `agents fleet` is an alias for `agents devices` — same subcommands."><div class="command-head"><h3><code>agents devices</code></h3><span class="meta">Aliases: fleet</span></div><p>Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale. Alias: fleet.</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code>Discover &amp; register:
+        agents devices sync            # pick which tailscale nodes to keep (TTY)
+        agents devices sync --yes      # register all non-ignored nodes
+        agents devices ignore ipad165  # dismiss a node so it&#39;s never re-suggested
+
+      Inspect:
+        agents devices list            # what&#39;s registered (★ = interactive host)
+        agents devices status          # live reachability + load
+        agents devices ping            # quick liveness probe
+
+      Configure a device:
+        agents devices set-interactive zion   # where agents show YOU artifacts
+        agents devices configure mac-mini --max-agents 4 --scheduler off
+        agents devices note mac-mini &quot;runs the releases — don&#39;t reboot&quot;
+        agents devices set win-mini --auth password --bundle muqsit
+        agents devices set worker --auth key --identity-file ~/.ssh/worker_ed25519
+        agents devices render --write  # write ~/.ssh/config.d/agents include
+
+      Factory auto-launch:
+        agents devices prefer mac-mini   # boost in auto-launch ranking
+        agents devices disable zion      # exclude from auto-launch
+
+      Fleet operations:
+        agents fleet update              # roll out latest agents-cli everywhere
+        agents fleet run uname -a        # run a command on every online device</code></pre><h4>Notes</h4><p class="notes">`agents fleet` is an alias for `agents devices` — same subcommands.</p></article>
 <article id="devices-accounts" data-search="accounts devices accounts  per device, one row per account: which harnesses share it, signed-in, quota, and ready. the identity lens on `agents devices harnesses`. --json output machine-readable json (per-host account groups) --agents &lt;csv&gt; only these agents (comma-separated) --device &lt;csv&gt; only these devices (comma-separated); default: every online box --refresh fetch live quota instead of the cached snapshot (slower) --live alias of --refresh --local this host only: emit this box&#39;s account groups -h, --help show help agents devices accounts                  # every box: account · agents · signed · quota · ready
 agents devices accounts --device mac-mini
 agents devices accounts --json           # machine-readable, per-host account groups collapses the installs that share one account (e.g. five claude versions on one

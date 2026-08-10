@@ -1,9 +1,5 @@
 # Changelog
 
-## 1.22.36
-
-- **`agents devices --help` is an intent-based menu instead of a flat 27-command list.** The subcommands are grouped by what the operator is trying to do — Discover & register, Inspect, Configure a device, Factory auto-launch, Fleet operations — via the existing `registerCommandGroups` formatter (the same pattern `browser`, `computer`, and `secrets` already use), and the "Typical workflow" block moves from the bottom of the help (`.addHelpText('after', …)`) into a workflow-first `Examples:` section right under the description via `setHelpSections`. No commands, flags, or behavior change. Source: `apps/cli/src/commands/ssh.ts`, `apps/cli/src/lib/help.test.ts`.
-
 ## 1.22.35
 
 - **`agents doctor --fix` and `agents upgrade` purge stale multi-install agents-cli copies instead of only warning (RUSH-2415).** Pre-1.22.30 installs (and "unsafe legacy helper installer" / npx-cache trees) re-introduce the Touch ID storm + usage-API revocation class fixed in v1.22.30. Detection already existed (`findAgentsCliInstalls` / multi-install warning) but left remediation to the user. Bare `agents doctor --fix` and a successful `agents upgrade` now delete npx-cache installs, non-atomic helper installs, and pre-1.22.30 package roots when a fixed peer already exists on the box — never the running copy, never a lone pre-fixed install that would strand the machine. The multi-install warning points at `agents doctor --fix`. Source: `apps/cli/src/lib/self-update.ts`, `apps/cli/src/commands/doctor.ts`, `apps/cli/src/index.ts`.
