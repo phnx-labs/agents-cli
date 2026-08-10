@@ -468,11 +468,23 @@ describeDaemon('agents daemon', () => {
 
       // ...but never actionable: no doctor problem, so no kill instruction and
       // no exit 1 for every other user on this box (RUSH-2368's actual harm).
+      // The tier must ride the machine surface too — a routine reading
+      // staleBinaries has to tell a ghost it may act on from one it may not.
+      const row = payload.staleBinaries.find((s: { pid: number }) => s.pid === child.pid);
+      expect(row.actionable, 'json row must be marked non-actionable').toBe(false);
+
       const health = JSON.parse(run(home, ['doctor', '--json']).stdout);
       expect(
         health.problems.some((p: string) => p.includes(String(child.pid))),
         'must NOT be a doctor problem',
       ).toBe(false);
+
+      // And the text footer must not offer `kill` under a section whose only
+      // rows are visibility-tier — the same harm via the render layer.
+      const text = run(home, ['status']).stdout;
+      expect(text).toContain('Stale code');
+      expect(text).toContain('nothing for you to stop here');
+      expect(text).not.toContain('kill <pid>');
     } finally {
       try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* gone */ }
       fs.rmSync(home, { recursive: true, force: true });
@@ -480,6 +492,8 @@ describeDaemon('agents daemon', () => {
   });
 
 
+  // root ignores mode bits, so the EACCES condition cannot be produced there and
+  // the test would pass without exercising anything. Not flake suppression.
   it.skipIf(typeof process.getuid === 'function' && process.getuid() === 0)(
     'does not call an unreadable entry deleted (EACCES is not ENOENT)', async () => {
     const home = makeHome();

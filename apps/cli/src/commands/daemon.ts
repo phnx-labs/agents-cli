@@ -149,8 +149,8 @@ function entryIsGone(p: DaemonProcess): boolean {
 function staleDaemons(
   processes: DaemonProcess[],
   ownerPid: number | null,
+  registered: Set<number>,
 ): { actionable: DaemonProcess[]; visible: DaemonProcess[] } {
-  const registered = new Set(findSurvivingStateDirDaemons(new Set()));
   const isOurs = (p: DaemonProcess) => p.pid === ownerPid || registered.has(p.pid);
   const myUid = typeof process.getuid === 'function' ? process.getuid() : null;
   const gone = processes.filter(entryIsGone);
@@ -407,7 +407,10 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
   const duplicates = registryScopedDuplicates(processes, pid ?? null);
   // Every daemon whose code is gone from disk, including this device's own if
   // it is one. Not filtered by the duplicate scope — see entryIsGone.
-  const staleTiers = staleDaemons(processes, pid ?? null);
+  // One registry snapshot, shared with the duplicate scan below: two reads could
+  // disagree mid-invocation, and each costs a per-pid `ps` spawn.
+  const registeredPids = new Set(findSurvivingStateDirDaemons(new Set()));
+  const staleTiers = staleDaemons(processes, pid ?? null, registeredPids);
   const stale = staleTiers.visible;
   const ownerEntryGone = owner ? entryIsGone(owner) : false;
 
@@ -425,7 +428,16 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
       binaryVersion: owner?.version ?? null,
       binaryMissing: ownerEntryGone,
       duplicates: duplicates.map((d) => ({ pid: d.pid, entry: d.entry, version: d.version })),
-      staleBinaries: stale.map((d) => ({ pid: d.pid, entry: d.entry, version: d.version })),
+      // `actionable` is part of the contract, not decoration: a routine or
+      // monitor reading this must be able to tell a ghost it may act on from one
+      // that is merely visible. Without it the machine surface re-opens exactly
+      // what the two-tier split closed for the text surface.
+      staleBinaries: stale.map((d) => ({
+        pid: d.pid,
+        entry: d.entry,
+        version: d.version,
+        actionable: staleTiers.actionable.some((a) => a.pid === d.pid),
+      })),
       daemonEnabled: enabled,
       services: {
         secretsBroker: {
@@ -477,11 +489,20 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
       const note = mine || (actionablePids.has(d.pid) ? '' : ' — not this install; shown for visibility');
       console.log(`  PID ${d.pid}  ${chalk.gray(d.entry ?? 'unknown entry')}${chalk.red('  (deleted)')}${chalk.gray(note)}`);
     }
-    console.log(chalk.gray(
-      '\n  These run code that no longer exists on disk, so a restart fails and their\n' +
-      '  behaviour is whatever was loaded when the file was deleted.\n' +
-      `  Yours: ${chalk.white('agents daemon restart')}   A stray from a removed worktree: ${chalk.white('kill <pid>')}`,
-    ));
+    const advice = [
+      '\n  These run code that no longer exists on disk, so a restart fails and their',
+      '  behaviour is whatever was loaded when the file was deleted.',
+    ];
+    // Only offer a remedy when a row here is one we may act on. Printing
+    // `kill <pid>` under a section whose only rows are visibility-tier is
+    // RUSH-2368's harm re-entering through the render layer after the data
+    // layer stopped producing it.
+    if (staleTiers.actionable.length > 0) {
+      advice.push(`  Yours: ${chalk.white('agents daemon restart')}   A stray this install owns: ${chalk.white('kill <pid>')}`);
+    } else {
+      advice.push('  None belong to this install — nothing for you to stop here.');
+    }
+    console.log(chalk.gray(advice.join('\n')));
   }
 
   if (duplicates.length > 0) {
@@ -632,7 +653,7 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
   // A daemon whose entry is gone from disk is a problem even when it answers
   // every probe: it cannot restart, and it is running whatever was loaded
   // before the file was deleted (RUSH-2493).
-  for (const p of staleDaemons(healthProcesses, status.pid).actionable) {
+  for (const p of staleDaemons(healthProcesses, status.pid, new Set(findSurvivingStateDirDaemons(new Set()))).actionable) {
     const own = status.pid !== null && p.pid === status.pid;
     problems.push(
       `Daemon pid ${p.pid} runs code deleted from disk (${p.entry}). ` +
