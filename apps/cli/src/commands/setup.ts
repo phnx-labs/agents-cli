@@ -161,10 +161,6 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
     }
   }
 
-  // Install-time always-on: write launchd/systemd and start the daemon so
-  // KeepAlive/Restart=always take over. Deliberate startDaemon (not
-  // ensureDaemonStarted) so setup is not blocked by the auto-start circuit
-  // breaker. Best-effort — never block setup.
   try {
     const { startDaemon } = await import('../lib/daemon.js');
     const started = startDaemon();
