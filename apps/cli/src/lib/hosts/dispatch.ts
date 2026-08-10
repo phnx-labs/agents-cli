@@ -34,10 +34,16 @@ export { deriveMirroredCwd, homeRemainder, remoteCdPrefix };
  * Diagnostic helper for RUSH-2441: log the requested agent and initial remote
  * `agents run` argv without changing normal command output.
  */
-export function logForwardedArgs(kind: string, agent: string, version: string | undefined, args: string[]): void {
+export function logForwardedArgs(
+  kind: string,
+  agent: string,
+  version: string | undefined,
+  args: string[],
+  hasPrompt: boolean,
+): void {
   if (!process.env.AGENTS_DISPATCH_DEBUG) return;
   const safeArgs = [...args];
-  if (safeArgs[0] === 'run' && safeArgs[2] && (kind === 'headless' || !safeArgs[2].startsWith('--'))) {
+  if (safeArgs[0] === 'run' && safeArgs[2] && hasPrompt) {
     safeArgs[2] = '<prompt>';
   }
   for (let i = 0; i < safeArgs.length; i++) {
@@ -512,7 +518,7 @@ export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
   else if (opts.sessionId) args.push('--session-id', opts.sessionId);
   if (opts.emitSessionId) args.push('--emit-session-id');
   if (opts.passthroughArgs && opts.passthroughArgs.length > 0) args.push('--', ...opts.passthroughArgs);
-  logForwardedArgs('headless', opts.agent, opts.version, args);
+  logForwardedArgs('headless', opts.agent, opts.version, args, true);
   return args;
 }
 
@@ -594,7 +600,7 @@ export function buildInteractiveRunForwardedArgs(opts: InteractiveDispatchOption
   if (opts.passthroughArgs && opts.passthroughArgs.length > 0) {
     args.push('--', ...opts.passthroughArgs);
   }
-  logForwardedArgs('interactive', opts.agent, opts.version, args);
+  logForwardedArgs('interactive', opts.agent, opts.version, args, Boolean(opts.prompt && opts.forceInteractive));
   return args;
 }
 

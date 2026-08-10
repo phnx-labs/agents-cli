@@ -31,9 +31,11 @@ function runDispatchDiagnostic(debug: boolean): ReturnType<typeof spawnSync> {
   else delete env.AGENTS_DISPATCH_DEBUG;
   return spawnSync('bun', [
     '-e',
-    "import { buildRunForwardedArgs } from './apps/cli/src/lib/hosts/dispatch.ts'; " +
+    "import { buildRunForwardedArgs, buildInteractiveRunForwardedArgs } from './apps/cli/src/lib/hosts/dispatch.ts'; " +
       "buildRunForwardedArgs({ agent: 'grok', prompt: '--token=sk-live-prompt', mode: 'auto', " +
-      "env: ['API_TOKEN=sk-live-env'], passthroughArgs: ['--api-key', 'sk-live-arg'] });",
+      "env: ['API_TOKEN=sk-live-env'], passthroughArgs: ['--api-key', 'sk-live-arg'] }); " +
+      "buildInteractiveRunForwardedArgs({ agent: 'grok', prompt: '--token=sk-live-interactive', " +
+      "forceInteractive: true });",
   ], { cwd: REPO_ROOT, env, encoding: 'utf8' });
 }
 
@@ -49,6 +51,8 @@ describe('dispatch diagnostics', () => {
     expect(result.stderr).not.toContain('sk-live-prompt');
     expect(result.stderr).not.toContain('sk-live-env');
     expect(result.stderr).not.toContain('sk-live-arg');
+    expect(result.stderr).toContain('[dispatch:interactive] agent=grok args=["run","grok","<prompt>","--interactive"]');
+    expect(result.stderr).not.toContain('sk-live-interactive');
   });
 
   it('emits no diagnostic when AGENTS_DISPATCH_DEBUG is unset', () => {
