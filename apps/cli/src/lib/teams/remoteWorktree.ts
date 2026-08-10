@@ -127,11 +127,13 @@ export function createRemoteWorktree(target: string, repoPath: string, worktreeN
  * pointed at a 71-commit-stale checkout on another box).
  *
  * `ensureRemoteRepo` already fetched `origin` when it provisioned/reused the
- * checkout right before this runs, so the remote-tracking ref is fresh and this
- * reads it WITHOUT a second fetch: resolve the default branch, then
- * `rev-list --count HEAD..origin/<default>`. Returns null on any git/ssh error
- * (unreachable host, non-repo path) — the caller treats null as "can't tell,
- * don't block".
+ * checkout right before this runs, so the remote-tracking ref is usually fresh and
+ * this reads it WITHOUT a second fetch: resolve the default branch, then
+ * `rev-list --count HEAD..origin/<default>`. (That reuse fetch is best-effort —
+ * an offline host leaves the ref stale, so this under-reports rather than blocks;
+ * `createRemoteWorktree` re-fetches at launch so the teammate's base is still
+ * fresh regardless.) Returns null on any git/ssh error (unreachable host, non-repo
+ * path) — the caller treats null as "can't tell, don't block".
  */
 export function remoteCommitsBehindDefault(
   target: string,

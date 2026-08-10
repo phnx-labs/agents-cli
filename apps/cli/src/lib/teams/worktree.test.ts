@@ -281,4 +281,22 @@ describe('commitsBehindDefault', () => {
     fs.mkdirSync(plain);
     expect(await commitsBehindDefault(plain)).toBeNull();
   });
+
+  // The `--use-worktree` shared-team case: teammates run in a LINKED worktree with
+  // its own HEAD, distinct from the main checkout. The count must reflect the
+  // passed worktree's HEAD (via --show-toplevel), not fold to the main repo root —
+  // otherwise a stale-main / current-worktree pair reports the wrong tree.
+  it('measures the passed linked worktree, not the main checkout', async () => {
+    advanceOrigin(); // origin/main advances to B; the main clone (HEAD=A) is now 1 behind.
+
+    // A linked worktree checked out AT the new origin/main (up to date).
+    git(clone, ['fetch', 'origin']);
+    const lw = path.join(tmp, 'shared-wt');
+    git(clone, ['worktree', 'add', '-b', 'uptodate', lw, 'origin/main']);
+
+    // Main checkout is behind; the linked worktree is current. If the count folded
+    // to the main repo root it would report the main's 1 for BOTH.
+    expect((await commitsBehindDefault(clone))?.behind).toBe(1);
+    expect((await commitsBehindDefault(lw))?.behind).toBe(0);
+  });
 });

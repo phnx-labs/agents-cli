@@ -120,16 +120,19 @@ export async function localDefaultBranch(gitRoot: string): Promise<string> {
  * `HEAD..origin/<default>` reads 0 and hides the drift. After the fetch the count
  * is against the true remote.
  *
- * Resolves the placement root with {@link getMainRepoRoot} (the same root a
- * teammate worktree forks from), so the count is exactly "how far behind main the
- * base your teammates build on is". Returns null when `repoDir` isn't a git repo,
- * origin is unreachable, or git errors — the caller treats null as "can't tell,
- * don't block".
+ * Measures the passed checkout's OWN root ({@link getGitRoot} / `--show-toplevel`,
+ * worktree-correct) — NOT {@link getMainRepoRoot}: for a `--use-worktree` shared
+ * worktree (or a caller standing inside a linked worktree), the teammate runs in
+ * THAT worktree, whose HEAD differs from the main checkout's, so folding to the
+ * main root would report the wrong tree's staleness. `origin/<default>` resolves
+ * from the shared object store regardless of which worktree we stand in. Returns
+ * null when `repoDir` isn't a git repo, origin is unreachable, or git errors — the
+ * caller treats null as "can't tell, don't block".
  */
 export async function commitsBehindDefault(
   repoDir: string,
 ): Promise<{ behind: number; base: string } | null> {
-  const gitRoot = await getMainRepoRoot(repoDir).catch(() => null);
+  const gitRoot = await getGitRoot(repoDir).catch(() => null);
   if (!gitRoot) return null;
   try {
     await execFileAsync('git', ['fetch', 'origin'], { cwd: gitRoot });
