@@ -66,4 +66,30 @@ describe('captureFleet', () => {
     expect(m.secrets).toBeUndefined();
     expect(m.routines).toBeUndefined();
   });
+
+  it('keeps the config of a device missing from the captured roster', () => {
+    // `fleet.devices.<name>.config` is the operator-config store, so a capture
+    // run from a box whose registry has not seen a peer used to erase that
+    // peer's settings outright. Observed for real: capturing on yosemite-s0
+    // deleted zion's whole config block from the shared agents.yaml.
+    const prev = {
+      devices: {
+        zion: { config: { browserRemoteControl: false, defaultBrowserProfile: 'comet-local' } },
+        'mac-mini': { agents: ['claude@latest'] },
+      },
+    } as Parameters<typeof captureFleet>[0];
+
+    const m = captureFleet(prev, { devices: ['yosemite-s0'] });
+    const map = m.devices as Record<string, { agents?: string[]; config?: Record<string, unknown> }>;
+
+    // The roster still reflects live state — the captured device is present.
+    expect(map['yosemite-s0']).toBeDefined();
+    // zion's config survives even though it dropped out of the roster.
+    expect(map['zion'].config).toEqual({
+      browserRemoteControl: false,
+      defaultBrowserProfile: 'comet-local',
+    });
+    // A dropped device carries config ONLY — never its stale roster fields.
+    expect(map['mac-mini']).toBeUndefined();
+  });
 });

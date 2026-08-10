@@ -47,6 +47,55 @@ afterEach(() => {
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best-effort */ }
 });
 
+describe('the shared agents.yaml stays clean on read', () => {
+  /**
+   * `~/.agents/agents.yaml` is tracked and shared by every machine in the fleet.
+   * The fold used to hang off getConfigValue/setConfigValue/unsetConfigValue, so
+   * an ordinary `agents config get` rewrote that tracked file — 13 machines each
+   * dirtying one path on nearly every command. yosemite-s0 ended up unable to
+   * pull at all. A read must never write.
+   */
+  it('a config read does not create or modify the central file', async () => {
+    // The fold must be ENABLED for this to mean anything: bootstrap.ts defaults
+    // AGENTS_SKIP_MIGRATION=1, and with that set the read path is inert whether
+    // or not it calls the migration — the test would pass against the bug.
+    delete process.env.AGENTS_SKIP_MIGRATION;
+    fs.mkdirSync(path.dirname(deviceDocPath('mac-mini')), { recursive: true });
+    fs.writeFileSync(deviceDocPath('mac-mini'), 'config:\n  maxAgents: 4\n');
+
+    const { getConfigValue } = await freshModules();
+
+    // No central file yet: reading must not bring one into existence.
+    expect(fs.existsSync(centralPath())).toBe(false);
+    for (let i = 0; i < 50; i++) {
+      getConfigValue('agents.max-concurrent', { device: 'mac-mini' });
+      getConfigValue('browser.profile');
+      getConfigValue('scheduler.enabled');
+    }
+    expect(fs.existsSync(centralPath())).toBe(false);
+  });
+
+  it('repeated reads leave an existing central file byte-identical', async () => {
+    delete process.env.AGENTS_SKIP_MIGRATION;
+    fs.mkdirSync(path.dirname(deviceDocPath('mac-mini')), { recursive: true });
+    fs.writeFileSync(deviceDocPath('mac-mini'), 'config:\n  notes:\n    - legacy\n');
+    fs.mkdirSync(path.dirname(centralPath()), { recursive: true });
+    fs.writeFileSync(
+      centralPath(),
+      'fleet:\n  devices:\n    mac-mini:\n      config:\n        maxAgents: 8\n',
+    );
+    const before = readCentral();
+
+    const { getConfigValue } = await freshModules();
+    for (let i = 0; i < 50; i++) {
+      getConfigValue('agents.max-concurrent', { device: 'mac-mini' });
+      getConfigValue('daemon.enabled');
+    }
+
+    expect(readCentral()).toBe(before);
+  });
+});
+
 describe('migrateDeviceConfigToCentral', () => {
   it('folds device-doc config + defaultBrowserProfile into the central block, keeping pins', async () => {
     fs.mkdirSync(path.dirname(deviceDocPath('mac-mini')), { recursive: true });
@@ -66,20 +115,22 @@ describe('migrateDeviceConfigToCentral', () => {
     expect(getConfigValue('browser.profile', { device: 'mac-mini' }).value).toBe('comet-local');
     expect(getConfigValue('scheduler.enabled').value).toBe(false); // self (testbox)
 
-    // Pins survive in the device doc; config keys are gone from it.
+    // The fold is ADDITIVE: the legacy source is left exactly as it was. A box
+    // still on the previous CLI reads that doc, so deleting it mid-rollout would
+    // silently drop its config. The redundant copy is pruned later by one
+    // explicit operator command, not by every machine independently.
     const macDoc = fs.readFileSync(deviceDocPath('mac-mini'), 'utf-8');
     expect(macDoc).toContain('claude: 2.1.0');
-    expect(macDoc).not.toContain('maxAgents');
-    expect(macDoc).not.toContain('defaultBrowserProfile');
-    expect(macDoc).not.toContain('config:');
-    // A doc that held ONLY config is removed outright.
-    expect(fs.existsSync(deviceDocPath('testbox'))).toBe(false);
+    expect(macDoc).toContain('maxAgents');
+    expect(macDoc).toContain('defaultBrowserProfile');
+    // A doc that held ONLY config also survives.
+    expect(fs.existsSync(deviceDocPath('testbox'))).toBe(true);
 
     // The fold did not invent agent pins centrally either.
     expect(readMeta().agents?.claude).toBeUndefined();
   });
 
-  it('folds auto-launch.json flags and removes the file', async () => {
+  it('folds auto-launch.json flags and leaves the file in place', async () => {
     fs.mkdirSync(path.dirname(autoLaunchPath()), { recursive: true });
     fs.writeFileSync(
       autoLaunchPath(),
@@ -99,7 +150,7 @@ describe('migrateDeviceConfigToCentral', () => {
       zion: { enabled: false },
       'mac-mini': { preferred: true },
     });
-    expect(fs.existsSync(autoLaunchPath())).toBe(false);
+    expect(fs.existsSync(autoLaunchPath())).toBe(true);
   });
 
   it('is idempotent — a second run changes nothing', async () => {
@@ -126,8 +177,9 @@ describe('migrateDeviceConfigToCentral', () => {
     migrateDeviceConfigToCentral();
 
     expect(getConfigValue('agents.max-concurrent', { device: 'mac-mini' }).value).toBe(8);
-    // The legacy doc was still stripped (its value was folded-or-overridden).
-    expect(fs.existsSync(deviceDocPath('mac-mini'))).toBe(false);
+    // The legacy doc survives untouched — the newer central value simply wins.
+    expect(fs.existsSync(deviceDocPath('mac-mini'))).toBe(true);
+    expect(fs.readFileSync(deviceDocPath('mac-mini'), 'utf-8')).toContain('maxAgents: 4');
   });
 
   it('skips a corrupted device doc loudly and leaves it for a later retry', async () => {
