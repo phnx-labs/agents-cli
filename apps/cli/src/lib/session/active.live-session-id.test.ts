@@ -165,6 +165,30 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
       rows = await listUnattributedActive(new Set());
       return rows.find((r) => r.sessionId === UUID || r.pid === pid);
     });
+    // RUSH-2508 (cont.): the comm-name guard above is a point-in-time read, but on
+    // Node 24 the holder's comm flips from `claude` to `MainThread` within ~1s of
+    // boot. It can pass the guard and then become unclassifiable BEFORE the scan
+    // observes it, so `listUnattributedActive` correctly returns nothing — the same
+    // skip case, reached a moment later. Measured: this raced green on ubuntu-22 /
+    // macOS / Windows but failed on the loaded `ubuntu-latest, 24` release runner.
+    // On a timeout, re-read comm: if the holder is no longer an agent name, skip
+    // (nothing left to assert); only fail when it is STILL `claude`, i.e. the scan
+    // genuinely missed a classifiable process.
+    if (!hit) {
+      let commNow: string | undefined;
+      try {
+        commNow = execFileSync('ps', ['-p', String(pid), '-o', 'comm='], {
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim();
+      } catch {
+        commNow = undefined;
+      }
+      if (!commNow || !/^claude/.test(path.basename(commNow))) {
+        ctx.skip(`holder comm flipped to '${commNow ?? '<gone>'}' before the scan observed it — see RUSH-2508`);
+        return;
+      }
+    }
     expect(hit, `expected active row for ${UUID} / pid ${pid}; got ${rows.map((r) => `${r.pid}:${r.sessionId}`).join(', ')}`).toBeDefined();
     expect(hit!.sessionId).toBe(UUID);
     // cwd should be the worktree path (lsof) when recoverable.
