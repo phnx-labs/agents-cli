@@ -293,7 +293,6 @@ Observe (read the fleet — no store merge; aliases point at the real readers):
   status                          Sync/drift only (not the live fleet snapshot)
 
 Credentials and profiles:
-  profile                         Activate resource profiles across skills, MCP, permissions, and secrets
   profiles                        Bundles of (host CLI, endpoint, model, auth)
   secrets                         Keychain-backed env bundles; use 'secrets exec <bundle> -- <cmd>' to inject into a subprocess
 

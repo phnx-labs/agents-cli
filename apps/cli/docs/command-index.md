@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_98 command groups · 575 commands._
+_97 command groups · 567 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -568,17 +568,6 @@ agents plugins remove [name]                  Unsync a plugin from all agent ver
 agents plugins update [name]                  Re-pull a plugin from its original source and re-sync to all versions
 ```
 
-## profile — Activate top-level resource profiles across commands, skills, hooks, rules, MCP, permissions, and secrets.
-
-```
-agents profile             Activate top-level resource profiles across commands, skills, hooks, rules, MCP, permissions, and secrets.
-agents profile clear       Clear the active top-level resource profile and reconcile installed versions
-agents profile list        List top-level resource profiles
-agents profile set <name>  Create or update a top-level resource profile
-agents profile status      Show the active top-level resource profile
-agents profile use <name>  Activate a top-level resource profile and reconcile installed versions
-```
-
 ## profiles — Named bundles of (host CLI, endpoint, model, auth) — run Kimi/DeepSeek/Qwen/etc through Claude Code without a proxy.
 
 ```
@@ -590,8 +579,6 @@ agents profiles login <provider>   Store or rotate the API key for a provider (e
 agents profiles logout <provider>  Remove a stored provider key from keychain
 agents profiles presets            List built-in presets (OpenRouter + direct providers)
 agents profiles remove <name>      Delete a profile (keychain token is kept — use `profiles logout <provider>` to remove)
-agents profiles status             Alias for `agents profile status`
-agents profiles use <name>         Alias for `agents profile use <name>`
 agents profiles view <name>        Show a profile (env, host, auth source, preset link)
 ```
 

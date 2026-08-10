@@ -38,8 +38,20 @@ describe('KNOWN_TOP_LEVEL_COMMANDS', () => {
 
   it('rejects a name the CLI does not register', () => {
     expect(isKnownTopLevelCommand('session')).toBe(false); // the RUSH-2022 typo
+    expect(isKnownTopLevelCommand('profile')).toBe(false);
     expect(isKnownTopLevelCommand('zzzznotacommand')).toBe(false);
     expect(isKnownTopLevelCommand('')).toBe(false);
+  });
+
+  it('keeps provider profiles while removing the resource-profile tree', async () => {
+    const program = await buildFullCommandTree();
+    expect(program.commands.some((command) => command.name() === 'profile')).toBe(false);
+
+    const profiles = program.commands.find((command) => command.name() === 'profiles');
+    expect(profiles).toBeDefined();
+    expect(profiles!.commands.map((command) => command.name())).toContain('list');
+    expect(profiles!.commands.map((command) => command.name())).not.toContain('use');
+    expect(profiles!.commands.map((command) => command.name())).not.toContain('status');
   });
 
   it('does not recognize the removed defaults and export commands', () => {

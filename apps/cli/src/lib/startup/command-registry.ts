@@ -208,7 +208,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   apply: [loadApply],
   status: [loadStatus],
   snapshot: [loadSnapshot],
-  profile: [loadProfiles],
   profiles: [loadProfiles],
   harness: [loadHarness],
   harnesses: [loadHarness],

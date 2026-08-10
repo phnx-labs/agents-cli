@@ -103,43 +103,6 @@ Both flows drive one shared step engine ([`src/commands/harness-wizard.ts`](../s
 
 The row carries the pinned model, the account/auth state, and `via <host>` — the native harness that actually runs it, with its version when the harness pins one. A harness whose host CLI has no install is flagged `(host <id> not installed)` rather than listed as runnable. `agents view <name>` describes one harness (host, model, provider, auth, lineage, YAML path), and `agents view <name> --json` emits its summary. A native-specific `agents view <agent>` shows only that native harness's versions; it does not include custom harnesses that execute through it. The exact custom name also wins in `agents run`, before native ids and hard-deprecated aliases, so the fork remains runnable through its configured host. The unfiltered `agents view --json` inventory keeps hosted summaries under the `harnesses` key for machine consumers.
 
-## Top-level resource profiles
-
-`agents profile use <name>` activates a resource profile from `agents.yaml`.
-This is separate from model-provider profiles (`agents profiles add kimi`):
-resource profiles switch the resolved set of commands, skills, hooks, rules,
-MCP servers, permissions, workflows, plugins, subagents, and secrets.
-
-Create or update one from the CLI:
-
-```sh
-agents profile set work \
-  --skills "system:code-review,user:deploy" \
-  --mcp "user:github" \
-  --permissions "system:default" \
-  --rules work \
-  --secrets "github.com,prod"
-agents profile use work
-```
-
-The same state can be kept directly in `~/.agents/agents.yaml`:
-
-```yaml
-profiles:
-  active: work
-  presets:
-    work:
-      skills: ["system:code-review", "user:deploy"]
-      mcp: ["user:github"]
-      permissions: ["system:default"]
-      rules: work
-      secrets: ["github.com", "prod"]
-```
-
-When a profile is active, omitted resource kinds remain unchanged; listed kinds
-are filtered to the selected names. Secrets outside the active profile are not
-listed and cannot be injected into runs.
-
 ## Architecture
 
 ```
