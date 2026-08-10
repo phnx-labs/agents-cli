@@ -44,10 +44,19 @@ describe('profiles-presets', () => {
       'vllm',
       'ollama',
       'anthropic',
+      'deepinfra',
       'proxy',
     ]) {
       expect(providers).toContain(name);
     }
+  });
+
+  it('deepinfra preset uses its OpenAI-compatible endpoint through Codex', () => {
+    const preset = getPreset('deepinfra');
+    expect(preset?.host).toBe('codex');
+    expect(preset?.authEnvVar).toBe('OPENAI_API_KEY');
+    expect(preset?.env.OPENAI_BASE_URL).toBe('https://api.deepinfra.com/v1/openai');
+    expect(preset?.env.OPENAI_MODEL).toBe('deepseek-ai/DeepSeek-V3');
   });
 
   it('bedrock and proxy presets are authOptional', () => {

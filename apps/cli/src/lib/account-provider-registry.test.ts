@@ -15,7 +15,17 @@ describe('account provider adapters', () => {
   it('derives the base-url override env from the provider connection env', () => {
     expect(getAccountProvider('openrouter').baseUrlEnvFor('claude')).toBe('ANTHROPIC_BASE_URL');
     expect(getAccountProvider('openrouter').baseUrlEnvFor('codex')).toBe('OPENAI_BASE_URL');
+    expect(getAccountProvider('deepinfra').baseUrlEnvFor('codex')).toBe('OPENAI_BASE_URL');
     // A provider with no endpoint env on that host has nothing to override.
     expect(getAccountProvider('cursor').baseUrlEnvFor('cursor')).toBeNull();
+  });
+
+  it('injects DeepInfra settings for OpenAI-compatible hosts', () => {
+    const provider = getAccountProvider('deepinfra');
+    expect(provider.authKinds).toEqual(['api-key']);
+    expect(provider.envFor('codex', 'api-key')).toBe('OPENAI_API_KEY');
+    expect(provider.connectionEnvFor('codex')).toEqual({
+      OPENAI_BASE_URL: 'https://api.deepinfra.com/v1/openai',
+    });
   });
 });
