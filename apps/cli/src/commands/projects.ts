@@ -40,6 +40,7 @@ import {
   projectDefPath,
   isSafeProjectName,
   validateProjectDef,
+  projectNameForCwd,
   type ProjectDef,
   type ProjectContext,
   type ProjectGoal,
@@ -546,6 +547,20 @@ export function registerProjectsCommands(program: Command): void {
           `  ${chalk.bold(row.name.padEnd(w.name))} ${chalk.dim(row.path.padEnd(w.path))} ${chalk.cyan(row.repo.padEnd(w.repo))}${agentsSuffix}`,
         );
       }
+    });
+
+  // ---- for-cwd ----
+  projects
+    .command('for-cwd [cwd]')
+    .description('Resolve a directory to its defined project name (root or a repos[].path/subpath match). Defaults to the current directory.')
+    .option('--json', 'Machine-readable output: {"name": string | null}')
+    .action((cwdArg: string | undefined, opts: { json?: boolean }) => {
+      const name = projectNameForCwd(cwdArg ?? process.cwd(), listProjectDefs());
+      if (opts.json) {
+        console.log(JSON.stringify({ name: name ?? null }));
+        return;
+      }
+      if (name) console.log(name);
     });
 
   // ---- add ----
