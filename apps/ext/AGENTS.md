@@ -21,11 +21,14 @@ the `swarm-ext://` endpoint. It does not own fleet or agent policy.
   set. Explicit harness/host controls pass the user's choice to agents-cli; the
   extension never scores hosts, harnesses, versions, or accounts. Every launch
   is built by `buildAgentLaunchCommand` (`src/core/agents.ts`) — the one place
-  that owns flag construction — and every spawned tab is registered through
-  `registerAgentTerminal`, including an automatic launch, which registers
-  against the `shell` def until adoption re-keys it to the harness the CLI
-  picked. An unregistered tab is invisible to Copy Session ID / Resume / Fork
-  and is not restored after a window reload.
+  that owns flag construction. The two launch paths (`launchAgent` and
+  `openSingleAgent`) register their tab through the shared
+  `registerAgentTerminal`; other creation sites still call `terminals.register`
+  directly. An automatic launch registers against the `shell` def until adoption
+  re-keys it to the harness the CLI picked — the `sh` prefix is load-bearing,
+  since `armShellAdoptionForTerminal` only arms for it. An unregistered tab is
+  invisible to Copy Session ID / Resume / Fork and is not restored after a
+  window reload.
 - Other reads use their CLI noun: `devices list/status/accounts`, `teams ...
   --json`, `tickets list --json`, `watchdog status/history`, and `routines ...
   --json`. Missing nouns are upgrade errors, never filesystem/polling fallbacks.

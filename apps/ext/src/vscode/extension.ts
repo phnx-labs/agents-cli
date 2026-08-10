@@ -475,9 +475,17 @@ async function launchAgent(context: vscode.ExtensionContext, opts: LaunchAgentOp
   // `--project` owns the working directory end-to-end, so it and cwd are
   // mutually exclusive (buildAgentLaunchCommand throws if both are passed).
   const projectSlug = cwd ? await resolveProjectForCwd(cwd) : undefined;
+  // "Local" must cover BOTH an explicit `local: true` (the per-harness New X
+  // commands) and a Pick Host prompt the user answered with "This Mac", which
+  // returns no host. Passing plain `opts.local` there leaves it undefined, the
+  // builder's `local = false` default fires `--device auto`, and a deliberate
+  // This-Mac pick silently dispatches to another box. An AUTOMATIC launch is
+  // different: no host and no pick means "choose for me", which is exactly what
+  // `--device auto` is for, so it must NOT be treated as local.
+  const isLocal = opts.local === true || (opts.pickHost === true && !host);
   const command = buildAgentLaunchCommand(
     agent, null, defaultModel, undefined, undefined, 'balanced', 'auto',
-    { host, local: opts.local, project: projectSlug, cwd: projectSlug ? undefined : cwd },
+    { host, local: isLocal, project: projectSlug, cwd: projectSlug ? undefined : cwd },
   );
 
   // Tab identity must be established AT createTerminal: iconPath and name are
@@ -486,14 +494,19 @@ async function launchAgent(context: vscode.ExtensionContext, opts: LaunchAgentOp
   // resolve a session id. Shell adoption cannot repair any of it later; it only
   // rewrites the internal registry, never the live terminal.
   const terminalId = terminals.nextId(agentConfig.prefix);
-  const isShellTab = !builtIn || opts.agentKey === 'shell';
+  // Registering an automatic launch under the `shell` def is a REGISTRY choice
+  // (adoption re-keys it later); it does not make the tab a user shell. Only a
+  // real `New Shell` is one. Conflating the two would declare
+  // `scrubSensitive: false` / `kind: 'shell'` on a tab that is about to run an
+  // agent, which is the opposite of the policy in core/terminals.ts.
+  const isUserShell = opts.agentKey === 'shell';
   const terminal = vscode.window.createTerminal({
     name: automatic ? 'Agents Auto' : buildTerminalTitle(agentConfig.title, undefined, context, null),
     iconPath: agentConfig.iconPath,
     location: { viewColumn: vscode.ViewColumn.Active },
     env: buildAgentTerminalEnv(terminalId, undefined, cwd, undefined, {
-      scrubSensitive: !isShellTab,
-      kind: isShellTab ? 'shell' : 'agent',
+      scrubSensitive: !isUserShell,
+      kind: isUserShell ? 'shell' : 'agent',
     }),
     isTransient: true,
   });
