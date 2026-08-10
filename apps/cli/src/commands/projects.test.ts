@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   computeProjectListWidths,
   formatFleetSkippedNote,
+  formatForCwdOutput,
   formatMilestoneDue,
   formatMilestoneLines,
   formatNextMilestone,
@@ -20,6 +21,24 @@ describe('formatFleetSkippedNote', () => {
       .toBe("  · 1 device didn't answer (unreachable, older agents-cli, or timed out): gpu-box\n");
     expect(stripAnsi(formatFleetSkippedNote(['a', 'b', 'c', 'd', 'e', 'f'])))
       .toBe("  · 6 devices didn't answer (unreachable, older agents-cli, or timed out): a, b, c, d +2\n");
+  });
+});
+
+describe('formatForCwdOutput', () => {
+  it('emits {"name": "<slug>"} for a JSON match', () => {
+    expect(formatForCwdOutput('agents-cli', true)).toBe('{"name":"agents-cli"}');
+  });
+
+  it('emits {"name": null} for a JSON non-match — never empty, so a caller can tell "ran, no match" from a crash', () => {
+    expect(formatForCwdOutput(undefined, true)).toBe('{"name":null}');
+  });
+
+  it('prints the bare name for a plain-text match', () => {
+    expect(formatForCwdOutput('agents-cli', false)).toBe('agents-cli');
+  });
+
+  it('prints nothing for a plain-text non-match', () => {
+    expect(formatForCwdOutput(undefined, false)).toBe('');
   });
 });
 

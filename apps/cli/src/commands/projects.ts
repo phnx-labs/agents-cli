@@ -78,6 +78,18 @@ export const PROJECTS_NO_FANOUT_ENV = 'AGENTS_PROJECTS_LOCAL';
 const SKIPPED_NAME_LIMIT = 4;
 
 /**
+ * Render `agents projects for-cwd`'s output for a resolved (or absent)
+ * project name — `--json` always prints `{"name": ...}` even on no match, so
+ * a scripted caller can distinguish "ran and found nothing" from a crash;
+ * the plain-text form prints nothing on no match. Returns '' when nothing
+ * should be printed.
+ */
+export function formatForCwdOutput(name: string | undefined, json: boolean): string {
+  if (json) return JSON.stringify({ name: name ?? null });
+  return name ?? '';
+}
+
+/**
  * One compact trailing note for peers that didn't answer the `--fleet`
  * fan-out — unreachable, running an agents-cli too old to carry `projects
  * probe`, or too slow to finish inside the 12s SSH budget. Mirrors
@@ -556,11 +568,8 @@ export function registerProjectsCommands(program: Command): void {
     .option('--json', 'Machine-readable output: {"name": string | null}')
     .action((cwdArg: string | undefined, opts: { json?: boolean }) => {
       const name = projectNameForCwd(cwdArg ?? process.cwd(), listProjectDefs());
-      if (opts.json) {
-        console.log(JSON.stringify({ name: name ?? null }));
-        return;
-      }
-      if (name) console.log(name);
+      const out = formatForCwdOutput(name, !!opts.json);
+      if (out) console.log(out);
     });
 
   // ---- add ----
