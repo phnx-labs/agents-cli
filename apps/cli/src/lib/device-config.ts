@@ -393,9 +393,21 @@ export function getConfigValue(name: string, opts?: ConfigTarget): ConfigEntry {
   return { spec, value, layer: value !== undefined ? 'device' : undefined };
 }
 
-/** List every known key with its value and the layer that set it. */
+/**
+ * List every known key with its value and the layer that set it.
+ *
+ * Listing a PEER omits its machine-local keys rather than throwing. Their values
+ * live in that box's own doc and are genuinely unknowable from here, but a bulk
+ * listing must not hard-fail because one key in the registry is unreadable —
+ * `agents devices config <peer>` should still show everything it CAN resolve.
+ * Asking for such a key by name still errors, with the `agents ssh` fix named.
+ */
 export function listConfig(opts?: ConfigTarget): ConfigEntry[] {
-  return CONFIG_KEYS.map((spec) => getConfigValue(spec.name, opts));
+  const isPeer = targetDevice(opts) !== machineId();
+  const visible = isPeer
+    ? CONFIG_KEYS.filter((spec) => spec.scope !== 'device' || spec.visibility !== 'machine')
+    : CONFIG_KEYS;
+  return visible.map((spec) => getConfigValue(spec.name, opts));
 }
 
 /** List user-scope config keys with their values. Used to show inherited settings
