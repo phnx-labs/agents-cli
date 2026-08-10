@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 104,
+  "groups": 103,
   "commands": 584,
   "root": {
     "name": "agents",
@@ -6446,7 +6446,7 @@
           "negate": false
         }
       ],
-      "examples": "Discover & register:\n        agents devices sync            # pick which tailscale nodes to keep (TTY)\n        agents devices sync --yes      # register all non-ignored nodes\n        agents devices ignore ipad165  # dismiss a node so it's never re-suggested\n\n      Inspect:\n        agents devices list            # what's registered (★ = interactive host)\n        agents devices status          # live reachability + load\n        agents devices ping            # quick liveness probe\n\n      Configure a device:\n        agents devices config mac-mini                       # settings menu (TTY) / print (piped)\n        agents devices config mac-mini agents.max-concurrent 4\n        agents devices config mac-mini scheduler.enabled off\n        agents devices config mac-mini notes \"runs the releases\"\n        agents devices config win-mini ssh.auth password\n        agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519\n        agents devices config mac-mini auto-launch.enabled off\n        agents devices config mac-mini interactive.host zion # where agents show YOU artifacts\n        agents devices render --write  # write ~/.ssh/config.d/agents include\n\n      Fleet operations:\n        agents fleet update              # roll out latest agents-cli everywhere\n        agents fleet run uname -a        # run a command on every online device",
+      "examples": "Discover & register:\n        agents devices sync            # pick which tailscale nodes to keep (TTY)\n        agents devices sync --yes      # register all non-ignored nodes\n        agents devices ignore ipad165  # dismiss a node so it's never re-suggested\n\n      Inspect:\n        agents devices list            # what's registered (★ = interactive host)\n        agents devices status          # live reachability + load\n        agents devices ping            # quick liveness probe\n        agents devices lease list      # disposable crabbox devices available for reuse\n\n      Configure a device:\n        agents devices config mac-mini                       # settings menu (TTY) / print (piped)\n        agents devices config mac-mini agents.max-concurrent 4\n        agents devices config mac-mini scheduler.enabled off\n        agents devices config mac-mini notes \"runs the releases\"\n        agents devices config win-mini ssh.auth password\n        agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519\n        agents devices config mac-mini auto-launch.enabled off\n        agents devices config mac-mini interactive.host zion # where agents show YOU artifacts\n        agents devices render --write  # write ~/.ssh/config.d/agents include\n\n      Fleet operations:\n        agents fleet update              # roll out latest agents-cli everywhere\n        agents fleet run uname -a        # run a command on every online device",
       "notes": "`agents fleet` is an alias for `agents devices` — same subcommands.",
       "subcommands": [
         {
@@ -6888,6 +6888,166 @@
             }
           ],
           "subcommands": []
+        },
+        {
+          "name": "lease",
+          "path": "devices lease",
+          "aliases": [],
+          "description": "Manage the disposable cloud boxes used by `agents run --lease`.",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "gc",
+              "path": "devices lease gc",
+              "aliases": [],
+              "description": "Stop expired, idle lease boxes that are holding your provider quota. Safe: never stops a box in active use.",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--dry-run",
+                  "description": "List reap-safe orphan boxes without stopping any",
+                  "long": "--dry-run",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "defaultValue": false
+                },
+                {
+                  "flags": "--yes",
+                  "description": "Stop them without the interactive confirm",
+                  "long": "--yes",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "defaultValue": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Output JSON",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "defaultValue": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "list",
+              "path": "devices lease list",
+              "aliases": [
+                "ls"
+              ],
+              "description": "List warm crabbox boxes you can reuse with `agents run --box <slug>`.",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "Output JSON",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "defaultValue": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "setup",
+              "path": "devices lease setup",
+              "aliases": [],
+              "description": "One-time credential setup so `agents run --lease` works with no env var or flag.",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--provider <name>",
+                  "description": "Cloud provider (only hetzner today)",
+                  "long": "--provider",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "defaultValue": "hetzner"
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "stop",
+              "path": "devices lease stop",
+              "aliases": [],
+              "description": "Stop (release) a leased crabbox box now.",
+              "args": [
+                {
+                  "name": "slug",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            }
+          ]
         },
         {
           "name": "list",
@@ -10512,166 +10672,6 @@
         }
       ],
       "subcommands": []
-    },
-    {
-      "name": "lease",
-      "path": "lease",
-      "aliases": [],
-      "description": "Manage the disposable cloud boxes used by `agents run --lease`.",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "gc",
-          "path": "lease gc",
-          "aliases": [],
-          "description": "Stop expired, idle lease boxes that are holding your provider quota. Safe: never stops a box in active use.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--dry-run",
-              "description": "List reap-safe orphan boxes without stopping any",
-              "long": "--dry-run",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": false
-            },
-            {
-              "flags": "--yes",
-              "description": "Stop them without the interactive confirm",
-              "long": "--yes",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": false
-            },
-            {
-              "flags": "--json",
-              "description": "Output JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "list",
-          "path": "lease list",
-          "aliases": [
-            "ls"
-          ],
-          "description": "List warm crabbox boxes you can reuse with `agents run --box <slug>`.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Output JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "setup",
-          "path": "lease setup",
-          "aliases": [],
-          "description": "One-time credential setup so `agents run --lease` works with no env var or flag.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--provider <name>",
-              "description": "Cloud provider (only hetzner today)",
-              "long": "--provider",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "hetzner"
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "stop",
-          "path": "lease stop",
-          "aliases": [],
-          "description": "Stop (release) a leased crabbox box now.",
-          "args": [
-            {
-              "name": "slug",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
     },
     {
       "name": "list",

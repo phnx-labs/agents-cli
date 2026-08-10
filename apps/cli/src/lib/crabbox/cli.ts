@@ -487,7 +487,7 @@ export async function crabboxWarmup(opts: WarmupOptions = {}): Promise<CrabboxBo
         if (orphans.length) {
           hint =
             ` ${orphans.length} expired, idle box(es) are holding the quota — free them with ` +
-            `\`agents lease gc\` (or \`crabbox stop ${orphans[0].slug}\`).`;
+            `\`agents devices lease gc\` (or \`crabbox stop ${orphans[0].slug}\`).`;
         }
       } catch {
         /* best-effort hint; fall back to the generic guidance above */
@@ -688,7 +688,7 @@ export function reapSafeOrphans(boxes: CrabboxBox[], nowSecs: number): CrabboxBo
 /**
  * List reap-safe orphans and (unless `dryRun`) stop them. Returns the candidates
  * considered and the slugs actually stopped. Best-effort per box — a stop failure
- * is skipped, never thrown. Backs `agents lease gc` and the 403 auto-reap opt-in.
+ * is skipped, never thrown. Backs `agents devices lease gc` and the 403 auto-reap opt-in.
  */
 export function reapOrphans(
   opts: CrabboxOptions & { nowSecs?: number; dryRun?: boolean } = {},

@@ -1,7 +1,7 @@
 /**
- * `agents lease` — manage the disposable cloud boxes used by `agents run --lease`.
+ * `agents devices lease` — manage the disposable cloud boxes used by `agents run --lease`.
  *
- * Today: `agents lease gc`, which stops expired + idle "orphan" boxes that are
+ * Today: `agents devices lease gc`, which stops expired + idle "orphan" boxes that are
  * holding a provider's server quota (the cause of the `server_limit` 403 a new
  * lease hits). Reaping is conservative: only boxes whose lease has expired AND
  * that have been untouched for a safety window are eligible (see `isReapSafe`),
@@ -71,7 +71,7 @@ export function reusableBoxes(boxes: CrabboxBox[], nowSecs: number): CrabboxBox[
     .sort((a, b) => (b.lastTouchedAt ?? 0) - (a.lastTouchedAt ?? 0));
 }
 
-/** One aligned row for the reuse picker / `agents lease list`. */
+/** One aligned row for the reuse picker / `agents devices lease list`. */
 export function formatBoxRow(box: CrabboxBox, nowSecs: number): string {
   const slug = box.slug.padEnd(16);
   const cls = (box.class ?? '?').padEnd(10);
@@ -223,8 +223,8 @@ export async function runLeaseSetup(opts: { provider?: string } = {}): Promise<b
   }
 }
 
-export function registerLeaseCommand(program: Command): void {
-  const lease = program
+export function registerLeaseCommand(devicesCommand: Command): void {
+  const lease = devicesCommand
     .command('lease')
     .description('Manage the disposable cloud boxes used by `agents run --lease`.');
 
@@ -264,7 +264,7 @@ export function registerLeaseCommand(program: Command): void {
       console.log(chalk.bold(`Warm boxes (${boxes.length})`));
       for (const b of boxes) console.log('  ' + formatBoxRow(b, nowSecs));
       console.log(
-        chalk.gray('  Reuse: agents run <agent> "…" --box <slug>   ·   Stop: agents lease stop <slug>'),
+        chalk.gray('  Reuse: agents run <agent> "…" --box <slug>   ·   Stop: agents devices lease stop <slug>'),
       );
     });
 

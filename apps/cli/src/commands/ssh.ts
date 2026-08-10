@@ -110,7 +110,7 @@ import {
   type HostHarnessResult,
 } from '../lib/devices/harness-inventory.js';
 import { crabboxList, crabboxFind, crabboxSshArgv, type CrabboxBox } from '../lib/crabbox/cli.js';
-import { boxAddress, boxStatus, fmtIdleShort, fmtExpiresShort } from './lease.js';
+import { boxAddress, boxStatus, fmtIdleShort, fmtExpiresShort, registerLeaseCommand } from './lease.js';
 import {
   authCellColor,
   formatCheckedAge,
@@ -279,7 +279,7 @@ export function renderLeasedBoxesSection(boxes: CrabboxBox[], nowSecs: number): 
         chalk.gray(fmtExpiresShort(b, nowSecs)),
     );
   }
-  lines.push(chalk.gray('  Reuse a box with `agents run --box <slug>` · stop with `agents lease stop <slug>`'));
+  lines.push(chalk.gray('  Reuse a box with `agents run --box <slug>` · stop with `agents devices lease stop <slug>`'));
   return lines;
 }
 
@@ -1060,6 +1060,7 @@ function registerDevicesCommands(program: Command): void {
         agents devices list            # what's registered (★ = interactive host)
         agents devices status          # live reachability + load
         agents devices ping            # quick liveness probe
+        agents devices lease list      # disposable crabbox devices available for reuse
 
       Configure a device:
         agents devices config mac-mini                       # settings menu (TTY) / print (piped)
@@ -1079,9 +1080,12 @@ function registerDevicesCommands(program: Command): void {
     notes: '`agents fleet` is an alias for `agents devices` — same subcommands.',
   });
 
+  registerLeaseCommand(devicesCmd);
+
   registerCommandGroups(devicesCmd, [
     { title: 'Discover & register', names: ['sync', 'register', 'add', 'ignore', 'unignore', 'rm'] },
     { title: 'Inspect', names: ['list', 'show', 'status', 'ping', 'harnesses', 'accounts'] },
+    { title: 'Disposable devices', names: ['lease'] },
     { title: 'Configure a device', names: ['config', 'render'] },
     { title: 'Fleet operations', names: ['update', 'run', 'login', 'pair-ios', 'capture', 'apply'] },
   ]);

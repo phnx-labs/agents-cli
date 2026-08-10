@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_104 command groups · 584 commands._
+_103 command groups · 584 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -251,6 +251,11 @@ agents devices capture                         Snapshot the live environment (ro
 agents devices config <name> [key] [value...]  Get, set, or unset a device’s settings (scheduler, agent cap, ssh overrides, auto-launch, notes). Bare opens an interactive settings menu (TTY) or prints the resolved config (piped). Stored centrally in ~/.agents/agents.yaml under fleet.devices.<name>.config — synced, so any box can configure any device.
 agents devices harnesses                       Per device, one row per installed agent@version: account, signed-in, quota, and a single ready verdict. SSH-probes each online box.
 agents devices ignore <name>                   Dismiss a node from auto-discovery so it is never re-suggested (and remove it from the registry if present).
+agents devices lease                           Manage the disposable cloud boxes used by `agents run --lease`.
+agents devices lease gc                        Stop expired, idle lease boxes that are holding your provider quota. Safe: never stops a box in active use.
+agents devices lease list                      List warm crabbox boxes you can reuse with `agents run --box <slug>`.
+agents devices lease setup                     One-time credential setup so `agents run --lease` works with no env var or flag.
+agents devices lease stop <slug>               Stop (release) a leased crabbox box now.
 agents devices list                            List registered devices with platform, address, reachability, and live resource headroom.
 agents devices login                           Log agent CLIs into fleet boxes over SSH: drive each box's device-code OAuth, scrape the URL + code, and surface every pending login in one local browser page. Default drives all codes at once; --interactive walks one box at a time (codes requested just-in-time so they don't expire).
 agents devices pair-ios [name]                 Pair an iPhone/iPad cockpit (RUSH-1733): mint a control token for `agents serve --control` and mark the device control-only. The token is shown ONCE — enter it in the app. Run this on the anchor.
@@ -402,16 +407,6 @@ agents inspect <target>  Inspect one installed agent harness at one version (not
 
 ```
 agents install <identifier>  Install a package: mcp:, skill:, plugin:, or GitHub (gh:user/repo) — one install path (Phase 5)
-```
-
-## lease — Manage the disposable cloud boxes used by `agents run --lease`.
-
-```
-agents lease              Manage the disposable cloud boxes used by `agents run --lease`.
-agents lease gc           Stop expired, idle lease boxes that are holding your provider quota. Safe: never stops a box in active use.
-agents lease list         List warm crabbox boxes you can reuse with `agents run --box <slug>`.
-agents lease setup        One-time credential setup so `agents run --lease` works with no env var or flag.
-agents lease stop <slug>  Stop (release) a leased crabbox box now.
 ```
 
 ## list — List installed agent CLI versions

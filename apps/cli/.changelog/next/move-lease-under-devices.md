@@ -1,0 +1,1 @@
+- **Nest disposable leases under devices.** Manage crabbox leases with `agents devices lease setup|list|stop|gc`; the removed top-level `agents lease` command now fails as unknown, while `agents run --lease` and `--box` keep their existing behavior. Source: `apps/cli/src/commands/lease.ts`.
