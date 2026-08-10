@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Agent Router — Market Scan</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:5px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span></div>
+<h1>Agent Router — Market Scan</h1>
+
+<div class="meta" aria-label="Artifact metadata"><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">agents/agent-router-market-scan</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/a89310f1-8ac1-4163-87ea-600d0abd3261">a89310f1</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a href="#1-focus-for-review"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>1. Focus for review</a><a href="#findings"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Findings</a><a href="#3-where-claudexor-lands-vs-the-spec"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>3. Where Claudexor lands vs. the spec</a><a href="#4-the-strongest-public-counter-argument"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>4. The strongest public counter-argument</a><a href="#5-recommendation"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>5. Recommendation</a><a href="#evidence"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Evidence</a><a href="#tracking"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h1>Agent Router — Market Scan</h1>
+<h2 id="summary">Summary</h2>
+<p>The market has split into <strong>three distinct routing layers</strong>, and only one of them is
+crowded. Confusing them is the main way this analysis goes wrong.</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>What it picks</th>
+<th>Crowding</th>
+<th>Best-in-class today</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>L1 — Model gateway</strong></td>
+<td>which <em>model/provider</em> answers one API request</td>
+<td>saturated (56k-star incumbent)</td>
+<td>LiteLLM, OpenRouter, Portkey, Ramp Router</td>
+</tr>
+<tr>
+<td><strong>L2 — CLI proxy router</strong></td>
+<td>which <em>model</em> a coding CLI talks to, via a local endpoint</td>
+<td>crowded, one dominant repo</td>
+<td>claude-code-router (36.5k)</td>
+</tr>
+<tr>
+<td><strong>L3 — Meta-harness router</strong></td>
+<td>which <em>harness × account × model × device</em> runs a task</td>
+<td>nearly empty — <strong>one real competitor</strong></td>
+<td>Claudexor (400 stars, 10 weeks old)</td>
+</tr>
+</tbody></table>
+<p><code>agents-cli</code>'s router spec is <strong>L3</strong>. That layer has exactly one credible other
+implementation, it is 10 weeks old, and it converged on the same two hard
+constraints (native-CLI execution, no credential transfer) independently. That is
+the strongest validation signal in this scan — and the tightest deadline.</p>
+<h2 id="1-focus-for-review">1. Focus for review</h2>
+<ul>
+<li><strong>L3 is real and contested by exactly one team.</strong> Claudexor already ships
+quota-aware rotation across multiple Claude/Codex subscriptions, native-CLI
+execution, and SSH-remote hosts with credentials pinned to their origin machine.
+That is the agent-router spec, shipped.</li>
+<li><strong>Nobody owns "routing across <em>subscription accounts</em>."</strong> L1/L2 tools all assume
+API keys. Subscription-seat routing (Max/Pro/Team plans, 5h/7d quota windows) is
+where agents-cli already has real inventory and nobody else has a moat.</li>
+<li><strong>The framework question has a boring answer.</strong> There is no agent-routing
+framework to adopt. Everyone hand-rolls policy; the only reusable pieces are
+gateways (LiteLLM/Portkey) at L1 and classifier models (RouteLLM, Arch/plano) for
+prompt→model scoring.</li>
+<li><strong>YC shipped a structural competitor to the whole harness layer</strong>, not just the
+router: QM (MIT, July 31 2026) — pluggable agent drivers + scopes + keychains +
+crons + skills grants. 13k stars in 10 days.</li>
+<li><strong>Cost-routing skepticism is the loudest counter-argument in public.</strong> The
+best-attended HN thread on router products (216 pts) is mostly developers arguing
+routing <em>loses</em> money via cache misses and retry loops.</li>
+</ul>
+<h2 id="findings">Findings</h2>
+<h3>L1 — Model gateways (do not build here)</h3>
+<p>Mature, commoditized, and orthogonal to what agents-cli does. Worth reading for
+scoring mechanics, not worth competing with.</p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Stars</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><a href="https://github.com/BerriAI/litellm">LiteLLM</a></td>
+<td>56,052</td>
+<td>The default OSS gateway. 100+ providers behind one API, fallbacks, budgets</td>
+</tr>
+<tr>
+<td><a href="https://github.com/Portkey-AI/gateway">Portkey Gateway</a></td>
+<td>12,683</td>
+<td>1,600+ models, guardrails, conditional routing</td>
+</tr>
+<tr>
+<td><a href="https://github.com/katanemo/plano">plano (Katanemo)</a></td>
+<td>6,995</td>
+<td>Rust proxy/data plane; ships <strong>Arch-Router</strong>, a preference-aligned routing model</td>
+</tr>
+<tr>
+<td><a href="https://github.com/vllm-project/semantic-router">vllm semantic-router</a></td>
+<td>5,132</td>
+<td>Mixture-of-Models router for heterogeneous inference</td>
+</tr>
+<tr>
+<td><a href="https://github.com/lm-sys/RouteLLM">RouteLLM</a></td>
+<td>5,322</td>
+<td>The academic reference — strong/weak router trained on preference data. <strong>Unmaintained since 2024</strong></td>
+</tr>
+<tr>
+<td><a href="https://openrouter.ai/blog/insights/model-routing/">OpenRouter Auto</a></td>
+<td>—</td>
+<td>500+ models, <code>cost_quality_tradeoff</code> dial 0–10, no surcharge</td>
+</tr>
+<tr>
+<td><a href="https://builders.ramp.com/post/thompson-sampling-model-routing">Ramp Router</a></td>
+<td>—</td>
+<td>Internal router opened to public July 2026; Thompson sampling + EWMA over live latency/failure; claims 25–30% spend cut</td>
+</tr>
+</tbody></table>
+<p><strong>The one genuinely transferable idea:</strong> Ramp's routing is <em>failure-aware and
+online</em> — Thompson sampling over live latency/error distributions, not a static
+scoring table. The spec's <code>weights</code> config is a static prior; Ramp's result says
+the win comes from updating it from observed outcomes.</p>
+<h3>L2 — CLI proxy routers (adjacent, one dominant player)</h3>
+<p>These intercept the coding CLI's API traffic and swap the model behind it.</p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Stars</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><a href="https://github.com/musistudio/claude-code-router">claude-code-router</a></td>
+<td><strong>36,553</strong></td>
+<td>The category king. One local endpoint for Claude Code, Codex, Grok, Kimi, OpenCode, Pi; provider presets incl. subscription passthrough</td>
+</tr>
+<tr>
+<td><a href="https://github.com/BlockRunAI/ClawRouter">ClawRouter</a></td>
+<td>6,608</td>
+<td>Agent-native, 66 models, &lt;1ms local routing</td>
+</tr>
+<tr>
+<td><a href="https://news.ycombinator.com/item?id=48688700">Weave Router</a></td>
+<td>—</td>
+<td>Show HN, 216 pts / 113 comments. RL model over agent traces; claims 40% token savings</td>
+</tr>
+<tr>
+<td><a href="https://github.com/VictorMinemu/CC-Router">CC-Router</a></td>
+<td>24</td>
+<td>Round-robin proxy over 2–20 Claude Max seats with OAuth rotation — the <em>narrow</em> version of agents-cli's account layer</td>
+</tr>
+</tbody></table>
+<p><strong>Architectural fork in the road:</strong> L2 proxies the wire. agents-cli and Claudexor
+run the <strong>native CLI</strong>. Proxying gives per-request granularity but breaks harness
+features (native auth, agent-side caching, vendor session state); native execution
+keeps them but makes routing a per-<em>task</em> decision, not per-request. The spec picks
+native — same as Claudexor. That is the defensible choice and should be stated as
+one.</p>
+<h3>L3 — Meta-harness routers (the actual competitive set)</h3>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Stars</th>
+<th>Created</th>
+<th>Overlap with the spec</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong><a href="https://github.com/razzant/claudexor">Claudexor</a></strong></td>
+<td>400</td>
+<td>2026-06-05</td>
+<td><strong>Near-total.</strong> Multi-harness control plane (Claude Code, Codex, Cursor, OpenCode); quota-aware rotation across multiple Claude/Codex subscriptions; native-CLI execution; SSH remote hosts; credentials never leave their machine</td>
+</tr>
+<tr>
+<td><a href="https://github.com/yc-software/qm">QM (Y Combinator)</a></td>
+<td>12,955</td>
+<td>2026-07-31</td>
+<td>Harness layer, not router: pluggable drivers (Claude Code, OpenCode, Codex, Pi) + scopes, keychains, crons, skills grants, admin policy. MIT</td>
+</tr>
+<tr>
+<td>OMK</td>
+<td>—</td>
+<td>2026</td>
+<td>"Provider-neutral CLI control plane for coding agents"</td>
+</tr>
+<tr>
+<td><a href="https://github.com/BloopAI/vibe-kanban">vibe-kanban</a></td>
+<td>27,736</td>
+<td>2025</td>
+<td>Task board over agents — <em>placement</em>, not scored routing. <strong>No push since April</strong></td>
+</tr>
+<tr>
+<td>Superset (YC S26)</td>
+<td>—</td>
+<td>2026</td>
+<td>Terminal that coordinates parallel agent sessions</td>
+</tr>
+</tbody></table>
+<p>Everything else in the ecosystem — and there are <strong>150+ tools</strong> catalogued in
+<a href="https://github.com/bradAGI/awesome-cli-coding-agents">awesome-cli-coding-agents</a> —
+is a <em>runner</em>: worktrees, tmux panes, kanban boards, dashboards. They put agents
+side by side. They do not <strong>choose</strong> between them on task shape, quota headroom,
+and cost.</p>
+<h2 id="3-where-claudexor-lands-vs-the-spec">3. Where Claudexor lands vs. the spec</h2>
+<p>Read this as a diff against the merged <code>agent-router-spec.md</code>, not as a scoreboard.</p>
+<table>
+<thead>
+<tr>
+<th>Spec requirement</th>
+<th>Claudexor</th>
+<th>Read</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Named, reusable routers (allowlist of harness × model × accounts)</td>
+<td><strong>No</strong> — routing is <code>pool + --primary-harness + --routing-goal auto|quality|economy</code></td>
+<td><strong>The open gap.</strong> Their routing is per-invocation flags; the spec's named-router-as-resource is a real differentiator</td>
+</tr>
+<tr>
+<td>Quota-aware account rotation</td>
+<td><strong>Yes</strong> — per-profile from the vendor's own <code>oauth/usage</code>, 5h/7d/per-model percentages</td>
+<td>Parity. They rotate only on typed vendor-limit signals or headroom breach, never on network errors — a detail worth copying</td>
+</tr>
+<tr>
+<td>Native-CLI execution, not API proxy</td>
+<td><strong>Yes</strong></td>
+<td>Parity, and independent convergence</td>
+</tr>
+<tr>
+<td>No credential transfer across machines</td>
+<td><strong>Yes</strong> — creds stay on the origin host, reached over SSH local forwarding</td>
+<td>Parity with the spec's no-cred-transfer constraint</td>
+</tr>
+<tr>
+<td>Remote/device routing</td>
+<td><strong>Yes</strong> — SSH alias, signed no-sudo remote runtime</td>
+<td>Parity</td>
+</tr>
+<tr>
+<td><code>--explain</code> / non-executing dry run</td>
+<td><strong>Partial</strong> — <code>apply --dry-run</code>, all write commands default to inspection</td>
+<td>The spec's scoreboard-style <code>--explain</code> is better; ship it as a wedge</td>
+</tr>
+<tr>
+<td>Cross-harness fallback on rate limit</td>
+<td><strong>Yes</strong> — <code>limit_action: fail|ask|rotate</code></td>
+<td>Parity; theirs is config-declared, matching spec Group D</td>
+</tr>
+<tr>
+<td>Cross-harness delegation</td>
+<td><strong>Yes</strong> — <code>agent --delegate</code>, <code>best-of</code> races N candidates with review</td>
+<td><strong>Ahead.</strong> RUSH-2573/2574 are still Backlog here</td>
+</tr>
+</tbody></table>
+<p>Two things they do that the spec does not, and both are cheap to fold in:
+<code>best-of</code> (race N harnesses on one task, review the winners) and <code>plan --council</code>
+(multi-harness planning drafts). Those are the demos that sell a meta-harness
+router — a scoring table is not a demo.</p>
+<h2 id="4-the-strongest-public-counter-argument">4. The strongest public counter-argument</h2>
+<p>The Weave Router <a href="https://news.ycombinator.com/item?id=48688700">Show HN</a> is the
+most-attended public debate on this idea, and the room was hostile. The three
+arguments that landed:</p>
+<ol>
+<li><strong>Cache destruction.</strong> Switching models invalidates prompt cache; the saving is
+often smaller than the cache miss. <em>Mitigation in their product: cache-aware
+routing raises the switch threshold.</em></li>
+<li><strong>The agent already knows.</strong> Routing outside the agent breaks its feedback loop —
+the router "doesn't know it just tried DeepSeek and failed, so try Opus."</li>
+<li><strong>Cheap models cost more.</strong> Weak models fail, loop, and need rescuing, so
+naive cost-routing can <em>increase</em> spend.</li>
+</ol>
+<p><strong>Why this matters less at L3:</strong> all three are per-<em>request</em> objections. Routing a
+whole task to a harness+account keeps the cache warm inside that session, keeps the
+agent's loop intact, and makes the fallback a session-level event. The spec should
+say this explicitly — it is the reason meta-harness routing survives the critique
+that model routing does not.</p>
+<h2 id="5-recommendation">5. Recommendation</h2>
+<p><strong>Do not adopt a framework.</strong> There isn't one at L3. LiteLLM/Portkey solve a
+different layer, and wiring one in would force the API-proxy architecture the spec
+deliberately rejected.</p>
+<p><strong>Do borrow four specific things:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Borrow</th>
+<th>From</th>
+<th>Where it lands</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Online, failure-aware weighting (Thompson sampling / EWMA over observed outcomes) instead of static weights</td>
+<td>Ramp Router</td>
+<td>RUSH-2570 (<code>scoreCandidates(weights)</code>)</td>
+</tr>
+<tr>
+<td>Rotate only on <em>typed</em> vendor-limit signals, never on generic errors</td>
+<td>Claudexor</td>
+<td>RUSH-2571 (cross-harness fallback)</td>
+</tr>
+<tr>
+<td><code>best-of</code> — race N harnesses on one task, review the results</td>
+<td>Claudexor</td>
+<td>new ticket; this is the demo</td>
+</tr>
+<tr>
+<td>Cache-awareness as an explicit non-goal at L3, stated in the spec</td>
+<td>Weave Router HN thread</td>
+<td>spec §counter-arguments</td>
+</tr>
+</tbody></table>
+<p><strong>Ship the differentiator first.</strong> The named router as a <em>resource kind</em>
+(RUSH-2562/2563) is the one thing no competitor has — Claudexor routes with
+per-invocation flags, claude-code-router routes with a global config. A reusable,
+shareable, task-typed router that layers project &gt; user &gt; system is a genuinely
+new surface, and it is the least-built part of the spec.</p>
+<p><strong>Timing is the risk.</strong> Claudexor went 0 → 400 stars and shipped this entire
+feature set in ten weeks; QM took 13k stars in ten days. The L3 window is open now
+and will not stay open.</p>
+<h2 id="evidence">Evidence</h2>
+<p>Searched: GitHub repository search (star/push filters, <code>gh api</code>), Hacker News
+threads, YC company directory, vendor engineering blogs, and the
+<code>awesome-cli-coding-agents</code> catalogue (150+ tools). Star counts and push dates were
+read from the GitHub API on 2026-08-10, not from prose. Claims about Claudexor's
+architecture come from its README; claims about QM from YC's release coverage.</p>
+<h2 id="tracking">Tracking</h2>
+<ul>
+<li>Epic: RUSH-2555 — Agent Router (meta-harness routing)</li>
+<li>Spec: <code>.agents/artifacts/2026-08-10/agent-router-spec.md</code> (PR #2641, merged)</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0aXRsZTogQWdlbnQgUm91dGVyIOKAlCBNYXJrZXQgU2NhbgpzdXJmYWNlOiBjbGkKa2lja2VyOiBhZ2VudHMtY2xpIMK3IHdobyBlbHNlIGlzIGJ1aWxkaW5nIG1ldGEtaGFybmVzcyByb3V0aW5nCi0tLQoKIyBBZ2VudCBSb3V0ZXIg4oCUIE1hcmtldCBTY2FuCgojIyBTdW1tYXJ5CgpUaGUgbWFya2V0IGhhcyBzcGxpdCBpbnRvICoqdGhyZWUgZGlzdGluY3Qgcm91dGluZyBsYXllcnMqKiwgYW5kIG9ubHkgb25lIG9mIHRoZW0gaXMKY3Jvd2RlZC4gQ29uZnVzaW5nIHRoZW0gaXMgdGhlIG1haW4gd2F5IHRoaXMgYW5hbHlzaXMgZ29lcyB3cm9uZy4KCnwgTGF5ZXIgfCBXaGF0IGl0IHBpY2tzIHwgQ3Jvd2RpbmcgfCBCZXN0LWluLWNsYXNzIHRvZGF5IHwKfC0tLXwtLS18LS0tfC0tLXwKfCAqKkwxIOKAlCBNb2RlbCBnYXRld2F5KiogfCB3aGljaCAqbW9kZWwvcHJvdmlkZXIqIGFuc3dlcnMgb25lIEFQSSByZXF1ZXN0IHwgc2F0dXJhdGVkICg1Nmstc3RhciBpbmN1bWJlbnQpIHwgTGl0ZUxMTSwgT3BlblJvdXRlciwgUG9ydGtleSwgUmFtcCBSb3V0ZXIgfAp8ICoqTDIg4oCUIENMSSBwcm94eSByb3V0ZXIqKiB8IHdoaWNoICptb2RlbCogYSBjb2RpbmcgQ0xJIHRhbGtzIHRvLCB2aWEgYSBsb2NhbCBlbmRwb2ludCB8IGNyb3dkZWQsIG9uZSBkb21pbmFudCByZXBvIHwgY2xhdWRlLWNvZGUtcm91dGVyICgzNi41aykgfAp8ICoqTDMg4oCUIE1ldGEtaGFybmVzcyByb3V0ZXIqKiB8IHdoaWNoICpoYXJuZXNzIMOXIGFjY291bnQgw5cgbW9kZWwgw5cgZGV2aWNlKiBydW5zIGEgdGFzayB8IG5lYXJseSBlbXB0eSDigJQgKipvbmUgcmVhbCBjb21wZXRpdG9yKiogfCBDbGF1ZGV4b3IgKDQwMCBzdGFycywgMTAgd2Vla3Mgb2xkKSB8CgpgYWdlbnRzLWNsaWAncyByb3V0ZXIgc3BlYyBpcyAqKkwzKiouIFRoYXQgbGF5ZXIgaGFzIGV4YWN0bHkgb25lIGNyZWRpYmxlIG90aGVyCmltcGxlbWVudGF0aW9uLCBpdCBpcyAxMCB3ZWVrcyBvbGQsIGFuZCBpdCBjb252ZXJnZWQgb24gdGhlIHNhbWUgdHdvIGhhcmQKY29uc3RyYWludHMgKG5hdGl2ZS1DTEkgZXhlY3V0aW9uLCBubyBjcmVkZW50aWFsIHRyYW5zZmVyKSBpbmRlcGVuZGVudGx5LiBUaGF0IGlzCnRoZSBzdHJvbmdlc3QgdmFsaWRhdGlvbiBzaWduYWwgaW4gdGhpcyBzY2FuIOKAlCBhbmQgdGhlIHRpZ2h0ZXN0IGRlYWRsaW5lLgoKIyMgMS4gRm9jdXMgZm9yIHJldmlldwoKLSAqKkwzIGlzIHJlYWwgYW5kIGNvbnRlc3RlZCBieSBleGFjdGx5IG9uZSB0ZWFtLioqIENsYXVkZXhvciBhbHJlYWR5IHNoaXBzCiAgcXVvdGEtYXdhcmUgcm90YXRpb24gYWNyb3NzIG11bHRpcGxlIENsYXVkZS9Db2RleCBzdWJzY3JpcHRpb25zLCBuYXRpdmUtQ0xJCiAgZXhlY3V0aW9uLCBhbmQgU1NILXJlbW90ZSBob3N0cyB3aXRoIGNyZWRlbnRpYWxzIHBpbm5lZCB0byB0aGVpciBvcmlnaW4gbWFjaGluZS4KICBUaGF0IGlzIHRoZSBhZ2VudC1yb3V0ZXIgc3BlYywgc2hpcHBlZC4KLSAqKk5vYm9keSBvd25zICJyb3V0aW5nIGFjcm9zcyAqc3Vic2NyaXB0aW9uIGFjY291bnRzKi4iKiogTDEvTDIgdG9vbHMgYWxsIGFzc3VtZQogIEFQSSBrZXlzLiBTdWJzY3JpcHRpb24tc2VhdCByb3V0aW5nIChNYXgvUHJvL1RlYW0gcGxhbnMsIDVoLzdkIHF1b3RhIHdpbmRvd3MpIGlzCiAgd2hlcmUgYWdlbnRzLWNsaSBhbHJlYWR5IGhhcyByZWFsIGludmVudG9yeSBhbmQgbm9ib2R5IGVsc2UgaGFzIGEgbW9hdC4KLSAqKlRoZSBmcmFtZXdvcmsgcXVlc3Rpb24gaGFzIGEgYm9yaW5nIGFuc3dlci4qKiBUaGVyZSBpcyBubyBhZ2VudC1yb3V0aW5nCiAgZnJhbWV3b3JrIHRvIGFkb3B0LiBFdmVyeW9uZSBoYW5kLXJvbGxzIHBvbGljeTsgdGhlIG9ubHkgcmV1c2FibGUgcGllY2VzIGFyZQogIGdhdGV3YXlzIChMaXRlTExNL1BvcnRrZXkpIGF0IEwxIGFuZCBjbGFzc2lmaWVyIG1vZGVscyAoUm91dGVMTE0sIEFyY2gvcGxhbm8pIGZvcgogIHByb21wdOKGkm1vZGVsIHNjb3JpbmcuCi0gKipZQyBzaGlwcGVkIGEgc3RydWN0dXJhbCBjb21wZXRpdG9yIHRvIHRoZSB3aG9sZSBoYXJuZXNzIGxheWVyKiosIG5vdCBqdXN0IHRoZQogIHJvdXRlcjogUU0gKE1JVCwgSnVseSAzMSAyMDI2KSDigJQgcGx1Z2dhYmxlIGFnZW50IGRyaXZlcnMgKyBzY29wZXMgKyBrZXljaGFpbnMgKwogIGNyb25zICsgc2tpbGxzIGdyYW50cy4gMTNrIHN0YXJzIGluIDEwIGRheXMuCi0gKipDb3N0LXJvdXRpbmcgc2tlcHRpY2lzbSBpcyB0aGUgbG91ZGVzdCBjb3VudGVyLWFyZ3VtZW50IGluIHB1YmxpYy4qKiBUaGUKICBiZXN0LWF0dGVuZGVkIEhOIHRocmVhZCBvbiByb3V0ZXIgcHJvZHVjdHMgKDIxNiBwdHMpIGlzIG1vc3RseSBkZXZlbG9wZXJzIGFyZ3VpbmcKICByb3V0aW5nICpsb3NlcyogbW9uZXkgdmlhIGNhY2hlIG1pc3NlcyBhbmQgcmV0cnkgbG9vcHMuCgojIyBGaW5kaW5ncwoKIyMjIEwxIOKAlCBNb2RlbCBnYXRld2F5cyAoZG8gbm90IGJ1aWxkIGhlcmUpCgpNYXR1cmUsIGNvbW1vZGl0aXplZCwgYW5kIG9ydGhvZ29uYWwgdG8gd2hhdCBhZ2VudHMtY2xpIGRvZXMuIFdvcnRoIHJlYWRpbmcgZm9yCnNjb3JpbmcgbWVjaGFuaWNzLCBub3Qgd29ydGggY29tcGV0aW5nIHdpdGguCgp8IFRvb2wgfCBTdGFycyB8IFdoYXQgaXQgaXMgfAp8LS0tfC0tLXwtLS18CnwgW0xpdGVMTE1dKGh0dHBzOi8vZ2l0aHViLmNvbS9CZXJyaUFJL2xpdGVsbG0pIHwgNTYsMDUyIHwgVGhlIGRlZmF1bHQgT1NTIGdhdGV3YXkuIDEwMCsgcHJvdmlkZXJzIGJlaGluZCBvbmUgQVBJLCBmYWxsYmFja3MsIGJ1ZGdldHMgfAp8IFtQb3J0a2V5IEdhdGV3YXldKGh0dHBzOi8vZ2l0aHViLmNvbS9Qb3J0a2V5LUFJL2dhdGV3YXkpIHwgMTIsNjgzIHwgMSw2MDArIG1vZGVscywgZ3VhcmRyYWlscywgY29uZGl0aW9uYWwgcm91dGluZyB8CnwgW3BsYW5vIChLYXRhbmVtbyldKGh0dHBzOi8vZ2l0aHViLmNvbS9rYXRhbmVtby9wbGFubykgfCA2LDk5NSB8IFJ1c3QgcHJveHkvZGF0YSBwbGFuZTsgc2hpcHMgKipBcmNoLVJvdXRlcioqLCBhIHByZWZlcmVuY2UtYWxpZ25lZCByb3V0aW5nIG1vZGVsIHwKfCBbdmxsbSBzZW1hbnRpYy1yb3V0ZXJdKGh0dHBzOi8vZ2l0aHViLmNvbS92bGxtLXByb2plY3Qvc2VtYW50aWMtcm91dGVyKSB8IDUsMTMyIHwgTWl4dHVyZS1vZi1Nb2RlbHMgcm91dGVyIGZvciBoZXRlcm9nZW5lb3VzIGluZmVyZW5jZSB8CnwgW1JvdXRlTExNXShodHRwczovL2dpdGh1Yi5jb20vbG0tc3lzL1JvdXRlTExNKSB8IDUsMzIyIHwgVGhlIGFjYWRlbWljIHJlZmVyZW5jZSDigJQgc3Ryb25nL3dlYWsgcm91dGVyIHRyYWluZWQgb24gcHJlZmVyZW5jZSBkYXRhLiAqKlVubWFpbnRhaW5lZCBzaW5jZSAyMDI0KiogfAp8IFtPcGVuUm91dGVyIEF1dG9dKGh0dHBzOi8vb3BlbnJvdXRlci5haS9ibG9nL2luc2lnaHRzL21vZGVsLXJvdXRpbmcvKSB8IOKAlCB8IDUwMCsgbW9kZWxzLCBgY29zdF9xdWFsaXR5X3RyYWRlb2ZmYCBkaWFsIDDigJMxMCwgbm8gc3VyY2hhcmdlIHwKfCBbUmFtcCBSb3V0ZXJdKGh0dHBzOi8vYnVpbGRlcnMucmFtcC5jb20vcG9zdC90aG9tcHNvbi1zYW1wbGluZy1tb2RlbC1yb3V0aW5nKSB8IOKAlCB8IEludGVybmFsIHJvdXRlciBvcGVuZWQgdG8gcHVibGljIEp1bHkgMjAyNjsgVGhvbXBzb24gc2FtcGxpbmcgKyBFV01BIG92ZXIgbGl2ZSBsYXRlbmN5L2ZhaWx1cmU7IGNsYWltcyAyNeKAkzMwJSBzcGVuZCBjdXQgfAoKKipUaGUgb25lIGdlbnVpbmVseSB0cmFuc2ZlcmFibGUgaWRlYToqKiBSYW1wJ3Mgcm91dGluZyBpcyAqZmFpbHVyZS1hd2FyZSBhbmQKb25saW5lKiDigJQgVGhvbXBzb24gc2FtcGxpbmcgb3ZlciBsaXZlIGxhdGVuY3kvZXJyb3IgZGlzdHJpYnV0aW9ucywgbm90IGEgc3RhdGljCnNjb3JpbmcgdGFibGUuIFRoZSBzcGVjJ3MgYHdlaWdodHNgIGNvbmZpZyBpcyBhIHN0YXRpYyBwcmlvcjsgUmFtcCdzIHJlc3VsdCBzYXlzCnRoZSB3aW4gY29tZXMgZnJvbSB1cGRhdGluZyBpdCBmcm9tIG9ic2VydmVkIG91dGNvbWVzLgoKIyMjIEwyIOKAlCBDTEkgcHJveHkgcm91dGVycyAoYWRqYWNlbnQsIG9uZSBkb21pbmFudCBwbGF5ZXIpCgpUaGVzZSBpbnRlcmNlcHQgdGhlIGNvZGluZyBDTEkncyBBUEkgdHJhZmZpYyBhbmQgc3dhcCB0aGUgbW9kZWwgYmVoaW5kIGl0LgoKfCBUb29sIHwgU3RhcnMgfCBOb3RlIHwKfC0tLXwtLS18LS0tfAp8IFtjbGF1ZGUtY29kZS1yb3V0ZXJdKGh0dHBzOi8vZ2l0aHViLmNvbS9tdXNpc3R1ZGlvL2NsYXVkZS1jb2RlLXJvdXRlcikgfCAqKjM2LDU1MyoqIHwgVGhlIGNhdGVnb3J5IGtpbmcuIE9uZSBsb2NhbCBlbmRwb2ludCBmb3IgQ2xhdWRlIENvZGUsIENvZGV4LCBHcm9rLCBLaW1pLCBPcGVuQ29kZSwgUGk7IHByb3ZpZGVyIHByZXNldHMgaW5jbC4gc3Vic2NyaXB0aW9uIHBhc3N0aHJvdWdoIHwKfCBbQ2xhd1JvdXRlcl0oaHR0cHM6Ly9naXRodWIuY29tL0Jsb2NrUnVuQUkvQ2xhd1JvdXRlcikgfCA2LDYwOCB8IEFnZW50LW5hdGl2ZSwgNjYgbW9kZWxzLCA8MW1zIGxvY2FsIHJvdXRpbmcgfAp8IFtXZWF2ZSBSb3V0ZXJdKGh0dHBzOi8vbmV3cy55Y29tYmluYXRvci5jb20vaXRlbT9pZD00ODY4ODcwMCkgfCDigJQgfCBTaG93IEhOLCAyMTYgcHRzIC8gMTEzIGNvbW1lbnRzLiBSTCBtb2RlbCBvdmVyIGFnZW50IHRyYWNlczsgY2xhaW1zIDQwJSB0b2tlbiBzYXZpbmdzIHwKfCBbQ0MtUm91dGVyXShodHRwczovL2dpdGh1Yi5jb20vVmljdG9yTWluZW11L0NDLVJvdXRlcikgfCAyNCB8IFJvdW5kLXJvYmluIHByb3h5IG92ZXIgMuKAkzIwIENsYXVkZSBNYXggc2VhdHMgd2l0aCBPQXV0aCByb3RhdGlvbiDigJQgdGhlICpuYXJyb3cqIHZlcnNpb24gb2YgYWdlbnRzLWNsaSdzIGFjY291bnQgbGF5ZXIgfAoKKipBcmNoaXRlY3R1cmFsIGZvcmsgaW4gdGhlIHJvYWQ6KiogTDIgcHJveGllcyB0aGUgd2lyZS4gYWdlbnRzLWNsaSBhbmQgQ2xhdWRleG9yCnJ1biB0aGUgKipuYXRpdmUgQ0xJKiouIFByb3h5aW5nIGdpdmVzIHBlci1yZXF1ZXN0IGdyYW51bGFyaXR5IGJ1dCBicmVha3MgaGFybmVzcwpmZWF0dXJlcyAobmF0aXZlIGF1dGgsIGFnZW50LXNpZGUgY2FjaGluZywgdmVuZG9yIHNlc3Npb24gc3RhdGUpOyBuYXRpdmUgZXhlY3V0aW9uCmtlZXBzIHRoZW0gYnV0IG1ha2VzIHJvdXRpbmcgYSBwZXItKnRhc2sqIGRlY2lzaW9uLCBub3QgcGVyLXJlcXVlc3QuIFRoZSBzcGVjIHBpY2tzCm5hdGl2ZSDigJQgc2FtZSBhcyBDbGF1ZGV4b3IuIFRoYXQgaXMgdGhlIGRlZmVuc2libGUgY2hvaWNlIGFuZCBzaG91bGQgYmUgc3RhdGVkIGFzCm9uZS4KCiMjIyBMMyDigJQgTWV0YS1oYXJuZXNzIHJvdXRlcnMgKHRoZSBhY3R1YWwgY29tcGV0aXRpdmUgc2V0KQoKfCBUb29sIHwgU3RhcnMgfCBDcmVhdGVkIHwgT3ZlcmxhcCB3aXRoIHRoZSBzcGVjIHwKfC0tLXwtLS18LS0tfC0tLXwKfCAqKltDbGF1ZGV4b3JdKGh0dHBzOi8vZ2l0aHViLmNvbS9yYXp6YW50L2NsYXVkZXhvcikqKiB8IDQwMCB8IDIwMjYtMDYtMDUgfCAqKk5lYXItdG90YWwuKiogTXVsdGktaGFybmVzcyBjb250cm9sIHBsYW5lIChDbGF1ZGUgQ29kZSwgQ29kZXgsIEN1cnNvciwgT3BlbkNvZGUpOyBxdW90YS1hd2FyZSByb3RhdGlvbiBhY3Jvc3MgbXVsdGlwbGUgQ2xhdWRlL0NvZGV4IHN1YnNjcmlwdGlvbnM7IG5hdGl2ZS1DTEkgZXhlY3V0aW9uOyBTU0ggcmVtb3RlIGhvc3RzOyBjcmVkZW50aWFscyBuZXZlciBsZWF2ZSB0aGVpciBtYWNoaW5lIHwKfCBbUU0gKFkgQ29tYmluYXRvcildKGh0dHBzOi8vZ2l0aHViLmNvbS95Yy1zb2Z0d2FyZS9xbSkgfCAxMiw5NTUgfCAyMDI2LTA3LTMxIHwgSGFybmVzcyBsYXllciwgbm90IHJvdXRlcjogcGx1Z2dhYmxlIGRyaXZlcnMgKENsYXVkZSBDb2RlLCBPcGVuQ29kZSwgQ29kZXgsIFBpKSArIHNjb3Blcywga2V5Y2hhaW5zLCBjcm9ucywgc2tpbGxzIGdyYW50cywgYWRtaW4gcG9saWN5LiBNSVQgfAp8IE9NSyB8IOKAlCB8IDIwMjYgfCAiUHJvdmlkZXItbmV1dHJhbCBDTEkgY29udHJvbCBwbGFuZSBmb3IgY29kaW5nIGFnZW50cyIgfAp8IFt2aWJlLWthbmJhbl0oaHR0cHM6Ly9naXRodWIuY29tL0Jsb29wQUkvdmliZS1rYW5iYW4pIHwgMjcsNzM2IHwgMjAyNSB8IFRhc2sgYm9hcmQgb3ZlciBhZ2VudHMg4oCUICpwbGFjZW1lbnQqLCBub3Qgc2NvcmVkIHJvdXRpbmcuICoqTm8gcHVzaCBzaW5jZSBBcHJpbCoqIHwKfCBTdXBlcnNldCAoWUMgUzI2KSB8IOKAlCB8IDIwMjYgfCBUZXJtaW5hbCB0aGF0IGNvb3JkaW5hdGVzIHBhcmFsbGVsIGFnZW50IHNlc3Npb25zIHwKCkV2ZXJ5dGhpbmcgZWxzZSBpbiB0aGUgZWNvc3lzdGVtIOKAlCBhbmQgdGhlcmUgYXJlICoqMTUwKyB0b29scyoqIGNhdGFsb2d1ZWQgaW4KW2F3ZXNvbWUtY2xpLWNvZGluZy1hZ2VudHNdKGh0dHBzOi8vZ2l0aHViLmNvbS9icmFkQUdJL2F3ZXNvbWUtY2xpLWNvZGluZy1hZ2VudHMpIOKAlAppcyBhICpydW5uZXIqOiB3b3JrdHJlZXMsIHRtdXggcGFuZXMsIGthbmJhbiBib2FyZHMsIGRhc2hib2FyZHMuIFRoZXkgcHV0IGFnZW50cwpzaWRlIGJ5IHNpZGUuIFRoZXkgZG8gbm90ICoqY2hvb3NlKiogYmV0d2VlbiB0aGVtIG9uIHRhc2sgc2hhcGUsIHF1b3RhIGhlYWRyb29tLAphbmQgY29zdC4KCiMjIDMuIFdoZXJlIENsYXVkZXhvciBsYW5kcyB2cy4gdGhlIHNwZWMKClJlYWQgdGhpcyBhcyBhIGRpZmYgYWdhaW5zdCB0aGUgbWVyZ2VkIGBhZ2VudC1yb3V0ZXItc3BlYy5tZGAsIG5vdCBhcyBhIHNjb3JlYm9hcmQuCgp8IFNwZWMgcmVxdWlyZW1lbnQgfCBDbGF1ZGV4b3IgfCBSZWFkIHwKfC0tLXwtLS18LS0tfAp8IE5hbWVkLCByZXVzYWJsZSByb3V0ZXJzIChhbGxvd2xpc3Qgb2YgaGFybmVzcyDDlyBtb2RlbCDDlyBhY2NvdW50cykgfCAqKk5vKiog4oCUIHJvdXRpbmcgaXMgYHBvb2wgKyAtLXByaW1hcnktaGFybmVzcyArIC0tcm91dGluZy1nb2FsIGF1dG9cfHF1YWxpdHlcfGVjb25vbXlgIHwgKipUaGUgb3BlbiBnYXAuKiogVGhlaXIgcm91dGluZyBpcyBwZXItaW52b2NhdGlvbiBmbGFnczsgdGhlIHNwZWMncyBuYW1lZC1yb3V0ZXItYXMtcmVzb3VyY2UgaXMgYSByZWFsIGRpZmZlcmVudGlhdG9yIHwKfCBRdW90YS1hd2FyZSBhY2NvdW50IHJvdGF0aW9uIHwgKipZZXMqKiDigJQgcGVyLXByb2ZpbGUgZnJvbSB0aGUgdmVuZG9yJ3Mgb3duIGBvYXV0aC91c2FnZWAsIDVoLzdkL3Blci1tb2RlbCBwZXJjZW50YWdlcyB8IFBhcml0eS4gVGhleSByb3RhdGUgb25seSBvbiB0eXBlZCB2ZW5kb3ItbGltaXQgc2lnbmFscyBvciBoZWFkcm9vbSBicmVhY2gsIG5ldmVyIG9uIG5ldHdvcmsgZXJyb3JzIOKAlCBhIGRldGFpbCB3b3J0aCBjb3B5aW5nIHwKfCBOYXRpdmUtQ0xJIGV4ZWN1dGlvbiwgbm90IEFQSSBwcm94eSB8ICoqWWVzKiogfCBQYXJpdHksIGFuZCBpbmRlcGVuZGVudCBjb252ZXJnZW5jZSB8CnwgTm8gY3JlZGVudGlhbCB0cmFuc2ZlciBhY3Jvc3MgbWFjaGluZXMgfCAqKlllcyoqIOKAlCBjcmVkcyBzdGF5IG9uIHRoZSBvcmlnaW4gaG9zdCwgcmVhY2hlZCBvdmVyIFNTSCBsb2NhbCBmb3J3YXJkaW5nIHwgUGFyaXR5IHdpdGggdGhlIHNwZWMncyBuby1jcmVkLXRyYW5zZmVyIGNvbnN0cmFpbnQgfAp8IFJlbW90ZS9kZXZpY2Ugcm91dGluZyB8ICoqWWVzKiog4oCUIFNTSCBhbGlhcywgc2lnbmVkIG5vLXN1ZG8gcmVtb3RlIHJ1bnRpbWUgfCBQYXJpdHkgfAp8IGAtLWV4cGxhaW5gIC8gbm9uLWV4ZWN1dGluZyBkcnkgcnVuIHwgKipQYXJ0aWFsKiog4oCUIGBhcHBseSAtLWRyeS1ydW5gLCBhbGwgd3JpdGUgY29tbWFuZHMgZGVmYXVsdCB0byBpbnNwZWN0aW9uIHwgVGhlIHNwZWMncyBzY29yZWJvYXJkLXN0eWxlIGAtLWV4cGxhaW5gIGlzIGJldHRlcjsgc2hpcCBpdCBhcyBhIHdlZGdlIHwKfCBDcm9zcy1oYXJuZXNzIGZhbGxiYWNrIG9uIHJhdGUgbGltaXQgfCAqKlllcyoqIOKAlCBgbGltaXRfYWN0aW9uOiBmYWlsXHxhc2tcfHJvdGF0ZWAgfCBQYXJpdHk7IHRoZWlycyBpcyBjb25maWctZGVjbGFyZWQsIG1hdGNoaW5nIHNwZWMgR3JvdXAgRCB8CnwgQ3Jvc3MtaGFybmVzcyBkZWxlZ2F0aW9uIHwgKipZZXMqKiDigJQgYGFnZW50IC0tZGVsZWdhdGVgLCBgYmVzdC1vZmAgcmFjZXMgTiBjYW5kaWRhdGVzIHdpdGggcmV2aWV3IHwgKipBaGVhZC4qKiBSVVNILTI1NzMvMjU3NCBhcmUgc3RpbGwgQmFja2xvZyBoZXJlIHwKClR3byB0aGluZ3MgdGhleSBkbyB0aGF0IHRoZSBzcGVjIGRvZXMgbm90LCBhbmQgYm90aCBhcmUgY2hlYXAgdG8gZm9sZCBpbjoKYGJlc3Qtb2ZgIChyYWNlIE4gaGFybmVzc2VzIG9uIG9uZSB0YXNrLCByZXZpZXcgdGhlIHdpbm5lcnMpIGFuZCBgcGxhbiAtLWNvdW5jaWxgCihtdWx0aS1oYXJuZXNzIHBsYW5uaW5nIGRyYWZ0cykuIFRob3NlIGFyZSB0aGUgZGVtb3MgdGhhdCBzZWxsIGEgbWV0YS1oYXJuZXNzCnJvdXRlciDigJQgYSBzY29yaW5nIHRhYmxlIGlzIG5vdCBhIGRlbW8uCgojIyA0LiBUaGUgc3Ryb25nZXN0IHB1YmxpYyBjb3VudGVyLWFyZ3VtZW50CgpUaGUgV2VhdmUgUm91dGVyIFtTaG93IEhOXShodHRwczovL25ld3MueWNvbWJpbmF0b3IuY29tL2l0ZW0/aWQ9NDg2ODg3MDApIGlzIHRoZQptb3N0LWF0dGVuZGVkIHB1YmxpYyBkZWJhdGUgb24gdGhpcyBpZGVhLCBhbmQgdGhlIHJvb20gd2FzIGhvc3RpbGUuIFRoZSB0aHJlZQphcmd1bWVudHMgdGhhdCBsYW5kZWQ6CgoxLiAqKkNhY2hlIGRlc3RydWN0aW9uLioqIFN3aXRjaGluZyBtb2RlbHMgaW52YWxpZGF0ZXMgcHJvbXB0IGNhY2hlOyB0aGUgc2F2aW5nIGlzCiAgIG9mdGVuIHNtYWxsZXIgdGhhbiB0aGUgY2FjaGUgbWlzcy4gKk1pdGlnYXRpb24gaW4gdGhlaXIgcHJvZHVjdDogY2FjaGUtYXdhcmUKICAgcm91dGluZyByYWlzZXMgdGhlIHN3aXRjaCB0aHJlc2hvbGQuKgoyLiAqKlRoZSBhZ2VudCBhbHJlYWR5IGtub3dzLioqIFJvdXRpbmcgb3V0c2lkZSB0aGUgYWdlbnQgYnJlYWtzIGl0cyBmZWVkYmFjayBsb29wIOKAlAogICB0aGUgcm91dGVyICJkb2Vzbid0IGtub3cgaXQganVzdCB0cmllZCBEZWVwU2VlayBhbmQgZmFpbGVkLCBzbyB0cnkgT3B1cy4iCjMuICoqQ2hlYXAgbW9kZWxzIGNvc3QgbW9yZS4qKiBXZWFrIG1vZGVscyBmYWlsLCBsb29wLCBhbmQgbmVlZCByZXNjdWluZywgc28KICAgbmFpdmUgY29zdC1yb3V0aW5nIGNhbiAqaW5jcmVhc2UqIHNwZW5kLgoKKipXaHkgdGhpcyBtYXR0ZXJzIGxlc3MgYXQgTDM6KiogYWxsIHRocmVlIGFyZSBwZXItKnJlcXVlc3QqIG9iamVjdGlvbnMuIFJvdXRpbmcgYQp3aG9sZSB0YXNrIHRvIGEgaGFybmVzcythY2NvdW50IGtlZXBzIHRoZSBjYWNoZSB3YXJtIGluc2lkZSB0aGF0IHNlc3Npb24sIGtlZXBzIHRoZQphZ2VudCdzIGxvb3AgaW50YWN0LCBhbmQgbWFrZXMgdGhlIGZhbGxiYWNrIGEgc2Vzc2lvbi1sZXZlbCBldmVudC4gVGhlIHNwZWMgc2hvdWxkCnNheSB0aGlzIGV4cGxpY2l0bHkg4oCUIGl0IGlzIHRoZSByZWFzb24gbWV0YS1oYXJuZXNzIHJvdXRpbmcgc3Vydml2ZXMgdGhlIGNyaXRpcXVlCnRoYXQgbW9kZWwgcm91dGluZyBkb2VzIG5vdC4KCiMjIDUuIFJlY29tbWVuZGF0aW9uCgoqKkRvIG5vdCBhZG9wdCBhIGZyYW1ld29yay4qKiBUaGVyZSBpc24ndCBvbmUgYXQgTDMuIExpdGVMTE0vUG9ydGtleSBzb2x2ZSBhCmRpZmZlcmVudCBsYXllciwgYW5kIHdpcmluZyBvbmUgaW4gd291bGQgZm9yY2UgdGhlIEFQSS1wcm94eSBhcmNoaXRlY3R1cmUgdGhlIHNwZWMKZGVsaWJlcmF0ZWx5IHJlamVjdGVkLgoKKipEbyBib3Jyb3cgZm91ciBzcGVjaWZpYyB0aGluZ3M6KioKCnwgQm9ycm93IHwgRnJvbSB8IFdoZXJlIGl0IGxhbmRzIHwKfC0tLXwtLS18LS0tfAp8IE9ubGluZSwgZmFpbHVyZS1hd2FyZSB3ZWlnaHRpbmcgKFRob21wc29uIHNhbXBsaW5nIC8gRVdNQSBvdmVyIG9ic2VydmVkIG91dGNvbWVzKSBpbnN0ZWFkIG9mIHN0YXRpYyB3ZWlnaHRzIHwgUmFtcCBSb3V0ZXIgfCBSVVNILTI1NzAgKGBzY29yZUNhbmRpZGF0ZXMod2VpZ2h0cylgKSB8CnwgUm90YXRlIG9ubHkgb24gKnR5cGVkKiB2ZW5kb3ItbGltaXQgc2lnbmFscywgbmV2ZXIgb24gZ2VuZXJpYyBlcnJvcnMgfCBDbGF1ZGV4b3IgfCBSVVNILTI1NzEgKGNyb3NzLWhhcm5lc3MgZmFsbGJhY2spIHwKfCBgYmVzdC1vZmAg4oCUIHJhY2UgTiBoYXJuZXNzZXMgb24gb25lIHRhc2ssIHJldmlldyB0aGUgcmVzdWx0cyB8IENsYXVkZXhvciB8IG5ldyB0aWNrZXQ7IHRoaXMgaXMgdGhlIGRlbW8gfAp8IENhY2hlLWF3YXJlbmVzcyBhcyBhbiBleHBsaWNpdCBub24tZ29hbCBhdCBMMywgc3RhdGVkIGluIHRoZSBzcGVjIHwgV2VhdmUgUm91dGVyIEhOIHRocmVhZCB8IHNwZWMgwqdjb3VudGVyLWFyZ3VtZW50cyB8CgoqKlNoaXAgdGhlIGRpZmZlcmVudGlhdG9yIGZpcnN0LioqIFRoZSBuYW1lZCByb3V0ZXIgYXMgYSAqcmVzb3VyY2Uga2luZCoKKFJVU0gtMjU2Mi8yNTYzKSBpcyB0aGUgb25lIHRoaW5nIG5vIGNvbXBldGl0b3IgaGFzIOKAlCBDbGF1ZGV4b3Igcm91dGVzIHdpdGgKcGVyLWludm9jYXRpb24gZmxhZ3MsIGNsYXVkZS1jb2RlLXJvdXRlciByb3V0ZXMgd2l0aCBhIGdsb2JhbCBjb25maWcuIEEgcmV1c2FibGUsCnNoYXJlYWJsZSwgdGFzay10eXBlZCByb3V0ZXIgdGhhdCBsYXllcnMgcHJvamVjdCA+IHVzZXIgPiBzeXN0ZW0gaXMgYSBnZW51aW5lbHkKbmV3IHN1cmZhY2UsIGFuZCBpdCBpcyB0aGUgbGVhc3QtYnVpbHQgcGFydCBvZiB0aGUgc3BlYy4KCioqVGltaW5nIGlzIHRoZSByaXNrLioqIENsYXVkZXhvciB3ZW50IDAg4oaSIDQwMCBzdGFycyBhbmQgc2hpcHBlZCB0aGlzIGVudGlyZQpmZWF0dXJlIHNldCBpbiB0ZW4gd2Vla3M7IFFNIHRvb2sgMTNrIHN0YXJzIGluIHRlbiBkYXlzLiBUaGUgTDMgd2luZG93IGlzIG9wZW4gbm93CmFuZCB3aWxsIG5vdCBzdGF5IG9wZW4uCgojIyBFdmlkZW5jZQoKU2VhcmNoZWQ6IEdpdEh1YiByZXBvc2l0b3J5IHNlYXJjaCAoc3Rhci9wdXNoIGZpbHRlcnMsIGBnaCBhcGlgKSwgSGFja2VyIE5ld3MKdGhyZWFkcywgWUMgY29tcGFueSBkaXJlY3RvcnksIHZlbmRvciBlbmdpbmVlcmluZyBibG9ncywgYW5kIHRoZQpgYXdlc29tZS1jbGktY29kaW5nLWFnZW50c2AgY2F0YWxvZ3VlICgxNTArIHRvb2xzKS4gU3RhciBjb3VudHMgYW5kIHB1c2ggZGF0ZXMgd2VyZQpyZWFkIGZyb20gdGhlIEdpdEh1YiBBUEkgb24gMjAyNi0wOC0xMCwgbm90IGZyb20gcHJvc2UuIENsYWltcyBhYm91dCBDbGF1ZGV4b3IncwphcmNoaXRlY3R1cmUgY29tZSBmcm9tIGl0cyBSRUFETUU7IGNsYWltcyBhYm91dCBRTSBmcm9tIFlDJ3MgcmVsZWFzZSBjb3ZlcmFnZS4KCiMjIFRyYWNraW5nCgotIEVwaWM6IFJVU0gtMjU1NSDigJQgQWdlbnQgUm91dGVyIChtZXRhLWhhcm5lc3Mgcm91dGluZykKLSBTcGVjOiBgLmFnZW50cy9hcnRpZmFjdHMvMjAyNi0wOC0xMC9hZ2VudC1yb3V0ZXItc3BlYy5tZGAgKFBSICMyNjQxLCBtZXJnZWQpCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
