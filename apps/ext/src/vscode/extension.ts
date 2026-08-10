@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, isAgentRunner, usesManagedAgentLaunch, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand, shquote } from '../core/agents';
 import { loadAutoLaunchPreferences, isAutoLaunchEnabled, isAutoLaunchPreferred, readDeviceMaxConcurrent } from '../core/deviceAutoLaunch';
+import { resolveProjectForCwd } from '../core/managedProjects';
 import { parseSpawnRequest, resolveSpawnSurface, SpawnRequest } from '../core/spawn';
 import {
   AgentConfig,
@@ -2276,6 +2277,13 @@ async function openSingleAgent(
   const terminalId = terminals.nextId(agentConfig.prefix);
   const { cwd, isolated: worktreeIsolated } = await resolveTerminalCwd(workspaceFolder, terminalId);
 
+  // If the workspace folder is a bound directory of a defined project, let the
+  // CLI resolve `--project <slug>` to a cwd itself (locally or on `host`)
+  // instead of Factory computing/forwarding one by hand. Skipped for a
+  // worktree-isolated terminal — that cwd is a fresh, unbound worktree, not the
+  // project's own checkout.
+  const projectSlug = worktreeIsolated ? undefined : await resolveProjectForCwd(workspaceFolder);
+
   let sessionId: string | null = null;
 
   // Track OpenCode sessions before spawn to detect new one
@@ -2324,7 +2332,8 @@ async function openSingleAgent(
       {
         host: targetHost,
         local: !targetHost,
-        cwd: targetHost ? cwd : undefined,
+        cwd: projectSlug ? undefined : (targetHost ? cwd : undefined),
+        project: projectSlug,
       },
     );
   }

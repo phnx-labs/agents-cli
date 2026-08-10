@@ -21,14 +21,21 @@ import { resolveAgentsBin, bootstrapPath, runAgents, AgentsBinNotFoundError } fr
 export interface ManagedProject {
   id: string;                                 // stable local id (= the project YAML slug)
   name: string;                               // label in sidebar + dispatch
-  path: string;                               // absolute local folder
-  repoSlug?: string;                          // "owner/repo"
+  path: string;                               // absolute local folder (root/defaultPath — the FIRST bound directory)
+  repoSlug?: string;                          // "owner/repo" (repos[0].slug — the FIRST bound directory's repo)
+  dirs: ManagedProjectDir[];                  // every directory bound to this project, root/defaultPath first
   linearProjectId?: string;
   linearProjectName?: string;                 // for the Linear pill
   autoDispatch?: boolean;                     // opt-in: auto-pick delegated Todo tickets (default off)
   maxAgents?: number;                         // cap on concurrent auto-dispatched agents for this project
   confidence: 'high' | 'medium' | 'low';
   source: 'detected' | 'manual';
+}
+
+/** One directory bound to a project — a repo's checkout, optionally pinned to a monorepo subpath. */
+export interface ManagedProjectDir {
+  slug?: string;                              // "owner/repo", when this dir has a bound repo
+  path: string;                               // absolute local folder for this dir (subpath already joined in)
 }
 
 /** Mirror of cli/src/lib/projects.ts isSafeProjectName — no path separators or dot-escapes. */
@@ -72,11 +79,27 @@ export function defToManaged(def: Record<string, unknown>): ManagedProject {
       : typeof repos[0]?.slug === 'string'
         ? repos[0].slug
         : undefined;
+  // Every directory bound to this project: the primary root/defaultPath first
+  // (unchanged single-dir behavior for a project with no `repos[].path`), then
+  // one row per repo that opted into its own local checkout via `path` (see
+  // ProjectRepo.path in cli/src/lib/projects.ts) — `subpath` joined in so the
+  // row is the exact folder an agent would cd into.
+  const primaryDir = expandedPath ? { slug: repoSlug, path: expandedPath } : undefined;
+  const extraDirs = repos
+    .filter((r): r is Record<string, unknown> & { path: string } => typeof r.path === 'string' && r.path.length > 0)
+    .map((r) => {
+      const base = r.path.startsWith('~/') ? path.join(homedir(), r.path.slice(2)) : r.path;
+      const abs = typeof r.subpath === 'string' && r.subpath ? path.join(base, r.subpath) : base;
+      return { slug: typeof r.slug === 'string' ? r.slug : undefined, path: abs };
+    })
+    .filter((d) => d.path !== primaryDir?.path);
+  const dirs = primaryDir ? [primaryDir, ...extraDirs] : extraDirs;
   return {
     id: name,
     name,
     path: expandedPath,
     repoSlug,
+    dirs,
     linearProjectId: typeof linear?.projectId === 'string' ? linear.projectId : undefined,
     linearProjectName: typeof linear?.name === 'string' ? linear.name : undefined,
     autoDispatch: dispatch?.enabled === true,
@@ -196,6 +219,23 @@ export async function readManagedProjects(): Promise<ManagedProject[]> {
   return parsed
     .filter((d) => d && typeof d === 'object' && typeof (d as Record<string, unknown>).name === 'string')
     .map((d) => defToManaged(d as Record<string, unknown>));
+}
+
+/**
+ * Resolve a local directory to its defined project slug via
+ * `agents projects for-cwd <cwd> --json` — the CLI does the matching
+ * (root and every repos[].path/subpath), never reimplemented here. Returns
+ * undefined when nothing matches or the CLI call fails; a launch should fall
+ * back to today's computed-cwd behavior rather than block on this.
+ */
+export async function resolveProjectForCwd(cwd: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await runAgentsArgv(['projects', 'for-cwd', cwd, '--json']);
+    const parsed = JSON.parse(stdout) as { name?: string | null };
+    return typeof parsed.name === 'string' ? parsed.name : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Load raw ProjectDef objects from `agents projects list --json` (for merge-on-save). */

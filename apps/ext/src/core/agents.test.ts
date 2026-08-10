@@ -443,6 +443,53 @@ describe('buildAgentLaunchCommand', () => {
     )).toThrow('cannot combine portable cwd with exact remoteCwd');
   });
 
+  // RUSH-2487: a matched project owns the working directory end-to-end — the
+  // CLI's resolveRunCwd (exec.ts) hard-exits on --project + --cwd/--remote-cwd,
+  // so buildAgentLaunchCommand must never emit that combination either.
+  test('a local launch with a matched project emits --project and no cwd flag', () => {
+    const cmd = buildAgentLaunchCommand(
+      'claude', null, undefined, undefined, undefined, undefined, undefined,
+      { local: true, project: 'agents-cli' },
+    );
+    expect(cmd).toContain("--project 'agents-cli'");
+    expect(cmd).not.toContain('--cwd');
+    expect(cmd).not.toContain('--device');
+  });
+
+  test('a device-auto launch with a matched project emits --device auto and --project together', () => {
+    const cmd = buildAgentLaunchCommand(
+      'claude', null, undefined, undefined, undefined, undefined, undefined,
+      { project: 'agents-cli' },
+    );
+    expect(cmd).toContain('--device auto');
+    expect(cmd).toContain("--project 'agents-cli'");
+  });
+
+  test('a picked-host launch with a matched project emits --host and --project, never --cwd', () => {
+    const cmd = buildAgentLaunchCommand(
+      'codex', null, undefined, undefined, undefined, undefined, undefined,
+      { host: 'mac-mini', project: 'agents-cli' },
+    );
+    expect(cmd).toContain("--host 'mac-mini'");
+    expect(cmd).toContain("--project 'agents-cli'");
+    expect(cmd).not.toContain('--cwd');
+    expect(cmd).not.toContain('--remote-cwd');
+  });
+
+  test('rejects a project target combined with portable cwd', () => {
+    expect(() => buildAgentLaunchCommand(
+      'codex', null, undefined, undefined, undefined, undefined, undefined,
+      { host: 'linux-box', cwd: '/Users/muqsit/src', project: 'agents-cli' },
+    )).toThrow('cannot combine project with cwd or remoteCwd');
+  });
+
+  test('rejects a project target combined with exact remoteCwd', () => {
+    expect(() => buildAgentLaunchCommand(
+      'codex', null, undefined, undefined, undefined, undefined, undefined,
+      { host: 'linux-box', remoteCwd: '/srv/exact', project: 'agents-cli' },
+    )).toThrow('cannot combine project with cwd or remoteCwd');
+  });
+
   test('default model is included when provided', () => {
     const cmd = buildAgentLaunchCommand('claude', null, 'claude-haiku-4-5');
     expect(cmd).toContain('--model claude-haiku-4-5');

@@ -177,11 +177,19 @@ export function buildAgentLaunchCommand(
     cwd?: string;
     /** Exact path already resolved on `host`; emitted verbatim as `--remote-cwd`. */
     remoteCwd?: string;
+    /** A defined project's slug — the CLI resolves it to a cwd itself (local or on `host`). */
+    project?: string;
   } = {},
 ): string {
-  const { host, local = false, cwd, remoteCwd } = target;
+  const { host, local = false, cwd, remoteCwd, project } = target;
   if (cwd && remoteCwd) {
     throw new Error('Agent launch target cannot combine portable cwd with exact remoteCwd');
+  }
+  // `--project` owns the working directory end-to-end (exec.ts's resolveRunCwd
+  // hard-exits on `--project` + `--cwd`/`--remote-cwd`), so keep the two exclusive
+  // by construction here too rather than emitting a command the CLI will reject.
+  if (project && (cwd || remoteCwd)) {
+    throw new Error('Agent launch target cannot combine project with cwd or remoteCwd');
   }
   const agentSpec = pinnedVersion ? `${agentKey}@${pinnedVersion}` : agentKey;
   let command = `agents run ${agentSpec} --interactive`;
@@ -197,6 +205,12 @@ export function buildAgentLaunchCommand(
   // Explicit Pick Host / @version pin skip this.
   if (!host && !pinnedVersion && !local) {
     command += ' --device auto';
+  }
+  // A matched project owns the working directory on ANY target — local, picked
+  // host, or --device auto — so it is emitted once here rather than duplicated
+  // in each branch above.
+  if (project) {
+    command += ` --project ${shquote(project)}`;
   }
   if (sessionId && agentKey === 'claude') {
     command += ` --session-id ${sessionId}`;
