@@ -909,3 +909,99 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
     expect(session?.usedPercent).toBe(42);
   });
 });
+
+describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
+  let home: string;
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-usage-'));
+  });
+  afterEach(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  function writeBillingLine(opts: {
+    tsMs: number;
+    percent?: number | null;
+    periodStartMs: number;
+    periodEndMs: number;
+    tier?: string;
+  }): void {
+    const logDir = path.join(home, '.grok', 'logs');
+    fs.mkdirSync(logDir, { recursive: true });
+    const p = path.join(logDir, 'unified.jsonl');
+    const config: Record<string, unknown> = {
+      currentPeriod: {
+        type: 'USAGE_PERIOD_TYPE_WEEKLY',
+        start: new Date(opts.periodStartMs).toISOString(),
+        end: new Date(opts.periodEndMs).toISOString(),
+      },
+    };
+    if (opts.percent !== null && opts.percent !== undefined) {
+      config.creditUsagePercent = opts.percent;
+    }
+    const line = JSON.stringify({
+      ts: new Date(opts.tsMs).toISOString(),
+      msg: 'billing: fetched credits config',
+      ctx: { config, subscriptionTier: opts.tier ?? 'X Premium+' },
+    });
+    fs.appendFileSync(p, line + '\n');
+  }
+
+  it('renders the latest in-period creditUsagePercent as the week bar', async () => {
+    const now = Date.now();
+    writeBillingLine({
+      tsMs: now - HOUR,
+      percent: 37,
+      periodStartMs: now - DAY,
+      periodEndMs: now + 6 * DAY,
+      tier: 'SuperGrok Heavy',
+    });
+
+    const info = await getUsageInfo('grok', { home });
+    expect(info.snapshot?.plan).toBe('SuperGrok Heavy');
+    expect(info.snapshot?.source).toBe('last_seen');
+    const week = info.snapshot?.windows.find((w) => w.key === 'week');
+    expect(week?.usedPercent).toBe(37);
+  });
+
+  it('does not invent a 0% bar when creditUsagePercent is missing', async () => {
+    const now = Date.now();
+    // Prior period at 100%, then a new period line with no percent yet — the
+    // real fleet case that painted W: 0% on one box while another still
+    // showed a stale expired reading.
+    writeBillingLine({
+      tsMs: now - 2 * HOUR,
+      percent: 100,
+      periodStartMs: now - 8 * DAY,
+      periodEndMs: now - HOUR,
+    });
+    writeBillingLine({
+      tsMs: now - HOUR,
+      percent: null,
+      periodStartMs: now - HOUR,
+      periodEndMs: now + 6 * DAY,
+    });
+
+    const info = await getUsageInfo('grok', { home });
+    expect(info.snapshot?.windows).toEqual([]);
+    expect(info.snapshot?.plan).toBe('X Premium+');
+  });
+
+  it('drops expired billing windows so stale 100% is not rate-limited', async () => {
+    const now = Date.now();
+    writeBillingLine({
+      tsMs: now - DAY,
+      percent: 100,
+      periodStartMs: now - 8 * DAY,
+      periodEndMs: now - HOUR,
+      tier: 'SuperGrok Heavy',
+    });
+
+    const info = await getUsageInfo('grok', { home });
+    expect(info.snapshot?.windows).toEqual([]);
+    expect(info.snapshot?.plan).toBe('SuperGrok Heavy');
+  });
+});

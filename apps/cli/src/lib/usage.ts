@@ -2335,12 +2335,23 @@ async function getGrokUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     const match = await readLatestGrokBilling(logPath);
     if (!match) return { snapshot: null, error: null };
 
+    // Grok has no live usage API (`network: false`) — bars are last-seen from
+    // this machine's unified.jsonl only. Drop windows whose billing period has
+    // already ended so a stale 100% does not paint "rate-limited" after reset,
+    // and so an expired 92% on one box cannot disagree with a fresh reading on
+    // another. Missing `creditUsagePercent` never reaches here as a 0% bar
+    // (see readLatestGrokBilling).
+    const now = new Date();
+    const windows = match.windows.filter((window) =>
+      isCachedUsageWindowFresh(window, match.capturedAt, now)
+    );
+
     return {
       snapshot: {
         source: 'last_seen',
         sourceLabel: 'last seen in Grok logs',
         capturedAt: match.capturedAt,
-        windows: match.windows,
+        windows,
         plan: match.subscriptionTier,
       },
       error: null,
@@ -2567,11 +2578,13 @@ async function readLatestGrokBilling(filePath: string): Promise<GrokBillingMatch
           const config = parsed.ctx.config;
           const windows: UsageWindow[] = [];
 
-          if (config.currentPeriod?.end) {
+          if (config.currentPeriod?.end && typeof config.creditUsagePercent === 'number') {
             // `creditUsagePercent` is Grok's weekly credit consumption (0-100);
             // the billing period's `end` is when that window resets.
-            const rawPercent =
-              typeof config.creditUsagePercent === 'number' ? config.creditUsagePercent : 0;
+            // Do NOT coerce a missing percent to 0 — a new period often lands a
+            // billing line before the gauge is populated, and inventing 0% makes
+            // `agents view` disagree across devices (and looks like a fresh week).
+            const rawPercent = config.creditUsagePercent;
             windows.push({
               key: 'week',
               label: 'Current week',
