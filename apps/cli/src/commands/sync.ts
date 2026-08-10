@@ -31,7 +31,7 @@
  */
 
 import * as path from 'path';
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import chalk from 'chalk';
 import { resolveSyncPassphraseFromEnv } from '../lib/secrets/sync-passphrase.js';
 import { agentLabel, resolveAgentName, MANAGED_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../lib/agents.js';
@@ -66,7 +66,7 @@ import { runLaunchSync } from '../lib/project-launch.js';
 import { formatKeptProjectResources } from '../lib/project-resources.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { runUmbrellaSync, type UmbrellaFlags } from '../lib/sync-umbrella.js';
-import { addHostOption, addSelectorOptions } from '../lib/hosts/option.js';
+import { addHostOption } from '../lib/hosts/option.js';
 import { syncRepoGit } from '../lib/git.js';
 import { getSystemAgentsDir, getUserAgentsDir, getEnabledExtraRepos } from '../lib/state.js';
 
@@ -169,6 +169,47 @@ function parseKindSelection(opts: SyncOpts): ResourceSelection | undefined {
   if (workflows)   sel.workflows   = workflows;
   if (memory)      sel.memory      = memory;
   return sel;
+}
+
+/**
+ * Attach the resource-selector flag family to the sync command.
+ * Kept local — these flags are specific to `agents sync`.
+ */
+function addSelectorOptions(cmd: Command): Command {
+  const kindCollector = (val: string, prev: string[] | undefined): string[] => {
+    const names = val.split(',').map((s) => s.trim()).filter(Boolean);
+    const base = Array.isArray(prev) ? prev : [];
+    return [...base, ...names];
+  };
+
+  function addKindPair(singular: string, plural: string, desc: string): void {
+    cmd.addOption(new Option(`--${singular} [names]`, desc).argParser(kindCollector));
+    cmd.addOption(new Option(`--${plural} [names]`, `Alias of --${singular}`).argParser(kindCollector).hideHelp());
+  }
+
+  addKindPair('plugin', 'plugins', 'Sync only plugins (bare = all; comma-separated names to filter)');
+  addKindPair('command', 'commands', 'Sync only commands (bare = all; comma-separated names to filter)');
+  addKindPair('skill', 'skills', 'Sync only skills (bare = all; comma-separated names to filter)');
+  addKindPair('hook', 'hooks', 'Sync only hooks (bare = all; comma-separated names to filter)');
+  addKindPair('subagent', 'subagents', 'Sync only subagents (bare = all; comma-separated names to filter)');
+  addKindPair('permission', 'permissions', 'Sync only permissions (bare = all; comma-separated names to filter)');
+  addKindPair('mcp', 'mcps', 'Sync only MCP servers (bare = all; comma-separated names to filter)');
+  addKindPair('workflow', 'workflows', 'Sync only workflows (bare = all; comma-separated names to filter)');
+  cmd.addOption(
+    new Option(
+      '--rule [names]',
+      'Sync only the rules/memory file (maps to the "memory" key — the whole file is always recompiled, individual names are not filtered)',
+    ).argParser(kindCollector),
+  );
+  cmd.addOption(new Option('--rules [names]', 'Alias of --rule').argParser(kindCollector).hideHelp());
+  cmd.addOption(new Option('--memory', 'Sync only the rules/memory file (alias of --rule with no name filter)'));
+  cmd.addOption(
+    new Option(
+      '--version <spec>',
+      'Agent version or selector: @latest, @oldest, @pinned (= @default), @all, or a concrete x.y.z. "all" targets every installed version non-interactively.',
+    ),
+  );
+  return cmd;
 }
 
 /** Register the `agents sync` command. */
