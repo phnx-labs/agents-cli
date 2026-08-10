@@ -50,6 +50,7 @@ import {
   hasNewResources,
   promptResourceSelection,
   promptNewResourceSelection,
+  buildSelection,
   buildRepoScopedSelection,
   mergeRepoScopedSelections,
   listRepoNames,
@@ -65,13 +66,15 @@ import { runLaunchSync } from '../lib/project-launch.js';
 import { formatKeptProjectResources } from '../lib/project-resources.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { runUmbrellaSync, type UmbrellaFlags } from '../lib/sync-umbrella.js';
-import { addHostOption } from '../lib/hosts/option.js';
+import { addHostOption, addSelectorOptions } from '../lib/hosts/option.js';
 import { syncRepoGit } from '../lib/git.js';
 import { getSystemAgentsDir, getUserAgentsDir, getEnabledExtraRepos } from '../lib/state.js';
 
 interface SyncOpts {
   agent?: string;
   agentVersion?: string;
+  /** Version selector from --version flag: @all, @latest, @oldest, @pinned, or x.y.z. */
+  version?: string;
   repo?: string;
   projectDir?: string;
   cwd?: string;
@@ -79,6 +82,8 @@ interface SyncOpts {
   yes?: boolean;
   force?: boolean;
   quiet?: boolean;
+  dryRun?: boolean;
+  allowExecSurfaces?: boolean;
   /**
    * Machine-readable output. Also required by the fleet fan-out path
    * (`agents sync --host all`), which injects `--json` on every peer so the
@@ -91,6 +96,28 @@ interface SyncOpts {
   secrets?: boolean;
   cloud?: boolean;
   local?: boolean;
+  // Per-kind selector flags (singular = primary, plural = hidden alias).
+  // Value is string[] when names were given, true when the flag was bare,
+  // undefined when the flag was not used at all.
+  plugin?: string[] | true;
+  plugins?: string[] | true;
+  command?: string[] | true;
+  commands?: string[] | true;
+  skill?: string[] | true;
+  skills?: string[] | true;
+  hook?: string[] | true;
+  hooks?: string[] | true;
+  subagent?: string[] | true;
+  subagents?: string[] | true;
+  permission?: string[] | true;
+  permissions?: string[] | true;
+  mcp?: string[] | true;
+  mcps?: string[] | true;
+  workflow?: string[] | true;
+  workflows?: string[] | true;
+  rule?: string[] | true;
+  rules?: string[] | true;
+  memory?: boolean;
 }
 
 /** Emit one JSON object to stdout for `--json` callers / fleet fan-out. */
@@ -98,13 +125,59 @@ function emitJson(payload: unknown): void {
   console.log(JSON.stringify(payload));
 }
 
+/**
+ * Translate per-kind CLI flags into a `ResourceSelection` for `buildSelection`.
+ * Returns `undefined` when no kind flag was given (caller should use full sync).
+ *
+ * Each kind has a singular primary flag and a hidden plural alias; both carry
+ * the same value. `true` = bare flag (all names for that kind), `string[]` =
+ * explicit name filter, `undefined` = flag not used.
+ *
+ * --rule / --rules / --memory all map to the `memory` key (always `'all'` —
+ * the composed file is recompiled from every layer, individual names ignored).
+ */
+function parseKindSelection(opts: SyncOpts): ResourceSelection | undefined {
+  function resolve(singular: string[] | true | undefined, plural: string[] | true | undefined): string[] | 'all' | undefined {
+    const val = singular ?? plural;
+    if (val === undefined) return undefined;
+    return val === true ? 'all' : val;
+  }
+
+  const plugins     = resolve(opts.plugin,      opts.plugins);
+  const commands    = resolve(opts.command,     opts.commands);
+  const skills      = resolve(opts.skill,       opts.skills);
+  const hooks       = resolve(opts.hook,        opts.hooks);
+  const subagents   = resolve(opts.subagent,    opts.subagents);
+  const permissions = resolve(opts.permission,  opts.permissions);
+  const mcp         = resolve(opts.mcp,         opts.mcps);
+  const workflows   = resolve(opts.workflow,    opts.workflows);
+  // --rule/--rules/--memory all enable a full memory recompile (no name filter).
+  const memory: 'all' | undefined = (opts.rule || opts.rules || opts.memory) ? 'all' : undefined;
+
+  const anySet = [plugins, commands, skills, hooks, subagents, permissions, mcp, workflows, memory]
+    .some(v => v !== undefined);
+  if (!anySet) return undefined;
+
+  const sel: ResourceSelection = {};
+  if (plugins)     sel.plugins     = plugins;
+  if (commands)    sel.commands    = commands;
+  if (skills)      sel.skills      = skills;
+  if (hooks)       sel.hooks       = hooks;
+  if (subagents)   sel.subagents   = subagents;
+  if (permissions) sel.permissions = permissions;
+  if (mcp)         sel.mcp         = mcp;
+  if (workflows)   sel.workflows   = workflows;
+  if (memory)      sel.memory      = memory;
+  return sel;
+}
+
 /** Register the `agents sync` command. */
 export function registerSyncCommand(program: Command): void {
-  addHostOption(program.command('sync [agentSpec] [repo]'))
+  const cmd = addHostOption(program.command('sync [agentSpec] [repo]'))
     .summary('Make this machine current, or sync resources into one agent')
     .description('With an [agentSpec], syncs resources (commands, skills, hooks, rules, MCPs, plugins, etc.) into that installed agent version — previews changes and lets you pick. e.g. "claude", "claude@2.1.142", a selector: @latest / @oldest / @pinned (= @default), or @all for every installed version.\n\nAppend a [repo] (or pass --repo) to scope the sync to a single DotAgent repo — system / user / project / <alias>. e.g. "agents sync claude@all system" reconciles only the system repo\'s resources into every installed Claude.\n\nGive a DotAgent repo name ALONE — "agents sync system" / "agents sync user" / "agents sync <alias>" — to git-sync that one repo: git pull --rebase against origin when the tree is clean; when it is dirty, fast-forward anyway if no incoming path is uncommitted, else refuse and name what collided. The user repo and extra aliases also push local commits up; the system repo is a pull-only mirror.\n\nWith NO agent, runs the umbrella verb: fetch the config repos then reconcile them into every installed agent. Secrets are opt-in — add --secrets to pull secret bundles. Session transcripts are queryable live via "agents sessions --host <machine>", or moved with "agents sessions export/import". Also: --cloud (fetch only), --local (reconcile only).')
     .option('--agent <agent>', 'Agent identifier (legacy form; prefer the positional spec)')
-    .option('--agent-version <version>', 'Version to sync into (legacy form; prefer "agent@version")')
+    .option('--agent-version <version>', 'Version to sync into (legacy form; prefer "agent@version" or --version)')
     .option('--repo <name>', 'Scope the sync to a single DotAgent repo: system / user / project / <alias> (also accepted as a positional)')
     .option('--project-dir <path>', 'Path to project-level .agents/ directory containing project-scoped resources')
     .option('--cwd <path>', 'Working directory for discovering project manifest and resources')
@@ -112,6 +185,8 @@ export function registerSyncCommand(program: Command): void {
     .option('-y, --yes', 'Skip the interactive preview and auto-sync all detected resources', false)
     .option('--force', 'Re-sync even if no changes are detected since the last sync', false)
     .option('--quiet', 'Suppress all output (exit code indicates success)', false)
+    .option('--dry-run', 'Show what would be synced without making any changes', false)
+    .option('--allow-exec-surfaces', 'Allow syncing plugin exec surfaces (scripts, binaries) — off by default for safety', false)
     .option('--json', 'Emit machine-readable JSON (also accepted so fleet fan-out via --host all can parse each peer)', false)
     // Umbrella verb (no agent given): make this machine current.
     .option('--repos', 'Umbrella: git-pull ~/.agents + enabled ~/.agents-* extras', false)
@@ -121,6 +196,10 @@ export function registerSyncCommand(program: Command): void {
     .action(async (agentSpec: string | undefined, repo: string | undefined, opts: SyncOpts) => {
       await runSync(agentSpec, repo, opts);
     });
+
+  // Per-kind resource selectors + --version. Registered after the main flags so
+  // help output groups the positional/repo/agent flags first.
+  addSelectorOptions(cmd);
 }
 
 /**
@@ -409,7 +488,13 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   // user-owned repos. This is distinct from the [repo] resource-scoping arg
   // below, and it precedes agent-spec parsing because repo names like
   // "system"/"user" would otherwise fail parseAgentSpec.
+  //
+  // DEPRECATED: prefer `agents repo sync <name>` — this positional form will be
+  // removed in a future release.
   if (agentSpec && !opts.agent && !repoArg && listRepoNames().includes(agentSpec)) {
+    if (!quiet && !json) {
+      console.error(chalk.yellow(`Warning: 'agents sync ${agentSpec}' is deprecated. Use: agents repo sync ${agentSpec}`));
+    }
     await runRepoGitSync(agentSpec, quiet, outLog, errLog, json);
     return;
   }
@@ -432,6 +517,10 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     agentId = parsed.agent;
     if (agentSpec.includes('@')) selector = parsed.version;
   }
+
+  // --version flag beats any @selector from the positional.
+  // Strip a leading @ so '--version @latest' and '--version latest' both work.
+  if (opts.version) selector = opts.version.replace(/^@/, '');
 
   // Repo scope: --repo flag wins over the positional. Validate against the
   // known DotAgent repos so a typo fails loudly instead of syncing nothing.
@@ -483,9 +572,20 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   const cwd = opts.cwd || process.cwd();
   const force = !!opts.force;
 
+  // Promote to @all when no version can be resolved and multiple are installed.
+  // Replaces the old "no default version pinned" error: bare `agents sync claude`
+  // with multiple installed versions and no pinned default now syncs them all.
+  if (!selector && !version && !opts.agentVersion) {
+    const pinned = resolveVersion(agentId, opts.cwd || process.cwd());
+    if (!pinned) {
+      const installed = listInstalledVersions(agentId);
+      if (installed.length > 1) selector = 'all';
+    }
+  }
+
   // ---------- 2a. @all: reconcile every installed version of this agent ----------
   // Non-interactive by design — fanning an interactive preview across N
-  // versions is unusable. Honors an optional repo scope.
+  // versions is unusable. Honors optional repo scope and per-kind flags.
   if (selector === 'all') {
     const installed = listInstalledVersions(agentId);
     if (installed.length === 0) {
@@ -497,12 +597,13 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
       process.exitCode = 1;
       return;
     }
+    const kindFilter = parseKindSelection(opts);
     let selection: ResourceSelection | undefined;
-    if (repoScope) {
-      selection = buildRepoScopedSelection(repoScope, cwd);
+    if (repoScope || kindFilter) {
+      selection = buildSelection(repoScope ? [`${repoScope}:*`] : [], kindFilter ?? undefined, cwd);
       if (Object.keys(selection).length === 0) {
         if (json) emitJson({ ok: true, mode: 'agent-all', agent: agentId, repo: repoScope, versions: [], note: 'nothing to sync' });
-        else outLog(chalk.gray(`Nothing from repo '${repoScope}' to sync.`));
+        else outLog(chalk.gray(`Nothing to sync${repoScope ? ` from repo '${repoScope}'` : ''}.`));
         return;
       }
     }
@@ -514,7 +615,7 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
       // it no longer provides. Bare @all (no repo) leaves selection undefined
       // and falls through to the full-sync orphan sweep, so prune is a no-op
       // there (it requires a caller selection).
-      const result = syncResourcesToVersion(agentId, v, selection, { projectDir, cwd, force, prune: !!repoScope });
+      const result = syncResourcesToVersion(agentId, v, selection, { projectDir, cwd, force, prune: !!repoScope, allowExecSurfaces: !!opts.allowExecSurfaces });
       versions.push({ version: v, result });
       if (!quiet && !json) printSyncDetail(result, agentId, v, cwd);
     }
@@ -566,17 +667,19 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
         process.exitCode = 1;
         return;
       } else {
+        // Multiple installed, no default — promoted to @all before reaching here.
+        // This branch is a safety net for unexpected flow; normal callers won't hit it.
         failJson({
           mode: 'agent',
           agent: agentId,
           error: `No default ${agentLabel(agentId)} version pinned.`,
           installed,
+          hint: `Use agents sync ${agentId}@all to sync every installed version, or agents sync ${agentId}@latest for the newest.`,
         });
         if (!json) {
-          errLog(chalk.red(`No default ${agentLabel(agentId)} version pinned. Specify one:`));
-          for (const v of installed) {
-            errLog(chalk.gray(`  agents sync ${agentId}@${v}`));
-          }
+          errLog(chalk.red(`No default ${agentLabel(agentId)} version pinned.`));
+          errLog(chalk.gray(`  Sync all:    agents sync ${agentId}@all`));
+          errLog(chalk.gray(`  Sync newest: agents sync ${agentId}@latest`));
         }
         process.exitCode = 1;
         return;
@@ -610,11 +713,12 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     return;
   }
 
-  // ---------- 3b. Repo-scoped single-version sync ----------
-  // An explicit --repo / positional repo is a targeted request, so skip the
-  // interactive preview and reconcile just that repo's resources.
-  if (repoScope) {
-    const scoped = buildRepoScopedSelection(repoScope, cwd);
+  // ---------- 3b. Repo-scoped or kind-filtered single-version sync ----------
+  // An explicit --repo / positional repo, or any per-kind flag, is a targeted
+  // request: skip the interactive preview and reconcile only the specified scope.
+  const kindFilter = parseKindSelection(opts);
+  if (repoScope || kindFilter) {
+    const scoped = buildSelection(repoScope ? [`${repoScope}:*`] : [], kindFilter ?? undefined, cwd);
     if (Object.keys(scoped).length === 0) {
       if (json) {
         emitJson({
@@ -622,15 +726,26 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
           mode: 'agent',
           agent: agentId,
           version,
-          repo: repoScope,
+          ...(repoScope !== undefined ? { repo: repoScope } : {}),
           note: 'nothing to sync',
         });
       } else {
-        outLog(chalk.gray(`Nothing from repo '${repoScope}' to sync into ${agentLabel(agentId)}@${version}.`));
+        outLog(chalk.gray(`Nothing to sync${repoScope ? ` from repo '${repoScope}'` : ''} into ${agentLabel(agentId)}@${version}.`));
       }
       return;
     }
-    const result = syncResourcesToVersion(agentId, version, scoped, { projectDir, cwd, force, prune: true });
+    if (opts.dryRun) {
+      if (!quiet && !json) {
+        console.log(chalk.cyan(`Dry run — would sync into ${agentLabel(agentId)}@${version}${repoScope ? ` (repo: ${repoScope})` : ''}:`));
+        for (const [k, v] of Object.entries(scoped) as [string, string[] | 'all'][]) {
+          const names = v === 'all' ? chalk.gray('(all)') : v.join(', ');
+          console.log(chalk.gray(`  ${k}: ${names}`));
+        }
+      }
+      if (json) emitJson({ ok: true, mode: 'dry-run', agent: agentId, version, repo: repoScope, selection: scoped });
+      return;
+    }
+    const result = syncResourcesToVersion(agentId, version, scoped, { projectDir, cwd, force, prune: !!repoScope, allowExecSurfaces: !!opts.allowExecSurfaces });
     if (json) {
       emitJson(agentSyncJson(agentId, version, result, repoScope));
     } else if (!quiet) {
@@ -686,7 +801,7 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   }
 
   // ---------- 5. Run sync ----------
-  const result = syncResourcesToVersion(agentId, version, selection, { projectDir, cwd, force });
+  const result = syncResourcesToVersion(agentId, version, selection, { projectDir, cwd, force, allowExecSurfaces: !!opts.allowExecSurfaces });
 
   // Compile project-scope rules into the workspace itself so each agent's
   // native loader picks up cwd/<INSTRUCTIONS_FILE>. projectDir is the
