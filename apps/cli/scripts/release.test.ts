@@ -213,6 +213,12 @@ describe('release.sh: home-base provisionprofile seed recovers from origin (RUSH
     git(repoRoot, 'init', '--quiet');
     git(repoRoot, 'remote', 'add', 'origin', remote);
     git(repoRoot, 'fetch', '--quiet', 'origin');
+    // Whether `fetch` itself populates refs/remotes/origin/HEAD varies by git
+    // version (observed: git 2.43 leaves it unset here, git 2.54 sets it) --
+    // delete it explicitly so the precondition this test exercises is
+    // deterministic across environments, rather than an accident of git's
+    // fetch-time behavior on this runner.
+    spawnSync('git', ['symbolic-ref', '--delete', 'refs/remotes/origin/HEAD'], { cwd: repoRoot });
     expect(() => git(repoRoot, 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD')).toThrow();
 
     const gen = spawnSync('bash', ['-c', `${FUNC_SRC}\nhome_base_wt_snippet "1.2.3"`], {
