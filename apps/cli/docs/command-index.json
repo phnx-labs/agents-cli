@@ -708,7 +708,7 @@
         }
       ],
       "examples": "# One-time: provision your own endpoint (or join a teammate's)\n      agents artifacts setup\n      agents artifacts share join https://share.agents-cli.sh\n\n      # Publish — auto OG cover, default 30d expiry, shareable link\n      agents artifacts share ./out/plan.html\n\n      # What's live in your namespace, and taking one down\n      agents artifacts share list\n      agents unshare my-plan-a1b2\n\n      # Endpoint health, and pushing a new Worker template to it\n      agents artifacts share status\n      agents artifacts share update",
-      "notes": "agents artifacts share is the publish action; agents artifacts setup is the\n  one-time endpoint provisioning (it runs a wizard on a TTY, and provisions\n  directly when you pass --account/--token or run non-interactively).\n\n  agents unshare <targets...> stays a top-level alias of\n  agents artifacts share delete.\n\n  Full reference: apps/cli/docs/share.md.",
+      "notes": "agents artifacts share is the publish action; agents artifacts setup is the\n  one-time endpoint provisioning. It runs the interactive wizard only when you\n  type NO endpoint flag on a TTY; type any of --bundle/--worker/--bucket/\n  --account/--token/--domain/--analytics-token, or run non-interactively, and it\n  provisions directly with what you named.\n\n  agents unshare <targets...> stays a top-level alias of\n  agents artifacts share delete.\n\n  Full reference: apps/cli/docs/share.md.",
       "subcommands": [
         {
           "name": "setup",

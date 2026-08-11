@@ -47,8 +47,10 @@ export function registerArtifactsCommands(program: Command): void {
     `,
     notes: `
   agents artifacts share is the publish action; agents artifacts setup is the
-  one-time endpoint provisioning (it runs a wizard on a TTY, and provisions
-  directly when you pass --account/--token or run non-interactively).
+  one-time endpoint provisioning. It runs the interactive wizard only when you
+  type NO endpoint flag on a TTY; type any of --bundle/--worker/--bucket/
+  --account/--token/--domain/--analytics-token, or run non-interactively, and it
+  provisions directly with what you named.
 
   agents unshare <targets...> stays a top-level alias of
   agents artifacts share delete.
