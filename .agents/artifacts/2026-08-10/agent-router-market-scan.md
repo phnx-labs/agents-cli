@@ -88,7 +88,7 @@ keeps them but makes routing a per-*task* decision, not per-request. The spec pi
 native — same as Claudexor. That is the defensible choice and should be stated as
 one.
 
-### L3 — Meta-harness routers (the actual competitive set)
+### L3 — Meta-harness routers (everything that reaches this layer)
 
 | Tool | Stars | Created | Overlap with the spec |
 |---|---|---|---|
