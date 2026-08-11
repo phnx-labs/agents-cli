@@ -13,13 +13,15 @@ const { getSetupStatus, registerSetupCommand, runSetup, runSetupHub } = await im
 const { listInstalledBrowsers } = await import('../lib/browser/chrome.js');
 
 describe('agents setup command group', () => {
-  it('registers the browser/computer/share/fleet/mine/secrets capability subcommands', () => {
+  it('registers the browser/computer/fleet/mine/secrets capability subcommands', () => {
     const program = new Command();
     registerSetupCommand(program);
     const setup = program.commands.find((c) => c.name() === 'setup');
     expect(setup).toBeDefined();
     const subs = setup!.commands.map((c) => c.name()).sort();
-    expect(subs).toEqual(['browser', 'computer', 'fleet', 'mine', 'secrets', 'share', 'status', 'watchdog']);
+    // `share` is deliberately absent: artifact-share provisioning moved to
+    // `agents artifacts setup` (RUSH-2580). The `share` PHASE stays in the hub.
+    expect(subs).toEqual(['browser', 'computer', 'fleet', 'mine', 'secrets', 'status', 'watchdog']);
   });
 
   it('keeps the bare `setup` command with its force / no-system-repo flags', () => {

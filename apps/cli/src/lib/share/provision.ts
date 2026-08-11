@@ -1,4 +1,4 @@
-// Cloudflare provisioning for `agents share setup` — plain `fetch` against the CF
+// Cloudflare provisioning for `agents artifacts setup` — plain `fetch` against the CF
 // REST API (the repo has no CF wrapper). Creates the R2 bucket, configures its
 // lifecycle, uploads the Worker (with an R2 binding), sets the WRITE_TOKEN secret,
 // enables the free `*.workers.dev` subdomain, and — when the token owns the zone —
@@ -231,14 +231,14 @@ export async function updateWorker(
   await deployWorker(apiToken, accountId, workerName, script, bucketName, opts);
   // Script upload clears bindings/secrets (see JSDoc above). If re-applying
   // WRITE_TOKEN fails here, the live Worker has no write token — every
-  // `agents share` publish/delete 401s until a re-run of `agents share update`
+  // `agents artifacts share` publish/delete 401s until a re-run of `agents artifacts share update`
   // completes both steps. Surface that explicitly instead of the raw CF error.
   try {
     await setWorkerSecret(apiToken, accountId, workerName, writeToken, opts);
   } catch (e) {
     const detail = e instanceof Error ? e.message : String(e);
     throw new Error(
-      `Worker deployed but the write token failed to re-apply — re-run \`agents share update\` to fix this before publishing/deleting anything. (${detail})`,
+      `Worker deployed but the write token failed to re-apply — re-run \`agents artifacts share update\` to fix this before publishing/deleting anything. (${detail})`,
     );
   }
   return { templateHash, skipped: false };

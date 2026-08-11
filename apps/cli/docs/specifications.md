@@ -1318,7 +1318,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
   prompt for a `hold` bundle and pile up helper sheets. **Given** an interactive
   `agents run --secrets <hold-bundle>` whose bundle is not broker-held **When** it
   launches **Then** it fails fast naming `agents secrets unlock <bundle>`, no sheet.
-  This does NOT cover the explicit `agents share` / `agents share setup` commands —
+  This does NOT cover the explicit `agents artifacts share` / `agents artifacts setup` commands —
   those are user-initiated, not launches, and keep the `isHeadlessSecretsContext()`
   gate (`readWriteTokenFromBundle`, `readCloudflareCreds`).
 - **SEC-13b (MUST).** A **deliberate human reveal/run** at a real interactive
@@ -1820,7 +1820,7 @@ Given `share:` is configured and the `share` bundle is biometry-gated and not
 broker-held; When a human runs `agents run <agent>` in an interactive terminal;
 Then `shareRuntimeEnv` resolves the token `agentOnly` and returns undefined without
 a Touch ID sheet (`lib/share/config.ts`), so the launch is silent — and a `share`
-bundle created by `agents share setup` is `never`-tier (no-ACL), so the token is
+bundle created by `agents artifacts setup` is `never`-tier (no-ACL), so the token is
 injected silently with no unlock at all.
 
 ---

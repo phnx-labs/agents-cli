@@ -1158,14 +1158,14 @@ Sources: a command's stdout (`--watch` / `--poll`), an HTTP endpoint (`--poll-ht
 
 ```bash
 # Publish an HTML artifact to a public link on your own Cloudflare R2 (~$0).
-agents share setup                                  # once: provision bucket + Worker on your CF
-agents share plan.html --slug fleet --expire 30d    # → https://<base>/fleet
-agents share plan.html --json                       # URL object for plan-render hooks
-agents share status                                 # show the endpoint
-agents unshare fleet                                # take a published link (+ its OG cover) down
+agents artifacts setup                                      # once: provision bucket + Worker on your CF
+agents artifacts share plan.html --slug fleet --expire 30d  # → https://<base>/fleet
+agents artifacts share plan.html --json                     # URL object for plan-render hooks
+agents artifacts share status                               # show the endpoint
+agents unshare fleet                                        # take a published link (+ its OG cover) down
 ```
 
-`agents share` closes the loop: an agent makes work (a plan, a viz, a report),
+`agents artifacts share` closes the loop: an agent makes work (a plan, a viz, a report),
 publishes it, and you open the link to see it. `setup` reads a Cloudflare API token
 from your `cloudflare.com` secrets bundle (or `--token`), creates an R2 bucket, uploads
 a tiny Worker, and enables the free `*.workers.dev` subdomain (or maps `--domain
@@ -1175,12 +1175,12 @@ the Worker (its R2 binding does the put, so the client needs no S3 keys); reads 
 this is effectively free.
 
 **Fleet mode:** provision one endpoint, then every fleet / cloud / ephemeral agent
-publishes through it with a shared write token — `agents share join <baseUrl>` uses an
+publishes through it with a shared write token — `agents artifacts share join <baseUrl>` uses an
 existing endpoint with no provisioning. `--expire 30d|12h|<date>` auto-expires a link.
 `--json` emits `{ url, coverUrl, expiresAt }` so plan-render automation can publish the
 rendered HTML and post the returned link without scraping terminal text.
 
-`agents share delete <targets...>` (alias `agents unshare`) takes a page down — pass a
+`agents artifacts share delete <targets...>` (alias `agents unshare`) takes a page down — pass a
 full URL, `<user>/<slug>`, or a bare slug (resolved against your own namespace); several
 targets at once are fine. It also deletes the sibling `<slug>.png` OG cover by default
 (`--keep-cover` opts out) and verifies the page actually 404s before reporting success —

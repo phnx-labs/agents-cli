@@ -42,8 +42,27 @@ async function freshShareModules() {
   const filestore = await import('../lib/secrets/filestore.js');
   filestore._resetFileStoreForTest({ fileDir: path.join(tmpHome, '.file-secrets') });
   const share = await import('./share.js');
+  const artifacts = await import('./artifacts.js');
   const config = await import('../lib/share/config.js');
-  return { share, config, mem };
+  return { share, artifacts, config, mem };
+}
+
+/**
+ * A root program carrying the REAL surface — `agents artifacts share ...` plus
+ * the top-level `agents unshare` alias. Registering share.ts against a bare
+ * `new Command()` would give `agents share ...`, a shape the CLI no longer has
+ * (RUSH-2580), so every CLI-level assertion goes through this.
+ */
+function programWithArtifacts(artifacts: { registerArtifactsCommands: (p: Command) => void }): Command {
+  const program = new Command();
+  program.exitOverride();
+  artifacts.registerArtifactsCommands(program);
+  return program;
+}
+
+/** The `share` group as it is actually reachable: `agents artifacts share`. */
+function shareGroup(program: Command): Command | undefined {
+  return program.commands.find((c) => c.name() === 'artifacts')?.commands.find((c) => c.name() === 'share');
 }
 
 beforeEach(() => {
@@ -53,7 +72,7 @@ beforeEach(() => {
   previousPath = process.env.PATH;
   previousShareGitHubUser = process.env.AGENTS_SHARE_GITHUB_USER;
   delete process.env.AGENTS_SHARE_GITHUB_USER;
-  // A live `agents share` session in this shell may have SHARE_WRITE_TOKEN
+  // A live `agents artifacts share` session in this shell may have SHARE_WRITE_TOKEN
   // injected (shareRuntimeEnv) — clear it so readWriteToken() in tests always
   // resolves through the (mocked) bundle, not this process's real env.
   previousShareWriteToken = process.env.SHARE_WRITE_TOKEN;
@@ -233,7 +252,7 @@ describe('runShareProvision custom domain selection', () => {
 describe('runShareUpdate', () => {
   it('refuses when share was never configured', async () => {
     const { share } = await freshShareModules();
-    await expect(share.runShareUpdate({})).rejects.toThrow(/Run 'agents share setup'/);
+    await expect(share.runShareUpdate({})).rejects.toThrow(/Run 'agents artifacts setup'/);
   });
 
   it('reuses the existing account/worker/bucket/token from config — never re-provisions', async () => {
@@ -289,7 +308,7 @@ describe('runShareUpdate', () => {
   it('does not persist templateHash when the secret re-apply fails mid-update (RUSH-2453 self-heal pin)', async () => {
     // writeShareConfig runs only after updateWorker returns successfully. If the
     // second call (setWorkerSecret) throws after the deploy already landed, the
-    // on-disk hash must stay stale so a plain re-run of `agents share update`
+    // on-disk hash must stay stale so a plain re-run of `agents artifacts share update`
     // does not short-circuit on a matching hash and leaves the broken endpoint
     // unfixed. This is the recovery property the error message above depends on.
     const { share, config } = await freshShareModules();
@@ -315,7 +334,7 @@ describe('runShareUpdate', () => {
     ).rejects.toThrow(/Worker deployed but the write token failed to re-apply/);
 
     // Config must NOT have been rewritten with the new template hash — the stale
-    // hash is what makes the next `agents share update` re-deploy instead of
+    // hash is what makes the next `agents artifacts share update` re-deploy instead of
     // no-op'ing as "already matches".
     expect(config.readShareConfig()?.templateHash).toBe('pre-update-stale-hash');
   });
@@ -351,9 +370,9 @@ describe('shareTemplateStatus', () => {
   });
 });
 
-describe('agents share update (CLI)', () => {
+describe('agents artifacts share update (CLI)', () => {
   it('--json reports skipped:false=>updated true with the new hash on first run', async () => {
-    const { share, config } = await freshShareModules();
+    const { artifacts, share, config } = await freshShareModules();
     config.writeShareConfig({
       baseUrl: 'https://share.test',
       accountId: 'acct_1',
@@ -365,10 +384,8 @@ describe('agents share update (CLI)', () => {
     // The CLI action doesn't accept a `request` override, so this exercises the
     // real Cloudflare requester path only up to argument parsing — assert via
     // the underlying function instead, and cover the CLI wiring/help surface here.
-    const program = new Command();
-    program.exitOverride();
-    share.registerShareCommands(program);
-    const updateCmd = program.commands.find((c) => c.name() === 'share')?.commands.find((c) => c.name() === 'update');
+    const program = programWithArtifacts(artifacts);
+    const updateCmd = shareGroup(program)?.commands.find((c) => c.name() === 'update');
     expect(updateCmd).toBeDefined();
     expect(updateCmd?.options.map((o) => o.long)).toEqual(
       expect.arrayContaining(['--bundle', '--account', '--token', '--force', '--json']),
@@ -378,7 +395,7 @@ describe('agents share update (CLI)', () => {
 
 describe('share status and analytics namespace display', () => {
   it('resolves the status namespace through gh auth when github.user is unset', async () => {
-    const { share, config } = await freshShareModules();
+    const { artifacts, share, config } = await freshShareModules();
     config.writeShareConfig({
       baseUrl: 'https://share.test',
       accountId: 'acct_1',
@@ -387,10 +404,8 @@ describe('share status and analytics namespace display', () => {
     });
     installFakeGh('gh-only-user');
 
-    const program = new Command();
-    program.exitOverride();
-    share.registerShareCommands(program);
-    await program.parseAsync(['node', 'agents', 'share', 'status']);
+    const program = programWithArtifacts(artifacts);
+    await program.parseAsync(['node', 'agents', 'artifacts', 'share', 'status']);
 
     const out = loggedOutput();
     expect(out).toContain('https://share.test/gh-only-user');
@@ -401,7 +416,7 @@ describe('share status and analytics namespace display', () => {
   });
 
   it('uses the gh-resolved namespace in the analytics path hint', async () => {
-    const { share, config } = await freshShareModules();
+    const { artifacts, share, config } = await freshShareModules();
     config.writeShareConfig({
       baseUrl: 'https://share.test',
       accountId: 'acct_1',
@@ -412,16 +427,14 @@ describe('share status and analytics namespace display', () => {
     });
     installFakeGh('gh-only-user');
 
-    const program = new Command();
-    program.exitOverride();
-    share.registerShareCommands(program);
-    await program.parseAsync(['node', 'agents', 'share', 'analytics']);
+    const program = programWithArtifacts(artifacts);
+    await program.parseAsync(['node', 'agents', 'artifacts', 'share', 'analytics']);
 
     expect(loggedOutput()).toContain('filter by /gh-only-user/');
   });
 
   it('shows the template as unknown for a config with no recorded hash', async () => {
-    const { share, config } = await freshShareModules();
+    const { artifacts, share, config } = await freshShareModules();
     config.writeShareConfig({
       baseUrl: 'https://share.test',
       accountId: 'acct_1',
@@ -430,16 +443,14 @@ describe('share status and analytics namespace display', () => {
     });
     installFakeGh('gh-only-user');
 
-    const program = new Command();
-    program.exitOverride();
-    share.registerShareCommands(program);
-    await program.parseAsync(['node', 'agents', 'share', 'status']);
+    const program = programWithArtifacts(artifacts);
+    await program.parseAsync(['node', 'agents', 'artifacts', 'share', 'status']);
 
     expect(loggedOutput()).toContain('unknown');
   });
 
-  it('shows the template as current right after `agents share update` and outdated once the hash is stale', async () => {
-    const { share, config } = await freshShareModules();
+  it('shows the template as current right after `agents artifacts share update` and outdated once the hash is stale', async () => {
+    const { artifacts, share, config } = await freshShareModules();
     config.writeShareConfig({
       baseUrl: 'https://share.test',
       accountId: 'acct_1',
@@ -450,15 +461,13 @@ describe('share status and analytics namespace display', () => {
     await share.runShareUpdate({ token: 'cf-token', request: async () => ({}) });
     installFakeGh('gh-only-user');
 
-    const program = new Command();
-    program.exitOverride();
-    share.registerShareCommands(program);
-    await program.parseAsync(['node', 'agents', 'share', 'status']);
+    const program = programWithArtifacts(artifacts);
+    await program.parseAsync(['node', 'agents', 'artifacts', 'share', 'status']);
     expect(loggedOutput()).toContain('current');
 
     config.writeShareConfig({ ...config.readShareConfig()!, templateHash: 'stale-hash' });
     vi.mocked(console.log).mockClear();
-    await program.parseAsync(['node', 'agents', 'share', 'status']);
+    await program.parseAsync(['node', 'agents', 'artifacts', 'share', 'status']);
     expect(loggedOutput()).toContain('outdated');
   });
 });
@@ -488,12 +497,12 @@ describe('parseShareListing', () => {
 
   it('fails loud with the outdated-template hint when the body is HTML (old Worker gallery)', async () => {
     const { share } = await freshShareModules();
-    expect(() => share.parseShareListing('octocat', '<!doctype html><h1>@octocat</h1>')).toThrow(/agents share update/);
+    expect(() => share.parseShareListing('octocat', '<!doctype html><h1>@octocat</h1>')).toThrow(/agents artifacts share update/);
   });
 
   it('fails loud when the JSON has no objects array', async () => {
     const { share } = await freshShareModules();
-    expect(() => share.parseShareListing('octocat', JSON.stringify({ user: 'octocat' }))).toThrow(/agents share update/);
+    expect(() => share.parseShareListing('octocat', JSON.stringify({ user: 'octocat' }))).toThrow(/agents artifacts share update/);
   });
 });
 
@@ -571,7 +580,7 @@ describe('runShareList', () => {
         config: { baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b', templateHash: 'stale-hash' },
         fetchListing: async () => { fetched = true; return { status: 200, contentType: 'application/json', body: '{}' }; },
       }),
-    ).rejects.toThrow(/agents share update/);
+    ).rejects.toThrow(/agents artifacts share update/);
     expect(fetched).toBe(false);
   });
 
@@ -594,7 +603,7 @@ describe('runShareList', () => {
         config: { baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b' },
         fetchListing: async () => ({ status: 404, contentType: 'text/plain', body: 'not found' }),
       }),
-    ).rejects.toThrow(/agents share update/);
+    ).rejects.toThrow(/agents artifacts share update/);
   });
 
   it('maps a non-JSON 200 (old Worker served the HTML gallery) to the outdated-template hint', async () => {
@@ -605,7 +614,7 @@ describe('runShareList', () => {
         config: { baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b' },
         fetchListing: async () => ({ status: 200, contentType: 'text/html; charset=utf-8', body: '<h1>@octocat</h1>' }),
       }),
-    ).rejects.toThrow(/agents share update/);
+    ).rejects.toThrow(/agents artifacts share update/);
   });
 
   it('refuses when share was never configured', async () => {
@@ -614,13 +623,11 @@ describe('runShareList', () => {
   });
 });
 
-describe('agents share list (CLI)', () => {
+describe('agents artifacts share list (CLI)', () => {
   it('registers the list command with --json and --github-user', async () => {
-    const { share } = await freshShareModules();
-    const program = new Command();
-    program.exitOverride();
-    share.registerShareCommands(program);
-    const listCmd = program.commands.find((c) => c.name() === 'share')?.commands.find((c) => c.name() === 'list');
+    const { artifacts, share } = await freshShareModules();
+    const program = programWithArtifacts(artifacts);
+    const listCmd = shareGroup(program)?.commands.find((c) => c.name() === 'list');
     expect(listCmd).toBeDefined();
     expect(listCmd?.options.map((o) => o.long)).toEqual(expect.arrayContaining(['--json', '--github-user']));
   });

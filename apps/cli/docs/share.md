@@ -2,21 +2,26 @@
 
 Publish an HTML artifact (a plan, a viz, a report, a game) to a public link on **your own**
 Cloudflare R2, behind a tiny Worker — for effectively **$0** (R2 has zero egress and a
-10 GB free tier). The loop `agents share` closes: an agent makes work, publishes it,
+10 GB free tier). The loop `agents artifacts share` closes: an agent makes work, publishes it,
 and you open the link to see if it worked.
+
+> **Moved in RUSH-2580.** The commands used to be top-level `agents share …`, with
+> provisioning split across `agents share setup` and `agents setup share`. They are now
+> `agents artifacts share …` and one `agents artifacts setup`. `agents unshare` is
+> unchanged.
 
 ## Overview
 
 ```bash
-agents share setup --analytics-token <cf-token>   # once: provision on your Cloudflare
-agents share plan.html                            # → public link, default 30d expiry
-agents share plan.html --unlisted --expire 12h    # hidden from gallery; still world-readable by URL
-agents share plan.html --slug fleet --expire never  # permanent public slug
-agents share plan.html --json                     # machine-readable URL for hooks
-agents share status                               # show endpoint, namespace, analytics, template
-agents share analytics                            # link to the Web Analytics dashboard
-agents share update                               # re-deploy the Worker to the latest template
-agents unshare fleet                              # take the link (+ its OG cover) down
+agents artifacts setup --analytics-token <cf-token>            # once: provision on your Cloudflare
+agents artifacts share plan.html                              # → public link, default 30d expiry
+agents artifacts share plan.html --unlisted --expire 12h      # hidden from gallery; still world-readable by URL
+agents artifacts share plan.html --slug fleet --expire never  # permanent public slug
+agents artifacts share plan.html --json                       # machine-readable URL for hooks
+agents artifacts share status                                 # show endpoint, namespace, analytics, template
+agents artifacts share analytics                              # link to the Web Analytics dashboard
+agents artifacts share update                                 # re-deploy the Worker to the latest template
+agents unshare fleet                                          # take the link (+ its OG cover) down
 ```
 
 `setup` reads a Cloudflare API token from your `cloudflare` secrets bundle (or pass
@@ -24,8 +29,8 @@ agents unshare fleet                              # take the link (+ its OG cove
 the `WRITE_TOKEN` Worker secret, and enables the free
 `*.workers.dev` subdomain. It maps `share.agents-cli.sh` when the token owns the
 `agents-cli.sh` zone; otherwise it keeps the `*.workers.dev` endpoint. Pass
-`--domain share.example.com` to use a different visible zone. Then `agents share <file>`
-does an authed `PUT` and prints the link. Re-running `agents setup share` interactively
+`--domain share.example.com` to use a different visible zone. Then `agents artifacts share <file>`
+does an authed `PUT` and prints the link. Re-running `agents artifacts setup` interactively
 against an already-configured endpoint offers to update the deployed Worker in place
 instead of only "keep" or "reconfigure from scratch" — see
 [Updating the deployed Worker](#updating-the-deployed-worker).
@@ -34,7 +39,7 @@ instead of only "keep" or "reconfigure from scratch" — see
 
 ```
 agent makes plan.html
-        │  agents share plan.html         (PUT /<user>/<slug>, Authorization: Bearer <token>)
+        │  agents artifacts share plan.html         (PUT /<user>/<slug>, Authorization: Bearer <token>)
         ▼
    the Worker  ──(R2 binding).put()──►  R2 bucket (your account)
         ▲
@@ -55,8 +60,8 @@ agent makes plan.html
   backward compatibility.
 - **Fleet / central mode.** Provision one endpoint (the owner); every fleet / cloud /
   ephemeral agent then publishes through it with a shared write token — no per-agent
-  Cloudflare. `agents share join` uses synced `share:` config plus an injected
-  `SHARE_WRITE_TOKEN`, and `agents share join <baseUrl>` still joins an explicit
+  Cloudflare. `agents artifacts share join` uses synced `share:` config plus an injected
+  `SHARE_WRITE_TOKEN`, and `agents artifacts share join <baseUrl>` still joins an explicit
   endpoint without provisioning.
 - **Expiry.** Publishes default to **30 days** (`--expire 30d`) so an accidental share
   decays instead of living forever (RUSH-2443). Pass `--expire 12h`, an absolute date
@@ -65,7 +70,7 @@ agent makes plan.html
   `setup` also installs an R2 lifecycle rule so old share objects are removed
   automatically even if nobody opens the expired link again.
 - **Unlisted / private.** `--unlisted` (alias `--private`) stores `visibility=unlisted`
-  on the object. The public `/<user>` gallery and `agents share list` omit it; the
+  on the object. The public `/<user>` gallery and `agents artifacts share list` omit it; the
   direct URL is still world-readable (capability URL — unlisted, not secret). Use with
   a short `--expire` when bounding blast radius after an accidental sensitive publish.
 - **Pre-publish scan.** Before upload, the CLI refuses files that contain email addresses
@@ -74,7 +79,7 @@ agent makes plan.html
 - **Usage analytics.** `setup --analytics-token <cf-token>` enables Cloudflare Web Analytics:
   a cookieless, privacy-first beacon is injected into every published HTML page, so you get
   per-path pageviews without GA4-style tracking. Opt out per publish with `--no-analytics`.
-  Use `agents share analytics` for the dashboard link; per-path breakdowns are available in
+  Use `agents artifacts share analytics` for the dashboard link; per-path breakdowns are available in
   the Cloudflare dashboard under `/<github-username>/`.
 - **Preview cards (OG images).** Publishing an HTML page screenshots its own hero at
   1200×630 and attaches it as `og:image` + `twitter:card`, so the link unfurls into a
@@ -82,7 +87,7 @@ agent makes plan.html
   Chromium via the CLI's browser detector, with a managed-Chromium fallback), so there's
   no central render service and no extra cost. No headless browser available → the cover
   is skipped and the plain link still publishes. Opt out with `--no-cover`.
-- **Static media, not just HTML.** `agents share <file>` publishes any static asset —
+- **Static media, not just HTML.** `agents artifacts share <file>` publishes any static asset —
   a PNG/JPEG/GIF/WebP/AVIF screenshot, an MP4/MOV/WebM screen recording, a PDF — and
   serves it with the matching `content-type` (not `application/octet-stream`). That is
   what lets an agent embed visual PR evidence: GitHub's image proxy (camo) only renders
@@ -90,7 +95,7 @@ agent makes plan.html
   screenshot or recording drops straight into a PR body. Media publishes carry no OG
   cover (that is an HTML-only step).
 - **Plan-render automation.** Hooks that render plans can run
-  `agents share <plan.html> --json` after writing the HTML and read the returned
+  `agents artifacts share <plan.html> --json` after writing the HTML and read the returned
   `{ "url", "coverUrl", "expiresAt" }` object. The human output still prints the URL on
   the first line.
 - **Slugs.** With no `--slug`, the default is `<project>-<feature>-<hash>` (e.g.
@@ -99,7 +104,7 @@ agent makes plan.html
   Note that the tail is **not** a privacy control for the namespace gallery — every
   non-expired share under your namespace, random-tail slugs included, is listed on your
   public `/<github-username>` gallery (your GitHub username is public by definition), so
-  treat anything you `agents share` as publicly discoverable. Pass `--slug` for a stable,
+  treat anything you `agents artifacts share` as publicly discoverable. Pass `--slug` for a stable,
   exact name under your GitHub-username namespace.
 
 ## Updating the deployed Worker
@@ -109,8 +114,8 @@ ever writes it out during first provisioning — an endpoint provisioned last mo
 stuck on last month's template until you push the current one out:
 
 ```bash
-agents share status   # → template current | outdated | unknown
-agents share update   # re-deploy the current template to your EXISTING endpoint
+agents artifacts share status   # → template current | outdated | unknown
+agents artifacts share update   # re-deploy the current template to your EXISTING endpoint
 ```
 
 `update` reuses the account, Worker name, and bucket already in your config — it never
@@ -127,7 +132,7 @@ immediately after the script upload so it survives (see `updateWorker` in
 If the script upload succeeds but the secret re-apply then fails (network blip, expired
 API token, rate limit), the live Worker has **no write token** — every publish and
 delete 401s until the failure is healed. The error names that state and tells you to
-re-run `agents share update`. Config is only rewritten after *both* steps succeed, so
+re-run `agents artifacts share update`. Config is only rewritten after *both* steps succeed, so
 a plain re-run does not short-circuit on a matching hash and will re-deploy + re-set
 the secret.
 
@@ -149,28 +154,28 @@ synced config exists and the token is already available.
 
 | Command | What it does |
 |---|---|
-| `agents share <file> [--slug s] [--github-user u] [--expire spec] [--unlisted\|--private] [--force] [--no-cover] [--no-analytics] [--json]` | Publish `<file>` under your GitHub-username namespace (default expiry **30d**); print the link, or emit `{ url, coverUrl, expiresAt, unlisted? }` for plan-render hooks with `--json`. `--unlisted`/`--private` hides from the gallery; `--force` bypasses the email/credential scan. HTML pages get an auto OG cover unless `--no-cover` and a CF Web Analytics beacon unless `--no-analytics`. |
-| `agents share list [--github-user u] [--json]` | List the ACTIVE pages in your namespace — human table, or the raw listing with `--json` (see [Listing your shares](#listing-your-shares) below). |
-| `agents share delete <targets...>` / `agents unshare <targets...>` | Take a published page down (see [Deleting a share](#deleting-a-share) below). |
-| `agents share setup [--token t] [--account id] [--bundle b] [--worker w] [--bucket b] [--domain h] [--analytics-token token]` | Provision an R2 bucket + Worker on your Cloudflare, map `share.agents-cli.sh` when visible (or `--domain h`), optionally configure a CF Web Analytics token, and save the config. |
-| `agents share join [baseUrl] [--token t]` | Use an existing endpoint, no provisioning. With no URL, consumes synced `share:` config plus `SHARE_WRITE_TOKEN` / the local `share` bundle. |
-| `agents share status` | Show the configured endpoint, namespace, analytics state, and whether the deployed Worker matches the current template. |
-| `agents share analytics` | Show the Web Analytics status and dashboard link. |
-| `agents share update [--bundle b] [--account id] [--token t] [--force] [--json]` | Re-deploy the Worker script to your existing endpoint (same account/worker/bucket, same write token). No-op when the deployed template already matches unless `--force`. |
+| `agents artifacts share <file> [--slug s] [--github-user u] [--expire spec] [--unlisted\|--private] [--force] [--no-cover] [--no-analytics] [--json]` | Publish `<file>` under your GitHub-username namespace (default expiry **30d**); print the link, or emit `{ url, coverUrl, expiresAt, unlisted? }` for plan-render hooks with `--json`. `--unlisted`/`--private` hides from the gallery; `--force` bypasses the email/credential scan. HTML pages get an auto OG cover unless `--no-cover` and a CF Web Analytics beacon unless `--no-analytics`. |
+| `agents artifacts share list [--github-user u] [--json]` | List the ACTIVE pages in your namespace — human table, or the raw listing with `--json` (see [Listing your shares](#listing-your-shares) below). |
+| `agents artifacts share delete <targets...>` / `agents unshare <targets...>` | Take a published page down (see [Deleting a share](#deleting-a-share) below). |
+| `agents artifacts setup [--token t] [--account id] [--bundle b] [--worker w] [--bucket b] [--domain h] [--analytics-token token]` | Provision an R2 bucket + Worker on your Cloudflare, map `share.agents-cli.sh` when visible (or `--domain h`), optionally configure a CF Web Analytics token, and save the config. On a TTY with no endpoint flags it runs the interactive wizard (provision, join, or update an existing endpoint); with `--account`/`--token`/`--domain`/`--analytics-token`, or on a non-TTY, it provisions directly. |
+| `agents artifacts share join [baseUrl] [--token t]` | Use an existing endpoint, no provisioning. With no URL, consumes synced `share:` config plus `SHARE_WRITE_TOKEN` / the local `share` bundle. |
+| `agents artifacts share status` | Show the configured endpoint, namespace, analytics state, and whether the deployed Worker matches the current template. |
+| `agents artifacts share analytics` | Show the Web Analytics status and dashboard link. |
+| `agents artifacts share update [--bundle b] [--account id] [--token t] [--force] [--json]` | Re-deploy the Worker script to your existing endpoint (same account/worker/bucket, same write token). No-op when the deployed template already matches unless `--force`. |
 
 ## Listing your shares
 
-`agents share list` answers "what have I published?" from the CLI. Before it existed,
+`agents artifacts share list` answers "what have I published?" from the CLI. Before it existed,
 the only way to enumerate your public pages after an accidental publish was to fetch the
 gallery HTML and grep it (the RUSH-2428 incident). It reads the Worker's machine-readable
 listing route (`GET /<user>?format=json`) for your namespace and prints a table, newest
 first:
 
 ```bash
-agents share list                       # human table for your own namespace
-agents share list --github-user octocat # list another namespace
-agents share list --json                # raw listing for scripts
-agents share list --json | jq -r '.objects[].url'   # every still-public URL
+agents artifacts share list                       # human table for your own namespace
+agents artifacts share list --github-user octocat # list another namespace
+agents artifacts share list --json                # raw listing for scripts
+agents artifacts share list --json | jq -r '.objects[].url'   # every still-public URL
 ```
 
 The listing shows the **active** pages only — expired links and the sibling `<slug>.png`
@@ -188,15 +193,15 @@ OG covers are omitted, mirroring the public gallery. Each object carries its `sl
 The listing route ships with the current Worker template, so it only reaches you after the
 deployed Worker carries it. An endpoint provisioned before this feature has no such route:
 rather than a confusing 404 or an HTML body, `list` fails loud with
-`Your deployed share Worker has no machine-readable listing route … Run agents share update`.
-`agents share update` (RUSH-2449) pushes the current template out to your existing
-endpoint; `agents share status` tells you whether an update is due (see
+`Your deployed share Worker has no machine-readable listing route … Run agents artifacts share update`.
+`agents artifacts share update` (RUSH-2449) pushes the current template out to your existing
+endpoint; `agents artifacts share status` tells you whether an update is due (see
 [Updating the deployed Worker](#updating-the-deployed-worker)).
 
 ## Deleting a share
 
-`agents share delete <targets...>` (alias `agents unshare`) takes a published page down.
-It accepts several targets at once, in any of the three forms `agents share <file>` can
+`agents artifacts share delete <targets...>` (alias `agents unshare`) takes a published page down.
+It accepts several targets at once, in any of the three forms `agents artifacts share <file>` can
 produce or that you'd copy off a link:
 
 ```bash
@@ -242,7 +247,7 @@ the link can read the content, and the Worker serves it to them.
   only when the page is intentionally permanent. The Worker `410`s and lazily deletes
   past the expiry instant.
 - **`--unlisted` / `--private` hides from the gallery, not from the URL.** An unlisted
-  page is omitted from `/<user>` and `agents share list`, but anyone with the link can
+  page is omitted from `/<user>` and `agents artifacts share list`, but anyone with the link can
   still read it. Prefer unlisted + short expiry over "hope nobody finds the gallery".
 - **Pre-publish scan refuses emails and credential-shaped strings.** The CLI scans the
   file before upload and exits non-zero when it finds them — pass `--force` only when

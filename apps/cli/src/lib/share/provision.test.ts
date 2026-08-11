@@ -360,7 +360,7 @@ describe('updateWorker', () => {
   it('when the secret re-apply fails after a successful deploy, fails loud with a re-run hint (RUSH-2453)', async () => {
     // Script upload succeeds; Secrets API then throws (network blip, expired API
     // token, rate limit). The live Worker now has no WRITE_TOKEN, so every
-    // publish/delete 401s until a re-run of `agents share update` completes both
+    // publish/delete 401s until a re-run of `agents artifacts share update` completes both
     // steps. The error must say that — not just the raw Cloudflare body.
     const seen: CloudflareRequest[] = [];
     await expect(
@@ -374,7 +374,7 @@ describe('updateWorker', () => {
         },
       }),
     ).rejects.toThrow(
-      /Worker deployed but the write token failed to re-apply — re-run `agents share update`/,
+      /Worker deployed but the write token failed to re-apply — re-run `agents artifacts share update`/,
     );
     // Both calls still ran: the deploy landed, then the secret attempt failed.
     expect(seen.map((r) => r.pathname)).toEqual([

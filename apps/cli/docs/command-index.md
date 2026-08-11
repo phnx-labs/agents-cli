@@ -52,6 +52,20 @@ agents alias remove <name>              Delete an alias shim
 agents apply  Reconcile the fleet to a declared profile: install agents, sync config, propagate login.
 ```
 
+## artifacts — Publish agent-made artifacts (plans, reports, visuals) to your own Cloudflare R2 and get a shareable link (~$0).
+
+```
+agents artifacts                            Publish agent-made artifacts (plans, reports, visuals) to your own Cloudflare R2 and get a shareable link (~$0).
+agents artifacts setup                      Provision (or join) the Cloudflare R2 + Worker endpoint that backs `agents artifacts share`.
+agents artifacts share [file]               Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).
+agents artifacts share analytics            Show the Cloudflare Web Analytics status for this share endpoint.
+agents artifacts share delete <targets...>  Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Top-level alias: agents unshare.
+agents artifacts share join [baseUrl]       Use an existing synced share endpoint and write token (no provisioning).
+agents artifacts share list                 List the pages you've published to your share namespace (human table; --json for scripts).
+agents artifacts share status               Show the configured share endpoint and namespace.
+agents artifacts share update               Re-deploy the Worker script to the current template on an already-provisioned endpoint (idempotent).
+```
+
 ## audit — Alias of `agents events --include runs` — dispatched-run outcomes
 
 ```
@@ -798,22 +812,8 @@ agents setup computer  Set up `agents computer` (macOS) — install the signed h
 agents setup fleet     Set up `agents fleet` — discover Tailscale devices, choose auth, render SSH config, and test connectivity.
 agents setup mine      White-label the CLI — mint your own personally-named binary (e.g. `jack`).
 agents setup secrets   Configure `agents secrets` defaults and optionally import existing secrets.
-agents setup share     Configure the `agents share` endpoint (Cloudflare R2 + Worker) — provision your own or join one.
 agents setup status    Show setup readiness for core, browser, computer, secrets, fleet, share, watchdog, and preferences.
 agents setup watchdog  Choose the devices where the daemon watchdog pass runs.
-```
-
-## share — Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).
-
-```
-agents share [file]               Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).
-agents share analytics            Show the Cloudflare Web Analytics status for this share endpoint.
-agents share delete <targets...>  Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Top-level alias: agents unshare.
-agents share join [baseUrl]       Use an existing synced share endpoint and write token (no provisioning).
-agents share list                 List the pages you've published to your share namespace (human table; --json for scripts).
-agents share setup                One-time: provision an R2 bucket + Worker on your Cloudflare and save the config.
-agents share status               Show the configured share endpoint and namespace.
-agents share update               Re-deploy the Worker script to the current template on an already-provisioned endpoint (idempotent).
 ```
 
 ## skills — Add domain-specific capabilities to agents via packaged SKILL.md files
@@ -941,10 +941,10 @@ agents trends tools-per-session  Mix recipe: tools-per-session
 agents uninstall  Completely remove agents-cli and restore your original agent configs. Reverses `agents setup`.
 ```
 
-## unshare — Alias of `agents share delete` — take down a published page (and by default its OG cover).
+## unshare — Alias of `agents artifacts share delete` — take down a published page (and by default its OG cover).
 
 ```
-agents unshare <targets...>  Alias of `agents share delete` — take down a published page (and by default its OG cover).
+agents unshare <targets...>  Alias of `agents artifacts share delete` — take down a published page (and by default its OG cover).
 ```
 
 ## update — Move a frozen agent installation to a new release, keeping its name and every reference to it

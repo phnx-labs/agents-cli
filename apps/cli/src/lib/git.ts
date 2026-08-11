@@ -521,7 +521,7 @@ function readGitConfigUser(): string | null {
 }
 
 /**
- * Resolve the GitHub username synchronously for `agents share`. Order:
+ * Resolve the GitHub username synchronously for `agents artifacts share`. Order:
  *   1. `AGENTS_SHARE_GITHUB_USER` env override
  *   2. `git config --global github.user`
  * Falls back to null so callers can decide whether to require auth or proceed

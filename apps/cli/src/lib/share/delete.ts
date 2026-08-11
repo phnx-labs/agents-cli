@@ -1,4 +1,4 @@
-// The delete path for `agents share delete` / `agents unshare` — an authed DELETE
+// The delete path for `agents artifacts share delete` / `agents unshare` — an authed DELETE
 // to the Worker, which already implements it (worker-template.ts). Mirrors
 // publish.ts: pure target-resolution logic is exported for tests, the network
 // calls (a status check + a delete) sit behind an injectable DI seam.
@@ -118,7 +118,7 @@ export async function deleteObject(
 
   const r = await del(url, { authorization: `Bearer ${endpoint.token}` });
   if (!r.ok) {
-    throw new Error(`Delete failed (${r.status}) for ${url}. Check the write token, or that 'agents share setup' completed.`);
+    throw new Error(`Delete failed (${r.status}) for ${url}. Check the write token, or that 'agents artifacts setup' completed.`);
   }
 
   const after = await check(url);
@@ -167,7 +167,7 @@ export async function deleteShare(target: string, opts: DeleteShareOptions = {})
   const cfg = opts.config ?? readShareConfig();
   if (!cfg) {
     throw new Error(
-      "Not set up yet. Run 'agents share setup' (provision your own endpoint) or 'agents share join' (use an existing one).",
+      "Not set up yet. Run 'agents artifacts setup' (provision your own endpoint) or 'agents artifacts share join' (use an existing one).",
     );
   }
   const token = opts.writeToken ?? readWriteToken();

@@ -1,4 +1,4 @@
-// Cloudflare Web Analytics injection for `agents share`.
+// Cloudflare Web Analytics injection for `agents artifacts share`.
 //
 // The beacon is cookieless and privacy-first, which matters because a lot of shared
 // content (games, kid-facing pages) should avoid GA4-style tracking. The token is

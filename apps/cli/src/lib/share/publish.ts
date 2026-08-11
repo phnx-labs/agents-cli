@@ -1,4 +1,4 @@
-// The publish path for `agents share <file>` — an authed PUT to the Worker.
+// The publish path for `agents artifacts share <file>` — an authed PUT to the Worker.
 // Pure logic (slug, expiry) is exported for tests; the network call is behind a DI seam.
 //
 // For HTML publishes it also captures a 1200×630 cover (the page's own hero) and
@@ -38,7 +38,7 @@ export interface PublishOptions {
   expire?: string;
   contentType?: string;
   /**
-   * Hide this page from the public `/<user>` gallery and `agents share list`
+   * Hide this page from the public `/<user>` gallery and `agents artifacts share list`
    * (metadata `visibility=unlisted`). The direct URL is still world-readable —
    * unlisted, not secret (RUSH-2443). Alias of `--private` on the CLI.
    */
@@ -332,7 +332,7 @@ export async function publishFile(
   const cfg = opts.config ?? readShareConfig();
   if (!cfg) {
     throw new Error(
-      "Not set up yet. Run 'agents share setup' (provision your own endpoint) or 'agents share join' (use an existing one).",
+      "Not set up yet. Run 'agents artifacts setup' (provision your own endpoint) or 'agents artifacts share join' (use an existing one).",
     );
   }
   const token = opts.writeToken ?? readWriteToken();
@@ -407,7 +407,7 @@ export async function publishToEndpoint(
   const r = await put(pageUrl, body, authHeaders(opts.contentType ?? guessContentType(filePath)));
   if (!r.ok) {
     throw new Error(
-      `Publish failed (${r.status}) for ${pageUrl}. Check the write token, or that 'agents share setup' completed.`,
+      `Publish failed (${r.status}) for ${pageUrl}. Check the write token, or that 'agents artifacts setup' completed.`,
     );
   }
   return {

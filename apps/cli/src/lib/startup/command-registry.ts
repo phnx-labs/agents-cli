@@ -109,7 +109,9 @@ export const loadSend: ModuleLoader = async () => (await import('../../commands/
 export const loadFeed: ModuleLoader = async () => (await import('../../commands/feed.js')).registerFeedCommand;
 export const loadMailboxes: ModuleLoader = async () => (await import('../../commands/mailboxes.js')).registerMailboxesCommand;
 export const loadServe: ModuleLoader = async () => (await import('../../commands/serve.js')).registerServeCommand;
-export const loadShare: ModuleLoader = async () => (await import('../../commands/share.js')).registerShareCommands;
+// Registers the `artifacts` group (with `share` + `setup` under it) AND the
+// top-level `unshare` alias — see commands/artifacts.ts.
+export const loadArtifacts: ModuleLoader = async () => (await import('../../commands/artifacts.js')).registerArtifactsCommands;
 export const loadAudit: ModuleLoader = async () => (await import('../../commands/audit.js')).registerAuditCommands;
 export const loadWebhooks: ModuleLoader = async () => (await import('../../commands/webhook.js')).registerWebhooksCommand;
 export const loadHumans: ModuleLoader = async () => (await import('../../commands/humans.js')).registerHumansCommands;
@@ -253,10 +255,10 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   mailboxes: [loadMailboxes],
   mailbox: [loadMailboxes],
   serve: [loadServe],
-  share: [loadShare],
-  // `unshare` is a top-level convenience alias of `share delete` (see
+  artifacts: [loadArtifacts],
+  // `unshare` is a top-level convenience alias of `artifacts share delete` (see
   // commands/share.ts) — same module, registered as its own program.command().
-  unshare: [loadShare],
+  unshare: [loadArtifacts],
   audit: [loadAudit],
   webhooks: [loadWebhooks],
   humans: [loadHumans],
@@ -298,7 +300,16 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
   ...INLINE_COMMAND_NAMES,
 ]);
 
-export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set(['webhook', 'set']);
+/**
+ * Former top-level names that must NOT auto-correct (edit-distance 1) into a
+ * live command. Without this a pruned surface silently misroutes: the typed
+ * name is gone, the spellchecker finds a neighbour, and the CLI runs something
+ * the user never asked for instead of saying the command is gone.
+ *
+ * `set` moved under `agents models`/`agents config` (RUSH-2579); `share` moved
+ * under `agents artifacts share` (RUSH-2580).
+ */
+export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set(['webhook', 'set', 'share']);
 
 
 /** Whether `name` is a top-level command this CLI registers. See {@link KNOWN_TOP_LEVEL_COMMANDS}. */

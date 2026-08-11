@@ -1068,7 +1068,7 @@ unsubstituted token is **skipped**, not sent with a hole in it.
 The **ticket is joined from the session index**, not passed as a flag — it is a
 domain fact about the session (the rule above), and an agent that has to remember
 a `--ticket` argument is an agent that will forget it. Attach the PR or a shared
-plan with `--attach <url>` (an HTML plan published via `agents share` gives you a
+plan with `--attach <url>` (an HTML plan published via `agents artifacts share` gives you a
 public one) and it rides along as `{links}` / `{message}`.
 
 Delivery is best-effort and reported: each sink that ran prints `→ <name>`, a

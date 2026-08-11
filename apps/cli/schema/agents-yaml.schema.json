@@ -215,7 +215,7 @@
     },
     "share": {
       "type": "object",
-      "description": "`agents share` endpoint (Cloudflare R2 + Worker).",
+      "description": "`agents artifacts share` endpoint (Cloudflare R2 + Worker).",
       "properties": {
         "baseUrl": { "type": "string" },
         "accountId": { "type": "string" },

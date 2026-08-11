@@ -1,7 +1,7 @@
 /**
  * Render an HTML file to a 1200×630 PNG — the Open Graph cover for a shared plan.
  *
- * When `agents share plan.html` runs, we screenshot the plan's own hero and use it
+ * When `agents artifacts share plan.html` runs, we screenshot the plan's own hero and use it
  * as the `og:image`, so the link unfurls into a card in Slack / iMessage / Twitter /
  * Discord. No AI, no central render service: it's a headless screenshot on the
  * publisher's machine, so it works identically for us and for any user, and costs
@@ -119,7 +119,7 @@ export async function captureCover(htmlPath: string, timeoutMs = 15_000): Promis
     // when in fact no headless browser was found. Say so and point at the escape
     // hatch instead of leaving the publish coverless with no explanation.
     process.stderr.write(
-      '[agents share] no headless browser found for the OG cover — install Chrome/Chromium ' +
+      '[agents artifacts share] no headless browser found for the OG cover — install Chrome/Chromium ' +
         'or set AGENTS_SHARE_BROWSER=/path/to/chrome. Publishing without a preview image.\n',
     );
     return null;
@@ -170,7 +170,7 @@ export async function captureCover(htmlPath: string, timeoutMs = 15_000): Promis
   // Every candidate ran but none yielded a cover — surface the last reason so a
   // missing preview card is diagnosable (timeout, crash, bad binary) rather than silent.
   process.stderr.write(
-    `[agents share] OG cover capture failed (${lastFailure || 'unknown error'}) — ` +
+    `[agents artifacts share] OG cover capture failed (${lastFailure || 'unknown error'}) — ` +
       'publishing without a preview image. Set AGENTS_SHARE_BROWSER to override.\n',
   );
   return null;

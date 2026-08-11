@@ -159,7 +159,7 @@ describe('share config', () => {
     } as SecretsBundle);
     // The auto-inject read is agentOnly: on a locked keychain bundle it resolves to
     // undefined (no token injected) rather than popping a sheet — the per-run storm
-    // fix (SEC-13). The agent can still publish via its own explicit `agents share`.
+    // fix (SEC-13). The agent can still publish via its own explicit `agents artifacts share`.
     try {
       expect(shareRuntimeEnv()).toBeUndefined();
     } finally {

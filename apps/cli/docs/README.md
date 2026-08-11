@@ -57,7 +57,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 | Tickets | `agents tickets list --json` — one Linear/GitHub backlog shape with cycle metadata and explicit per-source availability for UI and automation consumers. |
 | [Cloud](cloud.md) | Unified dispatch across Rush Cloud / Codex Cloud / Factory. Multi-repo tasks, balanced routing, SSE streaming. |
 | [Hosts](hosts.md) | Offload `agents run` to your own machines over SSH (`--host`); track with `agents hosts ps` and view/follow with `agents hosts logs`. |
-| [Share](share.md) | Publish an HTML artifact to a public link on your own Cloudflare R2 (`agents share <file>`) — zero-egress, BYO-Cloudflare, expiry + fleet mode. |
+| [Share](share.md) | Publish an HTML artifact to a public link on your own Cloudflare R2 (`agents artifacts share <file>`) — zero-egress, BYO-Cloudflare, expiry + fleet mode. |
 | [Routines](routines.md) | Cron-scheduled and signed-webhook-triggered agent runs with sandboxed permissions and a long-running daemon. |
 | [Monitors](monitors.md) | Durable event-triggered watchers: watch a source, detect a change, fire an action. A routine whose trigger is a watched source instead of a clock. |
 | [Projects](projects.md) | Named multi-repo projects layered over the `--project` convention, plus the progress rollup — one card per project instead of a per-agent activity line. Beta. |

@@ -23,7 +23,7 @@ import { ensureShimCurrent, switchHomeFileSymlinks, isShimsInPath, addShimsToPat
 import { setHelpSections } from '../lib/help.js';
 import { registerSetupBrowserCommand, runBrowserWizard } from './setup-browser.js';
 import { registerSetupComputerCommand, runComputerWizard } from './setup-computer.js';
-import { registerSetupShareCommand, runShareWizard } from './setup-share.js';
+import { runShareWizard } from './artifacts-setup.js';
 import { registerSetupMineCommand } from './setup-mine.js';
 import { registerSetupSecretsCommand } from './setup-secrets.js';
 import { registerSetupFleetCommand } from './setup-fleet.js';
@@ -408,10 +408,11 @@ export function registerSetupCommand(program: Command): void {
     .option('-f, --force', 'Re-run setup even if ~/.agents/.system/ already exists (use with caution)')
     .option('--no-system-repo', 'Skip cloning the system repo (you must populate ~/.agents/.system/ yourself)');
 
-  // Capability subcommands: `agents setup browser|computer|share|mine|secrets|fleet`.
+  // Capability subcommands: `agents setup browser|computer|mine|secrets|fleet`.
+  // Share/artifact publishing is set up by `agents artifacts setup` (RUSH-2580);
+  // the hub below still offers it as a phase via runShareWizard.
   registerSetupBrowserCommand(setupCmd);
   registerSetupComputerCommand(setupCmd);
-  registerSetupShareCommand(setupCmd);
   registerSetupMineCommand(setupCmd);
   registerSetupSecretsCommand(setupCmd);
   registerSetupFleetCommand(setupCmd);
@@ -437,7 +438,6 @@ export function registerSetupCommand(program: Command): void {
       # Set up a specific capability on its own
       agents setup browser
       agents setup computer
-      agents setup share
       agents setup secrets
       agents setup fleet
       agents setup watchdog
@@ -452,7 +452,7 @@ export function registerSetupCommand(program: Command): void {
       Capability setup can also be run any time on its own:
         agents setup browser    # detect a browser + create the default profile
         agents setup computer    # install the signed macOS helper + grant permissions
-        agents setup share       # provision or join a Cloudflare share endpoint
+        agents artifacts setup   # provision or join a Cloudflare share endpoint
         agents setup secrets     # choose secrets backend/policy defaults + import
         agents setup fleet       # discover Tailscale devices + configure SSH access
         agents setup watchdog    # choose which devices run the daemon watchdog pass

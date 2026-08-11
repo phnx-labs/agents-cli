@@ -1,8 +1,15 @@
 /**
- * `agents setup share` — interactive wizard to configure the `agents share`
- * endpoint (Cloudflare R2 + Worker). A friendly front door over the existing
- * `agents share setup` (provision) and `agents share join` flows, reusing their
- * exact logic so there is a single source of truth for provisioning.
+ * `agents artifacts setup` — configure the artifact share endpoint (Cloudflare
+ * R2 + Worker) that backs `agents artifacts share`.
+ *
+ * One door, two modes, because it replaces two commands that used to be
+ * separate (RUSH-2580): the interactive wizard formerly at `agents setup share`
+ * and the flag-driven provisioner formerly at `agents share setup`. On a TTY
+ * with no provisioning flags it runs the wizard (provision or join, and offers
+ * a Worker update when an endpoint already exists); with any provisioning flag,
+ * or on a non-TTY, it provisions directly. Both modes call the same
+ * `runShareProvision` / `runShareJoin` in commands/share.ts, so there is a
+ * single source of truth for provisioning.
  *
  * Idempotent: re-running shows the current endpoint and offers to reconfigure.
  */
@@ -12,6 +19,7 @@ import chalk from 'chalk';
 import {
   DEFAULT_BUCKET_NAME,
   DEFAULT_CF_BUNDLE,
+  DEFAULT_SHARE_DOMAIN,
   DEFAULT_WORKER_NAME,
   readShareConfig,
 } from '../lib/share/config.js';
@@ -27,8 +35,9 @@ export async function runShareWizard(): Promise<boolean> {
   if (!isInteractiveTerminal()) {
     console.error(
       chalk.red(
-        'agents setup share needs an interactive terminal. ' +
-          'Non-interactively, use `agents share setup` (provision) or `agents share join [url]`.',
+        'The artifact share wizard needs an interactive terminal. ' +
+          'Non-interactively, use `agents artifacts setup --account <id> --token <t>` (provision) ' +
+          'or `agents artifacts share join <baseUrl> --token <t>`.',
       ),
     );
     return false;
@@ -118,13 +127,48 @@ export async function runShareWizard(): Promise<boolean> {
   return true;
 }
 
-/** Register `agents setup share` under the parent `setup` command. */
-export function registerSetupShareCommand(setupCmd: Command): void {
-  setupCmd
-    .command('share')
-    .description('Configure the `agents share` endpoint (Cloudflare R2 + Worker) — provision your own or join one.')
-    .action(async () => {
+/** Provisioning flags — the ones that make `artifacts setup` skip the wizard. */
+interface ArtifactsSetupOpts {
+  bundle: string;
+  worker: string;
+  bucket: string;
+  account?: string;
+  token?: string;
+  domain?: string;
+  analyticsToken?: string;
+}
+
+/**
+ * True when the invocation named a Cloudflare endpoint detail, i.e. the caller
+ * is driving the old `agents share setup` provisioning path rather than asking
+ * for the wizard. `--bundle`/`--worker`/`--bucket` carry commander defaults and
+ * are therefore always present, so they cannot be part of this signal — only
+ * the flags with no default can.
+ */
+export function isDirectProvisionRequest(opts: ArtifactsSetupOpts): boolean {
+  return Boolean(opts.account || opts.token || opts.domain || opts.analyticsToken);
+}
+
+/** Register `agents artifacts setup` under the parent `artifacts` command. */
+export function registerArtifactsSetupCommand(artifactsCmd: Command): void {
+  artifactsCmd
+    .command('setup')
+    .description('Provision (or join) the Cloudflare R2 + Worker endpoint that backs `agents artifacts share`.')
+    .option('--bundle <name>', 'secrets bundle holding the Cloudflare API token', DEFAULT_CF_BUNDLE)
+    .option('--worker <name>', 'Worker name', DEFAULT_WORKER_NAME)
+    .option('--bucket <name>', 'R2 bucket name', DEFAULT_BUCKET_NAME)
+    .option('--account <id>', 'Cloudflare account id (else read from the bundle / prompt)')
+    .option('--token <t>', 'Cloudflare API token (else read from the --bundle)')
+    .option('--domain <host>', `custom domain to map (default: ${DEFAULT_SHARE_DOMAIN}; workers.dev if zone is not visible)`)
+    .option('--analytics-token <token>', 'Cloudflare Web Analytics token to inject into published HTML pages')
+    .action(async (opts: ArtifactsSetupOpts) => {
       try {
+        // Named endpoint details, or no terminal to prompt on, means provision
+        // directly — the wizard has nothing to ask that was not already given.
+        if (isDirectProvisionRequest(opts) || !isInteractiveTerminal()) {
+          await runShareProvision(opts);
+          return;
+        }
         await runShareWizard();
       } catch (err) {
         if (isPromptCancelled(err)) {

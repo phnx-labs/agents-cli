@@ -690,6 +690,475 @@
       "subcommands": []
     },
     {
+      "name": "artifacts",
+      "path": "artifacts",
+      "aliases": [],
+      "description": "Publish agent-made artifacts (plans, reports, visuals) to your own Cloudflare R2 and get a shareable link (~$0).",
+      "args": [],
+      "options": [
+        {
+          "flags": "-h, --help",
+          "description": "Show help",
+          "short": "-h",
+          "long": "--help",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        }
+      ],
+      "examples": "# One-time: provision your own endpoint (or join a teammate's)\n      agents artifacts setup\n      agents artifacts share join https://share.agents-cli.sh\n\n      # Publish — auto OG cover, default 30d expiry, shareable link\n      agents artifacts share ./out/plan.html\n\n      # What's live in your namespace, and taking one down\n      agents artifacts share list\n      agents unshare my-plan-a1b2\n\n      # Endpoint health, and pushing a new Worker template to it\n      agents artifacts share status\n      agents artifacts share update",
+      "notes": "agents artifacts share is the publish action; agents artifacts setup is the\n  one-time endpoint provisioning (it runs a wizard on a TTY, and provisions\n  directly when you pass --account/--token or run non-interactively).\n\n  agents unshare <targets...> stays a top-level alias of\n  agents artifacts share delete.\n\n  Full reference: apps/cli/docs/share.md.",
+      "subcommands": [
+        {
+          "name": "setup",
+          "path": "artifacts setup",
+          "aliases": [],
+          "description": "Provision (or join) the Cloudflare R2 + Worker endpoint that backs `agents artifacts share`.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--bundle <name>",
+              "description": "secrets bundle holding the Cloudflare API token",
+              "long": "--bundle",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "cloudflare"
+            },
+            {
+              "flags": "--worker <name>",
+              "description": "Worker name",
+              "long": "--worker",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "agents-share"
+            },
+            {
+              "flags": "--bucket <name>",
+              "description": "R2 bucket name",
+              "long": "--bucket",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "agents-share"
+            },
+            {
+              "flags": "--account <id>",
+              "description": "Cloudflare account id (else read from the bundle / prompt)",
+              "long": "--account",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--token <t>",
+              "description": "Cloudflare API token (else read from the --bundle)",
+              "long": "--token",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--domain <host>",
+              "description": "custom domain to map (default: share.agents-cli.sh; workers.dev if zone is not visible)",
+              "long": "--domain",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--analytics-token <token>",
+              "description": "Cloudflare Web Analytics token to inject into published HTML pages",
+              "long": "--analytics-token",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "share",
+          "path": "artifacts share",
+          "aliases": [],
+          "description": "Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).",
+          "args": [
+            {
+              "name": "file",
+              "required": false,
+              "variadic": false,
+              "description": "file to publish (HTML or any static asset)"
+            }
+          ],
+          "options": [
+            {
+              "flags": "--slug <slug>",
+              "description": "custom URL slug under your namespace (default: <project>-<feature>-<hash>)",
+              "long": "--slug",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--github-user <user>",
+              "description": "GitHub username for the share namespace (default: resolved from gh/git config)",
+              "long": "--github-user",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--expire <spec>",
+              "description": "auto-expire (default 30d). e.g. 12h, 30d, 2026-08-01, or 'never'",
+              "long": "--expire",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--unlisted",
+              "description": "hide from the public gallery and `agents artifacts share list` (direct URL still works)",
+              "long": "--unlisted",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--private",
+              "description": "alias of --unlisted",
+              "long": "--private",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--force",
+              "description": "publish even when the file contains emails or credential-shaped strings",
+              "long": "--force",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--no-cover",
+              "description": "skip the OG preview image (HTML pages get one by default)",
+              "long": "--no-cover",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
+            },
+            {
+              "flags": "--no-analytics",
+              "description": "skip injecting the Cloudflare Web Analytics beacon",
+              "long": "--no-analytics",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
+            },
+            {
+              "flags": "--json",
+              "description": "emit machine-readable publish result for plan-render hooks and scripts",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# Publish an HTML file — auto OG cover, default 30d expiry, shareable link\n      agents artifacts share ./out/plan.html\n\n      # Hide from the public gallery (direct URL still works) and expire sooner\n      agents artifacts share ./out/report.html --unlisted --expire 12h\n\n      # Permanent public page (opt out of the default 30d expiry)\n      agents artifacts share ./out/landing.html --slug landing --expire never\n\n      # Custom slug, expiring in 7 days\n      agents artifacts share ./out/report.html --slug q3-report --expire 7d\n\n      # Delete by full URL — also takes down the sibling OG cover\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists\n\n      # One-time setup (or join an existing endpoint)\n      agents artifacts setup\n      agents artifacts share join https://share.agents-cli.sh\n\n      # Push a worker-template.ts change out to an already-provisioned endpoint\n      agents artifacts share update",
+          "notes": "Default expiry is 30d so an accidental publish decays. Pass --expire never for\n  a permanent link. --unlisted / --private hides the page from the public gallery\n  and agents artifacts share list; the direct URL is still world-readable\n  (unlisted, not secret). A pre-publish scan refuses emails and credential-shaped\n  strings unless --force is passed.\n\n  A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  agents artifacts share delete === agents unshare (same command, different name).",
+          "subcommands": [
+            {
+              "name": "analytics",
+              "path": "artifacts share analytics",
+              "aliases": [],
+              "description": "Show the Cloudflare Web Analytics status for this share endpoint.",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "delete",
+              "path": "artifacts share delete",
+              "aliases": [],
+              "description": "Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Top-level alias: agents unshare.",
+              "args": [
+                {
+                  "name": "targets",
+                  "required": true,
+                  "variadic": true,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--keep-cover",
+                  "description": "leave the sibling <slug>.png OG cover in place (default: delete it too)",
+                  "long": "--keep-cover",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--if-exists",
+                  "description": "treat an already-missing target as a no-op success instead of an error",
+                  "long": "--if-exists",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--github-user <user>",
+                  "description": "GitHub username for resolving a bare-slug target (default: resolved from gh/git config)",
+                  "long": "--github-user",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "emit machine-readable results",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "# Delete by full URL — also takes down the sibling OG cover\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists",
+              "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  agents artifacts share delete === agents unshare (same command, different name).",
+              "subcommands": []
+            },
+            {
+              "name": "join",
+              "path": "artifacts share join",
+              "aliases": [],
+              "description": "Use an existing synced share endpoint and write token (no provisioning).",
+              "args": [
+                {
+                  "name": "baseUrl",
+                  "required": false,
+                  "variadic": false,
+                  "description": "base URL of the endpoint, e.g. https://share.agents-cli.sh"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--token <token>",
+                  "description": "write token (else SHARE_WRITE_TOKEN env, existing bundle, or prompt)",
+                  "long": "--token",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "list",
+              "path": "artifacts share list",
+              "aliases": [],
+              "description": "List the pages you've published to your share namespace (human table; --json for scripts).",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--github-user <user>",
+                  "description": "GitHub username whose namespace to list (default: resolved from gh/git config)",
+                  "long": "--github-user",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt)",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "# Everything you've published, newest first\n      agents artifacts share list\n\n      # Machine-readable — e.g. pull every still-public URL with jq\n      agents artifacts share list --json | jq -r '.objects[].url'\n\n      # List another namespace\n      agents artifacts share list --github-user octocat",
+              "notes": "Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG\n  covers are omitted (it mirrors the public gallery). It reads the endpoint's JSON\n  listing route, which ships with the current Worker template. If your deployed\n  Worker predates this feature the command says so and points you at 'agents\n  artifacts share update' (RUSH-2449) rather than returning a wrong or empty result\n  — see 'agents artifacts share status' for whether an update is due.",
+              "subcommands": []
+            },
+            {
+              "name": "status",
+              "path": "artifacts share status",
+              "aliases": [],
+              "description": "Show the configured share endpoint and namespace.",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "update",
+              "path": "artifacts share update",
+              "aliases": [],
+              "description": "Re-deploy the Worker script to the current template on an already-provisioned endpoint (idempotent).",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--bundle <name>",
+                  "description": "secrets bundle holding the Cloudflare API token",
+                  "long": "--bundle",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "defaultValue": "cloudflare"
+                },
+                {
+                  "flags": "--account <id>",
+                  "description": "Cloudflare account id override (default: the configured endpoint's account)",
+                  "long": "--account",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--token <t>",
+                  "description": "Cloudflare API token (else read from --bundle)",
+                  "long": "--token",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--force",
+                  "description": "re-deploy even if the deployed template already matches",
+                  "long": "--force",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "emit a machine-readable result",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "# Push a worker-template.ts change out to your already-provisioned endpoint\n      agents artifacts share update\n\n      # Force a re-deploy even though the template hash already matches\n      agents artifacts share update --force",
+              "notes": "Reuses the existing account/worker/bucket from 'agents artifacts share status' and the\n  existing write token — it never re-provisions a bucket, touches routes, or\n  regenerates the token. See 'agents artifacts share status' for whether an update is due.",
+              "subcommands": []
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "audit",
       "path": "audit",
       "aliases": [],
@@ -23612,8 +24081,8 @@
           "negate": false
         }
       ],
-      "examples": "# First-time setup (clones the system repo into ~/.agents/.system/)\n      agents setup\n\n      # Re-run after corruption or to repair ~/.agents/.system/\n      agents setup --force\n\n      # Set up a specific capability on its own\n      agents setup browser\n      agents setup computer\n      agents setup share\n      agents setup secrets\n      agents setup fleet\n      agents setup watchdog",
-      "notes": "What it does:\n        1. Clones the system repo into ~/.agents/.system/\n        2. Imports any unmanaged agent installations it finds\n        3. Opens a re-runnable capability menu with live ready/missing status\n        4. Delegates each selection to its existing setup wizard\n\n      Capability setup can also be run any time on its own:\n        agents setup browser    # detect a browser + create the default profile\n        agents setup computer    # install the signed macOS helper + grant permissions\n        agents setup share       # provision or join a Cloudflare share endpoint\n        agents setup secrets     # choose secrets backend/policy defaults + import\n        agents setup fleet       # discover Tailscale devices + configure SSH access\n        agents setup watchdog    # choose which devices run the daemon watchdog pass\n\n      To install CLIs from agents.yaml and sync resources into version homes:\n        agents sync --local -y",
+      "examples": "# First-time setup (clones the system repo into ~/.agents/.system/)\n      agents setup\n\n      # Re-run after corruption or to repair ~/.agents/.system/\n      agents setup --force\n\n      # Set up a specific capability on its own\n      agents setup browser\n      agents setup computer\n      agents setup secrets\n      agents setup fleet\n      agents setup watchdog",
+      "notes": "What it does:\n        1. Clones the system repo into ~/.agents/.system/\n        2. Imports any unmanaged agent installations it finds\n        3. Opens a re-runnable capability menu with live ready/missing status\n        4. Delegates each selection to its existing setup wizard\n\n      Capability setup can also be run any time on its own:\n        agents setup browser    # detect a browser + create the default profile\n        agents setup computer    # install the signed macOS helper + grant permissions\n        agents artifacts setup   # provision or join a Cloudflare share endpoint\n        agents setup secrets     # choose secrets backend/policy defaults + import\n        agents setup fleet       # discover Tailscale devices + configure SSH access\n        agents setup watchdog    # choose which devices run the daemon watchdog pass\n\n      To install CLIs from agents.yaml and sync resources into version homes:\n        agents sync --local -y",
       "subcommands": [
         {
           "name": "browser",
@@ -23843,26 +24312,6 @@
           "subcommands": []
         },
         {
-          "name": "share",
-          "path": "setup share",
-          "aliases": [],
-          "description": "Configure the `agents share` endpoint (Cloudflare R2 + Worker) — provision your own or join one.",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
           "name": "status",
           "path": "setup status",
           "aliases": [],
@@ -23909,452 +24358,6 @@
               "negate": false
             }
           ],
-          "subcommands": []
-        }
-      ]
-    },
-    {
-      "name": "share",
-      "path": "share",
-      "aliases": [],
-      "description": "Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).",
-      "args": [
-        {
-          "name": "file",
-          "required": false,
-          "variadic": false,
-          "description": "file to publish (HTML or any static asset)"
-        }
-      ],
-      "options": [
-        {
-          "flags": "--slug <slug>",
-          "description": "custom URL slug under your namespace (default: <project>-<feature>-<hash>)",
-          "long": "--slug",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--github-user <user>",
-          "description": "GitHub username for the share namespace (default: resolved from gh/git config)",
-          "long": "--github-user",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--expire <spec>",
-          "description": "auto-expire (default 30d). e.g. 12h, 30d, 2026-08-01, or 'never'",
-          "long": "--expire",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--unlisted",
-          "description": "hide from the public gallery and `agents share list` (direct URL still works)",
-          "long": "--unlisted",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--private",
-          "description": "alias of --unlisted",
-          "long": "--private",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--force",
-          "description": "publish even when the file contains emails or credential-shaped strings",
-          "long": "--force",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--no-cover",
-          "description": "skip the OG preview image (HTML pages get one by default)",
-          "long": "--no-cover",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": true
-        },
-        {
-          "flags": "--no-analytics",
-          "description": "skip injecting the Cloudflare Web Analytics beacon",
-          "long": "--no-analytics",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": true
-        },
-        {
-          "flags": "--json",
-          "description": "emit machine-readable publish result for plan-render hooks and scripts",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "# Publish an HTML file — auto OG cover, default 30d expiry, shareable link\n      agents share ./out/plan.html\n\n      # Hide from the public gallery (direct URL still works) and expire sooner\n      agents share ./out/report.html --unlisted --expire 12h\n\n      # Permanent public page (opt out of the default 30d expiry)\n      agents share ./out/landing.html --slug landing --expire never\n\n      # Custom slug, expiring in 7 days\n      agents share ./out/report.html --slug q3-report --expire 7d\n\n      # Delete by full URL — also takes down the sibling OG cover\n      agents share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists\n\n      # One-time setup (or join an existing endpoint)\n      agents share setup\n      agents share join https://share.agents-cli.sh\n\n      # Push a worker-template.ts change out to an already-provisioned endpoint\n      agents share update",
-      "notes": "Default expiry is 30d so an accidental publish decays. Pass --expire never for\n  a permanent link. --unlisted / --private hides the page from the public gallery\n  and agents share list; the direct URL is still world-readable (unlisted, not\n  secret). A pre-publish scan refuses emails and credential-shaped strings\n  unless --force is passed.\n\n  A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  agents share delete === agents unshare (same command, different name).",
-      "subcommands": [
-        {
-          "name": "analytics",
-          "path": "share analytics",
-          "aliases": [],
-          "description": "Show the Cloudflare Web Analytics status for this share endpoint.",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "delete",
-          "path": "share delete",
-          "aliases": [],
-          "description": "Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Top-level alias: agents unshare.",
-          "args": [
-            {
-              "name": "targets",
-              "required": true,
-              "variadic": true,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--keep-cover",
-              "description": "leave the sibling <slug>.png OG cover in place (default: delete it too)",
-              "long": "--keep-cover",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--if-exists",
-              "description": "treat an already-missing target as a no-op success instead of an error",
-              "long": "--if-exists",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--github-user <user>",
-              "description": "GitHub username for resolving a bare-slug target (default: resolved from gh/git config)",
-              "long": "--github-user",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "emit machine-readable results",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# Delete by full URL — also takes down the sibling OG cover\n      agents share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists",
-          "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  agents share delete === agents unshare (same command, different name).",
-          "subcommands": []
-        },
-        {
-          "name": "join",
-          "path": "share join",
-          "aliases": [],
-          "description": "Use an existing synced share endpoint and write token (no provisioning).",
-          "args": [
-            {
-              "name": "baseUrl",
-              "required": false,
-              "variadic": false,
-              "description": "base URL of the endpoint, e.g. https://share.agents-cli.sh"
-            }
-          ],
-          "options": [
-            {
-              "flags": "--token <token>",
-              "description": "write token (else SHARE_WRITE_TOKEN env, existing bundle, or prompt)",
-              "long": "--token",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "list",
-          "path": "share list",
-          "aliases": [],
-          "description": "List the pages you've published to your share namespace (human table; --json for scripts).",
-          "args": [],
-          "options": [
-            {
-              "flags": "--github-user <user>",
-              "description": "GitHub username whose namespace to list (default: resolved from gh/git config)",
-              "long": "--github-user",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt)",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# Everything you've published, newest first\n      agents share list\n\n      # Machine-readable — e.g. pull every still-public URL with jq\n      agents share list --json | jq -r '.objects[].url'\n\n      # List another namespace\n      agents share list --github-user octocat",
-          "notes": "Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG\n  covers are omitted (it mirrors the public gallery). It reads the endpoint's JSON\n  listing route, which ships with the current Worker template. If your deployed\n  Worker predates this feature the command says so and points you at 'agents share\n  update' (RUSH-2449) rather than returning a wrong or empty result — see 'agents\n  share status' for whether an update is due.",
-          "subcommands": []
-        },
-        {
-          "name": "setup",
-          "path": "share setup",
-          "aliases": [],
-          "description": "One-time: provision an R2 bucket + Worker on your Cloudflare and save the config.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--bundle <name>",
-              "description": "secrets bundle holding the Cloudflare API token",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "cloudflare"
-            },
-            {
-              "flags": "--worker <name>",
-              "description": "Worker name",
-              "long": "--worker",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "agents-share"
-            },
-            {
-              "flags": "--bucket <name>",
-              "description": "R2 bucket name",
-              "long": "--bucket",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "agents-share"
-            },
-            {
-              "flags": "--account <id>",
-              "description": "Cloudflare account id (else read from the bundle / prompt)",
-              "long": "--account",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--token <t>",
-              "description": "Cloudflare API token (else read from the --bundle)",
-              "long": "--token",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--domain <host>",
-              "description": "custom domain to map (default: share.agents-cli.sh; workers.dev if zone is not visible)",
-              "long": "--domain",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--analytics-token <token>",
-              "description": "Cloudflare Web Analytics token to inject into published HTML pages",
-              "long": "--analytics-token",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "status",
-          "path": "share status",
-          "aliases": [],
-          "description": "Show the configured share endpoint and namespace.",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "update",
-          "path": "share update",
-          "aliases": [],
-          "description": "Re-deploy the Worker script to the current template on an already-provisioned endpoint (idempotent).",
-          "args": [],
-          "options": [
-            {
-              "flags": "--bundle <name>",
-              "description": "secrets bundle holding the Cloudflare API token",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "cloudflare"
-            },
-            {
-              "flags": "--account <id>",
-              "description": "Cloudflare account id override (default: the configured endpoint's account)",
-              "long": "--account",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--token <t>",
-              "description": "Cloudflare API token (else read from --bundle)",
-              "long": "--token",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--force",
-              "description": "re-deploy even if the deployed template already matches",
-              "long": "--force",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "emit a machine-readable result",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# Push a worker-template.ts change out to your already-provisioned endpoint\n      agents share update\n\n      # Force a re-deploy even though the template hash already matches\n      agents share update --force",
-          "notes": "Reuses the existing account/worker/bucket from 'agents share status' and the\n  existing write token — it never re-provisions a bucket, touches routes, or\n  regenerates the token. See 'agents share status' for whether an update is due.",
           "subcommands": []
         }
       ]
@@ -27986,7 +27989,7 @@
       "name": "unshare",
       "path": "unshare",
       "aliases": [],
-      "description": "Alias of `agents share delete` — take down a published page (and by default its OG cover).",
+      "description": "Alias of `agents artifacts share delete` — take down a published page (and by default its OG cover).",
       "args": [
         {
           "name": "targets",
@@ -28043,8 +28046,8 @@
           "negate": false
         }
       ],
-      "examples": "# Delete by full URL — also takes down the sibling OG cover\n      agents share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists",
-      "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  agents share delete === agents unshare (same command, different name).",
+      "examples": "# Delete by full URL — also takes down the sibling OG cover\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists",
+      "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  agents artifacts share delete === agents unshare (same command, different name).",
       "subcommands": []
     },
     {

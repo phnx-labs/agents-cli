@@ -283,6 +283,7 @@ Run and dispatch:
   logs [id]                       Show a run's log — host-dispatch task or session; -f to follow
   browser                         Automate a browser — navigate, click, screenshot, console, network
   pty                             Drive interactive terminal programs (REPLs, TUIs) via a persistent PTY session
+  artifacts                       Publish what an agent made (plans, reports, visuals) to a shareable link
 
 Observe (read the fleet — no store merge; aliases point at the real readers):
   feed / inbox                    Needs-you inbox (open blocks waiting on you)

@@ -1,4 +1,4 @@
-// Config + credential glue for `agents share`.
+// Config + credential glue for `agents artifacts share`.
 //
 // - The endpoint config (base URL, account, worker/bucket names) lives in
 //   `agents.yaml` under `share:` (Meta.share) so it syncs fleet-wide via
@@ -52,7 +52,7 @@ export function readWriteTokenEnv(env: NodeJS.ProcessEnv = process.env): string 
   return token ? token : null;
 }
 
-/** Read the persisted endpoint config, or null if `agents share setup`/`join` never ran. */
+/** Read the persisted endpoint config, or null if `agents artifacts setup` / `agents artifacts share join` never ran. */
 export function readShareConfig(): ShareConfig | null {
   const s = readMeta().share;
   if (!s?.baseUrl || !s.accountId || !s.workerName || !s.bucketName) return null;
@@ -86,7 +86,7 @@ export function storeWriteToken(token: string): void {
   } catch {
     bundle = {
       name: SHARE_BUNDLE,
-      description: 'agents share — write token for the R2 share endpoint',
+      description: 'agents artifacts share — write token for the R2 share endpoint',
       // A NEW share bundle defaults to the `never` tier (no biometry ACL). The R2
       // write token is low-sensitivity automation infra that is auto-read on EVERY
       // `agents run` (shareRuntimeEnv) — a biometry ACL there is what produced the
@@ -115,7 +115,7 @@ export function readWriteTokenFromBundle(): string {
   if (!token) {
     throw new Error(
       `No ${SHARE_TOKEN_KEY} in the '${SHARE_BUNDLE}' secrets bundle. ` +
-        `Run 'agents share setup' (to provision your own endpoint) or 'agents share join' (to use an existing one).`,
+        `Run 'agents artifacts setup' (to provision your own endpoint) or 'agents artifacts share join' (to use an existing one).`,
     );
   }
   return token;
@@ -137,7 +137,7 @@ export function readWriteToken(): string {
  * launch. The read is now always `agentOnly` — it resolves the token only from the
  * injected env or an already-held / no-ACL bundle, and silently returns undefined
  * otherwise (the caller runs without auto-share; the agent can still publish via
- * its own `agents share`). To get zero-friction auto-share with no prompt: unlock
+ * its own `agents artifacts share`). To get zero-friction auto-share with no prompt: unlock
  * once (`agents secrets unlock share`) or make it no-ACL (`agents secrets policy
  * share never`). */
 export function shareRuntimeEnv(): Record<string, string> | undefined {

@@ -3109,7 +3109,7 @@ export function registerRunCommand(program: Command): void {
       // Profile carries provider auth; secrets bundles carry user-defined
       // values; --env is the per-invocation override. The share token is
       // best-effort: if it is not already in env or an unlocked bundle, unrelated
-      // runs keep working, and `agents share` itself still fails loudly on use.
+      // runs keep working, and `agents artifacts share` itself still fails loudly on use.
       const hasOverrides = profileEnv || accountEnv || autoShareEnv || options.secrets.length > 0 || userEnv;
       const env: Record<string, string> | undefined = hasOverrides
         ? { ...(profileEnv ?? {}), ...(accountEnv ?? {}), ...(autoShareEnv ?? {}), ...secretsEnv, ...(userEnv ?? {}) }

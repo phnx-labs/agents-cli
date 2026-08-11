@@ -1,5 +1,9 @@
-// `agents share` — publish an HTML file to your own Cloudflare R2 behind a tiny
-// Worker, and get a shareable link (~$0). See apps/cli/docs/share.md.
+// `agents artifacts share` — publish an HTML file to your own Cloudflare R2
+// behind a tiny Worker, and get a shareable link (~$0). See apps/cli/docs/share.md.
+//
+// Registered under the `artifacts` group by commands/artifacts.ts; the
+// provisioning door lives beside it at `agents artifacts setup`
+// (commands/artifacts-setup.ts), which calls `runShareProvision` below.
 
 import { existsSync } from 'node:fs';
 import type { Command } from 'commander';
@@ -84,11 +88,11 @@ export type ListingFetchFn = (url: string) => Promise<{ status: number; contentT
 
 /** Shown whenever the deployed Worker has no `?format=json` listing route — an
  * endpoint provisioned before this feature. Points at the RUSH-2449 update path
- * (`agents share update`) instead of letting the caller hit a 404 or an HTML body
- * and get a confusing parse error. */
+ * (`agents artifacts share update`) instead of letting the caller hit a 404 or an
+ * HTML body and get a confusing parse error. */
 const OUTDATED_TEMPLATE_HINT =
-  'Your deployed share Worker has no machine-readable listing route — it predates `agents share list`. ' +
-  'Run `agents share update` to deploy the current Worker template, then retry (`agents share status` shows whether an update is due).';
+  'Your deployed share Worker has no machine-readable listing route — it predates `agents artifacts share list`. ' +
+  'Run `agents artifacts share update` to deploy the current Worker template, then retry (`agents artifacts share status` shows whether an update is due).';
 
 async function defaultListingFetch(url: string): Promise<{ status: number; contentType: string; body: string }> {
   const res = await fetch(url, { headers: { accept: 'application/json' } });
@@ -135,7 +139,7 @@ export async function runShareList(
   const cfg = opts.config ?? readShareConfig();
   if (!cfg) {
     throw new Error(
-      "Not set up yet. Run 'agents share setup' (provision your own endpoint) or 'agents share join' (use an existing one).",
+      "Not set up yet. Run 'agents artifacts setup' (provision your own endpoint) or 'agents artifacts share join' (use an existing one).",
     );
   }
   // A known-stale template can't have the listing route — say so before any network
@@ -158,7 +162,7 @@ export async function runShareList(
     // endpoint predates the listing route entirely. The recorded templateHash
     // disambiguates: a 'current' template HAS the route, so its 404 means an empty
     // namespace ("nothing published"); otherwise the route may be absent, so point
-    // at `agents share update`.
+    // at `agents artifacts share update`.
     if (templateStatus === 'current') {
       return { user, count: 0, objects: [] };
     }
@@ -166,7 +170,7 @@ export async function runShareList(
   }
   if (res.status !== 200) {
     throw new Error(
-      `Listing failed (${res.status}) for ${listUrl}. Check the endpoint is reachable, or that 'agents share setup' completed.`,
+      `Listing failed (${res.status}) for ${listUrl}. Check the endpoint is reachable, or that 'agents artifacts setup' completed.`,
     );
   }
   if (!/application\/json/i.test(res.contentType)) {
@@ -228,8 +232,8 @@ interface ShareDeleteCliOpts {
   json?: boolean;
 }
 
-/** Shared handler for `agents share delete <targets...>` and the top-level
- * `agents unshare <targets...>` alias. Deletes each target independently and
+/** Shared handler for `agents artifacts share delete <targets...>` and the
+ * top-level `agents unshare <targets...>` alias. Deletes each target independently and
  * continues past a failed one (rm-style), reporting all results and exiting
  * non-zero if any target failed to verify as gone.
  *
@@ -276,10 +280,10 @@ function registerShareDeleteOptions(cmd: Command): Command {
 
 const SHARE_DELETE_EXAMPLES = `
       # Delete by full URL — also takes down the sibling OG cover
-      agents share delete https://share.agents-cli.sh/octocat/my-plan-a1b2
+      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2
 
       # Delete by <user>/<slug>, or a bare slug in your own namespace
-      agents share delete octocat/my-plan-a1b2
+      agents artifacts share delete octocat/my-plan-a1b2
       agents unshare my-plan-a1b2
 
       # Several at once
@@ -297,18 +301,24 @@ const SHARE_DELETE_NOTES = `
   Worker's DELETE is idempotent and returns {"ok":true} even for a key that was
   never there, so that response alone is never proof of a takedown.
 
-  agents share delete === agents unshare (same command, different name).
+  agents artifacts share delete === agents unshare (same command, different name).
 `;
 
-export function registerShareCommands(program: Command): void {
-  const shareCmd = program
+/**
+ * Register the `share` subtree under its parent group — `agents artifacts share`
+ * (see commands/artifacts.ts). The top-level `agents unshare` alias is a sibling
+ * registration on the ROOT program, so it is {@link registerUnshareCommand}, not
+ * part of this subtree.
+ */
+export function registerShareCommands(artifactsCmd: Command): void {
+  const shareCmd = artifactsCmd
     .command('share')
     .description('Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).')
     .argument('[file]', 'file to publish (HTML or any static asset)')
     .option('--slug <slug>', 'custom URL slug under your namespace (default: <project>-<feature>-<hash>)')
     .option('--github-user <user>', 'GitHub username for the share namespace (default: resolved from gh/git config)')
     .option('--expire <spec>', "auto-expire (default 30d). e.g. 12h, 30d, 2026-08-01, or 'never'")
-    .option('--unlisted', 'hide from the public gallery and `agents share list` (direct URL still works)')
+    .option('--unlisted', 'hide from the public gallery and `agents artifacts share list` (direct URL still works)')
     .option('--private', 'alias of --unlisted')
     .option('--force', 'publish even when the file contains emails or credential-shaped strings')
     .option('--no-cover', 'skip the OG preview image (HTML pages get one by default)')
@@ -354,30 +364,30 @@ export function registerShareCommands(program: Command): void {
   setHelpSections(shareCmd, {
     examples: `
       # Publish an HTML file — auto OG cover, default 30d expiry, shareable link
-      agents share ./out/plan.html
+      agents artifacts share ./out/plan.html
 
       # Hide from the public gallery (direct URL still works) and expire sooner
-      agents share ./out/report.html --unlisted --expire 12h
+      agents artifacts share ./out/report.html --unlisted --expire 12h
 
       # Permanent public page (opt out of the default 30d expiry)
-      agents share ./out/landing.html --slug landing --expire never
+      agents artifacts share ./out/landing.html --slug landing --expire never
 
       # Custom slug, expiring in 7 days
-      agents share ./out/report.html --slug q3-report --expire 7d
+      agents artifacts share ./out/report.html --slug q3-report --expire 7d
 ${SHARE_DELETE_EXAMPLES}
       # One-time setup (or join an existing endpoint)
-      agents share setup
-      agents share join https://share.agents-cli.sh
+      agents artifacts setup
+      agents artifacts share join https://share.agents-cli.sh
 
       # Push a worker-template.ts change out to an already-provisioned endpoint
-      agents share update
+      agents artifacts share update
     `,
     notes: `
   Default expiry is 30d so an accidental publish decays. Pass --expire never for
   a permanent link. --unlisted / --private hides the page from the public gallery
-  and agents share list; the direct URL is still world-readable (unlisted, not
-  secret). A pre-publish scan refuses emails and credential-shaped strings
-  unless --force is passed.
+  and agents artifacts share list; the direct URL is still world-readable
+  (unlisted, not secret). A pre-publish scan refuses emails and credential-shaped
+  strings unless --force is passed.
 ${SHARE_DELETE_NOTES}
     `,
   });
@@ -391,35 +401,6 @@ ${SHARE_DELETE_NOTES}
   shareDeleteCmd.action(async (targets: string[], opts: ShareDeleteCliOpts) => {
     await runShareDelete(targets, opts);
   });
-
-  const unshareCmd = registerShareDeleteOptions(
-    program
-      .command('unshare <targets...>')
-      .description('Alias of `agents share delete` — take down a published page (and by default its OG cover).'),
-  );
-  setHelpSections(unshareCmd, { examples: SHARE_DELETE_EXAMPLES, notes: SHARE_DELETE_NOTES });
-  unshareCmd.action(async (targets: string[], opts: ShareDeleteCliOpts) => {
-    await runShareDelete(targets, opts);
-  });
-
-  shareCmd
-    .command('setup')
-    .description('One-time: provision an R2 bucket + Worker on your Cloudflare and save the config.')
-    .option('--bundle <name>', 'secrets bundle holding the Cloudflare API token', DEFAULT_CF_BUNDLE)
-    .option('--worker <name>', 'Worker name', DEFAULT_WORKER_NAME)
-    .option('--bucket <name>', 'R2 bucket name', DEFAULT_BUCKET_NAME)
-    .option('--account <id>', 'Cloudflare account id (else read from the bundle / prompt)')
-    .option('--token <t>', 'Cloudflare API token (else read from the --bundle)')
-    .option('--domain <host>', `custom domain to map (default: ${DEFAULT_SHARE_DOMAIN}; workers.dev if zone is not visible)`)
-    .option('--analytics-token <token>', 'Cloudflare Web Analytics token to inject into published HTML pages')
-    .action(async (opts: { bundle: string; worker: string; bucket: string; account?: string; token?: string; domain?: string; analyticsToken?: string }) => {
-      try {
-        await runShareProvision(opts);
-      } catch (e) {
-        console.error(chalk.red((e as Error).message));
-        process.exitCode = 1;
-      }
-    });
 
   shareCmd
     .command('join')
@@ -464,15 +445,15 @@ ${SHARE_DELETE_NOTES}
   setHelpSections(shareUpdateCmd, {
     examples: `
       # Push a worker-template.ts change out to your already-provisioned endpoint
-      agents share update
+      agents artifacts share update
 
       # Force a re-deploy even though the template hash already matches
-      agents share update --force
+      agents artifacts share update --force
     `,
     notes: `
-  Reuses the existing account/worker/bucket from 'agents share status' and the
+  Reuses the existing account/worker/bucket from 'agents artifacts share status' and the
   existing write token — it never re-provisions a bucket, touches routes, or
-  regenerates the token. See 'agents share status' for whether an update is due.
+  regenerates the token. See 'agents artifacts share status' for whether an update is due.
     `,
   });
 
@@ -482,7 +463,7 @@ ${SHARE_DELETE_NOTES}
     .action(async () => {
       const cfg = readShareConfig();
       if (!cfg) {
-        console.log(chalk.dim("Not configured. Run 'agents share setup' or 'agents share join'."));
+        console.log(chalk.dim("Not configured. Run 'agents artifacts setup' or 'agents artifacts share join'."));
         return;
       }
       console.log(`${chalk.bold('endpoint')}  ${chalk.green(cfg.baseUrl)}`);
@@ -495,8 +476,8 @@ ${SHARE_DELETE_NOTES}
         templateStatus === 'current'
           ? chalk.green('current')
           : templateStatus === 'outdated'
-            ? chalk.yellow('outdated — run `agents share update`')
-            : chalk.dim("unknown — provisioned before version tracking; run `agents share update` to adopt it");
+            ? chalk.yellow('outdated — run `agents artifacts share update`')
+            : chalk.dim("unknown — provisioned before version tracking; run `agents artifacts share update` to adopt it");
       console.log(`${chalk.bold('template')}  ${templateLabel}`);
     });
 
@@ -518,21 +499,21 @@ ${SHARE_DELETE_NOTES}
   setHelpSections(shareListCmd, {
     examples: `
       # Everything you've published, newest first
-      agents share list
+      agents artifacts share list
 
       # Machine-readable — e.g. pull every still-public URL with jq
-      agents share list --json | jq -r '.objects[].url'
+      agents artifacts share list --json | jq -r '.objects[].url'
 
       # List another namespace
-      agents share list --github-user octocat
+      agents artifacts share list --github-user octocat
     `,
     notes: `
   Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG
   covers are omitted (it mirrors the public gallery). It reads the endpoint's JSON
   listing route, which ships with the current Worker template. If your deployed
-  Worker predates this feature the command says so and points you at 'agents share
-  update' (RUSH-2449) rather than returning a wrong or empty result — see 'agents
-  share status' for whether an update is due.
+  Worker predates this feature the command says so and points you at 'agents
+  artifacts share update' (RUSH-2449) rather than returning a wrong or empty result
+  — see 'agents artifacts share status' for whether an update is due.
     `,
   });
 
@@ -542,7 +523,7 @@ ${SHARE_DELETE_NOTES}
     .action(async () => {
       const cfg = readShareConfig();
       if (!cfg) {
-        console.log(chalk.dim("Not configured. Run 'agents share setup' or 'agents share join'."));
+        console.log(chalk.dim("Not configured. Run 'agents artifacts setup' or 'agents artifacts share join'."));
         return;
       }
       if (!analyticsEnabled(cfg)) {
@@ -563,9 +544,27 @@ ${SHARE_DELETE_NOTES}
     });
 }
 
+/**
+ * Register the top-level `agents unshare <targets...>` alias of
+ * `agents artifacts share delete`. It takes the ROOT program (not the artifacts
+ * group) because it is deliberately a top-level convenience verb — taking a page
+ * down is the one artifact action typed often enough to keep at the root.
+ */
+export function registerUnshareCommand(program: Command): void {
+  const unshareCmd = registerShareDeleteOptions(
+    program
+      .command('unshare <targets...>')
+      .description('Alias of `agents artifacts share delete` — take down a published page (and by default its OG cover).'),
+  );
+  setHelpSections(unshareCmd, { examples: SHARE_DELETE_EXAMPLES, notes: SHARE_DELETE_NOTES });
+  unshareCmd.action(async (targets: string[], opts: ShareDeleteCliOpts) => {
+    await runShareDelete(targets, opts);
+  });
+}
+
 /** Provision a fresh R2 bucket + Worker on the user's Cloudflare and persist the
- * endpoint config + write token. Shared by `agents share setup` and the unified
- * `agents setup share` wizard. */
+ * endpoint config + write token. Shared by both modes of `agents artifacts setup`
+ * (the flag-driven provision and the interactive wizard). */
 export async function runShareProvision(opts: {
   bundle: string;
   worker: string;
@@ -634,7 +633,7 @@ export async function runShareProvision(opts: {
     storeWriteToken(token);
 
     console.log(chalk.green(`\nShare endpoint ready → ${chalk.bold(baseUrl)}`));
-    console.log(chalk.dim('Publish with:  ') + chalk.cyan('agents share <file>'));
+    console.log(chalk.dim('Publish with:  ') + chalk.cyan('agents artifacts share <file>'));
     console.log(
       chalk.dim(
         `Fleet: push the token with 'agents secrets export share --host <box>' and pull config with 'agents repo pull'.`,
@@ -669,7 +668,7 @@ export async function runShareUpdate(opts: {
 } = {}): Promise<ShareUpdateResult> {
   const cfg = readShareConfig();
   if (!cfg) {
-    throw new Error("Not configured. Run 'agents share setup' (to provision) or 'agents share join' first.");
+    throw new Error("Not configured. Run 'agents artifacts setup' (to provision) or 'agents artifacts share join' first.");
   }
 
   const { apiToken, accountId: acctFromBundle } = readCloudflareCreds(opts.bundle ?? DEFAULT_CF_BUNDLE, {
@@ -711,15 +710,15 @@ function cleanHostname(domain: string | undefined): string | undefined {
 }
 
 /** Join an existing share endpoint (no provisioning): prompt for the endpoint
- * details + write token and persist them. Shared by `agents share join` and the
- * unified `agents setup share` wizard. */
+ * details + write token and persist them. Shared by `agents artifacts share join`
+ * and the `agents artifacts setup` wizard. */
 export async function runShareJoin(baseUrl?: string, opts: { token?: string } = {}): Promise<void> {
   const { password, input } = await import('@inquirer/prompts');
   const existing = readShareConfig();
   const clean = baseUrl?.replace(/\/+$/, '');
   if (!clean && !existing) {
     throw new Error(
-      "No synced share endpoint found. Pull config first with 'agents repo pull', or pass the endpoint URL: agents share join <baseUrl>.",
+      "No synced share endpoint found. Pull config first with 'agents repo pull', or pass the endpoint URL: agents artifacts share join <baseUrl>.",
     );
   }
 
@@ -751,5 +750,5 @@ export async function runShareJoin(baseUrl?: string, opts: { token?: string } = 
   if (!token) throw new Error('A write token is required to join.');
   writeShareConfig(cfg);
   storeWriteToken(token);
-  console.log(chalk.green(`Joined ${chalk.bold(cfg.baseUrl)} — publish with `) + chalk.cyan('agents share <file>'));
+  console.log(chalk.green(`Joined ${chalk.bold(cfg.baseUrl)} — publish with `) + chalk.cyan('agents artifacts share <file>'));
 }

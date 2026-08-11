@@ -1061,7 +1061,7 @@ export interface Meta {
    * Full shape in `lib/fleet/types.ts` (FleetManifest).
    */
   fleet?: import('./fleet/types.js').FleetManifest;
-  /** `agents share` endpoint (Cloudflare R2 + Worker). Set by `agents share
+  /** Artifact share endpoint (Cloudflare R2 + Worker). Set by `agents artifacts
    * setup`/`join`; syncs fleet-wide via `agents repo push/pull`. The write token
    * lives in the `share` secrets bundle, not here. */
   share?: {
@@ -1073,7 +1073,7 @@ export interface Meta {
     /** Cloudflare Web Analytics token injected into published HTML pages. */
     analyticsToken?: string;
     /** sha256 of the Worker script deployed at the last provision/update, so
-     * `agents share status` can tell current vs outdated vs unknown (a config
+     * `agents artifacts share status` can tell current vs outdated vs unknown (a config
      * from before this field existed has no hash — always "unknown"). */
     templateHash?: string;
   };
