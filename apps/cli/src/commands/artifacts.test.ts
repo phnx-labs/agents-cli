@@ -7,10 +7,11 @@
  * Built from the REAL command tree (`buildFullCommandTree`), no mocks, so a
  * registration that regresses in the loader table fails here.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Command } from 'commander';
 import { registerArtifactsCommands } from './artifacts.js';
 import { isDirectProvisionRequest } from './artifacts-setup.js';
+import { DEFAULT_CF_BUNDLE } from '../lib/share/config.js';
 import {
   buildFullCommandTree,
   isKnownTopLevelCommand,
@@ -59,7 +60,8 @@ describe('agents artifacts group', () => {
     const artifacts = artifactsGroup();
     const setup = artifacts.commands.find((c) => c.name() === 'setup');
     expect(setup).toBeDefined();
-    // Every flag the retired `agents share setup` carried is still reachable.
+    // Every flag the retired `agents share setup` carried is still registered.
+    // That it is HONOURED (not just present) is the next two tests.
     expect(setup?.options.map((o) => o.long)).toEqual(
       expect.arrayContaining(['--bundle', '--worker', '--bucket', '--account', '--token', '--domain', '--analytics-token']),
     );
@@ -67,15 +69,51 @@ describe('agents artifacts group', () => {
     expect(share?.commands.map((c) => c.name())).not.toContain('setup');
   });
 
-  it('routes `artifacts setup` to the direct provisioner only when endpoint details were named', () => {
-    // --bundle/--worker/--bucket carry commander defaults, so they are always
-    // present and must never by themselves mean "skip the wizard".
-    const defaults = { bundle: 'cloudflare.com', worker: 'agents-share', bucket: 'agents-share' };
+  it('routes `artifacts setup` to the direct provisioner whenever an endpoint detail was TYPED', () => {
+    // --bundle/--worker/--bucket carry commander defaults, so their presence is
+    // never the signal — only whether the user typed them is. Reading presence
+    // would send `--bundle cloudflare-work` down the wizard, which provisions
+    // against the DEFAULT bundle and silently uses the wrong Cloudflare account.
+    const defaults = { bundle: DEFAULT_CF_BUNDLE, worker: 'agents-share', bucket: 'agents-share' };
+    const typed = (...flags: string[]) => (flag: string) => flags.includes(flag);
+
     expect(isDirectProvisionRequest(defaults)).toBe(false);
+    expect(isDirectProvisionRequest(defaults, typed())).toBe(false);
+
+    for (const flag of ['bundle', 'worker', 'bucket'] as const) {
+      expect(isDirectProvisionRequest(defaults, typed(flag))).toBe(true);
+    }
     expect(isDirectProvisionRequest({ ...defaults, account: 'acct_1' })).toBe(true);
     expect(isDirectProvisionRequest({ ...defaults, token: 'cf-token' })).toBe(true);
     expect(isDirectProvisionRequest({ ...defaults, domain: 'share.example.com' })).toBe(true);
     expect(isDirectProvisionRequest({ ...defaults, analyticsToken: 'tok' })).toBe(true);
+  });
+
+  it('carries a typed --bundle all the way into provisioning, not the default bundle', async () => {
+    // The real action, through real commander — no mocks. Provisioning fails
+    // here (no such bundle), and the failure NAMES the bundle it read, which is
+    // the observable proof the flag reaches runShareProvision.
+    //
+    // Scope, stated honestly: vitest is not a TTY, so this exercises the
+    // non-interactive arm. The arm that actually regressed — a TTY run falling
+    // into the wizard, which provisions with its own hardcoded defaults — is
+    // pinned by the isDirectProvisionRequest test above, which fails against a
+    // presence-only implementation.
+    const program = new Command();
+    program.exitOverride();
+    registerArtifactsCommands(program);
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
+      errors.push(a.map(String).join(' '));
+    });
+    try {
+      await program.parseAsync(['node', 'agents', 'artifacts', 'setup', '--bundle', 'cloudflare-typed-by-user']);
+    } finally {
+      spy.mockRestore();
+    }
+    const out = errors.join('\n');
+    expect(out).toContain('cloudflare-typed-by-user');
+    expect(out).not.toContain(`'${DEFAULT_CF_BUNDLE}' bundle`);
   });
 
   it('keeps `unshare` a TOP-LEVEL alias, not a member of the artifacts group', () => {

@@ -5,11 +5,13 @@
  * One door, two modes, because it replaces two commands that used to be
  * separate (RUSH-2580): the interactive wizard formerly at `agents setup share`
  * and the flag-driven provisioner formerly at `agents share setup`. On a TTY
- * with no provisioning flags it runs the wizard (provision or join, and offers
- * a Worker update when an endpoint already exists); with any provisioning flag,
- * or on a non-TTY, it provisions directly. Both modes call the same
+ * with no provisioning flags TYPED it runs the wizard (provision or join, and
+ * offers a Worker update when an endpoint already exists); with any provisioning
+ * flag typed, or on a non-TTY, it provisions directly. Both modes call the same
  * `runShareProvision` / `runShareJoin` in commands/share.ts, so there is a
  * single source of truth for provisioning.
+ *
+ * "Typed", not "present", is load-bearing — see {@link isDirectProvisionRequest}.
  *
  * Idempotent: re-running shows the current endpoint and offers to reconfigure.
  */
@@ -127,7 +129,7 @@ export async function runShareWizard(): Promise<boolean> {
   return true;
 }
 
-/** Provisioning flags — the ones that make `artifacts setup` skip the wizard. */
+/** Parsed `agents artifacts setup` options — the retired `agents share setup` flag set. */
 interface ArtifactsSetupOpts {
   bundle: string;
   worker: string;
@@ -138,15 +140,28 @@ interface ArtifactsSetupOpts {
   analyticsToken?: string;
 }
 
+/** The provisioning flags, by their commander option-value keys. */
+const PROVISION_FLAGS = ['bundle', 'worker', 'bucket', 'account', 'token', 'domain', 'analyticsToken'] as const;
+
 /**
  * True when the invocation named a Cloudflare endpoint detail, i.e. the caller
  * is driving the old `agents share setup` provisioning path rather than asking
- * for the wizard. `--bundle`/`--worker`/`--bucket` carry commander defaults and
- * are therefore always present, so they cannot be part of this signal — only
- * the flags with no default can.
+ * for the wizard.
+ *
+ * `--bundle`/`--worker`/`--bucket` carry commander defaults, so their mere
+ * PRESENCE proves nothing — the question is whether the user typed them, which
+ * only `wasTyped` (backed by commander's `getOptionValueSource`) can answer.
+ * Reading presence alone would classify `agents artifacts setup --bundle
+ * cloudflare-work` as a wizard run and then silently provision against the
+ * DEFAULT bundle, i.e. someone else's Cloudflare account. The other four flags
+ * have no default, so presence is proof for them.
  */
-export function isDirectProvisionRequest(opts: ArtifactsSetupOpts): boolean {
-  return Boolean(opts.account || opts.token || opts.domain || opts.analyticsToken);
+export function isDirectProvisionRequest(
+  opts: ArtifactsSetupOpts,
+  wasTyped: (flag: (typeof PROVISION_FLAGS)[number]) => boolean = () => false,
+): boolean {
+  if (opts.account || opts.token || opts.domain || opts.analyticsToken) return true;
+  return PROVISION_FLAGS.some((flag) => wasTyped(flag));
 }
 
 /** Register `agents artifacts setup` under the parent `artifacts` command. */
@@ -161,11 +176,15 @@ export function registerArtifactsSetupCommand(artifactsCmd: Command): void {
     .option('--token <t>', 'Cloudflare API token (else read from the --bundle)')
     .option('--domain <host>', `custom domain to map (default: ${DEFAULT_SHARE_DOMAIN}; workers.dev if zone is not visible)`)
     .option('--analytics-token <token>', 'Cloudflare Web Analytics token to inject into published HTML pages')
-    .action(async (opts: ArtifactsSetupOpts) => {
+    .action(async (opts: ArtifactsSetupOpts, cmd: Command) => {
       try {
         // Named endpoint details, or no terminal to prompt on, means provision
-        // directly — the wizard has nothing to ask that was not already given.
-        if (isDirectProvisionRequest(opts) || !isInteractiveTerminal()) {
+        // directly — the wizard has nothing to ask that was not already given,
+        // and it would provision against its own hardcoded defaults, dropping
+        // whatever the caller named.
+        const wasTyped = (flag: (typeof PROVISION_FLAGS)[number]): boolean =>
+          cmd.getOptionValueSource(flag) === 'cli';
+        if (isDirectProvisionRequest(opts, wasTyped) || !isInteractiveTerminal()) {
           await runShareProvision(opts);
           return;
         }
