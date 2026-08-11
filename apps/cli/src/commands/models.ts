@@ -24,6 +24,18 @@ import { setTierOverride, clearTierOverride, listTierOverrides } from '../lib/mo
 import { getModelPricing } from '../lib/pricing/index.js';
 import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 import { wrapJoined } from './inspect.js';
+import { setHelpSections } from '../lib/help.js';
+import {
+  formatRunDefaultEntry,
+  listRunDefaults,
+  parseRunDefaultSelector,
+  setRunDefault,
+} from '../lib/run-defaults.js';
+
+interface SetDefaultOptions {
+  mode?: string;
+  model?: string;
+}
 
 const MODEL_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'opencode', 'cursor', 'openclaw', 'antigravity', 'kimi', 'grok', 'droid', 'pi'];
 
@@ -85,6 +97,75 @@ export function registerModelsCommand(program: Command): void {
         console.log(chalk.gray('  Permission modes (--mode plan|edit|auto|skip): `agents modes <agent>`'));
       }
     });
+
+  // `models set` — the ergonomic setter for per-agent/version run defaults. It
+  // reads and writes the same store as `agents config set run.<agent@version>.*`
+  // (agents.yaml -> run.defaults), so the two stay consistent — `set` is just the
+  // short front door, nested here because `models` owns model/mode concerns.
+  const set = models
+    .command('set [selector]')
+    .description('Set the default model/mode an agent version uses for `agents run`')
+    .option('--model <model>', 'Default model or model alias, forwarded via --model')
+    .option('--mode <mode>', "Default mode: plan, edit, auto, skip. 'full' accepted as alias for skip.")
+    .action((selector: string | undefined, options: SetDefaultOptions) => {
+      try {
+        const hasFlags = options.model !== undefined || options.mode !== undefined;
+
+        if (!selector) {
+          if (hasFlags) {
+            throw new Error('Selector is required when passing --model/--mode. Example: agents models set claude@2.1.220 --model opus-5');
+          }
+          const entries = listRunDefaults();
+          if (entries.length === 0) {
+            console.log(chalk.gray('No agent defaults configured.'));
+            console.log(chalk.gray('Set one with: agents models set claude@2.1.220 --model opus-5'));
+            return;
+          }
+          console.log(chalk.bold('Agent Defaults\n'));
+          for (const entry of entries) {
+            console.log(`  ${formatRunDefaultEntry(entry)}`);
+          }
+          return;
+        }
+
+        if (!hasFlags) {
+          const parsed = parseRunDefaultSelector(selector);
+          const entry = listRunDefaults().find((e) => e.selector === parsed.selector);
+          if (!entry || (!entry.defaults.mode && !entry.defaults.model)) {
+            console.log(chalk.gray(`No default set for ${parsed.selector}.`));
+            console.log(chalk.gray(`Set one with: agents models set ${selector} --model <model>`));
+            return;
+          }
+          console.log(`  ${formatRunDefaultEntry(entry)}`);
+          return;
+        }
+
+        const entry = setRunDefault(selector, {
+          ...(options.mode !== undefined ? { mode: options.mode } : {}),
+          ...(options.model !== undefined ? { model: options.model } : {}),
+        });
+        console.log(chalk.green('Set default:'));
+        console.log(`  ${formatRunDefaultEntry(entry)}`);
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+
+  setHelpSections(set, {
+    examples: `
+      agents models set claude@2.1.220 --model opus-5
+      agents models set 'claude:*' --mode auto --model opus
+      agents models set claude@2.1.220
+      agents models set
+    `,
+    notes: `
+      Selectors use <agent>@<version> or <agent>:<version>; * matches all versions.
+      Exact selectors override wildcard selectors field by field.
+      Writes the same store as 'agents config set run.<agent@version>.*'. Explicit flags on
+      'agents run' always win over configured defaults.
+    `,
+  });
 
   // Override subcommands. These WRITE agents.yaml so the user never hand-edits it;
   // resolution is exact `<agent>@<version>` over `<agent>` over the auto guess.

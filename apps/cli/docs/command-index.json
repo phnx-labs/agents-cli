@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 90,
+  "groups": 89,
   "commands": 542,
   "root": {
     "name": "agents",
@@ -11899,6 +11899,53 @@
       ],
       "subcommands": [
         {
+          "name": "set",
+          "path": "models set",
+          "aliases": [],
+          "description": "Set the default model/mode an agent version uses for `agents run`",
+          "args": [
+            {
+              "name": "selector",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--model <model>",
+              "description": "Default model or model alias, forwarded via --model",
+              "long": "--model",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--mode <mode>",
+              "description": "Default mode: plan, edit, auto, skip. 'full' accepted as alias for skip.",
+              "long": "--mode",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents models set claude@2.1.220 --model opus-5\n      agents models set 'claude:*' --mode auto --model opus\n      agents models set claude@2.1.220\n      agents models set",
+          "notes": "Selectors use <agent>@<version> or <agent>:<version>; * matches all versions.\n      Exact selectors override wildcard selectors field by field.\n      Writes the same store as 'agents config set run.<agent@version>.*'. Explicit flags on\n      'agents run' always win over configured defaults.",
+          "subcommands": []
+        },
+        {
           "name": "tier",
           "path": "models tier",
           "aliases": [],
@@ -23527,53 +23574,6 @@
           "subcommands": []
         }
       ]
-    },
-    {
-      "name": "set",
-      "path": "set",
-      "aliases": [],
-      "description": "Set the default model/mode an agent version uses for `agents run`",
-      "args": [
-        {
-          "name": "selector",
-          "required": false,
-          "variadic": false,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "--model <model>",
-          "description": "Default model or model alias, forwarded via --model",
-          "long": "--model",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--mode <mode>",
-          "description": "Default mode: plan, edit, auto, skip. 'full' accepted as alias for skip.",
-          "long": "--mode",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "agents set claude@2.1.220 --model opus-5\n      agents set 'claude:*' --mode auto --model opus\n      agents set claude@2.1.220\n      agents set",
-      "notes": "Selectors use <agent>@<version> or <agent>:<version>; * matches all versions.\n      Exact selectors override wildcard selectors field by field.\n      Writes the same store as 'agents config set run.<agent@version>.*'. Explicit flags on\n      'agents run' always win over configured defaults.",
-      "subcommands": []
     },
     {
       "name": "setup",

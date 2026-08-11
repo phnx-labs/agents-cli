@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_90 command groups · 542 commands._
+_89 command groups · 542 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -458,6 +458,7 @@ agents mine toggle <name>  Enable/disable features for a brand
 
 ```
 agents models [agentSpec]                         Show the cost-tier map (cheap|default|best|ultra) for installed harnesses; pin overrides with `tier set`.
+agents models set [selector]                      Set the default model/mode an agent version uses for `agents run`
 agents models tier                                Override which model a cost tier resolves to (per harness, or per agent@version).
 agents models tier clear <selector> [tier]        Clear one tier (or all tiers) back to the auto guess.
 agents models tier list                           List all configured tier overrides.
@@ -786,12 +787,6 @@ agents sessions resume [query]              Reopen one session by canonical iden
 agents sessions stats                       Which skills/commands you actually invoke, and which installed ones are dead weight.
 agents sessions tail [sessionId]            Stream compact live lines from a session file as events are written. Long-running: Ctrl+C to stop. Claude and Codex only.
 agents sessions watch                       Stream canonical live and recoverable session row changes as NDJSON
-```
-
-## set — Set the default model/mode an agent version uses for `agents run`
-
-```
-agents set [selector]  Set the default model/mode an agent version uses for `agents run`
 ```
 
 ## setup — Set up agents-cli, or re-open the capability onboarding hub.

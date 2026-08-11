@@ -59,7 +59,6 @@ export const loadOpen: ModuleLoader = async () => (await import('../../commands/
 export const loadReconnect: ModuleLoader = async () => (await import('../../commands/reconnect.js')).registerReconnectCommand;
 export const loadFork: ModuleLoader = async () => (await import('../../commands/fork.js')).registerForkCommand;
 export const loadConfig: ModuleLoader = async () => (await import('../../commands/config.js')).registerConfigCommand;
-export const loadSet: ModuleLoader = async () => (await import('../../commands/set.js')).registerSetCommand;
 export const loadModels: ModuleLoader = async () => (await import('../../commands/models.js')).registerModelsCommand;
 export const loadModes: ModuleLoader = async () => (await import('../../commands/modes.js')).registerModesCommand;
 export const loadPrune: ModuleLoader = async () => (await import('../../commands/prune.js')).registerPruneCommand;
@@ -189,7 +188,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   reconnect: [loadReconnect],
   fork: [loadFork],
   config: [loadConfig],
-  set: [loadSet],
   models: [loadModels],
   modes: [loadModes],
   trash: [loadTrash],
@@ -300,7 +298,7 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
   ...INLINE_COMMAND_NAMES,
 ]);
 
-export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set(['webhook']);
+export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set(['webhook', 'set']);
 
 
 /** Whether `name` is a top-level command this CLI registers. See {@link KNOWN_TOP_LEVEL_COMMANDS}. */
