@@ -58,12 +58,10 @@
  * - the reaping process itself, its ancestors, pid 1, and every long-lived
  *   agents-cli service ({@link isProtectedAgentsService}) are never candidates.
  * - an UNRELIABLE read of tmux's session state (the query threw, timed out, or
- *   tmux itself never answered) disables tier 1 for that sweep entirely — an
- *   absent map entry proves a session is gone only when the map is known-good.
- *   Distinguishing "tmux answered: no such session" (a completed, if nonzero,
- *   exit — genuinely nothing there) from "tmux did not answer" (a thrown
- *   error/timeout — unknown) is exactly this: a completed process is a real
- *   answer, a rejected promise is not one at all.
+ *   tmux itself never answered) disables tier 1 for that sweep entirely;
+ * - an absent session entry is unknown, even after a reliable read. A tmux
+ *   server restart can produce the same empty snapshot while marked agents
+ *   remain alive, so tier 1 requires a present owner with positive death proof.
  * - tier 2 is anchored on the actual claude EXECUTABLE (argv[0]'s basename),
  *   never a substring match anywhere in the command line, and excludes any
  *   process still structurally part of a LIVE pane leaf's process tree right
@@ -637,8 +635,8 @@ function describe(c: OrphanCandidate): string {
  * Reap every helper process whose owning agent has exited.
  *
  * Called from the daemon's periodic tick and from `agents sessions reap`. Panes
- * are read BEFORE processes so a session that disappears mid-scan is treated as
- * gone (reapable) rather than as a live owner.
+ * are read before processes to take one ownership snapshot. A session absent
+ * from that snapshot is unknown and is never sufficient proof for tier 1.
  *
  * `opts.pids` is the test-only process-table scope described on
  * {@link readAgentProcesses} — never set by production callers.
