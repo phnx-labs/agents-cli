@@ -72,6 +72,20 @@ export interface Task {
   tabs: Record<string, string>; // shortId (8 chars) -> CDP targetId
   currentTabId?: string; // shortId of current tab
   createdAt: number;
+  /**
+   * When this task last did anything. Stamped at creation (equal to
+   * `createdAt`) and refreshed by every task-scoped action, because every one
+   * of them resolves the task through `BrowserService.findTask`.
+   *
+   * Read by the idle half of the abandoned-task reaper (`hygiene.ts`): a task
+   * nobody has driven for `idleMs` is stopped so its tabs stop piling up in the
+   * profile window (RUSH-2622).
+   *
+   * Persisted in tasks.json. Tasks written before RUSH-2622 carry none;
+   * `loadTaskState` normalizes those to `createdAt` on read, so every task in
+   * memory has one and the reaper never has to guess.
+   */
+  lastActionAt: number;
   pid: number;
   /**
    * Resolved actor id (`resolveActor().id`) stamped at task start — WHO launched
@@ -146,8 +160,29 @@ export interface HistoricalTask {
   owner?: string;
 }
 
+/**
+ * Why the reaper stopped a task. `session-dead` — the agent session (or run)
+ * that started it is provably gone; `idle` — nothing has driven it for the
+ * idle window. See `hygiene.ts`.
+ */
+export type ReapReason = 'session-dead' | 'idle';
+
+/** One task the reaper stopped (or, under `dryRun`, would have stopped). */
+export interface ReapedTask {
+  task: string;
+  profile: string;
+  reason: ReapReason;
+}
+
+export interface ReapResult {
+  closed: ReapedTask[];
+  /** Tasks left alone this pass: still live, still inside the idle window, or recording. */
+  skipped: number;
+}
+
 export type IPCAction =
   | 'start'
+  | 'gc'
   | 'record-start'
   | 'record-stop'
   | 'done'
@@ -242,6 +277,16 @@ export interface IPCRequest {
   appLevel?: string;
   // Browser start: opt out of domain-skill discovery.
   skipDomainSkill?: boolean;
+  /**
+   * Browser start: always open a new tab, even when the profile already shows
+   * this exact URL. Without it, `start --url` adopts a matching live tab rather
+   * than opening a duplicate (RUSH-2622) — set this when the caller needs a tab
+   * of its own.
+   */
+  fresh?: boolean;
+  // `gc`: override the idle window (default 30) and preview without closing.
+  idleMinutes?: number;
+  dryRun?: boolean;
   // Caller identity, forwarded from the CLI process. The browser daemon is
   // shared and long-lived, so it cannot resolve the caller's actor/run itself
   // (resolveActor() there yields the daemon's identity, not the caller's).
@@ -285,6 +330,8 @@ export interface IPCResponse {
   tabs?: TabInfo[];
   profiles?: ProfileStatus[];
   history?: HistoricalTask[];
+  /** `gc`: what the abandoned-task reaper closed (or would close under dryRun). */
+  reaped?: ReapResult;
   result?: unknown;
   path?: string;
   bytes?: number;

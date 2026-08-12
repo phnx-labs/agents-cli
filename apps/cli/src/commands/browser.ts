@@ -758,6 +758,7 @@ function registerTaskCommands(browser: Command): void {
     .option(TASK_OPTION_FLAG, 'Task name (auto-generated if omitted)')
     .option('-e, --endpoint <name>', 'Endpoint preset (defaults to the profile\'s default)')
     .option('-u, --url <url>', 'Open URL in first tab')
+    .option('--fresh', 'Always open a new tab, even if this profile already shows that URL (default: take over the existing tab)')
     .option('--no-skills', 'Skip auto-discovery of site-specific SKILL.md from ~/.agents/skills/browser/domain-skills/')
     .option('--record', 'Start recording right after the tab opens (shorthand for `agents browser record start` as a follow-up)')
     .option('--fps <n>', 'Recording frames per second (with --record; 1–30, default 5)', (v) => parseInt(v, 10))
@@ -856,6 +857,7 @@ function registerTaskCommands(browser: Command): void {
         url: opts.url,
         endpoint: opts.endpoint,
         skipDomainSkill: opts.skills === false,
+        fresh: opts.fresh === true,
         // Forward the caller's identity: the browser daemon is shared, so it
         // cannot resolve who/which-run called `start`. `resolveActor()` runs
         // here in the CLI (the caller's process); `$AGENT_LAUNCH_ID` is the

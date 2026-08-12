@@ -33,7 +33,9 @@ import {
   type TaskStatus,
   type BrowserProfile,
   type HistoricalTask,
+  type ReapResult,
 } from './types.js';
+import { reapAbandonedTasks, type ReapOptions } from './hygiene.js';
 import { getRefs, resolveRefToCoords, describeRefs, healRef, type RefOpts, type RefNode, type RefSnapshot } from './refs.js';
 import { clickAtCoords, hoverAtCoords, scrollAtCoords, typeText, pressKey, focusNode } from './input.js';
 import { typeEditorText } from './editor.js';
@@ -51,6 +53,20 @@ import { sshExecAsync } from '../ssh-exec.js';
 import type { TargetFilter } from './types.js';
 
 export type UploadMode = 'auto' | 'input' | 'drop' | 'chooser';
+
+/**
+ * Canonical form for comparing a requested URL against what CDP reports for a
+ * live target. `new URL('https://example.com').href` is `https://example.com/`,
+ * which is exactly what Chrome reports — comparing the raw strings would miss
+ * every bare-origin match. Unparseable input compares as itself.
+ */
+function canonicalTabUrl(raw: string): string {
+  try {
+    return new URL(raw).href;
+  } catch {
+    return raw;
+  }
+}
 
 function isPathInside(candidate: string, dir: string): boolean {
   const rel = path.relative(dir, candidate);
@@ -342,6 +358,11 @@ export class BrowserService {
   private pendingDownloads = new Map<string, { path: string; filename?: string; completed: boolean }>();
   private enabledSessions = new Map<string, Set<string>>(); // sessionId -> enabled domains
 
+  /** Profile -> when a `touchTask` last persisted tasks.json for it. */
+  private lastTouchPersist = new Map<string, number>();
+  /** Coalescing window for the `touchTask` write. See {@link touchTask}. */
+  private static readonly TOUCH_PERSIST_INTERVAL_MS = 60_000;
+
   async start(
     profileName: string,
     opts: {
@@ -349,6 +370,8 @@ export class BrowserService {
       url?: string;
       endpointName?: string;
       skipDomainSkill?: boolean;
+      /** Always open a new tab instead of adopting a live one on the same URL. */
+      fresh?: boolean;
       /** Caller identity, forwarded from the CLI (see IPCRequest.actor/launchId). */
       actor?: string;
       launchId?: string;
@@ -434,26 +457,40 @@ export class BrowserService {
     // Browsers launch with --no-startup-window (session-cookie persistence,
     // see launchBrowser), so a bare `start` with no --url would otherwise
     // leave the user staring at a process with zero windows. Recreate the
-    // old startup-window affordance: if no page target exists, open a blank
-    // one. Deliberately NOT registered on the task — the startup window
-    // never was either, and tasks track only tabs they created.
+    // old startup-window affordance: if no page target exists, open a blank one.
+    //
+    // This tab IS registered on the task below. It used to be deliberately
+    // unregistered ("tasks track only tabs they created") — but this daemon did
+    // create it, and an unregistered tab is one `done`/`stop` can never close:
+    // `stop` closes exactly the entries in `task.tabs`. So every bare `start`
+    // left a blank globe tab behind forever, which is a large share of the
+    // pile-up in RUSH-2622. Tabs the daemon did NOT open are still left alone —
+    // the branch only fires when the profile has no page target at all.
+    let startupBlankTargetId: string | undefined;
     if (!opts.url && !conn.electron) {
       const { targetInfos } = (await conn.cdp.send('Target.getTargets')) as {
         targetInfos: Array<{ type: string }>;
       };
       if (!targetInfos.some((t) => t.type === 'page')) {
-        await conn.cdp.send('Target.createTarget', { url: 'about:blank' });
+        const created = (await conn.cdp.send('Target.createTarget', {
+          url: 'about:blank',
+        })) as { targetId: string };
+        startupBlankTargetId = created.targetId;
         this.invalidateTargetCache(conn);
       }
     }
 
+    const now = Date.now();
     const task: Task = {
       id: taskId,
       name: taskName,
       profile: effectiveProfileName,
       tabs: {},
       currentTabId: undefined,
-      createdAt: Date.now(),
+      createdAt: now,
+      // A brand-new task has done exactly one thing — start — so its last
+      // action is its creation. The reaper's idle window runs from here.
+      lastActionAt: now,
       pid: conn.pid,
       // Identity is forwarded from the caller (see resolveTaskIdentity): WHO
       // (owner), WHICH run (launchId), and WHICH agent session (sessionId).
@@ -464,6 +501,12 @@ export class BrowserService {
         () => resolveActor().id,
       ),
     };
+
+    if (startupBlankTargetId) {
+      const shortId = generateShortId();
+      task.tabs[shortId] = startupBlankTargetId;
+      task.currentTabId = shortId;
+    }
 
     // For Electron, get the existing window as the tab
     if (conn.electron) {
@@ -513,14 +556,20 @@ export class BrowserService {
       });
     }).catch(() => { /* fail soft */ });
 
-    // If URL provided, create tab directly (no about:blank)
+    // If URL provided, take over a live tab already showing it, else create one
+    // directly (no about:blank).
     let tabId: string | undefined;
     if (opts.url && !conn.electron) {
-      const result = (await conn.cdp.send('Target.createTarget', {
-        url: opts.url,
-      })) as { targetId: string };
+      const adopted = opts.fresh ? undefined : await this.adoptTabShowing(conn, opts.url);
+      const targetId =
+        adopted ??
+        (
+          (await conn.cdp.send('Target.createTarget', {
+            url: opts.url,
+          })) as { targetId: string }
+        ).targetId;
       const shortId = generateShortId();
-      task.tabs[shortId] = result.targetId;
+      task.tabs[shortId] = targetId;
       task.currentTabId = shortId;
       this.invalidateTargetCache(conn);
       await this.saveTaskState(effectiveProfileName, conn.tasks);
@@ -540,6 +589,90 @@ export class BrowserService {
     }
 
     return { task: taskId, name: taskName, tabId, profile: effectiveProfileName, skill };
+  }
+
+  /**
+   * A live page target already showing `url` that a starting task can take
+   * over, instead of opening a second copy of the same page (RUSH-2622).
+   * Returns its CDP targetId, or undefined when nothing matches.
+   *
+   * Preference order is the whole design. An UNOWNED match — a tab no live task
+   * claims — is the accumulated-orphan case this exists for, so it is taken
+   * first and no other task is disturbed. Only when every match is owned does
+   * it take one from another task, and it TRANSFERS rather than shares: two
+   * tasks holding one targetId means the first `done` closes the other task's
+   * tab, which is the double-owner bug this whole change exists to stop.
+   * `start --fresh` opts out entirely when a caller needs its own tab.
+   *
+   * URLs are compared canonically (`new URL(...).href`), so a requested
+   * `https://example.com` matches the `https://example.com/` Chrome reports.
+   * A page that has since redirected elsewhere simply does not match, and the
+   * caller opens a tab as before.
+   */
+  private async adoptTabShowing(
+    conn: ProfileConnection,
+    url: string
+  ): Promise<string | undefined> {
+    const { targetInfos } = (await conn.cdp.send('Target.getTargets')) as {
+      targetInfos: Array<{ targetId: string; type: string; url: string }>;
+    };
+
+    const wanted = canonicalTabUrl(url);
+    const matches = targetInfos.filter(
+      (t) => t.type === 'page' && canonicalTabUrl(t.url) === wanted
+    );
+    if (matches.length === 0) return undefined;
+
+    const owned = new Set<string>();
+    for (const task of conn.tasks.values()) {
+      for (const cdpId of Object.values(task.tabs)) owned.add(cdpId);
+    }
+    const pick = matches.find((t) => !owned.has(t.targetId)) ?? matches[0];
+
+    // Transfer: drop it from whichever task holds it, so exactly one task owns
+    // any targetId (see the docblock).
+    for (const task of conn.tasks.values()) {
+      for (const [shortId, cdpId] of Object.entries(task.tabs)) {
+        if (cdpId !== pick.targetId) continue;
+        delete task.tabs[shortId];
+        if (task.currentTabId === shortId) {
+          const remaining = Object.keys(task.tabs);
+          task.currentTabId = remaining.length > 0 ? remaining[remaining.length - 1] : undefined;
+        }
+      }
+    }
+
+    try {
+      await conn.cdp.send('Target.activateTarget', { targetId: pick.targetId });
+    } catch {
+      // Bringing the tab to the front is cosmetic and not every endpoint
+      // implements activateTarget; the tab is adopted either way.
+    }
+    return pick.targetId;
+  }
+
+  /**
+   * Every live task across every connected profile — the reaper's input
+   * (`hygiene.ts`). A read-only view: mutating a returned `Task` mutates the
+   * daemon's live state, so callers only read it and act through `stop`.
+   */
+  listTasks(): Array<{ profile: string; task: Task }> {
+    const out: Array<{ profile: string; task: Task }> = [];
+    for (const [key, conn] of this.connections) {
+      for (const task of conn.tasks.values()) {
+        out.push({ profile: conn.profileName ?? key, task });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Close tasks whose owning agent session is gone, or that have sat untouched
+   * past the idle window. The entry point the daemon's periodic tick and
+   * `agents browser gc` both call; the policy lives in `hygiene.ts`.
+   */
+  async reapAbandoned(opts: ReapOptions = {}): Promise<ReapResult> {
+    return reapAbandonedTasks(this, opts);
   }
 
   async stop(taskName: string): Promise<{ ok: boolean; profile?: string }> {
@@ -2340,6 +2473,41 @@ export class BrowserService {
     throw new Error('Could not generate unique task name after 8 attempts');
   }
 
+  /**
+   * Mark a task as active, so the reaper's idle window measures time since the
+   * last real use rather than time since `start` (RUSH-2622).
+   *
+   * Called from `findTask` — the single funnel every task-scoped operation
+   * resolves through — rather than from each of the ~26 call sites, so a new
+   * action added later cannot forget to stamp it.
+   *
+   * The in-memory stamp is what the reaper reads: it runs inside the same
+   * daemon that owns these `Task` objects. The write to tasks.json exists only
+   * so a daemon RESTART does not inherit a stale stamp and reap a task an agent
+   * has been clicking through for the last half hour — `click`, `type`,
+   * `evaluate`, and `screenshot` never call `saveTaskState` on their own, so
+   * without this the on-disk stamp would sit at the last navigation. It is
+   * coalesced to at most one write per profile per minute so a screenshot loop
+   * does not become a write loop; the resulting on-disk stamp trails by at most
+   * a minute, well inside the 30-minute idle window.
+   */
+  private async touchTask(conn: ProfileConnection, task: Task): Promise<void> {
+    const now = Date.now();
+    task.lastActionAt = now;
+
+    const last = this.lastTouchPersist.get(task.profile) ?? 0;
+    if (now - last < BrowserService.TOUCH_PERSIST_INTERVAL_MS) return;
+    this.lastTouchPersist.set(task.profile, now);
+    try {
+      await this.saveTaskState(task.profile, conn.tasks);
+    } catch {
+      // Durability here is best-effort — the in-memory stamp above is
+      // authoritative for the running daemon — and an unwritable runtime dir
+      // must not turn a working browser action into a failure. Same guard the
+      // `recordBrowserSession` call in `start` uses for the same reason.
+    }
+  }
+
   private async findTask(
     taskId: string,
     profileName?: string
@@ -2353,12 +2521,14 @@ export class BrowserService {
       if (!task) {
         throw new Error(`Task "${taskId}" not found on profile "${profileName}"`);
       }
+      await this.touchTask(conn, task);
       return { conn, task, profileName };
     }
 
     for (const [key, conn] of this.connections) {
       const task = conn.tasks.get(taskId);
       if (task) {
+        await this.touchTask(conn, task);
         return { conn, task, profileName: conn.profileName ?? key };
       }
     }
@@ -2553,10 +2723,18 @@ export class BrowserService {
           tabs,
           currentTabId: tabIds.length > 0 ? tabIds[tabIds.length - 1] : undefined,
           createdAt: task.createdAt as number,
+          lastActionAt: (task.lastActionAt as number) ?? (task.createdAt as number),
           pid: task.pid as number,
         });
       } else {
-        tasks.set(key, task as unknown as Task);
+        const loaded = task as unknown as Task;
+        // Tasks persisted before RUSH-2622 carry no lastActionAt. Normalize on
+        // read so every in-memory task has one: its own createdAt is the last
+        // moment we can prove the task did anything.
+        if (typeof loaded.lastActionAt !== 'number') {
+          loaded.lastActionAt = loaded.createdAt;
+        }
+        tasks.set(key, loaded);
       }
     }
 

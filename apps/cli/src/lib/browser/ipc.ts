@@ -373,6 +373,7 @@ export class BrowserIPCServer {
           url: request.url,
           endpointName: request.endpoint,
           skipDomainSkill: request.skipDomainSkill,
+          fresh: request.fresh,
           actor: request.actor,
           launchId: request.launchId,
           sessionId: request.sessionId,
@@ -384,6 +385,18 @@ export class BrowserIPCServer {
           windowTargetId: result.windowId,
           skill: result.skill,
         };
+      }
+
+      // The out-of-process seam onto the abandoned-task reaper: the daemon
+      // owns the live BrowserService, so a CLI verb (`agents browser gc`) can
+      // only reach `reapAbandoned` through IPC. The daemon's own periodic tick
+      // calls the service method directly.
+      case 'gc': {
+        const reaped = await this.service.reapAbandoned({
+          idleMs: request.idleMinutes !== undefined ? request.idleMinutes * 60_000 : undefined,
+          dryRun: request.dryRun,
+        });
+        return { ok: true, reaped };
       }
 
       case 'done': {
