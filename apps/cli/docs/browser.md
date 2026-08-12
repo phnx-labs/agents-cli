@@ -191,7 +191,8 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | `-p, --profile <name>` | Profile to use (auto-picks if omitted) |
 | `--task <name>` | Override auto-generated task name |
 | `-e, --endpoint <name>` | Endpoint preset within the profile |
-| `-u, --url <url>` | Open URL in first tab |
+| `-u, --url <url>` | Open URL in first tab. If an abandoned task on this profile already holds a tab showing that exact URL, the tab is reclaimed instead of a duplicate being opened (RUSH-2622) — a tab held by a live task, or one you opened yourself, is never taken |
+| `--fresh` | Always open a new tab, skipping the reclaim above |
 | `--no-skills` | Skip domain-skill auto-discovery |
 | `--record` | Start recording immediately after tab opens |
 | `--fps <n>` | Recording frames per second (1–30, default 5) |

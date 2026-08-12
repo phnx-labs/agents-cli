@@ -35,7 +35,12 @@ import {
   type HistoricalTask,
   type ReapResult,
 } from './types.js';
-import { reapAbandonedTasks, type ReapOptions } from './hygiene.js';
+import {
+  reapAbandonedTasks,
+  resolveLiveIdentities,
+  taskOwnerIsGone,
+  type ReapOptions,
+} from './hygiene.js';
 import { getRefs, resolveRefToCoords, describeRefs, healRef, type RefOpts, type RefNode, type RefSnapshot } from './refs.js';
 import { clickAtCoords, hoverAtCoords, scrollAtCoords, typeText, pressKey, focusNode } from './input.js';
 import { typeEditorText } from './editor.js';
@@ -592,21 +597,35 @@ export class BrowserService {
   }
 
   /**
-   * A live page target already showing `url` that a starting task can take
-   * over, instead of opening a second copy of the same page (RUSH-2622).
-   * Returns its CDP targetId, or undefined when nothing matches.
+   * Reclaim a live page already showing `url` from an ABANDONED task, instead
+   * of opening a second copy of the same page (RUSH-2622). Returns its CDP
+   * targetId, or undefined when there is nothing safe to reclaim.
    *
-   * Preference order is the whole design. An UNOWNED match — a tab no live task
-   * claims — is the accumulated-orphan case this exists for, so it is taken
-   * first and no other task is disturbed. Only when every match is owned does
-   * it take one from another task, and it TRANSFERS rather than shares: two
-   * tasks holding one targetId means the first `done` closes the other task's
-   * tab, which is the double-owner bug this whole change exists to stop.
-   * `start --fresh` opts out entirely when a caller needs its own tab.
+   * "Safe" is narrow on purpose, because both of the wider readings close a tab
+   * somebody is using:
+   *
+   *   - An UNOWNED matching page is NOT taken. No task claims it, which most
+   *     often means the user opened it themselves — and adopting it would make
+   *     this task's `done` close the user's tab.
+   *   - A page owned by a LIVE task is NOT taken. Stealing it would leave that
+   *     agent's `screenshot`/`click` throwing "No tabs open for this task", its
+   *     `navigate` silently opening the duplicate this feature exists to
+   *     prevent, and any in-flight recording truncated when the new owner calls
+   *     `done`.
+   *
+   * What is left is exactly the pile-up case: a page held by a task whose owner
+   * is provably gone. Liveness uses the reaper's own predicate
+   * (`taskOwnerIsGone`), so "dead" has one definition in this codebase rather
+   * than two that can drift. A task the reaper cannot prove dead keeps its tab
+   * and is closed later by the idle rule instead.
+   *
+   * Reclaiming transfers rather than shares: two tasks holding one targetId
+   * means the first `done` closes the other's tab. `start --fresh` skips this
+   * path entirely.
    *
    * URLs are compared canonically (`new URL(...).href`), so a requested
-   * `https://example.com` matches the `https://example.com/` Chrome reports.
-   * A page that has since redirected elsewhere simply does not match, and the
+   * `https://example.com` matches the `https://example.com/` Chrome reports. A
+   * page that has since redirected elsewhere simply does not match, and the
    * caller opens a tab as before.
    */
   private async adoptTabShowing(
@@ -618,37 +637,45 @@ export class BrowserService {
     };
 
     const wanted = canonicalTabUrl(url);
-    const matches = targetInfos.filter(
-      (t) => t.type === 'page' && canonicalTabUrl(t.url) === wanted
+    const matching = new Set(
+      targetInfos
+        .filter((t) => t.type === 'page' && canonicalTabUrl(t.url) === wanted)
+        .map((t) => t.targetId)
     );
-    if (matches.length === 0) return undefined;
+    if (matching.size === 0) return undefined;
 
-    const owned = new Set<string>();
-    for (const task of conn.tasks.values()) {
-      for (const cdpId of Object.values(task.tabs)) owned.add(cdpId);
-    }
-    const pick = matches.find((t) => !owned.has(t.targetId)) ?? matches[0];
-
-    // Transfer: drop it from whichever task holds it, so exactly one task owns
-    // any targetId (see the docblock).
+    const candidates: Array<{ task: Task; shortId: string; targetId: string }> = [];
     for (const task of conn.tasks.values()) {
       for (const [shortId, cdpId] of Object.entries(task.tabs)) {
-        if (cdpId !== pick.targetId) continue;
-        delete task.tabs[shortId];
-        if (task.currentTabId === shortId) {
-          const remaining = Object.keys(task.tabs);
-          task.currentTabId = remaining.length > 0 ? remaining[remaining.length - 1] : undefined;
-        }
+        if (matching.has(cdpId)) candidates.push({ task, shortId, targetId: cdpId });
       }
     }
+    if (candidates.length === 0) return undefined;
 
-    try {
-      await conn.cdp.send('Target.activateTarget', { targetId: pick.targetId });
-    } catch {
-      // Bringing the tab to the front is cosmetic and not every endpoint
-      // implements activateTarget; the tab is adopted either way.
+    const live = resolveLiveIdentities();
+    for (const { task, shortId, targetId } of candidates) {
+      // An in-flight capture means the task is in use whatever its owner looks
+      // like — same guard the reaper applies before stopping anything.
+      if (this.recordings.has(task.name)) continue;
+      if (!(await taskOwnerIsGone(task, live))) continue;
+
+      delete task.tabs[shortId];
+      delete task.refDescriptors?.[shortId];
+      if (task.currentTabId === shortId) {
+        const remaining = Object.keys(task.tabs);
+        task.currentTabId = remaining.length > 0 ? remaining[remaining.length - 1] : undefined;
+      }
+
+      try {
+        await conn.cdp.send('Target.activateTarget', { targetId });
+      } catch {
+        // Bringing the tab to the front is cosmetic and not every endpoint
+        // implements activateTarget; the tab is reclaimed either way.
+      }
+      return targetId;
     }
-    return pick.targetId;
+
+    return undefined;
   }
 
   /**

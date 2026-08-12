@@ -3360,6 +3360,15 @@
               "negate": false
             },
             {
+              "flags": "--fresh",
+              "description": "Always open a new tab, even if this profile already shows that URL (default: take over the existing tab)",
+              "long": "--fresh",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--no-skills",
               "description": "Skip auto-discovery of site-specific SKILL.md from ~/.agents/skills/browser/domain-skills/",
               "long": "--no-skills",

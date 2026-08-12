@@ -67,6 +67,11 @@ export interface ReapOptions {
   deps?: ReapDeps;
 }
 
+export interface LiveIdentities {
+  sessions: Set<string>;
+  launches: Set<string>;
+}
+
 /**
  * Session and launch ids belonging to a process that is alive right now.
  *
@@ -77,7 +82,7 @@ export interface ReapOptions {
  * process carries `--session-id` on its argv, which is the RUSH-2384 recovery
  * path the registry itself documents (pid-registry.ts:102-107).
  */
-function liveIdentities(deps: ReapDeps): { sessions: Set<string>; launches: Set<string> } {
+export function resolveLiveIdentities(deps: ReapDeps = {}): LiveIdentities {
   const listEntries = deps.listEntries ?? listPidSessionEntries;
   const alive = deps.pidAlive ?? isPidAlive;
   const sessionIdOf = deps.sessionIdOfPid ?? sessionIdFromLivePid;
@@ -94,36 +99,40 @@ function liveIdentities(deps: ReapDeps): { sessions: Set<string>; launches: Set<
 }
 
 /**
- * True when every identity the task carries says its owner is gone.
+ * True when the task's owner is PROVABLY gone. The bar is proof, not absence of
+ * evidence, because being wrong here closes a working agent's tabs.
  *
- * A task with NEITHER a `sessionId` nor a `launchId` is never session-reaped —
- * there is nothing to prove dead, so it is left to the idle rule. When a task
- * carries both and only one resolves live, it counts as live: a half-resolved
- * identity is not proof of death, and the cost of being wrong here is closing a
- * working agent's tabs.
+ * Only a `sessionId` can carry that proof. It has two independent sources — the
+ * per-pid launch registry, and a live process carrying `--session-id <id>` in
+ * its argv — so a session the registry missed is still caught by the process
+ * table. The registry misses constantly: a wrapper pid exits, a prune sweeps
+ * the entry, or the agent was never launched via `agents run`
+ * (pid-registry.ts:102-107, RUSH-2384).
  *
- * The registry can be missing an entry for a live agent (a wrapper pid exited,
- * a prune wiped it, the agent was not launched via `agents run` —
- * pid-registry.ts:102-107), so a session the registry cannot vouch for gets a
- * second, authoritative check against the process table: a live process
- * carrying `--session-id <id>` in its argv. Only then is it called dead.
+ * A `launchId` has NO second source — the registry is its only witness, and
+ * that witness is the unreliable one. So a task carrying only a `launchId` is
+ * never session-reaped, exactly like a task carrying no identity at all; both
+ * fall through to the idle rule. This is not a corner case: `launchId` is
+ * minted for every run (`exec.ts` `resolveLaunchId`) while `AGENT_SESSION_ID`
+ * is Claude-only and skipped on resume, so treating a missing registry entry as
+ * proof of death would close the tabs of every live codex/droid/grok run whose
+ * launch pid had already exited.
+ *
+ * A live `launchId` still RESCUES a task whose `sessionId` looks dead — proof of
+ * life needs only one witness, unlike proof of death.
  */
-async function ownerIsGone(
+export async function taskOwnerIsGone(
   task: Task,
-  live: { sessions: Set<string>; launches: Set<string> },
-  deps: ReapDeps,
+  live: LiveIdentities,
+  deps: ReapDeps = {},
 ): Promise<boolean> {
-  if (!task.sessionId && !task.launchId) return false;
+  if (!task.sessionId) return false;
 
   if (task.launchId && live.launches.has(task.launchId)) return false;
+  if (live.sessions.has(task.sessionId)) return false;
 
-  if (task.sessionId) {
-    if (live.sessions.has(task.sessionId)) return false;
-    const onProcessTable = deps.sessionLiveOnProcessTable ?? ((id: string) => isSessionIdLiveOnProcessTable(id));
-    if (await onProcessTable(task.sessionId)) return false;
-  }
-
-  return true;
+  const onProcessTable = deps.sessionLiveOnProcessTable ?? ((id: string) => isSessionIdLiveOnProcessTable(id));
+  return !(await onProcessTable(task.sessionId));
 }
 
 /**
@@ -138,9 +147,16 @@ export async function reapAbandonedTasks(
   opts: ReapOptions = {},
 ): Promise<ReapResult> {
   const idleMs = opts.idleMs ?? DEFAULT_IDLE_MS;
+  // Fail loud rather than reap everything. A caller-supplied `0` survives `??`
+  // and would close every task including one created a millisecond ago; a
+  // non-numeric value makes every `>=` comparison false and silently disables
+  // idle reaping. Both are worse than an error.
+  if (!Number.isFinite(idleMs) || idleMs <= 0) {
+    throw new Error(`idleMs must be a positive number of milliseconds, got ${String(idleMs)}`);
+  }
   const now = opts.now ?? Date.now();
   const deps = opts.deps ?? {};
-  const live = liveIdentities(deps);
+  const live = resolveLiveIdentities(deps);
 
   const closed: ReapedTask[] = [];
   let skipped = 0;
@@ -152,7 +168,7 @@ export async function reapAbandonedTasks(
     }
 
     let reason: ReapedTask['reason'] | undefined;
-    if (await ownerIsGone(task, live, deps)) {
+    if (await taskOwnerIsGone(task, live, deps)) {
       reason = 'session-dead';
     } else if (now - (task.lastActionAt ?? task.createdAt) >= idleMs) {
       reason = 'idle';

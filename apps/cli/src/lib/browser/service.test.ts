@@ -760,72 +760,142 @@ describe('BrowserService.start — the startup about:blank is a task tab (RUSH-2
   });
 });
 
-describe('BrowserService.start — URL dedup (RUSH-2622)', () => {
-  it('takes over the live tab already showing that URL instead of opening a second one', async () => {
-    writeProfile('dedup', ['cdp://localhost:9222']);
+describe('BrowserService.start — URL reclaim (RUSH-2622)', () => {
+  // A UUID no live process carries, so the real liveness predicate (registry +
+  // process table) proves this task's owner gone without any injection.
+  const GONE_SESSION = '33333333-3333-4333-8333-333333333333';
+
+  it('reclaims the tab an abandoned task is still holding on that URL', async () => {
+    writeProfile('reclaim', ['cdp://localhost:9222']);
     const service = new BrowserService();
-    const { conn, targets, calls } = makeTargetedConn('dedup@endpoint-0');
-    attach(service, 'dedup', conn);
+    const { conn, targets, calls } = makeTargetedConn('reclaim@endpoint-0');
+    attach(service, 'reclaim', conn);
 
-    const first = await service.start('dedup', { url: 'https://example.com/docs' });
-    const second = await service.start('dedup', { url: 'https://example.com/docs' });
+    const abandoned = await service.start('reclaim', {
+      url: 'https://example.com/docs',
+      sessionId: GONE_SESSION,
+    });
+    const next = await service.start('reclaim', { url: 'https://example.com/docs' });
 
-    // One page, one create — the second start adopted the first's tab.
+    // One page, one create — the second start reclaimed the orphan's tab.
     expect(targets).toHaveLength(1);
     expect(createTargetCount(calls)).toBe(1);
 
-    // Ownership TRANSFERS rather than being shared: two tasks pointing at one
-    // targetId would mean the first `done` closes the second task's tab.
-    const firstTask = conn.tasks.get(first.name)!;
-    const secondTask = conn.tasks.get(second.name)!;
-    expect(firstTask.tabs).toEqual({});
-    expect(firstTask.currentTabId).toBeUndefined();
-    expect(Object.values(secondTask.tabs)).toEqual([targets[0].targetId]);
+    // Reclaim TRANSFERS rather than shares: two tasks pointing at one targetId
+    // would mean the first `done` closes the other's tab.
+    expect(conn.tasks.get(abandoned.name)!.tabs).toEqual({});
+    expect(conn.tasks.get(abandoned.name)!.currentTabId).toBeUndefined();
+    expect(Object.values(conn.tasks.get(next.name)!.tabs)).toEqual([targets[0].targetId]);
+  });
 
-    await service.done(first.name);
-    expect(targets).toHaveLength(1); // the tab it no longer owns survives
+  it('never takes a tab from a task whose owner is still alive', async () => {
+    writeProfile('nosteal', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets, calls } = makeTargetedConn('nosteal@endpoint-0');
+    attach(service, 'nosteal', conn);
+
+    // No sessionId, so the owner can never be proven gone — the ordinary case
+    // for a non-Claude harness. Stealing here would leave the first agent's
+    // next `click`/`screenshot` throwing "No tabs open for this task".
+    const live = await service.start('nosteal', { url: 'https://example.com/docs' });
+    const other = await service.start('nosteal', { url: 'https://example.com/docs' });
+
+    expect(createTargetCount(calls)).toBe(2);
+    expect(targets).toHaveLength(2);
+    expect(Object.values(conn.tasks.get(live.name)!.tabs)).toHaveLength(1);
+    expect(Object.values(conn.tasks.get(other.name)!.tabs)).toHaveLength(1);
+  });
+
+  it('never adopts an unowned tab — that is the user\'s own tab', async () => {
+    writeProfile('usertab', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets, calls } = makeTargetedConn('usertab@endpoint-0', {
+      pages: [{ targetId: 'users-own-tab', url: 'https://example.com/docs' }],
+    });
+    attach(service, 'usertab', conn);
+
+    const started = await service.start('usertab', { url: 'https://example.com/docs' });
+
+    // Adopting it would make this task's `done` close a tab the user opened.
+    expect(createTargetCount(calls)).toBe(1);
+    expect(targets).toHaveLength(2);
+    expect(Object.values(conn.tasks.get(started.name)!.tabs)).not.toContain('users-own-tab');
+
+    await service.done(started.name);
+    expect(targets.map((t) => t.targetId)).toEqual(['users-own-tab']);
+  });
+
+  it('never reclaims from an abandoned task that is mid-recording', async () => {
+    writeProfile('recl-rec', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets, calls } = makeTargetedConn('recl-rec@endpoint-0');
+    attach(service, 'recl-rec', conn);
+
+    const abandoned = await service.start('recl-rec', {
+      url: 'https://example.com/docs',
+      sessionId: GONE_SESSION,
+    });
+    (service as unknown as { recordings: Map<string, unknown> }).recordings.set(abandoned.name, {
+      outputPath: '/tmp/x.mp4',
+      startedAt: Date.now(),
+    });
+
+    await service.start('recl-rec', { url: 'https://example.com/docs' });
+
+    // Taking the recorded target would truncate the capture on the next `done`.
+    expect(createTargetCount(calls)).toBe(2);
+    expect(targets).toHaveLength(2);
+    expect(Object.values(conn.tasks.get(abandoned.name)!.tabs)).toHaveLength(1);
   });
 
   it('matches a bare origin against the trailing-slash form Chrome reports', async () => {
     writeProfile('dedupurl', ['cdp://localhost:9222']);
     const service = new BrowserService();
-    const { conn, calls } = makeTargetedConn('dedupurl@endpoint-0', {
-      pages: [{ targetId: 'live-1', url: 'https://example.com/' }],
-    });
+    const { conn, calls } = makeTargetedConn('dedupurl@endpoint-0');
     attach(service, 'dedupurl', conn);
 
-    const started = await service.start('dedupurl', { url: 'https://example.com' });
-
-    expect(createTargetCount(calls)).toBe(0);
-    expect(Object.values(conn.tasks.get(started.name)!.tabs)).toEqual(['live-1']);
-  });
-
-  it('does not adopt a different URL', async () => {
-    writeProfile('dedupmiss', ['cdp://localhost:9222']);
-    const service = new BrowserService();
-    const { conn, targets, calls } = makeTargetedConn('dedupmiss@endpoint-0', {
-      pages: [{ targetId: 'live-1', url: 'https://example.com/a' }],
+    const abandoned = await service.start('dedupurl', {
+      url: 'https://example.com/',
+      sessionId: GONE_SESSION,
     });
-    attach(service, 'dedupmiss', conn);
+    const reclaimed = Object.values(conn.tasks.get(abandoned.name)!.tabs)[0];
 
-    await service.start('dedupmiss', { url: 'https://example.com/b' });
+    // Requested bare, reported with the trailing slash — raw string compare
+    // would miss every bare-origin match.
+    const next = await service.start('dedupurl', { url: 'https://example.com' });
 
     expect(createTargetCount(calls)).toBe(1);
+    expect(Object.values(conn.tasks.get(next.name)!.tabs)).toEqual([reclaimed]);
+  });
+
+  it('does not reclaim a different URL', async () => {
+    writeProfile('dedupmiss', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets, calls } = makeTargetedConn('dedupmiss@endpoint-0');
+    attach(service, 'dedupmiss', conn);
+
+    await service.start('dedupmiss', { url: 'https://example.com/a', sessionId: GONE_SESSION });
+    await service.start('dedupmiss', { url: 'https://example.com/b' });
+
+    expect(createTargetCount(calls)).toBe(2);
     expect(targets).toHaveLength(2);
   });
 
-  it('--fresh always opens its own tab', async () => {
+  it('--fresh skips the reclaim even when an abandoned task holds that URL', async () => {
     writeProfile('freshp', ['cdp://localhost:9222']);
     const service = new BrowserService();
     const { conn, targets, calls } = makeTargetedConn('freshp@endpoint-0');
     attach(service, 'freshp', conn);
 
-    const first = await service.start('freshp', { url: 'https://example.com/docs' });
+    const abandoned = await service.start('freshp', {
+      url: 'https://example.com/docs',
+      sessionId: GONE_SESSION,
+    });
     const second = await service.start('freshp', { url: 'https://example.com/docs', fresh: true });
 
     expect(createTargetCount(calls)).toBe(2);
     expect(targets).toHaveLength(2);
-    expect(Object.values(conn.tasks.get(first.name)!.tabs)).toHaveLength(1);
+    expect(Object.values(conn.tasks.get(abandoned.name)!.tabs)).toHaveLength(1);
     expect(Object.values(conn.tasks.get(second.name)!.tabs)).toHaveLength(1);
   });
 });
@@ -928,6 +998,43 @@ describe('BrowserService.reapAbandoned — abandoned-task reaper (RUSH-2622)', (
 
     expect(result.closed).toEqual([]);
     expect(result.skipped).toBe(1);
+    expect(targets).toHaveLength(1);
+  });
+
+  it('never session-reaps a launchId-only task — the registry is its only witness', async () => {
+    writeProfile('reap2b', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets } = makeTargetedConn('reap2b@endpoint-0');
+    attach(service, 'reap2b', conn);
+
+    // Every `agents run` mints a launchId, but AGENT_SESSION_ID is Claude-only
+    // and skipped on resume — so this is a live codex/droid/grok run whose
+    // launch pid has already exited and been pruned from the registry. Only a
+    // sessionId has a second witness (the process table); treating a missing
+    // registry entry as proof of death here would close a working agent's tabs.
+    const t = await startTask(service, 'reap2b', { launchId: 'launch-dead' });
+
+    const result = await service.reapAbandoned({ deps });
+
+    expect(result.closed).toEqual([]);
+    expect(result.skipped).toBe(1);
+    expect(conn.tasks.has(t.name)).toBe(true);
+    expect(targets).toHaveLength(1);
+  });
+
+  it('rejects a non-positive or non-numeric idle window instead of reaping everything', async () => {
+    writeProfile('reap9', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets } = makeTargetedConn('reap9@endpoint-0');
+    attach(service, 'reap9', conn);
+    const fresh = await startTask(service, 'reap9', {});
+
+    // `0` survives `??` and would close a task created a millisecond ago; NaN
+    // makes every comparison false and silently disables idle reaping.
+    await expect(service.reapAbandoned({ deps, idleMs: 0 })).rejects.toThrow(/positive number/);
+    await expect(service.reapAbandoned({ deps, idleMs: NaN })).rejects.toThrow(/positive number/);
+
+    expect(conn.tasks.has(fresh.name)).toBe(true);
     expect(targets).toHaveLength(1);
   });
 
