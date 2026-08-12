@@ -203,13 +203,17 @@ command owns them: `agents devices config <name> [key] [value] [--unset]
 [--json]` — bare opens an interactive settings menu on a TTY (and prints the
 resolved config when piped), `key` reads one value back, `key value` sets it
 with validation, `key --unset` restores the default, and `notes <text>`
-appends a free-form operator note. Device-scope keys (`agents.max-concurrent`,
-`scheduler.enabled`, `daemon.enabled`, `watchdog.enabled`,
-`browser.remote-control`, `browser.profile`, `notes`, the `ssh.*` profile
-overrides, `platform`, `auto-launch.*`) land in `fleet.devices.<name>.config`
-in `~/.agents/agents.yaml` — central, so any box can configure any device and
-the settings sync + back up with the repo (a `fleet.devices: all` declaration
-upgrades to an explicit roster map on the first config write). The device
+appends a free-form operator note. Device-scope keys split by **who reads
+them**. The ones a PEER reads (`agents.max-concurrent`, `watchdog.enabled`,
+`notes`, the `ssh.*` profile overrides, `platform`, `auto-launch.*`) land in
+`fleet.devices.<name>.config` in `~/.agents/agents.yaml` — central, so any box
+can configure any device and the settings sync + back up with the repo (a
+`fleet.devices: all` declaration upgrades to an explicit roster map on the
+first config write). The ones only the OWNING box reads (`scheduler.enabled`,
+`daemon.enabled`, `tmux.enabled`, `browser.remote-control`, `browser.profile`)
+stay in that machine's own doc, never sync, and are refused for a peer —
+`browser.remote-control` is a consent flag, and a broken tmux or a paused
+daemon is one machine's state, not fleet policy. The device
 registry stays the **discovery cache** (address, tailscale snapshot,
 reachability); the config's `ssh.*` / `platform` / user values overlay the
 registry profile at dial time (`src/lib/devices/resolve-profile.ts`), so

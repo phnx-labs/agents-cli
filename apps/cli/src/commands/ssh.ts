@@ -1401,15 +1401,18 @@ function registerDevicesCommands(program: Command): void {
     `,
     notes: `
       Keys: agents.max-concurrent, scheduler.enabled, daemon.enabled,
-      watchdog.enabled, browser.remote-control, browser.profile, notes,
-      ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,
+      watchdog.enabled, tmux.enabled, browser.remote-control, browser.profile,
+      notes, ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,
       ssh.identity-file, platform (windows|linux|macos|unknown),
       auto-launch.enabled, auto-launch.preferred — plus the user-scope
       interactive.host (stored centrally; the device name is syntax only).
 
       Booleans take on/off (or true/false). 'notes' appends one entry per
-      invocation. Values land in ~/.agents/agents.yaml under
-      fleet.devices.<name>.config and sync with 'agents repo push/pull'.
+      invocation. Values a PEER reads land in ~/.agents/agents.yaml under
+      fleet.devices.<name>.config and sync with 'agents repo push/pull'. The
+      keys only the owning box reads — scheduler.enabled, daemon.enabled,
+      tmux.enabled, browser.remote-control, browser.profile — stay in that
+      machine's own doc, never sync, and can only be set on the device itself.
       ssh.* / platform / user overlay the discovered registry profile at dial
       time. scheduler.enabled / daemon.enabled take effect when the daemon
       reloads or restarts on that device.

@@ -721,15 +721,18 @@ email) into a single row. Use `agents devices harnesses` for the per-install vie
       agents devices config mac-mini auto-launch.preferred on   # boost in auto-launch ranking
       agents devices config zion interactive.host zion          # user scope: where agents show you artifacts
       agents devices config mac-mini --json                     # machine-readable keys: agents.max-concurrent, scheduler.enabled, daemon.enabled,
-      watchdog.enabled, browser.remote-control, browser.profile, notes,
-      ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,
+      watchdog.enabled, tmux.enabled, browser.remote-control, browser.profile,
+      notes, ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,
       ssh.identity-file, platform (windows|linux|macos|unknown),
       auto-launch.enabled, auto-launch.preferred — plus the user-scope
       interactive.host (stored centrally; the device name is syntax only).
 
       booleans take on/off (or true/false). &#39;notes&#39; appends one entry per
-      invocation. values land in ~/.agents/agents.yaml under
-      fleet.devices.&lt;name&gt;.config and sync with &#39;agents repo push/pull&#39;.
+      invocation. values a peer reads land in ~/.agents/agents.yaml under
+      fleet.devices.&lt;name&gt;.config and sync with &#39;agents repo push/pull&#39;. the
+      keys only the owning box reads — scheduler.enabled, daemon.enabled,
+      tmux.enabled, browser.remote-control, browser.profile — stay in that
+      machine&#39;s own doc, never sync, and can only be set on the device itself.
       ssh.* / platform / user overlay the discovered registry profile at dial
       time. scheduler.enabled / daemon.enabled take effect when the daemon
       reloads or restarts on that device.
@@ -748,15 +751,18 @@ email) into a single row. Use `agents devices harnesses` for the per-install vie
       agents devices config mac-mini auto-launch.preferred on   # boost in auto-launch ranking
       agents devices config zion interactive.host zion          # user scope: where agents show YOU artifacts
       agents devices config mac-mini --json                     # machine-readable</code></pre><h4>Notes</h4><p class="notes">Keys: agents.max-concurrent, scheduler.enabled, daemon.enabled,
-      watchdog.enabled, browser.remote-control, browser.profile, notes,
-      ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,
+      watchdog.enabled, tmux.enabled, browser.remote-control, browser.profile,
+      notes, ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,
       ssh.identity-file, platform (windows|linux|macos|unknown),
       auto-launch.enabled, auto-launch.preferred — plus the user-scope
       interactive.host (stored centrally; the device name is syntax only).
 
       Booleans take on/off (or true/false). &#39;notes&#39; appends one entry per
-      invocation. Values land in ~/.agents/agents.yaml under
-      fleet.devices.&lt;name&gt;.config and sync with &#39;agents repo push/pull&#39;.
+      invocation. Values a PEER reads land in ~/.agents/agents.yaml under
+      fleet.devices.&lt;name&gt;.config and sync with &#39;agents repo push/pull&#39;. The
+      keys only the owning box reads — scheduler.enabled, daemon.enabled,
+      tmux.enabled, browser.remote-control, browser.profile — stay in that
+      machine&#39;s own doc, never sync, and can only be set on the device itself.
       ssh.* / platform / user overlay the discovered registry profile at dial
       time. scheduler.enabled / daemon.enabled take effect when the daemon
       reloads or restarts on that device.
