@@ -14,11 +14,14 @@ date: 2026-08-12
 
 QM is genuinely multi-user but deliberately single-agent: one org agent with per-person/per-room scoped state, where any scope can pin its own model and harness but there is only one agent identity and one Slack bot. Its identity surface is OIDC sign-in only — the built-in email-link broker is itself a small OIDC server, Google Workspace is the documented IdP default, and the tree contains zero SAML, SCIM, Entra, Okta, or Workday code; the only automated directory sync is the Slack roster. Mapped against 21 real companies from seed to public enterprise, that lands exactly where YC's portfolio lives: seed/Series A Google-Workspace startups can adopt it today, Series B/C works when the IdP speaks OIDC and the suite is Google, growth companies need a fork (SAML/SCIM/M365 are absent but MIT-forkable), and enterprises plus non-tech small businesses are out — the former on identity and hardening grounds, the latter because there is no managed vendor to buy from.
 
+v2 adds the operational half: QM is five Terraform-provisioned services plus Postgres with in-process workers, one-run-per-session serialization, admin-panel-only observability (no Prometheus/Sentry/alerting), no CHANGELOG, pre-1.0 versioning, and a first-12-days issue tracker already carrying four silent-failure deploy bugs. There is deliberately no QM Cloud ("we wanted something we could own and host ourselves" — YC), so the n8n-style escape from the ops tax doesn't exist; managed alternatives at $18-30/seat (Copilot, Claude, ChatGPT, Dust, Glean) absorb the companies that lack a platform engineer, and a reseller selling QM-into-your-AWS appeared one day after launch. Self-hosting QM is rational precisely when the platform engineer already exists and the sandbox/multiplayer capabilities are needed — the YC-portfolio profile, again.
+
 ## Focus for review
 
 - Whether QM's identity surface (OIDC-only sign-in, no SAML/SCIM, Slack-roster directory sync) matches what companies at each stage actually require.
 - The company-by-stage matrix as a visualization of who could adopt QM today vs after a fork vs not at all.
 - The multi-agent question: QM is one org agent with scoped state, not a multi-agent platform.
+- v2 additions: performance/scale architecture, the real operational overhead (Terraform, migrations, backups, the first 12 days of deploy bugs), observability gaps, developer reception, and the n8n-paradox economics of self-host vs managed.
 
 ## Intent
 
@@ -142,6 +145,69 @@ Caveats carried from the research: Theseus headcount is disputed (3 vs 10-12 by 
 
 <!-- COMPANY_MATRIX -->
 
+## Performance and scale, from the code
+
+The scaling design is "Postgres is everything": the run queue is a Postgres table claimed with `SELECT … FOR UPDATE SKIP LOCKED` (`src/runs/postgres-run-store.ts:140-158`), and a unique index enforces **one running run per session** (`postgres-run-store.ts:69`) — a conversation is strictly serialized; parallelism comes from many sessions in flight. Workers are in-process threads of the core service (default `workers: 16`, `src/config.ts:408`), polling the queue every 250ms (`src/wiring.ts:1341`); a standalone worker entrypoint exists (`src/runs/worker-main.ts`) but neither the AWS nor the Fly template deploys a worker tier — the reference deployment is **one core task** (`desiredCount ?? 1`, `cli/src/backends/aws.ts:1288-1289`; a single `shared-cpu-1x / 2GB` VM on Fly, `cli/templates/fly/core.toml:26-30`).
+
+Multiple core replicas are possible — a Postgres advisory-lock leader lease keeps the singleton loops (cron, reaper, monitor poller) from double-firing (`src/persistence/leader-lease.ts:69`), and the instance registry exists for blue/green drain, not load balancing (`src/runs/instance-registry.ts:40-57`). Two real ceilings for a growing org:
+
+- **Connection fan-out.** There is no shared connection pool: 23 stores each call `createPgPool` with no `max` set (node-pg defaults to 10 per pool, `src/persistence/pg-pool.ts:65`), so one core process can hold 20+ pools against the default `db.t4g.small` RDS with 20GB storage (`cli/templates/aws/main.tf:508-518`).
+- **Per-principal, not per-org, throughput controls.** Rate limit defaults to 60 requests/min/principal (`src/config.ts:388-389`); spend ceilings (`BUDGET_USD_PER_WINDOW`, `ORG_BUDGET_USD_PER_WINDOW`) default to Infinity.
+
+Sandboxes are persistent per scope, not per run — local Docker names a container per scope with a persistent volume (`src/sandbox/local-sandbox.ts:79-80`), AWS uses Lambda microVMs at 4 vCPU / 8GB / 8GB disk with an 8-hour lifetime and pre-rotation at 7.5h (`src/sandbox/aws-sandbox.ts:110-116`), so cold starts hit the first turn in a scope, not every turn. Latency is observable in-product: the metrics sink records a per-turn phase breakdown (TTFT, queue, provision, exec, stream — `src/admin/metrics-sink.ts:4-39`) with p50/p95/p99 computed in the admin Metrics tab. No stated user or throughput ceiling exists anywhere in the docs; the honest reading is "sized for one org of startup headcount, scale past that unmeasured."
+
+Measured on the local dev instance (this machine, idle): core 334MB + web 107MB + admin 101MB + portal 104MB + dev supervisor 94MB of Node RSS, plus ~91MB Postgres and a 446MB sandbox image — roughly 1GB of memory before the first turn runs.
+
+## What operating QM actually takes
+
+This is real infrastructure, not an npm install. The reference AWS deployment (`cli/templates/aws/main.tf`, 840 lines of Terraform) provisions a VPC, ALB, ECS Fargate cluster, ECR, Cloud Map, IAM roles, a DynamoDB deploy-lock table, RDS Postgres, an S3 artifact bucket, Secrets Manager, CloudFront, and CloudWatch log groups — running **five services** (core, web-ui, admin, portal, auth). Fly is the lighter path (five small apps). The `qm` CLI owns the lifecycle (`init → check → doctor → plan → up --yes → check --live`, `docs/deploy-directory.md:118`) and versions are consumed as the pinned `@yc-software/qm` npm package (currently **0.1.6**), not a git checkout.
+
+The sharp edges an operator inherits:
+
+| Concern | What ships | The gap |
+| --- | --- | --- |
+| Migrations | Idempotent lazy DDL under an advisory lock (`src/persistence/pg-pool.ts:45`); no migration framework | No down-migrations; `rollback` restores code/config, "never data" (`docs/deploy-directory.md:122`) |
+| Backups | Pre-deploy RDS snapshot + RDS automated backups (retention ≥1 day enforced) | Restore is explicitly operator-run; no continuous backup story beyond RDS |
+| Storage growth | S3 artifact bucket | "File artifacts have no expiry … can accumulate indefinitely" (`SECURITY.md:147-151`) |
+| Upgrades | CI-enforced version bumps, GHCR images pinned by digest | Operator must bump the pin and re-deploy; no auto-update |
+| Alerting | Nothing | No PagerDuty/webhook hooks; `/healthz` always returns `{ok:true}` without checking the DB (`src/api/routes/index.ts:29`) |
+
+Twelve days post-launch, the issue tracker is already an operator's-eye view of these edges: [#354](https://github.com/yc-software/qm/issues/354) — removing the Slack integration silently renamed the config-derived S3 bucket, so Terraform proposed **destroying the bucket holding all agent files**; [#350](https://github.com/yc-software/qm/issues/350) — custom sandbox tools work on Fly but silently fail on AWS while `qm check` passes; [#328](https://github.com/yc-software/qm/issues/328) — adding a domain restriction silently dropped the email allow-list and locked users out; [#339](https://github.com/yc-software/qm/issues/339) — a race in memory consolidation silently loses concurrent writes. All four are the silent-failure class that costs unattended operators the most.
+
+## Observability: admin-panel-only
+
+QM measures itself well and exports nothing. Per-turn phase metrics (TTFT, queue, provision, exec, stream, cache reads — `src/admin/metrics-sink.ts:4-39`), a Postgres error log, egress and credential-usage audit sinks, captured model requests per session (on by default, `src/config.ts:736`), and live run state over SSE — all surfaced only in the admin UI. A repo-wide grep for `prometheus|opentelemetry|statsd|datadog|sentry` returns zero hits; logging is 155 bare `console.log/error` call sites (no structured logger), landing wherever stdout goes (CloudWatch on AWS). For a team that already runs Grafana/Datadog, QM is a black box until someone builds an exporter; for getting paged when it breaks, there is nothing to wire a pager to.
+
+## How developers are receiving it (first 12 days)
+
+Repo signal as of Aug 12: 13.2k stars, 1.5k forks, 89 open issues, 106 open PRs vs 140 closed/merged, last commit Aug 11. The open issues skew toward deploy/infra pain (AWS/Fly/Terraform), Postgres pool reliability, and auth bugs — not feature asks. The contribution model: feature proposals must be human-written prose in `adrs/` ("Please do not have AI artificially expand what you'd like to do into a formal proposal" — `CONTRIBUTING.md`), while bug-fix code PRs are accepted; in practice 8 of the 10 most recent open PRs are ordinary code PRs, and the sampled open issues show no visible maintainer replies yet.
+
+From the [681-point HN launch thread](https://news.ycombinator.com/item?id=49126604), the recurring themes:
+
+- **Criticism:** the human-written-only policy read as ironic for an AI-built project ("an ai project, written by ai, requiring human-written text"); the shipped 22k-token "anti-slop" skill mocked as its own slop; "who is this for" skepticism versus Claude Cowork / Microsoft Copilot / Block's Buzz; and the one substantive security take — "if the agent is acting as me, then security wise it can do anything I can do."
+- **Praise:** the per-person-scope + shared-room architecture ("the hardest problem in multiplayer agents … is scoping and QM's per-person scopes plus shared rooms is a sane answer" — a builder in the same space); the contribution policy defended as a spec-quality gate; README quality.
+- **Production evidence:** exactly one firm claims production deployments — a consultancy deploying QM into customer AWS accounts and already selling a [DIY-vs-managed cost calculator](https://digitize.llc/qm/calculator/). The most engaged issue reporters are people who deployed this week and hit the silent-failure bugs above. No "we ran it for two weeks" write-ups exist yet, and no abandonment reports either — it is 12 days old.
+
+## The n8n paradox — free license, paid operations
+
+n8n is the instructive precedent: free to self-host, yet worth $5.2B ([SAP investment, May 2026](https://tech.eu/2026/05/12/n8n-s-valuation-doubles-to-5-2bn-following-sap-strategic-investment/)) largely by charging for the hosted version of software anyone can run (Cloud tiers €20-667/mo — [n8n pricing](https://n8n.io/pricing/); a third-party estimate puts ~55% of revenue on cloud subscriptions — [Sacra](https://sacra.com/c/n8n/), not company-disclosed). The pattern repeats wherever it can be measured:
+
+- **GitLab (the only first-party split, 10-K-mandated):** SaaS is $296M (32%) vs self-managed $568M (59%) of FY26 revenue ([10-K](https://www.sec.gov/Archives/edgar/data/1653482/000162828026018731/gtlb-20260131.htm)) — large staffed orgs genuinely self-host cheaper; everyone else pays for "on time upgrades and patches" and compliance-ready hosting.
+- **Metabase names the breakeven:** "if they spend ~2 hours a month dealing with your self-hosted Metabase installation, Metabase Cloud will have already paid for itself" ([Why Metabase Cloud](https://www.metabase.com/blog/why-metabase-cloud)) — though it also concedes self-hosting wins for HIPAA/PCI.
+- **Supabase kills the compliance-rides-along assumption:** "Supabase's SOC 2 compliance does not transfer to environments outside of Supabase's control" ([docs](https://supabase.com/docs/guides/security/soc-2-compliance)). Self-hosters bring their own attestations.
+
+What people are really buying in every case is the **operational tax** (upgrades, patching, incidents, uptime) and the **compliance tax** (SOC2/HIPAA attestations procurement demands) moved onto a vendor.
+
+Applied to QM, three things follow:
+
+1. **QM has no one to pay.** There is no QM Cloud, and that is YC's stated choice, not a gap: "We also wanted something that we could own and host ourselves" ([qm.ycombinator.com](https://qm.ycombinator.com/index.html)). Unlike n8n/GitLab/Metabase, the escape hatch from the ops tax does not exist — the §Operating section above *is* the product.
+2. **The managed alternative isn't hosted-QM, it's a different product.** The buy-instead set clusters at $18-30/seat/month with SSO, admin controls, and compliance certs bundled: M365 Copilot $18-30, Claude Team $20-25 / Claude Enterprise ($20/seat + metered, with SAML/SCIM/audit logs), ChatGPT Business $20-25, Dust $24-30, Glean (sales-only). A company whose blocker is compliance or headcount skips QM entirely rather than self-hosting it.
+3. **The reseller cottage industry has already started.** One day after launch, Digitize LLC began selling managed QM deployments into customers' own AWS accounts — $4,500 setup + $850/mo operate tier ([digitize.llc/qm](https://digitize.llc/qm/)). That is exactly the shape the n8n pattern predicts when a free tool has a real ops tax and no first-party cloud: not multi-tenant SaaS competing with Claude Enterprise, but ops-as-a-service riding QM's infra-in-your-account design. The open question is whether YC eventually reverses and ships a QM Cloud, or leaves that margin to resellers.
+
+The arithmetic for the target buyer: QM at $0/license plus a slice of a platform engineer (five services, Postgres, sandbox pipeline, upgrades — §Operating above) versus ~$20-30/seat/month for a managed assistant with zero ops. At 20 people, the managed alternative costs ~$5-7k/year; a fraction of an engineer costs more. Self-hosting QM is rational when the platform engineer already exists and the sandbox/multiplayer capabilities are actually needed — which is, again, exactly a YC-portfolio-shaped company.
+
+<!-- N8N_PARADOX -->
+
 ## Findings
 
 ### Who can adopt QM, and when
@@ -156,6 +222,14 @@ Caveats carried from the research: Theseus headcount is disputed (3 vs 10-12 by 
 
 The one-sentence answer to "is it enterprise-adoptable": **QM is adoptable today by exactly the companies YC funds, and that is a design choice, not an accident** — identity lands where a 10-50-person Google-Workspace startup already is, and every layer an enterprise would demand (SAML, SCIM, HRIS flow, Microsoft, roles) is absent but forkable under MIT.
 
+### The operational verdict, added in v2
+
+The identity verdict said *who is allowed in the door*; the operational angles say *who can afford to keep the lights on*. They point at the same buyer with one sharpened caveat:
+
+- **The startup that fits QM's identity profile still pays an ops tax it may not want.** Five services, Terraform-provisioned AWS (or five Fly apps), Postgres, a sandbox image pipeline, version-pin upgrades, no alerting, and a first-12-days issue tracker full of silent-failure deploy bugs. QM's stated requirement of "at least one platform engineer" is real: this is a part-time infrastructure product, not an install-and-forget app. A 10-person seed startup has the identity fit but often not the appetite — which is exactly the gap a managed offering would fill, and one consultancy is already selling QM-into-your-AWS deployments with a DIY-vs-managed calculator.
+- **Scale is unproven past one startup-sized org, by design.** One-run-per-session serialization, an in-process worker pool on a single default core task, 20+ unpooled Postgres connection pools against a `db.t4g.small`, and no published ceiling. None of that blocks a 30-person company; all of it is unmeasured territory for a 500-person one.
+- **Bugs are handled by one team's bandwidth.** Test culture is strong (the test tree outweighs the source tree; zero TODOs; 7-day dependency quarantine) but there is no CHANGELOG, versions are pre-1.0, and feature contributions are prose-only ADRs the maintainers implement themselves — so fix latency is bounded by YC's attention, not community throughput. The candid SECURITY.md limitation list is the most honest maturity signal in the repo.
+
 <!-- VERDICT -->
 
 ## Evidence
@@ -163,3 +237,5 @@ The one-sentence answer to "is it enterprise-adoptable": **QM is adoptable today
 - QM identity/SSO/connector audit: file:line citations inline above, against `github.com/yc-software/qm` at commit 3cb5623 (Aug 12), audited in a local worktree.
 - Enterprise-readiness signals: Postgres-backed audit log (`src/audit/audit-log.ts:1-19`), org/scope budgets and rate limits (`src/config.ts:740-747`), egress allowlists with enforcement explicitly "conditional" (`SECURITY.md:140-142`), self-hosted Postgres in the operator's own cloud account (`README.md:63,112-113`), MIT license.
 - QM's own posture: "It is early, experimental software … QM is not a hardened public or multi-tenant service boundary" (`SECURITY.md:3-5,26-33`).
+- v2 performance/ops/observability audit: run queue (`src/runs/postgres-run-store.ts:140-158`), worker pool (`src/config.ts:408`, `src/wiring.ts:1333-1341`), leader lease (`src/persistence/leader-lease.ts:69`), pool fan-out (`src/persistence/pg-pool.ts:65` + 23 `createPgPool` call sites), sandbox lifecycles (`src/sandbox/local-sandbox.ts:79-80`, `aws-sandbox.ts:110-116`), Terraform (`cli/templates/aws/main.tf`), migrations/backup/rollback (`docs/deploy-directory.md:103,118,122`), metrics/error sinks (`src/admin/metrics-sink.ts:4-39`), healthz (`src/api/routes/index.ts:29`), CONTRIBUTING.md, CI (`.github/workflows/cicd.yml`), test-tree size (379 test files, ~89k lines vs ~77k source). Local footprint numbers measured on this report's own dev instance.
+- Reception: [HN launch thread](https://news.ycombinator.com/item?id=49126604) (681 points, 164 comments), GitHub issues [#354](https://github.com/yc-software/qm/issues/354), [#350](https://github.com/yc-software/qm/issues/350), [#328](https://github.com/yc-software/qm/issues/328), [#339](https://github.com/yc-software/qm/issues/339), repo counters read from the rendered GitHub pages on Aug 12 (13.2k stars, 89 open issues, 106 open PRs). Reddit threads exist but were unreachable (blocked) — titles only, not cited as content; lobste.rs confirmed zero coverage.
