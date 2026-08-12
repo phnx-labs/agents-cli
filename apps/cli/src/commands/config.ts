@@ -78,7 +78,8 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
     case 'project':
       return raw.trim();
     case 'device': {
-      switch (parsed.property) {
+      const property = parsed.property;
+      switch (property) {
         case 'max-agents':
           if (!/^\d+$/.test(raw.trim())) {
             throw new Error(`Config key '${key}' expects an integer, got '${raw}'.`);
@@ -87,6 +88,7 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
         case 'scheduler':
         case 'daemon':
         case 'watchdog':
+        case 'tmux':
         case 'browser.remote-control':
           return parseBool(raw, key);
         case 'notes':
@@ -94,6 +96,13 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
         case 'browser.profile':
           return raw.trim();
       }
+      // A device property with no arm above used to fall out of the switch and
+      // return `undefined`, so the write failed downstream with "expects a
+      // boolean, got undefined" instead of naming the real gap. The `never`
+      // binding makes adding a DeviceConfigProperty without a parse rule a
+      // compile error rather than a runtime mystery.
+      const unhandled: never = property;
+      throw new Error(`Config key '${key}' has no parse rule for device property '${String(unhandled)}'.`);
     }
   }
 }

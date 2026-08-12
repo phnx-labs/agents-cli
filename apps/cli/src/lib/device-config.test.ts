@@ -318,6 +318,7 @@ describe('listConfig', () => {
       'ssh.bundle-key',
       'ssh.identity-file',
       'ssh.user',
+      'tmux.enabled',
       'usage.primary-host',
       'watchdog.enabled',
     ]);
@@ -360,6 +361,34 @@ describe('scheduler gate (scheduler.enabled=false on this device)', () => {
     expect(() => setConfigValue('scheduler.enabled', false, { device: 'mac-mini' }))
       .toThrow(/machine-local/);
     expect(isSchedulerEnabled()).toBe(true);
+  });
+});
+
+describe('tmux gate (tmux.enabled=false on this device)', () => {
+  it('defaults to enabled when unset (unset = today’s behavior: wrap)', async () => {
+    const { isTmuxEnabled } = await freshModules();
+    expect(isTmuxEnabled()).toBe(true);
+  });
+
+  it('isTmuxEnabled reflects the stored value', async () => {
+    const { isTmuxEnabled, setConfigValue } = await freshModules();
+    setConfigValue('tmux.enabled', false);
+    expect(isTmuxEnabled()).toBe(false);
+    setConfigValue('tmux.enabled', true);
+    expect(isTmuxEnabled()).toBe(true);
+  });
+
+  it('persists to this box’s own doc, never the fleet-shared file', async () => {
+    const { setConfigValue } = await freshModules();
+    setConfigValue('tmux.enabled', false);
+    expect(readCentral()).not.toMatch(/tmuxEnabled/);
+  });
+
+  it('cannot be set for a peer at all — it is machine-local', async () => {
+    const { isTmuxEnabled, setConfigValue } = await freshModules();
+    expect(() => setConfigValue('tmux.enabled', false, { device: 'mac-mini' }))
+      .toThrow(/machine-local/);
+    expect(isTmuxEnabled()).toBe(true);
   });
 });
 

@@ -30,6 +30,8 @@ import { recordRunName } from './session/run-names.js';
 import { mailboxDir, isValidMailboxId } from './mailbox.js';
 import { composeWin32CommandLine } from './platform/index.js';
 import { isTmuxInstalled } from './tmux/binary.js';
+import { isTmuxEnabled } from './device-config.js';
+import { machineId } from './machine-id.js';
 import { shellQuote } from './ssh-exec.js';
 import { resolveClaudeSetupToken } from './claude-account-token.js';
 import { codexEditWritableRoots, codexPolicyArgs } from './codex-policy.js';
@@ -1534,6 +1536,8 @@ export interface TmuxWrapContext {
   raw: boolean;
   /** The AGENTS_NO_TMUX=1 escape hatch. */
   noTmuxEnv: boolean;
+  /** This device's `tmux.enabled` config — false turns the wrap off for every launch on this box. */
+  configEnabled: boolean;
   /** Whether a tmux binary is on PATH. */
   tmuxAvailable: boolean;
 }
@@ -1547,12 +1551,13 @@ export interface TmuxWrapContext {
  * focus` re-attach a live session without forking it. Pure so the gate is unit-
  * tested independently of the (side-effecting) spawn.
  *
- * All five guards must pass:
+ * All seven guards must pass:
  *   - interactive     — a headless `-p` run has no TTY to attach; keep bare spawn.
  *   - not Windows     — no tmux path on win32.
  *   - not already in tmux — nesting tmux-in-tmux is pointless and confusing.
  *   - not --raw       — explicit opt-out.
  *   - not AGENTS_NO_TMUX=1 — env opt-out (CI, scripts, the shim passthrough path).
+ *   - tmux.enabled    — this device's durable opt-out, for a box whose tmux is broken.
  *   - tmux installed  — otherwise there is nothing to wrap with.
  */
 export function shouldWrapInTmux(ctx: TmuxWrapContext): boolean {
@@ -1561,6 +1566,7 @@ export function shouldWrapInTmux(ctx: TmuxWrapContext): boolean {
   if (ctx.inTmux) return false;
   if (ctx.raw) return false;
   if (ctx.noTmuxEnv) return false;
+  if (!ctx.configEnabled) return false;
   if (!ctx.tmuxAvailable) return false;
   return true;
 }
@@ -1683,7 +1689,7 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
   const name = slugifyName(`ag-${options.agent}-${idSeed}`);
 
   const RED = '\x1b[31m', GRAY = '\x1b[90m', OFF = '\x1b[0m';
-  const NO_TMUX_TIP = `${GRAY}  Tip: re-run with --no-tmux to launch the agent directly and see its full output.${OFF}\n\n`;
+  const NO_TMUX_TIP = `${GRAY}  Tip: re-run with --no-tmux to launch the agent directly and see its full output.\n  If tmux is broken on this machine, turn the wrap off for good: agents config set devices.${machineId()}.tmux off${OFF}\n\n`;
 
   // Recap a dead pane's tail into THIS shell's stderr. The pane-died hook
   // detaches the client the instant the agent exits, so a fast failure (a
@@ -1995,6 +2001,7 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     inTmux: !!process.env.TMUX,
     raw: options.raw === true,
     noTmuxEnv: process.env.AGENTS_NO_TMUX === '1',
+    configEnabled: isTmuxEnabled(),
     tmuxAvailable: isTmuxInstalled(),
   })) {
     timer.mark('startup');

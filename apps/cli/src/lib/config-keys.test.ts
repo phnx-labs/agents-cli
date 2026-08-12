@@ -122,6 +122,7 @@ describe('config-keys', () => {
         'usage.primary-host',
         'browser.profile',
         'devices.mac-mini.max-agents',
+        'devices.mac-mini.tmux',
       ]) {
         expect(formatConfigKey(parseConfigKey(key))).toBe(key);
       }
@@ -134,6 +135,7 @@ describe('config-keys', () => {
       expect(devicePropertyToConfigName('scheduler')).toBe('scheduler.enabled');
       expect(devicePropertyToConfigName('daemon')).toBe('daemon.enabled');
       expect(devicePropertyToConfigName('watchdog')).toBe('watchdog.enabled');
+      expect(devicePropertyToConfigName('tmux')).toBe('tmux.enabled');
       expect(devicePropertyToConfigName('browser.remote-control')).toBe('browser.remote-control');
       expect(devicePropertyToConfigName('notes')).toBe('notes');
       expect(devicePropertyToConfigName('browser.profile')).toBe('browser.profile');

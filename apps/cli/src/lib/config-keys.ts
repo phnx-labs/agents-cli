@@ -68,6 +68,7 @@ export type DeviceConfigProperty =
   | 'scheduler'
   | 'daemon'
   | 'watchdog'
+  | 'tmux'
   | 'browser.remote-control'
   | 'notes'
   | 'browser.profile';
@@ -77,6 +78,7 @@ const DEVICE_CONFIG_PROPERTIES: DeviceConfigProperty[] = [
   'scheduler',
   'daemon',
   'watchdog',
+  'tmux',
   'browser.remote-control',
   'notes',
   'browser.profile',
@@ -121,6 +123,7 @@ export function formatAgentVersion(agent: AgentId, version: string): string {
  *   devices.<name>.scheduler
  *   devices.<name>.daemon
  *   devices.<name>.watchdog
+ *   devices.<name>.tmux
  *   devices.<name>.browser.remote-control
  *   devices.<name>.notes
  *   devices.<name>.browser.profile
@@ -158,7 +161,7 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   }
 
   const deviceMatch = raw.match(
-    /^devices\.(.+)\.(max-agents|scheduler|daemon|watchdog|notes|browser\.remote-control|browser\.profile)$/,
+    /^devices\.(.+)\.(max-agents|scheduler|daemon|watchdog|tmux|notes|browser\.remote-control|browser\.profile)$/,
   );
   if (deviceMatch) {
     return {
@@ -251,6 +254,8 @@ export function devicePropertyToConfigName(property: DeviceConfigProperty): stri
       return 'daemon.enabled';
     case 'watchdog':
       return 'watchdog.enabled';
+    case 'tmux':
+      return 'tmux.enabled';
     case 'browser.remote-control':
       return 'browser.remote-control';
     case 'notes':

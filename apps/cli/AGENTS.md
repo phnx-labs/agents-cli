@@ -376,11 +376,22 @@ agents config set interactive.host zion
 agents config set browser.profile work
 agents config set devices.mac-mini.max-agents 4
 agents config set devices.mac-mini.scheduler off
+agents config set devices.mac-mini.tmux off
 ```
 
 The new command is a **facade over the existing YAML storage**
 (`run.defaults`, `model.tiers`, `config.interactiveHost`,
 `defaultBrowserProfile`, and `deviceConfig`). Fleet sync behavior is unchanged.
+
+`devices.<name>.tmux` (stored as `tmux.enabled`) is the durable form of
+`--no-tmux` / `AGENTS_NO_TMUX=1`: off makes every interactive `agents run` on that
+box spawn the agent directly instead of wrapping it in the shared-socket tmux
+session. It is machine-local by design — a broken or unwanted tmux is a property
+of one machine, so the value never enters the fleet-shared file and cannot be set
+for a peer. Off costs that box `%pane` addressing, so `agents sessions --active`
+can no longer tell co-located agents apart there and `agents focus` cannot
+re-attach its sessions. The gate is `shouldWrapInTmux`
+([`src/lib/exec.ts`](src/lib/exec.ts)), reading `isTmuxEnabled()`.
 
 `interactive.host` is a **user-level** preference: it lives in central
 `~/.agents/agents.yaml` under `config.interactiveHost`, syncs fleet-wide via

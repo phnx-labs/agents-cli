@@ -187,6 +187,19 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     description: 'Whether the daemon runs the watchdog pass on this device.',
   },
   {
+    name: 'tmux.enabled',
+    yamlKey: 'tmuxEnabled',
+    scope: 'device',
+    visibility: 'machine',
+    type: 'bool',
+    defaultValue: true,
+    description:
+      'Whether an interactive `agents run` on this device is wrapped in the shared-socket tmux session. ' +
+      'On gives every agent an addressable pane (`agents sessions --active` tells co-located agents apart, ' +
+      '`agents focus` re-attaches without forking). Off spawns the agent directly on this box — the durable ' +
+      'form of `--no-tmux`, for a machine whose tmux is broken or unwanted.',
+  },
+  {
     name: 'browser.remote-control',
     yamlKey: 'browserRemoteControl',
     scope: 'device',
@@ -594,6 +607,18 @@ export function assertSchedulerEnabled(): void {
     `The routines scheduler is disabled on this device (scheduler.enabled=false in ~/.agents/agents.yaml fleet.devices.${machineId()}.config). ` +
       `Re-enable with: agents devices config ${machineId()} scheduler.enabled on`,
   );
+}
+
+/**
+ * True unless this machine's config turns off the managed tmux wrap for
+ * interactive `agents run` launches (`tmux.enabled=false`).
+ *
+ * Read as one of the guards in `shouldWrapInTmux` (lib/exec.ts) — the durable,
+ * per-machine form of `--no-tmux` / `AGENTS_NO_TMUX=1`, for a box whose tmux is
+ * broken or unwanted. Unset means today's behavior: wrap.
+ */
+export function isTmuxEnabled(): boolean {
+  return getConfigValue('tmux.enabled').value !== false;
 }
 
 /** True unless this machine's config disables the daemon outright (top-level kill switch). */

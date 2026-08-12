@@ -135,7 +135,9 @@ so a launch that still fails lands in the caller's shell instead of a bare
 **nonzero** exit recaps too; a clean exit or a manual `Ctrl-b d` detach stays
 quiet. The `--no-tmux` / `--disable-tmux` flag (and `AGENTS_NO_TMUX=1`) bypass the
 wrapper entirely to spawn the agent with full stdio — the fastest way to see a
-launch failure raw.
+launch failure raw. When tmux itself is the problem on one box rather than one
+run, `agents config set devices.<name>.tmux off` turns the wrapper off there for
+good (machine-local; it never syncs to a peer).
 
 ## The health probe
 

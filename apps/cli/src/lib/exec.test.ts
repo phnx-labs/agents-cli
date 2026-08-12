@@ -521,6 +521,7 @@ describePosix('shouldWrapInTmux (interactive spawn-wrap gate)', () => {
     inTmux: false,
     raw: false,
     noTmuxEnv: false,
+    configEnabled: true,
     tmuxAvailable: true,
   };
 
@@ -548,6 +549,13 @@ describePosix('shouldWrapInTmux (interactive spawn-wrap gate)', () => {
 
   it('does not wrap when tmux is not installed', () => {
     expect(shouldWrapInTmux({ ...base, tmuxAvailable: false })).toBe(false);
+  });
+
+  it('does not wrap when this device set tmux.enabled=false', () => {
+    expect(shouldWrapInTmux({ ...base, configEnabled: false })).toBe(false);
+    // The config opt-out is independent of the per-run ones: it holds even when
+    // tmux is installed and no flag/env was passed.
+    expect(shouldWrapInTmux({ ...base, configEnabled: false, tmuxAvailable: true, raw: false })).toBe(false);
   });
 });
 
