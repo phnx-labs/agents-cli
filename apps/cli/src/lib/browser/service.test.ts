@@ -651,3 +651,400 @@ describe('navigate/screenshot — emit typed events (#11)', () => {
     expect(recs[0].quality).toBe('raw');
   });
 });
+
+// ─── RUSH-2622: leftover tabs ────────────────────────────────────────────────
+//
+// Three leaks fed the pile-up, each covered below: the startup about:blank was
+// never registered on the task (so `done` could not close it), a repeat `start`
+// on the same URL always opened another copy of the page, and nothing ever
+// stopped a task whose agent had exited.
+
+/** A CDP double backed by a real target list that create/close actually mutate. */
+function makeTargetedConn(profile: string, opts: { pages?: Array<{ targetId: string; url: string }> } = {}) {
+  const targets: Array<{ targetId: string; type: string; url: string; title: string }> = (
+    opts.pages ?? []
+  ).map((p) => ({ targetId: p.targetId, type: 'page', url: p.url, title: p.url }));
+  let seq = 0;
+  const calls: Array<{ method: string; params: any }> = [];
+
+  const conn = {
+    cdp: {
+      isOpen: true,
+      close: vi.fn(),
+      send: vi.fn(async (method: string, params: any = {}) => {
+        calls.push({ method, params });
+        switch (method) {
+          case 'Browser.getVersion':
+            return {};
+          case 'Target.getTargets':
+            return { targetInfos: targets.map((t) => ({ ...t })) };
+          case 'Target.createTarget': {
+            const targetId = `created-${++seq}`;
+            targets.push({ targetId, type: 'page', url: params.url, title: params.url });
+            return { targetId };
+          }
+          case 'Target.closeTarget': {
+            const i = targets.findIndex((t) => t.targetId === params.targetId);
+            if (i >= 0) targets.splice(i, 1);
+            return {};
+          }
+          case 'Target.activateTarget':
+            return {};
+          case 'Target.attachToTarget':
+            return { sessionId: `sess-${params.targetId}` };
+          case 'Page.navigate':
+            return {};
+          default:
+            throw new Error(`unexpected CDP call in test: ${method}`);
+        }
+      }),
+    },
+    port: 9222,
+    pid: 4242,
+    profileName: profile,
+    tasks: new Map(),
+    sessionCache: new Map(),
+  };
+  return { conn, targets, calls };
+}
+
+/** Seed a live connection so `start` reuses it instead of launching a browser. */
+function attach(service: any, profile: string, conn: unknown): void {
+  (service as { connections: Map<string, unknown> }).connections.set(`${profile}@endpoint-0`, conn);
+}
+
+function createTargetCount(calls: Array<{ method: string }>): number {
+  return calls.filter((c) => c.method === 'Target.createTarget').length;
+}
+
+describe('BrowserService.start — the startup about:blank is a task tab (RUSH-2622)', () => {
+  it('registers the blank tab it opens, so `done` can close it', async () => {
+    writeProfile('blankp', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets, calls } = makeTargetedConn('blankp@endpoint-0');
+    attach(service, 'blankp', conn);
+
+    const started = await service.start('blankp');
+
+    // The daemon opened exactly one page and it belongs to the task — before
+    // the fix `task.tabs` was `{}` and this tab outlived every `done`.
+    expect(targets).toHaveLength(1);
+    const task = conn.tasks.get(started.name)!;
+    expect(Object.values(task.tabs)).toEqual([targets[0].targetId]);
+    expect(task.currentTabId).toBeDefined();
+
+    await service.done(started.name);
+
+    expect(targets).toHaveLength(0);
+    expect(calls.some((c) => c.method === 'Target.closeTarget')).toBe(true);
+    expect(conn.tasks.has(started.name)).toBe(false);
+  });
+
+  it('leaves a page the daemon did not open alone', async () => {
+    writeProfile('blankp2', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets, calls } = makeTargetedConn('blankp2@endpoint-0', {
+      pages: [{ targetId: 'users-own-tab', url: 'https://news.example/' }],
+    });
+    attach(service, 'blankp2', conn);
+
+    const started = await service.start('blankp2');
+
+    // A page target already exists, so no blank is opened and nothing the user
+    // opened is adopted — `done` must never close somebody else's tab.
+    expect(createTargetCount(calls)).toBe(0);
+    expect(conn.tasks.get(started.name)!.tabs).toEqual({});
+
+    await service.done(started.name);
+    expect(targets.map((t) => t.targetId)).toEqual(['users-own-tab']);
+  });
+});
+
+describe('BrowserService.start — URL dedup (RUSH-2622)', () => {
+  it('takes over the live tab already showing that URL instead of opening a second one', async () => {
+    writeProfile('dedup', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets, calls } = makeTargetedConn('dedup@endpoint-0');
+    attach(service, 'dedup', conn);
+
+    const first = await service.start('dedup', { url: 'https://example.com/docs' });
+    const second = await service.start('dedup', { url: 'https://example.com/docs' });
+
+    // One page, one create — the second start adopted the first's tab.
+    expect(targets).toHaveLength(1);
+    expect(createTargetCount(calls)).toBe(1);
+
+    // Ownership TRANSFERS rather than being shared: two tasks pointing at one
+    // targetId would mean the first `done` closes the second task's tab.
+    const firstTask = conn.tasks.get(first.name)!;
+    const secondTask = conn.tasks.get(second.name)!;
+    expect(firstTask.tabs).toEqual({});
+    expect(firstTask.currentTabId).toBeUndefined();
+    expect(Object.values(secondTask.tabs)).toEqual([targets[0].targetId]);
+
+    await service.done(first.name);
+    expect(targets).toHaveLength(1); // the tab it no longer owns survives
+  });
+
+  it('matches a bare origin against the trailing-slash form Chrome reports', async () => {
+    writeProfile('dedupurl', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, calls } = makeTargetedConn('dedupurl@endpoint-0', {
+      pages: [{ targetId: 'live-1', url: 'https://example.com/' }],
+    });
+    attach(service, 'dedupurl', conn);
+
+    const started = await service.start('dedupurl', { url: 'https://example.com' });
+
+    expect(createTargetCount(calls)).toBe(0);
+    expect(Object.values(conn.tasks.get(started.name)!.tabs)).toEqual(['live-1']);
+  });
+
+  it('does not adopt a different URL', async () => {
+    writeProfile('dedupmiss', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets, calls } = makeTargetedConn('dedupmiss@endpoint-0', {
+      pages: [{ targetId: 'live-1', url: 'https://example.com/a' }],
+    });
+    attach(service, 'dedupmiss', conn);
+
+    await service.start('dedupmiss', { url: 'https://example.com/b' });
+
+    expect(createTargetCount(calls)).toBe(1);
+    expect(targets).toHaveLength(2);
+  });
+
+  it('--fresh always opens its own tab', async () => {
+    writeProfile('freshp', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets, calls } = makeTargetedConn('freshp@endpoint-0');
+    attach(service, 'freshp', conn);
+
+    const first = await service.start('freshp', { url: 'https://example.com/docs' });
+    const second = await service.start('freshp', { url: 'https://example.com/docs', fresh: true });
+
+    expect(createTargetCount(calls)).toBe(2);
+    expect(targets).toHaveLength(2);
+    expect(Object.values(conn.tasks.get(first.name)!.tabs)).toHaveLength(1);
+    expect(Object.values(conn.tasks.get(second.name)!.tabs)).toHaveLength(1);
+  });
+});
+
+describe('Task.lastActionAt — activity stamp (RUSH-2622)', () => {
+  it('starts equal to createdAt and advances on a task-scoped action', async () => {
+    writeProfile('stampp', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn } = makeTargetedConn('stampp@endpoint-0');
+    attach(service, 'stampp', conn);
+
+    const started = await service.start('stampp', { url: 'https://example.com/one' });
+    const task = conn.tasks.get(started.name)!;
+    expect(task.lastActionAt).toBe(task.createdAt);
+
+    const before = task.lastActionAt;
+    await new Promise((r) => setTimeout(r, 5));
+    await service.navigate(started.name, 'https://example.com/two');
+
+    // navigate resolves through findTask, which is where the stamp is applied —
+    // so every task-scoped action gets it without its own call site.
+    expect(task.lastActionAt).toBeGreaterThan(before);
+  });
+
+  it('persists the stamp to tasks.json and normalizes a pre-RUSH-2622 task on read', async () => {
+    writeProfile('loadp', ['cdp://localhost:9222']);
+    const service = new BrowserService() as any;
+
+    // A task written before the field existed.
+    const runtimeDir = path.join(TEST_BROWSER_DIR, 'loadp');
+    fs.mkdirSync(runtimeDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(runtimeDir, 'tasks.json'),
+      JSON.stringify({
+        legacy: { id: 'legacy', name: 'legacy', profile: 'loadp', tabs: {}, createdAt: 1000, pid: 0 },
+      })
+    );
+
+    const loaded = service.loadTaskState('loadp') as Map<string, { lastActionAt: number }>;
+    expect(loaded.get('legacy')!.lastActionAt).toBe(1000);
+  });
+});
+
+describe('BrowserService.reapAbandoned — abandoned-task reaper (RUSH-2622)', () => {
+  const LIVE_SESSION = '11111111-1111-4111-8111-111111111111';
+  const DEAD_SESSION = '22222222-2222-4222-8222-222222222222';
+
+  /** Only LIVE_SESSION resolves; nothing is live on the process table. */
+  const deps = {
+    listEntries: () => [
+      { pid: 111, agent: 'claude', sessionId: LIVE_SESSION, launchId: 'launch-live', startedAtMs: 1 },
+      { pid: 222, agent: 'claude', sessionId: DEAD_SESSION, launchId: 'launch-dead', startedAtMs: 1 },
+    ],
+    pidAlive: (pid: number) => pid === 111,
+    sessionIdOfPid: () => undefined,
+    sessionLiveOnProcessTable: async () => false,
+  };
+
+  async function startTask(
+    service: any,
+    profile: string,
+    identity: { sessionId?: string; launchId?: string }
+  ) {
+    return service.start(profile, { url: `https://example.com/${Math.random()}`, ...identity });
+  }
+
+  it('stops a task whose agent session is gone and leaves a live one alone', async () => {
+    writeProfile('reap1', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets } = makeTargetedConn('reap1@endpoint-0');
+    attach(service, 'reap1', conn);
+
+    const dead = await startTask(service, 'reap1', { sessionId: DEAD_SESSION, launchId: 'launch-dead' });
+    const live = await startTask(service, 'reap1', { sessionId: LIVE_SESSION, launchId: 'launch-live' });
+    expect(targets).toHaveLength(2);
+
+    const result = await service.reapAbandoned({ deps });
+
+    expect(result.closed).toEqual([
+      { task: dead.name, profile: 'reap1@endpoint-0', reason: 'session-dead' },
+    ]);
+    expect(result.skipped).toBe(1);
+    expect(conn.tasks.has(dead.name)).toBe(false);
+    expect(conn.tasks.has(live.name)).toBe(true);
+    // The dead task's tab is gone; the live task's is untouched.
+    expect(targets).toHaveLength(1);
+    expect(Object.values(conn.tasks.get(live.name)!.tabs)).toEqual([targets[0].targetId]);
+  });
+
+  it('never session-reaps a task that carries no identity at all', async () => {
+    writeProfile('reap2', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets } = makeTargetedConn('reap2@endpoint-0');
+    attach(service, 'reap2', conn);
+
+    // A human running `agents browser start` by hand: no session, no launch.
+    await startTask(service, 'reap2', {});
+
+    const result = await service.reapAbandoned({ deps });
+
+    expect(result.closed).toEqual([]);
+    expect(result.skipped).toBe(1);
+    expect(targets).toHaveLength(1);
+  });
+
+  it('keeps a task whose launchId is still live even when its sessionId is not', async () => {
+    writeProfile('reap3', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn } = makeTargetedConn('reap3@endpoint-0');
+    attach(service, 'reap3', conn);
+
+    // Half-resolved identity is not proof of death.
+    const t = await startTask(service, 'reap3', { sessionId: DEAD_SESSION, launchId: 'launch-live' });
+
+    const result = await service.reapAbandoned({ deps });
+
+    expect(result.closed).toEqual([]);
+    expect(conn.tasks.has(t.name)).toBe(true);
+  });
+
+  it('keeps a session the registry missed but the process table can still see', async () => {
+    writeProfile('reap4', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn } = makeTargetedConn('reap4@endpoint-0');
+    attach(service, 'reap4', conn);
+
+    const t = await startTask(service, 'reap4', { sessionId: DEAD_SESSION });
+
+    // RUSH-2384: the by-pid registry is often empty mid-run, so a live process
+    // carrying --session-id is the authoritative second opinion.
+    const result = await service.reapAbandoned({
+      deps: { ...deps, listEntries: () => [], sessionLiveOnProcessTable: async () => true },
+    });
+
+    expect(result.closed).toEqual([]);
+    expect(conn.tasks.has(t.name)).toBe(true);
+  });
+
+  it('reaps a task idle past the window and keeps one inside it', async () => {
+    writeProfile('reap5', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets } = makeTargetedConn('reap5@endpoint-0');
+    attach(service, 'reap5', conn);
+
+    const stale = await startTask(service, 'reap5', {});
+    const recent = await startTask(service, 'reap5', {});
+    const now = Date.now();
+    conn.tasks.get(stale.name)!.lastActionAt = now - 31 * 60_000;
+    conn.tasks.get(recent.name)!.lastActionAt = now - 5 * 60_000;
+
+    const result = await service.reapAbandoned({ deps, now });
+
+    expect(result.closed).toEqual([
+      { task: stale.name, profile: 'reap5@endpoint-0', reason: 'idle' },
+    ]);
+    expect(result.skipped).toBe(1);
+    expect(conn.tasks.has(recent.name)).toBe(true);
+    expect(targets).toHaveLength(1);
+  });
+
+  it('closes only the reaped task\'s own tabs — never a stray tab or the browser', async () => {
+    writeProfile('reap6', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets, calls } = makeTargetedConn('reap6@endpoint-0', {
+      pages: [{ targetId: 'stray', url: 'https://someone-else.example/' }],
+    });
+    attach(service, 'reap6', conn);
+
+    const stale = await startTask(service, 'reap6', {});
+    const now = Date.now();
+    conn.tasks.get(stale.name)!.lastActionAt = now - 31 * 60_000;
+
+    await service.reapAbandoned({ deps, now });
+
+    expect(targets.map((t) => t.targetId)).toEqual(['stray']);
+    expect(calls.filter((c) => c.method === 'Target.closeTarget')).toHaveLength(1);
+    // The shared profile window / browser process is not ours to kill.
+    expect(conn.cdp.close).not.toHaveBeenCalled();
+    expect((service as unknown as { connections: Map<string, unknown> }).connections.size).toBe(1);
+  });
+
+  it('dryRun reports what it would close without closing it', async () => {
+    writeProfile('reap7', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets } = makeTargetedConn('reap7@endpoint-0');
+    attach(service, 'reap7', conn);
+
+    const stale = await startTask(service, 'reap7', {});
+    const now = Date.now();
+    conn.tasks.get(stale.name)!.lastActionAt = now - 31 * 60_000;
+
+    const result = await service.reapAbandoned({ deps, now, dryRun: true });
+
+    expect(result.closed).toEqual([
+      { task: stale.name, profile: 'reap7@endpoint-0', reason: 'idle' },
+    ]);
+    expect(conn.tasks.has(stale.name)).toBe(true);
+    expect(targets).toHaveLength(1);
+  });
+
+  it('leaves a recording task alone even when it is past the idle window', async () => {
+    writeProfile('reap8', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets } = makeTargetedConn('reap8@endpoint-0');
+    attach(service, 'reap8', conn);
+
+    const stale = await startTask(service, 'reap8', {});
+    const now = Date.now();
+    conn.tasks.get(stale.name)!.lastActionAt = now - 31 * 60_000;
+    // Reaping mid-capture would truncate a recording the user asked for.
+    (service as unknown as { recordings: Map<string, unknown> }).recordings.set(stale.name, {
+      outputPath: '/tmp/x.mp4',
+      startedAt: now,
+    });
+
+    const result = await service.reapAbandoned({ deps, now });
+
+    expect(result.closed).toEqual([]);
+    expect(result.skipped).toBe(1);
+    expect(targets).toHaveLength(1);
+  });
+});

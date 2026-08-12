@@ -173,3 +173,89 @@ describe('shouldRestartStaleDaemon', () => {
     expect(shouldRestartStaleDaemon('unknown', '1.3.0')).toBe(false);
   });
 });
+
+// RUSH-2622: the daemon owns the live BrowserService, so `agents browser gc`
+// can only reach the abandoned-task reaper across this seam. Driven over a real
+// socket against a real BrowserService — the point is that the request routes
+// and the typed `reaped` payload survives the JSON round-trip.
+describe('gc action — reaper over IPC', () => {
+  it('routes to reapAbandoned and returns the typed reap result', async () => {
+    const { BrowserIPCServer } = await import('./ipc.js');
+    const { BrowserService } = await import('./service.js');
+    const service = new BrowserService();
+
+    // One task, last touched two hours ago, on a stub connection.
+    const tasks = new Map();
+    tasks.set('stale-task', {
+      id: 'stale-task',
+      name: 'stale-task',
+      profile: 'gcprofile',
+      tabs: { tab1: 'cdp-1' },
+      currentTabId: 'tab1',
+      createdAt: Date.now() - 2 * 60 * 60_000,
+      lastActionAt: Date.now() - 2 * 60 * 60_000,
+      pid: 0,
+    });
+    (service as unknown as { connections: Map<string, unknown> }).connections.set('gcprofile', {
+      cdp: { isOpen: true, send: async () => ({ targetInfos: [] }), close: () => {} },
+      port: 0,
+      pid: 0,
+      profileName: 'gcprofile',
+      tasks,
+      sessionCache: new Map(),
+    });
+
+    const server = new BrowserIPCServer(service);
+    await server.start();
+    try {
+      // dryRun so the assertion is about the seam, not about writing runtime
+      // state into the developer's real ~/.agents/browser directory.
+      const response = await sendIPCRequest({ action: 'gc', idleMinutes: 30, dryRun: true });
+      expect(response.ok).toBe(true);
+      expect(response.reaped).toEqual({
+        closed: [{ task: 'stale-task', profile: 'gcprofile', reason: 'idle' }],
+        skipped: 0,
+      });
+      // dryRun really did not close it.
+      expect(tasks.has('stale-task')).toBe(true);
+    } finally {
+      await server.stop();
+    }
+  }, 20_000);
+
+  it('honours a wider idle window — a task inside it is skipped, not closed', async () => {
+    const { BrowserIPCServer } = await import('./ipc.js');
+    const { BrowserService } = await import('./service.js');
+    const service = new BrowserService();
+
+    const tasks = new Map();
+    tasks.set('recent-task', {
+      id: 'recent-task',
+      name: 'recent-task',
+      profile: 'gcprofile2',
+      tabs: { tab1: 'cdp-1' },
+      currentTabId: 'tab1',
+      createdAt: Date.now() - 40 * 60_000,
+      lastActionAt: Date.now() - 40 * 60_000,
+      pid: 0,
+    });
+    (service as unknown as { connections: Map<string, unknown> }).connections.set('gcprofile2', {
+      cdp: { isOpen: true, send: async () => ({ targetInfos: [] }), close: () => {} },
+      port: 0,
+      pid: 0,
+      profileName: 'gcprofile2',
+      tasks,
+      sessionCache: new Map(),
+    });
+
+    const server = new BrowserIPCServer(service);
+    await server.start();
+    try {
+      // 40 minutes idle, but the caller asked for a 90-minute window.
+      const response = await sendIPCRequest({ action: 'gc', idleMinutes: 90, dryRun: true });
+      expect(response.reaped).toEqual({ closed: [], skipped: 1 });
+    } finally {
+      await server.stop();
+    }
+  }, 20_000);
+});
