@@ -297,9 +297,10 @@ export async function reapDeadTmuxPanes(
   const sock = socket ?? getDefaultSocketPath();
   const result: ReapDeadPanesResult = { reaped: 0, sessions: [], details: [], processes: 0, processDetails: [], warnings: [] };
 
-  // The process sweep runs even with no server on this socket: a torn-down
-  // server (`killAll` unlinks the socket) is the strongest orphan signal there
-  // is, and skipping it here would strand exactly those leftovers forever.
+  // The process sweep may run with no server, but an absent session is not
+  // evidence that a still-live marked process is orphaned. Tier 1 only acts on
+  // a present pane owner confirmed dead; tier 2 independently verifies its
+  // declared spawner pid (RUSH-2603).
   // `opts.pids` is a test-only process-table scope (see `readAgentProcesses`)
   // — production callers never set it.
   const { reapOrphanAgentProcesses } = await import('./orphan-reap.js');

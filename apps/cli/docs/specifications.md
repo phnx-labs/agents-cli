@@ -406,6 +406,14 @@ SSH access (§7); rendering sessions that no harness produced.
   semantics), leaving the original untouched, and MUST refuse harnesses it can't
   yet handle with a clear message (Claude-only in v1)
   (`lib/session/fork.ts:1-16,84-86`).
+- **SES-21a (MUST).** The tmux helper-process reaper MUST fail closed. A process
+  carrying `AGENT_TMUX_SESSION_NAME` MAY be selected only when the corresponding
+  tmux owner is present, its pane process is confirmed dead, and it has no
+  attached client. An absent owner, including a reliable empty answer after a
+  tmux server restart, MUST be treated as unknown and MUST NOT select the
+  process. A harness-specific detached-helper rule MAY select a process only
+  when its declared spawner pid is confirmed dead. (`lib/tmux/orphan-reap.ts`;
+  regression tests in `lib/tmux/orphan-reap.test.ts`, RUSH-2603.)
 - **SES-41 (MUST).** A direct lifecycle selector (full session id, unique id
   prefix, full `ag-<agent>-<8hex>` tmux alias, or unique alias prefix/suffix of at
   least six characters) MUST resolve to one canonical harness-native session id

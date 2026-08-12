@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -26,6 +27,7 @@ import {
   parseProcessRows,
   parseTmuxSessionMarker,
   readPaneOwners,
+  reapOrphanAgentProcesses,
   selectOrphanProcesses,
   type AgentProcess,
   type PaneOwner,
@@ -33,6 +35,9 @@ import {
 
 const posix = process.platform !== 'win32';
 const skipReason = !posix ? 'POSIX-only' : (isTmuxInstalled() ? null : 'tmux not installed');
+const tier1SkipReason = !fs.existsSync('/proc/self/environ')
+  ? 'tier 1 requires Linux /proc environment reads'
+  : skipReason;
 
 const proc = (pid: number, ppid: number, args: string, tmuxSession?: string): AgentProcess =>
   ({ pid, ppid, args, tmuxSession });
@@ -101,10 +106,10 @@ describe('parsePanePids', () => {
 });
 
 describe('selectOrphanProcesses', () => {
-  it('reaps a helper whose tmux session no longer exists', () => {
+  it('NEVER treats an absent tmux session as proof that a live marked process is orphaned', () => {
     const table = [proc(500, 1, 'cgraph-mcp --daemon', 'ag-codex-ff55f79f')];
     const picked = selectOrphanProcesses(table, owners([]), noneProtected);
-    expect(picked).toEqual([{ pid: 500, args: 'cgraph-mcp --daemon', reason: 'tmux-session-gone', tmuxSession: 'ag-codex-ff55f79f' }]);
+    expect(picked).toEqual([]);
   });
 
   it('reaps a helper whose session exists but whose agent pane process has exited', () => {
@@ -171,16 +176,13 @@ describe('selectOrphanProcesses', () => {
     expect(rule.spawnerPid('claude.exe daemon run --spawned-by {"pid":42}')).toBe(42);
   });
 
-  // Blocker 2 (RUSH-2521 review): a tmux query that failed to answer must not
-  // be treated as "genuinely no sessions" — an absent map entry is only proof
-  // of anything when the map is known-complete.
+  // RUSH-2603: neither a failed query nor a reliable empty answer proves the
+  // marked process itself is dead. Only a present owner with a dead pane does.
   it('NEVER runs tier 1 when the owners read is unreliable — even a process with no matching session survives', () => {
     const table = [proc(500, 1, 'cgraph-mcp --daemon', 'ag-codex-ff55f79f')];
-    // Same inputs as the very first test in this block (which DOES reap this
-    // process when owners is reliable) — only `ownersReliable` differs.
     const reliable = selectOrphanProcesses(table, owners([]), { ...noneProtected, ownersReliable: true });
     const unreliable = selectOrphanProcesses(table, owners([]), { ...noneProtected, ownersReliable: false });
-    expect(reliable).toHaveLength(1);
+    expect(reliable).toEqual([]);
     expect(unreliable).toEqual([]);
   });
 
@@ -191,10 +193,10 @@ describe('selectOrphanProcesses', () => {
     expect(picked.map(c => c.pid)).toEqual([3868250]);
   });
 
-  it('ownersReliable defaults to true (unchanged behavior for every existing direct caller)', () => {
-    const table = [proc(500, 1, 'cgraph-mcp --daemon', 'ag-codex-ff55f79f')];
-    const picked = selectOrphanProcesses(table, owners([]), noneProtected);
-    expect(picked).toHaveLength(1);
+  it('ownersReliable defaults to true and still requires a present, dead owner', () => {
+    const table = [proc(500, 1, 'cgraph-mcp --daemon', 'ag-codex-dead')];
+    const picked = selectOrphanProcesses(table, owners([['ag-codex-dead', { agentAlive: false, attached: false }]]), noneProtected);
+    expect(picked.map(c => c.reason)).toEqual(['tmux-agent-exited']);
   });
 
   // Blocker 4 (RUSH-2521 review): tier 2 must not fire on a substring match
@@ -349,7 +351,30 @@ describe('readPaneOwners', () => {
   });
 });
 
-describe.skipIf(skipReason)('reaping a real leaked helper', () => {
+describe.skipIf(!fs.existsSync('/proc/self/environ'))('daemon-start regression (RUSH-2603)', () => {
+  it('keeps a real live marked agent alive when its tmux server is absent', async () => {
+    const missingSocket = path.join(os.tmpdir(), `agents-rush-2603-${process.pid}`, 'server.sock');
+    const child = spawn('sleep', ['120'], {
+      env: { ...process.env, [TMUX_SESSION_ENV]: `ag-claude-rush2603-${process.pid}` },
+      stdio: 'ignore',
+    });
+    expect(child.pid).toBeTypeOf('number');
+    try {
+      const result = await reapOrphanAgentProcesses({
+        socket: missingSocket,
+        pids: [child.pid!],
+        graceMs: 10,
+      });
+      expect(result.candidates).toEqual([]);
+      expect(alive(child.pid!)).toBe(true);
+    } finally {
+      child.kill('SIGKILL');
+      await new Promise<void>(resolve => child.once('exit', () => resolve()));
+    }
+  });
+});
+
+describe.skipIf(tier1SkipReason)('reaping a real leaked helper', () => {
   let socket: string;
   let tempDir: string;
   const spawned: number[] = [];

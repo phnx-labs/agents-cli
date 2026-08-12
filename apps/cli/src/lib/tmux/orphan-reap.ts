@@ -144,7 +144,7 @@ export interface PaneOwner {
 }
 
 /** Why a process was selected, for human output and tests. */
-export type OrphanReason = 'tmux-session-gone' | 'tmux-agent-exited' | 'detached-helper';
+export type OrphanReason = 'tmux-agent-exited' | 'detached-helper';
 
 export interface OrphanCandidate {
   pid: number;
@@ -258,16 +258,14 @@ function livePid(pid: number): boolean {
 /**
  * Pure. Select the processes whose owning agent is provably gone.
  *
- * `owners` maps a tmux session name to its liveness; a name ABSENT from the map
- * is a session tmux no longer has, which is the strongest orphan signal there is
- * — but ONLY when `owners` is itself known-complete. `opts.ownersReliable`
- * (default `true`, so existing direct callers/tests keep their prior meaning)
- * says whether the caller actually got a real answer from tmux for every
- * socket it queried. When it is `false` — a query threw, timed out, or tmux
- * itself never answered — tier 1 is skipped entirely for this call: an absent
- * map entry proves nothing when the map itself might be missing entries for
- * sessions tmux never got asked about (RUSH-2521 review — a flaky tick must
- * never fall back to "treat every marked process as orphaned").
+ * `owners` maps a tmux session name to its liveness. An ABSENT name is never
+ * proof that the marked process is orphaned: the tmux server can restart or its
+ * socket can disappear while the pane's process tree is still alive. That exact
+ * state made the daemon classify every live agent as `tmux-session-gone` and
+ * SIGTERM it on startup (RUSH-2603). Tier 1 therefore requires a PRESENT owner
+ * whose pane process is confirmed dead and has no attached client. A reliable
+ * empty map means "nothing proven dead", not "every marked process is dead".
+ * `opts.ownersReliable` still disables tier 1 when any query failed to answer.
  */
 export function selectOrphanProcesses(
   procs: AgentProcess[],
@@ -341,10 +339,7 @@ export function selectOrphanProcesses(
     for (const p of procs) {
       if (!p.tmuxSession || !eligible(p)) continue;
       const owner = owners.get(p.tmuxSession);
-      if (!owner) {
-        push(p, 'tmux-session-gone');
-        continue;
-      }
+      if (!owner) continue;
       // An attached client or a live agent pane process is a hard exclusion.
       if (owner.attached || owner.agentAlive) continue;
       push(p, 'tmux-agent-exited');

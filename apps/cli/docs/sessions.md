@@ -1284,22 +1284,23 @@ replaced by init, the controlling terminal is disassociated from the whole POSIX
 session when its leader exits, and the surviving helpers are precisely the ones
 that left the pane's process group. What does survive is the environment: the pane
 exports `AGENT_TMUX_SESSION_NAME` and every descendant inherits it, reparented or
-not. A process carrying that marker is reaped when its tmux session no longer
-exists, or when that session has **no attached client AND** its agent pane process
-has exited. A live agent or an attached client protects everything it owns, and the
-routines daemon, the secrets broker, and the reaping process's own ancestry are
-never candidates. Reading that marker needs another process's environment, which is
+not. A process carrying that marker is reaped only when tmux still reports its
+session and that session has **no attached client AND** its agent pane process has
+exited. An absent session is not proof: a tmux server can restart while its pane's
+process tree is still alive. A live agent, an attached client, or an absent owner
+protects everything it owns. The routines daemon, the secrets broker, and the
+reaping process's own ancestry are never candidates. Reading that marker needs
+another process's environment, which is
 a plain `/proc/<pid>/environ` file read on Linux but has no working equivalent on
 macOS: modern `ps -E` no longer prints another process's environment at all
 (verified on macOS Sequoia), so `readAgentProcesses()` returns every macOS process
 with no marker and tier 1 correctly finds nothing to do there — safe, not
 effective. Only tier 2 (below) reaps anything on macOS today.
 
-**When tmux itself can't be asked.** Tier 1 only trusts an ABSENT session as proof
-of "gone" when the tmux query that built that answer actually completed — a query
-that threw (tmux missing/unsupported version, a spawn failure, or a timed-out
-server) skips tier 1 entirely for that tick rather than treating "we don't know" as
-"there's nothing here". `agents sessions reap --json`'s `warnings` array (and a
+**When tmux itself can't be asked.** A query that threw (tmux
+missing/unsupported version, a spawn failure, or a timed-out server) skips tier 1
+entirely for that tick. A completed empty answer also reaps nothing: absence is not
+positive liveness evidence. `agents sessions reap --json`'s `warnings` array (and a
 `WARN`-level daemon log line) says so when it happens; tier 2 is unaffected, since
 it never consults tmux at all.
 
