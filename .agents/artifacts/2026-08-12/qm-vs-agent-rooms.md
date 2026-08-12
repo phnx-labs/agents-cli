@@ -2,17 +2,20 @@
 kind: report
 title: QM (Y Combinator) vs agent-rooms — two answers to "multiplayer agents"
 surface: internal
+human: redacted
+host: redacted
+session: redacted
 ---
 
 # QM (Y Combinator) vs agent-rooms — two answers to "multiplayer agents"
 
 ## Summary
 
-Y Combinator's QM (open-sourced July 31, 2026) and the agent-rooms demo (built Aug 11 on Cloudflare Durable Objects) both call themselves multiplayer agent systems, and they mean different things by it. QM is a ~100k-LOC org harness — one agent for a whole company, with identity, per-scope sandboxes, policy postures, and Postgres durability; it took a model key, a Docker sandbox image, and four local processes to reach its first verified turn on zion. agent-rooms is a 1,478-LOC live canvas — humans and the agent co-editing one CRDT document with visible cursors, deployed keyless in one `wrangler deploy`. QM has no live co-editing or agent presence; agent-rooms has no identity, policy, or durable execution. Both were run and verified during this comparison.
+Y Combinator's QM (open-sourced July 31, 2026) and the agent-rooms demo (built Aug 11 on Cloudflare Durable Objects) both call themselves multiplayer agent systems, and they mean different things by it. QM is a ~100k-LOC org harness — one agent for a whole company, with identity, per-scope sandboxes, policy postures, and Postgres durability; it took a model key, a Docker sandbox image, and four local processes to reach its first verified turn on a dev Mac. agent-rooms is a 1,478-LOC live canvas — humans and the agent co-editing one CRDT document with visible cursors, deployed keyless in one `wrangler deploy`. QM has no live co-editing or agent presence; agent-rooms has no identity, policy, or durable execution. Both were run and verified during this comparison.
 
 ## Focus for review
 
-- QM was cloned, updated to latest `origin/main` (3cb5623, Aug 12), booted locally on zion, and driven end-to-end: a live Claude Code turn executed `uname -a; whoami` inside its Docker sandbox.
+- QM was cloned, updated to latest `origin/main` (3cb5623, Aug 12), booted locally on a dev Mac, and driven end-to-end: a live Claude Code turn executed `uname -a; whoami` inside its Docker sandbox.
 - The two systems use the word "multiplayer" for different things: QM means **one org agent, many people, scoped state**; agent-rooms means **many people and the agent live-editing one document**.
 - Neither subsumes the other. QM has no live co-editing, presence, or agent-as-visible-peer; agent-rooms has no identity, policy, sandbox, or durability beyond one Durable Object.
 
@@ -28,7 +31,7 @@ Scale on disk: ~77k lines of TypeScript in `src/`, ~23k more in `plugins/` (web 
 
 ## Running it locally — what it took, verified
 
-The repo carries a real local dev path (`npm run dev-instance`) that production docs do not advertise (deployment assumes Fly.io or AWS plus Postgres). Local boot on zion:
+The repo carries a real local dev path (`npm run dev-instance`) that production docs do not advertise (deployment assumes Fly.io or AWS plus Postgres). Local boot on a dev Mac:
 
 ```bash
 git worktree add .agents/worktrees/run-latest origin/main   # 3cb5623
@@ -136,7 +139,7 @@ Scale on disk: **1,478 lines** total. Zero infrastructure: no database, no socke
 | State | Postgres: sessions, memory, queue, grants, budgets, audit | One DO: Yjs doc + SQLite transcript; `runFiber` checkpoints survive ~70–140s DO evictions |
 | Steering mid-run | Send a message; posture may pause for approval | Edit the brief or type a steer; agent re-reads on next step |
 | Surfaces | Web app, admin panel, portal, Slack (channels, group DMs) | One web page; share the URL |
-| Setup to first turn | Node + Postgres + Docker + model key; admin onboarding gate (measured: ~15 min on zion including sandbox image build) | `bunx wrangler deploy`, keyless (measured in the Aug 11 session: minutes) |
+| Setup to first turn | Node + Postgres + Docker + model key; admin onboarding gate (measured: ~15 min on a dev Mac including sandbox image build) | `bunx wrangler deploy`, keyless (measured in the Aug 11 session: minutes) |
 | Footprint | ~100k LOC TS, 4 processes + Postgres + sandbox containers | 1,478 LOC, zero servers |
 | License / stars | MIT · 13,155 stars · released 2026-07-31 | Personal demo · deployed 2026-08-11 |
 
