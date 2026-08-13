@@ -278,10 +278,11 @@ export interface IPCRequest {
   // Browser start: opt out of domain-skill discovery.
   skipDomainSkill?: boolean;
   /**
-   * Browser start: always open a new tab, even when the profile already shows
-   * this exact URL. Without it, `start --url` adopts a matching live tab rather
-   * than opening a duplicate (RUSH-2622) — set this when the caller needs a tab
-   * of its own.
+   * Browser start: always open a new tab. Without it, `start --url` reclaims a
+   * tab that an ABANDONED task is still holding on this exact URL rather than
+   * opening a duplicate (RUSH-2622). A tab held by a live task, or one nobody's
+   * task owns (the user's own), is never taken either way — set this when the
+   * caller wants its own tab regardless.
    */
   fresh?: boolean;
   // `gc`: override the idle window (default 30) and preview without closing.

@@ -3361,7 +3361,7 @@
             },
             {
               "flags": "--fresh",
-              "description": "Always open a new tab, even if this profile already shows that URL (default: take over the existing tab)",
+              "description": "Always open a new tab, skipping the reclaim of a tab an abandoned task is holding on that URL",
               "long": "--fresh",
               "required": false,
               "optional": false,

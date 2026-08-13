@@ -788,7 +788,34 @@ describe('BrowserService.start — URL reclaim (RUSH-2622)', () => {
     expect(Object.values(conn.tasks.get(next.name)!.tabs)).toEqual([targets[0].targetId]);
   });
 
-  it('never takes a tab from a task whose owner is still alive', async () => {
+  it('two concurrent starts never end up owning the same reclaimed tab', async () => {
+    writeProfile('reclaimrace', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets } = makeTargetedConn('reclaimrace@endpoint-0');
+    attach(service, 'reclaimrace', conn);
+
+    await service.start('reclaimrace', {
+      url: 'https://example.com/docs',
+      sessionId: GONE_SESSION,
+    });
+
+    // Nothing serializes IPC requests, so both starts suspend on the same
+    // liveness await and race for the one abandoned tab. Without the
+    // post-await re-check both would return it, and the first `done` would
+    // then close the other task's tab.
+    const [a, b] = await Promise.all([
+      service.start('reclaimrace', { url: 'https://example.com/docs' }),
+      service.start('reclaimrace', { url: 'https://example.com/docs' }),
+    ]);
+
+    const owners = [a, b].map((s) => Object.values(conn.tasks.get(s.name)!.tabs)[0]);
+    expect(owners[0]).not.toBe(owners[1]);
+    expect(new Set(owners).size).toBe(2);
+    // The loser opened its own tab rather than sharing.
+    expect(targets).toHaveLength(2);
+  });
+
+  it('never takes a tab from a task whose owner cannot be proven gone', async () => {
     writeProfile('nosteal', ['cdp://localhost:9222']);
     const service = new BrowserService();
     const { conn, targets, calls } = makeTargetedConn('nosteal@endpoint-0');

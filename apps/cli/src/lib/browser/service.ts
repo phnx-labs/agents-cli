@@ -375,7 +375,7 @@ export class BrowserService {
       url?: string;
       endpointName?: string;
       skipDomainSkill?: boolean;
-      /** Always open a new tab instead of adopting a live one on the same URL. */
+      /** Always open a new tab, skipping the abandoned-task reclaim. */
       fresh?: boolean;
       /** Caller identity, forwarded from the CLI (see IPCRequest.actor/launchId). */
       actor?: string;
@@ -561,8 +561,8 @@ export class BrowserService {
       });
     }).catch(() => { /* fail soft */ });
 
-    // If URL provided, take over a live tab already showing it, else create one
-    // directly (no about:blank).
+    // If URL provided, reclaim a tab an abandoned task is holding on it, else
+    // create one directly (no about:blank).
     let tabId: string | undefined;
     if (opts.url && !conn.electron) {
       const adopted = opts.fresh ? undefined : await this.adoptTabShowing(conn, opts.url);
@@ -658,6 +658,13 @@ export class BrowserService {
       // like — same guard the reaper applies before stopping anything.
       if (this.recordings.has(task.name)) continue;
       if (!(await taskOwnerIsGone(task, live))) continue;
+      // Re-check the claim after the await. Nothing serializes IPC requests —
+      // `BrowserIPCServer` registers a per-connection `socket.on('data', async …)`
+      // that Node never awaits — so two concurrent `start`s can both pass the
+      // liveness check on one candidate and both return the same targetId,
+      // putting two live tasks on one tab and re-opening the double-owner bug
+      // this reclaim is careful to avoid. Whoever deletes it first owns it.
+      if (task.tabs[shortId] !== targetId) continue;
 
       delete task.tabs[shortId];
       delete task.refDescriptors?.[shortId];
