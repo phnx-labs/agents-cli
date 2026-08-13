@@ -1336,10 +1336,13 @@ function registerDevicesCommands(program: Command): void {
    * what it does to automatic placement.
    *
    * A role written here lands in the SHARED block (`fleet.devices.<name>.config.role`)
-   * because every box has to agree on it. `control` is additionally mirrored
-   * onto this machine's device registry entry, which is what the existing
-   * dial-exclusion filters (`isControlDevice`) read — the registry is
-   * per-machine and gitignored, so it can hold the mirror but never the truth.
+   * because every box has to agree on it. The vocabulary is deliberately
+   * `worker | personal` only: a paired cockpit's `control` role lives in the
+   * per-machine device registry, is written by `agents devices pair-ios`, and is
+   * what the existing dial-exclusion filters (`isControlDevice`) read. Accepting
+   * `control` here too would promise a fleet-wide dial exclusion this key cannot
+   * deliver — those filters read each box's own registry, so the mark would only
+   * hold on the machine that ran the command.
    */
   const runDevicesRole = async (
     name: string | undefined,
@@ -1393,7 +1396,6 @@ function registerDevicesCommands(program: Command): void {
     // configuredDeviceRole's key spec validates the value; a bad one throws with
     // the accepted list, which the command's catch turns into exit 1.
     setConfiguredDeviceRole(name, role as ConfiguredDeviceRole);
-    if (role === 'control') await upsertDevice(name, { role: 'control' });
     if (opts.json) {
       writeJson({ device: name, role, autoPoolWorkers: listWorkerDevices() });
       return;
@@ -1529,8 +1531,8 @@ function registerDevicesCommands(program: Command): void {
   const roleCmd = devicesCmd
     .command('role [name] [role]')
     .description(
-      'Show or set what a device is for: worker (agents run here), personal (you sit here — never picked automatically), ' +
-        'or control (a cockpit that is never dialed). Marking any device worker makes `--device auto` an allowlist over the marked workers.',
+      'Show or set what a device is for: worker (agents run here) or personal (you sit here — never picked automatically). ' +
+        'Marking any device worker makes `--device auto` an allowlist over the marked workers.',
     )
     .option('--clear', 'remove the mark, returning the device to unmarked')
     .option('--json', 'output machine-readable JSON')
@@ -1556,15 +1558,18 @@ function registerDevicesCommands(program: Command): void {
       fleet.devices.<name>.config.role and travel with 'agents repo push/pull',
       so a mark set on one box is the whole fleet's answer.
 
-      Effect on '--device auto' (agents run, teams, and the AGI EXT launch
-      commands, which all resolve placement through the CLI):
-        no device marked   -> every online device, as before
-        any worker marked  -> ONLY the marked workers
-        personal / control -> never picked, under either state
+      Effect on '--device auto' (agents run, teams, agents ssh auto, and the AGI
+      EXT launch commands, which all resolve placement through the CLI):
+        no device marked  -> every online device, as before
+        any worker marked -> ONLY the marked workers
+        personal          -> never picked, under either state
 
-      Turn the allowlist off with 'agents config set auto.pool all'; personal and
-      control devices stay excluded (a cockpit cannot run an agent, and a
-      personal box is marked precisely to keep agents off it).
+      Turn the allowlist off with 'agents config set auto.pool all'; a personal
+      box stays excluded, since that is what the mark is for.
+
+      A paired iPhone/iPad cockpit is a separate role: 'agents devices pair-ios'
+      marks it control in that box's device registry, and the fleet never dials
+      it — including for placement. This command does not set that role.
     `,
   });
 

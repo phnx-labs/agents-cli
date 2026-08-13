@@ -38,7 +38,7 @@
         "autoPool": {
           "type": "string",
           "enum": ["workers", "all"],
-          "description": "User scope. Which devices automatic placement (`--device auto`) may pick: 'workers' (default — only devices marked role=worker, once any is marked) or 'all'. Devices marked personal/control are never picked under either mode. Set via `agents config set auto.pool <mode>`."
+          "description": "User scope. Which devices automatic placement (`--device auto`) may pick: 'workers' (default — only devices marked role=worker, once any is marked) or 'all'. A device marked personal is never picked under either mode. Set via `agents config set auto.pool <mode>`."
         }
       }
     },
@@ -149,8 +149,8 @@
                 "properties": {
                   "role": {
                     "type": "string",
-                    "enum": ["worker", "personal", "control"],
-                    "description": "What this device is for, fleet-wide (`agents devices role <name> <role>`). Marking any device 'worker' makes `--device auto` an allowlist over the marked workers; 'personal' and 'control' are never picked automatically."
+                    "enum": ["worker", "personal"],
+                    "description": "What this device is for, fleet-wide (`agents devices role <name> <role>`). Marking any device 'worker' makes `--device auto` an allowlist over the marked workers; a 'personal' device is never picked automatically. A paired cockpit's 'control' role lives in that box's own device registry (agents devices pair-ios), not here."
                   },
                   "maxAgents": {
                     "type": "integer",

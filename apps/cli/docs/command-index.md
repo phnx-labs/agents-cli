@@ -274,7 +274,7 @@ agents devices ps                              List agent tasks dispatched to de
 agents devices register <name>                 Register a discovered (pending) node by name — used by the menu-bar "NEW DEVICES → Register" action.
 agents devices render                          Render the registry to ssh_config. Prints to stdout, or use --write to update ~/.ssh/config.d/agents.
 agents devices rm <name>                       Remove a device from the registry.
-agents devices role [name] [role]              Show or set what a device is for: worker (agents run here), personal (you sit here — never picked automatically), or control (a cockpit that is never dialed). Marking any device worker makes `--device auto` an allowlist over the marked workers.
+agents devices role [name] [role]              Show or set what a device is for: worker (agents run here) or personal (you sit here — never picked automatically). Marking any device worker makes `--device auto` an allowlist over the marked workers.
 agents devices run <cmd...>                    Run a command on every online registered device. Offline devices are skipped. Alias surface: agents fleet run …
 agents devices show <name>                     Show the full profile for one device.
 agents devices status                          Fleet health at a glance: online/offline rollup, a NEEDS ATTENTION list (each with its fix command), and quiet per-device rows grouped by OS. Use --verbose for the full auth/CLI/sync grid.

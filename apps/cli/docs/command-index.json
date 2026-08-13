@@ -8033,7 +8033,7 @@
           "name": "role",
           "path": "devices role",
           "aliases": [],
-          "description": "Show or set what a device is for: worker (agents run here), personal (you sit here — never picked automatically), or control (a cockpit that is never dialed). Marking any device worker makes `--device auto` an allowlist over the marked workers.",
+          "description": "Show or set what a device is for: worker (agents run here) or personal (you sit here — never picked automatically). Marking any device worker makes `--device auto` an allowlist over the marked workers.",
           "args": [
             {
               "name": "name",
@@ -8079,7 +8079,7 @@
             }
           ],
           "examples": "agents devices role                          # who is marked what, and what --device auto would pick\n      agents devices role yosemite-s0 worker       # agents spin up here\n      agents devices role yosemite-s1 worker       # …and here; auto now rotates over these two only\n      agents devices role zion personal            # your laptop — keep automatic placement off it\n      agents devices role yosemite-s0 --clear      # unmark\n      agents devices role --json                   # machine-readable",
-          "notes": "Roles are stored fleet-wide in ~/.agents/agents.yaml under\n      fleet.devices.<name>.config.role and travel with 'agents repo push/pull',\n      so a mark set on one box is the whole fleet's answer.\n\n      Effect on '--device auto' (agents run, teams, and the AGI EXT launch\n      commands, which all resolve placement through the CLI):\n        no device marked   -> every online device, as before\n        any worker marked  -> ONLY the marked workers\n        personal / control -> never picked, under either state\n\n      Turn the allowlist off with 'agents config set auto.pool all'; personal and\n      control devices stay excluded (a cockpit cannot run an agent, and a\n      personal box is marked precisely to keep agents off it).",
+          "notes": "Roles are stored fleet-wide in ~/.agents/agents.yaml under\n      fleet.devices.<name>.config.role and travel with 'agents repo push/pull',\n      so a mark set on one box is the whole fleet's answer.\n\n      Effect on '--device auto' (agents run, teams, agents ssh auto, and the AGI\n      EXT launch commands, which all resolve placement through the CLI):\n        no device marked  -> every online device, as before\n        any worker marked -> ONLY the marked workers\n        personal          -> never picked, under either state\n\n      Turn the allowlist off with 'agents config set auto.pool all'; a personal\n      box stays excluded, since that is what the mark is for.\n\n      A paired iPhone/iPad cockpit is a separate role: 'agents devices pair-ios'\n      marks it control in that box's device registry, and the fleet never dials\n      it — including for placement. This command does not set that role.",
           "subcommands": []
         },
         {

@@ -56,16 +56,23 @@ agents devices role                       # who is marked what, and what auto wo
 |---|---|
 | nothing marked | every online device (the historical behavior) |
 | any device marked `worker` | ONLY the marked workers |
-| a device marked `personal` / `control` | never, under either state |
+| a device marked `personal` | never, under either state |
 
 Marking a worker is what turns the pool into an **allowlist** — that is the whole
 opt-in: two marks and every automatic launch lands on those two boxes. The rule
 lives in one place (`src/lib/devices/pool.ts`) and every automatic-placement
 caller reads it, so `agents run --device auto`, `agents teams add --device auto`,
 `agents ssh auto`, and the AGI EXT `New <Harness>` commands agree. Widen it back
-with `agents config set auto.pool all` (personal/control stay excluded — a
-cockpit cannot run an agent, and a personal box is marked precisely to keep
-agents off it).
+with `agents config set auto.pool all`; a `personal` box stays excluded, since
+that is what the mark is for. A paired cockpit (iPhone/iPad) is a separate,
+pre-existing role — `agents devices pair-ios` marks it `control` in that box's
+device registry and the fleet never dials it, so it is not a placement candidate
+either.
+
+An empty pool is an error, not a shrug: with workers marked and none of them
+reachable, `--device auto` fails loud naming the fix rather than quietly running
+on the machine you are sitting at — including through `agents ssh auto` and the
+generic `--host auto` passthrough, which resolve `auto` via the same pool.
 
 Roles live in the fleet-**shared** `fleet.devices.<name>.config.role` block of
 `~/.agents/agents.yaml` and travel with `agents repo push` / `pull`; the device

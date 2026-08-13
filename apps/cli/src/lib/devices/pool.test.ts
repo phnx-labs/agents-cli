@@ -21,14 +21,14 @@ describe('filterAutoPool (the allowlist rule)', () => {
     expect(filterAutoPool(FLEET, { mode: 'workers', roles })).toEqual(['yosemite-s0', 'yosemite-s1']);
   });
 
-  it('never picks a personal or control device, even with no worker marked', () => {
-    const roles = { zion: 'personal', iphone: 'control' } as const;
-    expect(filterAutoPool(FLEET, { mode: 'workers', roles })).toEqual(['yosemite-s0', 'yosemite-s1', 'mac-mini']);
+  it('never picks a personal device, even with no worker marked', () => {
+    const roles = { zion: 'personal' } as const;
+    expect(filterAutoPool(FLEET, { mode: 'workers', roles })).toEqual(['yosemite-s0', 'yosemite-s1', 'mac-mini', 'iphone']);
   });
 
-  it('auto.pool=all drops the worker allowlist but keeps personal/control out', () => {
-    const roles = { 'yosemite-s0': 'worker', zion: 'personal', iphone: 'control' } as const;
-    expect(filterAutoPool(FLEET, { mode: 'all', roles })).toEqual(['yosemite-s0', 'yosemite-s1', 'mac-mini']);
+  it('auto.pool=all drops the worker allowlist but keeps a personal box out', () => {
+    const roles = { 'yosemite-s0': 'worker', zion: 'personal' } as const;
+    expect(filterAutoPool(FLEET, { mode: 'all', roles })).toEqual(['yosemite-s0', 'yosemite-s1', 'mac-mini', 'iphone']);
   });
 
   it('returns empty rather than widening back to the fleet when no worker is a candidate', () => {
@@ -58,7 +58,7 @@ describe('filterAutoPool (the allowlist rule)', () => {
   });
 
   it('listWorkerDevices returns only the worker marks', () => {
-    const roles = { 'yosemite-s0': 'worker', zion: 'personal', iphone: 'control' } as const;
+    const roles = { 'yosemite-s0': 'worker', zion: 'personal' } as const;
     expect(listWorkerDevices({ roles })).toEqual(['yosemite-s0']);
   });
 });
@@ -121,7 +121,12 @@ describe('roles read from the stored fleet block', () => {
 
   it('rejects a role outside the vocabulary', async () => {
     const mod = await freshPool();
-    expect(() => mod.setConfigValue('role', 'buildbox', { device: 'yosemite-s0' })).toThrow(/worker \| personal \| control/);
+    expect(() => mod.setConfigValue('role', 'buildbox', { device: 'yosemite-s0' })).toThrow(/worker \| personal/);
+  });
+
+  it('refuses control — that role lives in the per-machine registry, set by pair-ios', async () => {
+    const mod = await freshPool();
+    expect(() => mod.setConfigValue('role', 'control', { device: 'iphone' })).toThrow(/worker \| personal/);
   });
 
   it('rejects an auto.pool mode outside the vocabulary', async () => {

@@ -103,7 +103,7 @@ export interface ConfigTarget {
 const DEVICE_PLATFORMS = ['windows', 'linux', 'macos', 'unknown'] as const;
 const SSH_AUTH_METHODS = ['key', 'password'] as const;
 /** Roles a device can be marked with — see the `role` key below. */
-const DEVICE_ROLES = ['worker', 'personal', 'control'] as const;
+const DEVICE_ROLES = ['worker', 'personal'] as const;
 /** Which devices automatic placement may pick — see the `auto.pool` key below. */
 const AUTO_POOL_MODES = ['workers', 'all'] as const;
 
@@ -146,7 +146,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     type: 'string',
     description:
       "Which devices automatic placement (`--device auto`) may pick: 'workers' (default — only devices marked role=worker, " +
-      "once at least one is marked) or 'all' (every online device, ignoring roles). Devices marked personal or control are " +
+      "once at least one is marked) or 'all' (every online device, ignoring worker marks). A device marked personal is " +
       'never picked automatically under either mode.',
     defaultValue: 'workers',
     validate: (v) =>
@@ -300,9 +300,10 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     visibility: 'shared',
     type: 'string',
     description:
-      "What this device is for, fleet-wide: 'worker' (a box agents run on), 'personal' (a machine you sit at — never picked " +
-      "automatically), or 'control' (a cockpit that steers the fleet and is never dialed). Marking ANY device worker turns " +
-      'automatic placement into an allowlist: `--device auto` then picks only from the marked workers.',
+      "What this device is for, fleet-wide: 'worker' (a box agents run on) or 'personal' (a machine you sit at — never " +
+      'picked automatically). Marking ANY device worker turns automatic placement into an allowlist: `--device auto` then ' +
+      'picks only from the marked workers. (A paired iPhone/iPad cockpit is marked control by `agents devices pair-ios` ' +
+      'and is excluded from placement by that role, not this key.)',
     validate: (v) =>
       (DEVICE_ROLES as readonly string[]).includes(v as string)
         ? null

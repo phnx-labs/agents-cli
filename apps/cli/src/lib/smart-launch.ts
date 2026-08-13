@@ -8,7 +8,7 @@
 
 import { queryAffinityRollup, type AffinityRow } from './session/db.js';
 import { localMachineId } from './session/origin-machine.js';
-import { loadDevicesSync } from './devices/registry.js';
+import { isControlDevice, loadDevicesSync } from './devices/registry.js';
 import { describeAutoPool, filterAutoPool, isAutoPoolMember } from './devices/pool.js';
 import { normalizeHost } from './machine-id.js';
 import { probePoolSignals } from './teams/placement-probe.js';
@@ -69,6 +69,14 @@ export function sampleWeighted(
  * is marked `role=worker`: this is the single place both automatic-placement
  * paths (`resolveDeviceAuto`, `resolveDeviceAffinity`) get their candidates, so
  * marking workers moves every `--device auto` at once instead of one surface.
+ *
+ * Paired cockpits (`role: control` in the device registry) are dropped here,
+ * where the registry is already being read — they are control surfaces, not
+ * compute. It CAN return an empty list — a fleet where every marked worker is
+ * offline, or where this box is the only candidate and is marked `personal`. That is a
+ * real answer, and both callers fail loud on it rather than falling back to the
+ * local machine (which would be the exact box the operator marked personal to
+ * keep agents off).
  */
 export function listOnlineDeviceNames(localName: string = localMachineId()): string[] {
   const names = new Set<string>([normalizeHost(localName)]);
@@ -79,6 +87,9 @@ export function listOnlineDeviceNames(localName: string = localMachineId()): str
       const online = d.tailscale?.online;
       // No tailscale snapshot → treat as candidate (registry-only box).
       if (online === false) continue;
+      // A paired cockpit (iPhone/iPad) is a control surface, not compute — it
+      // is never dialed for a session, so it is never a placement candidate.
+      if (isControlDevice(d)) continue;
       names.add(normalizeHost(name));
     }
   } catch {
@@ -91,8 +102,10 @@ export interface DeviceAffinityOptions {
   sinceDays?: number;
   alpha?: number;
   /**
-   * Eligible hosts (normalized). Defaults to online devices + local.
-   * Empty after filter → fall back to local.
+   * Eligible hosts (normalized). Defaults to the automatic-placement pool
+   * (online devices + local, narrowed by device roles). An explicitly empty
+   * list falls back to local — the caller supplied it; an empty DEFAULT pool
+   * throws, because roles emptied it on purpose.
    */
   eligibleHosts?: string[];
   localMachine?: string;
@@ -115,6 +128,19 @@ export interface DeviceAutoPlan {
   host: string | null;
   candidates: Array<{ key: string; loadPercent?: number; installed?: boolean; signedIn?: boolean }>;
   pickedDeviceKey: string;
+}
+
+/**
+ * The error both automatic-placement resolvers raise when device roles leave no
+ * candidate at all. Fail loud: the alternative — quietly running on the local
+ * machine — puts the agent on the box the operator marked `personal`.
+ */
+export function formatEmptyAutoPoolError(): string {
+  const marked = describeAutoPool();
+  return (
+    `agents: no device is eligible for automatic placement${marked ? ` (${marked})` : ''} — ` +
+    'mark one with `agents devices role <name> worker`, or widen the pool with `agents config set auto.pool all`.'
+  );
 }
 
 export function formatNoHealthyDeviceError(
@@ -162,13 +188,7 @@ export async function resolveDeviceAuto(
   // role excludes it. Adding it unconditionally would put agents back on the box
   // the operator marked `personal` precisely to keep them off it.
   if (!pool.includes(local) && isAutoPoolMember(local)) pool.push(local);
-  if (pool.length === 0) {
-    const marked = describeAutoPool();
-    throw new Error(
-      `agents: no device is eligible for automatic placement${marked ? ` (${marked})` : ''} — ` +
-        'mark one with `agents devices role <name> worker`, or widen the pool with `agents config set auto.pool all`.',
-    );
-  }
+  if (pool.length === 0) throw new Error(formatEmptyAutoPoolError());
 
   const signals = await (opts.probe ?? probePoolSignals)(pool, agent as AgentType | undefined);
   if (!agent && !opts.probe) {
@@ -211,6 +231,12 @@ export async function resolveDeviceAuto(
 
 /**
  * Resolve host for `--device auto`. Does NOT pick harness or accounts.
+ *
+ * Draws from the same automatic-placement pool as {@link resolveDeviceAuto}, so
+ * `agents ssh auto`, the generic `--host auto` passthrough, and `matchHost`'s
+ * `auto` sentinel honour device roles too. Throws when roles leave the pool
+ * empty — a `null` host here means "run locally", which for a box marked
+ * `personal` is the outcome the mark exists to prevent.
  */
 export function resolveDeviceAffinity(opts: DeviceAffinityOptions = {}): DeviceAffinityPlan {
   const local = normalizeHost(opts.localMachine ?? localMachineId());
@@ -219,10 +245,19 @@ export function resolveDeviceAffinity(opts: DeviceAffinityOptions = {}): DeviceA
   const sinceDays = opts.sinceDays ?? 14;
   const sinceMs = Date.now() - sinceDays * 24 * 60 * 60 * 1000;
 
+  // `listOnlineDeviceNames` always contained the local machine before device
+  // roles existed, so an empty default list can only mean roles excluded
+  // everything — fail loud, exactly as resolveDeviceAuto does. An explicitly
+  // empty `eligibleHosts` is the caller's own list and keeps the historical
+  // degrade-to-local behavior.
+  const usingDefaultPool = opts.eligibleHosts === undefined;
   const eligible = new Set(
     (opts.eligibleHosts ?? listOnlineDeviceNames(local)).map(normalizeHost),
   );
-  if (eligible.size === 0) eligible.add(local);
+  if (eligible.size === 0) {
+    if (usingDefaultPool) throw new Error(formatEmptyAutoPoolError());
+    eligible.add(local);
+  }
 
   const deviceRows =
     opts.deviceAffinity ??

@@ -17,17 +17,22 @@
  * |---|---|
  * | no device marked | every online device (unchanged behavior) |
  * | some marked `worker` | ONLY those workers |
- * | marked `personal` / `control` | never, under either state |
+ * | marked `personal` | never, under either state |
  *
- * `auto.pool all` turns the allowlist off (personal/control stay excluded — a
- * cockpit cannot run an agent, and a machine the user sits at is marked
- * precisely so agents stay off it).
+ * `auto.pool all` turns the allowlist off; `personal` stays excluded, because a
+ * machine the user sits at is marked precisely so agents stay off it.
+ *
+ * Paired cockpits (an iPhone/iPad, `role: control` in the device registry, set
+ * by `agents devices pair-ios`) are excluded by the CALLER that reads the
+ * registry — `listOnlineDeviceNames` in `lib/smart-launch.ts` — not here. That
+ * role is machine-local by nature and already has a home; duplicating it in the
+ * shared config would be a second store for one concept.
  */
 import { autoPoolMode, listConfiguredDeviceRoles, type AutoPoolMode, type ConfiguredDeviceRole } from '../device-config.js';
 import { normalizeHost } from '../machine-id.js';
 
 /** Roles that automatic placement never picks, whatever the pool mode. */
-const NEVER_AUTO: ReadonlySet<ConfiguredDeviceRole> = new Set<ConfiguredDeviceRole>(['personal', 'control']);
+const NEVER_AUTO: ReadonlySet<ConfiguredDeviceRole> = new Set<ConfiguredDeviceRole>(['personal']);
 
 export interface AutoPoolOptions {
   /** Pool mode; defaults to the configured `auto.pool`. */

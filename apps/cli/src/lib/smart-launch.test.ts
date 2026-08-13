@@ -325,6 +325,35 @@ describe('device roles narrow automatic placement', () => {
     expect(plan.host).toBe('yosemite-s0');
   });
 
+  it('resolveDeviceAffinity fails loud instead of degrading to a personal local box', async () => {
+    // The generic `auto` sentinel (agents ssh auto, the --host auto passthrough,
+    // matchHost) resolves through resolveDeviceAffinity, and a null host there
+    // means "run locally" — on the very box the personal mark exists to protect.
+    const mod = await fresh();
+    mod.setConfiguredDeviceRole('zion', 'personal');
+    expect(() => mod.resolveDeviceAffinity({ localMachine: 'zion' }))
+      .toThrow(/no device is eligible for automatic placement/);
+  });
+
+  it('resolveDeviceAffinity keeps the historical degrade when the CALLER hands it an empty list', async () => {
+    const mod = await fresh();
+    const plan = mod.resolveDeviceAffinity({ localMachine: 'zion', eligibleHosts: [], deviceAffinity: [] });
+    expect(plan.host).toBeNull();
+  });
+
+  it('resolveDeviceAffinity picks a marked worker over the local personal box', async () => {
+    const mod = await fresh();
+    mod.setConfiguredDeviceRole('zion', 'personal');
+    mod.setConfiguredDeviceRole('yosemite-s0', 'worker');
+    const plan = mod.resolveDeviceAffinity({
+      localMachine: 'zion',
+      eligibleHosts: ['yosemite-s0'],
+      deviceAffinity: [{ key: 'yosemite-s0', launches: 3, durationMs: 0, tokenCount: 0, costUsd: 0 }],
+      rng: () => 0.5,
+    });
+    expect(plan.host).toBe('yosemite-s0');
+  });
+
   it('fails loud, naming the fix, when roles leave no eligible device', async () => {
     const mod = await fresh();
     mod.setConfiguredDeviceRole('zion', 'personal');

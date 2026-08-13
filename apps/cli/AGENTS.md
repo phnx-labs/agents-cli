@@ -396,18 +396,29 @@ re-attach its sessions. The gate is `shouldWrapInTmux`
 ([`src/lib/exec.ts`](src/lib/exec.ts)), reading `isTmuxEnabled()`.
 
 `devices.<name>.role` (stored as `role`) says what a device is for fleet-wide —
-`worker` (agents run here), `personal` (a machine you sit at), or `control` (a
-cockpit that is never dialed). `agents devices role <name> <role>` is the
-task-shaped spelling. Marking any device `worker` turns automatic placement into
-an allowlist: `--device auto` then picks only from the marked workers, in every
-caller (`run`, `teams`, `ssh auto`, and the AGI EXT launch commands, which resolve
-placement through the CLI rather than scoring devices themselves). `personal` and
-`control` are never picked automatically. The rule is one function —
+`worker` (agents run here) or `personal` (a machine you sit at).
+`agents devices role <name> <role>` is the task-shaped spelling. Marking any
+device `worker` turns automatic placement into an allowlist: `--device auto` then
+picks only from the marked workers, in every caller (`run`, `teams`, `ssh auto`,
+the generic `--host auto` passthrough, and the AGI EXT launch commands, which
+resolve placement through the CLI rather than scoring devices themselves); a
+`personal` box is never picked automatically. The rule is one function —
 `filterAutoPool` in [`src/lib/devices/pool.ts`](src/lib/devices/pool.ts) — read by
 `listOnlineDeviceNames`, and `auto.pool` (`workers` by default, or `all`) turns
-the allowlist off. Unlike the machine-local keys, `role` is **shared**: it lives in
-the central `fleet.devices.<name>.config` block and syncs, because every box has
-to agree on where agents may land.
+the allowlist off. When roles leave the pool empty, **both** resolvers throw
+(`formatEmptyAutoPoolError`): a `null` host means "run locally", which on a
+`personal` box is the outcome the mark exists to prevent. Unlike the machine-local
+keys, `role` is **shared**: it lives in the central `fleet.devices.<name>.config`
+block and syncs, because every box has to agree on where agents may land.
+
+The vocabulary stops at `worker | personal` on purpose. A paired cockpit's
+`control` role is the pre-existing `DeviceRole` in
+[`src/lib/devices/registry.ts`](src/lib/devices/registry.ts), written by
+`agents devices pair-ios` into that box's own registry and read by the
+`isControlDevice()` dial filters. Those filters read each machine's LOCAL
+registry, so accepting `control` in the shared key would promise a fleet-wide
+dial exclusion it cannot deliver — placement simply skips control devices where
+it already reads the registry (`listOnlineDeviceNames`).
 
 `interactive.host` is a **user-level** preference: it lives in central
 `~/.agents/agents.yaml` under `config.interactiveHost`, syncs fleet-wide via
