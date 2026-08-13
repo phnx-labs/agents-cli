@@ -309,6 +309,9 @@ function* listDeviceConfigEntries(device: string): Generator<{ key: string; valu
       case 'watchdog.enabled':
         key = `${prefix}watchdog`;
         break;
+      case 'tmux.enabled':
+        key = `${prefix}tmux`;
+        break;
       case 'browser.remote-control':
         key = `${prefix}browser.remote-control`;
         break;
