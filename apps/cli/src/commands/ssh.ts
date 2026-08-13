@@ -1350,7 +1350,7 @@ function registerDevicesCommands(program: Command): void {
     opts: { clear?: boolean; json?: boolean },
   ): Promise<void> => {
     if (!name) {
-      if (role) throw new Error('Name a device: agents devices role <name> <worker|personal|control>');
+      if (role) throw new Error('Name a device: agents devices role <name> <worker|personal>');
       const roles = listConfiguredDeviceRoles();
       const mode = autoPoolMode();
       const reg = await loadDevices();
@@ -1373,7 +1373,7 @@ function registerDevicesCommands(program: Command): void {
       }
       console.log();
       console.log(chalk.bold('--device auto picks from: ') + (pool.length > 0 ? pool.join(', ') : chalk.red('nothing — no eligible device')));
-      if (mode === 'all') console.log(chalk.gray('auto.pool=all — worker marks are ignored (personal/control are still excluded).'));
+      if (mode === 'all') console.log(chalk.gray('auto.pool=all — worker marks are ignored (a personal device is still excluded).'));
       return;
     }
 
@@ -1505,7 +1505,7 @@ function registerDevicesCommands(program: Command): void {
       agents devices config mac-mini --json                     # machine-readable
     `,
     notes: `
-      Keys: role (worker|personal|control), see 'agents devices role',
+      Keys: role (worker|personal), see 'agents devices role',
       agents.max-concurrent, scheduler.enabled, daemon.enabled,
       watchdog.enabled, tmux.enabled, browser.remote-control, browser.profile,
       notes, ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,
