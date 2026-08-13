@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.22.38
+
+- Webhook `stateTo` triggers and handlers now fire only on the delivery that actually moved a Linear issue INTO that state, not on every later update while it still sits there. Previously a `stateTo: Plan` handler re-matched on any subsequent `Issue/update` — a label edit, an assignee change, a description touch — because it checked the issue's *current* state instead of the transition, which accumulated 11 duplicate plan comments on one issue. It now additionally requires the delivery's `updatedFrom` to record a state change. (RUSH-2539)
+
+- **A new release home base no longer needs the provisioning profile hand-copied over (RUSH-2541).** `apps/cli/bin/embedded.provisionprofile` became a committed, tracked file in commit `2567004b4` (RUSH-2535), but `release.sh`'s home-base seed step and `signing-home-base-probe.sh`'s preflight both still checked only the home base's own on-disk working tree -- so a legitimately new home base (or one whose local checkout simply predated that commit) still reported "unprovisioned" or died at the sign step with a misleading "generate at developer.apple.com" message, even though `git fetch origin` (which both already run) had the file the whole time. Both now recover the blob from the freshly fetched `origin/<default>` ref when it is absent on disk, and the seed step fails loud with the correct recovery guidance (recover from git history; do not regenerate at Apple's portal) instead of limping forward on a warning. Source: `apps/cli/scripts/release.sh`, `apps/cli/scripts/signing-home-base-probe.sh`, `apps/cli/scripts/build-keychain-helper.sh`.
+
+- **`release.sh`'s home-base provisionprofile recovery no longer dies silently under `set -e` on a freshly bootstrapped checkout (RUSH-2541 follow-up).** The `DEFAULT_BRANCH="$(git symbolic-ref ...)"` assignment added to recover `embedded.provisionprofile` from `origin/<default>` ran under `home_base_wt_snippet`'s own `set -euo pipefail`; `git symbolic-ref` returns non-zero whenever `refs/remotes/origin/HEAD` is unset, which is the normal state of a checkout bootstrapped via `init && remote add && fetch` rather than `clone` -- plausibly a brand-new fleet home base, exactly the box this feature targets. Under `set -e` the bare failing assignment tripped errexit at that line, killing the whole home-base phase with zero output before even the "main" fallback on the next line ran. Guarded with `|| true`, matching the pattern `assert_signing_home_base` already established for the identical anti-pattern. Source: `apps/cli/scripts/release.sh`.
+
+- **Top-level `agents set` is removed — use `agents models set` (RUSH-2579).** `agents set claude@2.1.220 --model opus-5` moves to `agents models set claude@2.1.220 --model opus-5`, unchanged otherwise: same selector forms (`<agent>@<version>`, `<agent>:*`), same `--model`/`--mode` flags, same underlying `run.defaults` store (`agents config get run.<agent@version>.model` still reads it). `agents set` now reports `unknown command`. Source: `apps/cli/src/commands/models.ts`, `apps/cli/src/lib/startup/command-registry.ts`.
+
+- **BREAKING: `agents share` moved under a new `agents artifacts` group (RUSH-2580).**
+  `artifacts` is the noun and `share` the action on it, so the surface now reads
+  noun-then-action like the rest of the CLI. The whole subtree moved down one
+  level — `agents artifacts share <file>` publishes, and
+  `agents artifacts share list|delete|analytics|join|status|update` are unchanged
+  under it. The two provisioning doors collapsed into one:
+  `agents artifacts setup` replaces both `agents share setup` (flag-driven) and
+  `agents setup share` (the wizard). It runs the wizard only when no endpoint
+  flag is typed on a TTY; type any of `--bundle`/`--worker`/`--bucket`/
+  `--account`/`--token`/`--domain`/`--analytics-token`, or run non-interactively,
+  and it provisions directly with what you named. The top-level `agents share` group and the
+  `agents setup share` subcommand no longer exist; `share` is retired from
+  distance-1 auto-correct, so a stale invocation fails loudly instead of running a
+  neighbouring command. `agents unshare <targets...>` is unchanged and stays
+  top-level. Source: `apps/cli/src/commands/artifacts.ts`,
+  `apps/cli/src/commands/artifacts-setup.ts`, `apps/cli/src/commands/share.ts`,
+  `apps/cli/src/commands/setup.ts`, `apps/cli/src/lib/startup/command-registry.ts`.
+
+### Fixed
+
+- The daemon orphan reaper no longer terminates live agents after a tmux server restart. A missing tmux session is now treated as unknown; helper processes are reaped only when their pane owner is present and confirmed dead, or a harness-specific rule proves their declared spawner exited.
+
+- **`agents browser` stops leaving duplicate and orphan tabs behind (RUSH-2622).**
+  The `about:blank` that a bare `agents browser start` opens is now registered on
+  the task, so `done`/`stop` actually closes it — it never was, which made every
+  bare start leak one tab permanently. `agents browser start --url` now reclaims
+  a tab that an abandoned task is still holding on that exact URL instead of
+  opening a duplicate; a tab held by a live task, or one you opened yourself, is
+  never taken, and the new `--fresh` skips the reclaim entirely. Tasks also carry
+  a `lastActionAt` stamp in `tasks.json` now. Source:
+  `apps/cli/src/lib/browser/service.ts`, `apps/cli/src/lib/browser/types.ts`.
+
 ## 1.22.37
 
 - **`agents.yaml`'s five writers now emit identical bytes, closing the rest of the sync-blocking drift (RUSH-2505).**
