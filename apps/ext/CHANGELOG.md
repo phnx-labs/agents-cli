@@ -6,6 +6,15 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+- **`Agents: New <Harness>` runs where you say — and defaults to the fleet's worker
+  boxes.** The per-harness New commands were hardcoded to this machine. New setting
+  `agents.launch.defaultTarget`: `auto` (the default — the CLI picks a device), `local`
+  (previous behavior), or `ask` (prompt for the host each time). Device choice stays with
+  the CLI, so `auto` emits `--device auto` and lands on whatever the fleet's
+  automatic-placement pool allows: mark boxes with `agents devices role <name> worker` and
+  new agents rotate over those only. The `(Pick Host)` and `(Auto)` command variants are
+  unchanged.
+
 ## [0.9.319] - 2026-08-10
 
 - **Marketplace icon is now the agents-cli brand mark.** The listing used a

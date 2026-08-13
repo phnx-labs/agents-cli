@@ -73,6 +73,8 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
       return raw.trim();
     case 'usage':
       return raw.trim();
+    case 'auto':
+      return raw.trim();
     case 'browser':
       return raw.trim();
     case 'project':
@@ -80,6 +82,8 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
     case 'device': {
       const property = parsed.property;
       switch (property) {
+        case 'role':
+          return raw.trim();
         case 'max-agents':
           if (!/^\d+$/.test(raw.trim())) {
             throw new Error(`Config key '${key}' expects an integer, got '${raw}'.`);
@@ -133,6 +137,10 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
       setConfigValue('usage.primary-host', value as string);
       return;
     }
+    case 'auto': {
+      setConfigValue('auto.pool', value as string);
+      return;
+    }
     case 'browser': {
       // Device-local default lives in the central fleet.devices.<name>.config
       // block (same store `agents devices config` / getConfigValue use). Bare
@@ -181,6 +189,11 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
       unsetConfigValue('usage.primary-host');
       return had;
     }
+    case 'auto': {
+      const had = getConfigValue('auto.pool').value !== undefined;
+      unsetConfigValue('auto.pool');
+      return had;
+    }
     case 'browser': {
       const target = parsed.device ? { device: parsed.device } : undefined;
       const had = getConfigValue('browser.profile', target).value !== undefined;
@@ -218,6 +231,8 @@ function getConfig(parsed: ParsedConfigKey): unknown {
       return getConfigValue('interactive.host').value;
     case 'usage':
       return getConfigValue('usage.primary-host').value;
+    case 'auto':
+      return getConfigValue('auto.pool').value;
     case 'browser': {
       return getConfigValue(
         'browser.profile',
@@ -277,6 +292,9 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
   }
   if (meta.config?.usagePrimaryHost !== undefined) {
     yield { key: 'usage.primary-host', value: meta.config.usagePrimaryHost, hint: 'config.usagePrimaryHost' };
+  }
+  if (meta.config?.autoPool !== undefined) {
+    yield { key: 'auto.pool', value: meta.config.autoPool, hint: 'config.autoPool' };
   }
   if (meta.projectRoot !== undefined) {
     yield { key: 'project.root', value: meta.projectRoot, hint: 'devices.<self>.projectRoot' };

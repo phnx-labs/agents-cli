@@ -618,12 +618,27 @@
         "agents.openaiApiKey": {
           "type": "string",
           "default": "",
-          "description": "OpenAI API key. Used by the Foreman voice coordinator (gpt-realtime-2). Autogit no longer uses this \u2014 commit messages are generated via `agents run claude --model haiku`."
+          "description": "OpenAI API key. Used by the Foreman voice coordinator (gpt-realtime-2). Autogit no longer uses this — commit messages are generated via `agents run claude --model haiku`."
         },
         "agents.commitGenTimeoutMs": {
           "type": "number",
           "default": 60000,
           "description": "Timeout (ms) for the `agents run claude --model haiku` call that generates commit messages. Increase if commits are slow to generate."
+        },
+        "agents.launch.defaultTarget": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "local",
+            "ask"
+          ],
+          "enumDescriptions": [
+            "Let the CLI pick a device (`--device auto`). Once you mark devices with `agents devices role <name> worker`, new agents rotate over those workers only.",
+            "Always run on this machine.",
+            "Prompt for the host on every launch."
+          ],
+          "default": "auto",
+          "description": "Where the per-harness \"Agents: New <Harness>\" commands run. Device choice stays with the CLI: 'auto' emits --device auto, which draws from the fleet's worker pool (agents devices role). The (Pick Host) and (Auto) command variants are unaffected."
         }
       }
     },

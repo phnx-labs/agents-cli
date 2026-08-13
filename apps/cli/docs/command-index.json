@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 89,
-  "commands": 542,
+  "commands": 543,
   "root": {
     "name": "agents",
     "path": "",
@@ -7413,8 +7413,8 @@
               "negate": false
             }
           ],
-          "examples": "agents devices config mac-mini                            # settings menu (TTY) / print config (piped)\n      agents devices config mac-mini agents.max-concurrent 4    # cap concurrent agents\n      agents devices config mac-mini scheduler.enabled off      # no routines firing there\n      agents devices config mac-mini scheduler.enabled          # read one key back\n      agents devices config mac-mini scheduler.enabled --unset  # back to the default\n      agents devices config mac-mini notes \"runs the releases\"  # append an operator note\n      agents devices config win-mini ssh.auth password          # password auth…\n      agents devices config win-mini ssh.bundle muqsit          # …from this secrets bundle\n      agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519\n      agents devices config mac-mini auto-launch.enabled off    # exclude from AGI EXT auto-launch\n      agents devices config mac-mini auto-launch.preferred on   # boost in auto-launch ranking\n      agents devices config zion interactive.host zion          # user scope: where agents show YOU artifacts\n      agents devices config mac-mini --json                     # machine-readable",
-          "notes": "Keys: agents.max-concurrent, scheduler.enabled, daemon.enabled,\n      watchdog.enabled, tmux.enabled, browser.remote-control, browser.profile,\n      notes, ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,\n      ssh.identity-file, platform (windows|linux|macos|unknown),\n      auto-launch.enabled, auto-launch.preferred — plus the user-scope\n      interactive.host (stored centrally; the device name is syntax only).\n\n      Booleans take on/off (or true/false). 'notes' appends one entry per\n      invocation. Values a PEER reads land in ~/.agents/agents.yaml under\n      fleet.devices.<name>.config and sync with 'agents repo push/pull'. The\n      keys only the owning box reads — scheduler.enabled, daemon.enabled,\n      tmux.enabled, browser.remote-control, browser.profile — stay in that\n      machine's own doc, never sync, and can only be set on the device itself.\n      ssh.* / platform / user overlay the discovered registry profile at dial\n      time. scheduler.enabled / daemon.enabled take effect when the daemon\n      reloads or restarts on that device.\n\n      The retired subcommands still work and forward here: configure, note,\n      set, set-interactive, enable, disable, prefer, unprefer.",
+          "examples": "agents devices config mac-mini                            # settings menu (TTY) / print config (piped)\n      agents devices config mac-mini agents.max-concurrent 4    # cap concurrent agents\n      agents devices config mac-mini scheduler.enabled off      # no routines firing there\n      agents devices config mac-mini scheduler.enabled          # read one key back\n      agents devices config mac-mini scheduler.enabled --unset  # back to the default\n      agents devices config mac-mini notes \"runs the releases\"  # append an operator note\n      agents devices config win-mini ssh.auth password          # password auth…\n      agents devices config win-mini ssh.bundle muqsit          # …from this secrets bundle\n      agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519\n      agents devices config mac-mini role worker                 # same as `agents devices role mac-mini worker`\n      agents devices config mac-mini auto-launch.enabled off    # exclude from AGI EXT auto-launch\n      agents devices config mac-mini auto-launch.preferred on   # boost in auto-launch ranking\n      agents devices config zion interactive.host zion          # user scope: where agents show YOU artifacts\n      agents devices config mac-mini --json                     # machine-readable",
+          "notes": "Keys: role (worker|personal|control), see 'agents devices role',\n      agents.max-concurrent, scheduler.enabled, daemon.enabled,\n      watchdog.enabled, tmux.enabled, browser.remote-control, browser.profile,\n      notes, ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,\n      ssh.identity-file, platform (windows|linux|macos|unknown),\n      auto-launch.enabled, auto-launch.preferred — plus the user-scope\n      interactive.host (stored centrally; the device name is syntax only).\n\n      Booleans take on/off (or true/false). 'notes' appends one entry per\n      invocation. Values a PEER reads land in ~/.agents/agents.yaml under\n      fleet.devices.<name>.config and sync with 'agents repo push/pull'. The\n      keys only the owning box reads — scheduler.enabled, daemon.enabled,\n      tmux.enabled, browser.remote-control, browser.profile — stay in that\n      machine's own doc, never sync, and can only be set on the device itself.\n      ssh.* / platform / user overlay the discovered registry profile at dial\n      time. scheduler.enabled / daemon.enabled take effect when the daemon\n      reloads or restarts on that device.\n\n      The retired subcommands still work and forward here: configure, note,\n      set, set-interactive, enable, disable, prefer, unprefer.",
           "subcommands": []
         },
         {
@@ -8027,6 +8027,59 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "role",
+          "path": "devices role",
+          "aliases": [],
+          "description": "Show or set what a device is for: worker (agents run here), personal (you sit here — never picked automatically), or control (a cockpit that is never dialed). Marking any device worker makes `--device auto` an allowlist over the marked workers.",
+          "args": [
+            {
+              "name": "name",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "role",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--clear",
+              "description": "remove the mark, returning the device to unmarked",
+              "long": "--clear",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "output machine-readable JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents devices role                          # who is marked what, and what --device auto would pick\n      agents devices role yosemite-s0 worker       # agents spin up here\n      agents devices role yosemite-s1 worker       # …and here; auto now rotates over these two only\n      agents devices role zion personal            # your laptop — keep automatic placement off it\n      agents devices role yosemite-s0 --clear      # unmark\n      agents devices role --json                   # machine-readable",
+          "notes": "Roles are stored fleet-wide in ~/.agents/agents.yaml under\n      fleet.devices.<name>.config.role and travel with 'agents repo push/pull',\n      so a mark set on one box is the whole fleet's answer.\n\n      Effect on '--device auto' (agents run, teams, and the AGI EXT launch\n      commands, which all resolve placement through the CLI):\n        no device marked   -> every online device, as before\n        any worker marked  -> ONLY the marked workers\n        personal / control -> never picked, under either state\n\n      Turn the allowlist off with 'agents config set auto.pool all'; personal and\n      control devices stay excluded (a cockpit cannot run an agent, and a\n      personal box is marked precisely to keep agents off it).",
           "subcommands": []
         },
         {

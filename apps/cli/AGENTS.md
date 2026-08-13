@@ -374,6 +374,8 @@ agents config set run.claude@*.mode auto
 agents config set run.claude@*.effort high
 agents config set interactive.host zion
 agents config set browser.profile work
+agents config set auto.pool workers
+agents config set devices.mac-mini.role worker
 agents config set devices.mac-mini.max-agents 4
 agents config set devices.mac-mini.scheduler off
 agents config set devices.mac-mini.tmux off
@@ -392,6 +394,20 @@ for a peer. Off costs that box `%pane` addressing, so `agents sessions --active`
 can no longer tell co-located agents apart there and `agents focus` cannot
 re-attach its sessions. The gate is `shouldWrapInTmux`
 ([`src/lib/exec.ts`](src/lib/exec.ts)), reading `isTmuxEnabled()`.
+
+`devices.<name>.role` (stored as `role`) says what a device is for fleet-wide —
+`worker` (agents run here), `personal` (a machine you sit at), or `control` (a
+cockpit that is never dialed). `agents devices role <name> <role>` is the
+task-shaped spelling. Marking any device `worker` turns automatic placement into
+an allowlist: `--device auto` then picks only from the marked workers, in every
+caller (`run`, `teams`, `ssh auto`, and the AGI EXT launch commands, which resolve
+placement through the CLI rather than scoring devices themselves). `personal` and
+`control` are never picked automatically. The rule is one function —
+`filterAutoPool` in [`src/lib/devices/pool.ts`](src/lib/devices/pool.ts) — read by
+`listOnlineDeviceNames`, and `auto.pool` (`workers` by default, or `all`) turns
+the allowlist off. Unlike the machine-local keys, `role` is **shared**: it lives in
+the central `fleet.devices.<name>.config` block and syncs, because every box has
+to agree on where agents may land.
 
 `interactive.host` is a **user-level** preference: it lives in central
 `~/.agents/agents.yaml` under `config.interactiveHost`, syncs fleet-wide via

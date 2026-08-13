@@ -102,6 +102,10 @@ export interface ConfigTarget {
 
 const DEVICE_PLATFORMS = ['windows', 'linux', 'macos', 'unknown'] as const;
 const SSH_AUTH_METHODS = ['key', 'password'] as const;
+/** Roles a device can be marked with — see the `role` key below. */
+const DEVICE_ROLES = ['worker', 'personal', 'control'] as const;
+/** Which devices automatic placement may pick — see the `auto.pool` key below. */
+const AUTO_POOL_MODES = ['workers', 'all'] as const;
 
 export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
   {
@@ -134,6 +138,21 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
         return err?.message ?? String(err);
       }
     },
+  },
+  {
+    name: 'auto.pool',
+    yamlKey: 'autoPool',
+    scope: 'user',
+    type: 'string',
+    description:
+      "Which devices automatic placement (`--device auto`) may pick: 'workers' (default — only devices marked role=worker, " +
+      "once at least one is marked) or 'all' (every online device, ignoring roles). Devices marked personal or control are " +
+      'never picked automatically under either mode.',
+    defaultValue: 'workers',
+    validate: (v) =>
+      (AUTO_POOL_MODES as readonly string[]).includes(v as string)
+        ? null
+        : `auto.pool must be one of ${AUTO_POOL_MODES.join(' | ')}.`,
   },
   {
     name: 'browser.profile',
@@ -273,6 +292,21 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       (DEVICE_PLATFORMS as readonly string[]).includes(v as string)
         ? null
         : `platform must be one of ${DEVICE_PLATFORMS.join(' | ')}.`,
+  },
+  {
+    name: 'role',
+    yamlKey: 'role',
+    scope: 'device',
+    visibility: 'shared',
+    type: 'string',
+    description:
+      "What this device is for, fleet-wide: 'worker' (a box agents run on), 'personal' (a machine you sit at — never picked " +
+      "automatically), or 'control' (a cockpit that steers the fleet and is never dialed). Marking ANY device worker turns " +
+      'automatic placement into an allowlist: `--device auto` then picks only from the marked workers.',
+    validate: (v) =>
+      (DEVICE_ROLES as readonly string[]).includes(v as string)
+        ? null
+        : `role must be one of ${DEVICE_ROLES.join(' | ')}.`,
   },
   {
     name: 'auto-launch.enabled',
@@ -532,6 +566,57 @@ export function unsetConfigValue(name: string, opts?: ConfigTarget): void {
     return;
   }
   unsetInCentralBlock(device, spec);
+}
+
+// ─── Device roles + the automatic-placement pool ──────────────────────────────
+
+/** A role an operator marked a device with (`agents devices role <name> <role>`). */
+export type ConfiguredDeviceRole = (typeof DEVICE_ROLES)[number];
+
+/** Which devices automatic placement may pick (`auto.pool`). */
+export type AutoPoolMode = (typeof AUTO_POOL_MODES)[number];
+
+/**
+ * The role marked on one device, or undefined when the operator never marked it.
+ *
+ * Undefined is meaningful and is NOT the same as `worker`: an unmarked device is
+ * eligible for automatic placement only while no device anywhere carries an
+ * explicit `worker` mark (see {@link listConfiguredDeviceRoles}).
+ */
+export function configuredDeviceRole(name: string): ConfiguredDeviceRole | undefined {
+  assertValidDeviceName(name);
+  return getConfigValue('role', { device: name }).value as ConfiguredDeviceRole | undefined;
+}
+
+/** Mark a device's role fleet-wide; `undefined` clears the mark. */
+export function setConfiguredDeviceRole(name: string, role: ConfiguredDeviceRole | undefined): void {
+  assertValidDeviceName(name);
+  if (role === undefined) unsetConfigValue('role', { device: name });
+  else setConfigValue('role', role, { device: name });
+}
+
+/**
+ * Every device an operator has marked, keyed by device name. Devices with no
+ * mark are absent — that absence is what makes the worker allowlist opt-in.
+ */
+export function listConfiguredDeviceRoles(): Record<string, ConfiguredDeviceRole> {
+  ensureDeviceConfigMigrated();
+  const devices = readMeta().fleet?.devices;
+  const out: Record<string, ConfiguredDeviceRole> = {};
+  if (!devices || devices === 'all') return out;
+  for (const [name, override] of Object.entries(devices)) {
+    const role = override?.config?.role;
+    if (typeof role === 'string' && (DEVICE_ROLES as readonly string[]).includes(role)) {
+      out[name] = role as ConfiguredDeviceRole;
+    }
+  }
+  return out;
+}
+
+/** The configured automatic-placement pool mode. Unset means `workers`. */
+export function autoPoolMode(): AutoPoolMode {
+  const value = getConfigValue('auto.pool').value;
+  return value === 'all' ? 'all' : 'workers';
 }
 
 // ─── Auto-launch preferences (Factory auto-host selection) ────────────────────

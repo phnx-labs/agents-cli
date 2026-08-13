@@ -40,6 +40,40 @@ affinity (weighted by launch counts on `sessions.db` `machine`; most-used online
 device has highest probability). Harness stays the agent you typed — never
 auto-picked. Affinity failure degrades to local rather than aborting the run.
 
+### Which devices `auto` may pick — device roles
+
+Automatic placement draws from a **pool**, not from every online box. Mark what a
+device is for, once, from any machine:
+
+```
+agents devices role yosemite-s0 worker    # agents run here
+agents devices role yosemite-s1 worker    # …and here
+agents devices role zion personal         # your laptop — keep agents off it
+agents devices role                       # who is marked what, and what auto would pick
+```
+
+| Fleet state | `--device auto` picks from |
+|---|---|
+| nothing marked | every online device (the historical behavior) |
+| any device marked `worker` | ONLY the marked workers |
+| a device marked `personal` / `control` | never, under either state |
+
+Marking a worker is what turns the pool into an **allowlist** — that is the whole
+opt-in: two marks and every automatic launch lands on those two boxes. The rule
+lives in one place (`src/lib/devices/pool.ts`) and every automatic-placement
+caller reads it, so `agents run --device auto`, `agents teams add --device auto`,
+`agents ssh auto`, and the AGI EXT `New <Harness>` commands agree. Widen it back
+with `agents config set auto.pool all` (personal/control stay excluded — a
+cockpit cannot run an agent, and a personal box is marked precisely to keep
+agents off it).
+
+Roles live in the fleet-**shared** `fleet.devices.<name>.config.role` block of
+`~/.agents/agents.yaml` and travel with `agents repo push` / `pull`; the device
+registry under `~/.agents/devices/` is per-machine and gitignored, so it could
+never hold a fleet-wide answer. `agents devices list` tags marked rows, and
+`agents devices list --json` carries `role` plus an `autoPool` boolean per
+device.
+
 ### `agents run auto` — all three routing layers
 
 `auto` as the AGENT name (`agents run auto "…"`, distinct from `--host auto`)

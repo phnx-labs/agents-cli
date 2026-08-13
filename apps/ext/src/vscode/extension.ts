@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, isAgentRunner, usesManagedAgentLaunch, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand, shquote } from '../core/agents';
 import { resolveProjectForCwd } from '../core/managedProjects';
 import { parseSpawnRequest, resolveSpawnSurface, SpawnRequest } from '../core/spawn';
+import { launchOptsForTarget, resolveLaunchTarget } from '../core/launchTarget';
 import {
   AgentConfig,
   buildIconPath,
@@ -1507,9 +1508,13 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  /** The configured default target for the bare `New <Harness>` commands. */
+  const defaultLaunchTarget = () =>
+    resolveLaunchTarget(vscode.workspace.getConfiguration('agents').get<string>('launch.defaultTarget'));
+
   // Per-harness launch commands — every one is a thin route into launchAgent.
   // For each non-shell agent:
-  //   New <Harness>              -> balanced version, this Mac
+  //   New <Harness>              -> balanced version, on agents.launch.defaultTarget
   //   New <Harness> (Pick Host)  -> pick a device first, then balanced version
   //   New <Harness> (Auto)       -> instant cached device pick, balanced version
   // There is no version picker, no pinned/latest variant, no per-strategy trio:
@@ -1531,7 +1536,12 @@ export async function activate(context: vscode.ExtensionContext) {
       continue;
     }
     context.subscriptions.push(
-      vscode.commands.registerCommand(def.commandId, () => launchAgent(context, { agentKey: def.key, local: true }))
+      // Where a bare `New <Harness>` runs is the user's setting, read at press
+      // time so a change takes effect without reloading the window. The default
+      // (`auto`) hands placement to the CLI, which rotates over the devices
+      // marked `agents devices role <name> worker`.
+      vscode.commands.registerCommand(def.commandId, () =>
+        launchAgent(context, { agentKey: def.key, ...launchOptsForTarget(defaultLaunchTarget()) }))
     );
     context.subscriptions.push(
       vscode.commands.registerCommand(`${def.commandId}PickHost`, () => launchAgent(context, { agentKey: def.key, pickHost: true }))

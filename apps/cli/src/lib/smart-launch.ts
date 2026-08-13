@@ -9,6 +9,7 @@
 import { queryAffinityRollup, type AffinityRow } from './session/db.js';
 import { localMachineId } from './session/origin-machine.js';
 import { loadDevicesSync } from './devices/registry.js';
+import { describeAutoPool, filterAutoPool, isAutoPoolMember } from './devices/pool.js';
 import { normalizeHost } from './machine-id.js';
 import { probePoolSignals } from './teams/placement-probe.js';
 import { pickBestDevice, type DevicePlacementSignal } from './teams/scheduler.js';
@@ -60,7 +61,15 @@ export function sampleWeighted(
   return candidates[candidates.length - 1].key;
 }
 
-/** Online device names from the local registry (+ always include local). */
+/**
+ * Online device names from the local registry (+ local), narrowed to the
+ * automatic-placement pool.
+ *
+ * The pool rule lives in `devices/pool.ts` and is an allowlist once any device
+ * is marked `role=worker`: this is the single place both automatic-placement
+ * paths (`resolveDeviceAuto`, `resolveDeviceAffinity`) get their candidates, so
+ * marking workers moves every `--device auto` at once instead of one surface.
+ */
 export function listOnlineDeviceNames(localName: string = localMachineId()): string[] {
   const names = new Set<string>([normalizeHost(localName)]);
   try {
@@ -75,7 +84,7 @@ export function listOnlineDeviceNames(localName: string = localMachineId()): str
   } catch {
     /* registry missing — local only */
   }
-  return [...names];
+  return filterAutoPool([...names]);
 }
 
 export interface DeviceAffinityOptions {
@@ -125,7 +134,11 @@ export function formatNoHealthyDeviceError(
     return `${key} (${reason})`;
   }).join(', ');
   const target = agent ? `can run ${agent}` : "for 'run auto'";
-  return `agents: no healthy device ${target} — excluded: ${excluded}; earliest window resets unknown`;
+  // Name the role narrowing when there is one: a fleet where every box but two
+  // is filtered out by a worker mark reads as "the fleet is down" without it.
+  const marked = describeAutoPool();
+  const poolNote = marked ? ` [pool: ${marked}]` : '';
+  return `agents: no healthy device ${target}${poolNote} — excluded: ${excluded}; earliest window resets unknown`;
 }
 
 /**
@@ -145,7 +158,17 @@ export async function resolveDeviceAuto(
 ): Promise<DeviceAutoPlan> {
   const local = normalizeHost(opts.localMachine ?? localMachineId());
   const pool = [...new Set((opts.eligibleHosts ?? listOnlineDeviceNames(local)).map(normalizeHost))];
-  if (!pool.includes(local)) pool.push(local);
+  // The local machine participates in the same probe as every peer — unless a
+  // role excludes it. Adding it unconditionally would put agents back on the box
+  // the operator marked `personal` precisely to keep them off it.
+  if (!pool.includes(local) && isAutoPoolMember(local)) pool.push(local);
+  if (pool.length === 0) {
+    const marked = describeAutoPool();
+    throw new Error(
+      `agents: no device is eligible for automatic placement${marked ? ` (${marked})` : ''} — ` +
+        'mark one with `agents devices role <name> worker`, or widen the pool with `agents config set auto.pool all`.',
+    );
+  }
 
   const signals = await (opts.probe ?? probePoolSignals)(pool, agent as AgentType | undefined);
   if (!agent && !opts.probe) {

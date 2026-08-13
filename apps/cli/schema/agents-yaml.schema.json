@@ -34,6 +34,11 @@
         "interactiveHost": {
           "type": "string",
           "description": "User scope. Device that shows the user artifacts (browser opens, dashboards). Set via `agents devices config <name> interactive.host <name>`."
+        },
+        "autoPool": {
+          "type": "string",
+          "enum": ["workers", "all"],
+          "description": "User scope. Which devices automatic placement (`--device auto`) may pick: 'workers' (default — only devices marked role=worker, once any is marked) or 'all'. Devices marked personal/control are never picked under either mode. Set via `agents config set auto.pool <mode>`."
         }
       }
     },
@@ -142,6 +147,11 @@
                 "description": "Device-scope operator config for this device (central, synced). Unset keys keep default behavior.",
                 "additionalProperties": true,
                 "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": ["worker", "personal", "control"],
+                    "description": "What this device is for, fleet-wide (`agents devices role <name> <role>`). Marking any device 'worker' makes `--device auto` an allowlist over the marked workers; 'personal' and 'control' are never picked automatically."
+                  },
                   "maxAgents": {
                     "type": "integer",
                     "minimum": 1,

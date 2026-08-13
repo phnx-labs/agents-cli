@@ -130,7 +130,20 @@ import {
   type VerdictSummary,
 } from '../lib/auth-health.js';
 import { runFleetLogin, type LoginStatus } from '../lib/fleet/remote-login.js';
-import { getConfigValue, listConfig, setConfigValue, unsetConfigValue, configKeySpec, type ConfigKeySpec } from '../lib/device-config.js';
+import {
+  getConfigValue,
+  listConfig,
+  setConfigValue,
+  unsetConfigValue,
+  configKeySpec,
+  autoPoolMode,
+  configuredDeviceRole,
+  listConfiguredDeviceRoles,
+  setConfiguredDeviceRole,
+  type ConfigKeySpec,
+  type ConfiguredDeviceRole,
+} from '../lib/device-config.js';
+import { filterAutoPool, listWorkerDevices } from '../lib/devices/pool.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 
 /** One-line summary of a device for `list`. `isSelf` marks the machine this
@@ -153,7 +166,18 @@ function deviceSummary(d: DeviceProfile, isSelf = false, stats?: DeviceStats, is
   const name = isSelf ? chalk.bold.cyan(d.name.padEnd(16)) : chalk.bold(d.name.padEnd(16));
   const here = isSelf ? chalk.cyan('  ← this machine') : '';
   const interactive = isInteractive ? chalk.yellow('  ★ interactive') : '';
-  return `${marker}${name} ${String(d.platform).padEnd(8)} ${(d.user ? d.user + '@' : '') + addr}  ${online}${reach}${here}${interactive}`;
+  const role = roleTag(d.name, listConfiguredDeviceRoles());
+  return `${marker}${name} ${String(d.platform).padEnd(8)} ${(d.user ? d.user + '@' : '') + addr}  ${online}${reach}${here}${interactive}${role}`;
+}
+
+/** The fleet-wide role mark, rendered for a device row. Empty when unmarked —
+ * an unmarked device is the common case and must not add a column of noise. */
+function roleTag(name: string, roles: Record<string, ConfiguredDeviceRole>): string {
+  const role = roles[name];
+  if (!role) return '';
+  if (role === 'worker') return chalk.green('  worker');
+  if (role === 'personal') return chalk.yellow('  personal');
+  return chalk.gray('  control');
 }
 
 const HEADROOM_BADGE: Record<Headroom, string> = {
@@ -190,6 +214,7 @@ function renderDeviceTable(
 ): string[] {
   if (!statsMap) return names.map((n) => deviceSummary(reg[n], n === self, undefined, n === interactiveHost));
 
+  const deviceRoles = listConfiguredDeviceRoles();
   const lines: string[] = [];
   const head =
     '  ' +
@@ -234,7 +259,7 @@ function renderDeviceTable(
     const badge = HEADROOM_BADGE[headroom(stats)];
     const here = isSelf ? chalk.cyan('  ← this machine') : '';
     const interactive = name === interactiveHost ? chalk.yellow('  ★ interactive') : '';
-    lines.push(`${marker}${label}${plat} ${cores}${load}${mem}${freeTotal}  ${badge}${relay}${here}${interactive}`);
+    lines.push(`${marker}${label}${plat} ${cores}${load}${mem}${freeTotal}  ${badge}${relay}${here}${interactive}${roleTag(name, deviceRoles)}`);
   }
 
   // Fleet capacity summary — total cores + how much RAM is free right now.
@@ -1306,6 +1331,83 @@ function registerDevicesCommands(program: Command): void {
     await runDevicesConfigMenu(name);
   };
 
+  /**
+   * The `devices role` engine — read or write the fleet-wide role mark, and say
+   * what it does to automatic placement.
+   *
+   * A role written here lands in the SHARED block (`fleet.devices.<name>.config.role`)
+   * because every box has to agree on it. `control` is additionally mirrored
+   * onto this machine's device registry entry, which is what the existing
+   * dial-exclusion filters (`isControlDevice`) read — the registry is
+   * per-machine and gitignored, so it can hold the mirror but never the truth.
+   */
+  const runDevicesRole = async (
+    name: string | undefined,
+    role: string | undefined,
+    opts: { clear?: boolean; json?: boolean },
+  ): Promise<void> => {
+    if (!name) {
+      if (role) throw new Error('Name a device: agents devices role <name> <worker|personal|control>');
+      const roles = listConfiguredDeviceRoles();
+      const mode = autoPoolMode();
+      const reg = await loadDevices();
+      const online = Object.entries(reg)
+        .filter(([, d]) => d?.tailscale?.online !== false)
+        .map(([n]) => n);
+      const pool = filterAutoPool(online, { mode, roles });
+      if (opts.json) {
+        writeJson({ mode, roles, autoPool: pool });
+        return;
+      }
+      const marked = Object.entries(roles);
+      if (marked.length === 0) {
+        console.log(chalk.gray('No device is marked. `--device auto` considers every online device.'));
+      } else {
+        for (const [device, r] of marked) {
+          const tint = r === 'worker' ? chalk.green : r === 'personal' ? chalk.yellow : chalk.gray;
+          console.log(`  ${device.padEnd(20)} ${tint(r)}`);
+        }
+      }
+      console.log();
+      console.log(chalk.bold('--device auto picks from: ') + (pool.length > 0 ? pool.join(', ') : chalk.red('nothing — no eligible device')));
+      if (mode === 'all') console.log(chalk.gray('auto.pool=all — worker marks are ignored (personal/control are still excluded).'));
+      return;
+    }
+
+    await mustGetDevice(name);
+
+    if (opts.clear || role === 'none') {
+      setConfiguredDeviceRole(name, undefined);
+      if (opts.json) writeJson({ device: name, role: null });
+      else console.log(chalk.green(`Cleared the role on '${name}'.`));
+      return;
+    }
+
+    if (!role) {
+      const current = configuredDeviceRole(name);
+      if (opts.json) writeJson({ device: name, role: current ?? null });
+      else console.log(`  ${name.padEnd(20)} ${current ? chalk.cyan(current) : chalk.gray('— (unmarked)')}`);
+      return;
+    }
+
+    // configuredDeviceRole's key spec validates the value; a bad one throws with
+    // the accepted list, which the command's catch turns into exit 1.
+    setConfiguredDeviceRole(name, role as ConfiguredDeviceRole);
+    if (role === 'control') await upsertDevice(name, { role: 'control' });
+    if (opts.json) {
+      writeJson({ device: name, role, autoPoolWorkers: listWorkerDevices() });
+      return;
+    }
+    console.log(chalk.green(`Marked '${name}' role=${role}.`));
+    const workers = listWorkerDevices();
+    if (workers.length > 0) {
+      console.log(chalk.gray(`\`--device auto\` now picks only from: ${workers.join(', ')}`));
+    } else {
+      console.log(chalk.gray('No device is marked worker, so `--device auto` still considers every online device.'));
+    }
+    console.log(chalk.gray('Sync it to the fleet with `agents repo push`.'));
+  };
+
   /** The interactive settings menu: pick a key, edit it, repeat. TTY-only. */
   const runDevicesConfigMenu = async (name: string): Promise<void> => {
     const { select, input, confirm } = await import('@inquirer/prompts');
@@ -1394,13 +1496,15 @@ function registerDevicesCommands(program: Command): void {
       agents devices config win-mini ssh.auth password          # password auth…
       agents devices config win-mini ssh.bundle muqsit          # …from this secrets bundle
       agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519
+      agents devices config mac-mini role worker                 # same as \`agents devices role mac-mini worker\`
       agents devices config mac-mini auto-launch.enabled off    # exclude from AGI EXT auto-launch
       agents devices config mac-mini auto-launch.preferred on   # boost in auto-launch ranking
       agents devices config zion interactive.host zion          # user scope: where agents show YOU artifacts
       agents devices config mac-mini --json                     # machine-readable
     `,
     notes: `
-      Keys: agents.max-concurrent, scheduler.enabled, daemon.enabled,
+      Keys: role (worker|personal|control), see 'agents devices role',
+      agents.max-concurrent, scheduler.enabled, daemon.enabled,
       watchdog.enabled, tmux.enabled, browser.remote-control, browser.profile,
       notes, ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,
       ssh.identity-file, platform (windows|linux|macos|unknown),
@@ -1419,6 +1523,48 @@ function registerDevicesCommands(program: Command): void {
 
       The retired subcommands still work and forward here: configure, note,
       set, set-interactive, enable, disable, prefer, unprefer.
+    `,
+  });
+
+  const roleCmd = devicesCmd
+    .command('role [name] [role]')
+    .description(
+      'Show or set what a device is for: worker (agents run here), personal (you sit here — never picked automatically), ' +
+        'or control (a cockpit that is never dialed). Marking any device worker makes `--device auto` an allowlist over the marked workers.',
+    )
+    .option('--clear', 'remove the mark, returning the device to unmarked')
+    .option('--json', 'output machine-readable JSON')
+    .action(async (name: string | undefined, role: string | undefined, opts: { clear?: boolean; json?: boolean }) => {
+      try {
+        await runDevicesRole(name, role, opts);
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+    });
+  setHelpSections(roleCmd, {
+    examples: `
+      agents devices role                          # who is marked what, and what --device auto would pick
+      agents devices role yosemite-s0 worker       # agents spin up here
+      agents devices role yosemite-s1 worker       # …and here; auto now rotates over these two only
+      agents devices role zion personal            # your laptop — keep automatic placement off it
+      agents devices role yosemite-s0 --clear      # unmark
+      agents devices role --json                   # machine-readable
+    `,
+    notes: `
+      Roles are stored fleet-wide in ~/.agents/agents.yaml under
+      fleet.devices.<name>.config.role and travel with 'agents repo push/pull',
+      so a mark set on one box is the whole fleet's answer.
+
+      Effect on '--device auto' (agents run, teams, and the AGI EXT launch
+      commands, which all resolve placement through the CLI):
+        no device marked   -> every online device, as before
+        any worker marked  -> ONLY the marked workers
+        personal / control -> never picked, under either state
+
+      Turn the allowlist off with 'agents config set auto.pool all'; personal and
+      control devices stay excluded (a cockpit cannot run an agent, and a
+      personal box is marked precisely to keep agents off it).
     `,
   });
 
@@ -1626,12 +1772,19 @@ function registerDevicesCommands(program: Command): void {
     }
 
     if (opts.json) {
+      const jsonRoles = listConfiguredDeviceRoles();
+      const autoPool = new Set(filterAutoPool(names, { roles: jsonRoles }));
       process.stdout.write(JSON.stringify(names.map((name) => {
         const config = deviceConfigJson(name);
         const health = statsMap?.get(name);
         return {
           ...resolveDeviceProfile(reg[name]),
           interactive: name === interactiveHost,
+          // Roles as machine-readable fields: `role` is what the operator
+          // marked (absent when unmarked), `autoPool` is the answer that
+          // matters to a caller — may `--device auto` pick this box.
+          ...(jsonRoles[name] ? { role: jsonRoles[name] } : {}),
+          autoPool: autoPool.has(name),
           ...(config ? { config } : {}),
           ...(health ? { health: { ...health, headroom: headroom(health) } } : {}),
         };
