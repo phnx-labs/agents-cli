@@ -972,6 +972,47 @@ notify:
     expect(central.browser).toBeUndefined();
   });
 
+  it('keeps a comment glued directly above browser: when the key itself is dropped', () => {
+    // No blank line before `browser:` — YAML attaches those lines to the Pair,
+    // so a bare doc.delete('browser') takes the header with them.
+    const dir = userDirWith(`# agents-cli metadata
+# hand-written comment that must survive
+browser:
+  default:
+    browser: chromium
+    binary: /usr/bin/chromium-browser
+notify:
+  owner:
+    channel: imessage
+`);
+
+    migrateMachineLocalBrowserProfileOutOfCentral(dir, 'zion');
+
+    // Assert on RAW BYTES: yaml.parse() hides both this and the `{}` defect.
+    const raw = fs.readFileSync(path.join(dir, 'agents.yaml'), 'utf-8');
+    expect(raw).toContain('# agents-cli metadata');
+    expect(raw).toContain('# hand-written comment that must survive');
+    expect(raw).toContain('channel: imessage');
+    expect(raw).not.toMatch(/^browser:/m);
+  });
+
+  it('writes the header, never a flow {} root, when browser was central\'s only key', () => {
+    const dir = userDirWith(`browser:
+  default:
+    browser: chromium
+    binary: /usr/bin/chromium-browser
+`);
+
+    migrateMachineLocalBrowserProfileOutOfCentral(dir, 'zion');
+
+    const raw = fs.readFileSync(path.join(dir, 'agents.yaml'), 'utf-8');
+    // A flow `{}` root is poison: a later parseDocument inherits flow and
+    // renders the whole rewritten file inline (see serializeCentral).
+    expect(raw.trim()).not.toBe('{}');
+    expect(raw).toContain('# agents-cli metadata');
+    expect(yaml.parse(raw) ?? {}).toEqual({});
+  });
+
   it('is idempotent and leaves a clean central file untouched', () => {
     const dir = userDirWith(CENTRAL_WITH_DEFAULT);
 

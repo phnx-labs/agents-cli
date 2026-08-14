@@ -1643,8 +1643,31 @@ export function migrateMachineLocalBrowserProfileOutOfCentral(
   // Then strip it from the synced file, dropping `browser:` entirely when the
   // machine-local entry was its only member.
   doc.deleteIn(['browser', DEFAULT_BROWSER_PROFILE_NAME]);
-  if (Object.keys(browser as Record<string, unknown>).length === 1) doc.delete('browser');
-  atomicWriteFileSync(metaFile, stringifyDoc(doc));
+  if (Object.keys(browser as Record<string, unknown>).length === 1) {
+    // A comment block sitting directly above `browser:` with no blank line is
+    // attached to that pair's KEY node, so deleting the key takes those lines
+    // with it — including the file header. Re-home them onto whatever key is
+    // now first, or this migration silently destroys the comments it exists to
+    // preserve. (Not `doc.get('browser', true)`: that returns the VALUE node,
+    // which never carries the comment.)
+    type Keyed = { key?: { value?: unknown; commentBefore?: string | null } };
+    const itemsOf = (): Keyed[] => ((doc.contents as { items?: Keyed[] } | null)?.items) ?? [];
+    const idx = itemsOf().findIndex((pair) => pair.key?.value === 'browser');
+    const orphaned = idx >= 0 ? itemsOf()[idx]?.key?.commentBefore ?? undefined : undefined;
+    doc.delete('browser');
+    if (orphaned) {
+      // Deleting shifted the following pair down into `idx`.
+      const next = itemsOf()[idx]?.key;
+      if (next) next.commentBefore = next.commentBefore ? `${orphaned}\n${next.commentBefore}` : orphaned;
+      else doc.commentBefore = orphaned;
+    }
+  }
+  // Everything cleared -> header only, never a bare `{}`. stringifyDoc emits a
+  // FLOW empty map for an empty root, and a later parseDocument inherits that
+  // flow and renders the whole rewritten file inline. serializeCentral guards
+  // the identical case (state.ts, `isEmpty ? META_HEADER : stringifyDoc(doc)`).
+  const remaining = Object.keys((doc.toJSON() as Record<string, unknown> | null) ?? {}).length;
+  atomicWriteFileSync(metaFile, remaining === 0 ? DEVICE_META_HEADER : stringifyDoc(doc));
   console.error(`Migrated agents.yaml: browser '${DEFAULT_BROWSER_PROFILE_NAME}' profile -> devices/${machine}/agents.yaml`);
 }
 

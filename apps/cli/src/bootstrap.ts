@@ -1186,7 +1186,7 @@ const SETUP_EXEMPT_COMMANDS = new Set(['setup', 'help', 'uninstall']);
 //
 // Skipped for --help/--version (RUSH-2454): pure documentation paths must not
 // load any migration graph. Loaded from migrate-fold.js (leaf: fs + createLink),
-// not migrate.js, so a real command pays only the fold hop unless the v19
+// not migrate.js, so a real command pays only the fold hop unless the v20
 // sentinel is missing and runMigration() is required below.
 if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !helpOrVersionRequested) {
   try {
