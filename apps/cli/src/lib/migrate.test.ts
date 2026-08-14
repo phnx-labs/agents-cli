@@ -1013,6 +1013,22 @@ notify:
     expect(yaml.parse(raw) ?? {}).toEqual({});
   });
 
+  it('writes the device file with the canonical four-line META_HEADER', () => {
+    // The subtlest decision in the migration: migrate.ts's own local HEADER
+    // constants are THREE lines (no yaml-language-server hint), so writing one
+    // of those would leave a device file that state.ts's writeIfChanged rewrites
+    // on the very next meta write — reintroducing the churn this removes.
+    const dir = userDirWith(CENTRAL_WITH_DEFAULT);
+
+    migrateMachineLocalBrowserProfileOutOfCentral(dir, 'zion');
+
+    const raw = fs.readFileSync(path.join(dir, 'devices', 'zion', 'agents.yaml'), 'utf-8');
+    expect(raw).toContain('# agents-cli metadata');
+    expect(raw).toContain('# Auto-generated - do not edit manually');
+    expect(raw).toContain('# https://github.com/phnx-labs/agents-cli');
+    expect(raw).toContain('# yaml-language-server: $schema=');
+  });
+
   it('is idempotent and leaves a clean central file untouched', () => {
     const dir = userDirWith(CENTRAL_WITH_DEFAULT);
 

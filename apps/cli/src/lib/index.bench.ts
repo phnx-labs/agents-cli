@@ -120,7 +120,7 @@ const REAL_PATH = process.env.PATH || '';
 const SYSTEM_DIR = getAgentsDir();
 const LEGACY_SYSTEM_DIR = getLegacySystemAgentsDir();
 const MIGRATED_SENTINEL_FILE = getMigratedSentinelPath();
-// Mirrors `sentinelValue` in index.ts — keep in sync or the bench measures the
+// Mirrors `sentinelValue` in bootstrap.ts — keep in sync or the bench measures the
 // non-short-circuiting path that a real (already-migrated) install never takes.
 const MIGRATION_SENTINEL_VALUE = 'v20';
 
