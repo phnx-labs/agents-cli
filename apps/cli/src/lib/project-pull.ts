@@ -113,20 +113,40 @@ export async function pullProjectTargets(
     // Slug verification: if the project def declares a slug, the directory's
     // origin must match it. A mismatch means the path hosts a different repo
     // and we must not fast-forward it under a wrong project's command.
+    // An unreadable remote URL or an unrecognised remote shape is also blocked —
+    // we cannot confirm the checkout is the right repo, so we fail closed.
     if (target.expectedSlug) {
       const remoteUrl = await getRemoteUrl(absPath);
-      if (remoteUrl !== null) {
-        const actualSlug = parseOwnerRepoFromRemote(remoteUrl);
-        if (actualSlug !== null && actualSlug.toLowerCase() !== target.expectedSlug.toLowerCase()) {
-          results.push({
-            host,
-            path: target.path,
-            expectedSlug: target.expectedSlug,
-            status: 'blocked',
-            message: `Slug mismatch: expected ${target.expectedSlug}, found ${actualSlug}`,
-          });
-          continue;
-        }
+      if (remoteUrl === null) {
+        results.push({
+          host,
+          path: target.path,
+          expectedSlug: target.expectedSlug,
+          status: 'blocked',
+          message: `Slug verification failed: no origin remote found (expected ${target.expectedSlug})`,
+        });
+        continue;
+      }
+      const actualSlug = parseOwnerRepoFromRemote(remoteUrl);
+      if (actualSlug === null) {
+        results.push({
+          host,
+          path: target.path,
+          expectedSlug: target.expectedSlug,
+          status: 'blocked',
+          message: `Slug verification failed: cannot parse remote URL "${remoteUrl}" (expected ${target.expectedSlug})`,
+        });
+        continue;
+      }
+      if (actualSlug.toLowerCase() !== target.expectedSlug.toLowerCase()) {
+        results.push({
+          host,
+          path: target.path,
+          expectedSlug: target.expectedSlug,
+          status: 'blocked',
+          message: `Slug mismatch: expected ${target.expectedSlug}, found ${actualSlug}`,
+        });
+        continue;
       }
     }
 

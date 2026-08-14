@@ -49,6 +49,7 @@ import {
 } from '../lib/projects.js';
 import {
   buildPullEnvelope,
+  fingerprintTargets,
   parseProjectPullEnvelope,
   printProjectPullSummary,
   projectPullComplete,
@@ -965,13 +966,16 @@ export function registerProjectsCommands(program: Command): void {
       const self = machineId();
       const localResults = await pullProjectTargets(targets, self);
 
-      // Fan out to fleet peers.
+      // Fan out to fleet peers. Compute the fingerprint once so every peer
+      // envelope can be verified against the exact target set we sent.
       const paths = targets.map((t) => t.path);
+      const expectedFingerprint = fingerprintTargets(targets);
       const remoteRes = await gatherRemoteAgentsJson({
         args: ['projects', 'pull-local', '--json', ...paths],
         noFanoutEnv: PROJECTS_NO_FANOUT_ENV,
         hosts: deviceFilter,
-        parse: (stdout: string, machine: string) => parseProjectPullEnvelope(stdout, machine),
+        parse: (stdout: string, machine: string) =>
+          parseProjectPullEnvelope(stdout, machine, { expectedFingerprint }),
         quiet: true,
         timeoutMs: 120_000,
       });
