@@ -41,11 +41,19 @@ import {
   isSafeProjectName,
   validateProjectDef,
   projectNameForCwd,
+  projectRepoTargetsForDef,
   type ProjectDef,
   type ProjectContext,
   type ProjectGoal,
   type ProjectRepo,
 } from '../lib/projects.js';
+import {
+  buildPullEnvelope,
+  parseProjectPullEnvelope,
+  printProjectPullSummary,
+  projectPullComplete,
+  pullProjectTargets,
+} from '../lib/project-pull.js';
 import {
   rollupSessionsByProject,
   withDefaultMachine,
@@ -917,6 +925,86 @@ export function registerProjectsCommands(program: Command): void {
       // and this command has no remote code path either way.
       console.log(JSON.stringify(probeProjectWorkspaces(paths ?? []), null, 2));
     });
+
+  // ---- pull-local (hidden; the peer half of `pull`) ----
+  projects
+    .command('pull-local [paths...]', { hidden: true })
+    .description('Fast-forward workspace repos (default-branch only) and print JSON. Answers for this machine only.')
+    .option('--json', 'Machine-readable output (the only output format)')
+    .action(async (paths: string[]) => {
+      // Never fans out — this is the peer half of the fleet fan-out.
+      const targets = (paths ?? []).map((p: string) => ({ path: p }));
+      const results = await pullProjectTargets(targets);
+      const envelope = buildPullEnvelope(results, targets);
+      console.log(JSON.stringify(envelope, null, 2));
+    });
+
+  // ---- pull ----
+  const pullCmd = projects
+    .command('pull <name>')
+    .description('Fast-forward every fleet checkout of a named project to its remote default branch.')
+    .option('--device <name...>', 'Scope fleet pull to one or more devices (repeatable)')
+    .option('--devices <names>', 'Scope fleet pull to a comma-separated list of devices')
+    .option('--json', 'Machine-readable output')
+    .action(async (name: string, rawOpts: { device?: string[]; devices?: string; json?: boolean }) => {
+      const def = loadProjectDef(name);
+      if (!def) {
+        console.error(chalk.red(`No project named "${name}". Create it: agents projects add ${name}`));
+        process.exit(1);
+      }
+
+      const targets = projectRepoTargetsForDef(def);
+      if (targets.length === 0) {
+        console.error(chalk.yellow(`Project "${name}" has no configured repositories.`));
+        process.exit(0);
+      }
+
+      const deviceFilter = resolveDeviceFilter(rawOpts.device, rawOpts.devices);
+
+      // Pull locally first.
+      const self = machineId();
+      const localResults = await pullProjectTargets(targets, self);
+
+      // Fan out to fleet peers.
+      const paths = targets.map((t) => t.path);
+      const remoteRes = await gatherRemoteAgentsJson({
+        args: ['projects', 'pull-local', '--json', ...paths],
+        noFanoutEnv: PROJECTS_NO_FANOUT_ENV,
+        hosts: deviceFilter,
+        parse: (stdout: string, machine: string) => parseProjectPullEnvelope(stdout, machine),
+        quiet: true,
+        timeoutMs: 120_000,
+      });
+
+      const allResults = [...localResults, ...remoteRes.items];
+
+      if (rawOpts.json) {
+        console.log(JSON.stringify(allResults, null, 2));
+      } else {
+        printProjectPullSummary(name, allResults, remoteRes.skipped);
+      }
+
+      if (!projectPullComplete(allResults)) {
+        process.exit(1);
+      }
+    });
+
+  setHelpSections(pullCmd, {
+    examples: `
+      agents projects pull rush                        # pull every checkout in the project
+      agents projects pull rush --device yosemite-s0  # scope to one device
+      agents projects pull rush --devices s0,s1       # scope to multiple devices
+      agents projects pull rush --json                # machine-readable results
+    `,
+    notes: `
+      Only checkouts on their remote's default branch are fast-forwarded. Dirty
+      trees, local commits ahead of upstream, or a wrong branch are blocked and
+      reported — never overwritten.
+
+      Checkouts absent on a device are skipped (never cloned). Blocked or failed
+      checkouts drive a non-zero exit; missing paths do not.
+    `,
+  });
 
   // ---- import ----
   projects

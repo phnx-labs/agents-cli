@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 89,
-  "commands": 543,
+  "commands": 544,
   "root": {
     "name": "agents",
     "path": "",
@@ -14952,6 +14952,62 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "pull",
+          "path": "projects pull",
+          "aliases": [],
+          "description": "Fast-forward every fleet checkout of a named project to its remote default branch.",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--device <name...>",
+              "description": "Scope fleet pull to one or more devices (repeatable)",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": true,
+              "negate": false
+            },
+            {
+              "flags": "--devices <names>",
+              "description": "Scope fleet pull to a comma-separated list of devices",
+              "long": "--devices",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Machine-readable output",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents projects pull rush                        # pull every checkout in the project\n      agents projects pull rush --device yosemite-s0  # scope to one device\n      agents projects pull rush --devices s0,s1       # scope to multiple devices\n      agents projects pull rush --json                # machine-readable results",
+          "notes": "Only checkouts on their remote's default branch are fast-forwarded. Dirty\n      trees, local commits ahead of upstream, or a wrong branch are blocked and\n      reported — never overwritten.\n\n      Checkouts absent on a device are skipped (never cloned). Blocked or failed\n      checkouts drive a non-zero exit; missing paths do not.",
           "subcommands": []
         },
         {

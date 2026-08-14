@@ -52,6 +52,19 @@ export interface ProjectRepo {
 }
 
 /**
+ * One checkout target for `projects pull`: a home-relative path plus the
+ * expected GitHub slug so the pull step can verify the remote matches before
+ * fast-forwarding. `expectedSlug` is absent when a bound dir has no declared
+ * slug (the pull still fast-forwards; it just skips the slug check).
+ */
+export interface ProjectRepoTarget {
+  /** Home-relative path — re-roots on each fleet device. */
+  path: string;
+  /** Expected GitHub slug (`owner/repo`) for the remote; absent = unchecked. */
+  expectedSlug?: string;
+}
+
+/**
  * A described context anchor: a subdirectory plus what it is. Agents starting on
  * the project read `purpose` to know where to look — an indexed starting point,
  * not just a path. This is the richer form of the single monorepo-focus dir.
@@ -407,17 +420,40 @@ function projectDirList(
 }
 
 /**
+ * All checkout targets for a project definition, each tagged with its expected
+ * GitHub slug. The primary root carries `def.repo`; each `repos[i].path`
+ * carries `repos[i].slug`. Paths are home-relative (re-root per fleet device)
+ * and include missing checkouts so a remote peer can answer `missing` for them.
+ *
+ * This is the single authoritative expansion for both `projects status` (via
+ * {@link projectProbeTargets}) and `projects pull`, so the two commands always
+ * operate on exactly the same set of directories.
+ */
+export function projectRepoTargetsForDef(def: ProjectDef): ProjectRepoTarget[] {
+  const targets: ProjectRepoTarget[] = [];
+  const seen = new Set<string>();
+
+  const addTarget = (rawPath: string, expectedSlug?: string): void => {
+    const abs = path.resolve(expandLocalHome(rawPath));
+    if (seen.has(abs)) return;
+    seen.add(abs);
+    targets.push({ path: toHomeRelative(abs), expectedSlug });
+  };
+
+  if (def.root && def.root.length > 0) addTarget(def.root, def.repo);
+  for (const r of def.repos ?? []) {
+    if (r.path && r.path.length > 0) addTarget(r.path, r.slug);
+  }
+  return targets;
+}
+
+/**
  * The directories `projects status` probes across the fleet: the repo root plus
  * every bound checkout, home-relative so each host re-roots them, and including
  * directories absent here so a peer can still answer `✗ missing` for them.
  */
 export function projectProbeTargets(def: ProjectDef): string[] {
-  return projectDirList(def, {
-    primary: def.root,
-    forRemote: true,
-    keepMissing: true,
-    joinSubpath: false,
-  });
+  return projectRepoTargetsForDef(def).map((t) => t.path);
 }
 
 /**
