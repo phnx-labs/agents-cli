@@ -77,6 +77,11 @@ describe('config-keys', () => {
         device: 'mac-mini',
         property: 'browser.remote-control',
       });
+      expect(parseConfigKey('devices.mac-mini.browser.task-idle-minutes')).toEqual({
+        scope: 'device',
+        device: 'mac-mini',
+        property: 'browser.task-idle-minutes',
+      });
       expect(parseConfigKey('devices.mac-mini.browser.profile')).toEqual({
         scope: 'device',
         device: 'mac-mini',
@@ -137,6 +142,7 @@ describe('config-keys', () => {
       expect(devicePropertyToConfigName('watchdog')).toBe('watchdog.enabled');
       expect(devicePropertyToConfigName('tmux')).toBe('tmux.enabled');
       expect(devicePropertyToConfigName('browser.remote-control')).toBe('browser.remote-control');
+      expect(devicePropertyToConfigName('browser.task-idle-minutes')).toBe('browser.task-idle-minutes');
       expect(devicePropertyToConfigName('notes')).toBe('notes');
       expect(devicePropertyToConfigName('browser.profile')).toBe('browser.profile');
     });
@@ -151,6 +157,7 @@ describe('config-keys', () => {
       expect(keys).toContain('usage.primary-host');
       expect(keys).toContain('browser.profile');
       expect(keys).toContain('devices.<name>.max-agents');
+      expect(keys).toContain('devices.<name>.browser.task-idle-minutes');
     });
   });
 

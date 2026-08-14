@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { IS_WINDOWS, ipcEndpoint } from '../platform/index.js';
 import { getHelpersDir } from '../state.js';
+import { resolveBrowserTaskIdleMs } from '../device-config.js';
 import { BrowserService } from './service.js';
 import { startDaemon, stopDaemon } from '../daemon.js';
 import { getCliVersion } from '../version.js';
@@ -392,10 +393,15 @@ export class BrowserIPCServer {
       // only reach `reapAbandoned` through IPC. The daemon's own periodic tick
       // calls the service method directly.
       case 'gc': {
-        const reaped = await this.service.reapAbandoned({
-          idleMs: request.idleMinutes !== undefined ? request.idleMinutes * 60_000 : undefined,
-          dryRun: request.dryRun,
-        });
+        // 0 is the "disable idle reaping" signal (browser.task-idle-minutes),
+        // not a zero-ms window — translate it to reapAbandoned's `null` rather
+        // than let it hit the idleMs<=0 guard. Omitting the flag falls back to
+        // this box's own configured default (or 30 minutes when unset).
+        const idleMs =
+          request.idleMinutes !== undefined
+            ? (request.idleMinutes === 0 ? null : request.idleMinutes * 60_000)
+            : resolveBrowserTaskIdleMs();
+        const reaped = await this.service.reapAbandoned({ idleMs, dryRun: request.dryRun });
         return { ok: true, reaped };
       }
 

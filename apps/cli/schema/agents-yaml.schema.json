@@ -177,6 +177,11 @@
                     "type": "string",
                     "description": "Browser profile `agents browser start` resolves to without --profile on this device (browser.profile)."
                   },
+                  "browserTaskIdleMinutes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Minutes a browser task may sit with no IPC action before the daemon's abandoned-task reaper closes its tabs (browser.task-idle-minutes). Default 30; 0 disables idle reaping (a task whose owning agent session exited is still closed)."
+                  },
                   "notes": {
                     "type": "array",
                     "items": { "type": "string" },

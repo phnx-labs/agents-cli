@@ -95,6 +95,11 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
         case 'tmux':
         case 'browser.remote-control':
           return parseBool(raw, key);
+        case 'browser.task-idle-minutes':
+          if (!/^\d+$/.test(raw.trim())) {
+            throw new Error(`Config key '${key}' expects a non-negative integer, got '${raw}'.`);
+          }
+          return Number.parseInt(raw.trim(), 10);
         case 'notes':
           return raw.trim();
         case 'browser.profile':
@@ -332,6 +337,9 @@ function* listDeviceConfigEntries(device: string): Generator<{ key: string; valu
         break;
       case 'browser.remote-control':
         key = `${prefix}browser.remote-control`;
+        break;
+      case 'browser.task-idle-minutes':
+        key = `${prefix}browser.task-idle-minutes`;
         break;
       case 'notes':
         key = `${prefix}notes`;

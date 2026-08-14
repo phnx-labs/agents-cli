@@ -309,6 +309,7 @@ describe('listConfig', () => {
       'auto.pool',
       'browser.profile',
       'browser.remote-control',
+      'browser.task-idle-minutes',
       'daemon.enabled',
       'interactive.host',
       'notes',
@@ -391,6 +392,43 @@ describe('tmux gate (tmux.enabled=false on this device)', () => {
     expect(() => setConfigValue('tmux.enabled', false, { device: 'mac-mini' }))
       .toThrow(/machine-local/);
     expect(isTmuxEnabled()).toBe(true);
+  });
+});
+
+describe('resolveBrowserTaskIdleMs (browser.task-idle-minutes, RUSH-2622)', () => {
+  it('defaults to 30 minutes in ms when unset', async () => {
+    const { resolveBrowserTaskIdleMs } = await freshModules();
+    expect(resolveBrowserTaskIdleMs()).toBe(30 * 60_000);
+  });
+
+  it('reflects a stored value, in ms', async () => {
+    const { resolveBrowserTaskIdleMs, setConfigValue } = await freshModules();
+    setConfigValue('browser.task-idle-minutes', 15);
+    expect(resolveBrowserTaskIdleMs()).toBe(15 * 60_000);
+  });
+
+  it('0 resolves to null — the "idle reaping is off" signal, not a zero-ms window', async () => {
+    const { resolveBrowserTaskIdleMs, setConfigValue } = await freshModules();
+    setConfigValue('browser.task-idle-minutes', 0);
+    expect(resolveBrowserTaskIdleMs()).toBeNull();
+  });
+
+  it('rejects a negative value', async () => {
+    const { setConfigValue } = await freshModules();
+    expect(() => setConfigValue('browser.task-idle-minutes', -1)).toThrow(/must be >= 0/);
+  });
+
+  it('persists to this box’s own doc, never the fleet-shared file', async () => {
+    const { setConfigValue } = await freshModules();
+    setConfigValue('browser.task-idle-minutes', 15);
+    expect(readCentral()).not.toMatch(/browserTaskIdleMinutes/);
+  });
+
+  it('cannot be set for a peer at all — it is machine-local', async () => {
+    const { resolveBrowserTaskIdleMs, setConfigValue } = await freshModules();
+    expect(() => setConfigValue('browser.task-idle-minutes', 15, { device: 'mac-mini' }))
+      .toThrow(/machine-local/);
+    expect(resolveBrowserTaskIdleMs()).toBe(30 * 60_000);
   });
 });
 

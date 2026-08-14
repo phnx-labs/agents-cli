@@ -183,6 +183,7 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | `agents browser ps` | List all tracked browser/electron/tunnel processes, alive or stale |
 | `agents browser history` | Recent task history |
 | `agents browser stream [--task <name>]` | Keep one CLI process and daemon IPC socket open; NDJSON requests in, NDJSON responses out |
+| `agents browser gc [--dry-run]` | Run the abandoned-task reaper now instead of waiting for the daemon's next tick |
 
 `start` flags:
 
@@ -198,6 +199,43 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | `--fps <n>` | Recording frames per second (1–30, default 5) |
 | `--duration <sec>` | Recording duration cap (default 60s) |
 | `--max-mb <mb>` | Recording size cap (default 25 MB) |
+
+### Tab hygiene — automatic reaping (RUSH-2622)
+
+`agents browser done` / `stop` close a task's tabs, but agents routinely never
+call them — the run ends, the process exits, and the tabs stay open in the
+profile window forever. The daemon runs a periodic reaper so leftover tabs
+don't pile up, on the same 5-minute cadence as its other housekeeping ticks:
+
+- **Session-end reap.** When the agent session (or run) that started a task is
+  no longer alive on this host, the daemon closes that task's tabs and marks it
+  done — the same code path `done` uses. This always runs; there is no way to
+  turn it off.
+- **Idle reap.** A task with no IPC action (navigate, click, type, screenshot,
+  evaluate, …) for `browser.task-idle-minutes` (default **30**) is closed the
+  same way. Set it to `0` to disable idle reaping only — a task with no
+  recorded identity then never gets closed by this path, though session-end
+  reaping still catches every task that *does* carry one:
+
+  ```bash
+  agents devices config <this-machine> browser.task-idle-minutes 15
+  agents devices config <this-machine> browser.task-idle-minutes 0   # idle reap off
+  ```
+
+  Machine-local, like `browser.profile` and `browser.remote-control` — it
+  lives in this box's own config and cannot be set for a peer.
+
+Both reasons are conservative: only tabs in `task.tabs` are ever closed (a tab
+you opened yourself is never touched), a task mid-recording is always left
+alone, and the shared profile window itself is never closed or killed.
+
+Run the same pass on demand instead of waiting for the next tick:
+
+```bash
+agents browser gc --dry-run   # list what would be closed, close nothing
+agents browser gc             # actually close it
+agents browser gc --idle-minutes 5   # override the idle window for this run
+```
 
 ### Driving another machine's browser (`--host`) and consent
 

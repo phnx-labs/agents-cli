@@ -81,7 +81,7 @@ const TASK_OPTION_DESC = 'Task name (defaults to $AGENTS_BROWSER_TASK)';
 // instead of an alphabetical dump. Everything not listed falls into a
 // trailing "Other commands" section automatically.
 const BROWSER_HELP_GROUPS = [
-  { title: 'Session lifecycle', names: ['start', 'done', 'status'] },
+  { title: 'Session lifecycle', names: ['start', 'done', 'status', 'gc'] },
   { title: 'Fast action loop', names: ['stream'] },
   {
     title: 'Drive the page',
@@ -131,6 +131,9 @@ export function registerBrowserCommand(program: Command): void {
 
       # End the session when done
       agents browser done
+
+      # Close tabs the daemon's own reaper would have caught on its next 5-min tick
+      agents browser gc --dry-run
     `,
     notes: `
       Most agent workflows should use the 'browser' skill instead of raw subcommands.
@@ -974,6 +977,54 @@ function registerTaskCommands(browser: Command): void {
       }
 
       console.log(`Stopped task: ${task}`);
+    });
+
+  browser
+    .command('gc')
+    .description(
+      'Close tabs for abandoned tasks — owning agent session exited, or idle past the window — and mark them done. ' +
+        'The same reaper the daemon already runs every 5 minutes; use this to run it now.'
+    )
+    .option('--dry-run', 'List what would be closed without closing anything')
+    .option(
+      '--idle-minutes <n>',
+      'Override the idle window in minutes (default: this device\'s browser.task-idle-minutes, or 30). ' +
+        '0 disables idle-only closing for this run; session-dead tasks are still closed.',
+      (v) => parseInt(v, 10)
+    )
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (opts) => {
+      const response = await sendIPCRequest({
+        action: 'gc',
+        dryRun: opts.dryRun,
+        idleMinutes: opts.idleMinutes,
+      });
+
+      if (!response.ok) {
+        if (opts.json) {
+          console.log(JSON.stringify({ ok: false, error: response.error }));
+        } else {
+          console.error(response.error);
+        }
+        process.exit(1);
+      }
+
+      const reaped = response.reaped ?? { closed: [], skipped: 0 };
+      if (opts.json) {
+        console.log(JSON.stringify(reaped, null, 2));
+        return;
+      }
+
+      if (reaped.closed.length === 0) {
+        console.log(`No abandoned tasks${opts.dryRun ? ' (dry run)' : ''}; ${reaped.skipped} task(s) still active.`);
+        return;
+      }
+
+      const verb = opts.dryRun ? 'Would close' : 'Closed';
+      console.log(`${verb} ${reaped.closed.length} task(s), left ${reaped.skipped} alone:`);
+      for (const c of reaped.closed) {
+        console.log(`  ${c.task}  (${c.profile}, ${c.reason})`);
+      }
     });
 
   browser

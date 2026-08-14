@@ -78,6 +78,7 @@ export type DeviceConfigProperty =
   | 'watchdog'
   | 'tmux'
   | 'browser.remote-control'
+  | 'browser.task-idle-minutes'
   | 'notes'
   | 'browser.profile';
 
@@ -89,6 +90,7 @@ const DEVICE_CONFIG_PROPERTIES: DeviceConfigProperty[] = [
   'watchdog',
   'tmux',
   'browser.remote-control',
+  'browser.task-idle-minutes',
   'notes',
   'browser.profile',
 ];
@@ -136,6 +138,7 @@ export function formatAgentVersion(agent: AgentId, version: string): string {
  *   devices.<name>.watchdog
  *   devices.<name>.tmux
  *   devices.<name>.browser.remote-control
+ *   devices.<name>.browser.task-idle-minutes
  *   devices.<name>.notes
  *   devices.<name>.browser.profile
  */
@@ -176,7 +179,7 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   }
 
   const deviceMatch = raw.match(
-    /^devices\.(.+)\.(role|max-agents|scheduler|daemon|watchdog|tmux|notes|browser\.remote-control|browser\.profile)$/,
+    /^devices\.(.+)\.(role|max-agents|scheduler|daemon|watchdog|tmux|notes|browser\.remote-control|browser\.task-idle-minutes|browser\.profile)$/,
   );
   if (deviceMatch) {
     return {
@@ -280,6 +283,8 @@ export function devicePropertyToConfigName(property: DeviceConfigProperty): stri
       return 'tmux.enabled';
     case 'browser.remote-control':
       return 'browser.remote-control';
+    case 'browser.task-idle-minutes':
+      return 'browser.task-idle-minutes';
     case 'notes':
       return 'notes';
     case 'browser.profile':
