@@ -5,7 +5,7 @@ import { spawnSync, spawn } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'url';
 
-import { migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateKimiSubagentsToMarkdown, migrateRoutineDeviceToDevices, migrateRoutineRemoteCwdToCwd, migrateWatchdogSentinelToConfig, repairSelfReferentialBinShims, seedActiveCursorLoginPerVersion } from './migrate.js';
+import { migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateKimiSubagentsToMarkdown, migrateMachineLocalBrowserProfileOutOfCentral, migrateRoutineDeviceToDevices, migrateRoutineRemoteCwdToCwd, migrateWatchdogSentinelToConfig, repairSelfReferentialBinShims, seedActiveCursorLoginPerVersion } from './migrate.js';
 import { toPosix } from './platform/index.js';
 import * as yaml from 'yaml';
 
@@ -901,5 +901,114 @@ describe('migrateKimiSubagentsToMarkdown', () => {
     migrateKimiSubagentsToMarkdown(versions);
     migrateKimiSubagentsToMarkdown(versions);
     expect(fs.readdirSync(dir)).toEqual([]);
+  });
+});
+
+describe('migrateMachineLocalBrowserProfileOutOfCentral', () => {
+  function userDirWith(central: string): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-browser-default-'));
+    tempDirs.push(dir);
+    fs.writeFileSync(path.join(dir, 'agents.yaml'), central);
+    return dir;
+  }
+
+  const CENTRAL_WITH_DEFAULT = `# agents-cli metadata
+# hand-written comment that must survive
+browser:
+  # a named profile the user created — real fleet config
+  comet-local:
+    browser: comet
+    binary: /Applications/Comet.app/Contents/MacOS/Comet
+  default:
+    browser: chrome
+    description: Auto-detected chrome profile
+    binary: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+    endpoints:
+      - cdp://127.0.0.1:9227
+notify:
+  owner:
+    channel: imessage
+`;
+
+  it('moves the machine-local default profile to the device file and out of central', () => {
+    const dir = userDirWith(CENTRAL_WITH_DEFAULT);
+
+    migrateMachineLocalBrowserProfileOutOfCentral(dir, 'zion');
+
+    const central = yaml.parse(fs.readFileSync(path.join(dir, 'agents.yaml'), 'utf-8'));
+    expect(central.browser.default).toBeUndefined();
+    // The user's named profile is fleet config and stays put.
+    expect(central.browser['comet-local'].browser).toBe('comet');
+    expect(central.notify.owner.channel).toBe('imessage');
+
+    const device = yaml.parse(fs.readFileSync(path.join(dir, 'devices', 'zion', 'agents.yaml'), 'utf-8'));
+    expect(device.browser.default.browser).toBe('chrome');
+    expect(device.browser.default.binary).toBe('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
+    expect(device.browser.default.endpoints).toEqual(['cdp://127.0.0.1:9227']);
+  });
+
+  it('preserves hand-written comments in the synced file', () => {
+    const dir = userDirWith(CENTRAL_WITH_DEFAULT);
+
+    migrateMachineLocalBrowserProfileOutOfCentral(dir, 'zion');
+
+    // A plain re-stringify would drop these, rewriting the whole committed file
+    // and re-creating the churn this migration exists to stop.
+    const raw = fs.readFileSync(path.join(dir, 'agents.yaml'), 'utf-8');
+    expect(raw).toContain('# hand-written comment that must survive');
+    expect(raw).toContain('# a named profile the user created');
+  });
+
+  it('drops the browser key entirely when default was its only entry', () => {
+    const dir = userDirWith(`browser:
+  default:
+    browser: chromium
+    binary: /usr/bin/chromium-browser
+`);
+
+    migrateMachineLocalBrowserProfileOutOfCentral(dir, 'yosemite-s1');
+
+    const central = yaml.parse(fs.readFileSync(path.join(dir, 'agents.yaml'), 'utf-8')) ?? {};
+    expect(central.browser).toBeUndefined();
+  });
+
+  it('is idempotent and leaves a clean central file untouched', () => {
+    const dir = userDirWith(CENTRAL_WITH_DEFAULT);
+
+    migrateMachineLocalBrowserProfileOutOfCentral(dir, 'zion');
+    const afterFirst = fs.readFileSync(path.join(dir, 'agents.yaml'), 'utf-8');
+    migrateMachineLocalBrowserProfileOutOfCentral(dir, 'zion');
+    const afterSecond = fs.readFileSync(path.join(dir, 'agents.yaml'), 'utf-8');
+
+    // Byte-identical: a rewrite on the second pass is exactly the dirty-file
+    // churn that wedges `agents repos pull user`.
+    expect(afterSecond).toBe(afterFirst);
+  });
+
+  it('keeps this machine\'s live device entry when central still holds a stale copy', () => {
+    const dir = userDirWith(CENTRAL_WITH_DEFAULT);
+    const devicePath = path.join(dir, 'devices', 'mark-1', 'agents.yaml');
+    fs.mkdirSync(path.dirname(devicePath), { recursive: true });
+    fs.writeFileSync(devicePath, yaml.stringify({
+      browser: { default: { browser: 'brave', binary: '/opt/brave.com/brave/brave' } },
+    }));
+
+    migrateMachineLocalBrowserProfileOutOfCentral(dir, 'mark-1');
+
+    const device = yaml.parse(fs.readFileSync(devicePath, 'utf-8'));
+    expect(device.browser.default.browser).toBe('brave');
+    const central = yaml.parse(fs.readFileSync(path.join(dir, 'agents.yaml'), 'utf-8'));
+    expect(central.browser.default).toBeUndefined();
+  });
+
+  it('no-ops when there is no central file and when browser is absent', () => {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-browser-default-'));
+    tempDirs.push(empty);
+    expect(() => migrateMachineLocalBrowserProfileOutOfCentral(empty, 'zion')).not.toThrow();
+    expect(fs.existsSync(path.join(empty, 'devices'))).toBe(false);
+
+    const noBrowser = userDirWith('notify:\n  owner:\n    channel: imessage\n');
+    migrateMachineLocalBrowserProfileOutOfCentral(noBrowser, 'zion');
+    expect(fs.existsSync(path.join(noBrowser, 'devices'))).toBe(false);
   });
 });
