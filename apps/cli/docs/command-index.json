@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 89,
-  "commands": 543,
+  "commands": 544,
   "root": {
     "name": "agents",
     "path": "",
@@ -1631,7 +1631,7 @@
           "negate": false
         }
       ],
-      "examples": "# List configured browser profiles\n      agents browser profiles list\n\n      # Create a Chrome profile pointed at a CDP endpoint\n      agents browser profiles create work --browser chrome --endpoint http://localhost:9222\n\n      # Start a session — auto-picks the first installed Chromium-family browser\n      agents browser start\n\n      # Or pin to a specific profile\n      agents browser start --profile work\n\n      # Drive the page\n      agents browser navigate https://example.com\n      agents browser screenshot\n\n      # Keep one process and daemon socket warm for repeated actions\n      agents browser stream --task \"$AGENTS_BROWSER_TASK\"\n\n      # Drive another machine's browser (needs its consent — see remote-control)\n      agents browser start --host zion\n\n      # Browse a task-heavy profile's captures: one row per task, not per file\n      agents browser sessions\n\n      # Allow / deny other fleet machines driving THIS machine's browser\n      agents browser remote-control on\n\n      # End the session when done\n      agents browser done",
+      "examples": "# List configured browser profiles\n      agents browser profiles list\n\n      # Create a Chrome profile pointed at a CDP endpoint\n      agents browser profiles create work --browser chrome --endpoint http://localhost:9222\n\n      # Start a session — auto-picks the first installed Chromium-family browser\n      agents browser start\n\n      # Or pin to a specific profile\n      agents browser start --profile work\n\n      # Drive the page\n      agents browser navigate https://example.com\n      agents browser screenshot\n\n      # Keep one process and daemon socket warm for repeated actions\n      agents browser stream --task \"$AGENTS_BROWSER_TASK\"\n\n      # Drive another machine's browser (needs its consent — see remote-control)\n      agents browser start --host zion\n\n      # Browse a task-heavy profile's captures: one row per task, not per file\n      agents browser sessions\n\n      # Allow / deny other fleet machines driving THIS machine's browser\n      agents browser remote-control on\n\n      # End the session when done\n      agents browser done\n\n      # Close tabs the daemon's own reaper would have caught on its next 5-min tick\n      agents browser gc --dry-run",
       "notes": "Most agent workflows should use the 'browser' skill instead of raw subcommands.\n      The skill wraps profile selection, snapshotting, and tunneling.\n\n      Browser support: Chromium-family only (Chrome, Comet, Chromium, Brave, Edge).\n      Safari and Firefox are not supported — they don't speak the Chrome DevTools\n      Protocol the way agents browser expects. On Windows, Edge is the default\n      because it's preinstalled. On macOS and Linux, Chrome is preferred when\n      installed; otherwise the first Chromium-family binary on disk wins.",
       "subcommands": [
         {
@@ -1935,6 +1935,53 @@
               "short": "-f",
               "long": "--file",
               "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "gc",
+          "path": "browser gc",
+          "aliases": [],
+          "description": "Close tabs for abandoned tasks — owning agent session exited, or idle past the window — and mark them done. The same reaper the daemon already runs every 5 minutes; use this to run it now.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--dry-run",
+              "description": "List what would be closed without closing anything",
+              "long": "--dry-run",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--idle-minutes <n>",
+              "description": "Override the idle window in minutes (default: this device's browser.task-idle-minutes, or 30). 0 disables idle-only closing for this run; session-dead tasks are still closed.",
+              "long": "--idle-minutes",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Output machine-readable JSON",
+              "long": "--json",
+              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false

@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_89 command groups · 543 commands._
+_89 command groups · 544 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -103,6 +103,7 @@ agents browser done                           Complete a task and close its tabs
 agents browser download                       Set the download directory for a task (defaults to the profile's downloads dir)
 agents browser errors                         Read page errors from a tab
 agents browser evaluate                       Evaluate JavaScript in current tab
+agents browser gc                             Close tabs for abandoned tasks — owning agent session exited, or idle past the window — and mark them done. The same reaper the daemon already runs every 5 minutes; use this to run it now.
 agents browser history                        Show recent browser task history
 agents browser hover <ref>                    Hover over an element by ref
 agents browser logs <task>                    Read merged rush-app + rush-cli JSONL logs for a task
