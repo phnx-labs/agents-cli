@@ -210,7 +210,8 @@ them**. The ones a PEER reads (`agents.max-concurrent`, `watchdog.enabled`,
 can configure any device and the settings sync + back up with the repo (a
 `fleet.devices: all` declaration upgrades to an explicit roster map on the
 first config write). The ones only the OWNING box reads (`scheduler.enabled`,
-`daemon.enabled`, `tmux.enabled`, `browser.remote-control`, `browser.profile`)
+`daemon.enabled`, `tmux.enabled`, `browser.remote-control`,
+`browser.task-idle-minutes`, `browser.profile`)
 stay in that machine's own doc, never sync, and are refused for a peer —
 `browser.remote-control` is a consent flag, and a broken tmux or a paused
 daemon is one machine's state, not fleet policy. The device
