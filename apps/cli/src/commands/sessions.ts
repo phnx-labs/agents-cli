@@ -59,7 +59,7 @@ import { sessionOwnerDevice, RESUME_PINNED_ENV } from '../lib/session/resume-own
 import { renderMarkdown } from '../lib/markdown.js';
 import { AGENTS, colorAgent, resolveAgentName } from '../lib/agents.js';
 import { getShimsDir } from '../lib/state.js';
-import { listJobs, listJobsWithRuns, listRuns, getRunDir, type RunMeta } from '../lib/routines.js';
+import { listJobs, listJobsWithRuns, listRuns, getRunDir, type RunMeta } from '../lib/scheduling/routines.js';
 import { formatUsd } from '../lib/pricing/cost.js';
 import { fuzzyMatch, FUZZY_PRESETS } from '../lib/fuzzy.js';
 import { itemPicker } from '../lib/picker.js';

@@ -193,7 +193,7 @@ describe('dispatchAction run (skipped run returns ok:false)', () => {
 
 /**
  * RUSH-2681: a monitor's `run` action was refused by the ROUTINES activation
- * manifest. `jobRunsOnThisDevice` (lib/routines.ts) consulted
+ * manifest. `jobRunsOnThisDevice` (lib/scheduling/routines.ts) consulted
  * `routineEnabledOnThisDevice` FIRST and short-circuited on its answer, and a
  * monitor's synthesized job name is never in that manifest (nothing under
  * monitors/ writes one), so every fire recorded
@@ -278,7 +278,7 @@ describe('dispatchAction run (the routines activation manifest does not refuse a
     const routineName = 'rush-2681-routine';
     const dispatchUrl = pathToFileURL(path.resolve('src/lib/monitors/dispatch.ts')).href;
     const activationUrl = pathToFileURL(path.resolve('src/lib/routine-activation.ts')).href;
-    const routinesUrl = pathToFileURL(path.resolve('src/lib/routines.ts')).href;
+    const routinesUrl = pathToFileURL(path.resolve('src/lib/scheduling/routines.ts')).href;
 
     const out = runFixture(
       `import { dispatchAction } from ${JSON.stringify(dispatchUrl)};\n` +

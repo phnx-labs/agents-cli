@@ -48,7 +48,7 @@ import {
   setDaemonServiceEnabled,
   getDaemonServicesConfigPath,
 } from '../lib/daemon-services.js';
-import { listJobs, getLatestRun } from '../lib/routines.js';
+import { listJobs, getLatestRun } from '../lib/scheduling/routines.js';
 import { JobScheduler } from '../lib/scheduler.js';
 import { followFile } from '../lib/log-follow.js';
 import { parseDuration } from '../lib/hooks/cache.js';

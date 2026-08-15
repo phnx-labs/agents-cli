@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateJob, type JobConfig } from '../routines.js';
+import { validateJob, type JobConfig } from '../scheduling/routines.js';
 
 function base(overrides: Partial<JobConfig> = {}): Partial<JobConfig> {
   return {

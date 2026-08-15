@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseTimeout } from '../routines.js';
+import { parseTimeout } from '../scheduling/routines.js';
 
 describe('parseTimeout', () => {
   it('parses 10m as 600000ms', () => {

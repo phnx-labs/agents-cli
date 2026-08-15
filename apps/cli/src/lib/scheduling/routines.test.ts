@@ -7,7 +7,7 @@ import * as yaml from 'yaml';
 // Keep this legacy-definition suite independent of the developer machine's
 // device manifest. Device activation itself has a dedicated adjacent suite.
 vi.mock('./routine-activation.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./routine-activation.js')>();
+  const actual = await importOriginal<typeof import('../routine-activation.js')>();
   return {
     ...actual,
     enabledRoutineNames: () => null,
@@ -15,8 +15,8 @@ vi.mock('./routine-activation.js', async (importOriginal) => {
   };
 });
 import { routineOwnerDevice, hasAmbiguousDevicePin, validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, getJobRunsDir, getRunDir, finalizeRunMeta, writeRunMeta, resolveJobPrompt, getLatestCompletedRun, routineStats, computeProjectGroup, computeProjectGroupKind, projectGroupKey, projectGroupTitle, normalizeProjects, serializeJob, type JobConfig, type RunMeta } from './routines.js';
-import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir } from './state.js';
-import { ROUTINE_AGENT_IDS } from './agents.js';
+import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir } from '../state.js';
+import { ROUTINE_AGENT_IDS } from '../agents.js';
 
 /** Minimal valid schedule-based job. */
 function baseJob(partial: Partial<JobConfig> = {}): Partial<JobConfig> {
