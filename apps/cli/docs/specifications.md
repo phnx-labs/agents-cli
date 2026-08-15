@@ -2906,9 +2906,59 @@ a machine-wide process sweep.)
   and `index.ts:255-256` adds top-level `uncaughtException`/`unhandledRejection`
   handlers so a startup crash always reaches the now-throttled supervisor rather than
   hanging (RUSH-2418, SING-GAP-6 resolved).
+- **SING-17 (MUST).** Public webhook ingress MUST be a supervised daemon-hosted
+  service, not an unsupervised process. The `webhook-receiver` service
+  (`lib/daemon-services.ts`) binds one signed receiver per entry in
+  `~/.agents/daemon/webhooks.yaml` (`lib/daemon-webhooks.ts`,
+  `startHostedWebhookReceivers`), hosted after the secrets broker so each
+  receiver's signing secret resolves headlessly through the broker
+  (`resolveReceiverSecrets`, `agentOnly: true` per SEC-13) — no
+  `AGENTS_SECRETS_PASSPHRASE` and no `nohup`. Every receiver MUST be torn down on
+  shutdown (`handleShutdown`, `lib/daemon.ts`). A box that declares no receiver
+  MUST bind nothing. A receiver whose bundle is locked or carries neither
+  `GITHUB_WEBHOOK_SECRET` nor `LINEAR_WEBHOOK_SECRET` MUST fail LOUD — logged and
+  skipped, never bound with an unverifiable signature — and MUST NOT take the
+  other receivers down with it. Declarations are per-box operational state and
+  are managed with `agents daemon webhooks add|list|remove`
+  (`commands/daemon.ts`), keyed by bind port (RUSH-2548).
+- **SING-18 (MUST).** A webhook receiver MUST acknowledge a verified delivery
+  BEFORE dispatching it. Once a delivery passes signature verification,
+  freshness, dedup, and rate limiting, `startWebhookServer`
+  (`lib/triggers/webhook.ts`) MUST write `202 {ok, accepted, deliveryId}` and
+  dispatch afterwards: dispatch starts an agent run (15-20s) and MUST NOT hold
+  the socket past a sender's delivery timeout. The dedup ledger MUST be
+  unchanged by this — `<source>:<delivery-id>` remains the key, a settled
+  delivery MUST still answer `200 {duplicate:true}`, per-job `markJob` MUST still
+  let a retry finish only the matches that failed, and a delivery MUST be marked
+  complete only after it settles. A retry arriving while the first is still
+  settling MUST be answered as a duplicate. Because no HTTP status can carry a
+  post-ack failure, one MUST be surfaced — `webhook.failed` plus the
+  `onDeliveryError` hook the daemon host and `agents webhooks serve` both log
+  (RUSH-2548).
+  **A post-ack dispatch failure is terminal until a manual redelivery**, and the
+  ack is what makes it so: the receiver used to answer 4xx on a dispatch failure,
+  which is what made GitHub/Linear retry and let the per-job ledger finish the
+  matches that failed. A sender does not retry a 202, so the ledger is intact but
+  nothing triggers it on its own. This is the accepted cost of not timing out
+  every delivery; the failure is loud in the log and the delivery stays unmarked,
+  so re-sending it from the provider's UI still completes only what did not run.
+  Closing this gap with an in-process retry of the unmarked jobs is
+  **WEBHOOK-GAP-1**, below.
 
 ### 4. Given/When/Then scenarios
 
+- **GIVEN** a box declares a receiver in `daemon/webhooks.yaml` whose secrets
+  bundle is locked, **WHEN** the daemon starts, **THEN** that receiver is skipped
+  with a WARN naming the bundle and does not bind, while any other declared
+  receiver still binds (SING-17,
+  `lib/daemon-webhooks.test.ts` "fails a receiver LOUD when its signing secret
+  cannot be resolved").
+- **GIVEN** a signed Linear delivery whose matched routine takes 15-20s to
+  dispatch, **WHEN** it is received, **THEN** the `202` ack is written while the
+  dispatch is provably still in flight, and a retry of the same delivery id in
+  that window is answered as a duplicate rather than dispatched again (SING-18,
+  `lib/triggers/webhook.test.ts` "acks a signed delivery before the agent
+  dispatch completes").
 - **GIVEN** a session hits its weekly account limit, **WHEN** the daemon watchdog
   tick detects it, **THEN** the daemon alone decides and executes the rotate (or the
   skip) — no UI surface fires a second rotate for the same session.
@@ -3030,6 +3080,17 @@ a machine-wide process sweep.)
   `agents daemon doctor`/`status`. `index.ts:255-256` adds top-level
   `uncaughtException`/`unhandledRejection` handlers so a crash during startup always
   exits deterministically into the now-throttled supervisor instead of hanging.
+- **WEBHOOK-GAP-1 (RUSH-2548).** SING-18's ack-before-dispatch removed the 4xx that
+  used to make a sender retry a failed dispatch, and nothing replaced it. The
+  per-delivery ledger still records exactly which matched jobs completed
+  (`markJob`, `lib/triggers/webhook.ts`) and a failed settle leaves the delivery
+  unmarked, so a retry would still finish only what did not run — but a sender does
+  not retry a 202, so only a manual redelivery from the provider's UI reaches it. A
+  routine whose `executeJobDetached` fails (missing agent binary, full disk) is
+  therefore logged (`webhook.failed` + the host's WARN) and then simply does not
+  run. Closing this needs an in-process retry of the unmarked jobs on the receiver
+  side; the trade was taken deliberately because the alternative — holding the
+  socket for the whole agent run — timed out every real delivery.
 
 ---
 

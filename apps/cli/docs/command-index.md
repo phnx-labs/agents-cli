@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_89 command groups · 552 commands._
+_89 command groups · 556 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -248,6 +248,10 @@ agents daemon services list               List every daemon service and whether 
 agents daemon start                       Start the daemon. Bypasses daemon.enabled — this is the deliberate override.
 agents daemon status                      Identity (state/pid/uptime/binary), duplicate daemons, daemons running deleted code, and per-service health.
 agents daemon stop                        Stop the daemon.
+agents daemon webhooks                    Signed webhook receivers this box hosts as a supervised daemon service.
+agents daemon webhooks add                Declare a receiver on this box. Replaces any receiver already on the same port.
+agents daemon webhooks list               List the receivers declared for this box.
+agents daemon webhooks remove <port>      Stop hosting the receiver bound to this port.
 ```
 
 ## devices — Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale. Alias: fleet.

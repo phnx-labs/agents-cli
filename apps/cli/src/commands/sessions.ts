@@ -809,13 +809,34 @@ function modelLabel(model?: string): string {
 }
 
 /**
+ * The single project/group key for an active session row (RUSH-2688). It is the
+ * ONE derivation every project-grouped consumer of `--active`/the menubar snapshot
+ * shares, so a session is bucketed the same way everywhere:
+ *
+ *   - A real working dir → its `basename` — the same key SessionMeta derives (see
+ *     discover.ts), so the active view and the history view join identically on
+ *     (ticketId + project).
+ *   - A row with NO local cwd (a cloud task, a provider-run job) → an explicit
+ *     bucket keyed by context: `cloud` for a cloud row, else `other`.
+ *
+ * It never falls back to `kind` (the harness — 'codex', 'claude') or `machine`
+ * (the box it runs on): neither is a project, and letting either stand in for the
+ * key is exactly what leaked a Codex cloud task under a 'codex' group and a bogus
+ * machine label in the menubar. No fallback chain — one explicit bucket.
+ */
+export function activeSessionProjectKey(s: Pick<ActiveSession, 'cwd' | 'context'>): string {
+  if (s.cwd) return path.basename(s.cwd);
+  return s.context === 'cloud' ? 'cloud' : 'other';
+}
+
+/**
  * The row shape `agents sessions --active --json` emits. RUSH-1981: a watcher
  * joins active sessions on ticketId + project, but the raw ActiveSession nests
  * the ticket (`ticket.id`) and carries no `project` at all — so a naive join
  * silently drops every row. Emit both as flat, always-present top-level keys
- * (null when unknown) alongside the raw fields, so every active row is joinable.
- * `project` uses the same derivation SessionMeta does — basename(cwd) (see
- * discover.ts) — so the active view and the history view join identically.
+ * alongside the raw fields, so every active row is joinable. `project` is the
+ * canonical {@link activeSessionProjectKey} — basename(cwd), or an explicit
+ * `cloud`/`other` bucket for a row with no local cwd, never the harness/machine.
  *
  * `viewingIn` flattens to the same display string the row renderer prints —
  * `'codium tab 3'` / `'detached'` / null — so a consumer can tell a watched
@@ -826,14 +847,14 @@ export function serializeActiveSessionsForJson(
   sessions: ActiveSession[],
 ): Array<Omit<ActiveSession, 'viewingIn'> & {
   ticketId: string | null;
-  project: string | null;
+  project: string;
   prLink: string | null;
   viewingIn: string | null;
 }> {
   return sessions.map((s) => ({
     ...s,
     ticketId: s.ticket?.id ?? null,
-    project: s.cwd ? path.basename(s.cwd) : null,
+    project: activeSessionProjectKey(s),
     prLink: s.pr?.url ?? null,
     viewingIn: viewingInLabel(s) ?? null,
   }));

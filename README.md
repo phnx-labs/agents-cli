@@ -1094,7 +1094,7 @@ agents routines add agent-labeled-issue --on linear:Issue --action update \
   --team-key RUSH --label agent --agent claude \
   --cwd '~' \
   --prompt "Work the Linear issue that was just labeled agent"
-agents webhook serve --secrets-bundle webhooks --port 8787          # /hooks/linear, /hooks/github
+agents daemon webhooks add --secrets-bundle webhooks --port 8787    # supervised receiver: /hooks/linear, /hooks/github
 agents daemon funnel up yosemite-s0 --local-port 8787 --port 443    # public HTTPS ingress
 ```
 

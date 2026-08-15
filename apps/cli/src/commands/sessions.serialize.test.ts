@@ -91,7 +91,7 @@ describe('serializeActiveSessionsForJson (RUSH-1981 — join keys)', () => {
     expect(row.prLink).toBe('https://github.com/acme/widget/pull/42');
   });
 
-  it('emits both keys as null (never absent) when the session has no ticket or cwd', () => {
+  it('emits every join key (never absent); project buckets a cwd-less row explicitly', () => {
     const [row] = serializeActiveSessionsForJson([active()]);
     // The keys must EXIST so a `.ticketId`/`.project` join never throws — a
     // missing property and an explicit null are not the same to a consumer.
@@ -99,7 +99,9 @@ describe('serializeActiveSessionsForJson (RUSH-1981 — join keys)', () => {
     expect(Object.prototype.hasOwnProperty.call(row, 'project')).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(row, 'prLink')).toBe(true);
     expect(row.ticketId).toBeNull();
-    expect(row.project).toBeNull();
+    // A cwd-less non-cloud row buckets to the explicit 'other' key, never the
+    // harness/machine name (RUSH-2688) — not null, so it groups consistently.
+    expect(row.project).toBe('other');
     expect(row.prLink).toBeNull();
   });
 

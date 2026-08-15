@@ -78,12 +78,14 @@ describe('supports() capability gate', () => {
   });
 });
 
-describe('goose workflows and allowlist support', () => {
-  it('passes workflow and allowlist capability checks', () => {
+describe('goose workflows support', () => {
+  it('passes the workflow capability check and reports no allowlist', () => {
     expect(supports('goose', 'workflows')).toEqual({ ok: true });
-    expect(supports('goose', 'allowlist')).toEqual({ ok: true });
-    expect(supports('goose', 'workflows', '1.41.0')).toEqual({ ok: true });
-    expect(supports('goose', 'allowlist', '1.41.0')).toEqual({ ok: true });
+    // Goose permissions are not supported: its permission.yaml gates whole
+    // tools, so canonical rules could not be expressed faithfully. The
+    // capability table must say so rather than let a write path assume it.
+    expect(supports('goose', 'allowlist')).toEqual({ ok: false, reason: 'unsupported' });
+    expect(capableAgents('allowlist')).not.toContain('goose');
   });
 });
 

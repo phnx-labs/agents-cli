@@ -470,9 +470,8 @@ describe('PermissionsHandler', () => {
       expect(result).toBe(path.join('/test/home', '.factory', 'settings.json'));
     });
 
-    it('returns correct path for Goose', () => {
-      const result = PermissionsHandler.configPath!('goose', '/test/home');
-      expect(result).toBe(path.join('/test/home', '.config', 'goose', 'permission.yaml'));
+    it('returns no path for Goose — permissions support was removed', () => {
+      expect(PermissionsHandler.configPath!('goose', '/test/home')).toBeNull();
     });
 
     it('returns null for unsupported agents', () => {

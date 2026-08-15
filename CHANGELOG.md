@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **`agents doctor --fix` names the exact removal command for a duplicate install it will not purge, and the multi-install banner only advertises `--fix` when it can really resolve the peer (RUSH-2705).** A healthy `>=1.22.30` duplicate
+  global (for example a second install under nvm) was detected and nagged about on
+  every command, but `--fix` deliberately never deletes it and ended on
+  "Everything in sync" — the advertised remedy was a no-op, so the nag returned
+  forever. `doctor --fix` and the post-upgrade purge now list such peers with the
+  `npm uninstall -g --prefix <peer prefix> @phnx-labs/agents-cli` command that
+  removes them, and the startup banner prints that same command instead of
+  pointing at `--fix`. Auto-purge itself is unchanged (npx-cache / unsafe-legacy /
+  pre-1.22.30 copies only; the running copy is never deleted). Source:
+  `apps/cli/src/lib/self-update.ts`, `apps/cli/src/commands/doctor.ts`,
+  `apps/cli/src/bootstrap.ts`.
+
 - **`agents open` resumes a session from an `agents://` deep link, and registers the OS URL-scheme handler.** A rendered artifact (plan/report) can now carry an
   `agents://session/<id>` link in its provenance line; clicking it hands off to the
   OS, which runs `agents open <url>`, parses it, and routes the id into the existing

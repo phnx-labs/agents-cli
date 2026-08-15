@@ -34,8 +34,10 @@ describe('getMcpConfigPath', () => {
   // the way the host produces them — the source uses path.join, which yields
   // backslashes on Windows. Hardcoded forward-slash literals would fail there.
   it('returns correct config path for Claude', () => {
+    // Claude reads user-scope MCP from ~/.claude.json. This asserted
+    // .claude/settings.json, a file Claude never consults for mcpServers.
     const configPath = getMcpConfigPath('claude', '/home/user');
-    expect(configPath).toBe(path.join('/home/user', '.claude', 'settings.json'));
+    expect(configPath).toBe(path.join('/home/user', '.claude.json'));
   });
 
   it('returns correct config path for Codex', () => {
@@ -536,7 +538,7 @@ describe('McpHandler.sync', () => {
     McpHandler.sync('claude', versionHome, projectRoot);
 
     const userConfig = JSON.parse(
-      fs.readFileSync(path.join(versionHome, '.claude', 'settings.json'), 'utf-8')
+      fs.readFileSync(path.join(versionHome, '.claude.json'), 'utf-8')
     );
     expect(userConfig.mcpServers).toHaveProperty('project-server');
     expect(userConfig.mcpServers).toHaveProperty('user-server');
@@ -558,7 +560,7 @@ describe('McpHandler.sync', () => {
     McpHandler.sync('claude', versionHome, projectRoot);
 
     const userConfig = JSON.parse(
-      fs.readFileSync(path.join(versionHome, '.claude', 'settings.json'), 'utf-8')
+      fs.readFileSync(path.join(versionHome, '.claude.json'), 'utf-8')
     );
     expect(userConfig.mcpServers).toHaveProperty('user-server');
     expect(fs.existsSync(path.join(projectRoot, '.mcp.json'))).toBe(false);

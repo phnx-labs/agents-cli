@@ -25,6 +25,7 @@ import { damerauLevenshtein } from './fuzzy.js';
 import { getCacheDir, getVersionsDir, getShimsDir, getHistoryDir, getCliVersionCachePath } from './state.js';
 import { resolveVersion, getVersionHomePath, getBinaryPath } from './versions.js';
 import { supports } from './capabilities.js';
+import { MCP_TARGETS } from './mcp-registry.js';
 
 /** Represents the installation state of an agent's CLI binary. */
 export interface CliState {
@@ -574,13 +575,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     supportsHooks: true,
     // Plugins: Open Plugins under ~/.agents/plugins/<name>/ (same layout as
     // agents-cli source). Version isolation copies into versionHome/.agents/plugins/.
-    // Workflows sync as Goose recipe YAML; permissions sync to permission.yaml.
+    // Workflows sync as Goose recipe YAML. Permissions are NOT supported:
+    // permission.yaml gates whole tools, so canonical rules cannot round-trip.
     // Commands: a Goose slash command is a recipe YAML under
     // ~/.config/goose/commands/<name>.yaml, registered in ~/.config/goose/config.yaml
     // under `slash_commands: [{ command, recipe_path }]` (see goose-commands.ts).
     // Subagents: recipe YAML named agents under ~/.config/goose/agents/<name>.yaml
     // (goose auto-discovers and delegates to them by name in autonomous mode).
-    capabilities: { hooks: { since: '1.34.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: { since: '1.25.0' }, commands: true, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: true, memory: false, modes: ['edit'], interactiveRepl: true },
+    capabilities: { hooks: { since: '1.34.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: { since: '1.25.0' }, commands: true, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: true, memory: false, modes: ['edit'], interactiveRepl: true },
   },
   // Google Antigravity CLI (`agy`) — official replacement for Gemini CLI as of IO 2026.
   // configDir nests inside `~/.gemini/` since agy shares the parent dir with the Gemini
@@ -2827,8 +2829,13 @@ function extractNpmVersion(args: string[]): string | undefined {
 /**
  * Strip JSON comments for JSONC parsing.
  * Only removes comments outside of strings.
+ *
+ * Exported because the MCP writer needs the SAME parser the reader uses: a
+ * naive `//`-to-end-of-line regex eats the `//` inside
+ * `"$schema": "https://opencode.ai/config.json"`, which every opencode-generated
+ * config carries.
  */
-function stripJsonComments(content: string): string {
+export function stripJsonComments(content: string): string {
   let result = '';
   let inString = false;
   let escape = false;
@@ -2993,145 +3000,33 @@ function parseMcpFromOpenCodeConfig(configPath: string): Record<string, McpConfi
 
 /**
  * Get user-scoped MCP config path for an agent.
+ *
+ * All three MCP path resolvers read `MCP_TARGETS`, so the file the writer
+ * targets, the file the parser reads, and the file the staleness detector
+ * watches cannot drift apart. An agent with no MCP target (the hard-deprecated
+ * `gemini`) keeps the historical settings.json default so old configs still
+ * parse.
  */
 export function getUserMcpConfigPath(agentId: AgentId): string {
-  const agent = AGENTS[agentId];
-
-  switch (agentId) {
-    case 'claude':
-      // Claude user-scoped MCPs are in ~/.claude.json (global user config)
-      return path.join(HOME, '.claude.json');
-    case 'codex':
-      // Codex uses TOML config
-      return path.join(agent.configDir, 'config.toml');
-    case 'opencode':
-      // OpenCode loads ~/.config/opencode/opencode.jsonc (not ~/.opencode/)
-      return path.join(HOME, '.config', 'opencode', 'opencode.jsonc');
-    case 'cursor':
-      // Cursor uses mcp.json
-      return path.join(agent.configDir, 'mcp.json');
-    case 'openclaw':
-      // OpenClaw uses openclaw.json
-      return path.join(agent.configDir, 'openclaw.json');
-    case 'copilot':
-      // GitHub Copilot CLI uses mcp-config.json (matches versioned + project paths)
-      return path.join(agent.configDir, 'mcp-config.json');
-    case 'antigravity':
-      // agy uses mcp_config.json inside its nested config dir (~/.gemini/antigravity-cli/)
-      return path.join(agent.configDir, 'mcp_config.json');
-    case 'grok':
-      // grok mcp.json — exact field schema verified at first install
-      return path.join(agent.configDir, 'mcp.json');
-    case 'droid':
-      // Factory AI Droid stores MCPs in ~/.factory/mcp.json
-      return path.join(agent.configDir, 'mcp.json');
-    case 'hermes':
-      return path.join(agent.configDir, 'config.yaml');
-    case 'pi':
-      // omp reads user-scope MCP from ~/.omp/agent/.mcp.json (Claude schema).
-      return path.join(agent.configDir, '.mcp.json');
-    case 'muse':
-      // Muse Code: MCP lives in ~/.config/muse/settings.json under mcp_servers.
-      return path.join(agent.configDir, 'settings.json');
-    case 'warp':
-      // Oz reads user-scope MCP from ~/.warp/.mcp.json (Claude schema).
-      return path.join(agent.configDir, '.mcp.json');
-    default:
-      // Gemini and others use settings.json
-      return path.join(agent.configDir, 'settings.json');
-  }
+  return getMcpConfigPathForHome(agentId, HOME);
 }
 
 /**
  * Get MCP config path for a specific HOME directory (used for version-managed agents).
  */
 export function getMcpConfigPathForHome(agentId: AgentId, home: string): string {
-  switch (agentId) {
-    case 'claude':
-      return path.join(home, '.claude.json');
-    case 'codex':
-      return path.join(home, '.codex', 'config.toml');
-    case 'opencode':
-      return path.join(home, '.config', 'opencode', 'opencode.jsonc');
-    case 'cursor':
-      return path.join(home, '.cursor', 'mcp.json');
-    case 'openclaw':
-      return path.join(home, '.openclaw', 'openclaw.json');
-    case 'copilot':
-      return path.join(home, '.copilot', 'mcp-config.json');
-    case 'amp':
-      return path.join(home, '.config', 'amp', 'settings.json');
-    case 'kiro':
-      return path.join(home, '.kiro', 'settings', 'mcp.json');
-    case 'goose':
-      return path.join(home, '.config', 'goose', 'config.yaml');
-    case 'antigravity':
-      return path.join(home, '.gemini', 'antigravity-cli', 'mcp_config.json');
-    case 'grok':
-      return path.join(home, '.grok', 'config.toml');
-    case 'droid':
-      return path.join(home, '.factory', 'mcp.json');
-    case 'hermes':
-      return path.join(home, '.hermes', 'config.yaml');
-    case 'pi':
-      return path.join(home, '.omp', 'agent', '.mcp.json');
-    case 'muse':
-      return path.join(home, '.config', 'muse', 'settings.json');
-    case 'warp':
-      return path.join(home, '.warp', '.mcp.json');
-    default:
-      return path.join(home, agentConfigDirName(agentId), 'settings.json');
-  }
+  const target = MCP_TARGETS[agentId];
+  if (target) return target.home(home);
+  return path.join(home, agentConfigDirName(agentId), 'settings.json');
 }
 
 /**
  * Get project-scoped MCP config path for an agent.
  */
 export function getProjectMcpConfigPath(agentId: AgentId, cwd: string = process.cwd()): string {
-  switch (agentId) {
-    case 'claude':
-      // Claude uses .mcp.json at project root for project-scoped MCPs
-      return path.join(cwd, '.mcp.json');
-    case 'codex':
-      return path.join(cwd, `.${agentId}`, 'config.toml');
-    case 'opencode':
-      // Project config is opencode.jsonc at project root (not .opencode/)
-      return path.join(cwd, 'opencode.jsonc');
-    case 'cursor':
-      return path.join(cwd, `.${agentId}`, 'mcp.json');
-    case 'openclaw':
-      return path.join(cwd, `.${agentId}`, 'openclaw.json');
-    case 'gemini':
-      return path.join(cwd, `.${agentId}`, 'settings.json');
-    case 'copilot':
-      return path.join(cwd, '.copilot', 'mcp-config.json');
-    case 'amp':
-      return path.join(cwd, '.amp', 'settings.json');
-    case 'kiro':
-      return path.join(cwd, '.kiro', 'settings', 'mcp.json');
-    case 'goose':
-      return path.join(cwd, '.goose', 'config.yaml');
-    case 'antigravity':
-      return path.join(cwd, '.gemini', 'antigravity-cli', 'mcp_config.json');
-    case 'grok':
-      return path.join(cwd, '.grok', 'config.toml');
-    case 'droid':
-      return path.join(cwd, '.factory', 'mcp.json');
-    case 'hermes':
-      return path.join(cwd, '.hermes', 'config.yaml');
-    case 'pi':
-      // omp reads project MCP from <root>/.mcp.json (Claude-compatible).
-      return path.join(cwd, '.mcp.json');
-    case 'muse':
-      // Muse project MCP rides the same settings schema under .muse/settings.json
-      // when present; otherwise fall back to the user settings path.
-      return path.join(cwd, '.muse', 'settings.json');
-    case 'warp':
-      // Oz reads project MCP from <root>/.warp/.mcp.json (Claude schema).
-      return path.join(cwd, '.warp', '.mcp.json');
-    default:
-      return path.join(cwd, `.${agentId}`, 'settings.json');
-  }
+  const target = MCP_TARGETS[agentId];
+  if (target) return target.project(cwd);
+  return path.join(cwd, `.${agentId}`, 'settings.json');
 }
 
 /**
@@ -3184,16 +3079,22 @@ function parseMcpFromOpenClawConfig(configPath: string): Record<string, McpConfi
  * Parse MCP config based on agent type.
  */
 export function parseMcpConfig(agentId: AgentId, configPath: string): Record<string, McpConfigEntry> {
-  switch (agentId) {
-    case 'codex':
+  // Dispatch on the registry's declared format, not the agent id, so the parser
+  // can never disagree with the writer about a file's serialization -- grok's
+  // TOML config was previously read as JSON and always came back empty.
+  switch (MCP_TARGETS[agentId]?.format) {
+    case 'toml':
       return parseMcpFromTomlConfig(configPath);
-    case 'opencode':
+    case 'opencode-jsonc':
       return parseMcpFromOpenCodeConfig(configPath);
-    case 'openclaw':
+    case 'openclaw-json':
       return parseMcpFromOpenClawConfig(configPath);
-    case 'hermes':
+    case 'yaml':
       return parseMcpFromYamlConfig(configPath);
     default:
+      // claude-json / antigravity-json / muse-json all live in a JSON object;
+      // parseMcpFromJsonConfig accepts mcpServers | mcp_servers | mcp. Agents
+      // with no declared format fall here too, matching prior behavior.
       return parseMcpFromJsonConfig(configPath);
   }
 }

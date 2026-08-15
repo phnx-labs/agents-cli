@@ -24,6 +24,7 @@ import { notifyRoutineStart, notifyRoutineFinish, notifyRoutineStartFailed } fro
 import { notifyOwnerRoutineFinish, notifyOwnerRoutineStartFailed } from './routine-notify-owner.js';
 import { BrowserService } from './browser/service.js';
 import { BrowserIPCServer, getSocketPath as getBrowserIpcSocketPath } from './browser/ipc.js';
+import { startHostedWebhookReceivers, type HostedWebhookReceivers } from './daemon-webhooks.js';
 import { secretsBrokerSocketPath, brokerPidAlive } from './secrets/agent.js';
 import { redactSecrets } from './redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from './cli-entry.js';
@@ -1276,6 +1277,27 @@ export async function runDaemon(): Promise<void> {
     log('INFO', 'Browser IPC service disabled');
   }
 
+  // 5th hosted service: signed webhook receiver(s) + their funnel (RUSH-2548).
+  // Started after the broker (above) so it resolves each receiver's signing
+  // secret headlessly — no AGENTS_SECRETS_PASSPHRASE, no nohup. Binds nothing
+  // unless daemon/webhooks.yaml declares a receiver, so an unconfigured box no-ops.
+  let webhookReceivers: HostedWebhookReceivers | null = null;
+  if (isEnabled('webhook-receiver')) {
+    try {
+      webhookReceivers = await startHostedWebhookReceivers({ log });
+      log(
+        'INFO',
+        webhookReceivers.count > 0
+          ? `Webhook receiver hosting ${webhookReceivers.count} receiver(s)`
+          : 'Webhook receiver service enabled; no receivers declared in daemon/webhooks.yaml',
+      );
+    } catch (err) {
+      log('WARN', `Webhook receiver host skipped: ${(err as Error).message}`);
+    }
+  } else {
+    log('INFO', 'Webhook receiver service disabled');
+  }
+
   runMonitorTick();
   const monitorInterval = setInterval(runMonitorTick, MONITOR_TICK_MS);
 
@@ -1483,6 +1505,7 @@ export async function runDaemon(): Promise<void> {
     stopScheduler();
     monitorEngine?.stop();
     await browserIPC?.stop();
+    await webhookReceivers?.close();
     clearInterval(monitorInterval);
     if (healInterval) clearInterval(healInterval);
     if (healKickoff) clearTimeout(healKickoff);
@@ -1543,12 +1566,29 @@ export function writeOwnerOnlyServiceManifest(filePath: string, content: string)
  * credential at all. Routine runs authenticate through the per-account
  * CLAUDE_CONFIG_DIR login on this device, exactly like an interactive
  * `agents run`, so no credential ever touches the service manifest.
+ *
+ * RUSH-2639: launchd does NOT inherit `launchctl load`'s caller's process
+ * environment — a spawned daemon only ever sees the login session's default
+ * env plus whatever this dict adds/overrides. Before this fix the dict carried
+ * only PATH, so HOME resolved to the launchd session's own value regardless of
+ * what HOME the process that generated (and loaded) the plist was running
+ * under. In production that's a no-op (the login session's HOME already is the
+ * real HOME), but under a hermetic test harness that redirects HOME to a
+ * fork-private sandbox, a launchd-started daemon silently escaped the sandbox
+ * and bootstrapped `~/.agents` (.cache/.history/.system/routines) in the
+ * developer's/runner's REAL home. Baking HOME (and the AGENTS_REAL_HOME seam
+ * every version-home consumer honors, see tests/setup.ts) into the plist at
+ * generation time makes the launchd child inherit the SAME home the caller
+ * resolved, exactly like the plain detached-spawn path already does via
+ * `env: {...process.env}`.
  */
 export function generateLaunchdPlist(
   agentsBin: string = getAgentsBinPath(),
 ): string {
   const launch = getDaemonLaunch(agentsBin);
   const logPath = getDaemonLogPath();
+  const home = process.env.HOME || os.homedir();
+  const realHome = process.env.AGENTS_REAL_HOME || home;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -1574,6 +1614,10 @@ ${[launch.command, ...launch.args].map((arg) => `    <string>${xmlEscape(arg)}</
   <dict>
     <key>PATH</key>
     <string>${daemonPathValue(agentsBin, ['/usr/local/bin', '/usr/bin', '/bin', '/opt/homebrew/bin', `${os.homedir()}/.bun/bin`])}</string>
+    <key>HOME</key>
+    <string>${xmlEscape(home)}</string>
+    <key>AGENTS_REAL_HOME</key>
+    <string>${xmlEscape(realHome)}</string>
   </dict>
 </dict>
 </plist>`;
@@ -1591,12 +1635,21 @@ function systemdExecArg(value: string): string {
  * credential at all. Routine runs authenticate through the per-account
  * CLAUDE_CONFIG_DIR login on this device, exactly like an interactive
  * `agents run`, so no credential ever touches the unit file.
+ *
+ * RUSH-2639: same seam as `generateLaunchdPlist` — a systemd --user unit is
+ * started by the user's systemd instance, not the process that generated the
+ * unit, so HOME is whatever that session provides unless this file pins it.
+ * Baking HOME (and AGENTS_REAL_HOME) in at generation time keeps a
+ * hermetic-test-started unit inside its sandbox instead of resolving against
+ * the real account home.
  */
 export function generateSystemdUnit(
   agentsBin: string = getAgentsBinPath(),
 ): string {
   const launch = getDaemonLaunch(agentsBin);
   const execStart = [launch.command, ...launch.args].map(systemdExecArg).join(' ');
+  const home = process.env.HOME || os.homedir();
+  const realHome = process.env.AGENTS_REAL_HOME || home;
 
   return `[Unit]
 Description=Agents Daemon - Scheduled Job Runner
@@ -1610,6 +1663,8 @@ ExecStart=${execStart}
 Restart=always
 RestartSec=${DAEMON_THROTTLE_SECONDS}
 Environment=PATH=${daemonPathValue(agentsBin, ['/usr/local/bin', '/usr/bin', '/bin'])}
+Environment=HOME=${home}
+Environment=AGENTS_REAL_HOME=${realHome}
 
 [Install]
 WantedBy=default.target`;
