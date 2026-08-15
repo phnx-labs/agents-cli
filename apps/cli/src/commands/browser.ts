@@ -14,6 +14,8 @@ import {
   extractConfiguredPort,
   findFreeProfilePort,
   getEndpointPresets,
+  listProfilesWithScope,
+  formatProfilesTable,
   type BrowserProfile,
 } from '../lib/browser/profiles.js';
 import { resolveActor } from '../lib/actor.js';
@@ -33,6 +35,9 @@ import {
   listProfileCacheDirs,
   removeProfileCache,
   listAllProfileSnapshots,
+  buildProfilePrunePlan,
+  pruneProfiles,
+  PRUNE_REASON_TEXT,
 } from '../lib/browser/runtime-state.js';
 import { DEFAULT_VIEWPORT } from '../lib/browser/devices.js';
 import { runBrowserSessionsCommand } from './browser-sessions-picker.js';
@@ -186,47 +191,34 @@ function registerProfilesCommands(browser: Command): void {
   profiles
     .command('list')
     .alias('ls')
-    .description('List all browser profiles')
-    .action(async () => {
-      const allProfiles = await listProfiles();
-      if (allProfiles.length === 0) {
-        console.log('No browser profiles configured.');
-        console.log('Create one with: agents browser profiles create <name> --endpoint <url>');
+    .description('List all browser profiles, with the store each lives in (local / fleet)')
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (opts: { json?: boolean }) => {
+      const scoped = await listProfilesWithScope();
+      const configuredDefault = getConfiguredDefaultProfileName();
+
+      if (opts.json) {
+        console.log(JSON.stringify(
+          scoped.map(({ profile, scope }) => ({
+            ...profile,
+            scope,
+            isConfiguredDefault: profile.name === configuredDefault,
+          })),
+          null,
+          2,
+        ));
         return;
       }
 
-      // The configured default is what a bare `agents browser start` (and an
-      // explicit `--profile default`) resolves to on THIS machine — mark it.
-      const configuredDefault = getConfiguredDefaultProfileName();
-      const marker = (name: string) => (name === configuredDefault ? '   (default)' : '');
+      if (scoped.length === 0) {
+        console.log('No browser profiles configured.');
+        console.log('Create one with: agents browser profiles create <name> --browser chrome');
+        return;
+      }
 
-      const hasDescriptions = allProfiles.some(p => p.description);
-      if (hasDescriptions) {
-        console.log('NAME'.padEnd(20) + 'BROWSER'.padEnd(12) + 'DESCRIPTION'.padEnd(38) + 'ENDPOINTS');
-        console.log('-'.repeat(92));
-        for (const p of allProfiles) {
-          const presets = getEndpointPresets(p);
-          const endpoints = Object.entries(presets)
-            .map(([name, ep]) => (name.startsWith('endpoint-') ? ep.target : `${name}=${ep.target}`))
-            .join(', ');
-          const desc = (p.description ?? '').slice(0, 36).padEnd(38);
-          console.log(p.name.padEnd(20) + (p.browser || '-').padEnd(12) + desc + endpoints + marker(p.name));
-        }
-      } else {
-        console.log('NAME'.padEnd(20) + 'BROWSER'.padEnd(12) + 'ENDPOINTS');
-        console.log('-'.repeat(72));
-        for (const p of allProfiles) {
-          const presets = getEndpointPresets(p);
-          const endpoints = Object.entries(presets)
-            .map(([name, ep]) => (name.startsWith('endpoint-') ? ep.target : `${name}=${ep.target}`))
-            .join(', ');
-          console.log(p.name.padEnd(20) + (p.browser || '-').padEnd(12) + endpoints + marker(p.name));
-        }
-      }
-      if (configuredDefault) {
-        console.log('');
-        console.log(`Default profile (this machine): ${configuredDefault}`);
-      }
+      // Rendering lives in lib/browser/profiles.ts so the column widths and the
+      // default-marking rules are unit-tested rather than eyeballed (RUSH-2710).
+      for (const line of formatProfilesTable(scoped, configuredDefault)) console.log(line);
     });
 
   const browserProfileDeprecation = chalk.yellow(
@@ -302,8 +294,12 @@ function registerProfilesCommands(browser: Command): void {
 
   profiles
     .command('create <name>')
-    .description('Create a new browser profile')
+    .description('Create a new browser profile (machine-local unless --fleet)')
     .requiredOption('-b, --browser <type>', `Browser type: ${VALID_BROWSERS.join(', ')}`)
+    .option(
+      '--fleet',
+      'Store in the synced agents.yaml so every machine sees it. Default is machine-local: a profile pins an OS-specific binary path and a locally chosen port, so a synced copy is wrong on every other box.'
+    )
     .option('-e, --endpoint <url>', 'CDP endpoint URL (repeatable; auto-assigned if omitted)', collect, [])
     .option('-s, --secrets <bundle>', 'Secrets bundle to inject')
     .option('-d, --description <text>', 'Profile description')
@@ -396,8 +392,10 @@ function registerProfilesCommands(browser: Command): void {
         viewport,
       };
 
-      await createProfile(profile);
-      console.log(`Created profile: ${name}`);
+      await createProfile(profile, { fleet: !!opts.fleet });
+      console.log(
+        `Created profile: ${name} (${opts.fleet ? 'fleet-synced — visible on every machine' : 'machine-local'})`
+      );
       // Warn (don't fail) if the declared secrets bundle doesn't exist yet — it
       // may be created later, but a typo should surface now.
       if (opts.secrets && !bundleExists(opts.secrets)) {
@@ -511,6 +509,77 @@ function registerProfilesCommands(browser: Command): void {
         );
       }
     });
+
+  profiles
+    .command('prune')
+    .description('Remove dead machine-local profiles: browser not installed here, or never started')
+    .option('-n, --dry-run', 'Print what would be removed and exit without changing anything')
+    .option('--fleet', 'Also consider fleet-synced profiles (removing one removes it from EVERY machine)')
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (opts: { dryRun?: boolean; fleet?: boolean; json?: boolean }) => {
+      const plan = await buildProfilePrunePlan({ includeFleet: opts.fleet });
+
+      if (!opts.dryRun) await pruneProfiles(plan);
+
+      if (opts.json) {
+        console.log(JSON.stringify({ dryRun: !!opts.dryRun, ...plan }, null, 2));
+        return;
+      }
+
+      if (plan.candidates.length === 0) {
+        console.log('Nothing to prune — every profile is in use, healthy, or protected.');
+        if (plan.kept.length > 0) {
+          for (const k of plan.kept) console.log(`  kept ${k.name} (${k.scope}) — ${k.why}`);
+        }
+        return;
+      }
+
+      const verb = opts.dryRun ? 'Would remove' : 'Removed';
+      console.log(`${verb} ${plan.candidates.length} profile${plan.candidates.length === 1 ? '' : 's'}:`);
+      for (const c of plan.candidates) {
+        const cache = c.cacheDirs.length > 0
+          ? ` + ${c.cacheDirs.length} cache dir${c.cacheDirs.length === 1 ? '' : 's'}`
+          : '';
+        console.log(`  ${c.name} (${c.scope}) — ${PRUNE_REASON_TEXT[c.reason]}${cache}`);
+      }
+      if (opts.dryRun) {
+        console.log('');
+        console.log('Nothing was changed. Re-run without --dry-run to apply.');
+      }
+    });
+
+  setHelpSections(profiles, {
+    examples: `
+      # What exists here, and whether each is this machine's or the whole fleet's
+      agents browser profiles list
+
+      # Create one — machine-local by default
+      agents browser profiles create work --browser chrome
+
+      # Create one every machine should see (e.g. a remote ssh:// endpoint)
+      agents browser profiles create shared-remote --browser chrome --fleet
+
+      # Clean up dead ones: check first, then apply
+      agents browser profiles prune --dry-run
+      agents browser profiles prune
+
+      # Make one the machine's default for a bare \`agents browser start\`
+      agents config set browser.profile work
+    `,
+    notes: `
+      Profiles are machine-local by default. A profile pins an OS-specific binary
+      path and a locally chosen CDP port, so a fleet-synced copy is wrong on every
+      other machine — pass --fleet only when the profile really is fleet config.
+
+      In \`list\`, the \`*\` marker means "this machine's configured default"
+      (\`agents browser start\` with no --profile). It is NOT the same thing as the
+      profile NAMED \`default\`, which is the auto-detected one; they are often
+      different profiles.
+
+      \`prune\` never removes a profile that is in use, the configured default, the
+      auto \`default\`, or (without --fleet) a fleet-synced one.
+    `,
+  });
 
   profiles
     .command('doctor <name>')

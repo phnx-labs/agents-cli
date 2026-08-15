@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_90 command groups · 561 commands._
+_90 command groups · 562 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -49,10 +49,10 @@ agents alias list                       Show installed aliases
 agents alias remove <name>              Delete an alias shim
 ```
 
-## apply — Reconcile the fleet to a declared profile: install agents, sync config, propagate login.
+## apply — Reconcile the fleet to a declared profile: install agents and sync config.
 
 ```
-agents apply  Reconcile the fleet to a declared profile: install agents, sync config, propagate login.
+agents apply  Reconcile the fleet to a declared profile: install agents and sync config.
 ```
 
 ## artifacts — Publish agent-made artifacts (plans, reports, visuals) to your own Cloudflare R2 and get a shareable link (~$0).
@@ -115,11 +115,12 @@ agents browser navigate                       Navigate current tab to URL (creat
 agents browser pdf [output]                   Export the current tab as PDF via CDP Page.printToPDF — auto-saved under sessions/<task>/ when [output] is omitted
 agents browser press <key>                    Press a key (Enter, Tab, Escape, etc)
 agents browser profiles                       Manage browser profiles
-agents browser profiles create <name>         Create a new browser profile
+agents browser profiles create <name>         Create a new browser profile (machine-local unless --fleet)
 agents browser profiles delete <name>         Delete a browser profile (drops YAML config + all cached runtime dirs)
 agents browser profiles doctor <name>         Diagnose a browser profile: binary, port, user-data-dir, onboarding state
-agents browser profiles list                  List all browser profiles
+agents browser profiles list                  List all browser profiles, with the store each lives in (local / fleet)
 agents browser profiles logins                Show which login-gated services each profile has a live session for, the account signed in, and whether login creds are available in the profile's secrets bundle (reads cookie/username presence only, never decrypts).
+agents browser profiles prune                 Remove dead machine-local profiles: browser not installed here, or never started
 agents browser profiles set-default [name]    Set the profile `agents browser start` uses when no --profile is passed (also re-points an explicit `--profile default`). Device-local — each machine has its own. No name prints the current value.
 agents browser profiles show <name>           Show profile details
 agents browser ps                             List every browser/electron/tunnel process agents has tracked (alive or stale) — works without the daemon
@@ -265,7 +266,7 @@ _aliases: fleet_
 agents devices                                 Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale. Alias: fleet.
 agents devices accounts                        Per device, one row per account: which harnesses share it, signed-in, quota, and ready. The identity lens on `agents devices harnesses`.
 agents devices add <name> <target>             Add a device manually (target is user@host or host).
-agents devices apply                           Reconcile the fleet to a declared profile: install agents, sync config, propagate login.
+agents devices apply                           Reconcile the fleet to a declared profile: install agents and sync config.
 agents devices capture                         Snapshot the live environment (roster names, agents, browser, secret-bundle names, routines) into agents.yaml fleet:.
 agents devices config <name> [key] [value...]  Get, set, or unset a device’s settings (scheduler, agent cap, ssh overrides, auto-launch, notes). Bare opens an interactive settings menu (TTY) or prints the resolved config (piped). Stored centrally in ~/.agents/agents.yaml under fleet.devices.<name>.config — synced, so any box can configure any device.
 agents devices harnesses                       Per device, one row per installed agent@version: account, signed-in, quota, and a single ready verdict. SSH-probes each online box.

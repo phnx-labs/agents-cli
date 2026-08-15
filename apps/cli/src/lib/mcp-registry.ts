@@ -6,8 +6,8 @@
  * serialization format that file uses. Generic path resolution, config writing,
  * config parsing, and install now read this table instead of the four
  * independent `switch (agentId)` / `if (agentId === '...')` chains that used to
- * be copy-pasted across `lib/agents.ts`, `lib/mcp.ts`, and
- * `lib/resources/mcp.ts` -- three of which had *different* membership sets, so
+ * be copy-pasted across `lib/agents.ts`, `lib/mcp.ts`, and a since-deleted
+ * `lib/resources/mcp.ts` (RUSH-2695) -- which had *different* membership sets, so
  * a harness could resolve a config path and then be silently skipped by the
  * writer, or be written to one file and read back from another.
  *

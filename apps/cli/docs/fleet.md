@@ -1,8 +1,8 @@
 # Fleet profile sync (`agents apply`)
 
 Reconcile every machine you own to one declared profile: which agents are
-installed, which config scopes are synced, and whether logins propagate. One
-host set up the way you like it becomes the template for the whole fleet.
+installed, which config scopes are synced, and which boxes still need local
+authentication. Native logins are never copied.
 
 `agents apply` (alias `ag apply`) is the fleet-wide counterpart to
 [resource sync](resource-sync.md): resource sync reconciles resources within
@@ -11,7 +11,7 @@ over the same [SSH transport](ssh-transport.md) every `--host` command uses.
 
 Source: `src/commands/apply.ts` (command + plan render),
 `src/lib/fleet/{types,manifest,apply,auth-sync}.ts` (schema, reconcile engine,
-credential propagation).
+login readiness inventory).
 
 ## The `fleet:` block
 
@@ -37,7 +37,7 @@ fleet:
 | `devices` | `all` — every online, registered device except the source machine — or a map of `device-name: {override}`. |
 | `defaults.agents` | Agent specs to ensure installed, e.g. `claude@latest`. Missing agents are installed; version drift is left to the pins. |
 | `defaults.sync` | Config sync scopes to reconcile on each device (e.g. `user`). |
-| `defaults.login` | `sync` propagates logins where the credential is portable; `skip` probes and reports but takes no login action. |
+| `defaults.login` | `sync` reports missing device-local login/account readiness; `skip` omits that dimension. Neither copies native OAuth. |
 
 `login` accepts **`sync`** or **`skip`** only. (An interactive per-agent
 `prompt` mode is intentionally not offered — it was removed rather than accepted
@@ -94,8 +94,10 @@ set of actions across five dimensions:
   is absent, even if some other claude is already there. Version-pinned specs
   trigger a per-device `agents view --json` probe to read the installed version set.
 - **config** — `sync-config` for the declared `sync:` scopes.
-- **login** — `push-login` where a portable credential can be propagated;
-  `needs-login` where the login is desired but genuinely can't be (see below).
+- **login** — always `needs-login` when a login is desired. A native OAuth /
+  session login is never copied between devices (SING-1b, RUSH-2527), so `apply`
+  does not propagate one: log in on the
+  box itself, or sync a portable provider account (`agents accounts sync`).
 - **secrets** — `push-secret` for a declared bundle when `--provision-secrets` is
   set and the gates below pass; `needs-secret` (a manual reminder) otherwise. Runs
   **last**, because it is the most sensitive mutation `apply` performs: every
@@ -138,8 +140,8 @@ skipped device is never silent:
 | Device reachable? | ordinary manual reminder |
 | Host key **pinned**? | `host key not pinned; run \`agents ssh <device>\` once to pin it` |
 
-The pin requirement is the same bar `agents exec --copy-creds` already sets
-(EXEC-34): credential values only ever move to a host whose key is pinned.
+Credential values only move to a host whose key is already pinned. Enroll it
+first with a non-secret `agents ssh <device>` connection.
 
 **Backend follows the platform, and this is the load-bearing default:** `file` on
 Linux, `keychain` on macOS/Windows. A headless Linux box has no keychain, and its
@@ -155,34 +157,17 @@ converged fleet would nag on every apply. Known limitation, stated plainly: this
 compares **presence**, not content — a bundle whose values changed locally still
 reads as present. Use `--force` to re-push regardless.
 
-## Login propagation
+## Login and account readiness
 
-`login: sync` seeds a fresh machine from an already-signed-in one — the point of
-the feature. It turns "6 hosts × ~8 harnesses = ~48 OAuth flows" into a single
-login on the source.
+`login: sync` is now an inventory intent: `apply` reports `needs-login` for each
+device that lacks a requested native login, but it never reads or copies a native
+OAuth/session file. Fleet apply has no native-auth materialization receiver.
+Complete an interactive login on that device, or create
+a portable provider account and copy it explicitly with
+`agents accounts sync <account> --device <device>`.
 
-Portable credential files are captured on the source and streamed to each target
-over the encrypted SSH channel (`sshExec` **stdin** — never shell-interpolated) by
-an internal `--recv-auth` receiver that materializes them at `0600` and rejects
-path traversal. Agents with a portable credential:
-
-> `claude`, `codex`, `gemini`, `grok`, `kimi`, `opencode`, `droid`, `antigravity`
-
-**Honest boundary — never faked, never fatal.** macOS keychain-bound tokens
-(`claude`, `antigravity`) can't be read from the ACL-locked keychain on a **macOS
-target**, and a token that is keychain-bound on the **source** can't be extracted
-to push. Single-use rotating refresh tokens — droid (WorkOS) is the known
-offender — are also never propagated: copying one credential file across N boxes
-would let the first refresh on any box invalidate every other holder. Those cases
-surface as a one-time **manual login** in the plan, not a fake success. Agents
-with no portable credential (e.g. `cursor`), and a source that simply isn't signed
-into an agent, produce no login action at all — the same on every OS.
-
-The "is this credential safe to copy?" decision is centralized in
-`src/lib/fleet/auth-sync.ts` (`isCredentialSafeToPropagate` and
-`SINGLE_USE_ROTATING_REFRESH_AGENTS`). Add any newly-discovered single-use-
-rotation harness there rather than scattering per-agent conditionals through the
-propagation path.
+The custody decision is centralized in `src/lib/fleet/auth-sync.ts`:
+`isCredentialSafeToPropagate` returns false for every native harness login.
 
 ## Flags
 
@@ -194,7 +179,7 @@ propagation path.
 | `--device <name>` | Scope the apply to a single device. |
 | `--agent <specs...>` | Override the roster for the targeted device(s) — install exactly these specs instead of the manifest's. Pairs with `--device` to seed one box. See [§Replicating this machine's version set](#replicating-this-machines-version-set). |
 | `--only <dims>` | Limit to a comma list of `agents,config,login`. |
-| `--no-login` | Do not propagate logins (equivalent to `login: skip` everywhere). |
+| `--no-login` | Deprecated no-op; native logins are always device-local. |
 | `--provision-secrets` | Push the declared `secrets.bundles` to each device. OFF by default; only to a device whose host key is pinned. See [§Provisioning secrets](#provisioning-secrets---provision-secrets). |
 | `--force` | With `--provision-secrets`: re-push a bundle the device already has. |
 
@@ -215,15 +200,12 @@ agents apply --agent claude@2.1.207 --device yosemite-s0
 `claude@all` expands **source-side** to one pinned spec per version installed here
 (`claude@2.1.170`, `claude@2.1.207`, …); `apply` then installs each missing version
 on the target and skips ones already present. `--agent` overrides the roster only
-for the run — it doesn't rewrite `agents.yaml`. Config sync and login propagation
-still run per the manifest (login is shared across a harness's versions, so it
-propagates once per agent, not once per version). Without `--device`, the override
+for the run — it doesn't rewrite `agents.yaml`. Config sync and login readiness
+still run per the manifest. Without `--device`, the override
 applies to every targeted device.
 
 ## Security
 
-Credential transport rides the existing SSH transport and passes bundles via real
-stdin, so credentials never appear in a command line or process list. The receiver
-validates paths and writes at `0600`. Consistent with the repo's rule to never
-transfer auth files without authorization, the live propagation path only runs on
-an explicit (non-`--plan`) `apply`.
+Provider-bundle transport rides SSH stdin, never argv, disables multiplexing, and
+requires an already-pinned host key. Native OAuth/session files have no receiver
+or materialization path in `apply`.

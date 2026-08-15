@@ -335,6 +335,12 @@ describe('buildWindowsStdinImportCommand', () => {
     expect(script).not.toContain('--force');
   });
 
+  it('sets policy never in the same import process', () => {
+    const script = decodeWindows(buildWindowsStdinImportCommand('linear.app', { policyNever: true }));
+    expect(script).toContain("agents secrets import 'linear.app' --from $tmp --policy never --i-understand");
+    expect(script).not.toContain('secrets policy');
+  });
+
   it('creates + writes the temp file INSIDE the try so a crash still cleans it up (RUSH-1764)', () => {
     const script = decodeWindows(buildWindowsStdinImportCommand('linear.app'));
     // GetTempFileName + WriteAllText must sit after `try {`, so the finally's

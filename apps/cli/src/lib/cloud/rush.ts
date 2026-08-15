@@ -10,7 +10,6 @@ import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import * as yaml from 'yaml';
-import { getCloudDir } from '../state.js';
 import type {
   CloudProvider,
   CloudTask,
@@ -29,50 +28,10 @@ import { loadClaudeOauth } from '../accounting/usage.js';
 import { selectBalancedVersion } from '../accounting/rotate.js';
 
 const PROXY_BASE = process.env.RUSH_PROXY_BASE ?? 'https://api.prix.dev';
-const PROXY_HOST = new URL(PROXY_BASE).host;
 const USER_YAML = path.join(os.homedir(), '.rush', 'user.yaml');
 
-// Persistent consent record for uploading Claude OAuth blobs to Rush Cloud.
-// Created on first explicit consent (env var or flag); subsequent dispatches
-// see it and proceed without re-prompting.
-export const RUSH_CONSENT_PATH = path.join(getCloudDir(), 'rush-consent.json');
-const RUSH_CONSENT_ENV = 'AGENTS_RUSH_UPLOAD_TOKENS';
-
-interface RushConsentFile {
-  granted_at: string;
-  granted_by: 'env' | 'flag' | 'manual';
-  host: string;
-  account_fingerprint: string;
-}
-
-export function hasRushUploadConsent(accountFingerprint: string, opts?: DispatchOptions, consentPath = RUSH_CONSENT_PATH): boolean {
-  if (process.env[RUSH_CONSENT_ENV] === '1') return true;
-  const po = opts?.providerOptions as { uploadAccountTokens?: boolean } | undefined;
-  if (po?.uploadAccountTokens === true) return true;
-  try {
-    if (!fs.existsSync(consentPath)) return false;
-    const body = JSON.parse(fs.readFileSync(consentPath, 'utf-8')) as Partial<RushConsentFile>;
-    return body.host === PROXY_HOST && body.account_fingerprint === accountFingerprint;
-  } catch {
-    return false;
-  }
-}
-
-function recordRushUploadConsent(grantedBy: RushConsentFile['granted_by'], accountFingerprint: string): void {
-  try {
-    fs.mkdirSync(path.dirname(RUSH_CONSENT_PATH), { recursive: true });
-    const body: RushConsentFile = {
-      granted_at: new Date().toISOString(),
-      granted_by: grantedBy,
-      host: PROXY_HOST,
-      account_fingerprint: accountFingerprint,
-    };
-    fs.writeFileSync(RUSH_CONSENT_PATH, JSON.stringify(body, null, 2), { mode: 0o600 });
-  } catch {
-    // Non-fatal: consent persistence is a UX optimization, not a security
-    // boundary. Worst case, the user is asked to consent again next dispatch.
-  }
-}
+// Native OAuth/session credentials never cross the cloud boundary. A server
+// token request fails loud rather than materializing a harness login (see dispatch()).
 
 interface UserYaml {
   session?: {
@@ -155,25 +114,22 @@ async function findInstallation(token: string, owner: string, repo: string): Pro
 export interface AccountManifestEntry {
   version: string;
   email: string;
-  cred_fp: string;
 }
 
 /**
- * Manifest of the user's local Claude accounts. Sent on every dispatch so the
- * server can detect "new account" or "token rotated" drift and ask the client
- * to upload the underlying credentials. The manifest itself contains no
- * secrets — only public-ish identifiers + a hash of each token.
+ * Manifest of the user's local Claude accounts (version + account email only).
+ * Sent on a non-balanced dispatch so the server knows which accounts exist and
+ * can route to one. It carries **no credential material** and does NOT read the
+ * native OAuth login (RUSH-2527 / SING-1b): agents-cli never reads a harness's
+ * interactive login to build this. When the server asks for the underlying token
+ * (a new account, or a rotation it can't otherwise resolve), the client does NOT
+ * upload it — there is no consented path to copy a native OAuth login to the
+ * cloud. Dispatch fails loud and steers to a portable provider account instead
+ * (see the 401 handler in `dispatch()`).
  */
 export interface AccountManifest {
   fp: string;
   versions: AccountManifestEntry[];
-}
-
-/** Token blob uploaded on retry when the server detects drift. */
-export interface AccountTokenEntry {
-  version: string;
-  /** Stringified OAuth credentials JSON (Mac: keychain blob; Linux: .credentials.json). */
-  credentials_json: string;
 }
 
 /** sha256 → hex. */
@@ -281,42 +237,25 @@ export async function buildAccountManifest(strategy?: string): Promise<AccountMa
     candidateVersions = rows.filter((r): r is { version: string; email: string } => r !== null);
   }
 
-  const entries: AccountManifestEntry[] = [];
-  for (const { version, email } of candidateVersions) {
-    const home = getVersionHomePath('claude', version);
-    const blob = await readClaudeCredentialsBlob(home);
-    if (!blob) continue;
-    entries.push({ version, email, cred_fp: sha256(blob) });
-  }
+  // RUSH-2527 / SING-1b: do NOT read the native OAuth login to fingerprint it.
+  // The manifest carries version + account email only — enough for the server to
+  // route to an account. If the server needs the token itself, the client does NOT
+  // upload it (there is no consented path to copy a native OAuth login to the
+  // cloud); dispatch fails loud and steers to a portable provider account.
+  const entries: AccountManifestEntry[] = candidateVersions
+    .map(({ version, email }) => ({ version, email }))
+    .sort((a, b) => a.version.localeCompare(b.version));
 
   if (entries.length === 0) return null;
-  entries.sort((a, b) => a.version.localeCompare(b.version));
   const fp = sha256(JSON.stringify(entries));
   return { fp, versions: entries };
 }
 
-/**
- * Re-load OAuth blobs for the given versions so they can be uploaded to the
- * server on a retry. Only the versions named in the manifest are loaded — we
- * never upload tokens for versions the server hasn't asked about.
- */
-export async function buildAccountTokensPayload(
-  versions: string[],
-): Promise<AccountTokenEntry[]> {
-  const out: AccountTokenEntry[] = [];
-  for (const version of versions) {
-    const home = getVersionHomePath('claude', version);
-    const blob = await readClaudeCredentialsBlob(home);
-    if (!blob) continue;
-    out.push({ version, credentials_json: blob });
-  }
-  return out;
-}
-
-export function accountTokensFingerprint(tokens: AccountTokenEntry[]): string {
-  const canonical = [...tokens].sort((a, b) => a.version.localeCompare(b.version));
-  return sha256(JSON.stringify(canonical));
-}
+// buildAccountTokensPayload / accountTokensFingerprint (which read every installed
+// Claude version's native OAuth token to upload it to the cloud) were REMOVED —
+// SING-1b forbids reading or transferring a native OAuth / session login, even
+// with consent. Cloud dispatch under a native login now fails loud and steers to a
+// portable provider account (see the 401 handler in dispatch()).
 
 /**
  * Build the POST body for /api/v1/cloud-runs. Exported so tests can verify
@@ -331,7 +270,6 @@ export function buildDispatchBody(input: {
   strategy?: string;
   resolvedRepos: Array<{ installation_id: number; repo_owner: string; repo_name: string }>;
   accountManifest?: AccountManifest | null;
-  accountTokens?: AccountTokenEntry[] | null;
   /**
    * Skill ride-alongs so the cloud pod isn't context-blind. Forwarded verbatim
    * as `skills` so the Factory Floor can mount them by id/version before the
@@ -364,9 +302,6 @@ export function buildDispatchBody(input: {
   }
   if (input.accountManifest) {
     body.account_manifest = input.accountManifest;
-  }
-  if (input.accountTokens && input.accountTokens.length > 0) {
-    body.account_tokens = input.accountTokens;
   }
   if (input.skills && input.skills.length > 0) {
     body.skills = input.skills;
@@ -464,64 +399,29 @@ export class RushCloudProvider implements CloudProvider {
 
     let res = await api('POST', '/api/v1/cloud-runs', token, body);
 
-    // Server detects drift (new account or rotated token) by comparing the
-    // manifest's fp against what's stored. It returns 401 with a prompt_code
-    // telling the client to re-upload the actual token blobs and retry once.
+    // The server asks the client to upload the underlying Claude OAuth token when
+    // it detects a new account or a rotation (401 + prompt_code). agents-cli NEVER
+    // reads or transfers a native OAuth / session login off this machine — not
+    // even with consent (SING-1b): a rotating token copied to the cloud is
+    // invalidated on its next refresh and logs the fleet out. Fail loud and steer
+    // to a portable provider account instead of exfiltrating the login.
     if (res.status === 401 && accountManifest) {
       const errBody = await res.clone().text();
       const promptCode = parsePromptCode(errBody);
       if (promptCode === 'NEW_ACCOUNT' || promptCode === 'TOKEN_ROTATED') {
-        const accountTokens = await buildAccountTokensPayload(
-          accountManifest.versions.map((v) => v.version),
+        throw new Error(
+          [
+            `Rush Cloud asked to sync your Claude login (reason: ${promptCode.toLowerCase()}), but`,
+            `agents-cli never copies a native OAuth / session login off this machine (SING-1b) —`,
+            `a rotating token uploaded to the cloud is invalidated on its next refresh.`,
+            ``,
+            `Portable provider accounts can run locally or on a pinned fleet device, but cloud`,
+            `placement does not securely inject them yet. Create and sync one with:`,
+            `    agents accounts add <name> --provider anthropic --auth api-key    # or: --auth setup-token`,
+            `    agents accounts sync <name> <device>`,
+            `then run locally or on that device with --account <name>. See docs/credential-management.md (SING-1b).`,
+          ].join('\n'),
         );
-        const accountFingerprint = accountTokensFingerprint(accountTokens);
-
-        // Refuse to silently exfiltrate Claude OAuth credentials. The retry
-        // path below reads accessToken+refreshToken from every installed
-        // Claude version and POSTs them to api.prix.dev. That's an explicit
-        // data-flow decision the user has to opt into.
-        if (!hasRushUploadConsent(accountFingerprint, options)) {
-          throw new Error(
-            [
-              `Rush Cloud asked to sync your Claude credentials (reason: ${promptCode.toLowerCase()}).`,
-              `This would upload accessToken + refreshToken from every installed Claude version`,
-              `to ${PROXY_BASE} so Factory Floor pods can act as your Anthropic account.`,
-              ``,
-              `To consent, re-run with one of:`,
-              `  AGENTS_RUSH_UPLOAD_TOKENS=1 agents cloud run ...`,
-              `  agents cloud run --upload-account-tokens ...`,
-              ``,
-              `Consent will be recorded at ${RUSH_CONSENT_PATH} so you won't be asked again.`,
-              `Remove that file to revoke.`,
-            ].join('\n'),
-          );
-        }
-
-        // Always-on stderr notice (no isTTY gate). Scripts and CI need to see
-        // this in their captured stderr / logs.
-        const grantedBy: RushConsentFile['granted_by'] =
-          process.env[RUSH_CONSENT_ENV] === '1' ? 'env'
-            : (options.providerOptions as { uploadAccountTokens?: boolean } | undefined)?.uploadAccountTokens === true ? 'flag'
-              : 'manual';
-        process.stderr.write(`[rush] uploading ${accountTokens.length} account token(s) to ${PROXY_HOST}\n`);
-        const retryBody = buildDispatchBody({
-          agent: options.agent,
-          prompt: options.prompt,
-          mode: options.providerOptions?.mode as string | undefined,
-          resolvedRepos,
-          accountManifest,
-          accountTokens,
-          skills: options.skills,
-          images: options.images,
-          env: options.env,
-        });
-        res = await api('POST', '/api/v1/cloud-runs', token, retryBody);
-
-        // Persist consent on first successful upload so we don't re-prompt
-        // every time tokens rotate.
-        if (res.ok && grantedBy !== 'manual') {
-          recordRushUploadConsent(grantedBy, accountFingerprint);
-        }
       }
     }
 

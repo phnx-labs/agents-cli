@@ -36,7 +36,14 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
    stores, syncs, or references a harness's interactive OAuth login. Not for usage,
    not for fleet sync, not for account selection. It is never written to the keychain
    by us and never copied across devices. It stays on the box that minted it and
-   refreshes itself there.
+   refreshes itself there. Enforced on the transfer paths too (RUSH-2527): neither
+   `agents run --host --copy-creds` nor `agents run --lease` serializes a native
+   login (Claude OAuth + codex/grok/gemini `auth.json`) to another device — both
+   **refuse** and steer to a portable provider account, sharing the one
+   `isNativeOAuthRuntime` predicate (`src/lib/hosts/credentials.ts` →
+   `buildHostCredentialScript`, `src/lib/crabbox/runtimes.ts` →
+   `buildCredentialScript`; SING-1b). Portable account bundles still cross the
+   fleet through the explicit `agents accounts sync` path.
 
 3. **The only credential agents-cli manages is a deliberate, durable credential.** A
    long-lived, **non-rotating** OAuth setup-token / API key / bearer token
@@ -141,8 +148,8 @@ deliberately created with `agents accounts add` and explicitly pushed with
 
 ## How each surface changes
 
-- **`agents apply`** stops copying login files. `FLEET_AUTH_FILES` loses its copy
-  role; the `push-login` / `--recv-auth` login-materialize path is removed. Per
+- **`agents apply`** does not copy login files. `FLEET_AUTH_FILES` is inventory
+  metadata only; fleet apply has no native-login materialization path. Per
   agent per box `apply` surfaces: "logged in" / "log in on this box" (interactive or
   `agents fleet login`) / "add or sync a provider account (`agents accounts add` /
   `sync`)" — driven by whether the box has its own login or a declared account

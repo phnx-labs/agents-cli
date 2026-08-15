@@ -16,13 +16,7 @@ import { readyProbe, bootstrapAgentsCli } from '../hosts/ready.js';
 import { buildRemoteAgentsInvocation } from '../hosts/remote-cmd.js';
 import { sshExec } from '../ssh-exec.js';
 import type { TeamsDoctorEntry } from '../teams/agents.js';
-import {
-  isPropagatableAgent,
-  hasPortableAuthFiles,
-  isCredentialSafeToPropagate,
-  KEYCHAIN_BOUND_ON_MAC,
-  buildAuthBundle,
-} from './auth-sync.js';
+import { hasPortableAuthFiles } from './auth-sync.js';
 import type {
   DeviceDesired,
   DeviceProbe,
@@ -116,18 +110,6 @@ export interface SourceAuth {
   filesByAgent: Map<string, AuthFilePayload[]>;
 }
 
-/**
- * Can we propagate `agent`'s login to a target on `targetPlatform`? False when
- * the agent has no portable file, the source can't provide it (bound / not
- * signed in), or the target consumes credentials from its own keychain.
- */
-export function canPushLogin(agent: string, targetPlatform: string | undefined, src: SourceAuth): boolean {
-  if (!isPropagatableAgent(agent)) return false;
-  if (src.bound.has(agent)) return false;
-  if (targetPlatform === 'macos' && KEYCHAIN_BOUND_ON_MAC.has(agent)) return false;
-  return src.available.has(agent);
-}
-
 export interface DiffContext {
   /** agents-cli version the source is on — the fleet target version. */
   targetCliVersion: string;
@@ -188,28 +170,24 @@ export function diffFleet(desired: DeviceDesired[], probes: Map<string, DevicePr
         rowActions.push({ device: d.device, kind: 'sync-config', detail: `sync config (${d.sync.join(', ')})` });
       }
       // login — per agent id, not per spec: `claude@all` names one id many times,
-      // but login propagates once per agent (its credential is version-shared).
+      // but a login is established once per agent (its credential is version-shared).
       if (d.login === 'sync') {
         for (const id of [...new Set(d.agents.map(agentIdOf))]) {
-          if (canPushLogin(id, probe.platform, ctx.sourceAuth)) {
-            rowActions.push({ device: d.device, kind: 'push-login', agent: id, detail: `propagate ${id} login` });
-          } else if (hasPortableAuthFiles(id) && !isCredentialSafeToPropagate(id)) {
-            // Single-use rotating refresh tokens (e.g. droid/WorkOS) must never be
-            // copied across boxes — the first refresh invalidates every other copy.
-            // Surface per-machine login guidance instead of silently propagating.
+          // SING-1b: a native OAuth / session login MUST NOT be copied between
+          // devices — a rotating token invalidates the fleet on its next refresh
+          // (droid/WorkOS collapsed 10 boxes to 1 overnight). `apply` therefore no
+          // longer propagates any login; it surfaces per-box login / portable
+          // provider-account guidance for every agent that has a login to
+          // establish. An agent with no portable login file, or a source that
+          // isn't signed in, is silently skipped the same on every OS.
+          if (hasPortableAuthFiles(id)) {
             loginBlocked.push(id);
-            rowActions.push({ device: d.device, kind: 'needs-login', agent: id, detail: `${id} login uses a single-use rotating refresh token — log in on ${d.device} itself` });
-          } else if (
-            isPropagatableAgent(id) &&
-            (ctx.sourceAuth.bound.has(id) || (probe.platform === 'macos' && KEYCHAIN_BOUND_ON_MAC.has(id)))
-          ) {
-            // A login-propagation candidate we still can't push: the source token
-            // is keychain-bound (unextractable), or the macOS target consumes its
-            // own keychain. Surface those as manual — don't fake. Agents that were
-            // never propagation candidates (no portable file), or a source that
-            // simply isn't signed in, are silently skipped the same on every OS.
-            loginBlocked.push(id);
-            rowActions.push({ device: d.device, kind: 'needs-login', agent: id, detail: `${id} needs a manual login` });
+            rowActions.push({
+              device: d.device,
+              kind: 'needs-login',
+              agent: id,
+              detail: `${id}: a native OAuth login can't be copied between devices (SING-1b) — log in on ${d.device} itself, or sync a portable provider account (agents accounts sync)`,
+            });
           }
         }
       }
@@ -512,16 +490,8 @@ export function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: Exe
     ok = ok && syncOk;
   }
 
-  // 4. login propagation — one bundle for all pushable agents on this device.
-  const pushAgents = [...new Set(row.actions.filter((a) => a.kind === 'push-login').map((a) => a.agent!))];
-  if (pushAgents.length > 0) {
-    const files: AuthFilePayload[] = [];
-    for (const agent of pushAgents) files.push(...(ctx.sourceAuth.filesByAgent.get(agent) ?? []));
-    const bundle = buildAuthBundle(ctx.source, files);
-    const r = sshAgents(['apply', '--recv-auth'], JSON.stringify(bundle));
-    steps.push({ kind: 'push-login', ok: r.code === 0, detail: `propagate login: ${pushAgents.join(', ')}` });
-    ok = ok && r.code === 0;
-  }
+  // 4. Native login materialization does not exist. Every agent that needs a login is surfaced as
+  // `needs-login` (per-box login / portable-account guidance) in the diff above.
 
   // 5. secrets provisioning — LAST, and deliberately so. It is the most
   // sensitive mutation apply performs (credential VALUES crossing to another

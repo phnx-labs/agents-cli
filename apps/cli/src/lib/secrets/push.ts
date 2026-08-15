@@ -189,6 +189,7 @@ export function planPushTransport(
     const { remoteCmd, input } = buildRemoteFileImportCommand(bundle, resolved.dotenv, {
       passphrase: opts.passphrase ?? '',
       force: opts.force,
+      policyNever: opts.policyNever,
     });
     return { kind: 'ssh', remoteCmd, input, multiplex: false };
   }
@@ -200,7 +201,7 @@ export function planPushTransport(
     // the wire over ssh stdin.
     return {
       kind: 'ssh',
-      remoteCmd: buildWindowsStdinImportCommand(bundle, { force: opts.force }),
+      remoteCmd: buildWindowsStdinImportCommand(bundle, { force: opts.force, policyNever: opts.policyNever }),
       input: resolved.dotenv,
       multiplex: false,
     };
@@ -210,7 +211,11 @@ export function planPushTransport(
   // path the READ inverse (`remoteResolveEnv`) uses.
   return {
     kind: 'remote-secrets',
-    args: ['import', bundle, '--from', '-', ...(opts.force ? ['--force'] : [])],
+    args: [
+      'import', bundle, '--from', '-',
+      ...(opts.force ? ['--force'] : []),
+      ...(opts.policyNever ? ['--policy', 'never', '--i-understand'] : []),
+    ],
     input: resolved.dotenv,
     multiplex: false,
   };
@@ -265,14 +270,6 @@ export function pushResolvedBundleToHost(
       return fail(verdict.kind === 'locked-keychain'
         ? keychainWriteFailureMessage(host, bundle, verdict.reason)
         : `pushed '${bundle}' but could not verify it on the remote: ${verdict.reason}`);
-    }
-  }
-
-  if (opts.policyNever) {
-    const policy = remoteSecretsRaw(host, ['policy', bundle, 'never', '--i-understand'], { osLookupName: host, secret: true });
-    if (policy.code !== 0) {
-      const msg = (policy.stderr || policy.stdout || '').trim();
-      return fail(`pushed '${bundle}' but could not set remote policy never${msg ? `: ${msg}` : ''}`);
     }
   }
 

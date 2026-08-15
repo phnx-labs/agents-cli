@@ -2145,6 +2145,8 @@ Examples:
     .option('--backend <backend>', 'When creating the bundle: keychain or file (defaults to agents.yaml secrets.backend)')
     .option('--synced', 'When creating the bundle, store it in the age-encrypted synced secrets file')
     .option('--force', 'Overwrite an existing key in the bundle')
+    .option('--policy <policy>', 'Set the bundle prompt policy as part of this import (always, hold, or never)')
+    .option('--i-understand', 'Confirm an import with policy never (no biometry ACL)')
     .option('--purge', 'With --from icloud: delete the iCloud copies after a successful import (iCloud propagates the deletion to your other devices)')
     .option('--from-file <path>', `Import from an AES-256-GCM encrypted offline bundle file (needs ${SYNC_PASSPHRASE_ENV}; symmetric counterpart of export --to-file)`)
     .option('--from-ssh', 'Pull the bundle from a fleet peer over SSH and import it locally (requires --host)')
@@ -2157,12 +2159,27 @@ Examples:
       backend?: string;
       synced?: boolean;
       force?: boolean;
+      policy?: string;
+      iUnderstand?: boolean;
       purge?: boolean;
       fromFile?: string;
       fromSsh?: boolean;
       host?: string;
     }) => {
       try {
+        const importPolicy = opts.policy ? parsePolicyOpt(opts.policy) : undefined;
+        const policyAck = assertNeverPolicyAcknowledged(importPolicy, {
+          iUnderstand: opts.iUnderstand,
+          interactive: isInteractiveTerminal(),
+        });
+        if (policyAck === 'prompt' && !(await confirmNeverPolicyInteractive(bundleName ?? 'imported bundle'))) {
+          console.error(chalk.yellow('Aborted.'));
+          return;
+        }
+        const applyImportPolicy = (bundle: SecretsBundle): SecretsBundle => {
+          if (importPolicy) bundle.policy = importPolicy;
+          return bundle;
+        };
         // A single import can name only one source. --from-file / --from-ssh are
         // early-return paths, so guard them against each other and the --from /
         // --from-1password pair (which parseImportSource guards on its own).
@@ -2185,7 +2202,7 @@ Examples:
           }
           const env = importBundleFromFile(opts.fromFile, passphrase);
           const resolvedBundleName = bundleName ?? (await pickBundleName('import into'));
-          const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced, opts.force);
+          const bundle = applyImportPolicy(resolveImportBundle(resolvedBundleName, opts.backend, opts.synced, opts.force));
           const { added, skipped } = applyEnvToBundle(bundle, env, opts);
           emitSecretAudit({ event: 'secrets.import', bundle: bundle.name, operation: 'import --from-file', source: 'file', status: 'success', keyCount: added });
           console.log(chalk.green(`Imported ${added} key(s) from file${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
@@ -2200,7 +2217,7 @@ Examples:
           const resolvedBundleName = bundleName ?? (await pickBundleName('import into'));
           const target = await resolveHostSshTarget(opts.host);
           const env = await remoteResolveEnv(target, resolvedBundleName, { osLookupName: opts.host });
-          const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced, opts.force);
+          const bundle = applyImportPolicy(resolveImportBundle(resolvedBundleName, opts.backend, opts.synced, opts.force));
           const { added, skipped } = applyEnvToBundle(bundle, env, opts);
           emitSecretAudit({ event: 'secrets.import', bundle: bundle.name, operation: 'import --from-ssh', source: 'ssh', host: opts.host, status: 'success', keyCount: added });
           console.log(chalk.green(`Imported ${added} key(s) from ${opts.host}${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
@@ -2231,7 +2248,7 @@ Examples:
         // to downgrade keychain -> file) or creates it with the requested backend
         // so a single `import --backend file` works (what `export --host ...
         // --remote-backend file` drives on the remote).
-        const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced, opts.force);
+        const bundle = applyImportPolicy(resolveImportBundle(resolvedBundleName, opts.backend, opts.synced, opts.force));
 
         if (source.kind === '1password') {
           assertOpAvailable();

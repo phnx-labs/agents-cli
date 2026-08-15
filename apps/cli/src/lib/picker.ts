@@ -55,6 +55,13 @@ export interface PickerConfig<T> {
    */
   registerPreviewRepaint?: (repaint: () => void) => void;
   shortIdFor?: (item: T) => string;
+  /**
+   * Prefix each selectable row with its 1-based position in the current
+   * filtered list (`  1.`, ` 12.`), right-aligned so the labels stay columnar
+   * and a user scanning a long list can tell where they are. Separators are
+   * never numbered.
+   */
+  numbered?: boolean;
   pageSize?: number;
   initialSearch?: string;
   emptyMessage?: string;
@@ -249,11 +256,21 @@ export function itemPicker<T>(config: PickerConfig<T>): Promise<PickedItem<T> | 
 
     const results = useMemo(() => {
       const filtered = cfg.filter(searchTerm).slice(0, 50);
-      return filtered.map<Choice<T> | Separator>((item) =>
-        Separator.isSeparator(item)
-          ? item
-          : { value: item, label: cfg.labelFor(item, searchTerm) },
-      );
+      // Ordinals count only selectable rows, in filtered order, and are padded
+      // to the widest index so single- and double-digit rows stay aligned.
+      const selectableCount = filtered.filter((it) => !Separator.isSeparator(it)).length;
+      const ordinalWidth = String(Math.max(1, selectableCount)).length;
+      let ordinal = 0;
+      return filtered.map<Choice<T> | Separator>((item) => {
+        if (Separator.isSeparator(item)) return item;
+        const label = cfg.labelFor(item, searchTerm);
+        if (!cfg.numbered) return { value: item, label };
+        ordinal += 1;
+        return {
+          value: item,
+          label: `${chalk.gray(`${String(ordinal).padStart(ordinalWidth)}.`)} ${label}`,
+        };
+      });
     }, [searchTerm]);
 
     // A row is selectable unless it is a divider (Separator). Navigation and the

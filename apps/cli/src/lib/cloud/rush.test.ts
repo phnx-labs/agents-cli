@@ -2,24 +2,17 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { accountTokensFingerprint, buildDispatchBody, hasRushUploadConsent, RushCloudProvider } from './rush.js';
+import { buildDispatchBody, RushCloudProvider } from './rush.js';
 import { MAX_IMAGES_PER_DISPATCH, normalizeProviderStatus } from './types.js';
 import type { ImageAttachment, SkillRef } from './types.js';
 
-const ORIGINAL_UPLOAD_ENV = process.env.AGENTS_RUSH_UPLOAD_TOKENS;
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rush-consent-test-'));
-  delete process.env.AGENTS_RUSH_UPLOAD_TOKENS;
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rush-cloud-test-'));
 });
 
 afterEach(() => {
-  if (ORIGINAL_UPLOAD_ENV === undefined) {
-    delete process.env.AGENTS_RUSH_UPLOAD_TOKENS;
-  } else {
-    process.env.AGENTS_RUSH_UPLOAD_TOKENS = ORIGINAL_UPLOAD_ENV;
-  }
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -97,12 +90,14 @@ describe('buildDispatchBody', () => {
     ).toThrow(/at least one entry/);
   });
 
-  it('includes account_manifest when supplied', () => {
+  it('includes account_manifest (version + email only, no credential material) when supplied', () => {
+    // RUSH-2527 / SING-1b: the manifest carries no token hash — agents-cli never
+    // reads the native OAuth login to build it. Only version + account email ride.
     const manifest = {
       fp: 'aaaa',
       versions: [
-        { version: '2.1.110', email: 'a@b.com', cred_fp: 'h1' },
-        { version: '2.1.112', email: 'c@d.com', cred_fp: 'h2' },
+        { version: '2.1.110', email: 'a@b.com' },
+        { version: '2.1.112', email: 'c@d.com' },
       ],
     };
     const body = buildDispatchBody({
@@ -111,6 +106,8 @@ describe('buildDispatchBody', () => {
       accountManifest: manifest,
     });
     expect(body.account_manifest).toEqual(manifest);
+    // No per-version credential fingerprint / token anywhere in the ordinary body.
+    expect(JSON.stringify(body)).not.toContain('cred_fp');
     expect(body.account_tokens).toBeUndefined();
   });
 
@@ -123,25 +120,18 @@ describe('buildDispatchBody', () => {
     expect(body.account_manifest).toBeUndefined();
   });
 
-  it('passes through account_tokens verbatim when supplied (retry path)', () => {
-    const tokens = [
-      { version: '2.1.110', credentials_json: '{"accessToken":"abc"}' },
-    ];
+  it('has no account_tokens surface at all — a native OAuth token is never uploaded (SING-1b)', () => {
+    // The token-upload payload was removed: buildDispatchBody has no accountTokens
+    // input, so the dispatch body can never carry Claude OAuth credentials.
     const body = buildDispatchBody({
       prompt: 'x',
       resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
-      accountTokens: tokens,
-    });
-    expect(body.account_tokens).toEqual(tokens);
-  });
-
-  it('omits account_tokens when array is empty', () => {
-    const body = buildDispatchBody({
-      prompt: 'x',
-      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
-      accountTokens: [],
+      // @ts-expect-error accountTokens was removed from the dispatch surface (RUSH-2527)
+      accountTokens: [{ version: '2.1.110', credentials_json: '{"accessToken":"abc"}' }],
     });
     expect(body.account_tokens).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain('credentials_json');
+    expect(JSON.stringify(body)).not.toContain('accessToken');
   });
 
   it('includes strategy when balanced', () => {
@@ -266,31 +256,18 @@ describe('buildDispatchBody', () => {
     expect(body.account_manifest).toBeUndefined();
   });
 
-  it('treats Rush upload consent with a mismatched host as no consent', () => {
-    const fingerprint = accountTokensFingerprint([
-      { version: '2.1.110', credentials_json: '{"accessToken":"abc"}' },
-    ]);
-    const consentPath = path.join(tmpDir, 'rush-consent.json');
-    fs.writeFileSync(consentPath, JSON.stringify({
-      granted_at: '2026-05-16T00:00:00.000Z',
-      granted_by: 'flag',
-      host: 'other.example.com',
-      account_fingerprint: fingerprint,
-    }));
-
-    expect(hasRushUploadConsent(fingerprint, undefined, consentPath)).toBe(false);
-  });
-
-  it('treats old Rush upload consent files without host/account scope as no consent', () => {
-    const fingerprint = accountTokensFingerprint([
-      { version: '2.1.110', credentials_json: '{"accessToken":"abc"}' },
-    ]);
-    const consentPath = path.join(tmpDir, 'rush-consent.json');
-    fs.writeFileSync(consentPath, JSON.stringify({
-      granted_at: '2026-05-16T00:00:00.000Z',
-      granted_by: 'flag',
-    }));
-
-    expect(hasRushUploadConsent(fingerprint, undefined, consentPath)).toBe(false);
+  it('has no upload-consent / token-upload surface anymore (SING-1b regression)', async () => {
+    // The consent gate and the token-upload helpers were removed — a native OAuth
+    // login can never be sent to the cloud, with or without consent. Assert the
+    // module no longer exports any of them, so a future change can't re-introduce
+    // the upload path unnoticed.
+    const mod = (await import('./rush.js')) as Record<string, unknown>;
+    expect(mod.hasRushUploadConsent).toBeUndefined();
+    expect(mod.buildAccountTokensPayload).toBeUndefined();
+    expect(mod.accountTokensFingerprint).toBeUndefined();
+    expect(mod.RUSH_CONSENT_PATH).toBeUndefined();
+    // readClaudeCredentialsBlob still exists (the --lease path imports it) but the
+    // cloud dispatch never calls it: the module source has no call site outside its
+    // own definition.
   });
 });
