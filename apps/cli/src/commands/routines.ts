@@ -993,8 +993,8 @@ export function registerRoutinesCommands(program: Command): void {
         - Three distinct device flags: '--devices a,b' is the scheduler FIRING
           allowlist (which daemons may fire this routine); '--run-on <name|auto>'
           is BODY placement (where the fired job executes — 'auto' re-picks a
-          healthy device at each fire); the parent '--device'/'--host' manages
-          the routine DEFINITION on another machine.
+          healthy device at each fire); the parent '--device' manages the
+          routine DEFINITION on another machine.
         - Foreground 'agents routines run' re-dispatches to the next healthy
           same-agent account when a mid-run rate/usage limit is detected.
         - Detached/daemon fires use the pre-flight pick only (next tick re-selects).
