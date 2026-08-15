@@ -365,7 +365,7 @@ export interface RoutineReadinessResult {
 export function evaluateRoutineReadiness(
   context: ResolvedExecutionContext,
   probes: HarnessReadinessProbes = {},
-  opts: { agent?: string } = {},
+  opts: { agent?: string; version?: string } = {},
 ): RoutineReadinessResult {
   if (!context.ready) {
     return { context, ready: false, readiness: context.readiness };
@@ -379,10 +379,15 @@ export function evaluateRoutineReadiness(
   }
 
   if (probes.agentInstalled && !probes.agentInstalled()) {
+    // A pinned version names its exact miss — "no usable version" would send the
+    // operator hunting for a harness that IS installed, just not at the pin.
+    const pinned = opts.version && opts.agent ? `${opts.agent}@${opts.version}` : undefined;
     return withBlocker(context, {
       code: 'agent_unavailable',
-      message: `no usable version of ${opts.agent ?? 'the agent'} is installed on the target`,
-      repair: opts.agent ? `agents add ${opts.agent}@<version>` : undefined,
+      message: pinned
+        ? `pinned ${pinned} is not installed on the target`
+        : `no usable version of ${opts.agent ?? 'the agent'} is installed on the target`,
+      repair: pinned ? `agents add ${pinned}` : (opts.agent ? `agents add ${opts.agent}@<version>` : undefined),
     });
   }
 
