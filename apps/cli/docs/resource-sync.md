@@ -320,8 +320,8 @@ groups ending in `-deny` (e.g. `99-deny.yaml`) contribute to `deny` even
 though their YAML lists appear under `allow`
 (`permissions.ts:230-235`).
 
-Reading back — `agents permissions list <agent>` and `agents permissions export`
-— goes through `PERMISSION_TARGETS` (`lib/permissions-registry.ts`), one entry
+Reading back — `agents permissions list <agent>`, and the config-file import
+behind `agents permissions add <path>` — goes through `PERMISSION_TARGETS` (`lib/permissions-registry.ts`), one entry
 per allowlist-capable harness declaring its config path and how to project that
 file onto the canonical `PermissionSet`. A completeness test pins the key set to
 `capableAgents('allowlist')`, so a harness the write path handles can never be
@@ -360,10 +360,10 @@ were written, and each target names its own loss in a `lossyBecause` line:
 - Kiro 2.8.0+ maps canonical shell, filesystem, and web rules into v3
   capability rules under `.kiro/settings/permissions.yaml`. Existing user
   rules are preserved when managed rules are merged.
-- Goose maps canonical tool families into `.config/goose/permission.yaml`
-  `user.always_allow` / `user.never_allow` entries using the Goose Developer
-  extension tool names. Existing non-managed permission categories and
-  unrelated user tool entries are preserved.
+- Goose is **not** allowlist-capable. Its `permission.yaml` gates whole tools
+  (`developer__shell`, `developer__text_editor`), so several distinct canonical
+  rules collapse onto one entry and cannot be read back faithfully — the
+  capability is off in the registry rather than half-supported.
 - OpenClaw gates at tool granularity only, so only **blanket** (whole-tool)
   rules map into `~/.openclaw/openclaw.json` `tools.alsoAllow` (allow) /
   `tools.deny` (deny): `bash → exec`, `read → read`, `write`/`edit → write`,
