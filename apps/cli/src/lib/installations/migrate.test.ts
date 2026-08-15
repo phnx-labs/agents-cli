@@ -24,7 +24,7 @@ afterEach(() => {
   }
 });
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 function seedVersionHome(historyDir: string, agentId: string, ver: string): {
   pluginsDir: string;
