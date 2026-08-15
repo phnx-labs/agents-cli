@@ -168,6 +168,13 @@ revisions is a deliberate follow-up, not something publish does for you. Pass
 `--no-revision` to skip retention for one publish. Revisions never appear on
 the public gallery or in `agents artifacts share list` beyond a `revisionCount` on
 their canonical entry — they are history, not additional public pages.
+
+> **Known limitation.** The copy-then-overwrite isn't atomic (no conditional put) — two
+> genuinely concurrent publishes to the *same* slug (e.g. two teammates writing the same
+> ticket-derived slug at once) can race on the canonical key, and the losing writer's
+> content is never retained anywhere (not canonical, not a revision). No worse than
+> plain last-write-wins would have been pre-revisions, but it silently breaks the
+> "default keep-all" guarantee above for that narrow case. Tracked as RUSH-2701.
 `agents artifacts share revisions <target>` accepts the same three target forms as
 `agents unshare` (full URL, `<user>/<slug>`, or a bare slug resolved against
 your own namespace) and reads the Worker's `?revisions=json` route:
@@ -258,8 +265,10 @@ first:
 agents artifacts share list                          # human table for your own namespace
 agents artifacts share list --agent claude            # only shares published by this harness
 agents artifacts share list --label-contains "fleet"  # only shares whose title contains this text
-agents artifacts share list --json                    # raw listing for scripts
-agents artifacts share list --json | jq -r '.objects[].url'   # every still-public URL
+
+# --json is affected by the Known issue above (silently ignored) — for scripts,
+# hit the Worker's JSON route directly instead:
+curl -s "https://share.agents-cli.sh/$(gh api user --jq .login)?format=json" | jq -r '.objects[].url'
 ```
 
 The listing shows the **active** pages only — expired links and the sibling `<slug>.png`
@@ -303,15 +312,21 @@ agents unshare fleet-status-9f3c old-report --if-exists                # several
 By default it also deletes the sibling `<slug>.png` OG cover — a republish over a slug
 replaces the page but leaves the *old* cover screenshot public, so leaving it up looks
 like a takedown from the page side while the cover keeps serving. Pass `--keep-cover`
-to leave it. An already-missing target is an error (say so plainly) unless `--if-exists`
-is passed, matching SQL's `DROP ... IF EXISTS` — a no-op success instead of a crash or a
-silent no-op either way.
+to leave it. It also deletes any retained revisions of the target (see
+[Revisions](#revisions)) — a share republished at least once leaves its prior version(s)
+live at their own URL, and leaving those up would defeat the point of taking the page
+down; pass `--keep-revisions` to leave them (they still expire on their own via the
+bucket's lifecycle rule either way). An already-missing target is an error (say so
+plainly) unless `--if-exists` is passed, matching SQL's `DROP ... IF EXISTS` — a no-op
+success instead of a crash or a silent no-op either way.
 
 The Worker's `DELETE` is idempotent (R2 delete succeeds even on a key that was never
 there), so `{"ok":true}` from the Worker is never treated as proof a page came down: the
 command always issues a follow-up check and only reports success once that resolves 404
-for both the page and (unless `--keep-cover`) the cover. `--json` emits an array of
-per-target results for scripting.
+for the page, the cover (unless `--keep-cover`), and every retained revision (unless
+`--keep-revisions`). Fetching the revisions list is best-effort — a network blip or an
+endpoint that predates revisions never blocks the primary page delete, it just means
+nothing was found to purge. `--json` emits an array of per-target results for scripting.
 
 ## Security
 

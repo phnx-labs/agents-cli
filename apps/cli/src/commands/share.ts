@@ -382,11 +382,15 @@ export function formatShareDeleteResult(result: DeleteShareResult, json = false)
         : chalk.dim(`  cover (none) ${result.cover.url}`),
     );
   }
+  if (result.revisions?.length) {
+    lines.push(chalk.dim(`  ${result.revisions.length} retained ${result.revisions.length === 1 ? 'revision' : 'revisions'} deleted`));
+  }
   return lines.join('\n');
 }
 
 interface ShareDeleteCliOpts {
   keepCover?: boolean;
+  keepRevisions?: boolean;
   ifExists?: boolean;
   githubUser?: string;
   json?: boolean;
@@ -410,6 +414,7 @@ export async function runShareDelete(
     try {
       const result = await deleteFn(target, {
         keepCover: opts.keepCover === true,
+        keepRevisions: opts.keepRevisions === true,
         ifExists: opts.ifExists === true,
         githubUser: opts.githubUser,
       });
@@ -433,13 +438,14 @@ export async function runShareDelete(
 function registerShareDeleteOptions(cmd: Command): Command {
   return cmd
     .option('--keep-cover', 'leave the sibling <slug>.png OG cover in place (default: delete it too)')
+    .option('--keep-revisions', 'leave retained revisions (<slug>/rev-*) in place (default: delete them too)')
     .option('--if-exists', 'treat an already-missing target as a no-op success instead of an error')
     .option('--github-user <user>', 'GitHub username for resolving a bare-slug target (default: resolved from gh/git config)')
     .option('--json', 'emit machine-readable results');
 }
 
 const SHARE_DELETE_EXAMPLES = `
-      # Delete by full URL — also takes down the sibling OG cover
+      # Delete by full URL — also takes down the sibling OG cover and any retained revisions
       agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2
 
       # Delete by <user>/<slug>, or a bare slug in your own namespace
@@ -452,6 +458,9 @@ const SHARE_DELETE_EXAMPLES = `
       # Keep the cover image up (rare — you usually want both gone)
       agents unshare my-plan-a1b2 --keep-cover
 
+      # Keep retained revisions up too (rare — they're world-readable by URL like the page itself)
+      agents unshare my-plan-a1b2 --keep-revisions
+
       # Don't error if it's already gone
       agents unshare my-plan-a1b2 --if-exists
 `;
@@ -460,6 +469,12 @@ const SHARE_DELETE_NOTES = `
   A follow-up GET is required to resolve 404 before this reports success — the
   Worker's DELETE is idempotent and returns {"ok":true} even for a key that was
   never there, so that response alone is never proof of a takedown.
+
+  Also deletes any retained revisions of the target (RUSH-2683) — a share that was
+  republished at least once leaves its prior version(s) live at their own URL until
+  they're purged too, so leaving them up would defeat the point of taking the page
+  down. Pass --keep-revisions to leave them (they still expire via the bucket's
+  lifecycle rule on their own schedule either way).
 
   agents artifacts share delete === agents unshare (same command, different name).
 `;
