@@ -597,7 +597,7 @@ describe('manualUninstallCommand (RUSH-2705)', () => {
   it('pins the peer npm prefix for a POSIX global layout (the nvm duplicate case)', () => {
     const root = '/home/u/.nvm/versions/node/v24.15.0/lib/node_modules/@phnx-labs/agents-cli';
     expect(manualUninstallCommand(root)).toBe(
-      'npm uninstall -g --prefix /home/u/.nvm/versions/node/v24.15.0 @phnx-labs/agents-cli',
+      "npm uninstall -g --prefix '/home/u/.nvm/versions/node/v24.15.0' @phnx-labs/agents-cli",
     );
   });
 
@@ -973,7 +973,7 @@ describe('classifyRemovableAgentsCliInstalls / purge (RUSH-2415)', () => {
     expect(unresolved.version).toBe('1.22.37');
     expect(fs.realpathSync(unresolved.packageRoot)).toBe(fs.realpathSync(dupRoot));
     expect(unresolved.manualRemoveCommand).toBe(
-      `npm uninstall -g --prefix ${fs.realpathSync(nvmPrefix)} @phnx-labs/agents-cli`,
+      `npm uninstall -g --prefix '${fs.realpathSync(nvmPrefix)}' @phnx-labs/agents-cli`,
     );
   });
 });

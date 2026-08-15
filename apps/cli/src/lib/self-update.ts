@@ -580,7 +580,7 @@ export function manualUninstallCommand(packageRoot: string): string {
     return `bun remove -g ${NPM_PACKAGE_NAME}`;
   }
   try {
-    return `npm uninstall -g --prefix ${deriveGlobalPrefix(resolved)} ${NPM_PACKAGE_NAME}`;
+    return `npm uninstall -g --prefix '${deriveGlobalPrefix(resolved)}' ${NPM_PACKAGE_NAME}`;
   } catch {
     // Not inside a node_modules tree — no npm prefix owns it; deleting the
     // directory is the only removal there is.
