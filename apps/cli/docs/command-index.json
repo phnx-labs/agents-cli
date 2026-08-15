@@ -687,7 +687,7 @@
       "name": "apply",
       "path": "apply",
       "aliases": [],
-      "description": "Reconcile the fleet to a declared profile: install agents, sync config, propagate login.",
+      "description": "Reconcile the fleet to a declared profile: install agents and sync config.",
       "args": [],
       "options": [
         {
@@ -757,7 +757,7 @@
         },
         {
           "flags": "--no-login",
-          "description": "Do not propagate logins",
+          "description": "Deprecated no-op: native logins are always device-local",
           "long": "--no-login",
           "required": false,
           "optional": false,
@@ -793,7 +793,7 @@
           "negate": false
         }
       ],
-      "examples": "# Preview what would change across the fleet\n      agents apply --plan -f agents.yaml\n\n      # Bring every device to the profile (installs, syncs, propagates login)\n      ag apply -f agents.yaml\n\n      # One device only\n      agents apply --device yosemite-s1 -y\n\n      # Replicate every claude version on this machine onto a fresh box\n      agents apply --agent claude@all --device yosemite-s0 -y\n\n      # Install a specific pinned version on one device\n      agents apply --agent claude@2.1.207 --device yosemite-s0",
+      "examples": "# Preview what would change across the fleet\n      agents apply --plan -f agents.yaml\n\n      # Bring every device to the profile (installs + config sync; native login stays local)\n      ag apply -f agents.yaml\n\n      # One device only\n      agents apply --device yosemite-s1 -y\n\n      # Replicate every claude version on this machine onto a fresh box\n      agents apply --agent claude@all --device yosemite-s0 -y\n\n      # Install a specific pinned version on one device\n      agents apply --agent claude@2.1.207 --device yosemite-s0",
       "subcommands": []
     },
     {
@@ -7501,7 +7501,7 @@
           "name": "apply",
           "path": "devices apply",
           "aliases": [],
-          "description": "Reconcile the fleet to a declared profile: install agents, sync config, propagate login.",
+          "description": "Reconcile the fleet to a declared profile: install agents and sync config.",
           "args": [],
           "options": [
             {
@@ -7571,7 +7571,7 @@
             },
             {
               "flags": "--no-login",
-              "description": "Do not propagate logins",
+              "description": "Deprecated no-op: native logins are always device-local",
               "long": "--no-login",
               "required": false,
               "optional": false,
@@ -20162,7 +20162,7 @@
         },
         {
           "flags": "--copy-creds",
-          "description": "With --host, copy the picked runtime credentials (and Claude OAuth token) to the host, then shred them after the run. Opt-in per run.",
+          "description": "Deprecated refusal: native OAuth/session credentials cannot be copied between devices. Use `agents accounts sync <account> --device <device>` for a portable provider credential.",
           "long": "--copy-creds",
           "required": false,
           "optional": false,
@@ -21109,6 +21109,24 @@
               "flags": "--force",
               "description": "Overwrite an existing key in the bundle",
               "long": "--force",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--policy <policy>",
+              "description": "Set the bundle prompt policy as part of this import (always, hold, or never)",
+              "long": "--policy",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--i-understand",
+              "description": "Confirm an import with policy never (no biometry ACL)",
+              "long": "--i-understand",
               "required": false,
               "optional": false,
               "variadic": false,

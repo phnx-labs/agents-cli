@@ -2292,14 +2292,11 @@ schema (`--json` passes through each agent's native stream format).
   Workflow-frontmatter auto-secrets (`autoSecrets`, classified `'forward'`)
   instead resolve from the REMOTE host's own keychain, never the
   launcher's.
-- **EXEC-34 (MUST).** `--copy-creds` MUST only target a host whose SSH host
-  key is pinned in the managed known_hosts store
-  (`decideCopyCredsGate`/`isHostPinned`, `commands/exec.ts:278-299`), MUST
-  force strict host-key checking and disable SSH connection multiplexing
-  for that call (a shared control socket could bypass the strict check),
-  and MUST shred the copied credentials on the remote after the run
-  regardless of exit code (`wrapHostCommandWithCredentials` setup/teardown
-  wrapper, `lib/hosts/credentials.ts:47-59`).
+- **EXEC-34 (MUST NOT).** `--copy-creds` and lease placement MUST NOT resolve,
+  serialize, or transfer native OAuth/session credentials. `--copy-creds` is a
+  deprecated fail-loud flag. Portable provider credentials move only through
+  explicit `agents accounts sync <account> --device <device>`, which requires an already
+  pinned managed SSH host key and disables SSH multiplexing.
 - **EXEC-35 (MUST).** A `~`/`$HOME`-anchored `--cwd` MUST be re-rooted onto
   the REMOTE user's home via an unquoted `"$HOME"` shell expansion
   evaluated on the remote side, never expanded locally (`/home/<me>` vs

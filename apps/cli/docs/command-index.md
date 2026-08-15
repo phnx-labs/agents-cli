@@ -49,10 +49,10 @@ agents alias list                       Show installed aliases
 agents alias remove <name>              Delete an alias shim
 ```
 
-## apply — Reconcile the fleet to a declared profile: install agents, sync config, propagate login.
+## apply — Reconcile the fleet to a declared profile: install agents and sync config.
 
 ```
-agents apply  Reconcile the fleet to a declared profile: install agents, sync config, propagate login.
+agents apply  Reconcile the fleet to a declared profile: install agents and sync config.
 ```
 
 ## artifacts — Publish agent-made artifacts (plans, reports, visuals) to your own Cloudflare R2 and get a shareable link (~$0).
@@ -264,7 +264,7 @@ _aliases: fleet_
 agents devices                                 Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale. Alias: fleet.
 agents devices accounts                        Per device, one row per account: which harnesses share it, signed-in, quota, and ready. The identity lens on `agents devices harnesses`.
 agents devices add <name> <target>             Add a device manually (target is user@host or host).
-agents devices apply                           Reconcile the fleet to a declared profile: install agents, sync config, propagate login.
+agents devices apply                           Reconcile the fleet to a declared profile: install agents and sync config.
 agents devices capture                         Snapshot the live environment (roster names, agents, browser, secret-bundle names, routines) into agents.yaml fleet:.
 agents devices config <name> [key] [value...]  Get, set, or unset a device’s settings (scheduler, agent cap, ssh overrides, auto-launch, notes). Bare opens an interactive settings menu (TTY) or prints the resolved config (piped). Stored centrally in ~/.agents/agents.yaml under fleet.devices.<name>.config — synced, so any box can configure any device.
 agents devices harnesses                       Per device, one row per installed agent@version: account, signed-in, quota, and a single ready verdict. SSH-probes each online box.

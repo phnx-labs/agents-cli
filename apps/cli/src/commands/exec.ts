@@ -12,7 +12,6 @@ import type { ExecOptions, ExecMode, ExecEffort, FallbackEntry } from '../lib/ex
 import { isTierToken } from '../lib/model-tiers.js';
 import type { AgentId } from '../lib/types.js';
 import { RUN_AUTO_KEYWORD } from '../lib/types.js';
-import type { DetectedRuntime } from '../lib/crabbox/runtimes.js';
 import type { ResolvedRunDefaults } from '../lib/run-defaults.js';
 import { setHelpSections } from '../lib/help.js';
 import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
@@ -25,8 +24,6 @@ import { recordDispatchedRun } from '../lib/audit/log.js';
 import { maybeShowStarNudge } from '../lib/star-nudge.js';
 import { warnUnpushedWork, shouldWarnUnpushed } from '../lib/warn-unpushed.js';
 import { warnOrphanedOpenPr } from '../lib/pr-land-detach.js';
-import { isHostPinned, pinHostKey, managedKnownHostsPath } from '../lib/devices/known-hosts.js';
-import { sshResolve, type SshGResult } from '../lib/hosts/ssh-config.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -237,15 +234,6 @@ function formatRotationBanner(result: RotateResult, verb: string = 'balanced'): 
   return `[agents] ${verb} picked ${label} (${ratio}${caveat})`;
 }
 
-/** The host descriptor fields the `--copy-creds` security gate reads. */
-export interface CopyCredsGateHost {
-  name: string;
-  /** Concrete SSH target for inline/provider hosts; unset for ssh-config aliases. */
-  address?: string;
-  /** `devices` = registered Tailscale fleet host; `local` = ssh-config/inline. */
-  provider?: string;
-}
-
 /**
  * Whether `cwd` is inside a git work tree.
  *
@@ -320,71 +308,6 @@ export function writeAlwaysFreshRepos(repos: string[]): void {
   } catch {
     /* best-effort — losing the preference just means the picker shows next time */
   }
-}
-
-/** Outcome of the `--copy-creds` security gate (RUSH-1767). */
-export interface CopyCredsGateDecision {
-  /** Ship credentials? True only when the host key is pinned in the managed store. */
-  allowed: boolean;
-  /** The address whose key is checked/pinned — an ssh-config alias resolved to its real HostName. */
-  pinTarget: string;
-  /** True when the non-device self-pin path pinned the target during this call. */
-  selfPinned: boolean;
-}
-
-/** Injectable network seams so the gate decision is testable without ssh/keyscan. */
-export interface CopyCredsGateDeps {
-  /** Managed known_hosts store file (defaults to the real cache path). */
-  file?: string;
-  /** Resolve an ssh-config alias to its effective HostName/Port (defaults to real `ssh -G`). */
-  resolve?: (name: string) => SshGResult | undefined;
-  /** Self-pin `target` via ssh-keyscan; returns whether it's pinned afterward (defaults to real `pinHostKey`). */
-  selfPin?: (target: string, port: number | undefined, file: string) => boolean;
-}
-
-/**
- * Decide whether `--copy-creds` may ship credentials (and the Claude OAuth
- * token) to `host` (RUSH-1767). Credentials ship only to a host whose SSH host
- * key is pinned in the managed known_hosts store, so the offload never rides an
- * accept-new (TOFU) connection a machine-in-the-middle could intercept.
- *
- * Resolution:
- *  - The checked target is the host's concrete `address`, else its ssh-config
- *    HostName (`ssh -G`), else its name — so an alias is pinned/verified against
- *    the SAME real host the strict dispatch later connects to.
- *  - An unpinned NON-device (a bare `~/.ssh/config` `Host` alias or literal,
- *    which `agents ssh <name>` can't reach — "Unknown device") is self-pinned in
- *    place via ssh-keyscan. A registered device is left unpinned here — it earns
- *    its pin through the normal `agents ssh <name>` accept-new connect, so the
- *    caller steers there instead.
- *
- * The network seams (`resolve`, `selfPin`) default to the real ssh -G /
- * ssh-keyscan implementations and are injectable so the ship/refuse decision is
- * unit-testable against real known_hosts fixtures with no network.
- */
-export function decideCopyCredsGate(host: CopyCredsGateHost, deps: CopyCredsGateDeps = {}): CopyCredsGateDecision {
-  const file = deps.file ?? managedKnownHostsPath();
-  const resolve = deps.resolve ?? sshResolve;
-  const selfPin =
-    deps.selfPin ?? ((target, port, f) => pinHostKey(target, { file: f, ...(port ? { port } : {}) }).pinned);
-
-  // For an ssh-config host `host.address` is unset; ssh -G gives the real
-  // HostName (and Port) the strict dispatch will verify against.
-  const cfg = host.address ? undefined : resolve(host.name);
-  const pinTarget = host.address ?? cfg?.hostname ?? host.name;
-
-  // Not pinned yet? A registered device earns its pin through the normal
-  // accept-new connect (`agents ssh <name>` / the fleet sweep), so leave it and
-  // let the caller steer there. A bare ssh-config alias / literal is NOT a
-  // registered device — that flow can never pin it — so pin it right here.
-  let selfPinned = false;
-  if (!isHostPinned(pinTarget, file) && host.provider !== 'devices') {
-    const cfgPort = cfg?.port;
-    const port = cfgPort && cfgPort !== '22' ? Number(cfgPort) : undefined;
-    selfPinned = selfPin(pinTarget, port, file);
-  }
-
-  return { allowed: isHostPinned(pinTarget, file), pinTarget, selfPinned };
 }
 
 /**
@@ -851,7 +774,7 @@ export function registerRunCommand(program: Command): void {
     .option('--any', 'With --host <cap> (a capability tag), pick any matching host instead of erroring when several match.')
     .option(
       '--copy-creds',
-      'With --host, copy the picked runtime credentials (and Claude OAuth token) to the host, then shred them after the run. Opt-in per run.',
+      'Deprecated refusal: native OAuth/session credentials cannot be copied between devices. Use `agents accounts sync <account> --device <device>` for a portable provider credential.',
     )
     .option(
       '--lease [backend]',
@@ -1478,7 +1401,7 @@ export function registerRunCommand(program: Command): void {
           }
         }
 
-        const { detectSignedInRuntimes, resolveClaudeCredentialsBlob, inferLeaseRuntime, profileNeedsBaseRuntimeCredentials } = await import('../lib/crabbox/runtimes.js');
+        const { assertNoNativeOAuthTransfer, detectSignedInRuntimes, inferLeaseRuntime, profileNeedsBaseRuntimeCredentials } = await import('../lib/crabbox/runtimes.js');
         const { leaseAndRun, leaseWorkspaceId } = await import('../lib/crabbox/lease.js');
         const { boxAddress } = await import('./lease.js');
         const { getConfiguredRunStrategy, resolveRunVersion } = await import('../lib/accounting/rotate.js');
@@ -1528,40 +1451,18 @@ export function registerRunCommand(program: Command): void {
           console.error(chalk.yellow(`Profile '${agentName}' needs ${runtime} credentials, but ${runtime} is not signed in locally. Sign in locally, then retry.`));
           process.exit(1);
         }
-
-        // Copy the account the run's OWN strategy would pick (default `balanced`:
-        // a healthy, non-rate-limited account weighted by remaining headroom) —
-        // never the raw default signed-in one, which could be throttled or out of
-        // credits and would boot the box straight into a wall.
-        //
-        // Only claude's token is account-switched: resolveClaudeCredentialsBlob
-        // honors preferEmail across version-homes. The other runtimes'
-        // buildCredentialScript copies the single currently-active credential file
-        // with no switching, so run the balanced picker only for claude — otherwise
-        // the notice below would name a balanced-picked account that is NOT the one
-        // actually shipped. Best-effort: fall back to the default account on error.
-        let leaseEmail = detected.find((d) => d.id === runtime)?.email ?? null;
-        if (credentialRuntimes.includes('claude')) {
-          try {
-            const strategy = getConfiguredRunStrategy(runtime, leaseCwd);
-            const { rotation } = await resolveRunVersion(runtime, strategy, leaseCwd);
-            if (rotation?.picked.email) leaseEmail = rotation.picked.email;
-          } catch {
-            /* strategy resolution is best-effort; keep the default signed-in account */
-          }
-        }
+        // Refuse before account selection, OAuth reads, box lookup, or lease
+        // provisioning. A provider-backed profile has no credentialRuntimes and
+        // proceeds with its portable provider environment instead.
+        assertNoNativeOAuthTransfer(credentialRuntimes, detected);
 
         // Headless-by-contract: don't prompt, but print exactly what ships and
         // where — copying an auth token to a cloud box is a credential transfer.
         // The box is destroyed after the run, so the credential's lifetime is
         // bounded by the run.
-        const whatShips = credentialRuntimes.includes('claude')
-          ? `${dispatchProfile ? `profile '${dispatchProfile.name}', ` : ''}${runtime} credentials + Claude OAuth token`
-          : credentialRuntimes.length > 0
-            ? `${dispatchProfile ? `profile '${dispatchProfile.name}', ` : ''}${runtime} credentials`
-            : dispatchProfile
-              ? `profile '${dispatchProfile.name}'`
-              : `${runtime} credentials`;
+        const whatShips = dispatchProfile
+          ? `profile '${dispatchProfile.name}'`
+          : `${runtime} runtime setup`;
         const boxLifecycle = reuseSlug
           ? `Reusing crabbox box ${reuseSlug}`
           : options.fresh
@@ -1576,21 +1477,11 @@ export function registerRunCommand(program: Command): void {
               : 'the shared-pool box is kept after the run';
         console.error(
           chalk.gray(
-            `${boxLifecycle} · shipping ${whatShips}${credentialRuntimes.length > 0 && leaseEmail ? ` (${leaseEmail})` : ''}; ${boxAfterRun}.`,
+            `${boxLifecycle} · shipping ${whatShips}; ${boxAfterRun}.`,
           ),
         );
 
-        // Read the Claude OAuth token from the local Keychain (silent) so it can be
-        // written to ~/.claude/.credentials.json on the box — otherwise Claude boots
-        // "Not logged in". `preferEmail` targets the strategy-picked account so the
-        // token matches the account this run resolved to.
-        let claudeCredentialsJson: string | null = null;
-        if (credentialRuntimes.includes('claude')) {
-          claudeCredentialsJson = await resolveClaudeCredentialsBlob({ preferEmail: leaseEmail });
-          if (!claudeCredentialsJson) {
-            console.error(chalk.yellow('Warning: could not read the local Claude OAuth token — the box may come up "Not logged in".'));
-          }
-        }
+        const claudeCredentialsJson: null = null;
 
         // Progress UI (F2, RUSH-1921). A self-throttled spinner (NOT ora — see
         // progress.ts) covers provisioning; the box-side bootstrap then streams a
@@ -1745,6 +1636,14 @@ export function registerRunCommand(program: Command): void {
           for (const msg of hostRejects) console.error(chalk.red(msg));
           process.exit(1);
         }
+        if (options.copyCreds) {
+          console.error(chalk.red(
+            'Refusing --copy-creds: native OAuth/session credentials are device-local and cannot be copied. ' +
+            'Create a portable provider account and run `agents accounts sync <account> --device <device>` instead.',
+          ));
+          process.exit(1);
+          return;
+        }
         // Shared resolution (name → capability tag → error). A password-auth
         // device throws DeviceOffloadUnsupportedError inside the helper and
         // propagates untouched — it's printed cleanly by the top-level catch in
@@ -1803,92 +1702,7 @@ export function registerRunCommand(program: Command): void {
           // concrete id.
           const resumeId = typeof options.resume === 'string' ? options.resume : undefined;
 
-          // --copy-creds: provision runtime credentials (and the Claude OAuth token)
-          // on the remote host before the run, then shred them after. Unlike
-          // --lease, a host is persistent, so this is strictly opt-in per run.
-          let hostCopyCreds: { runtimes: AgentId[]; detected: DetectedRuntime[]; claudeCredentialsJson?: string | null } | undefined;
-          if (options.copyCreds) {
-            // Refuse to copy credentials (and the Claude OAuth token) to a host
-            // whose SSH host key isn't pinned in the managed known_hosts store:
-            // the offload transport would otherwise ride an accept-new (TOFU)
-            // connection, so a machine-in-the-middle on an unverified first
-            // connect could capture the tokens. The dispatch itself then verifies
-            // strictly against that pin (see lib/hosts/dispatch.ts) (RUSH-1767).
-            // The ship/refuse decision — pinTarget resolution, the non-device
-            // self-pin, and the final pinned check — lives in decideCopyCredsGate
-            // (unit-tested against real known_hosts fixtures).
-            const gate = decideCopyCredsGate(host);
-            if (gate.selfPinned) {
-              console.error(chalk.gray(`Pinned "${host.name}" (${gate.pinTarget}) into the managed known_hosts store.`));
-            }
-
-            if (!gate.allowed) {
-              console.error(chalk.red(
-                `Refusing --copy-creds to "${host.name}": its SSH host key isn't pinned, so the ` +
-                `credentials could be exposed to a machine-in-the-middle on an unverified first connect.`,
-              ));
-              console.error(chalk.gray(
-                host.provider === 'devices'
-                  ? `Pin the key first by connecting once so agents records and verifies it:  agents ssh ${host.name}\n` +
-                    `Then re-run with --copy-creds.`
-                  : `Couldn't reach "${gate.pinTarget}" to pin its key (ssh-keyscan returned nothing). ` +
-                    `Make sure the host is reachable over SSH, then re-run with --copy-creds.`,
-              ));
-              process.exit(1);
-            }
-
-            // --copy-creds ships live credentials to a host, so it deliberately
-            // requires an interactive terminal to pick which signed-in runtimes to
-            // send and to confirm the transfer. Fail clean in a non-TTY/headless
-            // shell instead of hanging on the picker/confirm below — auto-shipping
-            // every signed-in token without consent would defeat the gate's purpose.
-            if (!isInteractiveTerminal()) {
-              // No non-interactive form: --copy-creds must pick which signed-in
-              // runtimes to ship and confirm the transfer, so pass no alternatives
-              // (an empty list prints just the "needs an interactive terminal" line).
-              requireInteractiveSelection(
-                '--copy-creds (it selects which credentials to ship and confirms the transfer)',
-                [],
-              );
-            }
-
-            const { detectSignedInRuntimes, pickRuntimes, resolveClaudeCredentialsBlob } = await import('../lib/crabbox/runtimes.js');
-            const { confirm } = await import('@inquirer/prompts');
-
-            const detected = await detectSignedInRuntimes();
-            const runtimes = await pickRuntimes(detected);
-            if (runtimes.length === 0) {
-              console.error(chalk.yellow('No runtimes selected. Sign into one locally then retry, or omit --copy-creds.'));
-              process.exit(1);
-            }
-
-            const names = runtimes
-              .map((id) => {
-                const d = detected.find((x) => x.id === id);
-                return `${d?.label ?? id}${d?.email ? ` (${d.email})` : ''}`;
-              })
-              .join(', ');
-            const whatShips = runtimes.includes('claude') ? 'credentials + Claude OAuth token' : 'credentials';
-            const ok = await confirm({
-              message: `Copy ${whatShips} for ${names} to host "${host.name}", run there, then shred them after?`,
-              default: false,
-            });
-            if (!ok) {
-              console.error(chalk.yellow('Aborted — no credentials pushed, no run dispatched.'));
-              process.exit(1);
-            }
-
-            let claudeCredentialsJson: string | null = null;
-            if (runtimes.includes('claude')) {
-              const claudeEmail = detected.find((d) => d.id === 'claude')?.email ?? null;
-              claudeCredentialsJson = await resolveClaudeCredentialsBlob({ preferEmail: claudeEmail });
-              if (!claudeCredentialsJson) {
-                console.error(chalk.yellow('Warning: could not read the local Claude OAuth token — the host may boot Claude "Not logged in".'));
-              }
-            }
-
-            hostCopyCreds = { runtimes, detected, claudeCredentialsJson };
-          }
+          let hostCopyCreds: undefined;
 
           // Decide whether this host run is interactive. No prompt always means
           // interactive (matching local resolveInteractive); --interactive forces

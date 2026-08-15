@@ -43,6 +43,39 @@ export const LEASE_RUNTIMES: RuntimeCred[] = [
   { id: 'grok', label: 'Grok CLI', localCandidates: ['.grok/auth.json'], remote: '.grok/auth.json' },
 ];
 
+/**
+ * Every runtime whose login this module can serialize (`LEASE_RUNTIMES`) is a
+ * native, rotating OAuth / session credential (Claude OAuth token, codex/grok
+ * `auth.json`, gemini `google_accounts.json`). The fleet-auth contract forbids
+ * copying any of them between devices — including to an ephemeral leased box —
+ * because a shared refresh token rotates server-side on the next refresh and
+ * invalidates every other copy (`docs/specifications.md` SING-1b,
+ * `docs/credential-management.md` invariant 2). The set is derived from
+ * `LEASE_RUNTIMES` so a newly-added runtime can never be silently exempted. This
+ * is the single canonical predicate; `--copy-creds` (`hosts/credentials.ts`) and
+ * `--lease` (this module's `buildCredentialScript`) both refuse against it.
+ */
+const NATIVE_OAUTH_RUNTIMES = new Set<AgentId>(LEASE_RUNTIMES.map((c) => c.id));
+
+/** True when `id` is a native OAuth / session login that MUST NOT be copied between devices (SING-1b). */
+export function isNativeOAuthRuntime(id: AgentId): boolean {
+  return NATIVE_OAUTH_RUNTIMES.has(id);
+}
+
+/** The fail-loud message naming the forbidden runtimes and the portable path to use instead. */
+export function nativeOAuthTransferRefusal(nativeRuntimes: AgentId[]): string {
+  return (
+    `Refusing to copy native OAuth / session credentials to another device: ${nativeRuntimes.join(', ')}.\n` +
+    `A rotating harness login copied across machines is invalidated on its next server-side token ` +
+    `refresh — it logs the rest of the fleet out — so agents-cli never stores or transfers a harness's ` +
+    `interactive login (docs/specifications.md SING-1b).\n` +
+    `Use a portable provider account instead — a long-lived, non-rotating API key / setup-token that is ` +
+    `safe to reuse on many devices:\n` +
+    `    agents accounts add <name> --provider <provider> --auth <api-key|setup-token>\n` +
+    `    agents accounts sync <name> --device <host>`
+  );
+}
+
 export interface DetectedRuntime {
   id: AgentId;
   label: string;
@@ -268,38 +301,63 @@ export async function resolveClaudeCredentialsBlob(opts?: {
 }
 
 /**
- * Build a bash snippet that writes each picked runtime's token file to the box's
- * home-level config path (0600), from the token contents read locally. Returns
- * `''` when no runtimes were selected. The snippet is meant to be embedded in
- * the `--script-stdin` body (never argv).
+ * The credential-provisioning snippet for a `--lease` box.
  *
- * `extras.claudeCredentialsJson` (the raw wrapped payload from
- * `resolveClaudeCredentialsBlob`) is written to `~/.claude/.credentials.json` in
- * ADDITION to claude's `.claude.json` config — without it the box is "Not logged in".
+ * Every runtime this could serialize is a native OAuth / session login
+ * (`LEASE_RUNTIMES`), and SING-1b forbids copying one to another device —
+ * including an ephemeral leased box, whose refresh of a shared rotating token
+ * invalidates every other holder. So this no longer writes a login: it REFUSES
+ * (throws, steering to the portable `agents accounts` path) whenever a picked
+ * runtime actually has a native credential to copy — signed in locally
+ * (`credPath`), or a Claude OAuth blob supplied. A picked runtime with nothing to
+ * copy is simply skipped, so `buildCredentialScript` returns `''` (a no-op box
+ * bootstrap) rather than throwing on a not-signed-in runtime.
  */
+/**
+ * The native OAuth runtimes among `picked` that actually have a credential to copy
+ * — signed in locally (`credPath`) or a Claude OAuth blob supplied — i.e. the ones
+ * a transfer would leak. A picked runtime with nothing to copy is not refused.
+ */
+export function refusedNativeOAuthRuntimes(
+  picked: AgentId[],
+  detected: DetectedRuntime[],
+  extras?: { claudeCredentialsJson?: string | null },
+): AgentId[] {
+  const byId = new Map(detected.map((d) => [d.id, d]));
+  return picked.filter((id) => {
+    if (!isNativeOAuthRuntime(id)) return false;
+    const hasLocalFile = !!byId.get(id)?.credPath && LEASE_RUNTIMES.some((c) => c.id === id);
+    const hasClaudeToken = id === 'claude' && !!extras?.claudeCredentialsJson;
+    return hasLocalFile || hasClaudeToken;
+  });
+}
+
+/**
+ * Throw the SING-1b refusal if any picked runtime would transfer a native OAuth
+ * login. Callers should invoke this at a FAIL-FAST point — before any expensive or
+ * costly side effect (e.g. before `crabboxWarmup` leases a paid box) — so a refused
+ * `--lease` never leaks infra, mirroring how `--copy-creds` refuses before it opens
+ * an SSH connection.
+ */
+export function assertNoNativeOAuthTransfer(
+  picked: AgentId[],
+  detected: DetectedRuntime[],
+  extras?: { claudeCredentialsJson?: string | null },
+): void {
+  const refused = refusedNativeOAuthRuntimes(picked, detected, extras);
+  if (refused.length > 0) {
+    throw new Error(nativeOAuthTransferRefusal(refused));
+  }
+}
+
 export function buildCredentialScript(
   picked: AgentId[],
   detected: DetectedRuntime[],
   extras?: { claudeCredentialsJson?: string | null },
 ): string {
-  const byId = new Map(detected.map((d) => [d.id, d]));
-  const parts: string[] = [];
-  for (const id of picked) {
-    const d = byId.get(id);
-    const cred = LEASE_RUNTIMES.find((c) => c.id === id);
-    if (!d?.credPath || !cred) continue;
-    let contents: string;
-    try {
-      contents = fs.readFileSync(d.credPath, 'utf-8');
-    } catch {
-      continue;
-    }
-    parts.push(buildHomeFileWriteScript(cred.remote, contents));
-    // For claude the file above is config/state only; the OAuth token is a
-    // second artifact — without it the box comes up "Not logged in".
-    if (id === 'claude' && extras?.claudeCredentialsJson) {
-      parts.push(buildHomeFileWriteScript(CLAUDE_TOKEN_REMOTE, extras.claudeCredentialsJson));
-    }
-  }
-  return parts.join('\n');
+  assertNoNativeOAuthTransfer(picked, detected, extras);
+  // Past the refusal there is nothing to serialize — every runtime this handles is
+  // native OAuth, so a non-refused set has no credential to copy. (Always '' today;
+  // the shape stays general in case a non-native runtime is ever added.)
+  return '';
 }

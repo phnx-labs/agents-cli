@@ -4,7 +4,6 @@ import {
   parseRemoteBundles,
   agentIdOf,
   diffFleet,
-  canPushLogin,
   pinnedVersion,
   rosterNeedsVersions,
   expandAllSpecs,
@@ -27,30 +26,12 @@ describe('agentIdOf', () => {
   });
 });
 
-describe('canPushLogin', () => {
-  it('pushes a propagatable, available, non-bound agent to a linux target', () => {
-    expect(canPushLogin('codex', 'linux', srcAuth(['codex']))).toBe(true);
-  });
-  it('refuses an agent with no portable file', () => {
-    expect(canPushLogin('cursor', 'linux', srcAuth(['cursor']))).toBe(false);
-  });
-  it('refuses when the source token is keychain-bound', () => {
-    expect(canPushLogin('claude', 'linux', srcAuth([], ['claude']))).toBe(false);
-  });
-  it('refuses claude to a macOS target (consumes from its own keychain)', () => {
-    expect(canPushLogin('claude', 'macos', srcAuth(['claude']))).toBe(false);
-  });
-  it('refuses when the source is not signed in', () => {
-    expect(canPushLogin('grok', 'linux', srcAuth([]))).toBe(false);
-  });
-});
-
 describe('diffFleet', () => {
   const desired: DeviceDesired[] = [
     { device: 's1', agents: ['claude@latest', 'codex@latest'], sync: ['user'], login: 'sync' },
   ];
 
-  it('plans install-cli + add both agents + sync + push-login on a bare device', () => {
+  it('plans install-cli + add both agents + sync, and surfaces native logins as manual', () => {
     const probes = new Map<string, DeviceProbe>([
       ['s1', { device: 's1', reachable: true, platform: 'linux', cliVersion: undefined, installedAgents: [] }],
     ]);
@@ -59,11 +40,12 @@ describe('diffFleet', () => {
     expect(kinds).toContain('install-cli');
     expect(kinds.filter((k) => k === 'add-agent')).toHaveLength(2);
     expect(kinds).toContain('sync-config');
-    expect(kinds.filter((k) => k === 'push-login')).toHaveLength(2);
-    expect(plan.devices[0].loginBlocked).toEqual([]);
+    // Both login:sync agents surface as needs-login (log in per box).
+    expect(kinds.filter((k) => k === 'needs-login')).toHaveLength(2);
+    expect(plan.devices[0].loginBlocked.sort()).toEqual(['claude', 'codex']);
   });
 
-  it('is idempotent: nothing to install when cli + agents already present (login still pushes)', () => {
+  it('is idempotent: nothing to install when cli + agents already present (login surfaces per box, never pushed)', () => {
     const probes = new Map<string, DeviceProbe>([
       ['s1', { device: 's1', reachable: true, platform: 'linux', cliVersion: CLI, installedAgents: ['claude', 'codex'] }],
     ]);
@@ -72,9 +54,8 @@ describe('diffFleet', () => {
     expect(kinds).not.toContain('install-cli');
     expect(kinds).not.toContain('upgrade-cli');
     expect(kinds).not.toContain('add-agent');
-    // sync + login are push operations, still present
     expect(kinds).toContain('sync-config');
-    expect(kinds.filter((k) => k === 'push-login')).toHaveLength(2);
+    expect(kinds.filter((k) => k === 'needs-login')).toHaveLength(2);
   });
 
   it('plans upgrade-cli on a version mismatch', () => {
@@ -85,7 +66,7 @@ describe('diffFleet', () => {
     expect(plan.actions.map((a) => a.kind)).toContain('upgrade-cli');
   });
 
-  it('surfaces a macOS keychain login as needs-login, not push', () => {
+  it('surfaces every login:sync agent with a portable file as needs-login, never push', () => {
     const macDesired: DeviceDesired[] = [
       { device: 'mac', agents: ['claude@latest', 'codex@latest'], sync: [], login: 'sync' },
     ];
@@ -93,18 +74,16 @@ describe('diffFleet', () => {
       ['mac', { device: 'mac', reachable: true, platform: 'macos', cliVersion: CLI, installedAgents: ['claude', 'codex'] }],
     ]);
     const plan = diffFleet(macDesired, probes, { targetCliVersion: CLI, sourceAuth: srcAuth(['claude', 'codex']) });
-    const claudeActions = plan.actions.filter((a) => a.agent === 'claude');
-    expect(claudeActions.some((a) => a.kind === 'needs-login')).toBe(true);
-    expect(claudeActions.some((a) => a.kind === 'push-login')).toBe(false);
-    // codex is portable on macOS -> still pushes
-    expect(plan.actions.some((a) => a.agent === 'codex' && a.kind === 'push-login')).toBe(true);
-    expect(plan.devices[0].loginBlocked).toContain('claude');
+    // Both claude and codex are surfaced as needs-login — a native OAuth login is
+    // never copied, on any platform.
+    for (const id of ['claude', 'codex']) {
+      const acts = plan.actions.filter((a) => a.agent === id);
+      expect(acts.some((a) => a.kind === 'needs-login')).toBe(true);
+    }
+    expect(plan.devices[0].loginBlocked.sort()).toEqual(['claude', 'codex']);
   });
 
-  it('does not flag a non-propagatable agent as needs-login on a macOS target', () => {
-    // Regression: the branch was `isPropagatableAgent(id) || platform === 'macos'`,
-    // which flagged EVERY agent on a mac target — including ones (like cursor)
-    // that have no portable credential and were never propagation candidates.
+  it('does not flag an agent with no portable credential file (cursor) as needs-login', () => {
     const macDesired: DeviceDesired[] = [
       { device: 'mac', agents: ['cursor@latest'], sync: [], login: 'sync' },
     ];
@@ -116,9 +95,9 @@ describe('diffFleet', () => {
     expect(plan.devices[0].loginBlocked).toEqual([]);
   });
 
-  it('does not flag a propagatable agent the source is not signed into (parity with linux)', () => {
-    // grok is propagatable but the source has no grok login — nothing to push and
-    // nothing to nag about; must stay silent on macOS just like on linux.
+  it('surfaces a portable-file agent as needs-login regardless of source sign-in (nothing is pushed anyway)', () => {
+    // grok has a portable file; the source sign-in state is now irrelevant because
+    // apply never copies a login — the device is told to log in on the box.
     const macDesired: DeviceDesired[] = [
       { device: 'mac', agents: ['grok@latest'], sync: [], login: 'sync' },
     ];
@@ -126,40 +105,32 @@ describe('diffFleet', () => {
       ['mac', { device: 'mac', reachable: true, platform: 'macos', cliVersion: CLI, installedAgents: ['grok'] }],
     ]);
     const plan = diffFleet(macDesired, probes, { targetCliVersion: CLI, sourceAuth: srcAuth([]) });
-    expect(plan.actions.some((a) => a.kind === 'needs-login')).toBe(false);
-    expect(plan.devices[0].loginBlocked).toEqual([]);
+    expect(plan.actions.some((a) => a.agent === 'grok' && a.kind === 'needs-login')).toBe(true);
+    expect(plan.devices[0].loginBlocked).toEqual(['grok']);
   });
 
-  it('flags a keychain-bound source token as needs-login on a linux target', () => {
-    // claude bound on the source (unextractable) → can't push, must surface manual.
+  it('surfaces a bound source token as needs-login on a linux target (still never pushed)', () => {
     const probes = new Map<string, DeviceProbe>([
       ['s1', { device: 's1', reachable: true, platform: 'linux', cliVersion: CLI, installedAgents: ['claude', 'codex'] }],
     ]);
     const plan = diffFleet(desired, probes, { targetCliVersion: CLI, sourceAuth: srcAuth(['codex'], ['claude']) });
-    const claudeActions = plan.actions.filter((a) => a.agent === 'claude');
-    expect(claudeActions.some((a) => a.kind === 'needs-login')).toBe(true);
-    expect(plan.devices[0].loginBlocked).toContain('claude');
-    // codex is portable and available → still pushes.
-    expect(plan.actions.some((a) => a.agent === 'codex' && a.kind === 'push-login')).toBe(true);
+    expect(plan.devices[0].loginBlocked.sort()).toEqual(['claude', 'codex']);
+    const detail = plan.actions.find((a) => a.agent === 'claude' && a.kind === 'needs-login')?.detail;
+    expect(detail).toMatch(/SING-1b/);
   });
 
-  it('excludes droid (single-use rotating refresh token) from propagation and surfaces per-machine login', () => {
+  it('never propagates droid (or any agent) — surfaces per-machine login for all portable-file agents', () => {
     const droidDesired: DeviceDesired[] = [
       { device: 's1', agents: ['droid@latest', 'codex@latest'], sync: [], login: 'sync' },
     ];
     const probes = new Map<string, DeviceProbe>([
       ['s1', { device: 's1', reachable: true, platform: 'linux', cliVersion: CLI, installedAgents: ['droid', 'codex'] }],
     ]);
-    // Pretend the source has droid credentials available — the propagation gate
-    // must still refuse to push them.
     const plan = diffFleet(droidDesired, probes, { targetCliVersion: CLI, sourceAuth: srcAuth(['droid', 'codex']) });
-    const droidActions = plan.actions.filter((a) => a.agent === 'droid');
-    expect(droidActions.some((a) => a.kind === 'push-login')).toBe(false);
-    expect(droidActions.some((a) => a.kind === 'needs-login')).toBe(true);
-    expect(droidActions.find((a) => a.kind === 'needs-login')?.detail).toMatch(/single-use rotating refresh token/);
-    expect(plan.devices[0].loginBlocked).toContain('droid');
-    // codex is still portable and safe → pushes.
-    expect(plan.actions.some((a) => a.agent === 'codex' && a.kind === 'push-login')).toBe(true);
+    for (const id of ['droid', 'codex']) {
+      expect(plan.actions.some((a) => a.agent === id && a.kind === 'needs-login')).toBe(true);
+    }
+    expect(plan.devices[0].loginBlocked.sort()).toEqual(['codex', 'droid']);
   });
 
   it('produces no actions for an unreachable device', () => {
@@ -179,7 +150,6 @@ describe('diffFleet', () => {
       ['s1', { device: 's1', reachable: true, platform: 'linux', cliVersion: CLI, installedAgents: ['codex'] }],
     ]);
     const plan = diffFleet(skipDesired, probes, { targetCliVersion: CLI, sourceAuth: srcAuth(['codex']) });
-    expect(plan.actions.map((a) => a.kind)).not.toContain('push-login');
     expect(plan.actions).toEqual([]);
   });
 });
@@ -443,7 +413,7 @@ describe('diffFleet — version-aware add-agent', () => {
     expect(plan.actions.filter((a) => a.kind === 'add-agent')).toHaveLength(2);
   });
 
-  it('propagates login once per id even when @all names claude many times', () => {
+  it('surfaces a needs-login once per id even when @all names claude many times (never a push)', () => {
     const roster: DeviceDesired[] = [
       { device: 's0', agents: ['claude@2.1.170', 'claude@2.1.207'], sync: [], login: 'sync' },
     ];
@@ -454,7 +424,7 @@ describe('diffFleet — version-aware add-agent', () => {
       }],
     ]);
     const plan = diffFleet(roster, probes, { targetCliVersion: CLI, sourceAuth: srcAuth(['claude']) });
-    expect(plan.actions.filter((a) => a.kind === 'push-login')).toHaveLength(1);
+    expect(plan.actions.filter((a) => a.kind === 'needs-login')).toHaveLength(1);
   });
 });
 

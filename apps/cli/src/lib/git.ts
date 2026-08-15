@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { IS_WINDOWS, isWindowsAbsolutePath } from './platform/index.js';
+import { IS_WINDOWS, isWindowsAbsolutePath, toNativePath } from './platform/index.js';
 import { getPackageLocalPath } from './state.js';
 import { DEFAULT_SYSTEM_REPO, systemRepoSlug } from './types.js';
 
@@ -764,10 +764,14 @@ export function isGitRepo(dir: string): boolean {
  * Shells out to `git rev-parse --show-toplevel`, so it resolves correctly from
  * any subdirectory and for linked worktrees (unlike the root-only, synchronous
  * {@link isGitRepo} above). Throws if `dir` is not inside a git repository.
+ *
+ * Git prints POSIX separators even on Windows (`C:/Users/...`); we fold them to
+ * the native separator so the result is a real filesystem path that compares
+ * equal to one built with `path.*`. On POSIX this is a no-op.
  */
 export async function getGitRoot(dir: string): Promise<string> {
   const root = await simpleGit(dir).revparse(['--show-toplevel']);
-  return root.trim();
+  return toNativePath(root.trim());
 }
 
 /**
@@ -777,10 +781,14 @@ export async function getGitRoot(dir: string): Promise<string> {
  * worktree: `--show-toplevel` there returns the worktree's own path, but the
  * common git dir (`--git-common-dir`) always points at the primary repo's
  * `.git`, whose parent is the main checkout. Throws if `dir` is not in a repo.
+ *
+ * Git prints POSIX separators even on Windows (`C:/Users/...`); we fold them to
+ * the native separator so the result is a real filesystem path that compares
+ * equal to one built with `path.*`. On POSIX this is a no-op.
  */
 export async function getMainRepoRoot(dir: string): Promise<string> {
   const common = await simpleGit(dir).raw(['rev-parse', '--path-format=absolute', '--git-common-dir']);
-  return path.dirname(common.trim());
+  return toNativePath(path.dirname(common.trim()));
 }
 
 /**

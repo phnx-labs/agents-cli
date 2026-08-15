@@ -360,6 +360,10 @@ describe('pullProjectTargets', () => {
     await simpleGit().raw(['init', '--bare', '-b', 'main', slugRemote]);
     await simpleGit().clone(slugRemote, slugAuthor);
     await configIdentity(slugAuthor);
+    // Same `* -text` guard as the beforeAll fixture (f065a0b43): without it the
+    // slugLocal clone below checks out CRLF under Windows autocrlf=true, reads
+    // phantom-dirty, and strict pullRepo blocks the fast-forward.
+    fs.writeFileSync(path.join(slugAuthor, '.gitattributes'), '* -text\n');
     await commitFile(slugAuthor, 'README.md', 'v1\n', 'init');
     await simpleGit(slugAuthor).push('origin', 'main');
     await simpleGit().clone(slugRemote, slugLocal);
