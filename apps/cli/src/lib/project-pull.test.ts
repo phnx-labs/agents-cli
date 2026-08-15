@@ -16,6 +16,8 @@ import * as path from 'path';
 import simpleGit from 'simple-git';
 import {
   buildPullEnvelope,
+  decodePullTargets,
+  encodePullTargets,
   fingerprintTargets,
   parseProjectPullEnvelope,
   projectPullComplete,
@@ -75,54 +77,57 @@ describe('parseProjectPullEnvelope', () => {
   }
 
   it('parses a well-formed envelope', () => {
-    const results = parseProjectPullEnvelope(validEnvelope(), machine);
-    expect(results).toHaveLength(1);
-    expect(results[0].status).toBe('current');
-    expect(results[0].path).toBe('~/src/a');
+    const { items, valid } = parseProjectPullEnvelope(validEnvelope(), machine);
+    expect(valid).toBe(true);
+    expect(items).toHaveLength(1);
+    expect(items[0].status).toBe('current');
+    expect(items[0].path).toBe('~/src/a');
   });
 
-  it('returns [] for non-JSON input', () => {
-    expect(parseProjectPullEnvelope('not json', machine)).toEqual([]);
+  // Every rejection below must report `valid: false`, NOT a bare empty list. An
+  // empty-but-valid answer is indistinguishable from a peer with nothing to do,
+  // which is how a peer's real mutation/block/failure used to vanish from the
+  // output while the command still exited 0.
+  it('rejects non-JSON input loudly', () => {
+    expect(parseProjectPullEnvelope('not json', machine)).toEqual({ items: [], valid: false });
   });
 
-  it('returns [] when schemaVersion is wrong', () => {
-    expect(parseProjectPullEnvelope(validEnvelope({ schemaVersion: 2 }), machine)).toEqual([]);
+  it('rejects a wrong schemaVersion loudly', () => {
+    expect(parseProjectPullEnvelope(validEnvelope({ schemaVersion: 2 }), machine)).toEqual({ items: [], valid: false });
   });
 
-  it('returns [] when kind is wrong', () => {
-    expect(parseProjectPullEnvelope(validEnvelope({ kind: 'project-status' }), machine)).toEqual([]);
+  it('rejects a wrong kind loudly', () => {
+    expect(parseProjectPullEnvelope(validEnvelope({ kind: 'project-status' }), machine)).toEqual({ items: [], valid: false });
   });
 
-  it('returns [] when machine does not match', () => {
-    expect(parseProjectPullEnvelope(validEnvelope(), 'other-machine')).toEqual([]);
+  it('rejects a machine mismatch loudly', () => {
+    expect(parseProjectPullEnvelope(validEnvelope(), 'other-machine')).toEqual({ items: [], valid: false });
   });
 
-  it('returns [] when fingerprint does not match and opts.expectedFingerprint is set', () => {
-    const results = parseProjectPullEnvelope(validEnvelope(), machine, { expectedFingerprint: 'deadbeef12345678' });
-    expect(results).toEqual([]);
+  it('rejects a fingerprint mismatch loudly when opts.expectedFingerprint is set', () => {
+    expect(parseProjectPullEnvelope(validEnvelope(), machine, { expectedFingerprint: 'deadbeef12345678' }))
+      .toEqual({ items: [], valid: false });
   });
 
   it('accepts any fingerprint when opts.expectedFingerprint is absent', () => {
-    const results = parseProjectPullEnvelope(validEnvelope(), machine);
-    expect(results).toHaveLength(1);
+    expect(parseProjectPullEnvelope(validEnvelope(), machine).items).toHaveLength(1);
   });
 
-  it('returns [] when results is not an array', () => {
-    expect(parseProjectPullEnvelope(validEnvelope({ results: null }), machine)).toEqual([]);
+  it('rejects a non-array results field loudly', () => {
+    expect(parseProjectPullEnvelope(validEnvelope({ results: null }), machine)).toEqual({ items: [], valid: false });
   });
 
-  it('skips result rows missing a status or path', () => {
-    const env = validEnvelope({
-      results: [
-        { host: machine, path: '~/src/a', status: 'current' },
-        { host: machine, status: 'updated' },           // no path
-        { host: machine, path: '~/src/b' },             // no status
-        { host: machine, path: '~/src/c', status: 'bad-status' }, // invalid status
-      ],
-    });
-    const results = parseProjectPullEnvelope(env, machine);
-    expect(results).toHaveLength(1);
-    expect(results[0].path).toBe('~/src/a');
+  it('rejects the whole envelope when ANY result row is malformed', () => {
+    // Dropping the bad row would hide one directory's real outcome inside an
+    // otherwise healthy-looking answer, so a bad row fails the envelope.
+    for (const bad of [
+      { host: machine, status: 'updated' },                       // no path
+      { host: machine, path: '~/src/b' },                         // no status
+      { host: machine, path: '~/src/c', status: 'bad-status' },   // invalid status
+    ]) {
+      const env = validEnvelope({ results: [{ host: machine, path: '~/src/a', status: 'current' }, bad] });
+      expect(parseProjectPullEnvelope(env, machine)).toEqual({ items: [], valid: false });
+    }
   });
 
   it('maps optional fields through when present', () => {
@@ -138,12 +143,40 @@ describe('parseProjectPullEnvelope', () => {
         expectedSlug: 'org/a',
       }],
     });
-    const [r] = parseProjectPullEnvelope(env, machine);
+    const [r] = parseProjectPullEnvelope(env, machine).items;
     expect(r.branch).toBe('main');
     expect(r.before).toBe('abcd1234');
     expect(r.after).toBe('efgh5678');
     expect(r.message).toBe('fast-forwarded');
     expect(r.expectedSlug).toBe('org/a');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// encodePullTargets / decodePullTargets — the CLI-arg wire format
+// ---------------------------------------------------------------------------
+
+describe('encodePullTargets / decodePullTargets', () => {
+  it('round-trips a target list WITH its expectedSlug', () => {
+    const targets: ProjectRepoTarget[] = [
+      { path: '~/src/github.com/o/agents-cli', expectedSlug: 'o/agents-cli' },
+      { path: '~/.agents/.system', expectedSlug: 'phnx-labs/.agents-system' },
+      { path: '~/.agents' },
+    ];
+    expect(decodePullTargets(encodePullTargets(targets))).toEqual(targets);
+  });
+
+  it('preserves the fingerprint across the wire — the property the fan-out verifies', () => {
+    const targets: ProjectRepoTarget[] = [{ path: '~/src/a', expectedSlug: 'org/a' }];
+    expect(fingerprintTargets(decodePullTargets(encodePullTargets(targets)))).toBe(fingerprintTargets(targets));
+  });
+
+  it('throws rather than guessing a partial list', () => {
+    expect(() => decodePullTargets('not json')).toThrow(/not valid JSON/);
+    expect(() => decodePullTargets('{"path":"~/a"}')).toThrow(/JSON array/);
+    expect(() => decodePullTargets('["~/a"]')).toThrow(/not an object/);
+    expect(() => decodePullTargets('[{}]')).toThrow(/no "path"/);
+    expect(() => decodePullTargets('[{"path":"~/a","expectedSlug":7}]')).toThrow(/non-string "expectedSlug"/);
   });
 });
 
@@ -288,6 +321,50 @@ describe('pullProjectTargets', () => {
     expect(results[0].status).toBe('blocked');
   });
 
+  // Slug verification runs BEFORE any fetch or merge, so these need no network.
+  it('blocks a checkout whose origin is a different repo than the declared slug', async () => {
+    await simpleGit(local).raw(['remote', 'set-url', 'origin', 'https://github.com/org/other.git']);
+    const targets: ProjectRepoTarget[] = [{ path: local, expectedSlug: 'org/a' }];
+    const results = await pullProjectTargets(targets, 'host');
+    expect(results[0].status).toBe('blocked');
+    expect(results[0].message).toMatch(/Slug mismatch: expected org\/a, found org\/other/);
+    expect(results[0].expectedSlug).toBe('org/a');
+  });
+
+  it('blocks when the origin remote cannot be resolved to a slug at all', async () => {
+    // origin here is the bare local test remote — not a github URL, so the
+    // checkout cannot be confirmed as the right repo. Fail closed.
+    const targets: ProjectRepoTarget[] = [{ path: local, expectedSlug: 'org/a' }];
+    const results = await pullProjectTargets(targets, 'host');
+    expect(results[0].status).toBe('blocked');
+    expect(results[0].message).toMatch(/cannot parse remote URL/);
+  });
+
+  it('fast-forwards when the origin slug matches the declared slug', async () => {
+    // A real, fetchable local remote whose PATH is itself slug-shaped, so the
+    // same origin both serves the fetch and parses as `org/a`. (Rewriting the
+    // URL with `insteadOf` cannot work here: `git remote` reports the rewritten
+    // URL, which is what the slug check reads.)
+    const slugRemote = path.join(root, 'github.com', 'org', 'a.git');
+    const slugAuthor = path.join(root, 'slug-author');
+    const slugLocal = path.join(root, 'slug-local');
+    fs.mkdirSync(path.dirname(slugRemote), { recursive: true });
+    await simpleGit().raw(['init', '--bare', '-b', 'main', slugRemote]);
+    await simpleGit().clone(slugRemote, slugAuthor);
+    await configIdentity(slugAuthor);
+    await commitFile(slugAuthor, 'README.md', 'v1\n', 'init');
+    await simpleGit(slugAuthor).push('origin', 'main');
+    await simpleGit().clone(slugRemote, slugLocal);
+    await configIdentity(slugLocal);
+    await commitFile(slugAuthor, 'new.txt', 'new\n', 'upstream commit');
+    await simpleGit(slugAuthor).push('origin', 'main');
+
+    const targets: ProjectRepoTarget[] = [{ path: slugLocal, expectedSlug: 'org/a' }];
+    const results = await pullProjectTargets(targets, 'host');
+    expect(results[0].status).toBe('updated');
+    expect(fs.existsSync(path.join(slugLocal, 'new.txt'))).toBe(true);
+  });
+
   it('processes multiple targets sequentially, continuing past missing ones', async () => {
     const missing = path.join(root, 'missing');
     const targets: ProjectRepoTarget[] = [
@@ -327,9 +404,10 @@ describe('buildPullEnvelope round-trip', () => {
     const parsed = parseProjectPullEnvelope(JSON.stringify(envelope), envelope.machine, {
       expectedFingerprint: envelope.targetFingerprint,
     });
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0].path).toBe('~/src/a');
-    expect(parsed[0].status).toBe('current');
-    expect(parsed[0].branch).toBe('main');
+    expect(parsed.valid).toBe(true);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.items[0].path).toBe('~/src/a');
+    expect(parsed.items[0].status).toBe('current');
+    expect(parsed.items[0].branch).toBe('main');
   });
 });
