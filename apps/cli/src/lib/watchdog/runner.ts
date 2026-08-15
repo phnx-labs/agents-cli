@@ -46,8 +46,10 @@ import {
 import {
   resolveInjectTargetForSession,
   type InjectRail,
-} from '../terminal/resolve.js';
-import { injectIntoTerminal, type InjectResult, type InjectTarget } from '../terminal/inject.js';
+  injectIntoTerminal,
+  type InjectResult,
+  type InjectTarget,
+} from '../terminal/index.js';
 import {
   classifyTerminal,
   isLikelyTrulyBlocked,

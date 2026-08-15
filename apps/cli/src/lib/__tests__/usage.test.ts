@@ -36,7 +36,7 @@ import {
   type KimiUsagesResponse,
   type UsageSnapshot,
   type UsageWindow,
-} from '../usage.js';
+} from '../accounting/usage.js';
 import { deleteKeychainToken, setKeychainToken, setKeychainBackendForTest, type KeychainBackend } from '../secrets/index.js';
 
 function makeAccountInfo(overrides: Partial<AccountInfo> = {}): AccountInfo {

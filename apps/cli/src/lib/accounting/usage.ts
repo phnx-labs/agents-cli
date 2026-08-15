@@ -18,25 +18,25 @@ import * as readline from 'readline';
 import { promisify } from 'util';
 import chalk from 'chalk';
 
-import { decodeJwtPayload, decryptDroidAuthPayload, type AccountInfo } from './agents.js';
-import { walkForFiles } from './fs-walk.js';
+import { decodeJwtPayload, decryptDroidAuthPayload, type AccountInfo } from '../agents.js';
+import { walkForFiles } from '../fs-walk.js';
 import {
   getKeychainToken,
   setKeychainToken,
   deleteKeychainToken,
   isKeychainBackendOverridden,
-} from './secrets/index.js';
-import { resolveClaudeSetupToken } from './claude-account-token.js';
+} from '../secrets/index.js';
+import { resolveClaudeSetupToken } from '../claude-account-token.js';
 import {
   formatBackoffRemaining,
   noteUsageRateLimited,
   usageRateLimitedUntil,
-} from './usage-backoff.js';
-import { getCacheDir } from './state.js';
-import type { AgentId } from './types.js';
-import { mapBounded } from './concurrency.js';
-import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
-import { withRefreshLease } from './refresh-coordinator.js';
+} from '../usage-backoff.js';
+import { getCacheDir } from '../state.js';
+import type { AgentId } from '../types.js';
+import { mapBounded } from '../concurrency.js';
+import { atomicWriteFileSync, ensureLockTarget, withFileLock } from '../fs-atomic.js';
+import { withRefreshLease } from '../refresh-coordinator.js';
 
 const execFileAsync = promisify(execFile);
 

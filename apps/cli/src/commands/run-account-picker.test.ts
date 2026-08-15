@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { RotateCandidate } from '../lib/rotate.js';
-import type { UsageSnapshot, UsageWindowKey } from '../lib/usage.js';
+import type { RotateCandidate } from '../lib/accounting/rotate.js';
+import type { UsageSnapshot, UsageWindowKey } from '../lib/accounting/usage.js';
 import { buildRunAccountChoices, formatAccountLimits, pickSignInLaunchVersion, signInLaunchDecision } from './run-account-picker.js';
 
 function snapshot(windows: Array<[UsageWindowKey, number]>, plan: string | null = null): UsageSnapshot {

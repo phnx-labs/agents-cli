@@ -38,9 +38,7 @@ import { getActiveSessions } from '../lib/session/active.js';
 import { discoverSessions, resolveSessionById } from '../lib/session/discover.js';
 import { buildResumeCommand } from './sessions.js';
 import { injectTargetFromReplyRail } from '../lib/session/inject.js';
-import { injectIntoTerminal } from '../lib/terminal/index.js';
-import { iLoginShell } from '../lib/terminal/shell.js';
-import { shellQuote as quoteArg } from '../lib/terminal/quote.js';
+import { injectIntoTerminal, iLoginShell, shellQuote as quoteArg } from '../lib/terminal/index.js';
 import { killSession } from '../lib/tmux/session.js';
 import { getDefaultSocketPath } from '../lib/tmux/paths.js';
 

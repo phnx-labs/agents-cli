@@ -21,7 +21,7 @@ import {
   pickCompactUsageWindows,
   type UsageSnapshot,
   type UsageWindow,
-} from '../src/lib/usage.js';
+} from '../src/lib/accounting/usage.js';
 import { stringWidth } from '../src/lib/session/width.js';
 import { mapBounded } from '../src/lib/concurrency.js';
 

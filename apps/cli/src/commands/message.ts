@@ -53,7 +53,7 @@ import {
   resumeArgv,
   type AnswerRoute,
 } from '../lib/answer-router.js';
-import { injectIntoTerminal } from '../lib/terminal/inject.js';
+import { injectIntoTerminal } from '../lib/terminal/index.js';
 import { setHelpSections } from '../lib/help.js';
 
 /** Find the still-open block addressed to `mailboxId`, if any. */

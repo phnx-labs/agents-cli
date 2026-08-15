@@ -28,7 +28,7 @@ import {
   getUsageLookupKey,
   type UsageIdentityInput,
   type UsageSnapshot,
-} from '../usage.js';
+} from '../accounting/usage.js';
 import { getVersionHomePath, listInstalledVersions } from '../versions.js';
 import { readMeta } from '../state.js';
 import { listNativeAccounts } from '../account-registry.js';

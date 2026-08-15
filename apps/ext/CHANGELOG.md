@@ -6,6 +6,16 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+- **The Fleet panel no longer reports 0 sessions in a second editor window (RUSH-2733).**
+  One window per machine wins the monitor lease and owns the single `agents sessions watch
+  --json` child; that stream emits a `reset` once at startup and only deltas afterwards, so
+  every other window depends on the host replaying a synthetic `reset` when it reports in.
+  The host registered its request handler as `(payload) => handleRequest(payload)`, dropping
+  the `socket` the broadcast server passes — and the replay is guarded by `if (socket)`, so
+  it silently never ran. Follower windows were ACKed, received only deltas for rows they
+  never had, and rendered "0 agents running" while agents were running. Source:
+  `apps/ext/src/monitor/host.ts`.
+
 ## [0.9.323] - 2026-08-15
 
 - **The Foreman orb no longer covers the Fleet session detail.** The orb, its speaker

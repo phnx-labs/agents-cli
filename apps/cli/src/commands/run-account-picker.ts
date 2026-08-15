@@ -9,7 +9,7 @@ import {
   isSignInRecoverable,
   type AccountReadiness,
   type RotateCandidate,
-} from '../lib/rotate.js';
+} from '../lib/accounting/rotate.js';
 import { compareVersions, getGlobalDefault } from '../lib/versions.js';
 import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
 

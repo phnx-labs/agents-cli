@@ -12,7 +12,7 @@
  */
 import type { OpenBlock, BlockOption } from './feed.js';
 import type { ActiveSession } from './session/active.js';
-import type { InjectTarget } from './terminal/inject.js';
+import type { InjectTarget } from './terminal/index.js';
 import { injectTargetFromReplyRail } from './session/inject.js';
 
 export type AnswerRouteKind = 'mailbox' | 'pty' | 'tmux' | 'iterm' | 'resume' | 'refuse';
