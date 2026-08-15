@@ -14,6 +14,9 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import * as TOML from 'smol-toml';
+import { execFile, execFileSync } from 'child_process';
+import { promisify } from 'util';
+import { fileURLToPath } from 'url';
 import { AGENTS, ALL_AGENT_IDS, agentConfigDirName, isAgentHardDeprecated } from './agents.js';
 import { supports, explainSkip, capableAgents } from './capabilities.js';
 import { getAgentsDir, getHooksDir as getSystemHooksDir, getUserHooksDir, getUserAgentsDir, getSystemAgentsDir, getProjectAgentsDir, getTrashHooksDir, getEnabledExtraRepos, getResolvedRulesDir, getUserRulesDir, getPerfDir } from './state.js';
@@ -3765,4 +3768,117 @@ function registerHooksForHermes(
   }
 
   return { registered, errors };
+}
+
+const execFileAsync = promisify(execFile);
+
+export interface InstallSessionTrackerHookResult {
+  installed: boolean;
+  error?: string;
+}
+
+function resolveSessionTrackerRoot(): string | null {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  // Built/installed layout: dist/lib/ -> dist/session-tracker
+  const built = path.resolve(here, '..', 'session-tracker');
+  if (fs.existsSync(path.join(built, 'dist', 'hook.sh'))) {
+    return built;
+  }
+  // Source layout: apps/cli/src/lib/ -> repo root -> packages/session-tracker
+  const source = path.resolve(here, '..', '..', '..', '..', 'packages', 'session-tracker');
+  if (fs.existsSync(path.join(source, 'src', 'hook.sh'))) {
+    return source;
+  }
+  return null;
+}
+
+function resolveTsxLoader(trackerRoot: string): string | null {
+  const loader = path.join(trackerRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+  if (fs.existsSync(loader)) return loader;
+  return null;
+}
+
+function buildInstallHookInvocation(
+  trackerRoot: string,
+  agent: AgentId,
+): { command: string; args: string[] } | null {
+  const distScript = path.join(trackerRoot, 'dist', 'install-hook.js');
+  if (fs.existsSync(distScript)) {
+    return { command: process.execPath, args: [distScript, agent] };
+  }
+  const loader = resolveTsxLoader(trackerRoot);
+  if (!loader) return null;
+  return {
+    command: process.execPath,
+    args: [loader, path.join(trackerRoot, 'src', 'install-hook.ts'), agent],
+  };
+}
+
+/**
+ * Install the shared SessionStart state-writer hook (`packages/session-tracker`)
+ * into the harness's native config. Gated by `supports(agent, 'hooks', version)`;
+ * unsupported agents return `installed: false` with a reason instead of throwing.
+ *
+ * This is the bridge that makes bare `claude` / `codex` / `kimi` launches write
+ * `~/.agents/.cache/terminals/sessions/<pid>.json`, not just `agents run` launches.
+ */
+export async function installSessionTrackerHook(
+  agent: AgentId,
+  version?: string,
+  home?: string,
+): Promise<InstallSessionTrackerHookResult> {
+  const gate = supports(agent, 'hooks', version);
+  if (!gate.ok) {
+    return { installed: false, error: explainSkip(agent, 'hooks', gate, version) };
+  }
+  const trackerRoot = resolveSessionTrackerRoot();
+  if (!trackerRoot) {
+    return { installed: false, error: 'session-tracker package not found' };
+  }
+  const invocation = buildInstallHookInvocation(trackerRoot, agent);
+  if (!invocation) {
+    return { installed: false, error: 'session-tracker not built and tsx is unavailable' };
+  }
+  try {
+    await execFileAsync(invocation.command, invocation.args, {
+      env: { ...process.env, HOME: home ?? process.env.HOME },
+    });
+    return { installed: true };
+  } catch (err) {
+    const message = (err as Error & { stderr?: string }).stderr ?? (err as Error).message;
+    return { installed: false, error: message };
+  }
+}
+
+/**
+ * Synchronous variant for callers that cannot be made async (e.g.
+ * `syncResourcesToVersion`). Best-effort: failures are returned, not thrown.
+ */
+export function installSessionTrackerHookSync(
+  agent: AgentId,
+  version?: string,
+  home?: string,
+): InstallSessionTrackerHookResult {
+  const gate = supports(agent, 'hooks', version);
+  if (!gate.ok) {
+    return { installed: false, error: explainSkip(agent, 'hooks', gate, version) };
+  }
+  const trackerRoot = resolveSessionTrackerRoot();
+  if (!trackerRoot) {
+    return { installed: false, error: 'session-tracker package not found' };
+  }
+  const invocation = buildInstallHookInvocation(trackerRoot, agent);
+  if (!invocation) {
+    return { installed: false, error: 'session-tracker not built and tsx is unavailable' };
+  }
+  try {
+    execFileSync(invocation.command, invocation.args, {
+      env: { ...process.env, HOME: home ?? process.env.HOME },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { installed: true };
+  } catch (err) {
+    const message = (err as Error & { stderr?: string }).stderr ?? (err as Error).message;
+    return { installed: false, error: message };
+  }
 }

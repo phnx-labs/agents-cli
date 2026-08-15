@@ -59,6 +59,16 @@ bun install --silent
 dim "  Compiling TypeScript"
 bun run build >/dev/null 2>&1
 
+# Bundle the session-tracker SessionStart hook helper into the CLI dist.
+# `agents sync` and `agents add` register hook.sh in each harness's native config;
+# that only works if the helper travels with the installed CLI tarball.
+ST_ROOT=../../packages/session-tracker
+if [ -d "$ST_ROOT/dist" ]; then
+  mkdir -p dist/session-tracker/dist
+  cp -R "$ST_ROOT/dist/"* dist/session-tracker/dist/
+  cp "$ST_ROOT/src/hook.sh" dist/session-tracker/dist/hook.sh
+fi
+
 # TypeScript emits CLI entrypoints with mode 644. npm pack preserves the mode,
 # and npm install in newer versions does NOT auto-chmod the bin target, so
 # users see `zsh: permission denied: agents` when invoking through the global

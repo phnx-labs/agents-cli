@@ -5,8 +5,8 @@ import type { SessionState } from './types.js';
 
 export const STATE_DIR = path.join(os.homedir(), '.agents', '.cache', 'terminals', 'sessions');
 
-export function stateFilePath(pid: number): string {
-  return path.join(STATE_DIR, `${pid}.json`);
+export function stateFilePath(pid: number, stateDir: string = STATE_DIR): string {
+  return path.join(stateDir, `${pid}.json`);
 }
 
 const KEY_ORDER: (keyof SessionState)[] = [
@@ -52,10 +52,66 @@ export function parseState(raw: string): SessionState | null {
   return o as unknown as SessionState;
 }
 
-export async function writeStateAtomic(state: SessionState): Promise<void> {
-  await fs.promises.mkdir(STATE_DIR, { recursive: true });
-  const finalPath = stateFilePath(state.pid);
+export async function writeStateAtomic(
+  state: SessionState,
+  stateDir: string = STATE_DIR,
+): Promise<void> {
+  await fs.promises.mkdir(stateDir, { recursive: true });
+  const finalPath = stateFilePath(state.pid, stateDir);
   const tmpPath = `${finalPath}.${process.pid}.${Date.now()}.tmp`;
-  await fs.promises.writeFile(tmpPath, serializeState(state), 'utf8');
-  await fs.promises.rename(tmpPath, finalPath);
+  try {
+    await fs.promises.writeFile(tmpPath, serializeState(state), 'utf8');
+    await fs.promises.rename(tmpPath, finalPath);
+  } catch (err) {
+    try { await fs.promises.unlink(tmpPath); } catch { /* best-effort */ }
+    throw err;
+  }
+}
+
+const PID_JSON_RE = /^(\d+)\.json$/;
+const PID_TEMP_RE = /^\.(\d+)\.[^.]+$/;
+
+/** Remove stale state files: dead-pid records, zero-byte JSON files, and orphaned
+ *  temp files left behind by failed atomic writes. Returns the number of files
+ *  removed. Best-effort: individual failures are ignored and do not stop the sweep. */
+export async function cleanupOrphanedStateFiles(stateDir: string = STATE_DIR): Promise<number> {
+  let names: string[];
+  try {
+    names = await fs.promises.readdir(stateDir);
+  } catch {
+    return 0;
+  }
+  let removed = 0;
+  for (const name of names) {
+    const full = path.join(stateDir, name);
+    let stat: fs.Stats | undefined;
+    try {
+      stat = await fs.promises.stat(full);
+    } catch {
+      continue;
+    }
+    // Zero-byte JSON files are never valid state records.
+    if (stat.size === 0 && name.endsWith('.json')) {
+      try {
+        await fs.promises.unlink(full);
+        removed++;
+      } catch { /* ignore race */ }
+      continue;
+    }
+    const pidMatch = PID_JSON_RE.exec(name) ?? PID_TEMP_RE.exec(name);
+    if (!pidMatch) continue;
+    const pid = Number(pidMatch[1]);
+    if (!Number.isFinite(pid) || pid <= 0) continue;
+    try {
+      process.kill(pid, 0);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ESRCH') {
+        try {
+          await fs.promises.unlink(full);
+          removed++;
+        } catch { /* ignore race */ }
+      }
+    }
+  }
+  return removed;
 }
