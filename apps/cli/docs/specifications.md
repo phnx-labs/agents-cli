@@ -3257,6 +3257,16 @@ readiness/context fields RT-1..RT-8 describe.
   guarantees this section already pins are RT-1, RT-6 (run-first history), RT-8, and
   RT-11. A change that lands any [Intended] requirement MUST flip its `Status:` to
   **Current** in the same PR and MUST NOT widen this gap.
+- **RT-GAP-2 (RUSH-2719).** Launch-target readiness is validated on the LOCAL box
+  only: a pinned `version:` absent locally saves the routine paused with
+  `agent_unavailable` (`lib/routine-readiness.ts` probes `isVersionInstalled`),
+  and `strategy:` resolution runs on the firing box. For a genuinely remote
+  `host:`/`fleet` body target the pinned version and sign-in state on THAT box
+  are not validated at add/enable time — that check needs the RT-GAP-1
+  execution-context-on-target resolver and is deferred with it, not silently
+  skipped: the fire fails loud on the target instead. `host: auto` placement
+  (`--run-on auto`) does probe target health/install/sign-in at each fire via
+  `resolveDeviceAuto` (`lib/routines-placement.ts`).
 
 ---
 

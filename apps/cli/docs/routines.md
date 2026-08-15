@@ -112,7 +112,8 @@ Where the **job body** runs when the daemon fires it (`devices` still controls w
 | --- | --- | --- | --- |
 | `local` | `hostStrategy: local` (default) | `--placement local` | Run on the firing machine |
 | `host` | `hostStrategy: host` + `host: <name>` | `--placement host --run-on <name>` | Run on a named machine over SSH |
-| `fleet` | `hostStrategy: fleet` | `--placement fleet` | Pick one online registered device per run |
+| `fleet` | `hostStrategy: fleet` | `--placement fleet` | Pick one online registered device per run (first eligible by name) |
+| `fleet` (auto) | `hostStrategy: fleet` + `host: auto` | `--run-on auto` | Re-pick a healthy, signed-in, unloaded device AT EACH FIRE — the same picker as `agents run --device auto` |
 | `cloud` | `hostStrategy: cloud` | `--placement cloud` | Dispatch via the agent's native cloud provider |
 
 ```bash
@@ -123,6 +124,11 @@ agents routines add train --schedule "0 2 * * *" --agent claude \
 # Fire once from this machine; each run picks any online fleet device
 agents routines add drain --schedule "0 3 * * *" --agent claude \
   --placement fleet --prompt "Drain the local work queue"
+
+# Health-aware auto placement: each fire re-picks a healthy, signed-in,
+# unloaded device (agents run --device auto semantics)
+agents routines add shepherd --schedule "*/5 * * * *" --agent claude \
+  --strategy balanced --run-on auto --prompt "Own the release through verification"
 
 # Dispatch to Rush Cloud / the agent's native cloud
 agents routines add review --schedule "0 9 * * 1" --agent claude \
@@ -160,7 +166,9 @@ name: daily-review
 schedule: "0 9 * * *"         # 9am daily (cron syntax)
 agent: claude
 account: muqsit@trp.so        # Optional: pin to a signed-in account by identity (see "Pinning an account")
-version: 2.0.65               # Optional: pin to an exact version; uses global default if omitted
+version: 2.0.65               # Optional: pin to an exact version (or --agent claude@2.0.65); strategy-selected if omitted
+strategy: balanced            # Optional: per-routine selection policy (pinned | available | balanced) —
+                              # beats the firing box's run.<agent>.strategy; conflicts with version:
 mode: auto                    # auto (default), plan (read-only), edit, or skip
 effort: default               # fast, default, or detailed
 timeout: 10m
@@ -1059,7 +1067,7 @@ Temporal sequence from cron fire to report saved.
 ```
 croner            JobScheduler          runner.ts           sandbox.ts       spawned agent       filesystem
 (library)         scheduler.ts:20       executeJob          prepareJobHome   (claude/codex/      ~/.agents-system/runs/
-                                                                              gemini)
+                                                                              kimi)
 
      │                  │                  │                    │                │                    │
      ●──fire callback──▶│                  │                    │                │                    │
