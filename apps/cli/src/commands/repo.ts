@@ -1142,7 +1142,7 @@ export function registerRepoCommands(program: Command): void {
 
   repoCmd
     .command('pull [alias] [url]')
-    .description('Pull updates. Aliases: "system" (~/.agents/.system/), "user" (~/.agents/), or any registered extra. No arg pulls all. Pass a git URL to git-back a not-yet-cloned user repo: "agents repo pull user <url>".')
+    .description('Pull updates and reconcile synced device decisions. Aliases: "system" (~/.agents/.system/), "user" (~/.agents/), or any registered extra. No arg pulls all. Pass a git URL to git-back a not-yet-cloned user repo: "agents repo pull user <url>".')
     .action(async (alias: string | undefined, url: string | undefined) => {
       const targets = collectRepoTargets(alias);
       if (!targets) {
@@ -1154,6 +1154,7 @@ export function registerRepoCommands(program: Command): void {
         return;
       }
       let anyPulled = false;
+      let userPulled = false;
       for (const t of targets) {
         if (!fs.existsSync(t.dir) || !isGitRepo(t.dir)) {
           // A plain (never-cloned) user repo — setup makes ~/.agents a bare dir and
@@ -1193,6 +1194,7 @@ export function registerRepoCommands(program: Command): void {
         if (result.success) {
           spinner.succeed(`${formatRepoTarget(t.alias, t.dir, result.branch)}: ${result.commit}`);
           anyPulled = true;
+          if (t.alias === 'user') userPulled = true;
         } else {
           spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${result.error}`);
           // A failed repo must fail the command. Without this, `agents fleet run
@@ -1213,6 +1215,16 @@ export function registerRepoCommands(program: Command): void {
         if (isDaemonRunning() && signalDaemonReload()) {
           console.log(chalk.gray('Reloaded the routines daemon (device pins refreshed).'));
         }
+      }
+      if (userPulled) {
+        const { reconcileDeviceDiscoveryPolicies } = await import('../lib/devices/discovery-policy.js');
+        const result = await reconcileDeviceDiscoveryPolicies();
+        const parts = [
+          result.registered.length ? `${result.registered.length} registered` : null,
+          result.ignored.length ? `${result.ignored.length} ignored` : null,
+          result.unresolved.length ? `${result.unresolved.length} approved but unavailable` : null,
+        ].filter(Boolean);
+        if (parts.length > 0) console.log(chalk.gray(`Device policy: ${parts.join(' · ')}`));
       }
     });
 
@@ -1299,6 +1311,10 @@ Examples:
         if (result.success) {
           const pushed = result.pushed ? ' (pushed)' : '';
           spinner.succeed(`${formatRepoTarget(t.alias, t.dir)}: ${result.commit}${pushed}`);
+          if (t.alias === 'user') {
+            const { reconcileDeviceDiscoveryPolicies } = await import('../lib/devices/discovery-policy.js');
+            await reconcileDeviceDiscoveryPolicies();
+          }
         } else {
           spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${result.error}`);
           process.exitCode = 1;

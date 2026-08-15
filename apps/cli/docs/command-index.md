@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_90 command groups · 552 commands._
+_90 command groups · 554 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -104,6 +104,7 @@ agents browser done                           Complete a task and close its tabs
 agents browser download                       Set the download directory for a task (defaults to the profile's downloads dir)
 agents browser errors                         Read page errors from a tab
 agents browser evaluate                       Evaluate JavaScript in current tab
+agents browser gc                             Close tabs for abandoned tasks — owning agent session exited, or idle past the window — and mark them done. The same reaper the daemon already runs every 5 minutes; use this to run it now.
 agents browser history                        Show recent browser task history
 agents browser hover <ref>                    Hover over an element by ref
 agents browser logs <task>                    Read merged rush-app + rush-cli JSONL logs for a task
@@ -261,7 +262,7 @@ agents devices apply                           Reconcile the fleet to a declared
 agents devices capture                         Snapshot the live environment (roster names, agents, browser, secret-bundle names, routines) into agents.yaml fleet:.
 agents devices config <name> [key] [value...]  Get, set, or unset a device’s settings (scheduler, agent cap, ssh overrides, auto-launch, notes). Bare opens an interactive settings menu (TTY) or prints the resolved config (piped). Stored centrally in ~/.agents/agents.yaml under fleet.devices.<name>.config — synced, so any box can configure any device.
 agents devices harnesses                       Per device, one row per installed agent@version: account, signed-in, quota, and a single ready verdict. SSH-probes each online box.
-agents devices ignore <name>                   Dismiss a node from auto-discovery so it is never re-suggested (and remove it from the registry if present).
+agents devices ignore <name>                   Dismiss a node and sync the decision through agents.yaml fleet.discovery (also removes it locally).
 agents devices lease                           Manage the disposable cloud boxes used by `agents run --lease`.
 agents devices lease gc                        Stop expired, idle lease boxes that are holding your provider quota. Safe: never stops a box in active use.
 agents devices lease list                      List warm crabbox boxes you can reuse with `agents run --box <slug>`.
@@ -272,7 +273,7 @@ agents devices login                           Log agent CLIs into fleet boxes o
 agents devices pair-ios [name]                 Pair an iPhone/iPad cockpit (RUSH-1733): mint a control token for `agents serve --control` and mark the device control-only. The token is shown ONCE — enter it in the app. Run this on the anchor.
 agents devices ping                            Live auth health: complete a real request for every agent account across the fleet (unlike the cached "signed in" flag). Writes the shared auth-health cache read by `agents view` and `fleet status`.
 agents devices ps                              List agent tasks dispatched to devices with `agents run --device <name> --no-follow`. Reconciles each still-`running` record against the remote before listing. View a log with `agents logs <id>`.
-agents devices register <name>                 Register a discovered (pending) node by name — used by the menu-bar "NEW DEVICES → Register" action.
+agents devices register <name>                 Register a discovered node and sync the approval through agents.yaml fleet.discovery.
 agents devices render                          Render the registry to ssh_config. Prints to stdout, or use --write to update ~/.ssh/config.d/agents.
 agents devices rm <name>                       Remove a device from the registry.
 agents devices role [name] [role]              Show or set what a device is for: worker (agents run here) or personal (you sit here — never picked automatically). Marking any device worker makes `--device auto` an allowlist over the marked workers.
@@ -587,6 +588,7 @@ agents projects for-cwd [cwd]  Resolve a directory to its defined project name (
 agents projects import         Import project definitions from Linear (via the `linear` CLI).
 agents projects link <name>    Attach an external tracker to a project definition (writes linear.projectId into the YAML).
 agents projects list           List defined projects (definitions only by default; no session scan).
+agents projects pull <name>    Fast-forward every fleet checkout of a named project to its remote default branch.
 agents projects rm <name>      Delete a project definition. Never touches the repo.
 agents projects save           Create or update one project from a complete ProjectDef JSON object on stdin.
 agents projects set <name>     Change one field on a project definition, preserving everything else.
@@ -641,7 +643,7 @@ agents repos disable <alias>     Stop merging this repo during sync without dele
 agents repos enable <alias>      Re-enable a previously disabled extra repo
 agents repos init [target]       Create a user-owned repo from a template and register it as an extra
 agents repos list [alias]        Show all repos with resource-level sync (skills/commands/plugins to pull or push) and local changes.
-agents repos pull [alias] [url]  Pull updates. Aliases: "system" (~/.agents/.system/), "user" (~/.agents/), or any registered extra. No arg pulls all. Pass a git URL to git-back a not-yet-cloned user repo: "agents repo pull user <url>".
+agents repos pull [alias] [url]  Pull updates and reconcile synced device decisions. Aliases: "system" (~/.agents/.system/), "user" (~/.agents/), or any registered extra. No arg pulls all. Pass a git URL to git-back a not-yet-cloned user repo: "agents repo pull user <url>".
 agents repos push [alias]        Commit and push the user repo or a user-owned extra. Refuses to push the system repo.
 agents repos remove <alias>      Unregister an extra repo. Managed clones are deleted; external paths are kept.
 agents repos sync <alias>        Git-sync a repo: pull (and push for user/extras). Aliases: "system", "user", or a registered extra.

@@ -25,6 +25,20 @@ describe('parseFleetManifest', () => {
     expect(Object.keys(map)).toEqual(['yosemite-s1', 'mac-mini']);
   });
 
+  it('accepts portable device discovery decisions', () => {
+    const m = parseFleetManifest({
+      devices: {},
+      discovery: { 'mac-mini': 'approved', 'old-laptop': 'ignored' },
+    });
+    expect(m.discovery).toEqual({ 'mac-mini': 'approved', 'old-laptop': 'ignored' });
+  });
+
+  it('rejects invalid device discovery decisions', () => {
+    expect(() => parseFleetManifest({ devices: {}, discovery: { 'mac-mini': 'pending' } })).toThrow(
+      /discovery\.mac-mini/,
+    );
+  });
+
   it('rejects a missing devices key', () => {
     expect(() => parseFleetManifest({ defaults: {} })).toThrow(/devices/);
   });

@@ -61,7 +61,7 @@ import {
   switchHomeFileSymlinks,
 } from './shims.js';
 import { parseHookManifest, registerHooksToSettings } from './hooks.js';
-import { isPromptCancelled } from '../commands/utils.js';
+import { isPromptCancelled } from './format.js';
 
 export interface RefreshOptions {
   /** Limit operations to a single agent (claude/codex/etc). Default: all installed. */

@@ -143,6 +143,11 @@ agents devices sync --yes           # or run this directly — registers every d
 agents devices list                 # platform, address, reachability, live headroom
 ```
 
+Register/ignore decisions are stored in `~/.agents/agents.yaml` under
+`fleet.discovery`. Push and pull the user DotAgents repo to carry those decisions
+between machines; each machine reconstructs connection details from its own live
+Tailscale state.
+
 Pick the one machine that should show YOU rendered artifacts — a browser
 window, a dashboard, a plan — when an agent opens something for you to look
 at. This is usually the laptop or desktop you actually sit at:

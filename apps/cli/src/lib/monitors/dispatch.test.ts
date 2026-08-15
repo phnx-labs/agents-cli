@@ -192,6 +192,122 @@ describe('dispatchAction run (skipped run returns ok:false)', () => {
 });
 
 /**
+ * RUSH-2681: a monitor's `run` action was refused by the ROUTINES activation
+ * manifest. `jobRunsOnThisDevice` (lib/routines.ts) consulted
+ * `routineEnabledOnThisDevice` FIRST and short-circuited on its answer, and a
+ * monitor's synthesized job name is never in that manifest (nothing under
+ * monitors/ writes one), so every fire recorded
+ * `skipReason: "wrong_owner"` with the empty-allowlist message
+ * `Job '<name>' can only run on: ` and no action ever ran — measured 5/5 fires on
+ * yosemite-s1 at 1.22.39.
+ *
+ * Real path, in a child process so HOME is set before the state module resolves
+ * its path constants: the manifest is materialized through the real writer
+ * (`replaceEnabledRoutines`), then `dispatchAction` runs for real. The assertions
+ * are on the two gates this fix opens, not on the agent's exit: the run record
+ * must carry neither `skipReason: "wrong_owner"` (the eligibility gate,
+ * runner.ts:363) nor `readiness.code: "execution_context_missing"` (the readiness
+ * gate behind it). Whatever the spawned agent then does under a temp HOME is not
+ * what is being asserted.
+ */
+describe('dispatchAction run (the routines activation manifest does not refuse a monitor)', () => {
+  const tsxBin = path.resolve('node_modules/.bin/tsx');
+  let home: string;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'monitor-activation-'));
+  });
+
+  afterEach(() => fs.rmSync(home, { recursive: true, force: true }));
+
+  /** Run a fixture with HOME planted; return its parsed stdout JSON. */
+  function runFixture(body: string): { result: { ok: boolean; kind: string; error?: string }; skipReason?: string } {
+    const fixture = path.join(home, 'fixture.mts');
+    fs.writeFileSync(fixture, body);
+    const child = spawnSync(tsxBin, [fixture], { encoding: 'utf-8', env: { ...process.env, HOME: home } });
+    expect(child.status, child.stderr).toBe(0);
+    return JSON.parse(child.stdout.trim());
+  }
+
+  /** The newest run record written for `name`, if any. */
+  function latestRunMeta(name: string): { skipReason?: string; readiness?: { code?: string } } {
+    const runsDir = path.join(home, '.agents', '.history', 'runs', name);
+    if (!fs.existsSync(runsDir)) return {};
+    const runs = fs.readdirSync(runsDir).sort();
+    if (runs.length === 0) return {};
+    const metaPath = path.join(runsDir, runs[runs.length - 1]!, 'meta.json');
+    if (!fs.existsSync(metaPath)) return {};
+    return JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+  }
+
+  it('dispatches when the manifest EXISTS and the monitor name is absent from it', () => {
+    const monitorName = 'rush-2681-monitor';
+    const dispatchUrl = pathToFileURL(path.resolve('src/lib/monitors/dispatch.ts')).href;
+    const activationUrl = pathToFileURL(path.resolve('src/lib/routine-activation.ts')).href;
+
+    const out = runFixture(
+      `import { dispatchAction } from ${JSON.stringify(dispatchUrl)};\n` +
+      `import { replaceEnabledRoutines, enabledRoutineNames } from ${JSON.stringify(activationUrl)};\n` +
+      // Materialize a real manifest that does NOT contain the monitor's name.
+      `replaceEnabledRoutines(['some-other-routine']);\n` +
+      `if (enabledRoutineNames() === null) throw new Error('manifest was not materialized');\n` +
+      `const monitor = {\n` +
+      `  name: ${JSON.stringify(monitorName)},\n` +
+      `  enabled: true,\n` +
+      `  source: { type: 'command', command: 'echo x' },\n` +
+      `  condition: { mode: 'on-change' },\n` +
+      `  action: { type: 'run', agent: 'claude', prompt: 'test {event}' },\n` +
+      `} as any;\n` +
+      `const event = { monitorName: ${JSON.stringify(monitorName)}, firedAt: '2026-08-15T12:00:00.000Z', summary: 'e', payload: {} } as any;\n` +
+      `const result = await dispatchAction(monitor, event);\n` +
+      `console.log(JSON.stringify({ result }));\n`,
+    );
+
+    // Before the fix: "Job 'rush-2681-monitor' can only run on: " (empty allowlist).
+    expect(out.result.error ?? '').not.toMatch(/can only run on/);
+    const meta = latestRunMeta(monitorName);
+    expect(meta.skipReason).not.toBe('wrong_owner');
+    // The gate behind it: a monitor owns no project and had no field able to
+    // supply a cwd, so the run was then blocked with `execution_context_missing`
+    // — inert for a second reason. dispatchAction now defaults the job's cwd to
+    // the target home.
+    expect(meta.readiness?.code).not.toBe('execution_context_missing');
+  });
+
+  it('still refuses a routine action whose routine is defined but NOT activated here', () => {
+    const routineName = 'rush-2681-routine';
+    const dispatchUrl = pathToFileURL(path.resolve('src/lib/monitors/dispatch.ts')).href;
+    const activationUrl = pathToFileURL(path.resolve('src/lib/routine-activation.ts')).href;
+    const routinesUrl = pathToFileURL(path.resolve('src/lib/routines.ts')).href;
+
+    const out = runFixture(
+      `import { dispatchAction } from ${JSON.stringify(dispatchUrl)};\n` +
+      `import { replaceEnabledRoutines } from ${JSON.stringify(activationUrl)};\n` +
+      `import { writeJob } from ${JSON.stringify(routinesUrl)};\n` +
+      `writeJob({ name: ${JSON.stringify(routineName)}, schedule: '0 9 * * *', agent: 'claude',\n` +
+      `  mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: 'hi {event}' } as any);\n` +
+      // Activated: something else. This routine is defined but off on this device.
+      `replaceEnabledRoutines(['some-other-routine']);\n` +
+      `const monitor = {\n` +
+      `  name: 'rush-2681-routine-monitor',\n` +
+      `  enabled: true,\n` +
+      `  source: { type: 'command', command: 'echo x' },\n` +
+      `  condition: { mode: 'on-change' },\n` +
+      `  action: { type: 'routine', routine: ${JSON.stringify(routineName)} },\n` +
+      `} as any;\n` +
+      `const event = { monitorName: 'rush-2681-routine-monitor', firedAt: '2026-08-15T12:00:00.000Z', summary: 'e', payload: {} } as any;\n` +
+      `const result = await dispatchAction(monitor, event);\n` +
+      `console.log(JSON.stringify({ result }));\n`,
+    );
+
+    // The exemption is deliberately narrow: a real routine keeps its activation gate.
+    expect(out.result.ok).toBe(false);
+    expect(out.result.error).toMatch(/can only run on/);
+    expect(latestRunMeta(routineName).skipReason).toBe('wrong_owner');
+  });
+});
+
+/**
  * The daemon-survival guarantee, proven in a real child process — the same shape
  * as the review's live repro. An in-process assertion can't distinguish "returned
  * a result" from "would have exited", so this runs dispatchAction for real and

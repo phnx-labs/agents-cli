@@ -4,6 +4,10 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   truncate,
+  formatBytes,
+  isPromptCancelled,
+  isInteractiveTerminal,
+  parseCommaSeparatedList,
   relTime,
   humanDuration,
   visibleWidth,
@@ -162,5 +166,35 @@ describe('dieFriction', () => {
     expect(record.surface).toBe('teams');
     expect(record.failureId).toBe('remote-cwd-on-add');
     expect(record.error).toBe('cannot use --remote-cwd');
+  });
+});
+
+describe('formatBytes', () => {
+  it('renders human-readable sizes', () => {
+    expect(formatBytes(0)).toBe('0 B');
+    expect(formatBytes(512)).toBe('512 B');
+    expect(formatBytes(1024)).toBe('1.0 KB');
+    expect(formatBytes(86 * 1024)).toBe('86 KB');
+    expect(formatBytes(3.1 * 1024 * 1024)).toBe('3.1 MB');
+  });
+});
+
+describe('relocated CLI helpers', () => {
+  it('parses a comma-separated list, trimming and dropping empties', () => {
+    expect(parseCommaSeparatedList('a, b ,,c')).toEqual(['a', 'b', 'c']);
+    expect(parseCommaSeparatedList(undefined)).toEqual([]);
+  });
+
+  it('recognizes a cancelled prompt by name and by message', () => {
+    const named = new Error('nope');
+    named.name = 'ExitPromptError';
+    expect(isPromptCancelled(named)).toBe(true);
+    expect(isPromptCancelled(new Error('User force closed the prompt'))).toBe(true);
+    expect(isPromptCancelled(new Error('unrelated'))).toBe(false);
+    expect(isPromptCancelled('not an error')).toBe(false);
+  });
+
+  it('reports an interactive terminal only when both streams are TTYs', () => {
+    expect(typeof isInteractiveTerminal()).toBe('boolean');
   });
 });

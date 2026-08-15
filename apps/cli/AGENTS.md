@@ -494,9 +494,10 @@ src/
     shims.ts           # Shim generation, config symlink switching
     hooks.ts           # hooks.yaml parser + per-agent registrar
     hooks/match.ts     # `matches:` predicate evaluator
-    browser/           # browser daemon service + existing CDP connection pool; ipc.ts owns one-shot and persistent socket clients, stream.ts owns the NDJSON action loop
+    browser/           # browser daemon service + existing CDP connection pool; ipc.ts owns one-shot and persistent socket clients, stream.ts owns the NDJSON action loop; hygiene.ts is the abandoned-task reaper (session-dead + idle, RUSH-2622) the daemon's 5-min tick and `agents browser gc` both call
     monitors/          # `agents monitors` — event-triggered watchers (source→condition→action); native state-diff store; MonitorEngine runs in the daemon beside the cron scheduler. See docs/monitors.md
     projects.ts        # `agents projects` — named multi-repo project defs (~/.agents/projects/*.yaml) layered above the --project convention (resolveProjectRef in project-root.ts); project-status.ts rolls live sessions + merged PRs + artifacts into the progress card. Beta-gated. See docs/projects.md
+    project-pull.ts    # `agents projects pull` — fleet fan-out logic: pullProjectTargets (sequential local fast-forward + per-target repo-slug verification), pullLocalArgs/encodePullTargets/decodePullTargets (the {path, expectedSlug} CLI-arg hop to each peer's hidden `pull-local` — bare paths would disable slug verification remotely AND break the fingerprint), buildPullEnvelope/parseProjectPullEnvelope (fail-closed AND fail-loud: a rejected envelope returns valid:false so the peer lands in parseFailed and exits non-zero, never a silent empty result set), printProjectPullSummary. Strict safe contract: dirty trees and non-default branches are blocked; missing checkouts are skipped, never cloned. See docs/projects.md §Pulling every reachable checkout
     migrate.ts         # One-shot idempotent migrations
     session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents sessions stats` + `sessions backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger); `claude-accounts.ts` attributes each Claude transcript to the account that produced it (account_key) and `insights.ts` extracts the cached multi-harness friction/correction/automation facets behind `agents sessions insights` (`agents insights` alias)
     terminal/          # Terminal launch engine — tab/split in iTerm/Ghostty/tmux/Terminal.app, local or --host;
@@ -526,6 +527,17 @@ ID-shaped selectors go through the indexed fleet resolver, remote cards render o
 their owning peer, and the normalized digest is cached in SQLite against the
 transcript's actual mtime + size. Live status is deliberately outside that durable
 digest and expires after 15 seconds through `session-cache.ts`.
+
+Indexing is lazy — only `discoverSessions` writes the index — so a session THIS
+box just started is "running" in `--active` before it is indexed. The id resolver
+(`computeLocalMetadataMatches` in `sessions.ts`) therefore unions the indexed
+rows with the LIVE registry on a cold id miss, so `preview`/`resume`/`focus`
+resolve a running session with no transcript row yet (the fan-out peer answers
+from the same union, so it works cross-device too — SES-9b). The daemon keeps the
+index current within seconds via `runSessionIndexWarmTick`, and the cold-miss
+repair waits for a concurrent scan rather than returning a stale read
+(`discoverSessions({ waitForScan })` — SES-9c). This is why a running session no
+longer reads "No session matching" during the index-lag window (RUSH-2682).
 
 Routing lives in `src/commands/sessions.ts`: `isBareBrowserListing`
 (+`hasNoBrowserDisqualifyingFlags`) gates the bare fleet-wide listing to the rich

@@ -12,6 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { getCliLaunch } from '../lib/cli-entry.js';
 import { loadDevices } from '../lib/devices/registry.js';
 import { runDeviceSync } from '../lib/devices/sync.js';
+import { setDeviceDiscoveryStatus } from '../lib/devices/discovery-policy.js';
 import { tailscaleStatusJson } from '../lib/devices/tailscale.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { maybePickInteractiveHost } from './setup-preferences.js';
@@ -126,6 +127,7 @@ async function syncDevices(opts: SetupFleetOptions): Promise<boolean> {
     console.error(chalk.red(`Tailscale discovery failed: ${res.reason ?? 'unknown error'}`));
     return false;
   }
+  for (const name of res.syncedNames) setDeviceDiscoveryStatus(name, 'approved');
   const extra = res.pending.length ? chalk.gray(` (${res.pending.length} new)`) : '';
   console.log(chalk.green(`Synced ${res.synced} device${res.synced === 1 ? '' : 's'} from Tailscale${extra}.`));
   return true;

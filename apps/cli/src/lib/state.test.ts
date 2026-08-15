@@ -65,6 +65,7 @@ describe('device doc carries only machine-local pins (config moved to the centra
     const fleet = readMeta().fleet;
     expect((fleet?.devices as Record<string, { config?: Record<string, unknown> }>).testbox.config).toEqual({ maxAgents: 4 });
   });
+
 });
 
 describe('reading state never writes a tracked agents.yaml (RUSH-1925)', () => {

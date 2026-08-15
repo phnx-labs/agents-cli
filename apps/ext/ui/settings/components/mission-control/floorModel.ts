@@ -214,7 +214,7 @@ export type SessionSort = 'recent' | 'started' | 'status' | 'name' | 'tok'
  * crashed) the whole surface exists for; it is derived from the raw `liveStatus`,
  * never from `phase` (which can't see it). Pure so it is unit-tested.
  */
-export type SessionBand = 'reconnect' | 'active' | 'done'
+export type SessionBand = 'reconnect' | 'attention' | 'active' | 'done'
 
 /** Lowercased lifecycle words that mean "alive/left-behind, resume to reconnect". */
 const RECONNECT_STATUSES = new Set(['orphaned', 'crashed', 'abandoned'])
@@ -224,11 +224,20 @@ export function needsReconnect(a: Pick<FloorAgent, 'liveStatus'>): boolean {
   return RECONNECT_STATUSES.has((a.liveStatus ?? '').toLowerCase())
 }
 
-/** Assign a session to its state band. reconnect > active(working/waiting/idle) > done. */
+/**
+ * Assign a session to its state band, ranked by PROGRESS (see the root AGENTS.md
+ * "Purpose" section): reconnect (detached/crashed) > attention (live but stopped
+ * progressing — waiting on input, stalled, idle, or failed) > active (running,
+ * making progress) > done. Idle-but-unfinished work is the highest-abandonment
+ * risk, so it surfaces ABOVE running rather than below it. Pure so it is
+ * unit-tested; classifies the CLI-supplied `phase`/`liveStatus`, never derives
+ * lifecycle itself.
+ */
 export function sessionBand(a: FloorAgent): SessionBand {
   if (needsReconnect(a)) return 'reconnect'
   if (a.phase === 'done') return 'done'
-  return 'active'
+  if (a.phase === 'running') return 'active'
+  return 'attention'
 }
 
 // ---------- HOSTS sidebar rows ----------

@@ -43,23 +43,10 @@ export function resolveListFilterOrExit(agent: AgentId, qualifier: string | unde
   }
 }
 
-/**
- * Check if an error is from user cancelling a prompt (Ctrl+C)
- */
-export function isPromptCancelled(err: unknown): boolean {
-  return err instanceof Error && (
-    err.name === 'ExitPromptError' ||
-    err.message.includes('force closed') ||
-    err.message.includes('User force closed')
-  );
-}
-
-/**
- * True when stdin/stdout are attached to a real terminal.
- */
-export function isInteractiveTerminal(): boolean {
-  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
-}
+// Defined in lib/format.ts so `lib/` callers don't have to import upward into
+// the command layer; re-exported here for the ~50 command-layer consumers.
+import { isPromptCancelled, isInteractiveTerminal, parseCommaSeparatedList } from '../lib/format.js';
+export { isPromptCancelled, isInteractiveTerminal, parseCommaSeparatedList };
 
 /** The resolved I/O surface for one command invocation — the human/agent split. */
 export interface Surface {
@@ -168,17 +155,6 @@ export function printWithPager(output: string, lineCount: number): void {
   if (less.status !== 0) {
     process.stdout.write(output.endsWith('\n') ? output : `${output}\n`);
   }
-}
-
-/**
- * Parse a comma-separated CLI list, trimming whitespace and dropping empties.
- */
-export function parseCommaSeparatedList(value: string | undefined): string[] {
-  if (!value) return [];
-  return value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 /**

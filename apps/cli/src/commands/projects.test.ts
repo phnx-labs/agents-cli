@@ -3,16 +3,27 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import { Command } from 'commander';
+import simpleGit from 'simple-git';
 import {
   computeProjectListWidths,
   formatFleetSkippedNote,
+  formatFleetUnverifiedNote,
   formatForCwdOutput,
   formatMilestoneDue,
   formatMilestoneLines,
   formatNextMilestone,
   projectRepoFromDir,
+  registerProjectsCommands,
   type ProjectListRow,
 } from './projects.js';
+import {
+  fingerprintTargets,
+  parseProjectPullEnvelope,
+  pullLocalArgs,
+} from '../lib/project-pull.js';
+import { machineId } from '../lib/machine-id.js';
+import type { ProjectRepoTarget } from '../lib/projects.js';
 
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
@@ -281,5 +292,141 @@ describe('projectRepoFromDir', () => {
     } finally {
       fs.rmSync(under, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatFleetUnverifiedNote
+// ---------------------------------------------------------------------------
+
+describe('formatFleetUnverifiedNote', () => {
+  it('says nothing when every answer verified', () => {
+    expect(formatFleetUnverifiedNote([])).toBe('');
+  });
+
+  it('names the peers whose answer could not be trusted, distinctly from silence', () => {
+    expect(stripAnsi(formatFleetUnverifiedNote(['gpu-box'])))
+      .toBe('  · 1 device answered with a result that could not be verified: gpu-box\n');
+    expect(stripAnsi(formatFleetUnverifiedNote(['a', 'b', 'c', 'd', 'e'])))
+      .toBe('  · 5 devices answered with a result that could not be verified: a, b, c, d +1\n');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `projects pull` → `projects pull-local` CLI-arg round trip (RUSH-2536)
+// ---------------------------------------------------------------------------
+
+/**
+ * The seam the fleet fan-out actually crosses: `pull` serializes its targets
+ * into an argv, ssh hands that argv to a peer, and the peer's `pull-local`
+ * rebuilds targets from it. Both halves are exercised for real here — the real
+ * `pullLocalArgs` builder, the real commander command parsing that argv, real
+ * git checkouts underneath — because the two things that broke were only
+ * visible ACROSS this boundary:
+ *
+ *   1. `expectedSlug` never crossed it, so slug verification silently became a
+ *      no-op on every remote peer;
+ *   2. the peer's fingerprint (which hashes the slug) could then never match
+ *      the caller's, so `parseProjectPullEnvelope` discarded the peer's ENTIRE
+ *      result set — with no skipped/parseFailed marker, because a bare `[]`
+ *      reads as "valid, zero items".
+ *
+ * Neither shows up in a unit test of either half alone: `pullProjectTargets`
+ * verifies slugs correctly when handed slugs, and the envelope round-trips
+ * correctly when both sides hash the same targets.
+ */
+describe('projects pull-local — CLI-arg round trip from pull', () => {
+  let root: string;
+  let remote: string;
+  let author: string;
+  let plain: string;
+  let mismatched: string;
+
+  async function configIdentity(dir: string): Promise<void> {
+    const g = simpleGit(dir);
+    await g.addConfig('user.email', 'test@example.com');
+    await g.addConfig('user.name', 'Test');
+    await g.addConfig('commit.gpgsign', 'false');
+  }
+
+  /** Run the real `agents projects pull-local …` argv and capture its stdout. */
+  async function runPullLocal(args: string[]): Promise<string> {
+    const program = new Command();
+    program.exitOverride();
+    registerProjectsCommands(program);
+    const lines: string[] = [];
+    const realLog = console.log;
+    console.log = (...a: unknown[]) => { lines.push(a.join(' ')); };
+    try {
+      await program.parseAsync(args, { from: 'user' });
+    } finally {
+      console.log = realLog;
+    }
+    return lines.join('\n');
+  }
+
+  beforeEach(async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'projects-pull-cli-'));
+    remote = path.join(root, 'remote.git');
+    author = path.join(root, 'author');
+    plain = path.join(root, 'plain');
+    mismatched = path.join(root, 'mismatched');
+
+    await simpleGit().raw(['init', '--bare', '-b', 'main', remote]);
+    await simpleGit().clone(remote, author);
+    await configIdentity(author);
+    fs.writeFileSync(path.join(author, 'README.md'), 'v1\n');
+    await simpleGit(author).add('-A');
+    await simpleGit(author).commit('init');
+    await simpleGit(author).push('origin', 'main');
+
+    await simpleGit().clone(remote, plain);
+    await configIdentity(plain);
+    await simpleGit().clone(remote, mismatched);
+    await configIdentity(mismatched);
+    // This checkout hosts a DIFFERENT repo than the project declares.
+    await simpleGit(mismatched).raw(['remote', 'set-url', 'origin', 'https://github.com/org/other.git']);
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('carries expectedSlug across the boundary, so the peer verifies slugs AND its fingerprint matches', async () => {
+    const targets: ProjectRepoTarget[] = [
+      { path: plain },
+      { path: mismatched, expectedSlug: 'org/a' },
+    ];
+    // Exactly what the orchestrating `pull` sends each peer, and exactly the
+    // fingerprint it will verify the peer's answer against.
+    const expectedFingerprint = fingerprintTargets(targets);
+    const stdout = await runPullLocal(pullLocalArgs(targets));
+
+    const parsed = parseProjectPullEnvelope(stdout, machineId(), { expectedFingerprint });
+
+    // Fingerprint agreement: the slug survived the hop. With bare paths on the
+    // wire this is `valid: false` / zero items — the peer's whole answer gone.
+    expect(parsed.valid).toBe(true);
+    expect(parsed.items).toHaveLength(2);
+
+    // Slug verification actually ran on the peer.
+    const blocked = parsed.items.find((r) => r.path === mismatched);
+    expect(blocked?.status).toBe('blocked');
+    expect(blocked?.message).toMatch(/Slug mismatch: expected org\/a, found org\/other/);
+    expect(blocked?.expectedSlug).toBe('org/a');
+
+    // The slug-less target is still pulled normally.
+    expect(parsed.items.find((r) => r.path === plain)?.status).toBe('current');
+  });
+
+  it('rejects a peer answer whose fingerprint does not match the targets that were sent', async () => {
+    // A peer that answered about a DIFFERENT target set must never be folded
+    // into the results as if it had answered ours.
+    const sent: ProjectRepoTarget[] = [{ path: plain, expectedSlug: 'org/a' }];
+    const stdout = await runPullLocal(pullLocalArgs([{ path: plain }]));
+
+    expect(parseProjectPullEnvelope(stdout, machineId(), {
+      expectedFingerprint: fingerprintTargets(sent),
+    })).toEqual({ items: [], valid: false });
   });
 });

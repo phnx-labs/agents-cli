@@ -92,4 +92,15 @@ describe('captureFleet', () => {
     // A dropped device carries config ONLY — never its stale roster fields.
     expect(map['mac-mini']).toBeUndefined();
   });
+
+  it('preserves portable device discovery decisions', () => {
+    const prev: FleetManifest = {
+      devices: {},
+      discovery: { 'mac-mini': 'approved', 'old-laptop': 'ignored' },
+    };
+
+    const m = captureFleet(prev, { devices: ['yosemite-s0'] });
+
+    expect(m.discovery).toEqual({ 'mac-mini': 'approved', 'old-laptop': 'ignored' });
+  });
 });

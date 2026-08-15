@@ -124,10 +124,14 @@ export function sortSessions(list: FloorAgent[], sort: SessionSort, desc: boolea
 
 const BAND_LABEL: Record<SessionBand, string> = {
   reconnect: 'Needs reconnecting',
-  active: 'Active',
+  attention: 'Needs attention',
+  active: 'Running',
   done: 'Recently finished',
 }
-const BAND_ORDER: SessionBand[] = ['reconnect', 'active', 'done']
+// Ranked by progress (root AGENTS.md "Purpose"): detached work first, then live work
+// that has STOPPED progressing (attention), then healthy running work, then done —
+// so idle-but-unfinished sessions surface above running, never buried below it.
+const BAND_ORDER: SessionBand[] = ['reconnect', 'attention', 'active', 'done']
 
 /**
  * Group a scoped list into ordered sections. Starred sessions are lifted into a
@@ -166,7 +170,17 @@ export function groupSessions(
     for (const band of BAND_ORDER) {
       const inBand = rest.filter((a) => sessionBand(a) === band)
       if (inBand.length) {
-        sections.push({ key: `band:${band}`, label: BAND_LABEL[band], kind: 'band', band, agents: sortSessions(inBand, sort, desc) })
+        // The attention band exists to surface work that has STOPPED progressing, so
+        // it always leads with the MOST-stuck session (oldest activity) — the highest
+        // abandonment risk — independent of the list-wide sort. Other bands honor the
+        // chosen (`sort`,`desc`).
+        const agents = band === 'attention'
+          ? [...inBand].sort((a, b) => {
+              const d = (a.lastActivityMs || 0) - (b.lastActivityMs || 0)
+              return d !== 0 ? d : (a.sessionId || a.id).localeCompare(b.sessionId || b.id)
+            })
+          : sortSessions(inBand, sort, desc)
+        sections.push({ key: `band:${band}`, label: BAND_LABEL[band], kind: 'band', band, agents })
       }
     }
     return sections

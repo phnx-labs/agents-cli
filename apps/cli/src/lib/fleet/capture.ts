@@ -77,6 +77,10 @@ export function captureFleet(prev: FleetManifest | undefined, inputs: CaptureInp
     devices,
   };
 
+  if (prev?.discovery && Object.keys(prev.discovery).length > 0) {
+    manifest.discovery = { ...prev.discovery };
+  }
+
   const bundles = inputs.secretsBundles ?? prev?.secrets?.bundles;
   if (bundles && bundles.length > 0) manifest.secrets = { bundles: [...bundles].sort() };
 

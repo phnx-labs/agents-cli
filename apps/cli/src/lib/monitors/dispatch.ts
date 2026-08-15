@@ -48,12 +48,27 @@ export async function dispatchAction(
   if (action.type === 'run') {
     const job: JobConfig = {
       name: monitor.name,
+      // This job is not a routine — no definition, no yaml, never listed by
+      // `agents routines` — so it can never be a member of this device's routine
+      // activation manifest and MUST NOT be gated on it. Before this marker the
+      // gate refused every monitor `run` action with `wrong_owner` and an empty
+      // allowlist ("Job '<name>' can only run on: "), so no monitor action ever
+      // executed (RUSH-2681). The monitor's own `device:` pin already resolved
+      // exactly-once ownership before this dispatch.
+      dispatchedBy: 'monitor',
       agent: action.agent as AgentId,
       mode: action.mode ?? 'auto',
       effort: action.effort ?? 'auto',
       timeout: action.timeout ?? '10m',
       enabled: true,
       prompt: injectEvent(action.prompt ?? '', event),
+      // A monitor watches a source; it owns no project, and until `cwd` existed
+      // it had no field able to supply one — so `resolveJobExecutionContext`
+      // blocked every `run` action with `execution_context_missing`
+      // (lib/routine-context.ts) once the eligibility gate above stopped
+      // swallowing them first. `~` is the execution TARGET's home, so it stays
+      // portable across a `runOn:` SSH hop.
+      cwd: monitor.cwd ?? '~',
       ...(monitor.variables ? { variables: monitor.variables } : {}),
       ...(monitor.version ? { version: monitor.version } : {}),
       ...(monitor.runOn ? { host: monitor.runOn } : {}),

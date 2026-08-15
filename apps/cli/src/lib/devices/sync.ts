@@ -91,6 +91,8 @@ export interface DeviceSyncResult {
   ok: boolean;
   /** Number of tailscale nodes upserted into the registry. */
   synced: number;
+  /** Names upserted, for explicit onboarding surfaces to persist approval. */
+  syncedNames: string[];
   /** Nodes discovered but neither registered-before nor ignored (name+platform). */
   pending: PendingDevice[];
   /** Populated when ok is false: why discovery was skipped. */
@@ -195,10 +197,10 @@ export async function runDeviceSync(
       await upsertDevice(node.name, input);
     }
 
-    return { ok: true, synced: toUpsert.length, pending };
+    return { ok: true, synced: toUpsert.length, syncedNames: toUpsert.map((node) => node.name), pending };
   } catch (err: any) {
     if (opts.soft) {
-      return { ok: false, synced: 0, pending: [], reason: err?.message ?? String(err) };
+      return { ok: false, synced: 0, syncedNames: [], pending: [], reason: err?.message ?? String(err) };
     }
     throw err;
   }

@@ -61,6 +61,13 @@ describe('needsReconnect / sessionBand', () => {
   test('reconnect wins even over a done phase (a crashed session is resumable, not finished)', () => {
     expect(sessionBand(mk({ liveStatus: 'crashed', phase: 'done' }))).toBe('reconnect')
   })
+  test('attention band = live but not progressing (idle / stalled / waiting / failed)', () => {
+    for (const phase of ['idle', 'stalled', 'waiting', 'failed'] as const) {
+      expect(sessionBand(mk({ phase }))).toBe('attention')
+    }
+    // a running session IS progressing, so it stays in the active band, not attention
+    expect(sessionBand(mk({ phase: 'running' }))).toBe('active')
+  })
 })
 
 describe('scopeSessions — filter chips', () => {
@@ -131,13 +138,13 @@ describe('groupSessions — starred pinned to a single top section', () => {
     mk({ id: 'orph', liveStatus: 'orphaned', phase: 'idle' }),
     mk({ id: 'run', phase: 'running' }),
   ]
-  test('state group: Starred first, then Needs reconnecting, then Active — no duplication', () => {
+  test('state group: Starred first, then Needs reconnecting, then Running — no duplication', () => {
     const secs = groupSessions(list, 'state', 'recent', true)
-    expect(secs.map((s) => s.label)).toEqual(['Starred', 'Needs reconnecting', 'Active'])
-    // The starred row appears ONLY in Starred, never again in Active.
+    expect(secs.map((s) => s.label)).toEqual(['Starred', 'Needs reconnecting', 'Running'])
+    // The starred row appears ONLY in Starred, never again in Running.
     const allIds = secs.flatMap((s) => s.agents.map((a) => a.id))
     expect(allIds.filter((id) => id === 'star')).toHaveLength(1)
-    expect(secs.find((s) => s.label === 'Active')!.agents.map((a) => a.id)).toEqual(['run'])
+    expect(secs.find((s) => s.label === 'Running')!.agents.map((a) => a.id)).toEqual(['run'])
   })
   test('filter=starred: no separate Starred band (the whole list is starred)', () => {
     const onlyStar = [mk({ id: 's1', pinned: true }), mk({ id: 's2', pinned: true })]
@@ -149,6 +156,31 @@ describe('groupSessions — starred pinned to a single top section', () => {
     const secs = groupSessions(onlyStar, 'state', 'recent', true, /* filterIsStarred */ false)
     expect(secs[0]!.kind).toBe('starred')
     expect(secs[0]!.agents.map((a) => a.id).sort()).toEqual(['s1', 's2'])
+  })
+})
+
+describe('groupSessions — attention band ranks progress-stopped work above running', () => {
+  test('idle/stalled sessions surface in "Needs attention" ABOVE the running band', () => {
+    const list = [
+      mk({ id: 'run', phase: 'running', lastActivityMs: 9_000 }),
+      mk({ id: 'idle', phase: 'idle', lastActivityMs: 5_000 }),
+      mk({ id: 'stall', phase: 'stalled', lastActivityMs: 1_000 }),
+    ]
+    const secs = groupSessions(list, 'state', 'recent', true)
+    expect(secs.map((s) => s.label)).toEqual(['Needs attention', 'Running'])
+    // Within attention, MOST-stuck (oldest activity) first — stall(1s) before idle(5s).
+    expect(secs.find((s) => s.label === 'Needs attention')!.agents.map((a) => a.id)).toEqual(['stall', 'idle'])
+    expect(secs.find((s) => s.label === 'Running')!.agents.map((a) => a.id)).toEqual(['run'])
+  })
+  test('attention leads most-stuck-first even under a recency sort that would reverse it', () => {
+    // Under 'recent' desc the most-recent (idle2 @ 8s) would sort first; the band's
+    // staleness override must instead put the most-stuck (idle1 @ 2s) at the top.
+    const list = [
+      mk({ id: 'idle1', phase: 'idle', lastActivityMs: 2_000 }),
+      mk({ id: 'idle2', phase: 'idle', lastActivityMs: 8_000 }),
+    ]
+    const secs = groupSessions(list, 'state', 'recent', true)
+    expect(secs.find((s) => s.label === 'Needs attention')!.agents.map((a) => a.id)).toEqual(['idle1', 'idle2'])
   })
 })
 

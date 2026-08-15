@@ -182,6 +182,10 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
   // resolve to ok:false), so this can never block setup.
   const { runDeviceSync } = await import('../lib/devices/sync.js');
   const dev = await runDeviceSync({ soft: true });
+  if (dev.ok) {
+    const { setDeviceDiscoveryStatus } = await import('../lib/devices/discovery-policy.js');
+    for (const name of dev.syncedNames) setDeviceDiscoveryStatus(name, 'approved');
+  }
   if (dev.ok && dev.synced > 0) {
     console.log(chalk.gray(`Discovered ${dev.synced} device${dev.synced === 1 ? '' : 's'} on your tailnet (agents devices list).`));
   }

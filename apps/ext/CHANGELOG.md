@@ -6,6 +6,15 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+- **Fleet sessions list ranks by progress — idle work no longer hides below running.**
+  The state-grouped Sessions list now surfaces a **Needs attention** band (live sessions
+  that have stopped progressing — waiting on input, stalled, idle, or failed) *above* the
+  **Running** band, ordered most-stuck-first so the highest-abandonment-risk session sits
+  at the top. Detached/crashed work still leads in **Needs reconnecting**; finished
+  sessions fold into **Recently finished**. Presentation-only grouping of the CLI's
+  existing session states (no new lifecycle logic in the extension). Source:
+  `apps/ext/ui/settings/components/mission-control/floorModel.ts`, `sessionsModel.ts`.
+
 ## [0.9.321] - 2026-08-14
 
 - **`Agents: Attach` finds your backgrounded agents again (RUSH-2670).** A

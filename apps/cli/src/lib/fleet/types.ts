@@ -70,6 +70,12 @@ export interface FleetManifest {
   secrets?: { bundles?: string[] };
   /** Routine NAMES that should be active on the fleet (files sync via the repo). */
   routines?: string[];
+  /**
+   * Portable user decisions for Tailscale discovery. A name maps to `approved`
+   * or `ignored`; absence means pending. Connection metadata remains in each
+   * machine's local device registry and is never committed.
+   */
+  discovery?: Record<string, 'approved' | 'ignored'>;
 }
 
 /**

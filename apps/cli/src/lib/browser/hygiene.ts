@@ -58,8 +58,16 @@ export interface ReapDeps {
 }
 
 export interface ReapOptions {
-  /** Idle window in ms. Default {@link DEFAULT_IDLE_MS}. */
-  idleMs?: number;
+  /**
+   * Idle window in ms. Default {@link DEFAULT_IDLE_MS}.
+   *
+   * `null` is the explicit "idle reaping is off" signal
+   * (`browser.task-idle-minutes=0`) — session-dead reaping below is
+   * unaffected. A caller-supplied `0` is a DIFFERENT thing and still throws
+   * (see the guard below): it is far likelier to be a bug (a value that
+   * survived `??` unset) than an intentional "reap everything immediately."
+   */
+  idleMs?: number | null;
   /** Clock, injectable for tests. Default `Date.now()`. */
   now?: number;
   /** Report what would be closed without closing anything. */
@@ -146,12 +154,15 @@ export async function reapAbandonedTasks(
   service: ReapableService,
   opts: ReapOptions = {},
 ): Promise<ReapResult> {
-  const idleMs = opts.idleMs ?? DEFAULT_IDLE_MS;
+  const idleDisabled = opts.idleMs === null;
+  const idleMs = idleDisabled ? undefined : (opts.idleMs ?? DEFAULT_IDLE_MS);
   // Fail loud rather than reap everything. A caller-supplied `0` survives `??`
   // and would close every task including one created a millisecond ago; a
   // non-numeric value makes every `>=` comparison false and silently disables
-  // idle reaping. Both are worse than an error.
-  if (!Number.isFinite(idleMs) || idleMs <= 0) {
+  // idle reaping. Both are worse than an error. `null` (idleDisabled) skips
+  // this check entirely — that is the one deliberate way to turn idle
+  // reaping off, distinct from an accidental `0`.
+  if (!idleDisabled && (!Number.isFinite(idleMs) || (idleMs as number) <= 0)) {
     throw new Error(`idleMs must be a positive number of milliseconds, got ${String(idleMs)}`);
   }
   const now = opts.now ?? Date.now();
@@ -170,7 +181,7 @@ export async function reapAbandonedTasks(
     let reason: ReapedTask['reason'] | undefined;
     if (await taskOwnerIsGone(task, live, deps)) {
       reason = 'session-dead';
-    } else if (now - (task.lastActionAt ?? task.createdAt) >= idleMs) {
+    } else if (!idleDisabled && now - (task.lastActionAt ?? task.createdAt) >= (idleMs as number)) {
       reason = 'idle';
     }
 

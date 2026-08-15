@@ -67,6 +67,23 @@ describe('devices command', () => {
     expect(stdout).toContain("No devices. Run 'agents devices sync'");
     expect(stdout).not.toContain('Usage: agents devices');
   });
+
+  it('persists add, ignore, and unignore decisions in the synced fleet manifest', () => {
+    guardedHome();
+    const policyPath = path.join(testHome, '.agents', 'agents.yaml');
+
+    const added = run(['devices', 'add', 'mac-mini', 'operator@mac-mini.internal', '--platform', 'macos']);
+    expect(added.status).toBe(0);
+    expect(fs.readFileSync(policyPath, 'utf-8')).toContain('mac-mini: approved');
+
+    const ignored = run(['devices', 'ignore', 'mac-mini']);
+    expect(ignored.status).toBe(0);
+    expect(fs.readFileSync(policyPath, 'utf-8')).toContain('mac-mini: ignored');
+
+    const unignored = run(['devices', 'unignore', 'mac-mini']);
+    expect(unignored.status).toBe(0);
+    expect(fs.readFileSync(policyPath, 'utf-8')).toContain('discovery: {}');
+  });
 });
 
 describe('ssh askpass', () => {

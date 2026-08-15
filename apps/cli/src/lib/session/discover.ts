@@ -56,6 +56,7 @@ import {
   ftsSearch,
   tryClaimScan,
   releaseScan,
+  scanInProgressByLivePid,
   cacheLinearProject,
   type ScanStamp,
   type DirStamp,
@@ -226,6 +227,23 @@ export interface DiscoverOptions {
   idExact?: string;
   /** Session id prefix — a targeted indexed lookup with no scan (RUSH-2477). */
   idPrefix?: string;
+  /**
+   * Cold-miss repair: when another live process already holds the scan claim,
+   * wait (bounded) for that in-flight scan to finish before reading the index,
+   * instead of returning the pre-scan snapshot (RUSH-2682). A caller repairing a
+   * "not indexed yet" miss wants the fresh result the concurrent scan is about to
+   * write, not the stale read that just missed. Ignored when THIS process wins
+   * the claim (it scans itself) or no scan is in progress.
+   */
+  waitForScan?: boolean;
+}
+
+/** Max time a `waitForScan` repair waits for a concurrent scan to settle. */
+const WAIT_FOR_SCAN_TIMEOUT_MS = 2_000;
+const WAIT_FOR_SCAN_POLL_MS = 100;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /** Progress report emitted during incremental scanning. */
@@ -374,11 +392,34 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
     } finally {
       releaseScan(process.pid);
     }
+  } else if (options?.waitForScan) {
+    // Lost the single-flight claim to another live process (a foreground
+    // `agents sessions*` or the daemon's index warm). Rather than return the
+    // pre-scan snapshot that just missed, wait (bounded) for that scan to finish
+    // so the read below reflects what it wrote (RUSH-2682 cold-miss repair).
+    await waitForScanToSettle();
   }
 
   return queryIndexedSessions(options, {
     skipExistenceCheck: options?.skipExistenceCheck ?? false,
   });
+}
+
+/**
+ * Poll until no live process holds the scan claim, or the bound elapses
+ * (RUSH-2682). Bounded so a wedged/slow scan can never hang a foreground preview.
+ * Exported for the cold-miss repair test.
+ */
+export async function waitForScanToSettle(
+  timeoutMs: number = WAIT_FOR_SCAN_TIMEOUT_MS,
+  pollMs: number = WAIT_FOR_SCAN_POLL_MS,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (scanInProgressByLivePid()) {
+    if (Date.now() >= deadline) return false;
+    await sleep(pollMs);
+  }
+  return true;
 }
 
 /** Read the current SQLite snapshot without scanning or parsing transcript files. */

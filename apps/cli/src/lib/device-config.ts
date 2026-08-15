@@ -230,6 +230,21 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       'Default off — a fleet-remote drive is refused until the owner runs `agents browser remote-control on`.',
   },
   {
+    name: 'browser.task-idle-minutes',
+    yamlKey: 'browserTaskIdleMinutes',
+    scope: 'device',
+    visibility: 'machine',
+    type: 'int',
+    defaultValue: 30,
+    description:
+      'Minutes a browser task may sit with no IPC action (navigate, click, type, screenshot, …) before the daemon\'s ' +
+      'abandoned-task reaper closes its tabs and marks it done (RUSH-2622). 0 disables idle reaping — the reaper still ' +
+      "closes a task whose owning agent session has exited, whatever this is set to. Read only on THIS box's own " +
+      'reaper tick and `agents browser gc`, so it never applies to a peer.',
+    validate: (v) =>
+      (v as number) >= 0 ? null : 'browser.task-idle-minutes must be >= 0 (0 disables idle reaping).',
+  },
+  {
     name: 'notes',
     yamlKey: 'notes',
     scope: 'device',
@@ -725,6 +740,18 @@ export function assertDaemonEnabled(): void {
     `The daemon is disabled on this device (daemon.enabled=false in ~/.agents/agents.yaml fleet.devices.${machineId()}.config). ` +
       `Re-enable with: agents daemon enable`,
   );
+}
+
+/**
+ * Idle window (ms) the browser-task reaper (`browser/hygiene.ts`) uses on THIS
+ * machine, or `null` when idle reaping is off (`browser.task-idle-minutes=0`)
+ * — session-dead reaping is unaffected either way. Unset means the default 30
+ * minutes. Read by the daemon's periodic tick and, as the fallback when a
+ * caller omits `--idle-minutes`, by the `gc` IPC action.
+ */
+export function resolveBrowserTaskIdleMs(): number | null {
+  const minutes = (getConfigValue('browser.task-idle-minutes').value as number | undefined) ?? 30;
+  return minutes === 0 ? null : minutes * 60_000;
 }
 
 /**

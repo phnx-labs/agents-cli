@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 90,
-  "commands": 552,
+  "commands": 554,
   "root": {
     "name": "agents",
     "path": "",
@@ -1098,9 +1098,9 @@
                   "negate": false
                 },
                 {
-                  "flags": "--label <substr>",
+                  "flags": "--label-contains <substr>",
                   "description": "filter to shares whose label contains this text (case-insensitive)",
-                  "long": "--label",
+                  "long": "--label-contains",
                   "required": true,
                   "optional": false,
                   "variadic": false,
@@ -1126,8 +1126,8 @@
                   "negate": false
                 }
               ],
-              "examples": "# Everything you've published, newest first\n      agents artifacts share list\n\n      # Machine-readable — e.g. pull every still-public URL with jq\n      agents artifacts share list --json | jq -r '.objects[].url'\n\n      # List another namespace\n      agents artifacts share list --github-user octocat\n\n      # Narrow by who/what published it\n      agents artifacts share list --agent claude\n      agents artifacts share list --label \"fleet plan\"",
-              "notes": "Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG\n  covers are omitted (it mirrors the public gallery). It reads the endpoint's JSON\n  listing route, which ships with the current Worker template. If your deployed\n  Worker predates this feature the command says so and points you at 'agents\n  artifacts share update' (RUSH-2449) rather than returning a wrong or empty result\n  — see 'agents artifacts share status' for whether an update is due.\n\n  --agent/--session/--label filter the fetched listing client-side; --json's\n  count reflects the filtered set.",
+              "examples": "# Everything you've published, newest first\n      agents artifacts share list\n\n      # Machine-readable — e.g. pull every still-public URL with jq\n      agents artifacts share list --json | jq -r '.objects[].url'\n\n      # List another namespace\n      agents artifacts share list --github-user octocat\n\n      # Narrow by who/what published it\n      agents artifacts share list --agent claude\n      agents artifacts share list --label-contains \"fleet plan\"",
+              "notes": "Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG\n  covers are omitted (it mirrors the public gallery). It reads the endpoint's JSON\n  listing route, which ships with the current Worker template. If your deployed\n  Worker predates this feature the command says so and points you at 'agents\n  artifacts share update' (RUSH-2449) rather than returning a wrong or empty result\n  — see 'agents artifacts share status' for whether an update is due.\n\n  --agent/--session/--label-contains filter the fetched listing client-side; --json's\n  count reflects the filtered set.",
               "subcommands": []
             },
             {
@@ -1742,7 +1742,7 @@
           "negate": false
         }
       ],
-      "examples": "# List configured browser profiles\n      agents browser profiles list\n\n      # Create a Chrome profile pointed at a CDP endpoint\n      agents browser profiles create work --browser chrome --endpoint http://localhost:9222\n\n      # Start a session — auto-picks the first installed Chromium-family browser\n      agents browser start\n\n      # Or pin to a specific profile\n      agents browser start --profile work\n\n      # Drive the page\n      agents browser navigate https://example.com\n      agents browser screenshot\n\n      # Keep one process and daemon socket warm for repeated actions\n      agents browser stream --task \"$AGENTS_BROWSER_TASK\"\n\n      # Drive another machine's browser (needs its consent — see remote-control)\n      agents browser start --host zion\n\n      # Browse a task-heavy profile's captures: one row per task, not per file\n      agents browser sessions\n\n      # Allow / deny other fleet machines driving THIS machine's browser\n      agents browser remote-control on\n\n      # End the session when done\n      agents browser done",
+      "examples": "# List configured browser profiles\n      agents browser profiles list\n\n      # Create a Chrome profile pointed at a CDP endpoint\n      agents browser profiles create work --browser chrome --endpoint http://localhost:9222\n\n      # Start a session — auto-picks the first installed Chromium-family browser\n      agents browser start\n\n      # Or pin to a specific profile\n      agents browser start --profile work\n\n      # Drive the page\n      agents browser navigate https://example.com\n      agents browser screenshot\n\n      # Keep one process and daemon socket warm for repeated actions\n      agents browser stream --task \"$AGENTS_BROWSER_TASK\"\n\n      # Drive another machine's browser (needs its consent — see remote-control)\n      agents browser start --host zion\n\n      # Browse a task-heavy profile's captures: one row per task, not per file\n      agents browser sessions\n\n      # Allow / deny other fleet machines driving THIS machine's browser\n      agents browser remote-control on\n\n      # End the session when done\n      agents browser done\n\n      # Close tabs the daemon's own reaper would have caught on its next 5-min tick\n      agents browser gc --dry-run",
       "notes": "Most agent workflows should use the 'browser' skill instead of raw subcommands.\n      The skill wraps profile selection, snapshotting, and tunneling.\n\n      Browser support: Chromium-family only (Chrome, Comet, Chromium, Brave, Edge).\n      Safari and Firefox are not supported — they don't speak the Chrome DevTools\n      Protocol the way agents browser expects. On Windows, Edge is the default\n      because it's preinstalled. On macOS and Linux, Chrome is preferred when\n      installed; otherwise the first Chromium-family binary on disk wins.",
       "subcommands": [
         {
@@ -2046,6 +2046,53 @@
               "short": "-f",
               "long": "--file",
               "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "gc",
+          "path": "browser gc",
+          "aliases": [],
+          "description": "Close tabs for abandoned tasks — owning agent session exited, or idle past the window — and mark them done. The same reaper the daemon already runs every 5 minutes; use this to run it now.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--dry-run",
+              "description": "List what would be closed without closing anything",
+              "long": "--dry-run",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--idle-minutes <n>",
+              "description": "Override the idle window in minutes (default: this device's browser.task-idle-minutes, or 30). 0 disables idle-only closing for this run; session-dead tasks are still closed.",
+              "long": "--idle-minutes",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Output machine-readable JSON",
+              "long": "--json",
+              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -7525,7 +7572,7 @@
             }
           ],
           "examples": "agents devices config mac-mini                            # settings menu (TTY) / print config (piped)\n      agents devices config mac-mini agents.max-concurrent 4    # cap concurrent agents\n      agents devices config mac-mini scheduler.enabled off      # no routines firing there\n      agents devices config mac-mini scheduler.enabled          # read one key back\n      agents devices config mac-mini scheduler.enabled --unset  # back to the default\n      agents devices config mac-mini notes \"runs the releases\"  # append an operator note\n      agents devices config win-mini ssh.auth password          # password auth…\n      agents devices config win-mini ssh.bundle muqsit          # …from this secrets bundle\n      agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519\n      agents devices config mac-mini role worker                 # same as `agents devices role mac-mini worker`\n      agents devices config mac-mini auto-launch.enabled off    # exclude from AGI EXT auto-launch\n      agents devices config mac-mini auto-launch.preferred on   # boost in auto-launch ranking\n      agents devices config zion interactive.host zion          # user scope: where agents show YOU artifacts\n      agents devices config mac-mini --json                     # machine-readable",
-          "notes": "Keys: role (worker|personal), see 'agents devices role',\n      agents.max-concurrent, scheduler.enabled, daemon.enabled,\n      watchdog.enabled, tmux.enabled, browser.remote-control, browser.profile,\n      notes, ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,\n      ssh.identity-file, platform (windows|linux|macos|unknown),\n      auto-launch.enabled, auto-launch.preferred — plus the user-scope\n      interactive.host (stored centrally; the device name is syntax only).\n\n      Booleans take on/off (or true/false). 'notes' appends one entry per\n      invocation. Values a PEER reads land in ~/.agents/agents.yaml under\n      fleet.devices.<name>.config and sync with 'agents repo push/pull'. The\n      keys only the owning box reads — scheduler.enabled, daemon.enabled,\n      tmux.enabled, browser.remote-control, browser.profile — stay in that\n      machine's own doc, never sync, and can only be set on the device itself.\n      ssh.* / platform / user overlay the discovered registry profile at dial\n      time. scheduler.enabled / daemon.enabled take effect when the daemon\n      reloads or restarts on that device.\n\n      The retired subcommands still work and forward here: configure, note,\n      set, set-interactive, enable, disable, prefer, unprefer.",
+          "notes": "Keys: role (worker|personal), see 'agents devices role',\n      agents.max-concurrent, scheduler.enabled, daemon.enabled,\n      watchdog.enabled, tmux.enabled, browser.remote-control,\n      browser.task-idle-minutes, browser.profile,\n      notes, ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,\n      ssh.identity-file, platform (windows|linux|macos|unknown),\n      auto-launch.enabled, auto-launch.preferred — plus the user-scope\n      interactive.host (stored centrally; the device name is syntax only).\n\n      Booleans take on/off (or true/false). 'notes' appends one entry per\n      invocation. Values a PEER reads land in ~/.agents/agents.yaml under\n      fleet.devices.<name>.config and sync with 'agents repo push/pull'. The\n      keys only the owning box reads — scheduler.enabled, daemon.enabled,\n      tmux.enabled, browser.remote-control, browser.task-idle-minutes,\n      browser.profile — stay in that machine's own doc, never sync, and can\n      only be set on the device itself.\n      ssh.* / platform / user overlay the discovered registry profile at dial\n      time. scheduler.enabled / daemon.enabled take effect when the daemon\n      reloads or restarts on that device.\n\n      The retired subcommands still work and forward here: configure, note,\n      set, set-interactive, enable, disable, prefer, unprefer.",
           "subcommands": []
         },
         {
@@ -7608,7 +7655,7 @@
           "name": "ignore",
           "path": "devices ignore",
           "aliases": [],
-          "description": "Dismiss a node from auto-discovery so it is never re-suggested (and remove it from the registry if present).",
+          "description": "Dismiss a node and sync the decision through agents.yaml fleet.discovery (also removes it locally).",
           "args": [
             {
               "name": "name",
@@ -8059,7 +8106,7 @@
           "name": "register",
           "path": "devices register",
           "aliases": [],
-          "description": "Register a discovered (pending) node by name — used by the menu-bar \"NEW DEVICES → Register\" action.",
+          "description": "Register a discovered node and sync the approval through agents.yaml fleet.discovery.",
           "args": [
             {
               "name": "name",
@@ -13019,6 +13066,15 @@
               "negate": false
             },
             {
+              "flags": "--cwd <path>",
+              "description": "Working directory for --run, home-relative or ~/… (default: the execution target's home)",
+              "long": "--cwd",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--rate-limit <spec>",
               "description": "Auto-pause if it fires more than N/<interval> (e.g. 5/1m)",
               "long": "--rate-limit",
@@ -15066,6 +15122,62 @@
           "subcommands": []
         },
         {
+          "name": "pull",
+          "path": "projects pull",
+          "aliases": [],
+          "description": "Fast-forward every fleet checkout of a named project to its remote default branch.",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--device <name...>",
+              "description": "Scope fleet pull to one or more devices (repeatable)",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": true,
+              "negate": false
+            },
+            {
+              "flags": "--devices <names>",
+              "description": "Scope fleet pull to a comma-separated list of devices",
+              "long": "--devices",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Machine-readable output",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents projects pull rush                        # pull every checkout in the project\n      agents projects pull rush --device yosemite-s0  # scope to one device\n      agents projects pull rush --devices s0,s1       # scope to multiple devices\n      agents projects pull rush --json                # machine-readable results",
+          "notes": "Only checkouts on their remote's default branch are fast-forwarded. Dirty\n      trees, local commits ahead of upstream, or a wrong branch are blocked and\n      reported — never overwritten.\n\n      Each checkout is verified against the project's declared repo slug before\n      anything is fast-forwarded — on every device, not just this one. A path\n      hosting a different repo is blocked.\n\n      Checkouts absent on a device are skipped (never cloned). Blocked or failed\n      checkouts drive a non-zero exit; missing paths do not. A device that\n      answers with a result that cannot be verified is reported as unverified\n      and also drives a non-zero exit; a device that never answers is reported\n      as unavailable and does not.",
+          "subcommands": []
+        },
+        {
           "name": "rm",
           "path": "projects rm",
           "aliases": [
@@ -16490,7 +16602,7 @@
           "name": "pull",
           "path": "repos pull",
           "aliases": [],
-          "description": "Pull updates. Aliases: \"system\" (~/.agents/.system/), \"user\" (~/.agents/), or any registered extra. No arg pulls all. Pass a git URL to git-back a not-yet-cloned user repo: \"agents repo pull user <url>\".",
+          "description": "Pull updates and reconcile synced device decisions. Aliases: \"system\" (~/.agents/.system/), \"user\" (~/.agents/), or any registered extra. No arg pulls all. Pass a git URL to git-back a not-yet-cloned user repo: \"agents repo pull user <url>\".",
           "args": [
             {
               "name": "alias",

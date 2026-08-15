@@ -258,4 +258,42 @@ describe('gc action — reaper over IPC', () => {
       await server.stop();
     }
   }, 20_000);
+
+  it('idleMinutes: 0 disables idle reaping — an hour-idle task is left alone (RUSH-2622)', async () => {
+    const { BrowserIPCServer } = await import('./ipc.js');
+    const { BrowserService } = await import('./service.js');
+    const service = new BrowserService();
+
+    const tasks = new Map();
+    tasks.set('long-idle-task', {
+      id: 'long-idle-task',
+      name: 'long-idle-task',
+      profile: 'gcprofile3',
+      tabs: { tab1: 'cdp-1' },
+      currentTabId: 'tab1',
+      createdAt: Date.now() - 60 * 60_000,
+      lastActionAt: Date.now() - 60 * 60_000,
+      pid: 0,
+    });
+    (service as unknown as { connections: Map<string, unknown> }).connections.set('gcprofile3', {
+      cdp: { isOpen: true, send: async () => ({ targetInfos: [] }), close: () => {} },
+      port: 0,
+      pid: 0,
+      profileName: 'gcprofile3',
+      tasks,
+      sessionCache: new Map(),
+    });
+
+    const server = new BrowserIPCServer(service);
+    await server.start();
+    try {
+      // 0 means "off", not "a zero-ms window" — an hour-idle task with no
+      // recorded session must survive, not be closed as if idleMs were 0.
+      const response = await sendIPCRequest({ action: 'gc', idleMinutes: 0, dryRun: true });
+      expect(response.ok).toBe(true);
+      expect(response.reaped).toEqual({ closed: [], skipped: 1 });
+    } finally {
+      await server.stop();
+    }
+  }, 20_000);
 });

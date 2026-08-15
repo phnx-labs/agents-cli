@@ -129,6 +129,18 @@ export interface MonitorConfig {
   devices?: string[];
   /** Execute the ACTION on this machine over SSH (placement), distinct from the owner that fires it. */
   runOn?: string;
+  /**
+   * Working directory for a `run` action, in the routines-portable form
+   * (`~/…`, or relative to the execution target's home). Optional: a monitor
+   * watches a source rather than owning a project, so `dispatchAction` defaults
+   * it to the target's home (`~`) when unset.
+   *
+   * Without this, every `run` action was blocked at readiness with
+   * `execution_context_missing` — `resolveJobExecutionContext` refuses an
+   * agent job carrying neither `project` nor `cwd` (`lib/routine-context.ts`),
+   * and a monitor had no field with which to supply one (RUSH-2681).
+   */
+  cwd?: string;
   /** Firehose guard: auto-pause the monitor if it fires more than `max` times per `per`. */
   rateLimit?: { max: number; per: string };
   /** User-defined prompt variables (expanded like routines' variables). */
@@ -398,6 +410,9 @@ export function validateMonitor(config: Partial<MonitorConfig>): string[] {
   }
   if (config.runOn !== undefined && (typeof config.runOn !== 'string' || config.runOn.trim() === '')) {
     errors.push('runOn must be a non-empty machine name (a registered host, device, capability tag, or user@host)');
+  }
+  if (config.cwd !== undefined && (typeof config.cwd !== 'string' || config.cwd.trim() === '')) {
+    errors.push('cwd must be a non-empty path (home-relative or ~/…)');
   }
 
   // ─── HYGIENE ─────────────────────────────────────────────────────────────────

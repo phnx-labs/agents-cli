@@ -27,11 +27,11 @@ import { BrowserIPCServer, getSocketPath as getBrowserIpcSocketPath } from './br
 import { secretsBrokerSocketPath, brokerPidAlive } from './secrets/agent.js';
 import { redactSecrets } from './redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from './cli-entry.js';
-import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled, getConfigValue } from './device-config.js';
+import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled, getConfigValue, resolveBrowserTaskIdleMs } from './device-config.js';
 import { reapTerminalRoutineProcesses } from './routine-process-cleanup.js';
 import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC, SUBSYSTEM_DAEMON_START } from './daemon-health.js';
 import { startAccountStateService } from './account-state-service.js';
-import { runActiveSessionsWarmTick, runFleetCacheWarmTick, runUsageRefreshTick } from './daemon-ticks.js';
+import { runActiveSessionsWarmTick, runFleetCacheWarmTick, runSessionIndexWarmTick, runUsageRefreshTick } from './daemon-ticks.js';
 import { emit, emitRoutineEnd } from './events.js';
 import { readDaemonServicesConfig, isDaemonServiceEnabled, type DaemonServiceId } from './daemon-services.js';
 
@@ -76,6 +76,8 @@ const BROKER_SELF_HEAL_TICK_MS = 60_000;
 const KEYCHAIN_REAP_TICK_MS = 5 * 60_000;
 // RUSH-2501: reap tmux sessions whose panes are all dead every 5 minutes.
 const DEAD_PANE_REAP_TICK_MS = 5 * 60_000;
+// RUSH-2622: close abandoned browser-task tabs every 5 minutes.
+const BROWSER_TASK_REAP_TICK_MS = 5 * 60_000;
 const STATE_DIR_CHECK_TICK_MS = 60_000;
 // Watchdog nudges this host's own stalled sessions; device-probe refreshes
 // registered devices' reachability and surfaces newly appeared tailnet nodes.
@@ -87,6 +89,10 @@ const DEVICE_PROBE_TICK_MS = 3 * 60_000;
 // Matches DEFAULT_ACTIVE_CACHE_MAX_AGE_MS (15s) so long-lived watchers never
 // outlive the publisher (RUSH-2484 — CLI-owned continuous publish).
 const ACTIVE_SESSIONS_WARM_TICK_MS = 15_000;
+// Incrementally scan this host's transcript dirs into the local index so a
+// locally-started session is indexed within seconds, not on the next unrelated
+// `agents sessions*` call (RUSH-2682 — indexing was lazy, nothing scheduled it).
+const SESSION_INDEX_WARM_TICK_MS = 20_000;
 const WEDGE_THRESHOLD_TICKS = 3;
 
 /**
@@ -674,6 +680,7 @@ export function warnEphemeralDaemonRoot(resolveBin: () => string = getAgentsBinP
 let healing = false;
 let reapingKeychain = false;
 let reapingDeadPanes = false;
+let reapingBrowserTasks = false;
 
 /**
  * Resource self-heal: fill missing resources, repair invalid manifests, and
@@ -754,6 +761,32 @@ async function runDeadPaneReap(): Promise<void> {
     log('ERROR', `Dead-pane reaper failed: ${(err as Error).message}`);
   } finally {
     reapingDeadPanes = false;
+  }
+}
+
+/**
+ * RUSH-2622: close abandoned browser-task tabs — a task whose owning agent
+ * session has exited, or one idle past `browser.task-idle-minutes` (default 30,
+ * 0 disables idle reaping only). Same policy `agents browser gc` triggers on
+ * demand; this is the periodic side, and the daemon is the single executor so
+ * no UI surface can race it. `service` is the daemon's own long-lived
+ * BrowserService — the browser IPC server it started earlier in `runDaemon()`.
+ *
+ * Runs every BROWSER_TASK_REAP_TICK_MS (5 min).
+ */
+async function runBrowserTaskReap(service: BrowserService): Promise<void> {
+  if (reapingBrowserTasks) return;
+  reapingBrowserTasks = true;
+  try {
+    const result = await service.reapAbandoned({ idleMs: resolveBrowserTaskIdleMs() });
+    if (result.closed.length > 0) {
+      log('INFO', `Browser-task reaper: closed ${result.closed.length} task(s)`);
+      for (const c of result.closed) log('INFO', `  ${c.task} (${c.reason}, profile ${c.profile})`);
+    }
+  } catch (err) {
+    log('ERROR', `Browser-task reaper failed: ${(err as Error).message}`);
+  } finally {
+    reapingBrowserTasks = false;
   }
 }
 
@@ -1031,6 +1064,25 @@ export async function runDaemon(): Promise<void> {
   void runActiveSessionsWarm();
   const activeSessionsWarmInterval = setInterval(() => { void runActiveSessionsWarm(); }, ACTIVE_SESSIONS_WARM_TICK_MS);
 
+  // Session-index warm (RUSH-2682): keep THIS host's transcript index current so
+  // a locally-started session is discoverable within seconds. Incremental +
+  // single-flight (the DB scan claim), overlap-guarded so a slow scan never
+  // stacks on the next tick.
+  let sessionIndexWarmInFlight = false;
+  const runSessionIndexWarm = async (): Promise<void> => {
+    if (sessionIndexWarmInFlight) return;
+    sessionIndexWarmInFlight = true;
+    try {
+      await runSessionIndexWarmTick();
+    } catch (err) {
+      log('WARN', `session-index warm failed: ${(err as Error).message}`);
+    } finally {
+      sessionIndexWarmInFlight = false;
+    }
+  };
+  void runSessionIndexWarm();
+  const sessionIndexWarmInterval = setInterval(() => { void runSessionIndexWarm(); }, SESSION_INDEX_WARM_TICK_MS);
+
   // Watchdog: nudge this host's own stalled agent sessions. Gated on the
   // `watchdog.enabled` device-config flag (`agents watchdog enable`), so the
   // timer always fires but only does work when the user opted in. Overlap-safe
@@ -1287,6 +1339,16 @@ export async function runDaemon(): Promise<void> {
   void runDeadPaneReap(); // kick-off on startup so the backlog clears immediately
   const deadPaneReapInterval = setInterval(() => { void runDeadPaneReap(); }, DEAD_PANE_REAP_TICK_MS);
 
+  // RUSH-2622: close abandoned browser-task tabs on the same 5-min cadence,
+  // reusing the daemon's own long-lived BrowserService instead of a second
+  // one. Only when browser IPC is actually up — there is no service to reap
+  // through otherwise.
+  let browserTaskReapInterval: NodeJS.Timeout | undefined;
+  if (browserService) {
+    void runBrowserTaskReap(browserService); // kick-off on startup
+    browserTaskReapInterval = setInterval(() => { void runBrowserTaskReap(browserService); }, BROWSER_TASK_REAP_TICK_MS);
+  }
+
   // RUSH-2367: self-terminate if this daemon's own state dir has been removed
   // out from under it — the shape of a leaked test-fixture daemon whose /tmp
   // HOME was deleted by its test's own cleanup while the process itself
@@ -1415,6 +1477,7 @@ export async function runDaemon(): Promise<void> {
     log('INFO', 'Daemon shutting down');
     accountStateService?.stop();
     clearInterval(activeSessionsWarmInterval);
+    clearInterval(sessionIndexWarmInterval);
     if (watchdogInterval) clearInterval(watchdogInterval);
     if (deviceProbeInterval) clearInterval(deviceProbeInterval);
     stopScheduler();
@@ -1426,6 +1489,7 @@ export async function runDaemon(): Promise<void> {
     if (brokerSelfHealInterval) clearInterval(brokerSelfHealInterval);
     if (keychainReapInterval) clearInterval(keychainReapInterval);
     clearInterval(deadPaneReapInterval);
+    if (browserTaskReapInterval) clearInterval(browserTaskReapInterval);
     if (stateDirCheckInterval) clearInterval(stateDirCheckInterval);
     try {
       if (fs.readFileSync(lifetimePath, 'utf-8') === lifetimeToken) fs.unlinkSync(lifetimePath);

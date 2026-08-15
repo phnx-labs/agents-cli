@@ -88,6 +88,20 @@ export function parseFleetManifest(raw: unknown): FleetManifest {
 
   const manifest: FleetManifest = { defaults, devices };
 
+  if (o.discovery !== undefined) {
+    if (typeof o.discovery !== 'object' || o.discovery === null || Array.isArray(o.discovery)) {
+      throw new Error('fleet: discovery must be a mapping of device name to approved or ignored.');
+    }
+    const discovery: NonNullable<FleetManifest['discovery']> = {};
+    for (const [name, status] of Object.entries(o.discovery as Record<string, unknown>)) {
+      if (status !== 'approved' && status !== 'ignored') {
+        throw new Error(`fleet: discovery.${name} must be approved or ignored.`);
+      }
+      discovery[name] = status;
+    }
+    manifest.discovery = discovery;
+  }
+
   // Additive, backward-compatible extras (captured by `agents fleet capture`).
   if (o.secrets !== undefined) {
     if (typeof o.secrets !== 'object' || o.secrets === null || Array.isArray(o.secrets)) {

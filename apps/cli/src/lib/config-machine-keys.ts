@@ -15,4 +15,5 @@ export const MACHINE_LOCAL_YAML_KEYS: ReadonlySet<string> = new Set([
   'schedulerEnabled',      // scheduler.enabled
   'daemonEnabled',         // daemon.enabled
   'tmuxEnabled',           // tmux.enabled — whether an interactive run is tmux-wrapped on THIS box
+  'browserTaskIdleMinutes', // browser.task-idle-minutes — only THIS box's reaper reads it
 ]);

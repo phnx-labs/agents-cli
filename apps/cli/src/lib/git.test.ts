@@ -1043,3 +1043,96 @@ describe('resolveSnapshotSha (#12 — resource/plugin provenance)', () => {
     expect(resolveSnapshotSha(repoDir)).not.toBe(first);
   });
 });
+
+// ---- RUSH-2536: pullRepo strict mode (default-branch-fast-forward) ----
+describe('pullRepo strict mode (default-branch-fast-forward)', () => {
+  let root: string;
+  let remote: string;
+  let author: string;
+  let local: string;
+
+  async function configIdentity(dir: string): Promise<void> {
+    const g = simpleGit(dir);
+    await g.addConfig('user.email', 'test@example.com');
+    await g.addConfig('user.name', 'Test');
+    await g.addConfig('commit.gpgsign', 'false');
+    await g.addConfig('core.autocrlf', 'false');
+  }
+
+  async function commitFile(dir: string, name: string, body: string, msg: string): Promise<void> {
+    const g = simpleGit(dir);
+    fs.writeFileSync(path.join(dir, name), body);
+    await g.add('-A');
+    await g.commit(msg);
+  }
+
+  beforeEach(async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'pullrepo-strict-'));
+    remote = path.join(root, 'remote.git');
+    author = path.join(root, 'author');
+    local = path.join(root, 'local');
+
+    await simpleGit().raw(['init', '--bare', '-b', 'main', remote]);
+    await simpleGit().clone(remote, author);
+    await configIdentity(author);
+    await commitFile(author, 'README.md', 'v1\n', 'init');
+    await simpleGit(author).push('origin', 'main');
+
+    await simpleGit().clone(remote, local);
+    await configIdentity(local);
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('fast-forwards a clean checkout that is behind its upstream', async () => {
+    await commitFile(author, 'up.txt', 'new\n', 'upstream commit');
+    await simpleGit(author).push('origin', 'main');
+
+    const res = await pullRepo(local, { mode: 'default-branch-fast-forward' });
+
+    expect(res.success).toBe(true);
+    expect(res.branch).toBe('main');
+    expect(res.commit).toMatch(/^[0-9a-f]{7,8}$/);
+    expect(fs.existsSync(path.join(local, 'up.txt'))).toBe(true);
+  });
+
+  it('reports success and the current commit when already up-to-date', async () => {
+    const res = await pullRepo(local, { mode: 'default-branch-fast-forward' });
+
+    expect(res.success).toBe(true);
+    expect(res.branch).toBe('main');
+    expect(res.commit).toMatch(/^[0-9a-f]{7,8}$/);
+  });
+
+  it('blocks a dirty tree immediately (no fetch attempted)', async () => {
+    fs.writeFileSync(path.join(local, 'dirty.txt'), 'unsaved\n');
+
+    const res = await pullRepo(local, { mode: 'default-branch-fast-forward' });
+
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/dirty|uncommitted/i);
+  });
+
+  it('blocks when the local branch has commits ahead of upstream', async () => {
+    await commitFile(local, 'local.txt', 'local\n', 'local commit');
+
+    const res = await pullRepo(local, { mode: 'default-branch-fast-forward' });
+
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/ahead/i);
+  });
+
+  it('blocks when the checkout is on a non-default branch', async () => {
+    // Create and switch to a feature branch locally.
+    await simpleGit(local).checkoutBranch('feature/x', 'main');
+
+    const res = await pullRepo(local, { mode: 'default-branch-fast-forward' });
+
+    expect(res.success).toBe(false);
+    // The error names the current branch and the expected default branch.
+    expect(res.error).toMatch(/feature\/x/i);
+    expect(res.error).toMatch(/main/i);
+  });
+});

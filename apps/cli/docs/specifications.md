@@ -160,9 +160,9 @@ SSH access (§7); rendering sessions that no harness produced.
 #### 3.1 Discovery & harness parsing
 
 - **SES-1 (MUST).** The canonical session-capable harness set is
-  `SESSION_AGENTS` — exactly these 12, in display order: `claude, codex, gemini,
-  antigravity, opencode, openclaw, rush, hermes, grok, kimi, droid, cursor`
-  (`lib/session/types.ts:14`). Adding harness discovery MUST extend this set (and
+  `SESSION_AGENTS` — exactly these 13, in display order: `claude, codex, gemini,
+  antigravity, opencode, openclaw, rush, hermes, grok, kimi, droid, cursor, muse`
+  (`lib/session/types.ts:17`). Adding harness discovery MUST extend this set (and
   its parser + `dispatchAgentScan` arm), not special-case a caller.
 - **SES-2 (MUST).** Each harness's transcript location + on-disk format is fixed
   and MUST be parsed from its native shape (JSONL / single-JSON / SQLite / CLI
@@ -243,6 +243,30 @@ SSH access (§7); rendering sessions that no harness produced.
   RUSH-2203's early-exit rule is also unchanged and stays full-UUID-only
   (`isDefinitiveMatch`), because that cancels a sweep still in flight, where a
   silent peer is still expected to answer.
+- **SES-9b (MUST).** An ID-shaped selector that misses the local transcript index
+  but names a session the LOCAL live registry (`getActiveSessions`, the source
+  `--active` reads) currently reports as running MUST resolve to that session
+  rather than "No session matching". Indexing is lazy (only `discoverSessions`
+  writes the index), so a session started on THIS box is running before its
+  transcript is indexed; the id resolver behind `preview`/`resume`/`focus` MUST
+  union the indexed rows with the live registry on a cold id miss
+  (`computeLocalMetadataMatches`, `commands/sessions.ts`). The synthesized row
+  parses no transcript and renders nothing; when the transcript is on disk its
+  path rides across so the downstream preview renders the real digest, else the
+  header plus a live note. The peer answering a fan-out (`--resolve-safe-v1`,
+  NO_FANOUT) uses the same union, so a running session resolves cross-device too.
+  A genuine miss (no indexed row and no live row) still fails closed, and a
+  degraded live-registry read yields no candidates rather than throwing.
+  Status: landed (RUSH-2682).
+- **SES-9c (SHOULD).** A session started on a machine SHOULD reach that machine's
+  transcript index within seconds, not on the next unrelated `agents sessions*`
+  invocation. The daemon incrementally scans this host's transcript dirs into the
+  local index on a bounded timer (`runSessionIndexWarmTick`,
+  `SESSION_INDEX_WARM_TICK_MS`), single-flight with foreground scans via the DB
+  scan claim. A cold-miss repair that loses that claim MUST wait (bounded) for the
+  in-flight scan to finish before reading, not return the pre-scan snapshot
+  (`discoverSessions({ waitForScan })` → `waitForScanToSettle`,
+  `scanInProgressByLivePid`). Status: landed (RUSH-2682).
 - **SES-10 (MUST).** A preview string MUST be cleaned of terminal/harness noise
   (OSC titles, CSI/SGR, harness tags, collapsed whitespace) before display
   (`cleanPreview`, `commands/sessions.ts:329-337`), and truncated width-aware
@@ -814,9 +838,10 @@ SSH access (§7); rendering sessions that no harness produced.
 
 #### 4.1 Command surface
 
-The command surface (bare `sessions [query]`, `preview`, `tail`, `sync`, `resume`, `focus`,
-`detach`, `attach`, `inject`, `export`, `import`, `migrate`/`relocate`,
-`migrations`, `backfill tools`, `fork`) with flags is the reference in
+The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `detach`,
+`inject`, `export`, `render`, `import`, `migrate`/`relocate`, `migrations`,
+`backfill tools`/`backfill resources`, `fork`, `bookmark`, `stats`, `insights`,
+`optimize`, `watch`) with flags is the reference in
 [sessions.md](sessions.md); this spec governs the guarantees behind it.
 
 #### 4.2 Machine-readable output (STABLE — agents depend on these)
@@ -831,8 +856,8 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `sync`, `resume
 - **SES-IF-2 (MUST).** `sessions --active --json` MUST emit `ActiveSession[]` with
   `ticketId`/`project`/`prLink` always present as keys (test
   `sessions.serialize.test.ts:76-115`); `tail --json` MUST pass raw JSONL through
-  one event per line (`commands/sessions-tail.ts:229-232`); `sync --json`,
-  `inject --json`, `migrations --json` emit their documented shapes.
+  one event per line (`commands/sessions-tail.ts:229-232`); `inject --json` and
+  `migrations --json` emit their documented shapes.
 - **SES-IF-2a (MUST).** `sessions --resolve <selector> --json` MUST resolve a full
   id, unique id prefix, or keyword query from indexed `SessionMeta` rows without
   parsing or rendering transcript events. It MUST search the online fleet unless
@@ -2710,6 +2735,19 @@ nothing but its own view cache.
 - **SING-5e (MUST).** Run metadata MUST be allocated before pre-spawn work so every
   blocked, skipped, failed, timed-out, missed, and completed attempt remains
   inspectable without requiring an archived session transcript.
+- **SING-5f (MUST).** The routine activation manifest of SING-5a governs ROUTINES
+  only. A job a monitor synthesizes for its `run` action (`lib/monitors/dispatch.ts`)
+  has no definition and no manifest membership, so it MUST NOT be gated on that
+  manifest; its exactly-once ownership is the monitor's own `device:` pin
+  (`monitorRunsOnThisDevice`, `lib/monitors/config.ts`), resolved before dispatch.
+  The exemption MUST be carried by an explicit marker on the dispatched job
+  (`dispatchedBy: 'monitor'`, read by `jobRunsOnThisDevice`, `lib/routines.ts`) and
+  MUST NOT be inferred from whether a routine of that name exists. Monitor names
+  MUST NOT be written into a device's routine manifest. A monitor's `routine`
+  action fires a real routine and MUST still honour SING-5a: a routine defined but
+  not activated on the firing device is refused. Landed (RUSH-2681); before it,
+  every monitor `run` action recorded `skipReason: "wrong_owner"` with an empty
+  allowlist and no action ever executed.
 - **SING-6 (MUST).** A new fleet-affecting feature MUST be implemented in
   `apps/cli` (daemon routine and/or command) first; the UI PR adds rendering and
   control wiring only. If the feature seemingly requires UI-side execution, SING-3

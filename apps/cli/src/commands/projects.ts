@@ -41,11 +41,23 @@ import {
   isSafeProjectName,
   validateProjectDef,
   projectNameForCwd,
+  projectRepoTargetsForDef,
   type ProjectDef,
   type ProjectContext,
   type ProjectGoal,
   type ProjectRepo,
+  type ProjectRepoTarget,
 } from '../lib/projects.js';
+import {
+  buildPullEnvelope,
+  decodePullTargets,
+  fingerprintTargets,
+  pullLocalArgs,
+  parseProjectPullEnvelope,
+  printProjectPullSummary,
+  projectPullComplete,
+  pullProjectTargets,
+} from '../lib/project-pull.js';
 import {
   rollupSessionsByProject,
   withDefaultMachine,
@@ -104,6 +116,23 @@ export function formatFleetSkippedNote(skipped: string[]): string {
   const list = rest > 0 ? `${named.join(', ')} +${rest}` : named.join(', ');
   const noun = skipped.length === 1 ? 'device' : 'devices';
   return chalk.gray(`  · ${skipped.length} ${noun} didn't answer (unreachable, older agents-cli, or timed out): ${list}\n`);
+}
+
+/**
+ * One compact trailing note for peers that DID answer a fan-out but whose
+ * payload failed verification — a wrong machine id, a fingerprint that doesn't
+ * match the targets we sent, or a malformed row. Deliberately separate from
+ * {@link formatFleetSkippedNote}: silence means a peer never ran, while this
+ * means it ran and we cannot trust what it reports, which is the worse state.
+ * Empty string when every answer verified.
+ */
+export function formatFleetUnverifiedNote(unverified: string[]): string {
+  if (unverified.length === 0) return '';
+  const named = unverified.slice(0, SKIPPED_NAME_LIMIT);
+  const rest = unverified.length - named.length;
+  const list = rest > 0 ? `${named.join(', ')} +${rest}` : named.join(', ');
+  const noun = unverified.length === 1 ? 'device' : 'devices';
+  return chalk.red(`  · ${unverified.length} ${noun} answered with a result that could not be verified: ${list}\n`);
 }
 
 /** `path:purpose` → a context anchor. Purpose may contain colons. */
@@ -917,6 +946,119 @@ export function registerProjectsCommands(program: Command): void {
       // and this command has no remote code path either way.
       console.log(JSON.stringify(probeProjectWorkspaces(paths ?? []), null, 2));
     });
+
+  // ---- pull-local (hidden; the peer half of `pull`) ----
+  projects
+    .command('pull-local', { hidden: true })
+    .description('Fast-forward workspace repos (default-branch only) and print JSON. Answers for this machine only.')
+    .requiredOption('--targets <json>', 'JSON array of {path, expectedSlug} targets, from the orchestrating `pull`')
+    .option('--json', 'Machine-readable output (the only output format)')
+    .action(async (opts: { targets: string }) => {
+      // Never fans out — this is the peer half of the fleet fan-out.
+      //
+      // Targets arrive as {path, expectedSlug} PAIRS, not bare paths: the slug
+      // is what lets this machine refuse to fast-forward a directory hosting a
+      // different repo, and it is hashed into the fingerprint the caller
+      // verifies. Decoding failures exit non-zero so the caller records this
+      // peer as skipped instead of reading a missing answer as "nothing to do".
+      let targets: ProjectRepoTarget[];
+      try {
+        targets = decodePullTargets(opts.targets);
+      } catch (err) {
+        console.error(chalk.red(`Invalid --targets: ${(err as Error).message}`));
+        process.exit(1);
+      }
+      const results = await pullProjectTargets(targets);
+      const envelope = buildPullEnvelope(results, targets);
+      console.log(JSON.stringify(envelope, null, 2));
+    });
+
+  // ---- pull ----
+  const pullCmd = projects
+    .command('pull <name>')
+    .description('Fast-forward every fleet checkout of a named project to its remote default branch.')
+    .option('--device <name...>', 'Scope fleet pull to one or more devices (repeatable)')
+    .option('--devices <names>', 'Scope fleet pull to a comma-separated list of devices')
+    .option('--json', 'Machine-readable output')
+    .action(async (name: string, rawOpts: { device?: string[]; devices?: string; json?: boolean }) => {
+      const def = loadProjectDef(name);
+      if (!def) {
+        console.error(chalk.red(`No project named "${name}". Create it: agents projects add ${name}`));
+        process.exit(1);
+      }
+
+      const targets = projectRepoTargetsForDef(def);
+      if (targets.length === 0) {
+        console.error(chalk.yellow(`Project "${name}" has no configured repositories.`));
+        process.exit(0);
+      }
+
+      const deviceFilter = resolveDeviceFilter(rawOpts.device, rawOpts.devices);
+
+      // Pull locally first.
+      const self = machineId();
+      const localResults = await pullProjectTargets(targets, self);
+
+      // Fan out to fleet peers. Send the full {path, expectedSlug} targets —
+      // bare paths would disable slug verification on every peer AND make the
+      // peer's fingerprint (which hashes the slug) unmatchable, so its whole
+      // answer would be discarded. Compute the fingerprint once so every peer
+      // envelope can be verified against the exact target set we sent.
+      const expectedFingerprint = fingerprintTargets(targets);
+      const remoteRes = await gatherRemoteAgentsJson({
+        args: pullLocalArgs(targets),
+        noFanoutEnv: PROJECTS_NO_FANOUT_ENV,
+        hosts: deviceFilter,
+        parse: (stdout: string, machine: string) =>
+          parseProjectPullEnvelope(stdout, machine, { expectedFingerprint }),
+        quiet: true,
+        timeoutMs: 120_000,
+      });
+
+      const allResults = [...localResults, ...remoteRes.items];
+
+      if (rawOpts.json) {
+        // Mirror `status --json`: peers that didn't answer, or answered
+        // unverifiably, go to stderr so a machine caller can still tell them
+        // apart from a device with nothing to report (the JSON array itself
+        // stays a clean result list).
+        if (remoteRes.skipped.length > 0) process.stderr.write(formatFleetSkippedNote(remoteRes.skipped));
+        if (remoteRes.parseFailed.length > 0) process.stderr.write(formatFleetUnverifiedNote(remoteRes.parseFailed));
+        console.log(JSON.stringify(allResults, null, 2));
+      } else {
+        printProjectPullSummary(name, allResults, remoteRes.skipped, remoteRes.parseFailed);
+      }
+
+      // A peer whose answer could not be verified already ran a real pull whose
+      // outcome we cannot see — that is a failed pull, not a quiet success.
+      if (!projectPullComplete(allResults) || remoteRes.parseFailed.length > 0) {
+        process.exit(1);
+      }
+    });
+
+  setHelpSections(pullCmd, {
+    examples: `
+      agents projects pull rush                        # pull every checkout in the project
+      agents projects pull rush --device yosemite-s0  # scope to one device
+      agents projects pull rush --devices s0,s1       # scope to multiple devices
+      agents projects pull rush --json                # machine-readable results
+    `,
+    notes: `
+      Only checkouts on their remote's default branch are fast-forwarded. Dirty
+      trees, local commits ahead of upstream, or a wrong branch are blocked and
+      reported — never overwritten.
+
+      Each checkout is verified against the project's declared repo slug before
+      anything is fast-forwarded — on every device, not just this one. A path
+      hosting a different repo is blocked.
+
+      Checkouts absent on a device are skipped (never cloned). Blocked or failed
+      checkouts drive a non-zero exit; missing paths do not. A device that
+      answers with a result that cannot be verified is reported as unverified
+      and also drives a non-zero exit; a device that never answers is reported
+      as unavailable and does not.
+    `,
+  });
 
   // ---- import ----
   projects

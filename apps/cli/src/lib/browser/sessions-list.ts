@@ -15,6 +15,9 @@
  * `feed-post.ts` `resolvePostIdentity`), never a second parser.
  */
 import * as fs from 'fs';
+import { formatBytes } from '../format.js';
+// Re-exported for the picker, which lists artifacts from this module's rows.
+export { formatBytes };
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { getBrowserRuntimeDir, getProfileRuntimeDir } from './profiles.js';
@@ -117,15 +120,6 @@ export function listBrowserSessions(only?: string): ProfileArtifacts[] {
   return profiles
     .map((p) => ({ profile: p, artifacts: listProfileArtifacts(p) }))
     .filter((r) => !!only || r.artifacts.length > 0);
-}
-
-export function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  const units = ['KB', 'MB', 'GB'];
-  let val = n / 1024;
-  let i = 0;
-  while (val >= 1024 && i < units.length - 1) { val /= 1024; i++; }
-  return `${val < 10 ? val.toFixed(1) : Math.round(val)} ${units[i]}`;
 }
 
 /** Per-kind counts over a flat artifact list — shared by the printed table and

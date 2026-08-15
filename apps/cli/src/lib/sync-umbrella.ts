@@ -115,6 +115,10 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
       }
     }
     result.repos = { pulled, errors };
+    if (!errors.some((error) => error.startsWith('user:'))) {
+      const { reconcileDeviceDiscoveryPolicies } = await import('./devices/discovery-policy.js');
+      await reconcileDeviceDiscoveryPolicies();
+    }
   }
 
   if (plan.fetchSecrets) {

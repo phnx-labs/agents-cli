@@ -466,6 +466,7 @@ export function registerMonitorsCommands(program: Command): void {
     .option('--device <name>', 'OWNER (not body placement) — the single machine that evaluates + fires (exactly-once). See docs/concepts.md#placement.')
     .option('--devices <list>', 'Allowlist (comma-separated): each device fires independently')
     .option('--run-on <host>', 'BODY placement — execute the ACTION on this machine over SSH (same idea as run --where device:<host>)')
+    .option('--cwd <path>', "Working directory for --run, home-relative or ~/… (default: the execution target's home)")
     .option('--rate-limit <spec>', 'Auto-pause if it fires more than N/<interval> (e.g. 5/1m)')
     .option('--disabled', 'Create the monitor paused (enable later with resume)')
     .option('--force', 'Overwrite a same-named monitor, or add one that duplicates an existing watcher')
@@ -554,6 +555,7 @@ export function registerMonitorsCommands(program: Command): void {
         ...(device ? { device } : {}),
         ...(devices ? { devices } : {}),
         ...(options.runOn ? { runOn: options.runOn } : {}),
+        ...(options.cwd ? { cwd: options.cwd } : {}),
         ...(rateLimit ? { rateLimit } : {}),
       };
 
