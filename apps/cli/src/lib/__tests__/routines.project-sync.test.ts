@@ -282,7 +282,7 @@ describe('discoverProjectRoutines (from registered projects)', () => {
 
 describe('placement resolution', () => {
   it('local stays local; host self is local; host remote is host', async () => {
-    const local = resolvePlacementTarget({
+    const local = await resolvePlacementTarget({
       name: 'a', mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: 'p',
       hostStrategy: 'local',
     } as JobConfig);
@@ -290,14 +290,14 @@ describe('placement resolution', () => {
 
     const { machineId } = await import('../machine-id.js');
     const self = machineId();
-    const hostSelf = resolvePlacementTarget({
+    const hostSelf = await resolvePlacementTarget({
       name: 'b', mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: 'p',
       hostStrategy: 'host',
       host: self,
     } as JobConfig);
     expect(hostSelf).toEqual({ mode: 'local' });
 
-    const hostRemote = resolvePlacementTarget({
+    const hostRemote = await resolvePlacementTarget({
       name: 'c', mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: 'p',
       hostStrategy: 'host',
       host: 'some-other-box',
@@ -305,8 +305,8 @@ describe('placement resolution', () => {
     expect(hostRemote).toEqual({ mode: 'host', host: 'some-other-box' });
   });
 
-  it('cloud resolves to cloud mode', () => {
-    const t = resolvePlacementTarget({
+  it('cloud resolves to cloud mode', async () => {
+    const t = await resolvePlacementTarget({
       name: 'd', mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: 'p',
       agent: 'claude',
       hostStrategy: 'cloud',
@@ -322,11 +322,41 @@ describe('placement resolution', () => {
     expect(picked!.length).toBeGreaterThan(0);
   });
 
-  it('host strategy without host throws', () => {
-    expect(() => resolvePlacementTarget({
+  it('host strategy without host throws', async () => {
+    await expect(resolvePlacementTarget({
       name: 'e', mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: 'p',
       hostStrategy: 'host',
-    } as JobConfig)).toThrow(/no host/);
+    } as JobConfig)).rejects.toThrow(/no host/);
+  });
+
+  it("fleet host:'auto' routes through the agents-run device picker at fire time (RUSH-2719)", async () => {
+    let askedAgent: string | undefined;
+    const t = await resolvePlacementTarget({
+      name: 'auto-place', mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: 'p',
+      agent: 'claude',
+      hostStrategy: 'fleet',
+      host: 'auto',
+    } as JobConfig, {
+      resolveDeviceAuto: async (agent) => {
+        askedAgent = agent;
+        return { pickedDeviceKey: 'healthy-box' };
+      },
+    });
+    expect(askedAgent).toBe('claude');
+    expect(t).toEqual({ mode: 'host', host: 'healthy-box' });
+  });
+
+  it("fleet host:'auto' surfaces the picker's no-healthy-device error instead of a generic one", async () => {
+    await expect(resolvePlacementTarget({
+      name: 'auto-dry', mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: 'p',
+      agent: 'claude',
+      hostStrategy: 'fleet',
+      host: 'auto',
+    } as JobConfig, {
+      resolveDeviceAuto: async () => {
+        throw new Error('agents: no healthy device can run claude — excluded: box-a (loaded)');
+      },
+    })).rejects.toThrow(/no healthy device can run claude/);
   });
 
   it('fleet with a self fire-pin still resolves (devices is not the execution pool)', async () => {
@@ -334,7 +364,7 @@ describe('placement resolution', () => {
     const self = machineId();
     // Even when devices pins firing to self, fleet may place on any online
     // device — resolvePlacementTarget must not throw and may return local or host.
-    const t = resolvePlacementTarget({
+    const t = await resolvePlacementTarget({
       name: 'fleet-pin', mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: 'p',
       agent: 'claude',
       hostStrategy: 'fleet',

@@ -63,8 +63,17 @@ export function pickFleetDevice(
 /**
  * Resolve where a fired job's body should execute.
  * Throws a human-readable Error when placement cannot be satisfied.
+ *
+ * `host: 'auto'` under `hostStrategy: fleet` re-picks a healthy, signed-in,
+ * unloaded device AT EACH FIRE via the same picker `agents run --device auto`
+ * uses (`resolveDeviceAuto`), instead of `pickFleetDevice`'s
+ * first-online-by-name order. The decision is deliberately not baked in at add
+ * time — fleet health at fire time is the whole point (RUSH-2719).
  */
-export function resolvePlacementTarget(config: JobConfig): PlacementTarget {
+export async function resolvePlacementTarget(
+  config: JobConfig,
+  deps: { resolveDeviceAuto?: (agent?: string) => Promise<{ pickedDeviceKey: string }> } = {},
+): Promise<PlacementTarget> {
   const strategy: HostStrategy = resolveHostStrategy(config);
   switch (strategy) {
     case 'local':
@@ -80,7 +89,17 @@ export function resolvePlacementTarget(config: JobConfig): PlacementTarget {
       return { mode: 'host', host: config.host };
     }
     case 'fleet': {
-      const picked = pickFleetDevice(config);
+      let picked: string | null;
+      if (config.host === 'auto') {
+        const resolveAuto = deps.resolveDeviceAuto
+          ?? (async (agent?: string) => (await import('./smart-launch.js')).resolveDeviceAuto(agent));
+        // resolveDeviceAuto fails loud on an empty/unhealthy pool — surface its
+        // message (it names each excluded device) instead of a generic one.
+        const plan = await resolveAuto(config.agent);
+        picked = plan.pickedDeviceKey;
+      } else {
+        picked = pickFleetDevice(config);
+      }
       if (!picked) {
         throw new Error(
           `Routine '${config.name}' hostStrategy: fleet — no eligible online device to place the run`,
