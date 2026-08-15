@@ -9,9 +9,9 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { buildDeclaredBlock, publishBlock, listBlocks, type DeclaringAgent } from './feed.js';
+import { buildDeclaredBlock, publishBlock, listBlocks, type DeclaringAgent } from './feed/feed.js';
 import { blockBroadcastContext, planFeedBroadcast, renderSinkArgv, blockDeliveryFailure } from './feed-broadcast.js';
-import { MILESTONE_EVENTS, tierForEvent } from './activity.js';
+import { MILESTONE_EVENTS, tierForEvent } from './feed/activity.js';
 
 const AGENT: DeclaringAgent = {
   sessionId: '74a4893f-63b3-49ef-bbcb-2437914f792e',

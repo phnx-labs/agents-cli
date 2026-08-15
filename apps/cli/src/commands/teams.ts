@@ -25,7 +25,7 @@ import {
 import { mailboxDir, enqueue } from '../lib/mailbox.js';
 import { resolveProvider } from '../lib/cloud/registry.js';
 import type { CloudProviderId, DispatchOptions } from '../lib/cloud/types.js';
-import { emit } from '../lib/events.js';
+import { emit } from '../lib/feed/events.js';
 import { maybeShowStarNudge } from '../lib/star-nudge.js';
 import { shareRuntimeEnv } from '../lib/share/config.js';
 import { runSupervisor } from '../lib/teams/supervisor.js';

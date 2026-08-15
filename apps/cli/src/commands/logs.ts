@@ -32,7 +32,7 @@ import { listTasks, type HostTask } from '../lib/hosts/tasks.js';
 import { itemPicker } from '../lib/picker.js';
 import {
   stats, getLogsPath, rotate,
-} from '../lib/events.js';
+} from '../lib/feed/events.js';
 import { addEventsReadOptions, runEventsCommand, type EventsOptions } from './events.js';
 
 interface LogsOptions {

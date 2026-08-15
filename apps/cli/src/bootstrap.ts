@@ -89,7 +89,7 @@ import { applyGlobalHelpConventions } from './lib/help.js';
 import { renderWhatsNew } from './lib/whats-new.js';
 import { IS_WINDOWS } from './lib/platform/index.js';
 import { getCliLaunch } from './lib/cli-entry.js';
-import { emit, emitFriction, redactArgs } from './lib/events.js';
+import { emit, emitFriction, redactArgs } from './lib/feed/events.js';
 import { stampProvenance } from './lib/event-provenance.js';
 import { die } from './lib/format.js';
 // Leaf (zero imports). Gates the dynamic passthrough import so the ~187ms

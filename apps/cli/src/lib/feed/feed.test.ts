@@ -22,9 +22,9 @@ import {
   listAskStats,
   type OpenBlock,
 } from './feed.js';
-import { classifyBlock, filterBlocksForFeed } from './ask-classifier.js';
-import { isPhoneUrgent, DEFAULT_POLICY } from './feed-policy.js';
-import { loadOperators } from './operator.js';
+import { classifyBlock, filterBlocksForFeed } from '../ask-classifier.js';
+import { isPhoneUrgent, DEFAULT_POLICY } from '../feed-policy.js';
+import { loadOperators } from '../operator.js';
 
 const hasPython = spawnSync('python3', ['--version']).status === 0;
 

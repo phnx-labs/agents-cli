@@ -16,7 +16,7 @@ import {
   type ComputerAction,
   type ComputerRunRow,
 } from './sessions-list.js';
-import { emit, query, truncate, _resetForTest } from '../events.js';
+import { emit, query, truncate, _resetForTest } from '../feed/events.js';
 import type { SessionMeta } from '../session/types.js';
 
 function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {

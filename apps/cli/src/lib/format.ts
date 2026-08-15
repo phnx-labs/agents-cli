@@ -9,7 +9,7 @@
  */
 import chalk from 'chalk';
 import { readSync } from 'node:fs';
-import { emitFriction } from './events.js';
+import { emitFriction } from './feed/events.js';
 
 /** Options for {@link die} — opt into machine-readable failure output. */
 export interface DieOptions {

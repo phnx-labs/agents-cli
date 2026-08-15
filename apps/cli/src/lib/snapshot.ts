@@ -15,7 +15,7 @@
  */
 
 import { machineId } from './machine-id.js';
-import { listBlocks, type OpenBlock } from './feed.js';
+import { listBlocks, type OpenBlock } from './feed/feed.js';
 import { computeAgentCounts, type FleetAgentCounts } from './fleet-status.js';
 import type { AgentId } from './types.js';
 import type { UnifiedSyncStatus } from './sync-status.js';

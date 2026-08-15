@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { detectRepeatedGuardBlocks } from './friction-heuristics.js';
-import type { EventRecord } from './events.js';
+import type { EventRecord } from './feed/events.js';
 
 function friction(overrides: Partial<EventRecord> & { surface: string; failureId: string }): EventRecord {
   return {

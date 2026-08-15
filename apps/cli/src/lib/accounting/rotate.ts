@@ -20,7 +20,7 @@ import {
 import { readMeta, writeMeta, getHelpersDir } from '../state.js';
 import { listInstalledVersions, getVersionHomePath, resolveVersion } from '../versions.js';
 import { getProjectRunConfigs } from '../run-config.js';
-import { emit } from '../events.js';
+import { emit } from '../feed/events.js';
 import {
   getUsageInfoByIdentity,
   getUsageLookupKey,

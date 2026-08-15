@@ -12,7 +12,7 @@ import type { RotateCandidate, RotateResult } from './accounting/rotate.js';
 import { saveTask, hostsCacheDir } from './hosts/tasks.js';
 import { _resetPerfDbForTest, aggregateSamples } from './perf/db.js';
 import * as activation from './routine-activation.js';
-import { query, _resetForTest } from './events.js';
+import { query, _resetForTest } from './feed/events.js';
 
 // RUSH-2215: only process-group / real-spawn holder suites are POSIX-oriented.
 // Pure command construction and path helpers must still run on Windows.

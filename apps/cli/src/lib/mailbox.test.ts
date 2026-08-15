@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { mailboxDir, enqueue, drain, peek, clear, assertValidMailboxId, isExpired, sweepExpired, listBoxes, readBox, watchMessages, DEFAULT_TTL_SECONDS, MAILBOX_TTL_ENV, type MailboxMessage } from './mailbox.js';
-import { blockIdForSession, getBlockReceipts, publishBlock } from './feed.js';
+import { blockIdForSession, getBlockReceipts, publishBlock } from './feed/feed.js';
 
 function tmpRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mailbox-test-'));

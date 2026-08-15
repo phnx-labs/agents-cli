@@ -12,7 +12,7 @@ import {
   levelFor, isEventType, EVENT_TYPES,
   getLogsPath, _resetForTest,
 } from './events.js';
-import { resetActorCache } from './actor.js';
+import { resetActorCache } from '../actor.js';
 
 // RUSH-2215: quarantine only I/O-heavy event-bus suites on win32; pure
 // event-kind / level tables still run (review: do not skip platform-neutral guards).

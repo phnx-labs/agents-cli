@@ -39,7 +39,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { emit, emitFriction, redactArgs, _resetForTest } from './events.js';
+import { emit, emitFriction, redactArgs, _resetForTest } from './feed/events.js';
 import { stampProvenance, resetEventProvenanceForTest } from './event-provenance.js';
 import { resetActorCache } from './actor.js';
 

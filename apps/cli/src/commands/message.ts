@@ -46,7 +46,7 @@ import {
   recordAnswer,
   recordMessageReceipt,
   type OpenBlock,
-} from '../lib/feed.js';
+} from '../lib/feed/feed.js';
 import { verifyOperatorIdentity } from '../lib/operator.js';
 import {
   resolveAnswerRoute,

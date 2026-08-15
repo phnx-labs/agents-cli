@@ -16,7 +16,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
-import { getLogsPath, stats, rotate, type EventRecord, type EventType, type EventLevel } from '../lib/events.js';
+import { getLogsPath, stats, rotate, type EventRecord, type EventType, type EventLevel } from '../lib/feed/events.js';
 import { readUnifiedEvents } from '../lib/event-stream.js';
 import { parseFamilyList, EVENT_FAMILIES, type EventFamily } from '../lib/event-families.js';
 import { ingestBatch } from '../lib/events-ingest.js';

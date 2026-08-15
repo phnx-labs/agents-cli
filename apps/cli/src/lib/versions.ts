@@ -56,7 +56,7 @@ import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAge
 import { composeRulesFromState } from './rules/compose.js';
 import { loadManifest, saveManifest, buildManifest as buildSyncManifest, isStale } from './staleness/index.js';
 import { pruneRemovedResources, type PrunableKind } from './staleness/prune.js';
-import { emit } from './events.js';
+import { emit } from './feed/events.js';
 import { safeJoin } from './paths.js';
 import {
   installCommandSkillToVersion,

@@ -7,7 +7,7 @@ import {
   resolveAnswerRoute,
   resumeArgv,
 } from './answer-router.js';
-import type { OpenBlock } from './feed.js';
+import type { OpenBlock } from './feed/feed.js';
 import type { ActiveSession } from './session/active.js';
 
 function block(over: Partial<OpenBlock> = {}): OpenBlock {

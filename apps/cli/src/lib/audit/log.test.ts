@@ -13,7 +13,7 @@ import {
   GENESIS_HASH,
   type AuditEntry,
 } from './log.js';
-import { query, _resetForTest as resetEvents } from '../events.js';
+import { query, _resetForTest as resetEvents } from '../feed/events.js';
 
 /** Absolute path to the log module under test — imported by the spawned workers. */
 const LOG_MODULE = fileURLToPath(new URL('./log.ts', import.meta.url));

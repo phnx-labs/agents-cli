@@ -10,7 +10,7 @@ import {
   isTimedOut,
   applyPolicyToBlock,
 } from './feed-policy.js';
-import { publishBlock, readBlock, listBlocks, blockIdForSession, type OpenBlock } from './feed.js';
+import { publishBlock, readBlock, listBlocks, blockIdForSession, type OpenBlock } from './feed/feed.js';
 import { drain, mailboxDir } from './mailbox.js';
 
 function tmpDir(): string {

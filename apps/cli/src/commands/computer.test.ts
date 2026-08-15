@@ -9,7 +9,7 @@ import {
   shouldBlockOffPlatform,
   emitComputerRunTaskMarker,
 } from './computer.js';
-import { query, _resetForTest } from '../lib/events.js';
+import { query, _resetForTest } from '../lib/feed/events.js';
 import { TASK_PREVIEW_MAX_CHARS } from '../lib/computer/sessions-list.js';
 
 // Real leading magic bytes, matching what each helper actually encodes.

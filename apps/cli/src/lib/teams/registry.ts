@@ -13,7 +13,7 @@ import * as path from 'path';
 import { randomBytes } from 'crypto';
 import lockfile from 'proper-lockfile';
 import { getTeamsRegistryPath } from '../state.js';
-import { emit } from '../events.js';
+import { emit } from '../feed/events.js';
 
 /** Metadata for a registered team. */
 export interface TeamMeta {

@@ -18,7 +18,7 @@ import {
   formatDie,
   dieFriction,
 } from './format.js';
-import { _resetForTest } from './events.js';
+import { _resetForTest } from './feed/events.js';
 
 const tempDirs: string[] = [];
 

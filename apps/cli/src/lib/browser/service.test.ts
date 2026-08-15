@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events';
 import * as yaml from 'yaml';
 import * as state from '../state.js';
 import * as profiles from './profiles.js';
-import { query, _resetForTest } from '../events.js';
+import { query, _resetForTest } from '../feed/events.js';
 
 const TEST_HOME = path.join(tmpdir(), 'agents-cli-browser-service-test');
 const TEST_AGENTS_DIR = path.join(TEST_HOME, '.agents');

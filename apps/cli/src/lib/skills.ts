@@ -18,7 +18,7 @@ import { capableAgents, isCapable } from './capabilities.js';
 import { getAgentsDir, getUserSkillsDir, getSkillsDir as getSystemSkillsDir, getProjectAgentsDir, getEnabledExtraRepos, getTrashSkillsDir } from './state.js';
 import { getEffectiveHome, getVersionHomePath, listInstalledVersions } from './versions.js';
 import { listCommandSkillsInVersion } from './command-skills.js';
-import { emit } from './events.js';
+import { emit } from './feed/events.js';
 
 const HOME = os.homedir();
 

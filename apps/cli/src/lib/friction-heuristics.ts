@@ -6,7 +6,7 @@
  * yet. This is a starting point: one detector for the most actionable pattern,
  * an agent stuck retrying the SAME denied action instead of adapting.
  */
-import type { EventRecord } from './events.js';
+import type { EventRecord } from './feed/events.js';
 
 export interface RepeatedGuardBlockFinding {
   /** Session id the repeated blocks happened in, or 'unknown' when the

@@ -37,7 +37,7 @@ import { makeVerbDispatcher } from '../lib/computer/dispatch.js';
 import { makeClaudeResponder, resolveApiKey, DEFAULT_CLAUDE_MODEL, DEFAULT_CLAUDE_BASE_URL } from '../lib/computer/model.js';
 import { TASK_PREVIEW_MAX_CHARS } from '../lib/computer/sessions-list.js';
 import { runComputerSessionsCommand } from './computer-sessions-picker.js';
-import { truncate } from '../lib/events.js';
+import { truncate } from '../lib/feed/events.js';
 
 // Help groups — mirror `agents browser` so the mental model carries over.
 const COMPUTER_HELP_GROUPS = [

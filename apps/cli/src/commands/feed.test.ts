@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'child_process';
 import { Command } from 'commander';
-import type { OpenBlock } from '../lib/feed.js';
+import type { OpenBlock } from '../lib/feed/feed.js';
 import {
   controlFeedSession,
   formatFeedMastheadRight,
@@ -22,7 +22,7 @@ import {
 } from './feed.js';
 import { groupBlocksByOutcome } from '../lib/feed-outcome.js';
 import { GLYPH } from '../lib/comms-render.js';
-import { formatActivityLine } from '../lib/activity.js';
+import { formatActivityLine } from '../lib/feed/activity.js';
 
 describe('resolveFeedFilter', () => {
   it('defaults to needs and normalizes aliases', () => {

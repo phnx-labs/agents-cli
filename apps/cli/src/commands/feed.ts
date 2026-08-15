@@ -25,7 +25,7 @@ import {
   buildDeclaredBlock,
   publishBlock,
   type OpenBlock,
-} from '../lib/feed.js';
+} from '../lib/feed/feed.js';
 
 import {
   ensureActivityLogHook,
@@ -36,7 +36,7 @@ import {
   parseActivityPayload,
   type ActivityEvent,
   type EnrichedActivityEvent,
-} from '../lib/activity.js';
+} from '../lib/feed/activity.js';
 import { projectKeyFromCwd } from '../lib/project-key.js';
 import { postFeedStatus } from '../lib/feed-post.js';
 import {

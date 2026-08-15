@@ -16,7 +16,7 @@ import { MAX_IMAGES_PER_DISPATCH } from '../lib/cloud/types.js';
 import { resolveCloudPrompt, executeCloudDispatch } from '../lib/cloud/dispatch.js';
 import type { JobConfig, JobTrigger } from '../lib/routines.js';
 import { normalizeTriggerEvent, validateTrigger, writeJob, setJobEnabled, jobExists, GITHUB_TRIGGER_EVENTS } from '../lib/routines.js';
-import { emit } from '../lib/events.js';
+import { emit } from '../lib/feed/events.js';
 
 /** Return a chalk color function appropriate for the given task status. */
 export function statusColor(status: string): (s: string) => string {

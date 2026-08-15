@@ -20,21 +20,21 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { stringifyDoc } from './yaml-io.js';
+import { stringifyDoc } from '../yaml-io.js';
 import chalk from 'chalk';
-import { relTime, truncate } from './format.js';
-import { getActivityDir, getUserAgentsDir } from './state.js';
-import { normalizeHost } from './machine-id.js';
-import { projectKeyFromCwd } from './project-key.js';
-import { stampProvenance } from './event-provenance.js';
-import type { ActorKind } from './actor.js';
+import { relTime, truncate } from '../format.js';
+import { getActivityDir, getUserAgentsDir } from '../state.js';
+import { normalizeHost } from '../machine-id.js';
+import { projectKeyFromCwd } from '../project-key.js';
+import { stampProvenance } from '../event-provenance.js';
+import type { ActorKind } from '../actor.js';
 // Type-only import: no runtime dependency on events.ts, so no import cycle
 // (events.ts / event-stream.ts import THIS module at runtime).
 import type { EventRecord } from './events.js';
 import {
   pythonToolRegistryLiteral,
   pythonValueFlagsLiteral,
-} from './session/bash-command.js';
+} from '../session/bash-command.js';
 
 /** Recognizable milestone events, ordered first in any activity lane. */
 export type MilestoneEvent =

@@ -15,7 +15,7 @@ import { parseTimeout } from './routines.js';
 import { compareVersions, getBinaryPath, getVersionHomePath, isVersionInstalled, listInstalledVersions, resolveVersion } from './versions.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { isTierToken, resolveTier } from './model-tiers.js';
-import { emitStart, createTimer, redactPrompt, redactArgs } from './events.js';
+import { emitStart, createTimer, redactPrompt, redactArgs } from './feed/events.js';
 import { sanitizeProcessEnv } from './secrets/bundles.js';
 import { resolveActor, actorEnv } from './actor.js';
 import { expandLocalHome } from './project-root.js';

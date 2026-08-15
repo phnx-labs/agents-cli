@@ -21,7 +21,7 @@ import {
   readRecentActivity,
   type ActivityEvent,
   type Attachment,
-} from './activity.js';
+} from './feed/activity.js';
 import { resolveProjectNameForCwd, listProjectDefs } from './projects.js';
 import { getHistoryDir } from './state.js';
 import { machineId } from './machine-id.js';
