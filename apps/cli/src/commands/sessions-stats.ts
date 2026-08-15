@@ -26,7 +26,7 @@ import {
   type ResourceStatRow,
 } from '../lib/session/db.js';
 import { listResources } from '../lib/resources.js';
-import { discoverPlugins } from '../lib/plugins.js';
+import { discoverPlugins } from '../lib/plugins/plugins.js';
 import { setHelpSections } from '../lib/help.js';
 import { terminalWidth, truncateToWidth, padToWidth, stringWidth } from '../lib/session/width.js';
 

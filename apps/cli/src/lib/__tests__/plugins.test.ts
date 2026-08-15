@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { loadPluginManifest } from '../plugins.js';
+import { loadPluginManifest } from '../plugins/plugins.js';
 
 const tempDirs: string[] = [];
 

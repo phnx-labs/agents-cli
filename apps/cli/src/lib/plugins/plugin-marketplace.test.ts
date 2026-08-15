@@ -6,7 +6,7 @@
  * Real filesystem under os.tmpdir(). The only thing redirected is state.js's
  * path getters (getPluginsDir / getEnabledExtraRepos / getProjectPluginsDir) so
  * discovery points at tmp repos instead of the real ~/.agents — the same
- * vi.doMock('./state.js') pattern used in plugins.test.ts.
+ * vi.doMock('../state.js') pattern used in plugins.test.ts.
  */
 
 import * as fs from 'fs';
@@ -31,7 +31,7 @@ import {
   unregisterCopilotInstalledPlugin,
   validateClaudePluginManifest,
 } from './plugin-marketplace.js';
-import type { DiscoveredPlugin, MarketplaceSpec } from './types.js';
+import type { DiscoveredPlugin, MarketplaceSpec } from '../types.js';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -112,8 +112,8 @@ describe('discoverMarketplaces', () => {
   ): Promise<void> {
     const { vi } = await import('vitest');
     vi.resetModules();
-    vi.doMock('./state.js', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('./state.js')>();
+    vi.doMock('../state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('../state.js')>();
       return {
         ...actual,
         getPluginsDir: () => overrides.pluginsDir ?? userPlugins,
@@ -129,7 +129,7 @@ describe('discoverMarketplaces', () => {
       const mod = await import('./plugin-marketplace.js');
       await fn(mod);
     } finally {
-      vi.doUnmock('./state.js');
+      vi.doUnmock('../state.js');
       vi.resetModules();
     }
   }
@@ -487,8 +487,8 @@ describe('syncAllMarketplaces', () => {
   it('produces one entry per discovered marketplace that has copied plugins', async () => {
     const { vi } = await import('vitest');
     vi.resetModules();
-    vi.doMock('./state.js', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('./state.js')>();
+    vi.doMock('../state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('../state.js')>();
       return {
         ...actual,
         getPluginsDir: () => userPlugins,
@@ -515,7 +515,7 @@ describe('syncAllMarketplaces', () => {
       const known = JSON.parse(fs.readFileSync(mod.knownMarketplacesPath('claude', versionHome), 'utf-8'));
       expect(Object.keys(known).sort()).toEqual(['agents-cli', 'agents-project']);
     } finally {
-      vi.doUnmock('./state.js');
+      vi.doUnmock('../state.js');
       vi.resetModules();
     }
   });
@@ -523,8 +523,8 @@ describe('syncAllMarketplaces', () => {
   it('skips discovered marketplaces with no copied plugins (no empty registration)', async () => {
     const { vi } = await import('vitest');
     vi.resetModules();
-    vi.doMock('./state.js', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('./state.js')>();
+    vi.doMock('../state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('../state.js')>();
       return {
         ...actual,
         getPluginsDir: () => userPlugins,
@@ -539,7 +539,7 @@ describe('syncAllMarketplaces', () => {
       const results = mod.syncAllMarketplaces('claude', versionHome);
       expect(results.map(r => r.name)).toEqual(['agents-cli']);
     } finally {
-      vi.doUnmock('./state.js');
+      vi.doUnmock('../state.js');
       vi.resetModules();
     }
   });

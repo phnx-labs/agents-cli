@@ -49,7 +49,7 @@ import {
 import { listHookEntriesFromDir } from '../lib/hooks.js';
 import { getResourceInventory, type ResourceInventory } from '../lib/resource-inventory.js';
 import { listMcpServerConfigs, discoverMcpConfigsFromRepo, type McpYamlConfig } from '../lib/mcp.js';
-import { discoverPlugins, discoverPluginsInDir, pluginResourceGroups, inspectPluginCapabilities, pluginCapabilityLabels, type PluginResourceGroup } from '../lib/plugins.js';
+import { discoverPlugins, discoverPluginsInDir, pluginResourceGroups, inspectPluginCapabilities, pluginCapabilityLabels, type PluginResourceGroup } from '../lib/plugins/plugins.js';
 import { showResourceList } from './resource-view.js';
 import { PLUGIN_GROUP_COLORS } from './plugins.js';
 import { isInteractiveTerminal } from './utils.js';

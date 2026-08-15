@@ -7,7 +7,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'yaml';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { toPosix } from './platform/index.js';
+import { toPosix } from '../platform/index.js';
 
 // RUSH-2215 review: do not skip the whole file on win32. Symlink-only cases
 // already use it.skipIf(win32); pure suites (expandPluginVars, parseInstallSpec, …)
@@ -38,7 +38,7 @@ import {
   isHermesPluginInstalled,
   isOpenCodePluginInstalled,
 } from './plugins.js';
-import type { DiscoveredPlugin, PluginManifest } from './types.js';
+import type { DiscoveredPlugin, PluginManifest } from '../types.js';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -275,8 +275,8 @@ describePlugins('discoverPlugins', () => {
     fs.symlinkSync(sourceRoot, path.join(pluginsDir, 'linked-plugin'), process.platform === 'win32' ? 'junction' : 'dir');
 
     vi.resetModules();
-    vi.doMock('./state.js', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('./state.js')>();
+    vi.doMock('../state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('../state.js')>();
       return { ...actual, getPluginsDir: () => pluginsDir, getEnabledExtraRepos: () => [], getProjectPluginsDir: () => null, getSystemPluginsDir: () => path.join(tmpDir, 'no-system') };
     });
 
@@ -292,7 +292,7 @@ describePlugins('discoverPlugins', () => {
       expect(plugins[0]?.repoRoot).toBe(tmpDir);
       expect(plugins[0]?.snapshotSha).toBeUndefined();
     } finally {
-      vi.doUnmock('./state.js');
+      vi.doUnmock('../state.js');
       vi.resetModules();
     }
   });
@@ -309,14 +309,14 @@ describePlugins('discoverPlugins', () => {
     fs.renameSync(path.join(tmpDir, 'test-plugin'), path.join(pluginsDir, 'git-tracked-plugin'));
 
     vi.resetModules();
-    vi.doMock('./state.js', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('./state.js')>();
+    vi.doMock('../state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('../state.js')>();
       return { ...actual, getPluginsDir: () => pluginsDir, getEnabledExtraRepos: () => [], getProjectPluginsDir: () => null, getSystemPluginsDir: () => path.join(tmpDir, 'no-system') };
     });
 
     try {
       const { discoverPlugins: discover } = await import('./plugins.js');
-      const { _resetSnapshotShaCacheForTest } = await import('./git.js');
+      const { _resetSnapshotShaCacheForTest } = await import('../git.js');
       _resetSnapshotShaCacheForTest();
       const plugins = discover();
       expect(plugins.map((plugin) => plugin.name)).toEqual(['git-tracked-plugin']);
@@ -324,7 +324,7 @@ describePlugins('discoverPlugins', () => {
       expect(plugins[0]?.snapshotSha).toBe(expectedSha);
       _resetSnapshotShaCacheForTest();
     } finally {
-      vi.doUnmock('./state.js');
+      vi.doUnmock('../state.js');
       vi.resetModules();
     }
   });
@@ -334,8 +334,8 @@ describePlugins('discoverPlugins', () => {
     fs.symlinkSync(path.join(tmpDir, 'missing'), path.join(pluginsDir, 'missing-plugin'), 'dir');
 
     vi.resetModules();
-    vi.doMock('./state.js', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('./state.js')>();
+    vi.doMock('../state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('../state.js')>();
       return { ...actual, getPluginsDir: () => pluginsDir, getEnabledExtraRepos: () => [], getProjectPluginsDir: () => null, getSystemPluginsDir: () => path.join(tmpDir, 'no-system') };
     });
 
@@ -343,7 +343,7 @@ describePlugins('discoverPlugins', () => {
       const { discoverPlugins: discover } = await import('./plugins.js');
       expect(discover()).toEqual([]);
     } finally {
-      vi.doUnmock('./state.js');
+      vi.doUnmock('../state.js');
       vi.resetModules();
     }
   });
@@ -359,8 +359,8 @@ describePlugins('discoverPlugins', () => {
     fs.renameSync(path.join(tmpDir, 'test-plugin'), path.join(pluginsDir, 'goodplug'));
 
     vi.resetModules();
-    vi.doMock('./state.js', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('./state.js')>();
+    vi.doMock('../state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('../state.js')>();
       return { ...actual, getPluginsDir: () => pluginsDir, getEnabledExtraRepos: () => [], getProjectPluginsDir: () => null, getSystemPluginsDir: () => path.join(tmpDir, 'no-system') };
     });
 
@@ -374,7 +374,7 @@ describePlugins('discoverPlugins', () => {
       expect(plugins.map((p) => p.name)).toEqual(['goodplug']);
     } finally {
       process.stderr.write = origWrite;
-      vi.doUnmock('./state.js');
+      vi.doUnmock('../state.js');
       vi.resetModules();
     }
 
@@ -415,18 +415,18 @@ describePlugins('discoverPlugins across marketplaces', () => {
   });
 
   afterEach(() => {
-    vi.doUnmock('./state.js');
+    vi.doUnmock('../state.js');
     vi.resetModules();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   async function withState(
-    overrides: Partial<typeof import('./state.js')>,
+    overrides: Partial<typeof import('../state.js')>,
     fn: (mod: typeof import('./plugins.js')) => Promise<void> | void
   ) {
     vi.resetModules();
-    vi.doMock('./state.js', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('./state.js')>();
+    vi.doMock('../state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('../state.js')>();
       // Isolate from a real ~/.agents/.system/plugins on the dev machine; a test
       // can still opt into a system repo by passing getSystemPluginsDir in overrides.
       return { ...actual, getSystemPluginsDir: () => path.join(tmpDir, 'no-system'), ...overrides };
@@ -435,7 +435,7 @@ describePlugins('discoverPlugins across marketplaces', () => {
       const mod = await import('./plugins.js');
       await fn(mod);
     } finally {
-      vi.doUnmock('./state.js');
+      vi.doUnmock('../state.js');
       vi.resetModules();
     }
   }
@@ -866,8 +866,8 @@ describePlugins('loadUserConfig / saveUserConfig', () => {
     const pluginsDir = path.join(tmpDir, 'plugins');
 
     vi.resetModules();
-    vi.doMock('./state.js', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('./state.js')>();
+    vi.doMock('../state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('../state.js')>();
       return { ...actual, getPluginsDir: () => pluginsDir };
     });
     try {
@@ -876,7 +876,7 @@ describePlugins('loadUserConfig / saveUserConfig', () => {
       const loaded = load(pluginName);
       expect(loaded).toEqual(testConfig);
     } finally {
-      vi.doUnmock('./state.js');
+      vi.doUnmock('../state.js');
       vi.resetModules();
     }
   });
@@ -950,8 +950,8 @@ describePlugins('installPlugin validation', () => {
     pluginsDir = path.join(tmpDir, 'plugins');
     execFileSyncMock = vi.fn();
     vi.resetModules();
-    vi.doMock('./state.js', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('./state.js')>();
+    vi.doMock('../state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('../state.js')>();
       return { ...actual, getPluginsDir: () => pluginsDir };
     });
     vi.doMock('child_process', async (importOriginal) => {
@@ -961,7 +961,7 @@ describePlugins('installPlugin validation', () => {
   });
 
   afterEach(() => {
-    vi.doUnmock('./state.js');
+    vi.doUnmock('../state.js');
     vi.doUnmock('child_process');
     vi.resetModules();
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -2029,8 +2029,8 @@ describePlugins('updatePlugin exec-surface consent gate', () => {
 
   async function loadUpdate() {
     vi.resetModules();
-    vi.doMock('./state.js', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('./state.js')>();
+    vi.doMock('../state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('../state.js')>();
       return {
         ...actual,
         getPluginsDir: () => pluginsDir,
@@ -2051,7 +2051,7 @@ describePlugins('updatePlugin exec-surface consent gate', () => {
   });
 
   afterEach(() => {
-    vi.doUnmock('./state.js');
+    vi.doUnmock('../state.js');
     vi.resetModules();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });

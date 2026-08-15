@@ -36,7 +36,7 @@ import {
   diffVersionSkills,
   iterSkillsCapableVersions,
   removeSkillFromVersion,
-} from '../lib/skills.js';
+} from '../lib/plugins/skills.js';
 import {
   listUnmanagedHooksInVersionHome,
   iterHooksCapableVersions,
@@ -46,7 +46,7 @@ import {
   diffVersionPlugins,
   iterPluginsCapableVersions,
   removePluginSkillFromVersion,
-} from '../lib/plugins.js';
+} from '../lib/plugins/plugins.js';
 import {
   diffVersionSubagents,
   iterSubagentsCapableVersions,

@@ -2028,7 +2028,7 @@ export function registerRunCommand(program: Command): void {
         import('../lib/secrets/remote.js'),
         import('../lib/accounting/rotate.js'),
         import('../lib/versions.js'),
-        import('../lib/plugins.js'),
+        import('../lib/plugins/plugins.js'),
         import('../lib/workflows.js'),
         import('../lib/run-defaults.js'),
         import('../lib/mcp.js'),

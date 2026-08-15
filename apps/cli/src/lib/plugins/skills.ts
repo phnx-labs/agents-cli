@@ -11,14 +11,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'yaml';
-import type { AgentId, SkillMetadata, InstalledSkill } from './types.js';
-import { normalizeAliases } from './resource-aliases.js';
-import { AGENTS, ensureSkillsDir, agentConfigDirName } from './agents.js';
-import { capableAgents, isCapable } from './capabilities.js';
-import { getAgentsDir, getUserSkillsDir, getSkillsDir as getSystemSkillsDir, getProjectAgentsDir, getEnabledExtraRepos, getTrashSkillsDir } from './state.js';
-import { getEffectiveHome, getVersionHomePath, listInstalledVersions } from './versions.js';
-import { listCommandSkillsInVersion } from './command-skills.js';
-import { emit } from './events.js';
+import type { AgentId, SkillMetadata, InstalledSkill } from '../types.js';
+import { normalizeAliases } from '../resource-aliases.js';
+import { AGENTS, ensureSkillsDir, agentConfigDirName } from '../agents.js';
+import { capableAgents, isCapable } from '../capabilities.js';
+import { getAgentsDir, getUserSkillsDir, getSkillsDir as getSystemSkillsDir, getProjectAgentsDir, getEnabledExtraRepos, getTrashSkillsDir } from '../state.js';
+import { getEffectiveHome, getVersionHomePath, listInstalledVersions } from '../versions.js';
+import { listCommandSkillsInVersion } from '../command-skills.js';
+import { emit } from '../events.js';
 
 const HOME = os.homedir();
 

@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 const tsxBin = path.resolve('node_modules/.bin/tsx');
-const skillsModuleUrl = pathToFileURL(path.resolve('src/lib/skills.ts')).href;
+const skillsModuleUrl = pathToFileURL(path.resolve('src/lib/plugins/skills.ts')).href;
 
 /**
  * Spawn a subprocess with an isolated HOME so os.homedir() returns tempHome.
