@@ -8,7 +8,7 @@
   <a href="https://www.npmjs.com/package/@phnx-labs/agents-cli"><img src="https://img.shields.io/npm/v/@phnx-labs/agents-cli.svg?style=flat-square" alt="npm version" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/npm/l/@phnx-labs/agents-cli.svg?style=flat-square" alt="license" /></a>
   <a href="https://www.npmjs.com/package/@phnx-labs/agents-cli"><img src="https://img.shields.io/npm/dm/@phnx-labs/agents-cli.svg?style=flat-square" alt="downloads" /></a>
-  <a href="https://github.com/phnx-labs/agents-cli"><img src="https://img.shields.io/badge/github-phnx--labs%2Fagents--cli-blue?style=flat-square" alt="github" /></a>
+  <a href="https://github.com/phnx-labs/agi-cli"><img src="https://img.shields.io/badge/github-phnx--labs%2Fagi--cli-blue?style=flat-square" alt="github" /></a>
 </p>
 
 **A framework for running a distributed agent factory.** Dispatch Claude, Codex, Antigravity, Grok, and more across your own machines, in parallel, on your existing subscriptions. Measure every run with `agents perf` / `agents insights`, fold what you learn back into `AGENTS.md` and skills, then put the loop on a schedule with routines and monitors. Spawn parallel teams in isolated terminals or dispatch to the cloud for a PR. Watch live state across the fleet, nudge stalled runs, and message agents mid-flight. Store secrets behind Touch ID, drive real browsers and Electron apps, and steer the whole fleet from a menu bar — all from one CLI.
@@ -58,7 +58,7 @@ Full path -- installing harnesses, logging in, smoke-testing `agents teams`, and
 
 Already installed? `agents upgrade` updates agi-cli itself to the latest version (`agents upgrade 1.2.3` for a specific version or dist-tag, `-y` to skip the confirm prompt). The command is `upgrade` on every platform -- do not reach for `agents update`, which updates an installed **agent harness**, not agi-cli (and on macOS, `agents helper update` is a third thing: it reinstalls the keychain helper).
 
-Source: [github.com/phnx-labs/agents-cli](https://github.com/phnx-labs/agents-cli)
+Source: [github.com/phnx-labs/agi-cli](https://github.com/phnx-labs/agi-cli)
 
 Also available as `ag` -- all commands work with both `agents` and `ag`.
 
@@ -1505,8 +1505,8 @@ Agents are defined in [src/lib/agents.ts](apps/cli/src/lib/agents.ts) -- each is
 ## Contributing
 
 ```bash
-git clone https://github.com/phnx-labs/agents-cli
-cd agents-cli/apps/cli
+git clone https://github.com/phnx-labs/agi-cli
+cd agi-cli/apps/cli
 bun install && bun run build && bun test
 ```
 

@@ -5,7 +5,7 @@
 If you discover a security vulnerability in agi-cli, please report it
 responsibly via GitHub Security Advisories:
 
-**https://github.com/phnx-labs/agents-cli/security/advisories/new**
+**https://github.com/phnx-labs/agi-cli/security/advisories/new**
 
 This opens a private channel with the maintainers. Please include:
 

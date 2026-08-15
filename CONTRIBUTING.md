@@ -5,8 +5,8 @@ Thanks for your interest in contributing. This guide covers the setup, conventio
 ## Setup
 
 ```bash
-git clone https://github.com/phnx-labs/agents-cli
-cd agents-cli/apps/cli
+git clone https://github.com/phnx-labs/agi-cli
+cd agi-cli/apps/cli
 bun install
 bun run build
 bun run test

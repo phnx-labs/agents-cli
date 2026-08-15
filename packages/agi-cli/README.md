@@ -17,6 +17,6 @@ npm uninstall -g @phnx-labs/agi-cli
 npm install -g @phnx-labs/agents-cli
 ```
 
-Docs and source: <https://github.com/phnx-labs/agents-cli>
+Docs and source: <https://github.com/phnx-labs/agi-cli>
 
 Apache-2.0 © Phoenix Labs
