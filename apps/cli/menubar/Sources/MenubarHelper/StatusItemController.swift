@@ -97,6 +97,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // this process's own `Notifier`, not a spawned `--notify` child, so the
     // alert cannot depend on anything the dead daemon would have provided.
     private var daemonUnhealthyTicks = 0
+    private var daemonUnhealthyState: DaemonLiveness?
     private var daemonDownNotified = false
     /// True once `daemonUnhealthyTicks` has crossed the threshold; drives the
     /// always-visible badge (see `refreshBadge`), independent of whether the
@@ -266,6 +267,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let liveness = AgentsCLI.daemonLiveness()
         if liveness == .running {
             daemonUnhealthyTicks = 0
+            daemonUnhealthyState = nil
             daemonDownNotified = false
             if schedulerDown {
                 schedulerDown = false
@@ -273,7 +275,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             }
             return
         }
-        daemonUnhealthyTicks += 1
+        if daemonUnhealthyState == liveness {
+            daemonUnhealthyTicks += 1
+        } else {
+            daemonUnhealthyState = liveness
+            daemonUnhealthyTicks = 1
+            daemonDownNotified = false
+        }
         if daemonUnhealthyTicks >= Self.daemonDownTickThreshold && !schedulerDown {
             schedulerDown = true
             refreshBadge()

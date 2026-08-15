@@ -24,7 +24,7 @@ enum DaemonLiveness: Equatable {
         guard let heartbeatData,
               let heartbeat = try? JSONDecoder().decode(Heartbeat.self, from: heartbeatData),
               heartbeat.pid == pid,
-              let lastTick = ISO8601DateFormatter().date(from: heartbeat.lastTick)
+              let lastTick = parseHeartbeatDate(heartbeat.lastTick)
         else {
             // A live PID with no trustworthy heartbeat is not enough evidence
             // to terminate it. The CLI status surface can still report the
@@ -32,5 +32,15 @@ enum DaemonLiveness: Equatable {
             return .running
         }
         return now.timeIntervalSince(lastTick) > wedgeThreshold ? .wedged : .running
+    }
+
+    /// JavaScript's Date.toISOString() always writes milliseconds. Accept the
+    /// older second-precision form too so an upgrade never turns a valid live
+    /// heartbeat into ambiguous state.
+    private static func parseHeartbeatDate(_ value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) { return date }
+        return ISO8601DateFormatter().date(from: value)
     }
 }
