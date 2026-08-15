@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Near-instant CI and release for agents-cli</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-awaiting-review">awaiting-review</span></div>
+<h1>Near-instant CI and release for agents-cli</h1>
+<p class="summary">Replace component-wide test sweeps and lease-bound sandboxes with exact affected-test selection on a dedicated untrusted-code executor, then release from merge-candidate attestations and reusable signed helper artifacts.</p>
+<div class="meta" aria-label="Artifact metadata"><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><img class="chip-favicon" src="https://www.google.com/s2/favicons?domain=vitest.dev&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><a href="https://vitest.dev/guide/cli" target="_blank" rel="noopener">cli</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/manage-access" target="_blank" rel="noopener">manage-access</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agi-cli/pull/2717" target="_blank" rel="noopener">PR #2717</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">ci-p99-policy</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/01a00504-8ac6-7e10-9799-da813a02c003">01a00504</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-15</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#focus-for-review" data-toc-for="focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a class="toc-item" href="#intent" data-toc-for="intent"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Intent</a><a class="toc-item" href="#purpose" data-toc-for="purpose"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Purpose</a><a class="toc-item" href="#current-architecture" data-toc-for="current-architecture"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Current architecture</a><a class="toc-item toc-sub" href="#what-happens-now" data-toc-for="what-happens-now">What happens now</a><a class="toc-item toc-sub" href="#six-month-request-available-evidence" data-toc-for="six-month-request-available-evidence">Six-month request, available evidence</a><a class="toc-item toc-sub" href="#where-the-required-test-time-goes" data-toc-for="where-the-required-test-time-goes">Where the required test time goes</a><a class="toc-item toc-sub" href="#why-only-the-changed-module-does-not-happen-today" data-toc-for="why-only-the-changed-module-does-not-happen-today">Why only-the-changed-module does not happen today</a><a class="toc-item toc-sub" href="#why-cli-docs-and-preflight-exist" data-toc-for="why-cli-docs-and-preflight-exist">Why CLI docs and preflight exist</a><a class="toc-item toc-sub" href="#existing-pr-2717-closed-not-optimized" data-toc-for="existing-pr-2717-closed-not-optimized">Existing PR #2717 — closed, not optimized</a><a class="toc-item" href="#proposed-changes" data-toc-for="proposed-changes"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a class="toc-item toc-sub" href="#1-one-exact-impact-planner-is-the-source-of-truth" data-toc-for="1-one-exact-impact-planner-is-the-source-of-truth">1. One exact impact planner is the source of truth</a><a class="toc-item toc-sub" href="#2-collapse-the-pull-request-gate-into-one-job" data-toc-for="2-collapse-the-pull-request-gate-into-one-job">2. Collapse the pull-request gate into one job</a><a class="toc-item toc-sub" href="#3-move-full-sweeps-out-of-the-merge-critical-path" data-toc-for="3-move-full-sweeps-out-of-the-merge-critical-path">3. Move full sweeps out of the merge critical path</a><a class="toc-item toc-sub" href="#4-release-from-evidence-already-earned-by-the-merged-tree" data-toc-for="4-release-from-evidence-already-earned-by-the-merged-tree">4. Release from evidence already earned by the merged tree</a><a class="toc-item toc-sub" href="#5-stop-rebuilding-unchanged-helpers-at-the-source" data-toc-for="5-stop-rebuilding-unchanged-helpers-at-the-source">5. Stop rebuilding unchanged helpers at the source</a><a class="toc-item" href="#options-considered" data-toc-for="options-considered"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Options considered</a><a class="toc-item" href="#public-interface" data-toc-for="public-interface"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Public Interface</a><a class="toc-item" href="#implementation-plan" data-toc-for="implementation-plan"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Implementation plan</a><a class="toc-item" href="#validation" data-toc-for="validation"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Validation</a><a class="toc-item" href="#risks" data-toc-for="risks"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Risks</a><a class="toc-item" href="#evidence" data-toc-for="evidence"><span class="toc-index">11&nbsp;&middot;&nbsp;</span>Evidence</a><a class="toc-item" href="#assumptions" data-toc-for="assumptions"><span class="toc-index">12&nbsp;&middot;&nbsp;</span>Assumptions</a><a class="toc-item" href="#tracking" data-toc-for="tracking"><span class="toc-index">13&nbsp;&middot;&nbsp;</span>Tracking</a><a class="toc-item" href="#references" data-toc-for="references"><span class="toc-index">14&nbsp;&middot;&nbsp;</span>References</a></nav><article class="artifact-body"><h2 id="focus-for-review">Focus for review</h2><ul>
+<li><strong>Required-check target:</strong> event-to-terminal-check P99 is <strong>≤90 seconds</strong>; a warm cache-hit should finish in <strong>≤10 seconds</strong>. A result older than or for a different commit SHA never counts.</li>
+<li><strong>Safety boundary:</strong> static imports select tests automatically; subprocess, filesystem, platform, and global-state dependencies are declared in one reviewed ownership manifest. An unmapped changed file fails immediately with the missing mapping instead of silently skipping tests or running the entire suite.</li>
+<li><strong>Compute:</strong> keep one always-on Crabbox as a shared multi-repository executor. Repositories and agents run concurrently in namespaced exact-candidate worktrees and one-use Firecracker microVMs restored from warm snapshots. No run acquires the machine; a fair scheduler admits CPU/memory slots. The host is only a controller/cache substrate and exposes no tailnet, durable credentials, host sockets, or writable trusted cache to jobs.</li>
+<li><strong>Windows:</strong> remove Windows from required pull-request and release gates. Keep at most a best-effort post-merge smoke while real usage is measured; close PR #2717 because optimizing a non-required gate adds complexity without helping the 90-second P99.</li>
+<li><strong>Release:</strong> ordinary release P99 is <strong>≤180 seconds</strong>. Promote the exact tested npm tarball with OIDC, run a clean install smoke, and rebuild/sign/notarize helpers only when their own inputs change.</li>
+<li><strong>Backstop:</strong> keep a full cross-platform sweep after merge and nightly. It detects selection mistakes and blocks promotion of the affected attestation policy, but does not hold every pull request open.</li>
+</ul>
+<h2 id="intent">Intent</h2><p>Make the required CI result feel immediate and make a routine release publish in minutes, without weakening correctness. A change to one module should not execute the CLI's entire 12,000-test corpus. A version-only release should not repeat tests already proven for the exact tree or rebuild unrelated native applications and helpers.</p>
+<h2 id="purpose">Purpose</h2><p>Return merge and release latency to the scale of the changed behavior. The test corpus remains a correctness backstop; it stops being a tax paid by every unrelated change.</p>
+<div class="artifact-callout">
+The load-bearing change is affected-test selection. Warm checkout and dependency caches save roughly 20 seconds; they cannot remove five minutes of unrelated test execution.
+</div><h2 id="current-architecture">Current architecture</h2><h3 id="what-happens-now">What happens now</h3><div class="artifact-grid artifact-grid-2 artifact-behavior">
+<div class="artifact-panel" data-state="current" data-evidence="capture">
+
+**Before — one CLI file changes**
+
+```console
+scope (Ubuntu)                         17s
+├─ cli-preflight: install + build      42s
+├─ cli-docs: docs + command index      25s
+├─ shard 1: 287 files / 4,088 tests   335s
+├─ shard 2: 287 files / 4,020 tests   300s
+└─ shard 3: 287 files / 4,051 tests   229s
+
+required workflow: median 6.1m · p90 15.8m
+```
+
+The scope classifier knows only that `apps/cli/**` changed. It does not know which source module, test owner, platform, command index, binary bootstrap, or helper changed.
+</div>
+
+<div class="artifact-panel" data-state="proposed" data-evidence="mockup">
+
+**After — the same file changes**
+
+```console
+impact plan                              2s
+exact-SHA worktree + warm dependencies   3s
+related + declared owner tests          8–35s
+policy / docs check only if affected     1–8s
+attestation + required check             2s
+
+target: P99 ≤90s · cache hit ≤10s
+selected: 3 test files, not 861
+```
+
+The required check names every selected test and the rule that selected it. An unmapped boundary produces a fast red policy result with the exact manifest entry to add.
+</div>
+</div><h3 id="six-month-request-available-evidence">Six-month request, available evidence</h3><p>The requested window begins 2026-02-15. GitHub exposes merged pull-request history for this repository from 2026-05-06, so the quantitative baseline covers <strong>101 days</strong>, not a fabricated six months. Fleet session search was widened across directories and devices; the available indexed topic corpus starts 2026-07-29 and is supporting context only. GitHub timestamps are the merge-latency source of truth.</p>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg viewBox="0 0 960 440" role="img" aria-label="CI and release latency baseline with hard targets" xmlns="http://www.w3.org/2000/svg">
+  <text x="24" y="28" font-family="ui-monospace,monospace" font-size="18" font-weight="700" fill="#f5f5f4">2,158 merged pull requests · 2026-05-06 → 2026-08-15</text>
+  <text x="24" y="49" font-family="ui-monospace,monospace" font-size="15" fill="#b9c7d5">Aggregate open→merge capacity wait: 6,383 hours (overlapping PR/agent time, not literal human hours)</text>
+  <line x1="170" y1="85" x2="930" y2="85" stroke="#b9c7d5" stroke-opacity=".25"></line><line x1="170" y1="165" x2="930" y2="165" stroke="#b9c7d5" stroke-opacity=".25"></line><line x1="170" y1="245" x2="930" y2="245" stroke="#b9c7d5" stroke-opacity=".25"></line>
+  <text x="24" y="107" font-family="ui-monospace,monospace" font-size="16" fill="#f5f5f4">PR open→merge p50</text><rect x="170" y="88" width="442" height="27" rx="4" fill="#e0663a"></rect><text x="620" y="107" font-family="ui-monospace,monospace" font-size="16" fill="#f5f5f4">17.7m</text>
+  <text x="24" y="147" font-family="ui-monospace,monospace" font-size="16" fill="#f5f5f4">PR open→merge p90</text><rect x="170" y="128" width="720" height="27" rx="4" fill="#e0663a"></rect><text x="898" y="147" font-family="ui-monospace,monospace" font-size="16" fill="#f5f5f4">297.6m</text>
+  <text x="24" y="187" font-family="ui-monospace,monospace" font-size="16" fill="#f5f5f4">Tests workflow p50</text><rect x="170" y="168" width="307" height="27" rx="4" fill="#e0663a"></rect><text x="485" y="187" font-family="ui-monospace,monospace" font-size="16" fill="#f5f5f4">6.1m</text>
+  <text x="24" y="227" font-family="ui-monospace,monospace" font-size="16" fill="#f5f5f4">Tests workflow p90</text><rect x="170" y="208" width="630" height="27" rx="4" fill="#e0663a"></rect><text x="808" y="227" font-family="ui-monospace,monospace" font-size="16" fill="#f5f5f4">15.8m</text>
+  <text x="24" y="267" font-family="ui-monospace,monospace" font-size="16" fill="#f5f5f4">Release PR p50 / p90</text><rect x="170" y="248" width="638" height="27" rx="4" fill="#e0663a"></rect><text x="816" y="267" font-family="ui-monospace,monospace" font-size="16" fill="#f5f5f4">12.8m / 73.5m</text>
+  <text x="24" y="315" font-family="ui-monospace,monospace" font-size="22" font-weight="700" fill="#84cc16">HARD P99 TARGETS</text>
+  <text x="24" y="358" font-family="ui-monospace,monospace" font-size="20" fill="#f5f5f4">Required CI</text><rect x="190" y="330" width="150" height="38" rx="6" fill="#84cc16"></rect><text x="360" y="357" font-family="ui-monospace,monospace" font-size="21" font-weight="700" fill="#f5f5f4">≤ 90 seconds</text>
+  <text x="500" y="358" font-family="ui-monospace,monospace" font-size="20" fill="#f5f5f4">Ordinary release</text><rect x="700" y="330" width="190" height="38" rx="6" fill="#84cc16"></rect><text x="900" y="357" font-family="ui-monospace,monospace" font-size="21" font-weight="700" text-anchor="end" fill="#f5f5f4">≤ 180 seconds</text>
+  <text x="24" y="408" font-family="ui-monospace,monospace" font-size="18" fill="#b9c7d5">Warm-cache CI stretch target: ≤ 10 seconds</text>
+</svg>
+<figcaption><b>Figure 1.</b> Large, explicit hard-percentile targets replace the previous soft median goals.</figcaption>
+</figure><h3 id="where-the-required-test-time-goes">Where the required test time goes</h3><table>
+<thead>
+<tr>
+<th>Work</th>
+<th>Current median</th>
+<th>What the evidence says</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Checkout</td>
+<td>3 seconds</td>
+<td>Not the bottleneck.</td>
+</tr>
+<tr>
+<td><code>bun install</code></td>
+<td>17 seconds</td>
+<td>Warm dependencies help, but cannot turn six minutes into seconds.</td>
+</tr>
+<tr>
+<td>Build</td>
+<td>14 seconds</td>
+<td>Split by build inputs; do not optimize first.</td>
+</tr>
+<tr>
+<td>Shard 1 tests</td>
+<td>318 seconds</td>
+<td>Dominant path.</td>
+</tr>
+<tr>
+<td>Shard 2 tests</td>
+<td>286 seconds</td>
+<td>Dominant path.</td>
+</tr>
+<tr>
+<td>Shard 3 tests</td>
+<td>228 seconds</td>
+<td>Dominant path.</td>
+</tr>
+<tr>
+<td>Docs</td>
+<td>25 seconds</td>
+<td>Separate runner/job overhead for a check that can be selected inside the impact plan.</td>
+</tr>
+<tr>
+<td>Preflight</td>
+<td>42 seconds</td>
+<td>Bundles unrelated command-index, build, binary-smoke, and benchmark concerns.</td>
+</tr>
+</tbody></table>
+<p>The slow tail is concentrated. Representative files include <code>routines.test.ts</code> at 208 seconds, <code>sessions.test.ts</code> at 176 seconds, <code>daemon.test.ts</code> at 112 seconds, <code>non-interactive.test.ts</code> at 76 seconds, and <code>versions.test.ts</code> at 73 seconds. More shards move this work around; affected-test selection stops running it when its owners did not change.</p>
+<h3 id="why-only-the-changed-module-does-not-happen-today">Why only-the-changed-module does not happen today</h3><div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">// scripts/ci-scope.ts — current decision granularity</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">if (file.startsWith('apps/cli/')) flags.cli = true</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">const plan = selectImpact(baseSha, headSha, changedFiles, ownershipManifest)</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">// plan.tests, plan.checks, plan.platforms, plan.reasons</span></span></pre></div><p>The current classifier emits five booleans: CLI, CLI docs, extension, session tracker, and Windows. Any non-document CLI path sets the single <code>cli</code> boolean, which starts all three full Vitest shards. Vitest already provides <code>related</code>/<code>--changed</code>, but its graph covers static imports and explicitly does not cover dynamic paths. This repository has CLI subprocess, filesystem, and global-state tests, so <code>vitest related</code> is a useful engine, not a complete policy.</p>
+<h3 id="why-cli-docs-and-preflight-exist">Why CLI docs and preflight exist</h3><p>They are legitimate invariants with the wrong scheduling boundary:</p>
+<table>
+<thead>
+<tr>
+<th>Current check</th>
+<th>Invariant</th>
+<th>Run when</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>CLI docs</td>
+<td>Generated command index and documented command surface agree</td>
+<td>Command definitions, command metadata, docs index generator, or covered docs change</td>
+</tr>
+<tr>
+<td>Preflight: command index</td>
+<td>Committed command index is current</td>
+<td>Same ownership set as CLI docs</td>
+</tr>
+<tr>
+<td>Preflight: TypeScript build</td>
+<td>Shipping entry graph compiles</td>
+<td>Imported production source, build config, lockfile, package manifest, or build script changes</td>
+</tr>
+<tr>
+<td>Preflight: standalone smoke</td>
+<td>The standalone bootstrap starts</td>
+<td>Bootstrap, binary builder, package version, or entrypoint changes</td>
+</tr>
+<tr>
+<td>Preflight: session benchmark</td>
+<td>Session distribution remains within threshold</td>
+<td>Session discovery/index/database/status code or benchmark policy changes</td>
+</tr>
+</tbody></table>
+<p>The plan keeps each invariant and removes the insistence that every CLI edit run all of them on separate machines.</p>
+<h3 id="existing-pr-2717-closed-not-optimized">Existing PR #2717 — closed, not optimized</h3><p>PR <a class="link-pill" href="https://github.com/phnx-labs/agi-cli/pull/2717" title="https://github.com/phnx-labs/agi-cli/pull/2717" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="link-pill-text">#2717</span></a> reduced the Windows gate to a 1 minute 47 second smoke. That single platform check already exceeds the complete 90-second event-to-result budget before Linux work or GitHub scheduling is counted. The PR is closed: Windows is removed from required pull-request and ordinary-release gates instead of spending more complexity on a platform that has not demonstrated enough demand to justify blocking every contributor.</p>
+<p>During a short evidence window, Windows gets at most one best-effort post-merge smoke on separate capacity. It cannot block a merge or release. If demand remains unproven, remove Windows-only code, documentation, packaging, and the supported-platform claim rather than carrying permanent conditional branches.</p>
+<h2 id="proposed-changes">Proposed Changes</h2><h3 id="1-one-exact-impact-planner-is-the-source-of-truth">1. One exact impact planner is the source of truth</h3><p>Extend <code>scripts/ci-scope.ts</code> from component booleans to a deterministic JSON plan keyed by the selection range, tested merge-candidate tree, and policy version. Add one reviewed manifest at <code>apps/cli/ci/test-ownership.yaml</code> for dependencies that static imports cannot see.</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">{ "cli": true, "cli_docs": false, "windows": false }</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">{</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  "selection_base_sha": "…",</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  "pr_head_sha": "…",</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  "candidate_tree_sha": "…",</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  "policy_version": "impact-v1",</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  "tests": [</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    {"file":"src/lib/example.test.ts","reason":"static-import"},</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    {"file":"tests/non-interactive.test.ts","reason":"owner:cli-bootstrap"}</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  ],</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  "checks": ["typecheck"],</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  "platforms": ["linux"],</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  "unmapped": []</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">}</span></span></pre></div><p>Selection rules are fixed and ordered:</p>
+<ol>
+<li>A changed test file selects itself.</li>
+<li>A changed TypeScript source file selects companion tests and <code>vitest related --run</code> results.</li>
+<li>The ownership manifest adds subprocess, dynamic-import, filesystem-layout, platform, generated-doc, build, benchmark, and global-state consumers.</li>
+<li>A changed dependency/configuration file selects the explicit group named in the manifest.</li>
+<li>Every changed executable source must select at least one test/check. Zero selections fail unless the path has an explicit reviewed <code>testless</code> entry; the manifest validator audits every production/build/config path, including paths absent from the 200-PR sample.</li>
+<li>A changed path with no classification produces <code>unmapped[]</code> and fails the policy check in seconds. There is no silent skip and no automatic full-suite fallback.</li>
+<li>Workflow/policy changes run the impact planner's own tests plus a shadow full sweep before the new policy version can attest later commits.</li>
+</ol>
+<p>The planner also emits a human-readable table in the check summary: changed file → selected test/check → reason. This makes a wrong selection reviewable.</p>
+<h3 id="2-collapse-the-pull-request-gate-into-one-job">2. Collapse the pull-request gate into one job</h3><p>Replace only the CLI <code>scope</code> fan-out, three CLI shards, <code>cli-docs</code>, and <code>cli-preflight</code> with one CLI <code>Tests / impact</code> execution. Extension and session-tracker jobs remain separately selected with their current build/test commands and continue feeding the stable final aggregator. During shadow rollout all pull-request jobs remain GitHub-hosted; only after the dedicated untrusted executor passes its isolation gate do same-repository branches move there.</p>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg viewBox="0 0 980 330" role="img" aria-label="Before and after CI architecture" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8z" fill="#b9c7d5"></path></marker></defs>
+  <text x="20" y="25" font-family="ui-monospace,monospace" font-size="17" font-weight="700" fill="#f5f5f4">BEFORE: every CLI edit fans out to whole-component jobs</text>
+  <rect x="20" y="45" width="105" height="45" rx="5" fill="none" stroke="#e0663a" stroke-width="2"></rect><text x="43" y="72" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">scope</text>
+  <line x1="125" y1="67" x2="170" y2="67" stroke="#b9c7d5" stroke-width="1.5" marker-end="url(#a)"></line>
+  <rect x="180" y="35" width="120" height="45" rx="5" fill="none" stroke="#e0663a" stroke-width="2"></rect><text x="199" y="62" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">preflight</text>
+  <rect x="180" y="90" width="120" height="45" rx="5" fill="none" stroke="#e0663a" stroke-width="2"></rect><text x="213" y="117" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">docs</text>
+  <rect x="325" y="35" width="120" height="45" rx="5" fill="none" stroke="#e0663a" stroke-width="2"></rect><text x="350" y="62" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">shard 1</text>
+  <rect x="325" y="90" width="120" height="45" rx="5" fill="none" stroke="#e0663a" stroke-width="2"></rect><text x="350" y="117" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">shard 2</text>
+  <rect x="470" y="62" width="120" height="45" rx="5" fill="none" stroke="#e0663a" stroke-width="2"></rect><text x="495" y="89" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">shard 3</text>
+  <line x1="590" y1="84" x2="650" y2="84" stroke="#b9c7d5" stroke-width="1.5" marker-end="url(#a)"></line><rect x="660" y="62" width="130" height="45" rx="5" fill="none" stroke="#e0663a" stroke-width="2"></rect><text x="683" y="89" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">required gate</text>
+  <text x="20" y="185" font-family="ui-monospace,monospace" font-size="17" font-weight="700" fill="#f5f5f4">AFTER: exact SHA → isolated worktree → selected proof</text>
+  <rect x="20" y="205" width="125" height="50" rx="5" fill="none" stroke="#84cc16" stroke-width="2"></rect><text x="42" y="226" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">GitHub event</text><text x="50" y="243" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">+ head SHA</text>
+  <line x1="145" y1="230" x2="185" y2="230" stroke="#b9c7d5" stroke-width="1.5" marker-end="url(#a)"></line>
+  <rect x="195" y="205" width="145" height="50" rx="5" fill="none" stroke="#84cc16" stroke-width="2"></rect><text x="208" y="226" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">shared Crabbox</text><text x="210" y="243" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">multi-repo · no lease</text>
+  <line x1="340" y1="230" x2="380" y2="230" stroke="#b9c7d5" stroke-width="1.5" marker-end="url(#a)"></line>
+  <rect x="390" y="195" width="155" height="70" rx="5" fill="none" stroke="#84cc16" stroke-width="2"></rect><text x="410" y="217" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">detached worktree</text><text x="413" y="235" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">Firecracker microVM</text><text x="425" y="252" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">warm cache</text>
+  <line x1="545" y1="230" x2="585" y2="230" stroke="#b9c7d5" stroke-width="1.5" marker-end="url(#a)"></line>
+  <rect x="595" y="205" width="145" height="50" rx="5" fill="none" stroke="#84cc16" stroke-width="2"></rect><text x="615" y="226" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">selected tests</text><text x="612" y="243" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">+ named reasons</text>
+  <line x1="740" y1="230" x2="780" y2="230" stroke="#b9c7d5" stroke-width="1.5" marker-end="url(#a)"></line>
+  <rect x="790" y="195" width="165" height="70" rx="5" fill="none" stroke="#84cc16" stroke-width="2"></rect><text x="814" y="217" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">SHA attestation</text><text x="817" y="235" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">required check</text><text x="823" y="252" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">P99 ≤90s</text>
+  <text x="195" y="295" font-family="ui-monospace,monospace" font-size="15" fill="#f5f5f4">Fork PRs: GitHub-hosted isolated lane; never execute fork code on the persistent machine.</text>
+</svg>
+<figcaption><b>Figure 2.</b> Worktrees solve concurrency; the per-job microVM and fork split solve persistence and trust.</figcaption>
+</figure><p>The target executor is one always-on Crabbox shared by multiple repositories and agents. It is provider-owned capacity from the fleet's perspective: the broker does not acquire, reclaim, or exclusively assign it per run. It is also separate from the existing trusted org-runner host. Its directory contract is:</p>
+<pre><code>/srv/ci/mirrors/&lt;owner&gt;/&lt;repo&gt;.git
+/srv/ci/runs/&lt;owner&gt;/&lt;repo&gt;/&lt;candidate-tree&gt;/&lt;run-id&gt;/worktree
+/srv/ci/results/&lt;owner&gt;/&lt;repo&gt;/&lt;run-id&gt;/
+/srv/ci/cache/bun/&lt;lockfile-digest&gt;/
+</code></pre>
+<p>Each job:</p>
+<ul>
+<li>computes selection from merge base to PR head, then executes GitHub's merge-ref tree or an independently constructed equivalent candidate tree;</li>
+<li>records selection base, PR head, base, candidate commit/tree, and policy/toolchain digests separately;</li>
+<li>creates a detached worktree named by check-run id and candidate tree SHA;</li>
+<li>mounts only that worktree and content-addressed Bun/Vitest caches into a one-use Firecracker microVM;</li>
+<li>runs with no signing, npm, GitHub-write, fleet, SSH, or user secrets;</li>
+<li>exposes worker output only as raw logs/reports; the controller derives the conclusion from controller-observed exit status and report hashes, then signs with a key never mounted into the worker;</li>
+<li>removes the container/worktree after completion;</li>
+<li>allows worktrees from different repositories and agents concurrently up to measured CPU/memory limits;</li>
+<li>enters a fair per-repository queue when capacity is full; this is short-lived resource admission, not an exclusive machine lease;</li>
+<li>caps per-repository concurrency so one repo cannot starve all other agents.</li>
+</ul>
+<p>GitHub explicitly warns that pull-request code can be dangerous on a persistent self-hosted runner. Fork PRs therefore use GitHub-hosted runners with restore-only, non-secret caches. Same-repository PRs move only to the separate untrusted-code host after isolation proves they cannot reach trusted-runner files/processes, host sockets, Docker, tailnet, SSH agent, signing/publish credentials, GitHub token, or host home. The existing trusted runner label remains forbidden on every <code>pull_request</code> trigger.</p>
+<h3 id="3-move-full-sweeps-out-of-the-merge-critical-path">3. Move full sweeps out of the merge critical path</h3><p>On every merge to the default branch, run the full Linux suite and relevant macOS/Windows sweeps asynchronously. Nightly, run all platforms and Node versions. Compare selected tests with full-suite failures and store:</p>
+<ul>
+<li>selection recall: full-suite failures whose test was not selected on the originating PR;</li>
+<li>impacted test count and duration per changed path;</li>
+<li>queue, setup, execution, and reporting latency percentiles;</li>
+<li>policy version and exact source tree SHA;</li>
+<li>top test files by exclusive wall time.</li>
+</ul>
+<p>The rollout stays in shadow mode until <strong>200 representative pull requests and at least 14 days</strong> complete with zero missed failures. During shadow mode, the old full suite remains required and the new impact job reports what it would have selected. Promotion requires the measured targets and zero false negatives; otherwise the manifest or graph is corrected and the sample restarts for that policy version.</p>
+<h3 id="4-release-from-evidence-already-earned-by-the-merged-tree">4. Release from evidence already earned by the merged tree</h3><p>Today the release script runs a full Crabbox suite before opening a release PR, waits for pull-request checks, waits for a release matrix, then always builds/signs/notarizes the CLI and native helpers. Replace that sequence:</p>
+<div class="artifact-grid artifact-grid-2 artifact-behavior">
+<div class="artifact-panel" data-state="current" data-evidence="capture">
+
+**Before — routine release**
+
+```console
+lease/reuse Crabbox
+full Linux build + test
+create version/changelog PR
+full PR test workflow
+release OS × Node matrix
+merge
+build/sign/notarize all helpers
+build package → npm publish
+
+release PR p50 12.8m · p90 73.5m
+merge→npm p50 3.6m · p90 26.1m
+```
+</div>
+
+<div class="artifact-panel" data-state="proposed" data-evidence="mockup">
+
+**After — routine release**
+
+```console
+verify candidate-tree attestations      seconds
+create version/changelog PR
+version/changelog + package/build/smoke seconds
+merge
+build package + versioned CLI binary  parallel
+resolve verified helper digests         seconds
+publish npm and release manifest
+
+target start→npm P99 ≤180s
+```
+</div>
+</div><p>The release attestation key is immutable: tested candidate tree digest, selection base/base/head identities, platform, runtime/toolchain versions, lockfile digest, test-policy version, and selected/full suite identity. A base advance invalidates the candidate. Release reuse is allowed only when the final default-branch tree digest equals the tested candidate tree digest; evidence from a parent, nearby commit, branch name, or mutable cache key never counts.</p>
+<h3 id="5-stop-rebuilding-unchanged-helpers-at-the-source">5. Stop rebuilding unchanged helpers at the source</h3><p>Decouple helper artifact identity from the CLI package version. On main, a change-driven helper builder produces a signed/notarized artifact keyed by a digest of its complete inputs: source, build script, lockfile/toolchain, entitlements, assets, signing identity, and target architecture. It verifies <code>codesign</code>, Gatekeeper/stapling, and SHA-256 before recording the artifact.</p>
+<p>The release manifest maps one CLI version to immutable helper digests and independent helper versions. Migration is staged: release N ships the manifest-aware downloader while retaining the current per-CLI-version helper asset; only after that client is live does release N+1 consume an independent helper artifact. Old clients keep resolving the immutable asset already attached to their own <code>v&lt;cli-version&gt;</code> tag.</p>
+<p>The bundled <code>dist/lib/computer/helper-manifest.json</code> contains <code>schemaVersion</code>, platform, helper version, immutable asset URL, SHA-256, signer team, and input digest. Package integrity protects the manifest; the downloaded app still passes checksum, code-signing team, Gatekeeper, and notarization verification. New clients cache by helper version + digest. Missing or invalid manifests/assets fail setup; they never derive a fallback URL.</p>
+<table>
+<thead>
+<tr>
+<th>Artifact</th>
+<th>Current coupling</th>
+<th>Proposed release behavior</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>TypeScript/npm package</td>
+<td>CLI version and sources</td>
+<td>Always build; current measured build is small.</td>
+</tr>
+<tr>
+<td>Standalone CLI binary</td>
+<td>CLI version embedded in bootstrap</td>
+<td>Rebuild/sign/notarize each CLI version, in parallel with package build.</td>
+</tr>
+<tr>
+<td>Keychain helper</td>
+<td>No CLI version observed in build inputs</td>
+<td>Reuse verified content-addressed artifact unless its inputs change.</td>
+</tr>
+<tr>
+<td>Menu bar app</td>
+<td>Native sources/assets/signing inputs</td>
+<td>Reuse verified artifact unless its complete input digest changes.</td>
+</tr>
+<tr>
+<td>Computer helper</td>
+<td>CLI version currently stamped into <code>Info.plist</code></td>
+<td>Give it an independent helper version; rebuild only for helper-input changes, then map its digest from the CLI release manifest.</td>
+</tr>
+</tbody></table>
+<p>Missing or unverifiable helper artifacts fail the release boundary. They do not fall back to a stale build. A helper source change triggers its builder before the release train can consume the new tree.</p>
+<h2 id="options-considered">Options considered</h2><table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Expected result</th>
+<th>Decision</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Add dependency cache to GitHub-hosted jobs</td>
+<td>Saves roughly the 17-second install and some setup; tests still take 4–6 minutes</td>
+<td>Reject as the primary fix; keep as hygiene for fork jobs.</td>
+</tr>
+<tr>
+<td>Add more shards / more leased boxes</td>
+<td>Shortens a single full sweep, increases fixed setup and burst contention; still runs 12,000 tests</td>
+<td>Reject as the target architecture. Useful only during shadow validation.</td>
+</tr>
+<tr>
+<td>One shared multi-repo Crabbox, but keep full suite</td>
+<td>Removes lease/checkout churn but the test corpus remains the critical path</td>
+<td>Necessary compute base, insufficient alone.</td>
+</tr>
+<tr>
+<td>Affected tests + ownership manifest + standing isolated executor</td>
+<td>Ordinary diffs execute only their real proof on warm capacity</td>
+<td><strong>Adopt.</strong></td>
+</tr>
+<tr>
+<td>Merge queue / batch testing</td>
+<td>Amortizes full-suite compute but makes an individual PR wait for a batch</td>
+<td>Secondary backstop, not the user-facing gate.</td>
+</tr>
+<tr>
+<td>Pre-push speculative attestation</td>
+<td>A branch push can arrive at GitHub with proof already computed</td>
+<td>Add after the exact-SHA attestation format is stable; it can reduce post-push checks to attestation lookup.</td>
+</tr>
+</tbody></table>
+<h2 id="public-interface">Public Interface</h2><ul>
+<li><code>scripts/ci-scope.ts --base &lt;sha&gt; --head &lt;sha&gt; --json</code> becomes the canonical impact-plan interface. Output is deterministic and versioned; non-JSON mode prints the human mapping table.</li>
+<li><code>apps/cli/ci/test-ownership.yaml</code> is the only manual dependency surface for non-static relationships. CI validates that every production/build/config path is classified and every referenced test exists.</li>
+<li>The shared-executor request contains repository identity, candidate commit/tree, impact-plan digest, resource class, and check-run id. It never contains a box lease or mutable checkout path; the executor derives a namespaced worktree path and returns a run id.</li>
+<li>The required GitHub context remains one stable <code>Tests / test</code> aggregator during migration; its summary links to the <code>Tests / impact</code> plan and result so branch protection does not churn.</li>
+<li>Attestations are immutable JSON records addressed by SHA-256 and include selection range, candidate tree, base/head identities, plan digest, platform/toolchain, selected checks, controller-observed results, durations, and report/artifact digests. Only the controller constructs/signs them; workers cannot write a conclusion or access the signing identity.</li>
+<li>The release manifest adds independent helper versions/digests through the staged N/N+1 migration. The setup command is unchanged; no user-managed flag or environment variable is added.</li>
+</ul>
+<h2 id="implementation-plan">Implementation plan</h2><div class="checklist"><div class="checklist-head">1 / 10 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>Instrument the baseline.</strong> Persist per-job queue/setup/test/report timings, selected test file counts, and top slow tests; publish a 30-day dashboard.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>Build and test the impact planner.</strong> Extend scope output, add the ownership manifest, test static/dynamic/subprocess/platform/global cases, and make unknown paths fail loud.</span></li><li class="cl-item cl-done"><span class="cl-box">✓</span><span class="cl-text"><strong>Remove Windows from the gate.</strong> PR #2717 is closed; retain at most a non-blocking post-merge smoke during the support-demand evidence window.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>Provision the shared executor.</strong> Designate one always-on Crabbox for all participating repositories; remove per-run acquisition/reclaim, trusted runners and tailnet access; add per-repo mirrors, namespaced candidate worktrees, Firecracker isolation, shared content caches, fair scheduling, per-repo concurrency caps, and no secrets.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>Run shadow mode.</strong> Execute impact and full suites together for 200 PRs/14 days; measure recall and latency without changing branch protection.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>Switch the required gate.</strong> Promote <code>Tests / impact</code>, retain the stable aggregator context, move full Linux/cross-platform sweeps to post-merge/nightly, and keep fork PRs isolated.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>Create exact-candidate attestations.</strong> Sign/store merge-candidate and main proofs, invalidate on base advance, require final-tree equality in the release script, and delete the pre-release duplicate full-suite invocation.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>Decouple native helpers.</strong> Build/sign/notarize on helper-input changes, introduce independent helper versions and the release manifest mapping, and verify artifacts before reuse.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>Parallelize the remaining release.</strong> Build the npm package and version-stamped standalone CLI concurrently, consume verified helper artifacts, publish, tag, and verify installed versions through the existing release train.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>Enforce the targets.</strong> Alert on p50/p90 regression, queueing, unmapped files, false-negative selection, stale attestations, and missing helper artifacts.</span></li></ul></div>
+<h2 id="validation">Validation</h2><table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Required result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>One leaf source file changes</td>
+<td>Companion + statically related tests only; check summary explains every selection.</td>
+</tr>
+<tr>
+<td>CLI command definition changes</td>
+<td>Command test owners, build/typecheck, command index, and docs verification selected; unrelated session/daemon suites absent.</td>
+</tr>
+<tr>
+<td>A subprocess entrypoint changes</td>
+<td>Explicit ownership selects non-interactive/CLI integration tests even though static imports do not.</td>
+</tr>
+<tr>
+<td>Windows-only code changes</td>
+<td>No required Windows check. Best-effort post-merge smoke records evidence without blocking the PR or release.</td>
+</tr>
+<tr>
+<td>Test file changes</td>
+<td>That test always runs.</td>
+</tr>
+<tr>
+<td>Lockfile/Vitest/global setup changes</td>
+<td>Manifest selects the declared broad group; no implicit fallback.</td>
+</tr>
+<tr>
+<td>Unmapped production path changes</td>
+<td>Fast red policy check lists the missing path and required manifest action.</td>
+</tr>
+<tr>
+<td>Fork PR opens</td>
+<td>Never scheduled on the persistent executor; isolated GitHub-hosted job has no secrets and restore-only caches.</td>
+</tr>
+<tr>
+<td>Two agents test the same repository simultaneously</td>
+<td>Distinct run-id worktrees and result directories; shared read-only mirror/cache; neither checkout can mutate the other.</td>
+</tr>
+<tr>
+<td>Three repositories use the Crabbox simultaneously</td>
+<td>Fair admission honors per-repo concurrency caps; jobs run concurrently within CPU/memory limits without acquiring the box.</td>
+</tr>
+<tr>
+<td>Base advances after a green PR</td>
+<td>Candidate tree changes; prior attestation is invalid and the new merge candidate is tested.</td>
+</tr>
+<tr>
+<td>Same candidate tree is retried</td>
+<td>Cache may accelerate execution, but attestation identity/result remains tied to that tree, base, and policy version.</td>
+</tr>
+<tr>
+<td>Release PR changes version/changelog only</td>
+<td>Validate version/changelog, package build/typecheck, tarball/prepack contents, version-stamped standalone build/smoke, and helper-manifest/asset resolution; candidate attestations satisfy functional-code validation.</td>
+</tr>
+<tr>
+<td>Helper source unchanged</td>
+<td>Existing signed artifact digest is verified and reused; no rebuild/notarization.</td>
+</tr>
+<tr>
+<td>Helper source/signing input changes</td>
+<td>New artifact must build, notarize, verify, and be recorded before release consumption.</td>
+</tr>
+<tr>
+<td>Stale/missing attestation</td>
+<td>Release fails with the missing exact key; it never accepts parent-commit evidence.</td>
+</tr>
+</tbody></table>
+<p>End-to-end acceptance is measured from GitHub event receipt to required-check completion and from release command start to npm registry visibility. Success is P99 ≤90 seconds (cache-hit target ≤10 seconds) for ordinary PRs, P99 ≤180 seconds for routine releases with unchanged helpers, p90 ≤8 minutes when one native helper changed, zero selection misses during shadow mode, and zero persistent-runner executions for fork code.</p>
+<h2 id="risks">Risks</h2><table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Control</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Static graph misses dynamic/subprocess consumers</td>
+<td>Reviewed ownership manifest, fail-loud unclassified paths, 200-PR shadow comparison.</td>
+</tr>
+<tr>
+<td>Persistent runner is contaminated</td>
+<td>Dedicated untrusted host, one-use Firecracker microVM per job, read-only mirror, no tailnet/trusted runners/secrets/sockets, explicit cleanup, periodic image replacement.</td>
+</tr>
+<tr>
+<td>Fork code compromises standing capacity</td>
+<td>Forks never receive the persistent label; GitHub-hosted isolated path only.</td>
+</tr>
+<tr>
+<td>Cached proof is stale or poisoned</td>
+<td>Immutable digest keys, controller-constructed signatures, candidate/base verification, and final-main-tree equality.</td>
+</tr>
+<tr>
+<td>Full sweep finds a missed failure after merge</td>
+<td>Quarantine the attestation policy version, fix mapping, and block releases containing that tree until a corrected full proof exists.</td>
+</tr>
+<tr>
+<td>One repository monopolizes the shared box</td>
+<td>Fair queue plus per-repository concurrency caps; expose global and per-repo queue p90. Add a second always-on executor only when sustained p90 breaches the target, never one lease per run.</td>
+</tr>
+<tr>
+<td>Helper reuse ships the wrong binary</td>
+<td>Full input digest plus signature, Gatekeeper, stapling, architecture, and checksum verification; missing proof is a hard failure.</td>
+</tr>
+</tbody></table>
+<h2 id="evidence">Evidence</h2><ul>
+<li><code>.github/workflows/tests.yml:3-8,19-214</code> — scope fan-out, three full CLI shards, docs, preflight, platform jobs, and the required aggregator.</li>
+<li><code>scripts/ci-scope.ts:5-69</code> — component booleans and the rule that any non-doc <code>apps/cli/**</code> change selects the whole CLI suite.</li>
+<li><code>apps/cli/vitest.config.ts</code> — all CLI tests share one included pool and global setup.</li>
+<li><code>apps/cli/scripts/release.sh:22-28,181-258,365-403,1007-1060,1101-1128,1190-1210,1294-1313</code> — duplicate Crabbox suite, PR/matrix wait, unconditional native builds, publish and verification.</li>
+<li><code>apps/cli/scripts/sandbox.sh:123-186,292-310</code> — leased box selection/reclaim and copied task workspaces rather than git worktrees.</li>
+<li><code>scripts/ci-runner/README.md:1-34</code> — directly owned standing runner model and the explicit warning against public-fork execution.</li>
+<li><code>native/computer-mac/scripts/build.sh:30-33,76-100,141-185</code> — CLI release version stamped into helper bundle plus signing/notarization and checksum emission.</li>
+<li><a class="link-pill" href="https://vitest.dev/guide/cli" title="https://vitest.dev/guide/cli" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=vitest.dev&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">Vitest CLI: <code>related</code> and <code>changed</code></span></a> — static-import related-test selection; dynamic imports are not covered.</li>
+<li><a class="link-pill" href="https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/manage-access" title="https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/manage-access" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="link-pill-text">GitHub self-hosted runner access</span></a> — public fork pull requests can execute dangerous code on persistent machines.</li>
+<li><a class="link-pill" href="https://docs.github.com/en/actions/concepts/workflows-and-actions/dependency-caching" title="https://docs.github.com/en/actions/concepts/workflows-and-actions/dependency-caching" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="link-pill-text">GitHub dependency cache security</span></a> — caches are untrusted inputs and fork access requires careful scope/write policy.</li>
+<li><a class="link-pill" href="https://docs.github.com/en/rest/checks/runs" title="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="link-pill-text">GitHub check runs</span></a> — checks attach to a specific commit SHA; write access is restricted to appropriate authenticated identities.</li>
+</ul>
+<h2 id="assumptions">Assumptions</h2><ul>
+<li>“Almost instant” defaults to the explicit percentile targets above, measured end to end rather than from process start.</li>
+<li>Ordinary PR means a trusted same-repository change touching at most three classified modules and not a global policy/toolchain dependency.</li>
+<li>Correctness is preserved by exact selection plus post-merge/nightly full sweeps; the full suite moves off the merge path rather than disappearing.</li>
+<li>The existing trusted standing host remains limited to main/schedule/release triggers. One always-on Crabbox becomes the shared untrusted-code executor for multiple repositories and agents, with no per-run or per-repository acquisition lease. Other leased boxes remain optional for ad-hoc full-suite work until acceptance.</li>
+<li>The repository remains public, so fork code is untrusted regardless of author intent.</li>
+<li>The release train remains the single publisher. This plan changes what evidence and artifacts it consumes, not release ownership.</li>
+</ul>
+<h2 id="tracking">Tracking</h2><p>No new ticket is created in Plan Mode. Implementation should be tracked as one CI/release epic with separate delivery units for impact selection, standing executor, attestations, and helper decoupling; the rendered plan URL belongs on the epic and each child ticket belongs back here.</p>
+<h2 id="references">References</h2><ol class="references-list"><li class="reference-item"><a class="reference-link" href="https://github.com/phnx-labs/agi-cli/pull/2717" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="reference-text">#2717</span><span class="reference-host">github.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://vitest.dev/guide/cli" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=vitest.dev&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">Vitest CLI: related and changed</span><span class="reference-host">vitest.dev</span></a></li><li class="reference-item"><a class="reference-link" href="https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/manage-access" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="reference-text">GitHub self-hosted runner access</span><span class="reference-host">docs.github.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://docs.github.com/en/actions/concepts/workflows-and-actions/dependency-caching" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="reference-text">GitHub dependency cache security</span><span class="reference-host">docs.github.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="reference-text">GitHub check runs</span><span class="reference-host">docs.github.com</span></a></li></ol></article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4Kc3VyZmFjZTogd29ya2Zsb3cKdGl0bGU6IE5lYXItaW5zdGFudCBDSSBhbmQgcmVsZWFzZSBmb3IgYWdlbnRzLWNsaQpzdW1tYXJ5OiBSZXBsYWNlIGNvbXBvbmVudC13aWRlIHRlc3Qgc3dlZXBzIGFuZCBsZWFzZS1ib3VuZCBzYW5kYm94ZXMgd2l0aCBleGFjdCBhZmZlY3RlZC10ZXN0IHNlbGVjdGlvbiBvbiBhIGRlZGljYXRlZCB1bnRydXN0ZWQtY29kZSBleGVjdXRvciwgdGhlbiByZWxlYXNlIGZyb20gbWVyZ2UtY2FuZGlkYXRlIGF0dGVzdGF0aW9ucyBhbmQgcmV1c2FibGUgc2lnbmVkIGhlbHBlciBhcnRpZmFjdHMuCnN0YXR1czogYXdhaXRpbmctcmV2aWV3CmxpbmtzOgogIC0gImh0dHBzOi8vdml0ZXN0LmRldi9ndWlkZS9jbGkiCiAgLSAiaHR0cHM6Ly9kb2NzLmdpdGh1Yi5jb20vZW4vYWN0aW9ucy9ob3ctdG9zL21hbmFnZS1ydW5uZXJzL3NlbGYtaG9zdGVkLXJ1bm5lcnMvbWFuYWdlLWFjY2VzcyIKICAtICJodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnaS1jbGkvcHVsbC8yNzE3IgotLS0KCiMjIEZvY3VzIGZvciByZXZpZXcKCi0gKipSZXF1aXJlZC1jaGVjayB0YXJnZXQ6KiogZXZlbnQtdG8tdGVybWluYWwtY2hlY2sgUDk5IGlzICoq4omkOTAgc2Vjb25kcyoqOyBhIHdhcm0gY2FjaGUtaGl0IHNob3VsZCBmaW5pc2ggaW4gKiriiaQxMCBzZWNvbmRzKiouIEEgcmVzdWx0IG9sZGVyIHRoYW4gb3IgZm9yIGEgZGlmZmVyZW50IGNvbW1pdCBTSEEgbmV2ZXIgY291bnRzLgotICoqU2FmZXR5IGJvdW5kYXJ5OioqIHN0YXRpYyBpbXBvcnRzIHNlbGVjdCB0ZXN0cyBhdXRvbWF0aWNhbGx5OyBzdWJwcm9jZXNzLCBmaWxlc3lzdGVtLCBwbGF0Zm9ybSwgYW5kIGdsb2JhbC1zdGF0ZSBkZXBlbmRlbmNpZXMgYXJlIGRlY2xhcmVkIGluIG9uZSByZXZpZXdlZCBvd25lcnNoaXAgbWFuaWZlc3QuIEFuIHVubWFwcGVkIGNoYW5nZWQgZmlsZSBmYWlscyBpbW1lZGlhdGVseSB3aXRoIHRoZSBtaXNzaW5nIG1hcHBpbmcgaW5zdGVhZCBvZiBzaWxlbnRseSBza2lwcGluZyB0ZXN0cyBvciBydW5uaW5nIHRoZSBlbnRpcmUgc3VpdGUuCi0gKipDb21wdXRlOioqIGtlZXAgb25lIGFsd2F5cy1vbiBDcmFiYm94IGFzIGEgc2hhcmVkIG11bHRpLXJlcG9zaXRvcnkgZXhlY3V0b3IuIFJlcG9zaXRvcmllcyBhbmQgYWdlbnRzIHJ1biBjb25jdXJyZW50bHkgaW4gbmFtZXNwYWNlZCBleGFjdC1jYW5kaWRhdGUgd29ya3RyZWVzIGFuZCBvbmUtdXNlIEZpcmVjcmFja2VyIG1pY3JvVk1zIHJlc3RvcmVkIGZyb20gd2FybSBzbmFwc2hvdHMuIE5vIHJ1biBhY3F1aXJlcyB0aGUgbWFjaGluZTsgYSBmYWlyIHNjaGVkdWxlciBhZG1pdHMgQ1BVL21lbW9yeSBzbG90cy4gVGhlIGhvc3QgaXMgb25seSBhIGNvbnRyb2xsZXIvY2FjaGUgc3Vic3RyYXRlIGFuZCBleHBvc2VzIG5vIHRhaWxuZXQsIGR1cmFibGUgY3JlZGVudGlhbHMsIGhvc3Qgc29ja2V0cywgb3Igd3JpdGFibGUgdHJ1c3RlZCBjYWNoZSB0byBqb2JzLgotICoqV2luZG93czoqKiByZW1vdmUgV2luZG93cyBmcm9tIHJlcXVpcmVkIHB1bGwtcmVxdWVzdCBhbmQgcmVsZWFzZSBnYXRlcy4gS2VlcCBhdCBtb3N0IGEgYmVzdC1lZmZvcnQgcG9zdC1tZXJnZSBzbW9rZSB3aGlsZSByZWFsIHVzYWdlIGlzIG1lYXN1cmVkOyBjbG9zZSBQUiAjMjcxNyBiZWNhdXNlIG9wdGltaXppbmcgYSBub24tcmVxdWlyZWQgZ2F0ZSBhZGRzIGNvbXBsZXhpdHkgd2l0aG91dCBoZWxwaW5nIHRoZSA5MC1zZWNvbmQgUDk5LgotICoqUmVsZWFzZToqKiBvcmRpbmFyeSByZWxlYXNlIFA5OSBpcyAqKuKJpDE4MCBzZWNvbmRzKiouIFByb21vdGUgdGhlIGV4YWN0IHRlc3RlZCBucG0gdGFyYmFsbCB3aXRoIE9JREMsIHJ1biBhIGNsZWFuIGluc3RhbGwgc21va2UsIGFuZCByZWJ1aWxkL3NpZ24vbm90YXJpemUgaGVscGVycyBvbmx5IHdoZW4gdGhlaXIgb3duIGlucHV0cyBjaGFuZ2UuCi0gKipCYWNrc3RvcDoqKiBrZWVwIGEgZnVsbCBjcm9zcy1wbGF0Zm9ybSBzd2VlcCBhZnRlciBtZXJnZSBhbmQgbmlnaHRseS4gSXQgZGV0ZWN0cyBzZWxlY3Rpb24gbWlzdGFrZXMgYW5kIGJsb2NrcyBwcm9tb3Rpb24gb2YgdGhlIGFmZmVjdGVkIGF0dGVzdGF0aW9uIHBvbGljeSwgYnV0IGRvZXMgbm90IGhvbGQgZXZlcnkgcHVsbCByZXF1ZXN0IG9wZW4uCgojIyBJbnRlbnQKCk1ha2UgdGhlIHJlcXVpcmVkIENJIHJlc3VsdCBmZWVsIGltbWVkaWF0ZSBhbmQgbWFrZSBhIHJvdXRpbmUgcmVsZWFzZSBwdWJsaXNoIGluIG1pbnV0ZXMsIHdpdGhvdXQgd2Vha2VuaW5nIGNvcnJlY3RuZXNzLiBBIGNoYW5nZSB0byBvbmUgbW9kdWxlIHNob3VsZCBub3QgZXhlY3V0ZSB0aGUgQ0xJJ3MgZW50aXJlIDEyLDAwMC10ZXN0IGNvcnB1cy4gQSB2ZXJzaW9uLW9ubHkgcmVsZWFzZSBzaG91bGQgbm90IHJlcGVhdCB0ZXN0cyBhbHJlYWR5IHByb3ZlbiBmb3IgdGhlIGV4YWN0IHRyZWUgb3IgcmVidWlsZCB1bnJlbGF0ZWQgbmF0aXZlIGFwcGxpY2F0aW9ucyBhbmQgaGVscGVycy4KCiMjIFB1cnBvc2UKClJldHVybiBtZXJnZSBhbmQgcmVsZWFzZSBsYXRlbmN5IHRvIHRoZSBzY2FsZSBvZiB0aGUgY2hhbmdlZCBiZWhhdmlvci4gVGhlIHRlc3QgY29ycHVzIHJlbWFpbnMgYSBjb3JyZWN0bmVzcyBiYWNrc3RvcDsgaXQgc3RvcHMgYmVpbmcgYSB0YXggcGFpZCBieSBldmVyeSB1bnJlbGF0ZWQgY2hhbmdlLgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+ClRoZSBsb2FkLWJlYXJpbmcgY2hhbmdlIGlzIGFmZmVjdGVkLXRlc3Qgc2VsZWN0aW9uLiBXYXJtIGNoZWNrb3V0IGFuZCBkZXBlbmRlbmN5IGNhY2hlcyBzYXZlIHJvdWdobHkgMjAgc2Vjb25kczsgdGhleSBjYW5ub3QgcmVtb3ZlIGZpdmUgbWludXRlcyBvZiB1bnJlbGF0ZWQgdGVzdCBleGVjdXRpb24uCjwvZGl2PgoKIyMgQ3VycmVudCBhcmNoaXRlY3R1cmUKCiMjIyBXaGF0IGhhcHBlbnMgbm93Cgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1ncmlkIGFydGlmYWN0LWdyaWQtMiBhcnRpZmFjdC1iZWhhdmlvciI+CjxkaXYgY2xhc3M9ImFydGlmYWN0LXBhbmVsIiBkYXRhLXN0YXRlPSJjdXJyZW50IiBkYXRhLWV2aWRlbmNlPSJjYXB0dXJlIj4KCioqQmVmb3JlIOKAlCBvbmUgQ0xJIGZpbGUgY2hhbmdlcyoqCgpgYGBjb25zb2xlCnNjb3BlIChVYnVudHUpICAgICAgICAgICAgICAgICAgICAgICAgIDE3cwrilJzilIAgY2xpLXByZWZsaWdodDogaW5zdGFsbCArIGJ1aWxkICAgICAgNDJzCuKUnOKUgCBjbGktZG9jczogZG9jcyArIGNvbW1hbmQgaW5kZXggICAgICAyNXMK4pSc4pSAIHNoYXJkIDE6IDI4NyBmaWxlcyAvIDQsMDg4IHRlc3RzICAgMzM1cwrilJzilIAgc2hhcmQgMjogMjg3IGZpbGVzIC8gNCwwMjAgdGVzdHMgICAzMDBzCuKUlOKUgCBzaGFyZCAzOiAyODcgZmlsZXMgLyA0LDA1MSB0ZXN0cyAgIDIyOXMKCnJlcXVpcmVkIHdvcmtmbG93OiBtZWRpYW4gNi4xbSDCtyBwOTAgMTUuOG0KYGBgCgpUaGUgc2NvcGUgY2xhc3NpZmllciBrbm93cyBvbmx5IHRoYXQgYGFwcHMvY2xpLyoqYCBjaGFuZ2VkLiBJdCBkb2VzIG5vdCBrbm93IHdoaWNoIHNvdXJjZSBtb2R1bGUsIHRlc3Qgb3duZXIsIHBsYXRmb3JtLCBjb21tYW5kIGluZGV4LCBiaW5hcnkgYm9vdHN0cmFwLCBvciBoZWxwZXIgY2hhbmdlZC4KPC9kaXY+Cgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1wYW5lbCIgZGF0YS1zdGF0ZT0icHJvcG9zZWQiIGRhdGEtZXZpZGVuY2U9Im1vY2t1cCI+CgoqKkFmdGVyIOKAlCB0aGUgc2FtZSBmaWxlIGNoYW5nZXMqKgoKYGBgY29uc29sZQppbXBhY3QgcGxhbiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIDJzCmV4YWN0LVNIQSB3b3JrdHJlZSArIHdhcm0gZGVwZW5kZW5jaWVzICAgM3MKcmVsYXRlZCArIGRlY2xhcmVkIG93bmVyIHRlc3RzICAgICAgICAgIDjigJMzNXMKcG9saWN5IC8gZG9jcyBjaGVjayBvbmx5IGlmIGFmZmVjdGVkICAgICAx4oCTOHMKYXR0ZXN0YXRpb24gKyByZXF1aXJlZCBjaGVjayAgICAgICAgICAgICAycwoKdGFyZ2V0OiBQOTkg4omkOTBzIMK3IGNhY2hlIGhpdCDiiaQxMHMKc2VsZWN0ZWQ6IDMgdGVzdCBmaWxlcywgbm90IDg2MQpgYGAKClRoZSByZXF1aXJlZCBjaGVjayBuYW1lcyBldmVyeSBzZWxlY3RlZCB0ZXN0IGFuZCB0aGUgcnVsZSB0aGF0IHNlbGVjdGVkIGl0LiBBbiB1bm1hcHBlZCBib3VuZGFyeSBwcm9kdWNlcyBhIGZhc3QgcmVkIHBvbGljeSByZXN1bHQgd2l0aCB0aGUgZXhhY3QgbWFuaWZlc3QgZW50cnkgdG8gYWRkLgo8L2Rpdj4KPC9kaXY+CgojIyMgU2l4LW1vbnRoIHJlcXVlc3QsIGF2YWlsYWJsZSBldmlkZW5jZQoKVGhlIHJlcXVlc3RlZCB3aW5kb3cgYmVnaW5zIDIwMjYtMDItMTUuIEdpdEh1YiBleHBvc2VzIG1lcmdlZCBwdWxsLXJlcXVlc3QgaGlzdG9yeSBmb3IgdGhpcyByZXBvc2l0b3J5IGZyb20gMjAyNi0wNS0wNiwgc28gdGhlIHF1YW50aXRhdGl2ZSBiYXNlbGluZSBjb3ZlcnMgKioxMDEgZGF5cyoqLCBub3QgYSBmYWJyaWNhdGVkIHNpeCBtb250aHMuIEZsZWV0IHNlc3Npb24gc2VhcmNoIHdhcyB3aWRlbmVkIGFjcm9zcyBkaXJlY3RvcmllcyBhbmQgZGV2aWNlczsgdGhlIGF2YWlsYWJsZSBpbmRleGVkIHRvcGljIGNvcnB1cyBzdGFydHMgMjAyNi0wNy0yOSBhbmQgaXMgc3VwcG9ydGluZyBjb250ZXh0IG9ubHkuIEdpdEh1YiB0aW1lc3RhbXBzIGFyZSB0aGUgbWVyZ2UtbGF0ZW5jeSBzb3VyY2Ugb2YgdHJ1dGguCgo8ZmlndXJlIGNsYXNzPSJhcnRpZmFjdC1maWd1cmUgYXJ0aWZhY3QtZmlndXJlLWRpYWdyYW0gYXJ0aWZhY3QtZmlndXJlLXdpZGUiPgo8c3ZnIHZpZXdCb3g9IjAgMCA5NjAgNDQwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkNJIGFuZCByZWxlYXNlIGxhdGVuY3kgYmFzZWxpbmUgd2l0aCBoYXJkIHRhcmdldHMiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPHRleHQgeD0iMjQiIHk9IjI4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxOCIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iI2Y1ZjVmNCI+MiwxNTggbWVyZ2VkIHB1bGwgcmVxdWVzdHMgwrcgMjAyNi0wNS0wNiDihpIgMjAyNi0wOC0xNTwvdGV4dD4KICA8dGV4dCB4PSIyNCIgeT0iNDkiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiBmaWxsPSIjYjljN2Q1Ij5BZ2dyZWdhdGUgb3BlbuKGkm1lcmdlIGNhcGFjaXR5IHdhaXQ6IDYsMzgzIGhvdXJzIChvdmVybGFwcGluZyBQUi9hZ2VudCB0aW1lLCBub3QgbGl0ZXJhbCBodW1hbiBob3Vycyk8L3RleHQ+CiAgPGxpbmUgeDE9IjE3MCIgeTE9Ijg1IiB4Mj0iOTMwIiB5Mj0iODUiIHN0cm9rZT0iI2I5YzdkNSIgc3Ryb2tlLW9wYWNpdHk9Ii4yNSIvPjxsaW5lIHgxPSIxNzAiIHkxPSIxNjUiIHgyPSI5MzAiIHkyPSIxNjUiIHN0cm9rZT0iI2I5YzdkNSIgc3Ryb2tlLW9wYWNpdHk9Ii4yNSIvPjxsaW5lIHgxPSIxNzAiIHkxPSIyNDUiIHgyPSI5MzAiIHkyPSIyNDUiIHN0cm9rZT0iI2I5YzdkNSIgc3Ryb2tlLW9wYWNpdHk9Ii4yNSIvPgogIDx0ZXh0IHg9IjI0IiB5PSIxMDciIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE2IiBmaWxsPSIjZjVmNWY0Ij5QUiBvcGVu4oaSbWVyZ2UgcDUwPC90ZXh0PjxyZWN0IHg9IjE3MCIgeT0iODgiIHdpZHRoPSI0NDIiIGhlaWdodD0iMjciIHJ4PSI0IiBmaWxsPSIjZTA2NjNhIi8+PHRleHQgeD0iNjIwIiB5PSIxMDciIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE2IiBmaWxsPSIjZjVmNWY0Ij4xNy43bTwvdGV4dD4KICA8dGV4dCB4PSIyNCIgeT0iMTQ3IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2Y1ZjVmNCI+UFIgb3BlbuKGkm1lcmdlIHA5MDwvdGV4dD48cmVjdCB4PSIxNzAiIHk9IjEyOCIgd2lkdGg9IjcyMCIgaGVpZ2h0PSIyNyIgcng9IjQiIGZpbGw9IiNlMDY2M2EiLz48dGV4dCB4PSI4OTgiIHk9IjE0NyIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTYiIGZpbGw9IiNmNWY1ZjQiPjI5Ny42bTwvdGV4dD4KICA8dGV4dCB4PSIyNCIgeT0iMTg3IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2Y1ZjVmNCI+VGVzdHMgd29ya2Zsb3cgcDUwPC90ZXh0PjxyZWN0IHg9IjE3MCIgeT0iMTY4IiB3aWR0aD0iMzA3IiBoZWlnaHQ9IjI3IiByeD0iNCIgZmlsbD0iI2UwNjYzYSIvPjx0ZXh0IHg9IjQ4NSIgeT0iMTg3IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2Y1ZjVmNCI+Ni4xbTwvdGV4dD4KICA8dGV4dCB4PSIyNCIgeT0iMjI3IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2Y1ZjVmNCI+VGVzdHMgd29ya2Zsb3cgcDkwPC90ZXh0PjxyZWN0IHg9IjE3MCIgeT0iMjA4IiB3aWR0aD0iNjMwIiBoZWlnaHQ9IjI3IiByeD0iNCIgZmlsbD0iI2UwNjYzYSIvPjx0ZXh0IHg9IjgwOCIgeT0iMjI3IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2Y1ZjVmNCI+MTUuOG08L3RleHQ+CiAgPHRleHQgeD0iMjQiIHk9IjI2NyIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTYiIGZpbGw9IiNmNWY1ZjQiPlJlbGVhc2UgUFIgcDUwIC8gcDkwPC90ZXh0PjxyZWN0IHg9IjE3MCIgeT0iMjQ4IiB3aWR0aD0iNjM4IiBoZWlnaHQ9IjI3IiByeD0iNCIgZmlsbD0iI2UwNjYzYSIvPjx0ZXh0IHg9IjgxNiIgeT0iMjY3IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2Y1ZjVmNCI+MTIuOG0gLyA3My41bTwvdGV4dD4KICA8dGV4dCB4PSIyNCIgeT0iMzE1IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIyMiIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iIzg0Y2MxNiI+SEFSRCBQOTkgVEFSR0VUUzwvdGV4dD4KICA8dGV4dCB4PSIyNCIgeT0iMzU4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIyMCIgZmlsbD0iI2Y1ZjVmNCI+UmVxdWlyZWQgQ0k8L3RleHQ+PHJlY3QgeD0iMTkwIiB5PSIzMzAiIHdpZHRoPSIxNTAiIGhlaWdodD0iMzgiIHJ4PSI2IiBmaWxsPSIjODRjYzE2Ii8+PHRleHQgeD0iMzYwIiB5PSIzNTciIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjIxIiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSIjZjVmNWY0Ij7iiaQgOTAgc2Vjb25kczwvdGV4dD4KICA8dGV4dCB4PSI1MDAiIHk9IjM1OCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMjAiIGZpbGw9IiNmNWY1ZjQiPk9yZGluYXJ5IHJlbGVhc2U8L3RleHQ+PHJlY3QgeD0iNzAwIiB5PSIzMzAiIHdpZHRoPSIxOTAiIGhlaWdodD0iMzgiIHJ4PSI2IiBmaWxsPSIjODRjYzE2Ii8+PHRleHQgeD0iOTAwIiB5PSIzNTciIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjIxIiBmb250LXdlaWdodD0iNzAwIiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSIjZjVmNWY0Ij7iiaQgMTgwIHNlY29uZHM8L3RleHQ+CiAgPHRleHQgeD0iMjQiIHk9IjQwOCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTgiIGZpbGw9IiNiOWM3ZDUiPldhcm0tY2FjaGUgQ0kgc3RyZXRjaCB0YXJnZXQ6IOKJpCAxMCBzZWNvbmRzPC90ZXh0Pgo8L3N2Zz4KPGZpZ2NhcHRpb24+PGI+RmlndXJlIDEuPC9iPiBMYXJnZSwgZXhwbGljaXQgaGFyZC1wZXJjZW50aWxlIHRhcmdldHMgcmVwbGFjZSB0aGUgcHJldmlvdXMgc29mdCBtZWRpYW4gZ29hbHMuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCiMjIyBXaGVyZSB0aGUgcmVxdWlyZWQgdGVzdCB0aW1lIGdvZXMKCnwgV29yayB8IEN1cnJlbnQgbWVkaWFuIHwgV2hhdCB0aGUgZXZpZGVuY2Ugc2F5cyB8CnwgLS0tIHwgLS0tOiB8IC0tLSB8CnwgQ2hlY2tvdXQgfCAzIHNlY29uZHMgfCBOb3QgdGhlIGJvdHRsZW5lY2suIHwKfCBgYnVuIGluc3RhbGxgIHwgMTcgc2Vjb25kcyB8IFdhcm0gZGVwZW5kZW5jaWVzIGhlbHAsIGJ1dCBjYW5ub3QgdHVybiBzaXggbWludXRlcyBpbnRvIHNlY29uZHMuIHwKfCBCdWlsZCB8IDE0IHNlY29uZHMgfCBTcGxpdCBieSBidWlsZCBpbnB1dHM7IGRvIG5vdCBvcHRpbWl6ZSBmaXJzdC4gfAp8IFNoYXJkIDEgdGVzdHMgfCAzMTggc2Vjb25kcyB8IERvbWluYW50IHBhdGguIHwKfCBTaGFyZCAyIHRlc3RzIHwgMjg2IHNlY29uZHMgfCBEb21pbmFudCBwYXRoLiB8CnwgU2hhcmQgMyB0ZXN0cyB8IDIyOCBzZWNvbmRzIHwgRG9taW5hbnQgcGF0aC4gfAp8IERvY3MgfCAyNSBzZWNvbmRzIHwgU2VwYXJhdGUgcnVubmVyL2pvYiBvdmVyaGVhZCBmb3IgYSBjaGVjayB0aGF0IGNhbiBiZSBzZWxlY3RlZCBpbnNpZGUgdGhlIGltcGFjdCBwbGFuLiB8CnwgUHJlZmxpZ2h0IHwgNDIgc2Vjb25kcyB8IEJ1bmRsZXMgdW5yZWxhdGVkIGNvbW1hbmQtaW5kZXgsIGJ1aWxkLCBiaW5hcnktc21va2UsIGFuZCBiZW5jaG1hcmsgY29uY2VybnMuIHwKClRoZSBzbG93IHRhaWwgaXMgY29uY2VudHJhdGVkLiBSZXByZXNlbnRhdGl2ZSBmaWxlcyBpbmNsdWRlIGByb3V0aW5lcy50ZXN0LnRzYCBhdCAyMDggc2Vjb25kcywgYHNlc3Npb25zLnRlc3QudHNgIGF0IDE3NiBzZWNvbmRzLCBgZGFlbW9uLnRlc3QudHNgIGF0IDExMiBzZWNvbmRzLCBgbm9uLWludGVyYWN0aXZlLnRlc3QudHNgIGF0IDc2IHNlY29uZHMsIGFuZCBgdmVyc2lvbnMudGVzdC50c2AgYXQgNzMgc2Vjb25kcy4gTW9yZSBzaGFyZHMgbW92ZSB0aGlzIHdvcmsgYXJvdW5kOyBhZmZlY3RlZC10ZXN0IHNlbGVjdGlvbiBzdG9wcyBydW5uaW5nIGl0IHdoZW4gaXRzIG93bmVycyBkaWQgbm90IGNoYW5nZS4KCiMjIyBXaHkgb25seS10aGUtY2hhbmdlZC1tb2R1bGUgZG9lcyBub3QgaGFwcGVuIHRvZGF5CgpgYGBkaWZmCiAvLyBzY3JpcHRzL2NpLXNjb3BlLnRzIOKAlCBjdXJyZW50IGRlY2lzaW9uIGdyYW51bGFyaXR5Ci1pZiAoZmlsZS5zdGFydHNXaXRoKCdhcHBzL2NsaS8nKSkgZmxhZ3MuY2xpID0gdHJ1ZQorY29uc3QgcGxhbiA9IHNlbGVjdEltcGFjdChiYXNlU2hhLCBoZWFkU2hhLCBjaGFuZ2VkRmlsZXMsIG93bmVyc2hpcE1hbmlmZXN0KQorLy8gcGxhbi50ZXN0cywgcGxhbi5jaGVja3MsIHBsYW4ucGxhdGZvcm1zLCBwbGFuLnJlYXNvbnMKYGBgCgpUaGUgY3VycmVudCBjbGFzc2lmaWVyIGVtaXRzIGZpdmUgYm9vbGVhbnM6IENMSSwgQ0xJIGRvY3MsIGV4dGVuc2lvbiwgc2Vzc2lvbiB0cmFja2VyLCBhbmQgV2luZG93cy4gQW55IG5vbi1kb2N1bWVudCBDTEkgcGF0aCBzZXRzIHRoZSBzaW5nbGUgYGNsaWAgYm9vbGVhbiwgd2hpY2ggc3RhcnRzIGFsbCB0aHJlZSBmdWxsIFZpdGVzdCBzaGFyZHMuIFZpdGVzdCBhbHJlYWR5IHByb3ZpZGVzIGByZWxhdGVkYC9gLS1jaGFuZ2VkYCwgYnV0IGl0cyBncmFwaCBjb3ZlcnMgc3RhdGljIGltcG9ydHMgYW5kIGV4cGxpY2l0bHkgZG9lcyBub3QgY292ZXIgZHluYW1pYyBwYXRocy4gVGhpcyByZXBvc2l0b3J5IGhhcyBDTEkgc3VicHJvY2VzcywgZmlsZXN5c3RlbSwgYW5kIGdsb2JhbC1zdGF0ZSB0ZXN0cywgc28gYHZpdGVzdCByZWxhdGVkYCBpcyBhIHVzZWZ1bCBlbmdpbmUsIG5vdCBhIGNvbXBsZXRlIHBvbGljeS4KCiMjIyBXaHkgQ0xJIGRvY3MgYW5kIHByZWZsaWdodCBleGlzdAoKVGhleSBhcmUgbGVnaXRpbWF0ZSBpbnZhcmlhbnRzIHdpdGggdGhlIHdyb25nIHNjaGVkdWxpbmcgYm91bmRhcnk6Cgp8IEN1cnJlbnQgY2hlY2sgfCBJbnZhcmlhbnQgfCBSdW4gd2hlbiB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCBDTEkgZG9jcyB8IEdlbmVyYXRlZCBjb21tYW5kIGluZGV4IGFuZCBkb2N1bWVudGVkIGNvbW1hbmQgc3VyZmFjZSBhZ3JlZSB8IENvbW1hbmQgZGVmaW5pdGlvbnMsIGNvbW1hbmQgbWV0YWRhdGEsIGRvY3MgaW5kZXggZ2VuZXJhdG9yLCBvciBjb3ZlcmVkIGRvY3MgY2hhbmdlIHwKfCBQcmVmbGlnaHQ6IGNvbW1hbmQgaW5kZXggfCBDb21taXR0ZWQgY29tbWFuZCBpbmRleCBpcyBjdXJyZW50IHwgU2FtZSBvd25lcnNoaXAgc2V0IGFzIENMSSBkb2NzIHwKfCBQcmVmbGlnaHQ6IFR5cGVTY3JpcHQgYnVpbGQgfCBTaGlwcGluZyBlbnRyeSBncmFwaCBjb21waWxlcyB8IEltcG9ydGVkIHByb2R1Y3Rpb24gc291cmNlLCBidWlsZCBjb25maWcsIGxvY2tmaWxlLCBwYWNrYWdlIG1hbmlmZXN0LCBvciBidWlsZCBzY3JpcHQgY2hhbmdlcyB8CnwgUHJlZmxpZ2h0OiBzdGFuZGFsb25lIHNtb2tlIHwgVGhlIHN0YW5kYWxvbmUgYm9vdHN0cmFwIHN0YXJ0cyB8IEJvb3RzdHJhcCwgYmluYXJ5IGJ1aWxkZXIsIHBhY2thZ2UgdmVyc2lvbiwgb3IgZW50cnlwb2ludCBjaGFuZ2VzIHwKfCBQcmVmbGlnaHQ6IHNlc3Npb24gYmVuY2htYXJrIHwgU2Vzc2lvbiBkaXN0cmlidXRpb24gcmVtYWlucyB3aXRoaW4gdGhyZXNob2xkIHwgU2Vzc2lvbiBkaXNjb3ZlcnkvaW5kZXgvZGF0YWJhc2Uvc3RhdHVzIGNvZGUgb3IgYmVuY2htYXJrIHBvbGljeSBjaGFuZ2VzIHwKClRoZSBwbGFuIGtlZXBzIGVhY2ggaW52YXJpYW50IGFuZCByZW1vdmVzIHRoZSBpbnNpc3RlbmNlIHRoYXQgZXZlcnkgQ0xJIGVkaXQgcnVuIGFsbCBvZiB0aGVtIG9uIHNlcGFyYXRlIG1hY2hpbmVzLgoKIyMjIEV4aXN0aW5nIFBSICMyNzE3IOKAlCBjbG9zZWQsIG5vdCBvcHRpbWl6ZWQKClBSIFsjMjcxN10oaHR0cHM6Ly9naXRodWIuY29tL3BobngtbGFicy9hZ2ktY2xpL3B1bGwvMjcxNykgcmVkdWNlZCB0aGUgV2luZG93cyBnYXRlIHRvIGEgMSBtaW51dGUgNDcgc2Vjb25kIHNtb2tlLiBUaGF0IHNpbmdsZSBwbGF0Zm9ybSBjaGVjayBhbHJlYWR5IGV4Y2VlZHMgdGhlIGNvbXBsZXRlIDkwLXNlY29uZCBldmVudC10by1yZXN1bHQgYnVkZ2V0IGJlZm9yZSBMaW51eCB3b3JrIG9yIEdpdEh1YiBzY2hlZHVsaW5nIGlzIGNvdW50ZWQuIFRoZSBQUiBpcyBjbG9zZWQ6IFdpbmRvd3MgaXMgcmVtb3ZlZCBmcm9tIHJlcXVpcmVkIHB1bGwtcmVxdWVzdCBhbmQgb3JkaW5hcnktcmVsZWFzZSBnYXRlcyBpbnN0ZWFkIG9mIHNwZW5kaW5nIG1vcmUgY29tcGxleGl0eSBvbiBhIHBsYXRmb3JtIHRoYXQgaGFzIG5vdCBkZW1vbnN0cmF0ZWQgZW5vdWdoIGRlbWFuZCB0byBqdXN0aWZ5IGJsb2NraW5nIGV2ZXJ5IGNvbnRyaWJ1dG9yLgoKRHVyaW5nIGEgc2hvcnQgZXZpZGVuY2Ugd2luZG93LCBXaW5kb3dzIGdldHMgYXQgbW9zdCBvbmUgYmVzdC1lZmZvcnQgcG9zdC1tZXJnZSBzbW9rZSBvbiBzZXBhcmF0ZSBjYXBhY2l0eS4gSXQgY2Fubm90IGJsb2NrIGEgbWVyZ2Ugb3IgcmVsZWFzZS4gSWYgZGVtYW5kIHJlbWFpbnMgdW5wcm92ZW4sIHJlbW92ZSBXaW5kb3dzLW9ubHkgY29kZSwgZG9jdW1lbnRhdGlvbiwgcGFja2FnaW5nLCBhbmQgdGhlIHN1cHBvcnRlZC1wbGF0Zm9ybSBjbGFpbSByYXRoZXIgdGhhbiBjYXJyeWluZyBwZXJtYW5lbnQgY29uZGl0aW9uYWwgYnJhbmNoZXMuCgojIyBQcm9wb3NlZCBDaGFuZ2VzCgojIyMgMS4gT25lIGV4YWN0IGltcGFjdCBwbGFubmVyIGlzIHRoZSBzb3VyY2Ugb2YgdHJ1dGgKCkV4dGVuZCBgc2NyaXB0cy9jaS1zY29wZS50c2AgZnJvbSBjb21wb25lbnQgYm9vbGVhbnMgdG8gYSBkZXRlcm1pbmlzdGljIEpTT04gcGxhbiBrZXllZCBieSB0aGUgc2VsZWN0aW9uIHJhbmdlLCB0ZXN0ZWQgbWVyZ2UtY2FuZGlkYXRlIHRyZWUsIGFuZCBwb2xpY3kgdmVyc2lvbi4gQWRkIG9uZSByZXZpZXdlZCBtYW5pZmVzdCBhdCBgYXBwcy9jbGkvY2kvdGVzdC1vd25lcnNoaXAueWFtbGAgZm9yIGRlcGVuZGVuY2llcyB0aGF0IHN0YXRpYyBpbXBvcnRzIGNhbm5vdCBzZWUuCgpgYGBkaWZmCi17ICJjbGkiOiB0cnVlLCAiY2xpX2RvY3MiOiBmYWxzZSwgIndpbmRvd3MiOiBmYWxzZSB9Cit7CisgICJzZWxlY3Rpb25fYmFzZV9zaGEiOiAi4oCmIiwKKyAgInByX2hlYWRfc2hhIjogIuKApiIsCisgICJjYW5kaWRhdGVfdHJlZV9zaGEiOiAi4oCmIiwKKyAgInBvbGljeV92ZXJzaW9uIjogImltcGFjdC12MSIsCisgICJ0ZXN0cyI6IFsKKyAgICB7ImZpbGUiOiJzcmMvbGliL2V4YW1wbGUudGVzdC50cyIsInJlYXNvbiI6InN0YXRpYy1pbXBvcnQifSwKKyAgICB7ImZpbGUiOiJ0ZXN0cy9ub24taW50ZXJhY3RpdmUudGVzdC50cyIsInJlYXNvbiI6Im93bmVyOmNsaS1ib290c3RyYXAifQorICBdLAorICAiY2hlY2tzIjogWyJ0eXBlY2hlY2siXSwKKyAgInBsYXRmb3JtcyI6IFsibGludXgiXSwKKyAgInVubWFwcGVkIjogW10KK30KYGBgCgpTZWxlY3Rpb24gcnVsZXMgYXJlIGZpeGVkIGFuZCBvcmRlcmVkOgoKMS4gQSBjaGFuZ2VkIHRlc3QgZmlsZSBzZWxlY3RzIGl0c2VsZi4KMi4gQSBjaGFuZ2VkIFR5cGVTY3JpcHQgc291cmNlIGZpbGUgc2VsZWN0cyBjb21wYW5pb24gdGVzdHMgYW5kIGB2aXRlc3QgcmVsYXRlZCAtLXJ1bmAgcmVzdWx0cy4KMy4gVGhlIG93bmVyc2hpcCBtYW5pZmVzdCBhZGRzIHN1YnByb2Nlc3MsIGR5bmFtaWMtaW1wb3J0LCBmaWxlc3lzdGVtLWxheW91dCwgcGxhdGZvcm0sIGdlbmVyYXRlZC1kb2MsIGJ1aWxkLCBiZW5jaG1hcmssIGFuZCBnbG9iYWwtc3RhdGUgY29uc3VtZXJzLgo0LiBBIGNoYW5nZWQgZGVwZW5kZW5jeS9jb25maWd1cmF0aW9uIGZpbGUgc2VsZWN0cyB0aGUgZXhwbGljaXQgZ3JvdXAgbmFtZWQgaW4gdGhlIG1hbmlmZXN0Lgo1LiBFdmVyeSBjaGFuZ2VkIGV4ZWN1dGFibGUgc291cmNlIG11c3Qgc2VsZWN0IGF0IGxlYXN0IG9uZSB0ZXN0L2NoZWNrLiBaZXJvIHNlbGVjdGlvbnMgZmFpbCB1bmxlc3MgdGhlIHBhdGggaGFzIGFuIGV4cGxpY2l0IHJldmlld2VkIGB0ZXN0bGVzc2AgZW50cnk7IHRoZSBtYW5pZmVzdCB2YWxpZGF0b3IgYXVkaXRzIGV2ZXJ5IHByb2R1Y3Rpb24vYnVpbGQvY29uZmlnIHBhdGgsIGluY2x1ZGluZyBwYXRocyBhYnNlbnQgZnJvbSB0aGUgMjAwLVBSIHNhbXBsZS4KNi4gQSBjaGFuZ2VkIHBhdGggd2l0aCBubyBjbGFzc2lmaWNhdGlvbiBwcm9kdWNlcyBgdW5tYXBwZWRbXWAgYW5kIGZhaWxzIHRoZSBwb2xpY3kgY2hlY2sgaW4gc2Vjb25kcy4gVGhlcmUgaXMgbm8gc2lsZW50IHNraXAgYW5kIG5vIGF1dG9tYXRpYyBmdWxsLXN1aXRlIGZhbGxiYWNrLgo3LiBXb3JrZmxvdy9wb2xpY3kgY2hhbmdlcyBydW4gdGhlIGltcGFjdCBwbGFubmVyJ3Mgb3duIHRlc3RzIHBsdXMgYSBzaGFkb3cgZnVsbCBzd2VlcCBiZWZvcmUgdGhlIG5ldyBwb2xpY3kgdmVyc2lvbiBjYW4gYXR0ZXN0IGxhdGVyIGNvbW1pdHMuCgpUaGUgcGxhbm5lciBhbHNvIGVtaXRzIGEgaHVtYW4tcmVhZGFibGUgdGFibGUgaW4gdGhlIGNoZWNrIHN1bW1hcnk6IGNoYW5nZWQgZmlsZSDihpIgc2VsZWN0ZWQgdGVzdC9jaGVjayDihpIgcmVhc29uLiBUaGlzIG1ha2VzIGEgd3Jvbmcgc2VsZWN0aW9uIHJldmlld2FibGUuCgojIyMgMi4gQ29sbGFwc2UgdGhlIHB1bGwtcmVxdWVzdCBnYXRlIGludG8gb25lIGpvYgoKUmVwbGFjZSBvbmx5IHRoZSBDTEkgYHNjb3BlYCBmYW4tb3V0LCB0aHJlZSBDTEkgc2hhcmRzLCBgY2xpLWRvY3NgLCBhbmQgYGNsaS1wcmVmbGlnaHRgIHdpdGggb25lIENMSSBgVGVzdHMgLyBpbXBhY3RgIGV4ZWN1dGlvbi4gRXh0ZW5zaW9uIGFuZCBzZXNzaW9uLXRyYWNrZXIgam9icyByZW1haW4gc2VwYXJhdGVseSBzZWxlY3RlZCB3aXRoIHRoZWlyIGN1cnJlbnQgYnVpbGQvdGVzdCBjb21tYW5kcyBhbmQgY29udGludWUgZmVlZGluZyB0aGUgc3RhYmxlIGZpbmFsIGFnZ3JlZ2F0b3IuIER1cmluZyBzaGFkb3cgcm9sbG91dCBhbGwgcHVsbC1yZXF1ZXN0IGpvYnMgcmVtYWluIEdpdEh1Yi1ob3N0ZWQ7IG9ubHkgYWZ0ZXIgdGhlIGRlZGljYXRlZCB1bnRydXN0ZWQgZXhlY3V0b3IgcGFzc2VzIGl0cyBpc29sYXRpb24gZ2F0ZSBkbyBzYW1lLXJlcG9zaXRvcnkgYnJhbmNoZXMgbW92ZSB0aGVyZS4KCjxmaWd1cmUgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZSBhcnRpZmFjdC1maWd1cmUtZGlhZ3JhbSBhcnRpZmFjdC1maWd1cmUtd2lkZSI+Cjxzdmcgdmlld0JveD0iMCAwIDk4MCAzMzAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iQmVmb3JlIGFuZCBhZnRlciBDSSBhcmNoaXRlY3R1cmUiIGNvbG9yPSIjZjVmNWY0IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxkZWZzPjxtYXJrZXIgaWQ9ImEiIG1hcmtlcldpZHRoPSI4IiBtYXJrZXJIZWlnaHQ9IjgiIHJlZlg9IjciIHJlZlk9IjQiIG9yaWVudD0iYXV0byI+PHBhdGggZD0iTTAsMCBMOCw0IEwwLDh6IiBmaWxsPSIjYjljN2Q1Ii8+PC9tYXJrZXI+PC9kZWZzPgogIDx0ZXh0IHg9IjIwIiB5PSIyNSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTciIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNmNWY1ZjQiPkJFRk9SRTogZXZlcnkgQ0xJIGVkaXQgZmFucyBvdXQgdG8gd2hvbGUtY29tcG9uZW50IGpvYnM8L3RleHQ+CiAgPHJlY3QgeD0iMjAiIHk9IjQ1IiB3aWR0aD0iMTA1IiBoZWlnaHQ9IjQ1IiByeD0iNSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZTA2NjNhIiBzdHJva2Utd2lkdGg9IjIiLz48dGV4dCB4PSI0MyIgeT0iNzIiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiBmaWxsPSIjZjVmNWY0Ij5zY29wZTwvdGV4dD4KICA8bGluZSB4MT0iMTI1IiB5MT0iNjciIHgyPSIxNzAiIHkyPSI2NyIgc3Ryb2tlPSIjYjljN2Q1IiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhKSIvPgogIDxyZWN0IHg9IjE4MCIgeT0iMzUiIHdpZHRoPSIxMjAiIGhlaWdodD0iNDUiIHJ4PSI1IiBmaWxsPSJub25lIiBzdHJva2U9IiNlMDY2M2EiIHN0cm9rZS13aWR0aD0iMiIvPjx0ZXh0IHg9IjE5OSIgeT0iNjIiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiBmaWxsPSIjZjVmNWY0Ij5wcmVmbGlnaHQ8L3RleHQ+CiAgPHJlY3QgeD0iMTgwIiB5PSI5MCIgd2lkdGg9IjEyMCIgaGVpZ2h0PSI0NSIgcng9IjUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2UwNjYzYSIgc3Ryb2tlLXdpZHRoPSIyIi8+PHRleHQgeD0iMjEzIiB5PSIxMTciIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiBmaWxsPSIjZjVmNWY0Ij5kb2NzPC90ZXh0PgogIDxyZWN0IHg9IjMyNSIgeT0iMzUiIHdpZHRoPSIxMjAiIGhlaWdodD0iNDUiIHJ4PSI1IiBmaWxsPSJub25lIiBzdHJva2U9IiNlMDY2M2EiIHN0cm9rZS13aWR0aD0iMiIvPjx0ZXh0IHg9IjM1MCIgeT0iNjIiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiBmaWxsPSIjZjVmNWY0Ij5zaGFyZCAxPC90ZXh0PgogIDxyZWN0IHg9IjMyNSIgeT0iOTAiIHdpZHRoPSIxMjAiIGhlaWdodD0iNDUiIHJ4PSI1IiBmaWxsPSJub25lIiBzdHJva2U9IiNlMDY2M2EiIHN0cm9rZS13aWR0aD0iMiIvPjx0ZXh0IHg9IjM1MCIgeT0iMTE3IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNSIgZmlsbD0iI2Y1ZjVmNCI+c2hhcmQgMjwvdGV4dD4KICA8cmVjdCB4PSI0NzAiIHk9IjYyIiB3aWR0aD0iMTIwIiBoZWlnaHQ9IjQ1IiByeD0iNSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZTA2NjNhIiBzdHJva2Utd2lkdGg9IjIiLz48dGV4dCB4PSI0OTUiIHk9Ijg5IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNSIgZmlsbD0iI2Y1ZjVmNCI+c2hhcmQgMzwvdGV4dD4KICA8bGluZSB4MT0iNTkwIiB5MT0iODQiIHgyPSI2NTAiIHkyPSI4NCIgc3Ryb2tlPSIjYjljN2Q1IiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhKSIvPjxyZWN0IHg9IjY2MCIgeT0iNjIiIHdpZHRoPSIxMzAiIGhlaWdodD0iNDUiIHJ4PSI1IiBmaWxsPSJub25lIiBzdHJva2U9IiNlMDY2M2EiIHN0cm9rZS13aWR0aD0iMiIvPjx0ZXh0IHg9IjY4MyIgeT0iODkiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiBmaWxsPSIjZjVmNWY0Ij5yZXF1aXJlZCBnYXRlPC90ZXh0PgogIDx0ZXh0IHg9IjIwIiB5PSIxODUiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE3IiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSIjZjVmNWY0Ij5BRlRFUjogZXhhY3QgU0hBIOKGkiBpc29sYXRlZCB3b3JrdHJlZSDihpIgc2VsZWN0ZWQgcHJvb2Y8L3RleHQ+CiAgPHJlY3QgeD0iMjAiIHk9IjIwNSIgd2lkdGg9IjEyNSIgaGVpZ2h0PSI1MCIgcng9IjUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzg0Y2MxNiIgc3Ryb2tlLXdpZHRoPSIyIi8+PHRleHQgeD0iNDIiIHk9IjIyNiIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTUiIGZpbGw9IiNmNWY1ZjQiPkdpdEh1YiBldmVudDwvdGV4dD48dGV4dCB4PSI1MCIgeT0iMjQzIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNSIgZmlsbD0iI2Y1ZjVmNCI+KyBoZWFkIFNIQTwvdGV4dD4KICA8bGluZSB4MT0iMTQ1IiB5MT0iMjMwIiB4Mj0iMTg1IiB5Mj0iMjMwIiBzdHJva2U9IiNiOWM3ZDUiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI2EpIi8+CiAgPHJlY3QgeD0iMTk1IiB5PSIyMDUiIHdpZHRoPSIxNDUiIGhlaWdodD0iNTAiIHJ4PSI1IiBmaWxsPSJub25lIiBzdHJva2U9IiM4NGNjMTYiIHN0cm9rZS13aWR0aD0iMiIvPjx0ZXh0IHg9IjIwOCIgeT0iMjI2IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNSIgZmlsbD0iI2Y1ZjVmNCI+c2hhcmVkIENyYWJib3g8L3RleHQ+PHRleHQgeD0iMjEwIiB5PSIyNDMiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiBmaWxsPSIjZjVmNWY0Ij5tdWx0aS1yZXBvIMK3IG5vIGxlYXNlPC90ZXh0PgogIDxsaW5lIHgxPSIzNDAiIHkxPSIyMzAiIHgyPSIzODAiIHkyPSIyMzAiIHN0cm9rZT0iI2I5YzdkNSIgc3Ryb2tlLXdpZHRoPSIxLjUiIG1hcmtlci1lbmQ9InVybCgjYSkiLz4KICA8cmVjdCB4PSIzOTAiIHk9IjE5NSIgd2lkdGg9IjE1NSIgaGVpZ2h0PSI3MCIgcng9IjUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzg0Y2MxNiIgc3Ryb2tlLXdpZHRoPSIyIi8+PHRleHQgeD0iNDEwIiB5PSIyMTciIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiBmaWxsPSIjZjVmNWY0Ij5kZXRhY2hlZCB3b3JrdHJlZTwvdGV4dD48dGV4dCB4PSI0MTMiIHk9IjIzNSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTUiIGZpbGw9IiNmNWY1ZjQiPkZpcmVjcmFja2VyIG1pY3JvVk08L3RleHQ+PHRleHQgeD0iNDI1IiB5PSIyNTIiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiBmaWxsPSIjZjVmNWY0Ij53YXJtIGNhY2hlPC90ZXh0PgogIDxsaW5lIHgxPSI1NDUiIHkxPSIyMzAiIHgyPSI1ODUiIHkyPSIyMzAiIHN0cm9rZT0iI2I5YzdkNSIgc3Ryb2tlLXdpZHRoPSIxLjUiIG1hcmtlci1lbmQ9InVybCgjYSkiLz4KICA8cmVjdCB4PSI1OTUiIHk9IjIwNSIgd2lkdGg9IjE0NSIgaGVpZ2h0PSI1MCIgcng9IjUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzg0Y2MxNiIgc3Ryb2tlLXdpZHRoPSIyIi8+PHRleHQgeD0iNjE1IiB5PSIyMjYiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiBmaWxsPSIjZjVmNWY0Ij5zZWxlY3RlZCB0ZXN0czwvdGV4dD48dGV4dCB4PSI2MTIiIHk9IjI0MyIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTUiIGZpbGw9IiNmNWY1ZjQiPisgbmFtZWQgcmVhc29uczwvdGV4dD4KICA8bGluZSB4MT0iNzQwIiB5MT0iMjMwIiB4Mj0iNzgwIiB5Mj0iMjMwIiBzdHJva2U9IiNiOWM3ZDUiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI2EpIi8+CiAgPHJlY3QgeD0iNzkwIiB5PSIxOTUiIHdpZHRoPSIxNjUiIGhlaWdodD0iNzAiIHJ4PSI1IiBmaWxsPSJub25lIiBzdHJva2U9IiM4NGNjMTYiIHN0cm9rZS13aWR0aD0iMiIvPjx0ZXh0IHg9IjgxNCIgeT0iMjE3IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNSIgZmlsbD0iI2Y1ZjVmNCI+U0hBIGF0dGVzdGF0aW9uPC90ZXh0Pjx0ZXh0IHg9IjgxNyIgeT0iMjM1IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNSIgZmlsbD0iI2Y1ZjVmNCI+cmVxdWlyZWQgY2hlY2s8L3RleHQ+PHRleHQgeD0iODIzIiB5PSIyNTIiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiBmaWxsPSIjZjVmNWY0Ij5QOTkg4omkOTBzPC90ZXh0PgogIDx0ZXh0IHg9IjE5NSIgeT0iMjk1IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNSIgZmlsbD0iI2Y1ZjVmNCI+Rm9yayBQUnM6IEdpdEh1Yi1ob3N0ZWQgaXNvbGF0ZWQgbGFuZTsgbmV2ZXIgZXhlY3V0ZSBmb3JrIGNvZGUgb24gdGhlIHBlcnNpc3RlbnQgbWFjaGluZS48L3RleHQ+Cjwvc3ZnPgo8ZmlnY2FwdGlvbj48Yj5GaWd1cmUgMi48L2I+IFdvcmt0cmVlcyBzb2x2ZSBjb25jdXJyZW5jeTsgdGhlIHBlci1qb2IgbWljcm9WTSBhbmQgZm9yayBzcGxpdCBzb2x2ZSBwZXJzaXN0ZW5jZSBhbmQgdHJ1c3QuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KClRoZSB0YXJnZXQgZXhlY3V0b3IgaXMgb25lIGFsd2F5cy1vbiBDcmFiYm94IHNoYXJlZCBieSBtdWx0aXBsZSByZXBvc2l0b3JpZXMgYW5kIGFnZW50cy4gSXQgaXMgcHJvdmlkZXItb3duZWQgY2FwYWNpdHkgZnJvbSB0aGUgZmxlZXQncyBwZXJzcGVjdGl2ZTogdGhlIGJyb2tlciBkb2VzIG5vdCBhY3F1aXJlLCByZWNsYWltLCBvciBleGNsdXNpdmVseSBhc3NpZ24gaXQgcGVyIHJ1bi4gSXQgaXMgYWxzbyBzZXBhcmF0ZSBmcm9tIHRoZSBleGlzdGluZyB0cnVzdGVkIG9yZy1ydW5uZXIgaG9zdC4gSXRzIGRpcmVjdG9yeSBjb250cmFjdCBpczoKCmBgYHRleHQKL3Nydi9jaS9taXJyb3JzLzxvd25lcj4vPHJlcG8+LmdpdAovc3J2L2NpL3J1bnMvPG93bmVyPi88cmVwbz4vPGNhbmRpZGF0ZS10cmVlPi88cnVuLWlkPi93b3JrdHJlZQovc3J2L2NpL3Jlc3VsdHMvPG93bmVyPi88cmVwbz4vPHJ1bi1pZD4vCi9zcnYvY2kvY2FjaGUvYnVuLzxsb2NrZmlsZS1kaWdlc3Q+LwpgYGAKCkVhY2ggam9iOgoKLSBjb21wdXRlcyBzZWxlY3Rpb24gZnJvbSBtZXJnZSBiYXNlIHRvIFBSIGhlYWQsIHRoZW4gZXhlY3V0ZXMgR2l0SHViJ3MgbWVyZ2UtcmVmIHRyZWUgb3IgYW4gaW5kZXBlbmRlbnRseSBjb25zdHJ1Y3RlZCBlcXVpdmFsZW50IGNhbmRpZGF0ZSB0cmVlOwotIHJlY29yZHMgc2VsZWN0aW9uIGJhc2UsIFBSIGhlYWQsIGJhc2UsIGNhbmRpZGF0ZSBjb21taXQvdHJlZSwgYW5kIHBvbGljeS90b29sY2hhaW4gZGlnZXN0cyBzZXBhcmF0ZWx5OwotIGNyZWF0ZXMgYSBkZXRhY2hlZCB3b3JrdHJlZSBuYW1lZCBieSBjaGVjay1ydW4gaWQgYW5kIGNhbmRpZGF0ZSB0cmVlIFNIQTsKLSBtb3VudHMgb25seSB0aGF0IHdvcmt0cmVlIGFuZCBjb250ZW50LWFkZHJlc3NlZCBCdW4vVml0ZXN0IGNhY2hlcyBpbnRvIGEgb25lLXVzZSBGaXJlY3JhY2tlciBtaWNyb1ZNOwotIHJ1bnMgd2l0aCBubyBzaWduaW5nLCBucG0sIEdpdEh1Yi13cml0ZSwgZmxlZXQsIFNTSCwgb3IgdXNlciBzZWNyZXRzOwotIGV4cG9zZXMgd29ya2VyIG91dHB1dCBvbmx5IGFzIHJhdyBsb2dzL3JlcG9ydHM7IHRoZSBjb250cm9sbGVyIGRlcml2ZXMgdGhlIGNvbmNsdXNpb24gZnJvbSBjb250cm9sbGVyLW9ic2VydmVkIGV4aXQgc3RhdHVzIGFuZCByZXBvcnQgaGFzaGVzLCB0aGVuIHNpZ25zIHdpdGggYSBrZXkgbmV2ZXIgbW91bnRlZCBpbnRvIHRoZSB3b3JrZXI7Ci0gcmVtb3ZlcyB0aGUgY29udGFpbmVyL3dvcmt0cmVlIGFmdGVyIGNvbXBsZXRpb247Ci0gYWxsb3dzIHdvcmt0cmVlcyBmcm9tIGRpZmZlcmVudCByZXBvc2l0b3JpZXMgYW5kIGFnZW50cyBjb25jdXJyZW50bHkgdXAgdG8gbWVhc3VyZWQgQ1BVL21lbW9yeSBsaW1pdHM7Ci0gZW50ZXJzIGEgZmFpciBwZXItcmVwb3NpdG9yeSBxdWV1ZSB3aGVuIGNhcGFjaXR5IGlzIGZ1bGw7IHRoaXMgaXMgc2hvcnQtbGl2ZWQgcmVzb3VyY2UgYWRtaXNzaW9uLCBub3QgYW4gZXhjbHVzaXZlIG1hY2hpbmUgbGVhc2U7Ci0gY2FwcyBwZXItcmVwb3NpdG9yeSBjb25jdXJyZW5jeSBzbyBvbmUgcmVwbyBjYW5ub3Qgc3RhcnZlIGFsbCBvdGhlciBhZ2VudHMuCgpHaXRIdWIgZXhwbGljaXRseSB3YXJucyB0aGF0IHB1bGwtcmVxdWVzdCBjb2RlIGNhbiBiZSBkYW5nZXJvdXMgb24gYSBwZXJzaXN0ZW50IHNlbGYtaG9zdGVkIHJ1bm5lci4gRm9yayBQUnMgdGhlcmVmb3JlIHVzZSBHaXRIdWItaG9zdGVkIHJ1bm5lcnMgd2l0aCByZXN0b3JlLW9ubHksIG5vbi1zZWNyZXQgY2FjaGVzLiBTYW1lLXJlcG9zaXRvcnkgUFJzIG1vdmUgb25seSB0byB0aGUgc2VwYXJhdGUgdW50cnVzdGVkLWNvZGUgaG9zdCBhZnRlciBpc29sYXRpb24gcHJvdmVzIHRoZXkgY2Fubm90IHJlYWNoIHRydXN0ZWQtcnVubmVyIGZpbGVzL3Byb2Nlc3NlcywgaG9zdCBzb2NrZXRzLCBEb2NrZXIsIHRhaWxuZXQsIFNTSCBhZ2VudCwgc2lnbmluZy9wdWJsaXNoIGNyZWRlbnRpYWxzLCBHaXRIdWIgdG9rZW4sIG9yIGhvc3QgaG9tZS4gVGhlIGV4aXN0aW5nIHRydXN0ZWQgcnVubmVyIGxhYmVsIHJlbWFpbnMgZm9yYmlkZGVuIG9uIGV2ZXJ5IGBwdWxsX3JlcXVlc3RgIHRyaWdnZXIuCgojIyMgMy4gTW92ZSBmdWxsIHN3ZWVwcyBvdXQgb2YgdGhlIG1lcmdlIGNyaXRpY2FsIHBhdGgKCk9uIGV2ZXJ5IG1lcmdlIHRvIHRoZSBkZWZhdWx0IGJyYW5jaCwgcnVuIHRoZSBmdWxsIExpbnV4IHN1aXRlIGFuZCByZWxldmFudCBtYWNPUy9XaW5kb3dzIHN3ZWVwcyBhc3luY2hyb25vdXNseS4gTmlnaHRseSwgcnVuIGFsbCBwbGF0Zm9ybXMgYW5kIE5vZGUgdmVyc2lvbnMuIENvbXBhcmUgc2VsZWN0ZWQgdGVzdHMgd2l0aCBmdWxsLXN1aXRlIGZhaWx1cmVzIGFuZCBzdG9yZToKCi0gc2VsZWN0aW9uIHJlY2FsbDogZnVsbC1zdWl0ZSBmYWlsdXJlcyB3aG9zZSB0ZXN0IHdhcyBub3Qgc2VsZWN0ZWQgb24gdGhlIG9yaWdpbmF0aW5nIFBSOwotIGltcGFjdGVkIHRlc3QgY291bnQgYW5kIGR1cmF0aW9uIHBlciBjaGFuZ2VkIHBhdGg7Ci0gcXVldWUsIHNldHVwLCBleGVjdXRpb24sIGFuZCByZXBvcnRpbmcgbGF0ZW5jeSBwZXJjZW50aWxlczsKLSBwb2xpY3kgdmVyc2lvbiBhbmQgZXhhY3Qgc291cmNlIHRyZWUgU0hBOwotIHRvcCB0ZXN0IGZpbGVzIGJ5IGV4Y2x1c2l2ZSB3YWxsIHRpbWUuCgpUaGUgcm9sbG91dCBzdGF5cyBpbiBzaGFkb3cgbW9kZSB1bnRpbCAqKjIwMCByZXByZXNlbnRhdGl2ZSBwdWxsIHJlcXVlc3RzIGFuZCBhdCBsZWFzdCAxNCBkYXlzKiogY29tcGxldGUgd2l0aCB6ZXJvIG1pc3NlZCBmYWlsdXJlcy4gRHVyaW5nIHNoYWRvdyBtb2RlLCB0aGUgb2xkIGZ1bGwgc3VpdGUgcmVtYWlucyByZXF1aXJlZCBhbmQgdGhlIG5ldyBpbXBhY3Qgam9iIHJlcG9ydHMgd2hhdCBpdCB3b3VsZCBoYXZlIHNlbGVjdGVkLiBQcm9tb3Rpb24gcmVxdWlyZXMgdGhlIG1lYXN1cmVkIHRhcmdldHMgYW5kIHplcm8gZmFsc2UgbmVnYXRpdmVzOyBvdGhlcndpc2UgdGhlIG1hbmlmZXN0IG9yIGdyYXBoIGlzIGNvcnJlY3RlZCBhbmQgdGhlIHNhbXBsZSByZXN0YXJ0cyBmb3IgdGhhdCBwb2xpY3kgdmVyc2lvbi4KCiMjIyA0LiBSZWxlYXNlIGZyb20gZXZpZGVuY2UgYWxyZWFkeSBlYXJuZWQgYnkgdGhlIG1lcmdlZCB0cmVlCgpUb2RheSB0aGUgcmVsZWFzZSBzY3JpcHQgcnVucyBhIGZ1bGwgQ3JhYmJveCBzdWl0ZSBiZWZvcmUgb3BlbmluZyBhIHJlbGVhc2UgUFIsIHdhaXRzIGZvciBwdWxsLXJlcXVlc3QgY2hlY2tzLCB3YWl0cyBmb3IgYSByZWxlYXNlIG1hdHJpeCwgdGhlbiBhbHdheXMgYnVpbGRzL3NpZ25zL25vdGFyaXplcyB0aGUgQ0xJIGFuZCBuYXRpdmUgaGVscGVycy4gUmVwbGFjZSB0aGF0IHNlcXVlbmNlOgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtZ3JpZCBhcnRpZmFjdC1ncmlkLTIgYXJ0aWZhY3QtYmVoYXZpb3IiPgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1wYW5lbCIgZGF0YS1zdGF0ZT0iY3VycmVudCIgZGF0YS1ldmlkZW5jZT0iY2FwdHVyZSI+CgoqKkJlZm9yZSDigJQgcm91dGluZSByZWxlYXNlKioKCmBgYGNvbnNvbGUKbGVhc2UvcmV1c2UgQ3JhYmJveApmdWxsIExpbnV4IGJ1aWxkICsgdGVzdApjcmVhdGUgdmVyc2lvbi9jaGFuZ2Vsb2cgUFIKZnVsbCBQUiB0ZXN0IHdvcmtmbG93CnJlbGVhc2UgT1Mgw5cgTm9kZSBtYXRyaXgKbWVyZ2UKYnVpbGQvc2lnbi9ub3Rhcml6ZSBhbGwgaGVscGVycwpidWlsZCBwYWNrYWdlIOKGkiBucG0gcHVibGlzaAoKcmVsZWFzZSBQUiBwNTAgMTIuOG0gwrcgcDkwIDczLjVtCm1lcmdl4oaSbnBtIHA1MCAzLjZtIMK3IHA5MCAyNi4xbQpgYGAKPC9kaXY+Cgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1wYW5lbCIgZGF0YS1zdGF0ZT0icHJvcG9zZWQiIGRhdGEtZXZpZGVuY2U9Im1vY2t1cCI+CgoqKkFmdGVyIOKAlCByb3V0aW5lIHJlbGVhc2UqKgoKYGBgY29uc29sZQp2ZXJpZnkgY2FuZGlkYXRlLXRyZWUgYXR0ZXN0YXRpb25zICAgICAgc2Vjb25kcwpjcmVhdGUgdmVyc2lvbi9jaGFuZ2Vsb2cgUFIKdmVyc2lvbi9jaGFuZ2Vsb2cgKyBwYWNrYWdlL2J1aWxkL3Ntb2tlIHNlY29uZHMKbWVyZ2UKYnVpbGQgcGFja2FnZSArIHZlcnNpb25lZCBDTEkgYmluYXJ5ICBwYXJhbGxlbApyZXNvbHZlIHZlcmlmaWVkIGhlbHBlciBkaWdlc3RzICAgICAgICAgc2Vjb25kcwpwdWJsaXNoIG5wbSBhbmQgcmVsZWFzZSBtYW5pZmVzdAoKdGFyZ2V0IHN0YXJ04oaSbnBtIFA5OSDiiaQxODBzCmBgYAo8L2Rpdj4KPC9kaXY+CgpUaGUgcmVsZWFzZSBhdHRlc3RhdGlvbiBrZXkgaXMgaW1tdXRhYmxlOiB0ZXN0ZWQgY2FuZGlkYXRlIHRyZWUgZGlnZXN0LCBzZWxlY3Rpb24gYmFzZS9iYXNlL2hlYWQgaWRlbnRpdGllcywgcGxhdGZvcm0sIHJ1bnRpbWUvdG9vbGNoYWluIHZlcnNpb25zLCBsb2NrZmlsZSBkaWdlc3QsIHRlc3QtcG9saWN5IHZlcnNpb24sIGFuZCBzZWxlY3RlZC9mdWxsIHN1aXRlIGlkZW50aXR5LiBBIGJhc2UgYWR2YW5jZSBpbnZhbGlkYXRlcyB0aGUgY2FuZGlkYXRlLiBSZWxlYXNlIHJldXNlIGlzIGFsbG93ZWQgb25seSB3aGVuIHRoZSBmaW5hbCBkZWZhdWx0LWJyYW5jaCB0cmVlIGRpZ2VzdCBlcXVhbHMgdGhlIHRlc3RlZCBjYW5kaWRhdGUgdHJlZSBkaWdlc3Q7IGV2aWRlbmNlIGZyb20gYSBwYXJlbnQsIG5lYXJieSBjb21taXQsIGJyYW5jaCBuYW1lLCBvciBtdXRhYmxlIGNhY2hlIGtleSBuZXZlciBjb3VudHMuCgojIyMgNS4gU3RvcCByZWJ1aWxkaW5nIHVuY2hhbmdlZCBoZWxwZXJzIGF0IHRoZSBzb3VyY2UKCkRlY291cGxlIGhlbHBlciBhcnRpZmFjdCBpZGVudGl0eSBmcm9tIHRoZSBDTEkgcGFja2FnZSB2ZXJzaW9uLiBPbiBtYWluLCBhIGNoYW5nZS1kcml2ZW4gaGVscGVyIGJ1aWxkZXIgcHJvZHVjZXMgYSBzaWduZWQvbm90YXJpemVkIGFydGlmYWN0IGtleWVkIGJ5IGEgZGlnZXN0IG9mIGl0cyBjb21wbGV0ZSBpbnB1dHM6IHNvdXJjZSwgYnVpbGQgc2NyaXB0LCBsb2NrZmlsZS90b29sY2hhaW4sIGVudGl0bGVtZW50cywgYXNzZXRzLCBzaWduaW5nIGlkZW50aXR5LCBhbmQgdGFyZ2V0IGFyY2hpdGVjdHVyZS4gSXQgdmVyaWZpZXMgYGNvZGVzaWduYCwgR2F0ZWtlZXBlci9zdGFwbGluZywgYW5kIFNIQS0yNTYgYmVmb3JlIHJlY29yZGluZyB0aGUgYXJ0aWZhY3QuCgpUaGUgcmVsZWFzZSBtYW5pZmVzdCBtYXBzIG9uZSBDTEkgdmVyc2lvbiB0byBpbW11dGFibGUgaGVscGVyIGRpZ2VzdHMgYW5kIGluZGVwZW5kZW50IGhlbHBlciB2ZXJzaW9ucy4gTWlncmF0aW9uIGlzIHN0YWdlZDogcmVsZWFzZSBOIHNoaXBzIHRoZSBtYW5pZmVzdC1hd2FyZSBkb3dubG9hZGVyIHdoaWxlIHJldGFpbmluZyB0aGUgY3VycmVudCBwZXItQ0xJLXZlcnNpb24gaGVscGVyIGFzc2V0OyBvbmx5IGFmdGVyIHRoYXQgY2xpZW50IGlzIGxpdmUgZG9lcyByZWxlYXNlIE4rMSBjb25zdW1lIGFuIGluZGVwZW5kZW50IGhlbHBlciBhcnRpZmFjdC4gT2xkIGNsaWVudHMga2VlcCByZXNvbHZpbmcgdGhlIGltbXV0YWJsZSBhc3NldCBhbHJlYWR5IGF0dGFjaGVkIHRvIHRoZWlyIG93biBgdjxjbGktdmVyc2lvbj5gIHRhZy4KClRoZSBidW5kbGVkIGBkaXN0L2xpYi9jb21wdXRlci9oZWxwZXItbWFuaWZlc3QuanNvbmAgY29udGFpbnMgYHNjaGVtYVZlcnNpb25gLCBwbGF0Zm9ybSwgaGVscGVyIHZlcnNpb24sIGltbXV0YWJsZSBhc3NldCBVUkwsIFNIQS0yNTYsIHNpZ25lciB0ZWFtLCBhbmQgaW5wdXQgZGlnZXN0LiBQYWNrYWdlIGludGVncml0eSBwcm90ZWN0cyB0aGUgbWFuaWZlc3Q7IHRoZSBkb3dubG9hZGVkIGFwcCBzdGlsbCBwYXNzZXMgY2hlY2tzdW0sIGNvZGUtc2lnbmluZyB0ZWFtLCBHYXRla2VlcGVyLCBhbmQgbm90YXJpemF0aW9uIHZlcmlmaWNhdGlvbi4gTmV3IGNsaWVudHMgY2FjaGUgYnkgaGVscGVyIHZlcnNpb24gKyBkaWdlc3QuIE1pc3Npbmcgb3IgaW52YWxpZCBtYW5pZmVzdHMvYXNzZXRzIGZhaWwgc2V0dXA7IHRoZXkgbmV2ZXIgZGVyaXZlIGEgZmFsbGJhY2sgVVJMLgoKfCBBcnRpZmFjdCB8IEN1cnJlbnQgY291cGxpbmcgfCBQcm9wb3NlZCByZWxlYXNlIGJlaGF2aW9yIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IFR5cGVTY3JpcHQvbnBtIHBhY2thZ2UgfCBDTEkgdmVyc2lvbiBhbmQgc291cmNlcyB8IEFsd2F5cyBidWlsZDsgY3VycmVudCBtZWFzdXJlZCBidWlsZCBpcyBzbWFsbC4gfAp8IFN0YW5kYWxvbmUgQ0xJIGJpbmFyeSB8IENMSSB2ZXJzaW9uIGVtYmVkZGVkIGluIGJvb3RzdHJhcCB8IFJlYnVpbGQvc2lnbi9ub3Rhcml6ZSBlYWNoIENMSSB2ZXJzaW9uLCBpbiBwYXJhbGxlbCB3aXRoIHBhY2thZ2UgYnVpbGQuIHwKfCBLZXljaGFpbiBoZWxwZXIgfCBObyBDTEkgdmVyc2lvbiBvYnNlcnZlZCBpbiBidWlsZCBpbnB1dHMgfCBSZXVzZSB2ZXJpZmllZCBjb250ZW50LWFkZHJlc3NlZCBhcnRpZmFjdCB1bmxlc3MgaXRzIGlucHV0cyBjaGFuZ2UuIHwKfCBNZW51IGJhciBhcHAgfCBOYXRpdmUgc291cmNlcy9hc3NldHMvc2lnbmluZyBpbnB1dHMgfCBSZXVzZSB2ZXJpZmllZCBhcnRpZmFjdCB1bmxlc3MgaXRzIGNvbXBsZXRlIGlucHV0IGRpZ2VzdCBjaGFuZ2VzLiB8CnwgQ29tcHV0ZXIgaGVscGVyIHwgQ0xJIHZlcnNpb24gY3VycmVudGx5IHN0YW1wZWQgaW50byBgSW5mby5wbGlzdGAgfCBHaXZlIGl0IGFuIGluZGVwZW5kZW50IGhlbHBlciB2ZXJzaW9uOyByZWJ1aWxkIG9ubHkgZm9yIGhlbHBlci1pbnB1dCBjaGFuZ2VzLCB0aGVuIG1hcCBpdHMgZGlnZXN0IGZyb20gdGhlIENMSSByZWxlYXNlIG1hbmlmZXN0LiB8CgpNaXNzaW5nIG9yIHVudmVyaWZpYWJsZSBoZWxwZXIgYXJ0aWZhY3RzIGZhaWwgdGhlIHJlbGVhc2UgYm91bmRhcnkuIFRoZXkgZG8gbm90IGZhbGwgYmFjayB0byBhIHN0YWxlIGJ1aWxkLiBBIGhlbHBlciBzb3VyY2UgY2hhbmdlIHRyaWdnZXJzIGl0cyBidWlsZGVyIGJlZm9yZSB0aGUgcmVsZWFzZSB0cmFpbiBjYW4gY29uc3VtZSB0aGUgbmV3IHRyZWUuCgojIyBPcHRpb25zIGNvbnNpZGVyZWQKCnwgT3B0aW9uIHwgRXhwZWN0ZWQgcmVzdWx0IHwgRGVjaXNpb24gfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgQWRkIGRlcGVuZGVuY3kgY2FjaGUgdG8gR2l0SHViLWhvc3RlZCBqb2JzIHwgU2F2ZXMgcm91Z2hseSB0aGUgMTctc2Vjb25kIGluc3RhbGwgYW5kIHNvbWUgc2V0dXA7IHRlc3RzIHN0aWxsIHRha2UgNOKAkzYgbWludXRlcyB8IFJlamVjdCBhcyB0aGUgcHJpbWFyeSBmaXg7IGtlZXAgYXMgaHlnaWVuZSBmb3IgZm9yayBqb2JzLiB8CnwgQWRkIG1vcmUgc2hhcmRzIC8gbW9yZSBsZWFzZWQgYm94ZXMgfCBTaG9ydGVucyBhIHNpbmdsZSBmdWxsIHN3ZWVwLCBpbmNyZWFzZXMgZml4ZWQgc2V0dXAgYW5kIGJ1cnN0IGNvbnRlbnRpb247IHN0aWxsIHJ1bnMgMTIsMDAwIHRlc3RzIHwgUmVqZWN0IGFzIHRoZSB0YXJnZXQgYXJjaGl0ZWN0dXJlLiBVc2VmdWwgb25seSBkdXJpbmcgc2hhZG93IHZhbGlkYXRpb24uIHwKfCBPbmUgc2hhcmVkIG11bHRpLXJlcG8gQ3JhYmJveCwgYnV0IGtlZXAgZnVsbCBzdWl0ZSB8IFJlbW92ZXMgbGVhc2UvY2hlY2tvdXQgY2h1cm4gYnV0IHRoZSB0ZXN0IGNvcnB1cyByZW1haW5zIHRoZSBjcml0aWNhbCBwYXRoIHwgTmVjZXNzYXJ5IGNvbXB1dGUgYmFzZSwgaW5zdWZmaWNpZW50IGFsb25lLiB8CnwgQWZmZWN0ZWQgdGVzdHMgKyBvd25lcnNoaXAgbWFuaWZlc3QgKyBzdGFuZGluZyBpc29sYXRlZCBleGVjdXRvciB8IE9yZGluYXJ5IGRpZmZzIGV4ZWN1dGUgb25seSB0aGVpciByZWFsIHByb29mIG9uIHdhcm0gY2FwYWNpdHkgfCAqKkFkb3B0LioqIHwKfCBNZXJnZSBxdWV1ZSAvIGJhdGNoIHRlc3RpbmcgfCBBbW9ydGl6ZXMgZnVsbC1zdWl0ZSBjb21wdXRlIGJ1dCBtYWtlcyBhbiBpbmRpdmlkdWFsIFBSIHdhaXQgZm9yIGEgYmF0Y2ggfCBTZWNvbmRhcnkgYmFja3N0b3AsIG5vdCB0aGUgdXNlci1mYWNpbmcgZ2F0ZS4gfAp8IFByZS1wdXNoIHNwZWN1bGF0aXZlIGF0dGVzdGF0aW9uIHwgQSBicmFuY2ggcHVzaCBjYW4gYXJyaXZlIGF0IEdpdEh1YiB3aXRoIHByb29mIGFscmVhZHkgY29tcHV0ZWQgfCBBZGQgYWZ0ZXIgdGhlIGV4YWN0LVNIQSBhdHRlc3RhdGlvbiBmb3JtYXQgaXMgc3RhYmxlOyBpdCBjYW4gcmVkdWNlIHBvc3QtcHVzaCBjaGVja3MgdG8gYXR0ZXN0YXRpb24gbG9va3VwLiB8CgojIyBQdWJsaWMgSW50ZXJmYWNlCgotIGBzY3JpcHRzL2NpLXNjb3BlLnRzIC0tYmFzZSA8c2hhPiAtLWhlYWQgPHNoYT4gLS1qc29uYCBiZWNvbWVzIHRoZSBjYW5vbmljYWwgaW1wYWN0LXBsYW4gaW50ZXJmYWNlLiBPdXRwdXQgaXMgZGV0ZXJtaW5pc3RpYyBhbmQgdmVyc2lvbmVkOyBub24tSlNPTiBtb2RlIHByaW50cyB0aGUgaHVtYW4gbWFwcGluZyB0YWJsZS4KLSBgYXBwcy9jbGkvY2kvdGVzdC1vd25lcnNoaXAueWFtbGAgaXMgdGhlIG9ubHkgbWFudWFsIGRlcGVuZGVuY3kgc3VyZmFjZSBmb3Igbm9uLXN0YXRpYyByZWxhdGlvbnNoaXBzLiBDSSB2YWxpZGF0ZXMgdGhhdCBldmVyeSBwcm9kdWN0aW9uL2J1aWxkL2NvbmZpZyBwYXRoIGlzIGNsYXNzaWZpZWQgYW5kIGV2ZXJ5IHJlZmVyZW5jZWQgdGVzdCBleGlzdHMuCi0gVGhlIHNoYXJlZC1leGVjdXRvciByZXF1ZXN0IGNvbnRhaW5zIHJlcG9zaXRvcnkgaWRlbnRpdHksIGNhbmRpZGF0ZSBjb21taXQvdHJlZSwgaW1wYWN0LXBsYW4gZGlnZXN0LCByZXNvdXJjZSBjbGFzcywgYW5kIGNoZWNrLXJ1biBpZC4gSXQgbmV2ZXIgY29udGFpbnMgYSBib3ggbGVhc2Ugb3IgbXV0YWJsZSBjaGVja291dCBwYXRoOyB0aGUgZXhlY3V0b3IgZGVyaXZlcyBhIG5hbWVzcGFjZWQgd29ya3RyZWUgcGF0aCBhbmQgcmV0dXJucyBhIHJ1biBpZC4KLSBUaGUgcmVxdWlyZWQgR2l0SHViIGNvbnRleHQgcmVtYWlucyBvbmUgc3RhYmxlIGBUZXN0cyAvIHRlc3RgIGFnZ3JlZ2F0b3IgZHVyaW5nIG1pZ3JhdGlvbjsgaXRzIHN1bW1hcnkgbGlua3MgdG8gdGhlIGBUZXN0cyAvIGltcGFjdGAgcGxhbiBhbmQgcmVzdWx0IHNvIGJyYW5jaCBwcm90ZWN0aW9uIGRvZXMgbm90IGNodXJuLgotIEF0dGVzdGF0aW9ucyBhcmUgaW1tdXRhYmxlIEpTT04gcmVjb3JkcyBhZGRyZXNzZWQgYnkgU0hBLTI1NiBhbmQgaW5jbHVkZSBzZWxlY3Rpb24gcmFuZ2UsIGNhbmRpZGF0ZSB0cmVlLCBiYXNlL2hlYWQgaWRlbnRpdGllcywgcGxhbiBkaWdlc3QsIHBsYXRmb3JtL3Rvb2xjaGFpbiwgc2VsZWN0ZWQgY2hlY2tzLCBjb250cm9sbGVyLW9ic2VydmVkIHJlc3VsdHMsIGR1cmF0aW9ucywgYW5kIHJlcG9ydC9hcnRpZmFjdCBkaWdlc3RzLiBPbmx5IHRoZSBjb250cm9sbGVyIGNvbnN0cnVjdHMvc2lnbnMgdGhlbTsgd29ya2VycyBjYW5ub3Qgd3JpdGUgYSBjb25jbHVzaW9uIG9yIGFjY2VzcyB0aGUgc2lnbmluZyBpZGVudGl0eS4KLSBUaGUgcmVsZWFzZSBtYW5pZmVzdCBhZGRzIGluZGVwZW5kZW50IGhlbHBlciB2ZXJzaW9ucy9kaWdlc3RzIHRocm91Z2ggdGhlIHN0YWdlZCBOL04rMSBtaWdyYXRpb24uIFRoZSBzZXR1cCBjb21tYW5kIGlzIHVuY2hhbmdlZDsgbm8gdXNlci1tYW5hZ2VkIGZsYWcgb3IgZW52aXJvbm1lbnQgdmFyaWFibGUgaXMgYWRkZWQuCgojIyBJbXBsZW1lbnRhdGlvbiBwbGFuCgotIFsgXSAqKkluc3RydW1lbnQgdGhlIGJhc2VsaW5lLioqIFBlcnNpc3QgcGVyLWpvYiBxdWV1ZS9zZXR1cC90ZXN0L3JlcG9ydCB0aW1pbmdzLCBzZWxlY3RlZCB0ZXN0IGZpbGUgY291bnRzLCBhbmQgdG9wIHNsb3cgdGVzdHM7IHB1Ymxpc2ggYSAzMC1kYXkgZGFzaGJvYXJkLgotIFsgXSAqKkJ1aWxkIGFuZCB0ZXN0IHRoZSBpbXBhY3QgcGxhbm5lci4qKiBFeHRlbmQgc2NvcGUgb3V0cHV0LCBhZGQgdGhlIG93bmVyc2hpcCBtYW5pZmVzdCwgdGVzdCBzdGF0aWMvZHluYW1pYy9zdWJwcm9jZXNzL3BsYXRmb3JtL2dsb2JhbCBjYXNlcywgYW5kIG1ha2UgdW5rbm93biBwYXRocyBmYWlsIGxvdWQuCi0gW3hdICoqUmVtb3ZlIFdpbmRvd3MgZnJvbSB0aGUgZ2F0ZS4qKiBQUiAjMjcxNyBpcyBjbG9zZWQ7IHJldGFpbiBhdCBtb3N0IGEgbm9uLWJsb2NraW5nIHBvc3QtbWVyZ2Ugc21va2UgZHVyaW5nIHRoZSBzdXBwb3J0LWRlbWFuZCBldmlkZW5jZSB3aW5kb3cuCi0gWyBdICoqUHJvdmlzaW9uIHRoZSBzaGFyZWQgZXhlY3V0b3IuKiogRGVzaWduYXRlIG9uZSBhbHdheXMtb24gQ3JhYmJveCBmb3IgYWxsIHBhcnRpY2lwYXRpbmcgcmVwb3NpdG9yaWVzOyByZW1vdmUgcGVyLXJ1biBhY3F1aXNpdGlvbi9yZWNsYWltLCB0cnVzdGVkIHJ1bm5lcnMgYW5kIHRhaWxuZXQgYWNjZXNzOyBhZGQgcGVyLXJlcG8gbWlycm9ycywgbmFtZXNwYWNlZCBjYW5kaWRhdGUgd29ya3RyZWVzLCBGaXJlY3JhY2tlciBpc29sYXRpb24sIHNoYXJlZCBjb250ZW50IGNhY2hlcywgZmFpciBzY2hlZHVsaW5nLCBwZXItcmVwbyBjb25jdXJyZW5jeSBjYXBzLCBhbmQgbm8gc2VjcmV0cy4KLSBbIF0gKipSdW4gc2hhZG93IG1vZGUuKiogRXhlY3V0ZSBpbXBhY3QgYW5kIGZ1bGwgc3VpdGVzIHRvZ2V0aGVyIGZvciAyMDAgUFJzLzE0IGRheXM7IG1lYXN1cmUgcmVjYWxsIGFuZCBsYXRlbmN5IHdpdGhvdXQgY2hhbmdpbmcgYnJhbmNoIHByb3RlY3Rpb24uCi0gWyBdICoqU3dpdGNoIHRoZSByZXF1aXJlZCBnYXRlLioqIFByb21vdGUgYFRlc3RzIC8gaW1wYWN0YCwgcmV0YWluIHRoZSBzdGFibGUgYWdncmVnYXRvciBjb250ZXh0LCBtb3ZlIGZ1bGwgTGludXgvY3Jvc3MtcGxhdGZvcm0gc3dlZXBzIHRvIHBvc3QtbWVyZ2UvbmlnaHRseSwgYW5kIGtlZXAgZm9yayBQUnMgaXNvbGF0ZWQuCi0gWyBdICoqQ3JlYXRlIGV4YWN0LWNhbmRpZGF0ZSBhdHRlc3RhdGlvbnMuKiogU2lnbi9zdG9yZSBtZXJnZS1jYW5kaWRhdGUgYW5kIG1haW4gcHJvb2ZzLCBpbnZhbGlkYXRlIG9uIGJhc2UgYWR2YW5jZSwgcmVxdWlyZSBmaW5hbC10cmVlIGVxdWFsaXR5IGluIHRoZSByZWxlYXNlIHNjcmlwdCwgYW5kIGRlbGV0ZSB0aGUgcHJlLXJlbGVhc2UgZHVwbGljYXRlIGZ1bGwtc3VpdGUgaW52b2NhdGlvbi4KLSBbIF0gKipEZWNvdXBsZSBuYXRpdmUgaGVscGVycy4qKiBCdWlsZC9zaWduL25vdGFyaXplIG9uIGhlbHBlci1pbnB1dCBjaGFuZ2VzLCBpbnRyb2R1Y2UgaW5kZXBlbmRlbnQgaGVscGVyIHZlcnNpb25zIGFuZCB0aGUgcmVsZWFzZSBtYW5pZmVzdCBtYXBwaW5nLCBhbmQgdmVyaWZ5IGFydGlmYWN0cyBiZWZvcmUgcmV1c2UuCi0gWyBdICoqUGFyYWxsZWxpemUgdGhlIHJlbWFpbmluZyByZWxlYXNlLioqIEJ1aWxkIHRoZSBucG0gcGFja2FnZSBhbmQgdmVyc2lvbi1zdGFtcGVkIHN0YW5kYWxvbmUgQ0xJIGNvbmN1cnJlbnRseSwgY29uc3VtZSB2ZXJpZmllZCBoZWxwZXIgYXJ0aWZhY3RzLCBwdWJsaXNoLCB0YWcsIGFuZCB2ZXJpZnkgaW5zdGFsbGVkIHZlcnNpb25zIHRocm91Z2ggdGhlIGV4aXN0aW5nIHJlbGVhc2UgdHJhaW4uCi0gWyBdICoqRW5mb3JjZSB0aGUgdGFyZ2V0cy4qKiBBbGVydCBvbiBwNTAvcDkwIHJlZ3Jlc3Npb24sIHF1ZXVlaW5nLCB1bm1hcHBlZCBmaWxlcywgZmFsc2UtbmVnYXRpdmUgc2VsZWN0aW9uLCBzdGFsZSBhdHRlc3RhdGlvbnMsIGFuZCBtaXNzaW5nIGhlbHBlciBhcnRpZmFjdHMuCgojIyBWYWxpZGF0aW9uCgp8IFNjZW5hcmlvIHwgUmVxdWlyZWQgcmVzdWx0IHwKfCAtLS0gfCAtLS0gfAp8IE9uZSBsZWFmIHNvdXJjZSBmaWxlIGNoYW5nZXMgfCBDb21wYW5pb24gKyBzdGF0aWNhbGx5IHJlbGF0ZWQgdGVzdHMgb25seTsgY2hlY2sgc3VtbWFyeSBleHBsYWlucyBldmVyeSBzZWxlY3Rpb24uIHwKfCBDTEkgY29tbWFuZCBkZWZpbml0aW9uIGNoYW5nZXMgfCBDb21tYW5kIHRlc3Qgb3duZXJzLCBidWlsZC90eXBlY2hlY2ssIGNvbW1hbmQgaW5kZXgsIGFuZCBkb2NzIHZlcmlmaWNhdGlvbiBzZWxlY3RlZDsgdW5yZWxhdGVkIHNlc3Npb24vZGFlbW9uIHN1aXRlcyBhYnNlbnQuIHwKfCBBIHN1YnByb2Nlc3MgZW50cnlwb2ludCBjaGFuZ2VzIHwgRXhwbGljaXQgb3duZXJzaGlwIHNlbGVjdHMgbm9uLWludGVyYWN0aXZlL0NMSSBpbnRlZ3JhdGlvbiB0ZXN0cyBldmVuIHRob3VnaCBzdGF0aWMgaW1wb3J0cyBkbyBub3QuIHwKfCBXaW5kb3dzLW9ubHkgY29kZSBjaGFuZ2VzIHwgTm8gcmVxdWlyZWQgV2luZG93cyBjaGVjay4gQmVzdC1lZmZvcnQgcG9zdC1tZXJnZSBzbW9rZSByZWNvcmRzIGV2aWRlbmNlIHdpdGhvdXQgYmxvY2tpbmcgdGhlIFBSIG9yIHJlbGVhc2UuIHwKfCBUZXN0IGZpbGUgY2hhbmdlcyB8IFRoYXQgdGVzdCBhbHdheXMgcnVucy4gfAp8IExvY2tmaWxlL1ZpdGVzdC9nbG9iYWwgc2V0dXAgY2hhbmdlcyB8IE1hbmlmZXN0IHNlbGVjdHMgdGhlIGRlY2xhcmVkIGJyb2FkIGdyb3VwOyBubyBpbXBsaWNpdCBmYWxsYmFjay4gfAp8IFVubWFwcGVkIHByb2R1Y3Rpb24gcGF0aCBjaGFuZ2VzIHwgRmFzdCByZWQgcG9saWN5IGNoZWNrIGxpc3RzIHRoZSBtaXNzaW5nIHBhdGggYW5kIHJlcXVpcmVkIG1hbmlmZXN0IGFjdGlvbi4gfAp8IEZvcmsgUFIgb3BlbnMgfCBOZXZlciBzY2hlZHVsZWQgb24gdGhlIHBlcnNpc3RlbnQgZXhlY3V0b3I7IGlzb2xhdGVkIEdpdEh1Yi1ob3N0ZWQgam9iIGhhcyBubyBzZWNyZXRzIGFuZCByZXN0b3JlLW9ubHkgY2FjaGVzLiB8CnwgVHdvIGFnZW50cyB0ZXN0IHRoZSBzYW1lIHJlcG9zaXRvcnkgc2ltdWx0YW5lb3VzbHkgfCBEaXN0aW5jdCBydW4taWQgd29ya3RyZWVzIGFuZCByZXN1bHQgZGlyZWN0b3JpZXM7IHNoYXJlZCByZWFkLW9ubHkgbWlycm9yL2NhY2hlOyBuZWl0aGVyIGNoZWNrb3V0IGNhbiBtdXRhdGUgdGhlIG90aGVyLiB8CnwgVGhyZWUgcmVwb3NpdG9yaWVzIHVzZSB0aGUgQ3JhYmJveCBzaW11bHRhbmVvdXNseSB8IEZhaXIgYWRtaXNzaW9uIGhvbm9ycyBwZXItcmVwbyBjb25jdXJyZW5jeSBjYXBzOyBqb2JzIHJ1biBjb25jdXJyZW50bHkgd2l0aGluIENQVS9tZW1vcnkgbGltaXRzIHdpdGhvdXQgYWNxdWlyaW5nIHRoZSBib3guIHwKfCBCYXNlIGFkdmFuY2VzIGFmdGVyIGEgZ3JlZW4gUFIgfCBDYW5kaWRhdGUgdHJlZSBjaGFuZ2VzOyBwcmlvciBhdHRlc3RhdGlvbiBpcyBpbnZhbGlkIGFuZCB0aGUgbmV3IG1lcmdlIGNhbmRpZGF0ZSBpcyB0ZXN0ZWQuIHwKfCBTYW1lIGNhbmRpZGF0ZSB0cmVlIGlzIHJldHJpZWQgfCBDYWNoZSBtYXkgYWNjZWxlcmF0ZSBleGVjdXRpb24sIGJ1dCBhdHRlc3RhdGlvbiBpZGVudGl0eS9yZXN1bHQgcmVtYWlucyB0aWVkIHRvIHRoYXQgdHJlZSwgYmFzZSwgYW5kIHBvbGljeSB2ZXJzaW9uLiB8CnwgUmVsZWFzZSBQUiBjaGFuZ2VzIHZlcnNpb24vY2hhbmdlbG9nIG9ubHkgfCBWYWxpZGF0ZSB2ZXJzaW9uL2NoYW5nZWxvZywgcGFja2FnZSBidWlsZC90eXBlY2hlY2ssIHRhcmJhbGwvcHJlcGFjayBjb250ZW50cywgdmVyc2lvbi1zdGFtcGVkIHN0YW5kYWxvbmUgYnVpbGQvc21va2UsIGFuZCBoZWxwZXItbWFuaWZlc3QvYXNzZXQgcmVzb2x1dGlvbjsgY2FuZGlkYXRlIGF0dGVzdGF0aW9ucyBzYXRpc2Z5IGZ1bmN0aW9uYWwtY29kZSB2YWxpZGF0aW9uLiB8CnwgSGVscGVyIHNvdXJjZSB1bmNoYW5nZWQgfCBFeGlzdGluZyBzaWduZWQgYXJ0aWZhY3QgZGlnZXN0IGlzIHZlcmlmaWVkIGFuZCByZXVzZWQ7IG5vIHJlYnVpbGQvbm90YXJpemF0aW9uLiB8CnwgSGVscGVyIHNvdXJjZS9zaWduaW5nIGlucHV0IGNoYW5nZXMgfCBOZXcgYXJ0aWZhY3QgbXVzdCBidWlsZCwgbm90YXJpemUsIHZlcmlmeSwgYW5kIGJlIHJlY29yZGVkIGJlZm9yZSByZWxlYXNlIGNvbnN1bXB0aW9uLiB8CnwgU3RhbGUvbWlzc2luZyBhdHRlc3RhdGlvbiB8IFJlbGVhc2UgZmFpbHMgd2l0aCB0aGUgbWlzc2luZyBleGFjdCBrZXk7IGl0IG5ldmVyIGFjY2VwdHMgcGFyZW50LWNvbW1pdCBldmlkZW5jZS4gfAoKRW5kLXRvLWVuZCBhY2NlcHRhbmNlIGlzIG1lYXN1cmVkIGZyb20gR2l0SHViIGV2ZW50IHJlY2VpcHQgdG8gcmVxdWlyZWQtY2hlY2sgY29tcGxldGlvbiBhbmQgZnJvbSByZWxlYXNlIGNvbW1hbmQgc3RhcnQgdG8gbnBtIHJlZ2lzdHJ5IHZpc2liaWxpdHkuIFN1Y2Nlc3MgaXMgUDk5IOKJpDkwIHNlY29uZHMgKGNhY2hlLWhpdCB0YXJnZXQg4omkMTAgc2Vjb25kcykgZm9yIG9yZGluYXJ5IFBScywgUDk5IOKJpDE4MCBzZWNvbmRzIGZvciByb3V0aW5lIHJlbGVhc2VzIHdpdGggdW5jaGFuZ2VkIGhlbHBlcnMsIHA5MCDiiaQ4IG1pbnV0ZXMgd2hlbiBvbmUgbmF0aXZlIGhlbHBlciBjaGFuZ2VkLCB6ZXJvIHNlbGVjdGlvbiBtaXNzZXMgZHVyaW5nIHNoYWRvdyBtb2RlLCBhbmQgemVybyBwZXJzaXN0ZW50LXJ1bm5lciBleGVjdXRpb25zIGZvciBmb3JrIGNvZGUuCgojIyBSaXNrcwoKfCBSaXNrIHwgQ29udHJvbCB8CnwgLS0tIHwgLS0tIHwKfCBTdGF0aWMgZ3JhcGggbWlzc2VzIGR5bmFtaWMvc3VicHJvY2VzcyBjb25zdW1lcnMgfCBSZXZpZXdlZCBvd25lcnNoaXAgbWFuaWZlc3QsIGZhaWwtbG91ZCB1bmNsYXNzaWZpZWQgcGF0aHMsIDIwMC1QUiBzaGFkb3cgY29tcGFyaXNvbi4gfAp8IFBlcnNpc3RlbnQgcnVubmVyIGlzIGNvbnRhbWluYXRlZCB8IERlZGljYXRlZCB1bnRydXN0ZWQgaG9zdCwgb25lLXVzZSBGaXJlY3JhY2tlciBtaWNyb1ZNIHBlciBqb2IsIHJlYWQtb25seSBtaXJyb3IsIG5vIHRhaWxuZXQvdHJ1c3RlZCBydW5uZXJzL3NlY3JldHMvc29ja2V0cywgZXhwbGljaXQgY2xlYW51cCwgcGVyaW9kaWMgaW1hZ2UgcmVwbGFjZW1lbnQuIHwKfCBGb3JrIGNvZGUgY29tcHJvbWlzZXMgc3RhbmRpbmcgY2FwYWNpdHkgfCBGb3JrcyBuZXZlciByZWNlaXZlIHRoZSBwZXJzaXN0ZW50IGxhYmVsOyBHaXRIdWItaG9zdGVkIGlzb2xhdGVkIHBhdGggb25seS4gfAp8IENhY2hlZCBwcm9vZiBpcyBzdGFsZSBvciBwb2lzb25lZCB8IEltbXV0YWJsZSBkaWdlc3Qga2V5cywgY29udHJvbGxlci1jb25zdHJ1Y3RlZCBzaWduYXR1cmVzLCBjYW5kaWRhdGUvYmFzZSB2ZXJpZmljYXRpb24sIGFuZCBmaW5hbC1tYWluLXRyZWUgZXF1YWxpdHkuIHwKfCBGdWxsIHN3ZWVwIGZpbmRzIGEgbWlzc2VkIGZhaWx1cmUgYWZ0ZXIgbWVyZ2UgfCBRdWFyYW50aW5lIHRoZSBhdHRlc3RhdGlvbiBwb2xpY3kgdmVyc2lvbiwgZml4IG1hcHBpbmcsIGFuZCBibG9jayByZWxlYXNlcyBjb250YWluaW5nIHRoYXQgdHJlZSB1bnRpbCBhIGNvcnJlY3RlZCBmdWxsIHByb29mIGV4aXN0cy4gfAp8IE9uZSByZXBvc2l0b3J5IG1vbm9wb2xpemVzIHRoZSBzaGFyZWQgYm94IHwgRmFpciBxdWV1ZSBwbHVzIHBlci1yZXBvc2l0b3J5IGNvbmN1cnJlbmN5IGNhcHM7IGV4cG9zZSBnbG9iYWwgYW5kIHBlci1yZXBvIHF1ZXVlIHA5MC4gQWRkIGEgc2Vjb25kIGFsd2F5cy1vbiBleGVjdXRvciBvbmx5IHdoZW4gc3VzdGFpbmVkIHA5MCBicmVhY2hlcyB0aGUgdGFyZ2V0LCBuZXZlciBvbmUgbGVhc2UgcGVyIHJ1bi4gfAp8IEhlbHBlciByZXVzZSBzaGlwcyB0aGUgd3JvbmcgYmluYXJ5IHwgRnVsbCBpbnB1dCBkaWdlc3QgcGx1cyBzaWduYXR1cmUsIEdhdGVrZWVwZXIsIHN0YXBsaW5nLCBhcmNoaXRlY3R1cmUsIGFuZCBjaGVja3N1bSB2ZXJpZmljYXRpb247IG1pc3NpbmcgcHJvb2YgaXMgYSBoYXJkIGZhaWx1cmUuIHwKCiMjIEV2aWRlbmNlCgotIGAuZ2l0aHViL3dvcmtmbG93cy90ZXN0cy55bWw6My04LDE5LTIxNGAg4oCUIHNjb3BlIGZhbi1vdXQsIHRocmVlIGZ1bGwgQ0xJIHNoYXJkcywgZG9jcywgcHJlZmxpZ2h0LCBwbGF0Zm9ybSBqb2JzLCBhbmQgdGhlIHJlcXVpcmVkIGFnZ3JlZ2F0b3IuCi0gYHNjcmlwdHMvY2ktc2NvcGUudHM6NS02OWAg4oCUIGNvbXBvbmVudCBib29sZWFucyBhbmQgdGhlIHJ1bGUgdGhhdCBhbnkgbm9uLWRvYyBgYXBwcy9jbGkvKipgIGNoYW5nZSBzZWxlY3RzIHRoZSB3aG9sZSBDTEkgc3VpdGUuCi0gYGFwcHMvY2xpL3ZpdGVzdC5jb25maWcudHNgIOKAlCBhbGwgQ0xJIHRlc3RzIHNoYXJlIG9uZSBpbmNsdWRlZCBwb29sIGFuZCBnbG9iYWwgc2V0dXAuCi0gYGFwcHMvY2xpL3NjcmlwdHMvcmVsZWFzZS5zaDoyMi0yOCwxODEtMjU4LDM2NS00MDMsMTAwNy0xMDYwLDExMDEtMTEyOCwxMTkwLTEyMTAsMTI5NC0xMzEzYCDigJQgZHVwbGljYXRlIENyYWJib3ggc3VpdGUsIFBSL21hdHJpeCB3YWl0LCB1bmNvbmRpdGlvbmFsIG5hdGl2ZSBidWlsZHMsIHB1Ymxpc2ggYW5kIHZlcmlmaWNhdGlvbi4KLSBgYXBwcy9jbGkvc2NyaXB0cy9zYW5kYm94LnNoOjEyMy0xODYsMjkyLTMxMGAg4oCUIGxlYXNlZCBib3ggc2VsZWN0aW9uL3JlY2xhaW0gYW5kIGNvcGllZCB0YXNrIHdvcmtzcGFjZXMgcmF0aGVyIHRoYW4gZ2l0IHdvcmt0cmVlcy4KLSBgc2NyaXB0cy9jaS1ydW5uZXIvUkVBRE1FLm1kOjEtMzRgIOKAlCBkaXJlY3RseSBvd25lZCBzdGFuZGluZyBydW5uZXIgbW9kZWwgYW5kIHRoZSBleHBsaWNpdCB3YXJuaW5nIGFnYWluc3QgcHVibGljLWZvcmsgZXhlY3V0aW9uLgotIGBuYXRpdmUvY29tcHV0ZXItbWFjL3NjcmlwdHMvYnVpbGQuc2g6MzAtMzMsNzYtMTAwLDE0MS0xODVgIOKAlCBDTEkgcmVsZWFzZSB2ZXJzaW9uIHN0YW1wZWQgaW50byBoZWxwZXIgYnVuZGxlIHBsdXMgc2lnbmluZy9ub3Rhcml6YXRpb24gYW5kIGNoZWNrc3VtIGVtaXNzaW9uLgotIFtWaXRlc3QgQ0xJOiBgcmVsYXRlZGAgYW5kIGBjaGFuZ2VkYF0oaHR0cHM6Ly92aXRlc3QuZGV2L2d1aWRlL2NsaSkg4oCUIHN0YXRpYy1pbXBvcnQgcmVsYXRlZC10ZXN0IHNlbGVjdGlvbjsgZHluYW1pYyBpbXBvcnRzIGFyZSBub3QgY292ZXJlZC4KLSBbR2l0SHViIHNlbGYtaG9zdGVkIHJ1bm5lciBhY2Nlc3NdKGh0dHBzOi8vZG9jcy5naXRodWIuY29tL2VuL2FjdGlvbnMvaG93LXRvcy9tYW5hZ2UtcnVubmVycy9zZWxmLWhvc3RlZC1ydW5uZXJzL21hbmFnZS1hY2Nlc3MpIOKAlCBwdWJsaWMgZm9yayBwdWxsIHJlcXVlc3RzIGNhbiBleGVjdXRlIGRhbmdlcm91cyBjb2RlIG9uIHBlcnNpc3RlbnQgbWFjaGluZXMuCi0gW0dpdEh1YiBkZXBlbmRlbmN5IGNhY2hlIHNlY3VyaXR5XShodHRwczovL2RvY3MuZ2l0aHViLmNvbS9lbi9hY3Rpb25zL2NvbmNlcHRzL3dvcmtmbG93cy1hbmQtYWN0aW9ucy9kZXBlbmRlbmN5LWNhY2hpbmcpIOKAlCBjYWNoZXMgYXJlIHVudHJ1c3RlZCBpbnB1dHMgYW5kIGZvcmsgYWNjZXNzIHJlcXVpcmVzIGNhcmVmdWwgc2NvcGUvd3JpdGUgcG9saWN5LgotIFtHaXRIdWIgY2hlY2sgcnVuc10oaHR0cHM6Ly9kb2NzLmdpdGh1Yi5jb20vZW4vcmVzdC9jaGVja3MvcnVucykg4oCUIGNoZWNrcyBhdHRhY2ggdG8gYSBzcGVjaWZpYyBjb21taXQgU0hBOyB3cml0ZSBhY2Nlc3MgaXMgcmVzdHJpY3RlZCB0byBhcHByb3ByaWF0ZSBhdXRoZW50aWNhdGVkIGlkZW50aXRpZXMuCgojIyBBc3N1bXB0aW9ucwoKLSDigJxBbG1vc3QgaW5zdGFudOKAnSBkZWZhdWx0cyB0byB0aGUgZXhwbGljaXQgcGVyY2VudGlsZSB0YXJnZXRzIGFib3ZlLCBtZWFzdXJlZCBlbmQgdG8gZW5kIHJhdGhlciB0aGFuIGZyb20gcHJvY2VzcyBzdGFydC4KLSBPcmRpbmFyeSBQUiBtZWFucyBhIHRydXN0ZWQgc2FtZS1yZXBvc2l0b3J5IGNoYW5nZSB0b3VjaGluZyBhdCBtb3N0IHRocmVlIGNsYXNzaWZpZWQgbW9kdWxlcyBhbmQgbm90IGEgZ2xvYmFsIHBvbGljeS90b29sY2hhaW4gZGVwZW5kZW5jeS4KLSBDb3JyZWN0bmVzcyBpcyBwcmVzZXJ2ZWQgYnkgZXhhY3Qgc2VsZWN0aW9uIHBsdXMgcG9zdC1tZXJnZS9uaWdodGx5IGZ1bGwgc3dlZXBzOyB0aGUgZnVsbCBzdWl0ZSBtb3ZlcyBvZmYgdGhlIG1lcmdlIHBhdGggcmF0aGVyIHRoYW4gZGlzYXBwZWFyaW5nLgotIFRoZSBleGlzdGluZyB0cnVzdGVkIHN0YW5kaW5nIGhvc3QgcmVtYWlucyBsaW1pdGVkIHRvIG1haW4vc2NoZWR1bGUvcmVsZWFzZSB0cmlnZ2Vycy4gT25lIGFsd2F5cy1vbiBDcmFiYm94IGJlY29tZXMgdGhlIHNoYXJlZCB1bnRydXN0ZWQtY29kZSBleGVjdXRvciBmb3IgbXVsdGlwbGUgcmVwb3NpdG9yaWVzIGFuZCBhZ2VudHMsIHdpdGggbm8gcGVyLXJ1biBvciBwZXItcmVwb3NpdG9yeSBhY3F1aXNpdGlvbiBsZWFzZS4gT3RoZXIgbGVhc2VkIGJveGVzIHJlbWFpbiBvcHRpb25hbCBmb3IgYWQtaG9jIGZ1bGwtc3VpdGUgd29yayB1bnRpbCBhY2NlcHRhbmNlLgotIFRoZSByZXBvc2l0b3J5IHJlbWFpbnMgcHVibGljLCBzbyBmb3JrIGNvZGUgaXMgdW50cnVzdGVkIHJlZ2FyZGxlc3Mgb2YgYXV0aG9yIGludGVudC4KLSBUaGUgcmVsZWFzZSB0cmFpbiByZW1haW5zIHRoZSBzaW5nbGUgcHVibGlzaGVyLiBUaGlzIHBsYW4gY2hhbmdlcyB3aGF0IGV2aWRlbmNlIGFuZCBhcnRpZmFjdHMgaXQgY29uc3VtZXMsIG5vdCByZWxlYXNlIG93bmVyc2hpcC4KCiMjIFRyYWNraW5nCgpObyBuZXcgdGlja2V0IGlzIGNyZWF0ZWQgaW4gUGxhbiBNb2RlLiBJbXBsZW1lbnRhdGlvbiBzaG91bGQgYmUgdHJhY2tlZCBhcyBvbmUgQ0kvcmVsZWFzZSBlcGljIHdpdGggc2VwYXJhdGUgZGVsaXZlcnkgdW5pdHMgZm9yIGltcGFjdCBzZWxlY3Rpb24sIHN0YW5kaW5nIGV4ZWN1dG9yLCBhdHRlc3RhdGlvbnMsIGFuZCBoZWxwZXIgZGVjb3VwbGluZzsgdGhlIHJlbmRlcmVkIHBsYW4gVVJMIGJlbG9uZ3Mgb24gdGhlIGVwaWMgYW5kIGVhY2ggY2hpbGQgdGlja2V0IGJlbG9uZ3MgYmFjayBoZXJlLgo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>

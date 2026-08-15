@@ -168,6 +168,48 @@ them (see [§Code review conventions](#code-review-conventions-the-reviewer-must
   three-line playbook, not 40 alphabetized options. Don't leave a non-trivial tool on
   commander's default help.
 
+## CI and release latency are correctness requirements
+
+The required pull-request check has a hard end-to-end **P99 of 90 seconds**, measured
+from the GitHub event timestamp until the single required check reaches a terminal
+state. Ten seconds is the cache-hit target. A required job that cannot fit inside the
+90-second budget must be split, rewritten, removed as duplicate ceremony, or moved to
+post-merge/nightly coverage. It must not silently expand the pull-request gate.
+
+- Run checks for the affected module and its declared reverse dependencies, not the
+  whole monorepo. Every source area owns an explicit test/project boundary; an
+  unmapped changed file fails impact analysis immediately.
+- Keep one app-bound required check identity. The workflow always starts; job-level
+  conditions report successful skips. Do not add required workflow path filters,
+  duplicate status contexts, or a matrix of independently required shards.
+- Execute the fast lane on already-online capacity. Queueing, runner assignment,
+  checkout, dependency preparation, tests, and status upload all count toward the
+  90-second P99.
+- The shared Crabbox is multi-repository infrastructure, not a leased checkout. Each
+  run gets a unique worktree and a disposable hardware-isolated microVM. Repositories
+  and agents may run concurrently under explicit CPU/memory admission and per-repo
+  fairness; no job acquires the machine itself.
+- Fork code never executes on a persistent host and never writes trusted caches. Fork
+  jobs receive no durable credentials, host sockets, tailnet access, or host filesystem
+  access.
+- Slow integration, broad regression, mutation, packaging, and rare-platform suites
+  remain valuable but run after merge or nightly. They do not block the required PR
+  result or consume fast-lane capacity.
+- Windows is not a required pull-request or release platform. Its smoke suite is
+  best-effort and post-merge while support demand is measured; it must never block a
+  merge or ordinary release. Remove Windows-only code and the supported-platform claim
+  when no demonstrated usage justifies the maintenance cost.
+- Keep only tests that protect a distinct product invariant or regression. Delete
+  duplicate assertions, implementation-detail tests, constant/trivial-guard tests, and
+  tests whose removal does not reduce meaningful mutation or defect coverage.
+
+An ordinary release has a hard **P99 of 180 seconds**, measured from release start to
+registry visibility plus a clean-prefix install smoke. Release promotes the exact
+tested package artifact; it does not rebuild or rerun the monorepo. Native helpers are
+content-addressed and independently versioned, so unchanged helpers are reused. Apple
+signing/notarization runs only when helper inputs change and is outside the ordinary
+three-minute release path. The release train remains the only publisher.
+
 ## Entry points — always build and release through the scripts
 
 Never hand-roll a build or a release. A bare `tsc` / `bun run build` / `npm publish` /
