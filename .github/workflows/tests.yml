@@ -39,7 +39,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: bun scripts/ci-scope.ts "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT"
       - name: Pin release-matrix trigger policy and .agents/ layout
-        run: bun test ./.github/workflows/
+        run: bun test ./.github/workflows/ ./scripts/ci-bench/
 
   # Install once for type-checking, the compiled-binary smoke, and the gating
   # distributed-session benchmark. The old separate jobs repeated dependency

@@ -21,7 +21,7 @@ import {
   getDaemonLaunch,
   validateDaemonBinary,
   getDaemonStatus,
-} from '../daemon.js';
+} from '../daemon/daemon.js';
 import { getDaemonDir } from '../state.js';
 import { writeRunMeta, type RunMeta } from '../scheduling/routines.js';
 import { getRunsDir } from '../state.js';

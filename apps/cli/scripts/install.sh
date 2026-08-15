@@ -297,12 +297,12 @@ fi
 # what `agents` resolves to; that premise no longer holds.
 if [[ -z "${CI:-}" && "${AGENTS_NO_HEAL:-}" != "1" && "$BOUNCE_DAEMON" == true ]]; then
   INSTALLED_PKG="$PREFIX/lib/node_modules/$PKG_NAME"
-  if [[ -f "$INSTALLED_PKG/dist/lib/daemon.js" ]]; then
+  if [[ -f "$INSTALLED_PKG/dist/lib/daemon/daemon.js" ]]; then
     dim "  Reloading daemon onto this build (if running)"
     # Export paths for the node one-shot so shell metacharacters in PREFIX
     # can't break the import. Use the installed module (not PATH) so we
     # don't accidentally restart with a different agents binary.
-    AGENTS_INSTALL_DAEMON_MOD="$INSTALLED_PKG/dist/lib/daemon.js" \
+    AGENTS_INSTALL_DAEMON_MOD="$INSTALLED_PKG/dist/lib/daemon/daemon.js" \
     AGENTS_INSTALL_BIN="$LINKED_PATH" \
     node --input-type=module -e '
       import { pathToFileURL } from "node:url";

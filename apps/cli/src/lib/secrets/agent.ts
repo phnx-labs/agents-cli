@@ -1472,7 +1472,7 @@ export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
     // hosts it and it holds no unlocks. Evicting a daemon-hosted broker orphans
     // the daemon's socket and starts the Touch ID storm — see
     // shouldClientEvictSkewedBroker.
-    const { isDaemonRunning } = await import('../daemon.js');
+    const { isDaemonRunning } = await import('../daemon/daemon.js');
     if (!shouldClientEvictSkewedBroker(isDaemonRunning(), (await agentStatus()).length)) return true;
     await teardownStaleBroker();
   }
@@ -1488,7 +1488,7 @@ export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
   // backbone rather than a separate launchd service. If bringing the daemon up
   // makes the broker answer, we're done.
   try {
-    const { ensureDaemonStarted } = await import('../daemon.js');
+    const { ensureDaemonStarted } = await import('../daemon/daemon.js');
     if (ensureDaemonStarted()) {
       const d0 = Date.now() + timeoutMs;
       while (Date.now() < d0) {

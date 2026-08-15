@@ -511,7 +511,7 @@ async function deliverViaResume(session: ActiveSession, text: string): Promise<{
   if (!sid) return { ok: false, error: 'no session id to resume' };
   try {
     const [{ getAgentsInvocation }, { spawn }] = await Promise.all([
-      import('../daemon.js'),
+      import('../daemon/daemon.js'),
       import('child_process'),
     ]);
     const inv = getAgentsInvocation(['run', session.kind, '--resume', sid, '--', text]);

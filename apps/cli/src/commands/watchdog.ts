@@ -49,7 +49,7 @@ function stateDir(): string {
  * Dynamic import keeps daemon.ts's heavy deps off the watchdog command's load path.
  */
 async function reloadDaemonForRoutine(startIfStopped: boolean): Promise<void> {
-  const { isDaemonRunning, ensureDaemonStarted, signalDaemonReload } = await import('../lib/daemon.js');
+  const { isDaemonRunning, ensureDaemonStarted, signalDaemonReload } = await import('../lib/daemon/daemon.js');
   if (isDaemonRunning()) {
     signalDaemonReload();
     return;

@@ -291,7 +291,7 @@ To enable version-aware shims, add this to your shell config:
  * non-interactive login shell's PATH, so `bash -lc 'agents …'` fails with
  * command-not-found — which breaks `agents secrets export --host` (it runs
  * `bash -lc 'agents secrets import …'` on the remote) and the routines daemon
- * (src/lib/daemon.ts falls back to bare `agents`). This is the POSIX symmetric
+ * (src/lib/daemon/daemon.ts falls back to bare `agents`). This is the POSIX symmetric
  * counterpart of the Windows branch in main() that registers npm's global-bin
  * dir on the user PATH.
  *
@@ -406,7 +406,7 @@ async function healLongRunningProcesses() {
   // starts (SING-4a). If it was already running under a disable, stop and leave
   // it down so upgrade does not resurrect a killed switch.
   try {
-    const d = await import('../dist/lib/daemon.js');
+    const d = await import('../dist/lib/daemon/daemon.js');
     const { isDaemonEnabled } = await import('../dist/lib/device-config.js');
     const wasRunning = Boolean(d.isDaemonRunning?.());
     const enabled = typeof isDaemonEnabled === 'function' ? isDaemonEnabled() : true;

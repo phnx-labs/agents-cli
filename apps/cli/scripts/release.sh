@@ -9,34 +9,29 @@
 # Three self-selected homes, no environment variables to set:
 #   - Orchestrate (bump, changelog, PR, tag): a release-owned detached worktree
 #     on the box you invoke it on (git + gh), based on fresh origin/<default>.
-#   - CI / tests: a crabbox (dynamic Hetzner Linux VM) via scripts/sandbox.sh --
-#     never a hardcoded instance. Covers the Linux suite; the GH Actions matrix
-#     still covers the cross-platform (macOS/Windows) legs on the release PR.
-#   - Build + sign + notarize + npm publish + computer-helper: a Mac home base --
-#     mac-mini by default, overridable with `--device <name>` (it holds the
-#     Developer ID cert + npm publish rights). If you invoke from that box it runs
-#     locally; otherwise the script ssh's to it, checks out the merged tag, and
-#     runs the privileged phase there in its headless secrets context (no Touch
-#     ID, no token borrow). Use `--device zion` when mac-mini is down.
+#   - Proof: exact-tree attestations (tree + toolchain + lockfile + policy) plus
+#     the pretested npm tarball they name. Ordinary release never re-runs the
+#     full suite and never accepts parent/nearby commit evidence.
+#   - Promote: a Mac home base (mac-mini by default, `--device <name>`) holds
+#     the npm publish identity. It publishes the exact attested .tgz, reuses
+#     immutable helper artifacts, and runs a real install smoke. Sign/notarize
+#     of helpers is outside this ordinary path.
 #
-# Flow (--apply): run the Linux suite on a crabbox; open the release as a
-# chore(release) PR on a release/v<version> branch -- which fires the full
-# cross-platform CI matrix (.github/workflows/ci.yml) plus the test + gitleaks
-# checks -- wait for that CI to go green, squash-merge the PR, verify the merged
-# tree matches what we built, then tag v<version> at the merge commit and route
-# the build+sign+publish phase to the home base. If a publish fails after the PR
-# merge, a retry rebuilds from that merged PR's exact CI-tested tree even when
-# newer commits have since landed on main.
+# Flow (--apply): require a passing attestation for origin/<default>; open the
+# chore(release) PR; require an attestation + pretested tarball for the release
+# commit tree; squash-merge only when the final default-branch tree equals that
+# attested candidate; tag; promote the exact .tgz. Ordinary release P99 is
+# <=180 seconds. A retry still demands the same exact-tree key.
 #
 # Usage: scripts/release.sh <version> [--apply] [--device <name>]
 #
 # --device <name> (alias --host) picks the Mac that builds/signs/publishes;
 # defaults to mac-mini. Everything else is unchanged and zero-config.
 #
-# Default mode is DRY-RUN: every local check runs (type-check, build, tarball
-# preview) and the detected release state is reported, but nothing is pushed,
-# opened, merged, tagged, or published. Add --apply to actually release. Tests
-# run on a crabbox (Linux) + in the GH Actions matrix on the release PR.
+# Default mode is DRY-RUN: every local check runs (type-check) and the detected
+# release state is reported, but nothing is pushed, opened, merged, tagged, or
+# published. Add --apply to actually release. Functional proof is the exact-tree
+# attestation; the published artifact is the attested tarball.
 #
 # Validates that <version> is a single-step bump from the current published
 # @phnx-labs latest -- patch+1, or minor+1 with patch=0, or major+1 with
@@ -67,8 +62,8 @@ die() { red "error: $*"; exit 1; }
 # the stable box that holds those, and is overridable with `--device <name>`
 # (parsed below, alias `--host`) so a release can be driven to any capable Mac
 # when mac-mini is down. Not an env var -- the target is a flag with a default,
-# never ambient config. Everything else self-selects (crabbox for tests; the
-# invoking box for git+gh orchestration).
+# never ambient config. Everything else self-selects (attestations for proof;
+# the invoking box for git+gh orchestration).
 readonly RELEASE_HOME_BASE_DEFAULT="mac-mini"
 
 # Detect the short hostname of the box we are on, portably (macOS + Linux).
@@ -165,8 +160,8 @@ else
   yellow "Mode: DRY-RUN (no branch, PR, merge, tag, publish, or push -- pass --apply to actually release)"
 fi
 gray "  this box:   $THIS_HOST$($ON_HOME_BASE && echo '  (home base)' || echo '')"
-gray "  home base:  $RELEASE_HOME_BASE  (build + sign + notarize + npm publish + computer-helper)"
-gray "  tests:      a crabbox (dynamic Hetzner Linux VM, selected at run time)"
+gray "  home base:  $RELEASE_HOME_BASE  (promote attested tgz + reuse helpers + install smoke)"
+gray "  proof:      exact-tree attestation (tree/toolchain/lock/policy); ordinary P99 <=180s"
 echo
 
 # ----- Privileged phase on the home base (internal --home-base-phase entrypoint) -----
@@ -175,12 +170,12 @@ echo
 # script executing here is guaranteed to carry --home-base-phase and
 # headless-sign-context.sh. It therefore assumes it is ALREADY inside the tagged
 # worktree ($ROOT = <tag-worktree>/apps/cli, cwd set by the caller): it verifies
-# the checked-out version == $TARGET, then builds the signed macOS artifacts
-# fresh (the home base is the sign host), publishes to npm with the token resolved
-# HERE, and pushes the computer-helper asset. It does NOT create its own worktree.
+# the checked-out version == $TARGET, downloads the attested tarball + manifest
+# from the tag (the throwaway worktree has no store), publishes those bytes, and
+# re-attaches the verified helper zip. It does NOT create its own worktree.
 run_home_base_phase() {
   [[ "$(uname)" == "Darwin" ]] \
-    || die "the home base ($RELEASE_HOME_BASE) must be macOS to build + sign + notarize + publish"
+    || die "the home base ($RELEASE_HOME_BASE) must be macOS (npm token + helper-asset attach)"
   command -v npm >/dev/null  || die "npm not found on $RELEASE_HOME_BASE"
   command -v node >/dev/null || die "node not found on $RELEASE_HOME_BASE"
   command -v git >/dev/null  || die "git not found on $RELEASE_HOME_BASE"
@@ -203,58 +198,57 @@ run_home_base_phase() {
   [[ "$checked_out_ver" == "$TARGET" ]] \
     || die "checked-out tree is at $checked_out_ver, not $TARGET -- refusing to build/publish on $RELEASE_HOME_BASE"
 
-  # Enter the headless signing + secrets context (shared with remote-sign-mac.sh):
-  # unlocks rush-signing.keychain-db + exports AGENTS_SECRETS_PASSPHRASE so
-  # codesign, notarytool, AND `agents secrets` (npmjs.com token + apple.com creds)
-  # all resolve with NO Touch ID and NO per-secret prompt. This must run BEFORE
-  # resolve_npm_auth, which reads the npmjs.com bundle.
+  # Ordinary path: promote the exact pretested tarball. Headless secrets are
+  # only for the npmjs.com token -- codesign/notarytool are outside this path.
   command -v agents >/dev/null 2>&1 \
-    || die "'agents' CLI not on PATH on $RELEASE_HOME_BASE -- needed to inject apple.com/npmjs.com creds"
+    || die "'agents' CLI not on PATH on $RELEASE_HOME_BASE -- needed to inject the npmjs.com token"
   # shellcheck source=scripts/headless-sign-context.sh
   . scripts/headless-sign-context.sh
-
-  # npm auth resolves HERE, on the home base, in its headless secrets context --
-  # the token never crosses to the box that invoked the release.
   resolve_npm_auth
 
-  bun install --frozen-lockfile >/dev/null \
-    || die "dependency install failed in the tagged worktree on $RELEASE_HOME_BASE"
+  local repo_root tree attest_dir attest tgz_json tgz manifest
+  repo_root="$(git rev-parse --show-toplevel)"
+  tree="$(git rev-parse "HEAD^{tree}")"
+  # The tagged worktree is throwaway and has no store. Pull the files the
+  # trigger uploaded to v$TARGET (stable names) into a temp dir.
+  attest_dir="$(mktemp -d "${TMPDIR:-/tmp}/agents-cli-release-attest.XXXXXX")"
+  gh release download "v$TARGET" --dir "$attest_dir" \
+    --pattern 'release-attestation.json' \
+    --pattern 'release-manifest.json' \
+    --pattern 'phnx-labs-agents-cli-*.tgz' \
+    --pattern 'ComputerHelper.app.zip*' \
+    || die "could not download attested artifacts from GitHub release v$TARGET -- the trigger must upload them before this phase"
+  bold "Requiring exact-tree attestation for ${tree:0:12} (no parent/nearby fallback)..."
+  attest="$(scripts/release-attestation.sh require --dir "$attest_dir" --tree "$tree" --repo-root "$repo_root")" \
+    || die "no passing attestation for tagged tree $tree -- refusing parent/nearby evidence"
+  tgz_json="$(scripts/release-attestation.sh tarball --file "$attest" --require-file)"
+  tgz="$(jq -r .path <<<"$tgz_json")"
+  scripts/release-attestation.sh promote --file "$attest" --tarball "$tgz" >/dev/null \
+    || die "pretested tarball failed digest bind -- refusing to rebuild"
 
-  # Sign + notarize the standalone binary, build the signed helpers, then publish.
-  # These reuse the same scripts the macOS-local release path uses. The apple.com
-  # bundle resolves headlessly (the context above set AGENTS_SECRETS_PASSPHRASE).
-  bold "Signing + notarizing the standalone agents binary + helpers on $RELEASE_HOME_BASE..."
-  agents secrets exec apple.com -- scripts/sign-cli-binary.sh \
-    || die "CLI binary sign/notarize failed on $RELEASE_HOME_BASE"
-  # The keychain + menu-bar helpers are the other signed .apps the tarball bundles.
-  # Build them directly here so bin/ is populated before `bun run build`.
-  agents secrets exec apple.com -- bash -c '
-    set -euo pipefail
-    menubar/scripts/build.sh release
-    rm -rf bin/MenubarHelper.app
-    cp -R menubar/dist/MenubarHelper.app bin/MenubarHelper.app
-    codesign --verify --deep --strict "bin/MenubarHelper.app"
-    # build.sh notarizes + staples (apple.com creds are in scope here); fail fast
-    # if the staged bundle is not stapled, before the prepack gate catches it.
-    xcrun stapler validate "bin/MenubarHelper.app"
-    scripts/build-keychain-helper.sh
-    shasum -a 256 "bin/Agents CLI.app/Contents/MacOS/Agents CLI" > "scripts/Agents CLI.app.sha256"
-  ' || die "signed helper build failed on $RELEASE_HOME_BASE"
+  manifest="$attest_dir/release-manifest.json"
+  [[ -f "$manifest" ]] || die "release manifest missing at $manifest -- no fallback rebuild"
+  scripts/release-manifest.sh require --file "$manifest" --repo-root "$repo_root" \
+    || die "helper manifest failed -- rebuild/notarization is outside the ordinary release path"
 
-  bold "Building (bun run build) on $RELEASE_HOME_BASE..."
-  rm -rf dist
-  bun run build >/dev/null || die "build failed on $RELEASE_HOME_BASE"
+  bold "Install-smoke of the exact pretested tarball..."
+  scripts/release-install-smoke.sh "$tgz" "$TARGET" \
+    || die "install smoke failed for $tgz"
 
-  bold "Publishing $PHNX_PKG@$TARGET from $RELEASE_HOME_BASE..."
-  npm publish --access=public --provenance=false \
-    || die "npm publish failed on $RELEASE_HOME_BASE (tag exists; rerun to retry)"
-  green "Published $PHNX_PKG@$TARGET"
+  bold "Publishing the exact pretested tarball $(basename "$tgz") as $PHNX_PKG@$TARGET..."
+  # Same bytes CI already packed. OIDC provenance when the GitHub token exchange
+  # is present; token publish of those same bytes otherwise.
+  if [[ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]]; then
+    npm publish "$tgz" --access=public --provenance \
+      || die "npm publish (OIDC provenance) failed on $RELEASE_HOME_BASE (tag exists; rerun to retry)"
+  else
+    npm publish "$tgz" --access=public --provenance=false \
+      || die "npm publish failed on $RELEASE_HOME_BASE (tag exists; rerun to retry)"
+  fi
+  green "Published $PHNX_PKG@$TARGET from attested $tgz"
 
-  # Publish the signed + notarized macOS computer helper as the release asset.
-  # Best-effort: npm is already published, so a failure here is a warning.
-  bold "Publishing the macOS computer helper asset for v$TARGET..."
-  agents secrets exec apple.com -- scripts/publish-computer-helper-mac.sh "$TARGET" \
-    || yellow "computer-helper publish failed -- retry on $RELEASE_HOME_BASE: agents secrets exec apple.com -- apps/cli/scripts/publish-computer-helper-mac.sh $TARGET"
+  gh release view "v$TARGET" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx 'ComputerHelper.app.zip' \
+    || die "v$TARGET is missing ComputerHelper.app.zip -- the client still downloads the per-CLI-version URL; reuse the prior zip (no rebuild)"
 }
 
 # Resolve the npm publish token from the local `npmjs.com` secrets bundle and
@@ -315,7 +309,7 @@ create_annotated_release_tag() {
 # The internal --home-base-phase entrypoint short-circuits everything else.
 if $HOME_BASE_PHASE; then
   [[ -n "$TARGET" ]] || die "--home-base-phase needs a <version>"
-  bold "[home-base phase] build + sign + notarize + npm publish + computer-helper on $THIS_HOST"
+  bold "[home-base phase] promote attested tgz + reuse helpers + install smoke on $THIS_HOST"
   # NPMRC_TMP is cleaned up on exit; declare the trap here since the trigger-box
   # traps below are not reached on this path.
   NPMRC_TMP=""
@@ -361,47 +355,6 @@ bun install --frozen-lockfile >/dev/null \
 # invoked the release. Anonymous
 # `npm view` reads below (latest version, is-target-published) need no token, so
 # version validation + the already-published short-circuit run fine on any box.
-
-# ----- Tests on a crabbox (dynamic Hetzner Linux VM) -----
-# scripts/sandbox.sh already selects an available crabbox for THIS repo's profile
-# (or warms a fresh one) and runs an arbitrary command on it -- never a hardcoded
-# box. We run the full suite there, capture its output to a log, and on failure
-# print which tests failed + the log location and HALT before any PR/publish.
-# This covers the LINUX suite; the GH Actions CI matrix on the release PR still
-# covers the cross-platform (macOS/Windows) legs (see wait_for_ci_green below).
-run_crabbox_tests() {
-  local log rc
-  # X placeholders MUST be the trailing characters: BSD mktemp (macOS) treats
-  # any suffix after them as part of a literal filename, so this template created
-  # a real file called "…crabbox-tests.XXXXXX.log" and every later release on the
-  # same box then died with "mkstemp failed: File exists". Matches the other
-  # mktemp templates in this script.
-  log="$(mktemp "${TMPDIR:-/tmp}/agents-cli-crabbox-tests.XXXXXX")"
-  bold "Running the Linux test suite on a crabbox (dynamic Hetzner VM)..."
-  gray "  (streaming; full log captured at $log)"
-  # sandbox.sh with no --pr flag = test mode: rsync this tree to the box, run the
-  # command. tee both streams so the operator watches live AND we keep the log.
-  # Pass ONE string (sandbox does cmd="$*" and embeds it into a remote bash -c
-  # script). Nested `bash -c '…'` loses quotes and becomes `bash -c cd …`.
-  # Crabbox syncs the monorepo root; CLI tests live under apps/cli.
-  if scripts/sandbox.sh -- 'cd apps/cli && bun install && bun run test' 2>&1 | tee "$log"; then
-    rc=0
-  else
-    rc="${PIPESTATUS[0]}"
-  fi
-  if [[ "$rc" != "0" ]]; then
-    red "  ✗ crabbox tests FAILED (exit $rc)"
-    # Surface the actual failing test names + assertion output, not a bare "red".
-    local fails
-    fails="$(grep -E '^\s*(FAIL|×|✗|not ok|AssertionError|Error:|Expected|Received)' "$log" | head -40 || true)"
-    if [[ -n "$fails" ]]; then
-      red "  failing tests / errors:"
-      printf '%s\n' "$fails" | while IFS= read -r line; do red "    $line"; done
-    fi
-    phase_fail "Linux tests failed on the crabbox -- release halted before opening a PR" "$log"
-  fi
-  phase_ok "crabbox tests passed (full log: $log)"
-}
 
 # ----- Route the privileged phase to the home base -----
 # After the trigger box has merged + tagged the release (git + gh, which need the
@@ -670,8 +623,8 @@ fi
 
 # Phase count for the [n/N] tracker, computed for the actual path taken so it
 # never shows gaps or a wrong denominator. Normal release runs 6 phases:
-# preflight, crabbox tests, PR+CI+merge, tag, publish, verify. A catch-up publish
-# (main already at $TARGET) skips the tests + PR+CI+merge phases -> 4 phases.
+# preflight, attestation, PR+attest+merge, tag, promote, verify. A catch-up
+# publish (main already at $TARGET) skips attestation+PR phases -> 4 phases.
 if $MAIN_AT_TARGET; then
   TOTAL_PHASES=4
 else
@@ -710,7 +663,7 @@ if $MAIN_AT_TARGET && ! $PHNX_TARGET_PUBLISHED && [[ -n "$MERGED_RELEASE_SHA" ]]
   [[ "$CI_TESTED_HEAD" == "$MERGED_RELEASE_HEAD" ]] \
     || die "fetched PR head ${CI_TESTED_HEAD:0:9} != recorded release head ${MERGED_RELEASE_HEAD:0:9} -- refusing catch-up publish"
   if [[ "$(git rev-parse "$CI_TESTED_HEAD^{tree}")" != "$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")" ]]; then
-    yellow "$DEFAULT_BRANCH drifted since release PR #$MERGED_RELEASE_PR merged (concurrent merges); will tag + publish the CI-tested head ${CI_TESTED_HEAD:0:9}, not the drifted merge."
+    die "$DEFAULT_BRANCH tree $(git rev-parse "$MERGED_RELEASE_SHA^{tree}") != attested candidate $(git rev-parse "$CI_TESTED_HEAD^{tree}") -- refusing parent/nearby evidence"
   fi
   [[ "$(git show "$MERGED_RELEASE_SHA:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
     || die "merged release PR #$MERGED_RELEASE_PR is not version $TARGET"
@@ -770,30 +723,21 @@ fi
 rm -f "$TSC_LOG"
 green "Type check clean."
 
-# The build + sign + notarize of the signed macOS artifacts no longer happens on
-# the trigger box: it runs on the home base ($RELEASE_HOME_BASE) in the privileged
-# phase (run_home_base_phase / --home-base-phase). That box is the only one with
-# the Developer ID cert + headless signing context, and every release rebuilds the
-# version-stamped standalone binary there. The trigger box's job is the fast local
-# fail-fast (tsc, above) + orchestration (tests on a crabbox, PR, merge, tag).
+# Ordinary release does not rebuild or notarize on the trigger box or the home
+# base. The home base promotes the attested tarball and reuses helper artifacts.
+# The trigger box's job is typecheck + attestation + PR + merge + tag.
 
-# ----- Tests -----
-# The Linux suite runs on a dynamic crabbox in the --apply flow, before the PR is
-# opened (see run_crabbox_tests / the "[2/6] Linux tests" phase below); the GH
-# Actions CI matrix on the release PR then covers the macOS/Windows legs. Local
-# 'tsc --noEmit' above is the fast pre-flight fail-fast. --skip-tests skips the
-# crabbox lease only (CI still gates the PR).
+# ----- Proof -----
+# Functional proof is the exact-tree attestation (tree/toolchain/lock/policy)
+# plus the pretested tarball digest. --skip-tests does not skip that bind.
 
-# ----- Tarball preview (home base only) -----
-# `npm pack --dry-run` fires prepack, whose verify-keychain-helper.sh /
-# verify-menubar-helper.sh / verify-cli-binary.sh gates need the signed macOS
-# artifacts. Those are built only on the home base, so the preview runs there.
-# On the trigger box we skip it and note where the real tarball is produced.
-if $ON_HOME_BASE && [[ -d dist && -d "bin/Agents CLI.app" ]]; then
-  bold "Tarball preview ($PHNX_PKG@$TARGET)"
-  npm pack --dry-run 2>&1 | tail -10
+# ----- Tarball preview -----
+# Ordinary release publishes the attested .tgz; it does not pack a new one here.
+if [[ -n "${RELEASE_PRETESTED_TGZ:-}" && -f "${RELEASE_PRETESTED_TGZ}" ]]; then
+  bold "Pretested tarball $RELEASE_PRETESTED_TGZ"
+  ls -l "$RELEASE_PRETESTED_TGZ"
 else
-  gray "Tarball preview skipped on $THIS_HOST -- the signed tarball is built + packed on the home base ($RELEASE_HOME_BASE)."
+  gray "Pretested tarball is resolved from the attestation store at promote time -- this path never rebuilds one."
 fi
 echo
 
@@ -892,11 +836,11 @@ if ! $APPLY; then
   echo
   yellow "Will run on --apply (self-routing, zero-config -- no env vars, no 2FA prompt):"
   yellow "  1. [this box: $THIS_HOST] fold .changelog/next/* -> .changelog/$TARGET.md + regenerate CHANGELOG.md"
-  yellow "  2. [crabbox]  run the Linux test suite on a dynamic Hetzner VM; halt on failure"
-  yellow "  3. [this box] push branch $RELEASE_BRANCH (chore(release): $TARGET) -> fires the CI matrix; open a PR"
-  yellow "  4. [this box] wait for CI green (matrix + test + gitleaks), fail-closed"
-  yellow "  5. [this box] squash-merge the PR; verify merged tree == expected; tag v$TARGET"
-  yellow "  6. [$RELEASE_HOME_BASE] build + sign + notarize + npm publish + push tag + computer-helper (token resolved there)"
+  yellow "  2. [this box] require exact-tree attestation (tree/toolchain/lock/policy) for origin/$DEFAULT_BRANCH"
+  yellow "  3. [this box] push branch $RELEASE_BRANCH (chore(release): $TARGET); open a PR"
+  yellow "  4. [this box] require attestation + pretested tgz for the release commit tree (90s), fail-closed"
+  yellow "  5. [this box] squash-merge only if final tree == attested candidate; tag v$TARGET"
+  yellow "  6. [$RELEASE_HOME_BASE] promote exact tgz + reuse helpers + install smoke + npm publish"
   gray   "  (steps already done in a prior run are skipped: published / merged / PR-open / tag-exists)"
   exit 0
 fi
@@ -974,7 +918,10 @@ if $PHNX_TARGET_PUBLISHED; then
     if [[ -n "$MERGED_RELEASE_PR" && -n "$MERGED_RELEASE_SHA" ]]; then
       git fetch --quiet origin "pull/$MERGED_RELEASE_PR/head" \
         || die "could not fetch the CI-tested head for merged release PR #$MERGED_RELEASE_PR"
-      TAG_TARGET="$(scripts/select-publish-commit.sh "$MERGED_RELEASE_SHA" "$(git rev-parse FETCH_HEAD)")"
+      if [[ "$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")" != "$(git rev-parse "FETCH_HEAD^{tree}")" ]]; then
+        die "already-published $TARGET: $DEFAULT_BRANCH tree $(git rev-parse "$MERGED_RELEASE_SHA^{tree}") != attested candidate $(git rev-parse "FETCH_HEAD^{tree}") -- refusing parent/nearby evidence"
+      fi
+      TAG_TARGET="$MERGED_RELEASE_SHA"
     else
       TAG_TARGET="origin/$DEFAULT_BRANCH"
     fi
@@ -1004,132 +951,100 @@ if $PHNX_TARGET_PUBLISHED; then
   exit 0
 fi
 
-# ----- Wait for CI to go green on a PR (bounded + fail-closed) -----
-# Poll `gh pr checks` on a hard deadline rather than `gh pr checks --watch`: the
-# watch is UNBOUNDED (a check that registers then stalls -- e.g. tests.yml's
-# `test` job hanging -- would hang the release forever) and it can
-# exit 0 on a partial set. This loop waits until every expected context is
-# present AND terminal (capped at 60m), then re-asserts each is a pass and dies
-# otherwise. tests.yml's final `test` job gates every component selected by the
-# scope classifier, so the release waiter follows that stable aggregate instead
-# of duplicating internal job names that change when CI is regrouped or resharded.
-# The build matrix and secret scan remain direct release gates.
-EXPECTED_CHECKS=(test gitleaks \
-  "build (ubuntu-latest, 22)"  "build (ubuntu-latest, 24)" \
-  "build (macos-latest, 22)"   "build (macos-latest, 24)")
-# The Windows build jobs gate the release by default. Set RELEASE_REQUIRE_WINDOWS=0 to
-# drop them from the wait when Windows CI is red on pre-existing, Windows-only test
-# breakage (POSIX file-mode / symlink assertions that don't hold on win32) unrelated to
-# the release diff. Windows is not a required check on this repo, so skipping the wait
-# never merges past a real branch-protection gate -- it only stops a known-noisy matrix
-# leg from blocking an otherwise-green, reviewed release.
-if [[ "${RELEASE_REQUIRE_WINDOWS:-1}" == "1" ]]; then
-  EXPECTED_CHECKS+=("build (windows-latest, 22)" "build (windows-latest, 24)")
-fi
-check_bucket() { jq -r --arg n "$1" 'map(select(.name==$n)) | (.[0].bucket // "missing")' <<<"$2"; }
-wait_for_ci_green() {
-  local pr="$1" head_sha="${2:-}" ctx b results problem=0
-  # The caller passes the exact commit it pushed or fetched. GitHub's PR API can
-  # briefly return the PREVIOUS head after a force-update; resolving headRefOid
-  # here made release.sh inspect that stale commit's failed checks and abort even
-  # while the new commit's matrix was running (1.22.0). Per-sha check-runs pinned
-  # to the caller's known commit cannot serve that stale state.
-  [[ -n "$head_sha" ]] || die "missing CI-tested head sha for PR #$pr"
-  bold "Waiting for CI on PR #$pr @ ${head_sha:0:9} (full matrix + test + gitleaks; up to 60m)..."
-  local deadline=$(( $(date +%s) + 3600 ))
-  while :; do
-    results="$(gh api "repos/{owner}/{repo}/commits/$head_sha/check-runs?per_page=100" \
-      --jq '[.check_runs[] | {name, bucket: (if .status != "completed" then "pending" elif (.conclusion == "success" or .conclusion == "skipped" or .conclusion == "neutral") then "pass" else "fail" end)}]' 2>/dev/null || echo '[]')"
-    local waiting=0
-    for ctx in "${EXPECTED_CHECKS[@]}"; do
-      b="$(check_bucket "$ctx" "$results")"
-      [[ "$b" == "missing" || "$b" == "pending" ]] && { waiting=1; break; }
-    done
-    (( waiting == 0 )) && break
-    (( $(date +%s) > deadline )) && { red "Timed out after 60m waiting for CI on PR #$pr."; break; }
-    sleep 20
-  done
-  results="$(gh api "repos/{owner}/{repo}/commits/$head_sha/check-runs?per_page=100" \
-    --jq '[.check_runs[] | {name, bucket: (if .status != "completed" then "pending" elif (.conclusion == "success" or .conclusion == "skipped" or .conclusion == "neutral") then "pass" else "fail" end)}]' 2>/dev/null || echo '[]')"
-  for ctx in "${EXPECTED_CHECKS[@]}"; do
-    b="$(check_bucket "$ctx" "$results")"
-    [[ "$b" == "pass" ]] || { red "  $ctx: $b"; problem=1; }
-  done
-  (( problem == 0 )) || die "CI not all-green on PR #$pr -- PR left OPEN. Fix on a normal PR to $DEFAULT_BRANCH, then re-run this script."
-  green "CI all-green on PR #$pr."
+# ----- Exact-tree attestation (ordinary release proof) -----
+# Bound to 90 seconds so the whole ordinary release stays inside the 180s P99.
+# --skip-tests does not skip this: there is no fallback rebuild or parent-commit
+# evidence. Sign/notarize is not invoked here.
+attestation_store_dir() {
+  printf '%s\n' "${RELEASE_ATTESTATION_DIR:-$REPO_ROOT/.release-attestations}"
 }
 
-# Verify the home base can actually sign BEFORE any mutation. Reached only past
-# the already-published short-circuit (that path just tags a shipped version and
-# never signs), so both remaining paths -- a catch-up publish and a brand-new
-# release -- are gated here, before the crabbox tests, the PR, the merge, or the
-# tag. Without this an unprovisioned --device fallback merges + tags and then dies
-# at the sign step, exactly the RUSH-2535 tagged-but-unpublished trap.
-assert_signing_home_base
+# Stage the attested json + tgz + manifest + reused helper zip onto v$TARGET so
+# the throwaway home-base worktree can download them. Never rebuilds a helper.
+upload_release_proof() {
+  local tree="$1"
+  local store attest tgz_json tgz dest
+  store="$(attestation_store_dir)"
+  attest="$(scripts/release-attestation.sh require --dir "$store" --tree "$tree" --repo-root "$REPO_ROOT")" \
+    || die "cannot upload proof: no attestation for $tree"
+  dest="$(mktemp -d "${TMPDIR:-/tmp}/agents-cli-release-proof.XXXXXX")"
+  cp "$attest" "$dest/release-attestation.json"
+  tgz_json="$(scripts/release-attestation.sh tarball --file "$attest" --require-file)"
+  tgz="$(jq -r .path <<<"$tgz_json")"
+  [[ -n "$tgz" && -f "$tgz" ]] || die "pretested tarball missing -- refusing to rebuild"
+  cp "$tgz" "$dest/$(basename "$tgz")"
+  [[ -f "$store/release-manifest.json" ]] \
+    || die "release manifest missing at $store/release-manifest.json -- no fallback rebuild"
+  cp "$store/release-manifest.json" "$dest/release-manifest.json"
+  if ! scripts/release-manifest.sh copy-asset --file "$store/release-manifest.json" --helper computer-mac --asset-path "$dest"; then
+    gh release download "v$PHNX_LATEST" --dir "$dest" --pattern 'ComputerHelper.app.zip*' \
+      || die "could not reuse ComputerHelper.app.zip from v$PHNX_LATEST -- no fallback rebuild"
+  fi
+  if gh release view "v$TARGET" >/dev/null 2>&1; then
+    gh release upload "v$TARGET" "$dest"/* --clobber \
+      || die "failed to upload attested artifacts to v$TARGET"
+  else
+    gh release create "v$TARGET" "$dest"/* --verify-tag --title "v$TARGET" \
+      --notes "attested tarball + reused helper for $TARGET" \
+      || die "failed to create GitHub release v$TARGET with attested artifacts"
+  fi
+}
+
+wait_for_attestation() {
+  local tree="$1"
+  local attest_dir
+  attest_dir="$(attestation_store_dir)"
+  local deadline=$(( $(date +%s) + 90 ))
+  local out
+  [[ -n "$tree" ]] || die "missing tree digest for attestation"
+  bold "Waiting for exact-tree attestation ${tree:0:12} (90s P99 budget)..."
+  while :; do
+    if out="$(scripts/release-attestation.sh require --dir "$attest_dir" --tree "$tree" --repo-root "$REPO_ROOT" 2>/dev/null)"; then
+      green "attestation $(basename "$out")"
+      printf '%s\n' "$out"
+      return 0
+    fi
+    (( $(date +%s) > deadline )) && break
+    sleep 5
+  done
+  scripts/release-attestation.sh require --dir "$attest_dir" --tree "$tree" --repo-root "$REPO_ROOT"
+}
 
 # A prior normal release run can merge its PR and then fail before publishing.
-# Re-running must reuse the exact CI-tested release tree — never treat a manual
+# Re-running must reuse the exact attested release tree — never treat a manual
 # package.json bump or a squash merge containing concurrent main changes as
-# release validation. This is the catch-up hole that let 1.20.58 publish before
-# its Windows tag matrix failed.
+# release validation.
 if $MAIN_AT_TARGET && ! $PHNX_TARGET_PUBLISHED; then
   [[ -n "$MERGED_RELEASE_PR" && -n "$MERGED_RELEASE_SHA" && -n "$MERGED_RELEASE_HEAD" ]] \
     || die "main is already at $TARGET but no complete merged $RELEASE_BRANCH PR exists -- refusing an unverified catch-up publish; cut the next patch through the normal release PR flow"
   if [[ -z "${CI_TESTED_HEAD:-}" ]]; then
     git fetch --quiet origin "pull/$MERGED_RELEASE_PR/head" \
-      || die "could not fetch the CI-tested head for merged release PR #$MERGED_RELEASE_PR"
+      || die "could not fetch the attested head for merged release PR #$MERGED_RELEASE_PR"
     CI_TESTED_HEAD="$(git rev-parse FETCH_HEAD)"
   fi
   [[ "$CI_TESTED_HEAD" == "$MERGED_RELEASE_HEAD" ]] \
     || die "fetched PR head ${CI_TESTED_HEAD:0:9} != recorded release head ${MERGED_RELEASE_HEAD:0:9} -- refusing catch-up publish"
   if [[ "$(git rev-parse "$CI_TESTED_HEAD^{tree}")" != "$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")" ]]; then
-    yellow "$DEFAULT_BRANCH drifted since release PR #$MERGED_RELEASE_PR merged (concurrent merges); will tag + publish the CI-tested head ${CI_TESTED_HEAD:0:9}, not the drifted merge."
+    die "$DEFAULT_BRANCH tree $(git rev-parse "$MERGED_RELEASE_SHA^{tree}") != attested candidate $(git rev-parse "$CI_TESTED_HEAD^{tree}") -- refusing parent/nearby evidence"
   fi
-  # This IS a catch-up: the release PR is merged and only the tag + publish remain,
-  # so phase 4 must resolve the release commit from the merged PR (MERGED_RELEASE_SHA
-  # + CI_TESTED_HEAD, both resolved above) rather than from RELEASE_COMMIT, which only
-  # the branch-creating path defines. The earlier detection at the top of the script
-  # sets this too, but only when main has moved PAST the release merge; when main sits
-  # exactly AT the merge commit -- the normal state after a merge -- only this block
-  # runs, and leaving the flag false made phase 4 dereference an unset RELEASE_COMMIT
-  # and abort under `set -u`. That aborted every retry of an unpublished release.
   HISTORICAL_CATCHUP=true
-  bold "Re-validating CI from merged release PR #$MERGED_RELEASE_PR before catch-up publish..."
-  wait_for_ci_green "$MERGED_RELEASE_PR" "$CI_TESTED_HEAD"
+  bold "Re-validating attestation for merged release PR #$MERGED_RELEASE_PR before catch-up publish..."
+  wait_for_attestation "$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")" >/dev/null
 fi
 
-# ----- Tests on a crabbox (before opening the PR) -----
-# Only for a genuinely new release (a catch-up publish already went through CI on
-# its merged PR). On failure this halts before any PR/publish with the failing
-# tests + log location. --skip-tests skips the crabbox lease (CI still gates the
-# PR below). Covers Linux; the GH Actions matrix on the PR covers macOS/Windows.
-#
-# Test the CLEAN, pre-bump tree: the only working-tree mutation so far is the
-# package.json version bump, and the suite is version-independent, so we revert to
-# $ORIGINAL_PKG_VERSION for the rsync (sandbox.sh copies the working tree) and
-# re-apply the bump afterward. This avoids testing a half-mutated tree (bumped
-# version but not-yet-folded changelog) that never actually ships.
+# ----- Require functional attestation for origin/<default> before opening a PR -----
 if ! $MAIN_AT_TARGET; then
-  phase "Linux tests" "a crabbox"
+  phase "Require origin/$DEFAULT_BRANCH attestation" "$THIS_HOST"
   if $SKIP_TESTS; then
-    gray "(--skip-tests: skipping the crabbox Linux suite; the GH Actions CI matrix still gates the PR)"
-    phase_ok "skipped (--skip-tests); GH Actions CI still gates the PR"
-  else
-    if $PKG_BUMPED; then
-      _rb_tmp="$(mktemp)"
-      jq --arg v "$ORIGINAL_PKG_VERSION" '.version = $v' package.json > "$_rb_tmp" && mv "$_rb_tmp" package.json
-    fi
-    run_crabbox_tests
-    if $PKG_BUMPED; then
-      _rb_tmp="$(mktemp)"
-      jq --arg v "$TARGET" '.version = $v' package.json > "$_rb_tmp" && mv "$_rb_tmp" package.json
-    fi
+    gray "(--skip-tests does not skip attestation; exact-tree proof is still required)"
   fi
+  wait_for_attestation "$(git rev-parse "origin/$DEFAULT_BRANCH^{tree}")" >/dev/null
+  phase_ok "origin/$DEFAULT_BRANCH tree is attested (toolchain/lock/policy bound)"
 fi
 
 # ----- Open (or reuse) the release PR + merge, unless already merged -----
 if ! $MAIN_AT_TARGET; then
-  phase "Open release PR, wait for the CI matrix (macOS/Windows/Linux), merge" "$THIS_HOST + GH Actions"
+  phase "Open release PR, wait for release-tree attestation, merge" "$THIS_HOST"
   # Collapse the release queue: fold every .changelog/next/<slug>.md fragment into
   # .changelog/$TARGET.md, then regenerate the released-only aggregate CHANGELOG.md.
   # Fails closed if the queue is empty (a release must document itself). The folded
@@ -1196,57 +1111,46 @@ if ! $MAIN_AT_TARGET; then
     green "Opened release PR #$PR_NUMBER"
   fi
 
-  [[ -n "$RELEASE_CI_HEAD" ]] || die "could not resolve CI-tested head for PR #$PR_NUMBER"
-  wait_for_ci_green "$PR_NUMBER" "$RELEASE_CI_HEAD"
+  [[ -n "$RELEASE_CI_HEAD" ]] || die "could not resolve attested head for PR #$PR_NUMBER"
+  wait_for_attestation "$(git rev-parse "$RELEASE_CI_HEAD^{tree}")" >/dev/null
 
-  # Squash-merge. Never --admin: branch protection must hold, and the ruleset has
-  # no PR-review rule, so green test+gitleaks is a sufficient, non-bypass merge.
-  # The CI wait above is the longest gap in the release (the matrix has run 57
-  # minutes). Re-prove the lease before the first irreversible act.
+  # Squash-merge. Never --admin. Attestation of the exact release tree is the
+  # functional gate -- not a full-suite matrix wait. Re-prove the lease before
+  # the first irreversible act.
   require_lease "merging PR #$PR_NUMBER"
   bold "Merging PR #$PR_NUMBER (squash)..."
   gh pr merge "$PR_NUMBER" --squash --delete-branch || die "merge failed for PR #$PR_NUMBER (left open)"
   green "Merged PR #$PR_NUMBER"
-  phase_ok "PR #$PR_NUMBER: CI matrix all-green, squash-merged"
+  phase_ok "PR #$PR_NUMBER: attested tree squash-merged"
 fi
 
 # Phase 4 (both paths): resolve the CI-tested release commit + create/push the tag.
-phase "Verify CI-tested tree + tag v$TARGET" "$THIS_HOST"
+phase "Verify attested tree + tag v$TARGET" "$THIS_HOST"
 
-# ----- Resolve the merge commit + the CI-tested release commit -----
-# The published tarball MUST be a tree the full CI matrix went green on. Normally
-# that is the commit that landed on the default branch. But the default branch is
-# busy: if unrelated PRs merge during this release PR's CI window, the squash-merge
-# lands on a newer base and its tree diverges from what CI actually tested. In that
-# case we do NOT publish the drifted, never-tested-as-a-unit merge tree -- we tag +
-# publish the exact release commit the matrix validated (the PR head), and the
-# commits that merged during the window ride the next release.
+# The published tarball MUST be the exact attested candidate tree. Final
+# default-branch tree digest must equal that candidate; parent/nearby SHAs
+# never count.
 git fetch --quiet origin "$DEFAULT_BRANCH"
 if $HISTORICAL_CATCHUP; then
   MERGED_SHA="$MERGED_RELEASE_SHA"
-  CI_COMMIT="$CI_TESTED_HEAD"                 # the merged release PR's CI-tested head
+  CI_COMMIT="$CI_TESTED_HEAD"
 else
   MERGED_SHA="$(git rev-parse "origin/$DEFAULT_BRANCH")"
-  CI_COMMIT="$RELEASE_COMMIT"                 # the release PR head this run built + CI-tested
+  CI_COMMIT="$RELEASE_COMMIT"
 fi
 MERGED_VER="$(git show "$MERGED_SHA:apps/cli/package.json" | jq -r .version)"
 [[ "$MERGED_VER" == "$TARGET" ]] || die "merged $DEFAULT_BRANCH is at $MERGED_VER, not $TARGET -- refusing to tag/publish"
 
-# CI_COMMIT is, by construction, the commit GH Actions ran the full matrix on (a
-# normal run built it via commit-tree and pushed it as the PR head; a catch-up
-# fetched it from pull/<pr>/head and re-asserted CI green). Its tree is the
-# CI-tested tree. Re-assert its version so we never tag a mismatched commit.
-[[ -n "${CI_COMMIT:-}" ]] || die "internal: no CI-tested release commit resolved -- refusing to publish"
+[[ -n "${CI_COMMIT:-}" ]] || die "internal: no attested release commit resolved -- refusing to publish"
 [[ "$(git show "$CI_COMMIT:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
-  || die "CI-tested release commit ${CI_COMMIT:0:9} is not version $TARGET -- refusing to publish"
+  || die "attested release commit ${CI_COMMIT:0:9} is not version $TARGET -- refusing to publish"
 
-# Tag the merge commit when its tree still matches the CI-tested tree (clean, keeps
-# the tag on the default branch); on concurrent-merge drift, tag the CI-tested
-# release commit so the published artifact is exactly what CI validated.
-PUBLISH_SHA="$(scripts/select-publish-commit.sh "$MERGED_SHA" "$CI_COMMIT")"
-if [[ "$PUBLISH_SHA" != "$MERGED_SHA" ]]; then
-  yellow "Concurrent merge drifted $DEFAULT_BRANCH during CI; tagging the CI-tested release commit ${PUBLISH_SHA:0:9} (its tree passed the full matrix). Commits that merged during the window ride the next release."
-fi
+MERGED_TREE="$(git rev-parse "$MERGED_SHA^{tree}")"
+ATTESTED_TREE="$(git rev-parse "$CI_COMMIT^{tree}")"
+[[ "$MERGED_TREE" == "$ATTESTED_TREE" ]] \
+  || die "final $DEFAULT_BRANCH tree $MERGED_TREE != attested candidate $ATTESTED_TREE -- refusing parent/nearby evidence"
+wait_for_attestation "$MERGED_TREE" >/dev/null
+PUBLISH_SHA="$MERGED_SHA"
 
 # The published tarball is built on the home base from a fresh checkout of the
 # tag (below), so the trigger box's working tree is not the publish source and is
@@ -1284,20 +1188,21 @@ fi
 # and falls straight through to here.
 require_lease "pushing tag v$TARGET"
 git push origin "v$TARGET"
-phase_ok "CI-tested tree verified; tag v$TARGET at ${PUBLISH_SHA:0:9} pushed"
+upload_release_proof "$MERGED_TREE"
+phase_ok "attested tree verified; tag v$TARGET at ${PUBLISH_SHA:0:9} pushed; proof uploaded"
 
 # Restore the working tree to clean now that the tag is durable; the privileged
 # phase below builds from a fresh checkout of the tag (locally on the home base,
 # or over ssh), never from this working tree.
 restore_release_tree
 
-# ----- Privileged phase: build + sign + notarize + npm publish + computer-helper -----
+# ----- Privileged phase: promote attested tgz + reuse helpers + install smoke -----
 # Routes to the home base ($RELEASE_HOME_BASE): inline if we ARE it, else over ssh.
 # The npm token is resolved on the home base and never crosses to this box. On
 # failure this halts with the cause; the tag + merge are durable, so a re-run
 # resumes at the publish (the already-published short-circuit + tag idempotency
 # make it safe).
-phase "Build + sign + notarize + npm publish + computer-helper" "$RELEASE_HOME_BASE"
+phase "Promote attested tgz + reuse helpers + install smoke" "$RELEASE_HOME_BASE"
 require_lease "publishing $PHNX_PKG@$TARGET"
 route_home_base_phase \
   || phase_fail "privileged phase failed on the home base ($RELEASE_HOME_BASE) -- PR merged + tag v$TARGET pushed; rerun to retry: $0 $TARGET --apply"

@@ -94,7 +94,7 @@ function spawnKeychainHelper(
   if (keychainDaemonBootEnabled && !keychainDaemonBootAttempted) {
     keychainDaemonBootAttempted = true;
     // Fire-and-forget: daemon start must not block the foreground secrets op.
-    import('../daemon.js')
+    import('../daemon/daemon.js')
       .then(({ ensureDaemonStarted }) => ensureDaemonStarted())
       .catch(() => { /* best effort */ });
   }

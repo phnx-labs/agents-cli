@@ -1207,7 +1207,7 @@ export function registerRepoCommands(program: Command): void {
       // so scheduler.reloadAll() re-reads the synced YAML and device pins refresh.
       // No-op when the daemon isn't running (or on Windows, which has no SIGHUP).
       if (anyPulled) {
-        const { isDaemonRunning, signalDaemonReload } = await import('../lib/daemon.js');
+        const { isDaemonRunning, signalDaemonReload } = await import('../lib/daemon/daemon.js');
         if (isDaemonRunning() && signalDaemonReload()) {
           console.log(chalk.gray('Reloaded the routines daemon (device pins refreshed).'));
         }

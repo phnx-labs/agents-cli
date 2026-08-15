@@ -12,7 +12,7 @@ import {
 } from './ipc.js';
 import { getHelpersDir } from '../state.js';
 import { ipcEndpoint } from '../platform/index.js';
-import { startDaemon } from '../daemon.js';
+import { startDaemon } from '../daemon/daemon.js';
 
 const HELPER_DIR = `/tmp/agents-cli-browser-ipc-${process.pid}`;
 
@@ -29,7 +29,7 @@ vi.mock('../state.js', async (importOriginal) => ({
   getHelpersDir: vi.fn(() => `/tmp/agents-cli-browser-ipc-${process.pid}`),
 }));
 
-vi.mock('../daemon.js', () => ({
+vi.mock('../daemon/daemon.js', () => ({
   startDaemon: vi.fn(),
   stopDaemon: vi.fn(),
 }));

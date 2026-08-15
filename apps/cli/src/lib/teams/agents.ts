@@ -8,7 +8,7 @@
  * multiple permission modes (plan, edit, full).
  */
 import { spawn, execSync, execFileSync, ChildProcess } from 'child_process';
-import { getAgentsInvocation } from '../daemon.js';
+import { getAgentsInvocation } from '../daemon/daemon.js';
 import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';

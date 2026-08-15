@@ -23,7 +23,7 @@ import {
   readDaemonLog,
   getDaemonStatus,
   getDaemonLogPath,
-} from '../lib/daemon.js';
+} from '../lib/daemon/daemon.js';
 import { assertSchedulerEnabled, assertDaemonEnabled, isDaemonEnabled } from '../lib/device-config.js';
 import { resolveAgentName, parseAgentVersionSpec, isAgentHardDeprecated, hardDeprecationError, ROUTINE_AGENT_IDS } from '../lib/agents.js';
 import { RUN_STRATEGIES, normalizeRunStrategy } from '../lib/accounting/rotate.js';

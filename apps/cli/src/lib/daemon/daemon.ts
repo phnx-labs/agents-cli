@@ -11,31 +11,31 @@ import { spawn, execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { getDaemonDir } from './state.js';
-import { isolatedHomeSuffix, namespacedServiceLabel, serviceManifestHomeEnv } from './service-manifest.js';
-import { isAlive, killTree, backgroundSpawnOptions, waitForExit } from './platform/index.js';
-import { listJobs as listAllJobs, type JobConfig } from './scheduling/routines.js';
-import { syncAllProjectRoutines } from './routines-project.js';
-import { JobScheduler } from './scheduler.js';
-import { MonitorEngine } from './monitors/engine.js';
-import { executeJobDetached, monitorRunningJobs, listLiveRoutineChildren } from './runner.js';
-import { detectOverdueJobs, notifyOverdue } from './overdue.js';
-import { runCatchup } from './catchup.js';
-import { notifyRoutineStart, notifyRoutineFinish, notifyRoutineStartFailed } from './routine-notify.js';
-import { notifyOwnerRoutineFinish, notifyOwnerRoutineStartFailed } from './routine-notify-owner.js';
-import { BrowserService } from './browser/service.js';
-import { BrowserIPCServer, getSocketPath as getBrowserIpcSocketPath } from './browser/ipc.js';
-import { startHostedWebhookReceivers, type HostedWebhookReceivers } from './daemon-webhooks.js';
-import { secretsBrokerSocketPath, brokerPidAlive } from './secrets/agent.js';
-import { redactSecrets } from './redact.js';
-import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from './cli-entry.js';
-import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled, getConfigValue, resolveBrowserTaskIdleMs } from './device-config.js';
-import { reapTerminalRoutineProcesses } from './routine-process-cleanup.js';
-import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC, SUBSYSTEM_DAEMON_START } from './daemon-health.js';
-import { startAccountStateService } from './account-state-service.js';
-import { runActiveSessionsWarmTick, runFleetCacheWarmTick, runSessionIndexWarmTick, runUsageRefreshTick } from './daemon-ticks.js';
-import { emit, emitRoutineEnd } from './feed/events.js';
-import { readDaemonServicesConfig, isDaemonServiceEnabled, type DaemonServiceId } from './daemon-services.js';
+import { getDaemonDir } from '../state.js';
+import { isolatedHomeSuffix, namespacedServiceLabel, serviceManifestHomeEnv } from '../service-manifest.js';
+import { isAlive, killTree, backgroundSpawnOptions, waitForExit } from '../platform/index.js';
+import { listJobs as listAllJobs, type JobConfig } from '../scheduling/routines.js';
+import { syncAllProjectRoutines } from '../routines-project.js';
+import { JobScheduler } from '../scheduler.js';
+import { MonitorEngine } from '../monitors/engine.js';
+import { executeJobDetached, monitorRunningJobs, listLiveRoutineChildren } from '../runner.js';
+import { detectOverdueJobs, notifyOverdue } from '../overdue.js';
+import { runCatchup } from '../catchup.js';
+import { notifyRoutineStart, notifyRoutineFinish, notifyRoutineStartFailed } from '../routine-notify.js';
+import { notifyOwnerRoutineFinish, notifyOwnerRoutineStartFailed } from '../routine-notify-owner.js';
+import { BrowserService } from '../browser/service.js';
+import { BrowserIPCServer, getSocketPath as getBrowserIpcSocketPath } from '../browser/ipc.js';
+import { startHostedWebhookReceivers, type HostedWebhookReceivers } from '../daemon-webhooks.js';
+import { secretsBrokerSocketPath, brokerPidAlive } from '../secrets/agent.js';
+import { redactSecrets } from '../redact.js';
+import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from '../cli-entry.js';
+import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled, getConfigValue, resolveBrowserTaskIdleMs } from '../device-config.js';
+import { reapTerminalRoutineProcesses } from '../routine-process-cleanup.js';
+import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC, SUBSYSTEM_DAEMON_START } from '../daemon-health.js';
+import { startAccountStateService } from '../account-state-service.js';
+import { runActiveSessionsWarmTick, runFleetCacheWarmTick, runSessionIndexWarmTick, runUsageRefreshTick } from '../daemon-ticks.js';
+import { emit, emitRoutineEnd } from '../feed/events.js';
+import { readDaemonServicesConfig, isDaemonServiceEnabled, type DaemonServiceId } from '../daemon-services.js';
 
 const PID_FILE = 'daemon.pid';
 const LIFETIME_FILE = 'daemon.lifetime';
@@ -743,7 +743,7 @@ async function runHealCheck(): Promise<void> {
   healing = true;
   try {
     const { runSelfHeal, selfHealChangedAnything, selfHealNeedsAttention, summarizeSelfHeal } =
-      await import('./self-heal/registry.js');
+      await import('../self-heal/registry.js');
     if (!fs.existsSync(getDaemonDir())) return;
     const report = await runSelfHeal({ mode: 'safe' });
     if (selfHealChangedAnything(report) || selfHealNeedsAttention(report)) {
@@ -765,7 +765,7 @@ async function runKeychainReap(): Promise<void> {
   if (reapingKeychain) return;
   reapingKeychain = true;
   try {
-    const { reapOrphanedKeychainProcesses } = await import('./secrets/reaper.js');
+    const { reapOrphanedKeychainProcesses } = await import('../secrets/reaper.js');
     const result = reapOrphanedKeychainProcesses();
     if (result.reaped > 0) {
       log('WARN', `Reaped ${result.reaped} keychain orphan/stuck process(es)`);
@@ -791,8 +791,8 @@ async function runDeadPaneReap(): Promise<void> {
   if (reapingDeadPanes) return;
   reapingDeadPanes = true;
   try {
-    const { reapDeadTmuxPanes } = await import('./tmux/session.js');
-    const { getDefaultSocketPath } = await import('./tmux/paths.js');
+    const { reapDeadTmuxPanes } = await import('../tmux/session.js');
+    const { getDefaultSocketPath } = await import('../tmux/paths.js');
     const result = await reapDeadTmuxPanes(getDefaultSocketPath());
     for (const w of result.warnings) log('WARN', `Dead-pane reaper: ${w}`);
     if (result.processes > 0) {
@@ -876,7 +876,7 @@ export async function runDaemon(): Promise<void> {
   // migration sentinel — so the daemon runs this itself so its scheduler/
   // watchdog gates read the converged store.
   try {
-    const { migrateDeviceConfigToCentral } = await import('./devices/config-migration.js');
+    const { migrateDeviceConfigToCentral } = await import('../devices/config-migration.js');
     migrateDeviceConfigToCentral();
   } catch (err) {
     log('WARN', `device config migration failed: ${(err as Error).message}`);
@@ -889,8 +889,8 @@ export async function runDaemon(): Promise<void> {
   // (tmux/session.ts) now cover what that poll used to. Idempotent and
   // non-destructive: a session already at the current schema is a no-op.
   try {
-    const { reconcileSessionHooks } = await import('./tmux/session.js');
-    const { isTmuxInstalled } = await import('./tmux/binary.js');
+    const { reconcileSessionHooks } = await import('../tmux/session.js');
+    const { isTmuxInstalled } = await import('../tmux/binary.js');
     if (isTmuxInstalled()) {
       const r = await reconcileSessionHooks();
       if (r.reconciled > 0) log('INFO', `tmux: retrofitted pane-died hook on ${r.reconciled}/${r.scanned} session(s)`);
@@ -937,7 +937,7 @@ export async function runDaemon(): Promise<void> {
   let hostedBroker: { close(): void } | null = null;
   if (isEnabled('secrets-broker')) {
     try {
-      const { agentPing, startHostedBroker } = await import('./secrets/agent.js');
+      const { agentPing, startHostedBroker } = await import('../secrets/agent.js');
       if ((await agentPing()).reachable) {
         log('INFO', 'Secrets broker already running (standalone); daemon not hosting it');
       } else {
@@ -1147,7 +1147,7 @@ export async function runDaemon(): Promise<void> {
       watchdogInFlight = true;
       try {
         if (getConfigValue('watchdog.enabled').value !== true) return;
-        const { runWatchdogPass } = await import('./watchdog/service.js');
+        const { runWatchdogPass } = await import('../watchdog/service.js');
         const result = await runWatchdogPass({ nudge: true });
         log('INFO', `watchdog: ${result.counts.total} live, ${result.counts.stalled} stalled, ${result.counts.nudged} nudged`);
         emit('watchdog.action', {
@@ -1183,11 +1183,11 @@ export async function runDaemon(): Promise<void> {
       if (deviceProbeInFlight) return;
       deviceProbeInFlight = true;
       try {
-        const { runDeviceSync } = await import('./devices/sync.js');
+        const { runDeviceSync } = await import('../devices/sync.js');
         const {
           reconcilePendingSentinels,
           pruneDismissedPendingSentinels,
-        } = await import('./devices/pending.js');
+        } = await import('../devices/pending.js');
         const dev = await runDeviceSync({ soft: true, mode: 'refresh' });
         if (!dev.ok) {
           await pruneDismissedPendingSentinels();
@@ -1302,7 +1302,7 @@ export async function runDaemon(): Promise<void> {
   // (cdp:// profile silently driven via stale ssh tunnel) or fail to
   // bind because the ports are still claimed.
   try {
-    const { reapOrphanedProcesses } = await import('./browser/runtime-state.js');
+    const { reapOrphanedProcesses } = await import('../browser/runtime-state.js');
     const result = reapOrphanedProcesses();
     if (result.reaped > 0) {
       log('INFO', `Reaped ${result.reaped} orphan process(es) from prior daemon(s)`);
@@ -1381,7 +1381,7 @@ export async function runDaemon(): Promise<void> {
       if (selfHealingBroker) return;
       selfHealingBroker = true;
       try {
-        const { agentPing, startHostedBroker } = await import('./secrets/agent.js');
+        const { agentPing, startHostedBroker } = await import('../secrets/agent.js');
         const reachable = (await agentPing()).reachable;
         if (!shouldTakeOverBroker(hostedBroker != null, reachable)) return;
         hostedBroker = await startHostedBroker();

@@ -33,6 +33,7 @@ import {
 } from './state.js';
 import { dispatchAction, type DispatchResult } from './dispatch.js';
 import { sendToOwner } from '../notify.js';
+import { readRunMeta } from '../scheduling/routines.js';
 
 /** How often the engine wakes to check which monitors are due. */
 const TICK_MS = 5_000;
@@ -332,11 +333,21 @@ export class MonitorEngine {
       result = { kind: monitor.action.type, ok: false, error: (err as Error).message };
     }
 
+    // Best-effort snapshot of the run's status AT THIS INSTANT — the same
+    // synchronous view `dispatchAction` just returned from. For the async-race
+    // case (RUSH-2690) this reads 'running': the dispatched process is still
+    // in flight, `ok` was frozen on that transient state, and the real outcome
+    // is not known yet. Recorded so a future reconciliation pass can find
+    // exactly the fires whose `ok` needs revisiting; `resolveFireOutcome`
+    // (state.ts) never trusts this field — it re-reads the run fresh instead.
+    const runStatusAtFire = result.runId ? readRunMeta(monitor.name, result.runId)?.status : undefined;
+
     writeFireRecord(event, {
       ...(result.runId ? { runId: result.runId } : {}),
       action: result.kind,
       ok: result.ok,
       ...(result.error ? { error: result.error } : {}),
+      ...(runStatusAtFire ? { runStatusAtFire } : {}),
     });
     writeState(monitor.name, decision.value, decision.dedupeKey, { lastFiredAt: event.firedAt, fireTimes });
 

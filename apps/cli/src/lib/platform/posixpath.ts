@@ -7,7 +7,7 @@
  * `bash -lc 'agents …'` fails with command-not-found. That breaks every
  * consumer that drives a login shell on the box: `agents secrets export --device`
  * (which runs `bash -lc 'agents secrets import …'` on the remote) and the
- * routines daemon (`src/lib/daemon.ts`, which falls back to bare `agents`).
+ * routines daemon (`src/lib/daemon/daemon.ts`, which falls back to bare `agents`).
  *
  * The fix mirrors the Windows postinstall branch (which registers npm's
  * global-bin dir on the user PATH): symlink the entrypoint into ~/.local/bin —

@@ -26,6 +26,7 @@ How agi-cli is laid out on disk and how it decides what to load.
 | [Concepts](concepts.md) | DotAgents repos, resource kinds, project › user › system resolution. |
 | [Version management](version-management.md) | Installing, pinning, switching, and isolating agent CLI versions. |
 | [Self-healing installs](self-healing.md) | Detect, surface, and repair a broken agent binary (gutted install / `ENOENT`) instead of dying cryptically. |
+| [Release](release.md) | Ordinary `release.sh` promotes the exact pretested tarball (tree/toolchain/lock/policy attestation). P99 ≤180s. |
 | [Resource sync](resource-sync.md) | How rules, commands, skills, hooks, etc. land in each version home. |
 | [**Specifications**](specifications.md) | **The normative contract** (MUST/SHOULD + Given/When/Then, cited to `file:line`) for the major subsystems — [Sessions](specifications.md#sessions), [Secrets](specifications.md#secrets), [Agent execution](specifications.md#agent-execution). Read the spec for the guarantee; the per-feature docs below for the how-to. |
 | [Sessions](sessions.md) | Unified transcript and tool-call search across all 12 `SESSION_AGENTS` harnesses; distinct-call queries, fleet fan-out, readable redacted Markdown rendering for Claude, Codex, Kimi, Grok, Cursor, and Droid; resume, export/import, live-session migration, and local/distributed benchmarks. |

@@ -16,6 +16,7 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import { getMonitorsHistoryDir, ensureAgentsDir } from '../state.js';
 import { safeJoin } from '../paths.js';
+import { readRunMeta, type RunMeta } from '../scheduling/routines.js';
 import type { MonitorEvent } from './config.js';
 
 /** Persisted last-seen state for one monitor. */
@@ -247,6 +248,20 @@ export interface FireRecord extends MonitorEvent {
   action?: string;
   ok?: boolean;
   error?: string;
+  /**
+   * The dispatched run's status AT FIRE TIME, best-effort (RUSH-2690).
+   * `dispatchAction` (lib/monitors/dispatch.ts) only sees a synchronous
+   * snapshot: `executeJobDetached` writes `status: 'running'` before spawning
+   * and returns immediately — the real outcome (`completed`/`failed`/`timeout`)
+   * lands later, asynchronously, in `executeJobDetachedClaimed`'s own
+   * `settle()` on child exit/error (lib/runner.ts). So a fire recorded
+   * `runStatusAtFire: 'running'` had its `ok` frozen before the run actually
+   * finished — that is the signal a future reconciliation pass (a daemon tick
+   * that revisits `running`-at-fire records and patches `ok` for real) would
+   * scan for. Never used to gate `ok` itself; `resolveFireOutcome` re-reads the
+   * run fresh on every call instead of trusting this snapshot.
+   */
+  runStatusAtFire?: RunMeta['status'];
 }
 
 /** List a monitor's fire history, chronologically ascending. */
@@ -269,4 +284,41 @@ export function listFires(name: string): FireRecord[] {
     }
   }
   return fires;
+}
+
+/** Run statuses that read as a healthy fire: still in flight, or settled clean. */
+const OK_RUN_STATUSES = new Set<RunMeta['status']>(['running', 'completed']);
+
+/** The reconciled outcome of one fire, resolved against the run's live status. */
+export interface ReconciledFireOutcome {
+  /** True fire outcome, correcting the frozen `ok` against the run's CURRENT status. */
+  ok: boolean;
+  /** The run's live terminal status, when a runId is present and resolvable. */
+  runStatus?: RunMeta['status'];
+}
+
+/**
+ * Reconcile a fire's frozen `ok` against its dispatched run's REAL, current
+ * status — the render-time fix for RUSH-2690.
+ *
+ * `writeFireRecord` (this module) persists `ok` once, at fire time, from
+ * `dispatchAction`'s synchronous return. For a `run`/`routine` action that
+ * return is a snapshot: `executeJobDetached` writes `status: 'running'` before
+ * spawning and hands that back immediately, so `dispatchAction`'s negative
+ * check (`skipped`/`blocked`/`failed`) never sees the async outcome that lands
+ * later via `settle()` — a run that goes on to fail, time out, or otherwise
+ * never produce output still reads `ok: true` in `agents monitors runs`
+ * forever, while `agents monitors logs` (which reads the run record fresh)
+ * shows the real status. Re-reading the run here, at DISPLAY time, closes that
+ * gap without touching the write path or the frozen historical record on disk.
+ *
+ * A fire with no `runId` (a `notify`/`webhook-out` action, or a `run`/`routine`
+ * dispatch that never got a runId at all) has nothing to reconcile against —
+ * its frozen `ok` is the only signal and is returned as-is.
+ */
+export function resolveFireOutcome(jobName: string, fire: FireRecord): ReconciledFireOutcome {
+  if (!fire.runId) return { ok: fire.ok !== false };
+  const run = readRunMeta(jobName, fire.runId);
+  if (!run) return { ok: fire.ok !== false };
+  return { ok: OK_RUN_STATUSES.has(run.status), runStatus: run.status };
 }

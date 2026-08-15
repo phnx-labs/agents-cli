@@ -48,9 +48,9 @@ import {
   daemonServiceLabel,
   daemonSystemdUnitName,
 } from './daemon.js';
-import { getDaemonDir } from './state.js';
-import { readSubsystemHealth, recordSubsystemOk, SUBSYSTEM_DAEMON_START } from './daemon-health.js';
-import { ipcEndpoint } from './platform/index.js';
+import { getDaemonDir } from '../state.js';
+import { readSubsystemHealth, recordSubsystemOk, SUBSYSTEM_DAEMON_START } from '../daemon-health.js';
+import { ipcEndpoint } from '../platform/index.js';
 
 const systemdQuote = (value: string): string =>
   `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
@@ -59,8 +59,8 @@ import {
   setKeychainToken,
   setKeychainBackendForTest,
   type KeychainBackend,
-} from './secrets/index.js';
-import { writeBundle, deleteBundle } from './secrets/bundles.js';
+} from '../secrets/index.js';
+import { writeBundle, deleteBundle } from '../secrets/bundles.js';
 
 function makeMemoryBackend(): { backend: KeychainBackend; store: Map<string, string> } {
   const store = new Map<string, string>();
@@ -793,7 +793,7 @@ function probeEndpoint(endpoint: string, timeoutMs = 500): Promise<boolean> {
   });
 }
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const DIST_ENTRY = path.join(REPO_ROOT, 'dist', 'index.js');
 
 // #556 / #561 (missing e2e coverage): drive the REAL startDetached path and
