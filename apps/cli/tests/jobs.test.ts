@@ -13,27 +13,29 @@ const hoistedState: JobsHoistedState =
   ((globalThis as Record<string, unknown>)[JOBS_HOISTED_KEY] as JobsHoistedState | undefined)
   ?? (((globalThis as Record<string, unknown>)[JOBS_HOISTED_KEY] = { TEST_DIR: '', META: {} }) as JobsHoistedState);
 
-vi.mock('../src/lib/state.js', () => {
+vi.mock('../src/lib/state.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/lib/state.js')>();
   const nodePath = require('node:path') as typeof import('path');
   const gt = globalThis as Record<string, unknown>;
   if (!gt.__agents_cli_jobs_test_state__) {
     gt.__agents_cli_jobs_test_state__ = { TEST_DIR: '', META: {} };
   }
   const state = () => gt.__agents_cli_jobs_test_state__ as JobsHoistedState;
+  // Spread the real module so every export the (post-cycle-break) import graph pulls
+  // in is present, then override only the path/meta accessors this suite redirects to
+  // TEST_DIR. getSystemRoutinesDir points at a nested path that won't exist under
+  // TEST_DIR, so listJobs()/readJob() union it but find nothing (existing tests unchanged).
   return {
-    get getRoutinesDir() { return () => nodePath.join(state().TEST_DIR, 'routines'); },
-    // System-layer routines dir — a nested path that won't exist under TEST_DIR,
-    // so listJobs()/readJob() union it but find nothing (existing tests unchanged).
-    get getSystemRoutinesDir() { return () => nodePath.join(state().TEST_DIR, '.system', 'routines'); },
-    get getRunsDir() { return () => nodePath.join(state().TEST_DIR, 'runs'); },
-    get getUserAgentsDir() { return () => state().TEST_DIR; },
-    get getCliVersionCachePath() { return () => nodePath.join(state().TEST_DIR, '.cli-version-cache.json'); },
-    get ensureAgentsDir() { return () => {}; },
-    get readMeta() { return () => state().META; },
-    get updateMeta() {
-      return (mutate: (meta: Record<string, unknown>) => Record<string, unknown>) => {
-        state().META = mutate(state().META);
-      };
+    ...actual,
+    getRoutinesDir: () => nodePath.join(state().TEST_DIR, 'routines'),
+    getSystemRoutinesDir: () => nodePath.join(state().TEST_DIR, '.system', 'routines'),
+    getRunsDir: () => nodePath.join(state().TEST_DIR, 'runs'),
+    getUserAgentsDir: () => state().TEST_DIR,
+    getCliVersionCachePath: () => nodePath.join(state().TEST_DIR, '.cli-version-cache.json'),
+    ensureAgentsDir: () => {},
+    readMeta: () => state().META,
+    updateMeta: (mutate: (meta: Record<string, unknown>) => Record<string, unknown>) => {
+      state().META = mutate(state().META);
     },
   };
 });

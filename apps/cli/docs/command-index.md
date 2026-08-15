@@ -14,21 +14,24 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_90 command groups · 557 commands._
+_90 command groups · 560 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
 ```
 agents accounts                             Browse native logins and manage provider account bundles
 agents accounts add <name>                  Add a durable API key, setup token, or bearer token
+agents accounts attach <account> <target>   Attach a named account to a native installation or custom harness
 agents accounts clear-default <agent>       Return a harness to native login or balanced account selection
-agents accounts inspect <name>              Show safe account metadata
+agents accounts detach <account> <target>   Remove one account attachment
 agents accounts list                        List credential accounts
+agents accounts name <source> <name>        Name a signed-in native installation without copying its OAuth credentials
 agents accounts remove <name>               Remove an account and its device-local credential
 agents accounts rename <old> <new>          Rename an account without changing its stable id
 agents accounts set-default <agent> <name>  Use a provider account for a harness when --account is omitted
 agents accounts set-key <name>              Rotate an account credential without changing its identity
-agents accounts sync <name>                 Copy one provider account bundle to a worker device
+agents accounts sync <name> [device]        Copy one provider account bundle to a worker device
+agents accounts view <name>                 Show safe account metadata, custody, and attachments
 ```
 
 ## add — Download and install agent CLI versions. Enables subsidized API usage through managed binaries.
@@ -589,7 +592,7 @@ agents projects add <name>     Define a project. Infers root and repo from the c
 agents projects edit <name>    Open the project YAML in $EDITOR (it is hand-editable regardless).
 agents projects for-cwd [cwd]  Resolve a directory to its defined project name (root or a repos[].path/subpath match). Defaults to the current directory.
 agents projects import         Import project definitions from Linear (via the `linear` CLI).
-agents projects link <name>    Attach an external tracker to a project definition (writes linear.projectId into the YAML).
+agents projects link <name>    Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).
 agents projects list           List defined projects (definitions only by default; no session scan).
 agents projects pull <name>    Fast-forward every fleet checkout of a named project to its remote default branch.
 agents projects rm <name>      Delete a project definition. Never touches the repo.

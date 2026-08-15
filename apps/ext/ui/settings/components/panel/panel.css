@@ -1,7 +1,11 @@
+/* Full-height scroll container rendered as a sibling of the Foreman overlay
+   (App.tsx), so its bottom-right corner is always underneath it — same clearance
+   as the Fleet detail column (index.css). */
 .sw-panel-tab {
   height: 100%;
   overflow-y: auto;
   padding: 18px;
+  padding-bottom: var(--foreman-overlay-clear);
   background:
     radial-gradient(circle at top left, rgba(242, 109, 91, 0.08), transparent 22%),
     linear-gradient(180deg, var(--ds-bg) 0%, var(--ds-bg-sunken) 100%);

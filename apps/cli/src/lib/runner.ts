@@ -990,18 +990,30 @@ export async function resolveRoutineLaunch(
   // resolveRoutineLaunch is only called for agent jobs (workflow returns above;
   // command jobs branch out of execute*Job before reaching this).
   const agent = config.agent!;
-  const { findAccount, resolveAccountSelection, resolveCredentialAccount } = await import('./account-registry.js');
+  const { findAccount, findUnifiedAccount, resolveAccountSelection, resolveCredentialAccount } = await import('./account-registry.js');
+  const meta = (deps.readMeta ?? readMeta)();
   const explicitCredential = config.account
     ? (deps.findCredentialAccount?.(config.account) ?? (deps.resolveCredentialAccount !== undefined || findAccount(config.account) !== null))
     : false;
   const selectedCredential = config.account
     ? (explicitCredential ? config.account : undefined)
-    : resolveAccountSelection(undefined, agent, (deps.readMeta ?? readMeta)());
+    : resolveAccountSelection(undefined, agent, meta);
   if (selectedCredential) {
-    (deps.resolveCredentialAccount ?? resolveCredentialAccount)(selectedCredential, agent);
+    // A default/binding may resolve to a native account — never route that
+    // through the provider credential path (it has no bundle to resolve).
+    const unified = findUnifiedAccount(selectedCredential, meta);
+    if (unified?.kind !== 'native') (deps.resolveCredentialAccount ?? resolveCredentialAccount)(selectedCredential, agent);
   }
   if (config.account && !explicitCredential) {
-    const accountVersion = await (deps.resolveAccountVersion ?? resolveAccountVersion)(agent, config.account);
+    // A native routine account is named by its durable name; the version matcher
+    // keys on the identity (email/accountKey), so translate before resolving,
+    // and refuse a login that belongs to a different harness.
+    const unified = findUnifiedAccount(config.account, meta);
+    if (unified?.kind === 'native' && unified.agent !== agent) {
+      throw new Error(`Routine '${config.name}' account '${config.account}' is a ${unified.agent} login and cannot authenticate ${agent}.`);
+    }
+    const identity = unified?.kind === 'native' ? unified.identityKey : config.account;
+    const accountVersion = await (deps.resolveAccountVersion ?? resolveAccountVersion)(agent, identity);
     if (accountVersion) {
       if (config.version && config.version !== accountVersion) {
         throw new Error(
@@ -1131,6 +1143,87 @@ export function pinJobBinary(cmd: string[], agent: AgentId, version: string | un
  * Such commands must NOT be binary-pinned (pinning rewrites cmd[0] to the agent binary,
  * producing a broken `<binary> run …`) and must not receive a version-pinned spawn env.
  */
+/**
+ * Assert a routine's account can be dispatched to the resolved placement, BEFORE
+ * any off-box dispatch (placement is resolved before {@link resolveRoutineLaunch}),
+ * at the top of both the foreground and detached paths:
+ *
+ * - **native** account → rejected for host AND cloud: a native login is a
+ *   device-local harness credential that cannot be forwarded off-box.
+ * - **provider** account + **cloud** → rejected (fail loud): the cloud dispatch
+ *   has no secure way to inject a device-local provider bundle yet.
+ * - **provider** account + **host** → allowed: the host dispatch forwards the
+ *   account NAME (the remote resolves its own local bundle — no secret copied).
+ *
+ * `account` is injectable so the guard is unit-tested for both modes without a
+ * registry or a real dispatch.
+ */
+export async function assertRoutineAccountLocalForPlacement(
+  config: Pick<JobConfig, 'name' | 'account'>,
+  mode: 'host' | 'cloud',
+  deps: { account?: import('./account-registry.js').UnifiedAccount | null; readMeta?: typeof readMeta } = {},
+): Promise<void> {
+  if (!config.account) return;
+  let account = deps.account;
+  if (account === undefined) {
+    const { findUnifiedAccount } = await import('./account-registry.js');
+    account = findUnifiedAccount(config.account, (deps.readMeta ?? readMeta)());
+  }
+  if (!account) {
+    throw new Error(`Routine '${config.name}' account '${config.account}' is unknown.`);
+  }
+  if (account?.kind === 'native') {
+    throw new Error(`Routine '${config.name}' account '${config.account}' is a device-local ${account.agent} login and cannot run on a ${mode} placement. Use a provider account, or place this routine on the device that holds the login.`);
+  }
+  if (mode === 'cloud' && account?.kind === 'provider') {
+    // RUSH-2689: cloud+provider injection not yet implemented.
+    throw new Error(`Routine '${config.name}' account '${config.account}' is a provider credential; cloud placement cannot securely inject it (RUSH-2689). Run this routine locally or on a host that holds the bundle.`);
+  }
+}
+
+export async function dispatchPlacedJob(
+  config: JobConfig,
+  target: import('./routines-placement.js').PlacementTarget,
+  attempt: RoutineAttempt,
+  deps: {
+    account?: import('./account-registry.js').UnifiedAccount | null;
+    host?: typeof executeJobOnHost;
+    cloud?: typeof executeJobOnCloud;
+  } = {},
+): Promise<RunResult | undefined> {
+  if (target.mode !== 'host' && target.mode !== 'cloud') return undefined;
+  await assertRoutineAccountLocalForPlacement(config, target.mode, { account: deps.account });
+  if (target.mode === 'host') {
+    return (deps.host ?? executeJobOnHost)({ ...config, host: target.host }, { detached: false }, attempt);
+  }
+  return (deps.cloud ?? executeJobOnCloud)(config, { detached: false }, attempt);
+}
+
+/**
+ * Build the options passed to `dispatchPromptToHost` for a host routine. Split
+ * out so the execution boundary is unit-testable: it MUST forward the routine's
+ * `account` by name (the remote resolves its own local bundle; no secret copied)
+ * — dropping it silently ran the remote under the wrong identity.
+ */
+export function buildHostDispatchOptions(
+  config: JobConfig,
+  ctx: { remoteCwd: string | undefined; runDir: string; detached: boolean },
+): import('./hosts/run-target.js').HostPromptRun {
+  return {
+    agent: config.agent!,
+    prompt: resolveJobPrompt(config),
+    mode: normalizeMode(config.mode),
+    effort: config.effort,
+    model: config.config?.model as string | undefined,
+    account: config.account,
+    timeout: config.timeout, // enforced by the REMOTE agents run
+    remoteCwd: ctx.remoteCwd,
+    name: config.name,
+    cwd: ctx.runDir,
+    follow: !ctx.detached,
+  };
+}
+
 export function dispatchesViaAgentsRun(config: Pick<JobConfig, 'workflow' | 'resume'>): boolean {
   return Boolean(config.workflow || config.resume);
 }
@@ -1337,12 +1430,8 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   {
     const { resolvePlacementTarget } = await import('./routines-placement.js');
     const target = resolvePlacementTarget(config);
-    if (target.mode === 'host') {
-      return executeJobOnHost({ ...config, host: target.host }, { detached: false }, attempt);
-    }
-    if (target.mode === 'cloud') {
-      return executeJobOnCloud(config, { detached: false }, attempt);
-    }
+    const placed = await dispatchPlacedJob(config, target, attempt);
+    if (placed) return placed;
   }
 
   // Command-mode: run a plain shell command directly (no agent, no rotation,
@@ -1389,11 +1478,15 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   // (command jobs branched out earlier, so config.agent is set on the non-workflow path.)
   const effectiveAgent: AgentId = config.workflow ? 'claude' : config.agent!;
   if (!dispatchesViaAgentsRun(config)) {
-    const { findAccount, resolveAccountSelection, resolveCredentialAccount } = await import('./account-registry.js');
-    const selectedAccount = config.account && !findAccount(config.account)
-      ? undefined
-      : resolveAccountSelection(config.account, effectiveAgent, readMeta());
-    if (selectedAccount) Object.assign(baseEnv, resolveCredentialAccount(selectedAccount, effectiveAgent).env);
+    const { findUnifiedAccount, resolveAccountSelection, resolveCredentialAccount } = await import('./account-registry.js');
+    const meta = readMeta();
+    const selectedAccount = resolveAccountSelection(config.account, effectiveAgent, meta);
+    if (selectedAccount) {
+      // Only a provider account injects env; a native account (explicit or via a
+      // device-scoped binding) is read from the harness home and forwards nothing.
+      const unified = findUnifiedAccount(selectedAccount, meta);
+      if (unified?.kind === 'provider') Object.assign(baseEnv, resolveCredentialAccount(selectedAccount, effectiveAgent).env);
+    }
   }
 
   const meta: RunMeta = {
@@ -1762,18 +1855,7 @@ async function executeJobOnHost(config: JobConfig, opts: { detached: boolean }, 
   };
   writeRunMeta(meta);
 
-  const { task, exitCode } = await dispatchPromptToHost(host, {
-    agent: config.agent!,
-    prompt: resolveJobPrompt(config),
-    mode: normalizeMode(config.mode),
-    effort: config.effort,
-    model: config.config?.model as string | undefined,
-    timeout: config.timeout, // enforced by the REMOTE agents run
-    remoteCwd,
-    name: config.name,
-    cwd: runDir,
-    follow: !opts.detached,
-  });
+  const { task, exitCode } = await dispatchPromptToHost(host, buildHostDispatchOptions(config, { remoteCwd, runDir, detached: opts.detached }));
   meta.hostTaskId = task.id;
 
   // Sync path: a real exit code finalizes now. -1 (follow window closed) and
@@ -1926,6 +2008,9 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
   {
     const { resolvePlacementTarget } = await import('./routines-placement.js');
     const target = resolvePlacementTarget(config);
+    if (target.mode === 'host' || target.mode === 'cloud') {
+      await assertRoutineAccountLocalForPlacement(config, target.mode);
+    }
     if (target.mode === 'host') {
       const { meta } = await executeJobOnHost({ ...config, host: target.host }, { detached: true }, attempt);
       if (meta.status !== 'running') emitRoutineEnd(meta);

@@ -14,7 +14,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import simpleGit from 'simple-git';
-import { toPosix } from './platform/index.js';
 import {
   buildPullEnvelope,
   decodePullTargets,
@@ -252,13 +251,13 @@ describe('pullProjectTargets', () => {
     await simpleGit().raw(['init', '--bare', '-b', 'main', remote]);
     await simpleGit().clone(remote, author);
     await configIdentity(author);
-    // Commit `* -text` so every clone checks out byte-identical LF content
-    // regardless of the machine's core.autocrlf. On Windows CI (autocrlf=true)
-    // the *checkout* during `git clone` runs before configIdentity() can set
-    // autocrlf=false on the fresh clone, so the local working tree would come
-    // out as CRLF and `status.isClean()` would see a phantom modification —
-    // making the strict pull refuse with "dirty working tree". A committed
-    // .gitattributes wins over autocrlf at checkout time and prevents that.
+    // Commit `* -text` before anything clones this repo. On Windows CI the
+    // *checkout* during `git clone` runs with the machine-default autocrlf
+    // (true) before configIdentity() can set autocrlf=false on the fresh clone,
+    // so the local working tree comes out as CRLF while the index holds LF and
+    // status.isClean() sees a phantom modification — making pullProjectTargets'
+    // strict pullRepo refuse a clean tree as dirty. A committed .gitattributes
+    // wins over autocrlf at checkout time and prevents that.
     fs.writeFileSync(path.join(author, '.gitattributes'), '* -text\n');
     await commitFile(author, 'README.md', 'v1\n', 'init');
     await simpleGit(author).push('origin', 'main');
@@ -353,19 +352,14 @@ describe('pullProjectTargets', () => {
     // A real, fetchable local remote whose PATH is itself slug-shaped, so the
     // same origin both serves the fetch and parses as `org/a`. (Rewriting the
     // URL with `insteadOf` cannot work here: `git remote` reports the rewritten
-    // URL, which is what the slug check reads.) Forward slashes throughout: a real
-    // github remote URL always uses them, and on Windows `path.join` would emit
-    // `github.com\org\a`, which `git remote get-url` preserves and the slug regex
-    // (`github.com[/:]owner/repo`) then cannot parse — a phantom slug mismatch.
-    const slugRemote = toPosix(path.join(root, 'github.com', 'org', 'a.git'));
+    // URL, which is what the slug check reads.)
+    const slugRemote = path.join(root, 'github.com', 'org', 'a.git');
     const slugAuthor = path.join(root, 'slug-author');
     const slugLocal = path.join(root, 'slug-local');
     fs.mkdirSync(path.dirname(slugRemote), { recursive: true });
     await simpleGit().raw(['init', '--bare', '-b', 'main', slugRemote]);
     await simpleGit().clone(slugRemote, slugAuthor);
     await configIdentity(slugAuthor);
-    // `* -text` — keep the checkout LF on Windows; see beforeEach's note.
-    fs.writeFileSync(path.join(slugAuthor, '.gitattributes'), '* -text\n');
     await commitFile(slugAuthor, 'README.md', 'v1\n', 'init');
     await simpleGit(slugAuthor).push('origin', 'main');
     await simpleGit().clone(slugRemote, slugLocal);

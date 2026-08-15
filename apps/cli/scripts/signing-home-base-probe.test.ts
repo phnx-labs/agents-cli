@@ -25,17 +25,6 @@ import * as path from 'path';
 const PROBE = path.resolve(__dirname, 'signing-home-base-probe.sh');
 const RELEASE = path.resolve(__dirname, 'release.sh');
 
-/**
- * Read a script normalized to LF. A Windows checkout under core.autocrlf hands
- * these shell scripts back CRLF, and every assertion here is line-anchored —
- * `$`-anchored regexes and bare `l === '}'` scans all miss on a trailing `\r`
- * (the exact windows-lane failure this fixes). The scripts execute under bash,
- * which requires LF anyway, so LF is the canonical form to assert against.
- */
-function readScript(p: string): string {
-  return fs.readFileSync(p, 'utf-8').replace(/\r\n/g, '\n');
-}
-
 /** Run the real probe against a synthetic checkout root. */
 function probe(repoRoot: string) {
   const r = spawnSync('bash', [PROBE], {
@@ -161,7 +150,8 @@ describe('signing home-base probe: it cannot advance a release', () => {
     // a mutation would defeat that, so assert the executable body carries none.
     // Strip comment lines and string-literal contents first, so a "npm publish"
     // in the docblock or an error string is not mistaken for a command.
-    const code = readScript(PROBE)
+    const code = fs
+      .readFileSync(PROBE, 'utf-8')
       .split('\n')
       .filter((l) => !l.trim().startsWith('#'))
       .map((l) => l.replace(/"[^"]*"/g, '""').replace(/'[^']*'/g, "''"))
@@ -178,7 +168,7 @@ describe('signing home-base probe: it cannot advance a release', () => {
 
 describe('release.sh: the preflight gates the mutating phases', () => {
   it('calls assert_signing_home_base before the crabbox, PR, merge, and tag push', () => {
-    const lines = readScript(RELEASE).split('\n');
+    const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
     const lineOf = (needle: RegExp) => {
       const i = lines.findIndex((l) => needle.test(l));
       expect(i, `expected to find ${needle} in release.sh`).toBeGreaterThanOrEqual(0);
@@ -210,7 +200,7 @@ describe('release.sh: the preflight gates the mutating phases', () => {
 function runAssert(probeExit: 'fail' | 'pass'): { status: number | null; out: string } {
   // Extract the function definition (from its header to the first line that is a
   // bare `}` at column 0) rather than sourcing release.sh, which executes.
-  const lines = readScript(RELEASE).split('\n');
+  const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
   const start = lines.findIndex((l) => l.startsWith('assert_signing_home_base() {'));
   expect(start, 'assert_signing_home_base() { not found').toBeGreaterThanOrEqual(0);
   const end = lines.findIndex((l, i) => i > start && l === '}');

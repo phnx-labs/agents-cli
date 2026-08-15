@@ -854,6 +854,17 @@ export interface Meta {
   /** Preferred provider account per harness. Explicit --account wins. */
   accounts?: {
     defaults?: Partial<Record<AgentId, string>>;
+    /** Named harness-owned identities. Metadata only; OAuth credentials stay in the harness home. */
+    native?: Record<string, {
+      id: string;
+      name: string;
+      agent: AgentId;
+      identityKey: string;
+      identityLabel?: string;
+      scope: 'version' | 'device';
+    }>;
+    /** Exact installation/custom-harness target -> stable account id. */
+    bindings?: Record<string, string>;
   };
   agents?: Partial<Record<AgentId, string>>;
   /**

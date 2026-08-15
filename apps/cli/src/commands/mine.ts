@@ -26,7 +26,7 @@ import {
 } from '../lib/brand.js';
 import { createBrandShim, removeBrandShim, isShimsInPath } from '../lib/shims.js';
 import { updateMeta } from '../lib/state.js';
-import { COMMAND_LOADERS } from '../lib/startup/command-registry.js';
+import { KNOWN_TOP_LEVEL_COMMANDS } from '../lib/startup/command-registry.js';
 import type { BrandConfig, ResourceProfilePreset } from '../lib/types.js';
 
 /** Profiled resource kinds a brand can curate via `toggle --disable-<kind>`. */
@@ -34,7 +34,7 @@ type ToggleKind = 'plugins' | 'skills' | 'commands' | 'mcp' | 'hooks' | 'subagen
 
 /** Built-in top-level command names, for validating `--disable <cmd>`. */
 function knownCommandNames(): Set<string> {
-  const names = new Set<string>(Object.keys(COMMAND_LOADERS));
+  const names = new Set<string>(KNOWN_TOP_LEVEL_COMMANDS);
   // Inline aliases registered outside COMMAND_LOADERS (see src/index.ts).
   for (const n of ['perms', 'exec', 'jobs', 'cron', 'upgrade']) names.add(n);
   return names;

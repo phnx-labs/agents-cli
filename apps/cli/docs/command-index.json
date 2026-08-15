@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 90,
-  "commands": 557,
+  "commands": 560,
   "root": {
     "name": "agents",
     "path": "",
@@ -79,8 +79,8 @@
           "negate": false
         }
       ],
-      "examples": "agents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts inspect work --json\nagents accounts set-default claude work\nagents accounts sync work --device yosemite-s0\nagents run claude --account work",
-      "notes": "Provider accounts are durable credentials independent of agent versions. Harness-native auth remains managed by each harness and is not copied or renamed by agents-cli.",
+      "examples": "agents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts name claude@2.1.220 work\nagents accounts attach work claude@2.1.225\nagents accounts view work --json\nagents accounts set-default claude work\nagents accounts sync openrouter-work yosemite-s0\nagents run claude --account work",
+      "notes": "Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never.",
       "subcommands": [
         {
           "name": "add",
@@ -146,6 +146,39 @@
           "subcommands": []
         },
         {
+          "name": "attach",
+          "path": "accounts attach",
+          "aliases": [],
+          "description": "Attach a named account to a native installation or custom harness",
+          "args": [
+            {
+              "name": "account",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "target",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
           "name": "clear-default",
           "path": "accounts clear-default",
           "aliases": [],
@@ -173,28 +206,25 @@
           "subcommands": []
         },
         {
-          "name": "inspect",
-          "path": "accounts inspect",
+          "name": "detach",
+          "path": "accounts detach",
           "aliases": [],
-          "description": "Show safe account metadata",
+          "description": "Remove one account attachment",
           "args": [
             {
-              "name": "name",
+              "name": "account",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "target",
               "required": true,
               "variadic": false,
               "description": ""
             }
           ],
           "options": [
-            {
-              "flags": "--json",
-              "description": "Machine-readable output",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -224,6 +254,39 @@
               "variadic": false,
               "negate": false
             },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "name",
+          "path": "accounts name",
+          "aliases": [],
+          "description": "Name a signed-in native installation without copying its OAuth credentials",
+          "args": [
+            {
+              "name": "source",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -377,12 +440,18 @@
               "required": true,
               "variadic": false,
               "description": ""
+            },
+            {
+              "name": "device",
+              "required": false,
+              "variadic": false,
+              "description": ""
             }
           ],
           "options": [
             {
               "flags": "--device <device>",
-              "description": "Destination device or SSH host",
+              "description": "Deprecated destination form; use the positional device",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -393,6 +462,44 @@
               "flags": "--force",
               "description": "Replace matching keys on the destination",
               "long": "--force",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "view",
+          "path": "accounts view",
+          "aliases": [
+            "inspect"
+          ],
+          "description": "Show safe account metadata, custody, and attachments",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Machine-readable output",
+              "long": "--json",
               "required": false,
               "optional": false,
               "variadic": false,
@@ -15085,7 +15192,7 @@
           "name": "link",
           "path": "projects link",
           "aliases": [],
-          "description": "Attach an external tracker to a project definition (writes linear.projectId into the YAML).",
+          "description": "Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).",
           "args": [
             {
               "name": "name",

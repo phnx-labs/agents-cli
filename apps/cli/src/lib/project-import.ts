@@ -110,7 +110,10 @@ export function buildLinearImportCandidates(
       continue;
     }
     seen.add(name);
-    const def: ProjectDef = { ...prior, name, linear: { projectId: p.id } };
+    // The Linear display name is recorded verbatim (`p.name`), not the
+    // slugified def name: `agi` is the local id, "AGI" is what the board calls
+    // it, and agents read the latter when they name the project.
+    const def: ProjectDef = { ...prior, name, linear: { projectId: p.id, name: p.name } };
     if (p.url) def.linear!.url = p.url;
     const dir = matchLocalCheckoutExact(p.name, deps.localDirs);
     if (dir) {

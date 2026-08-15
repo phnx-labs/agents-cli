@@ -177,6 +177,15 @@ export function readMultiInstallScanCache(file: string): MultiInstallScanCache |
     ) {
       return null;
     }
+    // A cache written before the entries carried running/autoPurgeable
+    // (RUSH-2705) cannot drive the banner's remedy choice — treat it as
+    // corrupt so the caller re-scans rather than mis-advertising --fix.
+    const entries = raw.inventory as Array<Partial<MultiInstallInventoryEntry>>;
+    if (entries.some(
+      (entry) => typeof entry?.running !== 'boolean' || typeof entry?.autoPurgeable !== 'boolean',
+    )) {
+      return null;
+    }
     return raw as MultiInstallScanCache;
   } catch {
     return null;
@@ -515,6 +524,68 @@ export interface MultiInstallInventoryEntry {
   packageRoot: string;
   version: string;
   note: string;
+  /** True for the copy that is currently executing. */
+  running: boolean;
+  /**
+   * True when a bare `agents doctor --fix` deletes this copy (RUSH-2415:
+   * npx-cache / unsafe-legacy / pre-1.22.30 with a fixed peer). False for the
+   * running copy and for healthy duplicates --fix will not touch — those need
+   * the manual command from manualUninstallCommand() (RUSH-2705).
+   */
+  autoPurgeable: boolean;
+}
+
+/** Best-effort canonical path; keeps the input when realpath fails. */
+function canonicalPath(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/**
+ * Ensure the running copy participates in classification (the "has a fixed
+ * peer" check) even when the PATH scan missed it — a source tree or unusual
+ * layout. The running root is never deleted regardless.
+ */
+function withRunningInstall(
+  installs: AgentsCliInstall[],
+  runningRoot: string,
+  runningVersion: string,
+): AgentsCliInstall[] {
+  const runningCanonical = canonicalPath(runningRoot);
+  const already = installs.some(
+    (install) => canonicalPath(install.packageRoot) === runningCanonical,
+  );
+  if (already) return installs;
+  return [...installs, {
+    packageRoot: runningRoot,
+    version: runningVersion,
+    // Unknown for a synthetic entry — classify only uses version for the
+    // fixed-peer check; the running root is never deleted regardless.
+    atomicHelperInstall: true,
+  }];
+}
+
+/**
+ * The exact shell command that removes the install at `packageRoot` by hand —
+ * the remedy for duplicates `doctor --fix` deliberately will not purge
+ * (RUSH-2705). `--prefix` pins the target tree no matter which npm binary
+ * PATH resolves, mirroring installPackageIntoPrefix.
+ */
+export function manualUninstallCommand(packageRoot: string): string {
+  const resolved = path.resolve(packageRoot);
+  if (detectPackageManager(resolved) === 'bun') {
+    return `bun remove -g ${NPM_PACKAGE_NAME}`;
+  }
+  try {
+    return `npm uninstall -g --prefix '${deriveGlobalPrefix(resolved)}' ${NPM_PACKAGE_NAME}`;
+  } catch {
+    // Not inside a node_modules tree — no npm prefix owns it; deleting the
+    // directory is the only removal there is.
+    return `rm -rf '${resolved}'`;
+  }
 }
 
 export function buildMultiInstallInventory(
@@ -522,10 +593,24 @@ export function buildMultiInstallInventory(
   runningVersion: string,
   installs: AgentsCliInstall[],
 ): MultiInstallInventoryEntry[] {
+  const runningCanonical = canonicalPath(runningRoot);
+  const removableRoots = new Set(
+    classifyRemovableAgentsCliInstalls(
+      runningRoot,
+      withRunningInstall(installs, runningRoot, runningVersion),
+    ).map((candidate) => candidate.packageRoot),
+  );
   const byRoot = new Map<string, MultiInstallInventoryEntry>();
-  byRoot.set(runningRoot, { packageRoot: runningRoot, version: runningVersion, note: 'running' });
+  byRoot.set(runningRoot, {
+    packageRoot: runningRoot,
+    version: runningVersion,
+    note: 'running',
+    running: true,
+    autoPurgeable: false,
+  });
   for (const install of installs) {
-    const notes = [install.packageRoot === runningRoot
+    const running = canonicalPath(install.packageRoot) === runningCanonical;
+    const notes = [running
       ? 'running'
       : install.binPath
         ? `agents on PATH: ${install.binPath}`
@@ -535,6 +620,8 @@ export function buildMultiInstallInventory(
       packageRoot: install.packageRoot,
       version: install.version,
       note: notes.join('; '),
+      running,
+      autoPurgeable: !running && removableRoots.has(canonicalPath(install.packageRoot)),
     });
   }
   return [...byRoot.values()];
@@ -715,6 +802,25 @@ export function purgeRemovableAgentsCliInstalls(
   return result;
 }
 
+/** A detected duplicate that `doctor --fix` will not purge (RUSH-2705). */
+export interface UnresolvedDuplicateInstall {
+  packageRoot: string;
+  version: string;
+  /** Exact shell command that removes this copy by hand. */
+  manualRemoveCommand: string;
+}
+
+export interface RemediateStaleInstallsResult extends PurgeRemovableInstallsResult {
+  inventory: MultiInstallInventoryEntry[];
+  candidates: RemovableAgentsCliInstall[];
+  /**
+   * Duplicates detected but deliberately left alone (healthy >=1.22.30
+   * globals). The caller must surface manualRemoveCommand — otherwise the
+   * multi-install warning keeps firing with no working remedy (RUSH-2705).
+   */
+  unresolved: UnresolvedDuplicateInstall[];
+}
+
 /**
  * Scan + classify + purge in one call. Used by `agents doctor --fix` and
  * `agents upgrade` so both paths remediate the same set of latent copies.
@@ -725,46 +831,32 @@ export function remediateStaleAgentsCliInstalls(opts: {
   pathEnv?: string;
   findOpts?: FindAgentsCliInstallsOptions;
   dryRun?: boolean;
-}): PurgeRemovableInstallsResult & {
-  inventory: MultiInstallInventoryEntry[];
-  candidates: RemovableAgentsCliInstall[];
-} {
+}): RemediateStaleInstallsResult {
   const pathEnv = opts.pathEnv ?? (process.env.PATH || '');
-  const installs = findAgentsCliInstalls(pathEnv, opts.findOpts);
+  let installs = findAgentsCliInstalls(pathEnv, opts.findOpts);
   // Ensure the running root participates in "has a fixed peer" even when the
   // PATH scan missed it (source tree, unusual layout).
   if (opts.runningVersion) {
-    const already = installs.some((i) => {
-      try {
-        return fs.realpathSync(i.packageRoot) === fs.realpathSync(opts.runningRoot);
-      } catch {
-        return i.packageRoot === opts.runningRoot;
-      }
-    });
-    if (!already) {
-      installs.push({
-        packageRoot: opts.runningRoot,
-        version: opts.runningVersion,
-        // Unknown for a synthetic entry — classify only uses version for the
-        // fixed-peer check; the running root is never deleted regardless.
-        atomicHelperInstall: true,
-      });
-    }
+    installs = withRunningInstall(installs, opts.runningRoot, opts.runningVersion);
   }
   const candidates = classifyRemovableAgentsCliInstalls(opts.runningRoot, installs);
   const purge = purgeRemovableAgentsCliInstalls(candidates, {
     dryRun: opts.dryRun,
     runningRoot: opts.runningRoot,
   });
-  return {
-    ...purge,
-    candidates,
-    inventory: buildMultiInstallInventory(
-      opts.runningRoot,
-      opts.runningVersion ?? 'unknown',
-      installs,
-    ),
-  };
+  const inventory = buildMultiInstallInventory(
+    opts.runningRoot,
+    opts.runningVersion ?? 'unknown',
+    installs,
+  );
+  const unresolved = inventory
+    .filter((entry) => !entry.running && !entry.autoPurgeable)
+    .map((entry) => ({
+      packageRoot: entry.packageRoot,
+      version: entry.version,
+      manualRemoveCommand: manualUninstallCommand(entry.packageRoot),
+    }));
+  return { ...purge, candidates, inventory, unresolved };
 }
 
 function childDirectories(parent: string): string[] {

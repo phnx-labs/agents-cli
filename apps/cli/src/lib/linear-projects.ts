@@ -156,3 +156,36 @@ export function listLinearProjects(): LinearProjectLite[] {
     return [];
   });
 }
+
+/**
+ * The `linear` block a def should carry after binding it to `project`.
+ *
+ * Pure so the write rule is testable without a `linear` CLI or a filesystem —
+ * `agents projects link` is the only caller and does nothing else to the field.
+ *
+ * Two rules, both learned from real drift:
+ *
+ * - `name` is REFRESHED, never merely preserved. It used to be written by
+ *   spreading `prior`, so a project renamed on the board kept its old label in
+ *   the YAML forever — and that label is what the status card, the AGI EXT
+ *   Fleet panel (`linearProjectName`), and agents naming the work all read.
+ * - `url` is dropped when the projectId CHANGES and the incoming row has none.
+ *   Carrying it over would leave a def pointing at the previous project's page
+ *   beside the new project's name, and the status card prefers `url` over the
+ *   id — so the one field a reader clicks would go to the wrong project.
+ *   Re-linking the SAME id keeps a previously stored url, since the CLI's list
+ *   row omitting `url` says nothing about whether the project has one.
+ */
+export function nextLinearLink(
+  prior: { projectId?: string; url?: string; name?: string } | undefined,
+  project: LinearProjectLite,
+): { projectId: string; url?: string; name: string } {
+  const next: { projectId: string; url?: string; name: string } = { projectId: project.id, name: project.name };
+  // A stored url is kept ONLY when the prior block names the same project. Not
+  // `prior.projectId && prior.projectId !== id`: `projects add --linear <url>`
+  // writes `{ url }` with no projectId at all, and treating that as "same
+  // project" carried a url belonging to whatever the user had pasted.
+  const url = project.url ?? (prior?.projectId === project.id ? prior?.url : undefined);
+  if (url) next.url = url;
+  return next;
+}
