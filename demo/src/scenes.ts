@@ -1,4 +1,4 @@
-// Each scene is scripted from REAL agents-cli output (verified from source code).
+// Each scene is scripted from REAL agi-cli output (verified from source code).
 // Colors match actual chalk output: green = success, gray = hints, yellow = warnings.
 
 export interface TermLine {

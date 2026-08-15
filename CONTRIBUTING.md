@@ -1,4 +1,4 @@
-# Contributing to agents-cli
+# Contributing to agi-cli
 
 Thanks for your interest in contributing. This guide covers the setup, conventions, and PR process.
 

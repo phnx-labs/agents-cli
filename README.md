@@ -56,7 +56,7 @@ Full path -- installing harnesses, logging in, smoke-testing `agents teams`, and
 
 **Learn (concepts):** [Loop + graph engineering](https://agents-cli.sh/learn/loop-and-graph-engineering) · [Teams as graph engineering](https://agents-cli.sh/learn/teams-graph-engineering) · [Sessions · index + cross-device](https://agents-cli.sh/learn/sessions-index) · [Distributed fleet execution](https://agents-cli.sh/learn/distributed-fleet). Also: [harness engineering](https://agents-cli.sh/learn/harness-engineering) · [visual longform](https://share.agents-cli.sh/muqsitnawaz/agents-loop-and-graph-engineering).
 
-Already installed? `agents upgrade` updates agents-cli itself to the latest version (`agents upgrade 1.2.3` for a specific version or dist-tag, `-y` to skip the confirm prompt). The command is `upgrade` on every platform -- do not reach for `agents update`, which updates an installed **agent harness**, not agents-cli (and on macOS, `agents helper update` is a third thing: it reinstalls the keychain helper).
+Already installed? `agents upgrade` updates agi-cli itself to the latest version (`agents upgrade 1.2.3` for a specific version or dist-tag, `-y` to skip the confirm prompt). The command is `upgrade` on every platform -- do not reach for `agents update`, which updates an installed **agent harness**, not agi-cli (and on macOS, `agents helper update` is a third thing: it reinstalls the keychain helper).
 
 Source: [github.com/phnx-labs/agents-cli](https://github.com/phnx-labs/agents-cli)
 
@@ -215,7 +215,7 @@ Supports plan (read-only), edit, auto, and skip modes, effort levels, JSON outpu
 ### What does `--mode skip` actually do?
 
 Treat `skip` as a last-resort escape hatch. In direct-exec runs (without `--acp`),
-agents-cli forwards the harness's native no-prompt flag; it does not add another
+agi-cli forwards the harness's native no-prompt flag; it does not add another
 safety layer. Prefer `auto` where it adds a safer automatic policy (smart classifier
 on Claude/Copilot, native high-auto mode on Droid, or interactive Kimi), or `edit`
 everywhere else. For headless Kimi, `edit`, `auto`, and `skip` all use the same
@@ -235,7 +235,7 @@ bypass. Harnesses without a native bypass flag reject direct-exec `skip`.
 | Kimi | `--yolo` interactively; no extra flag in headless `-p` runs, which already auto-approve |
 | Droid | `--skip-permissions-unsafe` |
 
-With `--acp`, these native flags are not used. agents-cli instead grants `skip`
+With `--acp`, these native flags are not used. agi-cli instead grants `skip`
 permission requests at the ACP protocol layer: it selects `allow_always` when offered,
 otherwise the first permission option offered by the server. The same last-resort
 warning applies.
@@ -256,7 +256,7 @@ but new scripts should use the explicit `skip` name.
 agents run claude "review this diff" --acp --json
 ```
 
-`--acp` routes through the [Agent Client Protocol](https://github.com/zed-industries/agent-client-protocol) so you get a unified event stream -- `agent_message_chunk`, `tool_call`, `plan_update`, `stop_reason` -- instead of writing a parser per CLI. File writes and shell commands flow through agents-cli, which means `--mode plan` becomes a real sandbox: the write RPC is denied, not just unused.
+`--acp` routes through the [Agent Client Protocol](https://github.com/zed-industries/agent-client-protocol) so you get a unified event stream -- `agent_message_chunk`, `tool_call`, `plan_update`, `stop_reason` -- instead of writing a parser per CLI. File writes and shell commands flow through agi-cli, which means `--mode plan` becomes a real sandbox: the write RPC is denied, not just unused.
 
 ACP adapters are documented for claude, codex, cursor, opencode, openclaw, and grok. Other harnesses keep running on the direct-exec path.
 
@@ -469,7 +469,7 @@ agents apply --only agents,config   # limit dimensions (agents, config, login)
 agents apply --no-login             # skip login propagation
 ```
 
-`agents apply` (`ag apply`) probes every target over the existing SSH transport, then reconciles it to the profile: installs missing agents, upgrades `agents-cli`, syncs the named config scopes, and **propagates logins** so a host signed in once seeds the fleet -- turning "6 hosts x 8 harnesses = 48 OAuth flows" into one. Portable credential files (claude, codex, grok, kimi, opencode, droid, antigravity) stream to each target over encrypted SSH stdin, never shell-interpolated, and land at `0600`. **Honest boundary:** macOS keychain-bound tokens (claude, antigravity on a Mac target) can't be extracted -- those surface as a one-time manual login, never faked. `--plan` / `--dry-run` shows the full matrix without touching anything.
+`agents apply` (`ag apply`) probes every target over the existing SSH transport, then reconciles it to the profile: installs missing agents, upgrades `agi-cli`, syncs the named config scopes, and **propagates logins** so a host signed in once seeds the fleet -- turning "6 hosts x 8 harnesses = 48 OAuth flows" into one. Portable credential files (claude, codex, grok, kimi, opencode, droid, antigravity) stream to each target over encrypted SSH stdin, never shell-interpolated, and land at `0600`. **Honest boundary:** macOS keychain-bound tokens (claude, antigravity on a Mac target) can't be extracted -- those surface as a one-time manual login, never faked. `--plan` / `--dry-run` shows the full matrix without touching anything.
 
 See [docs/fleet.md](apps/cli/docs/fleet.md) for the manifest schema and reconcile semantics.
 
@@ -561,7 +561,7 @@ Dispatch any read-only or config command -- and `agents run` itself -- to anothe
 ```bash
 # Enroll a machine (from ~/.ssh/config, or inline with user@address)
 agents hosts add gpu-box
-agents hosts check gpu-box              # reachable? which agents-cli version?
+agents hosts check gpu-box              # reachable? which agi-cli version?
 
 # Run there instead of locally
 agents run claude --host gpu-box "profile this build"   # headless: follows live by default
@@ -814,11 +814,11 @@ A plugin is a directory with a manifest:
   permissions/                     # optional — executable surface
 ```
 
-On sync, agents-cli copies the plugin into each version home's marketplace (`<home>/.claude/plugins/marketplaces/agents-cli/plugins/<name>/`), registers the synthetic marketplace, and flips `settings.json#enabledPlugins[<name>@agents-cli] = true` so Claude / OpenClaw load it.
+On sync, agi-cli copies the plugin into each version home's marketplace (`<home>/.claude/plugins/marketplaces/agents-cli/plugins/<name>/`), registers the synthetic marketplace, and flips `settings.json#enabledPlugins[<name>@agents-cli] = true` so Claude / OpenClaw load it.
 
 ### Executable-surface gate
 
-Plugins that ship `hooks/`, `.mcp.json`, `bin/`, `scripts/`, `settings.json` (non-permissions), or `permissions/` can execute code on session events. agents-cli requires explicit consent before flipping `enabledPlugins`:
+Plugins that ship `hooks/`, `.mcp.json`, `bin/`, `scripts/`, `settings.json` (non-permissions), or `permissions/` can execute code on session events. agi-cli requires explicit consent before flipping `enabledPlugins`:
 
 ```bash
 # Hooks-bearing plugins copy in but stay disabled by default
@@ -839,7 +839,7 @@ Plugins live in the user repo (`~/.agents/plugins/`), not inside any single vers
 
 ## Make it yours
 
-White-label the CLI. `agents setup mine` mints a **personally-named binary** — `jack` instead of `agents` — that _is_ agents-cli: same tool, your name, running the exact feature set you choose. Anyone can mint their own; Jack and Pranjal each get an independent brand.
+White-label the CLI. `agents setup mine` mints a **personally-named binary** — `jack` instead of `agents` — that _is_ agi-cli: same tool, your name, running the exact feature set you choose. Anyone can mint their own; Jack and Pranjal each get an independent brand.
 
 ```bash
 agents setup mine                      # wizard: pick a name, check off what to disable
@@ -982,7 +982,7 @@ agents profiles add deepinfra --account deepinfra
 
 One provider account **is** one `agents secrets` bundle -- `agents accounts add` creates it with secrets policy `never`, so a background agent launch on that account never raises Touch ID. `agents accounts` (no subcommand) lists provider bundles next to harness-native signed-in identities so you see both kinds of credential together; `accounts list` / `inspect <name>` / `set-key <name>` (rotate) / `rename` / `remove` manage a bundle by its stable id, independent of its current label.
 
-Harness-native OAuth logins (Claude Code's own `/login`, `codex login`, and so on) stay exactly where the harness put them -- agents-cli discovers and displays them but never copies, renames, or converts them into a provider bundle. `accounts sync <name> --device <device>` is the only way a provider account crosses machines, and it's explicit: nothing syncs automatically. Selection order for a run is explicit `--account`, then `accounts set-default` for that harness, then the harness's native/balanced account behavior.
+Harness-native OAuth logins (Claude Code's own `/login`, `codex login`, and so on) stay exactly where the harness put them -- agi-cli discovers and displays them but never copies, renames, or converts them into a provider bundle. `accounts sync <name> --device <device>` is the only way a provider account crosses machines, and it's explicit: nothing syncs automatically. Selection order for a run is explicit `--account`, then `accounts set-default` for that harness, then the harness's native/balanced account behavior.
 
 ---
 
@@ -1002,7 +1002,7 @@ agents run claude "charge a test card" --secrets prod-stripe
 ```
 
 <p align="center">
-  <img src="assets/secrets.svg" alt="How agents-cli secrets work: bundle definitions live in the macOS Keychain alongside their values, agents-cli resolves at runtime and injects the env into the child process" width="100%" />
+  <img src="assets/secrets.svg" alt="How agi-cli secrets work: bundle definitions live in the macOS Keychain alongside their values, agi-cli resolves at runtime and injects the env into the child process" width="100%" />
 </p>
 
 Merge order: profile env < `--secrets` < `--env K=V`. A missing keychain item aborts before the child starts.
@@ -1227,7 +1227,7 @@ Two repos with the same shape, different roles:
 
 | Repo | Role | Owner |
 |---|---|---|
-| `~/.agents-system/` | **System repo** — core/built-in skills, commands, hooks, rules, MCP configs, permissions, and profiles that ship with `agents-cli`. The defaults every install gets. | Maintained upstream at [phnx-labs/.agents-system](https://github.com/phnx-labs/.agents-system) |
+| `~/.agents-system/` | **System repo** — core/built-in skills, commands, hooks, rules, MCP configs, permissions, and profiles that ship with `agi-cli`. The defaults every install gets. | Maintained upstream at [phnx-labs/.agents-system](https://github.com/phnx-labs/.agents-system) |
 | `~/.agents/` | **User repo** — your personal additions and overrides. This is what `agents repo push`/`pull` syncs. | You |
 
 **Version pinning:** `agents.yaml` at project root pins which agent version to use (like `.nvmrc` for Node).
@@ -1242,7 +1242,7 @@ Other useful commands: `agents doctor` checks CLI availability and resource sync
 
 ## Menu bar
 
-On macOS, `agents-cli` puts a status item in your menu bar -- a live glance at what your agents are doing, plus a Spotlight-style bar for filing work without breaking focus.
+On macOS, `agi-cli` puts a status item in your menu bar -- a live glance at what your agents are doing, plus a Spotlight-style bar for filing work without breaking focus.
 
 ```bash
 agents menubar setup       # configure end-to-end: one instance, started at login
@@ -1292,7 +1292,7 @@ Extras clone into `~/.agents-system/.repos/<alias>/` and ship the same layout as
 
 ## Security & Privacy
 
-**The CLI binary has no built-in telemetry or phone-home path.** Routine commands run locally; explicit features such as cloud dispatch and iCloud Keychain sync send only the data needed for the action you invoke. Here's exactly what `agents-cli` stores locally and why.
+**The CLI binary has no built-in telemetry or phone-home path.** Routine commands run locally; explicit features such as cloud dispatch and iCloud Keychain sync send only the data needed for the action you invoke. Here's exactly what `agi-cli` stores locally and why.
 
 ### Event log
 
@@ -1361,7 +1361,7 @@ By default, secrets sync via iCloud Keychain to your other Macs. With `--no-iclo
 
 Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/agents.ts](apps/cli/src/lib/agents.ts) (`capabilities`); gates use `supports(agent, cap, version)` from [src/lib/capabilities.ts](apps/cli/src/lib/capabilities.ts). Full matrix also in [docs/concepts.md](apps/cli/docs/concepts.md).
 
-> **Gemini CLI is hard-deprecated.** Google retired it for free, Pro, and Ultra tiers on **June 18, 2026** (announced at Google I/O 2026); the `gemini` command no longer serves requests on those tiers. agents-cli keeps the legacy `gemini` id only so old sessions/config can still be read. `agents add gemini`, `agents import gemini`, and `agents sync gemini` fail and point to **Antigravity CLI** (`antigravity`), Google's official successor — see [the transition notice](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/).
+> **Gemini CLI is hard-deprecated.** Google retired it for free, Pro, and Ultra tiers on **June 18, 2026** (announced at Google I/O 2026); the `gemini` command no longer serves requests on those tiers. agi-cli keeps the legacy `gemini` id only so old sessions/config can still be read. `agents add gemini`, `agents import gemini`, and `agents sync gemini` fail and point to **Antigravity CLI** (`antigravity`), Google's official successor — see [the transition notice](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/).
 
 | Agent | Versions | Hooks | MCP | Permissions | Skills | Commands | Plugins | Subagents | Rules | Workflows |
 |-------|----------|-------|-----|-------------|--------|----------|---------|-----------|-------|-----------|
@@ -1383,7 +1383,7 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 
 **Host CLIs** (`agents cli`) are separate: YAML manifests under `~/.agents/cli/` install binaries onto your PATH (`gh`, `higgsfield`, etc.). They are not copied into per-agent version homes.
 
-### agents-cli features (not agent-native resources)
+### agi-cli features (not agent-native resources)
 
 | Agent | Routines | Teams | Session index |
 |-------|----------|-------|---------------|
@@ -1409,7 +1409,7 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 | File-based commands | Codex | < 0.117.0 (0.117+ uses command-as-skill) |
 | Plugins | Codex | >= 0.128.0 |
 
-Codex `0.117.0+` no longer reads `.codex/prompts/`; agents-cli converts slash commands into skills so they stay invocable as `$name`. OpenCode's plugin-based hook system is on the roadmap; hooks stay `no` until a writer ships.
+Codex `0.117.0+` no longer reads `.codex/prompts/`; agi-cli converts slash commands into skills so they stay invocable as `$name`. OpenCode's plugin-based hook system is on the roadmap; hooks stay `no` until a writer ships.
 
 Slash commands can declare per-agent/version targeting in frontmatter (`agents:`, `since:`, `until:`). Gating applies when syncing from `~/.agents/commands/` (user/system) into version homes — project `.agents/commands/` files are read in place and are not filtered by `agents:`.
 
@@ -1425,7 +1425,7 @@ Yes. This developer tool is entirely free because we believe developers should h
 
 ### Is this like `nvm` / `mise` / `asdf` for AI agents?
 
-For version management, yes. `agents-cli` reads `agents.yaml` from the project root, walks up the directory tree, and routes to the correct binary per project. But it also manages agent-native resources (skills, MCP servers, commands, hooks, permissions) that language version managers don't touch.
+For version management, yes. `agi-cli` reads `agents.yaml` from the project root, walks up the directory tree, and routes to the correct binary per project. But it also manages agent-native resources (skills, MCP servers, commands, hooks, permissions) that language version managers don't touch.
 
 ### How does version switching actually work?
 
@@ -1447,7 +1447,7 @@ Your choice. We hand off to the original CLI process — use your existing subsc
 
 **No CLI telemetry or phone-home.** API keys come from your shell environment or each agent CLI's existing auth, and remote calls only happen when you invoke a feature that requires them, such as cloud dispatch.
 
-For full transparency: `agents-cli` keeps a local event log at `~/.agents/.cache/logs/` so you can see exactly what agents did on your machine. Logs are owner-readable only (0600) and auto-prune after 7 days. Set `AGENTS_DISABLE_EVENT_LOG=1` to disable. See [Security & Privacy](#security--privacy) for details.
+For full transparency: `agi-cli` keeps a local event log at `~/.agents/.cache/logs/` so you can see exactly what agents did on your machine. Logs are owner-readable only (0600) and auto-prune after 7 days. Set `AGENTS_DISABLE_EVENT_LOG=1` to disable. See [Security & Privacy](#security--privacy) for details.
 
 ### Which platforms?
 
@@ -1467,13 +1467,13 @@ Yes -- `agents run` is non-interactive by default. `--yes` auto-accepts prompts,
 
 The auto-update prompt is suppressed automatically when stdin or stdout isn't a TTY. For headless environments where TTY detection misfires (k8s pods that allocate a PTY for stdout, cloud sandbox factories), set `AGENTS_CLI_DISABLE_AUTO_UPDATE=1` to skip the update check entirely -- no prompt, no network call.
 
-agents-cli also prints a one-time "star us on GitHub" line after your first successful `agents run`/`agents teams`. It's already skipped in CI, non-TTY, `--json`, and `--quiet` runs; set `AGENTS_NO_NUDGE=1` to suppress it everywhere.
+agi-cli also prints a one-time "star us on GitHub" line after your first successful `agents run`/`agents teams`. It's already skipped in CI, non-TTY, `--json`, and `--quiet` runs; set `AGENTS_NO_NUDGE=1` to suppress it everywhere.
 
 To update on demand instead of waiting for the prompt, run `agents upgrade` (add `-y` to skip the confirmation, or pass a version/dist-tag to install something other than latest).
 
 ### What happens to my config when I switch versions?
 
-Each version has its own isolated config directory. Switching just repoints a symlink — your per-version config stays untouched. On first migration (if you had a real `~/.claude/` directory before using agents-cli), that gets backed up once to `~/.agents-system/backups/`.
+Each version has its own isolated config directory. Switching just repoints a symlink — your per-version config stays untouched. On first migration (if you had a real `~/.claude/` directory before using agi-cli), that gets backed up once to `~/.agents-system/backups/`.
 
 ### Does session search use RAG or semantic search?
 
@@ -1489,7 +1489,7 @@ Agents are defined in [src/lib/agents.ts](apps/cli/src/lib/agents.ts) -- each is
 
 ### What's the relationship to Phoenix Labs / Rush?
 
-`agents-cli` is an open client maintained by Phoenix Labs. Rush is a separate product. No Rush account required, no upsell.
+`agi-cli` is an open client maintained by Phoenix Labs. Rush is a separate product. No Rush account required, no upsell.
 
 ## This monorepo also contains
 
