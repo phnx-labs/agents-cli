@@ -792,4 +792,34 @@ describe('installMcpServers handled-agent tracking', () => {
     // The user's file is byte-identical — nothing was clobbered.
     expect(fs.readFileSync(configPath, 'utf-8')).toBe(corrupt);
   });
+  it.skipIf(IS_WINDOWS)('treats an empty config file as nothing recorded, not corruption', () => {
+    // JSON.parse('') throws, so a bare `touch`ed or half-written config would
+    // have failed the whole sync once malformed configs stopped resetting to {}.
+    const home = makeTempHome();
+    const version = '0.1.0';
+    const userMcpDir = path.join(home, '.agents', 'mcp');
+    fs.mkdirSync(userMcpDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(userMcpDir, 'srv.yaml'),
+      ['name: srv', 'transport: stdio', 'command: node', 'args: ["s.js"]', ''].join('\n'),
+      'utf-8'
+    );
+
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'droid', version, 'home');
+    const configPath = path.join(versionHome, '.factory', 'mcp.json');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, '   \n', 'utf-8');
+
+    const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { installMcpServers } from ${JSON.stringify(moduleUrl)};
+      console.log(JSON.stringify(installMcpServers('droid', ${JSON.stringify(version)}, ${JSON.stringify(versionHome)})));
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim());
+    expect(result.errors).toEqual([]);
+    expect(result.applied).toContain('srv');
+    expect(JSON.parse(fs.readFileSync(configPath, 'utf-8')).mcpServers.srv).toBeTruthy();
+  });
 });

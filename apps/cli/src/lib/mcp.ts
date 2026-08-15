@@ -558,9 +558,14 @@ function readExistingConfig(
   parse: (raw: string) => unknown,
 ): Record<string, unknown> {
   if (!fs.existsSync(configPath)) return {};
+  const raw = fs.readFileSync(configPath, 'utf-8');
+  // An empty (or whitespace-only) file is "nothing recorded yet", not corruption
+  // -- a touched file or an interrupted write. `JSON.parse('')` throws, so
+  // without this an empty ~/.factory/mcp.json would fail the whole sync.
+  if (raw.trim() === '') return {};
   let parsed: unknown;
   try {
-    parsed = parse(fs.readFileSync(configPath, 'utf-8'));
+    parsed = parse(raw);
   } catch (err) {
     throw new Error(`existing config at ${configPath} is not valid: ${(err as Error).message}`);
   }
