@@ -746,7 +746,13 @@ export function registerProjectsCommands(program: Command): void {
     for (const ig of def.integrations ?? []) {
       console.log(`  ${chalk.dim(ig.kind.padEnd(8))} ${ig.url}${ig.label ? chalk.dim(`  (${ig.label})`) : ''}`);
     }
-    if (def.linear?.url || def.linear?.projectId) console.log(`  ${chalk.dim('linear')}   ${def.linear.url ?? def.linear.projectId}`);
+    if (def.linear?.url || def.linear?.projectId || def.linear?.name) {
+      // Lead with the board's own name — the id/url answers "which project",
+      // but the name is what a reader (or an agent) calls the work.
+      const ref = def.linear.url ?? def.linear.projectId;
+      const label = def.linear.name ? chalk.cyan(def.linear.name) : '';
+      console.log(`  ${chalk.dim('linear')}   ${[label, ref && chalk.dim(ref)].filter(Boolean).join('  ')}`);
+    }
     for (const d of def.docs ?? []) console.log(`  ${chalk.dim('doc')}      ${d}`);
     console.log(chalk.gray(`  ${projectDefPath(name)}`));
   }
@@ -1237,7 +1243,13 @@ export function registerProjectsCommands(program: Command): void {
       if (def.linear?.projectId && def.linear.projectId !== p.id) {
         console.log(chalk.gray(`  replacing previous Linear link (${def.linear.projectId})`));
       }
-      def.linear = { ...def.linear, projectId: p.id };
+      if (def.linear?.name && def.linear.name !== p.name) {
+        console.log(chalk.gray(`  renaming "${def.linear.name}" → "${p.name}" (Linear is authoritative)`));
+      }
+      // `name` is refreshed on every link, never merely preserved: a project
+      // renamed in Linear otherwise keeps its stale label here forever, and
+      // that label is what agents read when they name the project.
+      def.linear = { ...def.linear, projectId: p.id, name: p.name };
       if (p.url) def.linear.url = p.url;
       writeProjectDef(def);
       console.log(chalk.green(`${def.name} → Linear project "${p.name}" (${p.id})${p.url ? ` ${p.url}` : ''}`));
