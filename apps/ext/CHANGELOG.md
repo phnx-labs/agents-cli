@@ -6,6 +6,8 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+## [0.9.325] - 2026-08-15
+
 - **A release no longer claims "All running windows are live" without checking any window
   (RUSH-2724).** `activate.sh` picked the newest editor logs dir, but every
   `code`/`codium --install-extension` and `--list-extensions` call mints its own logs dir
