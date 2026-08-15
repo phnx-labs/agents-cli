@@ -113,10 +113,11 @@ describe('buildLinearImportCandidates', () => {
   });
 
   it('refreshes a stale linear.name when the Linear project was renamed', () => {
-    // The bug: `linear` was written by spreading the prior block, so a project
-    // renamed on the board (here "Agents CLI" -> "AGI") kept its old label in
-    // the YAML forever — and that label is what agents read when they name the
-    // project. The new name must win over the recorded one.
+    // The bug on THIS path: import never wrote `linear.name` at all, so a def
+    // re-imported after a board rename (here "Agents CLI" -> "AGI") kept
+    // whatever label an older version had left behind. (The sibling `link`
+    // command had the same outcome via a different mechanism — it spread the
+    // prior block — and is covered in linear-projects.test.ts.)
     const existing = new Map<string, ProjectDef>([
       ['agents-cli', { name: 'agents-cli', linear: { projectId: 'lin_1', name: 'Agents CLI' } }],
     ]);

@@ -108,6 +108,18 @@ describe('nextLinearLink', () => {
     expect(nextLinearLink(prior, { id: 'lin_new', name: 'Rush' })).toEqual({ projectId: 'lin_new', name: 'Rush' });
   });
 
+  it('drops a url the prior block carried WITHOUT a projectId', () => {
+    // `projects add --linear <url>` writes `{ url }` and no projectId
+    // (commands/projects.ts). Guarding on `prior.projectId` being truthy would
+    // read that as "same project" and keep a url the user pasted for something
+    // else — and the status card prefers url over the id.
+    const prior = { url: 'https://linear.app/acme/project/old-thing' };
+    expect(nextLinearLink(prior, { id: 'lin_new', name: 'New Thing' })).toEqual({
+      projectId: 'lin_new',
+      name: 'New Thing',
+    });
+  });
+
   it('takes the incoming url when the new row carries one', () => {
     const prior = { projectId: 'lin_old', name: 'Rush CLI', url: 'https://linear.app/x/project/rush-cli' };
     expect(nextLinearLink(prior, { id: 'lin_new', name: 'Rush', url: 'https://linear.app/x/project/rush' })).toEqual({

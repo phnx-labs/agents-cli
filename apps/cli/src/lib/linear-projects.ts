@@ -181,8 +181,11 @@ export function nextLinearLink(
   project: LinearProjectLite,
 ): { projectId: string; url?: string; name: string } {
   const next: { projectId: string; url?: string; name: string } = { projectId: project.id, name: project.name };
-  const relinked = Boolean(prior?.projectId) && prior?.projectId !== project.id;
-  const url = project.url ?? (relinked ? undefined : prior?.url);
+  // A stored url is kept ONLY when the prior block names the same project. Not
+  // `prior.projectId && prior.projectId !== id`: `projects add --linear <url>`
+  // writes `{ url }` with no projectId at all, and treating that as "same
+  // project" carried a url belonging to whatever the user had pasted.
+  const url = project.url ?? (prior?.projectId === project.id ? prior?.url : undefined);
   if (url) next.url = url;
   return next;
 }
