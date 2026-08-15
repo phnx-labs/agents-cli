@@ -314,3 +314,68 @@ describe('agents sync --json (RUSH-2216 fleet fan-out)', () => {
     expect(typeof parsed.ok).toBe('boolean');
   });
 });
+
+/**
+ * RUSH-2700: a resource agents-cli REFUSES to write must not read as a clean
+ * sync on the machine surfaces. `agentSyncJson` (mode 'agent') carried
+ * `declined` from RUSH-2677, but `agent-all` and the umbrella payload still
+ * hardcoded `ok: true` and omitted the field — so `agents sync --yes` and the
+ * `--device all` fan-out reported success for a write that never happened.
+ *
+ * Drives the real command against a temp HOME holding one user-scope MCP server
+ * and an installed copilot, whose MCP config format is deliberately
+ * unimplemented (see MCP_TARGETS `format: null`). No mocks.
+ */
+describe('sync --json reports a refused write (RUSH-2700)', () => {
+  /** A HOME with one MCP server and a probeable copilot install. */
+  function homeWithRefusableMcp(): string {
+    const home = guardedHome();
+    const mcpDir = path.join(home, '.agents', 'mcp');
+    fs.mkdirSync(mcpDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(mcpDir, 'github.yaml'),
+      ['name: github', 'transport: stdio', 'command: npx', 'args: ["-y", "srv"]', ''].join('\n'),
+      'utf-8',
+    );
+    const versionDir = path.join(home, '.agents', '.history', 'versions', 'copilot', '1.0.0');
+    fs.mkdirSync(path.join(versionDir, 'home'), { recursive: true });
+    const binDir = path.join(versionDir, 'node_modules', '.bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(path.join(binDir, 'copilot'), '#!/bin/sh\necho copilot\n', 'utf-8');
+    fs.chmodSync(path.join(binDir, 'copilot'), 0o755);
+    return home;
+  }
+
+  it('agent-all: ok is false and every version carries its decline', () => {
+    const home = homeWithRefusableMcp();
+    const { stdout } = run(['sync', 'copilot@all', '--json', '--yes'], home);
+    const payload = JSON.parse(stdout.trim());
+
+    expect(payload.mode).toBe('agent-all');
+    // The bug: this was hardcoded true regardless of what was written.
+    expect(payload.ok, 'a refused write is not a clean sync').toBe(false);
+    const declined = payload.versions.flatMap((v: { declined?: string[] }) => v.declined ?? []);
+    expect(declined.join('\n')).toContain('cannot write MCP config');
+    expect(declined.join('\n')).toContain('copilot');
+  });
+
+  it('agent-all: ok stays true when nothing was refused', () => {
+    // The negative control. kimi's MCP format IS implemented, so the very same
+    // server writes cleanly — proving `ok: false` above tracks the decline and
+    // not merely "this command ran". kimi (not droid) because droid resolves to
+    // one global binary, so a per-version layout is not a valid install.
+    const home = homeWithRefusableMcp();
+    const versionDir = path.join(home, '.agents', '.history', 'versions', 'kimi', '1.0.0');
+    fs.mkdirSync(path.join(versionDir, 'home'), { recursive: true });
+    const binDir = path.join(versionDir, 'node_modules', '.bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(path.join(binDir, 'kimi'), '#!/bin/sh\necho kimi\n', 'utf-8');
+    fs.chmodSync(path.join(binDir, 'kimi'), 0o755);
+
+    const { stdout } = run(['sync', 'kimi@all', '--json', '--yes'], home);
+    const payload = JSON.parse(stdout.trim());
+    expect(payload.mode).toBe('agent-all');
+    expect(payload.ok).toBe(true);
+    expect(payload.versions.flatMap((v: { declined?: string[] }) => v.declined ?? [])).toEqual([]);
+  });
+});

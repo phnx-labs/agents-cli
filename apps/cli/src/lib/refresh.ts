@@ -109,11 +109,26 @@ function migratePromptcutsToRoot(agentsDir: string, quiet = false): void {
  *
  * Idempotent — safe to run repeatedly. No network operations.
  */
-export async function refresh(options: RefreshOptions = {}): Promise<void> {
+/**
+ * What a reconcile pass refused to write, so callers can report it.
+ *
+ * `refresh` used to return void, so a resource agents-cli declined to write was
+ * visible only on the interactive path — `agents sync --yes` and the
+ * `--device all` fan-out reported a clean sync (RUSH-2700).
+ */
+export interface RefreshResult {
+  /** User-facing sentences, one per refused resource, prefixed with the agent. */
+  declined: string[];
+}
+
+export async function refresh(options: RefreshOptions = {}): Promise<RefreshResult> {
   const { agentFilter, skipPrompts = false, skipClis = false, quiet = false } = options;
   const agentsDir = getUserAgentsDir();
   // Gate every human progress line so --json / fleet fan-out can parse stdout.
   const log = (...args: unknown[]) => { if (!quiet) console.log(...args); };
+  // Resources this pass refused to write, surfaced by the caller. An empty
+  // synced list cannot also mean "declined and here is why" (RUSH-2700).
+  const declined: string[] = [];
 
   migratePromptcutsToRoot(agentsDir, quiet);
 
@@ -263,6 +278,9 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
           if (syncResult.permissions) kinds.add('permissions');
           if (syncResult.mcp.length > 0) kinds.add('mcp');
           if (syncResult.plugins.length > 0) kinds.add('plugins');
+          for (const reason of syncResult.declined) {
+            declined.push(`${agentLabel(agentId)}@${ver}: ${reason}`);
+          }
         }
 
         if (kinds.size > 0) {
@@ -419,4 +437,13 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
       log(chalk.yellow(`CLI install skipped: ${(err as Error).message}`));
     }
   }
+
+  // A resource agents-cli refused to write is reported, never swallowed —
+  // an empty synced list on its own reads as "nothing to do" (RUSH-2700).
+  if (declined.length > 0) {
+    log(chalk.yellow('Not written:'));
+    for (const reason of declined) log(`  ${chalk.yellow(reason)}`);
+  }
+
+  return { declined };
 }
