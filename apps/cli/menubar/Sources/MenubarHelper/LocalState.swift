@@ -516,10 +516,10 @@ enum LocalState {
         for a in active {
             let sid = a.sessionId ?? ""
             let mark = sid.isEmpty ? nil : attention[sid]
-            // Prefer real git repo name over worktree slug / bare last path component.
-            let repo = Self.repoName(from: a.cwd)
-                ?? a.cwd.map { ($0 as NSString).lastPathComponent }
-                ?? ""
+            // Prefer real git repo name over worktree slug; a cloud row with no
+            // local cwd groups under the explicit `cloud` bucket, never its
+            // harness/machine (RUSH-2688).
+            let repo = Self.groupKey(cwd: a.cwd, isCloud: a.context == "cloud")
             let status = SessionStatus(rawValue: a.status) ?? .unknown
             let work = ActiveDisplay.workTitle(topic: a.topic, label: a.label,
                                                preview: a.preview,
@@ -598,6 +598,30 @@ enum LocalState {
             }
         }
         return ns.lastPathComponent
+    }
+
+    /// The one group key for an ACTIVE row (RUSH-2688). A real working dir → its
+    /// repo (worktree-aware, via `repoName`). A row with NO local cwd — a cloud
+    /// task — groups under its own repo when the provider names one (reduced to
+    /// the bare name so a cloud task for `phnx-labs/agents-cli` lands with local
+    /// `agents-cli` work), else the explicit `cloud` bucket. It NEVER borrows the
+    /// harness/provider name ('codex') or a machine name — neither is a project,
+    /// and letting a provider stand in is exactly what grouped a Codex cloud task
+    /// under 'codex'. No fallback chain: a single explicit bucket. Empty string
+    /// means "unknown" and is folded into the `other` bucket at grouping time.
+    static func groupKey(cwd: String?, isCloud: Bool, cloudRepo: String? = nil) -> String {
+        if let repo = repoName(from: cwd) { return repo }
+        if isCloud { return shortRepo(cloudRepo) ?? "cloud" }
+        return ""
+    }
+
+    /// `org/name` (or any path-shaped repo) → its bare last segment, so a cloud
+    /// row for `phnx-labs/agents-cli` groups under `agents-cli`. Blank → nil.
+    private static func shortRepo(_ repo: String?) -> String? {
+        guard let repo = repo?.trimmingCharacters(in: .whitespacesAndNewlines), !repo.isEmpty
+        else { return nil }
+        let last = repo.split(separator: "/").last.map(String.init) ?? repo
+        return last.isEmpty ? nil : last
     }
 
     // MARK: Terminals
@@ -682,7 +706,13 @@ enum LocalState {
             let agent = col(stmt, 0) ?? "cloud"
             let raw = col(stmt, 1) ?? ""
             let prompt = col(stmt, 2) ?? ""
-            let repo = col(stmt, 3) ?? (col(stmt, 4) ?? "cloud")
+            let provider = col(stmt, 4)
+            // Group under the task's own repo when the provider named one, else
+            // the explicit `cloud` bucket — NEVER the provider/harness name
+            // ('codex'), which is not a project (RUSH-2688). The old
+            // `repo ?? provider ?? "cloud"` chain grouped a repo-less Codex cloud
+            // task under 'codex'.
+            let repo = Self.groupKey(cwd: nil, isCloud: true, cloudRepo: col(stmt, 3))
             let status: SessionStatus = raw == "running" ? .running
                 : (raw == "input_required" || raw == "needs_review") ? .inputRequired : .queued
             out.append(Session(agent: agent, repo: repo, cwd: nil,
@@ -691,6 +721,7 @@ enum LocalState {
                                question: status == .inputRequired ? "needs review" : "",
                                attentionSinceMs: nil,
                                machine: nil, surface: "cloud", sessionId: nil,
+                               cloudProvider: provider,
                                ticketId: nil, prLink: nil,
                                startedAtMs: nil, lastActivityMs: nil,
                                preview: nil, owner: nil, origin: nil, routineName: nil))

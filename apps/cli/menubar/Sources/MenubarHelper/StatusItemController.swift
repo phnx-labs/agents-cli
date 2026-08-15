@@ -132,6 +132,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // cache when the menu opens. Until first load, the cheap live-terminals view
     // fills in.
     private var cachedActiveSessions: [ActiveSession] = []
+    // Installed CLI version from the latest snapshot (`agents --version`), shown
+    // in the dropdown header. Nil until the first snapshot lands, or when read
+    // from an older CLI that predates the field (RUSH-2688).
+    private var cliVersion: String?
     private var activeSessionsLoaded = false
 
     // The registered fleet-device roster (from `agents menubar snapshot --json`),
@@ -320,6 +324,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         promptController.updateRecentSessions(snapshot.recentSessions)
         cachedActiveSessions = snapshot.activeSessions
         activeSessionsLoaded = true
+        cliVersion = snapshot.cliVersion
         cachedDevices = snapshot.devices ?? []
         devicesLoaded = true
         watchdogEnabled = snapshot.watchdog.enabled
@@ -519,7 +524,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             color = idleC
         }
 
-        let left = "agents-cli"
+        // Show the installed CLI version (RUSH-2688) so a stale menu bar — one
+        // whose helper outlived an `agents` upgrade — is visible at a glance.
+        // Falls back to the bare name until the first snapshot lands, or against
+        // an older CLI that does not emit the field.
+        let left = cliVersion.map { "agents-cli \($0)" } ?? "agents-cli"
         let width = max(left.count + 3, 44 - status.count)
         let title = left.padding(toLength: width, withPad: " ", startingAt: 0) + status
         let item = disabled(title)

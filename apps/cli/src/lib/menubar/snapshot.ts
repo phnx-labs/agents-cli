@@ -9,6 +9,7 @@ import { machineId } from '../machine-id.js';
 import { querySessions } from '../session/db.js';
 import { readActiveSessionsCache } from '../session/session-cache.js';
 import { getRuntimeStateDir } from '../state.js';
+import { getCliVersion } from '../version.js';
 import type { WatchdogTickResult } from '../watchdog/runner.js';
 
 /**
@@ -31,6 +32,13 @@ export interface MenubarDevice {
 export interface MenubarSnapshot {
   version: 1;
   capturedAt: string;
+  /**
+   * The installed CLI version that produced this snapshot — the same string
+   * `agents --version` prints (RUSH-2688). The snapshot is emitted by whatever
+   * `agents` binary is on PATH, so this is resolved at runtime, letting the menu
+   * bar show its own version in the header and making a stale menu bar visible.
+   */
+  cliVersion: string;
   routines: Record<string, unknown>[];
   recentSessions: Record<string, unknown>[];
   activeSessions: Record<string, unknown>[];
@@ -97,6 +105,7 @@ export async function computeMenubarSnapshot(): Promise<MenubarSnapshot> {
   return {
     version: 1,
     capturedAt: new Date().toISOString(),
+    cliVersion: getCliVersion(),
     routines,
     recentSessions: JSON.parse(serializeSessionsJson(recent)) as Record<string, unknown>[],
     activeSessions: serializeActiveSessionsForJson(activeSessions) as Record<string, unknown>[],
