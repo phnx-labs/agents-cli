@@ -13,6 +13,8 @@ import {
   listAllProfileSnapshots,
   isProcessAlive,
   reapOrphanedProcesses,
+  isProfileInUse,
+  planProfilePrune,
 } from './runtime-state.js';
 import { getBrowserRuntimeDir, getProfileRuntimeDir } from './profiles.js';
 
@@ -304,5 +306,116 @@ describe('fork runtime cleanup (RUSH-1528)', () => {
       (s) => s.name === fork && s.meta !== null,
     );
     expect(stale).toHaveLength(0);
+  });
+});
+
+describe('isProfileInUse', () => {
+  it('is false for a profile with no runtime dir at all', () => {
+    expect(isProfileInUse(uniq('unused'))).toBe(false);
+  });
+
+  it('is true while a live browser process is recorded', () => {
+    const name = uniq('live');
+    writeProfileRuntime(name, { pid: process.pid, port: 9222, command: currentProcessCommand() });
+    expect(isProfileInUse(name)).toBe(true);
+  });
+
+  it('is false once the recorded process is dead', () => {
+    const name = uniq('dead');
+    writeProfileRuntime(name, { pid: 999999, port: 9222, command: 'chrome' });
+    expect(isProfileInUse(name)).toBe(false);
+  });
+
+  it('sees a live COMPOSITE dir, not just <name>', () => {
+    // One profile owns several runtime dirs (`<name>@<endpoint>`); prune must
+    // not remove a profile whose composite dir is the one that is running.
+    const name = uniq('composite');
+    const fork = `${name}@endpoint-0`;
+    created.push(fork);
+    writeProfileRuntime(fork, { pid: process.pid, port: 9222, command: currentProcessCommand() });
+    expect(isProfileInUse(name)).toBe(true);
+  });
+
+  it('is true when a dir has open tasks even with no live pid', () => {
+    const name = uniq('tasks');
+    writeProfileRuntime(name, { pid: 999999, port: 9222, command: 'chrome' });
+    fs.writeFileSync(path.join(getProfileRuntimeDir(name), 'tasks.json'), JSON.stringify(['t1']));
+    expect(isProfileInUse(name)).toBe(true);
+  });
+});
+
+describe('planProfilePrune', () => {
+  const local = (name: string, launchableHere: boolean) =>
+    ({ name, scope: 'local' as const, launchableHere });
+
+  it('removes a local profile whose browser is not installed here', () => {
+    const name = uniq('nobinary');
+    // Give it a runtime dir so the verdict is binary-missing, not never-used.
+    writeProfileRuntime(name, { pid: 999999, port: 9222, command: 'chrome' });
+    const plan = planProfilePrune([local(name, false)]);
+    expect(plan.candidates.map((c) => c.name)).toEqual([name]);
+    expect(plan.candidates[0].reason).toBe('binary-missing');
+  });
+
+  it('removes a local profile that has never been started', () => {
+    const name = uniq('neverused');
+    const plan = planProfilePrune([local(name, true)]);
+    expect(plan.candidates.map((c) => c.name)).toEqual([name]);
+    expect(plan.candidates[0].reason).toBe('never-used');
+  });
+
+  it('keeps a healthy profile — installed browser plus runtime state', () => {
+    const name = uniq('healthy');
+    writeProfileRuntime(name, { pid: 999999, port: 9222, command: 'chrome' });
+    const plan = planProfilePrune([local(name, true)]);
+    expect(plan.candidates).toEqual([]);
+    expect(plan.kept[0].why).toMatch(/healthy/);
+  });
+
+  it('never removes a profile that is in use, even with no binary here', () => {
+    const name = uniq('busy');
+    writeProfileRuntime(name, { pid: process.pid, port: 9222, command: currentProcessCommand() });
+    const plan = planProfilePrune([local(name, false)]);
+    expect(plan.candidates).toEqual([]);
+    expect(plan.kept[0].why).toMatch(/in use/);
+  });
+
+  it('never removes the auto `default` profile', () => {
+    const plan = planProfilePrune([local('default', false)]);
+    expect(plan.candidates).toEqual([]);
+    expect(plan.kept[0].why).toMatch(/auto-detected default/);
+  });
+
+  it("never removes this machine's configured default", () => {
+    const name = uniq('mydefault');
+    const plan = planProfilePrune([local(name, false)], { configuredDefault: name });
+    expect(plan.candidates).toEqual([]);
+    expect(plan.kept[0].why).toMatch(/configured default/);
+  });
+
+  it('leaves fleet-synced profiles alone unless includeFleet is set', () => {
+    const name = uniq('shared');
+    const fleet = [{ name, scope: 'fleet' as const, launchableHere: false }];
+
+    const guarded = planProfilePrune(fleet);
+    expect(guarded.candidates).toEqual([]);
+    expect(guarded.kept[0].why).toMatch(/fleet-synced/);
+
+    const optedIn = planProfilePrune(fleet, { includeFleet: true });
+    expect(optedIn.candidates.map((c) => c.name)).toEqual([name]);
+    expect(optedIn.candidates[0].scope).toBe('fleet');
+  });
+
+  it('reports the cache dirs it would remove, composites included', () => {
+    const name = uniq('withcache');
+    const fork = `${name}@endpoint-0`;
+    created.push(fork);
+    writeProfileRuntime(name, { pid: 999999, port: 9222, command: 'chrome' });
+    writeProfileRuntime(fork, { pid: 999998, port: 9223, command: 'chrome' });
+
+    const plan = planProfilePrune([local(name, false)]);
+    expect(plan.candidates[0].cacheDirs.map((d) => path.basename(d)).sort()).toEqual(
+      [name, fork].sort(),
+    );
   });
 });

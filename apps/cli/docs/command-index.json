@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 90,
-  "commands": 560,
+  "commands": 561,
   "root": {
     "name": "agents",
     "path": "",
@@ -2450,12 +2450,14 @@
               "negate": false
             }
           ],
+          "examples": "# What exists here, and whether each is this machine's or the whole fleet's\n      agents browser profiles list\n\n      # Create one — machine-local by default\n      agents browser profiles create work --browser chrome\n\n      # Create one every machine should see (e.g. a remote ssh:// endpoint)\n      agents browser profiles create shared-remote --browser chrome --fleet\n\n      # Clean up dead ones: check first, then apply\n      agents browser profiles prune --dry-run\n      agents browser profiles prune\n\n      # Make one the machine's default for a bare `agents browser start`\n      agents config set browser.profile work",
+          "notes": "Profiles are machine-local by default. A profile pins an OS-specific binary\n      path and a locally chosen CDP port, so a fleet-synced copy is wrong on every\n      other machine — pass --fleet only when the profile really is fleet config.\n\n      In `list`, the `*` marker means \"this machine's configured default\"\n      (`agents browser start` with no --profile). It is NOT the same thing as the\n      profile NAMED `default`, which is the auto-detected one; they are often\n      different profiles.\n\n      `prune` never removes a profile that is in use, the configured default, the\n      auto `default`, or (without --fleet) a fleet-synced one.",
           "subcommands": [
             {
               "name": "create",
               "path": "browser profiles create",
               "aliases": [],
-              "description": "Create a new browser profile",
+              "description": "Create a new browser profile (machine-local unless --fleet)",
               "args": [
                 {
                   "name": "name",
@@ -2471,6 +2473,15 @@
                   "short": "-b",
                   "long": "--browser",
                   "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--fleet",
+                  "description": "Store in the synced agents.yaml so every machine sees it. Default is machine-local: a profile pins an OS-specific binary path and a locally chosen port, so a synced copy is wrong on every other box.",
+                  "long": "--fleet",
+                  "required": false,
                   "optional": false,
                   "variadic": false,
                   "negate": false
@@ -2642,9 +2653,18 @@
               "aliases": [
                 "ls"
               ],
-              "description": "List all browser profiles",
+              "description": "List all browser profiles, with the store each lives in (local / fleet)",
               "args": [],
               "options": [
+                {
+                  "flags": "--json",
+                  "description": "Output machine-readable JSON",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
                 {
                   "flags": "-h, --help",
                   "description": "Show help",
@@ -2665,6 +2685,54 @@
               "description": "Show which login-gated services each profile has a live session for, the account signed in, and whether login creds are available in the profile's secrets bundle (reads cookie/username presence only, never decrypts).",
               "args": [],
               "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "prune",
+              "path": "browser profiles prune",
+              "aliases": [],
+              "description": "Remove dead machine-local profiles: browser not installed here, or never started",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-n, --dry-run",
+                  "description": "Print what would be removed and exit without changing anything",
+                  "short": "-n",
+                  "long": "--dry-run",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--fleet",
+                  "description": "Also consider fleet-synced profiles (removing one removes it from EVERY machine)",
+                  "long": "--fleet",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Output machine-readable JSON",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
                 {
                   "flags": "-h, --help",
                   "description": "Show help",

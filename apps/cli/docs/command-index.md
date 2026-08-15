@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_90 command groups · 560 commands._
+_90 command groups · 561 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -114,11 +114,12 @@ agents browser navigate                       Navigate current tab to URL (creat
 agents browser pdf [output]                   Export the current tab as PDF via CDP Page.printToPDF — auto-saved under sessions/<task>/ when [output] is omitted
 agents browser press <key>                    Press a key (Enter, Tab, Escape, etc)
 agents browser profiles                       Manage browser profiles
-agents browser profiles create <name>         Create a new browser profile
+agents browser profiles create <name>         Create a new browser profile (machine-local unless --fleet)
 agents browser profiles delete <name>         Delete a browser profile (drops YAML config + all cached runtime dirs)
 agents browser profiles doctor <name>         Diagnose a browser profile: binary, port, user-data-dir, onboarding state
-agents browser profiles list                  List all browser profiles
+agents browser profiles list                  List all browser profiles, with the store each lives in (local / fleet)
 agents browser profiles logins                Show which login-gated services each profile has a live session for, the account signed in, and whether login creds are available in the profile's secrets bundle (reads cookie/username presence only, never decrypts).
+agents browser profiles prune                 Remove dead machine-local profiles: browser not installed here, or never started
 agents browser profiles set-default [name]    Set the profile `agents browser start` uses when no --profile is passed (also re-points an explicit `--profile default`). Device-local — each machine has its own. No name prints the current value.
 agents browser profiles show <name>           Show profile details
 agents browser ps                             List every browser/electron/tunnel process agents has tracked (alive or stale) — works without the daemon
