@@ -1,6 +1,6 @@
 /**
  * Remote secrets — read and use `agents secrets` bundles that live on another
- * host, over the same hardened SSH path that `agents secrets export --host`
+ * host, over the same hardened SSH path that `agents secrets export --device`
  * (the write inverse) already uses.
  *
  * This is the READ / USE direction:
@@ -10,7 +10,7 @@
  *              inject it ephemerally — never written to this machine's keychain.
  *
  * Trust model: relies on the operator's existing SSH access to the host (same
- * boundary as `export --host` / `run --host`). Bundle names are shell-quoted
+ * boundary as `export --device` / `run --device`). Bundle names are shell-quoted
  * into the remote command; resolved VALUES return over ssh stdout; a forwarded
  * file-backend passphrase travels over ssh stdin (first line) so it never lands
  * in argv / `ps` / remote shell history. Nothing is persisted locally.
@@ -96,9 +96,9 @@ function osForTarget(target: string, lookupName?: string): string | undefined {
 }
 
 /**
- * Resolve a `--host` value to an ssh target STRING for the remote-secrets path.
+ * Resolve a `--device` value to an ssh target STRING for the remote-secrets path.
  * Delegates to the single host/device resolver (`resolveHost`, RUSH-1967) so a
- * name here dials the exact same box `run --host` does; on a miss, treats the
+ * name here dials the exact same box `run --device` does; on a miss, treats the
  * value as a raw ssh target and validates it against injection. Named distinctly
  * from `../devices/resolve-target.ts` (which returns richer shapes) so importing
  * the wrong one can't silently change which machine you dial.
@@ -113,7 +113,7 @@ export async function resolveHostSshTarget(nameOrAlias: string): Promise<string>
 /**
  * Merge `--host <single>` / `--hosts <a,b,c>` (and their `--device` / `--devices`
  * aliases) into an ordered, de-duplicated list. All four flags compose; any alone
- * works. `--device`/`--devices` resolve identically to `--host`/`--hosts` so the
+ * works. `--device`/`--devices` resolve identically to `--device`/`--hosts` so the
  * fleet-wide `--device` vocabulary (see `agents run --device`, `agents feed --host`)
  * works on the secrets remote commands too. Empty when none is set.
  */
@@ -173,7 +173,7 @@ export function remoteSecretsRaw(
   // to multiplex — see `credentialTransportSshOpts` (RUSH-2527). A `-tt` session
   // (a remote reveal/passphrase prompt) additionally allocates a PTY and never
   // multiplexes, and it COMPOSES with the secret posture: a `view --reveal` over
-  // `--host` both prompts AND streams the plaintext value back over ssh stdout,
+  // `--device` both prompts AND streams the plaintext value back over ssh stdout,
   // so it needs the managed host-key pin too — `tty` must not short-circuit past
   // `secret`. A plain browse `list` passes neither and keeps the shared baseline.
   const posture = opts.secret ? credentialTransportSshOpts(target) : {};
@@ -196,13 +196,13 @@ export function remoteSecretsRaw(
  * appear (the macOS file-store guard then hard-errors "needs
  * AGENTS_SECRETS_PASSPHRASE") — this inherits the caller's real terminal, so the
  * remote sees a genuine TTY and its hidden passphrase prompt surfaces and reads
- * the keystrokes. This is the transport for `unlock --host`: you type the remote
+ * the keystrokes. This is the transport for `unlock --device`: you type the remote
  * bundle's passphrase at your own terminal. Output is NOT captured (it streams
  * to the terminal); only the exit code is returned.
  */
 export function remoteSecretsStream(target: string, args: string[], opts: { osLookupName?: string } = {}): number {
   const remoteCmd = buildRemoteAgentsInvocation(['secrets', ...args], undefined, osForTarget(target, opts.osLookupName));
-  // `unlock --host` carries the remote bundle's passphrase to the destination over
+  // `unlock --device` carries the remote bundle's passphrase to the destination over
   // this interactive channel, so it is secret-bearing: pin the managed host key
   // (a changed key is refused) and never multiplex (RUSH-2527).
   return sshStream(target, remoteCmd, { tty: true, ...credentialTransportSshOpts(target) });
@@ -409,7 +409,7 @@ export function keychainWriteFailureMessage(
     `A macOS login keychain is LOCKED under headless SSH, so a keychain-backed write ` +
     `lands the bundle metadata but no readable secret items, and later reads fail with ` +
     `"stored item '…' not found". Re-run with a headless-readable backend:\n` +
-    `    agents secrets export ${bundle} --host ${host} --remote-backend file\n` +
+    `    agents secrets export ${bundle} --device ${host} --remote-backend file\n` +
     `(needs AGENTS_SECRETS_PASSPHRASE set locally), or unlock the remote keychain first ` +
     `(e.g. an interactive login / \`agents secrets unlock\` on ${host}) and retry.`
   );
@@ -474,7 +474,7 @@ export function verifyRemoteKeychainPush(
 
 /**
  * The `bash -lc` command + stdin payload that drives a **file-backed** remote
- * import for `secrets export --host … --remote-backend file`.
+ * import for `secrets export --device … --remote-backend file`.
  *
  * The file store is passphrase-free by default: with `AGENTS_SECRETS_PASSPHRASE`
  * unset the remote `agents secrets import --backend file` auto-provisions the

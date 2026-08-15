@@ -1,14 +1,14 @@
 /**
  * Fan-out + `agents ssh` adapters over the single host/device resolver.
  *
- * Every `--host` / `--device` token becomes a concrete target through one core,
+ * Every `--device` / `--device` token becomes a concrete target through one core,
  * {@link matchHost} in ../hosts/registry.ts — the merged directory that reads the
  * devices registry, the agents.yaml overlay, AND ssh_config (RUSH-1967). This
  * module is only the two thin adapters the fan-out and interactive-ssh paths
  * need on top of that core:
  *   - {@link resolveExplicitTargets} — a token list → dialable `{target, machine,
- *     name, os}` rows, so `sessions --host` / session bundles / remote agents-json
- *     dial the exact same address (and machine id) `run --host` does.
+ *     name, os}` rows, so `sessions --device` / session bundles / remote agents-json
+ *     dial the exact same address (and machine id) `run --device` does.
  *   - {@link resolveDeviceTarget} — a token → the full {@link DeviceProfile}
  *     `agents ssh` needs (auth, shell, tailscale metadata), with the same
  *     grammar; a bare unregistered alias returns undefined ("Unknown device").
@@ -120,7 +120,7 @@ export async function resolveDeviceTarget(
 }
 
 /**
- * Resolve an explicit `--host`/`--device` list to dialable targets. A token that
+ * Resolve an explicit `--device`/`--device` list to dialable targets. A token that
  * fails the injection guard or names nothing reachable is skipped with a stderr
  * note (never fatal — one bad token must not blank the fan-out). Shared by every
  * cross-machine fan-out so they can never diverge onto two routes.

@@ -12,7 +12,7 @@ import {
   levelFor, isEventType, EVENT_TYPES,
   getLogsPath, _resetForTest,
 } from './events.js';
-import { resetActorCache } from './actor.js';
+import { resetActorCache } from '../actor.js';
 
 // RUSH-2215: quarantine only I/O-heavy event-bus suites on win32; pure
 // event-kind / level tables still run (review: do not skip platform-neutral guards).
@@ -544,7 +544,7 @@ describeEventsIo('events', () => {
       const raw = path.join(dayDir, 'events.jsonl');
       fs.writeFileSync(raw, '{"event":"info"}\n');
       const release = await lockfile.lock(raw);
-      const modulePath = path.resolve('src/lib/events.ts');
+      const modulePath = path.resolve('src/lib/feed/events.ts');
       const child = spawn(
         'node',
         ['--import', 'tsx', '-e', `console.log('READY'); const { rotate } = await import(${JSON.stringify(modulePath)}); rotate(365);`],

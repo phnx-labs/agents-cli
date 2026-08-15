@@ -8,11 +8,11 @@
  */
 
 import { spawn, execFileSync } from 'child_process';
-import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { getDaemonDir } from './state.js';
+import { isolatedHomeSuffix, namespacedServiceLabel, serviceManifestHomeEnv } from './service-manifest.js';
 import { isAlive, killTree, backgroundSpawnOptions, waitForExit } from './platform/index.js';
 import { listJobs as listAllJobs, type JobConfig } from './routines.js';
 import { syncAllProjectRoutines } from './routines-project.js';
@@ -34,7 +34,7 @@ import { reapTerminalRoutineProcesses } from './routine-process-cleanup.js';
 import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC, SUBSYSTEM_DAEMON_START } from './daemon-health.js';
 import { startAccountStateService } from './account-state-service.js';
 import { runActiveSessionsWarmTick, runFleetCacheWarmTick, runSessionIndexWarmTick, runUsageRefreshTick } from './daemon-ticks.js';
-import { emit, emitRoutineEnd } from './events.js';
+import { emit, emitRoutineEnd } from './feed/events.js';
 import { readDaemonServicesConfig, isDaemonServiceEnabled, type DaemonServiceId } from './daemon-services.js';
 
 const PID_FILE = 'daemon.pid';
@@ -72,22 +72,16 @@ const SYSTEMD_UNIT = 'agents-daemon.service';
  * every hermetic test process, false for every real interactive/production
  * invocation, so a real user's daemon keeps registering under the unchanged
  * production identifier.
+ *
+ * The rule itself now lives in `service-manifest.ts` — the daemon was the first
+ * manifest to need it, not the only one — and is re-exported here because it is
+ * part of this module's published surface.
  */
-export function isolatedHomeSuffix(): string | null {
-  try {
-    const effective = path.resolve(process.env.HOME || os.homedir());
-    const real = path.resolve(os.userInfo().homedir);
-    if (effective === real) return null;
-    return crypto.createHash('sha256').update(effective).digest('hex').slice(0, 12);
-  } catch {
-    return null;
-  }
-}
+export { isolatedHomeSuffix };
 
 /** launchd Label for this process's daemon — namespaced under a redirected HOME. */
 export function daemonServiceLabel(): string {
-  const suffix = isolatedHomeSuffix();
-  return suffix ? `${PLIST_NAME}.sandbox-${suffix}` : PLIST_NAME;
+  return namespacedServiceLabel(PLIST_NAME);
 }
 
 /** systemd --user unit name for this process's daemon — namespaced under a redirected HOME. */
@@ -1125,7 +1119,13 @@ export async function runDaemon(): Promise<void> {
     if (sessionIndexWarmInFlight) return;
     sessionIndexWarmInFlight = true;
     try {
-      await runSessionIndexWarmTick();
+      const { indexed, claimed } = await runSessionIndexWarmTick();
+      // Log only when the tick did something. A silent tick is what let it
+      // report 0 forever unnoticed (RUSH-2691); a line on every idle 20s tick
+      // would drown the log, so the steady state (claimed, nothing changed)
+      // stays quiet and both interesting outcomes are visible.
+      if (!claimed) log('INFO', 'session-index warm: skipped, another process holds the scan claim');
+      else if (indexed > 0) log('INFO', `session-index warm: indexed ${indexed} transcript(s)`);
     } catch (err) {
       log('WARN', `session-index warm failed: ${(err as Error).message}`);
     } finally {
@@ -1638,8 +1638,7 @@ export function generateLaunchdPlist(
 ): string {
   const launch = getDaemonLaunch(agentsBin);
   const logPath = getDaemonLogPath();
-  const home = process.env.HOME || os.homedir();
-  const realHome = process.env.AGENTS_REAL_HOME || home;
+  const { HOME: home, AGENTS_REAL_HOME: realHome } = serviceManifestHomeEnv();
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -1699,8 +1698,7 @@ export function generateSystemdUnit(
 ): string {
   const launch = getDaemonLaunch(agentsBin);
   const execStart = [launch.command, ...launch.args].map(systemdExecArg).join(' ');
-  const home = process.env.HOME || os.homedir();
-  const realHome = process.env.AGENTS_REAL_HOME || home;
+  const { HOME: home, AGENTS_REAL_HOME: realHome } = serviceManifestHomeEnv();
 
   return `[Unit]
 Description=Agents Daemon - Scheduled Job Runner

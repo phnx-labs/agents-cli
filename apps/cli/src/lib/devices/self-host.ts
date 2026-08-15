@@ -2,11 +2,11 @@
  * "Is this hostname the local machine?" — matched against every identity the box
  * answers to, not just its short id.
  *
- * The self-checks that gate `--host` dispatch and the fleet-health fan-out used to
+ * The self-checks that gate `--device` dispatch and the fleet-health fan-out used to
  * compare only against {@link machineId} (the lowercased short hostname, e.g.
  * `zion`). A caller that referenced the box by its **tailscale MagicDNS name**
  * (`zion.tail1a85a1.ts.net`) — which is exactly what `fleetDialTarget` and the
- * Factory floor's `--host` probes use — slipped past the check and SSH'd to the
+ * Factory floor's `--device` probes use — slipped past the check and SSH'd to the
  * LOCAL box over its own tailscale name. On a loaded machine that self-SSH'd
  * `doctor --json` orphaned on timeout and piled up until the host was crushed
  * (RUSH-2114). Matching the full identity set closes that gap at the source.
@@ -48,7 +48,7 @@ function selfAliases(): Set<string> {
 
 /**
  * True when `name` refers to the local machine. Case-insensitive and
- * trailing-dot-tolerant. Use this everywhere a `--host`/fleet target is compared
+ * trailing-dot-tolerant. Use this everywhere a `--device`/fleet target is compared
  * against "self" so a tailscale-name reference short-circuits to a local run
  * instead of self-SSHing.
  */

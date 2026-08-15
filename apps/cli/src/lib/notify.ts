@@ -13,7 +13,7 @@
  * monitor daemon and the feed-dispatch loop call in here, and `process.exit()`
  * would take them down on a typo'd channel name, bypassing their try/catch.
  */
-import type { OpenBlock } from './feed.js';
+import type { OpenBlock } from './feed/feed.js';
 import type { Meta } from './types.js';
 import { readMeta } from './state.js';
 import { getOwnerNotifyFromHumans } from './humans.js';

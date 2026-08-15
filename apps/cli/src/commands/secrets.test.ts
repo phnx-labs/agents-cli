@@ -79,7 +79,7 @@ describe('parseImportSource', () => {
   });
 });
 
-describe('secrets --device alias wiring (resolves identically to --host)', () => {
+describe('secrets --device wiring', () => {
   function secretsSub(name: string): Command {
     const program = new Command();
     registerSecretsCommands(program);
@@ -93,7 +93,6 @@ describe('secrets --device alias wiring (resolves identically to --host)', () =>
   it('registers --device / --devices on export, list, and view', () => {
     for (const name of ['export', 'list', 'view']) {
       const longs = secretsSub(name).options.map((o) => o.long);
-      expect(longs).toContain('--host');
       expect(longs).toContain('--device');
     }
   });
@@ -102,7 +101,6 @@ describe('secrets --device alias wiring (resolves identically to --host)', () =>
     const cmd = secretsSub('export');
     cmd.exitOverride();
     expect(() => cmd.parseOptions(['apple.com', '--device', 'mac-mini'])).not.toThrow();
-    // Variadic --device mirrors the variadic --host it aliases.
     expect(cmd.opts().device).toEqual(['mac-mini']);
     const cmd2 = secretsSub('export');
     cmd2.exitOverride();
@@ -671,7 +669,7 @@ describe('readImportDotenv', () => {
   });
 
   // POSIX-only by design, NOT a harness dodge: `--from -` (readStdinSync ->
-  // fs.readSync(0)) is the POSIX way `export --host` pipes a .env into a remote
+  // fs.readSync(0)) is the POSIX way `export --device` pipes a .env into a remote
   // `import`. On Windows the export deliberately does NOT use `--from -` — the
   // npm `agents.ps1` shim doesn't forward piped stdin to node, so it routes
   // through the temp-file bridge in `buildWindowsStdinImportCommand` instead
@@ -725,7 +723,7 @@ describe('resolveUnlockTtlMs', () => {
   });
 });
 
-describe('buildRemoteUnlockArgs (unlock --host wiring)', () => {
+describe('buildRemoteUnlockArgs (unlock --device wiring)', () => {
   it('forwards explicit bundle names', () => {
     expect(buildRemoteUnlockArgs(['a', 'b'], {})).toEqual(['unlock', 'a', 'b']);
   });
@@ -843,7 +841,7 @@ describe('exportBundleToFile / importBundleFromFile file round-trip', () => {
  *
  * That is the exact state provisioning exists to fix — a box whose file-store
  * key was lost or rotated out from under it, so its bundles are present but
- * unreadable. `agents secrets export <bundle> --host <box> --remote-backend
+ * unreadable. `agents secrets export <bundle> --device <box> --remote-backend
  * file --force` drives the remote's own `import`, which died on `readBundle`:
  *
  *   remote import failed (exit 1): Bundle 'higgsfield.ai': failed to decrypt

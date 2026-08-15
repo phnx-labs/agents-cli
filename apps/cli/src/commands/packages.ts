@@ -63,7 +63,7 @@ import {
   resolveInstalledAgentTargets,
   resolveConfiguredAgentTargets,
   syncResourcesToVersion,
-} from '../lib/versions.js';
+} from '../lib/installations/versions.js';
 import {
   formatPath,
   isInteractiveTerminal,
@@ -490,7 +490,7 @@ delegate to the same underlying installers.
             pluginResourceGroups,
           } = await import('../lib/plugins/plugins.js');
           const { listInstalledVersions, getGlobalDefault, getVersionHomePath, syncResourcesToVersion } =
-            await import('../lib/versions.js');
+            await import('../lib/installations/versions.js');
           const { agentLabel } = await import('../lib/agents.js');
 
           let name: string;

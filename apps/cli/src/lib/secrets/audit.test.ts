@@ -15,9 +15,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { emitSecretAudit, resolveAuditAgent } from './audit.js';
 import { getBundleUsage, getUsageHistory, closeSecretsUsageDb } from './usage-db.js';
-import { query, levelFor, _resetForTest } from '../events.js';
+import { query, levelFor, _resetForTest } from '../feed/events.js';
 import { readUnifiedEvents } from '../event-stream.js';
-import { MILESTONE_EVENTS } from '../activity.js';
+import { MILESTONE_EVENTS } from '../feed/activity.js';
 import {
   bundleItemStore,
   keychainRef,

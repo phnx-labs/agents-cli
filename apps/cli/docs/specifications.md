@@ -84,7 +84,7 @@ state, or sit next to credentials, and have no normative contract today:
    arbitrary agent runs to other machines over SSH. [ssh-transport.md](ssh-transport.md)
    and [hosts.md](hosts.md) describe the transport; no requirement pins it. Individual
    SSH guarantees are stated piecemeal inside the specified sections (SES-CROSS-1,
-   SEC-CROSS-1, the `--host` requirements in [§Agent execution](#agent-execution)),
+   SEC-CROSS-1, the `--device` requirements in [§Agent execution](#agent-execution)),
    which is exactly the fragmentation a `Hosts` section would resolve.
 2. **`teams`** (`commands/teams.ts`) — parallel agents across worktrees and devices; the
    cross-teammate seam is unguarded by any requirement.
@@ -130,7 +130,7 @@ across the fleet, and cross-platform**.
 **In scope:** discovery + harness parsing, the SQLite/FTS index, the preview and
 metadata contract, the list/active/overview display, session lifecycle
 (active/idle/waiting, detach/attach/fork/migrate), and cross-machine reach
-(`--host` live query, export/import bundles).
+(`--device` live query, export/import bundles).
 
 **Out of scope (non-goals):** writing transcripts (that is the harnesses
 themselves + `packages/session-tracker`); an identity/authorization layer beyond
@@ -258,15 +258,43 @@ SSH access (§7); rendering sessions that no harness produced.
   A genuine miss (no indexed row and no live row) still fails closed, and a
   degraded live-registry read yields no candidates rather than throwing.
   Status: landed (RUSH-2682).
+- **SES-9d (MUST).** The transcript a live row carries MUST be that session's own.
+  When the session id is known, it selects the transcript: Claude resolves
+  `<id>.jsonl` straight off disk (`findClaudeSessionFile` → `pickSessionFile`),
+  and every other tracked harness resolves the id against the session index
+  (`indexedSessionFileForId`, `lib/session/active.ts`). Only an id-less process
+  may fall back to the newest indexed transcript in its cwd, and an id neither
+  path resolves MUST yield no transcript rather than a co-located sibling's. The
+  cwd fallback answers `WHERE agent = ? AND cwd = ? ORDER BY last_activity DESC
+  LIMIT 1` (`latestSessionFileForCwd`), so with two same-harness agents in one
+  cwd it returns one stranger's transcript to all of them — which under SES-9b
+  renders another session's digest under this session's header and caches it
+  against the wrong id. A row whose indexed `agent` differs from the live
+  process's harness is refused for the same reason.
+
+  Consequence worth stating: because only Claude resolves off disk, a non-Claude
+  live row carries no transcript until the index reaches it, so during that
+  window `computeLiveSignals` returns `{}` and the row shows the
+  `resolveFallbackStatus` `running` rather than a `working` / `waiting_input`
+  distinction (SES-18 still holds — it never reads `unknown`). SES-9c's warm tick
+  is what keeps that window short. This is the deliberate trade: a coarser status
+  for seconds beats a confident render of someone else's conversation.
+  Status: landed (RUSH-2691).
 - **SES-9c (SHOULD).** A session started on a machine SHOULD reach that machine's
   transcript index within seconds, not on the next unrelated `agents sessions*`
   invocation. The daemon incrementally scans this host's transcript dirs into the
   local index on a bounded timer (`runSessionIndexWarmTick`,
   `SESSION_INDEX_WARM_TICK_MS`), single-flight with foreground scans via the DB
-  scan claim. A cold-miss repair that loses that claim MUST wait (bounded) for the
-  in-flight scan to finish before reading, not return the pre-scan snapshot
-  (`discoverSessions({ waitForScan })` → `waitForScanToSettle`,
-  `scanInProgressByLivePid`). Status: landed (RUSH-2682).
+  scan claim. That tick MUST run the scan itself (`scanSessionsIncremental`) and
+  MUST NOT route through `discoverSessions`, whose trailing listing query defaults
+  its cwd filter to the daemon's cwd and so reports rows indexed rather than
+  transcripts scanned (RUSH-2691). Every `SESSION_AGENTS` member MUST contribute
+  to that count, including the store-backed harnesses whose scanners index a batch
+  rather than per-file. The id cold-miss repair behind `preview`/`resume`/`focus`
+  MUST wait (bounded) for an in-flight scan to finish before reading, not return
+  the pre-scan snapshot (`discoverSessions({ waitForScan })` → `waitForScanToSettle`,
+  `scanInProgressByLivePid`). Status: landed (RUSH-2682, RUSH-2691);
+  see SES-GAP-9c for the repair paths that do not yet take the wait.
 - **SES-10 (MUST).** A preview string MUST be cleaned of terminal/harness noise
   (OSC titles, CSI/SGR, harness tags, collapsed whitespace) before display
   (`cleanPreview`, `commands/sessions.ts:329-337`), and truncated width-aware
@@ -451,7 +479,7 @@ SSH access (§7); rendering sessions that no harness produced.
 
 #### 3.5 Remote & export/import
 
-- **SES-22 (MUST).** `--host`/`--device` MUST run the peer's **own**
+- **SES-22 (MUST).** `--device` MUST run the peer's **own**
   `agents sessions` over hardened SSH; transcripts stay on the origin machine and
   there is no identity layer beyond SSH access (`lib/session/remote.ts:1-11`). A
   recursion guard (`AGENTS_SESSIONS_LOCAL=1`) MUST prevent re-fan-out
@@ -474,11 +502,11 @@ SSH access (§7); rendering sessions that no harness produced.
     as data instead — `RemoteListResult.unreachable`, rendered in the browser
     header — so "that box is asleep" stays distinguishable from "that box has no
     matching sessions" (`lib/session/remote-list.ts`; `commands/sessions-browser.ts`).
-  - **A host scope MUST NOT widen.** An explicit `--host`/`--device` naming only
+  - **A host scope MUST NOT widen.** An explicit `--device` naming only
     this machine leaves nothing remote to dial; the fan-out MUST be skipped rather
     than passing an empty list to `gatherRemoteList`, which reads `[]` as "no hosts
     given" and sweeps every online device.
-- **SES-23a (MUST).** A `--host`/`--device` scope on `--active` names **where the
+- **SES-23a (MUST).** A `--device` scope on `--active` names **where the
   session runs**, not which box reported it. Every returned row MUST satisfy
   `machine ∈ scope` (`filterActiveSessionsByHostScope`,
   `commands/sessions.ts`), applied inside the single gather so the interactive
@@ -970,10 +998,10 @@ normative — a change that widens/narrows a cell is a spec change.
 | cwd of a live process | `lsof` | `lsof`/`/proc` | pid-registry only (no `lsof`, `active.ts:856-858`) |
 | Codex home relocation (SUN_LEN socket) | yes (`lib/codex-home.ts` ~`:64-70`) | n/a | n/a |
 | Foreign-absolute-cwd drive rebase | n/a | n/a | **prohibited** (SES-6) |
-| Remote shell for `--host` | `bash -lc` | `bash -lc` | PowerShell (`remote.ts:117-121`) |
+| Remote shell for `--device` | `bash -lc` | `bash -lc` | PowerShell (`remote.ts:117-121`) |
 
 - **SES-CROSS-1 (MUST).** All three desktop platforms MUST be supported for discovery,
-  parsing, listing, and `--host`. Windows-specific gaps (no provenance, no
+  parsing, listing, and `--device`. Windows-specific gaps (no provenance, no
   start-time reuse guard) are documented deviations, not silent behavior.
 
 ---
@@ -992,7 +1020,7 @@ normative — a change that widens/narrows a cell is a spec change.
 
   Status: `[Intended]` — no `currentVersion > SCHEMA_VERSION` guard exists yet,
   so the fail-safe half is unenforced; the shortfall is SES-GAP-8.
-- **SES-COMPAT-4 (MUST).** On the streaming path, `--host` forwards every other flag
+- **SES-COMPAT-4 (MUST).** On the streaming path, `--device` forwards every other flag
   verbatim to the peer's same-version binary; the SSH target MUST stay validated
   against `SSH_TARGET_RE` to block argv-flag smuggling
   ([sessions.md](sessions.md):277). The interactive one-host browser
@@ -1012,6 +1040,21 @@ normative — a change that widens/narrows a cell is a spec change.
   ([sessions.md](sessions.md):277-278).
 
 **Known gaps (implemented-vs-intended drift to fix, not to hide):**
+- **SES-GAP-9c.** SES-9c's bounded wait is taken by the id cold-miss repair
+  (`commands/sessions.ts` ~`:2287`) and by nothing else. `richMetaById`
+  (`commands/focus.ts` ~`:922`) is an id repair by its own docstring and does not
+  take it, so a `focus <id>` that collides with the daemon's scan reads the
+  pre-scan snapshot, misses, and falls back to a row carrying no `version` — a
+  non-version-pinned resume. `openFocusTabs` (`commands/focus.ts` ~`:828`) is the
+  same class. The selector paths in `renderOneSession` /
+  `renderArtifactsGlobal` do not take it either. Widening the wait to those sites
+  is **not** a drop-in: they are not gated on a miss, so the cost would be
+  unconditional, and `WAIT_FOR_SCAN_TIMEOUT_MS` (2s, `session/discover.ts`) is
+  below a measured real scan hold (~3s on a 1.07 GB index), so a collision can pay
+  the full bound and still read the pre-scan snapshot —
+  `waitForScanToSettle`'s `false` return is discarded. Closing this means gating
+  on an actual miss AND either raising the bound past a realistic scan or acting
+  on that `false`. Raised by the RUSH-2691 review.
 - **SES-GAP-1.** `flatSessionRow` (`--flat`) and the picker's `formatPickerLabel`
   both feed `renderTopicCell` (~`commands/sessions.ts:1500`, `:2071` →
   `:1862`) without the `'-'` fallback the other renderers use, so a session with
@@ -1358,7 +1401,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
   terminal on a **locked** keychain bundle MUST resolve with **exactly one** Touch
   ID sheet, then reveal the value / run the command / push the bundle. This covers
   exactly three commands: `agents secrets view --reveal`, `agents secrets exec`, and
-  `agents secrets export --host` — all three gate `agentOnly` on
+  `agents secrets export --device` — all three gate `agentOnly` on
   `isHeadlessSecretsContext() || !isInteractiveTerminal()`
   (`commands/secrets.ts:1433`, `:1549`, `:2334`, `:2473`), the push forwarding it
   through `resolveBundleForPush` (`lib/secrets/push.ts:117`, which defaults to
@@ -1369,19 +1412,19 @@ access control (that is 1Password/Vault; this tool is device-local first).
   prompt even at an interactive terminal (`commands/secrets.ts:1642`, `:2293`,
   `:2360`, `:2402`) — prompting there would either dump plaintext onto a visible
   screen (`export --plaintext`, which prints) or block a `$(…)` capture
-  mid-pipeline (`get`). `export --host` is on the human side because neither hazard
+  mid-pipeline (`get`). `export --device` is on the human side because neither hazard
   applies: it prints a key COUNT, never a value, and nothing captures its stdout,
   so it is strictly less exposed than the `view --reveal` that already prompts.
   Under an agent (`AGENTS_RUNTIME`) or
   no TTY, **all** of these stay broker-only and fail closed per SEC-13. **Given** a
   human at a TTY (no `AGENTS_RUNTIME`) runs `agents secrets view --reveal <locked>`,
-  `agents secrets exec <locked> -- <cmd>`, or `agents secrets export <locked> --host
+  `agents secrets exec <locked> -- <cmd>`, or `agents secrets export <locked> --device
   <target>` **When** the bundle is not
   broker-held **Then** exactly one Touch ID sheet is raised and the value is
   revealed / command run / bundle pushed; whereas `get` or an automation-primitive
   `export` on the same locked bundle
   fails fast naming `agents secrets unlock <bundle>`, no sheet. This is the
-  reveal-vs-automation split — `view --reveal`/`exec`/`export --host` are the only
+  reveal-vs-automation split — `view --reveal`/`exec`/`export --device` are the only
   interactive
   biometric surfaces besides `unlock` (SEC-13a governs the separate `agents run
   --secrets` launch-injection path, which is always `agentOnly`).
@@ -1560,7 +1603,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
 
 #### 3.5 Sharing & sync
 
-- **SEC-21 (MUST).** `agents secrets exec <bundle>@<host>` / `--host` /
+- **SEC-21 (MUST).** `agents secrets exec <bundle>@<host>` / `--device` /
   `run --secrets <bundle>@<host>` MUST resolve a peer's bundle over hardened SSH,
   inject the values ephemerally, and MUST NOT write them to this machine's
   keychain or disk (`lib/secrets/remote.ts:11,165-234`).
@@ -1598,14 +1641,14 @@ flags and examples; this spec governs the **guarantees** behind them.
 Two orthogonal axes: **Boundary side** (does a plaintext value cross into the
 agent's process / a child / stdout?) and **Prompts (locked)?** (can this raise a
 Touch ID sheet on a *locked* bundle — see SEC-13b). They are independent: `exec`
-and `export --host` inject yet CAN prompt interactively, while `export
+and `export --device` inject yet CAN prompt interactively, while `export
 --plaintext` materializes yet NEVER prompts.
 
 | Command | Boundary side | Prompts (locked)? | Evidence |
 |---|---|---|---|
 | `secrets exec <b> -- <cmd>` | **Inject** (child env) | **interactive TTY only** (SEC-13b) | `commands/secrets.ts:2463,2473` |
 | `run --secrets <b>` | **Inject** (run child env) | never (SEC-13a) | `commands/exec.ts` secrets injection |
-| `secrets export --host` (SSH push) | **Inject** (over ssh stdin) | **interactive TTY only** (SEC-13b) | `commands/secrets.ts:2334`, `lib/secrets/push.ts:117` |
+| `secrets export --device` (SSH push) | **Inject** (over ssh stdin) | **interactive TTY only** (SEC-13b) | `commands/secrets.ts:2334`, `lib/secrets/push.ts:117` |
 | `secrets export --to-1password` / `--to-file` | **Neither** (to `op` argv / AES file) | never | `commands/secrets.ts:2360,2293` |
 | `secrets mcp` (`get_secret`) | **JIT, per-request** — never `process.env`, names-only in `tools/list` | never | `lib/secrets/mcp.ts` |
 | `secrets export --plaintext` | **Materialize** | never (automation primitive) | `commands/secrets.ts:2399,2402` |
@@ -1861,12 +1904,12 @@ injected silently with no unlock at all.
 ## Agent execution
 
 This is the **contract** for `agents run`: what a human, an agent, or a
-downstream tool (`agents teams`, routines, `--host` dispatch) is entitled to
+downstream tool (`agents teams`, routines, `--device` dispatch) is entitled to
 rely on when a run is dispatched, stated as testable requirements. It exists
 because "one execution engine" is a real architectural claim
 (`apps/cli/AGENTS.md` / repo `CLAUDE.md`, §Core concepts) that code can
 silently violate — a new agent added without env isolation, a bypass path that
-skips the audit funnel, a flag that stops crossing the `--host` SSH boundary.
+skips the audit funnel, a flag that stops crossing the `--device` SSH boundary.
 When code and this spec disagree, one of them is a bug; fixing the drift is
 mandatory, not optional.
 
@@ -1902,14 +1945,14 @@ scenarios are written Given/When/Then so they map 1:1 to tests.
 
 `agents run <agent> [prompt]` (`commands/exec.ts:502`) is the single funnel
 every agent invocation passes through — interactive or headless, local or
-`--host`-dispatched, single-shot or `--loop`, primary or a `--fallback` chain
+`--device`-dispatched, single-shot or `--loop`, primary or a `--fallback` chain
 entry. Its job: translate one `ExecOptions` into (a) an isolated child process
 env and (b) the right CLI argv for whichever of the 16 registered agents is
 being run, spawn it, and return one exit code.
 
 **In scope:** env composition and merge order; per-version config isolation;
 the buildExecEnv → execAgent/runWithFallback invariant and its one named
-exception (`--acp`); rate-limit fallback/retry semantics; `--host` SSH
+exception (`--acp`); rate-limit fallback/retry semantics; `--device` SSH
 dispatch (what crosses the hop, what is refused); how `--secrets` reaches a
 run's child env; POSIX/Windows spawn parity; the exit-code contract.
 
@@ -1935,7 +1978,7 @@ schema (`--json` passes through each agent's native stream format).
   `resolveActor()` and exported via `actorEnv()` (`lib/actor.ts`).
 - **Launch id** — `AGENT_LAUNCH_ID`, the correlation key that joins a spawned
   pid to the exact session its SessionStart hook records, and that a
-  `--host` launcher forwards across the SSH hop to resolve a remote-coined
+  `--device` launcher forwards across the SSH hop to resolve a remote-coined
   session id (`lib/exec.ts:396-399`).
 - **Governance chokepoint** — `recordDispatchedRun`, the one audit call every
   finalized run path makes (`commands/exec.ts:1571,2470,2628,2683`).
@@ -2106,7 +2149,7 @@ schema (`--json` passes through each agent's native stream format).
   `runWithFallback` (chain, `lib/exec.ts:2352-2455`) — the plain path
   (`commands/exec.ts:2657-2687`) and the `--loop` path
   (`commands/exec.ts:2591-2637`) both terminate in one of those two calls; a
-  `--host` run re-execs `agents run` itself on the remote box (§3.5), so it
+  `--device` run re-execs `agents run` itself on the remote box (§3.5), so it
   is the same engine one hop further out, not a third path.
 - **EXEC-19 (NAMED EXCEPTION).** `--acp` is the one documented bypass: it
   routes through `runAcpHeadless` (`lib/acp/run.ts`) instead of
@@ -2208,7 +2251,7 @@ schema (`--json` passes through each agent's native stream format).
   `status ?? 0` or a literal `0`, so an interactive run whose tmux server died
   mid-work (`[server exited unexpectedly]`, the agent stranded at an approval
   prompt) printed a failure banner reading `exit 1` and handed its caller `0`.
-  The rule matches the `--host` follow path in the exit-code table below —
+  The rule matches the `--device` follow path in the exit-code table below —
   "the remote's own exit code, or 1 if unknown".
 
   **Known cost (accepted).** The daemon reaps any session whose panes are all
@@ -2262,13 +2305,13 @@ schema (`--json` passes through each agent's native stream format).
   the audit record (EXEC-21) reflects the fallback that really ran, not
   always the primary (`lib/exec.ts:2379,2389`).
 
-#### 3.5 `--host` SSH dispatch
+#### 3.5 `--device` SSH dispatch
 
-- **EXEC-30 (MUST).** A headless `--host` run MUST re-exec
+- **EXEC-30 (MUST).** A headless `--device` run MUST re-exec
   `agents run <agent> "<prompt>" --quiet …` on the remote box over SSH,
   detached, with the remote's stdout/stderr redirected to a log file and its
   exit code written to a sidecar `.exit` file (`lib/hosts/dispatch.ts`:
-  `launchDetached`/`buildDetachedLaunchCommand`); an interactive `--host`
+  `launchDetached`/`buildDetachedLaunchCommand`); an interactive `--device`
   run streams the same style invocation live via `sshStream` instead
   (`runInteractiveOnHost`).
 - **EXEC-31 (MUST).** Actor-provenance env MUST cross the SSH hop:
@@ -2285,7 +2328,7 @@ schema (`--json` passes through each agent's native stream format).
   `resumeCheckpoint` are classified `'reject'` and MUST fail loud
   pre-dispatch rather than be silently dropped (`commands/exec.ts:1170-1173`).
 - **EXEC-33 (MUST NOT).** `--secrets` bundle VALUES MUST NEVER be resolved
-  locally and shipped to a `--host`-dispatched run — the dispatcher refuses
+  locally and shipped to a `--device`-dispatched run — the dispatcher refuses
   outright (`RUN_OPTION_REJECT_MESSAGES.secrets`,
   `lib/hosts/remote-cmd.ts:148-151`: *"--secrets cannot cross the SSH
   boundary — Keychain values are never sent to a host implicitly."*).
@@ -2328,7 +2371,7 @@ themselves are normative in [§Secrets](#secrets) — SEC-6..SEC-14 govern.)
 
 - **EXEC-38 (MUST).** `--secrets <bundle>@<host>` — a single bundle resolved
   from a PEER machine, independent of offloading the whole run via
-  `--host` (§3.5) — MUST resolve over SSH via `remoteResolveEnv` and inject
+  `--device` (§3.5) — MUST resolve over SSH via `remoteResolveEnv` and inject
   ephemerally, and MUST reject `--secrets-keys`/`--allow-expired` for a
   remote bundle ref, since those flags don't yet cross the SSH resolver
   (`commands/exec.ts:2247-2264`, `assertRemoteBundleFlagsUnsupported`).
@@ -2411,7 +2454,7 @@ resume (`--resume`/`--session-id`/`--name`), tmux (`--raw`/`--no-tmux`/
 `--disable-tmux`), reliability (`--timeout`/`--fallback`/`--balanced`/
 `--strategy`), `--acp`, budget (`--yes`), loop (`--loop`/
 `--resume-checkpoint`/`--max-iterations`/`--budget`/`--until`/`--interval`),
-and host/lease dispatch (`--host`/`--device`/`--remote-cwd`/`--no-follow`/
+and host/lease dispatch (`--device`/`--remote-cwd`/`--no-follow`/
 `--any`/`--copy-creds`/`--lease`/`--box`/`--keep-box`/`--fresh`/`--reuse`/`--bare`/
 `--tailscale`).
 
@@ -2424,8 +2467,8 @@ and host/lease dispatch (`--host`/`--device`/`--remote-cwd`/`--no-follow`/
 | `--acp` | `runAcpHeadless`'s own exit code, verbatim | `commands/exec.ts:2473` |
 | `--loop` | `loopExitCode(stoppedBy)`: `condition-met`/`max`→0, `budget`→7, `signal`→130, `stalled`/`error`→1 | `commands/exec.ts:373-387` |
 | Live budget hard-cap kill (non-loop) | 7 (`BUDGET_KILL_EXIT_CODE`) | `lib/exec.ts:2061,2048` |
-| `--host`, followed to completion | the remote's own exit code (read from the sidecar `.exit` file), or 1 if unknown | `commands/exec.ts:1484-1485` |
-| `--host`, `--no-follow` or follow window closed | 0 locally; the remote run continues untethered | `commands/exec.ts:1469-1485` |
+| `--device`, followed to completion | the remote's own exit code (read from the sidecar `.exit` file), or 1 if unknown | `commands/exec.ts:1484-1485` |
+| `--device`, `--no-follow` or follow window closed | 0 locally; the remote run continues untethered | `commands/exec.ts:1469-1485` |
 
 - **EXEC-IF-1 (MUST).** Exit code 7 MUST mean "budget-killed," never overloaded
   for any other failure — shared between the live watcher's hard-cap kill
@@ -2500,7 +2543,7 @@ and host/lease dispatch (`--host`/`--device`/`--remote-cwd`/`--no-follow`/
   "Pins CLAUDE_CONFIG_DIR for Claude, CODEX_HOME for Codex, and
   COPILOT_HOME for GitHub Copilot" (`lib/exec.ts:403-405`), silent on Kimi
   (which it also handles) and silent on the 12 agents it doesn't.
-- **EXEC-GAP-4.** A detached (`--no-follow`) `--host` run skips the local
+- **EXEC-GAP-4.** A detached (`--no-follow`) `--device` run skips the local
   `recordDispatchedRun` audit funnel entirely — no call site records it
   (EXEC-21's four sites are all reachable only from a path that knows the
   exit code). The launcher exits before an outcome is known, so a
@@ -2549,8 +2592,8 @@ codex, because `detectRateLimit` does not match auth-failure text
 (`lib/exec.ts:1977-1986,1698-1706`) — contrast a "5-hour limit" stderr, which
 does cascade.
 
-**GWT-E6 — `--host` forwards actor env, refuses `--secrets`.**
-Given `agents run claude "..." --host workbox --secrets prod`; When the
+**GWT-E6 — `--device` forwards actor env, refuses `--secrets`.**
+Given `agents run claude "..." --device workbox --secrets prod`; When the
 command is built; Then it fails loud pre-dispatch with
 `RUN_OPTION_REJECT_MESSAGES.secrets` (`lib/hosts/remote-cmd.ts:148-151`)
 rather than silently resolving `prod` locally and shipping the values; a

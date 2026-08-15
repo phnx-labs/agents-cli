@@ -97,7 +97,7 @@ registered, online devices over SSH:
 ```bash
 agents sessions --active           # this machine + every online device
 agents sessions --active --local   # this machine only (no SSH fan-out)
-agents sessions --active --host zion --host mac-mini   # specific machines
+agents sessions --active --device zion --device mac-mini   # specific machines
 agents sessions --active --json    # merged, machine-tagged, for scripts
 ```
 
@@ -110,28 +110,28 @@ Offload `agents run` itself to a registered host over SSH — it follows live by
 default; `--no-follow` detaches and returns immediately.
 
 ```bash
-agents run claude "profile this build" --host gpu-box   # run there, follow live
-agents run claude "..." --host gpu-box --no-follow        # detach
+agents run claude "profile this build" --device gpu-box   # run there, follow live
+agents run claude "..." --device gpu-box --no-follow        # detach
 
 agents hosts ps              # list dispatched runs and their status
 agents hosts stop <id>       # terminate a hung/detached run (alias: kill)
-agents hosts logs --host gpu-box   # pick a run on that host
+agents hosts logs --device gpu-box   # pick a run on that host
 agents hosts logs <id> -f        # follow a host-task log
 ```
 
 `agents hosts logs <id>` shows host-dispatch output; `agents events` (alias `agents logs`) is the timeline.
-local session by id, filters with `--host`/`--agent`/`--version`, and `-f`
+local session by id, filters with `--device`/`--agent`/`--version`, and `-f`
 follows a live one. `agents hosts logs <id>` is the host-only equivalent.
 `agents hosts stop <id>` SIGTERMs the remote process group from this machine and
 keeps the log for later inspection.
 
 Registered devices are part of the host pool automatically: they appear in
-`agents hosts list` (SOURCE `devices`), resolve as `--host` targets by name,
+`agents hosts list` (SOURCE `devices`), resolve as `--device` targets by name,
 and join capability routing once tagged (`agents hosts add <device> --cap gpu`
 enrolls straight from the device profile — no target needed). Password-auth
 devices are listed but can't carry a dispatch (BatchMode ssh); switch them with
 `agents devices set <name> --auth key`. Devices also work as cloud task targets
-(`agents cloud run "…" --host <device>`) and routines placement
+(`agents cloud run "…" --device <device>`) and routines placement
 (`agents routines add … --run-on <device>`).
 
 ## Tips

@@ -1687,14 +1687,14 @@ function deleteCachedClaudeOauth(service: string): void {
  *  1. The OS keychain (`getKeychainToken`). Canonical on macOS — Claude Code
  *     writes the token to the login keychain and we read it via `/usr/bin/security`.
  *  2. `<home>/.claude/.credentials.json`. On a headless Linux box (the
- *     `agents view --host <linux>` case) there is no reachable Secret Service, so
+ *     `agents view --device <linux>` case) there is no reachable Secret Service, so
  *     the Claude CLI stores its OAuth token in this plaintext file instead. The
  *     keychain read above finds nothing on that platform, so we fall back to the
  *     file. Same wrapped `{ claudeAiOauth }` shape, so one parser handles both.
  *     Mirrors `readClaudeCredentialsBlob` (cloud/rush.ts), the proven pattern.
  *
  * Without step 2 the live usage fetch got no token on Linux, so `agents view`
- * (run remotely over SSH by `--host`) rendered no usage bars even though the
+ * (run remotely over SSH by `--device`) rendered no usage bars even though the
  * account + plan — read from the plaintext `.claude.json` — showed fine.
  *
  * `opts.accessTokenCache` marks a read-only, access-token-only consumer (the

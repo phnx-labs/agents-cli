@@ -9,7 +9,7 @@ import {
   suppressStallBlock,
   suppressionDigest,
 } from './ask-classifier.js';
-import { blockIdForSession, listBlocks, publishBlock, type OpenBlock } from './feed.js';
+import { blockIdForSession, listBlocks, publishBlock, type OpenBlock } from './feed/feed.js';
 import { drain, mailboxDir } from './mailbox.js';
 
 function makeBlock(sessionId: string, text: string, over?: Partial<OpenBlock>): OpenBlock {

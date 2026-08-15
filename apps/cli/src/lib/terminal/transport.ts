@@ -5,7 +5,7 @@
  * are short-lived commands that create the surface and return, so waiting gives
  * a real success/failure. Remote: serialize the argv into one shell string and
  * hand it to `sshExec` — the same hardened SSH primitive `agents sessions
- * --host` and the browser driver use (target-injection guard, POSIX quoting,
+ * --device` and the browser driver use (target-injection guard, POSIX quoting,
  * connection multiplexing).
  */
 import { spawn } from 'child_process';

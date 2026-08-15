@@ -235,7 +235,7 @@ secrets bundle `share` WRITE_TOKEN                    # the raw write token — 
 
 Config is safe to sync (no secret); the write token lives only in the `share` bundle
 or a runtime `SHARE_WRITE_TOKEN` env var injected into an ephemeral agent. Push the
-bundle to a peer with `agents secrets export share --host <box>`; local agent,
+bundle to a peer with `agents secrets export share --device <box>`; local agent,
 teammate, and supported cloud launches inject the token automatically when the
 synced config exists and the token is already available.
 

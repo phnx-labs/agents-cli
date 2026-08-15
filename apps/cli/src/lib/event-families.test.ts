@@ -2,8 +2,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { emit, _resetForTest } from './events.js';
-import { appendActivityEvent } from './activity.js';
+import { emit, _resetForTest } from './feed/events.js';
+import { appendActivityEvent } from './feed/activity.js';
 import { readUnifiedEvents } from './event-stream.js';
 import { parseFamilyList, applyFamilies } from './event-families.js';
 

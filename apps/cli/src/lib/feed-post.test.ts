@@ -14,7 +14,7 @@ import {
   STATUS_POST_MAX_CHARS,
   STATUS_TITLE_MAX_CHARS,
 } from './feed-post.js';
-import { appendActivityEvent, readSessionActivity, tierForEvent } from './activity.js';
+import { appendActivityEvent, readSessionActivity, tierForEvent } from './feed/activity.js';
 import type { PidSessionEntry } from './session/pid-registry.js';
 
 function tmpActivityDir(): string {

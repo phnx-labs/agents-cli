@@ -1,6 +1,6 @@
 # Hosts — dispatch agents to your own machines
 
-> **Status:** Implemented. `agents hosts` and the `-H, --host` / `--device` flags
+> **Status:** Implemented. `agents hosts` and the `-D, --device` flag
 > ship today across virtually every first-class group (`repos`, `view`, `inspect`,
 > `usage`, `cost`, `doctor`, `list`, `sync`, `plugins`, `skills`, `status`,
 > `teams`, `routines`, …), on `agents run`, and on multi-host aggregators
@@ -12,7 +12,7 @@
 > the design rationale; see [concepts.md](concepts.md#devices--hosts) for
 > the concept overview and how hosts relate to the Tailscale-backed
 > `agents devices` registry, and [ssh-transport.md](ssh-transport.md) for
-> the shared, multiplexed SSH transport every `--host` command rides.
+> the shared, multiplexed SSH transport every `--device` command rides.
 
 `agents hosts` lets you run any agent (`claude`, `codex`, `droid`, …) on any of
 *your* machines — a Mac mini, a Windows mini, a couple of DGX Sparks — addressed
@@ -24,18 +24,17 @@ routines — see [concepts.md § Placement](concepts.md#placement). On
 `agents run`, prefer `--where`; the older flags remain aliases:
 
 ```
-agents run claude "fix the auth bug"   --where device:mac-mini   # = --host mac-mini
+agents run claude "fix the auth bug"   --where device:mac-mini   # = --device mac-mini
 agents run claude "…"                  --where auto              # = --device auto
 agents run claude "fix CI"            --where lease --mode edit # = --lease
-agents run claude "fix the auth bug"   --host mac-mini           # still works
-agents run codex  "port this to rust"  --host spark-0
-agents run droid  "triage the inbox"   --host win-mini
-agents run claude                      --host mac-mini            # interactive: TTY forwarded
+agents run claude "fix the auth bug"   --device mac-mini
+agents run codex  "port this to rust"  --device spark-0
+agents run droid  "triage the inbox"   --device win-mini
+agents run claude                      --device mac-mini          # interactive: TTY forwarded
 agents run claude "…"                  --device auto
-agents run claude "…"                  --host auto                # same (host value auto)
 ```
 
-Pass `auto` as the `--host` / `--device` value to pick a host from 14-day session
+Pass `auto` as the `--device` value to pick a host from 14-day session
 affinity (weighted by launch counts on `sessions.db` `machine`; most-used online
 device has highest probability). Harness stays the agent you typed — never
 auto-picked. Affinity failure degrades to local rather than aborting the run.
@@ -72,7 +71,7 @@ either.
 An empty pool is an error, not a shrug: with workers marked and none of them
 reachable, `--device auto` fails loud naming the fix rather than quietly running
 on the machine you are sitting at — including through `agents ssh auto` and the
-generic `--host auto` passthrough, which resolve `auto` via the same pool.
+generic `--device auto` passthrough, which resolve `auto` via the same pool.
 
 Roles live in the fleet-**shared** `fleet.devices.<name>.config.role` block of
 `~/.agents/agents.yaml` and travel with `agents repo push` / `pull`; the
@@ -84,15 +83,15 @@ device.
 
 ### `agents run auto` — all three routing layers
 
-`auto` as the AGENT name (`agents run auto "…"`, distinct from `--host auto`)
+`auto` as the AGENT name (`agents run auto "…"`, distinct from `--device auto`)
 composes the full dispatch stack:
 
-1. **Host** — with no `--host`/`--device` flag, the affinity pick above runs
+1. **Host** — with no `--device` flag, the affinity pick above runs
    (launches^1.3 weighted sample among online devices). A remote pick dispatches
    `agents run auto …` to that host over the same SSH path, and the harness +
    account layers resolve THERE (usage is per-machine); the dispatcher marks the
    host layer resolved (`AGENTS_RUN_AUTO_HOST_RESOLVED=1`) so the remote never
-   re-runs affinity and chain-hops. `--host <name>` pins this layer.
+   re-runs affinity and chain-hops. `--device <name>` pins this layer.
 2. **Harness** — `pickHarnessWeighted` (lib/rotate.ts): installed harnesses with
    ≥1 healthy account, weighted by best-account headroom
    (`100 − min routingUsed%`), sampled with the same `weightedRandomByCapacity`
@@ -142,7 +141,7 @@ suppresses the explanatory lines. The gate is `signInLaunchDecision` in
 `src/commands/utils.ts`.
 
 
-Pass `all` as the `--host` / `--device` value to fan any fleet-aware command out
+Pass `all` as the `--device` value to fan any fleet-aware command out
 across every registered device. The passthrough runs `agents <cmd> --json` on each
 box concurrently, then renders a grouped-by-OS roster with one row per device
 (`○ offline` rows for unreachable devices, `●` rows for successful ones). Add
@@ -154,16 +153,16 @@ agents output --device all             # per-device burn vs shipped output
 agents view --device all --json        # machine-readable fleet inventory
 ```
 
-`--devices all` and `--hosts all` are synonyms. Commands that already register
+`--devices all` fans out across every registered device. Commands that already register
 `--all-hosts` (e.g. `agents output --all-hosts`) keep their existing behavior.
 
-**The router only speaks for commands that exist.** `--host`/`--device` is handled
+**The router only speaks for commands that exist.** `--device` is handled
 before commander parses, so a group with no remote semantics gets a clear
-`` `agents <cmd>` does not support --host/--device `` instead of commander's raw
+`` `agents <cmd>` does not support --device `` instead of commander's raw
 `unknown option`. That answer is reserved for a **real** command: a name the CLI
 does not register falls straight through to `unknown command '<name>'` (plus its
-did-you-mean). Without that gate `agents session resume --host <box>` — one letter
-off `sessions`, which *does* take `--host` — was answered with a flag-support error
+did-you-mean). Without that gate `agents session resume --device <box>` — one letter
+off `sessions`, which *does* take `--device` — was answered with a flag-support error
 about a command nobody typed, sending the user looking in the wrong place
 (RUSH-2022). `KNOWN_TOP_LEVEL_COMMANDS`
 ([`src/lib/startup/command-registry.ts`](../src/lib/startup/command-registry.ts))
@@ -342,7 +341,7 @@ is a fast-follow `HostProvider`, opt-in when logged in — not a v1 dependency.
 ## Architecture
 
 ```
-agents run <agent> ["<task>"] --host <host>
+agents run <agent> ["<task>"] --device <device>
   │
   ├─ resolveHost(name)         one merged lookup (devices registry ∪ agents.yaml
   │                            overlay ∪ ssh_config) → {address,user,caps,os,…}   [Phase 1]
@@ -362,7 +361,7 @@ agents run <agent> ["<task>"] --host <host>
         clean detach / agent exit → local CLI exits with that code
 ```
 
-> Shipped surface: dispatch is `agents run <agent> ["<task>"] --host <name>`.
+> Shipped surface: dispatch is `agents run <agent> ["<task>"] --device <name>`.
 > With a prompt, the run is headless, follows live by default, and `--no-follow`
 > detaches; track with `agents hosts ps` and `agents hosts logs <id>`. With no
 > prompt (and a local TTY), the local TTY is forwarded over SSH and the agent runs
@@ -433,7 +432,7 @@ agents run <agent> ["<task>"] --host <host>
 > **Steering a detached dispatch.** `agents message <id|name> "<text>"` resolves a
 > `--no-follow` dispatch the same way `agents hosts ps`/`logs` do (dispatch id,
 > `--name` handle, or the remote agent's own session id) and reroutes the message
-> over `--host` to the box that actually owns the live process — no need to know
+> over `--device` to the box that actually owns the live process — no need to know
 > which host it landed on. A task that already finished fails loud naming its
 > status instead of silently doing nothing.
 
@@ -511,7 +510,7 @@ agent routing a GPU eval to a host tagged `gpu`).
 
 Resolution for an address goes through **one** resolver,
 [`matchHost`](../src/lib/hosts/registry.ts) (RUSH-1967), shared by every caller —
-`run --host`, the `sessions --host` fan-out, and `agents ssh` alike, so a token
+`run --device`, the `sessions --device` fan-out, and `agents ssh` alike, so a token
 can never dial two different boxes depending on which subcommand typed it. It
 merges three directories **per-field**, it does not let one shadow another:
 
@@ -530,7 +529,7 @@ auto` and `agents teams add --device auto` pick a device the same way `run`
 does) all resolve identically. `dispatchable` follows the device's auth method,
 so a password-auth device can't be made dispatchable by shadowing it with an
 inline entry. A bare unknown name resolves to nothing, which keeps
-capability-tag routing (`--host gpu`) and the `agents ssh` "Unknown device"
+capability-tag routing (`--device gpu`) and the `agents ssh` "Unknown device"
 verdict reachable. `agents ssh` additionally refuses an `auto` pick that lands
 on the machine you're already on — dialing yourself isn't the useful outcome
 `agents ssh auto` exists for — with a clear message instead of self-SSHing.
@@ -577,15 +576,15 @@ read-only: it diagnoses these states but never requests credentials or changes t
 
 Host dispatch has two shapes, chosen by whether a prompt is present:
 
-- **Headless** (`agents run <agent> "<task>" --host <h>`): the remote command is
+- **Headless** (`agents run <agent> "<task>" --device <h>`): the remote command is
   `agents run <agent> "<task>" --json` (+ `--mode`, `--model`, `--quiet`). The local
   CLI launches it detached, then incrementally tails the remote transcript.
-- **Interactive** (`agents run <agent> --host <h>`): the remote command is
+- **Interactive** (`agents run <agent> --device <h>`): the remote command is
   `agents run <agent>` with no prompt and no `--quiet`; the local CLI forwards its
   TTY over SSH (`ssh -tt`) so the remote agent starts its normal interactive UI.
   The tmux wrapper runs on the remote machine, exactly as it would if you had
   SSH'd in and typed `agents run <agent>` yourself. Passing both a prompt and
-  `--interactive` with `--host` also takes the interactive path and forwards the
+  `--interactive` with `--device` also takes the interactive path and forwards the
   prompt to the remote TUI.
 
 Headless dispatch supports Linux, macOS, and Windows OpenSSH hosts. Windows uses
@@ -692,7 +691,7 @@ mechanism that **already exists** — there is no new "sync engine":
 |---|---|---|
 | **`~/.agents` config** (commands, skills, hooks, memory) | The DotAgents user repo is git-backed — the box runs `agents repo pull user` (or `git pull`). One-time/idempotent bootstrap, **not** a per-dispatch push. | `agents repo pull user`; bootstrapped + verified by `ensureHostReady` / `hosts check` |
 | **Working codebase** | Phase 1: committed branch → `git fetch` + checkout on the box (per-repo, caller's `--remote-cwd`/`--branch`). Phase 2: uncommitted working tree → `rsync` over SSH (the differentiator). | per-repo git; rsync (Phase 2) |
-| **Secrets** | Persistent boxes self-auth once via `agents secrets` (keychain). Blank/leased boxes get an on-demand, never-on-disk injection. | `agents secrets export <bundle> --to-ssh --host <t>` (`secrets.ts:1089-1097`, env over ssh stdin) |
+| **Secrets** | Persistent boxes self-auth once via `agents secrets` (keychain). Blank/leased boxes get an on-demand, never-on-disk injection. | `agents secrets export <bundle> --to-ssh --device <t>` (`secrets.ts:1089-1097`, env over ssh stdin) |
 | **Sessions / `.history`** | **Not bulk-copied.** Recall is exposed as a *remote command*, not a file sync (below). | the routines daemon + `agents sessions`; selective `session/sync/` for the rare "make this transcript present" case |
 
 ### `ensureHostReady(name)` — the Phase 1 readiness precondition
@@ -707,7 +706,7 @@ sync substrate, so the precondition is thin and mostly one-time/cached:
    cheap, idempotent).
 3. **Agent installed** — remote `agents view --json` (fallback: `agents list`)
    confirms the requested harness exists. A **concrete version pin**
-   (`agents run codex@0.145.0 --host <box>`) is checked against that listing and
+   (`agents run codex@0.145.0 --device <box>`) is checked against that listing and
    **fails loud** when the pin is missing — naming the box, the missing pin, what
    *is* installed, and the install command — so a detached `--no-follow` dispatch
    never prints `Dispatched` for a pin the box cannot run (RUSH-2313). Aliases
@@ -804,7 +803,7 @@ just relocates the storm):
 - **Headless by default** — `agents run --json` when a prompt is supplied.
   Progress is summarized state from the transcript, not a live char stream.
   Interactive TTY forwarding is supported only when no prompt is given
-  (`agents run <agent> --host <h>`), so the user can drive the remote agent
+  (`agents run <agent> --device <h>`), so the user can drive the remote agent
   directly; the remote machine still owns the actual session and tmux wrapper.
 - **Bound concurrency** — cap simultaneous agents per host; a host's value is
   finite coordination capacity, not infinite parallelism.

@@ -17,10 +17,10 @@ import * as path from 'path';
 import * as os from 'os';
 import { createHash } from 'node:crypto';
 import { gzipSync, gunzipSync } from 'node:zlib';
-import { ensureLockTarget, withFileLock } from './fs-atomic.js';
-import { getUserAgentsDir } from './state.js';
-import { stampProvenance, resetEventProvenanceForTest } from './event-provenance.js';
-import type { ActorKind } from './actor.js';
+import { ensureLockTarget, withFileLock } from '../fs-atomic.js';
+import { getUserAgentsDir } from '../state.js';
+import { stampProvenance, resetEventProvenanceForTest } from '../event-provenance.js';
+import type { ActorKind } from '../actor.js';
 
 /** Lazy perf warehouse write — avoids a hard cycle at module load. */
 function recordPerfTiming(payload: {
@@ -34,7 +34,7 @@ function recordPerfTiming(payload: {
 }): void {
   try {
     // Dynamic import keeps events.ts free of a load-time dependency on perf/db.
-    void import('./perf/spool.js').then(({ recordSample }) => {
+    void import('../perf/spool.js').then(({ recordSample }) => {
       recordSample({
         kind: 'perf.timing',
         label: payload.label,

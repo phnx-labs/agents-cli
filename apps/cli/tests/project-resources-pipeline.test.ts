@@ -249,7 +249,7 @@ describe('project-resources: syncResourcesToVersion security defense', () => {
   // flip and the threat returns.
   it('does NOT materialize a project command into version home, regardless of cwd', async () => {
     const { repoRoot } = setupFixture();
-    const { syncResourcesToVersion } = await import('../src/lib/versions.js');
+    const { syncResourcesToVersion } = await import('../src/lib/installations/versions.js');
     const { resolveResource } = await import('../src/lib/resources.js');
 
     // Sanity: the fixture's project command resolves, so the resolver still
@@ -266,7 +266,7 @@ describe('project-resources: syncResourcesToVersion security defense', () => {
 
   it('does NOT materialize a project skill into version home, regardless of cwd', async () => {
     const { repoRoot } = setupFixture();
-    const { syncResourcesToVersion } = await import('../src/lib/versions.js');
+    const { syncResourcesToVersion } = await import('../src/lib/installations/versions.js');
     const { resolveResource } = await import('../src/lib/resources.js');
 
     const resolved = resolveResource('skills', 'myskill', repoRoot);

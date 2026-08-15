@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { blockIdForSession, type OpenBlock } from './feed.js';
+import { blockIdForSession, type OpenBlock } from './feed/feed.js';
 import {
   deriveOutcome,
   enrichBlockFromSession,

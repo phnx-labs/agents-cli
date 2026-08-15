@@ -12,7 +12,7 @@ import {
   adoptShadowingLauncher,
   listAgentsWithNonIsolatedInstalledVersions,
 } from '../../shims.js';
-import { getGlobalDefault } from '../../versions.js';
+import { getGlobalDefault } from '../../installations/versions.js';
 
 export const shadowingCheck: HealCheck = {
   id: 'shadowing',

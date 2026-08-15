@@ -1,6 +1,6 @@
 /**
  * RUSH-2022 — `KNOWN_TOP_LEVEL_COMMANDS` is the "does this command exist?"
- * predicate the `--host`/`--device` router consults before it can claim a
+ * predicate the `--device`/`--device` router consults before it can claim a
  * command has no remote semantics. A name that drifts out of it turns a real
  * command into a phantom `unknown command`, so this pins the set against the
  * command tree the CLI actually registers — the real modules, no mocks.

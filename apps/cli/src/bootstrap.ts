@@ -89,7 +89,7 @@ import { applyGlobalHelpConventions } from './lib/help.js';
 import { renderWhatsNew } from './lib/whats-new.js';
 import { IS_WINDOWS } from './lib/platform/index.js';
 import { getCliLaunch } from './lib/cli-entry.js';
-import { emit, emitFriction, redactArgs } from './lib/events.js';
+import { emit, emitFriction, redactArgs } from './lib/feed/events.js';
 import { stampProvenance } from './lib/event-provenance.js';
 import { die } from './lib/format.js';
 // Leaf (zero imports). Gates the dynamic passthrough import so the ~187ms
@@ -429,10 +429,11 @@ function maybeWarnMultiInstall(): void {
   for (const info of inventory) {
     console.error(chalk.gray(`  ${info.packageRoot}  ${info.version}  (${info.note})`));
   }
-  // RUSH-2705: only advertise `agents doctor --fix` for copies it will really
-  // delete. A healthy duplicate (>=1.22.30, not npx-cache, not legacy) is
-  // deliberately never auto-purged, so pointing at --fix for it is a remedy
-  // that no-ops forever — name the manual removal command instead.
+  // RUSH-2705/2713: only advertise `agents doctor --fix` for copies it will
+  // really delete. A duplicate --fix won't auto-purge (a healthy >=1.22.30 peer,
+  // OR a pre-1.22.30 copy left alone only because no fixed peer exists — the
+  // latter is genuinely vulnerable, not healthy) makes --fix a remedy that
+  // no-ops forever — name the manual removal command instead.
   const peers = inventory.filter((info) => !info.running);
   console.error(chalk.gray('Upgrades apply to the running copy.'));
   if (peers.some((info) => info.autoPurgeable)) {
@@ -883,8 +884,10 @@ async function runUpgrade(version: string | undefined, options: UpgradeOptions):
               `Could not purge ${purge.failed.length} stale install${purge.failed.length === 1 ? '' : 's'}; re-run agents doctor --fix.`,
             ));
           }
-          // RUSH-2705: healthy duplicates are never auto-purged — name the
-          // command that removes them instead of leaving a silent nag behind.
+          // RUSH-2705/2713: duplicates --fix won't auto-purge (a healthy
+          // >=1.22.30 peer, or a pre-1.22.30 copy with no fixed peer to fall back
+          // to — not healthy) — name the command that removes them instead of
+          // leaving a silent nag behind.
           for (const u of purge.unresolved) {
             console.log(chalk.gray(
               `Duplicate ${u.version} at ${u.packageRoot} left in place; remove it with: ${u.manualRemoveCommand}`,
@@ -977,14 +980,14 @@ program.on('command:*', (operands) => {
   if (minDist === 1 && closest && !RETIRED_TOP_LEVEL_COMMANDS.has(unknown)) {
     const args = process.argv.slice(2);
     args[0] = closest;
-    // The typo'd name was unknown, so the top-level --host router (which ran
+    // The typo'd name was unknown, so the top-level --device router (which ran
     // before commander parsing, against the ORIGINAL name) could not have
     // routed it - it correctly fell through to reach this handler at all
     // (that fallthrough is this ticket's own fix). But falling through to a
     // plain local re-parse means a routing flag on a corrected REAL
-    // host-routable command (e.g. `docto --host box`, corrected to `doctor`)
+    // host-routable command (e.g. `docto --device box`, corrected to `doctor`)
     // silently ran LOCALLY instead of remotely, with no error - worse than
-    // the loud "does not support --host" this ticket replaced. Re-run the
+    // the loud "does not support --device" this ticket replaced. Re-run the
     // router with the CORRECTED name before falling through to local parse;
     // it already no-ops when no routing flag is present. RUSH-2022 review r2.
     void (async () => {
@@ -1049,11 +1052,11 @@ const helpOrVersionRequested = passedArgs.some(
 const brandDisabled = disabledCommandsForActiveBrand();
 const requestedIsDisabled = requestedCommand !== undefined && brandDisabled.has(requestedCommand);
 
-// `--host` passthrough: run this invocation on a remote machine over SSH instead
+// `--device` passthrough: run this invocation on a remote machine over SSH instead
 // of locally. Handled before any local command registration / update check /
 // background sync — a remote run needs none of that. Only the allowlisted
 // read-only + config + teams commands route here; `run`/`sessions` are absent
-// from the table and fall through to their own richer `--host` handling below.
+// from the table and fall through to their own richer `--device` handling below.
 // `--help`/`--version` stay local (docs must work without a reachable host).
 //
 // RUSH-2374: gate the dynamic import on a routing flag actually being present.
@@ -1117,7 +1120,7 @@ if (isLazyRequest && !requestedIsDisabled) {
     !requestedIsDisabled &&
     !RETIRED_TOP_LEVEL_COMMANDS.has(requestedCommand)
   ) {
-    // Auto-correct: register ONLY the corrected command, then re-route --host
+    // Auto-correct: register ONLY the corrected command, then re-route --device
     // and reparse under the real name (RUSH-2329 + RUSH-2022 review r2).
     passedArgs[0] = closest;
     // Keep process.argv in sync for the command:* safety-net and any code that
@@ -1236,7 +1239,7 @@ if (
 // Skipped for --help/--version (RUSH-2454): same pure-docs gate as fold, the
 // update check, background sync, ensureInitialized, and the menu-bar self-heal.
 // The sentinel check itself is pure fs and does not load migrate.js — only a
-// missing/stale sentinel pays for `await import('./lib/migrate.js')` (which
+// missing/stale sentinel pays for `await import('./lib/installations/migrate.js')` (which
 // pulls the hosts/routine/teams/daemon/menubar graph).
 if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !helpOrVersionRequested) {
   try {
@@ -1253,7 +1256,7 @@ if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !helpOrVersionRequested) {
       }
     } catch { /* best-effort — fall through to run */ }
     if (needRun) {
-      const { runMigration } = await import('./lib/migrate.js');
+      const { runMigration } = await import('./lib/installations/migrate.js');
       await runMigration();
       try {
         fs.mkdirSync(path.dirname(sentinel), { recursive: true });
@@ -1315,10 +1318,10 @@ try {
       console.error(err.message);
       process.exit(1);
     }
-    // A --host targeting a password-auth device throws this from resolveHost.
-    // It carries an actionable message (switch to key auth);
-    // handling it here covers every resolveHost caller (run, teams,
-    // secrets --host) at the source instead of a catch at each call site.
+    // A --device targeting a password-auth device throws this from resolveHost.
+    // It carries an actionable message (switch to key auth / enroll as a host);
+    // handling it here covers every resolveHost caller (run, hosts check/rm,
+    // secrets --device) at the source instead of a catch at each call site.
     if (err.name === 'DeviceOffloadUnsupportedError') {
       console.error(err.message);
       process.exit(1);

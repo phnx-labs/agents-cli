@@ -2,7 +2,7 @@
  * Shared SSH exec primitive — the single hardened choke point for running a
  * command on a remote host over the system `ssh`.
  *
- * `agents run --host` dispatch and the browser driver both go through here so the
+ * `agents run --device` dispatch and the browser driver both go through here so the
  * connection hardening (`BatchMode`, `accept-new`, `ConnectTimeout`) and the
  * target-injection guard live in exactly one place. Target validation is the
  * canonical definition; `commands/secrets.ts` re-exports it.
@@ -95,7 +95,7 @@ export class RemoteUtf8Accumulator {
  * OpenSSH connection-multiplexing options. The first connection to a host opens
  * a control socket; subsequent connections (even from a *separate* `agents`
  * invocation) reuse it, skipping the TCP+auth handshake — so repeated
- * `--host <name>` calls to the same box feel local instead of paying ~100-300ms
+ * `--device <name>` calls to the same box feel local instead of paying ~100-300ms
  * each. `ControlPersist=60s` keeps the master alive briefly after the last
  * client exits. `%C` (a short fixed-length hash of local-host/remote/port/user)
  * keeps the socket path well under macOS's 104-char `sun_path` limit.

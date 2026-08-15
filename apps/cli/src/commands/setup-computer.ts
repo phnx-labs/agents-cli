@@ -44,7 +44,7 @@ export async function runComputerWizard(): Promise<boolean> {
     console.log(chalk.yellow('`agents setup computer` configures the macOS helper (local control).'));
     console.log(
       chalk.dim(
-        'On Windows, provision a remote host from a Mac/Linux box instead: `agents computer setup --host <device>`.',
+        'On Windows, provision a remote host from a Mac/Linux box instead: `agents computer setup --device <device>`.',
       ),
     );
     return false;

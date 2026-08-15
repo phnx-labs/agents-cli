@@ -194,14 +194,14 @@ agents run codex@ "review this branch"
 # Picks the host (14d usage affinity), the harness (installed CLIs weighted by
 # best-account headroom), and the account (balanced) -- all three layers.
 agents run auto "summarize recent commits"
-agents run auto --host yosemite-s0 "fix the flaky test"   # pin the host layer
+agents run auto --device yosemite-s0 "fix the flaky test"   # pin the host layer
 ```
 
 `run auto` excludes any harness whose accounts are all rate-limited or signed out, and exits nonzero with the earliest reset time when nothing anywhere is healthy.
 
 A trailing `@` opens an account picker before either an interactive or prompt-based run. Each installed version shows its account identity, exact version, login state, plan, and every available session, weekly, or monthly limit. Logged-out, rate-limited, and out-of-credit accounts remain visible with the reason they cannot be selected; signed-in accounts whose provider does not expose quota data stay selectable and say `limits unavailable`. The choice pins only that run and does not change your default version.
 
-Account selection is available for Claude, Codex, Gemini, Cursor, Antigravity, Grok, Kimi, Droid, and OpenCode. It requires a terminal and cannot be combined with `--resume`, `--strategy`/`--balanced`, `--lease`, or `--host`/`--device`; profiles and workflows must use their concrete host agent instead.
+Account selection is available for Claude, Codex, Gemini, Cursor, Antigravity, Grok, Kimi, Droid, and OpenCode. It requires a terminal and cannot be combined with `--resume`, `--strategy`/`--balanced`, `--lease`, or `--device`; profiles and workflows must use their concrete host agent instead.
 
 ### Chain agents
 
@@ -377,7 +377,7 @@ Pick up any past conversation and drop it back into a terminal:
 agents sessions resume                     # multi-select; packs two sessions per tab
 agents sessions resume "auth middleware"   # pre-filter the pool, then choose
 agents sessions resume --tmux              # into persistent tmux — survives editor restarts
-agents sessions resume --host zion --tmux  # resume on another machine over SSH
+agents sessions resume --device zion --tmux  # resume on another machine over SSH
 agents resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # original harness/version/device/mode
 agents run auto --resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # adapt if its account is unavailable
 ```
@@ -419,7 +419,7 @@ agents message tester "also cover the null case"
 ```bash
 agents feed                         # grouped by outcome (ticket/PR/worktree) across the fleet
 agents feed --flat                  # one row per agent (legacy)
-agents feed --host mac-mini         # scope the view to one or more hosts
+agents feed --device mac-mini         # scope the view to one or more hosts
 agents feed --local                 # skip the SSH fan-out
 agents feed --json                  # blocks stamped with their outcome key
 agents feed post --title "Halfway done" "CI green, watching merge"  # title + body
@@ -587,21 +587,21 @@ agents hosts add gpu-box
 agents hosts check gpu-box              # reachable? which agi-cli version?
 
 # Run there instead of locally
-agents run claude --host gpu-box "profile this build"   # headless: follows live by default
-agents run claude --host gpu-box                         # no prompt → interactive TTY over SSH (tmux-backed)
+agents run claude --device gpu-box "profile this build"   # headless: follows live by default
+agents run claude --device gpu-box                         # no prompt → interactive TTY over SSH (tmux-backed)
 agents accounts sync work --device gpu-box               # portable provider account only; native OAuth stays local
 agents run claude --device auto "…"                      # affinity-pick host from 14d usage (harness stays claude)
-agents run claude --host auto "…"                        # same — auto is a host value, not a harness name
+agents run claude --device auto "…"                        # same — auto is a host value, not a harness name
 agents view kimi --device all                            # fan out across every registered device (grouped-by-OS roster)
 agents output --device all                               # per-device burn vs shipped output across the fleet
 agents view --device all --json                          # machine-readable fleet inventory
 agents hosts ps                         # list dispatched runs + terminal status
 agents hosts stop <id>                  # terminate a hung/detached run (alias: kill)
-agents logs --host gpu-box              # pick a dispatched run — concise summary by default
+agents logs --device gpu-box              # pick a dispatched run — concise summary by default
 agents logs <id> --full                 # the full raw transcript / stdout (token-heavy)
 agents logs <id> -f                     # re-attach to a running one and follow
-agents view claude --host gpu-box       # inspect the remote install
-agents sync --host gpu-box              # make the remote machine current
+agents view claude --device gpu-box       # inspect the remote install
+agents sync --device gpu-box              # make the remote machine current
 agents doctor claude                    # diagnose every installed claude version
 agents doctor claude@latest             # diagnose only the newest installed version
 agents doctor claude@oldest             # diagnose only the oldest installed version
@@ -641,10 +641,10 @@ agents ssh mac-mini                     # hardened SSH: fails fast if offline,
 agents cp mac-mini:/abs/log.json /tmp/  # fleet file transfer; host:path or abs local
 agents cp -r /tmp/src/ yosemite-s0:~/dst/  # ~ and $HOME expand on the REMOTE, never locally
 agents hosts list                       # devices show up here too (one host pool)
-agents hosts add mac-mini --cap gpu     # tag a device for capability routing (--host gpu)
+agents hosts add mac-mini --cap gpu     # tag a device for capability routing (`--device` + `--cap gpu`)
 
 # Hosts as a task backend + scheduled placement
-agents cloud run "nightly benchmark" --host gpu-box --agent claude   # task in cloud ps AND hosts ps
+agents cloud run "nightly benchmark" --device gpu-box --agent claude   # task in cloud ps AND hosts ps
 agents routines add nightly -s "0 2 * * *" -a claude -p "run the sweep" --run-on gpu-box
 ```
 
@@ -685,9 +685,9 @@ email) and naming which harnesses use it — the fast way to see which accounts 
 and healthy across every machine. Scope either with `--agents <csv>` / `--device <csv>`, and
 add `--json` for the machine-readable per-host rows.
 
-**Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH and feed one host pool: devices appear in `agents hosts list` and capability routing without a second enrollment. On `--host` runs every `agents run` option is either forwarded (`--effort --env --timeout --loop …`), rejected loud (`--secrets` never crosses SSH implicitly), or consumed locally — nothing silently drops. See [docs/concepts.md](apps/cli/docs/concepts.md#devices--hosts).
+**Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH and feed one host pool: devices appear in `agents hosts list` and capability routing without a second enrollment. On `--device` runs every `agents run` option is either forwarded (`--effort --env --timeout --loop …`), rejected loud (`--secrets` never crosses SSH implicitly), or consumed locally — nothing silently drops. See [docs/concepts.md](apps/cli/docs/concepts.md#devices--hosts).
 
-Every `--host` command rides one multiplexed SSH engine, tuned for driving a fleet from a small laptop: the first call to a machine opens a control socket and every later call reuses it (no repeat TCP+auth handshake), connections carry keepalive so a dropped link dies in ~45 s instead of zombying, and following a remote run polls in a single round-trip per cycle. Measured against a Tailscale-relayed host: repeated calls **~6–7× faster**, dispatch readiness **~2×**, and the follow loop **~21× faster with 50% fewer local ssh spawns**. Design: [docs/ssh-transport.md](apps/cli/docs/ssh-transport.md) · reproduce: `node scripts/bench-ssh.mjs <host>`.
+Every `--device` command rides one multiplexed SSH engine, tuned for driving a fleet from a small laptop: the first call to a machine opens a control socket and every later call reuses it (no repeat TCP+auth handshake), connections carry keepalive so a dropped link dies in ~45 s instead of zombying, and following a remote run polls in a single round-trip per cycle. Measured against a Tailscale-relayed host: repeated calls **~6–7× faster**, dispatch readiness **~2×**, and the follow loop **~21× faster with 50% fewer local ssh spawns**. Design: [docs/ssh-transport.md](apps/cli/docs/ssh-transport.md) · reproduce: `node scripts/bench-ssh.mjs <host>`.
 
 ---
 
@@ -718,7 +718,7 @@ Team state is observable via `agents teams list --json` / `agents teams status -
 
 ## Cloud
 
-Some work shouldn't tie up your laptop. `agents cloud run` hands a task to a managed provider that clones the repo, plans, implements, tests, and opens a PR -- while your terminal stays free. The `host` provider dispatches the same way onto machines you own: `agents cloud run "…" --host gpu-box` (tasks track in `agents cloud ps` and `agents hosts ps` alike).
+Some work shouldn't tie up your laptop. `agents cloud run` hands a task to a managed provider that clones the repo, plans, implements, tests, and opens a PR -- while your terminal stays free. The `host` provider dispatches the same way onto machines you own: `agents cloud run "…" --device gpu-box` (tasks track in `agents cloud ps` and `agents hosts ps` alike).
 
 <p align="center">
   <img src="assets/cloud.svg" alt="agents cloud run dispatches one prompt to a managed provider (Rush, Codex, Cursor, Factory, or Antigravity) that runs while you keep working" width="100%" />
@@ -747,7 +747,7 @@ Five managed backends behind one interface (`agents cloud providers`):
 
 Auto-routes each `--agent` to its native cloud, or pin the backend with `--provider`. Instead of dispatching now, register a run as an **event trigger** with `--on pull_request` (also `push`, `issue_comment`, `workflow_run`) -- it persists as a trigger-bound routine that fires on the event. `--json` on every subcommand for scripting.
 
-The same dispatch is a placement on `agents run`: `agents run claude "fix the flaky e2e" --cloud --repo acme/api` routes through the identical provider registry and tracks in `agents cloud list/status/logs` alike. `--cloud` sits alongside `--host`/`--device`/`--lease` as one of three placements (local, machine, cloud) and is mutually exclusive with them; `--where cloud[:provider]` is the one-door spelling. Agents without a native cloud fail loud unless `--provider` is given.
+The same dispatch is a placement on `agents run`: `agents run claude "fix the flaky e2e" --cloud --repo acme/api` routes through the identical provider registry and tracks in `agents cloud list/status/logs` alike. `--cloud` sits alongside `--device`/`--lease` as one of three placements (local, machine, cloud) and is mutually exclusive with them; `--where cloud[:provider]` is the one-door spelling. Agents without a native cloud fail loud unless `--provider` is given.
 
 ---
 
@@ -1087,7 +1087,7 @@ agents routines add nightly-drain --schedule "0 3 * * *" --agent claude \
   --prompt "Drain the local work queue"
 
 agents routines devices nightly-drain --set yosemite-s0           # one schedule owner
-agents routines list --host yosemite-s0                            # query another device
+agents routines list --device yosemite-s0                            # query another device
 
 # Signed webhook trigger: Linear issue labeled "agent" fires a routine
 agents routines add agent-labeled-issue --on linear:Issue --action update \

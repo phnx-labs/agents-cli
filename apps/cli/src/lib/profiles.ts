@@ -414,7 +414,7 @@ export function profileFromPreset(profileName: string, preset: Preset, version?:
 
 /**
  * Env var each host CLI reads to override its model. Mirror of the read-side
- * `MODEL_ENV_KEYS` above, keyed by host so a one-shot `--host <agent> --model
+ * `MODEL_ENV_KEYS` above, keyed by agent so a one-shot `--device <agent> --model
  * <id>` writes the model onto the var that host actually honors.
  */
 const MODEL_ENV_KEY_BY_HOST: Partial<Record<AgentId, string>> = {

@@ -7,7 +7,54 @@ import { resolveBrowserTaskIdleMs } from '../device-config.js';
 import { BrowserService } from './service.js';
 import { startDaemon, stopDaemon } from '../daemon.js';
 import { getCliVersion } from '../version.js';
+import { compareVersions } from '../agent-spec/primitives.js';
+import { getDaemonLogPath } from '../daemon.js';
+import { resolveCallerIdentity } from './caller-identity.js';
+import { actionable } from './service.js';
 import type { IPCRequest, IPCResponse, RefNodeJson } from './types.js';
+
+/**
+ * Verbs that imply a page and may CREATE a task when none resolves.
+ * Observation-only verbs (console/logs/…) resolve but never create — an
+ * empty `agents browser logs` must not open a browser just to return [].
+ */
+const PAGE_CREATE_VERBS = new Set<IPCRequest['action']>([
+  'navigate',
+  'tab-add',
+  'evaluate',
+  'screenshot',
+  'pdf',
+  'refs',
+  'click',
+  'type',
+  'press',
+  'hover',
+  'scroll',
+  'set-viewport',
+  'set-device',
+  'wait',
+  'set-download-path',
+  'wait-download',
+  'upload',
+  'record-start',
+]);
+
+/** Task-scoped verbs that resolve identity but never create. */
+const PAGE_RESOLVE_VERBS = new Set<IPCRequest['action']>([
+  ...PAGE_CREATE_VERBS,
+  'tab-focus',
+  'tab-close',
+  'tab-list',
+  'console',
+  'errors',
+  'requests',
+  'response-body',
+  'getAppLogs',
+  'record-stop',
+]);
+
+/** Close verbs never create a task. */
+const CLOSE_VERBS = new Set<IPCRequest['action']>(['done', 'stop']);
 
 const SOCKET_NAME = 'browser.sock';
 
@@ -122,7 +169,8 @@ export class BrowserIPCConnection {
   }
 
   request(request: IPCRequest): Promise<IPCResponse> {
-    const result = this.tail.then(() => this.requestOnce(request));
+    const stamped = stampCallerIdentity(request);
+    const result = this.tail.then(() => this.requestOnce(stamped));
     this.tail = result.then(() => undefined, () => undefined);
     return result;
   }
@@ -350,6 +398,50 @@ export class BrowserIPCServer {
     });
   }
 
+  /**
+   * Resolve `request.task` from caller identity when omitted. Page verbs may
+   * create; done/stop never create. Returns an error response to short-circuit
+   * the action, or undefined when the request is ready (task filled in).
+   */
+  private async bindTask(
+    request: IPCRequest,
+  ): Promise<IPCResponse | undefined> {
+    const createIfMissing = PAGE_CREATE_VERBS.has(request.action);
+    const isClose = CLOSE_VERBS.has(request.action);
+
+    // stop with --profile only (no task) is handled by the stop case itself.
+    if (request.action === 'stop' && request.profile && !request.task) return undefined;
+
+    try {
+      const resolved = await this.service.resolveOrCreateTask({
+        task: request.task,
+        profile: request.profile,
+        actor: request.actor,
+        launchId: request.launchId,
+        sessionId: request.sessionId,
+        createIfMissing,
+        title: request.title,
+        url: request.url,
+      });
+      if (!resolved) {
+        if (isClose) {
+          return { ok: true, message: 'nothing to close' };
+        }
+        return {
+          ok: false,
+          error: actionable(
+            'No browser task for this session.',
+            'Next: agents browser navigate <url>  |  agents browser start',
+          ),
+        };
+      }
+      request.task = resolved.task.name;
+      return undefined;
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   private async handleRequest(request: IPCRequest): Promise<IPCResponse> {
     if ((request.action as string) === 'upload-stage') {
       const source = (request as IPCRequest & { source?: string }).source;
@@ -360,6 +452,12 @@ export class BrowserIPCServer {
       return { ok: true, path: result.path };
     }
 
+    // Task-scoped actions: resolve identity / create / refuse once here.
+    if (PAGE_RESOLVE_VERBS.has(request.action) || CLOSE_VERBS.has(request.action)) {
+      const early = await this.bindTask(request);
+      if (early) return early;
+    }
+
     switch (request.action) {
       case 'version': {
         return { ok: true, version: getCliVersion() };
@@ -367,7 +465,7 @@ export class BrowserIPCServer {
 
       case 'start': {
         if (!request.profile) {
-          return { ok: false, error: 'Profile required' };
+          return { ok: false, error: actionable('Profile required.', 'Next: agents browser profiles list') };
         }
         const result = await this.service.start(request.profile, {
           taskName: request.taskName,
@@ -378,6 +476,7 @@ export class BrowserIPCServer {
           actor: request.actor,
           launchId: request.launchId,
           sessionId: request.sessionId,
+          title: request.title,
         });
         return {
           ok: true,
@@ -407,22 +506,46 @@ export class BrowserIPCServer {
 
       case 'done': {
         if (!request.task) {
-          return { ok: false, error: 'Task required' };
+          return { ok: true, message: 'nothing to close' };
         }
         const result = await this.service.done(request.task);
-        return { ok: result.ok, error: result.ok ? undefined : 'Task not found' };
+        return {
+          ok: result.ok,
+          error: result.ok
+            ? undefined
+            : actionable(
+                `Task "${request.task}" not found.`,
+                'Next: agents browser status',
+              ),
+          task: result.ok ? request.task : undefined,
+        };
       }
 
       case 'stop': {
         if (request.task) {
           const result = await this.service.stop(request.task);
-          return { ok: result.ok, error: result.ok ? undefined : 'Task not found' };
+          return {
+            ok: result.ok,
+            error: result.ok
+              ? undefined
+              : actionable(
+                  `Task "${request.task}" not found.`,
+                  'Next: agents browser status',
+                ),
+            task: result.ok ? request.task : undefined,
+          };
         }
         if (request.profile) {
           await this.service.stopProfile(request.profile);
           return { ok: true };
         }
-        return { ok: false, error: 'Task or profile required' };
+        return {
+          ok: false,
+          error: actionable(
+            'Task or profile required.',
+            'Next: agents browser status  |  agents browser stop --profile <name>',
+          ),
+        };
       }
 
       case 'status': {
@@ -436,15 +559,30 @@ export class BrowserIPCServer {
       }
 
       case 'navigate': {
-        if (!request.task || !request.url) {
-          return { ok: false, error: 'Task and URL required' };
+        if (!request.url) {
+          return {
+            ok: false,
+            error: actionable(
+              'URL required.',
+              'Next: agents browser navigate <url>',
+            ),
+          };
+        }
+        if (!request.task) {
+          return {
+            ok: false,
+            error: actionable(
+              'No browser task for this session.',
+              'Next: agents browser navigate <url>  |  agents browser start',
+            ),
+          };
         }
         const result = await this.service.navigate(
           request.task,
           request.url,
           request.profile
         );
-        return { ok: true, tabId: result.tabId };
+        return { ok: true, tabId: result.tabId, task: request.task };
       }
 
       case 'tab-add': {
@@ -517,7 +655,13 @@ export class BrowserIPCServer {
 
       case 'screenshot': {
         if (!request.task) {
-          return { ok: false, error: 'Task required' };
+          return {
+            ok: false,
+            error: actionable(
+              'No browser task for this session.',
+              'Next: agents browser navigate <url>  |  agents browser start',
+            ),
+          };
         }
         const shot = await this.service.screenshot(
           request.task,
@@ -525,7 +669,14 @@ export class BrowserIPCServer {
           request.path,
           request.quality
         );
-        return { ok: true, path: shot.path, bytes: shot.bytes, width: shot.width, height: shot.height };
+        return {
+          ok: true,
+          path: shot.path,
+          bytes: shot.bytes,
+          width: shot.width,
+          height: shot.height,
+          task: request.task,
+        };
       }
 
       case 'pdf': {
@@ -751,17 +902,31 @@ export class BrowserIPCServer {
 let versionReconciledThisProcess = false;
 
 /**
- * Decide whether a running daemon is stale and must be restarted. A daemon
- * is stale when it reports a concrete version that differs from this CLI's.
+ * Decide whether a running daemon is stale and must be restarted.
+ *
+ * FORWARD ONLY: restart when the daemon is *older* than this CLI so a newer
+ * install loads current code. An older CLI rides a newer daemon instead of
+ * evicting it — two installs sharing one daemon dir (keyed off $HOME) must
+ * not flap the daemon indefinitely.
+ *
  * `undefined`/`'unknown'` means the daemon is too old to answer the `version`
  * action reliably — don't churn it on that ambiguous signal.
+ *
+ * When numeric compare cannot order two distinct strings (e.g. two
+ * `0.0.0-dev.*` builds), treat the mismatch as a restart so a concrete
+ * code change still loads.
  */
 export function shouldRestartStaleDaemon(
   daemonVersion: string | undefined,
   clientVersion: string
 ): boolean {
   if (!daemonVersion || daemonVersion === 'unknown') return false;
-  return daemonVersion !== clientVersion;
+  if (daemonVersion === clientVersion) return false;
+  const cmp = compareVersions(daemonVersion, clientVersion);
+  if (cmp < 0) return true; // daemon older than client → upgrade forward
+  if (cmp > 0) return false; // daemon newer → older CLI rides it
+  // cmp === 0 but strings differ (unorderable tails like 0.0.0-dev.abc)
+  return true;
 }
 
 /**
@@ -802,7 +967,25 @@ export async function sendIPCRequest(
   request: IPCRequest,
   opts: IPCRequestOptions = {}
 ): Promise<IPCResponse> {
-  return sendRawIPCRequest(request, opts);
+  // Stamp caller identity ONCE here so the 28+ call sites don't each have to.
+  // The daemon cannot resolve the caller's actor/session itself.
+  const stamped = stampCallerIdentity(request);
+  return sendRawIPCRequest(stamped, opts);
+}
+
+/**
+ * Fill actor / launchId / sessionId from the calling process when the request
+ * left them blank. Explicit values on the request always win.
+ */
+export function stampCallerIdentity(request: IPCRequest): IPCRequest {
+  if (request.actor && request.launchId && request.sessionId) return request;
+  const id = resolveCallerIdentity();
+  return {
+    ...request,
+    actor: request.actor ?? id.actor,
+    launchId: request.launchId ?? id.launchId,
+    sessionId: request.sessionId ?? id.sessionId,
+  };
 }
 
 /**
@@ -899,7 +1082,13 @@ async function prepareIPC(
       await waitForSocket(socketPath, 6000);
     }
     if (!(await isDaemonReachable())) {
-      throw new Error('Failed to start browser daemon');
+      throw new Error(
+        actionable(
+          'Failed to start browser daemon.',
+          `Log: ${getDaemonLogPath()}`,
+          'Next: agents doctor   (checks for a second agents-cli install)',
+        ),
+      );
     }
     await new Promise((r) => setTimeout(r, 300));
   }

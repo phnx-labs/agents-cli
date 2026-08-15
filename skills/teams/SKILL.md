@@ -65,8 +65,8 @@ agents teams start my-feature --watch
 Place teammates on **different machines** across your fleet (from `agents devices`)
 instead of all on the box running `teams start`. One orchestrator still drives the
 DAG, polls status, and cleans up — teammates just execute over SSH. One vocabulary —
-`--device` / `--devices` (aliases `--host` / `--hosts`); all optional (omit it and
-every teammate runs local, exactly as before).
+`--device` / `--devices` only (`--host` / `--hosts` is an unknown option);
+all optional (omit it and every teammate runs local, exactly as before).
 
 ```bash
 # Send ONE teammate elsewhere — no pool needed
@@ -99,7 +99,7 @@ agents teams add feat claude "..." --name w2 --device yosemite-s0    # or pin
 The trap that turns one team into a teardown-and-rebuild — get these right up front:
 
 1. **`--remote-cwd` does NOT place a teammate or set its repo.** It rides the shared
-   `--host` flag family but `teams add` ignores it (and now **rejects** it with
+   `--device` flag family but `teams add` ignores it (and now **rejects** it with
    guidance). Place a teammate with `--device <host>`; the code comes from the
    team's `--repo`. There is **no per-teammate repo/path override** — don't reach
    for `--remote-cwd` to send one teammate to a different repo.
@@ -121,7 +121,7 @@ The trap that turns one team into a teardown-and-rebuild — get these right up 
    - **remote** (`--device`) teammate → forks from the host's **freshly-fetched
      `origin/<default>`** automatically — no manual sync needed.
 
-4. **For a raw `--host` run (not teams), `--remote-cwd` resolves on the host.** Pass a
+4. **For a raw `--device` run (not teams), `--remote-cwd` resolves on the host.** Pass a
    single-quoted `'$HOME/…'` path (an unquoted `~` expands *locally* — `/Users/you`
    won't exist on a Linux worker) or a valid remote absolute path.
 

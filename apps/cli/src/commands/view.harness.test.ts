@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHarnessBlocks } from './view.js';
 import { profileSummary } from '../lib/profiles.js';
-import * as versions from '../lib/versions.js';
+import * as versions from '../lib/installations/versions.js';
 import type { AgentId } from '../lib/types.js';
 
 let lines: string[];

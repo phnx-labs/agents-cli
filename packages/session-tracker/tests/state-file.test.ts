@@ -1,5 +1,34 @@
-import { describe, it, expect } from 'vitest';
-import { parseState } from '../src/state-file.js';
+import { describe, it, expect, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { spawn } from 'child_process';
+import { parseState, writeStateAtomic, cleanupOrphanedStateFiles, stateFilePath } from '../src/state-file.js';
+import type { SessionState } from '../src/types.js';
+
+function tmpStateDir(): string {
+  const dir = path.join(os.tmpdir(), `session-tracker-state-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+async function deadPid(): Promise<number> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ['-e', 'process.exit(0)']);
+    child.on('exit', () => resolve(child.pid!));
+  });
+}
+
+function makeState(pid: number): SessionState {
+  return {
+    session_id: 'sess-123',
+    agent: 'claude',
+    cwd: '/tmp',
+    pid,
+    ts: Date.now(),
+    method: 'hook-stdin',
+  };
+}
 
 describe('parseState', () => {
   it('parses the canonical schema written by hook.sh', () => {
@@ -37,5 +66,75 @@ describe('parseState', () => {
 
   it('rejects malformed JSON', () => {
     expect(parseState('{not json')).toBeNull();
+  });
+});
+
+
+describe('writeStateAtomic', () => {
+  it('writes a valid state file and cleans up its temp file on failure', async () => {
+    const dir = tmpStateDir();
+    try {
+      const state = makeState(process.pid);
+      await writeStateAtomic(state, dir);
+
+      const final = stateFilePath(process.pid, dir);
+      expect(fs.existsSync(final)).toBe(true);
+      expect(fs.readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toHaveLength(0);
+
+      // A second write for the same pid should overwrite cleanly.
+      await writeStateAtomic({ ...state, ts: state.ts + 1 }, dir);
+      const files = fs.readdirSync(dir);
+      expect(files.filter((f) => f === `${process.pid}.json`)).toHaveLength(1);
+      expect(files.filter((f) => f.endsWith('.tmp'))).toHaveLength(0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('cleanupOrphanedStateFiles', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('removes dead-pid records, zero-byte JSON files, and orphaned temp files', async () => {
+    const dir = tmpStateDir();
+    dirs.push(dir);
+
+    const dead = await deadPid();
+
+    // Live-pid record must survive.
+    const liveState = makeState(process.pid);
+    await writeStateAtomic(liveState, dir);
+
+    // Dead-pid record must be removed.
+    fs.writeFileSync(path.join(dir, `${dead}.json`), JSON.stringify(makeState(dead)), 'utf8');
+
+    // Zero-byte JSON file must be removed.
+    fs.writeFileSync(path.join(dir, '999999.json'), '', 'utf8');
+
+    // Orphaned temp file for a dead pid must be removed.
+    fs.writeFileSync(path.join(dir, `.${dead}.abcdef`), 'orphan', 'utf8');
+
+    // Orphaned temp file for the live pid can stay (it may be in use).
+    fs.writeFileSync(path.join(dir, `.${process.pid}.uvwxyz`), 'in-flight', 'utf8');
+
+    const removed = await cleanupOrphanedStateFiles(dir);
+    expect(removed).toBe(3);
+
+    const remaining = new Set(fs.readdirSync(dir));
+    expect(remaining.has(`${process.pid}.json`)).toBe(true);
+    expect(remaining.has(`.${process.pid}.uvwxyz`)).toBe(true);
+    expect(remaining.has(`${dead}.json`)).toBe(false);
+    expect(remaining.has('999999.json')).toBe(false);
+    expect(remaining.has(`.${dead}.abcdef`)).toBe(false);
+  });
+
+  it('is a no-op when the state directory does not exist', async () => {
+    const removed = await cleanupOrphanedStateFiles(path.join(os.tmpdir(), 'does-not-exist-' + Date.now()));
+    expect(removed).toBe(0);
   });
 });

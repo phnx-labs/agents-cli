@@ -4,7 +4,7 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { generateShimScript, generateVersionedAliasScript, hasAliasShadowingShim, shimTargetsFor, onDiskShimFile, SHIM_SCHEMA_VERSION } from './shims.js';
-import { getProjectVersion } from './versions.js';
+import { getProjectVersion } from './installations/versions.js';
 
 const tempDirs: string[] = [];
 

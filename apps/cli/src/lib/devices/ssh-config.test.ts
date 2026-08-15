@@ -2,7 +2,7 @@
  * ssh_config render correctness.
  *
  * The rendered include is what makes plain ssh / scp / rsync / `agents
- * sessions --host` resolve logical device names. Real bugs guarded: emitting a
+ * sessions --device` resolve logical device names. Real bugs guarded: emitting a
  * Host with no HostName (ssh would fall through to DNS), preferring the IP over
  * the friendlier DNS name, dropping the User line, or churning the file order
  * between runs (noisy diffs).

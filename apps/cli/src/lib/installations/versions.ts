@@ -23,19 +23,19 @@ import { promisify } from 'util';
 import chalk from 'chalk';
 import * as TOML from 'smol-toml';
 import { checkbox, select, confirm } from '@inquirer/prompts';
-import type { AgentId, DiscoveredPlugin, VersionResources } from './types.js';
-import { getVersionsDir, getShimsDir, ensureAgentsDir, readMeta, writeMeta, getCommandsDir, getSkillsDir, getHooksDir, getResolvedRulesDir, getUserRulesDir, getPermissionsDir, getSubagentsDir, getVersionResources, recordVersionResources, ensureVersionResourcePatterns, getMcpDir, getProjectAgentsDir, getPromptcutsPath, getUserPromptcutsPath, getEnabledExtraRepos, getAgentsDir, getOptionalUserAgentsDir, getUserAgentsDir, getTrashVersionsDir, getActiveRulesPreset, getHomeDir } from './state.js';
-import { defaultPatterns, expandPatterns } from './resource-patterns.js';
-import { resolveResource, listResources } from './resources.js';
-import { activeRulesPreset, filterNamesForActiveResourceProfile } from './resource-profiles.js';
+import type { AgentId, DiscoveredPlugin, VersionResources } from '../types.js';
+import { getVersionsDir, getShimsDir, ensureAgentsDir, readMeta, writeMeta, getCommandsDir, getSkillsDir, getHooksDir, getResolvedRulesDir, getUserRulesDir, getPermissionsDir, getSubagentsDir, getVersionResources, recordVersionResources, ensureVersionResourcePatterns, getMcpDir, getProjectAgentsDir, getPromptcutsPath, getUserPromptcutsPath, getEnabledExtraRepos, getAgentsDir, getOptionalUserAgentsDir, getUserAgentsDir, getTrashVersionsDir, getActiveRulesPreset, getHomeDir } from '../state.js';
+import { defaultPatterns, expandPatterns } from '../resource-patterns.js';
+import { resolveResource, listResources } from '../resources.js';
+import { activeRulesPreset, filterNamesForActiveResourceProfile } from '../resource-profiles.js';
 // VERSION_RE + compareVersions are owned by the agent-spec engine primitives
 // (single source of truth). Re-exported below so existing importers of
 // `compareVersions` from './versions.js' keep working.
-import { VERSION_RE, compareVersions } from './agent-spec/primitives.js';
-import { AGENTS, agentConfigDirName, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig, resolveAgentName, formatAgentError, findInPath, isSelfUpdatingAgent, isAgentHardDeprecated, hardDeprecationError } from './agents.js';
-import { getDefaultPermissionSet, applyPermissionsToVersion as applyPermsToVersion, discoverPermissionGroups, getTotalPermissionRuleCount, buildPermissionsFromGroups, CODEX_RULES_FILENAME, getActivePermissionPresetName, readPermissionPresetRecipe, PERMISSION_PRESET_ENV_VAR } from './permissions.js';
-import { installMcpServers, parseMcpConfigForScan, isProjectMcpTrusted } from './mcp.js';
-import { markdownToToml } from './convert.js';
+import { VERSION_RE, compareVersions } from '../agent-spec/primitives.js';
+import { AGENTS, agentConfigDirName, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig, resolveAgentName, formatAgentError, findInPath, isSelfUpdatingAgent, isAgentHardDeprecated, hardDeprecationError } from '../agents.js';
+import { getDefaultPermissionSet, applyPermissionsToVersion as applyPermsToVersion, discoverPermissionGroups, getTotalPermissionRuleCount, buildPermissionsFromGroups, CODEX_RULES_FILENAME, getActivePermissionPresetName, readPermissionPresetRecipe, PERMISSION_PRESET_ENV_VAR } from '../permissions.js';
+import { installMcpServers, parseMcpConfigForScan, isProjectMcpTrusted } from '../mcp.js';
+import { markdownToToml } from '../convert.js';
 import {
   createVersionedAlias,
   removeVersionedAlias,
@@ -43,32 +43,32 @@ import {
   getConfigSymlinkVersion,
   ensureClaudeInsideSymlink,
   assertIsolationBoundary,
-} from './shims.js';
-import { importInstallScriptBinary } from './import.js';
-import { createInstallation } from './installations/store.js';
-import { INSTALLATION_RECORD_FILE } from './installations/types.js';
-import { IS_WINDOWS, composeWin32CommandLine } from './platform/index.js';
-import { listInstalledSubagents, transformSubagentForClaude, syncSubagentToOpenclaw } from './subagents.js';
-import { listInstalledWorkflows, syncWorkflowToVersion } from './workflows.js';
-import { parseHookManifest, registerHooksToSettings, selectHookManifest, pruneVersionHomeHookEntriesFromSettings } from './hooks.js';
-import { supports, explainSkip, capableAgents } from './capabilities.js';
-import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills, marketplaceSpecForName } from './plugins/plugins.js';
-import { composeRulesFromState } from './rules/compose.js';
-import { loadManifest, saveManifest, buildManifest as buildSyncManifest, isStale } from './staleness/index.js';
-import { pruneRemovedResources, type PrunableKind } from './staleness/prune.js';
-import { emit } from './events.js';
-import { safeJoin } from './paths.js';
+} from '../shims.js';
+import { importInstallScriptBinary } from '../import.js';
+import { createInstallation } from './store.js';
+import { INSTALLATION_RECORD_FILE } from './types.js';
+import { IS_WINDOWS, composeWin32CommandLine } from '../platform/index.js';
+import { listInstalledSubagents, transformSubagentForClaude, syncSubagentToOpenclaw } from '../subagents.js';
+import { listInstalledWorkflows, syncWorkflowToVersion } from '../workflows.js';
+import { parseHookManifest, registerHooksToSettings, selectHookManifest, pruneVersionHomeHookEntriesFromSettings, installSessionTrackerHookSync, installSessionTrackerHook } from '../hooks.js';
+import { supports, explainSkip, capableAgents } from '../capabilities.js';
+import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills, marketplaceSpecForName } from '../plugins/plugins.js';
+import { composeRulesFromState } from '../rules/compose.js';
+import { loadManifest, saveManifest, buildManifest as buildSyncManifest, isStale } from '../staleness/index.js';
+import { pruneRemovedResources, type PrunableKind } from '../staleness/prune.js';
+import { emit } from '../feed/events.js';
+import { safeJoin } from '../paths.js';
 import {
   installCommandSkillToVersion,
   listCommandSkillsInVersion,
   readSkillSourceCommandMarker,
   shouldAlsoInstallCommandAsSkill,
   shouldInstallCommandAsSkill,
-} from './command-skills.js';
-import { getWriter, getDetector } from './staleness/registry.js';
-import { syncMemoryToVersionHome } from './memory.js';
-import { listPluginSkillNames, resolveCommandSource, resolveSkillSource } from './staleness/writers/sources.js';
-import { syncProjectResourcesToAgent } from './project-resources.js';
+} from '../command-skills.js';
+import { getWriter, getDetector } from '../staleness/registry.js';
+import { syncMemoryToVersionHome } from '../memory.js';
+import { listPluginSkillNames, resolveCommandSource, resolveSkillSource } from '../staleness/writers/sources.js';
+import { syncProjectResourcesToAgent } from '../project-resources.js';
 
 /** Promisified exec for running shell commands. */
 const execAsync = promisify(exec);
@@ -1768,6 +1768,10 @@ export async function installVersion(
     // here on; the release it carries is recorded separately so `agents update`
     // can move the release without invalidating any reference to the label.
     createInstallation(agent, installedVersion, installedVersion);
+    const trackerInstall = await installSessionTrackerHook(agent, installedVersion);
+    if (!trackerInstall.installed && trackerInstall.error) {
+      console.warn(`agents: SessionStart hook not installed for ${agent}@${installedVersion}: ${trackerInstall.error}`);
+    }
     // The self-updating binary just changed on disk — drop the cached
     // `--version` so `agents view` reflects the freshly-installed release.
     invalidateLiveVersionCache(agent);
@@ -1938,6 +1942,10 @@ export async function installVersion(
 
   // Freeze this installation's identity (see the installScript branch above).
   createInstallation(agent, healthyVersion, healthyVersion);
+  const trackerInstall = await installSessionTrackerHook(agent, healthyVersion);
+  if (!trackerInstall.installed && trackerInstall.error) {
+    console.warn(`agents: SessionStart hook not installed for ${agent}@${healthyVersion}: ${trackerInstall.error}`);
+  }
   emit('version.install', { agent, version: healthyVersion });
   return { success: true, installedVersion: healthyVersion };
 }
@@ -2065,7 +2073,7 @@ async function reconcileGlobalBinaryVersions(agent: AgentId): Promise<void> {
     const staleDir = getVersionDir(agent, version);
     const trashPath = softDeleteVersionDir(agent, version);
     if (trashPath) {
-      const { updateSessionFilePaths } = await import('./session/db.js');
+      const { updateSessionFilePaths } = await import('../session/db.js');
       updateSessionFilePaths(staleDir, trashPath);
       foldedAny = true;
     }
@@ -2110,7 +2118,7 @@ export async function reconcileStaleLatestDir(
   // harness can't statically transform, so it must stay out of the eager graph.
   const trashPath = softDeleteVersionDir(agent, 'latest');
   if (trashPath) {
-    const { updateSessionFilePaths } = await import('./session/db.js');
+    const { updateSessionFilePaths } = await import('../session/db.js');
     updateSessionFilePaths(staleLatestDir, trashPath);
   }
   return 'trashed';
@@ -2973,6 +2981,17 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // `projectSkipped` contract is preserved for callers (RUSH-2320 #4).
   if (projectAgentsDir) {
     result.projectSkipped = syncProjectResourcesToAgent(agent, version, projectAgentsDir).skipped;
+  }
+
+  // Install the shared SessionStart state-writer hook for every hook-capable
+  // harness. This must run even when the rest of the sync is skipped by the
+  // staleness guard, because the hook is registered in the harness's native
+  // config (not in the version-home resource tree the manifest tracks).
+  if (supports(agent, 'hooks', version).ok) {
+    const trackerResult = installSessionTrackerHookSync(agent, version);
+    if (!trackerResult.installed && trackerResult.error) {
+      console.warn(`agents: SessionStart hook not installed for ${agent}@${version}: ${trackerResult.error}`);
+    }
   }
 
   // Fast guard BEFORE getAvailableResources / pattern expansion /

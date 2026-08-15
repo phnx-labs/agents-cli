@@ -105,7 +105,7 @@ and [`architecture.md`](apps/cli/docs/architecture.md).
   its own worktree — the multi-agent surface.
 - **Devices & hosts.** agents-cli runs commands on other machines over SSH, no daemon:
   **devices** are the Tailscale fleet (`agents devices`), **hosts** are dispatch targets
-  (`agents hosts`); `-H/--host <name>` routes a command to any of them. This is the
+  (`agents hosts`); `-D/--device <name>` routes a command to any of them. This is the
   cross-device fabric under sessions, teams, run, and cloud.
 - **One engine, many consumers.** `apps/cli` owns the state — the session index, the
   pid→id registry, `sessions`/`teams`/`run`/`cloud`, and the SSH fan-out. `apps/ext`
@@ -168,6 +168,57 @@ them (see [§Code review conventions](#code-review-conventions-the-reviewer-must
   three-line playbook, not 40 alphabetized options. Don't leave a non-trivial tool on
   commander's default help.
 
+## CI and release latency are correctness requirements
+
+**Status: target, not yet met.** As of 2026-08-15 the required Tests workflow runs a
+p50 of 6.1 minutes and a p90 of 15.8 minutes — see
+`.agents/artifacts/2026-08-15/plan-ci-release-near-instant.md` for the full baseline
+and the RUSH-2666 implementation plan that gets from here to the numbers below. Until
+that plan lands, treat this section as the acceptance bar new CI/release work is
+judged against, not a description of what CI does today.
+
+The required pull-request check has a hard end-to-end **P99 of 90 seconds**, measured
+from the GitHub event timestamp until the single required check reaches a terminal
+state. Ten seconds is the cache-hit target. A required job that cannot fit inside the
+90-second budget must be split, rewritten, removed as duplicate ceremony, or moved to
+post-merge/nightly coverage. It must not silently expand the pull-request gate.
+
+- Run checks for the affected module and its declared reverse dependencies, not the
+  whole monorepo. Every source area owns an explicit test/project boundary; an
+  unmapped changed file fails impact analysis immediately.
+- Keep one app-bound required check identity. The workflow always starts; job-level
+  conditions report successful skips. Do not add required workflow path filters,
+  duplicate status contexts, or a matrix of independently required shards.
+- Execute the fast lane on already-online capacity. Queueing, runner assignment,
+  checkout, dependency preparation, tests, and status upload all count toward the
+  90-second P99.
+- The shared Crabbox is multi-repository infrastructure, not a leased checkout. Each
+  run gets a unique worktree and a disposable hardware-isolated microVM. Repositories
+  and agents may run concurrently under explicit CPU/memory admission and per-repo
+  fairness; no job acquires the machine itself.
+- Fork code never executes on a persistent host and never writes trusted caches. Fork
+  jobs receive no durable credentials, host sockets, tailnet access, or host filesystem
+  access.
+- Slow integration, broad regression, mutation, packaging, and rare-platform suites
+  remain valuable but run after merge or nightly. They do not block the required PR
+  result or consume fast-lane capacity.
+- Windows must not remain a required pull-request or release platform (it still is
+  today — `.github/workflows/tests.yml`'s required aggregator waits on the `windows`
+  job). Its smoke suite becomes best-effort and post-merge while support demand is
+  measured; it must never block a merge or ordinary release. Remove Windows-only code
+  and the supported-platform claim when no demonstrated usage justifies the
+  maintenance cost.
+- Keep only tests that protect a distinct product invariant or regression. Delete
+  duplicate assertions, implementation-detail tests, constant/trivial-guard tests, and
+  tests whose removal does not reduce meaningful mutation or defect coverage.
+
+An ordinary release has a hard **P99 of 180 seconds**, measured from release start to
+registry visibility plus a clean-prefix install smoke. Release promotes the exact
+tested package artifact; it does not rebuild or rerun the monorepo. Native helpers are
+content-addressed and independently versioned, so unchanged helpers are reused. Apple
+signing/notarization runs only when helper inputs change and is outside the ordinary
+three-minute release path. The release train remains the only publisher.
+
 ## Entry points — always build and release through the scripts
 
 Never hand-roll a build or a release. A bare `tsc` / `bun run build` / `npm publish` /
@@ -183,7 +234,7 @@ one-off command in a PR.
 | CLI dev install | [`apps/cli/scripts/install.sh`](apps/cli/scripts/install.sh) `[--bounce-daemon]` | side-by-side dev build at `~/.local/agents-cli-dev`, invoked as **`agents-dev`** (and `ag-dev`); never creates or touches `~/.local/bin/{agents,ag,browser}` |
 | CLI tests | `bun run test:remote` (in `apps/cli`) | full vitest suite offloaded to a remote crabbox via [`sandbox.sh`](apps/cli/scripts/sandbox.sh) — the laptop-safe path |
 | CLI release | [`apps/cli/scripts/release.sh`](apps/cli/scripts/release.sh) `<version> [--apply]` | zero-config self-routing publish of `@phnx-labs/agents-cli` to npm: runnable from any fleet box with an empty environment — tests on a dynamic crabbox, PR + CI, then build/sign/notarize/publish on a Mac home base (`mac-mini` by default, overridable with `--device <name>`); prints a `[n/6]` phase tracker. Legacy `@swarmify` shim built for reference, not published |
-| ext build / release | [`apps/ext/scripts/build.sh`](apps/ext/scripts/build.sh) `<version>` · [`release.sh`](apps/ext/scripts/release.sh) `<x.y.z> [--confirm] [--host <name>] [--here]` | ships `swarmify.swarm-ext` to VS Code Marketplace + Open VSX (dry-run without `--confirm`). Self-routing like the CLI release: the marketplace PATs live in the `vs-marketplace` secrets bundle on one machine, and tokens never move between hosts, so invoking from a box without the bundle probes `zion` then `mac-mini` and re-runs the publish there against a clean clone of the same commit. `--host` pins the publish box, `--here` refuses to route |
+| ext build / release | [`apps/ext/scripts/build.sh`](apps/ext/scripts/build.sh) `<version>` · [`release.sh`](apps/ext/scripts/release.sh) `<x.y.z> [--confirm] [--device <name>] [--here]` | ships `swarmify.swarm-ext` to VS Code Marketplace + Open VSX (dry-run without `--confirm`). Self-routing like the CLI release: the marketplace PATs live in the `vs-marketplace` secrets bundle on one machine, and tokens never move between hosts, so invoking from a box without the bundle probes `zion` then `mac-mini` and re-runs the publish there against a clean clone of the same commit. `--device` pins the publish box, `--here` refuses to route |
 | agents-dbg app release | [`scripts/release.sh`](scripts/release.sh) `<version> [--confirm]` | root — builds/signs/notarizes the debug Mac app, uploads the GitHub release, updates the Homebrew tap |
 | computer-mac build | [`native/computer-mac/scripts/build.sh`](native/computer-mac/scripts/build.sh) | Swift daemon |
 
@@ -314,7 +365,7 @@ the exception.
 - **Surface parity for propagation / cross-cutting features.** When a change adds data
   that must ride the exec env or a spawn — actor/provenance, identity, session lineage,
   credentials — it must be wired through **every** exec boundary that data is meant to
-  reach: the local spawn (`buildExecEnv`), `--host` SSH dispatch, `agents ssh`
+  reach: the local spawn (`buildExecEnv`), `--device` SSH dispatch, `agents ssh`
   passthrough, teams (local **and** remote teammates), and routines/cron — or the PR
   states which boundaries are out of scope and why. The tell is an **absence** at a
   remote call site (no `SetEnv`/`--env` forwarding across the SSH hop), so check the

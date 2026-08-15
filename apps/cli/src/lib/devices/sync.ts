@@ -34,7 +34,7 @@ import type { PendingDevice } from './pending.js';
  * node's OS and address but NOT the account you ssh in as, so we materialize the
  * local operator's username — tailnet devices are overwhelmingly one person's
  * boxes, and this is exactly the account ssh would already fall back to. Pinning
- * it in the registry makes `--host <device>` dial that account no matter which
+ * it in the registry makes `--device <device>` dial that account no matter which
  * machine launches the fan-out (a peer whose local user differs otherwise dials
  * the wrong account). Returns undefined when the username isn't a safe ssh
  * identifier, so a weird value never lands in the registry. */

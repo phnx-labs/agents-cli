@@ -266,18 +266,17 @@ target either from an existing `~/.ssh/config` stanza (connection details stay i
 ssh config; agents-cli stores only a caps/os overlay) or *inline* (with its own
 `user@address`). The host registry lives in `agents.yaml` under `hosts:` and **is**
 git-synced with `agents repo push`/`pull`, so a fleet definition travels between
-machines. The `-H, --host <name>` (alias `--device`) flag routes a command over
+machines. The `-D, --device <name>` flag routes a command over
 SSH to that machine — supported on virtually every first-class group (`repos`,
 `view`, `inspect`, `usage`, `cost`, `doctor`, `list`, `sync`, `plugins`, `skills`,
 `status`, `teams`, `routines`, …), plus commands with their own richer host
 handling (`run`, `sessions`, `feed`, `computer`, `secrets`, `logs`). Groups with
 no remote semantics reject the flag with a clear message rather than commander's
 raw `unknown option`. The target may be a registered host name, a capability tag
-(`--host gpu --any`), a raw `user@host`, or the special value `auto`
-(`--device auto` / `--host auto`) to pick the least-loaded reachable host where
-the requested agent has an eligible account. The local device is evaluated by
-the same rule; an unreachable, overloaded, signed-out, rate-limited, or
-out-of-credits pool fails loud instead of silently launching locally. `agents run` and `agents teams add` use this live harness-aware
+(`--device gpu --any`), a raw `user@host`, or the special value `auto`
+(`--device auto`) to pick the least-loaded reachable host where
+the requested agent is installed and signed in, keeping execution local when no
+remote is better. `agents run` and `agents teams add` use this live harness-aware
 pick. Generic host-only callers such as `agents ssh auto`, which have no requested
 harness to validate, retain the 14-day `sessions.db` affinity resolver; `agents
 ssh` also refuses a pick that lands on the current machine because its purpose is
@@ -295,7 +294,7 @@ The two registries feed **one host pool** behind the `HostProvider` seam:
 `local` (agents.yaml overlay ∪ ssh-config) registers first, `devices` (the
 Tailscale registry) second, so an enrolled host shadows a same-name device.
 A device registered once with `agents devices sync` therefore shows up in
-`agents hosts list` (SOURCE `devices`), resolves as a `--host` target, and
+`agents hosts list` (SOURCE `devices`), resolves as a `--device` target, and
 participates in capability routing — password-auth devices are listed but
 marked non-dispatchable (offload rides `BatchMode=yes` ssh). To tag a device
 with capabilities, `agents hosts add <device> --cap gpu` enrolls it inline,
@@ -303,10 +302,10 @@ sourcing the address from its device profile. `agents devices render --write`
 still bridges to plain `ssh`/`scp` via ssh_config.
 
 Hosts are execution targets everywhere runs and tasks dispatch: `agents run
---host`, `agents teams` placement, `agents cloud run --host <name>` (the `host`
+--device`, `agents teams` placement, `agents cloud run --device <name>` (the `host`
 cloud provider — tasks visible in both `agents cloud ps` and `agents hosts
 ps`), and routines placement (`agents routines add … --run-on <name>`). See
-[hosts.md](hosts.md) for the `--host` execution model and the option-forwarding
+[hosts.md](hosts.md) for the `--device` execution model and the option-forwarding
 contract.
 
 ## Placement
@@ -326,7 +325,7 @@ one door:
 | Intent | Placement | Flag / path (aliases still work) |
 |---|---|---|
 | This machine | `kind: local` | (default) · `--where local` |
-| Named fleet / host box | `kind: device, target: <name>` | `--where device:<name>` · `--host` / `--device` |
+| Named fleet / host box | `kind: device, target: <name>` | `--where device:<name>` · `--device` |
 | Live healthy/load-aware pick | `kind: device, target: auto` | `--where auto` · `--device auto` |
 | Disposable crabbox | `kind: lease` | `--where lease` · `--lease` |
 | Warm crabbox reuse | `kind: lease, target: <slug>` | `--box <slug>` |
@@ -351,7 +350,7 @@ fires* (exactly-once owner). `--run-on` is where the *action body* runs. Same
 word `--device`, opposite jobs — always say "owner" vs "body placement" in
 docs and help.
 
-Mixing doors fails loud (`--where` + `--host`, `--host` + `--lease`, …). Source
+Mixing doors fails loud (`--where` + `--device`, `--device` + `--lease`, …). Source
 of truth: [`src/lib/placement.ts`](../src/lib/placement.ts).
 
 ---

@@ -30,7 +30,7 @@ function runInTempHome(scriptBody: string): Record<string, unknown> {
     const script = `
       import * as fs from 'fs';
       import * as path from 'path';
-      import { syncResourcesToVersion } from './src/lib/versions.ts';
+      import { syncResourcesToVersion } from './src/lib/installations/versions.ts';
       import { runLaunchSync } from './src/lib/project-launch.ts';
 
       const home = process.env.HOME;

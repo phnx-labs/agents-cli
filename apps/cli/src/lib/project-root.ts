@@ -7,7 +7,7 @@
  * launch inside (the directory ABOVE the git root) and cached in `agents.yaml`
  * so later runs resolve a bare slug from anywhere. It is stored home-relative
  * (`~/…`) when it sits under `$HOME`, so the SAME value resolves on a remote
- * host whose home differs (`/home/<user>` vs `/Users/<user>`): a `--host` run
+ * host whose home differs (`/home/<user>` vs `/Users/<user>`): a `--device` run
  * keeps the `~` and lets the remote login shell expand it (see `remoteCdPrefix`
  * in `hosts/dispatch.ts`), while a local run expands `~` against the local home.
  */
@@ -77,7 +77,7 @@ export function homeRemainder(p: string): string | null {
  * caller gave no `--cwd`/`--remote-cwd` (and for an interactive `agents ssh`
  * login with no command).
  *
- * Without this a `--host` run — or an `agents ssh <device>` login — lands in the
+ * Without this a `--device` run — or an `agents ssh <device>` login — lands in the
  * remote `$HOME`, so an agent launched from a repo starts with no project
  * context and the user has to `cd` by hand. Only a cwd under the LOCAL home is
  * mirrored — that is the part with a meaningful remote analogue (`~/src/x`

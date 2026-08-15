@@ -34,7 +34,7 @@ function runInTempHome(scriptBody: string): Record<string, unknown> {
     const script = `
       import * as fs from 'fs';
       import * as path from 'path';
-      import { syncResourcesToVersion, buildRepoScopedSelection } from './src/lib/versions.ts';
+      import { syncResourcesToVersion, buildRepoScopedSelection } from './src/lib/installations/versions.ts';
 
       const home = process.env.HOME;
       if (!home) throw new Error('HOME missing');

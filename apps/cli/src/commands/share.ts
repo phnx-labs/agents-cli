@@ -944,7 +944,7 @@ export async function runShareProvision(opts: {
     console.log(chalk.dim('Publish with:  ') + chalk.cyan('agents artifacts share <file>'));
     console.log(
       chalk.dim(
-        `Fleet: push the token with 'agents secrets export share --host <box>' and pull config with 'agents repo pull'.`,
+        `Fleet: push the token with 'agents secrets export share --device <box>' and pull config with 'agents repo pull'.`,
       ),
     );
   } catch (e) {

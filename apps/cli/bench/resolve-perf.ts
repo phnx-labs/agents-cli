@@ -16,7 +16,7 @@
 // Output: JSON on stdout. Run before/after to diff: `bun bench/resolve-perf.ts`.
 
 import { performance } from 'perf_hooks';
-import { listInstalledVersions, invalidateInstalledVersionsCache, getGlobalDefault } from '../src/lib/versions.js';
+import { listInstalledVersions, invalidateInstalledVersionsCache, getGlobalDefault } from '../src/lib/installations/versions.js';
 import { resolveAgentTargets } from '../src/lib/agent-spec/index.js';
 import { ALL_AGENT_IDS } from '../src/lib/agents.js';
 import type { AgentId } from '../src/lib/types.js';

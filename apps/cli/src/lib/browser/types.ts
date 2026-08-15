@@ -67,7 +67,18 @@ export interface ChromeOptions {
 
 export interface Task {
   id: string;
+  /**
+   * Unique addressable handle used as the tasks map key, capture-dir name, and
+   * the value agents export as `$AGENTS_BROWSER_TASK`. Prefer the short `id`
+   * for auto-generated tasks; an explicit `--task` name still wins.
+   */
   name: string;
+  /**
+   * Human-readable label for `browser status`. Derived once from `--title`,
+   * else the first navigated host, else `untitled`. Distinct from `name` so a
+   * short machine id can stay addressable while status stays readable.
+   */
+  label?: string;
   profile: string;
   tabs: Record<string, string>; // shortId (8 chars) -> CDP targetId
   currentTabId?: string; // shortId of current tab
@@ -140,6 +151,8 @@ export interface ProfileStatus {
 export interface TaskStatus {
   id: string;
   name: string;
+  /** Human label for status tables; falls back to name when absent. */
+  label?: string;
   tabCount: number;
   currentTabId?: string;
   createdAt: number;
@@ -277,6 +290,11 @@ export interface IPCRequest {
   appLevel?: string;
   // Browser start: opt out of domain-skill discovery.
   skipDomainSkill?: boolean;
+  /**
+   * Explicit human label for a new task (`agents browser start --title …`).
+   * When omitted, the label is derived from the first navigated host.
+   */
+  title?: string;
   /**
    * Browser start: always open a new tab. Without it, `start --url` reclaims a
    * tab that an ABANDONED task is still holding on this exact URL rather than

@@ -7,7 +7,7 @@
  *   - "first-wins" (commands, skills, mcp, subagents, workflows, plugins):
  *     project > user > system > extras. Same-named entries shadow.
  *   - "first-wins, no project" (hooks): security exclusion — see
- *     `src/lib/versions.ts:1832-1836` for the rationale. User > system > extras.
+ *     `src/lib/installations/versions.ts:1832-1836` for the rationale. User > system > extras.
  *   - "merged" (permissions): every layer contributes; first-wins on name.
  *   - "composed" (rules): preset + subrules resolved per-name across layers.
  */

@@ -42,7 +42,7 @@ import type { AgentId } from './types.js';
 import { shortCodexHome } from './codex-home.js';
 import { prepareJobHome, buildSpawnEnv, getJobHomePath } from './sandbox.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
-import { createTimer, redactPrompt, emitRoutineEnd } from './events.js';
+import { createTimer, redactPrompt, emitRoutineEnd } from './feed/events.js';
 import { codexEditWritableRoots, codexPolicyArgs } from './codex-policy.js';
 import { applyAddDirs } from './add-dir.js';
 import {
@@ -65,7 +65,7 @@ import { backgroundSpawnOptions, killTree } from './platform/process.js';
 import lockfile from 'proper-lockfile';
 import { ensureLockTarget } from './fs-atomic.js';
 import { walkForFiles } from './fs-walk.js';
-import { getBinaryPath, isVersionInstalled, resolveVersion, getVersionHomePath } from './versions.js';
+import { getBinaryPath, isVersionInstalled, resolveVersion, getVersionHomePath } from './installations/versions.js';
 import { resolveClaudeSetupToken } from './claude-account-token.js';
 import {
   getConfiguredRunStrategy,

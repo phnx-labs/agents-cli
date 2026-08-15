@@ -40,7 +40,7 @@ export interface OpenOptions {
 export async function openSurface(req: LaunchRequest, opts: OpenOptions = {}): Promise<LaunchResult> {
   try {
     // Both can throw: specForRequest on an unknown backend, runSpec when the
-    // SSH transport rejects an invalid --host target. Keep them inside the
+    // SSH transport rejects an invalid --device target. Keep them inside the
     // catch so a bad request degrades to a per-surface failure, never a throw.
     const spec: LaunchSpec = specForRequest(req);
     const res = await runSpec(spec, req.host, opts.resolveHost);

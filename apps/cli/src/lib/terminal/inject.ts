@@ -12,7 +12,7 @@
  * It mirrors the engine's shape exactly: pure per-backend spec builders (like
  * `tmuxTabArgv` / `itermTabScript`) produce a `LaunchSpec` (argv), and the same
  * `runSpec` transport runs it — so injection inherits the engine's local/remote
- * (`--host` over SSH) execution for free. A `LaunchSpec` never opens anything;
+ * (`--device` over SSH) execution for free. A `LaunchSpec` never opens anything;
  * building one is side-effect-free and unit-testable without a display.
  *
  * Backends (each addresses the EXACT split, not the frontmost surface):
@@ -27,7 +27,7 @@
  *             into the swarmify `swarm-ext` extension's `/inject` verb, targeting
  *             a live-terminals.json terminal by id. Focus-independent, exact
  *             terminal, and (like the launch backend, src/lib/terminal/backends/
- *             vscodium-agent.ts) works over `--host` SSH and on Linux.
+ *             vscodium-agent.ts) works over `--device` SSH and on Linux.
  *   - ghostty (macOS) → COARSE only: Ghostty has no scripting dictionary, so
  *             there is no per-split addressing — this raises a window and types
  *             via System Events keystrokes, stealing focus. The resolver refuses

@@ -21,7 +21,7 @@ process.env.USERPROFILE = tmpHome;
 type Discover = typeof import('../discover.js');
 type DB = typeof import('../db.js');
 type State = typeof import('../../state.js');
-type Versions = typeof import('../../versions.js');
+type Versions = typeof import('../../installations/versions.js');
 
 let discover: Discover;
 let db: DB;
@@ -32,7 +32,7 @@ beforeAll(async () => {
   db = await import('../db.js');
   discover = await import('../discover.js');
   state = await import('../../state.js');
-  versions = await import('../../versions.js');
+  versions = await import('../../installations/versions.js');
   db.getDB(); // create schema
 });
 

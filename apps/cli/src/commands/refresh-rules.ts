@@ -9,7 +9,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { AGENTS, resolveAgentName } from '../lib/agents.js';
-import { isVersionInstalled } from '../lib/versions.js';
+import { isVersionInstalled } from '../lib/installations/versions.js';
 import { ensureRulesFresh, supportsRulesImports } from '../lib/rules/compile.js';
 
 /**

@@ -5,7 +5,7 @@ import type { Readable, Writable } from 'stream';
 // with code 1006 ("Max decompressed message size exceeded") while the command
 // is pending. `ws` offers no permessage-deflate by default and takes an
 // explicit payload cap. (Reproduced live against a remote Edge over
-// `browser --host`: fresh blank newtab passed, reused content-rich newtab
+// `browser --device`: fresh blank newtab passed, reused content-rich newtab
 // failed on every Page.captureScreenshot.)
 import WSWebSocket from 'ws';
 

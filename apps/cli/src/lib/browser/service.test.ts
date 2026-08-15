@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events';
 import * as yaml from 'yaml';
 import * as state from '../state.js';
 import * as profiles from './profiles.js';
-import { query, _resetForTest } from '../events.js';
+import { query, _resetForTest } from '../feed/events.js';
 
 const TEST_HOME = path.join(tmpdir(), 'agents-cli-browser-service-test');
 const TEST_AGENTS_DIR = path.join(TEST_HOME, '.agents');
@@ -171,6 +171,34 @@ describe('BrowserService.status — disk reconciliation (Issue #6)', () => {
     });
     expect(result[0].tasks).toHaveLength(1);
     expect(result[0].tasks[0]).toMatchObject({ id: 'work', tabCount: 2, createdAt: 100 });
+  });
+
+  // Regression: soft rehydrate must not clearProfileRuntime (CI shard 2).
+  it('status still reconciles from disk when CDP is unreachable (no clear of pid files)', async () => {
+    // Port with nothing listening — soft rehydrate must not clear pid/port
+    // (connectProfile used to, which made status return [] on CI).
+    const deadPort = 19_987;
+    writeProfile('disk-only', [`cdp://localhost:${deadPort}`]);
+    writeRunningChrome('disk-only', deadPort, process.pid);
+    writeTaskState('disk-only', [{ id: 'orphan', tabIds: ['t1'], createdAt: 50 }]);
+
+    const service = new BrowserService();
+    const result = await service.status();
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      name: 'disk-only',
+      running: true,
+      port: deadPort,
+      pid: process.pid,
+    });
+    expect(result[0].tasks).toHaveLength(1);
+    expect(result[0].tasks[0]).toMatchObject({ id: 'orphan', tabCount: 1 });
+
+    // Runtime files must survive the failed soft attach.
+    const runtimeDir = path.join(TEST_AGENTS_DIR, 'browser', 'disk-only');
+    expect(fs.existsSync(path.join(runtimeDir, 'pid'))).toBe(true);
+    expect(fs.existsSync(path.join(runtimeDir, 'port'))).toBe(true);
   });
 
   it('drops profiles whose pid is no longer alive (stale pid file)', async () => {

@@ -248,7 +248,7 @@ Full design rationale: [ssh-transport.md](ssh-transport.md).
 
 ### Problem
 
-Every remote surface (`run/view/sync/sessions/teams … --host`, remote secrets,
+Every remote surface (`run/view/sync/sessions/teams … --device`, remote secrets,
 the CDP tunnel) forks the system `ssh`. On the laptop that drives the fleet, each
 fork is a process, a socket, and a full TCP+auth handshake. OpenSSH connection
 multiplexing was implemented in the choke point but was **opt-in**, and only 3 of
@@ -284,7 +284,7 @@ Live Tailscale-relayed host, `scripts/bench-ssh.mjs`, wall-clock on the laptop:
 ┌──────────────────────────────┬──────────┬──────────┬───────────────────────────┐
 │            Path              │  Before  │  After   │           Win             │
 ├──────────────────────────────┼──────────┼──────────┼───────────────────────────┤
-│ P3 repeated --host (per call)│  ~444ms  │  ~75ms   │ ~6-7x                     │
+│ P3 repeated --device (per call)│ ~444ms  │  ~75ms   │ ~6-7x                     │
 │ P2 readiness per dispatch    │ 1.5-1.8s │  ~0.8s   │ ~2x                       │
 │ P1 follow loop (per cycle)   │  ~706ms  │  ~33ms   │ ~21-23x, 50% fewer spawns │
 └──────────────────────────────┴──────────┴──────────┴───────────────────────────┘

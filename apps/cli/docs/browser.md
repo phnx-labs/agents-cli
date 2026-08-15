@@ -43,10 +43,14 @@ agent process
 The daemon auto-starts on the first command that needs it. Commands that only
 inspect local state (`ps`, `profiles list`) do not start it.
 
-Task names are auto-generated as `<adjective>-<noun>-<noun>-<hex8>` (e.g.,
-`swift-crab-falcon-a3f92b1c`). Set `AGENTS_BROWSER_TASK` once at the start of
-an agent run; every subsequent command in that process reads it without
-`--task`.
+Tasks are addressed by a short machine id (8 hex chars). `browser status`
+shows a human **label** (`--title` if given, else the first navigated host,
+else `untitled`). In the common case you never type a handle: the CLI stamps
+the caller's session/launch identity and the daemon resolves the single live
+task for that caller. Pass `--task` only when deliberately running two tasks
+at once. `$AGENTS_BROWSER_TASK` is still accepted as an explicit override.
+Page verbs (`navigate`, `screenshot`, …) create a task when none resolves;
+`done`/`stop` never create.
 
 ## Setup
 
@@ -122,15 +126,20 @@ cookies or saved state. Complete any first-run screens (agree to terms,
 sign in) before automating. Run `agents browser profiles doctor <name>` to
 check if onboarding is complete.
 
-### 3. Export the task name
+### 3. Drive the page (no export required)
 
 ```bash
-export AGENTS_BROWSER_TASK=$(agents browser start --profile work)
-# stdout = task name only; stderr = human commentary
+# Implicit task create + navigate — identity tracks the rest of the session
+agents browser navigate https://example.com
+agents browser screenshot
+
+# Explicit start still useful for --profile / --url / --record / --title
+agents browser start --profile work --title "login check"
+agents browser screenshot   # resolves from caller identity
 ```
 
-Every subsequent command in that shell reads `$AGENTS_BROWSER_TASK`
-automatically.
+Pass `--task <id>` only when running two tasks at once. `$AGENTS_BROWSER_TASK`
+remains a valid explicit override.
 
 ### Keep the action loop warm
 
@@ -286,12 +295,12 @@ agents browser gc             # actually close it
 agents browser gc --idle-minutes 5   # override the idle window for this run
 ```
 
-### Driving another machine's browser (`--host`) and consent
+### Driving another machine's browser (`--device`) and consent
 
-Any `agents browser` command takes the fleet `--host <device>` flag (same as
+Any `agents browser` command takes the fleet `--device <name>` flag (same as
 `agents sessions`/`teams`/`run`): it runs the command on that device over SSH and
 drives *its* browser, streaming the output back. No hand-built `ssh://` profile
-needed — `agents browser start --host zion` starts a task on `zion`'s own daemon.
+needed — `agents browser start --device zion` starts a task on `zion`'s own daemon.
 
 Because that lets one machine open a browser on another, the **target decides**
 whether it allows it:
@@ -304,15 +313,15 @@ whether it allows it:
 
 Consent is a **per-device setting** (the `browser.remote-control` config key,
 stored centrally under `fleet.devices.<machine>.config` in `~/.agents/agents.yaml`)
-and **off by default**: a `browser --host <this-machine> start` from
+and **off by default**: a `browser --device <this-machine> start` from
 elsewhere is refused with a message naming how to enable it, until the owner runs
-`agents browser remote-control on` here. Local starts (no `--host`) are never gated.
+`agents browser remote-control on` here. Local starts (no `--device`) are never gated.
 
 ### Navigation
 
 | Command | Description |
 |---------|-------------|
-| `agents browser navigate --url <url>` | Navigate current tab to URL |
+| `agents browser navigate [url]` | Navigate current tab (positional or `--url`; alias `goto`). Creates a task when none resolves for this caller |
 | `agents browser tabs` | List open tabs |
 | `agents browser tab add --url <url>` | Open URL in a new tab |
 | `agents browser tab focus <tabId>` | Switch to tab by ID, prefix, or URL substring |
@@ -352,12 +361,12 @@ elsewhere is refused with a message naming how to enable it, until the owner run
 | Command | Description |
 |---------|-------------|
 | `agents browser screenshot` | Capture current tab; path printed to stdout |
-| `agents browser evaluate --expression <js>` | Run JavaScript; `--file <path>` to read from file |
+| `agents browser evaluate [expr]` | Run JavaScript (positional, `-e`, or `--file`; alias `eval`) |
 | `agents browser console` | Read console logs; `--level` (log/info/warn/error), `--clear` |
 | `agents browser errors` | Read uncaught page errors; `--clear` |
 | `agents browser requests` | Captured network requests; `--filter <text>` |
 | `agents browser responsebody <url-pattern>` | Wait for and read a response body |
-| `agents browser logs <task>` | Read app JSONL logs; `--source`, `--lines`, `--since`, `--until`, `--level`, `--message`, `--filter` |
+| `agents browser logs` | Read app JSONL logs; `--task` (or identity), `--source`, `--lines`, `--since`, `--until`, `--level`, `--message`, `--filter` |
 
 `screenshot` flags:
 
@@ -412,7 +421,7 @@ disk under `~/.agents/.cache/browser/<profile>/sessions/<task>/`; nothing copies
 them into the database, and the listing counts captures by reading that
 directory rather than trusting a stored tally.
 
-**Known gap — `--host` drives record no session.** `agents browser start --host
+**Known gap — `--device` drives record no session.** `agents browser start --device
 <device>` runs the CLI on the remote box, and the SSH dispatch forwards only
 `AGENTS_ACTOR*` and `AGENT_TERMINAL_ID` — not `AGENT_SESSION_ID`. A task started
 that way therefore records no session and lists as `unlinked`. Local drives are

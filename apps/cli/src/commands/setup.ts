@@ -18,7 +18,7 @@ import { getAgentsDir, getVersionsDir, ensureAgentsDir } from '../lib/state.js';
 import { isGitRepo, cloneIntoExisting, pullRepo } from '../lib/git.js';
 import { isPromptCancelled, isInteractiveTerminal } from './utils.js';
 import { AGENTS, agentConfigDirName, getUnmanagedAgentInstalls, countSessionFiles, agentLabel } from '../lib/agents.js';
-import { setGlobalDefault } from '../lib/versions.js';
+import { setGlobalDefault } from '../lib/installations/versions.js';
 import { ensureShimCurrent, switchHomeFileSymlinks, isShimsInPath, addShimsToPath, getPathSetupInstructions, assertIsolationBoundary } from '../lib/shims.js';
 import { setHelpSections } from '../lib/help.js';
 import { registerSetupBrowserCommand, runBrowserWizard } from './setup-browser.js';

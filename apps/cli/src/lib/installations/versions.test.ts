@@ -37,7 +37,7 @@ function nodeExecPath(): string {
 function runVersionSync(home: string, expression: string): unknown {
   // tsx (Node) — not bun. The CLI ships against Node, and `versions.ts`
   // transitively imports the SQLite layer that this test exercises.
-  const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+  const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
   // Run tsx via `node node_modules/tsx/dist/cli.mjs` (not the .bin/tsx shim): on
   // Windows the shim is tsx.cmd, which spawnSync cannot exec without a shell, and
   // routing the multi-line `-e` script through cmd.exe would mangle it. node is an
@@ -61,7 +61,7 @@ function runVersionSync(home: string, expression: string): unknown {
 function runReconcile(home: string, agent: string, installedVersion: string): string {
   // tsx (Node) subprocess with an isolated HOME — exercises the real fs +
   // session-db path that reconcileStaleLatestDir touches, no mocking.
-  const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+  const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
   // Run tsx via `node node_modules/tsx/dist/cli.mjs` (not the .bin/tsx shim): on
   // Windows the shim is tsx.cmd, which spawnSync cannot exec without a shell, and
   // routing the multi-line `-e` script through cmd.exe would mangle it. node is an
@@ -139,7 +139,7 @@ describe('reconcileStaleLatestDir', () => {
 // shell-out, then fold the stale `latest` dir onto it. Uses a fake `droid` on
 // PATH — no mocking — so getCliVersionFromPath returns a concrete version.
 function runReconcileForAgent(home: string, agent: string, fakeBinDir: string): void {
-  const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+  const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
   const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
     import { reconcileStaleLatestForAgent } from ${JSON.stringify(moduleUrl)};
@@ -214,7 +214,7 @@ function grokBinaryDir(home: string, version: string): string {
 // Predicate check runs in a tsx subprocess (versions.ts pulls in the SQLite
 // layer with a top-level await the CJS test process can't statically transform).
 function runPredicates(expression: string): unknown {
-  const versionsUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+  const versionsUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
   const agentsUrl = pathToFileURL(path.resolve('src/lib/agents.ts')).href;
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
   const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
@@ -636,7 +636,7 @@ describe('version resource sync path handling', () => {
     makePluginSkill('agents', 'debug');
     makePluginSkill('blocked', 'secret');
 
-    const versionsUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+    const versionsUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
     const profilesUrl = pathToFileURL(path.resolve('src/lib/resource-profiles.ts')).href;
     const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
     const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
@@ -666,7 +666,7 @@ describe('version resource sync path handling', () => {
     fs.mkdirSync(path.join(pluginRoot, 'skills', 'routines'), { recursive: true });
     fs.writeFileSync(path.join(pluginRoot, 'skills', 'routines', 'SKILL.md'), 'routines body\n', 'utf-8');
 
-    const versionsUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+    const versionsUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
     const profilesUrl = pathToFileURL(path.resolve('src/lib/resource-profiles.ts')).href;
     const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
     const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
@@ -709,7 +709,7 @@ describe('version resource sync path handling', () => {
     writeWorkflow(userAgents, 'user-flow');
     writeWorkflow(systemAgents, 'system-flow');
 
-    const versionsUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+    const versionsUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
     const profilesUrl = pathToFileURL(path.resolve('src/lib/resource-profiles.ts')).href;
     const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
     const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
@@ -846,7 +846,7 @@ describe('version resource sync path handling', () => {
 // These tests assert the rejection happens before any npm exec, so a malicious
 // version can never escape into a shell.
 function runInstallVersion(home: string, agent: string, version: string, extraPathDir?: string): { ok: boolean; error?: string; result?: { success: boolean; installedVersion?: string; error?: string } } {
-  const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+  const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
   // Run tsx via `node node_modules/tsx/dist/cli.mjs` (not the .bin/tsx shim): on
   // Windows the shim is tsx.cmd, which spawnSync cannot exec without a shell, and
   // routing the multi-line `-e` script through cmd.exe would mangle it. node is an
@@ -941,7 +941,7 @@ function runInstallVersionWithScript(
   // and make a "the binary isn't resolvable yet" scenario silently pass.
   fullPathOverride?: string
 ): { ok: boolean; error?: string; result?: { success: boolean; installedVersion?: string; error?: string } } {
-  const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+  const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
   const agentsUrl = pathToFileURL(path.resolve('src/lib/agents.ts')).href;
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
   const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
@@ -1219,7 +1219,7 @@ describe('resolveGrokFallbackBinary (RUSH-2459)', () => {
 // installs a single global binary (~/.local/bin/droid) shared across version
 // dirs, so a fixture is just N dirs + one binary — every dir reads as installed.
 function runResolveAlias(home: string, agent: string, raw: string | undefined): string | null {
-  const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+  const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
   // Run tsx via `node node_modules/tsx/dist/cli.mjs` (not the .bin/tsx shim): on
   // Windows the shim is tsx.cmd, which spawnSync cannot exec without a shell, and
   // routing the multi-line `-e` script through cmd.exe would mangle it. node is an
@@ -1312,7 +1312,7 @@ describe('resolveVersionAlias @selectors', () => {
 describe('resolveVersionAliasLoose — @any', () => {
   it('treats "any" like "default": no version constraint (undefined)', () => {
     const home = makeTempHome();
-    const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+    const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
     const tsxBin = path.resolve('node_modules/.bin/tsx');
     const child = spawnSync(tsxBin, ['-e', `
       import { resolveVersionAlias, resolveVersionAliasLoose } from ${JSON.stringify(moduleUrl)};
@@ -1333,7 +1333,7 @@ describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () =>
   // layer-misattribution — the bug where `--repo system` would sweep in (or
   // drop) the wrong repo's skills.
   function runBuildScoped(home: string, repo: string): { skills?: string[]; memory?: string[] | 'all' } {
-    const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+    const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
     const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
     const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
       import { buildRepoScopedSelection } from ${JSON.stringify(moduleUrl)};
@@ -1437,7 +1437,7 @@ describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () =>
 describe('unionResourceSelections + mergeRepoScopedSelections — interactive multi-repo sync', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function evalExpr(home: string, expr: string): any {
-    const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+    const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
     const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
     const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
       import * as V from ${JSON.stringify(moduleUrl)};
@@ -1529,7 +1529,7 @@ function makeClaudeVersion(home: string, version: string, opts: { realBinary: bo
 }
 
 function runNamedExport(home: string, importName: string, callExpr: string): unknown {
-  const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+  const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
   const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
     import { ${importName} } from ${JSON.stringify(moduleUrl)};
@@ -1606,7 +1606,7 @@ describe('removeVersion — default reassignment when removing the pinned defaul
   // One subprocess so the module-level HOME + version caches stay consistent:
   // set the default, remove a version, then read back the resolved default.
   function runRemoveScenario(home: string, defaultVersion: string, versionToRemove: string): { removed: boolean; defaultAfter: string | null } {
-    const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+    const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
     const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
     const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
       import { setGlobalDefault, getGlobalDefault, removeVersion } from ${JSON.stringify(moduleUrl)};

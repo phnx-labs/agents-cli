@@ -1,5 +1,5 @@
 /**
- * Opt-in end-to-end coverage for the `agents computer --host <win>` path.
+ * Opt-in end-to-end coverage for the `agents computer --device <win>` path.
  *
  * Unlike ssh-tunnel.test.ts (pure script-builder units), this suite drives the
  * REAL remote runtime against a live Windows box: it pushes the daemon exe over
@@ -55,7 +55,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-suite('computer --host live remote (AGENTS_TEST_WIN_HOST)', () => {
+suite('computer --device live remote (AGENTS_TEST_WIN_HOST)', () => {
   let state: RemoteTunnelState;
   let target: string;
   let client: ComputerClient;
@@ -68,17 +68,17 @@ suite('computer --host live remote (AGENTS_TEST_WIN_HOST)', () => {
   beforeAll(async () => {
     ({ target } = await resolveRemoteDevice(HOST));
 
-    // Scenario 1: `computer setup --host` — push the exe + register/start the
+    // Scenario 1: `computer setup --device` — push the exe + register/start the
     // LOGON task. Throws with remote stderr on any hop failure.
     await setupRemoteHelper(HOST);
 
-    // Scenario 2 (part a): `computer start --host` — open the tunnel and confirm
+    // Scenario 2 (part a): `computer start --device` — open the tunnel and confirm
     // the daemon answers `list_apps` over it. startRemoteTunnel throws if the
     // daemon never responds, so a returned state IS the live-tunnel proof.
     state = await startRemoteTunnel(HOST);
 
     // Point this process's RPC client at the recorded tunnel, exactly as every
-    // `--host` verb does, then hold one shared TCP client for the round-trips.
+    // `--device` verb does, then hold one shared TCP client for the round-trips.
     hydrateRemoteEnvFromState(HOST);
     client = openComputerClient();
   }, SETUP_TIMEOUT);
@@ -90,7 +90,7 @@ suite('computer --host live remote (AGENTS_TEST_WIN_HOST)', () => {
       /* best effort */
     }
     if (HOST) {
-      // Scenario 5-equivalent for the computer path: `stop --host` kills the
+      // Scenario 5-equivalent for the computer path: `stop --device` kills the
       // tunnel and unregisters the remote task. Always run so a live box is left
       // clean even if an assertion above failed.
       await stopRemoteHelper(HOST);
@@ -98,7 +98,7 @@ suite('computer --host live remote (AGENTS_TEST_WIN_HOST)', () => {
   }, SETUP_TIMEOUT);
 
   it(
-    'setup --host leaves the helper exe on the remote under %LOCALAPPDATA%\\agents',
+    'setup --device leaves the helper exe on the remote under %LOCALAPPDATA%\\agents',
     () => {
       // Independent proof the push landed — query the remote filesystem directly
       // rather than trusting setupRemoteHelper's own return.
@@ -116,7 +116,7 @@ suite('computer --host live remote (AGENTS_TEST_WIN_HOST)', () => {
     RPC_TIMEOUT,
   );
 
-  it('start --host records a live tunnel the RPC client can reach', () => {
+  it('start --device records a live tunnel the RPC client can reach', () => {
     expect(state.localPort).toBeGreaterThan(0);
     expect(state.tunnelPid).toBeGreaterThan(0);
     expect(readRemoteState(HOST)?.localPort).toBe(state.localPort);
@@ -124,7 +124,7 @@ suite('computer --host live remote (AGENTS_TEST_WIN_HOST)', () => {
   });
 
   it(
-    'screenshot --host returns a non-empty PNG over the tunnel',
+    'screenshot --device returns a non-empty PNG over the tunnel',
     async () => {
       // Full-display capture: no app needed, and the Windows helper always
       // encodes PNG. Proves tunnel + daemon + screencapture end-to-end.
@@ -143,7 +143,7 @@ suite('computer --host live remote (AGENTS_TEST_WIN_HOST)', () => {
     'type-text then get-text round-trips over the tunnel with byte fidelity',
     async () => {
       // Drive Notepad the same way the on-box smoke test does, but through the
-      // real --host tunnel: launch -> resolve pid -> focus the edit control ->
+      // real --device tunnel: launch -> resolve pid -> focus the edit control ->
       // type -> read back. A unique marker so a stale document can't false-pass.
       const marker = `e2e-host-${process.pid}-${state.localPort}`;
       try {

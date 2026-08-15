@@ -12,7 +12,7 @@ import * as path from 'path';
 import { homedir } from 'os';
 import { betaEnableHint, isBetaEnabled } from '../lib/beta.js';
 import { insertTask } from '../lib/cloud/store.js';
-import { emit } from '../lib/events.js';
+import { emit } from '../lib/feed/events.js';
 import { buildFactorySnapshot, type FactorySnapshot } from '../lib/factory/snapshot.js';
 
 

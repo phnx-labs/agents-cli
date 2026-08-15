@@ -135,6 +135,8 @@ vi.mock('../src/lib/hooks.js', () => ({
   parseHookManifest: () => ({}),
   selectHookManifest: (manifest: object) => manifest,
   registerHooksToSettings: () => {},
+  installSessionTrackerHookSync: () => ({ installed: true }),
+  installSessionTrackerHook: async () => ({ installed: true }),
 }));
 
 vi.mock('../src/lib/permissions.js', () => ({
@@ -184,7 +186,7 @@ import {
   installVersion,
   type AvailableResources,
   type ResourceSelection,
-} from '../src/lib/versions.js';
+} from '../src/lib/installations/versions.js';
 import { AGENTS } from '../src/lib/agents.js';
 
 function installManagedVersion(agent: 'claude' | 'codex', version: string): void {

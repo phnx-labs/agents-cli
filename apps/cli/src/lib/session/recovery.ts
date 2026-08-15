@@ -12,7 +12,7 @@ import {
   type RotateCandidate,
 } from '../accounting/rotate.js';
 import type { AgentId } from '../types.js';
-import { getVersionHomePath } from '../versions.js';
+import { getVersionHomePath } from '../installations/versions.js';
 import type { SessionMeta } from './types.js';
 
 export type SessionRecoveryTarget =

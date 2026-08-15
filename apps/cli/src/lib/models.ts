@@ -13,7 +13,7 @@ import * as os from 'os';
 import { execFileSync } from 'child_process';
 import type { AgentId } from './types.js';
 import chalk from 'chalk';
-import { getVersionDir, getVersionHomePath, getBinaryPath } from './versions.js';
+import { getVersionDir, getVersionHomePath, getBinaryPath } from './installations/versions.js';
 import { getModelsCachePath } from './state.js';
 import { agentConfigDirName } from './agents.js';
 import { resolveRunDefaults } from './run-defaults.js';

@@ -4,7 +4,7 @@ import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { rpcMethodFor, toRpcParams, makeVerbDispatcher } from './dispatch.js';
 import type { ComputerClient, RPCResponse } from '../computer-rpc.js';
-import { query, _resetForTest } from '../events.js';
+import { query, _resetForTest } from '../feed/events.js';
 
 // The verb -> RPC translation in dispatch.ts is the load-bearing seam behind
 // `computer run`: a single wrong param key silently breaks every gated macOS
@@ -216,17 +216,17 @@ describe('makeVerbDispatcher — computer.action emission (#11 regression)', () 
     expect(recs[0].targetPid).toBe(999);
   });
 
-  it('carries the --host target through to the emitted event', async () => {
+  it('carries the --device target through to the emitted event', async () => {
     _resetForTest(eventsPath());
     const { client } = recordingClient();
-    const dispatch = makeVerbDispatcher(client, { host: 'win-mini' });
+    const dispatch = makeVerbDispatcher(client, { device: 'win-mini' });
 
     await dispatch({ name: 'click', input: { pid: 999, x: 10, y: 20 } });
 
     const recs = query({ eventTypes: ['computer.action'] });
     expect(recs).toHaveLength(1);
     expect(recs[0].command).toBe('click');
-    expect(recs[0].host).toBe('win-mini');
+    expect(recs[0].device).toBe('win-mini');
   });
 
   it('does NOT emit when the daemon call errors', async () => {

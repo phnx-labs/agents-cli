@@ -33,7 +33,7 @@
  *                         underlying resolve emits its own `secrets.get`.
  *  - `secrets.view`     — a bundle's (masked) metadata was inspected via `view`.
  */
-import { emit } from '../events.js';
+import { emit } from '../feed/events.js';
 import { recordSecretUsage, type SecretUsageEvent } from './usage-db.js';
 
 export type SecretAuditEvent =

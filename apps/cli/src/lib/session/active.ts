@@ -504,7 +504,7 @@ export interface ActiveSession {
    * registry. This is the one identifier that survives an SSH hop AND a session
    * rotation: a Factory tab offloaded to a device has no local process to inspect,
    * and its spawn-time session id goes stale the moment the agent moves to another
-   * session (`/clear`, exit-and-rerun), so `--active --host <device>` joined on
+   * session (`/clear`, exit-and-rerun), so `--active --device <device>` joined on
    * this is how that tab re-identifies its own session. Absent for any launch that
    * did not inherit a terminal id.
    */
@@ -1056,20 +1056,43 @@ export function resolveFallbackStatus(
  * (+ optional session uuid), so they resolve straight off disk. Every OTHER
  * tracked harness — Codex (date-partitioned), plus grok / droid / rush / gemini /
  * kimi / hermes / opencode / antigravity / cursor (per-session dirs, SQLite, single-JSON)
- * — is resolved through the session index by cwd: the newest indexed transcript
- * for that cwd, bounded by ACTIVE_SESSION_STALE_MS so a live pid never borrows a
- * weeks-old transcript. This is what lets a live NON-claude/codex agent get a real
- * status instead of falling through to `unknown` (the file feeds
+ * — is resolved through the session index. When the session id is KNOWN, that id
+ * selects the transcript. Only an id-less process falls back to the newest indexed
+ * transcript for that cwd, bounded by ACTIVE_SESSION_STALE_MS so a live pid never
+ * borrows a weeks-old transcript. This is what lets a live NON-claude/codex agent
+ * get a real status instead of falling through to `unknown` (the file feeds
  * {@link computeLiveSignals}). An opaque kind we don't track still yields undefined
  * here and degrades honestly to a live `running`.
+ *
+ * The id branch exists because the cwd fallback is only safe when there is nothing
+ * better: it answers `WHERE agent = ? AND cwd = ? ORDER BY last_activity DESC LIMIT 1`
+ * (`latestSessionFileForCwd`), so with two same-harness agents in ONE cwd — routine on
+ * this fleet — every one of them resolves to whichever transcript was touched last.
+ * That is the same "one stranger's transcript" hazard the id-less tmux pane already
+ * refuses to guess at (see `listTmuxAgentSessions`), and since RUSH-2682 it reaches
+ * further than a status badge: the live row now backs `sessions preview <id>`, so the
+ * guess renders session B's digest under session A's header and caches it against A.
+ * An id we cannot resolve yields undefined — the honest "not indexed here" render —
+ * rather than a neighbour's transcript (RUSH-2691).
  */
 export function findSessionFileForKind(kind: string, cwd?: string, sessionId?: string): string | undefined {
   if (!cwd) return undefined;
   if (kind === 'claude') return findClaudeSessionFile(cwd, sessionId);
-  if (isSessionTrackedAgent(kind)) {
-    return latestSessionFileForCwd(kind, cwd, { maxAgeMs: ACTIVE_SESSION_STALE_MS });
-  }
-  return undefined;
+  if (!isSessionTrackedAgent(kind)) return undefined;
+  if (sessionId) return indexedSessionFileForId(kind, sessionId);
+  return latestSessionFileForCwd(kind, cwd, { maxAgeMs: ACTIVE_SESSION_STALE_MS });
+}
+
+/**
+ * The indexed transcript for one exact session id, or undefined when the index has
+ * not reached it yet. The `agent` guard rejects a row that belongs to a different
+ * harness than the live process claims: those cannot be the same conversation, and
+ * returning it would reintroduce the misattribution this function exists to avoid.
+ */
+function indexedSessionFileForId(kind: string, sessionId: string): string | undefined {
+  const row = getSessionById(sessionId);
+  if (!row || row.agent !== kind) return undefined;
+  return row.filePath || undefined;
 }
 
 /** Recover the session UUID from a transcript filename (Claude `<uuid>.jsonl`, Codex `rollout-…-<uuid>.jsonl`). */
@@ -2333,7 +2356,7 @@ export async function foldTmuxClients(rows: ActiveSession[]): Promise<void> {
  * `registerInteractiveHostSession` write the index row with
  * `machine: normalizeHost(task.host)` (`lib/hosts/session-index.ts:55,134`), so
  * this folds that recorded machine back onto the live row. Every consumer then
- * agrees on one owner: the `--host`/`--device` scope, the browser's device
+ * agrees on one owner: the `--device`/`--device` scope, the browser's device
  * filter, `_remote`/preview routing (`liveSessionToMeta`), and the id resolver.
  *
  * Two rows are deliberately left alone:

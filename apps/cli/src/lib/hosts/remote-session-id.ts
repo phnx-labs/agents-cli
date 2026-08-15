@@ -1,7 +1,7 @@
 /**
- * Resolve a remote-created session id back to an interactive `--host` launcher.
+ * Resolve a remote-created session id back to an interactive `--device` launcher.
  *
- * A headless `--host` run captures the remote-coined id from the followed log
+ * A headless `--device` run captures the remote-coined id from the followed log
  * (the `--emit-session-id` marker — see session-marker.ts). An INTERACTIVE run
  * has no followed log: the local TTY is wired straight through `sshStream`
  * (stdio:'inherit'), so nothing can tap the stream for a marker without breaking

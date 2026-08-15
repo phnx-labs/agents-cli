@@ -14,7 +14,7 @@
  *      when the overlay entry was written), for hosts that live only in that overlay.
  *
  * Missing/unknown from all three → `undefined`, which `remoteShellFor` maps to
- * POSIX. Kept synchronous so the sync `agents sessions --host` fan-out can use it.
+ * POSIX. Kept synchronous so the sync `agents sessions --device` fan-out can use it.
  */
 
 import { loadDevicesSync } from '../devices/registry.js';

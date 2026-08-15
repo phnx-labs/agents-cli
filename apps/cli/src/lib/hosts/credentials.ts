@@ -1,5 +1,5 @@
 /**
- * Credential provisioning for `agents run --host --copy-creds`.
+ * Credential provisioning for `agents run --device --copy-creds`.
  *
  * `--copy-creds` USED TO copy each signed-in runtime's native login to a
  * persistent host — the Claude OAuth token (`.claude/.credentials.json`) plus

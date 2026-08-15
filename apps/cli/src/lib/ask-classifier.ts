@@ -13,8 +13,8 @@
  * Rules-based on stable high-volume shapes. Pure classify/match; suppression has
  * side effects via the feed store when applied.
  */
-import type { OpenBlock } from './feed.js';
-import { recordAnswer, recordMessageReceipt, removeBlock } from './feed.js';
+import type { OpenBlock } from './feed/feed.js';
+import { recordAnswer, recordMessageReceipt, removeBlock } from './feed/feed.js';
 import { enqueue, mailboxDir } from './mailbox.js';
 
 /** Taxonomy for a published ask. Exactly one class per block. */

@@ -9,7 +9,7 @@ import {
   sendToOwner,
 } from './notify.js';
 import type { Meta } from './types.js';
-import type { OpenBlock } from './feed.js';
+import type { OpenBlock } from './feed/feed.js';
 
 describe('buildOpenClawNotifyArgs', () => {
   it('builds message-send argv with the caller-supplied target (no hardcoded number)', () => {

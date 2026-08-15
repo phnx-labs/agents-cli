@@ -52,7 +52,7 @@ import {
   iterSubagentsCapableVersions,
   removeSubagentFromVersion,
 } from '../lib/subagents.js';
-import { getGlobalDefault } from '../lib/versions.js';
+import { getGlobalDefault } from '../lib/installations/versions.js';
 import { resolveAgentName, formatAgentError } from '../lib/agents.js';
 import { pruneDuplicates } from './view.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';

@@ -63,7 +63,7 @@ describe.skipIf(process.platform === 'win32')('isolated-only usage never disturb
   afterEach(() => { fs.rmSync(home, { recursive: true, force: true }); });
 
   it('survives a failed isolated repair plus repeated daemon self-heal passes', () => {
-    const versionsPath = path.resolve(process.cwd(), 'src/lib/versions.ts');
+    const versionsPath = path.resolve(process.cwd(), 'src/lib/installations/versions.ts');
     const registryPath = path.resolve(process.cwd(), 'src/lib/self-heal/registry.ts');
     const script = `
       import { ensureAgentRunnable, getGlobalDefault, isVersionIsolated } from ${JSON.stringify(versionsPath)};

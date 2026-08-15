@@ -33,7 +33,7 @@ import {
   getActuallySyncedResources,
   compareVersions,
   type ResourceSelection,
-} from './versions.js';
+} from './installations/versions.js';
 import {
   diffVersionResources,
   type DoctorKind,

@@ -15,7 +15,7 @@
  *   - ship the transcript with the SAME bundle pipeline as
  *     `sessions export --stdout | sessions import -`, over `sshExec`;
  *   - resume on the target through the SAME `openSurfaces({ backend:'tmux', host })`
- *     path `sessions resume --host` uses;
+ *     path `sessions resume --device` uses;
  *   - only AFTER the target's prompt is confirmed live, kill the source tmux
  *     session (`killSession`). --keep skips the kill (copy, not move).
  *
@@ -75,7 +75,7 @@ type MigrateMode = 'resume' | 'rehydrate';
 
 interface MigrateOptions {
   auto?: boolean;
-  host?: string;
+  device?: string;
   lease?: boolean;
   mode?: MigrateMode;
   keep?: boolean;
@@ -88,7 +88,7 @@ export function registerSessionsMigrateCommand(sessionsCmd: Command): void {
     .alias('relocate')
     .description('Relocate a running session onto another machine (fleet worker, device, or ephemeral box), then stop the source here.')
     .option('--auto', 'Pick the best target host automatically (idle fleet worker preferred)')
-    .option('--host <name>', 'Explicit target: an enrolled host, a device, or a warm ephemeral box slug')
+    .option('--device <name>', 'Explicit target: an enrolled host, device, or a warm ephemeral box slug')
     .option('--lease', 'Provision a fresh ephemeral crabbox box as the target')
     .option('--mode <mode>', 'rehydrate (default: the target agent reads the transported transcript) or resume (best-effort native --resume)', 'rehydrate')
     .option('--keep', 'Copy, not move — do NOT stop the source after resuming on the target')
@@ -100,13 +100,13 @@ export function registerSessionsMigrateCommand(sessionsCmd: Command): void {
       agents sessions migrate --auto
 
       # Move a specific session onto a named host
-      agents sessions migrate a1b2c3d4 --host yosemite-s1
+      agents sessions migrate a1b2c3d4 --device yosemite-s1
 
       # Spin up a fresh ephemeral box and move onto it
       agents sessions migrate --lease
 
       # Copy (don't stop the source), letting the agent wrap up its own dirty tree
-      agents sessions migrate --host box-a --keep --agent-wrapup
+      agents sessions migrate --device box-a --keep --agent-wrapup
     `,
     notes: `
       - Without a [session-id], migrate resolves the session running in THIS tmux pane ($TMUX_PANE).
@@ -120,17 +120,8 @@ export function registerSessionsMigrateCommand(sessionsCmd: Command): void {
     `,
   });
 
-  cmd.action(async (sessionId: string | undefined, options: MigrateOptions, command: Command) => {
-    // commander 15: the parent `sessions` command owns a global `-H, --host` (the
-    // listing fan-out), which shadows this subcommand's own --host — the value
-    // lands in the merged globals, not `options.host`. Read it from there so
-    // `agents sessions migrate --host <name>` binds.
-    const globals = command.optsWithGlobals() as { host?: string[] | string };
-    const hosts = Array.isArray(globals.host) ? globals.host : globals.host ? [globals.host] : [];
-    if (hosts.length > 1) {
-      console.error(chalk.yellow(`Multiple --host values given; migrating to the first (${hosts[0]}).`));
-    }
-    await sessionsMigrateAction(sessionId, { ...options, host: hosts[0] });
+  cmd.action(async (sessionId: string | undefined, options: MigrateOptions) => {
+    await sessionsMigrateAction(sessionId, options);
   });
 }
 
@@ -179,7 +170,7 @@ function statsByName(): Map<string, DeviceStats> {
   return new Map(Object.entries(cache));
 }
 
-/** Enumerate + rank targets, honoring --host / --auto / --lease. */
+/** Enumerate + rank targets, honoring --device / --auto / --lease. */
 async function resolveTarget(
   options: MigrateOptions,
   source: SessionMeta,
@@ -205,16 +196,16 @@ async function resolveTarget(
   }
   const stats = statsByName();
 
-  if (options.host) {
+  if (options.device) {
     // Explicit target: a fleet host/device, or a warm box slug.
-    const box = warm.find((b) => b.slug === options.host);
+    const box = warm.find((b) => b.slug === options.device);
     if (box) {
       return { name: box.slug, kind: 'ephemeral', os: 'linux', headroom: 'unknown', box };
     }
-    const host = await resolveHost(options.host);
-    if (!host) fail(`No host, device, or warm box named "${options.host}".`);
+    const host = await resolveHost(options.device);
+    if (!host) fail(`No host, device, or warm box named "${options.device}".`);
     if (host.name.toLowerCase() === selfHostname.toLowerCase()) {
-      fail(`"${options.host}" is this machine — migrate needs a different target.`);
+      fail(`"${options.device}" is this machine — migrate needs a different target.`);
     }
     return { name: host.name, kind: 'fleet', os: host.os, headroom: 'unknown', host };
   }
@@ -230,7 +221,7 @@ async function resolveTarget(
 
   // Interactive: rank the candidates and let the user pick.
   if (!isInteractiveTerminal()) {
-    fail('Pass --auto, --host <name>, or --lease to choose a target (no interactive picker without a tty).');
+    fail('Pass --auto, --device <name>, or --lease to choose a target (no interactive picker without a tty).');
   }
   const ranked = rankTargets(enumerateTargets(hosts, warm, stats, ctx), ctx);
   if (ranked.length === 0) {
@@ -514,7 +505,7 @@ export function buildMigrateResumeCommands(opts: {
 
 /**
  * Resume the session on the target through the SAME host path as
- * `sessions resume --host` (tmux backend). Returns true when the resume launched.
+ * `sessions resume --device` (tmux backend). Returns true when the resume launched.
  */
 async function resumeOnTarget(
   sshTarget: string,
@@ -531,7 +522,7 @@ async function resumeOnTarget(
   // box has none ("no server running"), so we create the session (and thus the
   // server) directly with `new-session -d`, mirroring the local `createSession`
   // helper (remain-on-exit keeps the pane inspectable if the agent exits), over
-  // the same SSH transport as `sessions resume --host`.
+  // the same SSH transport as `sessions resume --device`.
   //
   // Each argv element is quoted BEFORE the zsh -ilc wrapper so a command that
   // carries spaces or backticks (the rehydrate prompt) reaches the agent as one

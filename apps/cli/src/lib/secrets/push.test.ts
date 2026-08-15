@@ -1,5 +1,5 @@
 /**
- * Real-path coverage for the push primitive extracted from `secrets export --host`.
+ * Real-path coverage for the push primitive extracted from `secrets export --device`.
  *
  * No mocking (repo rule): the transport really is `spawnSync('ssh', …)`, and the
  * OS lookup really reads a device registry off disk. Both are driven with real
@@ -299,7 +299,7 @@ describe('bundleEnvToDotenv', () => {
  * `resolveBundleForPush` must FORWARD the caller's `agentOnly`, not hardcode it.
  *
  * The bug: it passed `agentOnly: true` unconditionally, so `agents secrets export
- * --host` refused every keychain-backed bundle with "not unlocked in the secrets
+ * --device` refused every keychain-backed bundle with "not unlocked in the secrets
  * agent" — even for a human at a TTY who could simply answer the Touch ID sheet.
  * The interactive sibling reads (`view --reveal`, `exec`) already decided this
  * per-invocation with `isHeadlessSecretsContext() || !isInteractiveTerminal()`, and

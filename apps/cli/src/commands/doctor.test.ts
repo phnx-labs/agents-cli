@@ -267,8 +267,8 @@ describe('doctor target + qualifier survives --device forwarding (issue #2058)',
     expect(forwarded).toEqual(['claude@latest', '--diff']);
   });
 
-  it('strips --host alias too', () => {
-    const forwarded = stripRoutingFlags(['codex@0.117.0', '--host', 'yosemite-s0'], HOST_ROUTING_SPECS);
+  it('strips --device routing flag', () => {
+    const forwarded = stripRoutingFlags(['codex@0.117.0', '--device', 'yosemite-s0'], HOST_ROUTING_SPECS);
     expect(forwarded).toEqual(['codex@0.117.0']);
   });
 

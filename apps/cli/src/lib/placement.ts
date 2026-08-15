@@ -2,7 +2,7 @@
  * Placement — one model for "where does the body run?"
  *
  * The CLI grew several doors that all mean execution target:
- *   run --host / --device / --lease / --box / --cloud
+ *   run --device / --lease / --box / --cloud
  *   routines --placement / --run-on / hostStrategy
  *   monitors --run-on (body) vs --device (owner — NOT placement)
  *   teams --device (teammate pin)
@@ -140,7 +140,7 @@ export function placementFromRunFlags(flags: RunPlacementFlags): Placement {
 
   const placementFlags: string[] = [];
   if (where) placementFlags.push('--where');
-  if (hostT) placementFlags.push('--host/--device');
+  if (hostT) placementFlags.push('--device');
   if (hasLease) placementFlags.push('--lease');
   if (hasBox) placementFlags.push('--box');
   if (hasCloud) placementFlags.push('--cloud');
@@ -159,7 +159,7 @@ export function placementFromRunFlags(flags: RunPlacementFlags): Placement {
     const backend = typeof flags.lease === 'string' ? flags.lease : undefined;
     return { kind: 'lease', target: backend, source: '--lease' };
   }
-  if (hostT) return { kind: 'device', target: hostT, source: '--host/--device' };
+  if (hostT) return { kind: 'device', target: hostT, source: '--device' };
   return { kind: 'local', source: 'default' };
 }
 
@@ -229,7 +229,7 @@ export const PLACEMENT_MATRIX = `
   Intent                         Flag / path
   ─────────────────────────────  ──────────────────────────────────────────
   This machine                   (default)  or  --where local
-  Named fleet box                --where device:<name>   (= --host / --device)
+  Named fleet box                --where device:<name>   (= --device)
   Affinity pick (14d usage)      --where auto            (= --device auto)
   Disposable cloud box           --where lease           (= --lease)
   Reuse warm crabbox             --box <slug>

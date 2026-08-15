@@ -192,7 +192,7 @@ const VALUE_FLAGS: Record<string, Set<string>> = {
   // (`agents sessions`, `linear list`) instead of one flat `other` pile (#1830).
   // `ag` is deliberately NOT here — it is the silver searcher in TOOL_REGISTRY,
   // not the agents alias, in this classifier's world.
-  agents: new Set(['-H', '--host', '--device']),
+  agents: new Set(['-D', '--device']),
   linear: new Set(),
 };
 

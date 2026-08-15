@@ -131,8 +131,8 @@ Verbs are grouped the way `agents computer --help` groups them.
 | `setup` (alias `install-helper`) | Copy helper to /Applications/, write LaunchAgent plist |
 | `start` | Write policy + peers, load the LaunchAgent, start the daemon |
 | `stop` | Unload the LaunchAgent, remove the socket |
-| `reload` | Reload the allow-list policy from ~/.agents/permissions/groups/ (SIGHUP the daemon); with `--host`, restart the remote Windows daemon |
-| `status` | Report install state, daemon state, TCC trust, policy, and peer list; with `--host`, tunnel + liveness of the remote Windows daemon |
+| `reload` | Reload the allow-list policy from ~/.agents/permissions/groups/ (SIGHUP the daemon); with `--device`, restart the remote Windows daemon |
+| `status` | Report install state, daemon state, TCC trust, policy, and peer list; with `--device`, tunnel + liveness of the remote Windows daemon |
 
 ### Observe
 
@@ -224,7 +224,7 @@ agents computer type-text --bundle <id> --text "..." --require-frontmost
 | `agents computer sessions` | Browse computer-driving history, grouped by run. `agents sessions --computer` is the same view. |
 
 `agents computer sessions` flags: `--machine <name>` (only rows on/driving a
-matching hostname, machineId, or `--host` device), `--limit <n>` (cap the flat
+matching hostname, machineId, or `--device` name), `--limit <n>` (cap the flat
 table at this many rows — default 50; the interactive picker and `--json` are
 unbounded), `--json`, `--no-interactive`.
 
@@ -273,12 +273,12 @@ never the text; a `run --task` description is the agent's own instruction
 prompt), kept but bounded to 200 characters before it is ever written — never
 the full text.
 
-## Remote Windows (`--host`)
+## Remote Windows (`--device`)
 
-Every verb takes `--host <device>` to drive a Windows machine registered with
-`agents devices`: `setup --host` pushes the C# daemon
+Every verb takes `--device <device>` to drive a Windows machine registered with
+`agents devices`: `setup --device` pushes the C# daemon
 (`computer-helper-win.exe`) and registers a LOGON scheduled task,
-`start --host` opens an `ssh -L` tunnel to its loopback port, and every other
+`start --device` opens an `ssh -L` tunnel to its loopback port, and every other
 verb reconnects through that tunnel. The daemon mirrors the macOS wire
 contract, with these Windows specifics:
 
@@ -287,8 +287,8 @@ contract, with these Windows specifics:
   `raise --window-id` takes), the default capture crops to the pid's largest
   on-screen window, `--window-id` shoots one window, `--display` the whole
   display the app is on. `--quality` is ignored (lossless PNG).
-- **Lifecycle:** `status --host <device>` reports the recorded tunnel and a
-  live daemon probe; `reload --host <device>` restarts the daemon's scheduled
+- **Lifecycle:** `status --device <device>` reports the recorded tunnel and a
+  live daemon probe; `reload --device <device>` restarts the daemon's scheduled
   task (the way to pick up a freshly pushed exe) and confirms it answers.
   There is no allow-list policy on Windows — the daemon is tunnel-gated.
 - **`--require-frontmost` is enforced:** Windows synthetic input lands in the
@@ -301,12 +301,12 @@ contract, with these Windows specifics:
   extraction (default 20k).
 
 ```bash
-agents computer setup --host win-mini      # push exe + register LOGON task
-agents computer start --host win-mini      # open the tunnel
-agents computer status --host win-mini     # tunnel + daemon liveness
-agents computer screenshot --host win-mini --pid 27180 --list
-agents computer reload --host win-mini     # restart the remote daemon
-agents computer stop --host win-mini       # tear down tunnel + task
+agents computer setup --device win-mini      # push exe + register LOGON task
+agents computer start --device win-mini      # open the tunnel
+agents computer status --device win-mini     # tunnel + daemon liveness
+agents computer screenshot --device win-mini --pid 27180 --list
+agents computer reload --device win-mini     # restart the remote daemon
+agents computer stop --device win-mini       # tear down tunnel + task
 ```
 
 ## Recipes

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { collectLocalFleetInventory, collectLocalFleetSignIn } from './fleet-inventory.js';
-import { listInstalledVersions } from '../versions.js';
+import { listInstalledVersions } from '../installations/versions.js';
 import { ALL_AGENT_IDS } from '../agents.js';
 
 // Real-path: exercise the live install (no mocking). The dev machine that runs

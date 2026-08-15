@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { migrateAgentsYaml } from '../migrate.js';
+import { migrateAgentsYaml } from '../installations/migrate.js';
 
 // Regression coverage for the v11 split migration wedging the system mirror.
 //

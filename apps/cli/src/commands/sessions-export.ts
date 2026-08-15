@@ -234,7 +234,7 @@ export function r2ExportGateError(
 ): string | null {
   if (!g.toR2) return null;
   if (g.host && g.host.length > 0) {
-    return "--to-r2 backs up THIS machine's sessions; it cannot be combined with --host.";
+    return "--to-r2 backs up THIS machine's sessions; it cannot be combined with --device.";
   }
   if (!isConfigured) {
     return (
@@ -311,7 +311,7 @@ export function resolveR2BackupKey(): Buffer | null {
  */
 async function runRemoteExport(g: GlobalSelection, selectors: string[], command: Command): Promise<void> {
   if (g.encrypt) {
-    process.stderr.write(chalk.yellow('Note: --encrypt is ignored with --host (the SSH stream is already encrypted). Encrypt a local bundle instead.\n'));
+    process.stderr.write(chalk.yellow('Note: --encrypt is ignored with --device (the SSH stream is already encrypted). Encrypt a local bundle instead.\n'));
   }
   const { bundles, errors } = await pullBundlesFromHosts(g.host!, forwardExportArgs(g, selectors, command));
   for (const e of errors) process.stderr.write(chalk.yellow(`  ${e}\n`));

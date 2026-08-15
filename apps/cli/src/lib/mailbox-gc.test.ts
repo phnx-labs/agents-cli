@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { mailboxDir, enqueue, drain } from './mailbox.js';
 import { gcMailbox } from './mailbox-gc.js';
-import { blockIdForSession, publishBlock, readBlock } from './feed.js';
+import { blockIdForSession, publishBlock, readBlock } from './feed/feed.js';
 
 function tmpRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mailbox-gc-'));

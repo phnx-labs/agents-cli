@@ -11,7 +11,7 @@
  *   3. An enrolled host must shadow a same-name device (provider order), so
  *      enrolling a device to tag it doesn't create a duplicate row.
  *   4. The `Meta.hosts` overlay (caps) must merge onto device entries so a
- *      device participates in `--host <cap>` routing.
+ *      device participates in `--device <cap>` routing.
  */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
@@ -117,7 +117,7 @@ describe('devices in the unified pool', () => {
     // to expect the overlay's '10.0.0.9', which encoded the frozen-route bug as a
     // contract: `agents devices sync` could move a device and the stale enrolled
     // address would keep winning — and `resolveHostByCap` hands this very row to
-    // dispatch, so `--host <cap>` dialed the dead address.
+    // dispatch, so `--device <cap>` dialed the dead address.
     expect(rows[0].address).toBe('shared.tail.ts.net');
     expect(rows[0].user).toBe('device-user');
   });

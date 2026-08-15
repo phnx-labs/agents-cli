@@ -9,7 +9,7 @@ import type { BrowserProfile } from '../types.js';
 // so existing importers of `shellQuote` from this module keep working.
 import { shellQuote, assertValidSshTarget, controlOpts, sshConnectOpts } from '../../ssh-exec.js';
 export { shellQuote };
-// The `ssh -L` tunnel spawn is shared with `agents computer --host`; it lives in
+// The `ssh -L` tunnel spawn is shared with `agents computer --device`; it lives in
 // the single ssh-tunnel helper. Calling it with no options preserves this
 // driver's original foreground, stderr-captured behavior exactly.
 import { startSSHTunnel } from '../../ssh-tunnel.js';
@@ -283,7 +283,7 @@ export function buildWindowsLaunchScript(
  * killing only the port-owning main process orphans its children. The orphans
  * keep the profile's SingletonLock, so every later launch against the same
  * `--user-data-dir` delegates to the zombie tree, exits, and never binds the
- * CDP port — `browser start --host` then fails until someone hand-cleans the
+ * CDP port — `browser start --device` then fails until someone hand-cleans the
  * box (found live on win-mini by the #561 e2e suite).
  */
 export function buildWindowsKillScript(port: number): string {

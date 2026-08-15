@@ -370,29 +370,12 @@ interface ScanEntry {
  * TTL, no external lock files needed.
  */
 export async function discoverSessions(options?: DiscoverOptions): Promise<SessionMeta[]> {
-  // Touch the DB so the schema is ready and connection is cached for this run.
-  getDB();
+  const { claimed } = await scanSessionsIncremental({
+    agent: options?.agent,
+    onProgress: options?.onProgress,
+  });
 
-  const agents = options?.agent ? [options.agent] : SESSION_AGENTS;
-  const onProgress = options?.onProgress;
-
-  if (tryClaimScan(process.pid)) {
-    try {
-      // Bounded + staggered instead of a single Promise.all: scanning every
-      // agent's dotfile dir (~/.claude, ~/.codex, ~/.gemini, …) simultaneously
-      // reads to behavioral EDR (CrowdStrike Falcon) as a ransomware-style bulk
-      // file-enumeration sweep. Same dirs, same results — just not all at once.
-      await scanAgentsBounded(agents, agent => dispatchAgentScan(agent, onProgress));
-      await scanAgentsBounded(agents, agent => scanRoutineArchivesIncremental(agent, onProgress));
-      // Seed labels from `agents run --name` handles onto the freshly-scanned
-      // rows by id. Runs AFTER the per-agent scans (which applied agent-generated
-      // titles via syncLabels), so a real title always wins and the seed only
-      // backfills sessions that would otherwise be unnamed.
-      seedLabelsFromNames(buildRunNameMap());
-    } finally {
-      releaseScan(process.pid);
-    }
-  } else if (options?.waitForScan) {
+  if (!claimed && options?.waitForScan) {
     // Lost the single-flight claim to another live process (a foreground
     // `agents sessions*` or the daemon's index warm). Rather than return the
     // pre-scan snapshot that just missed, wait (bounded) for that scan to finish
@@ -403,6 +386,79 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
   return queryIndexedSessions(options, {
     skipExistenceCheck: options?.skipExistenceCheck ?? false,
   });
+}
+
+/** What one incremental scan actually did. */
+export interface IncrementalScanResult {
+  /** True when this process won the single-flight claim and ran the scan. */
+  claimed: boolean;
+  /**
+   * Transcripts parsed this scan — i.e. those whose (mtime, size) changed. Zero
+   * is the steady state on an idle box and does NOT mean the scan was skipped;
+   * read `claimed` for that.
+   *
+   * Twelve of the 13 SESSION_AGENTS contribute, including OpenCode, whose
+   * scanner filters to sessions whose own per-session stamp changed and reports
+   * that batch — so a tick whose only changed sessions live there no longer
+   * reports 0 (RUSH-2691). OpenClaw is the exception and contributes nothing:
+   * its scanner has no change detection to report (a TTL gate, a fresh stamp
+   * every run, and an entry list rebuilt as the current inventory), so counting
+   * it would overstate rather than measure. See `scanOpenClawIncremental`.
+   */
+  scanned: number;
+}
+
+/**
+ * The write half of {@link discoverSessions}: claim the single-flight scan slot,
+ * incrementally index this host's transcript dirs, and report what was parsed.
+ *
+ * Split out so a caller that only wants the index refreshed — the daemon's warm
+ * tick — can run it WITHOUT the listing query `discoverSessions` ends with. That
+ * query is not free: it applies a cwd filter, runs the `archived_at`-writing
+ * existence check, and can issue a Linear fetch, none of which index anything
+ * (RUSH-2691). Keeping one implementation here is also what stops the tick and
+ * the foreground path from drifting apart.
+ */
+export async function scanSessionsIncremental(options?: {
+  agent?: SessionAgentId;
+  onProgress?: (p: ScanProgress) => void;
+}): Promise<IncrementalScanResult> {
+  // Touch the DB so the schema is ready and connection is cached for this run.
+  getDB();
+
+  const agents = options?.agent ? [options.agent] : SESSION_AGENTS;
+  const onProgress = options?.onProgress;
+
+  if (!tryClaimScan(process.pid)) return { claimed: false, scanned: 0 };
+
+  // `parsed` climbs monotonically within one scanner run, so the last value per
+  // (phase, agent) is that scanner's total. Phase-keyed because the dotfile scan
+  // and the routine-archive scan both report under the same agent id.
+  const parsedByPhaseAgent = new Map<string, number>();
+  const track = (phase: string) => (p: ScanProgress) => {
+    parsedByPhaseAgent.set(`${phase}\0${p.agent}`, p.parsed);
+    onProgress?.(p);
+  };
+
+  try {
+    // Bounded + staggered instead of a single Promise.all: scanning every
+    // agent's dotfile dir (~/.claude, ~/.codex, ~/.gemini, …) simultaneously
+    // reads to behavioral EDR (CrowdStrike Falcon) as a ransomware-style bulk
+    // file-enumeration sweep. Same dirs, same results — just not all at once.
+    await scanAgentsBounded(agents, agent => dispatchAgentScan(agent, track('dotfiles')));
+    await scanAgentsBounded(agents, agent => scanRoutineArchivesIncremental(agent, track('routines')));
+    // Seed labels from `agents run --name` handles onto the freshly-scanned
+    // rows by id. Runs AFTER the per-agent scans (which applied agent-generated
+    // titles via syncLabels), so a real title always wins and the seed only
+    // backfills sessions that would otherwise be unnamed.
+    seedLabelsFromNames(buildRunNameMap());
+  } finally {
+    releaseScan(process.pid);
+  }
+
+  let scanned = 0;
+  for (const n of parsedByPhaseAgent.values()) scanned += n;
+  return { claimed: true, scanned };
 }
 
 /**
@@ -598,8 +654,8 @@ function dispatchAgentScan(
     case 'codex': return scanCodexIncremental(onProgress);
     case 'gemini': return scanGeminiIncremental(onProgress);
     case 'antigravity': return scanAntigravityIncremental(onProgress);
-    case 'opencode': return scanOpenCodeIncremental();
-    case 'openclaw': return scanOpenClawIncremental();
+    case 'opencode': return scanOpenCodeIncremental(onProgress);
+    case 'openclaw': return scanOpenClawIncremental(onProgress);
     case 'rush': return scanRushIncremental(onProgress);
     case 'hermes': return scanHermesIncremental(onProgress);
     case 'kimi': return scanKimiIncremental(onProgress);
@@ -2410,7 +2466,7 @@ function openCodeSessionStamp(
 }
 
 /** Scan OpenCode sessions from its SQLite database when the DB file has changed. */
-async function scanOpenCodeIncremental(): Promise<void> {
+async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   if (!fs.existsSync(OPENCODE_DB)) return;
 
   const stat = safeStatSync(OPENCODE_DB);
@@ -2642,6 +2698,12 @@ async function scanOpenCodeIncremental(): Promise<void> {
     }
 
     upsertSessionsBatch(entries);
+    // Report what this scan indexed. OpenCode is one SQLite DB rather than N
+    // transcript files, so the whole batch lands as a single progress emit —
+    // enough for the daemon's warm tick to count it (RUSH-2691); without it a
+    // tick whose only changed sessions were OpenCode's reported 0 and logged
+    // nothing, the same silent-success class this tick exists to remove.
+    onProgress?.({ agent: 'opencode', parsed: entries.length, total: entries.length });
     // Stamp the OpenCode DB itself so we can short-circuit on the next run.
     recordScans([{ filePath: OPENCODE_DB, scan: currentScan }]);
   } catch (err: any) {
@@ -2658,7 +2720,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /** Scan active OpenClaw channels and cron jobs via the openclaw CLI. */
-async function scanOpenClawIncremental(): Promise<void> {
+async function scanOpenClawIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   // Check if openclaw is installed — silently skip if not. `which` is POSIX-only
   // (Windows resolves PATH with `where`), so a bare `which` throws ENOENT on every
   // Windows run and silently disabled the entire OpenClaw scan there — its sessions
@@ -2755,6 +2817,15 @@ async function scanOpenClawIncremental(): Promise<void> {
   }
 
   upsertSessionsBatch(entries);
+  // Deliberately NO onProgress emit, unlike every other scanner (RUSH-2691).
+  // This one cannot report a delta: its gate is a 60s TTL (not a store stamp),
+  // `scan` above stamps a fresh `now` on every entry every run, and `entries` is
+  // the CURRENT INVENTORY — running channels plus cron jobs — rebuilt from
+  // scratch each pass. Emitting entries.length would report "how many openclaw
+  // things exist", re-counted every 60s forever, which is a worse lie than
+  // silence: the warm tick's number means "transcripts parsed this scan". Giving
+  // OpenClaw a real per-entry stamp is tracked separately; until then it
+  // contributes 0 and the docblock on IncrementalScanResult says so.
   db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('openclaw_last_scan_ms', ?)`).run(String(Date.now()));
 }
 

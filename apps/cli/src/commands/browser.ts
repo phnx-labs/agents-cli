@@ -60,26 +60,26 @@ import { runBrowserIPCStream } from '../lib/browser/stream.js';
 /**
  * Resolve which browser task a command targets. Order:
  *   1. `--task <name>` flag (explicit per-command override)
- *   2. `$AGENTS_BROWSER_TASK` (set once at the start of an agent run)
+ *   2. `$AGENTS_BROWSER_TASK` (optional shell default)
+ *   3. `undefined` — the daemon resolves from the caller's identity
+ *      (session / launch id stamped in sendIPCRequest)
  *
- * Each agent process has its own environment, so the env-var path is safe for
- * parallel agents — they can't see each other's value.
+ * `undefined` is valid: page verbs create a task when none resolves, and
+ * done/stop report "nothing to close". Agents no longer need to type a handle
+ * in the common case.
  */
-function resolveTaskName(opts: { task?: string }): string {
+function resolveTaskName(opts: { task?: string }): string | undefined {
   if (opts.task) return opts.task;
   const fromEnv = process.env.AGENTS_BROWSER_TASK;
   if (fromEnv) return fromEnv;
-  console.error(
-    'No task specified. Pass --task <name> or set AGENTS_BROWSER_TASK in your shell.'
-  );
-  console.error('Tip: T=$(agents browser start --profile <p>) && export AGENTS_BROWSER_TASK=$T');
-  process.exit(1);
+  return undefined;
 }
 
 // `-t` is taken by `--tab` on most commands, so `--task` is long-form only.
-// Agents normally set $AGENTS_BROWSER_TASK once and never type this flag.
+// The daemon resolves from caller identity when omitted.
 const TASK_OPTION_FLAG = '--task <name>';
-const TASK_OPTION_DESC = 'Task name (defaults to $AGENTS_BROWSER_TASK)';
+const TASK_OPTION_DESC =
+  'Task name (defaults to $AGENTS_BROWSER_TASK, else the caller\'s live task)';
 
 // Help groups — surfaces the actual mental model an agent follows
 // ("open a session / drive the page / capture evidence / rare extras")
@@ -118,7 +118,7 @@ export function registerBrowserCommand(program: Command): void {
       # Or pin to a specific profile
       agents browser start --profile work
 
-      # Drive the page
+      # Drive the page (no start / --task needed — identity resolves the task)
       agents browser navigate https://example.com
       agents browser screenshot
 
@@ -126,7 +126,7 @@ export function registerBrowserCommand(program: Command): void {
       agents browser stream --task "$AGENTS_BROWSER_TASK"
 
       # Drive another machine's browser (needs its consent — see remote-control)
-      agents browser start --host zion
+      agents browser start --device zion
 
       # Browse a task-heavy profile's captures: one row per task, not per file
       agents browser sessions
@@ -753,7 +753,7 @@ function registerTaskCommands(browser: Command): void {
   browser
     .command('remote-control [state]')
     .description(
-      "Allow or deny other fleet machines driving THIS machine's browser over `browser --host`. " +
+      "Allow or deny other fleet machines driving THIS machine's browser over `browser --device`. " +
         '`on`/`off` to set (device-local, never synced); no argument prints the current value. Default off.',
     )
     .option('--json', 'Output as JSON')
@@ -785,8 +785,8 @@ function registerTaskCommands(browser: Command): void {
       console.log(`Remote browser control (this machine) is now ${value ? 'on' : 'off'}.`);
       console.log(
         value
-          ? 'Other fleet machines can now drive this browser via `browser --host <this-device>`.'
-          : 'Cross-machine `browser --host` drives to this machine are refused.',
+          ? 'Other fleet machines can now drive this browser via `browser --device <this-device>`.'
+          : 'Cross-machine `browser --device` drives to this machine are refused.',
       );
     });
 
@@ -825,9 +825,10 @@ function registerTaskCommands(browser: Command): void {
 
   browser
     .command('start')
-    .description('Start a browser task. Pass --profile <name>; omit to use your configured default (`agents config set browser.profile <name>`), else auto-pick an installed Chromium-family browser.')
+    .description('Start a browser task. Pass --profile <name>; omit to use your configured default (`agents config set browser.profile <name>`), else auto-pick an installed Chromium-family browser. Page verbs (navigate/screenshot/…) create a task implicitly when none exists — start is for --profile/--url/--record/--title.')
     .option('-p, --profile <name>', 'Browser profile to use (omit to use the configured default, else auto-pick an installed Chromium-family browser)')
-    .option(TASK_OPTION_FLAG, 'Task name (auto-generated if omitted)')
+    .option(TASK_OPTION_FLAG, 'Task name (auto-generated short id if omitted)')
+    .option('--title <label>', 'Human label shown in `browser status` (defaults to first navigated host)')
     .option('-e, --endpoint <name>', 'Endpoint preset (defaults to the profile\'s default)')
     .option('-u, --url <url>', 'Open URL in first tab')
     .option('--fresh', 'Always open a new tab, skipping the reclaim of a tab an abandoned task is holding on that URL')
@@ -837,7 +838,7 @@ function registerTaskCommands(browser: Command): void {
     .option('--duration <sec>', 'Recording duration cap in seconds (with --record; default 60)', (v) => parseInt(v, 10))
     .option('--max-mb <mb>', 'Recording size cap in MB (with --record; default 25)', (v) => parseInt(v, 10))
     .action(async (opts) => {
-      // Consent gate: a fleet-remote `browser --host <this-machine> start` may
+      // Consent gate: a fleet-remote `browser --device <this-machine> start` may
       // only open a browser here if the owner opted in. Refuse before we resolve
       // or auto-create any profile. Local starts are never gated.
       try {
@@ -922,6 +923,7 @@ function registerTaskCommands(browser: Command): void {
         } catch { /* login detection is best-effort; never block start */ }
       }
 
+      // Identity is stamped inside sendIPCRequest; no need to pass it here.
       const response = await sendIPCRequest({
         action: 'start',
         profile: profileName,
@@ -930,17 +932,7 @@ function registerTaskCommands(browser: Command): void {
         endpoint: opts.endpoint,
         skipDomainSkill: opts.skills === false,
         fresh: opts.fresh === true,
-        // Forward the caller's identity: the browser daemon is shared, so it
-        // cannot resolve who/which-run called `start`. `resolveActor()` runs
-        // here in the CLI (the caller's process); `$AGENT_LAUNCH_ID` is the
-        // per-run id exec.ts injects for every harness.
-        actor: resolveActor().id,
-        launchId: process.env.AGENT_LAUNCH_ID,
-        // The agent session that drove this task — what makes the capture
-        // traceable back to a conversation (RUSH-2549). Sent alongside, not
-        // instead of, launchId: a launch id is absent on most agent processes,
-        // a session id is not.
-        sessionId: process.env.AGENT_SESSION_ID || process.env.AGENTS_SESSION_ID,
+        title: opts.title,
       });
 
       if (!response.ok) {
@@ -959,7 +951,7 @@ function registerTaskCommands(browser: Command): void {
       } else {
         console.error(`Started task "${response.task}"`);
       }
-      console.error(`Tip: export AGENTS_BROWSER_TASK=${response.task}`);
+      console.error('Tip: page verbs resolve this task from your session — --task only when running two at once.');
       console.error('Try: agents browser screenshot | agents browser console --level error');
 
       // Surface the matched domain-skill (if any) so an agent driving the
@@ -998,7 +990,7 @@ function registerTaskCommands(browser: Command): void {
 
   browser
     .command('done')
-    .description('Complete a task and close its tabs')
+    .description('Complete a task and close its tabs (resolves from caller identity when --task is omitted)')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .action(async (opts) => {
       const task = resolveTaskName(opts);
@@ -1012,7 +1004,11 @@ function registerTaskCommands(browser: Command): void {
         process.exit(1);
       }
 
-      console.log(`Completed task: ${task}`);
+      if (response.message === 'nothing to close' || !response.task) {
+        console.log('nothing to close');
+        return;
+      }
+      console.log(`Completed task: ${response.task}`);
     });
 
   browser
@@ -1045,7 +1041,11 @@ function registerTaskCommands(browser: Command): void {
         process.exit(1);
       }
 
-      console.log(`Stopped task: ${task}`);
+      if (response.message === 'nothing to close' || !response.task) {
+        console.log('nothing to close');
+        return;
+      }
+      console.log(`Stopped task: ${response.task}`);
     });
 
   browser
@@ -1097,17 +1097,23 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
-    .command('navigate')
-    .description('Navigate current tab to URL (creates tab if none exist)')
+    .command('navigate [url]')
+    .alias('goto')
+    .description('Navigate current tab to URL (creates a task and tab when none exist)')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
-    .requiredOption('--url <url>', 'URL to navigate to')
+    .option('-u, --url <url>', 'URL to navigate to (or pass it positionally)')
     .option('-p, --profile <name>', 'Browser profile (optional if task is unique)')
-    .action(async (opts) => {
+    .action(async (urlPos: string | undefined, opts: { task?: string; url?: string; profile?: string }) => {
+      const url = urlPos || opts.url;
+      if (!url) {
+        console.error('URL required. Usage: agents browser navigate <url>');
+        process.exit(1);
+      }
       const task = resolveTaskName(opts);
       const response = await sendIPCRequest({
         action: 'navigate',
         task,
-        url: opts.url,
+        url,
         profile: opts.profile,
       });
 
@@ -1116,7 +1122,10 @@ function registerTaskCommands(browser: Command): void {
         process.exit(1);
       }
 
-      console.log(`Navigated ${response.tabId} to ${opts.url}`);
+      if (response.task) {
+        console.error(`task ${response.task}`);
+      }
+      console.log(`Navigated ${response.tabId} to ${url}`);
     });
 
   // Tab subcommand group
@@ -1302,16 +1311,18 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
-    .command('evaluate')
+    .command('evaluate [expression]')
+    .alias('eval')
     .description('Evaluate JavaScript in current tab')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
-    .option('-e, --expression <js>', 'JavaScript expression to evaluate')
+    .option('-e, --expression <js>', 'JavaScript expression to evaluate (or pass it positionally)')
     .option('-f, --file <path>', 'Path to a .js file whose contents will be evaluated')
-    .action(async (opts) => {
+    .action(async (exprPos: string | undefined, opts: { task?: string; tab?: string; expression?: string; file?: string }) => {
       const task = resolveTaskName(opts);
-      if (opts.expression && opts.file) {
-        console.error('Pass exactly one of --expression or --file');
+      const flagExpr = opts.expression || exprPos;
+      if (flagExpr && opts.file) {
+        console.error('Pass exactly one of an expression or --file');
         process.exit(1);
       }
       let expression: string;
@@ -1322,10 +1333,10 @@ function registerTaskCommands(browser: Command): void {
           console.error(`Cannot read --file ${opts.file}: ${(err as Error).message}`);
           process.exit(1);
         }
-      } else if (opts.expression) {
-        expression = opts.expression;
+      } else if (flagExpr) {
+        expression = flagExpr;
       } else {
-        console.error('Pass --expression <js> or --file <path>');
+        console.error('Pass an expression positionally, -e <js>, or --file <path>');
         process.exit(1);
       }
       const response = await sendIPCRequest({
@@ -1523,16 +1534,25 @@ function registerTaskCommands(browser: Command): void {
           if (profile.tasks.length === 0) {
             console.log('  No active tasks');
           } else {
-            console.log('  TASK'.padEnd(20) + 'TABS'.padEnd(6) + 'DOMAINS'.padEnd(25) + 'CREATED');
+            console.log(
+              '  ' +
+                'ID'.padEnd(12) +
+                'LABEL'.padEnd(20) +
+                'TABS'.padEnd(6) +
+                'DOMAINS'.padEnd(22) +
+                'CREATED',
+            );
             for (const task of profile.tasks) {
               const age = formatAge(task.createdAt);
-              const name = task.name || task.id;
+              const id = (task.name || task.id).slice(0, 10);
+              const label = (task.label || task.name || task.id).slice(0, 18);
               const domains = task.domains?.slice(0, 2).join(', ') || '-';
               console.log(
                 '  ' +
-                  name.padEnd(18) +
+                  id.padEnd(12) +
+                  label.padEnd(20) +
                   String(task.tabCount).padEnd(6) +
-                  domains.slice(0, 23).padEnd(25) +
+                  domains.slice(0, 20).padEnd(22) +
                   age
               );
             }
@@ -2144,8 +2164,9 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
-    .command('logs <task>')
+    .command('logs')
     .description('Read merged rush-app + rush-cli JSONL logs for a task')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('--source <name>', 'Source to scope to: rush-app or rush-cli (default both)')
     .option('--lines <n>', 'Tail N entries (default 200; ignored when --since)', (v) => parseInt(v, 10))
     .option('--since <when>', 'Absolute timestamp or relative offset (e.g. 5m, 2h, 1d)')
@@ -2154,11 +2175,22 @@ function registerTaskCommands(browser: Command): void {
     .option('--message <name>', 'Filter entries by exact message field')
     .option('--filter <text>', 'Filter entries whose JSON contains this substring')
     .option('-f, --follow', 'Follow mode (not yet implemented)')
-    .action(async (task: string, opts) => {
+    .action(async (opts: {
+      task?: string;
+      source?: string;
+      lines?: number;
+      since?: string;
+      until?: string;
+      level?: string;
+      message?: string;
+      filter?: string;
+      follow?: boolean;
+    }) => {
       if (opts.follow) {
         process.stderr.write('follow mode not yet implemented; coming next pass\n');
         process.exit(1);
       }
+      const task = resolveTaskName(opts);
       const response = await sendIPCRequest({
         action: 'getAppLogs',
         task,

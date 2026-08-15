@@ -43,7 +43,7 @@ agents run cursor "fix the flaky parser test" --cloud --repo acme/example
 agents run claude "…" --where cloud:codex   # one-door spelling (+ provider)
 ```
 
-`--cloud` sits beside `--host`/`--device` and `--lease` as one of three run
+`--cloud` sits beside `--device` and `--lease` as one of three run
 placements (local, machine, cloud) and is mutually exclusive with them. It
 accepts `--provider`, `--repo` (repeatable), `--branch`, `--cloud-env` (run's
 `--env` stays the KEY=VAL passthrough), `--timeout`, `--model`, `--no-follow`,

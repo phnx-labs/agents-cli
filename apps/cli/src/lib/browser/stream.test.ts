@@ -118,7 +118,7 @@ describe('runBrowserIPCStream', () => {
     const [startLine, versionLine] = await outputLines;
     expect(JSON.parse(startLine)).toMatchObject({
       ok: false,
-      error: expect.stringMatching(/yosemite-s0.*browser --host.*remote-control on/s),
+      error: expect.stringMatching(/yosemite-s0.*browser --device.*remote-control on/s),
     });
     expect(JSON.parse(versionLine)).toMatchObject({ ok: true });
     await run;

@@ -12,7 +12,7 @@ export async function runWatchdogSetupWizard(): Promise<void> {
   const devices = [...new Set([...Object.keys(registry), machineId()].map(normalizeHost))].sort();
   const enabled = new Set(devices.filter((device) => getConfigValue('watchdog.enabled', { device }).value === true));
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    requireInteractiveSelection('watchdog devices', ['agents watchdog on', 'agents watchdog on --host <device>']);
+    requireInteractiveSelection('watchdog devices', ['agents watchdog on', 'agents watchdog on --device <device>']);
   }
 
   try {
@@ -28,7 +28,7 @@ export async function runWatchdogSetupWizard(): Promise<void> {
         setConfigValue('watchdog.enabled', on);
         continue;
       }
-      const launch = getCliLaunch(['watchdog', on ? 'on' : 'off', '--host', device]);
+      const launch = getCliLaunch(['watchdog', on ? 'on' : 'off', '--device', device]);
       const result = spawnSync(launch.command, launch.args, { stdio: 'inherit', env: process.env });
       if ((result.status ?? 1) !== 0) throw new Error(`Could not configure watchdog on ${device}`);
     }

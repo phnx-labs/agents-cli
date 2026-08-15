@@ -10,7 +10,7 @@ import { exec } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { emit } from '../events.js';
+import { emit } from '../feed/events.js';
 import { machineId, normalizeHost } from '../machine-id.js';
 import { safeJoin } from '../paths.js';
 import { pickFleetDevice } from '../routines-placement.js';

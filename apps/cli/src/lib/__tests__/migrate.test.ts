@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 function runRealMigration(): void {
-  const modulePath = path.resolve(process.cwd(), 'src/lib/migrate.ts');
+  const modulePath = path.resolve(process.cwd(), 'src/lib/installations/migrate.ts');
   execFileSync(
     'bun',
     ['-e', `import { runMigration } from ${JSON.stringify(modulePath)}; await runMigration();`],
@@ -504,7 +504,7 @@ describe('runMigration', () => {
       fs.mkdirSync(path.join(systemDir, 'mystery-leftover'), { recursive: true });
       fs.writeFileSync(path.join(systemDir, 'mystery-leftover', 'data.txt'), 'unknown');
 
-      const modulePath = path.resolve(process.cwd(), 'src/lib/migrate.ts');
+      const modulePath = path.resolve(process.cwd(), 'src/lib/installations/migrate.ts');
       // Migration diagnostics go to stderr; capture it via spawnSync.
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { spawnSync } = require('child_process') as typeof import('child_process');

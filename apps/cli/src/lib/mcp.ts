@@ -16,7 +16,7 @@ import { execFileSync } from 'child_process';
 import * as os from 'os';
 import type { AgentId } from './types.js';
 import { getMcpDir, getUserMcpDir, getProjectAgentsDir, getVersionsDir, getUserAgentsDir } from './state.js';
-import { getBinaryPath, getVersionHomePath } from './versions.js';
+import { getBinaryPath, getVersionHomePath } from './installations/versions.js';
 import { IS_WINDOWS, execFileShellSpec } from './platform/index.js';
 import { AGENTS, getMcpConfigPathForHome, getProjectMcpConfigPath, stripJsonComments } from './agents.js';
 import { MCP_TARGETS, mcpWriteUnsupportedReason } from './mcp-registry.js';

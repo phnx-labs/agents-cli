@@ -7,7 +7,7 @@ import {
   getIsolatedDefault,
   getProjectVersion,
   isVersionInstalled,
-} from '../versions.js';
+} from '../installations/versions.js';
 import type { VersionProvider } from './types.js';
 
 export const defaultVersionProvider: VersionProvider = {

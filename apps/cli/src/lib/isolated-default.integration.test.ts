@@ -52,7 +52,7 @@ describe.skipIf(process.platform === 'win32')('isolated default', () => {
   /** Ask the library directly what a bare `agents run codex` would resolve to. */
   function resolved(): string | null {
     const script = `
-      import { resolveVersion } from ${JSON.stringify(path.resolve(process.cwd(), 'src/lib/versions.ts'))};
+      import { resolveVersion } from ${JSON.stringify(path.resolve(process.cwd(), 'src/lib/installations/versions.ts'))};
       console.log('__R__' + JSON.stringify(resolveVersion('codex')));
     `;
     const out = execFileSync('bun', ['-e', script], {

@@ -158,7 +158,7 @@ describe('isDaemonReachable (connection probe, not file existence)', () => {
 });
 
 describe('shouldRestartStaleDaemon', () => {
-  it('restarts when the daemon reports a different concrete version', () => {
+  it('restarts when the daemon reports an older concrete version (forward only)', () => {
     expect(shouldRestartStaleDaemon('1.2.0', '1.3.0')).toBe(true);
     expect(shouldRestartStaleDaemon('0.0.0-dev.abc', '0.0.0-dev.def')).toBe(true);
   });
@@ -171,6 +171,11 @@ describe('shouldRestartStaleDaemon', () => {
     expect(shouldRestartStaleDaemon(undefined, '1.3.0')).toBe(false);
     expect(shouldRestartStaleDaemon('', '1.3.0')).toBe(false);
     expect(shouldRestartStaleDaemon('unknown', '1.3.0')).toBe(false);
+  });
+
+  it('does not restart when the daemon is newer than this CLI (older CLI rides it)', () => {
+    expect(shouldRestartStaleDaemon('1.3.0', '1.2.0')).toBe(false);
+    expect(shouldRestartStaleDaemon('2.0.0', '1.22.39')).toBe(false);
   });
 });
 

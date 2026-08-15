@@ -38,7 +38,7 @@ vi.mock('../capabilities.js', () => ({
   explainSkip: () => '',
 }));
 
-vi.mock('../versions.js', () => ({
+vi.mock('../installations/versions.js', () => ({
   getEffectiveHome: () => '/tmp/none',
   getVersionHomePath: () => '/tmp/none',
   listInstalledVersions: () => [],

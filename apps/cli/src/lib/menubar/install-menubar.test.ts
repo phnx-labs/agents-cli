@@ -14,6 +14,7 @@ import {
   mayInstallMenubarHelper,
   processesToEnd,
   restartMenubarLaunchAgent,
+  serviceLabel,
 } from './install-menubar.js';
 
 // Regression guard for the STOLEN-HOTKEY blind spot. Status used
@@ -350,10 +351,33 @@ describe('restartMenubarLaunchAgent', () => {
 
     restartMenubarLaunchAgent(501, '/tmp/com.phnx-labs.agents-menubar.plist', exec);
 
+    // The service target is `serviceLabel()`, not the bare literal: under a
+    // redirected HOME (every test fork, and any sandboxed run) the identifier is
+    // namespaced so this bootout cannot tear down the operator's live helper —
+    // launchctl routes by identifier alone, never by the plist path (RUSH-2639).
+    const target = `gui/501/${serviceLabel()}`;
     expect(calls).toHaveLength(3);
-    expect(calls[0]).toEqual({ cmd: 'launchctl', args: ['bootout', 'gui/501/com.phnx-labs.agents-menubar'] });
+    expect(calls[0]).toEqual({ cmd: 'launchctl', args: ['bootout', target] });
     expect(calls[1]).toEqual({ cmd: 'launchctl', args: ['bootstrap', 'gui/501', '/tmp/com.phnx-labs.agents-menubar.plist'] });
-    expect(calls[2]).toEqual({ cmd: 'launchctl', args: ['kickstart', 'gui/501/com.phnx-labs.agents-menubar'] });
+    expect(calls[2]).toEqual({ cmd: 'launchctl', args: ['kickstart', target] });
+  });
+
+  // The assertion above would pass against a hardcoded label too, so pin the
+  // property that actually matters: the target the call sites use is derived
+  // from HOME. Without it a sandboxed fork boots out the production job.
+  it('namespaces the service target under a redirected HOME, and only then', () => {
+    const savedHome = process.env.HOME;
+    try {
+      const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-label-'));
+      process.env.HOME = sandbox;
+      expect(serviceLabel()).toMatch(/^com\.phnx-labs\.agents-menubar\.sandbox-[0-9a-f]{12}$/);
+      fs.rmSync(sandbox, { recursive: true, force: true });
+
+      process.env.HOME = os.userInfo().homedir;
+      expect(serviceLabel()).toBe('com.phnx-labs.agents-menubar');
+    } finally {
+      if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+    }
   });
 
   it('continues through launchctl errors so a partially-loaded job still gets restarted', () => {

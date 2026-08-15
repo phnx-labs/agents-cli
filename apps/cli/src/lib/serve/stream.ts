@@ -9,7 +9,7 @@
  * phone that drops mid-run reconnects with `?offset=<bytes>` (or the standard
  * `Last-Event-ID` header) and never loses or double-counts an event.
  *
- * Scope: this streams runs whose executor is the anchor itself (no `--host`).
+ * Scope: this streams runs whose executor is the anchor itself (no `--device`).
  * Streaming a run offloaded to another box reuses `pullRemoteLogDelta` and is a
  * follow-up; see the changelog fragment.
  */

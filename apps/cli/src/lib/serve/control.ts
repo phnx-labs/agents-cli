@@ -204,7 +204,7 @@ export function spawnDetached(
 /**
  * Default run dispatcher: re-invoke `agents run` with a server-minted id so the
  * run is addressable, detached so it outlives this request (and the anchor
- * process). Local runs detach here; `--host` runs detach on the executor via
+ * process). Local runs detach here; `--device` runs detach on the executor via
  * the existing dispatch path.
  */
 export const defaultRunner: RunDispatcher = async (req) => {
@@ -218,7 +218,7 @@ export const defaultRunner: RunDispatcher = async (req) => {
   const argv = ['run', req.agent, req.prompt, '--json', '--headless', '--quiet', '--name', name];
   if (req.agent === 'claude') argv.push('--session-id', sessionId);
   if (req.mode) argv.push('--mode', req.mode);
-  if (req.host) argv.push('--host', req.host);
+  if (req.host) argv.push('--device', req.host);
   if (req.cwd) argv.push('--cwd', req.cwd);
 
   const inv = getAgentsInvocation(argv);
@@ -226,7 +226,7 @@ export const defaultRunner: RunDispatcher = async (req) => {
   // unhandled 'error' that crashes the anchor for every other session.
   //
   // For an anchor-local run, capture the `--json` NDJSON to a per-session file
-  // so `GET /api/session/:id/stream` can offset-tail it. A `--host` run emits
+  // so `GET /api/session/:id/stream` can offset-tail it. A `--device` run emits
   // its NDJSON on the remote box (streaming that reuses pullRemoteLogDelta — a
   // follow-up), so we don't capture the local dispatcher's output.
   if (req.host) {

@@ -15,7 +15,7 @@ biometric assertion never reuses, so one launch used to mean one sheet per bundl
 
 The sheet is raised only by a deliberate human request on a **locked** bundle:
 `agents secrets unlock`, or an `agents secrets view --reveal` / `agents secrets
-exec`, or an `agents secrets export --host` you run **at a real interactive
+exec`, or an `agents secrets export --device` you run **at a real interactive
 terminal** (a TTY, outside any agent runtime) — one sheet, then the value is
 revealed / the command runs / the bundle is pushed. `agents secrets get` and the
 automation-primitive `agents secrets export` variants (`--plaintext`, `--to-file`,
@@ -36,18 +36,18 @@ Which `agents secrets` commands can raise a biometric sheet, and when:
 | Command | On a locked keychain bundle |
 |---|---|
 | `list`, `view` (no `--reveal`) | never prompts — metadata / masked values only |
-| `view --reveal`, `exec`, `export --host` | **at an interactive terminal:** one Touch ID, then reveals / runs / pushes. Under an agent (`AGENTS_RUNTIME`) or no TTY: broker-only, fail-closed, no sheet |
+| `view --reveal`, `exec`, `export --device` | **at an interactive terminal:** one Touch ID, then reveals / runs / pushes. Under an agent (`AGENTS_RUNTIME`) or no TTY: broker-only, fail-closed, no sheet |
 | `get`, `export` (`--plaintext` / `--to-file` / `--to-1password`) | **never prompts, in any shell** — automation primitives; fail-closed to `agents secrets unlock` |
 | `unlock` | the one deliberate biometric entry point |
 | any command on an already-unlocked bundle | never prompts — the broker fast-path returns before Keychain is touched |
 
 The rule: a **deliberate human reveal/run/push** (`view --reveal`, `exec`,
-`export --host`) at a terminal gets one sheet; the **automation
+`export --device`) at a terminal gets one sheet; the **automation
 primitives** (`get`, `export --plaintext` / `--to-file` / `--to-1password`) never
 do, because prompting would either dump plaintext onto a visible screen or block a
 `$(…)` capture mid-pipeline. Everything an **agent** launches stays broker-only.
 
-`export --host` sits on the human side because neither of those hazards applies to
+`export --device` sits on the human side because neither of those hazards applies to
 it: it prints a key COUNT, never a value, and nothing captures its stdout — it is a
 one-off fleet push a person types, strictly less exposed than the `view --reveal`
 that already prompts. Requiring a prior `agents secrets unlock` for it was an
@@ -236,25 +236,23 @@ holds only ciphertext): see [Recipe 8](#8-headless-release-on-a-remote-mac).
 ## Remote secrets (read & use from other hosts)
 
 Browse and *use* the bundles that live on another machine, over the same hardened
-SSH path that `secrets export --host` (the write direction) already uses. Hosts
+SSH path that `secrets export --device` (the write direction) already uses. Hosts
 resolve through the `agents hosts` registry, an ssh-config alias, or `user@host`.
 
 ```bash
 # Browse one host, or several at once (grouped by host)
-agents secrets list --host yosemite-s1
-agents secrets list --hosts yosemite-s0,yosemite-s1
-agents secrets view --host yosemite-s1 r2.backups --reveal --plaintext
+agents secrets list --device yosemite-s1
+agents secrets list --devices yosemite-s0,yosemite-s1
+agents secrets view --device yosemite-s1 r2.backups --reveal --plaintext
 
 # Use a remote bundle ephemerally — values are injected, never stored locally
-agents secrets exec --host yosemite-s1 r2.backups -- ./deploy.sh
+agents secrets exec --device yosemite-s1 r2.backups -- ./deploy.sh
 agents run claude "ship it" --secrets r2.backups@yosemite-s1   # bundle@host suffix
 ```
 
-- **`--host <target>`** (single) and **`--hosts <a,b,c>`** (comma list) compose on
-  `list` / `view` / `export`; **`--device` / `--devices`** are accepted as aliases
-  everywhere `--host` / `--hosts` are (fleet-vocabulary parity with `agents run
-  --device` and `agents feed --host`), and resolve identically. **`bundle@host`** is the
-  reference form for `run --secrets` and the target for `exec --host`.
+- **`--device <target>`** (single) and **`--devices <a,b,c>`** (comma list) compose on
+  `list` / `view` / `export`; **`bundle@host`** is the reference form for
+  `run --secrets` and the target for `exec --device`.
 - **Ephemeral.** Remote values cross over ssh stdout (encrypted in transit), are
   parsed in memory, and injected into the run/command env — never written to this
   machine's keychain or disk.
@@ -270,18 +268,18 @@ agents run claude "ship it" --secrets r2.backups@yosemite-s1   # bundle@host suf
   known_hosts store (a **changed** host key is refused) and forces a fresh
   connection with no lingering `ControlMaster` socket, so no unrelated later
   `agents` invocation can reuse the authenticated channel to a box you just
-  touched secrets on. This covers the `export --host` / `accounts sync` push and
-  its read-back / policy follow-ups; a remote **resolve** (`exec --host`,
-  `run --secrets b@host`); a **`view --reveal --host`** (the plaintext value
+  touched secrets on. This covers the `export --device` / `accounts sync` push and
+  its read-back / policy follow-ups; a remote **resolve** (`exec --device`,
+  `run --secrets b@host`); a **`view --reveal --device`** (the plaintext value
   returns over ssh stdout — on the interactive prompt path and the `--plaintext`
-  non-interactive path alike); and **`unlock --host`** (you type the remote
-  bundle's passphrase over the channel). Read-only `list --host` and a masked
-  `view --host` (no `--reveal`) carry no secret bytes and keep the fast
+  non-interactive path alike); and **`unlock --device`** (you type the remote
+  bundle's passphrase over the channel). Read-only `list --device` and a masked
+  `view --device` (no `--reveal`) carry no secret bytes and keep the fast
   shared-connection baseline.
 
 ### Pushing to a headless sign host — use `--remote-backend file`
 
-`secrets export --host` defaults to `--remote-backend keychain`. On a **macOS**
+`secrets export --device` defaults to `--remote-backend keychain`. On a **macOS**
 target reached over headless SSH (e.g. the sign host a Linux-driven release offloads
 notarization to), the remote login keychain is **locked** in the non-interactive SSH
 context: the keychain *write* is accepted but the biometry-gated items are not
@@ -296,7 +294,7 @@ headless sign host, push with the headless-readable file backend instead — **n
 passphrase required**:
 
 ```bash
-agents secrets export apple.com --host mac-mini --remote-backend file
+agents secrets export apple.com --device mac-mini --remote-backend file
 ```
 
 A file-backed bundle is encrypted at rest and reads with **no biometry** — the right
@@ -304,7 +302,7 @@ choice whenever the remote can't satisfy a Touch ID prompt. By default the remot
 encrypts it under a **machine-local key** it auto-provisions (a 0600 file under
 `~/.agents/.secrets-key/`), so the push needs no passphrase and the remote's reads are
 fully headless.
-<!-- docs-hygiene:allow-master-key-discussion — `export --host` legitimately forwards the
+<!-- docs-hygiene:allow-master-key-discussion — `export --device` legitimately forwards the
      MASTER key to key the remote's own store; this is store provisioning, not transport
      sync. Reviewed; see src/lib/secrets/docs-hygiene.test.ts. -->
 Set `AGENTS_SECRETS_PASSPHRASE` locally only to **opt into** a shared
@@ -318,32 +316,32 @@ keychain push. See [File-backed bundles](#file-backed-bundles-headless--remote) 
 
 ### Push to a Windows host
 
-`secrets export --host` targets Windows machines as well as POSIX ones — the push
+`secrets export --device` targets Windows machines as well as POSIX ones — the push
 detects the remote's platform (device registry) and drives the remote
 `agents secrets import` under PowerShell instead of `bash -lc`. The `.env` still
 only ever crosses the wire over ssh stdin. Because the npm `agents.ps1` shim
 doesn't forward that stdin to node, on Windows the push bridges it through
 PowerShell into a temp file and imports `--from <file>` (deleted afterwards);
-you don't do anything different — `agents secrets export <bundle> --host <win-host>`
+you don't do anything different — `agents secrets export <bundle> --device <win-host>`
 just works. (The `--remote-backend file` variant is POSIX-only for now and is
 refused cleanly against a Windows target.)
 
-### Unlock a bundle on a remote Mac from the road (`unlock --host`)
+### Unlock a bundle on a remote Mac from the road (`unlock --device`)
 
 ```bash
 # Traveling, away from the Mac Mini — unlock its FILE-backed bundle by typing its
 # passphrase into your own terminal (the prompt surfaces over an ssh -tt session):
-agents secrets unlock linear.app --host mac-mini
+agents secrets unlock linear.app --device mac-mini
 ```
 
-`unlock --host <machine> <bundle>` runs the unlock ON the remote over `ssh -tt`,
+`unlock --device <machine> <bundle>` runs the unlock ON the remote over `ssh -tt`,
 so the remote's passphrase prompt appears on your terminal — you type the
 password there, the remote holds the bundle in its own secrets-agent (default TTL
 7d), and later sessions read it silently. This works only for **file-backed**
 bundles (their passphrase is a CLI prompt); a keychain/biometry bundle would pop
 a **local** Touch-ID/passcode sheet on the remote's screen, which can't cross
-SSH — so those can't be remote-unlocked. `--host` is single-valued so it never
-swallows the positional bundle name: `unlock <bundle> --host <machine>`.
+SSH — so those can't be remote-unlocked. `--device` is single-valued so it never
+swallows the positional bundle name: `unlock <bundle> --device <machine>`.
 
 Source: `src/lib/secrets/remote.ts` (transport + resolve), wired into `list` /
 `view` / `exec` in `src/commands/secrets.ts` and the `--secrets` loop in
@@ -411,15 +409,15 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | `secrets import [bundle] --from icloud` | Recover a bundle stranded in the iCloud Keychain by the pre-biometry era (macOS; omit the bundle name for an interactive multi-select of everything discovered) | `agents secrets import hetzner.com --from icloud` |
 | `secrets import --from icloud --purge` | After a successful import, delete the iCloud copies (propagates to your other devices) | `agents secrets import --from icloud --purge` |
 | `secrets import [bundle] --from-file <path>` | Recover from an AES-256-GCM encrypted offline bundle file (needs `AGENTS_SYNC_PASSPHRASE`; server-independent, symmetric counterpart of `export --to-file`) | `agents secrets import prod --from-file prod.enc` |
-| `secrets import [bundle] --from-ssh --host <peer>` | Pull a bundle from a fleet peer over SSH and import it locally (no dependency on api.prix.dev) | `agents secrets import prod --from-ssh --host mac-mini` |
+| `secrets import [bundle] --from-ssh --device <peer>` | Pull a bundle from a fleet peer over SSH and import it locally (no dependency on api.prix.dev) | `agents secrets import prod --from-ssh --device mac-mini` |
 | `secrets import ... --all-plaintext` | Store imported values as literals, skip keychain | `agents secrets import prod --from .env --all-plaintext` |
 | `secrets import ... --force` | Overwrite existing keys | `agents secrets import prod --from .env --force` |
 | `secrets export [bundle]` | Print `KEY=VALUE` lines for shell eval | `eval "$(agents secrets export prod --plaintext)"` |
 | `secrets export [bundle] --to-1password --vault <name>` | Push bundle to a 1Password vault | `agents secrets export prod --to-1password --vault Team` |
 | `secrets export ... --force` | Overwrite existing 1Password items | `agents secrets export prod --to-1password --vault Team --force` |
 | `secrets export [bundle] --to-file <path>` | Write the bundle as an AES-256-GCM encrypted offline file (needs `AGENTS_SYNC_PASSPHRASE`; symmetric counterpart of `import --from-file`) | `agents secrets export prod --to-file prod.enc` |
-| `secrets export [bundle] --host <target>` | Push the bundle over SSH to a remote (repeatable; `--device` is an alias). Keychain-backed by default; the push read-back-verifies the write and fails loudly if it didn't persist | `agents secrets export apple.com --host mac-mini` |
-| `secrets export ... --remote-backend file` | Push as a headless-readable file bundle (no passphrase — the remote keys it with its machine-local key; forwards `AGENTS_SECRETS_PASSPHRASE` only if set) — for a **headless sign host** whose login keychain is locked over SSH | `agents secrets export apple.com --host mac-mini --remote-backend file` |
+| `secrets export [bundle] --device <target>` | Push the bundle over SSH to a remote (repeatable; `--device` is an alias). Keychain-backed by default; the push read-back-verifies the write and fails loudly if it didn't persist | `agents secrets export apple.com --device mac-mini` |
+| `secrets export ... --remote-backend file` | Push as a headless-readable file bundle (no passphrase — the remote keys it with its machine-local key; forwards `AGENTS_SECRETS_PASSPHRASE` only if set) — for a **headless sign host** whose login keychain is locked over SSH | `agents secrets export apple.com --device mac-mini --remote-backend file` |
 
 ### Agent commands (macOS)
 
@@ -652,8 +650,8 @@ key — **no passphrase to manage on either end**. See
 # Ship the release secrets to the remote as a file-backed bundle. The laptop
 # resolves them (one Touch ID) and pushes; the remote encrypts them at rest under
 # a machine-local key it auto-provisions — nothing to set, nothing to forward.
-agents secrets export apple.com     --host mac-mini --remote-backend file
-agents secrets export rush.releases --host mac-mini --remote-backend file
+agents secrets export apple.com     --device mac-mini --remote-backend file
+agents secrets export rush.releases --device mac-mini --remote-backend file
 
 # --- Each release, from the laptop ---
 # The remote reads the file-backed bundle headlessly (its own machine-local key) —
@@ -675,7 +673,7 @@ environment (see the warning under [File-backed bundles](#file-backed-bundles-he
 
 ```bash
 export AGENTS_SECRETS_PASSPHRASE="$(agents secrets exec release.key -- printenv PASSPHRASE)"
-agents secrets export apple.com --host mac-mini --remote-backend file   # keyed under the shared passphrase
+agents secrets export apple.com --device mac-mini --remote-backend file   # keyed under the shared passphrase
 unset AGENTS_SECRETS_PASSPHRASE
 # then each release forwards the same passphrase to the remote process env:
 P="$(agents secrets exec release.key -- printenv PASSPHRASE)"           # one Touch ID

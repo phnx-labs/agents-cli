@@ -238,7 +238,7 @@ export function isAutomaticSessionPeer(d: DeviceProfile, self: string): boolean 
 
 /**
  * Gather listing sessions from other machines. With an explicit `hosts` list
- * (from `--host`), fan out to exactly those. Otherwise sweep the registered,
+ * (from `--device`), fan out to exactly those. Otherwise sweep the registered,
  * online devices from `ag devices`, excluding this machine and any without an
  * address. `forwardedArgs` are the caller's own sessions args (query + filters,
  * already `--json`) so every peer returns the same slice this machine asked for.
@@ -661,16 +661,16 @@ export async function fetchPeerPreviewDigest(
  * `['sessions', id, '--markdown']` or `['sessions', 'resume', id]`. Used when a
  * picked session lives on another machine: its transcript and agent binary are
  * there, so both reading (no TTY) and resuming (TTY) must execute on the peer —
- * not via a local `--host` hop, which would discover locally and dead-end for a
+ * not via a local `--device` hop, which would discover locally and dead-end for a
  * session that exists only on the peer. Resolves 'no-target' when the machine
  * isn't a dialable registered device; the caller surfaces a clear message.
  *
  * `opts.env` adds variables to the remote command. It deliberately does NOT
- * carry `AGENTS_FLEET_REMOTE` the way the `--host` passthrough does: that marker
+ * carry `AGENTS_FLEET_REMOTE` the way the `--device` passthrough does: that marker
  * gates consent-sensitive actions on the far side
  * (lib/browser/remote-control.ts), and a resumed agent is a long-lived session
  * that would inherit it for its whole life — `agents browser start` inside it
- * would then be refused as a cross-machine drive. A one-shot `--host` command
+ * would then be refused as a cross-machine drive. A one-shot `--device` command
  * can carry the marker; a session cannot.
  */
 export async function runOnPeer(

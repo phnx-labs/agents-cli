@@ -23,7 +23,7 @@ import * as path from 'path';
 import type { AgentId } from './types.js';
 import { AGENTS, resolveNativeBinaryPath } from './agents.js';
 import { getUserAgentsDir, getVersionsDir } from './state.js';
-import { setGlobalDefault } from './versions.js';
+import { setGlobalDefault } from './installations/versions.js';
 import { createShim, createVersionedAlias, ensureShimCurrent, switchHomeFileSymlinks, assertIsolationBoundary } from './shims.js';
 
 export interface ImportConfigResult {

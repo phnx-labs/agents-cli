@@ -4,7 +4,7 @@
  * eventTypes, level) so the engine stays single-path.
  */
 
-import type { EventType, EventLevel } from './events.js';
+import type { EventType, EventLevel } from './feed/events.js';
 import type { UnifiedQuery } from './event-stream.js';
 
 export const EVENT_FAMILIES = [

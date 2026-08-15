@@ -108,7 +108,7 @@ describe('trailing-@ account picker request', () => {
       lease: true,
       box: 'warm-one',
       device: 'yosemite-s0',
-    })).toEqual(['--resume', '--strategy', '--balanced', '--lease', '--box', '--host/--device']);
+    })).toEqual(['--resume', '--strategy', '--balanced', '--lease', '--box', '--device']);
     expect(runAccountPickerConflicts({})).toEqual([]);
   });
 });
@@ -195,12 +195,12 @@ describe('always-fresh repo set (F3 picker "remember for this repo")', () => {
   });
 });
 
-describe('hostTargetGiven — the --host alias family (the --terminal reject guard)', () => {
-  // Regression: the --terminal handoff guard checked only `options.host`, so
+describe('hostTargetGiven — the --device routing flag family (the --terminal reject guard)', () => {
+  // Regression: the --terminal handoff guard checked only `options.device`, so
   // `agents run <agent> --terminal --device box` (or --on/--computer) silently
   // opened a LOCAL tab and dropped the remote target instead of rejecting the
   // combination. Every alias must count as a host target.
-  it('detects each --host alias, not just --host', () => {
+  it('detects each --device alias, not just --device', () => {
     expect(hostTargetGiven({ host: 'box' })).toEqual(['box']);
     expect(hostTargetGiven({ device: 'box' })).toEqual(['box']);
     expect(hostTargetGiven({ on: 'box' })).toEqual(['box']);
@@ -541,8 +541,8 @@ describe.skipIf(process.platform === 'win32')('--copy-creds refusal (RUSH-2527)'
   const appRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
 
   it('exits 1 and prints the refusal message — no agent launched', () => {
-    // --copy-creds is only evaluated when a --host target is given (it was a
-    // host-transfer feature). Pass --host with a dummy device name; the refusal
+    // --copy-creds is only evaluated when a --device target is given (it was a
+    // host-transfer feature). Pass --device with a dummy name; the refusal
     // must fire before any SSH or agent launch attempt.
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'copy-creds-'));
     try {
@@ -550,7 +550,7 @@ describe.skipIf(process.platform === 'win32')('--copy-creds refusal (RUSH-2527)'
       fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'), 'agents: {}\n');
       const result = spawnSync(
         bunBin(),
-        [path.join(appRoot, 'src', 'index.ts'), 'run', 'claude', '--host', 'dummy-device', '--copy-creds', '--mode', 'plan', 'probe'],
+        [path.join(appRoot, 'src', 'index.ts'), 'run', 'claude', '--device', 'dummy-device', '--copy-creds', '--mode', 'plan', 'probe'],
         {
           cwd: appRoot,
           env: { ...process.env, HOME: root },

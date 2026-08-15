@@ -5,7 +5,7 @@
  * registry.json) into the host pool behind the same `HostProvider` seam as
  * `local` — the "tailscale provider" fast-follow named in docs/hosts.md. With
  * it, a machine registered once via `agents devices sync` becomes a resolvable
- * `--host`/`--device` dispatch target, participates in capability routing, and
+ * `--device`/`--device` dispatch target, participates in capability routing, and
  * is enumerable by target pickers — not just resolvable by exact name.
  *
  * Password-auth devices are listed (the pool stays honest about what exists)

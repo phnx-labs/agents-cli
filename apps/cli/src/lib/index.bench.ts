@@ -98,7 +98,7 @@ import {
   readMeta,
 } from './state.js';
 import { isGitRepo } from './git.js';
-import { emit, redactArgs, _resetForTest } from './events.js';
+import { emit, redactArgs, _resetForTest } from './feed/events.js';
 import { stampProvenance } from './event-provenance.js';
 import { installMenubarLaunchAgentOnUpgrade } from './menubar/install-menubar.js';
 import {
@@ -488,7 +488,7 @@ const SESSIONS_COMMAND_SPEC = distUrl('commands/sessions.js');
 const MENUBAR_INSTALL_SPEC = distUrl('lib/menubar/install-menubar.js');
 const BRAND_SPEC = distUrl('lib/brand.js');
 const AGENTS_REGISTRY_SPEC = distUrl('lib/agents.js');
-const VERSIONS_SPEC = distUrl('lib/versions.js');
+const VERSIONS_SPEC = distUrl('lib/installations/versions.js');
 const PRIMITIVES_SPEC = distUrl('lib/agent-spec/primitives.js');
 const STATE_SPEC = distUrl('lib/state.js');
 const TYPES_SPEC = distUrl('lib/types.js');

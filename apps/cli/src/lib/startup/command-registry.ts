@@ -17,6 +17,18 @@ const INLINE_COMMAND_NAMES = [
   'perms', 'exec', 'jobs', 'cron', 'check', 'resources', 'hq', '_internal',
 ] as const;
 
+/**
+ * Every top-level command name the CLI answers to — the loader table plus the
+ * inline aliases/tombstones above. This is the "does this command exist?"
+ * predicate for code that runs BEFORE commander parses, most importantly the
+ * `--device` router (lib/hosts/passthrough.ts): without it a typo'd
+ * command carrying `--device` reported a flag-support error instead of
+ * `unknown command` (RUSH-2022).
+ *
+ * Commander sub-aliases (`sessions ls`, `teams rm`, …) are deliberately absent —
+ * this set is top-level only. `command-registry.test.ts` pins it against the real
+ * registered command tree so a new command can never drift out of it.
+ */
 export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
   ...LOADED_COMMAND_NAMES,
   ...INLINE_COMMAND_NAMES,

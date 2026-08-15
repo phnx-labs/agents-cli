@@ -57,7 +57,7 @@ import type { AgentId } from '../lib/types.js';
 import {
   getVersionHomePath,
   listInstalledVersions,
-} from '../lib/versions.js';
+} from '../lib/installations/versions.js';
 import { resolveAgentTargets, AgentSpecError } from '../lib/agent-spec/index.js';
 import { loadManifest, isStale } from '../lib/staleness/index.js';
 import {
@@ -68,7 +68,7 @@ import {
   type VersionResourceReport,
 } from '../lib/doctor-diff.js';
 import { checkVersionHookWiring, inspectDuplicateVersionHooks, registerHooksToSettings, repairManagedHookRuntimeArtifacts, type DuplicateVersionHook, type HookRuntimeRepairReport, type HookWiringReport } from '../lib/hooks.js';
-import { isVersionIsolated } from '../lib/versions.js';
+import { isVersionIsolated } from '../lib/installations/versions.js';
 import { computeDrift, checkSyncStatus, countOrphans, computeSourceBehind, type SyncStatusRow, type OrphanRow } from '../lib/drift.js';
 import { readAuthHealthCache, summarizeHostAuth } from '../lib/auth-health.js';
 import { readMeta } from '../lib/state.js';
@@ -108,10 +108,8 @@ interface DoctorOptions {
   fix?: boolean;
   adopt?: string;
   release?: string;
-  host?: string;
   device?: string;
   devices?: boolean;
-  hosts?: boolean;
   check?: boolean;
   quiet?: boolean;
 }
@@ -272,9 +270,9 @@ interface FleetTarget {
 }
 
 async function resolveFleetTargets(opts: DoctorOptions): Promise<FleetTarget[]> {
-  const singleName = opts.host || opts.device;
+  const singleName = opts.device;
   if (singleName) {
-    // --device / --host as a single-device filter: resolve through the device
+    // --device as a single-device filter: resolve through the device
     // registry first, then the general host registry, then ad-hoc user@host.
     const registry = await loadDevices();
     const deviceProfile = registry[singleName];
@@ -483,7 +481,7 @@ export function asFleetInventory(value: unknown): FleetInventory | null {
 }
 
 async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
-  const singleName = opts.host || opts.device;
+  const singleName = opts.device;
   const targets = await resolveFleetTargets(opts);
   const localName = machineId();
   const results: DeviceDoctorResult[] = [];
@@ -1407,12 +1405,14 @@ function renderStaleInstallPurgeText(purge: RemediateStaleInstallsResult): void 
       `  ${chalk.red('hold  ')} ${chalk.gray(`${f.packageRoot}  ${f.version}  — ${f.error}`)}`,
     );
   }
-  // RUSH-2705: a healthy duplicate (>=1.22.30, not npx-cache, not legacy) is
-  // deliberately never auto-purged, so --fix must hand back the command that
-  // does remove it instead of ending on a bare "everything in sync".
+  // RUSH-2705/2713: a duplicate --fix cannot auto-purge — either a healthy
+  // >=1.22.30 peer, OR a pre-1.22.30 copy left alone only because no fixed peer
+  // exists to fall back to (that one is NOT healthy). Either way, hand back the
+  // command that removes it instead of ending on a bare "everything in sync".
+  // Don't call it "healthy" — that would understate a genuinely vulnerable copy.
   for (const u of purge.unresolved) {
     console.log(
-      `  ${chalk.yellow('manual')} ${chalk.gray(`${u.packageRoot}  ${u.version}  — a healthy duplicate --fix will not delete; remove it with:`)}`,
+      `  ${chalk.yellow('manual')} ${chalk.gray(`${u.packageRoot}  ${u.version}  — --fix will not delete this copy; remove it with:`)}`,
     );
     console.log(`         ${chalk.bold(u.manualRemoveCommand)}`);
   }
@@ -1694,8 +1694,7 @@ export function registerDoctorCommand(program: Command): void {
     .option('--cwd <path>', 'Resolution cwd for project layer detection (default: process.cwd())')
     .option('--adopt <agent>', "Take over the agent's native launcher that shadows the shim (symlink it to the version-managed shim; reversible with --release)")
     .option('--release <agent>', 'Undo --adopt: restore the native launcher agents-cli previously adopted')
-    .option('--devices', 'Check agent readiness AND cross-device harness divergence (missing resources/versions, repo drift) on every registered device (alias --hosts)')
-    .option('--hosts', 'Alias of --devices')
+    .option('--devices', 'Check agent readiness AND cross-device harness divergence (missing resources/versions, repo drift) on every registered device')
     .option('--check', 'CI drift gate: exit non-zero when any installed version is out of sync (stale or never-synced), zero when clean. Combine with --devices to gate the whole fleet.')
     .option('--refresh', 'Bypass the cached overview snapshot: recompute the bare `doctor --json` overview live and refresh the shared cache that the menu-bar and other pollers read')
     .option('-q, --quiet', 'With --check, suppress per-version lines; print only the one-line verdict');
@@ -1752,7 +1751,7 @@ export function registerDoctorCommand(program: Command): void {
           console.error(chalk.red('Cannot combine --check with a target argument.'));
           process.exit(1);
         }
-        if (opts.devices || opts.hosts) {
+        if (opts.devices) {
           await runDevicesCheck(opts, cwd);
         } else {
           runCheckGate(opts, cwd);
@@ -1760,7 +1759,7 @@ export function registerDoctorCommand(program: Command): void {
         return;
       }
 
-      if (opts.devices || opts.hosts) {
+      if (opts.devices) {
         if (target) {
           console.error(chalk.red('Cannot combine --devices with a target argument.'));
           process.exit(1);

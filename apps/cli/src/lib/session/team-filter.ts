@@ -209,7 +209,7 @@ export function filterTeamSessions(
  * record backs the origin ({@link TeamOrigin.source} === `'meta'`).
  *
  * `source` is newer than the rest of {@link TeamOrigin}, so a row that arrived
- * from a pre-`source` peer over the `--host` fan-out carries none. There the
+ * from a pre-`source` peer over the `--device` fan-out carries none. There the
  * meta-only fields settle it: the entrypoint fallback is a bare `{ handle }`, so
  * any `team` / `mode` / `parentSessionId` / `startedAt` means a real teammate
  * record produced it — otherwise a genuine teammate from an unupgraded peer
