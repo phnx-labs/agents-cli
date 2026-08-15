@@ -141,18 +141,24 @@ describe('allow and deny never cross on the way back', () => {
   // registry could have.
 
   /**
-   * Harnesses whose format cannot record a SUB-COMMAND deny like `Bash(rm:*)`,
-   * verified by driving the real writer and reading the file it produced:
+   * Harnesses whose read path returns nothing for a SUB-COMMAND deny like
+   * `Bash(rm:*)`, verified by driving the real writer and reading what it
+   * produced. Two distinct reasons — do not conflate them:
    *
-   *   codex     — writes sandbox settings only; deny rules go to a separate
-   *               agents-deny.rules Starlark file the reader does not parse
-   *   openclaw  — tool-level only, so a sub-command rule is skipped by design
-   *   copilot   — records approvals (grants); its config has no deny list
+   *   openclaw  — CANNOT express it. Tool-level only, so a sub-command rule is
+   *               skipped by the serializer (convertToOpenClawFormat).
+   *   copilot   — CANNOT express it. Its config records approvals (grants) and
+   *               has no deny list at all.
+   *   codex     — CAN and DOES express it: the writer emits
+   *               `.codex/rules/agents-deny.rules` with
+   *               `prefix_rule(pattern=["rm"], decision="forbidden")`. The
+   *               READER just never opens that file, hardcoding an empty deny.
+   *               That is a fixable read-side gap (RUSH-2703), not a limit of
+   *               the format.
    *
-   * They legitimately read back as `null` for a deny-only set. Asserting
-   * non-null for them would be asserting a lie.
+   * All three read back `null` today, so asserting non-null would assert a lie.
    */
-  const CANNOT_EXPRESS_SUBCOMMAND_DENY = new Set(['codex', 'openclaw', 'copilot']);
+  const DENY_NOT_READ_BACK = new Set(['codex', 'openclaw', 'copilot']);
 
   for (const agent of capableAgents('allowlist')) {
     it(`${agent}: an allow-only set never reads back a deny`, () => {
@@ -173,9 +179,9 @@ describe('allow and deny never cross on the way back', () => {
       expect(applyPermissionsToVersion(agent, set, home, false, process.cwd()).success).toBe(true);
       const back = readCanonicalPermissions(agent, 'user', undefined, home);
 
-      if (CANNOT_EXPRESS_SUBCOMMAND_DENY.has(agent)) {
-        // Nothing recorded is the honest outcome — but it must be NOTHING, not
-        // a grant invented out of a deny.
+      if (DENY_NOT_READ_BACK.has(agent)) {
+        // Nothing read back is the honest outcome for these three — but it
+        // must be NOTHING, not a grant invented out of a deny.
         expect(back?.allow ?? []).toEqual([]);
         return;
       }
@@ -186,3 +192,51 @@ describe('allow and deny never cross on the way back', () => {
     });
   }
 });
+
+describe('harness detection does not depend on the working directory', () => {
+  // The bug: detection built its match suffixes from `target.home('')`, and
+  // OpenCode's resolvers probe the filesystem to choose between the two
+  // spellings it accepts. With an empty root that probe resolved against
+  // `process.cwd()`, so the SAME file detected differently depending on where
+  // the CLI ran. A cwd holding decoy opencode configs reproduces it; a cwd
+  // without them does not, which is why one-cwd coverage passed on main.
+  function withCwd<T>(dir: string, fn: () => T): T {
+    const before = process.cwd();
+    process.chdir(dir);
+    try {
+      return fn();
+    } finally {
+      process.chdir(before);
+    }
+  }
+
+  for (const spelling of ['opencode.jsonc', 'opencode.json']) {
+    it(`detects ${spelling} identically from a decoy cwd and a bare one`, () => {
+      const home = makeTempHome();
+      const configDir = path.join(home, '.config', 'opencode');
+      fs.mkdirSync(configDir, { recursive: true });
+      const configPath = path.join(configDir, spelling);
+      fs.writeFileSync(configPath, '{"permission":{"bash":{"git *":"allow"}}}', 'utf-8');
+
+      // The decoy cwd must carry ONLY the spelling the file under test is NOT,
+      // so an fs probe rooted at '' resolves to the WRONG suffix. Seeding both
+      // spellings would let the probe find the right one by luck and the test
+      // would pass against the bug.
+      const other = spelling === 'opencode.jsonc' ? 'opencode.json' : 'opencode.jsonc';
+      const decoy = makeTempHome();
+      fs.mkdirSync(path.join(decoy, '.config', 'opencode'), { recursive: true });
+      fs.writeFileSync(path.join(decoy, other), '{}', 'utf-8');
+      fs.writeFileSync(path.join(decoy, '.config', 'opencode', other), '{}', 'utf-8');
+      const bare = makeTempHome();
+
+      const fromDecoy = withCwd(decoy, () => exportPermissionsFromPath(configPath));
+      const fromBare = withCwd(bare, () => exportPermissionsFromPath(configPath));
+
+      expect(fromDecoy, `${spelling} undetected from a decoy cwd`).not.toBeNull();
+      expect(fromBare, `${spelling} undetected from a bare cwd`).not.toBeNull();
+      expect(fromDecoy).toEqual(fromBare);
+      expect(fromDecoy!.allow).toContain('Bash(git *)');
+    });
+  }
+});
+

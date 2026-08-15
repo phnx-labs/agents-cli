@@ -322,7 +322,15 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
       path.join(h, '.config', 'opencode', 'opencode.json'),
     ),
     project: (cwd) => existingOr(path.join(cwd, 'opencode.jsonc'), path.join(cwd, 'opencode.json')),
-    altSuffixes: [path.join('.config', 'opencode', 'opencode.json'), 'opencode.json'],
+    // BOTH spellings, for home and project. The preferred one needs an entry
+    // too: `home('')`/`project('')` resolve it through `existingOr`, which
+    // probes, so leaving it out left `opencode.jsonc` detection cwd-dependent.
+    altSuffixes: [
+      path.join('.config', 'opencode', 'opencode.jsonc'),
+      path.join('.config', 'opencode', 'opencode.json'),
+      'opencode.jsonc',
+      'opencode.json',
+    ],
     lossyBecause: 'OpenCode gates Bash only, so non-Bash rules were never written',
     toCanonical(configPath) {
       const config = readJson(configPath);
