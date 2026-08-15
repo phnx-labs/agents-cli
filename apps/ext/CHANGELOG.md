@@ -6,6 +6,16 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+- **The Foreman orb no longer covers the Fleet session detail.** The orb, its speaker
+  chip and its composer are a `position: fixed` bottom-right overlay, so the newest
+  Activity line in the session detail column rendered underneath them and could not be
+  scrolled clear (measured: 48-71px of the live `Bash:` line covered at a 430px column).
+  The detail column now reserves the overlay's footprint. The composer's placeholder is
+  also shortened to `Ask Foreman… (Enter to send)` — the old hint wrapped to a second
+  line that the one-row input clipped (measured 17px). Source:
+  `apps/ext/ui/settings/components/mission-control/floor.css`, `index.css`,
+  `components/foreman/ForemanOrb.tsx`.
+
 - **Fleet sessions list ranks by progress — idle work no longer hides below running.**
   The state-grouped Sessions list now surfaces a **Needs attention** band (live sessions
   that have stopped progressing — waiting on input, stalled, idle, or failed) *above* the
