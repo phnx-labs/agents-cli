@@ -9,24 +9,24 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'yaml';
-import { stringifyDoc } from './yaml-io.js';
+import { stringifyDoc } from '../yaml-io.js';
 import { execSync } from 'child_process';
-import { atomicWriteFileSync } from './fs-atomic.js';
-import type { AgentId } from './types.js';
-import { machineId } from './machine-id.js';
-import { AGENTS, agentConfigDirName, findInPath } from './agents.js';
-import { createLink } from './platform/index.js';
-import { foldLegacySystemRepo, copyDirSkipExisting } from './migrate-fold.js';
-export { foldLegacySystemRepo } from './migrate-fold.js';
-import { migrateLegacyRoutineActivation, listJobs, validateJob } from './routines.js';
-import { setConfigValue } from './device-config.js';
-import { enabledRoutineNames, replaceEnabledRoutines } from './routine-activation.js';
-import { evaluateActivationReadiness } from './routine-readiness.js';
-import { migrateDeviceConfigToCentral } from './devices/config-migration.js';
+import { atomicWriteFileSync } from '../fs-atomic.js';
+import type { AgentId } from '../types.js';
+import { machineId } from '../machine-id.js';
+import { AGENTS, agentConfigDirName, findInPath } from '../agents.js';
+import { createLink } from '../platform/index.js';
+import { foldLegacySystemRepo, copyDirSkipExisting } from '../migrate-fold.js';
+export { foldLegacySystemRepo } from '../migrate-fold.js';
+import { migrateLegacyRoutineActivation, listJobs, validateJob } from '../routines.js';
+import { setConfigValue } from '../device-config.js';
+import { enabledRoutineNames, replaceEnabledRoutines } from '../routine-activation.js';
+import { evaluateActivationReadiness } from '../routine-readiness.js';
+import { migrateDeviceConfigToCentral } from '../devices/config-migration.js';
 // Two constants only, never the read/write API — migrations still operate on raw
 // YAML so they never take the meta lock or prime the meta cache mid-migration.
-import { DEFAULT_BROWSER_PROFILE_NAME } from './browser/profiles.js';
-import { META_HEADER as DEVICE_META_HEADER } from './state.js';
+import { DEFAULT_BROWSER_PROFILE_NAME } from '../browser/profiles.js';
+import { META_HEADER as DEVICE_META_HEADER } from '../state.js';
 
 const HOME = process.env.HOME ?? os.homedir();
 const USER_DIR = path.join(HOME, '.agents');
@@ -1055,7 +1055,7 @@ async function mergeSqliteDb(src: string, dest: string): Promise<void> {
   // every user table. Dynamic import keeps the sqlite shim off the hot path
   // for CLI starts that don't actually need a merge.
   try {
-    const sqliteMod = (await import('./sqlite.js')) as { default: new (file: string) => SqliteLike };
+    const sqliteMod = (await import('../sqlite.js')) as { default: new (file: string) => SqliteLike };
     const Database = sqliteMod.default;
     const db = new Database(dest);
     try {
@@ -2336,8 +2336,8 @@ export async function runMigration(): Promise<void> {
   // machine that upgrades without immediately restarting its daemon still
   // repairs on the next `agents` invocation. Idempotent/non-destructive.
   try {
-    const { reconcileSessionHooks } = await import('./tmux/session.js');
-    const { isTmuxInstalled } = await import('./tmux/binary.js');
+    const { reconcileSessionHooks } = await import('../tmux/session.js');
+    const { isTmuxInstalled } = await import('../tmux/binary.js');
     if (isTmuxInstalled()) await reconcileSessionHooks();
   } catch {
     // best-effort — a migration must never fail because tmux wasn't reachable

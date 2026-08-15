@@ -23,7 +23,7 @@ vi.mock('../state.js', async (importOriginal) => {
 });
 
 async function loadLib() {
-  return await import('../versions.js');
+  return await import('../installations/versions.js');
 }
 
 const CLI_COMMAND: Record<string, string> = {

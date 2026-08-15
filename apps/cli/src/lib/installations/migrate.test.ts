@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'url';
 
 import { migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateKimiSubagentsToMarkdown, migrateMachineLocalBrowserProfileOutOfCentral, migrateRoutineDeviceToDevices, migrateRoutineRemoteCwdToCwd, migrateWatchdogSentinelToConfig, repairSelfReferentialBinShims, seedActiveCursorLoginPerVersion } from './migrate.js';
-import { toPosix } from './platform/index.js';
+import { toPosix } from '../platform/index.js';
 import * as yaml from 'yaml';
 
 const tempDirs: string[] = [];

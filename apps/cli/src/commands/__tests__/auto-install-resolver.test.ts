@@ -23,8 +23,8 @@ vi.mock('../../lib/state.js', async (importOriginal) => {
   };
 });
 
-vi.mock('../../lib/versions.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../lib/versions.js')>();
+vi.mock('../../lib/installations/versions.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/installations/versions.js')>();
   return {
     ...actual,
     installVersion: installVersionMock,

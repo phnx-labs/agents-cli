@@ -57,7 +57,7 @@ import type { AgentId } from '../lib/types.js';
 import {
   getVersionHomePath,
   listInstalledVersions,
-} from '../lib/versions.js';
+} from '../lib/installations/versions.js';
 import { resolveAgentTargets, AgentSpecError } from '../lib/agent-spec/index.js';
 import { loadManifest, isStale } from '../lib/staleness/index.js';
 import {
@@ -68,7 +68,7 @@ import {
   type VersionResourceReport,
 } from '../lib/doctor-diff.js';
 import { checkVersionHookWiring, inspectDuplicateVersionHooks, registerHooksToSettings, repairManagedHookRuntimeArtifacts, type DuplicateVersionHook, type HookRuntimeRepairReport, type HookWiringReport } from '../lib/hooks.js';
-import { isVersionIsolated } from '../lib/versions.js';
+import { isVersionIsolated } from '../lib/installations/versions.js';
 import { computeDrift, checkSyncStatus, countOrphans, computeSourceBehind, type SyncStatusRow, type OrphanRow } from '../lib/drift.js';
 import { readAuthHealthCache, summarizeHostAuth } from '../lib/auth-health.js';
 import { readMeta } from '../lib/state.js';

@@ -10,7 +10,7 @@ import {
   type AccountReadiness,
   type RotateCandidate,
 } from '../lib/accounting/rotate.js';
-import { compareVersions, getGlobalDefault } from '../lib/versions.js';
+import { compareVersions, getGlobalDefault } from '../lib/installations/versions.js';
 import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
 
 const CANCEL_SELECTION = '__agents_cancel_account_selection__';

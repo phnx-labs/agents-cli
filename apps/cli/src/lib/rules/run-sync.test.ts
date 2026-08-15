@@ -10,7 +10,7 @@ process.env.HOME = TEST_HOME;
 
 const { AGENTS, agentConfigDirName } = await import('../agents.js');
 const { setActiveRulesPreset } = await import('../state.js');
-const { getVersionHomePath } = await import('../versions.js');
+const { getVersionHomePath } = await import('../installations/versions.js');
 const { applyActiveRulesPresetAtRun } = await import('./run-sync.js');
 
 const AGENT = 'claude' as const;

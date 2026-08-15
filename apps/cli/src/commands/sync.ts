@@ -58,7 +58,7 @@ import {
   type ResourceSelection,
   type SyncResult,
   type AvailableResources,
-} from '../lib/versions.js';
+} from '../lib/installations/versions.js';
 import { capableAgents } from '../lib/capabilities.js';
 import { parseHookManifest, registerHooksToSettings } from '../lib/hooks.js';
 import { compileRulesForProject } from '../lib/rules/compile.js';

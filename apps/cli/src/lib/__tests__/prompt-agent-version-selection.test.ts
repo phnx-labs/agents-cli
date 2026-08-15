@@ -28,7 +28,7 @@ vi.mock('../state.js', async (importOriginal) => {
 });
 
 async function loadPrompt() {
-  const mod = await import('../versions.js');
+  const mod = await import('../installations/versions.js');
   return mod.promptAgentVersionSelection;
 }
 

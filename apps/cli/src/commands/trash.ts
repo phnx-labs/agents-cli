@@ -14,7 +14,7 @@ import * as path from 'path';
 import type { AgentId } from '../lib/types.js';
 import { resolveAgentName, agentLabel } from '../lib/agents.js';
 import { getTrashVersionsDir } from '../lib/state.js';
-import { getVersionDir } from '../lib/versions.js';
+import { getVersionDir } from '../lib/installations/versions.js';
 
 interface TrashEntry {
   agent: AgentId;

@@ -35,7 +35,7 @@ import {
   getVersionHomePath,
   resolveAgentVersionTargets,
   promptAgentVersionSelection,
-} from '../lib/versions.js';
+} from '../lib/installations/versions.js';
 import { getSubagentsDir, recordVersionResources } from '../lib/state.js';
 import {
   isInteractiveTerminal,

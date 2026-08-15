@@ -1,5 +1,5 @@
 import { AGENTS } from '../agents.js';
-import { getGlobalDefault } from '../versions.js';
+import { getGlobalDefault } from './versions.js';
 import type { AgentId } from '../types.js';
 import { listInstallations } from './store.js';
 import type { Installation } from './types.js';

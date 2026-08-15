@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import * as path from 'path';
 import { AGENTS, ALL_AGENT_IDS, isSelfUpdatingAgent } from '../agents.js';
-import { getBinaryPath, isGlobalBinaryAgent } from '../versions.js';
+import { getBinaryPath, isGlobalBinaryAgent } from './versions.js';
 import { installationDir } from './store.js';
 import { assertValidRelease, selectUpdateStrategy, supportsPinnedUpdate } from './strategies.js';
 

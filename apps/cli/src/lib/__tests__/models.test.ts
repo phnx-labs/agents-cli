@@ -10,7 +10,7 @@ import {
   parseGrokModelsStdout,
   resolveConfiguredModel,
 } from '../models.js';
-import { getVersionDir, listInstalledVersions } from '../versions.js';
+import { getVersionDir, listInstalledVersions } from '../installations/versions.js';
 
 function pickInstalledVersion(agent: 'claude' | 'codex' | 'gemini' | 'opencode' | 'openclaw', preference: (vs: string[]) => string | undefined): string | null {
   const versions = listInstalledVersions(agent);

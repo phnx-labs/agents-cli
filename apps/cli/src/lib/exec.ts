@@ -12,7 +12,7 @@ import type { AgentId, Mode } from './types.js';
 import { ALL_MODES } from './types.js';
 import { AGENTS, findInPath } from './agents.js';
 import { parseTimeout } from './routines.js';
-import { compareVersions, getBinaryPath, getVersionHomePath, isVersionInstalled, listInstalledVersions, resolveVersion } from './versions.js';
+import { compareVersions, getBinaryPath, getVersionHomePath, isVersionInstalled, listInstalledVersions, resolveVersion } from './installations/versions.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { isTierToken, resolveTier } from './model-tiers.js';
 import { emitStart, createTimer, redactPrompt, redactArgs } from './events.js';

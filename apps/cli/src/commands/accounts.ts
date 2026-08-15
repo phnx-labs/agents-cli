@@ -5,7 +5,7 @@ import { setHelpSections } from '../lib/help.js';
 import { readMeta, updateMeta } from '../lib/state.js';
 import type { AgentId } from '../lib/types.js';
 import { ALL_AGENT_IDS, getAccountInfo, resolveAgentName } from '../lib/agents.js';
-import { getVersionHomePath, listInstalledVersions } from '../lib/versions.js';
+import { getVersionHomePath, listInstalledVersions } from '../lib/installations/versions.js';
 import { nativeAccountCapability, nativeAccountNameable, nativeIdentityKey } from '../lib/account-capabilities.js';
 import { profileExists, readProfile, type Profile } from '../lib/profiles.js';
 import { pushBundleToHost } from '../lib/secrets/push.js';

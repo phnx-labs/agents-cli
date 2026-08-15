@@ -21,7 +21,7 @@ import {
   listShimFileNames,
   pruneOrphanedCommandShim,
 } from '../../shims.js';
-import { listInstalledVersions } from '../../versions.js';
+import { listInstalledVersions } from '../../installations/versions.js';
 
 export const shimsCheck: HealCheck = {
   id: 'shims',

@@ -41,7 +41,7 @@ import {
   getActuallySyncedResources,
   getVersionHomePath,
   compareVersions,
-} from './versions.js';
+} from './installations/versions.js';
 import { discoverPlugins, marketplaceSpecForName } from './plugins/plugins.js';
 import type { DiscoveredPlugin } from './types.js';
 import { pluginInstallDir, repairableManifestFields } from './plugins/plugin-marketplace.js';

@@ -49,7 +49,7 @@ import {
   resolveInstalledAgentTargets,
   resolveConfiguredAgentTargets,
   syncResourcesToVersion,
-} from '../lib/versions.js';
+} from '../lib/installations/versions.js';
 import { getUserAgentsDir } from '../lib/state.js';
 import {
   isPromptCancelled,

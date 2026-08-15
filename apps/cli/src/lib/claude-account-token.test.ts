@@ -12,7 +12,7 @@ import { buildExecEnv } from './exec.js';
 import { bundleItemStore, keychainRef, writeBundle, type SecretsBundle } from './secrets/bundles.js';
 import { _resetFileStoreForTest, fileStore, fileStoreItemPath } from './secrets/filestore.js';
 import { secretsKeychainItem } from './secrets/index.js';
-import { getVersionHomePath } from './versions.js';
+import { getVersionHomePath } from './installations/versions.js';
 
 const PASS = 'claude-account-token-test-pass';
 

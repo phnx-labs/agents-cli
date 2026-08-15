@@ -7,7 +7,7 @@ import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, bui
 import type { ExecOptions } from './exec.js';
 import { isTmuxInstalled } from './tmux/binary.js';
 import { mailboxDir } from './mailbox.js';
-import { getVersionHomePath } from './versions.js';
+import { getVersionHomePath } from './installations/versions.js';
 import { bundleItemStore, keychainRef, writeBundle, type SecretsBundle } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
 import { secretsKeychainItem } from './secrets/index.js';

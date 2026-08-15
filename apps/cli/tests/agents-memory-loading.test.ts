@@ -24,7 +24,7 @@ import * as os from 'os';
 import * as crypto from 'crypto';
 import { AGENTS } from '../src/lib/agents.js';
 import type { AgentId } from '../src/lib/types.js';
-import { getGlobalDefault } from '../src/lib/versions.js';
+import { getGlobalDefault } from '../src/lib/installations/versions.js';
 import { getVersionsDir } from '../src/lib/state.js';
 import { compileRulesForProject } from '../src/lib/rules/compile.js';
 

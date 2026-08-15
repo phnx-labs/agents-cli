@@ -12,7 +12,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { AGENTS, ALL_AGENT_IDS, agentConfigDirName } from '../agents.js';
 import { getResolvedRulesDir, getUserRulesDir, getProjectAgentsDir } from '../state.js';
-import { getEffectiveHome } from '../versions.js';
+import { getEffectiveHome } from '../installations/versions.js';
 import type { AgentId } from '../types.js';
 
 export type InstructionsScope = 'user' | 'project';

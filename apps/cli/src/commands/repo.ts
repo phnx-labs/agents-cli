@@ -75,7 +75,7 @@ import type { AgentId, ExtraRepoConfig } from '../lib/types.js';
 import { ALL_AGENT_IDS, isAgentName, resolveAgentName } from '../lib/agents.js';
 import { refresh } from '../lib/refresh.js';
 import { capableAgents } from '../lib/capabilities.js';
-import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../lib/versions.js';
+import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../lib/installations/versions.js';
 import { syncAllMarketplaces } from '../lib/plugins/plugin-marketplace.js';
 import { gatherRemoteAgentsJson } from '../lib/remote-agents-json.js';
 import { machineId, normalizeHost } from '../lib/machine-id.js';

@@ -9,7 +9,7 @@
  * into their doctor payload; the comparator then diffs those payloads.
  */
 
-import { getAvailableResources, getVersionHomePath, isVersionIsolated, listInstalledVersions } from '../versions.js';
+import { getAvailableResources, getVersionHomePath, isVersionIsolated, listInstalledVersions } from '../installations/versions.js';
 import { supports } from '../capabilities.js';
 import { checkVersionHookWiring } from '../hooks.js';
 import { getUserAgentsDir, getSystemAgentsDir, readMeta } from '../state.js';

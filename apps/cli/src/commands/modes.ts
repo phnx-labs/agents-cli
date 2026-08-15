@@ -24,7 +24,7 @@ import {
 } from '../lib/agent-modes.js';
 import { setHelpSections } from '../lib/help.js';
 import type { AgentId } from '../lib/types.js';
-import { getGlobalDefault, listInstalledVersions, resolveVersion, resolveVersionAlias } from '../lib/versions.js';
+import { getGlobalDefault, listInstalledVersions, resolveVersion, resolveVersionAlias } from '../lib/installations/versions.js';
 
 /** Agents that show in the no-arg overview (skip hard-deprecated). */
 const MODE_AGENTS: AgentId[] = ALL_AGENT_IDS.filter((id) => !AGENTS[id].deprecated?.hard);

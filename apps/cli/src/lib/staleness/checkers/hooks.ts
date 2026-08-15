@@ -2,7 +2,7 @@
  * Hooks staleness — one executable file per hook. Project layer is EXCLUDED
  * by design: a cloned public repo with `.agents/hooks/foo` must not plant a
  * hook that fires next time the user runs an agent inside it (see
- * `src/lib/versions.ts:1832-1836`). Only user + system + extras count.
+ * `src/lib/installations/versions.ts:1832-1836`). Only user + system + extras count.
  *
  * Auxiliary files (README.md, promptcuts.yaml) live in hooks/ but are not
  * hooks — the executable bit on the source distinguishes them. This matches

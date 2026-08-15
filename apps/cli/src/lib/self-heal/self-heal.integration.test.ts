@@ -169,7 +169,7 @@ describe.skipIf(process.platform === 'win32')('runSelfHeal — generated hook ru
     const registryPath = path.resolve(process.cwd(), 'src/lib/self-heal/registry.ts');
     const hooksPath = path.resolve(process.cwd(), 'src/lib/hooks.ts');
     const hookCachePath = path.resolve(process.cwd(), 'src/lib/hooks/cache.ts');
-    const versionsPath = path.resolve(process.cwd(), 'src/lib/versions.ts');
+    const versionsPath = path.resolve(process.cwd(), 'src/lib/installations/versions.ts');
     const script = `
       import { runSelfHeal } from ${JSON.stringify(registryPath)};
       import { registerHooksToSettings } from ${JSON.stringify(hooksPath)};

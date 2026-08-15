@@ -155,7 +155,7 @@ function seedClaudeVersionWithGeneratedShim(version: string, hookName: string, e
  *  subprocess rooted at testHome, returning its JSON report. */
 function runWiring(agent: string, version: string, opts: { register?: boolean } = {}): WiringReport {
   const modulePath = path.resolve(process.cwd(), 'src/lib/hooks.ts');
-  const versionsPath = path.resolve(process.cwd(), 'src/lib/versions.ts');
+  const versionsPath = path.resolve(process.cwd(), 'src/lib/installations/versions.ts');
   const register = opts.register
     ? `
       const { getVersionHomePath } = await import(${JSON.stringify(versionsPath)});

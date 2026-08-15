@@ -49,7 +49,7 @@ import {
   getProjectPluginsDir,
   getSystemPluginsDir,
 } from './state.js';
-import { getVersionHomePath } from './versions.js';
+import { getVersionHomePath } from './installations/versions.js';
 import { toPortableKey } from './platform/index.js';
 import { compileRulesForProject } from './rules/compile.js';
 import { syncProjectResourcesToAgent } from './project-resources.js';

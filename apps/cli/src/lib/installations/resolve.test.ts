@@ -16,7 +16,7 @@ async function load() {
   return {
     resolve: await import('./resolve.js'),
     store: await import('./store.js'),
-    versions: await import('../versions.js'),
+    versions: await import('./versions.js'),
   };
 }
 

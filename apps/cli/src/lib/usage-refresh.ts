@@ -62,7 +62,7 @@ import {
   type UsageIdentityInput,
 } from './accounting/usage.js';
 import { getAccountInfo } from './agents.js';
-import { listInstalledVersions, getVersionHomePath } from './versions.js';
+import { listInstalledVersions, getVersionHomePath } from './installations/versions.js';
 import type { AgentId } from './types.js';
 
 /**

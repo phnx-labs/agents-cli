@@ -16,7 +16,7 @@ import * as TOML from 'smol-toml';
 import type { JobConfig } from './routines.js';
 import { resolveJobExecutionContext, resolveHostStrategy } from './routines.js';
 import { evaluateRoutineReadiness, type RoutineReadinessResult, type PlacementMode } from './routine-context.js';
-import { getVersionHomePath, resolveVersion } from './versions.js';
+import { getVersionHomePath, resolveVersion } from './installations/versions.js';
 import { probeLocalFleetAuth } from './auth-health.js';
 import { resolveHostRunTarget } from './hosts/run-target.js';
 import { hostIdentityArgs, sshTargetFor } from './hosts/types.js';
