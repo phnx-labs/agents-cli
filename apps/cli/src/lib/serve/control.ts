@@ -21,7 +21,7 @@ import fs from 'fs';
 import type { StdioOptions } from 'child_process';
 import { spawn } from 'child_process';
 import { randomUUID, randomBytes } from 'crypto';
-import { getAgentsInvocation } from '../daemon.js';
+import { getAgentsInvocation } from '../daemon/daemon.js';
 import { handleServeGet, resolveServeContext, type ServeOptions } from './server.js';
 import { verifyControlToken } from './token.js';
 import { readNewEvents, streamDir, streamLogPath } from './stream.js';

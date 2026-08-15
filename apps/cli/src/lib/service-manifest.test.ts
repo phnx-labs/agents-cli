@@ -20,7 +20,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { isolatedHomeSuffix, namespacedServiceLabel, serviceManifestHomeEnv } from './service-manifest.js';
-import { generateLaunchdPlist, generateSystemdUnit, daemonServiceLabel } from './daemon.js';
+import { generateLaunchdPlist, generateSystemdUnit, daemonServiceLabel } from './daemon/daemon.js';
 import { generateServicePlist } from './menubar/install-menubar.js';
 import { renderLaunchAgentPlist, helperLabel } from '../commands/computer.js';
 

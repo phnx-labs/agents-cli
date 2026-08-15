@@ -169,7 +169,7 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
       : (await import('../lib/device-config.js')).isDaemonEnabled();
     if (enabled) {
       const start = options.startDaemonFn
-        ?? (await import('../lib/daemon.js')).startDaemon;
+        ?? (await import('../lib/daemon/daemon.js')).startDaemon;
       const started = start();
       if (started.method !== 'already-running' && started.pid) {
         console.log(chalk.gray(`Started the always-on agents daemon (pid ${started.pid}).`));

@@ -18,7 +18,7 @@ import {
   isDaemonRunning,
   signalDaemonReload,
   startDaemon,
-} from '../lib/daemon.js';
+} from '../lib/daemon/daemon.js';
 import { findDuplicateMonitor, monitorFingerprint } from '../lib/monitors/fingerprint.js';
 import { gatherFleetMonitors, NO_MONITOR_FANOUT_ENV } from '../lib/monitors/remote.js';
 import {

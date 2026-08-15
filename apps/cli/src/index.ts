@@ -82,7 +82,7 @@ if (process.argv[2] === '__shim') {
 }
 
 if (process.argv[2] === '__daemon-run') {
-  const { runDaemon, log: daemonLog } = await import('./lib/daemon.js');
+  const { runDaemon, log: daemonLog } = await import('./lib/daemon/daemon.js');
 
   // RUSH-2418: the daemon is the one always-on process here, and it ran with no
   // top-level handler of any kind — an uncaught throw or a rejected promise from

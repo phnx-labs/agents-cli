@@ -30,7 +30,7 @@ import { getActiveSessions, isSessionIdLiveOnProcessTable, type ActiveSession } 
 import { getTaskById, updateTaskStatus } from '../lib/cloud/store.js';
 import { resolveProvider } from '../lib/cloud/registry.js';
 import { mailboxDir, enqueue } from '../lib/mailbox.js';
-import { getAgentsInvocation } from '../lib/daemon.js';
+import { getAgentsInvocation } from '../lib/daemon/daemon.js';
 import { resolveTaskRef } from '../lib/hosts/tasks.js';
 import { reconcileRunningTasks } from '../lib/hosts/reconcile.js';
 import {

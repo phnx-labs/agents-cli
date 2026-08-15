@@ -15,7 +15,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { SSH_TARGET_RE, assertValidSshTarget, sshExec, type SshExecResult } from '../lib/ssh-exec.js';
 import { quoteWin32ExecArg, composeWin32CommandLine } from '../lib/platform/index.js';
-import { ensureDaemonStarted, isDaemonRunning } from '../lib/daemon.js';
+import { ensureDaemonStarted, isDaemonRunning } from '../lib/daemon/daemon.js';
 import {
   parseHostsOption,
   remoteResolveEnv,

@@ -37,7 +37,7 @@ import {
 import { parseBundleValue, secretsKeychainItem } from '../lib/secrets/index.js';
 import { readBundle } from '../lib/secrets/bundles.js';
 import { isInteractiveTerminal } from './utils.js';
-import { getAgentsInvocation } from '../lib/daemon.js';
+import { getAgentsInvocation } from '../lib/daemon/daemon.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
 import { findAccount } from '../lib/account-registry.js';
 
