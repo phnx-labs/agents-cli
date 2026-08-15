@@ -37,7 +37,7 @@ import {
   resolveHostStrategy,
 } from './routines.js';
 import type { ResolvedExecutionContext, PlacementMode } from './routine-context.js';
-import { getRunsDir, getUserAgentsDir, readMeta } from './state.js';
+import { getRunsDir, getUserAgentsDir, readMeta, getDaemonDir } from './state.js';
 import type { AgentId } from './types.js';
 import { shortCodexHome } from './codex-home.js';
 import { prepareJobHome, buildSpawnEnv, getJobHomePath } from './sandbox.js';
@@ -97,20 +97,90 @@ export class RoutineAlreadyRunningError extends Error {
 const ROUTINE_LAUNCH_LOCK_STALE_MS = 30_000;
 const ROUTINE_LAUNCH_LOCK_WAIT_MS = 10_000;
 
+/**
+ * The prior run of this routine that still holds the active-run slot, or null.
+ *
+ * ONLY a run still marked `running` can hold the slot. Every terminal status —
+ * completed / failed / timeout / missed / blocked / skipped — releases it the
+ * moment it is reached (RUSH-2640). A `failed`/`timeout` record used to keep the
+ * slot while its pid stayed alive, but that conflated two different operations:
+ * cleaning up a leftover process group (reapTerminalRoutineProcesses's job) with
+ * occupying the slot. A daemon-launched run that reached a terminal state while
+ * still carrying the daemon's own pid (a host run that threw `target_unreachable`
+ * before spawning a child) then held the slot forever, because the daemon never
+ * dies and `isPidOurs` never went false — every later scheduled slot was refused
+ * with `already has an active run` while the routine was silently dead.
+ *
+ * A `running` record is also aged out past its own timeout: a run cannot
+ * legitimately outlive its configured deadline, so past that window it is a
+ * wedged record (a daemon that died mid-run, a missed child-exit event, a reused
+ * pid an old record without `spawnedAt` reads as "ours"), not a live run — and it
+ * never holds the slot regardless of what its recorded pid now points at.
+ */
 function activeRoutineRun(config: Pick<JobConfig, 'name' | 'timeout'>): RunMeta | null {
   const timeoutMs = parseTimeout(config.timeout) || 10 * 60 * 1000;
   const now = Date.now();
   const runs = listRuns(config.name);
   for (let i = runs.length - 1; i >= 0; i--) {
     const run = runs[i];
-    if (!['running', 'failed', 'timeout'].includes(run.status)) continue;
-    if (run.pid && isPidOurs(run.pid, run.spawnedAt)) return run;
-    if (!run.pid) {
-      const startedAt = Date.parse(run.startedAt);
-      if (Number.isFinite(startedAt) && now - startedAt < (run.timeoutMs ?? timeoutMs)) return run;
-    }
+    if (run.status !== 'running') continue;
+    const startedAt = Date.parse(run.startedAt);
+    const limit = run.timeoutMs ?? timeoutMs;
+    if (Number.isFinite(startedAt) && now - startedAt >= limit) continue;
+    // A provisional launcher claim carries no child pid yet — trust it until the
+    // timeout window above elapses. A record with a child pid is active only
+    // while that pid is genuinely ours (alive with the same birth time).
+    if (!run.pid) return run;
+    if (isPidOurs(run.pid, run.spawnedAt)) return run;
   }
   return null;
+}
+
+/**
+ * Consecutive trailing `skipped`/`active_run` records — a routine that keeps
+ * being refused because a prior run "still owns" the slot. After the slot is
+ * released correctly on terminal states (see {@link activeRoutineRun}) this can
+ * only accumulate for a genuine long-overlap or a new wedge; either way it means
+ * the routine has stopped firing on schedule and should be surfaced, not left to
+ * pile up silently. `runs` is oldest→newest (listRuns sorts by run id).
+ */
+export function activeRunSkipStreak(runs: RunMeta[]): number {
+  let streak = 0;
+  for (let i = runs.length - 1; i >= 0; i--) {
+    const run = runs[i];
+    if (run.status === 'skipped' && run.skipReason === 'active_run') { streak++; continue; }
+    break;
+  }
+  return streak;
+}
+
+/** How many consecutive active-run skips before a routine's stall is surfaced. */
+const SKIP_STREAK_ALERT_THRESHOLD = 3;
+
+/**
+ * The pid to stamp on a launcher's provisional active claim, or null when the
+ * launcher is this box's routines daemon.
+ *
+ * The claim pid exists so a launcher that dies between claiming the slot and
+ * spawning the child releases the slot quickly (`isPidOurs` goes false) instead
+ * of wedging it for the full timeout. That fast recovery only helps a SHORT-LIVED
+ * foreground launcher (`agents routines run`): the daemon never dies between
+ * claim and spawn, and recording ITS pid is actively harmful — the daemon
+ * outlives every run, so `isPidOurs` never goes false and a claim finalized to a
+ * terminal state before its child spawned kept the slot and drew
+ * `reapTerminalRoutineProcesses` at the daemon's own process group on every tick
+ * (RUSH-2640, requirement: never record the daemon's own pid as a run's pid). So
+ * the daemon records no claim pid; the timeout window bounds a daemon that
+ * crashes mid-claim instead.
+ */
+export function launcherClaimPid(): number | null {
+  try {
+    // Mirrors daemon.ts readDaemonPid() (PID_FILE = 'daemon.pid'); read directly
+    // rather than importing it to avoid a runner<->daemon import cycle.
+    const daemonPid = parseInt(fs.readFileSync(path.join(getDaemonDir(), 'daemon.pid'), 'utf-8').trim(), 10);
+    if (Number.isFinite(daemonPid) && daemonPid === process.pid) return null;
+  } catch { /* no daemon pid file — a foreground launcher; record its pid */ }
+  return process.pid;
 }
 
 /** How a routine attempt was triggered, plus the schedule slot it belongs to. */
@@ -217,10 +287,13 @@ function writeActiveClaim(config: JobConfig, attempt: RoutineAttempt): RunMeta {
     ...attempt.stamp,
     ...(config.workflow ? { workflow: config.workflow } : config.command ? { command: config.command } : config.agent ? { agent: config.agent } : {}),
     // The launcher owns this provisional claim until the command/agent child
-    // replaces it with its own pid. Recording the owner makes a crash between
-    // lock release and child spawn recoverable instead of wedging the routine
-    // for its full configured timeout.
-    pid: process.pid,
+    // replaces it with its own pid. Recording a SHORT-LIVED foreground launcher's
+    // pid makes a crash between lock release and child spawn recoverable instead
+    // of wedging the routine for its full configured timeout. The long-lived
+    // daemon records no pid here (see launcherClaimPid): its pid never dies, so
+    // recording it wedged the slot forever and mis-aimed the process reaper at the
+    // daemon itself (RUSH-2640).
+    pid: launcherClaimPid(),
     // `isPidOurs` compares this value with the OS process birth time. The
     // daemon may have been alive for days before claiming a routine, so the
     // claim must carry the launcher's birth, not the claim timestamp.
@@ -352,6 +425,25 @@ function allocateRoutineAttempt(config: JobConfig, trigger: RoutineTrigger): Att
 }
 
 /**
+ * Emit a loud, once-per-wedge warning when a routine has been refused its slot
+ * for {@link SKIP_STREAK_ALERT_THRESHOLD} consecutive scheduled runs. Fires only
+ * when the streak first reaches the threshold (not on every later skip), so a
+ * genuinely-stalled routine surfaces once instead of piling up silent `skipped`
+ * records the way RUSH-2640 did. Runs on the daemon's own stderr, so it lands in
+ * the daemon log the operator reads.
+ */
+function surfaceWedgedRoutine(config: JobConfig, terminal: RunMeta): void {
+  if (terminal.status !== 'skipped' || terminal.skipReason !== 'active_run') return;
+  const streak = activeRunSkipStreak(listRuns(config.name));
+  if (streak !== SKIP_STREAK_ALERT_THRESHOLD) return;
+  const stuck = terminal.activeRunId ?? 'unknown';
+  process.stderr.write(
+    `[agents] routine '${config.name}' skipped ${streak} consecutive scheduled runs — ` +
+    `its active-run slot is still held by ${stuck}; the routine is not firing on schedule.\n`,
+  );
+}
+
+/**
  * Claim one routine attempt under the short launch lock, then execute after
  * releasing it. The persisted `running` claim makes a concurrent entry point
  * skip immediately instead of waiting for a foreground run to finish. `run` is
@@ -370,7 +462,10 @@ async function runWithAttempt<T>(
     writeActiveClaim(config, alloc.attempt);
     return { attempt: alloc.attempt };
   });
-  if ('terminal' in claimed) return wrapTerminal(claimed.terminal);
+  if ('terminal' in claimed) {
+    surfaceWedgedRoutine(config, claimed.terminal);
+    return wrapTerminal(claimed.terminal);
+  }
 
   try {
     return await run(claimed.attempt);
@@ -2342,8 +2437,6 @@ export function monitorRunningJobs(): void {
           continue;
         }
 
-        if (!meta.pid) continue;
-
         const runDirPath = path.join(jobRunsPath, runDirEntry.name);
         const stdoutPath = path.join(runDirPath, 'stdout.log');
 
@@ -2351,10 +2444,17 @@ export function monitorRunningJobs(): void {
         // parse or extract. Reap them on pid liveness alone.
         const isCommandRun = Boolean(meta.command) || !meta.agent;
 
+        // Age-out runs FIRST, before the null-pid guard below, so a wedged record
+        // still marked `running` past its deadline is always finalized — a
+        // provisional launcher claim whose daemon crashed before spawning a child
+        // (pid null), or an old record whose recorded pid was reused, would
+        // otherwise linger as `running` forever (RUSH-2640). Only kill a process
+        // group that is genuinely still ours; terminating a reused pid would kill
+        // an unrelated process, and a null pid has nothing to kill.
         const wallClockMs = Date.now() - Date.parse(meta.startedAt);
         const timeoutMs = meta.timeoutMs ?? MAX_WALL_CLOCK_MS;
         if (Number.isFinite(wallClockMs) && wallClockMs > timeoutMs) {
-          terminateRoutineTree(meta.pid);
+          if (meta.pid && isPidOurs(meta.pid, meta.spawnedAt)) terminateRoutineTree(meta.pid);
           finalizeRunMeta(meta, 'timeout', null, { errorMessage: 'exceeded configured timeout' });
           writeRunMeta(meta);
           emitRoutineEnd(meta);
@@ -2364,6 +2464,8 @@ export function monitorRunningJobs(): void {
           }
           continue;
         }
+
+        if (!meta.pid) continue;
 
         if (!isPidOurs(meta.pid, meta.spawnedAt)) {
           if (isCommandRun) {
