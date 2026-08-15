@@ -97,8 +97,6 @@ function getAgentConfigPath(agent: AgentId, versionHome: string): string | null 
       return path.join(versionHome, '.copilot', 'permissions-config.json');
     case 'hermes':
       return path.join(versionHome, '.hermes', 'config.yaml');
-    case 'goose':
-      return path.join(versionHome, '.config', 'goose', 'permission.yaml');
     case 'muse':
       // Muse approval defaults live in settings.json; no separate permissions file.
       return path.join(versionHome, '.config', 'muse', 'settings.json');

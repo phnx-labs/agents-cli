@@ -186,11 +186,24 @@ describe('computeMenubarSnapshot — active-session selector (RUSH-2336)', () =>
     expect(proc.machine).toBe('test-box');
     expect(proc.pid).toBe(4242);
     expect(proc.pidAlive).toBe(true);
+    // No cwd on this row → the explicit 'other' bucket, never the harness (RUSH-2688).
+    expect(proc.project).toBe('other');
 
     const cloud = snap.activeSessions.find((s) => s.sessionId === 'alive-cloud')!;
     expect(cloud.cloudProvider).toBe('rush');
     expect(cloud.cloudTaskId).toBe('task-123');
     expect(cloud.pid).toBeUndefined();
+    // A cloud row with no cwd groups under the explicit 'cloud' bucket, never
+    // its provider name (RUSH-2688).
+    expect(cloud.project).toBe('cloud');
+  });
+
+  it('stamps the installed CLI version so the menu-bar header is not compiled-in (RUSH-2688)', async () => {
+    writeActiveSessionsCache('local', [], { capturedAt: Date.now() });
+    const snap = await computeMenubarSnapshot();
+    const { getCliVersion } = await import('../version.js');
+    expect(snap.cliVersion).toBe(getCliVersion());
+    expect(snap.cliVersion.length).toBeGreaterThan(0);
   });
 
   it('emits no active sessions when the raw cache is empty or missing', async () => {

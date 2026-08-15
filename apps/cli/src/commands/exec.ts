@@ -2583,16 +2583,59 @@ export function registerRunCommand(program: Command): void {
 
       version = resolveVersionAlias(agent, version);
 
-      const { resolveAccountSelection } = await import('../lib/account-registry.js');
-      const configuredAccount = resolveAccountSelection(options.account, agent, readMeta(), { useDefault: !fromProfile });
-      if (configuredAccount) {
+      // Account selection follows the binding order: explicit --account → exact
+      // `agent@version` binding → device-scoped `agent` binding → per-harness
+      // default. The exact-installation binding needs the concrete launch
+      // version, so resolve it (default when the run named no version).
+      const { resolveSpawnAccount } = await import('../lib/account-registry.js');
+      // Binding key: a custom harness keys on its own profile name; a native /
+      // global run keys on the exact `agent@version` (default when unpinned).
+      const bindingTarget = fromProfile ? rawAgent : (version ? `${agent}@${version}` : `${agent}@${getGlobalDefault(agent) ?? ''}`);
+      let spawnAccount: import('../lib/account-registry.js').SpawnAccount | null = null;
+      try {
+        spawnAccount = resolveSpawnAccount(options.account, agent, version, readMeta(), { useDefault: !fromProfile, provider: profileProvider, target: bindingTarget });
+      } catch (err) { console.error(chalk.red((err as Error).message)); process.exit(1); }
+      // Downstream rotation gating asks only "was an account selected?".
+      const configuredAccount = spawnAccount?.name;
+      if (spawnAccount) {
         if (options.cloud || options.provider || options.lease) {
           console.error(chalk.red('--account selects a device-local credential and cannot be combined with cloud or lease placement.'));
           process.exit(1);
         }
-        const { resolveCredentialAccount } = await import('../lib/account-registry.js');
-        try { accountEnv = resolveCredentialAccount(configuredAccount, agent, profileProvider).env; }
-        catch (err) { console.error(chalk.red((err as Error).message)); process.exit(1); }
+        if (spawnAccount.kind === 'native') {
+          // A native login is owned by the harness and read from its own home —
+          // it cannot be forwarded to another machine, and no secret/env is
+          // injected. Fail closed for a remote target.
+          const remoteTarget = options.host || options.device;
+          if (remoteTarget) {
+            console.error(chalk.red(`Account '${spawnAccount.name}' is a device-local ${spawnAccount.agent} login and cannot be forwarded to '${remoteTarget}'. Sign in on that device and name the login there.`));
+            process.exit(1);
+          }
+          if (version) {
+            // A pinned version must actually be signed in as the named identity.
+            const { getAccountInfo } = await import('../lib/agents.js');
+            const info = await getAccountInfo(agent, getVersionHomePath(agent, version));
+            const liveKey = info.accountKey ?? info.email?.toLowerCase() ?? null;
+            if (!info.signedIn || liveKey !== spawnAccount.identityKey) {
+              console.error(chalk.red(`Account '${spawnAccount.name}' names a specific ${spawnAccount.agent} identity, but ${agent}@${version} ${info.signedIn ? 'is signed in as a different identity' : 'is not signed in'}. Sign in as that identity, or re-name the account.`));
+              process.exit(1);
+            }
+          } else {
+            // No version pinned: locate the installed version currently signed in
+            // as this identity and pin the run to it — do NOT assume the global
+            // default holds it (the account may live on another installed copy).
+            const { resolveAccountVersion } = await import('../lib/rotate.js');
+            const matched = await resolveAccountVersion(agent, spawnAccount.identityKey);
+            if (!matched) {
+              console.error(chalk.red(`No installed ${spawnAccount.agent} version is signed in as the identity named by account '${spawnAccount.name}'. Sign in as that identity, or attach a different account.`));
+              process.exit(1);
+            }
+            version = matched;
+          }
+          // Native identity confirmed live; the harness reads it from its home.
+        } else {
+          accountEnv = spawnAccount.env;
+        }
       }
 
       // --resume: resolve a prior conversation and rewrite the run target to

@@ -86,7 +86,7 @@ import { detectAgentsBinaryShadows } from '../lib/binary-shadow.js';
 import {
   remediateStaleAgentsCliInstalls,
   resolveRunningPackageRoot,
-  type PurgeRemovableInstallsResult,
+  type RemediateStaleInstallsResult,
 } from '../lib/self-update.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -1378,7 +1378,7 @@ function renderHookRuntimeRepairText(repair: HookRuntimeRepairReport): void {
  * `doctor <agent>@<version> --fix` only heals that version home and must not
  * touch other CLI installs on the box.
  */
-function purgeStaleAgentsCliCopies(_opts: DoctorOptions): PurgeRemovableInstallsResult | null {
+function purgeStaleAgentsCliCopies(_opts: DoctorOptions): RemediateStaleInstallsResult | null {
   let runningRoot: string;
   try {
     // dist/commands/doctor.js (or src/commands/doctor.ts under vitest) —
@@ -1393,8 +1393,8 @@ function purgeStaleAgentsCliCopies(_opts: DoctorOptions): PurgeRemovableInstalls
   });
 }
 
-function renderStaleInstallPurgeText(purge: PurgeRemovableInstallsResult): void {
-  if (purge.removed.length === 0 && purge.failed.length === 0) return;
+function renderStaleInstallPurgeText(purge: RemediateStaleInstallsResult): void {
+  if (purge.removed.length === 0 && purge.failed.length === 0 && purge.unresolved.length === 0) return;
   console.log(chalk.bold('\nStale agents-cli installs'));
   for (const r of purge.removed) {
     const why = r.reasons.join(', ');
@@ -1406,6 +1406,15 @@ function renderStaleInstallPurgeText(purge: PurgeRemovableInstallsResult): void 
     console.log(
       `  ${chalk.red('hold  ')} ${chalk.gray(`${f.packageRoot}  ${f.version}  — ${f.error}`)}`,
     );
+  }
+  // RUSH-2705: a healthy duplicate (>=1.22.30, not npx-cache, not legacy) is
+  // deliberately never auto-purged, so --fix must hand back the command that
+  // does remove it instead of ending on a bare "everything in sync".
+  for (const u of purge.unresolved) {
+    console.log(
+      `  ${chalk.yellow('manual')} ${chalk.gray(`${u.packageRoot}  ${u.version}  — a healthy duplicate --fix will not delete; remove it with:`)}`,
+    );
+    console.log(`         ${chalk.bold(u.manualRemoveCommand)}`);
   }
 }
 

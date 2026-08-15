@@ -246,6 +246,11 @@ struct Device: Decodable {
 struct MenubarSnapshot: Decodable {
     let version: Int
     let capturedAt: String
+    // The installed CLI version that produced this snapshot — the value
+    // `agents --version` prints, resolved at runtime so the header shows it and
+    // a stale menu bar is visible at a glance (RUSH-2688). Optional so a snapshot
+    // from an older `agents` CLI that predates the field still decodes.
+    let cliVersion: String?
     let routines: [Routine]
     let recentSessions: [RecentSession]
     let activeSessions: [ActiveSession]

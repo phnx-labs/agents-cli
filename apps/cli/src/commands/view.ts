@@ -71,7 +71,8 @@ import { resolveVersionFilter, AgentSpecError } from '../lib/agent-spec/index.js
 import { listCliStatus } from '../lib/cli-resources.js';
 import { isCapable } from '../lib/capabilities.js';
 import { discoverPlugins, pluginSupportsAgent } from '../lib/plugins.js';
-import { getAgentsDir, getUserAgentsDir, getEffectivePromptcutsPath, readMergedPromptcuts } from '../lib/state.js';
+import { getAgentsDir, getUserAgentsDir, getEffectivePromptcutsPath, readMergedPromptcuts, readMeta } from '../lib/state.js';
+import { listNativeAccounts } from '../lib/account-registry.js';
 import { isGitRepo, getGitSyncStatus } from '../lib/git.js';
 import { getCentralRulesFileName } from '../lib/rules/rules.js';
 import { composeRulesFromState, type ComposedSubrule } from '../lib/rules/compose.js';
@@ -87,6 +88,20 @@ import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/
 
 /** Shared account identity formatter, re-exported for the view-specific tests. */
 export const accountColumnLabel = accountDisplayLabel;
+
+/**
+ * The account column with the durable native-account name folded in: when the
+ * signed-in identity of `agentId` has been named via `agents accounts name`,
+ * render `work · email` instead of the bare email. Falls back to the plain
+ * display label when the identity is unnamed.
+ */
+export function namedAccountColumnLabel(agentId: AgentId, info: AccountInfo | undefined): string {
+  const display = accountColumnLabel(info);
+  const identityKey = info?.accountKey ?? info?.email?.toLowerCase();
+  if (!identityKey) return display;
+  const saved = listNativeAccounts(readMeta()).find(item => item.agent === agentId && item.identityKey === identityKey);
+  return saved ? `${saved.name} · ${display || saved.identityLabel || identityKey}` : display;
+}
 
 export interface AccountOrderedVersion {
   version: string;
@@ -616,7 +631,7 @@ async function showInstalledVersions(
         maxVerLabel = Math.max(maxVerLabel, versionRowLabel(agentId, v, globalDefault).length);
         const rawInfo = infoMap.get(`${agentId}:${v}`);
         const info = rawInfo ? mergeCanonical(rawInfo) : undefined;
-        const accountLabel = accountColumnLabel(info);
+        const accountLabel = namedAccountColumnLabel(agentId, info);
         if (accountLabel) maxEmail = Math.max(maxEmail, accountLabel.length);
         if (info?.plan) maxPlanWidth = Math.max(maxPlanWidth, info.plan.length);
         const model = resolveConfiguredModel(agentId, v)?.model;
@@ -748,7 +763,7 @@ async function showInstalledVersions(
           // Always emit account / usage / status / lastActive columns once any
           // signed-in row exists in the table (widths are global). Empty cells
           // are space-padded so later columns do not drift left.
-          const display = accountColumnLabel(vInfo);
+          const display = namedAccountColumnLabel(agentId, vInfo);
           parts.push(display ? chalk.cyan(padToWidth(display, maxEmail)) : ' '.repeat(maxEmail));
           if (maxUsageWidth > 0) {
             parts.push(padToWidth(usageStr, maxUsageWidth));

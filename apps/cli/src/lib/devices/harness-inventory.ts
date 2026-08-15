@@ -30,6 +30,8 @@ import {
   type UsageSnapshot,
 } from '../usage.js';
 import { getVersionHomePath, listInstalledVersions } from '../versions.js';
+import { readMeta } from '../state.js';
+import { listNativeAccounts } from '../account-registry.js';
 
 /** An account's usage headroom rolled into one glanceable summary. */
 export interface QuotaSummary {
@@ -190,6 +192,7 @@ export async function collectLocalHarnessInventory(opts?: {
     ? (await getUsageInfoByIdentity(usageInputs, opts?.refresh ? { forceRefresh: true } : undefined)).usageByKey
     : new Map();
 
+  const savedNative = listNativeAccounts(readMeta());
   return pending.map(({ agent, version, info }) => {
     const key = getUsageLookupKey(info);
     const usage = key ? usageByKey.get(key) : undefined;
@@ -197,7 +200,10 @@ export async function collectLocalHarnessInventory(opts?: {
     const quota = summarizeQuota(snapshot, usage?.error ?? null, info?.usageStatus ?? null);
     const signedIn = !!info?.signedIn;
     const { ready, reason } = computeReady(signedIn, quota);
-    const account = info ? accountDisplayLabel(info) || null : null;
+    const display = info ? accountDisplayLabel(info) || null : null;
+    const identityKey = info?.accountKey ?? info?.email?.toLowerCase();
+    const saved = identityKey ? savedNative.find(item => item.agent === agent && item.identityKey === identityKey) : undefined;
+    const account = saved ? `${saved.name} · ${display || saved.identityLabel || identityKey}` : display;
     return { agent, version, account, signedIn, quota, ready, reason };
   });
 }
@@ -213,6 +219,9 @@ export function groupByAccount(rows: HarnessRow[]): AccountGroup[] {
   const order: string[] = [];
   const groups = new Map<string, HarnessRow[]>();
   for (const row of rows) {
+    // Signed-out rows share one bucket under a sentinel key. Use the NUL-prefixed
+    // literal (a TS `\0` escape, NOT a raw NUL byte in the source) so the key can
+    // never collide with a real account label named literally "signed-out".
     const key = row.account ?? '\0signed-out';
     if (!groups.has(key)) {
       groups.set(key, []);

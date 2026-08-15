@@ -515,6 +515,28 @@ async function readRawBody(req: http.IncomingMessage, maxBytes: number): Promise
   return Buffer.concat(chunks);
 }
 
+/**
+ * Resolve once a receiver is actually accepting connections, REJECT if the bind
+ * failed. `server.listen()` reports a bind failure (EADDRINUSE, EACCES) as an
+ * asynchronous `'error'` event, never a throw — so a `try/catch` around
+ * `startWebhookServer` cannot see it, and without this the event reaches Node's
+ * default handler and takes the whole process down. Every caller that hosts a
+ * receiver MUST await this rather than assuming the return means "bound".
+ */
+export function waitForListening(server: http.Server): Promise<void> {
+  if (server.listening) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      server.off('listening', onListening);
+      server.off('error', onError);
+    };
+    const onListening = () => { cleanup(); resolve(); };
+    const onError = (err: Error) => { cleanup(); reject(err); };
+    server.once('listening', onListening);
+    server.once('error', onError);
+  });
+}
+
 /** Options for the local webhook http listener. */
 export interface WebhookServerOptions {
   port?: number;
@@ -523,8 +545,19 @@ export interface WebhookServerOptions {
   secrets: WebhookSecrets;
   /** Override the fire options (mainly for tests). */
   fire?: FireWebhookOptions;
-  /** Called after each delivery is handled (mainly for tests/observability). */
+  /**
+   * Called after a delivery has fully settled — every matched routine and
+   * handler dispatched. Because the receiver acks the HTTP response BEFORE
+   * dispatch (see `startWebhookServer`), this fires strictly after the response
+   * has been written, and is the only way a caller observes the outcome.
+   */
   onDelivery?: (webhook: IncomingWebhook, fired: FiredJob[], handlers: FiredHandler[]) => void;
+  /**
+   * Called when settling an already-acked delivery threw. The HTTP status can
+   * no longer carry the failure, so this is the loud path — the daemon host and
+   * `agents webhooks serve` both log it. Never swallowed silently.
+   */
+  onDeliveryError?: (webhook: IncomingWebhook, error: Error) => void;
   deliveryStore?: DeliveryStore;
   rateLimiter?: RateLimiter;
   rateLimitPerMinute?: number;
@@ -542,13 +575,81 @@ export interface WebhookServerOptions {
  *   POST /hooks/github  with X-Hub-Signature-256
  *   POST /hooks/linear  with Linear-Signature + fresh webhookTimestamp
  *
+ * **The ack is asynchronous (RUSH-2548).** Once a delivery has passed signature
+ * verification, freshness, dedup, and rate limiting, the receiver writes
+ * `202 {ok:true, accepted:true}` IMMEDIATELY and dispatches the matched routines
+ * and handlers afterwards. Dispatch starts an agent run and takes 15-20s, which
+ * exceeds Linear's delivery timeout — holding the socket open across it made
+ * every real delivery log a timeout + retry on Linear's side. Nothing about the
+ * dedup ledger changes: the `<source>:<delivery-id>` key is still what makes a
+ * retry a no-op, per-job `markJob` still lets a retry finish only the matches
+ * that failed, and the delivery is marked complete only after it settles.
+ *
+ * A retry that lands WHILE the first is still settling is answered as a
+ * duplicate from an in-flight set, since `deliveryStore.seen` only reports
+ * completed deliveries and would otherwise let a mid-flight retry double-fire.
+ *
  * Returns the underlying server so callers can `close()` it.
  */
 export function startWebhookServer(options: WebhookServerOptions): http.Server {
   const deliveryStore = options.deliveryStore ?? createMemoryDeliveryStore();
+  /** Delivery ids acked but not yet settled — dedup across the async window. */
+  const inFlight = new Set<string>();
   const rateLimiter = options.rateLimiter ?? createMemoryRateLimiter(options.rateLimitPerMinute ?? 60, 60_000);
   const ipRateLimiter = options.ipRateLimiter ?? createMemoryRateLimiter(options.ipRateLimitPerMinute ?? 120, 60_000);
   const maxBodyBytes = options.maxBodyBytes ?? 1024 * 1024;
+
+  /**
+   * Dispatch an already-acked delivery: matched routines first, then matched
+   * handlers, then mark the delivery complete. A failure leaves the delivery
+   * UNMARKED (its per-job `markJob` entries survive), so a later retry of the
+   * same delivery id re-runs only what did not complete — the same partial-retry
+   * ledger the synchronous receiver had, minus the 4xx that used to request it.
+   */
+  async function settleDelivery(webhook: IncomingWebhook, id: string): Promise<void> {
+    const { source, event: webhookEvent } = webhook;
+    try {
+      const context = buildWebhookContext(webhook);
+      const fireOptions = options.fire ?? {};
+      const firedJobs = await fireWebhookJobs(webhook, {
+        ...fireOptions,
+        context,
+        skipJobNames: deliveryStore.completedJobs(id),
+        onJobFired: (job, firedJob) => {
+          emit('webhook.fired', { source, event: webhookEvent, deliveryId: id, jobName: job.name, runId: firedJob.runId });
+          deliveryStore.markJob(id, job.name);
+          fireOptions.onJobFired?.(job, firedJob);
+        },
+      });
+
+      const matchedHandlers = listHandlers().filter((handler) => handlerMatchesWebhook(handler, webhook));
+      const firedHandlers: FiredHandler[] = [];
+      const handlerErrors: { handlerName: string; error: string }[] = [];
+      await Promise.allSettled(
+        matchedHandlers.map(async (handler) => {
+          if (deliveryStore.completedJobs(id).has(handler.name)) return;
+          emit('webhook.matched', { source, event: webhookEvent, deliveryId: id, handlerName: handler.name });
+          try {
+            const result = await executeHandler(handler, webhook);
+            deliveryStore.markJob(id, handler.name);
+            firedHandlers.push(result);
+          } catch (err) {
+            handlerErrors.push({ handlerName: handler.name, error: (err as Error).message });
+          }
+        }),
+      );
+
+      deliveryStore.mark(id);
+      for (const failure of handlerErrors) {
+        emit('webhook.failed', { source, event: webhookEvent, deliveryId: id, handlerName: failure.handlerName, error: failure.error });
+      }
+      options.onDelivery?.(webhook, firedJobs, firedHandlers);
+    } catch (err) {
+      const error = err as Error;
+      emit('webhook.failed', { source, event: webhookEvent, deliveryId: id, error: error.message });
+      options.onDeliveryError?.(webhook, error);
+    }
+  }
 
   const server = http.createServer((req, res) => {
     void (async () => {
@@ -609,7 +710,7 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
         const event = source === 'github' ? (header(req.headers, 'x-github-event') ?? '') : '';
         emit('webhook.received', { source, event, deliveryId: id });
 
-        if (deliveryStore.seen(id)) {
+        if (deliveryStore.seen(id) || inFlight.has(id)) {
           res.writeHead(200, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ ok: true, duplicate: true, fired: [] }));
           return;
@@ -637,48 +738,14 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
           payload,
         };
         emit('webhook.authorized', { source, event: webhookEvent, deliveryId: id });
-        const context = buildWebhookContext(webhook);
 
-        const fireOptions = options.fire ?? {};
-        const firedJobs = await fireWebhookJobs(webhook, {
-          ...fireOptions,
-          context,
-          skipJobNames: deliveryStore.completedJobs(id),
-          onJobFired: (job, firedJob) => {
-            emit('webhook.fired', { source, event: webhookEvent, deliveryId: id, jobName: job.name, runId: firedJob.runId });
-            deliveryStore.markJob(id, job.name);
-            fireOptions.onJobFired?.(job, firedJob);
-          },
-        });
+        // ACK FIRST (RUSH-2548). Everything that could reject this delivery has
+        // run; what remains starts agent runs and outlives any sender timeout.
+        inFlight.add(id);
+        res.writeHead(202, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, accepted: true, deliveryId: id }));
 
-        const handlers = listHandlers();
-        const matchedHandlers = handlers.filter((handler) => handlerMatchesWebhook(handler, webhook));
-        const firedHandlers: FiredHandler[] = [];
-        const handlerErrors: { handlerName: string; error: string }[] = [];
-        await Promise.allSettled(
-          matchedHandlers.map(async (handler) => {
-            if (deliveryStore.completedJobs(id).has(handler.name)) return;
-            emit('webhook.matched', { source, event: webhookEvent, deliveryId: id, handlerName: handler.name });
-            try {
-              const result = await executeHandler(handler, webhook);
-              deliveryStore.markJob(id, handler.name);
-              firedHandlers.push(result);
-            } catch (err) {
-              handlerErrors.push({ handlerName: handler.name, error: (err as Error).message });
-            }
-          }),
-        );
-
-        deliveryStore.mark(id);
-        options.onDelivery?.(webhook, firedJobs, firedHandlers);
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({
-          ok: true,
-          fired: firedJobs.map((f) => f.jobName),
-          runs: firedJobs,
-          handlers: firedHandlers,
-          ...(handlerErrors.length > 0 ? { handlerErrors } : {}),
-        }));
+        void settleDelivery(webhook, id).finally(() => inFlight.delete(id));
       } catch (err) {
         res.writeHead(400, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: (err as Error).message }));

@@ -77,6 +77,34 @@ enum ActiveSessionSelfTest {
         check("a positive pid with no known machine still shows the pid",
               ActiveDisplay.locator(machine: nil, pid: 999, cloudProvider: nil, cloudTaskId: nil) == "pid 999")
 
+        // RUSH-2688: the ACTIVE group key. A cloud/no-cwd row must never borrow
+        // its harness/provider ('codex') or a machine name as a project group.
+        check("a working dir groups under its repo name",
+              LocalState.groupKey(cwd: "/home/me/repos/agents-cli", isCloud: false) == "agents-cli")
+        check("a worktree groups under the enclosing repo, not the slug",
+              LocalState.groupKey(cwd: "/home/me/repos/agents-cli/.agents/worktrees/rush-2688", isCloud: false)
+                == "agents-cli")
+        check("a cloud row with no repo groups under the explicit 'cloud' bucket, never the harness",
+              LocalState.groupKey(cwd: nil, isCloud: true, cloudRepo: nil) == "cloud")
+        check("a cloud row with an org/name repo groups under the bare repo name",
+              LocalState.groupKey(cwd: nil, isCloud: true, cloudRepo: "phnx-labs/agents-cli") == "agents-cli")
+        check("a non-cloud row with no cwd is unknown (folds into 'other'), never a machine name",
+              LocalState.groupKey(cwd: nil, isCloud: false).isEmpty)
+
+        // End-to-end through the two builders that actually leaked: the exact
+        // queued Codex cloud row (repo NULL, provider 'codex') and the engine's
+        // cloud active row must both group under 'cloud', not 'codex'.
+        let leakJSON = """
+        {"kind":"codex","sessionId":"s4","status":"running","context":"cloud"}
+        """
+        if let leak = try? decoder.decode(ActiveSession.self, from: Data(leakJSON.utf8)) {
+            let s = LocalState.sessions(fromActive: [leak]).first
+            check("a cwd-less codex cloud active row groups under 'cloud', not 'codex'",
+                  s?.repo == "cloud")
+        } else {
+            check("cloud active row decodes", false)
+        }
+
         print(pass ? "ALL PASS" : "SOME FAILED")
         exit(pass ? 0 : 1)
     }

@@ -53,6 +53,17 @@ import { JobScheduler } from '../lib/scheduler.js';
 import { followFile } from '../lib/log-follow.js';
 import { parseDuration } from '../lib/hooks/cache.js';
 import { registerFunnelCommand } from './funnel.js';
+import {
+  DEFAULT_WEBHOOK_PORT,
+  DEFAULT_WEBHOOK_RATE_LIMIT,
+  addHostedReceiver,
+  getDaemonWebhooksConfigPath,
+  hostedReceiverPort,
+  readDaemonWebhooksConfig,
+  removeHostedReceiver,
+  type HostedReceiverConfig,
+} from '../lib/daemon-webhooks.js';
+import { parseFunnelPort } from '../lib/funnel.js';
 
 // ─── Process scanning — which install owns the pid, and every duplicate ──────
 
@@ -704,6 +715,149 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
   process.exitCode = 1;
 }
 
+// ─── Hosted webhook receivers ────────────────────────────────────────────
+
+/** Parse a positive-integer option, failing loud rather than silently defaulting. */
+function requirePositiveInt(raw: string, label: string): number {
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    console.error(chalk.red(`${label} must be a positive integer (got '${raw}').`));
+    process.exit(1);
+  }
+  return parsed;
+}
+
+/**
+ * `agents daemon webhooks` — which signed receivers THIS box hosts (RUSH-2548).
+ *
+ * The entries land in `daemon/webhooks.yaml`, which the daemon's
+ * `webhook-receiver` service reads at start; nothing binds until the daemon
+ * picks the change up, so every mutation says how to apply it.
+ */
+function registerWebhooksSubcommand(parent: Command): void {
+  const webhooks = parent
+    .command('webhooks')
+    .description('Signed webhook receivers this box hosts as a supervised daemon service.')
+    .option('--json', 'Emit as JSON')
+    .action((opts, command) => {
+      runWebhooksList(command.optsWithGlobals().json === true);
+    });
+
+  setHelpSections(webhooks, {
+    examples: `
+      # What this box hosts today
+      agents daemon webhooks list
+
+      # Host a receiver on the default port, signing secrets from a bundle
+      agents daemon webhooks add --secrets-bundle linear-webhook
+
+      # A second receiver on its own port, publicly exposed via Tailscale Funnel
+      agents daemon webhooks add --secrets-bundle gh-webhook --port 8788 --funnel-port 443
+
+      # Apply the change (the running daemon rebinds on restart)
+      agents daemon restart
+
+      # Stop hosting the receiver bound to a port
+      agents daemon webhooks remove 8788
+    `,
+    notes: `
+      The bundle must hold GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET
+      ('agents secrets add <bundle> LINEAR_WEBHOOK_SECRET'). The daemon reads it
+      through the secrets broker, so a hosted receiver needs no
+      AGENTS_SECRETS_PASSPHRASE and no nohup. A LOCKED bundle fails that receiver
+      loud in 'agents daemon logs' rather than binding unverified ingress.
+
+      Port is the identity: a second 'add' on the same port edits that receiver.
+      Funnel ports are limited by Tailscale to 443, 8443, and 10000.
+    `,
+  });
+
+  webhooks
+    .command('list')
+    .description('List the receivers declared for this box.')
+    .option('--json', 'Emit as JSON')
+    .action((opts, command) => {
+      runWebhooksList(command.optsWithGlobals().json === true || opts.json === true);
+    });
+
+  webhooks
+    .command('add')
+    .description('Declare a receiver on this box. Replaces any receiver already on the same port.')
+    .requiredOption('--secrets-bundle <name>', 'agents secrets bundle holding GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET')
+    .option('-p, --port <n>', `Local bind port (default ${DEFAULT_WEBHOOK_PORT})`)
+    .option('--rate-limit <n>', `Accepted deliveries per source per minute (default ${DEFAULT_WEBHOOK_RATE_LIMIT})`)
+    .option('--funnel-port <n>', 'Expose publicly on this Tailscale Funnel port (443 | 8443 | 10000)')
+    .action((opts: { secretsBundle: string; port?: string; rateLimit?: string; funnelPort?: string }) => {
+      const receiver: HostedReceiverConfig = { bundle: opts.secretsBundle };
+      if (opts.port !== undefined) receiver.port = requirePositiveInt(opts.port, '--port');
+      if (opts.rateLimit !== undefined) receiver.rateLimit = requirePositiveInt(opts.rateLimit, '--rate-limit');
+      if (opts.funnelPort !== undefined) {
+        try {
+          receiver.funnel = { publicPort: parseFunnelPort(opts.funnelPort) };
+        } catch (err) {
+          console.error(chalk.red((err as Error).message));
+          process.exit(1);
+        }
+      }
+      addHostedReceiver(receiver);
+      const port = hostedReceiverPort(receiver);
+      console.log(chalk.green(`Hosting a webhook receiver on 127.0.0.1:${port}`) + chalk.gray(` (bundle ${receiver.bundle})`));
+      if (receiver.funnel) console.log(chalk.gray(`  public: Tailscale Funnel :${receiver.funnel.publicPort} → localhost:${port}`));
+      console.log(chalk.gray(`  config: ${getDaemonWebhooksConfigPath()}`));
+      console.log(chalk.gray(isDaemonRunning()
+        ? '  run `agents daemon restart` to bind it'
+        : '  run `agents daemon start` to bind it'));
+    });
+
+  webhooks
+    .command('remove <port>')
+    .description('Stop hosting the receiver bound to this port.')
+    .action((portArg: string) => {
+      const port = requirePositiveInt(portArg, 'port');
+      const removed = removeHostedReceiver(port);
+      if (!removed) {
+        console.error(chalk.red(`No receiver declared on port ${port}. Run 'agents daemon webhooks list'.`));
+        process.exit(1);
+      }
+      console.log(chalk.green(`Removed the webhook receiver on port ${port}.`));
+      if (removed.funnel) {
+        // Leaving the Funnel up would keep a public HTTPS route pointed at a port
+        // nothing serves, so say what to run — this box may not be the tailnet
+        // node, and `funnel down` names the host explicitly.
+        console.log(chalk.yellow(`  public ingress is still up on :${removed.funnel.publicPort} — take it down:`));
+        console.log(chalk.gray(`    agents daemon funnel down <host> --port ${removed.funnel.publicPort}`));
+      }
+      if (isDaemonRunning()) console.log(chalk.gray('  run `agents daemon restart` to release the port'));
+    });
+}
+
+function runWebhooksList(json: boolean): void {
+  const { receivers } = readDaemonWebhooksConfig();
+  if (json) {
+    console.log(JSON.stringify(receivers.map((r) => ({
+      bundle: r.bundle,
+      port: hostedReceiverPort(r),
+      rateLimit: r.rateLimit ?? DEFAULT_WEBHOOK_RATE_LIMIT,
+      funnelPort: r.funnel?.publicPort ?? null,
+    })), null, 2));
+    return;
+  }
+  if (receivers.length === 0) {
+    console.log(chalk.gray('No webhook receivers declared on this box — the daemon binds nothing.'));
+    console.log(chalk.gray('Add one: agents daemon webhooks add --secrets-bundle <name>'));
+    return;
+  }
+  console.log(chalk.bold('Hosted webhook receivers'));
+  for (const r of receivers) {
+    const port = hostedReceiverPort(r);
+    const funnel = r.funnel ? chalk.cyan(` public :${r.funnel.publicPort}`) : chalk.gray(' localhost only');
+    console.log(`  127.0.0.1:${String(port).padEnd(6)} ${chalk.gray(`bundle ${r.bundle}`)}${funnel}`);
+    console.log(chalk.gray(`    endpoints: /hooks/github, /hooks/linear · ${r.rateLimit ?? DEFAULT_WEBHOOK_RATE_LIMIT}/min per source`));
+  }
+  console.log(chalk.gray(`\nConfig: ${getDaemonWebhooksConfigPath()}`));
+  console.log(chalk.gray('Changes take effect on the next daemon restart.'));
+}
+
 // ─── Command registration ────────────────────────────────────────────────
 
 export function registerDaemonCommand(program: Command): void {
@@ -735,8 +889,12 @@ export function registerDaemonCommand(program: Command): void {
       # Reload config (SIGHUP) without restarting — picks up routine/scheduler-gate changes
       agents daemon reload
 
-      # Just the two hosted services (secrets broker, browser IPC)
+      # Every hosted service (secrets broker, browser IPC, webhook receiver, ...)
       agents daemon services
+
+      # Host a signed webhook receiver here, supervised and restarted on crash
+      agents daemon webhooks add --secrets-bundle linear-webhook
+      agents daemon webhooks list
 
       # Manage public ingress for daemon-world webhook receivers
       agents daemon funnel status yosemite-s0
@@ -913,6 +1071,7 @@ export function registerDaemonCommand(program: Command): void {
         console.log(chalk.gray('Run `agents daemon reload` (or restart) to apply.'));
       }
     });
+  registerWebhooksSubcommand(cmd);
   registerFunnelCommand(cmd);
 
   cmd.command('logs')

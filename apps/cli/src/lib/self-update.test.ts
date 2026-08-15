@@ -19,6 +19,7 @@ import {
   isMultiInstallScanFresh,
   isNpxCacheInstall,
   isTouchIdStormFixedVersion,
+  manualUninstallCommand,
   MULTI_INSTALL_SCAN_TTL_MS,
   purgeRemovableAgentsCliInstalls,
   readInstalledVersion,
@@ -566,7 +567,48 @@ describe('buildMultiInstallInventory', () => {
       packageRoot: runningRoot,
       version: '1.20.88',
       note: 'running; unsafe legacy helper installer — remove this copy',
+      running: true,
+      autoPurgeable: false,
     }]);
+  });
+
+  // RUSH-2705: the multi-install banner chooses its remedy from these flags —
+  // `agents doctor --fix` for auto-purgeable peers, a manual command otherwise.
+  it('flags an npx-cache peer auto-purgeable but not a healthy >=1.22.30 duplicate', () => {
+    const runningRoot = '/opt/homebrew/lib/node_modules/@phnx-labs/agents-cli';
+    const nvmRoot = '/home/u/.nvm/versions/node/v24.15.0/lib/node_modules/@phnx-labs/agents-cli';
+    const npxRoot = '/home/u/.npm/_npx/abc123/node_modules/@phnx-labs/agents-cli';
+    const inventory = buildMultiInstallInventory(runningRoot, '1.22.39', [
+      { packageRoot: runningRoot, version: '1.22.39', atomicHelperInstall: true },
+      { packageRoot: nvmRoot, version: '1.22.37', atomicHelperInstall: true },
+      { packageRoot: npxRoot, version: '1.20.65', atomicHelperInstall: true },
+    ]);
+
+    const byRoot = new Map(inventory.map((entry) => [entry.packageRoot, entry]));
+    expect(byRoot.get(runningRoot)).toMatchObject({ running: true, autoPurgeable: false });
+    // The stale-but-safe global: detected, never auto-purged.
+    expect(byRoot.get(nvmRoot)).toMatchObject({ running: false, autoPurgeable: false });
+    // npx-cache + pre-1.22.30 with a fixed peer: --fix removes it.
+    expect(byRoot.get(npxRoot)).toMatchObject({ running: false, autoPurgeable: true });
+  });
+});
+
+describe('manualUninstallCommand (RUSH-2705)', () => {
+  it('pins the peer npm prefix for a POSIX global layout (the nvm duplicate case)', () => {
+    const root = '/home/u/.nvm/versions/node/v24.15.0/lib/node_modules/@phnx-labs/agents-cli';
+    expect(manualUninstallCommand(root)).toBe(
+      "npm uninstall -g --prefix '/home/u/.nvm/versions/node/v24.15.0' @phnx-labs/agents-cli",
+    );
+  });
+
+  it('uses bun for a bun global layout', () => {
+    const root = path.join(os.homedir(), '.bun', 'install', 'global', 'node_modules', '@phnx-labs', 'agents-cli');
+    expect(manualUninstallCommand(root)).toBe('bun remove -g @phnx-labs/agents-cli');
+  });
+
+  it('falls back to deleting the directory when no npm prefix owns the tree', () => {
+    const root = '/srv/checkouts/agents-cli';
+    expect(manualUninstallCommand(root)).toBe(`rm -rf '${root}'`);
   });
 });
 
@@ -581,6 +623,8 @@ describe('multi-install scan cache (RUSH-2324)', () => {
     packageRoot: runningRoot,
     version: '1.22.35',
     note: 'running',
+    running: true,
+    autoPurgeable: false,
   }];
 
   function makeCache(overrides: Partial<MultiInstallScanCache> = {}): MultiInstallScanCache {
@@ -623,6 +667,18 @@ describe('multi-install scan cache (RUSH-2324)', () => {
     expect(readMultiInstallScanCache(bad)).toBeNull();
   });
 
+  it('rejects a pre-RUSH-2705 cache whose entries lack the remedy flags', () => {
+    const dir = makeTempDir('multi-install-cache-old-shape');
+    const file = path.join(dir, '.multi-install-scan');
+    fs.writeFileSync(file, JSON.stringify(makeCache({
+      // The shape written before running/autoPurgeable existed.
+      inventory: [
+        { packageRoot: runningRoot, version: '1.22.35', note: 'running' },
+      ] as unknown as MultiInstallScanCache['inventory'],
+    })));
+    expect(readMultiInstallScanCache(file)).toBeNull();
+  });
+
   it('resolveMultiInstallInventory returns the cached inventory without re-scanning when fresh', () => {
     const dir = makeTempDir('multi-install-resolve');
     const file = path.join(dir, '.multi-install-scan');
@@ -632,8 +688,8 @@ describe('multi-install scan cache (RUSH-2324)', () => {
     const seeded = makeCache({
       pathEnv: '',
       inventory: [
-        { packageRoot: runningRoot, version: '1.22.35', note: 'running' },
-        { packageRoot: '/other/lib/node_modules/@phnx-labs/agents-cli', version: '1.20.0', note: 'discovered install' },
+        { packageRoot: runningRoot, version: '1.22.35', note: 'running', running: true, autoPurgeable: false },
+        { packageRoot: '/other/lib/node_modules/@phnx-labs/agents-cli', version: '1.20.0', note: 'discovered install', running: false, autoPurgeable: true },
       ],
     });
     writeMultiInstallScanCache(file, seeded);
@@ -664,8 +720,8 @@ describe('multi-install scan cache (RUSH-2324)', () => {
       pathEnv: '',
       scannedAt: NOW - MULTI_INSTALL_SCAN_TTL_MS - 1,
       inventory: [
-        { packageRoot: runningRoot, version: '1.22.35', note: 'running' },
-        { packageRoot: '/stale/other', version: '0.0.1', note: 'discovered install' },
+        { packageRoot: runningRoot, version: '1.22.35', note: 'running', running: true, autoPurgeable: false },
+        { packageRoot: '/stale/other', version: '0.0.1', note: 'discovered install', running: false, autoPurgeable: false },
       ],
     });
     writeMultiInstallScanCache(file, seeded);
@@ -686,7 +742,7 @@ describe('multi-install scan cache (RUSH-2324)', () => {
     );
     // Empty PATH + empty known roots → inventory is just the running copy.
     expect(resolved).toEqual([
-      { packageRoot: runningRoot, version: '1.22.35', note: 'running' },
+      { packageRoot: runningRoot, version: '1.22.35', note: 'running', running: true, autoPurgeable: false },
     ]);
     const rewritten = readMultiInstallScanCache(file);
     expect(rewritten?.scannedAt).toBe(NOW);
@@ -873,5 +929,51 @@ describe('classifyRemovableAgentsCliInstalls / purge (RUSH-2415)', () => {
     expect(result.removed.some((r) => r.packageRoot === npxCanonical)).toBe(true);
     expect(fs.existsSync(npxRoot)).toBe(false);
     expect(fs.existsSync(fixedRoot)).toBe(true);
+  });
+
+  // RUSH-2705: the bug this pins — a healthy >=1.22.30 duplicate was detected
+  // (and nagged about) but never purged, while --fix reported nothing at all.
+  it.skipIf(process.platform === 'win32')('remediateStaleAgentsCliInstalls reports a healthy duplicate as unresolved with its exact removal command', () => {
+    const homeDir = makeTempDir('remediate-unresolved');
+    const runningRoot = path.join(homeDir, 'brew', 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
+    fs.mkdirSync(path.join(runningRoot, 'dist', 'lib'), { recursive: true });
+    fs.writeFileSync(
+      path.join(runningRoot, 'package.json'),
+      JSON.stringify({ name: '@phnx-labs/agents-cli', version: '1.22.39' }),
+    );
+    fs.writeFileSync(path.join(runningRoot, 'dist', 'lib', 'app-bundle-install.js'), '// atomic\n');
+
+    // The nvm-shaped peer: >=1.22.30, atomic helper, not npx-cache. --fix must
+    // leave it on disk and hand back the npm uninstall pinned to its prefix.
+    const nvmPrefix = path.join(homeDir, '.nvm', 'versions', 'node', 'v24.15.0');
+    const dupRoot = path.join(nvmPrefix, 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
+    fs.mkdirSync(path.join(dupRoot, 'dist', 'lib'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dupRoot, 'package.json'),
+      JSON.stringify({ name: '@phnx-labs/agents-cli', version: '1.22.37' }),
+    );
+    fs.writeFileSync(path.join(dupRoot, 'dist', 'lib', 'app-bundle-install.js'), '// atomic\n');
+
+    const result = remediateStaleAgentsCliInstalls({
+      runningRoot,
+      runningVersion: '1.22.39',
+      pathEnv: '',
+      findOpts: {
+        homeDir,
+        npmCacheDir: path.join(homeDir, 'no-npm-cache'),
+        globalNodeModulesDirs: [path.join(nvmPrefix, 'lib', 'node_modules')],
+        fnmDir: path.join(homeDir, 'empty-fnm'),
+      },
+    });
+
+    expect(result.removed).toHaveLength(0);
+    expect(fs.existsSync(dupRoot)).toBe(true);
+    expect(result.unresolved).toHaveLength(1);
+    const unresolved = result.unresolved[0];
+    expect(unresolved.version).toBe('1.22.37');
+    expect(fs.realpathSync(unresolved.packageRoot)).toBe(fs.realpathSync(dupRoot));
+    expect(unresolved.manualRemoveCommand).toBe(
+      `npm uninstall -g --prefix '${fs.realpathSync(nvmPrefix)}' @phnx-labs/agents-cli`,
+    );
   });
 });

@@ -243,8 +243,11 @@ directly into the agent's config.
 ```
 Source: ~/.agents/mcp/*.yaml       Per-agent destinations:
 
-┌────────────────────┐             Agy     → <home>/.gemini/antigravity-cli/mcp_config.json
-│ github.yaml        │                      · key: mcpServers.<name> = {command,args,env}
+┌────────────────────┐             Agy     → ~/.gemini/config/mcp_config.json (REAL home,
+│ github.yaml        │                        not version-scoped — agy reads one
+│                    │                        shared file for every version)
+│                    │                      · key: mcpServers.<name> = {command,args,env};
+│                    │                        a remote server is keyed serverUrl
 │ ───────            │
 │ name: github       │                      · key: mcpServers.<name> = {command,args,env}
 │ transport: stdio   │             Cursor  → <home>/.cursor/mcp.json
@@ -267,10 +270,17 @@ Behavior rules, per `src/lib/mcp.ts`:
    Cursor:
 
    ```
-   config = JSON.parse(fs.readFileSync(settings.json)) || {}
+   config = readExistingConfig(settings.json)   // {} when absent or empty;
+                                                // THROWS when present-but-unparseable
    config.mcpServers[server.name] = { command, args, env }  // or { url }
    fs.writeFileSync(settings.json, JSON.stringify(config, null, 2))
    ```
+
+   A config that exists but does not parse is refused, never rebuilt from `{}` —
+   these files hold far more than MCP (hermes' whole `config.yaml`, openclaw's
+   `openclaw.json`), so resetting one destroys everything else in it. JSONC
+   configs go through the shared string-literal-aware `stripJsonComments`, so a
+   URL inside a string (`"$schema": "https://opencode.ai/config.json"`) survives.
 
    User-owned top-level keys (theme, editor settings, etc.) are preserved
    because the merge only touches `mcpServers`.
@@ -320,7 +330,19 @@ groups ending in `-deny` (e.g. `99-deny.yaml`) contribute to `deny` even
 though their YAML lists appear under `allow`
 (`permissions.ts:230-235`).
 
-Per-agent conversion is lossy in both directions:
+Reading back — `agents permissions list <agent>`, and the config-file import
+behind `agents permissions add <path>` — goes through `PERMISSION_TARGETS` (`lib/permissions-registry.ts`), one entry
+per allowlist-capable harness declaring its config path and how to project that
+file onto the canonical `PermissionSet`. A completeness test pins the key set to
+`capableAgents('allowlist')`, so a harness the write path handles can never be
+one the read path silently reports as empty (RUSH-2676). The registry also owns
+the canonical↔native tool vocabularies that the forward serializers below
+import, so the two directions cannot disagree about what `fs_read` or
+`developer__shell` means.
+
+Per-agent conversion is lossy in both directions — the reverse projection
+recovers a set that grants the same access, not the byte-identical rules that
+were written, and each target names its own loss in a `lossyBecause` line:
 
 - Claude's native format is closest to canonical — near 1:1 passthrough
   (`permissions.ts:362-369`).
@@ -348,10 +370,10 @@ Per-agent conversion is lossy in both directions:
 - Kiro 2.8.0+ maps canonical shell, filesystem, and web rules into v3
   capability rules under `.kiro/settings/permissions.yaml`. Existing user
   rules are preserved when managed rules are merged.
-- Goose maps canonical tool families into `.config/goose/permission.yaml`
-  `user.always_allow` / `user.never_allow` entries using the Goose Developer
-  extension tool names. Existing non-managed permission categories and
-  unrelated user tool entries are preserved.
+- Goose is **not** allowlist-capable. Its `permission.yaml` gates whole tools
+  (`developer__shell`, `developer__text_editor`), so several distinct canonical
+  rules collapse onto one entry and cannot be read back faithfully — the
+  capability is off in the registry rather than half-supported.
 - OpenClaw gates at tool granularity only, so only **blanket** (whole-tool)
   rules map into `~/.openclaw/openclaw.json` `tools.alsoAllow` (allow) /
   `tools.deny` (deny): `bash → exec`, `read → read`, `write`/`edit → write`,

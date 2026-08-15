@@ -78,7 +78,7 @@ dispatch:
 | `contexts[]` | `{path, purpose}` described starting points — indexed anchors for agents. |
 | `goals[]` | `{objective, measure}` the OKR-shaped outcomes a project serves — a project may have several. The objective is the "why"; `measure` is the optional key result. Milestones (pulled from Linear) are the dated checkpoints toward them. |
 | `integrations[]` | `{kind, url, label}` external context sources. |
-| `linear` | `{projectId, url, name}` — reuses the existing Linear path. `name` is a display label (shown in Fleet and the activity feed); the other two are set by `agents projects link`. |
+| `linear` | `{projectId, url, name}` — reuses the existing Linear path. All three are written by `agents projects link` and `projects import --from-linear`. `name` is the board's own display label (shown on the `status` card, in Fleet, and in the activity feed) and is **refreshed from Linear on every link**, so renaming a project on the board fixes the label here with one `agents projects link <name> --linear "<new name>"`. It is not the def's identity — the filename is (`agi.yaml` is the local id, `AGI` is what the board calls it). |
 | `dispatch` | `{enabled, maxAgents, provider, host}` — auto-dispatch settings read by `agents __auto-dispatch` and by the Fleet dispatch panel. All subfields are optional. `enabled: true` opts the project into auto-dispatch; `provider` optionally pins a `agents cloud` backend (`rush`, `codex`, `factory`, `host`, …), otherwise the delegated agent's native cloud backend is used; `host` selects a named fleet device when `provider: host`. |
 
 ## Resolution — definition first, convention fallback
@@ -329,7 +329,7 @@ A local workspace probe always feeds this footer (cheap, no SSH). The full per-h
 | `agents projects view <name>` / `show` | Alias of `status <name>`: full card, every milestone, stored definition. |
 | `agents projects edit <name>` | Open the YAML in `$EDITOR`. |
 | `agents projects status [name] [--json] [--window N] [--no-remote] [--device name...] [--devices a,b,c]` (aliases `view`, `show`) | Progress card for every project across the whole fleet (per-device workspace drift over SSH), or one named project. Named form also prints every milestone and the stored definition. `--device`/`--devices` scopes the fan-out to a subset. |
-| `agents projects link <name> --linear [query]` | Bind a Linear project into the def (`linear.projectId` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. |
+| `agents projects link <name> --linear [query]` | Bind a Linear project into the def (`linear.projectId` + `name` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. Re-run it to pick up a project renamed on the board — the recorded `name` is refreshed from Linear every time, and the command says which label it replaced. |
 | `agents projects import --from-linear` | Import the workspace's Linear projects (via the `linear` CLI) as definitions. See [Importing](#importing--from-linear). There is no ext import path — `~/.agents/factory/projects.json` is never read. |
 | `agents projects set <name> [--repo\|--root\|--path\|--description\|--goal objective:measure\|--add-dir\|--rm-dir\|--slug]` | Change one field, preserving every other. `--goal` (repeatable) replaces the goals list. `--add-dir` / `--rm-dir` (both repeatable) bind and unbind directories; `--slug` names the remote for a single `--add-dir` whose origin cannot be read. Removals apply before additions, so `--rm-dir old --add-dir new` re-points a directory in one command. Use this rather than `add --force`, which rebuilds the definition from flags alone. |
 | `agents projects rm <name> [--json]` | Delete the definition (never touches the repo). `--json` prints `{ ok, name, removed }` (or `{ ok: false, name, error }` on failure). |
@@ -414,8 +414,9 @@ guessed subset.
 ## Importing — from Linear
 
 `--from-linear` imports the workspace's Linear projects through the `linear` CLI.
-Each project becomes a def carrying `linear.projectId` (+ `url` when the CLI reports one),
-and the `show` backlink lights up immediately. A Linear project exists because someone
+Each project becomes a def carrying `linear.projectId` and `linear.name` (+ `url` when
+the CLI reports one), and the `show` backlink lights up immediately. `linear.name` is the
+board's display name verbatim — `AGI`, not the slugified def name `agi`. A Linear project exists because someone
 deliberately created it, so the name and the link are trustworthy.
 
 The local checkout is bound **only on an exact normalized-name match** against the

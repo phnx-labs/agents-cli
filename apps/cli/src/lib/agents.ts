@@ -25,6 +25,7 @@ import { damerauLevenshtein } from './fuzzy.js';
 import { getCacheDir, getVersionsDir, getShimsDir, getHistoryDir, getCliVersionCachePath } from './state.js';
 import { resolveVersion, getVersionHomePath, getBinaryPath } from './versions.js';
 import { supports } from './capabilities.js';
+import { MCP_TARGETS } from './mcp-registry.js';
 
 /** Represents the installation state of an agent's CLI binary. */
 export interface CliState {
@@ -268,16 +269,65 @@ function splitCommandLine(command: string): string[] {
 }
 
 /**
+ * Per-harness dispatch data that used to live in `if (agentId === …)` /
+ * `switch (agentId)` arms inside this file. These are stable properties of a
+ * harness, not per-call-site quirks — a new AgentId must declare every field
+ * (the completeness test in agents.test.ts pins that).
+ *
+ * Left as call-site specials (not registry data): `getAccountInfo` and
+ * `readAuthAccountIdentity` — those are parsers, not flags.
+ */
+export type VersionStdoutMatch = 'semver' | 'openclaw';
+export type UnmanagedBinaryResolver = 'path' | 'grok-downloads';
+export type McpRegisterPath = 'cli' | 'config';
+export type McpAddHttpStyle = 'transport' | 'url';
+export type McpAddStdioStyle = 'scope' | 'simple';
+export type McpConfigWriteStyle = 'json-mcpServers' | 'yaml-mcp_servers';
+
+export interface AgentRegistryConfig extends AgentConfig {
+  /**
+   * Session-transcript directory as path segments under a HOME root, or null
+   * when this harness has no local session tree `agents` can walk.
+   */
+  sessionDir: string[] | null;
+  /** File extension of session transcripts, or null when unknown. */
+  sessionFileExt: '.jsonl' | '.json' | null;
+  /** How to parse `cli --version` stdout. */
+  versionStdoutMatch: VersionStdoutMatch;
+  /** How to find an unmanaged (non-version-home) binary. */
+  unmanagedBinary: UnmanagedBinaryResolver;
+  /**
+   * How `registerMcp` / `unregisterMcp` talk to the harness. `config` writes
+   * the file directly (no `mcp add` CLI); `cli` shells out.
+   */
+  mcpRegister: McpRegisterPath;
+  /** Argv shape for `mcp add` over HTTP. */
+  mcpAddHttp: McpAddHttpStyle;
+  /** Argv shape for `mcp add` over stdio. */
+  mcpAddStdio: McpAddStdioStyle;
+  /** On-disk map key + serialization when writing MCP config directly. */
+  mcpConfigWrite: McpConfigWriteStyle;
+}
+
+/**
  * Master registry of all supported agents keyed by AgentId.
  *
  * Each entry defines the agent's CLI command, npm package, config directory layout,
  * instructions file name, slash-command format, and capability flags. This is the
  * single source of truth for agent metadata consumed throughout the codebase.
  */
-export const AGENTS: Record<AgentId, AgentConfig> = {
+export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
   claude: {
     id: 'claude',
     name: 'Claude',
+    sessionDir: ['.claude', 'projects'],
+    sessionFileExt: '.jsonl',
+    versionStdoutMatch: 'semver',
+    unmanagedBinary: 'path',
+    mcpRegister: 'cli',
+    mcpAddHttp: 'transport',
+    mcpAddStdio: 'scope',
+    mcpConfigWrite: 'json-mcpServers',
     color: 'magenta',
     cliCommand: 'claude',
     npmPackage: '@anthropic-ai/claude-code',
@@ -302,6 +352,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   codex: {
     id: 'codex',
     name: 'Codex',
+    sessionDir: ['.codex', 'sessions'],
+    sessionFileExt: '.jsonl',
+    versionStdoutMatch: 'semver',
+    unmanagedBinary: 'path',
+    mcpRegister: 'cli',
+    mcpAddHttp: 'url',
+    mcpAddStdio: 'simple',
+    mcpConfigWrite: 'json-mcpServers',
     color: 'green',
     cliCommand: 'codex',
     npmPackage: '@openai/codex',
@@ -323,6 +381,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   gemini: {
     id: 'gemini',
     name: 'Gemini',
+    sessionDir: ['.gemini', 'tmp'],
+    sessionFileExt: '.json',
+    versionStdoutMatch: 'semver',
+    unmanagedBinary: 'path',
+    mcpRegister: 'cli',
+    mcpAddHttp: 'transport',
+    mcpAddStdio: 'simple',
+    mcpConfigWrite: 'json-mcpServers',
     color: 'blue',
     cliCommand: 'gemini',
     npmPackage: '@google/gemini-cli',
@@ -355,6 +421,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   cursor: {
     id: 'cursor',
     name: 'Cursor',
+    sessionDir: null,
+    sessionFileExt: null,
+    versionStdoutMatch: 'semver',
+    unmanagedBinary: 'path',
+    mcpRegister: 'cli',
+    mcpAddHttp: 'transport',
+    mcpAddStdio: 'simple',
+    mcpConfigWrite: 'json-mcpServers',
     color: 'cyan',
     cliCommand: 'cursor-agent',
     npmPackage: '',
@@ -390,6 +464,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   opencode: {
     id: 'opencode',
     name: 'OpenCode',
+    sessionDir: null,
+    sessionFileExt: null,
+    versionStdoutMatch: 'semver',
+    unmanagedBinary: 'path',
+    mcpRegister: 'cli',
+    mcpAddHttp: 'transport',
+    mcpAddStdio: 'simple',
+    mcpConfigWrite: 'json-mcpServers',
     color: 'yellowBright',
     cliCommand: 'opencode',
     npmPackage: 'opencode-ai',
@@ -419,6 +501,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   pi: {
     id: 'pi',
     name: 'Pi',
+    sessionDir: null,
+    sessionFileExt: null,
+    versionStdoutMatch: 'semver',
+    unmanagedBinary: 'path',
+    mcpRegister: 'cli',
+    mcpAddHttp: 'transport',
+    mcpAddStdio: 'simple',
+    mcpConfigWrite: 'json-mcpServers',
     color: 'magenta',
     cliCommand: 'omp',
     npmPackage: '@oh-my-pi/pi-coding-agent',
@@ -450,6 +540,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   openclaw: {
     id: 'openclaw',
     name: 'OpenClaw',
+    sessionDir: null,
+    sessionFileExt: null,
+    versionStdoutMatch: 'openclaw',
+    unmanagedBinary: 'path',
+    mcpRegister: 'cli',
+    mcpAddHttp: 'transport',
+    mcpAddStdio: 'simple',
+    mcpConfigWrite: 'json-mcpServers',
     color: 'redBright',
     cliCommand: 'openclaw',
     npmPackage: 'openclaw',
@@ -483,6 +581,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   copilot: {
     id: 'copilot',
     name: 'Copilot',
+    sessionDir: ['.copilot', 'session-state'],
+    sessionFileExt: '.jsonl',
+    versionStdoutMatch: 'semver',
+    unmanagedBinary: 'path',
+    mcpRegister: 'cli',
+    mcpAddHttp: 'transport',
+    mcpAddStdio: 'simple',
+    mcpConfigWrite: 'json-mcpServers',
     color: 'whiteBright',
     cliCommand: 'copilot',
     npmPackage: '@github/copilot',
@@ -510,6 +616,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   amp: {
     id: 'amp',
     name: 'Amp',
+    sessionDir: null,
+    sessionFileExt: null,
+    versionStdoutMatch: 'semver',
+    unmanagedBinary: 'path',
+    mcpRegister: 'cli',
+    mcpAddHttp: 'transport',
+    mcpAddStdio: 'simple',
+    mcpConfigWrite: 'json-mcpServers',
     color: 'blueBright',
     cliCommand: 'amp',
     npmPackage: '@sourcegraph/amp',
@@ -528,6 +642,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   kiro: {
     id: 'kiro',
     name: 'Kiro',
+    sessionDir: null,
+    sessionFileExt: null,
+    versionStdoutMatch: 'semver',
+    unmanagedBinary: 'path',
+    mcpRegister: 'cli',
+    mcpAddHttp: 'transport',
+    mcpAddStdio: 'simple',
+    mcpConfigWrite: 'json-mcpServers',
     color: 'greenBright',
     cliCommand: 'kiro-cli',
     npmPackage: '',
@@ -553,6 +675,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   goose: {
     id: 'goose',
     name: 'Goose',
+    sessionDir: null,
+    sessionFileExt: null,
+    versionStdoutMatch: 'semver',
+    unmanagedBinary: 'path',
+    mcpRegister: 'cli',
+    mcpAddHttp: 'transport',
+    mcpAddStdio: 'simple',
+    mcpConfigWrite: 'json-mcpServers',
     color: 'magentaBright',
     cliCommand: 'goose',
     npmPackage: '',
@@ -574,13 +704,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     supportsHooks: true,
     // Plugins: Open Plugins under ~/.agents/plugins/<name>/ (same layout as
     // agents-cli source). Version isolation copies into versionHome/.agents/plugins/.
-    // Workflows sync as Goose recipe YAML; permissions sync to permission.yaml.
+    // Workflows sync as Goose recipe YAML. Permissions are NOT supported:
+    // permission.yaml gates whole tools, so canonical rules cannot round-trip.
     // Commands: a Goose slash command is a recipe YAML under
     // ~/.config/goose/commands/<name>.yaml, registered in ~/.config/goose/config.yaml
     // under `slash_commands: [{ command, recipe_path }]` (see goose-commands.ts).
     // Subagents: recipe YAML named agents under ~/.config/goose/agents/<name>.yaml
     // (goose auto-discovers and delegates to them by name in autonomous mode).
-    capabilities: { hooks: { since: '1.34.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: { since: '1.25.0' }, commands: true, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: true, memory: false, modes: ['edit'], interactiveRepl: true },
+    capabilities: { hooks: { since: '1.34.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: { since: '1.25.0' }, commands: true, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: true, memory: false, modes: ['edit'], interactiveRepl: true },
   },
   // Google Antigravity CLI (`agy`) — official replacement for Gemini CLI as of IO 2026.
   // configDir nests inside `~/.gemini/` since agy shares the parent dir with the Gemini
@@ -594,6 +725,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   antigravity: {
     id: 'antigravity',
     name: 'Antigravity',
+    sessionDir: null,
+    sessionFileExt: null,
+    versionStdoutMatch: 'semver',
+    unmanagedBinary: 'path',
+    mcpRegister: 'cli',
+    mcpAddHttp: 'transport',
+    mcpAddStdio: 'simple',
+    mcpConfigWrite: 'json-mcpServers',
     color: 'blueBright',
     cliCommand: 'agy',
     npmPackage: '',
@@ -622,6 +761,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   grok: {
     id: 'grok',
     name: 'Grok',
+    sessionDir: ['.grok', 'sessions'],
+    sessionFileExt: '.json',
+    versionStdoutMatch: 'semver',
+    unmanagedBinary: 'grok-downloads',
+    mcpRegister: 'cli',
+    mcpAddHttp: 'transport',
+    mcpAddStdio: 'simple',
+    mcpConfigWrite: 'json-mcpServers',
     color: 'cyanBright',
     cliCommand: 'grok',
     npmPackage: '',
@@ -671,6 +818,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   kimi: {
     id: 'kimi',
     name: 'Kimi',
+    sessionDir: null,
+    sessionFileExt: null,
+    versionStdoutMatch: 'semver',
+    unmanagedBinary: 'path',
+    mcpRegister: 'cli',
+    mcpAddHttp: 'transport',
+    mcpAddStdio: 'simple',
+    mcpConfigWrite: 'json-mcpServers',
     color: 'magentaBright',
     cliCommand: 'kimi',
     npmPackage: '@moonshot-ai/kimi-code',
@@ -757,6 +912,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   droid: {
     id: 'droid',
     name: 'Droid',
+    sessionDir: ['.factory', 'sessions'],
+    sessionFileExt: '.jsonl',
+    versionStdoutMatch: 'semver',
+    unmanagedBinary: 'path',
+    mcpRegister: 'cli',
+    mcpAddHttp: 'transport',
+    mcpAddStdio: 'simple',
+    mcpConfigWrite: 'json-mcpServers',
     color: 'yellowBright',
     cliCommand: 'droid',
     npmPackage: '',
@@ -800,6 +963,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   hermes: {
     id: 'hermes',
     name: 'Hermes',
+    sessionDir: null,
+    sessionFileExt: null,
+    versionStdoutMatch: 'semver',
+    unmanagedBinary: 'path',
+    mcpRegister: 'config',
+    mcpAddHttp: 'transport',
+    mcpAddStdio: 'simple',
+    mcpConfigWrite: 'yaml-mcp_servers',
     color: 'cyanBright',
     cliCommand: 'hermes',
     npmPackage: '',
@@ -857,6 +1028,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   muse: {
     id: 'muse',
     name: 'Muse',
+    sessionDir: ['.local', 'share', 'muse', 'sessions'],
+    sessionFileExt: '.jsonl',
+    versionStdoutMatch: 'semver',
+    unmanagedBinary: 'path',
+    mcpRegister: 'cli',
+    mcpAddHttp: 'transport',
+    mcpAddStdio: 'simple',
+    mcpConfigWrite: 'json-mcpServers',
     color: 'blueBright',
     cliCommand: 'muse',
     npmPackage: '',
@@ -926,6 +1105,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   warp: {
     id: 'warp',
     name: 'Warp',
+    sessionDir: null,
+    sessionFileExt: null,
+    versionStdoutMatch: 'semver',
+    unmanagedBinary: 'path',
+    mcpRegister: 'cli',
+    mcpAddHttp: 'transport',
+    mcpAddStdio: 'simple',
+    mcpConfigWrite: 'json-mcpServers',
     color: 'blueBright',
     cliCommand: 'warp',
     npmPackage: '',
@@ -1096,13 +1283,11 @@ async function getCachedVersionForBinary(agentId: AgentId, binaryPath: string): 
   let version: string | null = null;
   try {
     const { stdout } = await execFileAsync(agent.cliCommand, ['--version'], { timeout: 3000 });
-    if (agentId === 'openclaw') {
-      const match = stdout.match(/openclaw\/(\d+\.\d+\.\d+)/);
-      version = match ? match[1] : stdout.trim();
-    } else {
-      const match = stdout.match(/(\d+\.\d+\.\d+)/);
-      version = match ? match[1] : stdout.trim();
-    }
+    const versionRe = agent.versionStdoutMatch === 'openclaw'
+      ? /openclaw\/(\d+\.\d+\.\d+)/
+      : /(\d+\.\d+\.\d+)/;
+    const match = stdout.match(versionRe);
+    version = match ? match[1] : stdout.trim();
   } catch {
     /* version command failed */
     version = null;
@@ -1177,8 +1362,9 @@ export async function getCliState(agentId: AgentId): Promise<CliState> {
  */
 export async function getUnmanagedCliState(agentId: AgentId): Promise<CliState> {
   const agent = AGENTS[agentId];
-  // Special case for grok: it manages its own binaries in ~/.grok/downloads/
-  if (agentId === 'grok') {
+  // Grok (and any future harness with unmanagedBinary: 'grok-downloads')
+  // keeps versioned binaries under ~/.grok/downloads/, not on PATH.
+  if (agent.unmanagedBinary === 'grok-downloads') {
     const grokBin = resolveGrokBinary();
     if (!grokBin) {
       return { installed: false, version: null, path: null };
@@ -1225,19 +1411,12 @@ export interface UnmanagedInstall {
 
 /**
  * Agents that `agents setup` probes for pre-existing native installations
- * (i.e., a config dir present before agents-cli took over). Add an agent here
- * once its `cliCommand` reports a usable `--version` and its session dir is
- * wired into `getSessionDir`.
+ * (i.e., a config dir present before agents-cli took over). Derived from
+ * `sessionDir` so a new harness cannot be walkable yet missing from setup.
  */
-export const UNMANAGED_DETECTION_CANDIDATES: AgentId[] = [
-  'claude',
-  'codex',
-  'gemini',
-  'grok',
-  'copilot',
-  'droid',
-  'muse',
-];
+export const UNMANAGED_DETECTION_CANDIDATES: AgentId[] = ALL_AGENT_IDS.filter(
+  (id) => AGENTS[id].sessionDir !== null,
+);
 
 /**
  * Detect existing agent installations that are NOT yet managed by agents-cli.
@@ -2414,46 +2593,13 @@ function writeLastActiveCacheFile(cache: Record<string, LastActiveCacheEntry>, c
 
 /** Return the root directory where the agent stores session files, or null if unknown. */
 function getSessionDir(agentId: AgentId, base: string): string | null {
-  switch (agentId) {
-    case 'claude':
-      return path.join(base, '.claude', 'projects');
-    case 'codex':
-      return path.join(base, '.codex', 'sessions');
-    case 'gemini':
-      return path.join(base, '.gemini', 'tmp');
-    case 'grok':
-      return path.join(base, '.grok', 'sessions');
-    case 'copilot':
-      // Copilot persists sessions at ~/.copilot/session-state/<id>/events.jsonl.
-      // The events.jsonl is the canonical NDJSON event stream per session.
-      return path.join(base, '.copilot', 'session-state');
-    case 'droid':
-      return path.join(base, '.factory', 'sessions');
-    case 'muse':
-      // Muse sessions live under XDG data, not the config dir:
-      // ~/.local/share/muse/sessions/YYYY/MM/DD/<uuid>/session.jsonl
-      return path.join(base, '.local', 'share', 'muse', 'sessions');
-    default:
-      return null;
-  }
+  const rel = AGENTS[agentId].sessionDir;
+  return rel ? path.join(base, ...rel) : null;
 }
 
 /** Return the file extension used for session files by the given agent. */
 function getSessionExtension(agentId: AgentId): string | null {
-  switch (agentId) {
-    case 'claude':
-    case 'codex':
-    case 'copilot':
-    case 'droid':
-    case 'muse':
-      return '.jsonl';
-    case 'gemini':
-      return '.json';
-    case 'grok':
-      return '.json'; // sessions contain summary.json, events.jsonl, etc.
-    default:
-      return null;
-  }
+  return AGENTS[agentId].sessionFileExt;
 }
 
 /**
@@ -2541,7 +2687,7 @@ export async function registerMcp(
   if (transport === 'http' && options?.headers && Object.keys(options.headers).length > 0 && !supports(agentId, 'mcpHeaders').ok) {
     return { success: false, error: 'skipped: HTTP MCP headers are only supported for Claude registration' };
   }
-  if (agentId === 'hermes') {
+  if (agent.mcpRegister === 'config') {
     try {
       writeMcpToConfig(agentId, name, command, scope, transport, options?.home);
       return { success: true };
@@ -2558,13 +2704,13 @@ export async function registerMcp(
     const bin = options?.binary || agent.cliCommand;
     let args: string[];
     if (transport === 'http') {
-      if (agentId === 'codex') {
+      if (agent.mcpAddHttp === 'url') {
         args = ['mcp', 'add', name, '--url', command];
       } else {
         const headerArgs = Object.entries(options?.headers || {}).flatMap(([key, value]) => ['--header', `${key}: ${value}`]);
         args = ['mcp', 'add', '--transport', 'http', '--scope', scope, name, command, ...headerArgs];
       }
-    } else if (agentId === 'claude') {
+    } else if (agent.mcpAddStdio === 'scope') {
       const commandArgs = splitCommandLine(command);
       args = ['mcp', 'add', '--transport', transport, '--scope', scope, name, '--', ...commandArgs];
     } else {
@@ -2596,7 +2742,7 @@ export async function unregisterMcp(
   if (!supports(agentId, 'mcp').ok) {
     return { success: false, error: 'Agent does not support MCP' };
   }
-  if (agentId === 'hermes') {
+  if (agent.mcpRegister === 'config') {
     try {
       removeMcpFromConfig(agentId, name, options?.home);
       return { success: true };
@@ -2760,7 +2906,7 @@ function writeMcpToConfig(
   const configPath = scopedMcpConfigPath(agentId, scope, home);
   const entry = mcpEntryFromCommand(command, transport);
 
-  if (agentId === 'hermes') {
+  if (AGENTS[agentId].mcpConfigWrite === 'yaml-mcp_servers') {
     const config = readYamlConfig(configPath);
     if (!config.mcp_servers || typeof config.mcp_servers !== 'object' || Array.isArray(config.mcp_servers)) {
       config.mcp_servers = {};
@@ -2784,7 +2930,7 @@ function removeMcpFromConfig(agentId: AgentId, name: string, home?: string): voi
   const configPath = userMcpConfigPath(agentId, home);
   if (!fs.existsSync(configPath)) return;
 
-  if (agentId === 'hermes') {
+  if (AGENTS[agentId].mcpConfigWrite === 'yaml-mcp_servers') {
     const config = readYamlConfig(configPath);
     const servers = config.mcp_servers;
     if (servers && typeof servers === 'object' && !Array.isArray(servers)) {
@@ -2827,8 +2973,13 @@ function extractNpmVersion(args: string[]): string | undefined {
 /**
  * Strip JSON comments for JSONC parsing.
  * Only removes comments outside of strings.
+ *
+ * Exported because the MCP writer needs the SAME parser the reader uses: a
+ * naive `//`-to-end-of-line regex eats the `//` inside
+ * `"$schema": "https://opencode.ai/config.json"`, which every opencode-generated
+ * config carries.
  */
-function stripJsonComments(content: string): string {
+export function stripJsonComments(content: string): string {
   let result = '';
   let inString = false;
   let escape = false;
@@ -2993,145 +3144,33 @@ function parseMcpFromOpenCodeConfig(configPath: string): Record<string, McpConfi
 
 /**
  * Get user-scoped MCP config path for an agent.
+ *
+ * All three MCP path resolvers read `MCP_TARGETS`, so the file the writer
+ * targets, the file the parser reads, and the file the staleness detector
+ * watches cannot drift apart. An agent with no MCP target (the hard-deprecated
+ * `gemini`) keeps the historical settings.json default so old configs still
+ * parse.
  */
 export function getUserMcpConfigPath(agentId: AgentId): string {
-  const agent = AGENTS[agentId];
-
-  switch (agentId) {
-    case 'claude':
-      // Claude user-scoped MCPs are in ~/.claude.json (global user config)
-      return path.join(HOME, '.claude.json');
-    case 'codex':
-      // Codex uses TOML config
-      return path.join(agent.configDir, 'config.toml');
-    case 'opencode':
-      // OpenCode loads ~/.config/opencode/opencode.jsonc (not ~/.opencode/)
-      return path.join(HOME, '.config', 'opencode', 'opencode.jsonc');
-    case 'cursor':
-      // Cursor uses mcp.json
-      return path.join(agent.configDir, 'mcp.json');
-    case 'openclaw':
-      // OpenClaw uses openclaw.json
-      return path.join(agent.configDir, 'openclaw.json');
-    case 'copilot':
-      // GitHub Copilot CLI uses mcp-config.json (matches versioned + project paths)
-      return path.join(agent.configDir, 'mcp-config.json');
-    case 'antigravity':
-      // agy uses mcp_config.json inside its nested config dir (~/.gemini/antigravity-cli/)
-      return path.join(agent.configDir, 'mcp_config.json');
-    case 'grok':
-      // grok mcp.json — exact field schema verified at first install
-      return path.join(agent.configDir, 'mcp.json');
-    case 'droid':
-      // Factory AI Droid stores MCPs in ~/.factory/mcp.json
-      return path.join(agent.configDir, 'mcp.json');
-    case 'hermes':
-      return path.join(agent.configDir, 'config.yaml');
-    case 'pi':
-      // omp reads user-scope MCP from ~/.omp/agent/.mcp.json (Claude schema).
-      return path.join(agent.configDir, '.mcp.json');
-    case 'muse':
-      // Muse Code: MCP lives in ~/.config/muse/settings.json under mcp_servers.
-      return path.join(agent.configDir, 'settings.json');
-    case 'warp':
-      // Oz reads user-scope MCP from ~/.warp/.mcp.json (Claude schema).
-      return path.join(agent.configDir, '.mcp.json');
-    default:
-      // Gemini and others use settings.json
-      return path.join(agent.configDir, 'settings.json');
-  }
+  return getMcpConfigPathForHome(agentId, HOME);
 }
 
 /**
  * Get MCP config path for a specific HOME directory (used for version-managed agents).
  */
 export function getMcpConfigPathForHome(agentId: AgentId, home: string): string {
-  switch (agentId) {
-    case 'claude':
-      return path.join(home, '.claude.json');
-    case 'codex':
-      return path.join(home, '.codex', 'config.toml');
-    case 'opencode':
-      return path.join(home, '.config', 'opencode', 'opencode.jsonc');
-    case 'cursor':
-      return path.join(home, '.cursor', 'mcp.json');
-    case 'openclaw':
-      return path.join(home, '.openclaw', 'openclaw.json');
-    case 'copilot':
-      return path.join(home, '.copilot', 'mcp-config.json');
-    case 'amp':
-      return path.join(home, '.config', 'amp', 'settings.json');
-    case 'kiro':
-      return path.join(home, '.kiro', 'settings', 'mcp.json');
-    case 'goose':
-      return path.join(home, '.config', 'goose', 'config.yaml');
-    case 'antigravity':
-      return path.join(home, '.gemini', 'antigravity-cli', 'mcp_config.json');
-    case 'grok':
-      return path.join(home, '.grok', 'config.toml');
-    case 'droid':
-      return path.join(home, '.factory', 'mcp.json');
-    case 'hermes':
-      return path.join(home, '.hermes', 'config.yaml');
-    case 'pi':
-      return path.join(home, '.omp', 'agent', '.mcp.json');
-    case 'muse':
-      return path.join(home, '.config', 'muse', 'settings.json');
-    case 'warp':
-      return path.join(home, '.warp', '.mcp.json');
-    default:
-      return path.join(home, agentConfigDirName(agentId), 'settings.json');
-  }
+  const target = MCP_TARGETS[agentId];
+  if (target) return target.home(home);
+  return path.join(home, agentConfigDirName(agentId), 'settings.json');
 }
 
 /**
  * Get project-scoped MCP config path for an agent.
  */
 export function getProjectMcpConfigPath(agentId: AgentId, cwd: string = process.cwd()): string {
-  switch (agentId) {
-    case 'claude':
-      // Claude uses .mcp.json at project root for project-scoped MCPs
-      return path.join(cwd, '.mcp.json');
-    case 'codex':
-      return path.join(cwd, `.${agentId}`, 'config.toml');
-    case 'opencode':
-      // Project config is opencode.jsonc at project root (not .opencode/)
-      return path.join(cwd, 'opencode.jsonc');
-    case 'cursor':
-      return path.join(cwd, `.${agentId}`, 'mcp.json');
-    case 'openclaw':
-      return path.join(cwd, `.${agentId}`, 'openclaw.json');
-    case 'gemini':
-      return path.join(cwd, `.${agentId}`, 'settings.json');
-    case 'copilot':
-      return path.join(cwd, '.copilot', 'mcp-config.json');
-    case 'amp':
-      return path.join(cwd, '.amp', 'settings.json');
-    case 'kiro':
-      return path.join(cwd, '.kiro', 'settings', 'mcp.json');
-    case 'goose':
-      return path.join(cwd, '.goose', 'config.yaml');
-    case 'antigravity':
-      return path.join(cwd, '.gemini', 'antigravity-cli', 'mcp_config.json');
-    case 'grok':
-      return path.join(cwd, '.grok', 'config.toml');
-    case 'droid':
-      return path.join(cwd, '.factory', 'mcp.json');
-    case 'hermes':
-      return path.join(cwd, '.hermes', 'config.yaml');
-    case 'pi':
-      // omp reads project MCP from <root>/.mcp.json (Claude-compatible).
-      return path.join(cwd, '.mcp.json');
-    case 'muse':
-      // Muse project MCP rides the same settings schema under .muse/settings.json
-      // when present; otherwise fall back to the user settings path.
-      return path.join(cwd, '.muse', 'settings.json');
-    case 'warp':
-      // Oz reads project MCP from <root>/.warp/.mcp.json (Claude schema).
-      return path.join(cwd, '.warp', '.mcp.json');
-    default:
-      return path.join(cwd, `.${agentId}`, 'settings.json');
-  }
+  const target = MCP_TARGETS[agentId];
+  if (target) return target.project(cwd);
+  return path.join(cwd, `.${agentId}`, 'settings.json');
 }
 
 /**
@@ -3184,16 +3223,22 @@ function parseMcpFromOpenClawConfig(configPath: string): Record<string, McpConfi
  * Parse MCP config based on agent type.
  */
 export function parseMcpConfig(agentId: AgentId, configPath: string): Record<string, McpConfigEntry> {
-  switch (agentId) {
-    case 'codex':
+  // Dispatch on the registry's declared format, not the agent id, so the parser
+  // can never disagree with the writer about a file's serialization -- grok's
+  // TOML config was previously read as JSON and always came back empty.
+  switch (MCP_TARGETS[agentId]?.format) {
+    case 'toml':
       return parseMcpFromTomlConfig(configPath);
-    case 'opencode':
+    case 'opencode-jsonc':
       return parseMcpFromOpenCodeConfig(configPath);
-    case 'openclaw':
+    case 'openclaw-json':
       return parseMcpFromOpenClawConfig(configPath);
-    case 'hermes':
+    case 'yaml':
       return parseMcpFromYamlConfig(configPath);
     default:
+      // claude-json / antigravity-json / muse-json all live in a JSON object;
+      // parseMcpFromJsonConfig accepts mcpServers | mcp_servers | mcp. Agents
+      // with no declared format fall here too, matching prior behavior.
       return parseMcpFromJsonConfig(configPath);
   }
 }

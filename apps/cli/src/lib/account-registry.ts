@@ -19,7 +19,7 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import * as yaml from 'yaml';
 import { atomicWriteFileSync } from './fs-atomic.js';
-import { getUserAgentsDir } from './state.js';
+import { getUserAgentsDir, readMeta, updateMeta } from './state.js';
 import type { AgentId, Meta } from './types.js';
 import { deleteKeychainToken, getKeychainToken, hasKeychainToken } from './secrets/index.js';
 import { bundleExists, deleteBundle, listBundles, readBundle, renameBundle, writeBundleWithItems } from './secrets/bundles.js';
@@ -37,6 +37,16 @@ export interface CredentialAccount {
 
 export interface AccountRegistryDocument { version: 2; accounts: Record<string, CredentialAccount> }
 export interface ResolvedCredentialAccount { id: string; name: string; provider: string; auth: AccountAuthKind; env: Record<string, string> }
+export interface NativeAccount {
+  id: string;
+  name: string;
+  kind: 'native';
+  agent: AgentId;
+  identityKey: string;
+  identityLabel?: string;
+  scope: 'version' | 'device';
+}
+export type UnifiedAccount = (CredentialAccount & { kind: 'provider' }) | NativeAccount;
 
 const NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 const AUTH_KINDS: readonly AccountAuthKind[] = ['api-key', 'setup-token', 'bearer-token'];
@@ -145,14 +155,94 @@ export function findAccount(name: string, doc = readAccountRegistry()): Credenti
   return doc.accounts[name] ?? Object.values(doc.accounts).find(account => account.name === name) ?? null;
 }
 
+export function listNativeAccounts(meta: Pick<Meta, 'accounts'>): NativeAccount[] {
+  return Object.values(meta.accounts?.native ?? {}).map(account => ({ ...account, kind: 'native' as const }));
+}
+
+/**
+ * Resolve one account by name or id across both stores, native first.
+ *
+ * `doc` is optional and read LAZILY: a native match returns without ever reading
+ * the provider bundle registry — so a native view/attach/run never triggers a
+ * bundle read, legacy-`accounts.yaml` migration, or a keychain decrypt (which
+ * would surface a Touch ID prompt or crash on an undecryptable legacy item). A
+ * default-evaluated `doc = readAccountRegistry()` argument would defeat this by
+ * running before the body, so callers that only need a native lookup must be
+ * able to omit it.
+ */
+export function findUnifiedAccount(nameOrId: string, meta: Pick<Meta, 'accounts'>, doc?: AccountRegistryDocument): UnifiedAccount | null {
+  const native = listNativeAccounts(meta).find(account => account.id === nameOrId || account.name === nameOrId);
+  if (native) return native;
+  const provider = findAccount(nameOrId, doc ?? readAccountRegistry());
+  return provider ? { ...provider, kind: 'provider' } : null;
+}
+
+function assertUniqueUnifiedName(name: string, meta: Pick<Meta, 'accounts'>, doc?: AccountRegistryDocument): void {
+  if (findUnifiedAccount(name, meta, doc)) throw new Error(`Account '${name}' already exists.`);
+}
+
+export function addNativeAccount(
+  name: string,
+  agent: AgentId,
+  identityKey: string,
+  identityLabel: string | undefined,
+  scope: 'version' | 'device',
+): NativeAccount {
+  assertName(name);
+  const meta = readMeta();
+  assertUniqueUnifiedName(name, meta);
+  const duplicate = listNativeAccounts(meta).find(account => account.agent === agent && account.identityKey === identityKey);
+  if (duplicate) throw new Error(`This ${agent} login is already named '${duplicate.name}'.`);
+  const account: NativeAccount = { id: crypto.randomUUID(), name, kind: 'native', agent, identityKey, identityLabel, scope };
+  updateMeta(current => ({
+    ...current,
+    accounts: {
+      ...current.accounts,
+      native: { ...current.accounts?.native, [account.id]: { id: account.id, name, agent, identityKey, identityLabel, scope } },
+    },
+  }));
+  return account;
+}
+
+export function bindAccount(nameOrId: string, target: string): UnifiedAccount {
+  const meta = readMeta();
+  const account = findUnifiedAccount(nameOrId, meta);
+  if (!account) throw new Error(`Unknown account '${nameOrId}'.`);
+  updateMeta(current => ({
+    ...current,
+    accounts: { ...current.accounts, bindings: { ...current.accounts?.bindings, [target]: account.id } },
+  }));
+  return account;
+}
+
+export function unbindAccount(nameOrId: string, target: string): void {
+  const meta = readMeta();
+  const account = findUnifiedAccount(nameOrId, meta);
+  if (!account) throw new Error(`Unknown account '${nameOrId}'.`);
+  if (meta.accounts?.bindings?.[target] !== account.id) throw new Error(`Account '${account.name}' is not attached to '${target}'.`);
+  updateMeta(current => {
+    const bindings = { ...current.accounts?.bindings };
+    delete bindings[target];
+    return { ...current, accounts: { ...current.accounts, bindings } };
+  });
+}
+
+export function accountBindings(accountId: string, meta: Pick<Meta, 'accounts'>): string[] {
+  return Object.entries(meta.accounts?.bindings ?? {}).filter(([, id]) => id === accountId).map(([target]) => target).sort();
+}
+
 /** Explicit selection wins over a configured per-harness default. */
 export function resolveAccountSelection(
   explicit: string | undefined,
   agent: AgentId,
   meta: Pick<Meta, 'accounts'>,
-  opts: { useDefault?: boolean } = {},
+  opts: { useDefault?: boolean; target?: string } = {},
 ): string | undefined {
   if (explicit) return explicit;
+  const bound = opts.target ? meta.accounts?.bindings?.[opts.target] : undefined;
+  if (bound) return bound;
+  const deviceScoped = meta.accounts?.bindings?.[agent];
+  if (deviceScoped) return deviceScoped;
   return opts.useDefault === false ? undefined : meta.accounts?.defaults?.[agent];
 }
 
@@ -182,10 +272,10 @@ export interface AddAccountOptions { baseUrl?: string }
 
 export function addAccount(name: string, provider: string, auth: AccountAuthKind, secret: string, base = getUserAgentsDir(), opts: AddAccountOptions = {}): CredentialAccount {
   assertName(name);
+  assertUniqueUnifiedName(name, readMeta(), readAccountRegistry(base));
   const adapter = getAccountProvider(provider);
   adapter.validate(auth, secret);
   if (bundleExists(name)) throw new Error(`Secrets bundle '${name}' already exists. Choose a different account name.`);
-  if (findAccount(name, readAccountRegistry(base))) throw new Error(`Account '${name}' already exists.`);
   const record: AccountSchemaRecord = { id: crypto.randomUUID(), name, provider: adapter.provider, auth, baseUrl: opts.baseUrl };
   const { bundle, items } = buildAccountBundle(record, secret);
   writeBundleWithItems(bundle, items);
@@ -205,16 +295,47 @@ export function setAccountSecret(name: string, secret: string, base = getUserAge
 export function renameAccount(oldName: string, newName: string, base = getUserAgentsDir()): void {
   assertName(newName);
   const doc = readAccountRegistry(base);
+  const meta = readMeta();
+  const native = listNativeAccounts(meta).find(account => account.id === oldName || account.name === oldName);
+  if (native) {
+    assertUniqueUnifiedName(newName, meta, doc);
+    updateMeta(current => ({
+      ...current,
+      accounts: {
+        ...current.accounts,
+        native: { ...current.accounts?.native, [native.id]: { ...current.accounts?.native?.[native.id]!, name: newName } },
+      },
+    }));
+    return;
+  }
   const account = findAccount(oldName, doc);
   if (!account) throw new Error(`Unknown account '${oldName}'.`);
-  if (findAccount(newName, doc)) throw new Error(`Account '${newName}' already exists.`);
+  assertUniqueUnifiedName(newName, meta, doc);
   renameBundle(account.name, newName); // moves metadata + secret, preserves ACCOUNT_ID
   renameProfileConsumers(account.name, newName, base);
 }
 
 export function removeAccount(name: string, base = getUserAgentsDir()): void {
+  const meta = readMeta();
+  const native = listNativeAccounts(meta).find(account => account.id === name || account.name === name);
+  if (native) {
+    const bindings = accountBindings(native.id, meta);
+    if (bindings.length) throw new Error(`Account '${native.name}' is attached to: ${bindings.join(', ')}. Detach it before removing it.`);
+    updateMeta(current => {
+      const accounts = { ...current.accounts?.native };
+      delete accounts[native.id];
+      return { ...current, accounts: { ...current.accounts, native: accounts } };
+    });
+    return;
+  }
   const account = findAccount(name, readAccountRegistry(base));
   if (!account) throw new Error(`Unknown account '${name}'.`);
+  const bindings = accountBindings(account.id, meta);
+  const defaults = Object.entries(meta.accounts?.defaults ?? {}).filter(([, id]) => id === account.id).map(([agent]) => agent);
+  if (bindings.length || defaults.length) {
+    const refs = [...bindings.map(target => `binding ${target}`), ...defaults.map(agent => `default ${agent}`)];
+    throw new Error(`Account '${account.name}' is still referenced by: ${refs.join(', ')}. Detach or clear those references before removing it.`);
+  }
   const consumers = [...new Set([...profileConsumers(account.name, base), ...profileConsumers(account.id, base)])].sort();
   if (consumers.length) throw new Error(`Account '${account.name}' is used by harness${consumers.length === 1 ? '' : 'es'}: ${consumers.join(', ')}. Reassign them before removing it.`);
   deleteKeychainToken(account.secretRef);
@@ -252,4 +373,55 @@ export function resolveCredentialAccount(name: string, host: AgentId, expectedPr
     auth: account.auth,
     env: { ...connectionEnv, [envVar]: getKeychainToken(account.secretRef) },
   };
+}
+
+/** The account a spawn should launch under, classified for the exec path. */
+export type SpawnAccount =
+  | { kind: 'provider'; id: string; name: string; agent: AgentId; env: Record<string, string> }
+  | { kind: 'native'; id: string; name: string; agent: AgentId; identityKey: string; scope: 'version' | 'device' };
+
+/**
+ * Resolve the account a run should launch under, following the binding order
+ * (explicit → exact `agent@version` → device-scoped `agent` → per-harness
+ * default) and classifying the result:
+ *
+ * - **provider** → the injected env is resolved here (fails closed when the
+ *   credential is absent or the provider cannot authenticate the host).
+ * - **native** → returns the identity the caller must confirm is live on the
+ *   execution device; **no secret or env is produced**, because a native login
+ *   is owned by the harness and read from its own home. The caller validates the
+ *   live fingerprint against the installed version before spawn.
+ *
+ * A native account bound to a different harness than the one being launched
+ * fails loudly (EXEC-ACCOUNT-4). Returns null when nothing is selected.
+ */
+export function resolveSpawnAccount(
+  explicit: string | undefined,
+  agent: AgentId,
+  version: string | undefined,
+  meta: Pick<Meta, 'accounts'>,
+  opts: { useDefault?: boolean; provider?: string; base?: string; target?: string } = {},
+): SpawnAccount | null {
+  // The binding lookup key. A custom harness passes its own profile/harness name
+  // (a run of `deepseek` must find a binding on `deepseek`, not `claude@x`); a
+  // native/global run keys on the exact `agent@version` installation.
+  const target = opts.target ?? (version ? `${agent}@${version}` : agent);
+  const selection = resolveAccountSelection(explicit, agent, meta, { useDefault: opts.useDefault, target });
+  if (!selection) return null;
+  const unified = findUnifiedAccount(selection, meta);
+  if (!unified) throw new Error(`Unknown account '${selection}'.`);
+  if (unified.kind === 'native') {
+    if (unified.agent !== agent) {
+      throw new Error(`Account '${unified.name}' is a ${unified.agent} login and cannot authenticate the ${agent} harness.`);
+    }
+    // A provider-backed custom harness still injects its provider auth env, so a
+    // native identity claim over it is incoherent — reject before spawn even when
+    // the account is chosen explicitly with --account (which bypasses `attach`).
+    if (opts.provider) {
+      throw new Error(`Account '${unified.name}' is a native ${unified.agent} login and cannot run under a provider-backed harness (${opts.provider}); the harness's ${opts.provider} credentials would still be injected. Use a matching provider account.`);
+    }
+    return { kind: 'native', id: unified.id, name: unified.name, agent, identityKey: unified.identityKey, scope: unified.scope };
+  }
+  const resolved = resolveCredentialAccount(unified.name, agent, opts.provider, opts.base ?? getUserAgentsDir());
+  return { kind: 'provider', id: resolved.id, name: resolved.name, agent, env: resolved.env };
 }

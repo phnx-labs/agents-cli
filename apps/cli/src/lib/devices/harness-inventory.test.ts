@@ -181,6 +181,18 @@ describe('groupByAccount', () => {
     expect(groups[0].ready).toBe(false);
   });
 
+  it('does not merge a real account labelled "signed-out" into the signed-out bucket', () => {
+    const groups = groupByAccount([
+      row({ agent: 'claude', version: '1', account: 'signed-out', signedIn: true, ready: true }),
+      row({ agent: 'codex', version: '2', account: null, signedIn: false, ready: false, reason: 'signed out' }),
+    ]);
+    // The NUL-prefixed sentinel keeps the two apart: a real label 'signed-out'
+    // (signed in) never collides with the null signed-out bucket.
+    expect(groups).toHaveLength(2);
+    expect(groups.find((g) => g.account === 'signed-out')?.signedIn).toBe(true);
+    expect(groups.find((g) => g.account === null)?.signedIn).toBe(false);
+  });
+
   it('surfaces a throttled member so a rate-limit is never hidden by an available sibling', () => {
     const groups = groupByAccount([
       row({ agent: 'droid', version: '1', account: 'x@ex.com', quota: quota('available', 5) }),

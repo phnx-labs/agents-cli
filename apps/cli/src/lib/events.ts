@@ -208,6 +208,9 @@ export type EventType =
   | 'webhook.rejected'
   | 'webhook.matched'
   | 'webhook.fired'
+  // Settling an already-acked delivery failed. The 202 ack (RUSH-2548) means no
+  // HTTP status can carry this, so it is the only durable record of the failure.
+  | 'webhook.failed'
   | 'webhook.handler.start'
   | 'webhook.handler.end'
   // Agent activity (emitted at hook time; see lib/activity.ts). These share the
@@ -270,7 +273,7 @@ const EVENT_TYPE_TABLE: Record<EventType, true> = {
   'perf.timing': true,
   'session.start': true, 'session.end': true,
   'webhook.received': true, 'webhook.authorized': true, 'webhook.rejected': true, 'webhook.matched': true,
-  'webhook.fired': true, 'webhook.handler.start': true, 'webhook.handler.end': true,
+  'webhook.fired': true, 'webhook.failed': true, 'webhook.handler.start': true, 'webhook.handler.end': true,
   'plan.created': true, 'pr.opened': true, 'pr.merged': true, 'worktree.created': true,
   'worktree.removed': true, 'commit.created': true, 'pushed': true, 'subagent.spawned': true,
   'artifact.created': true, 'task.completed': true, 'checklist.created': true, 'status.posted': true,

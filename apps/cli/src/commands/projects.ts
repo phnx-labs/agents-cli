@@ -72,7 +72,7 @@ import {
   type ProjectWarning,
 } from '../lib/project-status.js';
 import { fetchLinearProjectCounts, type LinearMilestone, type LinearProjectCounts } from '../lib/linear-project-counts.js';
-import { listLinearProjects, pickLinearProject, type LinearPick, type LinearProjectLite } from '../lib/linear-projects.js';
+import { listLinearProjects, nextLinearLink, pickLinearProject, type LinearPick, type LinearProjectLite } from '../lib/linear-projects.js';
 import { checkRepoSlug } from '../lib/project-doctor.js';
 import { formatFocusAreas, readFocusAreas, type FocusArea } from '../lib/project-focus.js';
 import { formatVerdict, scheduleVerdict } from '../lib/project-schedule.js';
@@ -746,7 +746,13 @@ export function registerProjectsCommands(program: Command): void {
     for (const ig of def.integrations ?? []) {
       console.log(`  ${chalk.dim(ig.kind.padEnd(8))} ${ig.url}${ig.label ? chalk.dim(`  (${ig.label})`) : ''}`);
     }
-    if (def.linear?.url || def.linear?.projectId) console.log(`  ${chalk.dim('linear')}   ${def.linear.url ?? def.linear.projectId}`);
+    if (def.linear?.url || def.linear?.projectId || def.linear?.name) {
+      // Lead with the board's own name — the id/url answers "which project",
+      // but the name is what a reader (or an agent) calls the work.
+      const ref = def.linear.url ?? def.linear.projectId;
+      const label = def.linear.name ? chalk.cyan(def.linear.name) : '';
+      console.log(`  ${chalk.dim('linear')}   ${[label, ref && chalk.dim(ref)].filter(Boolean).join('  ')}`);
+    }
     for (const d of def.docs ?? []) console.log(`  ${chalk.dim('doc')}      ${d}`);
     console.log(chalk.gray(`  ${projectDefPath(name)}`));
   }
@@ -1181,7 +1187,7 @@ export function registerProjectsCommands(program: Command): void {
   // ---- link ----
   projects
     .command('link <name>')
-    .description('Attach an external tracker to a project definition (writes linear.projectId into the YAML).')
+    .description('Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).')
     .option('--linear [query]', 'Bind a Linear project by exact name or id; no value auto-suggests from the def name + repo')
     .action((name: string, opts: { linear?: string | boolean }) => {
       const def = loadProjectDef(name);
@@ -1237,8 +1243,12 @@ export function registerProjectsCommands(program: Command): void {
       if (def.linear?.projectId && def.linear.projectId !== p.id) {
         console.log(chalk.gray(`  replacing previous Linear link (${def.linear.projectId})`));
       }
-      def.linear = { ...def.linear, projectId: p.id };
-      if (p.url) def.linear.url = p.url;
+      if (def.linear?.name && def.linear.name !== p.name) {
+        console.log(chalk.gray(`  renaming "${def.linear.name}" → "${p.name}" (Linear is authoritative)`));
+      }
+      // Assigned, not spread over `def.linear`: a spread would resurrect a url
+      // that nextLinearLink deliberately dropped. The block has no other fields.
+      def.linear = nextLinearLink(def.linear, p);
       writeProjectDef(def);
       console.log(chalk.green(`${def.name} → Linear project "${p.name}" (${p.id})${p.url ? ` ${p.url}` : ''}`));
     });

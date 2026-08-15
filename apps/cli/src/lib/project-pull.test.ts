@@ -251,6 +251,14 @@ describe('pullProjectTargets', () => {
     await simpleGit().raw(['init', '--bare', '-b', 'main', remote]);
     await simpleGit().clone(remote, author);
     await configIdentity(author);
+    // Commit `* -text` before anything clones this repo. On Windows CI the
+    // *checkout* during `git clone` runs with the machine-default autocrlf
+    // (true) before configIdentity() can set autocrlf=false on the fresh clone,
+    // so the local working tree comes out as CRLF while the index holds LF and
+    // status.isClean() sees a phantom modification — making pullProjectTargets'
+    // strict pullRepo refuse a clean tree as dirty. A committed .gitattributes
+    // wins over autocrlf at checkout time and prevents that.
+    fs.writeFileSync(path.join(author, '.gitattributes'), '* -text\n');
     await commitFile(author, 'README.md', 'v1\n', 'init');
     await simpleGit(author).push('origin', 'main');
 

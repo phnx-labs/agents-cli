@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { activeRunSkipStreak, archiveRoutineTranscripts, buildJobCommand, executeJob, executeJobDetached, launcherClaimPid, monitorRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd, snapshotRoutineTranscriptBase } from './runner.js';
+import { activeRunSkipStreak, archiveRoutineTranscripts, assertRoutineAccountLocalForPlacement, buildHostDispatchOptions, buildJobCommand, dispatchPlacedJob, executeJob, executeJobDetached, launcherClaimPid, monitorRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd, snapshotRoutineTranscriptBase } from './runner.js';
 import { getRunDir, readRunMeta, writeRunMeta } from './routines.js';
 import { getVersionHomePath } from './versions.js';
 import type { JobConfig, RunMeta } from './routines.js';
@@ -902,5 +902,99 @@ describeSpawn('resolveRoutineLaunch — zero-healthy accounts fail the routine l
     }).then(() => null, (error: unknown) => error as Error);
     expect(err?.message).toBe("Account 'work' cannot authenticate the codex harness.");
     expect(strategyCalled).toBe(false);
+  });
+
+  it('a native routine account pins the installed version by its identity, forwarding nothing', async () => {
+    const meta = { accounts: { native: { n1: { id: 'n1', name: 'work', agent: 'claude' as const, identityKey: 'claude:user=1', scope: 'version' as const } } } };
+    let askedIdentity: string | undefined;
+    const plan = await resolveRoutineLaunch({ ...baseConfig(), account: 'work' }, process.cwd(), {
+      findCredentialAccount: () => false, // 'work' is native, not a provider credential
+      readMeta: () => meta as never,
+      resolveAccountVersion: async (_agent, identity) => { askedIdentity = identity; return '2.1.220'; },
+    });
+    // The durable name was translated to the identity key before matching...
+    expect(askedIdentity).toBe('claude:user=1');
+    // ...and the run pins that install without forwarding/injecting the login.
+    expect(plan).toMatchObject({ pinned: true, forwardAccount: false, chain: [{ agent: 'claude', version: '2.1.220' }] });
+  });
+
+  it('a native routine account named for another harness fails closed', async () => {
+    const meta = { accounts: { native: { n1: { id: 'n1', name: 'work', agent: 'claude' as const, identityKey: 'k', scope: 'version' as const } } } };
+    const err = await resolveRoutineLaunch({ ...baseConfig(), agent: 'codex', account: 'work' }, process.cwd(), {
+      findCredentialAccount: () => false,
+      readMeta: () => meta as never,
+      resolveAccountVersion: async () => '1.0.0',
+    }).then(() => null, (e: unknown) => e as Error);
+    expect(err?.message).toContain('is a claude login and cannot authenticate codex');
+  });
+});
+
+describe('assertRoutineAccountLocalForPlacement — native accounts never dispatch off-box', () => {
+  // Called at the top of BOTH the foreground (executeJobPlaced) and detached
+  // (executeJobDetachedClaimed) placement blocks, before host/cloud dispatch.
+  it('rejects a native routine account before a host dispatch', async () => {
+    await expect(
+      assertRoutineAccountLocalForPlacement({ name: 'r', account: 'work' }, 'host', { account: { kind: 'native', id: 'n', name: 'work', agent: 'claude', identityKey: 'k', scope: 'version' } }),
+    ).rejects.toThrow('device-local claude login and cannot run on a host placement');
+  });
+
+  it('rejects a native routine account before a cloud dispatch', async () => {
+    await expect(
+      assertRoutineAccountLocalForPlacement({ name: 'r', account: 'work' }, 'cloud', { account: { kind: 'native', id: 'n', name: 'work', agent: 'codex', identityKey: 'k', scope: 'version' } }),
+    ).rejects.toThrow('cannot run on a cloud placement');
+  });
+
+  it('rejects an unknown routine account before host or cloud dispatch', async () => {
+    await expect(
+      assertRoutineAccountLocalForPlacement({ name: 'r', account: 'typo' }, 'host', { account: null }),
+    ).rejects.toThrow("account 'typo' is unknown");
+    await expect(
+      assertRoutineAccountLocalForPlacement({ name: 'r', account: 'typo' }, 'cloud', { account: null }),
+    ).rejects.toThrow("account 'typo' is unknown");
+  });
+
+  it('the host dispatch boundary forwards the provider account by name (not dropped)', () => {
+    // executeJobOnHost builds its dispatch options here; the account MUST ride
+    // along or the remote runs under the wrong identity (the review regression).
+    const opts = buildHostDispatchOptions(
+      { name: 'r', agent: 'claude', account: 'prov', prompt: 'hello', mode: 'auto' } as never,
+      { remoteCwd: '/w', runDir: '/run', detached: false },
+    );
+    expect(opts.account).toBe('prov');
+    expect(opts.agent).toBe('claude');
+    expect(opts.remoteCwd).toBe('/w');
+    expect(opts.follow).toBe(true);
+    // No account configured → nothing forwarded.
+    const bare = buildHostDispatchOptions({ name: 'r', agent: 'claude', prompt: 'x', mode: 'auto' } as never, { remoteCwd: '/w', runDir: '/run', detached: true });
+    expect(bare.account).toBeUndefined();
+    expect(bare.follow).toBe(false);
+  });
+
+  it('fails a provider cloud placement before calling the cloud dispatcher', async () => {
+    const provider = { kind: 'provider' as const, id: 'p', name: 'prov', provider: 'openrouter', auth: 'api-key' as const, secretRef: 'r' };
+    let cloudDispatches = 0;
+    await expect(dispatchPlacedJob(
+      baseConfig({ name: 'provider-cloud', account: 'prov', hostStrategy: 'cloud' }),
+      { mode: 'cloud' },
+      { runId: 'provider-cloud-run', stamp: {} } as never,
+      {
+        account: provider,
+        cloud: async () => {
+          cloudDispatches += 1;
+          throw new Error('cloud dispatch must not run');
+        },
+      },
+    )).rejects.toThrow('cloud placement cannot securely inject it');
+    expect(cloudDispatches).toBe(0);
+  });
+
+  it('allows a provider account on host (forwarded by name), rejects it on cloud, no-ops without an account', async () => {
+    const provider = { kind: 'provider' as const, id: 'p', name: 'prov', provider: 'openrouter', auth: 'api-key' as const, secretRef: 'r' };
+    // Host: allowed — the remote resolves its own bundle from the forwarded name.
+    await expect(assertRoutineAccountLocalForPlacement({ name: 'r', account: 'prov' }, 'host', { account: provider })).resolves.toBeUndefined();
+    // Cloud: fails loud — no secure provider-account injection there yet.
+    await expect(assertRoutineAccountLocalForPlacement({ name: 'r', account: 'prov' }, 'cloud', { account: provider }))
+      .rejects.toThrow('cloud placement cannot securely inject it');
+    await expect(assertRoutineAccountLocalForPlacement({ name: 'r' }, 'host', {})).resolves.toBeUndefined();
   });
 });
