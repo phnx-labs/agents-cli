@@ -132,7 +132,7 @@ describeSpawn('single-fire + overlap + blocked (executeJobDetached)', () => {
     expect(result.meta.runId).not.toBe(staleRunId);
   });
 
-  it('treats an old but live launcher identity as active', async () => {
+  it('ages out a running record past its own timeout even when its pid is still live (RUSH-2640)', async () => {
     const cfg = commandConfig('old-live-launcher', 'exit 0');
     const activeRunId = 'old-live-launcher-run';
     fs.mkdirSync(getRunDir(cfg.name, activeRunId), { recursive: true });
@@ -142,15 +142,20 @@ describeSpawn('single-fire + overlap + blocked (executeJobDetached)', () => {
       pid: process.pid,
       spawnedAt: Date.now() - process.uptime() * 1000,
       status: 'running',
-      startedAt: new Date(Date.now() - 60_000).toISOString(),
+      // Started well past the 60s timeout below. A run cannot legitimately outlive
+      // its deadline, so it no longer holds the slot even though its recorded pid
+      // is still alive — the month-old `running` records that wedged sandbox-tests
+      // and triage-tickets were exactly this shape (RUSH-2640). A live launcher
+      // WITHIN its window still holds the slot (see the foreground-overlap test).
+      startedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
       completedAt: null,
       exitCode: null,
       timeoutMs: 60_000,
     } satisfies RunMeta));
 
     const result = await executeJob(cfg, undefined, { kind: 'manual' });
-    expect(result.meta.status).toBe('skipped');
-    expect(result.meta.activeRunId).toBe(activeRunId);
+    expect(result.meta.status).toBe('completed');
+    expect(result.meta.runId).not.toBe(activeRunId);
   });
 
   it('an agent routine with no project/cwd is BLOCKED (execution_context_missing), no spawn', async () => {

@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { archiveRoutineTranscripts, buildJobCommand, executeJob, executeJobDetached, monitorRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd, snapshotRoutineTranscriptBase } from './runner.js';
+import { activeRunSkipStreak, archiveRoutineTranscripts, buildJobCommand, executeJob, executeJobDetached, launcherClaimPid, monitorRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd, snapshotRoutineTranscriptBase } from './runner.js';
 import { getRunDir, readRunMeta, writeRunMeta } from './routines.js';
 import { getVersionHomePath } from './versions.js';
 import type { JobConfig, RunMeta } from './routines.js';
@@ -569,17 +569,75 @@ describeSpawn('command-mode routines (executeJobDetached — daemon/cron path)',
     expect(final.status).toBe('completed');
   });
 
-  it('a replacement while a failed record still owns a live process is skipped, linking the live run', async () => {
+  it('a terminal (failed) record releases the slot even while its process is still live — the next fire proceeds (RUSH-2640)', async () => {
     const command = `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 5000)"`;
     const config = commandConfig('cmd-det-failed-live', command);
     const first = await executeJobDetached(config);
+    // Mark the first run failed while its child is still alive — the exact shape
+    // that used to wedge the slot forever (a failed/timeout record whose pid stays
+    // live is treated as "active"). Reaping that orphaned process group is
+    // reapTerminalRoutineProcesses's job, not a reason to keep the slot occupied.
     writeRunMeta({ ...first, status: 'failed', completedAt: new Date().toISOString(), exitCode: 1 });
 
     const overlap = await executeJobDetached(config);
-    expect(overlap.status).toBe('skipped');
-    expect(overlap.skipReason).toBe('active_run');
-    expect(overlap.activeRunId).toBe(first.runId);
-    await waitTerminal(config.name, first.runId, 7000);
+    expect(overlap.skipReason).toBeUndefined();
+    expect(overlap.status).not.toBe('skipped');
+    expect(overlap.runId).not.toBe(first.runId);
+    await waitTerminal(config.name, overlap.runId, 7000);
+  });
+
+  it('a failed run still carrying a live daemon-shaped pid no longer wedges every later slot (RUSH-2640)', async () => {
+    const config = commandConfig('cmd-det-2640-failed', 'exit 0');
+    // Reproduce the release-train wedge: a prior run reached `failed` while its
+    // record still carries a pid that isPidOurs() always accepts. The daemon
+    // stamps its OWN pid on the provisional claim and the daemon never dies, so
+    // isPidOurs() can never go false — process.pid is exactly that shape here.
+    const runId = 'wedged-failed-daemonpid';
+    fs.mkdirSync(getRunDir(config.name, runId), { recursive: true });
+    writeRunMeta({
+      jobName: config.name,
+      runId,
+      command: 'exit 1',
+      pid: process.pid,
+      spawnedAt: Date.now() - process.uptime() * 1000,
+      timeoutMs: 60_000,
+      status: 'failed',
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      exitCode: 1,
+    } as RunMeta);
+
+    const meta = await executeJobDetached(config);
+    // Unfixed: the failed+live-pid record reads as active → skipped/active_run,
+    // and the routine never fires again. Fixed: the terminal state released it.
+    expect(meta.skipReason).toBeUndefined();
+    expect(meta.status).not.toBe('skipped');
+    const final = await waitTerminal(config.name, meta.runId);
+    expect(final.status).toBe('completed');
+  });
+
+  it('a stale running record past its own timeout no longer wedges the slot (RUSH-2640)', async () => {
+    const config = commandConfig('cmd-det-2640-stale', 'exit 0');
+    // The sandbox-tests/triage-tickets shape: a month-old `running` record with a
+    // live pid and no spawnedAt, which isPidOurs() accepts for any live process.
+    const runId = 'stale-running-nobirthtime';
+    fs.mkdirSync(getRunDir(config.name, runId), { recursive: true });
+    writeRunMeta({
+      jobName: config.name,
+      runId,
+      command: 'sleep',
+      pid: process.pid,
+      timeoutMs: 60_000,
+      status: 'running',
+      startedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+      completedAt: null,
+      exitCode: null,
+    } as RunMeta);
+
+    const meta = await executeJobDetached(config);
+    expect(meta.skipReason).toBeUndefined();
+    const final = await waitTerminal(config.name, meta.runId);
+    expect(final.status).toBe('completed');
   });
 
   it('ignores a shadowing `agents` binary on PATH and runs the current CLI (RUSH-2431)', async () => {
@@ -643,6 +701,87 @@ describeSpawn('command-mode routines (executeJobDetached — daemon/cron path)',
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timed-out child stayed alive')), 1000)),
     ]);
     expect(() => process.kill(child.pid!, 0)).toThrow();
+  });
+});
+
+describe('RUSH-2640 scheduler slot release (pure paths)', () => {
+  const jobs: string[] = [];
+  afterEach(() => {
+    for (const j of jobs.splice(0)) cleanupJobRuns(j);
+  });
+
+  it('launcherClaimPid records no pid when this process is the routines daemon', () => {
+    const savedDaemonDir = process.env.AGENTS_DAEMON_DIR;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-daemon-'));
+    process.env.AGENTS_DAEMON_DIR = tmp;
+    try {
+      // No daemon pid file: a short-lived foreground launcher records its own pid
+      // so a crash between claim and spawn releases the slot fast.
+      expect(launcherClaimPid()).toBe(process.pid);
+      // The daemon pid file names THIS process → we ARE the daemon → record no
+      // pid. The daemon never dies, so its pid must never anchor a run's claim
+      // (it would wedge the slot forever and mis-aim the reaper — RUSH-2640).
+      fs.writeFileSync(path.join(tmp, 'daemon.pid'), String(process.pid));
+      expect(launcherClaimPid()).toBeNull();
+      // A different daemon pid → this is a foreground launcher again → own pid.
+      fs.writeFileSync(path.join(tmp, 'daemon.pid'), String(process.pid + 100_000));
+      expect(launcherClaimPid()).toBe(process.pid);
+    } finally {
+      if (savedDaemonDir === undefined) delete process.env.AGENTS_DAEMON_DIR;
+      else process.env.AGENTS_DAEMON_DIR = savedDaemonDir;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('monitorRunningJobs ages out a running record with no pid past its timeout', () => {
+    const jobName = 'cmd-2640-ageout-nopid';
+    jobs.push(jobName);
+    const runId = 'ageout-nopid';
+    fs.mkdirSync(getRunDir(jobName, runId), { recursive: true });
+    writeRunMeta({
+      jobName,
+      runId,
+      command: 'noop',
+      pid: null,
+      spawnedAt: Date.now() - 10 * 60_000,
+      timeoutMs: 60_000,
+      status: 'running',
+      startedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+      completedAt: null,
+      exitCode: null,
+    } as RunMeta);
+
+    monitorRunningJobs();
+
+    // Unfixed: the `if (!meta.pid) continue` guard ran before the timeout check,
+    // so a null-pid claim wedged as `running` forever. Fixed: it is aged out.
+    const final = readRunMeta(jobName, runId);
+    expect(final?.status).toBe('timeout');
+    expect(final?.errorMessage).toBe('exceeded configured timeout');
+  });
+
+  it('activeRunSkipStreak counts only the trailing consecutive active_run skips', () => {
+    const base = (over: Partial<RunMeta>): RunMeta => ({
+      jobName: 'j', runId: 'r', command: 'c', pid: null,
+      status: 'completed', startedAt: '', completedAt: '', exitCode: 0, ...over,
+    } as RunMeta);
+    expect(activeRunSkipStreak([])).toBe(0);
+    expect(activeRunSkipStreak([
+      base({ status: 'completed' }),
+      base({ status: 'skipped', skipReason: 'active_run' }),
+      base({ status: 'skipped', skipReason: 'active_run' }),
+      base({ status: 'skipped', skipReason: 'active_run' }),
+    ])).toBe(3);
+    // A non-matching newest record breaks the streak.
+    expect(activeRunSkipStreak([
+      base({ status: 'skipped', skipReason: 'active_run' }),
+      base({ status: 'completed' }),
+    ])).toBe(0);
+    // Only active_run counts — a wrong_owner/duplicate_slot skip is not a wedge.
+    expect(activeRunSkipStreak([
+      base({ status: 'skipped', skipReason: 'wrong_owner' }),
+      base({ status: 'skipped', skipReason: 'active_run' }),
+    ])).toBe(1);
   });
 });
 
