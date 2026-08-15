@@ -21,7 +21,7 @@ import {
   formatAgentError,
   agentLabel,
 } from '../lib/agents.js';
-import type { AgentId } from '../lib/types.js';
+import type { AgentId, PermissionSet } from '../lib/types.js';
 import { cloneRepo } from '../lib/git.js';
 import { capableAgents, isCapable } from '../lib/capabilities.js';
 import {
@@ -101,26 +101,17 @@ When to use:
       const cwd = process.cwd();
 
       // Helper to render permissions for a specific version
-      const renderVersionPermissions = (
-        agentId: AgentId,
-        version: string,
-        isDefault: boolean,
-        home: string,
-        scope: 'user' | 'project'
-      ) => {
-        const agent = AGENTS[agentId];
-        const defaultLabel = isDefault ? ' default' : '';
-        const versionStr = chalk.gray(` (${version}${defaultLabel})`);
-
-        const perms = readAgentPermissions(agentId, scope, cwd, { home });
-        if (!perms) {
-          console.log(`  ${chalk.bold(agentLabel(agent.id))}${versionStr}: ${chalk.gray('none')}`);
-          console.log();
-          return;
-        }
-
-        console.log(`  ${chalk.bold(agentLabel(agent.id))}${versionStr}:`);
-
+      /**
+       * Print one harness's permission block.
+       *
+       * claude/opencode/codex keep their native renderings (Codex in particular
+       * has no rule list — showing its sandbox mode is more useful than the
+       * blanket grants that mode widens into). Every other allowlist-capable
+       * harness renders the canonical allow/deny that `PERMISSION_TARGETS` reads
+       * back, which is what makes `permissions list` answer for all 13 rather
+       * than three (RUSH-2676).
+       */
+      const renderPermissionBody = (agentId: AgentId, perms: unknown) => {
         if (agentId === 'claude') {
           const claudePerms = perms as { permissions: { allow: string[]; deny: string[] } };
           if (claudePerms.permissions.allow.length > 0) {
@@ -166,8 +157,40 @@ When to use:
               }
             }
           }
+        } else {
+          const set = perms as PermissionSet;
+          if (set.allow?.length) {
+            console.log(chalk.green('    Allow:'));
+            for (const p of set.allow) console.log(`      ${chalk.cyan(p)}`);
+          }
+          if (set.deny?.length) {
+            console.log(chalk.red('    Deny:'));
+            for (const p of set.deny) console.log(`      ${chalk.yellow(p)}`);
+          }
         }
         console.log();
+      };
+
+      const renderVersionPermissions = (
+        agentId: AgentId,
+        version: string,
+        isDefault: boolean,
+        home: string,
+        scope: 'user' | 'project'
+      ) => {
+        const agent = AGENTS[agentId];
+        const defaultLabel = isDefault ? ' default' : '';
+        const versionStr = chalk.gray(` (${version}${defaultLabel})`);
+
+        const perms = readAgentPermissions(agentId, scope, cwd, { home });
+        if (!perms) {
+          console.log(`  ${chalk.bold(agentLabel(agent.id))}${versionStr}: ${chalk.gray('none')}`);
+          console.log();
+          return;
+        }
+
+        console.log(`  ${chalk.bold(agentLabel(agent.id))}${versionStr}:`);
+        renderPermissionBody(agentId, perms);
       };
 
       if (agentArg) {
@@ -202,22 +225,7 @@ When to use:
           }
 
           console.log(`  ${chalk.bold(agentLabel(agent.id))}:`);
-
-          if (agentId === 'claude') {
-            const claudePerms = perms as { permissions: { allow: string[]; deny: string[] } };
-            if (claudePerms.permissions.allow.length > 0) {
-              console.log(chalk.green('    Allow:'));
-              for (const p of claudePerms.permissions.allow) {
-                console.log(`      ${chalk.cyan(p)}`);
-              }
-            }
-            if (claudePerms.permissions.deny.length > 0) {
-              console.log(chalk.red('    Deny:'));
-              for (const p of claudePerms.permissions.deny) {
-                console.log(`      ${chalk.yellow(p)}`);
-              }
-            }
-          }
+          renderPermissionBody(agentId, perms);
           return;
         }
 
