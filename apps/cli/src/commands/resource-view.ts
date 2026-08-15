@@ -99,8 +99,9 @@ export async function showResourceList(opts: ResourceViewOptions): Promise<void>
       filter: (query) => filterRows(opts.rows, query),
       labelFor: (row) => formatPickerRow(row, opts),
       buildPreview: (row) => row.buildDetail(),
-      // The pre-picker header prints the total ("commands (12)"); the row
-      // numbers say where each entry sits in that count while scrolling.
+      // Row numbers say where each entry sits in the list while scrolling —
+      // and read against the total when the caller prints one, as
+      // `agents inspect` does with its "commands (12)" header.
       numbered: true,
       pageSize: 12,
       emptyMessage: `No matching ${opts.resourcePlural}.`,

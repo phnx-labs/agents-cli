@@ -57,9 +57,9 @@ export interface PickerConfig<T> {
   shortIdFor?: (item: T) => string;
   /**
    * Prefix each selectable row with its 1-based position in the current
-   * filtered list (`  1.`, ` 12.`), right-aligned so the labels stay columnar.
-   * Pairs with a caller-printed total ("commands (12)") so a user scanning a
-   * long list can tell where they are. Separators are never numbered.
+   * filtered list (`  1.`, ` 12.`), right-aligned so the labels stay columnar
+   * and a user scanning a long list can tell where they are. Separators are
+   * never numbered.
    */
   numbered?: boolean;
   pageSize?: number;
