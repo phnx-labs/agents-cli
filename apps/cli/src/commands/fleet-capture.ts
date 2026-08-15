@@ -18,7 +18,7 @@ import * as yaml from 'yaml';
 import { loadDevices, isControlDevice } from '../lib/devices/registry.js';
 import { readMeta, updateMeta, getDeviceMetaPath } from '../lib/state.js';
 import { listBundles } from '../lib/secrets/bundles.js';
-import { listJobs } from '../lib/routines.js';
+import { listJobs } from '../lib/scheduling/routines.js';
 import { captureFleet, type CaptureInputs } from '../lib/fleet/capture.js';
 import type { FleetDefaults } from '../lib/fleet/types.js';
 

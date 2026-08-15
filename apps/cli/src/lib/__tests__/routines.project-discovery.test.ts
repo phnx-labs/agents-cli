@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import * as state from '../state.js';
-import { listJobs, readJob } from '../routines.js';
+import { listJobs, readJob } from '../scheduling/routines.js';
 
 let tmpDir = '';
 let projectDir = '';

@@ -18,8 +18,8 @@ import type { AgentProcess } from '../teams/agents.js';
 import { handleTasks, handleStatus, toTaskStatusSummary } from '../teams/api.js';
 import type { AgentStatusSummary } from '../teams/api.js';
 import { gitDiff } from '../teams/worktree.js';
-import { listJobs } from '../routines.js';
-import type { JobConfig } from '../routines.js';
+import { listJobs } from '../scheduling/routines.js';
+import type { JobConfig } from '../scheduling/routines.js';
 import { listTasks as listCloudTasks } from '../cloud/store.js';
 import type { CloudTask } from '../cloud/types.js';
 

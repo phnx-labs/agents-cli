@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { JobConfig } from '../routines.js';
+import type { JobConfig } from '../scheduling/routines.js';
 import { generateCodexConfig, generateCursorConfig } from '../sandbox.js';
 
 const tempDirs: string[] = [];

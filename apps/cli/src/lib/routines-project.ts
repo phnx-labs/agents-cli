@@ -31,7 +31,7 @@ import {
   deleteJob,
   listJobs,
   validateJob,
-} from './routines.js';
+} from './scheduling/routines.js';
 import { parseOwnerRepoFromRemote } from './registry.js';
 import { listProjectDefs, projectDirsAbs } from './projects.js';
 import { isSafeSegmentName } from './paths.js';

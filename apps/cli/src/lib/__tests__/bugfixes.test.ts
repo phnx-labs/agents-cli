@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { symlinkAllowedDirs } from '../sandbox.js';
-import { validateJob, parseAtTime, writeJob, readJob, deleteJob, resolveJobPrompt } from '../routines.js';
+import { validateJob, parseAtTime, writeJob, readJob, deleteJob, resolveJobPrompt } from '../scheduling/routines.js';
 import { cleanOrphanedPluginSkills } from '../plugins/plugins.js';
 
 describe('Bug Fix: Path traversal in sandbox.ts', () => {

@@ -49,7 +49,7 @@ import { sshExecAsync } from '../lib/ssh-exec.js';
 import { hostIdentityArgs, sshTargetFor } from '../lib/hosts/types.js';
 import { deviceIdentityArgs } from '../lib/devices/connect.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
-import { findAmbiguousDevicePins } from '../lib/routines.js';
+import { findAmbiguousDevicePins } from '../lib/scheduling/routines.js';
 import chalk from 'chalk';
 import { checkAllClis, collectTeamsDoctorData, type TeamsDoctorEntry } from '../lib/teams/agents.js';
 import { AGENTS, ALL_AGENT_IDS, resolveAgentName, formatAgentError, getAccountInfo, type AccountInfo } from '../lib/agents.js';

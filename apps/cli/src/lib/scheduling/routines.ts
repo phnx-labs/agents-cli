@@ -11,10 +11,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { Cron } from 'croner';
-import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir, getProjectRoutinesDir } from './state.js';
+import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir, getProjectRoutinesDir } from '../state.js';
 import * as os from 'os';
-import { safeJoin, isSafeSegmentName } from './paths.js';
-import { isSafeProjectName, loadProjectDef, projectBasePath } from './projects.js';
+import { safeJoin, isSafeSegmentName } from '../paths.js';
+import { isSafeProjectName, loadProjectDef, projectBasePath } from '../projects.js';
 import {
   resolveRoutineExecutionContext,
   type ResolvedExecutionContext,
@@ -22,27 +22,27 @@ import {
   type PlacementMode,
   type RoutineKind,
   type ContextFsProbe,
-} from './routine-context.js';
-import { atomicWriteFileSync } from './fs-atomic.js';
-import type { AgentId } from './types.js';
-import { ALL_AGENT_IDS, ROUTINE_AGENT_IDS } from './agents.js';
-import type { LoopConfig } from './loop.js';
-import { machineId, normalizeHost } from './machine-id.js';
-import { resolveActor } from './actor.js';
-import { percentile } from './percentile.js';
+} from '../routine-context.js';
+import { atomicWriteFileSync } from '../fs-atomic.js';
+import type { AgentId } from '../types.js';
+import { ALL_AGENT_IDS, ROUTINE_AGENT_IDS } from '../agents.js';
+import type { LoopConfig } from '../loop.js';
+import { machineId, normalizeHost } from '../machine-id.js';
+import { resolveActor } from '../actor.js';
+import { percentile } from '../percentile.js';
 import {
   enabledRoutineNames,
   devicesWithRoutineEnabled,
   replaceEnabledRoutines,
   routineEnabledOnThisDevice,
   setRoutineEnabledOnThisDevice,
-} from './routine-activation.js';
-import { humanizeCron, humanizeNextRun } from './routines-format.js';
-import { discoverProjectRoutines } from './routines-project.js';
-import { listProjectDefs } from './projects.js';
-import { monitorRunningJobs } from './runner.js';
-import { JobScheduler } from './scheduler.js';
-import { detectOverdueJobs } from './overdue.js';
+} from '../routine-activation.js';
+import { humanizeCron, humanizeNextRun } from '../routines-format.js';
+import { discoverProjectRoutines } from '../routines-project.js';
+import { listProjectDefs } from '../projects.js';
+import { monitorRunningJobs } from '../runner.js';
+import { JobScheduler } from '../scheduler.js';
+import { detectOverdueJobs } from '../overdue.js';
 
 export function fireConditionLabel(job: JobConfig): string {
   if (job.schedule) return humanizeCron(job.schedule, job.timezone);

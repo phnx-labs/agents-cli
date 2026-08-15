@@ -39,7 +39,7 @@ import {
   serializeSessionPickerRows,
   type RoutineDrilldown,
 } from './sessions.js';
-import type { RunMeta } from '../lib/routines.js';
+import type { RunMeta } from '../lib/scheduling/routines.js';
 import { remoteAgentsJsonCommand } from '../lib/remote-agents-json.js';
 import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
 import { parseRemoteList } from '../lib/session/remote-list.js';

@@ -63,9 +63,9 @@ import {
   nextRunLabel,
   localLatestRun,
   listJobsForDisplay,
-} from '../lib/routines.js';
-export { buildRoutineListJson } from '../lib/routines.js';
-import type { JobConfig, JobTrigger, LinearTriggerEvent, RunMeta, HostStrategy } from '../lib/routines.js';
+} from '../lib/scheduling/routines.js';
+export { buildRoutineListJson } from '../lib/scheduling/routines.js';
+import type { JobConfig, JobTrigger, LinearTriggerEvent, RunMeta, HostStrategy } from '../lib/scheduling/routines.js';
 import { listProjectDefs, isSafeProjectName } from '../lib/projects.js';
 import { evaluateActivationReadinessLive } from '../lib/routine-readiness.js';
 import {

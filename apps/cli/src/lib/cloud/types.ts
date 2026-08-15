@@ -6,7 +6,7 @@
  * the dispatch pipeline.
  */
 
-import type { JobTrigger } from '../routines.js';
+import type { JobTrigger } from '../scheduling/routines.js';
 
 /**
  * Identifier for a supported cloud dispatch backend.

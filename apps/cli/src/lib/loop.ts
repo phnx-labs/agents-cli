@@ -27,7 +27,7 @@ import type { AgentId } from './types.js';
 import type { ExecOptions } from './exec.js';
 import { buildExecCommand, buildExecEnv } from './exec.js';
 import { extractUsageEvents } from './budget/enforce.js';
-import { parseTimeout } from './routines.js';
+import { parseTimeout } from './scheduling/routines.js';
 import { writeCheckpoint, type Checkpoint } from './checkpoint.js';
 import { mailboxDir } from './mailbox.js';
 import { composeWin32CommandLine } from './platform/index.js';

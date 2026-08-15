@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, rmSync, mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { JobConfig } from '../src/lib/routines.js';
+import type { JobConfig } from '../src/lib/scheduling/routines.js';
 import type { ExecOptions } from '../src/lib/exec.js';
 import type { LoopDeps, IterationResult } from '../src/lib/loop.js';
 import * as activation from '../src/lib/routine-activation.js';

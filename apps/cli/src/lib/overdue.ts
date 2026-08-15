@@ -14,7 +14,7 @@
 
 import * as fs from 'fs';
 import { Cron } from 'croner';
-import { listJobs, getLatestRun, resolveJobFilePath, isPastEndAt, isOneShotRoutine, jobRunsOnThisDevice, type JobConfig } from './routines.js';
+import { listJobs, getLatestRun, resolveJobFilePath, isPastEndAt, isOneShotRoutine, jobRunsOnThisDevice, type JobConfig } from './scheduling/routines.js';
 import { notifyDesktop } from './menubar/notify-desktop.js';
 
 export interface OverdueJob {
