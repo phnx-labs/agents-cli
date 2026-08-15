@@ -14,6 +14,7 @@ import {
   canReuseProof,
   changedFilesBetween,
   classifyCiScope,
+  commandForTestFile,
   commandsForPlan,
   companionCandidates,
   existingCompanions,
@@ -292,6 +293,11 @@ describe('exact-tree proof reuse', () => {
 });
 
 describe('commandsForPlan', () => {
+  test('a changed workflow test is invoked as a path, not a name filter', () => {
+    const cmd = commandForTestFile('.github/workflows/tests-gate.test.ts', REPO);
+    expect(cmd.cmd).toEqual(['bun', 'test', './.github/workflows/tests-gate.test.ts']);
+  });
+
   test('a changed root script test is executed, not dropped', () => {
     const plan = selectImpact({
       files: ['scripts/bottle.test.sh'],

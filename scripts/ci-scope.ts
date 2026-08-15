@@ -561,7 +561,7 @@ export function commandForTestFile(file: string, repoRoot: string): RunCommand {
     };
   }
   if (f.endsWith('.test.ts')) {
-    return { cwd: repoRoot, cmd: ['bun', 'test', f] };
+    return { cwd: repoRoot, cmd: ['bun', 'test', `./${f}`] };
   }
   throw new Error(`no runner for selected test: ${f}`);
 }
