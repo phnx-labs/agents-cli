@@ -1,8 +1,8 @@
-# agents-cli — agent cheat sheet
+# agi-cli — agent cheat sheet
 
 Read this first, then dive into [`architecture.md`](architecture.md) or the per-feature docs. This file is the on-ramp: the concepts agents repeatedly need when touching this codebase.
 
-## 1. What agents-cli actually does
+## 1. What agi-cli actually does
 
 One engine installs the **resources** an agent needs, **runs** the agent, and extends it with tools, sessions, teams, and machines. Deep reference: [`concepts.md`](concepts.md).
 

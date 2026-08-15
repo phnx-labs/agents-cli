@@ -904,7 +904,7 @@ Em/en dashes in title or body are scrubbed to ASCII ` - ` on the way out (phone
 and plain-text clients render them poorly).
 
 ```bash
-# Inside an agents-cli run (AGENT_SESSION_ID / AGENTS_MAILBOX_DIR already set):
+# Inside an agi-cli run (AGENT_SESSION_ID / AGENTS_MAILBOX_DIR already set):
 agents feed post --title "CHANGELOG pushed" "Watching CI and mac-mini E2E"
 agents feed post --title "Cover ready" "render at ./out/cover.png" --attach ./out/cover.png
 agents feed post --title "Ready for review" "PR opened, waiting on prix-cloud" --json

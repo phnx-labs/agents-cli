@@ -1,4 +1,4 @@
-# agents-cli docs
+# agi-cli docs
 
 Reference documentation for every feature `agents` ships.
 

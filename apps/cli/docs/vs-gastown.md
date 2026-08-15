@@ -1,4 +1,4 @@
-# agents-cli vs Gas Town
+# agi-cli vs Gas Town
 
 How [agents-cli](https://github.com/phnx-labs/agents-cli) differs from
 [Gas Town](https://github.com/gastownhall/gastown) (also “Gastown”), Steve Yegge’s
@@ -31,7 +31,7 @@ Different center of gravity: agents-cli makes *any agent / any machine* operable
 
 ## What each product is
 
-### agents-cli
+### agi-cli
 
 A developer CLI (`agents` / `ag`) that treats Claude, Codex, Gemini, Cursor, OpenCode,
 Grok, Droid, and others as **interchangeable surfaces**:
@@ -157,7 +157,7 @@ Shell scripts on agent events: SessionStart, PreToolUse, Stop, etc.
 
 So **`agents hooks` ≈ `gt hooks`** for this meaning.
 
-### 2. Work hooks / GUPP ≠ agents-cli (different)
+### 2. Work hooks / GUPP ≠ agi-cli (different)
 
 Each Gas Town agent has a durable **work hook**: “assigned work for this identity.”
 **GUPP** (Gastown Universal Propulsion Principle): if there is work on your hook, you
@@ -205,7 +205,7 @@ Human goal: ship a medium feature with parallel workers and land it safely.
 5. Polecat `gt done` → Refinery merge queue
 6. Convoy lands → notify Overseer
 
-### agents-cli path
+### agi-cli path
 
 1. Open / claim Linear or GitHub ticket
 2. `agents teams create … --enable-worktrees`
@@ -277,7 +277,7 @@ human-in-the-loop control.
 
 ---
 
-## Product implications for agents-cli
+## Product implications for agi-cli
 
 ### Demand Gas Town proves (build for the overlap)
 

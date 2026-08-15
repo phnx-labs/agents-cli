@@ -1,4 +1,4 @@
-# agents-cli — Specifications
+# agi-cli — Specifications
 
 > Status: **accepted** · Kind: **normative spec** · Scope: the top-level
 > behavioral contracts for the agents-cli subsystems listed in the

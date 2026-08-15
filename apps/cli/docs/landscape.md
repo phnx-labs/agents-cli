@@ -11,7 +11,7 @@ For a deep head-to-head with Steve Yegge’s multi-agent factory (Gas Town / Gas
 
 ---
 
-## What agents-cli does
+## What agi-cli does
 
 agents-cli is a developer workstation tool that combines:
 
@@ -92,7 +92,7 @@ These tools solve adjacent problems worth knowing about.
 
 ---
 
-## Where agents-cli fits
+## Where agi-cli fits
 
 ```
                     Local developer machine              Cloud / CI / Production

@@ -80,7 +80,7 @@ Every existing product is **vertical**, not horizontal.
 
 ---
 
-## Does agents-cli meet the criteria?
+## Does agi-cli meet the criteria?
 
 Every layer of the toolchain maps to a concrete implementation in the codebase.
 

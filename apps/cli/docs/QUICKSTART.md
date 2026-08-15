@@ -5,7 +5,7 @@ harnesses, run a team, then set up devices you can dispatch to. Each step
 names the exact command; run `agents <cmd> --help` if anything below looks
 stale — the code wins over this doc.
 
-## 1. Install agents-cli
+## 1. Install agi-cli
 
 ```bash
 npm install -g @phnx-labs/agents-cli   # or: curl -fsSL agi-cli.sh | sh
