@@ -8,6 +8,7 @@
  */
 
 import { spawn, execFileSync } from 'child_process';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -45,6 +46,56 @@ const LOG_MAX_SIZE = 5 * 1024 * 1024; // 5 MB
 const LOG_ROTATE_COUNT = 3;
 const PLIST_NAME = 'com.phnx-labs.agents-daemon';
 const SYSTEMD_UNIT = 'agents-daemon.service';
+
+/**
+ * RUSH-2639 (residual): launchd/systemd route `unload`/`load`/`list` by the
+ * service identifier ALONE, never by the plist/unit file's path. Baking the
+ * caller's HOME into the plist content (the earlier RUSH-2639 fix, above)
+ * keeps the STARTED daemon inside its sandbox, but every hermetic-test
+ * instance and every real interactive install still share the one literal
+ * `PLIST_NAME`/`SYSTEMD_UNIT` string. `startDaemonLocked`'s own `unload`
+ * before `load` is written to be a no-op ("not loaded, expected") for a
+ * plist that has never been loaded — but confirmed on darwin: when a
+ * DIFFERENT plist is already loaded under that same label, `unload
+ * <this-instance's-own-never-loaded-path>` still tears down the OTHER job
+ * (verified directly against real launchctl with two throwaway plists
+ * sharing one label — the second job's own `unload` silently kills the
+ * first, still alive under a different path). On a machine running several
+ * hermetic test forks at once (CI) — or a developer's own suite next to
+ * their real always-on daemon — that "other job" is a live daemon with
+ * DIFFERENT baked-in state.
+ *
+ * Namespace the identifier itself whenever HOME has been redirected away
+ * from the account's real home. `os.userInfo().homedir` reads the OS/passwd
+ * record directly and ignores `$HOME` (unlike `os.homedir()`, which honors
+ * it), so comparing the two detects exactly this redirection — true for
+ * every hermetic test process, false for every real interactive/production
+ * invocation, so a real user's daemon keeps registering under the unchanged
+ * production identifier.
+ */
+export function isolatedHomeSuffix(): string | null {
+  try {
+    const effective = path.resolve(process.env.HOME || os.homedir());
+    const real = path.resolve(os.userInfo().homedir);
+    if (effective === real) return null;
+    return crypto.createHash('sha256').update(effective).digest('hex').slice(0, 12);
+  } catch {
+    return null;
+  }
+}
+
+/** launchd Label for this process's daemon — namespaced under a redirected HOME. */
+export function daemonServiceLabel(): string {
+  const suffix = isolatedHomeSuffix();
+  return suffix ? `${PLIST_NAME}.sandbox-${suffix}` : PLIST_NAME;
+}
+
+/** systemd --user unit name for this process's daemon — namespaced under a redirected HOME. */
+export function daemonSystemdUnitName(): string {
+  const suffix = isolatedHomeSuffix();
+  return suffix ? `agents-daemon-sandbox-${suffix}.service` : SYSTEMD_UNIT;
+}
+
 const MONITOR_TICK_MS = 60_000;
 /**
  * How often to re-scan for missed fires. Deliberately slower than the monitor
@@ -247,11 +298,11 @@ export function getDaemonLogPath(): string {
 }
 
 function getLaunchdPlistPath(): string {
-  return path.join(os.homedir(), 'Library', 'LaunchAgents', `${PLIST_NAME}.plist`);
+  return path.join(os.homedir(), 'Library', 'LaunchAgents', `${daemonServiceLabel()}.plist`);
 }
 
 function getSystemdUnitPath(): string {
-  return path.join(os.homedir(), '.config', 'systemd', 'user', `${SYSTEMD_UNIT}`);
+  return path.join(os.homedir(), '.config', 'systemd', 'user', daemonSystemdUnitName());
 }
 
 /** Read the stored daemon PID from disk. Returns null if not present or invalid. */
@@ -1595,7 +1646,7 @@ export function generateLaunchdPlist(
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${PLIST_NAME}</string>
+  <string>${daemonServiceLabel()}</string>
   <key>ProgramArguments</key>
   <array>
 ${[launch.command, ...launch.args].map((arg) => `    <string>${xmlEscape(arg)}</string>`).join('\n')}
@@ -1685,13 +1736,13 @@ export { getAgentsBinPath };
 function readServiceManagerPid(platform: NodeJS.Platform = os.platform()): number | null {
   try {
     if (platform === 'linux') {
-      const out = execFileSync('systemctl', ['--user', 'show', '-p', 'MainPID', '--value', SYSTEMD_UNIT],
+      const out = execFileSync('systemctl', ['--user', 'show', '-p', 'MainPID', '--value', daemonSystemdUnitName()],
         { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
       const pid = parseInt(out, 10);
       return !isNaN(pid) && pid > 0 ? pid : null;
     }
     if (platform === 'darwin') {
-      const out = execFileSync('launchctl', ['list', PLIST_NAME],
+      const out = execFileSync('launchctl', ['list', daemonServiceLabel()],
         { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
       const m = out.match(/"PID"\s*=\s*(\d+)/);
       if (m) {
@@ -1880,8 +1931,8 @@ function startDaemonLocked(agentsBin: string, releaseLock: () => void): { pid: n
       writeOwnerOnlyServiceManifest(unitPath, generateSystemdUnit(agentsBin));
 
       execFileSync('systemctl', ['--user', 'daemon-reload'], { encoding: 'utf-8' });
-      execFileSync('systemctl', ['--user', 'enable', SYSTEMD_UNIT], { encoding: 'utf-8' });
-      execFileSync('systemctl', ['--user', 'start', SYSTEMD_UNIT], { encoding: 'utf-8' });
+      execFileSync('systemctl', ['--user', 'enable', daemonSystemdUnitName()], { encoding: 'utf-8' });
+      execFileSync('systemctl', ['--user', 'start', daemonSystemdUnitName()], { encoding: 'utf-8' });
 
       // Launch issued — the child needs this lock to claim (RUSH-2417).
       releaseLock();
@@ -2249,8 +2300,8 @@ export function stopDaemon(): DaemonStopResult {
 
   if (platform === 'linux') {
     try {
-      execFileSync('systemctl', ['--user', 'stop', SYSTEMD_UNIT], { encoding: 'utf-8' });
-      execFileSync('systemctl', ['--user', 'disable', SYSTEMD_UNIT], { encoding: 'utf-8' });
+      execFileSync('systemctl', ['--user', 'stop', daemonSystemdUnitName()], { encoding: 'utf-8' });
+      execFileSync('systemctl', ['--user', 'disable', daemonSystemdUnitName()], { encoding: 'utf-8' });
     } catch (err: any) {
       if (process.env.AGENTS_DEBUG) {
         console.error(`[debug] systemctl stop failed: ${err.message}`);
