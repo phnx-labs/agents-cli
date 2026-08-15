@@ -365,6 +365,10 @@ agents projects pull rush --json                # machine-readable results
   behind (or equal to) its upstream before it is updated.
 - **Missing checkouts are skipped** — never cloned. If a project directory does not
   exist on a device, it is reported as `missing` and the command moves on.
+- **The declared repo slug is verified first, on every device.** A bound directory whose
+  `origin` is a different repo than the project declares is blocked, as is one whose
+  `origin` cannot be resolved to an `owner/repo` slug at all — the checkout cannot be
+  confirmed to be the right repo, so it is never fast-forwarded.
 - **Git hooks are never installed** during a pull.
 
 Blocked (`blocked`) and failed (`failed`) checkouts drive a non-zero exit code.
@@ -385,6 +389,27 @@ rush
 The fan-out uses the same `gatherRemoteAgentsJson` seam as `status`, with a
 120-second per-device timeout (vs the default 12s) to allow for large repos and
 slow links.
+
+### Devices that did not answer, and devices that answered unverifiably
+
+These are different states and the command keeps them apart:
+
+| State | Meaning | Reported as | Exit code |
+|---|---|---|---|
+| `unavailable` | The device never answered — offline, no `agents` CLI, or past the 120s budget. Nothing ran there. | `unavailable: <names>` | unaffected |
+| `unverified` | The device answered, but its response failed verification (wrong machine id, a target fingerprint that does not match the targets that were sent, or a malformed row). It already ran a real pull whose outcome cannot be read. | `unverified: <names>` | **non-zero** |
+
+An unverifiable answer is worse than silence, so it is never folded into the results as
+a device with nothing to report. Under `--json` both notes go to **stderr** (the JSON on
+stdout stays a clean result array), matching `projects status --json`.
+
+**How the fan-out stays verifiable.** Each peer runs the hidden
+`agents projects pull-local --json --targets <json>`, where `--targets` carries the full
+`{path, expectedSlug}` list — not bare paths. Both halves of a target have to cross that
+boundary: `expectedSlug` is what makes the peer refuse a directory hosting a different
+repo, and it is hashed into the target fingerprint the caller checks the peer's envelope
+against. A peer that cannot decode its targets exits non-zero rather than pulling a
+guessed subset.
 
 ## Importing — from Linear
 

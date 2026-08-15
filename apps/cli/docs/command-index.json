@@ -15007,7 +15007,7 @@
             }
           ],
           "examples": "agents projects pull rush                        # pull every checkout in the project\n      agents projects pull rush --device yosemite-s0  # scope to one device\n      agents projects pull rush --devices s0,s1       # scope to multiple devices\n      agents projects pull rush --json                # machine-readable results",
-          "notes": "Only checkouts on their remote's default branch are fast-forwarded. Dirty\n      trees, local commits ahead of upstream, or a wrong branch are blocked and\n      reported — never overwritten.\n\n      Checkouts absent on a device are skipped (never cloned). Blocked or failed\n      checkouts drive a non-zero exit; missing paths do not.",
+          "notes": "Only checkouts on their remote's default branch are fast-forwarded. Dirty\n      trees, local commits ahead of upstream, or a wrong branch are blocked and\n      reported — never overwritten.\n\n      Each checkout is verified against the project's declared repo slug before\n      anything is fast-forwarded — on every device, not just this one. A path\n      hosting a different repo is blocked.\n\n      Checkouts absent on a device are skipped (never cloned). Blocked or failed\n      checkouts drive a non-zero exit; missing paths do not. A device that\n      answers with a result that cannot be verified is reported as unverified\n      and also drives a non-zero exit; a device that never answers is reported\n      as unavailable and does not.",
           "subcommands": []
         },
         {
