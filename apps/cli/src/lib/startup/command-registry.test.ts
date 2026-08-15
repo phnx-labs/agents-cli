@@ -7,11 +7,13 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  LAZY_COMMAND_NAMES,
   KNOWN_TOP_LEVEL_COMMANDS,
   isKnownTopLevelCommand,
-  buildFullCommandTree,
 } from './command-registry.js';
+import {
+  LAZY_COMMAND_NAMES,
+  buildFullCommandTree,
+} from '../../cli/command-registry.js';
 
 describe('KNOWN_TOP_LEVEL_COMMANDS', () => {
   it('covers every top-level name and alias the real command modules register', async () => {

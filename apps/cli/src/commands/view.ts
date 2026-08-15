@@ -78,6 +78,8 @@ import { composeRulesFromState, type ComposedSubrule } from '../lib/rules/compos
 import { getConfiguredRunStrategy } from '../lib/rotate.js';
 import { resolveRunDefaults } from '../lib/run-defaults.js';
 import { resolveConfiguredModel, type ConfiguredModelSource } from '../lib/models.js';
+import type { ResourceItemJson, ResourceSection, SyncState, VersionResourcesJson, ViewJsonAgent, ViewJsonVersion } from '../lib/view-types.js';
+export type { ResourceItemJson, ResourceSection, SyncState, VersionResourcesJson, ViewJsonAgent, ViewJsonVersion } from '../lib/view-types.js';
 import { listProfiles, profileExists, profileSummary, readProfile, type Profile, type ProfileSummary } from '../lib/profiles.js';
 import { getByokUsageForHarness, hasByokProvider, renderByokBar, type ByokUsageResult } from '../lib/byok-usage.js';
 import { renderHarnessDetail } from './harness.js';
@@ -234,7 +236,6 @@ function getProjectVersionFromCwd(agent: AgentId): string | null {
   }
 }
 
-type SyncState = 'synced' | 'new' | 'modified' | 'deleted';
 
 interface ResourceWithSync {
   name: string;
@@ -1251,96 +1252,7 @@ async function showAgentResources(
   }
 }
 
-/** Machine-readable entry for a single installed version. */
-export interface ViewJsonVersion {
-  version: string;
-  isDefault: boolean;
-  /**
-   * Installed with `--isolated`. The human view has shown this since the isolated
-   * tag landed, but JSON carried no signal at all, so tooling could not tell a
-   * sandboxed copy from one that owns the user's launcher and real config.
-   */
-  isolated: boolean;
-  /**
-   * The isolated copy a bare `agents run <agent>` resolves to. Separate from
-   * `isDefault`, which is the GLOBAL default an isolated version can never be —
-   * reporting only `isDefault: false` hid the fact that this one is selected.
-   */
-  isIsolatedDefault: boolean;
-  signedIn: boolean;
-  email: string | null;
-  // Opaque account identifier when the credential exposes one but no email
-  // (Kimi's user_id). Optional for backward compatibility with older consumers.
-  accountId?: string | null;
-  // Claude-only raw org identity from .claude.json's oauthAccount
-  // ("claude_max", "claude_team", ...). Raw values, no display label baked in —
-  // renderers map them via formatClaudeOrgLabel/accountOrgBadge. Optional for
-  // backward compatibility with older consumers.
-  organizationType?: string | null;
-  organizationName?: string | null;
-  plan: string | null;
-  usageStatus: 'available' | 'rate_limited' | 'out_of_credits' | null;
-  // Optional so existing TypeScript consumers compiled against the prior
-  // interface don't error on the new field; null means we know there are no
-  // outstanding overage credits, undefined means we haven't fetched / can't say.
-  overageCredits?: { amount: number; currency: string } | null;
-  windows: Array<{
-    key: 'session' | 'week' | 'sonnet_week' | 'month';
-    // What the window meters — 'Current session'/'Current week' for most
-    // agents, the model id for Antigravity's per-model quota buckets (whose
-    // keys are all 'session', so the label is the only way to tell them
-    // apart). Optional for backward compatibility with older consumers.
-    label?: string;
-    usedPercent: number;
-    resetsAt: string | null;
-  }>;
-  lastActive: string | null;
-  path: string;
-  // The model this version is actually configured to run with, and where that
-  // selection comes from. Optional for backward compatibility with older
-  // consumers; null when the agent has no resolvable model.
-  configuredModel?: { model: string; source: ConfiguredModelSource } | null;
-  /** Present only when --resources / --detailed (or --json with a section
-   *  flag) is passed: this version's resource inventory with git sync-state. */
-  resources?: VersionResourcesJson;
-}
-
-/** Machine-readable entry for one agent's installed versions. */
-export interface ViewJsonAgent {
-  agent: AgentId;
-  versions: ViewJsonVersion[];
-  /** Custom harnesses that run on this agent as their host CLI. */
-  harnesses: ProfileSummary[];
-}
-
-/** Resource sections that --resources can include in --json output. */
-export type ResourceSection = 'commands' | 'skills' | 'mcp' | 'memory' | 'hooks' | 'workflows' | 'plugins';
-
 const ALL_RESOURCE_SECTIONS: ResourceSection[] = ['commands', 'skills', 'mcp', 'memory', 'hooks', 'workflows', 'plugins'];
-
-/** One resource entry in `--json --resources` output. */
-export interface ResourceItemJson {
-  name: string;
-  scope?: 'user' | 'project';
-  /** Git sync-state vs ~/.agents. Omitted for project-scoped resources or when
-   *  ~/.agents isn't a git repo. When queried via --host it reflects the
-   *  remote's ~/.agents — i.e. per-host resource drift. */
-  syncState?: SyncState;
-  description?: string;
-  /** Skills only, when > 0. */
-  ruleCount?: number;
-}
-
-/** Per-version resource inventory; one key per requested section. */
-export interface VersionResourcesJson {
-  commands?: ResourceItemJson[];
-  skills?: ResourceItemJson[];
-  mcp?: ResourceItemJson[];
-  memory?: ResourceItemJson[];
-  hooks?: ResourceItemJson[];
-  workflows?: ResourceItemJson[];
-  plugins?: ResourceItemJson[];
-}
 
 type ResourceSyncType = 'commands' | 'skills' | 'hooks' | 'memory';
 

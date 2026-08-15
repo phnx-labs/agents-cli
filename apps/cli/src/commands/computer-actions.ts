@@ -11,7 +11,6 @@ import { Command } from 'commander';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { randomUUID } from 'node:crypto';
 import {
   openComputerClient,
   describeTransport,
@@ -19,164 +18,13 @@ import {
   type ComputerClient,
   type RPCResponse,
 } from '../lib/computer-rpc.js';
-import {
-  COMPUTER_INPUT_GATED_VERBS,
-  formatComputerPermissionGrantHint,
-} from '../lib/permissions.js';
-import { emit as emitEvent } from '../lib/events.js';
-import { recordComputerSession } from '../lib/session/db.js';
-import { resolveActor } from '../lib/actor.js';
-
-export interface AppInfo {
-  pid: number;
-  name: string;
-  bundle_id: string;
-  active: boolean;
-}
-
-type ComputerInputVerb = typeof COMPUTER_INPUT_GATED_VERBS[number];
-
-interface TargetAdmission {
-  sessionId: string;
-  selector: string;
-  gateClass: 'input';
-  pid: number;
-  bundle_id: string;
-  name: string;
-  admittedAtMs: number;
-  admittedByVerb: ComputerInputVerb;
-}
-
-interface AdmissionCacheFile {
-  admissions?: TargetAdmission[];
-}
-
-function isComputerInputVerb(verb: string | undefined): verb is ComputerInputVerb {
-  return typeof verb === 'string' && (COMPUTER_INPUT_GATED_VERBS as readonly string[]).includes(verb);
-}
-
-function computerSessionId(env: NodeJS.ProcessEnv = process.env): string | null {
-  return env.CODEX_THREAD_ID
-    || env.CLAUDE_CODE_SESSION_ID
-    || env.CLAUDE_SESSION_ID
-    || env.AGENTS_SESSION_ID
-    || env.AGENTS_RUN_ID
-    || null;
-}
-
-function admissionCachePath(env: NodeJS.ProcessEnv = process.env): string {
-  if (env.AGENTS_COMPUTER_ADMISSION_CACHE) return env.AGENTS_COMPUTER_ADMISSION_CACHE;
-  return path.join(path.dirname(resolvePolicyPath()), 'computer-target-admissions.json');
-}
-
-function targetSelector(opts: { bundle?: string }): string {
-  return opts.bundle ? `bundle:${opts.bundle}` : 'frontmost';
-}
-
-function readAdmissionCache(filePath: string): TargetAdmission[] {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as AdmissionCacheFile;
-    return Array.isArray(parsed.admissions) ? parsed.admissions.filter(isAdmission) : [];
-  } catch {
-    return [];
-  }
-}
-
-function isAdmission(v: unknown): v is TargetAdmission {
-  if (!v || typeof v !== 'object') return false;
-  const r = v as Record<string, unknown>;
-  return r.sessionId !== undefined
-    && typeof r.sessionId === 'string'
-    && typeof r.selector === 'string'
-    && r.gateClass === 'input'
-    && typeof r.pid === 'number'
-    && typeof r.bundle_id === 'string'
-    && typeof r.name === 'string'
-    && typeof r.admittedAtMs === 'number'
-    && isComputerInputVerb(r.admittedByVerb as string | undefined);
-}
-
-function rememberAdmission(app: AppInfo, opts: {
-  selector: string;
-  verb: ComputerInputVerb;
-  env?: NodeJS.ProcessEnv;
-  nowMs?: number;
-}): void {
-  const sessionId = computerSessionId(opts.env);
-  if (!sessionId) return;
-
-  const filePath = admissionCachePath(opts.env);
-  const admissions = readAdmissionCache(filePath);
-  const next: TargetAdmission = {
-    sessionId,
-    selector: opts.selector,
-    gateClass: 'input',
-    pid: app.pid,
-    bundle_id: app.bundle_id,
-    name: app.name,
-    admittedAtMs: opts.nowMs ?? Date.now(),
-    admittedByVerb: opts.verb,
-  };
-  const filtered = admissions.filter((a) =>
-    !(a.sessionId === sessionId && a.selector === opts.selector && a.gateClass === 'input')
-  );
-  filtered.push(next);
-
-  try {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify({ admissions: filtered }, null, 2), { mode: 0o600 });
-  } catch {
-    // Cache persistence is best-effort; the daemon remains the final gate.
-  }
-}
-
-function findAdmission(opts: {
-  selector: string;
-  env?: NodeJS.ProcessEnv;
-}): TargetAdmission | null {
-  const sessionId = computerSessionId(opts.env);
-  if (!sessionId) return null;
-  const admissions = readAdmissionCache(admissionCachePath(opts.env));
-  const matches = admissions
-    .filter((a) => a.sessionId === sessionId && a.selector === opts.selector && a.gateClass === 'input')
-    .sort((a, b) => b.admittedAtMs - a.admittedAtMs);
-  return matches[0] ?? null;
-}
+import { emitComputerAction, pickTarget, resolveTargetPidDecision, type AppInfo } from '../lib/computer/actions.js';
+export { emitComputerAction, pickTarget, resolveTargetPidDecision, type AppInfo } from '../lib/computer/actions.js';
 
 // Pure target picker — exercised by unit tests. Precedence: explicit --pid,
 // then --bundle, then the frontmost active allow-listed app (the same default
 // `screenshot` uses). Kept side-effect-free so the resolution rules are
 // testable without a live daemon.
-export function pickTarget(
-  list: AppInfo[],
-  opts: { pid?: number; bundle?: string },
-): { ok: true; app: AppInfo } | { ok: false; error: string } {
-  if (opts.pid != null) {
-    const app = list.find((a) => a.pid === opts.pid);
-    // A --pid the daemon doesn't list (not allow-listed / not running) is
-    // still passed through: the daemon is the authority and will return a
-    // precise permission_denied / app_not_found. We don't second-guess it.
-    return { ok: true, app: app ?? { pid: opts.pid, name: '', bundle_id: '', active: false } };
-  }
-  if (opts.bundle) {
-    const app = list.find((a) => a.bundle_id === opts.bundle);
-    if (!app) {
-      return {
-        ok: false,
-        error: `bundle not in allow list (or not running): ${opts.bundle}\n${formatComputerPermissionGrantHint(opts.bundle)}`,
-      };
-    }
-    return { ok: true, app };
-  }
-  const active = list.find((a) => a.active);
-  if (!active) {
-    return {
-      ok: false,
-      error: `no active app found in allow list\n${formatComputerPermissionGrantHint()}`,
-    };
-  }
-  return { ok: true, app: active };
-}
 
 // Parse an "x,y" coordinate pair. Pure + tested.
 export function parseXY(s: string, flag: string): { x: number; y: number } {
@@ -293,30 +141,6 @@ export function unwrap(r: RPCResponse): Record<string, unknown> {
   return r.result ?? {};
 }
 
-export async function resolveTargetPidDecision(
-  client: ComputerClient,
-  opts: { pid?: number; bundle?: string },
-  gate?: { verb?: string; env?: NodeJS.ProcessEnv; nowMs?: number },
-): Promise<{ ok: true; pid: number; source: 'pid' | 'list_apps' | 'session_admission' } | { ok: false; error: string }> {
-  // A directly-supplied pid skips the list_apps roundtrip — the daemon gates.
-  if (opts.pid != null) return { ok: true, pid: opts.pid, source: 'pid' };
-  const apps = unwrap(await client.call('list_apps'));
-  const list = (apps.apps as AppInfo[]) || [];
-  const picked = pickTarget(list, opts);
-  const verb = gate?.verb;
-  const selector = targetSelector(opts);
-  if (picked.ok && isComputerInputVerb(verb)) {
-    rememberAdmission(picked.app, { selector, verb, env: gate?.env, nowMs: gate?.nowMs });
-  }
-  if (!picked.ok) {
-    if (isComputerInputVerb(verb)) {
-      const admitted = findAdmission({ selector, env: gate?.env });
-      if (admitted) return { ok: true, pid: admitted.pid, source: 'session_admission' };
-    }
-    return { ok: false, error: picked.error };
-  }
-  return { ok: true, pid: picked.app.pid, source: 'list_apps' };
-}
 
 // Resolve the target pid via list_apps + pickTarget, printing a precise error
 // and exiting when no target matches.
@@ -449,51 +273,6 @@ function emit(result: Record<string, unknown>, json: boolean, human: () => strin
 // NOTE: the field is `targetPid`, never `pid` — `pid` is a reserved envelope
 // key (the emitting process's OWN pid, events.ts RESERVED_META_KEYS) that
 // sanitizePayload() silently strips from the payload before it can collide.
-const COMPUTER_INVOCATION_ID = randomUUID();
-
-export function emitComputerAction(
-  verb: string,
-  targetPid: number | undefined,
-  opts: { bundle?: string; host?: string },
-  extra: Record<string, unknown> = {},
-): void {
-  emitEvent('computer.action', {
-    command: verb,
-    invocationId: COMPUTER_INVOCATION_ID,
-    targetPid,
-    bundle: opts.bundle,
-    host: opts.host,
-    ...extra,
-  });
-
-  // Mirror the invocation's IDENTITY into the durable store (RUSH-2549). The
-  // event above stays the audit record, but the event ledger is bounded and
-  // prunes at 7 days / 50 MiB (events.ts), so a run's history used to vanish on
-  // day 8. This row is metadata only -- no screenshots, no typed text -- and
-  // `action_count` accumulates across the many calls one invocation makes.
-  //
-  // Identity is read from this process's own env, exactly as stampProvenance()
-  // does for the event: `agents computer` runs IN the caller's process, so there
-  // is no shared daemon to mis-attribute it to (the browser problem).
-  //
-  // Guarded for the same reason `emit` above guards itself ("logging should
-  // never break the CLI", events.ts): this is a RECORD of the action, not the
-  // action. An unwritable or locked session DB must not stop `agents computer
-  // click` from clicking. The action still happened and its event still landed;
-  // only this row is missed, and the next call re-records the identity.
-  try {
-    recordComputerSession({
-      invocationId: COMPUTER_INVOCATION_ID,
-      sessionId: process.env.AGENT_SESSION_ID || process.env.AGENTS_SESSION_ID,
-      launchId: process.env.AGENT_LAUNCH_ID,
-      actor: resolveActor().id,
-      actionCount: 1,
-      taskPreview: typeof extra.task === 'string' ? extra.task : undefined,
-    });
-  } catch {
-    // Recording is best-effort; the action and its event are already done.
-  }
-}
 
 // Add the shared --pid/--bundle/--host target options to a verb. `--host` routes
 // the verb at a remote Windows device: the `computer` preAction hook hydrates
