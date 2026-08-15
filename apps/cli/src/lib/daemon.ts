@@ -31,7 +31,7 @@ import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled, getConfigV
 import { reapTerminalRoutineProcesses } from './routine-process-cleanup.js';
 import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC, SUBSYSTEM_DAEMON_START } from './daemon-health.js';
 import { startAccountStateService } from './account-state-service.js';
-import { runActiveSessionsWarmTick, runFleetCacheWarmTick, runUsageRefreshTick } from './daemon-ticks.js';
+import { runActiveSessionsWarmTick, runFleetCacheWarmTick, runSessionIndexWarmTick, runUsageRefreshTick } from './daemon-ticks.js';
 import { emit, emitRoutineEnd } from './events.js';
 import { readDaemonServicesConfig, isDaemonServiceEnabled, type DaemonServiceId } from './daemon-services.js';
 
@@ -87,6 +87,10 @@ const DEVICE_PROBE_TICK_MS = 3 * 60_000;
 // Matches DEFAULT_ACTIVE_CACHE_MAX_AGE_MS (15s) so long-lived watchers never
 // outlive the publisher (RUSH-2484 — CLI-owned continuous publish).
 const ACTIVE_SESSIONS_WARM_TICK_MS = 15_000;
+// Incrementally scan this host's transcript dirs into the local index so a
+// locally-started session is indexed within seconds, not on the next unrelated
+// `agents sessions*` call (RUSH-2682 — indexing was lazy, nothing scheduled it).
+const SESSION_INDEX_WARM_TICK_MS = 20_000;
 const WEDGE_THRESHOLD_TICKS = 3;
 
 /**
@@ -1031,6 +1035,25 @@ export async function runDaemon(): Promise<void> {
   void runActiveSessionsWarm();
   const activeSessionsWarmInterval = setInterval(() => { void runActiveSessionsWarm(); }, ACTIVE_SESSIONS_WARM_TICK_MS);
 
+  // Session-index warm (RUSH-2682): keep THIS host's transcript index current so
+  // a locally-started session is discoverable within seconds. Incremental +
+  // single-flight (the DB scan claim), overlap-guarded so a slow scan never
+  // stacks on the next tick.
+  let sessionIndexWarmInFlight = false;
+  const runSessionIndexWarm = async (): Promise<void> => {
+    if (sessionIndexWarmInFlight) return;
+    sessionIndexWarmInFlight = true;
+    try {
+      await runSessionIndexWarmTick();
+    } catch (err) {
+      log('WARN', `session-index warm failed: ${(err as Error).message}`);
+    } finally {
+      sessionIndexWarmInFlight = false;
+    }
+  };
+  void runSessionIndexWarm();
+  const sessionIndexWarmInterval = setInterval(() => { void runSessionIndexWarm(); }, SESSION_INDEX_WARM_TICK_MS);
+
   // Watchdog: nudge this host's own stalled agent sessions. Gated on the
   // `watchdog.enabled` device-config flag (`agents watchdog enable`), so the
   // timer always fires but only does work when the user opted in. Overlap-safe
@@ -1415,6 +1438,7 @@ export async function runDaemon(): Promise<void> {
     log('INFO', 'Daemon shutting down');
     accountStateService?.stop();
     clearInterval(activeSessionsWarmInterval);
+    clearInterval(sessionIndexWarmInterval);
     if (watchdogInterval) clearInterval(watchdogInterval);
     if (deviceProbeInterval) clearInterval(deviceProbeInterval);
     stopScheduler();

@@ -243,6 +243,30 @@ SSH access (§7); rendering sessions that no harness produced.
   RUSH-2203's early-exit rule is also unchanged and stays full-UUID-only
   (`isDefinitiveMatch`), because that cancels a sweep still in flight, where a
   silent peer is still expected to answer.
+- **SES-9b (MUST).** An ID-shaped selector that misses the local transcript index
+  but names a session the LOCAL live registry (`getActiveSessions`, the source
+  `--active` reads) currently reports as running MUST resolve to that session
+  rather than "No session matching". Indexing is lazy (only `discoverSessions`
+  writes the index), so a session started on THIS box is running before its
+  transcript is indexed; the id resolver behind `preview`/`resume`/`focus` MUST
+  union the indexed rows with the live registry on a cold id miss
+  (`computeLocalMetadataMatches`, `commands/sessions.ts`). The synthesized row
+  parses no transcript and renders nothing; when the transcript is on disk its
+  path rides across so the downstream preview renders the real digest, else the
+  header plus a live note. The peer answering a fan-out (`--resolve-safe-v1`,
+  NO_FANOUT) uses the same union, so a running session resolves cross-device too.
+  A genuine miss (no indexed row and no live row) still fails closed, and a
+  degraded live-registry read yields no candidates rather than throwing.
+  Status: landed (RUSH-2682).
+- **SES-9c (SHOULD).** A session started on a machine SHOULD reach that machine's
+  transcript index within seconds, not on the next unrelated `agents sessions*`
+  invocation. The daemon incrementally scans this host's transcript dirs into the
+  local index on a bounded timer (`runSessionIndexWarmTick`,
+  `SESSION_INDEX_WARM_TICK_MS`), single-flight with foreground scans via the DB
+  scan claim. A cold-miss repair that loses that claim MUST wait (bounded) for the
+  in-flight scan to finish before reading, not return the pre-scan snapshot
+  (`discoverSessions({ waitForScan })` → `waitForScanToSettle`,
+  `scanInProgressByLivePid`). Status: landed (RUSH-2682).
 - **SES-10 (MUST).** A preview string MUST be cleaned of terminal/harness noise
   (OSC titles, CSI/SGR, harness tags, collapsed whitespace) before display
   (`cleanPreview`, `commands/sessions.ts:329-337`), and truncated width-aware

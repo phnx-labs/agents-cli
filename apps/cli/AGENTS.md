@@ -527,6 +527,17 @@ their owning peer, and the normalized digest is cached in SQLite against the
 transcript's actual mtime + size. Live status is deliberately outside that durable
 digest and expires after 15 seconds through `session-cache.ts`.
 
+Indexing is lazy — only `discoverSessions` writes the index — so a session THIS
+box just started is "running" in `--active` before it is indexed. The id resolver
+(`computeLocalMetadataMatches` in `sessions.ts`) therefore unions the indexed
+rows with the LIVE registry on a cold id miss, so `preview`/`resume`/`focus`
+resolve a running session with no transcript row yet (the fan-out peer answers
+from the same union, so it works cross-device too — SES-9b). The daemon keeps the
+index current within seconds via `runSessionIndexWarmTick`, and the cold-miss
+repair waits for a concurrent scan rather than returning a stale read
+(`discoverSessions({ waitForScan })` — SES-9c). This is why a running session no
+longer reads "No session matching" during the index-lag window (RUSH-2682).
+
 Routing lives in `src/commands/sessions.ts`: `isBareBrowserListing`
 (+`hasNoBrowserDisqualifyingFlags`) gates the bare fleet-wide listing to the rich
 `runSessionBrowser` ([`src/commands/sessions-browser.ts`](src/commands/sessions-browser.ts));

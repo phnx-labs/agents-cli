@@ -1464,6 +1464,25 @@ export function tryClaimScan(pid: number): boolean {
 }
 
 /**
+ * Read-only probe: is a scan in progress right now, held by a LIVE process
+ * within the TTL? (RUSH-2682). Unlike {@link tryClaimScan} it never writes, so a
+ * caller that lost the claim can wait for the in-flight scan to finish rather
+ * than returning the pre-scan DB snapshot as if it were the answer. Returns
+ * false for a dead-PID or expired claim — that scan is not actually running.
+ */
+export function scanInProgressByLivePid(): boolean {
+  const db = getDB();
+  const existing = db
+    .prepare(`SELECT value FROM meta WHERE key = 'scan_in_progress'`)
+    .get() as { value: string } | undefined;
+  if (!existing) return false;
+  const parts = existing.value.split(':');
+  const pid = parseInt(parts[0], 10);
+  const ts = parseInt(parts[1], 10);
+  return isProcessAlive(pid) && Date.now() - ts < SCAN_CLAIM_TTL_MS;
+}
+
+/**
  * Release the scan claim written by tryClaimScan. Only deletes the entry
  * if it still belongs to this process (guards against TTL takeovers).
  */

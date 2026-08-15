@@ -122,3 +122,28 @@ export async function runActiveSessionsWarmTick(
   console.log(`active-sessions warm: ${r.sessions.length} session(s) published`);
   return { sessions: r.sessions.length };
 }
+
+/**
+ * Session-index warm (RUSH-2682): incrementally scan THIS host's transcript dirs
+ * into the local SQLite index on a timer, so a session started HERE reaches this
+ * box's index within seconds instead of on the next unrelated `agents sessions*`
+ * call. Indexing was otherwise lazy — only `discoverSessions` writes the index,
+ * and nothing scheduled it — which inverted freshness: a peer's session arrived
+ * via sync in ~0s while a locally-started one sat unindexed for minutes.
+ *
+ * The scan is incremental (only files whose mtime/size changed) and single-flight
+ * across processes via the DB scan claim, so a foreground `agents sessions*` and
+ * this tick never double-scan. The daemon is the single scheduled executor,
+ * consistent with the one-scheduler rule.
+ */
+export async function runSessionIndexWarmTick(
+  deps: { discover?: () => Promise<{ length: number }> } = {},
+): Promise<{ indexed: number }> {
+  const discover = deps.discover
+    ?? (async () => {
+      const { discoverSessions } = await import('./session/discover.js');
+      return discoverSessions();
+    });
+  const rows = await discover();
+  return { indexed: rows.length };
+}
