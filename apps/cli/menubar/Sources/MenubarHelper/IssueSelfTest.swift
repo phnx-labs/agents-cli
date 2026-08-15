@@ -17,6 +17,7 @@ enum IssueSelfTest {
         testRecentRepoDirs()
         testTicketIDParse()
         testPromptContract()
+        testLinearBinaryResolution()
         testTicketCreateArgsAndParsing()
         testQuickFixContract()
         testQuickDispatchRoster()
@@ -173,11 +174,11 @@ enum IssueSelfTest {
                                 delegate: "claude")
         let args = AgentsCLI.ticketCreateArgs(
             draft: draft,
-            screenshotPaths: ["/tmp/clip one.png", "/tmp/Muqsit's shot.png"]
+            screenshotPaths: ["/tmp/clip one.png", "/tmp/Muqsit's shot.png"],
+            binary: "/test/bin/linear"
         )
-        let linear = AgentsCLI.linearSkillBinary()
         let expected = [
-            linear, "create", "Cards show raw uuids",
+            "/test/bin/linear", "create", "Cards show raw uuids",
             "--priority", "high",
             "--project", "Agents CLI",
             "--label", "repo:agents-cli",
@@ -192,7 +193,8 @@ enum IssueSelfTest {
 
         let noDelegate = TicketDraft(title: "T", description: "D", priority: "low",
                                      project: "P", label: "repo:x", delegate: nil)
-        let noDelegateArgs = AgentsCLI.ticketCreateArgs(draft: noDelegate, screenshotPaths: [])
+        let noDelegateArgs = AgentsCLI.ticketCreateArgs(draft: noDelegate, screenshotPaths: [],
+                                                        binary: "/test/bin/linear")
         check("nil delegate omits --delegate",
               !noDelegateArgs.contains("--delegate"),
               detail: noDelegateArgs.joined(separator: " "))
@@ -215,6 +217,38 @@ enum IssueSelfTest {
               completion?.url == "https://linear.app/getrush/issue/RUSH-200/cards-show-raw-uuids")
         check("no created id yields no completion",
               AgentsCLI.ticketCompletion(output: "ticket create failed") == nil)
+        check("uses final actionable failure line",
+              AgentsCLI.ticketCreateFailureMessage("context\nauthentication failed\n") == "authentication failed")
+        check("uses generic failure when process emitted nothing",
+              AgentsCLI.ticketCreateFailureMessage("") == "linear create exited with an error.")
+    }
+
+    private static func testLinearBinaryResolution() {
+        let dirs = AgentsCLI.linearSearchDirectories(home: "/Users/test", path: "/usr/bin:/opt/homebrew/bin")
+        check("official linear install is first", dirs.first == "/Users/test/.local/bin")
+        check("linear search dirs are deduped",
+              dirs.filter { $0 == "/opt/homebrew/bin" }.count == 1)
+
+        let fixture = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("menubar-linear-test-\(ProcessInfo.processInfo.processIdentifier)",
+                                    isDirectory: true)
+        let executable = fixture.appendingPathComponent("linear")
+        let blocked = fixture.appendingPathComponent("blocked")
+        try? FileManager.default.createDirectory(at: fixture, withIntermediateDirectories: true)
+        try? Data("#!/bin/sh\nexit 0\n".utf8).write(to: executable)
+        try? Data("not executable\n".utf8).write(to: blocked)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: blocked.path)
+        defer { try? FileManager.default.removeItem(at: fixture) }
+
+        check("resolves a real executable from supplied directories",
+              AgentsCLI.executable(named: "linear", in: [fixture.path]) == executable.path)
+        check("rejects a non-executable file",
+              AgentsCLI.executable(named: "blocked", in: [fixture.path]) == nil)
+        check("missing executable resolves to nil",
+              AgentsCLI.executable(named: "definitely-not-linear", in: [fixture.path]) == nil)
+        check("missing CLI copy is actionable",
+              AgentsCLI.linearNotFoundMessage.contains("~/.local/bin/linear"))
     }
 
     // The autonomous fix path must carry screenshots through and name runs with
@@ -645,7 +679,7 @@ enum IssueSelfTest {
         check("cmd-click opens the ticket instead of dispatching",
               opened?.identifier == t.identifier && dispatched == nil)
 
-        let scopeArgs = AgentsCLI.linearTicketArgs(project: "Agents CLI")
+        let scopeArgs = AgentsCLI.linearTicketArgs(project: "Agents CLI", binary: "/test/bin/linear")
         check("the ticket query asks for every open ticket of the project",
               scopeArgs.contains("--all") && scopeArgs.contains("--status")
                   && scopeArgs.contains("open") && scopeArgs.contains("--cycle")
