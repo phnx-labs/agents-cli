@@ -122,6 +122,18 @@ function runAgents(home: string, args: string[], extraEnv: Record<string, string
       AGENTS_REAL_HOME: home,
       SHELL: '/bin/zsh',
       AGENTS_SYNC_MACHINE_ID: DEVICE_ID,
+      // This suite exercises real CLI usage against on-disk fixtures, including
+      // legacy pre-migration `agents.yaml` layouts (`versions:`/`agents:` still
+      // central rather than split into the machine-local history/device files) --
+      // migration running is part of what a real non-dev install does on first
+      // touch, and some fixtures below depend on it actually running. Dev builds
+      // (this repo's own tsx/dist invocations, detectDevBuild()) default
+      // AGENTS_SKIP_MIGRATION on to protect a real developer's ~/.agents/ while
+      // iterating; override that default here since these are throwaway temp
+      // homes, not a real developer's, and the whole point is exercising the
+      // real non-dev-build behavior (RUSH-2749). A specific test can still force
+      // it off via extraEnv.
+      AGENTS_SKIP_MIGRATION: '0',
       ...extraEnv,
     },
     encoding: 'utf-8',
