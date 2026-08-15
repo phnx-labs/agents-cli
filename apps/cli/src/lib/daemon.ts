@@ -1543,12 +1543,29 @@ export function writeOwnerOnlyServiceManifest(filePath: string, content: string)
  * credential at all. Routine runs authenticate through the per-account
  * CLAUDE_CONFIG_DIR login on this device, exactly like an interactive
  * `agents run`, so no credential ever touches the service manifest.
+ *
+ * RUSH-2639: launchd does NOT inherit `launchctl load`'s caller's process
+ * environment — a spawned daemon only ever sees the login session's default
+ * env plus whatever this dict adds/overrides. Before this fix the dict carried
+ * only PATH, so HOME resolved to the launchd session's own value regardless of
+ * what HOME the process that generated (and loaded) the plist was running
+ * under. In production that's a no-op (the login session's HOME already is the
+ * real HOME), but under a hermetic test harness that redirects HOME to a
+ * fork-private sandbox, a launchd-started daemon silently escaped the sandbox
+ * and bootstrapped `~/.agents` (.cache/.history/.system/routines) in the
+ * developer's/runner's REAL home. Baking HOME (and the AGENTS_REAL_HOME seam
+ * every version-home consumer honors, see tests/setup.ts) into the plist at
+ * generation time makes the launchd child inherit the SAME home the caller
+ * resolved, exactly like the plain detached-spawn path already does via
+ * `env: {...process.env}`.
  */
 export function generateLaunchdPlist(
   agentsBin: string = getAgentsBinPath(),
 ): string {
   const launch = getDaemonLaunch(agentsBin);
   const logPath = getDaemonLogPath();
+  const home = process.env.HOME || os.homedir();
+  const realHome = process.env.AGENTS_REAL_HOME || home;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -1574,6 +1591,10 @@ ${[launch.command, ...launch.args].map((arg) => `    <string>${xmlEscape(arg)}</
   <dict>
     <key>PATH</key>
     <string>${daemonPathValue(agentsBin, ['/usr/local/bin', '/usr/bin', '/bin', '/opt/homebrew/bin', `${os.homedir()}/.bun/bin`])}</string>
+    <key>HOME</key>
+    <string>${xmlEscape(home)}</string>
+    <key>AGENTS_REAL_HOME</key>
+    <string>${xmlEscape(realHome)}</string>
   </dict>
 </dict>
 </plist>`;
@@ -1591,12 +1612,21 @@ function systemdExecArg(value: string): string {
  * credential at all. Routine runs authenticate through the per-account
  * CLAUDE_CONFIG_DIR login on this device, exactly like an interactive
  * `agents run`, so no credential ever touches the unit file.
+ *
+ * RUSH-2639: same seam as `generateLaunchdPlist` — a systemd --user unit is
+ * started by the user's systemd instance, not the process that generated the
+ * unit, so HOME is whatever that session provides unless this file pins it.
+ * Baking HOME (and AGENTS_REAL_HOME) in at generation time keeps a
+ * hermetic-test-started unit inside its sandbox instead of resolving against
+ * the real account home.
  */
 export function generateSystemdUnit(
   agentsBin: string = getAgentsBinPath(),
 ): string {
   const launch = getDaemonLaunch(agentsBin);
   const execStart = [launch.command, ...launch.args].map(systemdExecArg).join(' ');
+  const home = process.env.HOME || os.homedir();
+  const realHome = process.env.AGENTS_REAL_HOME || home;
 
   return `[Unit]
 Description=Agents Daemon - Scheduled Job Runner
@@ -1610,6 +1640,8 @@ ExecStart=${execStart}
 Restart=always
 RestartSec=${DAEMON_THROTTLE_SECONDS}
 Environment=PATH=${daemonPathValue(agentsBin, ['/usr/local/bin', '/usr/bin', '/bin'])}
+Environment=HOME=${home}
+Environment=AGENTS_REAL_HOME=${realHome}
 
 [Install]
 WantedBy=default.target`;
