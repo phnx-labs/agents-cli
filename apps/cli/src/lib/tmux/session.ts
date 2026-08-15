@@ -463,13 +463,14 @@ export async function paneExitStatus(pane: string, socket?: string): Promise<Pan
  * Best-effort — returns false when tmux rejects the hook so callers do not
  * stamp a schema marker and daemon reconciliation can retry later.
  */
-export async function setSessionHook(name: string, hook: string, command: string, socket?: string): Promise<boolean> {
+export async function setSessionHook(name: string, hook: string, command: string, socket?: string, timeoutMs?: number): Promise<boolean> {
   assertValidSessionName(name);
   const sock = socket ?? getDefaultSocketPath();
   const result = await runTmux({
     socket: sock,
     args: ['set-hook', '-t', name, hook, command],
     throwOnError: false,
+    timeoutMs,
   }).catch(() => null);
   return result?.code === 0;
 }
@@ -504,6 +505,16 @@ export const AGENT_HOOK_SCHEMA = 5;
 const HOOK_SCHEMA_OPTION = '@ag_hook_schema';
 
 /**
+ * Bound on every tmux call made by the hook-repair path (daemon startup,
+ * upgrade migration, and single-session repair-before-attach). A wedged tmux
+ * server would otherwise hang the caller indefinitely — exactly the class of
+ * bug RUSH-2507 fixed for `listTmuxAgentSessions`'s `list-panes` call, applied
+ * here to `reconcileSessionHooks`/`repairSessionHookIfStale`'s calls so a
+ * wedged shared socket can no longer wedge daemon startup (RUSH-2435 review).
+ */
+const TMUX_HOOK_REPAIR_TIMEOUT_MS = 5_000;
+
+/**
  * The guarded `pane-died` hook. Detach the client ONLY when the agent pane dies
  * (so the blocking attach in runInTmux returns and the exit status can be read);
  * a user split's death runs the else-branch, closing just that split. The
@@ -522,14 +533,14 @@ export function agentPaneDiedHook(sessionName: string, agentPane: string): strin
 }
 
 /** Stamp a session's hook-schema marker to the current version. */
-export async function markSessionHookSchema(name: string, socket?: string): Promise<void> {
+export async function markSessionHookSchema(name: string, socket?: string, timeoutMs?: number): Promise<void> {
   const sock = socket ?? getDefaultSocketPath();
-  await runTmux({ socket: sock, args: ['set-option', '-t', name, HOOK_SCHEMA_OPTION, String(AGENT_HOOK_SCHEMA)], throwOnError: false }).catch(() => {});
+  await runTmux({ socket: sock, args: ['set-option', '-t', name, HOOK_SCHEMA_OPTION, String(AGENT_HOOK_SCHEMA)], throwOnError: false, timeoutMs }).catch(() => {});
 }
 
 /** Read a session's hook-schema marker; undefined when unset (pre-marker sessions). */
-async function readHookSchema(name: string, socket: string): Promise<string | undefined> {
-  const res = await runTmux({ socket, args: ['show-options', '-v', '-t', name, HOOK_SCHEMA_OPTION], throwOnError: false }).catch(() => null);
+async function readHookSchema(name: string, socket: string, timeoutMs?: number): Promise<string | undefined> {
+  const res = await runTmux({ socket, args: ['show-options', '-v', '-t', name, HOOK_SCHEMA_OPTION], throwOnError: false, timeoutMs }).catch(() => null);
   if (!res || res.code !== 0) return undefined;
   const v = res.stdout.trim();
   return v === '' ? undefined : v;
@@ -541,8 +552,8 @@ async function readHookSchema(name: string, socket: string): Promise<string | un
  * for sessions whose SessionMeta (which records the agent pane) predates meta
  * persistence. Undefined when the session has no panes (already torn down).
  */
-async function lowestPaneId(name: string, socket: string): Promise<string | undefined> {
-  const res = await runTmux({ socket, args: ['list-panes', '-t', name, '-F', '#{pane_id}'], throwOnError: false }).catch(() => null);
+async function lowestPaneId(name: string, socket: string, timeoutMs?: number): Promise<string | undefined> {
+  const res = await runTmux({ socket, args: ['list-panes', '-t', name, '-F', '#{pane_id}'], throwOnError: false, timeoutMs }).catch(() => null);
   if (!res || res.code !== 0) return undefined;
   const ids = res.stdout.split('\n').map(l => l.trim()).filter(id => /^%\d+$/.test(id));
   if (!ids.length) return undefined;
@@ -598,13 +609,13 @@ export async function prepareSessionForResume(
  * {@link ensureSessionHookRepaired} (single session, called before attach) so
  * the two can never drift on what counts as "repaired" (RUSH-2435).
  */
-async function repairSessionHookIfStale(name: string, sock: string, meta: SessionMeta | undefined): Promise<boolean> {
-  if (await readHookSchema(name, sock) === String(AGENT_HOOK_SCHEMA)) return false;
-  const agentPane = meta?.pane ?? await lowestPaneId(name, sock);
+async function repairSessionHookIfStale(name: string, sock: string, meta: SessionMeta | undefined, timeoutMs: number = TMUX_HOOK_REPAIR_TIMEOUT_MS): Promise<boolean> {
+  if (await readHookSchema(name, sock, timeoutMs) === String(AGENT_HOOK_SCHEMA)) return false;
+  const agentPane = meta?.pane ?? await lowestPaneId(name, sock, timeoutMs);
   if (!agentPane) return false;
-  const installed = await setSessionHook(name, 'pane-died', agentPaneDiedHook(name, agentPane), sock);
+  const installed = await setSessionHook(name, 'pane-died', agentPaneDiedHook(name, agentPane), sock, timeoutMs);
   if (!installed) return false;
-  await markSessionHookSchema(name, sock);
+  await markSessionHookSchema(name, sock, timeoutMs);
   return true;
 }
 
@@ -633,7 +644,7 @@ export async function reconcileSessionHooks(socket?: string): Promise<{ scanned:
   if (!fs.existsSync(sock)) return { scanned: 0, reconciled: 0 };
   let sessions: ListedSession[];
   try {
-    sessions = await listSessions({ socket: sock });
+    sessions = await listSessions({ socket: sock, timeoutMs: TMUX_HOOK_REPAIR_TIMEOUT_MS });
   } catch {
     return { scanned: 0, reconciled: 0 };
   }
@@ -669,7 +680,7 @@ export async function ensureSessionHookRepaired(name: string, socket?: string): 
  *  - tmux session with no meta → returned without `meta` (external session)
  *  - meta file with no tmux session → meta deleted (stale)
  */
-export async function listSessions(opts: { socket?: string } = {}): Promise<ListedSession[]> {
+export async function listSessions(opts: { socket?: string; timeoutMs?: number } = {}): Promise<ListedSession[]> {
   const socket = opts.socket ?? getDefaultSocketPath();
   if (!fs.existsSync(socket)) {
     // No server has ever run — clean orphan metas defensively.
@@ -683,6 +694,7 @@ export async function listSessions(opts: { socket?: string } = {}): Promise<List
     socket,
     args: ['list-sessions', '-F', fmt],
     throwOnError: false,
+    timeoutMs: opts.timeoutMs,
   });
 
   // tmux returns nonzero with "no server running" or "no sessions" — both mean empty.
