@@ -243,8 +243,11 @@ directly into the agent's config.
 ```
 Source: ~/.agents/mcp/*.yaml       Per-agent destinations:
 
-┌────────────────────┐             Agy     → <home>/.gemini/config/mcp_config.json
-│ github.yaml        │                      · key: mcpServers.<name> = {command,args,env}
+┌────────────────────┐             Agy     → ~/.gemini/config/mcp_config.json (REAL home,
+│ github.yaml        │                        not version-scoped — agy reads one
+│                    │                        shared file for every version)
+│                    │                      · key: mcpServers.<name> = {command,args,env};
+│                    │                        a remote server is keyed serverUrl
 │ ───────            │
 │ name: github       │                      · key: mcpServers.<name> = {command,args,env}
 │ transport: stdio   │             Cursor  → <home>/.cursor/mcp.json
@@ -267,10 +270,17 @@ Behavior rules, per `src/lib/mcp.ts`:
    Cursor:
 
    ```
-   config = JSON.parse(fs.readFileSync(settings.json)) || {}
+   config = readExistingConfig(settings.json)   // {} when absent or empty;
+                                                // THROWS when present-but-unparseable
    config.mcpServers[server.name] = { command, args, env }  // or { url }
    fs.writeFileSync(settings.json, JSON.stringify(config, null, 2))
    ```
+
+   A config that exists but does not parse is refused, never rebuilt from `{}` —
+   these files hold far more than MCP (hermes' whole `config.yaml`, openclaw's
+   `openclaw.json`), so resetting one destroys everything else in it. JSONC
+   configs go through the shared string-literal-aware `stripJsonComments`, so a
+   URL inside a string (`"$schema": "https://opencode.ai/config.json"`) survives.
 
    User-owned top-level keys (theme, editor settings, etc.) are preserved
    because the merge only touches `mcpServers`.

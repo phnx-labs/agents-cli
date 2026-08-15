@@ -822,4 +822,48 @@ describe('installMcpServers handled-agent tracking', () => {
     expect(result.applied).toContain('srv');
     expect(JSON.parse(fs.readFileSync(configPath, 'utf-8')).mcpServers.srv).toBeTruthy();
   });
+  it.skipIf(IS_WINDOWS)('keeps a URL inside a JSONC string intact when merging opencode MCP', () => {
+    // A `//`-to-end-of-line regex eats the `//` in
+    // "$schema": "https://opencode.ai/config.json" — which every
+    // opencode-generated config carries — so the writer would refuse a config
+    // the reader parses fine. Both must use the string-literal-aware stripper.
+    const home = makeTempHome();
+    const version = '0.1.0';
+    const userMcpDir = path.join(home, '.agents', 'mcp');
+    fs.mkdirSync(userMcpDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(userMcpDir, 'srv.yaml'),
+      ['name: srv', 'transport: stdio', 'command: node', 'args: ["s.js"]', ''].join('\n'),
+      'utf-8'
+    );
+
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'opencode', version, 'home');
+    const configPath = path.join(versionHome, '.config', 'opencode', 'opencode.jsonc');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, [
+      '{',
+      '  // a real comment, which must go',
+      '  "$schema": "https://opencode.ai/config.json",',
+      '  "theme": "tokyonight"',
+      '}',
+      '',
+    ].join('\n'), 'utf-8');
+
+    const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { installMcpServers } from ${JSON.stringify(moduleUrl)};
+      console.log(JSON.stringify(installMcpServers('opencode', ${JSON.stringify(version)}, ${JSON.stringify(versionHome)})));
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim());
+    expect(result.errors).toEqual([]);
+    expect(result.applied).toContain('srv');
+
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    // The schema URL survived, the neighbouring keys survived, and MCP landed.
+    expect(config.$schema).toBe('https://opencode.ai/config.json');
+    expect(config.theme).toBe('tokyonight');
+    expect(config.mcp.srv).toBeTruthy();
+  });
 });

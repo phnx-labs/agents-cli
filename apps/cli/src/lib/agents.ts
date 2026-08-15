@@ -2828,8 +2828,13 @@ function extractNpmVersion(args: string[]): string | undefined {
 /**
  * Strip JSON comments for JSONC parsing.
  * Only removes comments outside of strings.
+ *
+ * Exported because the MCP writer needs the SAME parser the reader uses: a
+ * naive `//`-to-end-of-line regex eats the `//` inside
+ * `"$schema": "https://opencode.ai/config.json"`, which every opencode-generated
+ * config carries.
  */
-function stripJsonComments(content: string): string {
+export function stripJsonComments(content: string): string {
   let result = '';
   let inString = false;
   let escape = false;

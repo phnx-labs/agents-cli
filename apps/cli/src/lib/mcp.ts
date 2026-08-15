@@ -18,7 +18,7 @@ import type { AgentId } from './types.js';
 import { getMcpDir, getUserMcpDir, getProjectAgentsDir, getVersionsDir, getUserAgentsDir } from './state.js';
 import { getBinaryPath, getVersionHomePath } from './versions.js';
 import { IS_WINDOWS, execFileShellSpec } from './platform/index.js';
-import { AGENTS, getMcpConfigPathForHome, getProjectMcpConfigPath } from './agents.js';
+import { AGENTS, getMcpConfigPathForHome, getProjectMcpConfigPath, stripJsonComments } from './agents.js';
 import { MCP_TARGETS, mcpWriteUnsupportedReason } from './mcp-registry.js';
 import { isCapable } from './capabilities.js';
 
@@ -576,9 +576,17 @@ function readExistingConfig(
   return parsed as Record<string, unknown>;
 }
 
-/** Strip `//` and block comments so a JSONC config parses as JSON. */
+/**
+ * Parse a JSONC config.
+ *
+ * Uses the shared string-literal-aware `stripJsonComments` — the same one the
+ * read path uses on this very file. A regex that blanks `//` to end-of-line
+ * destroys `"$schema": "https://opencode.ai/config.json"`, which every
+ * opencode-generated config carries, and would make the writer disagree with
+ * the reader about the same bytes.
+ */
 function parseJsonc(raw: string): unknown {
-  return JSON.parse(raw.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, ''));
+  return JSON.parse(stripJsonComments(raw));
 }
 
 /**
@@ -604,12 +612,15 @@ export function writeMcpConfig(
     return;
   }
 
-  const unsupported = mcpWriteUnsupportedReason(agentId);
-  if (unsupported) {
-    throw new Error(`cannot write MCP config: ${unsupported}`);
+  // Narrowed, not asserted: this is what lets the `never` guard on the default
+  // arm below be a real compile-time check rather than a cosmetic one.
+  const target = MCP_TARGETS[agentId];
+  if (!target || target.format === null) {
+    throw new Error(`cannot write MCP config: ${mcpWriteUnsupportedReason(agentId)}`);
   }
 
-  switch (MCP_TARGETS[agentId]!.format) {
+  const format = target.format;
+  switch (format) {
     // Claude's `{ "mcpServers": {...} }` schema, shared by cursor, kimi, droid,
     // omp (.mcp.json) and Oz (.warp/.mcp.json): stdio carries command/args/env,
     // remote carries url + optional headers.
@@ -835,9 +846,10 @@ export function writeMcpConfig(
     }
     default: {
       // Unreachable: mcpWriteUnsupportedReason above rejects a null format and
-      // every McpFormat has an arm. A newly added format lands here as a
-      // compile error rather than a silent no-op.
-      const unhandled: never = MCP_TARGETS[agentId]!.format as never;
+      // every McpFormat has an arm. The assignment is deliberately NOT cast —
+      // `as never` would make it unfailable and the guard cosmetic. Adding an
+      // McpFormat without an arm above is a compile error here.
+      const unhandled: never = format;
       throw new Error(`unhandled MCP config format: ${String(unhandled)}`);
     }
   }

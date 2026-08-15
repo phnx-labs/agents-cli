@@ -924,7 +924,10 @@ function agentSyncJson(
   repo?: string,
 ): Record<string, unknown> {
   return {
-    ok: true,
+    // A refused resource is not a clean sync. `ok` was hardcoded true, so the
+    // machine surface (`--host all` fan-out) reported success for exactly the
+    // silent no-op this changed (RUSH-2677).
+    ok: result.declined.length === 0,
     mode: 'agent',
     agent,
     version,
@@ -940,6 +943,7 @@ function agentSyncJson(
     workflows: result.workflows,
     projectSkipped: result.projectSkipped,
     pruned: result.pruned,
+    declined: result.declined,
   };
 }
 
