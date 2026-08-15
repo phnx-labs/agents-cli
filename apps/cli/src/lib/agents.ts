@@ -574,7 +574,8 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     supportsHooks: true,
     // Plugins: Open Plugins under ~/.agents/plugins/<name>/ (same layout as
     // agents-cli source). Version isolation copies into versionHome/.agents/plugins/.
-    // Workflows sync as Goose recipe YAML; permissions sync to permission.yaml.
+    // Workflows sync as Goose recipe YAML. Permissions are NOT supported:
+    // permission.yaml gates whole tools, so canonical rules cannot round-trip.
     // Commands: a Goose slash command is a recipe YAML under
     // ~/.config/goose/commands/<name>.yaml, registered in ~/.config/goose/config.yaml
     // under `slash_commands: [{ command, recipe_path }]` (see goose-commands.ts).

@@ -1248,7 +1248,7 @@ function readCodexPermissions(
  *
  * Every other allowlist-capable harness returns the canonical `PermissionSet`
  * that `PERMISSION_TARGETS` reads back. Before RUSH-2676 they returned `null`,
- * so permissions written for cursor, antigravity, grok, goose, kimi, droid,
+ * so permissions written for cursor, antigravity, grok, kimi, droid,
  * copilot, kiro, openclaw and hermes were reported as absent.
  */
 export function readAgentPermissions(

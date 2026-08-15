@@ -459,7 +459,7 @@ Examples:
         //
         // This used to hardcode `.json`/`.jsonc`/`.toml` plus a `.claude`/
         // `.opencode`/`.codex` substring, which excluded the ten other harnesses
-        // the CLI writes -- and excluded kiro/goose/hermes twice over, since
+        // the CLI writes -- and excluded kiro/hermes twice over, since
         // their configs are YAML. The registry already answers this by matching
         // each harness's own declared path, so ask it (RUSH-2676).
         const isAgentConfig = detectPermissionAgentFromPath(localPath) !== null;

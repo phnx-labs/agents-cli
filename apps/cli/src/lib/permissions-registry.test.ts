@@ -101,7 +101,7 @@ describe('round trip preserves the Bash rules a harness can express', () => {
 
 describe('exportPermissionsFromPath detects every harness by its own path', () => {
   // It used to auto-detect only `.claude` / `.opencode` / `.codex` fragments, so
-  // pointing it at a written cursor/kiro/goose config returned null.
+  // pointing it at a written cursor/kiro/hermes config returned null.
   for (const agent of capableAgents('allowlist')) {
     it(`detects ${agent} from the file the writer produced`, () => {
       const home = makeTempHome();
@@ -136,7 +136,7 @@ describe('exportPermissionsFromPath detects every harness by its own path', () =
 describe('allow and deny never cross on the way back', () => {
   // The reverse readers rebuild allow/deny from formats that encode polarity
   // very differently — Grok's `action`, Kimi's `decision`, Kiro's `effect`,
-  // Goose's always_allow/never_allow, Hermes' approvals.deny, OpenClaw's
+  // Hermes' approvals.deny, OpenClaw's
   // alsoAllow/deny. A polarity slip in any of them silently turns a deny into a
   // grant, which is the worst failure this registry could have.
   for (const agent of capableAgents('allowlist')) {
