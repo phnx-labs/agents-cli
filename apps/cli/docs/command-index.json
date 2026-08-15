@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 89,
-  "commands": 543,
+  "groups": 90,
+  "commands": 551,
   "root": {
     "name": "agents",
     "path": "",
@@ -16687,6 +16687,296 @@
         }
       ],
       "subcommands": []
+    },
+    {
+      "name": "route",
+      "path": "route",
+      "aliases": [],
+      "description": "Named routers -- reusable, task-typed allowlists of harnesses x models/tiers x linked accounts.",
+      "args": [],
+      "options": [
+        {
+          "flags": "-h, --help",
+          "description": "Show help",
+          "short": "-h",
+          "long": "--help",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        }
+      ],
+      "examples": "# Create a router scoped to two harnesses, capped at a tier\n      agents route create research --harness gemini,kimi --tier cheap,default\n\n      # Narrow one harness's model set\n      agents route allow research kimi kimi-k2\n\n      # Link accounts so routing under this router only ever picks them\n      agents route link-account research gemini personal\n      agents route link-account research kimi work\n\n      # Inspect it\n      agents route show research\n      agents route list --json",
+      "notes": "A router is a generalization of a profile -- a profile is a router\n      pinned to one harness and one account. It never resolves a target\n      outside its declared harness/model/tier allowlist or linked accounts.\n\n      Routers are a layered resource (project > user > system, like commands,\n      skills, and profiles) but 'agents route create'/'allow'/'link-account'\n      always write to the user layer (~/.agents/routers/<name>.yml).",
+      "subcommands": [
+        {
+          "name": "allow",
+          "path": "route allow",
+          "aliases": [],
+          "description": "Set (replace) a harness's eligible model/tier allowlist under a router.",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "harness",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "models",
+              "required": true,
+              "variadic": true,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "create",
+          "path": "route create",
+          "aliases": [],
+          "description": "Create a named router with an initial harness + tier allowlist.",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--harness <list>",
+              "description": "Comma-separated harness ids to allow, e.g. gemini,kimi",
+              "long": "--harness",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--tier <list>",
+              "description": "Comma-separated tier tokens applied to every listed harness, e.g. cheap,default",
+              "long": "--tier",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--task <type>",
+              "description": "Free-text task type this router serves, e.g. research",
+              "long": "--task",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "link-account",
+          "path": "route link-account",
+          "aliases": [],
+          "description": "Link a durable credential account to a harness under a router.",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "harness",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "account",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "list",
+          "path": "route list",
+          "aliases": [],
+          "description": "List every configured router.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Emit machine-readable JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "rm",
+          "path": "route rm",
+          "aliases": [
+            "remove"
+          ],
+          "description": "Delete a router.",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "show",
+          "path": "route show",
+          "aliases": [
+            "view"
+          ],
+          "description": "Show a router's harness/model/account allowlist, weights, and hijack flag.",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Emit machine-readable JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "unlink-account",
+          "path": "route unlink-account",
+          "aliases": [],
+          "description": "Unlink a durable credential account from a harness under a router.",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "harness",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "account",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        }
+      ]
     },
     {
       "name": "routines",
