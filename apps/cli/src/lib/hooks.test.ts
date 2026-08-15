@@ -628,3 +628,18 @@ describe('repairManagedHookRuntimeArtifacts', () => {
     expect(r.tooOld.attempts).toEqual([]);
   });
 });
+
+describe('installSessionTrackerHookSync — failure reasons are never empty', () => {
+  it('returns installed:false with a NON-EMPTY error when the hook cannot be installed', async () => {
+    const { installSessionTrackerHookSync } = await import('./hooks.js');
+    // antigravity passes the CLI-side supports(agent,'hooks') gate, but the
+    // session-tracker child declines it (no SessionStart hook event) and prints
+    // the reason to STDOUT. Pre-fix, err.stderr was an empty-but-truthy Buffer,
+    // so the surfaced error was '' — the regression this pins. In an environment
+    // where the package is unbuilt and tsx is absent, the static not-built
+    // message satisfies the same non-empty contract.
+    const res = installSessionTrackerHookSync('antigravity');
+    expect(res.installed).toBe(false);
+    expect((res.error ?? '').trim().length).toBeGreaterThan(0);
+  });
+});

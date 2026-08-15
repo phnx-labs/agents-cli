@@ -3842,12 +3842,26 @@ export async function installSessionTrackerHook(
   try {
     await execFileAsync(invocation.command, invocation.args, {
       env: { ...process.env, HOME: home ?? process.env.HOME },
+      encoding: 'utf8',
     });
     return { installed: true };
   } catch (err) {
-    const message = (err as Error & { stderr?: string }).stderr ?? (err as Error).message;
-    return { installed: false, error: message };
+    return { installed: false, error: installFailureMessage(err) };
   }
+}
+
+/**
+ * The child reports its refusal reason on stdout (its HOOK_SUPPORT table), not
+ * stderr — and a Buffer-typed empty stderr is truthy, so a bare `err.stderr ??
+ * err.message` surfaced an empty string. Prefer the first NON-EMPTY stream.
+ */
+function installFailureMessage(err: unknown): string {
+  const e = err as Error & { stdout?: string | Buffer; stderr?: string | Buffer };
+  for (const stream of [e.stderr, e.stdout]) {
+    const text = stream == null ? '' : String(stream).trim();
+    if (text.length > 0) return text;
+  }
+  return e.message;
 }
 
 /**
@@ -3875,10 +3889,10 @@ export function installSessionTrackerHookSync(
     execFileSync(invocation.command, invocation.args, {
       env: { ...process.env, HOME: home ?? process.env.HOME },
       stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
     });
     return { installed: true };
   } catch (err) {
-    const message = (err as Error & { stderr?: string }).stderr ?? (err as Error).message;
-    return { installed: false, error: message };
+    return { installed: false, error: installFailureMessage(err) };
   }
 }

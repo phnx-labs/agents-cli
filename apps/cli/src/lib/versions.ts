@@ -1768,7 +1768,10 @@ export async function installVersion(
     // here on; the release it carries is recorded separately so `agents update`
     // can move the release without invalidating any reference to the label.
     createInstallation(agent, installedVersion, installedVersion);
-    await installSessionTrackerHook(agent, installedVersion);
+    const trackerInstall = await installSessionTrackerHook(agent, installedVersion);
+    if (!trackerInstall.installed && trackerInstall.error) {
+      console.warn(`agents: SessionStart hook not installed for ${agent}@${installedVersion}: ${trackerInstall.error}`);
+    }
     // The self-updating binary just changed on disk — drop the cached
     // `--version` so `agents view` reflects the freshly-installed release.
     invalidateLiveVersionCache(agent);
@@ -1939,7 +1942,10 @@ export async function installVersion(
 
   // Freeze this installation's identity (see the installScript branch above).
   createInstallation(agent, healthyVersion, healthyVersion);
-  await installSessionTrackerHook(agent, healthyVersion);
+  const trackerInstall = await installSessionTrackerHook(agent, healthyVersion);
+  if (!trackerInstall.installed && trackerInstall.error) {
+    console.warn(`agents: SessionStart hook not installed for ${agent}@${healthyVersion}: ${trackerInstall.error}`);
+  }
   emit('version.install', { agent, version: healthyVersion });
   return { success: true, installedVersion: healthyVersion };
 }
