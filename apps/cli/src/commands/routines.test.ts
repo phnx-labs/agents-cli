@@ -101,6 +101,27 @@ function run(
   });
 }
 
+/** POSIX single-quote a string so it is safe to embed in a `/bin/sh -c` script. */
+function shSingleQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Read a run's status from meta.json, tolerating a torn read of a file another
+ * process is mid-write on (writeRunMeta is not atomic — same defensive parse
+ * `readRunMeta` in lib/routines.ts already applies to production readers).
+ * Returns null when the file is absent, empty, or not yet valid JSON — the
+ * caller polls again rather than treating a transient read race as a failure.
+ */
+function readRunStatus(runsDir: string, runId: string): string | null {
+  const metaPath = path.join(runsDir, runId, 'meta.json');
+  try {
+    return JSON.parse(fs.readFileSync(metaPath, 'utf8')).status ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function readRoutineYaml(home: string, name: string): Record<string, unknown> | null {
   const p = path.join(home, '.agents', 'routines', `${name}.yml`);
   if (!fs.existsSync(p)) return null;
@@ -1496,16 +1517,19 @@ describeRoutines('routines run --json', () => {
   });
 
   it('two independent CLI processes do not serialize overlapping foreground runs', async () => {
+    // The overlap window must stay open until this test is done probing it —
+    // a fixed `sleep N` raced real wall-clock time against source-mode CLI
+    // startup (10-15s+ on a loaded CI shard) and went flaky under contention.
+    // Instead, the job blocks on an observable state transition this test
+    // controls directly: a stop-file it does not create until AFTER it has
+    // asserted the second process was skipped. The `i -lt 1200` bound (60s)
+    // is a safety net for a wedged test, not the synchronization mechanism.
+    const stopFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-routines-overlap-')), 'stop');
     const home = makeHome({
       jobs: [{
         name: 'overlap-job',
         schedule: '0 3 * * *',
-        // Source-mode CLI startup under CI can take 10-15s on a loaded shard.
-        // The sleep must outlast two such startups: we observe the claim written
-        // by the first process (readiness signal), then the second process must
-        // also finish its own startup and read the claim before the sleep ends.
-        // 30s provides ~2x margin over the observed worst-case startup time.
-        command: 'sleep 30',
+        command: `i=0; while [ ! -f ${shSingleQuote(stopFile)} ] && [ "$i" -lt 1200 ]; do sleep 0.05; i=$((i + 1)); done`,
         mode: 'auto',
         effort: 'auto',
         timeout: '10m',
@@ -1521,6 +1545,13 @@ describeRoutines('routines run --json', () => {
       AGENTS_DEVICES_DIR: path.join(home, '.agents', '.history', 'devices'),
       AGENTS_SKIP_MIGRATION: '1',
     };
+    const releaseFirst = () => {
+      try {
+        fs.writeFileSync(stopFile, '');
+      } catch {
+        // best-effort — the temp dir may already be gone
+      }
+    };
     try {
       const first = spawn('node', ['--import', TSX_IMPORT, CLI_ENTRYPOINT, 'routines', 'run', 'overlap-job', '--json'], {
         cwd: REPO_ROOT,
@@ -1535,17 +1566,16 @@ describeRoutines('routines run --json', () => {
       first.stderr.on('data', (chunk) => { firstStderr += chunk; });
 
       // Wait until the first process writes meta.json with status 'running' —
-      // this is the readiness signal that the claim is held and the sleep has
-      // started. 30s gives the first source-mode boot plenty of headroom.
+      // the readiness signal that the claim is held. Because the job now
+      // blocks on stopFile rather than a fixed sleep, this claim cannot
+      // expire out from under the second process no matter how long its own
+      // startup takes.
       const runsDir = path.join(home, '.agents', '.history', 'runs', 'overlap-job');
       const deadline = Date.now() + 30_000;
       let observedRunning = false;
       while (Date.now() < deadline) {
         const runIds = fs.existsSync(runsDir) ? fs.readdirSync(runsDir).filter((entry) => !entry.startsWith('.')) : [];
-        if (runIds.some((runId) => {
-          const metaPath = path.join(runsDir, runId, 'meta.json');
-          return fs.existsSync(metaPath) && JSON.parse(fs.readFileSync(metaPath, 'utf8')).status === 'running';
-        })) {
+        if (runIds.some((runId) => readRunStatus(runsDir, runId) === 'running')) {
           observedRunning = true;
           break;
         }
@@ -1553,8 +1583,8 @@ describeRoutines('routines run --json', () => {
       }
       expect(observedRunning).toBe(true);
 
-      // The sleep just started when we observed 'running'. The second process
-      // has the full sleep duration to start up, observe the claim, and exit.
+      // The claim stays held (stopFile absent) for as long as this process
+      // needs — no race against a fixed sleep duration.
       const second = run(home, ['run', 'overlap-job', '--json']);
       expect(second.status, second.stderr).toBe(1);
       // Assert on raw stdout before parsing so a startup failure (empty/partial
@@ -1568,6 +1598,7 @@ describeRoutines('routines run --json', () => {
         status: 'skipped',
       });
 
+      releaseFirst();
       const firstExit = await new Promise<number | null>((resolve) => first.once('close', resolve));
       expect(firstExit, firstStderr).toBe(0);
       expect(
@@ -1579,6 +1610,10 @@ describeRoutines('routines run --json', () => {
         status: 'completed',
       });
     } finally {
+      // Unblock the first process's job even if an assertion above threw,
+      // so a failed run doesn't leave an orphaned child spinning for 60s.
+      releaseFirst();
+      fs.rmSync(path.dirname(stopFile), { recursive: true, force: true });
       fs.rmSync(home, { recursive: true, force: true });
     }
   }, 90_000);
