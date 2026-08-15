@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { flagValue, maybeRunOnHost, maybeRunStandaloneOnHost, passthroughSshOptions, runFleetPassthrough } from './passthrough.js';
+import { flagValue, maybeRunOnHost, maybeRunStandaloneOnHost, passthroughSshOptions, runFleetPassthrough, summarizeSyncResult } from './passthrough.js';
 import { machineId } from '../session/sync/config.js';
 import type { DeviceProfile, DeviceRegistry } from '../devices/registry.js';
 
@@ -545,5 +545,45 @@ describe('maybeRunStandaloneOnHost — standalone binary --host routing (RUSH-22
     expect(remoteCmds).toHaveLength(1);
     expect(remoteCmds[0]).toContain('browser');
     expect(remoteCmds[0]).toContain('start');
+  });
+});
+
+/**
+ * RUSH-2700: `agents sync --device all` injects `--json` per peer and gets back
+ * the corrected `ok` / `declined`, but the roster rendered a flat `ok`
+ * regardless — so every box showed green even where a harness's config was
+ * never written. That is the fleet-wide silent success the ticket exists to
+ * remove, one layer above where the payload was fixed.
+ */
+describe('sync fan-out roster surfaces a refused write', () => {
+  it('reports the count for an umbrella payload', () => {
+    expect(summarizeSyncResult({
+      mode: 'umbrella',
+      ok: false,
+      declined: ['Copilot@1.0.0: mcp: github: cannot write MCP config: copilot: ...'],
+    })).toBe('1 not written');
+  });
+
+  it('reports the count across versions for an agent-all payload', () => {
+    expect(summarizeSyncResult({
+      mode: 'agent-all',
+      ok: false,
+      versions: [
+        { version: '1.0.0', declined: ['mcp: a: cannot write MCP config: copilot: ...'] },
+        { version: '1.1.0', declined: ['mcp: b: cannot write MCP config: copilot: ...'] },
+      ],
+    })).toBe('2 not written');
+  });
+
+  it('stays ok when nothing was refused', () => {
+    expect(summarizeSyncResult({ mode: 'umbrella', ok: true, declined: [] })).toBe('ok');
+    expect(summarizeSyncResult({ mode: 'agent-all', ok: true, versions: [{ declined: [] }] })).toBe('ok');
+  });
+
+  it('stays ok for a peer whose payload predates the field', () => {
+    // An older agents-cli on the far side sends no `declined`; the roster must
+    // render as before rather than throw.
+    expect(summarizeSyncResult({ mode: 'umbrella', ok: true })).toBe('ok');
+    expect(summarizeSyncResult(null)).toBe('ok');
   });
 });

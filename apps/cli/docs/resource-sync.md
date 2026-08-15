@@ -210,6 +210,24 @@ A pruned resource is reported under a `Pruned from claude@<version> (removed fro
 source)` block, and the `--json` payload carries a `pruned: { commands, skills }`
 field.
 
+### Declined resources — a refused write is never a clean sync
+
+A resource agents-cli **refuses** to write (today: an MCP config whose harness
+format is not implemented — see `MCP_TARGETS` `format: null`) is reported, never
+swallowed. An empty synced list on its own reads as "nothing to do", which is how
+a harness could report a successful sync while nothing was written at all
+(RUSH-2677, RUSH-2700):
+
+- **Human output** — a `Not written to <agent>@<version>:` block naming the
+  resource and the reason. The umbrella (`agents sync`) prints a `Not written:`
+  block covering every agent it reconciled.
+- **`--json`** — every payload that can carry a decline sets `ok` from it and
+  includes a `declined: string[]`: `mode: 'agent'`, `mode: 'agent-all'` (per
+  version, under `versions[]`), and `mode: 'umbrella'`. A payload that runs no
+  sync (`nothing to sync`, any dry run, `repo-git`, `launch`) keeps `ok: true`.
+- **Fleet fan-out** — `agents sync --device all` injects `--json` per peer, so a
+  box that refused a write renders as `N not written` instead of `ok`.
+
 Pruning is **manifest-bounded**, so it never over-deletes:
 
 - **Only agents-installed resources are candidates.** The prune set is
