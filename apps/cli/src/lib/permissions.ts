@@ -32,7 +32,7 @@ import { updateGeminiSettings } from './gemini-settings.js';
 import {
   ANTIGRAVITY_ACTION_BY_TOOL,
   CANONICAL_TO_OPENCLAW_TOOL,
-  GOOSE_TOOL_BY_CANONICAL,
+  stripJsonComments,
   GROK_TOOL_BY_CANONICAL,
   KIRO_CAPABILITY_BY_TOOL,
   PERMISSION_TARGETS,
@@ -809,45 +809,6 @@ function serializeAntigravityEntries(perms: string[]): string[] {
   return Array.from(out);
 }
 
-export interface GoosePermissionConfig {
-  user: {
-    always_allow: string[];
-    ask_before: string[];
-    never_allow: string[];
-  };
-}
-
-function canonicalToGooseTool(permission: string): string | null {
-  if (BLANKET_BASH_FORMS.has(permission)) return 'developer__shell';
-  const parsed = parseCanonicalPattern(permission);
-  if (!parsed) return null;
-  return GOOSE_TOOL_BY_CANONICAL[parsed.tool] ?? null;
-}
-
-/** Convert canonical permissions to Goose's per-tool permission.yaml shape. */
-export function convertToGooseFormat(set: PermissionSet): GoosePermissionConfig {
-  const alwaysAllow = new Set<string>();
-  const neverAllow = new Set<string>();
-  for (const permission of set.allow) {
-    const tool = canonicalToGooseTool(permission);
-    if (tool) alwaysAllow.add(tool);
-  }
-  for (const permission of set.deny ?? []) {
-    const tool = canonicalToGooseTool(permission);
-    if (tool) neverAllow.add(tool);
-  }
-  for (const tool of neverAllow) {
-    alwaysAllow.delete(tool);
-  }
-  return {
-    user: {
-      always_allow: Array.from(alwaysAllow).sort(),
-      ask_before: [],
-      never_allow: Array.from(neverAllow).sort(),
-    },
-  };
-}
-
 /**
  * Convert canonical permission set to Grok format.
  * Grok reads ~/.grok/config.toml with
@@ -1168,63 +1129,6 @@ export function convertToCodexFormat(set: PermissionSet, cwd?: string): CodexPer
 // Read agent permissions from native configs
 // ============================================================================
 
-/**
- * Strip JSON comments for JSONC parsing.
- */
-function stripJsonComments(content: string): string {
-  let result = '';
-  let inString = false;
-  let escape = false;
-  let i = 0;
-
-  while (i < content.length) {
-    const char = content[i];
-    const next = content[i + 1];
-
-    if (escape) {
-      result += char;
-      escape = false;
-      i++;
-      continue;
-    }
-
-    if (char === '\\' && inString) {
-      result += char;
-      escape = true;
-      i++;
-      continue;
-    }
-
-    if (char === '"') {
-      inString = !inString;
-      result += char;
-      i++;
-      continue;
-    }
-
-    if (!inString) {
-      if (char === '/' && next === '/') {
-        while (i < content.length && content[i] !== '\n') {
-          i++;
-        }
-        continue;
-      }
-      if (char === '/' && next === '*') {
-        i += 2;
-        while (i < content.length && !(content[i] === '*' && content[i + 1] === '/')) {
-          i++;
-        }
-        i += 2;
-        continue;
-      }
-    }
-
-    result += char;
-    i++;
-  }
-
-  return result;
-}
 
 /**
  * Read Claude's current permissions from settings.json.
@@ -1748,49 +1652,6 @@ export function applyPermissionsToVersion(
       return { success: true };
     }
 
-    if (agentId === 'goose') {
-      const permissionsPath = path.join(versionHome, '.config', 'goose', 'permission.yaml');
-      let config: Record<string, unknown> = {};
-      if (fs.existsSync(permissionsPath)) {
-        const parsed = yaml.parse(fs.readFileSync(permissionsPath, 'utf-8'));
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          config = parsed as Record<string, unknown>;
-        }
-      }
-
-      const converted = convertToGooseFormat(set).user;
-      const user = (typeof config.user === 'object' && config.user !== null && !Array.isArray(config.user))
-        ? config.user as Record<string, unknown>
-        : {};
-
-      const currentAlways = Array.isArray(user.always_allow) ? user.always_allow.filter((v): v is string => typeof v === 'string') : [];
-      const currentAsk = Array.isArray(user.ask_before) ? user.ask_before.filter((v): v is string => typeof v === 'string') : [];
-      const currentNever = Array.isArray(user.never_allow) ? user.never_allow.filter((v): v is string => typeof v === 'string') : [];
-
-      if (merge) {
-        const incomingAlways = new Set(converted.always_allow);
-        const incomingNever = new Set(converted.never_allow);
-        const touched = new Set([...incomingAlways, ...incomingNever]);
-        const always = new Set(currentAlways.filter(tool => !touched.has(tool)));
-        const ask = new Set(currentAsk.filter(tool => !touched.has(tool)));
-        const never = new Set(currentNever.filter(tool => !touched.has(tool)));
-        for (const tool of incomingAlways) always.add(tool);
-        for (const tool of incomingNever) never.add(tool);
-        user.always_allow = Array.from(always).sort();
-        user.ask_before = Array.from(ask).sort();
-        user.never_allow = Array.from(never).sort();
-      } else {
-        user.always_allow = converted.always_allow;
-        user.ask_before = converted.ask_before;
-        user.never_allow = converted.never_allow;
-      }
-
-      config.user = user;
-      fs.mkdirSync(path.dirname(permissionsPath), { recursive: true });
-      fs.writeFileSync(permissionsPath, yaml.stringify(config), 'utf-8');
-      return { success: true };
-    }
-
     if (agentId === 'kimi') {
       const configPath = path.join(versionHome, '.kimi-code', 'config.toml');
       let config: Record<string, unknown> = {};
@@ -2092,22 +1953,6 @@ export function codexToCanonical(perms: CodexPermissions): PermissionSet {
 }
 
 /**
- * Export an agent's current permissions to canonical format.
- *
- * Covers every allowlist-capable harness through `PERMISSION_TARGETS`. It used
- * to answer for claude/opencode/codex only, so permissions written for the other
- * ten harnesses exported as absent (RUSH-2676). The projection is lossy per
- * harness — see each target's `lossyBecause`.
- */
-function exportAgentPermissions(
-  agentId: AgentId,
-  scope: 'user' | 'project' = 'user',
-  cwd?: string
-): PermissionSet | null {
-  return readCanonicalPermissions(agentId, scope, cwd);
-}
-
-/**
  * Export permissions from a specific config file path to canonical format,
  * auto-detecting the harness from the path.
  *
@@ -2129,7 +1974,7 @@ export function exportPermissionsFromPath(filePath: string): PermissionSet | nul
  * each registry target declares. Longer (more specific) suffixes win, so
  * `.kiro/settings/permissions.yaml` is never mistaken for a bare `permissions.yaml`.
  */
-function detectPermissionAgentFromPath(filePath: string): AgentId | null {
+export function detectPermissionAgentFromPath(filePath: string): AgentId | null {
   const normalized = path.resolve(filePath).split(path.sep).join('/');
   let best: { agentId: AgentId; length: number } | null = null;
 

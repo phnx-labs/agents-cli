@@ -3,10 +3,11 @@
  *
  * Every allowlist-capable agent gets ONE entry (`PERMISSION_TARGETS`) describing
  * where its permissions live and how to read that file back into the canonical
- * `PermissionSet`. `agents permissions list` and `agents permissions export`
- * used to dispatch through hand-written 3-arm switches while
+ * `PermissionSet`. `agents permissions list <agent>` and the config-file import
+ * behind `agents permissions add <path>` used to dispatch through hand-written
+ * 3-arm switches while
  * `applyPermissionsToVersion` wrote 13 harnesses, so permissions were written
- * for cursor, antigravity, grok, goose, kimi, droid, copilot, kiro, openclaw and
+ * for cursor, antigravity, grok, kimi, droid, copilot, kiro, openclaw and
  * hermes and then reported as absent for all ten (RUSH-2676).
  *
  * The key set is pinned to `capableAgents('allowlist')` by
@@ -31,6 +32,7 @@
  * `~/.agents/permissions/` set, not a harness's config.
  */
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import * as TOML from 'smol-toml';
@@ -45,18 +47,6 @@ export const GROK_TOOL_BY_CANONICAL: Record<string, string | undefined> = {
   write: 'edit',
   grep: 'grep',
   webfetch: 'webfetch',
-};
-
-/** Canonical tool -> Goose's `developer__*` tool ids. */
-export const GOOSE_TOOL_BY_CANONICAL: Record<string, string | undefined> = {
-  bash: 'developer__shell',
-  read: 'developer__text_editor',
-  write: 'developer__text_editor',
-  edit: 'developer__text_editor',
-  grep: 'developer__analyze',
-  glob: 'developer__analyze',
-  webfetch: 'developer__fetch',
-  mcp: undefined,
 };
 
 /** Canonical tool -> Kiro CLI v3 capability id. */
@@ -98,7 +88,7 @@ export const ANTIGRAVITY_ACTION_BY_TOOL: Record<string, string | undefined> = {
  * native id. Several canonical tools collapse onto one native id, so the
  * inverse must pick a representative; declaration order in the forward table is
  * that choice, which is why `read` (declared before `grep`/`glob`) represents
- * Kiro's `fs_read` and Goose's `developer__analyze` yields `grep`.
+ * Kiro's `fs_read`.
  */
 function invertFirstWins(forward: Record<string, string | undefined>): Record<string, string> {
   const out: Record<string, string> = {};
@@ -110,7 +100,6 @@ function invertFirstWins(forward: Record<string, string | undefined>): Record<st
 }
 
 const CANONICAL_BY_GROK_TOOL = invertFirstWins(GROK_TOOL_BY_CANONICAL);
-const CANONICAL_BY_GOOSE_TOOL = invertFirstWins(GOOSE_TOOL_BY_CANONICAL);
 const CANONICAL_BY_KIRO_CAPABILITY = invertFirstWins(KIRO_CAPABILITY_BY_TOOL);
 const CANONICAL_BY_OPENCLAW_TOOL = invertFirstWins(CANONICAL_TO_OPENCLAW_TOOL);
 const CANONICAL_BY_ANTIGRAVITY_ACTION = invertFirstWins(ANTIGRAVITY_ACTION_BY_TOOL);
@@ -166,9 +155,69 @@ function permissionSet(allow: string[], deny: string[]): PermissionSet | null {
 
 // ── file readers ─────────────────────────────────────────────────────────────
 
-/** Strip `//` and `/* *​/` comments so a JSONC file parses as JSON. */
-function stripJsonComments(content: string): string {
-  return content.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+/**
+ * Strip JSON comments for JSONC parsing, only OUTSIDE string literals.
+ *
+ * A naive `//`-to-end-of-line regex destroys
+ * `"$schema": "https://opencode.ai/config.json"` — which every
+ * opencode-generated config carries — so the file then fails to parse and its
+ * permissions read back as absent, the very defect this registry exists to fix.
+ * Exported so `permissions.ts` shares this one implementation instead of
+ * keeping its own copy.
+ */
+export function stripJsonComments(content: string): string {
+  let result = '';
+  let inString = false;
+  let escape = false;
+  let i = 0;
+
+  while (i < content.length) {
+    const char = content[i];
+    const next = content[i + 1];
+
+    if (escape) {
+      result += char;
+      escape = false;
+      i++;
+      continue;
+    }
+
+    if (char === '\\' && inString) {
+      result += char;
+      escape = true;
+      i++;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      result += char;
+      i++;
+      continue;
+    }
+
+    if (!inString) {
+      if (char === '/' && next === '/') {
+        while (i < content.length && content[i] !== '\n') {
+          i++;
+        }
+        continue;
+      }
+      if (char === '/' && next === '*') {
+        i += 2;
+        while (i < content.length && !(content[i] === '*' && content[i + 1] === '/')) {
+          i++;
+        }
+        i += 2;
+        continue;
+      }
+    }
+
+    result += char;
+    i++;
+  }
+
+  return result;
 }
 
 function readJson(configPath: string): Record<string, unknown> | null {
@@ -203,6 +252,11 @@ function readToml(configPath: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+/** `preferred` unless it is absent and `alternate` exists. */
+function existingOr(preferred: string, alternate: string): string {
+  return !fs.existsSync(preferred) && fs.existsSync(alternate) ? alternate : preferred;
 }
 
 /** Every string in `value` when it is a string array, else []. */
@@ -250,8 +304,14 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
   },
 
   opencode: {
-    home: (h) => path.join(h, '.config', 'opencode', 'opencode.jsonc'),
-    project: (cwd) => path.join(cwd, 'opencode.jsonc'),
+    // OpenCode accepts either extension and `openCodeConfigPath` probes both, so
+    // an existing `opencode.json` must be found rather than shadowed by the
+    // `.jsonc` default.
+    home: (h) => existingOr(
+      path.join(h, '.config', 'opencode', 'opencode.jsonc'),
+      path.join(h, '.config', 'opencode', 'opencode.json'),
+    ),
+    project: (cwd) => existingOr(path.join(cwd, 'opencode.jsonc'), path.join(cwd, 'opencode.json')),
     lossyBecause: 'OpenCode gates Bash only, so non-Bash rules were never written',
     toCanonical(configPath) {
       const config = readJson(configPath);
@@ -354,23 +414,6 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
         else if (r.action === 'allow') allow.push(canonical);
       }
       return permissionSet(allow, deny);
-    },
-  },
-
-  goose: {
-    home: (h) => path.join(h, '.config', 'goose', 'permission.yaml'),
-    lossyBecause: 'Goose gates whole tools, and Read/Write/Edit share developer__text_editor',
-    toCanonical(configPath) {
-      const config = readYaml(configPath);
-      const user = config?.user;
-      if (!user || typeof user !== 'object' || Array.isArray(user)) return null;
-      const u = user as Record<string, unknown>;
-      const back = (tools: string[]): string[] =>
-        tools.flatMap((tool) => {
-          const lowerTool = CANONICAL_BY_GOOSE_TOOL[tool];
-          return lowerTool ? [canonicalRule(lowerTool, null)] : [];
-        });
-      return permissionSet(back(stringList(u.always_allow)), back(stringList(u.never_allow)));
     },
   },
 
@@ -555,5 +598,7 @@ export function readCanonicalPermissions(
     if (!target.project) return null;
     return target.toCanonical(target.project(cwd ?? process.cwd()));
   }
-  return target.toCanonical(target.home(home ?? process.env.HOME ?? ''));
+  // os.homedir() -- not `process.env.HOME ?? ''`, which resolved a RELATIVE
+  // path (`.grok/config.toml`) when HOME is unset, as it is on Windows.
+  return target.toCanonical(target.home(home ?? os.homedir()));
 }

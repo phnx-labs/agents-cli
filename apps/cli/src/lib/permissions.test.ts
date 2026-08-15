@@ -16,7 +16,6 @@ import {
   convertToDroidFormat,
   convertToHermesFormat,
   convertToOpenClawFormat,
-  convertToGooseFormat,
   convertToKiroFormat,
   formatComputerPermissionGrantHint,
   listInstalledPermissions,
@@ -173,61 +172,6 @@ describe('Hermes permissions', () => {
       hooks: { pre_tool: ['echo hook'] },
       approvals: { mode: 'manual', deny: ['git push --force*', 'rm -rf *'] },
       command_allowlist: ['git status', 'ls'],
-    });
-  });
-});
-
-describe('Goose permissions', () => {
-  it('maps canonical rules to user permission categories', () => {
-    expect(convertToGooseFormat({
-      name: 'goose',
-      allow: ['Bash(git:*)', 'Read(**)', 'WebFetch(domain:docs.example.com)'],
-      deny: ['Write(secrets/**)'],
-    })).toEqual({
-      user: {
-        always_allow: ['developer__fetch', 'developer__shell'],
-        ask_before: [],
-        never_allow: ['developer__text_editor'],
-      },
-    });
-  });
-
-  it('writes and merges permission.yaml without replacing unrelated tools', () => {
-    const home = makeTempHome();
-    const configDir = path.join(home, '.config', 'goose');
-    fs.mkdirSync(configDir, { recursive: true });
-    fs.writeFileSync(path.join(configDir, 'permission.yaml'), yaml.stringify({
-      user: {
-        always_allow: ['developer__analyze'],
-        ask_before: ['custom__tool'],
-        never_allow: ['developer__text_editor'],
-      },
-      smart_approve: {
-        always_allow: [],
-        ask_before: ['developer__shell'],
-        never_allow: [],
-      },
-    }));
-
-    const result = applyPermissionsToVersion('goose', {
-      name: 'set',
-      allow: ['Bash(git:*)', 'Write(src/**)'],
-      deny: ['Read(**/.env)'],
-    }, home, true);
-    expect(result.success).toBe(true);
-
-    const config = yaml.parse(fs.readFileSync(path.join(configDir, 'permission.yaml'), 'utf-8'));
-    expect(config).toEqual({
-      user: {
-        always_allow: ['developer__analyze', 'developer__shell'],
-        ask_before: ['custom__tool'],
-        never_allow: ['developer__text_editor'],
-      },
-      smart_approve: {
-        always_allow: [],
-        ask_before: ['developer__shell'],
-        never_allow: [],
-      },
     });
   });
 });
