@@ -543,6 +543,40 @@ function toWritableServer(server: InstalledMcpServer): WritableMcpServer {
 }
 
 /**
+ * Read an existing agent config, or `{}` when it does not exist yet.
+ *
+ * A file that exists but does not parse **throws** rather than resetting to
+ * `{}`: these configs hold far more than MCP (hermes' whole `config.yaml`,
+ * openclaw's `openclaw.json`, opencode's `opencode.jsonc`), so silently
+ * rewriting one from scratch destroys everything else in it. The five per-agent
+ * installers this replaced parsed unguarded for exactly that reason -- the throw
+ * surfaced as a reported error and left the file intact, which is the behavior
+ * preserved here.
+ */
+function readExistingConfig(
+  configPath: string,
+  parse: (raw: string) => unknown,
+): Record<string, unknown> {
+  if (!fs.existsSync(configPath)) return {};
+  let parsed: unknown;
+  try {
+    parsed = parse(fs.readFileSync(configPath, 'utf-8'));
+  } catch (err) {
+    throw new Error(`existing config at ${configPath} is not valid: ${(err as Error).message}`);
+  }
+  if (parsed === null || parsed === undefined) return {};
+  if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`existing config at ${configPath} is not an object`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+/** Strip `//` and block comments so a JSONC config parses as JSON. */
+function parseJsonc(raw: string): unknown {
+  return JSON.parse(raw.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, ''));
+}
+
+/**
  * Serialize MCP servers into an agent-specific config file.
  *
  * The format comes from `MCP_TARGETS` (lib/mcp-registry.ts), so a harness whose
@@ -575,14 +609,7 @@ export function writeMcpConfig(
     // omp (.mcp.json) and Oz (.warp/.mcp.json): stdio carries command/args/env,
     // remote carries url + optional headers.
     case 'claude-json': {
-      let config: Record<string, unknown> = {};
-      if (fs.existsSync(configPath)) {
-        try {
-          config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        } catch {
-          config = {};
-        }
-      }
+      const config = readExistingConfig(configPath, JSON.parse);
 
       const mcpServers: Record<string, unknown> =
         mode === 'merge' && config.mcpServers && typeof config.mcpServers === 'object'
@@ -614,14 +641,7 @@ export function writeMcpConfig(
       // agy reads ~/.gemini/config/mcp_config.json. Same `mcpServers` map as
       // Claude for stdio, but a remote server is keyed `serverUrl` (SSE) and
       // carries no headers — see agy's bundled docs/mcp_servers.md.
-      let config: Record<string, unknown> = {};
-      if (fs.existsSync(configPath)) {
-        try {
-          config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        } catch {
-          config = {};
-        }
-      }
+      const config = readExistingConfig(configPath, JSON.parse);
 
       const mcpServers: Record<string, unknown> =
         mode === 'merge' && config.mcpServers && typeof config.mcpServers === 'object'
@@ -647,14 +667,7 @@ export function writeMcpConfig(
       break;
     }
     case 'openclaw-json': {
-      let config: Record<string, unknown> = {};
-      if (fs.existsSync(configPath)) {
-        try {
-          config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        } catch {
-          config = {};
-        }
-      }
+      const config = readExistingConfig(configPath, JSON.parse);
 
       if (!config.mcp || typeof config.mcp !== 'object') {
         config.mcp = {};
@@ -690,14 +703,7 @@ export function writeMcpConfig(
       break;
     }
     case 'toml': {
-      let config: Record<string, unknown> = {};
-      if (fs.existsSync(configPath)) {
-        try {
-          config = TOML.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
-        } catch {
-          config = {};
-        }
-      }
+      const config = readExistingConfig(configPath, (raw) => TOML.parse(raw));
 
       const mcpServers: Record<string, unknown> =
         mode === 'merge' && config.mcp_servers && typeof config.mcp_servers === 'object'
@@ -726,16 +732,7 @@ export function writeMcpConfig(
       break;
     }
     case 'opencode-jsonc': {
-      let config: Record<string, unknown> = {};
-      if (fs.existsSync(configPath)) {
-        try {
-          const content = fs.readFileSync(configPath, 'utf-8');
-          const jsonContent = content.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
-          config = JSON.parse(jsonContent);
-        } catch {
-          config = {};
-        }
-      }
+      const config = readExistingConfig(configPath, parseJsonc);
 
       const mcp: Record<string, unknown> =
         mode === 'merge' && config.mcp && typeof config.mcp === 'object'
@@ -765,17 +762,7 @@ export function writeMcpConfig(
       break;
     }
     case 'yaml': {
-      let config: Record<string, unknown> = {};
-      if (fs.existsSync(configPath)) {
-        try {
-          const parsed = yaml.parse(fs.readFileSync(configPath, 'utf-8'));
-          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            config = parsed as Record<string, unknown>;
-          }
-        } catch {
-          config = {};
-        }
-      }
+      const config = readExistingConfig(configPath, (raw) => yaml.parse(raw));
 
       const mcpServers: Record<string, unknown> =
         mode === 'merge' && config.mcp_servers && typeof config.mcp_servers === 'object' && !Array.isArray(config.mcp_servers)
@@ -806,14 +793,7 @@ export function writeMcpConfig(
       // Muse Code settings.json: requires schema_version: 1; MCP lives under
       // mcp_servers with an explicit transport (stdio | streamable_http).
       // See https://dev.meta.ai/docs/muse-code/extending#mcp
-      let config: Record<string, unknown> = {};
-      if (fs.existsSync(configPath)) {
-        try {
-          config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        } catch {
-          config = {};
-        }
-      }
+      const config = readExistingConfig(configPath, JSON.parse);
       if (config.schema_version === undefined) {
         config.schema_version = 1;
       }
@@ -847,6 +827,13 @@ export function writeMcpConfig(
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
       break;
+    }
+    default: {
+      // Unreachable: mcpWriteUnsupportedReason above rejects a null format and
+      // every McpFormat has an arm. A newly added format lands here as a
+      // compile error rather than a silent no-op.
+      const unhandled: never = MCP_TARGETS[agentId]!.format as never;
+      throw new Error(`unhandled MCP config format: ${String(unhandled)}`);
     }
   }
 }
