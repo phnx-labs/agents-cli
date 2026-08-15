@@ -1167,11 +1167,20 @@ export async function pullRepo(
       (await git.raw(['rev-list', '--count', `HEAD..${tracking}`])).trim(),
       10,
     );
-    const canFastForward =
-      Number.isFinite(aheadCount) &&
-      Number.isFinite(behindCount) &&
-      aheadCount === 0 &&
-      behindCount > 0;
+    // Both counts are the ONLY inputs to the fast-forward decision, so a count
+    // we cannot read is a refusal, not a reason to guess. Fail here rather than
+    // downstream: an unreadable count used to fall through to the rebase arm in
+    // preserve-local mode, and to a "HEAD diverged" message in strict mode that
+    // named the wrong cause.
+    if (!Number.isFinite(aheadCount) || !Number.isFinite(behindCount)) {
+      return {
+        success: false,
+        commit: '',
+        error: `Could not read how far HEAD is from ${tracking} — 'git rev-list --count' returned no usable count. Check the checkout, then pull again:\n\n  cd ${displayHomePath(dir)} && git status`,
+      };
+    }
+
+    const canFastForward = aheadCount === 0 && behindCount > 0;
 
     // Strict: block if HEAD has local commits not on the remote — fast-forward
     // requires the local tip to be an ancestor of the remote tip.
@@ -1201,19 +1210,19 @@ export async function pullRepo(
       if (canFastForward) {
         // Integrate the already-fetched tracking ref. No network, no FETCH_HEAD.
         await git.raw(['merge', '--ff-only', tracking]);
-      } else if (!strict) {
+      } else {
         // Diverged (or local-only commits). Rebase onto the tracking tip —
         // same outcome as `git pull --rebase <remote> <branch>` without
         // re-fetching or consulting FETCH_HEAD.
+        //
+        // PRESERVE-LOCAL ONLY — strict mode can never reach this arm, so the
+        // fleet pull never rewrites history. Strict has already returned for
+        // every case that leaves `canFastForward` false: an identical local and
+        // remote ref, `aheadCount > 0` (which is also what "diverged" means),
+        // and a count that would not parse. That leaves `aheadCount === 0` with
+        // a differing ref, i.e. `behindCount > 0` — a fast-forward. Keep those
+        // three returns above intact if you change this.
         await git.raw(['rebase', tracking]);
-      } else {
-        // Strict mode: cannot fast-forward (HEAD diverged from remote). Refuse
-        // rather than rebase — the fleet pull must never rewrite history.
-        return {
-          success: false,
-          commit: '',
-          error: `Blocked: HEAD diverged from ${tracking} and strict mode does not rebase. Reconcile the branch manually.`,
-        };
       }
     } catch (err) {
       // Abort so the tree is restored, matching the atomicity --ff-only gave us.
