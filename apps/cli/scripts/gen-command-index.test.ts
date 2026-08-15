@@ -4,7 +4,7 @@
 // empty/wrong index.
 
 import { describe, expect, it } from 'vitest';
-import { buildFullCommandTree } from '../src/lib/startup/command-registry.js';
+import { buildFullCommandTree } from '../src/cli/command-registry.js';
 import {
   argToken,
   auditReference,
