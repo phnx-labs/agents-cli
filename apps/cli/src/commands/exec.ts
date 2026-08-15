@@ -2023,7 +2023,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         import('../lib/secrets/bundles.js'),
         import('../lib/secrets/remote.js'),
         import('../lib/accounting/rotate.js'),
-        import('../lib/versions.js'),
+        import('../lib/installations/versions.js'),
         import('../lib/plugins/plugins.js'),
         import('../lib/workflows.js'),
         import('../lib/run-defaults.js'),
@@ -2710,7 +2710,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             // An isolated copy is never repaired by adopting another version, so
             // `add <agent>@latest` would build an unrelated NORMAL install rather
             // than fix what the user asked to run. Point at the isolated re-add.
-            const { isVersionIsolated } = await import('../lib/versions.js');
+            const { isVersionIsolated } = await import('../lib/installations/versions.js');
             const hint = isVersionIsolated(agent, launchTarget)
               ? `agents add ${agent}@${launchTarget} --isolated`
               : `agents add ${agent}@latest`;

@@ -105,7 +105,7 @@ import {
   getVersionHomePath,
   listInstalledVersions,
   syncResourcesToVersion,
-} from './versions.js';
+} from './installations/versions.js';
 import { listResources } from './resources.js';
 import { buildManifest, isStale, loadManifest } from './staleness/index.js';
 import { getDetector } from './staleness/registry.js';

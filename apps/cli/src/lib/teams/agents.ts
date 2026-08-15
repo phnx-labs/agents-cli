@@ -21,7 +21,7 @@ import { debug } from './debug.js';
 import type { AgentId } from '../types.js';
 import { getAgentsDir as getSystemAgentsDir, getShimsDir } from '../state.js';
 import { AGENTS, getAccountInfo } from '../agents.js';
-import { resolveVersion, isVersionInstalled, verifyInstalledBinaryLaunches } from '../versions.js';
+import { resolveVersion, isVersionInstalled, verifyInstalledBinaryLaunches } from '../installations/versions.js';
 import { sanitizeProcessEnv } from '../secrets/bundles.js';
 import { resolveActor, actorEnv } from '../actor.js';
 import { recordRunName } from '../session/run-names.js';

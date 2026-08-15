@@ -278,7 +278,7 @@ import {
   isVersionIsolated,
   listInstalledVersions,
   resolveVersion,
-} from './versions.js';
+} from './installations/versions.js';
 import type { AgentId, HookCacheConfig, HookMatches, InstalledHook, ManifestHook } from './types.js';
 import { generateHookShim, getHookShimPath, isValidHookShimName, parseCacheConfig, removeHookShim } from './hooks/cache.js';
 import { getHookShimsDir } from './state.js';

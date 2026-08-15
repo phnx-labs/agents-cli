@@ -23,7 +23,7 @@ import type { AgentId } from '../lib/types.js';
 import {
   listInstalledVersions,
   getVersionHomePath,
-} from '../lib/versions.js';
+} from '../lib/installations/versions.js';
 import { supports } from '../lib/capabilities.js';
 import { setHelpSections } from '../lib/help.js';
 

@@ -50,7 +50,7 @@ describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation
     probeIsolationOf: string,
     opts?: { allowDefaultSwitch?: boolean },
   ): Outcome {
-    const versionsPath = path.resolve(process.cwd(), 'src/lib/versions.ts');
+    const versionsPath = path.resolve(process.cwd(), 'src/lib/installations/versions.ts');
     const optsArg = opts ? `, undefined, ${JSON.stringify(opts)}` : '';
     const script = `
       import {
@@ -157,7 +157,7 @@ describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation
   // isolated install the global default — the leak the candidate filter above
   // blocks, arriving through a different door.
   it('refuses to pin `latest` when the user holds that exact version as an isolated copy', () => {
-    const versionsPath = path.resolve(process.cwd(), 'src/lib/versions.ts');
+    const versionsPath = path.resolve(process.cwd(), 'src/lib/installations/versions.ts');
     const latest = execFileSync('npm', ['view', '@openai/codex', 'version'], { encoding: 'utf-8' }).trim();
     expect(latest).toMatch(/^\d+\.\d+\.\d+/);
 

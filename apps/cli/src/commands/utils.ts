@@ -21,7 +21,7 @@ import {
   VersionNotInstalledError,
   type InstalledAgentTargetResult,
   type VersionSelectionResult,
-} from '../lib/versions.js';
+} from '../lib/installations/versions.js';
 import { resolveListFilter, AgentSpecError } from '../lib/agent-spec/index.js';
 
 /**
@@ -374,4 +374,4 @@ export async function resolveInstalledAgentTargetsAutoInstalling(
 
 // Re-export so callers can `catch (err) { if (err instanceof VersionNotInstalledError) … }`
 // without reaching into ../lib/versions directly.
-export { VersionNotInstalledError } from '../lib/versions.js';
+export { VersionNotInstalledError } from '../lib/installations/versions.js';

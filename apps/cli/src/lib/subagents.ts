@@ -12,7 +12,7 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { capableAgents } from './capabilities.js';
 import { getSubagentsDir, getUserSubagentsDir, getTrashSubagentsDir } from './state.js';
-import { listInstalledVersions, getVersionHomePath } from './versions.js';
+import { listInstalledVersions, getVersionHomePath } from './installations/versions.js';
 import { safeJoin } from './paths.js';
 import {
   subagentTarget,

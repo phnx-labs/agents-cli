@@ -39,7 +39,7 @@ vi.mock('../src/lib/agents.js', () => ({
   ensureSkillsDir: () => {},
 }));
 
-vi.mock('../src/lib/versions.js', () => ({
+vi.mock('../src/lib/installations/versions.js', () => ({
   getEffectiveHome: () => '',
   getVersionHomePath: () => '',
   listInstalledVersions: () => [],

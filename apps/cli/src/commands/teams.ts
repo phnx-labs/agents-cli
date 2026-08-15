@@ -80,7 +80,7 @@ import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
 import { remoteWorktreeDirty, removeRemoteWorktree, ensureRemoteRepo, remoteCommitsBehindDefault } from '../lib/teams/remoteWorktree.js';
 import { getRemoteUrl } from '../lib/git.js';
 import { machineId } from '../lib/session/sync/config.js';
-import { isVersionInstalled, resolveVersion, resolveVersionAlias, resolveVersionAliasLoose } from '../lib/versions.js';
+import { isVersionInstalled, resolveVersion, resolveVersionAlias, resolveVersionAliasLoose } from '../lib/installations/versions.js';
 import { AGENTS, warnAgentDeprecated } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { discoverSessions, parseTimeFilter, resolveSessionById } from '../lib/session/discover.js';

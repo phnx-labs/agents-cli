@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { foldBrowserSessionsIntoProfiles } from '../migrate.js';
+import { foldBrowserSessionsIntoProfiles } from '../installations/migrate.js';
 
 // Exercises the one-shot fold of the legacy GLOBAL browser/sessions/<task> root
 // into the per-profile browser/<profile>/sessions/<task> layout: task→profile

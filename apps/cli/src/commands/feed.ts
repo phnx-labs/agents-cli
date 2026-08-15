@@ -584,7 +584,7 @@ export function registerFeedCommand(program: Command): void {
         if (!hookInstall.error || !activityInstall.error) {
           const [{ iterHooksCapableVersions, parseHookManifest, registerHooksToSettings }, { getVersionHomePath }] = await Promise.all([
             import('../lib/hooks.js'),
-            import('../lib/versions.js'),
+            import('../lib/installations/versions.js'),
           ]);
           const manifest = parseHookManifest({ warn: false });
           for (const { agent, version } of iterHooksCapableVersions({ agent: 'claude' })) {

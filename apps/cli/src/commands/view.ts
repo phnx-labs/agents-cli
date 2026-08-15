@@ -58,7 +58,7 @@ import {
   getLiveVersion,
   isVersionIsolated,
   getIsolatedDefault,
-} from '../lib/versions.js';
+} from '../lib/installations/versions.js';
 import {
   getShimsDir,
   isShimsInPath,

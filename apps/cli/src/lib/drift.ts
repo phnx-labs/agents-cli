@@ -9,7 +9,7 @@
  */
 import type { AgentId } from './types.js';
 import { ALL_AGENT_IDS } from './agents.js';
-import { getGlobalDefault, listInstalledVersions } from './versions.js';
+import { getGlobalDefault, listInstalledVersions } from './installations/versions.js';
 import { loadManifest, isStale } from './staleness/index.js';
 import { diffVersionResources, type VersionResourceReport, type SourceLayerBehind } from './doctor-diff.js';
 import { diffVersionCommands, iterCommandsCapableVersions } from './commands.js';

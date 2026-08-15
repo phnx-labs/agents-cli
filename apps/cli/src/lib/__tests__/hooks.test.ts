@@ -9,7 +9,7 @@ import { getHookShimPath } from '../hooks/cache.js';
 import * as TOML from 'smol-toml';
 import * as yaml from 'yaml';
 import { CODEX_HOOKS_MIN_VERSION } from '../agents.js';
-import { compareVersions } from '../versions.js';
+import { compareVersions } from '../installations/versions.js';
 import { toPosix } from '../platform/index.js';
 import type { ManifestHook } from '../types.js';
 

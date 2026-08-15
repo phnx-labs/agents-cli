@@ -14,7 +14,7 @@ import {
   getVersionHomePath,
   invalidateLiveVersionCache,
   isGlobalBinaryAgent,
-} from '../versions.js';
+} from './versions.js';
 import type { AgentId } from '../types.js';
 import { installationDir } from './store.js';
 import type { Installation, UpdateStrategyId } from './types.js';

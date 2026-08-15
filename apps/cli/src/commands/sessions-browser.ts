@@ -18,7 +18,7 @@ import { isSessionTrackedAgent, type SessionMeta } from '../lib/session/types.js
 import type { ActiveSession } from '../lib/session/active.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { gatherRemoteList } from '../lib/session/remote-list.js';
-import { resolveVersionAliasLoose } from '../lib/versions.js';
+import { resolveVersionAliasLoose } from '../lib/installations/versions.js';
 import { AGENTS } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { enrichTeamOrigins, safeTeamText, shouldShowTeamSessions } from '../lib/session/team-filter.js';

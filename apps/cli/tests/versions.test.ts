@@ -186,7 +186,7 @@ import {
   installVersion,
   type AvailableResources,
   type ResourceSelection,
-} from '../src/lib/versions.js';
+} from '../src/lib/installations/versions.js';
 import { AGENTS } from '../src/lib/agents.js';
 
 function installManagedVersion(agent: 'claude' | 'codex', version: string): void {

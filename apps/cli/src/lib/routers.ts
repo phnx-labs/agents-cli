@@ -18,7 +18,7 @@ import { ALL_AGENT_IDS } from './agents.js';
 import type { AgentId } from './types.js';
 import { isTierToken, resolveTierMap, MODEL_TIERS } from './model-tiers.js';
 import { getModelCatalog } from './models.js';
-import { resolveVersion } from './versions.js';
+import { resolveVersion } from './installations/versions.js';
 
 /** Per-harness allowlist inside a router: eligible models/tiers + linked accounts. */
 export interface RouterHarnessAllowlist {

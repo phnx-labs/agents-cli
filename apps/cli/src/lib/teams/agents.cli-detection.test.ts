@@ -65,7 +65,7 @@ describe('checkCliAvailable — shims-dir detection', () => {
     fs.writeFileSync(path.join(shimsDir, 'claude'), '#!/bin/sh\n', { mode: 0o755 });
 
     vi.resetModules();
-    const versions = await import('../versions.js');
+    const versions = await import('../installations/versions.js');
     versions.setGlobalDefault('claude', '9.9.9'); // pinned default with no installed binary
     const { checkCliAvailable } = await import('./agents.js');
     const [installed, err] = checkCliAvailable('claude' as never);

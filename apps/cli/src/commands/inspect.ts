@@ -37,7 +37,7 @@ import {
 import { getVersionHomePath,
   isVersionIsolated,
   getIsolatedDefault,
-} from '../lib/versions.js';
+} from '../lib/installations/versions.js';
 import { getShimsDir, getVersionedAliasPath } from '../lib/shims.js';
 import {
   getAgentResources,

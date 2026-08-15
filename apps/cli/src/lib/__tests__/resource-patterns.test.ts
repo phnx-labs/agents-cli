@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parsePattern, expandPatterns, defaultPatterns, isLegacyName } from '../resource-patterns.js';
-import { buildSelection } from '../versions.js';
+import { buildSelection } from '../installations/versions.js';
 
 describe('parsePattern', () => {
   it('parses a wildcard inclusion', () => {

@@ -6,7 +6,7 @@ import {
   invalidateInstalledVersionsCache,
   invalidateLiveVersionCache,
   verifyBinaryLaunches,
-} from '../versions.js';
+} from './versions.js';
 import {
   assertValidRelease,
   selectUpdateStrategy,

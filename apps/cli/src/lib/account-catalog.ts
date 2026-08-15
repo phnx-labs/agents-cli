@@ -1,5 +1,5 @@
 import { ALL_AGENT_IDS, getAccountInfo, supportsAccountInspection } from './agents.js';
-import { getVersionHomePath, listInstalledVersions } from './versions.js';
+import { getVersionHomePath, listInstalledVersions } from './installations/versions.js';
 import type { AgentId } from './types.js';
 
 export interface NativeAccountCatalogEntry {

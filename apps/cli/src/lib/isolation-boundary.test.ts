@@ -24,7 +24,7 @@ describe('isolation boundary — the gate is on every adopting primitive', () =>
     { fn: 'switchConfigSymlink', file: 'src/lib/shims.ts' },
     { fn: 'switchHomeFileSymlinks', file: 'src/lib/shims.ts' },
     { fn: 'adoptShadowingLauncher', file: 'src/lib/shims.ts' },
-    { fn: 'setGlobalDefault', file: 'src/lib/versions.ts' },
+    { fn: 'setGlobalDefault', file: 'src/lib/installations/versions.ts' },
   ];
 
   it.each(GATED)('$fn calls assertIsolationBoundary before doing anything', ({ fn, file }) => {

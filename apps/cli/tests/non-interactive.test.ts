@@ -76,7 +76,7 @@ function writeFakeNpmInstaller(home: string, version: string): string {
       '#!/bin/sh',
       // Production install probes `npm --version` before `npm install` —
       // respond so the install path proceeds instead of bailing with
-      // "npm is not installed". See src/lib/versions.ts:1124.
+      // "npm is not installed". See src/lib/installations/versions.ts:1124.
       'if [ "$1" = "--version" ]; then',
       '  echo "10.0.0"',
       '  exit 0',

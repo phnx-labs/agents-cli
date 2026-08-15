@@ -38,6 +38,7 @@ import { makeClaudeResponder, resolveApiKey, DEFAULT_CLAUDE_MODEL, DEFAULT_CLAUD
 import { TASK_PREVIEW_MAX_CHARS } from '../lib/computer/sessions-list.js';
 import { runComputerSessionsCommand } from './computer-sessions-picker.js';
 import { truncate } from '../lib/feed/events.js';
+import { namespacedServiceLabel, serviceManifestHomeEnv } from '../lib/service-manifest.js';
 
 // Help groups — mirror `agents browser` so the mental model carries over.
 const COMPUTER_HELP_GROUPS = [
@@ -541,7 +542,16 @@ function registerScreenshotCommand(program: Command): void {
 const HELPER_BUNDLE_ID = 'com.phnx-labs.computer-helper';
 const HELPER_APP_NAME = 'Computer Helper.app';
 const HELPER_APP_DEST = `/Applications/${HELPER_APP_NAME}`;
-const HELPER_LABEL = HELPER_BUNDLE_ID;
+/**
+ * launchd Label for this process's helper — the production identifier for a real
+ * invocation, namespaced under a redirected HOME (RUSH-2639). launchd routes
+ * bootout/bootstrap/kickstart/print by identifier alone, never by the plist's
+ * path, so without this a process running under a sandbox HOME tears down the
+ * operator's live helper.
+ */
+export function helperLabel(): string {
+  return namespacedServiceLabel(HELPER_BUNDLE_ID);
+}
 
 /**
  * Install the macOS helper locally: resolve (or download + verify) the signed,
@@ -563,7 +573,7 @@ export async function installComputerHelperMacLocal(): Promise<{ appDest: string
 
   const socketPath = resolveSocketPath();
   const logPath = resolveLogPath();
-  const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `${HELPER_LABEL}.plist`);
+  const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `${helperLabel()}.plist`);
 
   console.log(`source:  ${srcApp}`);
   console.log(`dest:    ${HELPER_APP_DEST}`);
@@ -601,7 +611,7 @@ export async function installComputerHelperMacLocal(): Promise<{ appDest: string
 
   // 4. Write the LaunchAgent plist but DO NOT bootstrap it (opt-in via `start`).
   const execInsideApp = path.join(HELPER_APP_DEST, 'Contents', 'MacOS', 'ComputerHelper');
-  const plistContent = renderLaunchAgentPlist({ label: HELPER_LABEL, exec: execInsideApp, socketPath, logPath });
+  const plistContent = renderLaunchAgentPlist({ label: helperLabel(), exec: execInsideApp, socketPath, logPath });
   fs.mkdirSync(path.dirname(plistPath), { recursive: true });
   fs.writeFileSync(plistPath, plistContent);
   console.log(`wrote plist: ${plistPath} (NOT activated)`);
@@ -616,7 +626,7 @@ export async function installComputerHelperMacLocal(): Promise<{ appDest: string
  * Shared by `agents computer start` and the `agents setup computer` wizard.
  */
 export async function activateComputerHelperMacLocal(): Promise<{ trusted: boolean; socketPath: string; logPath: string }> {
-  const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `${HELPER_LABEL}.plist`);
+  const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `${helperLabel()}.plist`);
   const socketPath = resolveSocketPath();
   const logPath = resolveLogPath();
 
@@ -661,7 +671,7 @@ export async function activateComputerHelperMacLocal(): Promise<{ trusted: boole
   }
   // Force restart so we pick up the latest binary.
   try {
-    execFileSync('/bin/launchctl', ['kickstart', '-k', `${domain}/${HELPER_LABEL}`], { stdio: 'pipe' });
+    execFileSync('/bin/launchctl', ['kickstart', '-k', `${domain}/${helperLabel()}`], { stdio: 'pipe' });
   } catch (err) {
     throw new Error(`launchctl kickstart failed: ${(err as Error).message}`);
   }
@@ -844,7 +854,7 @@ function registerReloadCommand(program: Command): void {
 
       let pid: number | null = null;
       try {
-        const out = execFileSync('/bin/launchctl', ['print', `${domain}/${HELPER_LABEL}`], { encoding: 'utf-8' });
+        const out = execFileSync('/bin/launchctl', ['print', `${domain}/${helperLabel()}`], { encoding: 'utf-8' });
         const m = out.match(/\bpid\s*=\s*(\d+)/);
         if (m) pid = parseInt(m[1], 10);
       } catch (err) {
@@ -900,7 +910,7 @@ function registerStopCommand(program: Command): void {
       }
 
       const home = os.homedir();
-      const plistPath = path.join(home, 'Library', 'LaunchAgents', `${HELPER_LABEL}.plist`);
+      const plistPath = path.join(home, 'Library', 'LaunchAgents', `${helperLabel()}.plist`);
       const socketPath = resolveSocketPath();
 
       const uid = process.getuid?.();
@@ -927,7 +937,21 @@ function registerStopCommand(program: Command): void {
     });
 }
 
-function renderLaunchAgentPlist(opts: { label: string; exec: string; socketPath: string; logPath: string }): string {
+/**
+ * The helper's launchd plist.
+ *
+ * The `EnvironmentVariables` dict carries HOME (RUSH-2639, see
+ * `lib/service-manifest.ts`): launchd applies this dict on top of the LOGIN
+ * SESSION's environment, never the environment of whoever called `launchctl
+ * bootstrap`, so a manifest that omits HOME hands the helper the account home no
+ * matter which home the caller resolved. That is a silent escape from any
+ * redirected HOME — the hermetic test harness's, and an agent's isolated version
+ * home alike.
+ */
+export function renderLaunchAgentPlist(opts: { label: string; exec: string; socketPath: string; logPath: string }): string {
+  const envXml = Object.entries(serviceManifestHomeEnv())
+    .map(([k, v]) => `        <key>${escapeXml(k)}</key>\n        <string>${escapeXml(v)}</string>`)
+    .join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -940,6 +964,10 @@ function renderLaunchAgentPlist(opts: { label: string; exec: string; socketPath:
         <string>--socket</string>
         <string>${escapeXml(opts.socketPath)}</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+${envXml}
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>

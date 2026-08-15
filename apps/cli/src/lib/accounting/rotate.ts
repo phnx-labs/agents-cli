@@ -18,7 +18,7 @@ import {
   type CredentialPresence,
 } from '../agents.js';
 import { readMeta, writeMeta, getHelpersDir } from '../state.js';
-import { listInstalledVersions, getVersionHomePath, resolveVersion } from '../versions.js';
+import { listInstalledVersions, getVersionHomePath, resolveVersion } from '../installations/versions.js';
 import { getProjectRunConfigs } from '../run-config.js';
 import { emit } from '../feed/events.js';
 import {

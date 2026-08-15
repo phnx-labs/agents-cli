@@ -44,7 +44,7 @@ import {
   promptResourceSelection,
   resolveConfiguredAgentTargets,
   type ResourceSelection,
-} from './versions.js';
+} from './installations/versions.js';
 import {
   listCliStatus,
   installCli,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isMissingBinarySignature, probeSpawnSpec } from './versions.js';
+import { isMissingBinarySignature, probeSpawnSpec } from './installations/versions.js';
 
 /**
  * isMissingBinarySignature is the gate that decides whether a freshly-installed

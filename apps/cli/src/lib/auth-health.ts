@@ -29,7 +29,7 @@ import {
   USAGE_HEADLESS_SCOPE_MARKER,
   type ProviderProbe,
 } from './accounting/usage.js';
-import { getVersionHomePath, listInstalledVersions } from './versions.js';
+import { getVersionHomePath, listInstalledVersions } from './installations/versions.js';
 import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
 
 /**

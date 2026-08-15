@@ -1239,7 +1239,7 @@ if (
 // Skipped for --help/--version (RUSH-2454): same pure-docs gate as fold, the
 // update check, background sync, ensureInitialized, and the menu-bar self-heal.
 // The sentinel check itself is pure fs and does not load migrate.js — only a
-// missing/stale sentinel pays for `await import('./lib/migrate.js')` (which
+// missing/stale sentinel pays for `await import('./lib/installations/migrate.js')` (which
 // pulls the hosts/routine/teams/daemon/menubar graph).
 if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !helpOrVersionRequested) {
   try {
@@ -1256,7 +1256,7 @@ if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !helpOrVersionRequested) {
       }
     } catch { /* best-effort — fall through to run */ }
     if (needRun) {
-      const { runMigration } = await import('./lib/migrate.js');
+      const { runMigration } = await import('./lib/installations/migrate.js');
       await runMigration();
       try {
         fs.mkdirSync(path.dirname(sentinel), { recursive: true });

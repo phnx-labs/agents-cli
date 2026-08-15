@@ -43,7 +43,7 @@ import {
   promptAgentVersionSelection,
   getVersionHomePath,
   resolveAgentVersionTargets,
-} from '../lib/versions.js';
+} from '../lib/installations/versions.js';
 import { recordVersionResources, getActiveRulesPreset, setActiveRulesPreset } from '../lib/state.js';
 import { discoverRulesLayers } from '../lib/rules/compose.js';
 import * as yaml from 'yaml';

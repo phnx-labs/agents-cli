@@ -11,7 +11,7 @@ import { listInstalledCommandsWithScope, parseCommandMetadata } from './commands
 import { listInstalledSkillsWithScope, parseSkillMetadata, type SkillParseError } from './plugins/skills.js';
 import { listOnDiskHooks } from './resource-inventory.js';
 import { listInstalledInstructionsWithScope } from './rules/rules.js';
-import { getEffectiveHome } from './versions.js';
+import { getEffectiveHome } from './installations/versions.js';
 import { listMcpServerConfigs } from './mcp.js';
 import { WorkflowsHandler } from './resources/workflows.js';
 import { isCapable } from './capabilities.js';

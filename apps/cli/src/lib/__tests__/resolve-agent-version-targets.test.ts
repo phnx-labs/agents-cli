@@ -29,7 +29,7 @@ vi.mock('../state.js', async (importOriginal) => {
 
 // Lazy import so the mock above is registered first.
 async function loadResolver() {
-  const mod = await import('../versions.js');
+  const mod = await import('../installations/versions.js');
   return mod.resolveAgentVersionTargets;
 }
 

@@ -23,7 +23,7 @@ import {
   formatAgentError,
 } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
-import { listInstalledVersions, getGlobalDefault, getVersionHomePath } from '../lib/versions.js';
+import { listInstalledVersions, getGlobalDefault, getVersionHomePath } from '../lib/installations/versions.js';
 import { agentReportsUsage, formatUsageSection, getUsageInfoForIdentity } from '../lib/accounting/usage.js';
 
 /** One agent's usage snapshot — the unit the text and --json renderers share. */

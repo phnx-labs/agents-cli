@@ -6,7 +6,7 @@ import * as crypto from 'crypto';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
-import { getProjectVersion, removeVersion, getVersionDir, markVersionIsolated, isVersionIsolated } from '../versions.js';
+import { getProjectVersion, removeVersion, getVersionDir, markVersionIsolated, isVersionIsolated } from '../installations/versions.js';
 import { getVersionsDir, getTrashVersionsDir } from '../state.js';
 import { getDB, updateSessionFilePaths } from '../session/db.js';
 import type { AgentId } from '../types.js';
@@ -158,7 +158,7 @@ describe('syncResourcesToVersion preserves command-skills through the skills orp
       const script = String.raw`
         import * as fs from 'fs';
         import * as path from 'path';
-        import { getVersionHomePath, syncResourcesToVersion } from './src/lib/versions.ts';
+        import { getVersionHomePath, syncResourcesToVersion } from './src/lib/installations/versions.ts';
 
         const home = process.env.HOME;
         if (!home) throw new Error('HOME missing');
@@ -217,7 +217,7 @@ describe('syncResourcesToVersion respects version-gated subagent capabilities', 
       const script = String.raw`
         import * as fs from 'fs';
         import * as path from 'path';
-        import { getVersionHomePath, syncResourcesToVersion } from './src/lib/versions.ts';
+        import { getVersionHomePath, syncResourcesToVersion } from './src/lib/installations/versions.ts';
 
         const home = process.env.HOME;
         if (!home) throw new Error('HOME missing');
@@ -373,7 +373,7 @@ describe('removeVersion never promotes an isolated install to the global default
     import { AGENTS } from './src/lib/agents.ts';
     import {
       getVersionDir, setGlobalDefault, getGlobalDefault, removeVersion, markVersionIsolated,
-    } from './src/lib/versions.ts';
+    } from './src/lib/installations/versions.ts';
 
     function fakeInstall(agent, version) {
       const cfg = AGENTS[agent];

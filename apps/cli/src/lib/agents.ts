@@ -23,7 +23,7 @@ import { execFileShellSpec } from './platform/index.js';
 import { latestFileMtimeMs } from './fs-walk.js';
 import { damerauLevenshtein } from './fuzzy.js';
 import { getCacheDir, getVersionsDir, getShimsDir, getHistoryDir, getCliVersionCachePath } from './state.js';
-import { resolveVersion, getVersionHomePath, getBinaryPath } from './versions.js';
+import { resolveVersion, getVersionHomePath, getBinaryPath } from './installations/versions.js';
 import { supports } from './capabilities.js';
 import { MCP_TARGETS } from './mcp-registry.js';
 

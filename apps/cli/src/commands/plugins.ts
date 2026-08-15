@@ -40,7 +40,7 @@ import {
   syncResourcesToVersion,
   getGlobalDefault,
   getVersionHomePath,
-} from '../lib/versions.js';
+} from '../lib/installations/versions.js';
 import {
   isPromptCancelled,
   isInteractiveTerminal,

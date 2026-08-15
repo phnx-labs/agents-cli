@@ -22,7 +22,7 @@ import {
   getSystemPluginsDir,
   getProjectPluginsDir,
 } from './state.js';
-import { listInstalledVersions, getVersionHomePath } from './versions.js';
+import { listInstalledVersions, getVersionHomePath } from './installations/versions.js';
 
 // WORKFLOW_CAPABLE_AGENTS removed — use `capableAgents('workflows')` from
 // lib/capabilities.ts. The capability matrix on AgentConfig is the single

@@ -43,7 +43,7 @@ import {
   getVersionHomePath,
   resolveAgentVersionTargets,
   resolveInstalledAgentTargets,
-} from '../lib/versions.js';
+} from '../lib/installations/versions.js';
 import { recordVersionResources } from '../lib/state.js';
 import {
   isPromptCancelled,
