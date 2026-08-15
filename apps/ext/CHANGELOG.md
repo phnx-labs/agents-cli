@@ -6,6 +6,8 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+## [0.9.323] - 2026-08-15
+
 - **The Foreman orb no longer covers the Fleet session detail.** The orb, its speaker
   chip and its composer are a `position: fixed` bottom-right overlay, so the newest
   Activity line in the session detail column rendered underneath them and could not be
