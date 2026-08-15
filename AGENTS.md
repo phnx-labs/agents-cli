@@ -202,12 +202,11 @@ post-merge/nightly coverage. It must not silently expand the pull-request gate.
 - Slow integration, broad regression, mutation, packaging, and rare-platform suites
   remain valuable but run after merge or nightly. They do not block the required PR
   result or consume fast-lane capacity.
-- Windows must not remain a required pull-request or release platform (it still is
-  today — `.github/workflows/tests.yml`'s required aggregator waits on the `windows`
-  job). Its smoke suite becomes best-effort and post-merge while support demand is
-  measured; it must never block a merge or ordinary release. Remove Windows-only code
-  and the supported-platform claim when no demonstrated usage justifies the
-  maintenance cost.
+- Windows is not a required pull-request or ordinary-release platform.
+  `.github/workflows/tests.yml` runs a best-effort Windows smoke only on push to
+  `main`, with `continue-on-error`, and the required `Tests / test` job does not
+  wait on it. Remove Windows-only code and the supported-platform claim when no
+  demonstrated usage justifies the maintenance cost.
 - Keep only tests that protect a distinct product invariant or regression. Delete
   duplicate assertions, implementation-detail tests, constant/trivial-guard tests, and
   tests whose removal does not reduce meaningful mutation or defect coverage.

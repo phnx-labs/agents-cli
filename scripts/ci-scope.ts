@@ -1,6 +1,18 @@
 #!/usr/bin/env bun
+/**
+ * Exact impact planner for the required Linux CI check (RUSH-2666).
+ *
+ * `scripts/ci-scope.ts --base <sha> --head <sha> --json` is the canonical
+ * interface. Non-JSON mode prints the changed-file → test/check → reason table.
+ * Unmapped production paths fail the policy check; there is no full-suite fallback.
+ */
 
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { dirname, join, relative, resolve, sep } from 'node:path';
+
+export const POLICY_VERSION = 'impact-v1';
+export const IMPACT_BUDGET_SEC = 85;
 
 export interface CiScope {
   cli: boolean;
@@ -10,81 +22,147 @@ export interface CiScope {
   windows: boolean;
 }
 
-const FORCE_ALL_PATHS = new Set([
-  'scripts/ci-scope.ts',
-  'scripts/ci-scope.test.ts',
-]);
-
-function isCliDocumentation(file: string): boolean {
-  return file.startsWith('apps/cli/docs/')
-    || file.startsWith('apps/cli/.changelog/')
-    || [
-      'apps/cli/AGENTS.md',
-      'apps/cli/CHANGELOG.md',
-      'apps/cli/README.md',
-    ].includes(file);
+export interface SelectedTest {
+  file: string;
+  reason: string;
 }
 
-function isWindowsSensitive(file: string): boolean {
-  return file === 'apps/cli/src/lib/hooks.ts'
-    || file.startsWith('apps/cli/src/lib/hooks/')
-    || file.startsWith('apps/cli/src/lib/platform/')
-    || /^apps\/cli\/src\/lib\/shims[^/]*\.ts$/.test(file)
-    || /^apps\/cli\/src\/lib\/binary-shadow(\.test)?\.ts$/.test(file)
-    || file.startsWith('apps/cli/hooks/')
-    || file.startsWith('apps/cli/src/lib/hosts/');
+export interface ImpactPlan {
+  selection_base_sha: string;
+  pr_head_sha: string;
+  candidate_tree_sha: string;
+  policy_version: string;
+  policy_digest: string;
+  lockfile_digest: string;
+  suite: 'selected' | 'cli-full';
+  tests: SelectedTest[];
+  checks: string[];
+  platforms: string[];
+  unmapped: string[];
+  zero_selection: string[];
+  mapping: Array<{ file: string; selected: string; reason: string }>;
 }
 
-export function classifyCiScope(files: readonly string[]): CiScope {
-  const scope: CiScope = {
-    cli: false,
-    cliDocs: false,
-    ext: false,
-    sessionTracker: false,
-    windows: false,
-  };
+export interface ImpactProof {
+  schema: 'impact-proof-v1';
+  policy_version: string;
+  policy_digest: string;
+  lockfile_digest: string;
+  candidate_tree_sha: string;
+  platform: string;
+  suite: ImpactPlan['suite'];
+  tests: string[];
+  checks: string[];
+  result: 'pass';
+  bun: string;
+}
 
-  for (const file of files) {
-    if (FORCE_ALL_PATHS.has(file) || file.startsWith('.github/workflows/')) {
-      return {
-        cli: true,
-        cliDocs: true,
-        ext: true,
-        sessionTracker: true,
-        windows: true,
-      };
-    }
+interface OwnershipGroup {
+  id: string;
+  when: string[];
+  tests?: string[];
+  checks?: string[];
+  suite?: 'selected' | 'cli-full';
+}
 
-    if (file.startsWith('apps/cli/')) {
-      if (isCliDocumentation(file)) {
-        scope.cliDocs = true;
-      } else {
-        scope.cli = true;
-      }
-      if (isWindowsSensitive(file)) scope.windows = true;
-    }
+interface OwnershipArea {
+  prefix: string;
+  companion?: boolean;
+  related?: boolean;
+  checks?: string[];
+}
 
-    if (file.startsWith('apps/ext/')) scope.ext = true;
-    if (file.startsWith('packages/session-tracker/')) scope.sessionTracker = true;
+export interface OwnershipManifest {
+  policy_version: string;
+  areas: OwnershipArea[];
+  groups: OwnershipGroup[];
+  testless: string[];
+}
+
+const DEFAULT_MANIFEST = join(import.meta.dir, '..', 'apps/cli/ci/test-ownership.yaml');
+const CLI_TEST_GLOBS = [
+  /\/tests\/.*\.test\.ts$/,
+  /\/src\/.*\.test\.ts$/,
+  /\/scripts\/.*\.test\.ts$/,
+  /\/__tests__\/.*\.test\.ts$/,
+];
+
+const EXECUTABLE = /\.(ts|tsx|js|mjs|cjs|sh)$/;
+
+export function repoRootFrom(cwd = process.cwd()): string {
+  const proc = Bun.spawnSync({
+    cmd: ['git', 'rev-parse', '--show-toplevel'],
+    cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  if (proc.exitCode !== 0) return cwd;
+  return Buffer.from(proc.stdout).toString('utf8').trim();
+}
+
+export function posix(file: string): string {
+  return file.split(sep).join('/');
+}
+
+export function matchGlob(glob: string, file: string): boolean {
+  const f = posix(file);
+  const g = posix(glob);
+  if (g.endsWith('/**')) {
+    const prefix = g.slice(0, -2);
+    const dir = g.slice(0, -3);
+    return f === dir || f.startsWith(prefix);
   }
-
-  return scope;
+  if (!g.includes('*')) return f === g;
+  const escaped = g.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  return new RegExp(`^${escaped}$`).test(f);
 }
 
-export function formatGitHubOutputs(scope: CiScope): string {
-  return [
-    `cli=${scope.cli}`,
-    `cli_docs=${scope.cliDocs}`,
-    `ext=${scope.ext}`,
-    `session_tracker=${scope.sessionTracker}`,
-    `windows=${scope.windows}`,
-  ].join('\n') + '\n';
+export function loadOwnershipManifest(path = DEFAULT_MANIFEST): OwnershipManifest {
+  const parsed = Bun.YAML.parse(readFileSync(path, 'utf8')) as OwnershipManifest;
+  if (!parsed?.policy_version) throw new Error(`invalid ownership manifest: ${path}`);
+  parsed.areas ??= [];
+  parsed.groups ??= [];
+  parsed.testless ??= [];
+  return parsed;
 }
 
-function readChangedFiles(): string[] {
-  const input = readFileSync(0);
-  const separator = input.includes(0) ? '\0' : '\n';
-  return input.toString('utf8').split(separator).filter(Boolean);
+function sha256Text(text: string): string {
+  return `sha256:${createHash('sha256').update(text).digest('hex')}`;
+}
+
+function sha256File(path: string): string {
+  return sha256Text(readFileSync(path));
+}
+
+export function policyDigest(repoRoot: string): string {
+  const parts = [
+    join(repoRoot, 'apps/cli/vitest.config.ts'),
+    join(repoRoot, 'apps/cli/ci/test-ownership.yaml'),
+    join(repoRoot, 'scripts/ci-scope.ts'),
+  ]
+    .filter((p) => existsSync(p))
+    .map((p) => `${sha256File(p).slice('sha256:'.length)}  ${posix(relative(repoRoot, p))}`)
+    .join('\n');
+  return sha256Text(parts + '\n');
+}
+
+export function lockfileDigest(repoRoot: string): string {
+  const lock = join(repoRoot, 'apps/cli/bun.lock');
+  if (!existsSync(lock)) return '';
+  return sha256File(lock);
+}
+
+export function gitRevParse(ref: string, cwd: string): string {
+  const proc = Bun.spawnSync({
+    cmd: ['git', 'rev-parse', ref],
+    cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  if (proc.exitCode !== 0) {
+    throw new Error(Buffer.from(proc.stderr).toString('utf8').trim() || `git rev-parse ${ref} failed`);
+  }
+  return Buffer.from(proc.stdout).toString('utf8').trim();
 }
 
 export function changedFilesBetween(base: string, head: string, cwd = process.cwd()): string[] {
@@ -108,15 +186,638 @@ export function changedFilesBetween(base: string, head: string, cwd = process.cw
   return Buffer.from(proc.stdout).toString('utf8').split('\0').filter(Boolean);
 }
 
-function main(): void {
-  const [first, head, explicitOutput] = process.argv.slice(2);
-  const files = first && head ? changedFilesBetween(first, head) : readChangedFiles();
-  const githubOutput = first && head ? explicitOutput : first;
-  const output = formatGitHubOutputs(classifyCiScope(files));
-  if (githubOutput) appendFileSync(githubOutput, output);
-  else process.stdout.write(output);
+export function trackedFiles(cwd: string): string[] {
+  const proc = Bun.spawnSync({
+    cmd: ['git', 'ls-files', '-z'],
+    cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  if (proc.exitCode !== 0) {
+    throw new Error(Buffer.from(proc.stderr).toString('utf8').trim());
+  }
+  return Buffer.from(proc.stdout).toString('utf8').split('\0').filter(Boolean);
+}
 
+export function isTestFile(file: string): boolean {
+  const f = posix(file);
+  return CLI_TEST_GLOBS.some((re) => re.test(`/${f}`)) || f.endsWith('.test.ts') || f.endsWith('.test.sh');
+}
+
+export function isExecutableSource(file: string): boolean {
+  const f = posix(file);
+  return EXECUTABLE.test(f) && !isTestFile(f);
+}
+
+export function companionCandidates(file: string): string[] {
+  const f = posix(file);
+  if (isTestFile(f)) return [];
+  const ext = f.match(/\.(ts|tsx|js|mjs|cjs|sh)$/);
+  if (!ext) return [];
+  const noExt = f.slice(0, -ext[0].length);
+  const base = noExt.split('/').pop() ?? '';
+  const dir = noExt.slice(0, Math.max(0, noExt.lastIndexOf('/')));
+  const out = [`${noExt}.test.ts`, `${noExt}.test.sh`];
+  if (dir.includes('/src/')) {
+    out.push(`${dir}/__tests__/${base}.test.ts`);
+    out.push(`${noExt.replace('/src/', '/tests/')}.test.ts`);
+  }
+  return out;
+}
+
+export function existingCompanions(file: string, repoRoot: string): string[] {
+  return companionCandidates(file).filter((c) => existsSync(join(repoRoot, c)));
+}
+
+function classifyPath(file: string, manifest: OwnershipManifest): {
+  area?: OwnershipArea;
+  groups: OwnershipGroup[];
+  testless: boolean;
+} {
+  const area = [...manifest.areas]
+    .sort((a, b) => b.prefix.length - a.prefix.length)
+    .find((a) => posix(file).startsWith(posix(a.prefix)));
+  const groups = manifest.groups.filter((g) => g.when.some((glob) => matchGlob(glob, file)));
+  const testless = manifest.testless.some((glob) => matchGlob(glob, file));
+  return { area, groups, testless };
+}
+
+export function isClassified(file: string, manifest: OwnershipManifest): boolean {
+  const c = classifyPath(file, manifest);
+  return Boolean(c.area || c.testless || c.groups.length);
+}
+
+export function validateOwnershipManifest(
+  manifest: OwnershipManifest,
+  repoRoot: string,
+): { unmapped: string[]; missingTests: string[]; deadGlobs: string[] } {
+  const tracked = trackedFiles(repoRoot);
+  const unmapped = tracked.filter((file) => !isClassified(file, manifest));
+  const missingTests: string[] = [];
+  const deadGlobs: string[] = [];
+  for (const group of manifest.groups) {
+    for (const test of group.tests ?? []) {
+      if (!existsSync(join(repoRoot, test))) missingTests.push(`${group.id}:${test}`);
+    }
+    for (const glob of group.when) {
+      if (!tracked.some((file) => matchGlob(glob, file))) {
+        deadGlobs.push(`${group.id}:${glob}`);
+      }
+    }
+  }
+  return { unmapped, missingTests, deadGlobs };
+}
+
+const IMPORT_RE = /(?:from\s+|import\s*\()\s*['"](\.[^'"]+)['"]/g;
+
+function resolveImport(fromFile: string, spec: string, repoRoot: string): string | null {
+  const base = resolve(repoRoot, dirname(fromFile), spec);
+  const candidates = [
+    base,
+    `${base}.ts`,
+    `${base}.tsx`,
+    `${base}.js`,
+    join(base, 'index.ts'),
+    join(base, 'index.tsx'),
+  ];
+  if (base.endsWith('.js')) candidates.push(`${base.slice(0, -3)}.ts`);
+  for (const c of candidates) {
+    if (existsSync(c)) return posix(relative(repoRoot, c));
+  }
+  return null;
+}
+
+export function buildImportGraph(repoRoot: string, files: readonly string[]): Map<string, string[]> {
+  const graph = new Map<string, string[]>();
+  for (const file of files) {
+    if (!file.endsWith('.ts') && !file.endsWith('.tsx')) continue;
+    const abs = join(repoRoot, file);
+    if (!existsSync(abs)) continue;
+    const text = readFileSync(abs, 'utf8');
+    const imports: string[] = [];
+    IMPORT_RE.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = IMPORT_RE.exec(text))) {
+      const resolved = resolveImport(file, match[1], repoRoot);
+      if (resolved) imports.push(resolved);
+    }
+    graph.set(posix(file), imports);
+  }
+  return graph;
+}
+
+export function relatedTestFiles(
+  changed: readonly string[],
+  repoRoot: string,
+  files?: readonly string[],
+): string[] {
+  const byFile = relatedTestsBySource(changed, repoRoot, files);
+  return [...new Set([...byFile.values()].flat())];
+}
+
+export function relatedTestsBySource(
+  changed: readonly string[],
+  repoRoot: string,
+  files?: readonly string[],
+): Map<string, string[]> {
+  const universe = files ?? trackedFiles(repoRoot).filter((f) => f.endsWith('.ts') || f.endsWith('.tsx'));
+  const graph = buildImportGraph(repoRoot, universe);
+  const changedSet = new Set(changed.map(posix));
+  const out = new Map<string, string[]>();
+  for (const file of changedSet) out.set(file, []);
+  for (const [from, tos] of graph) {
+    if (!isTestFile(from) || changedSet.has(from)) continue;
+    for (const to of tos) {
+      if (!changedSet.has(to)) continue;
+      out.get(to)!.push(from);
+    }
+  }
+  return out;
+}
+
+function addTest(
+  selected: Map<string, string>,
+  mapping: ImpactPlan['mapping'],
+  changedFile: string,
+  testFile: string,
+  reason: string,
+): void {
+  if (!selected.has(testFile)) selected.set(testFile, reason);
+  mapping.push({ file: changedFile, selected: testFile, reason });
+}
+
+function addCheck(
+  checks: Set<string>,
+  mapping: ImpactPlan['mapping'],
+  changedFile: string,
+  check: string,
+  reason: string,
+): void {
+  checks.add(check);
+  mapping.push({ file: changedFile, selected: `check:${check}`, reason });
+}
+
+export interface SelectImpactInput {
+  files: readonly string[];
+  repoRoot: string;
+  manifest?: OwnershipManifest;
+  baseSha?: string;
+  headSha?: string;
+  treeSha?: string;
+  related?: boolean;
+}
+
+export function selectImpact(input: SelectImpactInput): ImpactPlan {
+  const manifest = input.manifest ?? loadOwnershipManifest();
+  const repoRoot = input.repoRoot;
+  const selected = new Map<string, string>();
+  const checks = new Set<string>();
+  const mapping: ImpactPlan['mapping'] = [];
+  const unmapped: string[] = [];
+  const zeroSelection: string[] = [];
+  let suite: ImpactPlan['suite'] = 'selected';
+
+  const relatedByDefault = input.related !== false;
+  const relatedBySource = relatedByDefault
+    ? relatedTestsBySource(input.files, repoRoot)
+    : new Map<string, string[]>();
+
+  for (const raw of input.files) {
+    const file = posix(raw);
+    const { area, groups, testless } = classifyPath(file, manifest);
+    if (!area && !testless && groups.length === 0) {
+      unmapped.push(file);
+      continue;
+    }
+
+    let selectedForFile = 0;
+    const mark = () => {
+      selectedForFile += 1;
+    };
+
+    if (isTestFile(file)) {
+      addTest(selected, mapping, file, file, 'changed-test');
+      mark();
+    }
+
+    if (area?.companion || file.startsWith('apps/cli/') || file.startsWith('scripts/')) {
+      for (const companion of existingCompanions(file, repoRoot)) {
+        addTest(selected, mapping, file, companion, 'companion');
+        mark();
+      }
+    }
+
+    if ((area?.related ?? file.startsWith('apps/cli/')) && relatedByDefault) {
+      for (const test of relatedBySource.get(file) ?? []) {
+        addTest(selected, mapping, file, test, 'static-import');
+        mark();
+      }
+    }
+
+    for (const check of area?.checks ?? []) {
+      addCheck(checks, mapping, file, check, `area:${area?.prefix ?? ''}`);
+      mark();
+    }
+
+    for (const group of groups) {
+      if (group.suite === 'cli-full') suite = 'cli-full';
+      for (const test of group.tests ?? []) {
+        addTest(selected, mapping, file, test, `owner:${group.id}`);
+        mark();
+      }
+      for (const check of group.checks ?? []) {
+        addCheck(checks, mapping, file, check, `owner:${group.id}`);
+        mark();
+      }
+    }
+
+    if (testless && selectedForFile === 0) {
+      mapping.push({ file, selected: '(none)', reason: 'testless' });
+      continue;
+    }
+
+    if (isExecutableSource(file) && selectedForFile === 0 && !testless) {
+      zeroSelection.push(file);
+    }
+  }
+
+  const tests = [...selected.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([file, reason]) => ({ file, reason }));
+
+  return {
+    selection_base_sha: input.baseSha ?? '',
+    pr_head_sha: input.headSha ?? '',
+    candidate_tree_sha: input.treeSha ?? '',
+    policy_version: manifest.policy_version,
+    policy_digest: existsSync(join(repoRoot, 'scripts/ci-scope.ts')) ? policyDigest(repoRoot) : '',
+    lockfile_digest: lockfileDigest(repoRoot),
+    suite,
+    tests,
+    checks: [...checks].sort(),
+    platforms: ['linux'],
+    unmapped,
+    zero_selection: zeroSelection,
+    mapping,
+  };
+}
+
+export function scopeFromPlan(plan: ImpactPlan): CiScope {
+  const has = (name: string) => plan.checks.includes(name);
+  const testUnder = (prefix: string) => plan.tests.some((t) => t.file.startsWith(prefix));
+  return {
+    cli: has('typecheck') || has('binary-smoke') || has('command-index') || has('impact-tests')
+      || has('sessions-bench') || testUnder('apps/cli/') || plan.suite === 'cli-full',
+    cliDocs: has('docs') || has('command-index'),
+    ext: has('ext'),
+    sessionTracker: has('session-tracker'),
+    windows: false,
+  };
+}
+
+export function classifyCiScope(files: readonly string[], repoRoot = repoRootFrom()): CiScope {
+  return scopeFromPlan(selectImpact({ files, repoRoot }));
+}
+
+export function formatGitHubOutputs(
+  scope: CiScope,
+  extra: Record<string, string> = {},
+): string {
+  const rows: Record<string, string> = {
+    cli: String(scope.cli),
+    cli_docs: String(scope.cliDocs),
+    ext: String(scope.ext),
+    session_tracker: String(scope.sessionTracker),
+    windows: String(scope.windows),
+    ...extra,
+  };
+  return Object.entries(rows).map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
+}
+
+export function formatMappingTable(plan: ImpactPlan): string {
+  const lines = [
+    `policy ${plan.policy_version}  tree ${plan.candidate_tree_sha || '(none)'}  suite ${plan.suite}`,
+    'changed file\tselected\treason',
+    ...plan.mapping.map((row) => `${row.file}\t${row.selected}\t${row.reason}`),
+  ];
+  if (plan.unmapped.length) lines.push(`UNMAPPED\t${plan.unmapped.join(' ')}`);
+  if (plan.zero_selection.length) lines.push(`ZERO_SELECTION\t${plan.zero_selection.join(' ')}`);
+  return lines.join('\n') + '\n';
+}
+
+export function planIsFailing(plan: ImpactPlan): boolean {
+  return plan.unmapped.length > 0 || plan.zero_selection.length > 0;
+}
+
+export function proofFromPlan(plan: ImpactPlan, bunVersion: string): ImpactProof {
+  return {
+    schema: 'impact-proof-v1',
+    policy_version: plan.policy_version,
+    policy_digest: plan.policy_digest,
+    lockfile_digest: plan.lockfile_digest,
+    candidate_tree_sha: plan.candidate_tree_sha,
+    platform: 'linux',
+    suite: plan.suite,
+    tests: plan.tests.map((t) => t.file),
+    checks: plan.checks,
+    result: 'pass',
+    bun: bunVersion,
+  };
+}
+
+export function canReuseProof(proof: ImpactProof, plan: ImpactPlan, bunVersion: string): boolean {
+  return proof.schema === 'impact-proof-v1'
+    && proof.result === 'pass'
+    && proof.candidate_tree_sha !== ''
+    && proof.candidate_tree_sha === plan.candidate_tree_sha
+    && proof.policy_digest === plan.policy_digest
+    && proof.lockfile_digest === plan.lockfile_digest
+    && proof.policy_version === plan.policy_version
+    && proof.platform === 'linux'
+    && proof.suite === plan.suite
+    && proof.bun === bunVersion;
+}
+
+export interface RunCommand {
+  cwd: string;
+  cmd: string[];
+}
+
+export function commandForTestFile(file: string, repoRoot: string): RunCommand {
+  const f = posix(file);
+  if (f.endsWith('.test.sh')) {
+    return { cwd: join(repoRoot, dirname(f)), cmd: ['bash', f.split('/').pop()!] };
+  }
+  if (f.startsWith('apps/cli/') && f.endsWith('.test.ts')) {
+    return {
+      cwd: join(repoRoot, 'apps/cli'),
+      cmd: ['node', './node_modules/vitest/vitest.mjs', 'run', '--', f.slice('apps/cli/'.length)],
+    };
+  }
+  if (f.startsWith('packages/session-tracker/') && f.endsWith('.test.ts')) {
+    return {
+      cwd: join(repoRoot, 'packages/session-tracker'),
+      cmd: ['bun', 'run', 'test', '--', f.slice('packages/session-tracker/'.length)],
+    };
+  }
+  if (f.endsWith('.test.ts')) {
+    return { cwd: repoRoot, cmd: ['bun', 'test', f] };
+  }
+  throw new Error(`no runner for selected test: ${f}`);
+}
+
+export function commandsForPlan(plan: ImpactPlan, repoRoot: string): RunCommand[] {
+  const out: RunCommand[] = [];
+  const cli = join(repoRoot, 'apps/cli');
+  if (plan.suite === 'cli-full') {
+    out.push({ cwd: cli, cmd: ['node', './node_modules/vitest/vitest.mjs', 'run'] });
+  } else {
+    const cliTests = plan.tests
+      .map((t) => t.file)
+      .filter((f) => f.startsWith('apps/cli/') && f.endsWith('.test.ts'))
+      .map((f) => f.slice('apps/cli/'.length));
+    if (cliTests.length) {
+      out.push({
+        cwd: cli,
+        cmd: ['node', './node_modules/vitest/vitest.mjs', 'run', '--', ...cliTests],
+      });
+    }
+  }
+  for (const test of plan.tests) {
+    if (test.file.startsWith('apps/cli/') && test.file.endsWith('.test.ts')) continue;
+    out.push(commandForTestFile(test.file, repoRoot));
+  }
+  for (const check of plan.checks) {
+    switch (check) {
+      case 'typecheck':
+        out.push({ cwd: cli, cmd: ['bun', 'run', 'build'] });
+        break;
+      case 'command-index':
+        out.push({ cwd: cli, cmd: ['bash', 'scripts/verify-command-index.sh'] });
+        break;
+      case 'docs':
+        out.push({ cwd: cli, cmd: ['bash', 'scripts/verify-docs.sh'] });
+        break;
+      case 'binary-smoke':
+        out.push({ cwd: cli, cmd: ['bash', 'scripts/build-bin.sh'] });
+        out.push({ cwd: cli, cmd: ['./dist/bin/agents', '--version'] });
+        break;
+      case 'sessions-bench':
+        out.push({ cwd: cli, cmd: ['bun', 'bench/sessions-active-perf.ts'] });
+        break;
+      case 'ext':
+        out.push({ cwd: join(repoRoot, 'apps/ext'), cmd: ['bun', 'run', 'compile'] });
+        out.push({
+          cwd: join(repoRoot, 'apps/ext'),
+          cmd: ['bash', '-lc', 'for t in scripts/*.test.sh; do echo "== $t"; bash "$t"; done'],
+        });
+        break;
+      case 'session-tracker':
+        out.push({
+          cwd: join(repoRoot, 'packages/session-tracker'),
+          cmd: ['bun', 'run', 'test', '--', 'tests/state-file.test.ts'],
+        });
+        break;
+      case 'impact-tests':
+        out.push({ cwd: repoRoot, cmd: ['bun', 'test', 'scripts/ci-scope.test.ts'] });
+        break;
+      case 'workflow-policy':
+        out.push({ cwd: repoRoot, cmd: ['bun', 'test', './.github/workflows/', './scripts/ci-bench/'] });
+        break;
+      default:
+        throw new Error(`unknown check: ${check}`);
+    }
+  }
+  return out;
+}
+
+export function installCommandsForPlan(plan: ImpactPlan, repoRoot: string): RunCommand[] {
+  const out: RunCommand[] = [];
+  const needsCli = plan.suite === 'cli-full'
+    || plan.tests.some((t) => t.file.startsWith('apps/cli/'))
+    || plan.checks.some((c) => ['typecheck', 'command-index', 'docs', 'binary-smoke', 'sessions-bench'].includes(c));
+  if (needsCli) out.push({ cwd: join(repoRoot, 'apps/cli'), cmd: ['bun', 'install', '--frozen-lockfile'] });
+  if (plan.checks.includes('ext')) {
+    out.push({ cwd: join(repoRoot, 'apps/ext'), cmd: ['bun', 'install', '--frozen-lockfile'] });
+    out.push({ cwd: join(repoRoot, 'apps/ext/ui'), cmd: ['bun', 'install', '--frozen-lockfile'] });
+  }
+  if (plan.checks.includes('session-tracker')) {
+    out.push({
+      cwd: join(repoRoot, 'packages/session-tracker'),
+      cmd: ['bun', 'install', '--frozen-lockfile'],
+    });
+  }
+  return out;
+}
+
+function readChangedFilesFromStdin(): string[] {
+  const input = readFileSync(0);
+  const separator = input.includes(0) ? '\0' : '\n';
+  return input.toString('utf8').split(separator).filter(Boolean);
+}
+
+function parseArgs(argv: string[]): {
+  base?: string;
+  head?: string;
+  json: boolean;
+  validate: boolean;
+  run?: string;
+  planFile?: string;
+  proofWrite?: string;
+  proofReuse?: string;
+  githubOutput?: string;
+  deadlineSec?: number;
+} {
+  const out: ReturnType<typeof parseArgs> = { json: false, validate: false };
+  const rest: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    const next = () => argv[++i];
+    switch (a) {
+      case '--base': out.base = next(); break;
+      case '--head': out.head = next(); break;
+      case '--json': out.json = true; break;
+      case '--validate-manifest': out.validate = true; break;
+      case '--run': out.run = next(); break;
+      case '--plan-file': out.planFile = next(); break;
+      case '--write-proof': out.proofWrite = next(); break;
+      case '--reuse-proof': out.proofReuse = next(); break;
+      case '--github-output': out.githubOutput = next(); break;
+      case '--deadline-sec': out.deadlineSec = Number(next()); break;
+      case '--fail-unmapped': break;
+      default: rest.push(a);
+    }
+  }
+  if (!out.base && rest[0] && rest[1] && !rest[0].startsWith('--')) {
+    out.base = rest[0];
+    out.head = rest[1];
+    out.githubOutput = rest[2] ?? out.githubOutput;
+  } else if (!out.base && rest[0] && !out.run && !out.validate && !out.proofReuse) {
+    out.githubOutput = rest[0];
+  }
+  return out;
+}
+
+function runCmd(spec: RunCommand): void {
+  const proc = Bun.spawnSync({
+    cmd: spec.cmd,
+    cwd: spec.cwd,
+    stdout: 'inherit',
+    stderr: 'inherit',
+    env: process.env,
+  });
+  if (proc.exitCode !== 0) {
+    throw new Error(`command failed (${proc.exitCode}): ${spec.cmd.join(' ')}`);
+  }
+}
+
+function main(): void {
+  const args = parseArgs(process.argv.slice(2));
+  const repoRoot = repoRootFrom();
+  const manifest = loadOwnershipManifest();
+
+  if (args.validate) {
+    const result = validateOwnershipManifest(manifest, repoRoot);
+    if (result.unmapped.length || result.missingTests.length || result.deadGlobs.length) {
+      process.stderr.write(
+        `unmapped (${result.unmapped.length}):\n${result.unmapped.map((f) => `  ${f}`).join('\n')}\n`
+        + `missing tests:\n${result.missingTests.map((f) => `  ${f}`).join('\n')}\n`
+        + `dead when-globs:\n${result.deadGlobs.map((f) => `  ${f}`).join('\n')}\n`,
+      );
+      process.exit(1);
+    }
+    process.stdout.write(`ownership manifest covers ${trackedFiles(repoRoot).length} tracked files\n`);
+    return;
+  }
+
+  if (args.run) {
+    const plan = JSON.parse(readFileSync(args.run, 'utf8')) as ImpactPlan;
+    if (planIsFailing(plan)) {
+      process.stderr.write(formatMappingTable(plan));
+      process.exit(1);
+    }
+    const started = Number(process.env.IMPACT_STARTED_AT ?? Date.now() / 1000);
+    for (const spec of [...installCommandsForPlan(plan, repoRoot), ...commandsForPlan(plan, repoRoot)]) {
+      runCmd(spec);
+    }
+    const elapsed = Math.round(Date.now() / 1000 - started);
+    const deadline = plan.suite === 'cli-full'
+      ? 1200
+      : (args.deadlineSec ?? IMPACT_BUDGET_SEC);
+    process.stdout.write(`impact ran in ${elapsed}s (budget ${deadline}s, suite ${plan.suite})\n`);
+    if (elapsed > deadline) {
+      process.stderr.write(`::error::impact exceeded ${deadline}s budget (${elapsed}s)\n`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  const files = args.base && args.head
+    ? changedFilesBetween(args.base, args.head, repoRoot)
+    : readChangedFilesFromStdin();
+
+  let treeSha = '';
+  let selectionBase = args.base ?? '';
+  if (args.head) {
+    try {
+      treeSha = gitRevParse(`${args.head}^{tree}`, repoRoot);
+      if (args.base) {
+        const proc = Bun.spawnSync({
+          cmd: ['git', 'merge-base', args.base, args.head],
+          cwd: repoRoot,
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
+        if (proc.exitCode === 0) {
+          selectionBase = Buffer.from(proc.stdout).toString('utf8').trim();
+        }
+      }
+    } catch {
+      treeSha = '';
+    }
+  }
+
+  const plan = selectImpact({
+    files,
+    repoRoot,
+    manifest,
+    baseSha: selectionBase,
+    headSha: args.head,
+    treeSha,
+  });
+
+  if (args.planFile) writeFileSync(args.planFile, `${JSON.stringify(plan, null, 2)}\n`);
+
+  const bunVersion = Bun.version;
+  let reused = false;
+  if (args.proofReuse && existsSync(args.proofReuse)) {
+    try {
+      const proof = JSON.parse(readFileSync(args.proofReuse, 'utf8')) as ImpactProof;
+      reused = canReuseProof(proof, plan, bunVersion);
+    } catch {
+      reused = false;
+    }
+  }
+
+  if (args.proofWrite && !planIsFailing(plan)) {
+    writeFileSync(args.proofWrite, `${JSON.stringify(proofFromPlan(plan, bunVersion), null, 2)}\n`);
+  }
+
+  const scope = scopeFromPlan(plan);
+  const extra = {
+    unmapped: String(plan.unmapped.length > 0),
+    reused: String(reused),
+    suite: plan.suite,
+    tree: plan.candidate_tree_sha,
+    policy_digest: plan.policy_digest,
+  };
+  const output = formatGitHubOutputs(scope, extra);
+  if (args.githubOutput) appendFileSync(args.githubOutput, output);
+  if (args.json) process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
+  else process.stdout.write(formatMappingTable(plan));
   process.stderr.write(`CI scope: ${files.length} changed files\n${output}`);
+
+  if (planIsFailing(plan)) process.exit(1);
 }
 
 if (import.meta.main) main();

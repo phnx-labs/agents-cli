@@ -1,0 +1,14 @@
+{
+  "leaf": "apps/cli/src/lib/artifact-actions.ts",
+  "plan_ms": 178,
+  "selected_tests": 1,
+  "checks": [
+    "typecheck"
+  ],
+  "suite": "selected",
+  "unmapped": [],
+  "budget_sec": 85,
+  "vitest_files": [
+    "tests/artifact-actions.test.ts"
+  ]
+}
