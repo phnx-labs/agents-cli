@@ -14,14 +14,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { execFileSync } from 'child_process';
-import type { AgentId, DiscoveredPlugin, PluginManifest, MarketplaceSpec } from './types.js';
-import { getPluginsDir, getTrashPluginsDir, getExtraPluginsDir, getProjectPluginsDir, getSystemPluginsDir } from './state.js';
-import { IS_WINDOWS, isWindowsAbsolutePath, homeDir } from './platform/index.js';
-import { assertSafeGitTransport, resolveSnapshotSha } from './git.js';
-import { listInstalledVersions, getVersionHomePath } from './versions.js';
-import { AGENTS, agentConfigDirName } from './agents.js';
-import { capableAgents, isCapable } from './capabilities.js';
-import { shouldInstallCommandAsSkill, installCommandSkillToVersion } from './command-skills.js';
+import type { AgentId, DiscoveredPlugin, PluginManifest, MarketplaceSpec } from '../types.js';
+import { getPluginsDir, getTrashPluginsDir, getExtraPluginsDir, getProjectPluginsDir, getSystemPluginsDir } from '../state.js';
+import { IS_WINDOWS, isWindowsAbsolutePath, homeDir } from '../platform/index.js';
+import { assertSafeGitTransport, resolveSnapshotSha } from '../git.js';
+import { listInstalledVersions, getVersionHomePath } from '../versions.js';
+import { AGENTS, agentConfigDirName } from '../agents.js';
+import { capableAgents, isCapable } from '../capabilities.js';
+import { shouldInstallCommandAsSkill, installCommandSkillToVersion } from '../command-skills.js';
 import {
   copyPluginToMarketplace,
   syncMarketplaceManifest,

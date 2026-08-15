@@ -34,7 +34,7 @@ import {
   syncPluginToVersion,
   pluginResourceGroups,
   type PluginCapabilities,
-} from '../lib/plugins.js';
+} from '../lib/plugins/plugins.js';
 import {
   listInstalledVersions,
   syncResourcesToVersion,
@@ -58,7 +58,7 @@ import {
 } from './resource-view.js';
 import { getPluginsDir } from '../lib/state.js';
 import { safeJoin } from '../lib/paths.js';
-import { discoverMarketplaces } from '../lib/plugin-marketplace.js';
+import { discoverMarketplaces } from '../lib/plugins/plugin-marketplace.js';
 
 /** Replace the home directory prefix with ~ for display. */
 function formatPath(p: string): string {

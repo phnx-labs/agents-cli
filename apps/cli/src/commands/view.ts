@@ -70,7 +70,7 @@ import { renderMergedResources } from '../lib/merged-resources.js';
 import { resolveVersionFilter, AgentSpecError } from '../lib/agent-spec/index.js';
 import { listCliStatus } from '../lib/cli-resources.js';
 import { isCapable } from '../lib/capabilities.js';
-import { discoverPlugins, pluginSupportsAgent } from '../lib/plugins.js';
+import { discoverPlugins, pluginSupportsAgent } from '../lib/plugins/plugins.js';
 import { getAgentsDir, getUserAgentsDir, getEffectivePromptcutsPath, readMergedPromptcuts, readMeta } from '../lib/state.js';
 import { listNativeAccounts } from '../lib/account-registry.js';
 import { isGitRepo, getGitSyncStatus } from '../lib/git.js';

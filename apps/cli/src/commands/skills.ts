@@ -40,7 +40,7 @@ import {
   removeSkillFromVersion,
   type SkillParseError,
   type VersionSkillDiff,
-} from '../lib/skills.js';
+} from '../lib/plugins/skills.js';
 import {
   listInstalledVersions,
   getGlobalDefault,
@@ -253,7 +253,7 @@ Examples:
             const skillMdPath = path.join(localPath, 'SKILL.md');
             if (fs.existsSync(skillMdPath)) {
               const skillName = path.basename(localPath);
-              const { validateSkillMetadata, countSkillRules } = await import('../lib/skills.js');
+              const { validateSkillMetadata, countSkillRules } = await import('../lib/plugins/skills.js');
               const parseResult = tryParseSkillMetadata(localPath);
               const validation = validateSkillMetadata(parseResult.metadata, skillName);
 

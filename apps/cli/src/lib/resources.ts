@@ -8,7 +8,7 @@ import * as path from 'path';
 import type { AgentId } from './types.js';
 import { AGENTS, listInstalledMcpsWithScope } from './agents.js';
 import { listInstalledCommandsWithScope, parseCommandMetadata } from './commands.js';
-import { listInstalledSkillsWithScope, parseSkillMetadata, type SkillParseError } from './skills.js';
+import { listInstalledSkillsWithScope, parseSkillMetadata, type SkillParseError } from './plugins/skills.js';
 import { listOnDiskHooks } from './resource-inventory.js';
 import { listInstalledInstructionsWithScope } from './rules/rules.js';
 import { getEffectiveHome } from './versions.js';

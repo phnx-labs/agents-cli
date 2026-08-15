@@ -21,7 +21,7 @@ import type {
 } from './types.js';
 import { DEFAULT_REGISTRIES, SEEDED_REGISTRIES } from './types.js';
 import { readMeta, writeMeta } from './state.js';
-import { discoverSkillsFromRepo } from './skills.js';
+import { discoverSkillsFromRepo } from './plugins/skills.js';
 
 const UNSAFE_PACKAGE_SPEC_CHARS = /[;&|`$\s\x00-\x1f\x7f]/;
 const NPM_SPEC_PATTERN = /^(@[a-z0-9][a-z0-9-_.]*\/)?[a-z0-9][a-z0-9-_.]*(@[A-Za-z0-9._+-]+)?$/;
