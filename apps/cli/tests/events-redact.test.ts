@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { redactPrompt, redactArgs } from '../src/lib/events.js';
+import { redactPrompt, redactArgs } from '../src/lib/feed/events.js';
 
 describe('redactPrompt', () => {
   it('replaces raw text with length and short sha', () => {
