@@ -60,7 +60,7 @@ export async function dispatchAction(
     };
     try {
       const runMeta = await executeJobDetached(job);
-      if (runMeta.status === 'skipped' || runMeta.status === 'blocked') {
+      if (runMeta.status === 'skipped' || runMeta.status === 'blocked' || runMeta.status === 'failed') {
         return { kind: 'run', ok: false, runId: runMeta.runId, error: runMeta.errorMessage ?? runMeta.status };
       }
       return { kind: 'run', ok: true, runId: runMeta.runId };
@@ -78,7 +78,7 @@ export async function dispatchAction(
     const fired: JobConfig = { ...routine, prompt: injectEvent(routine.prompt ?? '', event) };
     try {
       const runMeta = await executeJobDetached(fired);
-      if (runMeta.status === 'skipped' || runMeta.status === 'blocked') {
+      if (runMeta.status === 'skipped' || runMeta.status === 'blocked' || runMeta.status === 'failed') {
         return { kind: 'routine', ok: false, runId: runMeta.runId, error: runMeta.errorMessage ?? runMeta.status };
       }
       return { kind: 'routine', ok: true, runId: runMeta.runId };
