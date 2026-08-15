@@ -4,7 +4,7 @@ import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PERMISSION_TARGETS, readCanonicalPermissions } from './permissions-registry.js';
 import { capableAgents } from './capabilities.js';
-import { applyPermissionsToVersion, exportPermissionsFromPath } from './permissions.js';
+import { applyPermissionsToVersion, detectPermissionAgentFromPath, exportPermissionsFromPath } from './permissions.js';
 import type { AgentId, PermissionSet } from './types.js';
 
 const tempDirs: string[] = [];
@@ -209,6 +209,31 @@ describe('harness detection does not depend on the working directory', () => {
       process.chdir(before);
     }
   }
+
+  // Table-wide pin: whatever a target's own resolver answers for a real root,
+  // detecting that path must not depend on the working directory. Catches a
+  // future target whose resolver probes the filesystem without declaring its
+  // spellings in `altSuffixes` — the exact shape of this bug.
+  it('resolves every harness the same way from any cwd', () => {
+    // Seed ONLY the non-preferred spelling. A probing resolver rooted at ''
+    // then answers `.json` while the candidate under test is `.jsonc`, which is
+    // what makes the mismatch observable. Seeding both would let the probe find
+    // the right suffix by luck and the test would pass against the bug.
+    const decoy = makeTempHome();
+    fs.mkdirSync(path.join(decoy, '.config', 'opencode'), { recursive: true });
+    fs.writeFileSync(path.join(decoy, 'opencode.json'), '{}', 'utf-8');
+    fs.writeFileSync(path.join(decoy, '.config', 'opencode', 'opencode.json'), '{}', 'utf-8');
+    const bare = makeTempHome();
+
+    for (const agent of capableAgents('allowlist')) {
+      const root = path.join(makeTempHome(), 'root');
+      const candidate = PERMISSION_TARGETS[agent]!.home(root);
+      const fromDecoy = withCwd(decoy, () => detectPermissionAgentFromPath(candidate));
+      const fromBare = withCwd(bare, () => detectPermissionAgentFromPath(candidate));
+      expect(fromDecoy, `${agent}: ${candidate} undetected`).toBe(agent);
+      expect(fromBare, `${agent}: detection differs by cwd`).toBe(fromDecoy);
+    }
+  });
 
   for (const spelling of ['opencode.jsonc', 'opencode.json']) {
     it(`detects ${spelling} identically from a decoy cwd and a bare one`, () => {

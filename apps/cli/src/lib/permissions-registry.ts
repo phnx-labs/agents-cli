@@ -286,7 +286,14 @@ export interface PermissionTarget {
    * spellings, which is correct when resolving a real root but meaningless for
    * detection — `detectPermissionAgentFromPath` passes `''`, so the probe would
    * resolve against `process.cwd()` and make the same input detect differently
-   * depending on where the CLI was run. Detection reads these instead.
+   * depending on where the CLI was run.
+   *
+   * Detection still calls `home('')`/`project('')`, since most targets are pure
+   * `path.join` and need no entry. A target whose resolver probes MUST list
+   * EVERY spelling it can return — that is what makes the probe's answer
+   * irrelevant rather than unreachable. `existingOr` (opencode) is the only
+   * probing resolver today; `permissions-registry.test.ts` pins the invariant
+   * for the whole table rather than leaving it as prose.
    */
   altSuffixes?: string[];
 }
