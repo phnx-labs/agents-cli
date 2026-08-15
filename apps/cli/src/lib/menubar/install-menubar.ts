@@ -37,7 +37,7 @@ const SERVICE_LABEL_BASE = 'com.phnx-labs.agents-menubar';
  * routes bootout/bootstrap/kickstart by identifier alone, so without this a
  * hermetic test fork's own teardown boots out the operator's live helper.
  */
-function serviceLabel(): string {
+export function serviceLabel(): string {
   return namespacedServiceLabel(SERVICE_LABEL_BASE);
 }
 

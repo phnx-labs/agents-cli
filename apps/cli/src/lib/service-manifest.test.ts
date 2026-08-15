@@ -107,11 +107,13 @@ describe('every generated service manifest carries the caller HOME (RUSH-2639)',
     });
   });
 
-  // Regression: this plist had no EnvironmentVariables dict at all.
-  it('the computer-helper launchd plist bakes HOME and a namespaced Label', () => {
+  // Regression: this plist had no EnvironmentVariables dict at all. The label is
+  // passed as a literal here so the assertion fails on the plist's CONTENT
+  // rather than on whether `helperLabel` happens to be exported.
+  it('the computer-helper launchd plist bakes HOME', () => {
     withRedirectedHome((home) => {
       const plist = renderLaunchAgentPlist({
-        label: helperLabel(),
+        label: 'com.phnx-labs.computer-helper',
         exec: '/Applications/Computer Helper.app/Contents/MacOS/ComputerHelper',
         socketPath: path.join(home, '.agents', 'computer.sock'),
         logPath: path.join(home, '.agents', 'computer.log'),
@@ -119,8 +121,14 @@ describe('every generated service manifest carries the caller HOME (RUSH-2639)',
       expect(plist).toContain('<key>EnvironmentVariables</key>');
       expect(plist).toContain(`<key>HOME</key>\n        <string>${home}</string>`);
       expect(plist).toContain(`<key>AGENTS_REAL_HOME</key>\n        <string>${home}</string>`);
-      expect(plist).toContain(`com.phnx-labs.computer-helper.sandbox-${isolatedHomeSuffix()}`);
-      expect(plist).not.toContain('<string>com.phnx-labs.computer-helper</string>');
     });
+  });
+
+  it('the computer-helper Label is namespaced under a redirected HOME, and only then', () => {
+    withRedirectedHome(() => {
+      expect(helperLabel()).toBe(`com.phnx-labs.computer-helper.sandbox-${isolatedHomeSuffix()}`);
+    });
+    process.env.HOME = os.userInfo().homedir;
+    expect(helperLabel()).toBe('com.phnx-labs.computer-helper');
   });
 });
