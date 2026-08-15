@@ -2,6 +2,11 @@
 kind: plan
 title: "Refactor: sessions and the core modules of apps/cli"
 surface: internal
+# Provenance pinned to neutral values on purpose: this artifact is committed to a
+# PUBLIC repo, so the renderer must not auto-fill the authoring host or operator.
+human: Phoenix Labs
+host: fleet
+session: unpublished
 ---
 
 # Refactor: sessions and the core modules of `apps/cli`
