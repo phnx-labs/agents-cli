@@ -16,7 +16,11 @@ const ATTEST_SCRIPT = path.resolve(__dirname, 'release-attestation.sh');
 const roots: string[] = [];
 
 function tmp(prefix: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  // realpath: on macOS os.tmpdir() resolves under /var, which is itself a
+  // symlink to /private/var. `git worktree list` and other subprocesses
+  // report the resolved path, so an un-normalized root here diverges from
+  // what those commands print back (RUSH-2750).
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   roots.push(dir);
   return dir;
 }
