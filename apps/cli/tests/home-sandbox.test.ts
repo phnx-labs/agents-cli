@@ -33,6 +33,11 @@ describe('vitest HOME sandbox (RUSH-2639)', () => {
     expect(getUserAgentsDir()).not.toBe(path.join(realOsHome, '.agents'));
   });
 
+  it('pins the explicit real-home seam to the same fork-private sandbox', () => {
+    expect(process.env.AGENTS_REAL_HOME).toBe(process.env.HOME);
+    expect(process.env.AGENTS_REAL_HOME).not.toBe(os.userInfo().homedir);
+  });
+
   it('a naive subprocess spawn (env: {...process.env}) inherits the sandboxed HOME for free', () => {
     // This is the exact shape of the historical bug class: a test spawns the
     // CLI (or any subprocess) with the parent env spread verbatim and never
@@ -41,9 +46,9 @@ describe('vitest HOME sandbox (RUSH-2639)', () => {
     // already-sandboxed HOME with zero per-test effort.
     const out = execFileSync(
       process.execPath,
-      ['-e', 'process.stdout.write(process.env.HOME || "")'],
+      ['-e', 'process.stdout.write(`${process.env.HOME || ""}\n${process.env.AGENTS_REAL_HOME || ""}`)'],
       { env: { ...process.env } },
     ).toString();
-    expect(out).toBe(process.env.HOME);
+    expect(out).toBe(`${process.env.HOME}\n${process.env.HOME}`);
   });
 });

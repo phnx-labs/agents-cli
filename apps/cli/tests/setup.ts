@@ -50,6 +50,11 @@ const sandboxHome = path.join(tmp, 'home');
 fs.mkdirSync(sandboxHome, { recursive: true });
 process.env.HOME = sandboxHome;
 process.env.USERPROFILE = sandboxHome;
+// Several paths intentionally distinguish an agent's isolated HOME from the
+// active installation home via AGENTS_REAL_HOME. Pin that canonical seam too:
+// child processes launched through login shells/service managers may restore
+// HOME to the account home, but they still inherit AGENTS_REAL_HOME.
+process.env.AGENTS_REAL_HOME = sandboxHome;
 
 // Broker: pin the socket dir to a fork-private temp path so nothing in this
 // fork — nor any CLI subprocess it spawns with inherited env — can reach the
