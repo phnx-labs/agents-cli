@@ -637,8 +637,7 @@ async function handleTerminalHandoff(
   options: ExecCommandActionOptions,
   prompt: string | undefined,
 ): Promise<void> {
-  const { parseTerminalFlag, openRunInTerminal, toHostSamples } = await import('../lib/terminal/run-surface.js');
-  const { currentContext } = await import('../lib/terminal/index.js');
+  const { parseTerminalFlag, openRunInTerminal, toHostSamples, currentContext } = await import('../lib/terminal/index.js');
 
   const parsed = parseTerminalFlag(options.terminal);
   if (parsed.error) {
