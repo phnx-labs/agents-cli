@@ -258,15 +258,31 @@ SSH access (§7); rendering sessions that no harness produced.
   A genuine miss (no indexed row and no live row) still fails closed, and a
   degraded live-registry read yields no candidates rather than throwing.
   Status: landed (RUSH-2682).
+- **SES-9d (MUST).** The transcript a live row carries MUST be that session's own.
+  When the session id is known, it selects the transcript
+  (`findSessionFileForKind` → `indexedSessionFileForId`, `lib/session/active.ts`);
+  only an id-less process may fall back to the newest indexed transcript in its
+  cwd, and an id the index has not reached yet MUST yield no transcript rather
+  than a co-located sibling's. The cwd fallback answers `WHERE agent = ? AND cwd =
+  ? ORDER BY last_activity DESC LIMIT 1` (`latestSessionFileForCwd`), so with two
+  same-harness agents in one cwd it returns one stranger's transcript to all of
+  them — which under SES-9b renders another session's digest under this session's
+  header and caches it against the wrong id. A row whose indexed `agent` differs
+  from the live process's harness is refused for the same reason.
+  Status: landed (RUSH-2691).
 - **SES-9c (SHOULD).** A session started on a machine SHOULD reach that machine's
   transcript index within seconds, not on the next unrelated `agents sessions*`
   invocation. The daemon incrementally scans this host's transcript dirs into the
   local index on a bounded timer (`runSessionIndexWarmTick`,
   `SESSION_INDEX_WARM_TICK_MS`), single-flight with foreground scans via the DB
-  scan claim. A cold-miss repair that loses that claim MUST wait (bounded) for the
-  in-flight scan to finish before reading, not return the pre-scan snapshot
-  (`discoverSessions({ waitForScan })` → `waitForScanToSettle`,
-  `scanInProgressByLivePid`). Status: landed (RUSH-2682).
+  scan claim. That tick MUST run the scan itself (`scanSessionsIncremental`) and
+  MUST NOT route through `discoverSessions`, whose trailing listing query defaults
+  its cwd filter to the daemon's cwd and so reports rows indexed rather than
+  transcripts scanned (RUSH-2691). A cold-miss repair that loses the scan claim
+  MUST wait (bounded) for the in-flight scan to finish before reading, not return
+  the pre-scan snapshot — this binds every id/selector repair path, not only the
+  metadata resolver (`discoverSessions({ waitForScan })` → `waitForScanToSettle`,
+  `scanInProgressByLivePid`). Status: landed (RUSH-2682, RUSH-2691).
 - **SES-10 (MUST).** A preview string MUST be cleaned of terminal/harness noise
   (OSC titles, CSI/SGR, harness tags, collapsed whitespace) before display
   (`cleanPreview`, `commands/sessions.ts:329-337`), and truncated width-aware

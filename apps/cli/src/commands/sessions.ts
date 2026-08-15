@@ -4966,6 +4966,11 @@ async function renderArtifactsGlobal(
       cwd: process.cwd(),
       limit: 5000,
       onProgress: tracker.onProgress,
+      // Resolving a selector is a cold-miss repair, so it owes SES-9c the same
+      // bounded wait the metadata resolver already takes: losing the scan claim
+      // to another process must not return the pre-scan snapshot that just
+      // missed. Bounded at WAIT_FOR_SCAN_TIMEOUT_MS (RUSH-2691).
+      waitForScan: true,
     });
     tracker.stop();
 
@@ -5064,6 +5069,8 @@ async function renderOneSession(
       cwd: process.cwd(),
       limit: 5000,
       onProgress: tracker.onProgress,
+      // Same SES-9c cold-miss contract as the sibling repair above (RUSH-2691).
+      waitForScan: true,
     });
     tracker.stop();
 
