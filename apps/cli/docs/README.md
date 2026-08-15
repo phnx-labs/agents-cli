@@ -96,7 +96,7 @@ How agi-cli is laid out on disk and how it decides what to load.
 
 ## Contributing
 
-Docs live as plain Markdown so they can be edited by anyone and rendered anywhere (GitHub, VS Code preview, future MDX wrapper for agents-cli.sh). When you add or rename a command, update the matching doc in the same PR. The verification loop:
+Docs live as plain Markdown so they can be edited by anyone and rendered anywhere (GitHub, VS Code preview, future MDX wrapper for agi-cli.sh). When you add or rename a command, update the matching doc in the same PR. The verification loop:
 
 ```bash
 agents <cmd> --help                    # confirm every flag mentioned in the doc still prints
