@@ -9,6 +9,7 @@ import {
   AGENTS,
   ACCOUNT_INSPECTION_AGENT_IDS,
   ALL_AGENT_IDS,
+  UNMANAGED_DETECTION_CANDIDATES,
   __resetAntigravityKeychainCacheForTest,
   accountOrgBadge,
   antigravityOsKeyringProbe,
@@ -353,6 +354,56 @@ describe('AGENTS capability matrix', () => {
         expect(config.capabilities, `${agentId} missing ${capability}`).toHaveProperty(capability);
       }
     }
+  });
+
+  it('declares every dispatch field for every AgentId', () => {
+    const requiredDispatchFields = [
+      'sessionDir',
+      'sessionFileExt',
+      'versionStdoutMatch',
+      'unmanagedBinary',
+      'mcpRegister',
+      'mcpAddHttp',
+      'mcpAddStdio',
+      'mcpConfigWrite',
+    ] as const;
+
+    for (const id of ALL_AGENT_IDS) {
+      const config = AGENTS[id];
+      for (const field of requiredDispatchFields) {
+        expect(config, `${id} missing ${field}`).toHaveProperty(field);
+        expect(config[field], `${id}.${field} must not be undefined`).not.toBeUndefined();
+      }
+    }
+  });
+
+  it('pins the specialized dispatch rows so a copied default cannot hide drift', () => {
+    expect(AGENTS.openclaw.versionStdoutMatch).toBe('openclaw');
+    expect(AGENTS.grok.unmanagedBinary).toBe('grok-downloads');
+    expect(AGENTS.hermes.mcpRegister).toBe('config');
+    expect(AGENTS.hermes.mcpConfigWrite).toBe('yaml-mcp_servers');
+    expect(AGENTS.codex.mcpAddHttp).toBe('url');
+    expect(AGENTS.claude.mcpAddStdio).toBe('scope');
+    expect(AGENTS.claude.sessionDir).toEqual(['.claude', 'projects']);
+    expect(AGENTS.claude.sessionFileExt).toBe('.jsonl');
+    expect(AGENTS.codex.sessionDir).toEqual(['.codex', 'sessions']);
+    expect(AGENTS.gemini.sessionDir).toEqual(['.gemini', 'tmp']);
+    expect(AGENTS.gemini.sessionFileExt).toBe('.json');
+    expect(AGENTS.grok.sessionDir).toEqual(['.grok', 'sessions']);
+    expect(AGENTS.grok.sessionFileExt).toBe('.json');
+    expect(AGENTS.copilot.sessionDir).toEqual(['.copilot', 'session-state']);
+    expect(AGENTS.droid.sessionDir).toEqual(['.factory', 'sessions']);
+    expect(AGENTS.muse.sessionDir).toEqual(['.local', 'share', 'muse', 'sessions']);
+    expect(AGENTS.muse.sessionFileExt).toBe('.jsonl');
+  });
+
+  it('derives unmanaged-detection candidates from sessionDir, not a shadow list', () => {
+    expect(UNMANAGED_DETECTION_CANDIDATES).toEqual(
+      ALL_AGENT_IDS.filter((id) => AGENTS[id].sessionDir !== null),
+    );
+    expect(new Set(UNMANAGED_DETECTION_CANDIDATES)).toEqual(
+      new Set(['claude', 'codex', 'gemini', 'grok', 'copilot', 'droid', 'muse']),
+    );
   });
 
   it('allows current Cursor builds to open their prompt-less interactive TUI', () => {
