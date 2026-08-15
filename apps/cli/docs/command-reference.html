@@ -730,7 +730,8 @@ email) into a single row. Use `agents devices harnesses` for the per-install vie
       agents devices config zion interactive.host zion          # user scope: where agents show you artifacts
       agents devices config mac-mini --json                     # machine-readable keys: role (worker|personal), see &#39;agents devices role&#39;,
       agents.max-concurrent, scheduler.enabled, daemon.enabled,
-      watchdog.enabled, tmux.enabled, browser.remote-control, browser.profile,
+      watchdog.enabled, tmux.enabled, browser.remote-control,
+      browser.task-idle-minutes, browser.profile,
       notes, ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,
       ssh.identity-file, platform (windows|linux|macos|unknown),
       auto-launch.enabled, auto-launch.preferred — plus the user-scope
@@ -740,8 +741,9 @@ email) into a single row. Use `agents devices harnesses` for the per-install vie
       invocation. values a peer reads land in ~/.agents/agents.yaml under
       fleet.devices.&lt;name&gt;.config and sync with &#39;agents repo push/pull&#39;. the
       keys only the owning box reads — scheduler.enabled, daemon.enabled,
-      tmux.enabled, browser.remote-control, browser.profile — stay in that
-      machine&#39;s own doc, never sync, and can only be set on the device itself.
+      tmux.enabled, browser.remote-control, browser.task-idle-minutes,
+      browser.profile — stay in that machine&#39;s own doc, never sync, and can
+      only be set on the device itself.
       ssh.* / platform / user overlay the discovered registry profile at dial
       time. scheduler.enabled / daemon.enabled take effect when the daemon
       reloads or restarts on that device.
@@ -762,7 +764,8 @@ email) into a single row. Use `agents devices harnesses` for the per-install vie
       agents devices config zion interactive.host zion          # user scope: where agents show YOU artifacts
       agents devices config mac-mini --json                     # machine-readable</code></pre><h4>Notes</h4><p class="notes">Keys: role (worker|personal), see &#39;agents devices role&#39;,
       agents.max-concurrent, scheduler.enabled, daemon.enabled,
-      watchdog.enabled, tmux.enabled, browser.remote-control, browser.profile,
+      watchdog.enabled, tmux.enabled, browser.remote-control,
+      browser.task-idle-minutes, browser.profile,
       notes, ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,
       ssh.identity-file, platform (windows|linux|macos|unknown),
       auto-launch.enabled, auto-launch.preferred — plus the user-scope
@@ -772,8 +775,9 @@ email) into a single row. Use `agents devices harnesses` for the per-install vie
       invocation. Values a PEER reads land in ~/.agents/agents.yaml under
       fleet.devices.&lt;name&gt;.config and sync with &#39;agents repo push/pull&#39;. The
       keys only the owning box reads — scheduler.enabled, daemon.enabled,
-      tmux.enabled, browser.remote-control, browser.profile — stay in that
-      machine&#39;s own doc, never sync, and can only be set on the device itself.
+      tmux.enabled, browser.remote-control, browser.task-idle-minutes,
+      browser.profile — stay in that machine&#39;s own doc, never sync, and can
+      only be set on the device itself.
       ssh.* / platform / user overlay the discovered registry profile at dial
       time. scheduler.enabled / daemon.enabled take effect when the daemon
       reloads or restarts on that device.
