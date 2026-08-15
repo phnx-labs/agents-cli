@@ -37,7 +37,7 @@ import {
   type UsageSnapshot,
   type UsageWindow,
 } from '../usage.js';
-import { deleteKeychainToken, setKeychainToken } from '../secrets/index.js';
+import { deleteKeychainToken, setKeychainToken, setKeychainBackendForTest, type KeychainBackend } from '../secrets/index.js';
 
 function makeAccountInfo(overrides: Partial<AccountInfo> = {}): AccountInfo {
   return {
@@ -602,8 +602,30 @@ describe('usage identity deduping', () => {
 
 describe('Claude usage scoping', () => {
   const previousPassphrase = process.env.AGENTS_SECRETS_PASSPHRASE;
+  let previousBackend: KeychainBackend | null = null;
+
+  // RUSH-2639 sandboxed HOME for the whole suite, and macOS resolves the login
+  // keychain FROM $HOME — so `security` had no keychain to write and failed with
+  // "SecKeychainItemCreateFromContent (<default>): The authorization was
+  // canceled". That surfaced only in the release matrix (PR CI is Linux, which
+  // has no keychain), which is why it halted a release rather than a PR.
+  //
+  // Writing to the developer's REAL login keychain was never acceptable here —
+  // it is the same class of bug RUSH-2639 exists to stop. An in-memory backend
+  // keeps this test's actual subject (a malformed payload resolves to null)
+  // while touching no OS keychain on any platform.
+  beforeEach(() => {
+    const store = new Map<string, string>();
+    previousBackend = setKeychainBackendForTest({
+      get: (item) => store.get(item) ?? null,
+      set: (item, value) => { store.set(item, value); },
+      delete: (item) => store.delete(item),
+      list: (prefix) => [...store.keys()].filter((k) => k.startsWith(prefix)),
+    });
+  });
 
   afterEach(() => {
+    setKeychainBackendForTest(previousBackend);
     if (previousPassphrase === undefined) delete process.env.AGENTS_SECRETS_PASSPHRASE;
     else process.env.AGENTS_SECRETS_PASSPHRASE = previousPassphrase;
   });
