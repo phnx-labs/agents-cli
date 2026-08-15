@@ -579,10 +579,33 @@ export async function prepareSessionForResume(
     ? recordedPane
     : await lowestPaneId(name, sock);
   const state = pane ? await paneExitStatus(pane, sock) : undefined;
-  if (pane && state?.found && !state.dead) return { decision: 'attach', pane };
+  if (pane && state?.found && !state.dead) {
+    // Self-heal a legacy/stale hook right before handing the session back to
+    // an attach client — the steady-state repair point between the daemon's
+    // startup and upgrade one-shots (RUSH-2435).
+    await ensureSessionHookRepaired(name, sock);
+    return { decision: 'attach', pane };
+  }
 
   await killSession(name, sock);
   return { decision: 'create' };
+}
+
+/**
+ * Repair ONE session's `pane-died` hook if it predates AGENT_HOOK_SCHEMA.
+ * Idempotent and NON-DESTRUCTIVE — only `set-hook`s, never kills a pane or
+ * detaches a client. Shared by {@link reconcileSessionHooks} (full sweep) and
+ * {@link ensureSessionHookRepaired} (single session, called before attach) so
+ * the two can never drift on what counts as "repaired" (RUSH-2435).
+ */
+async function repairSessionHookIfStale(name: string, sock: string, meta: SessionMeta | undefined): Promise<boolean> {
+  if (await readHookSchema(name, sock) === String(AGENT_HOOK_SCHEMA)) return false;
+  const agentPane = meta?.pane ?? await lowestPaneId(name, sock);
+  if (!agentPane) return false;
+  const installed = await setSessionHook(name, 'pane-died', agentPaneDiedHook(name, agentPane), sock);
+  if (!installed) return false;
+  await markSessionHookSchema(name, sock);
+  return true;
 }
 
 /**
@@ -594,9 +617,15 @@ export async function prepareSessionForResume(
  * exited a split — self-heals in place, without waiting for those agents to exit
  * or for the server to be recycled.
  *
- * The daemon calls this on a light interval. The per-session `@ag_hook_schema`
- * marker makes steady-state a cheap no-op: a session already at the current
- * schema is skipped. Only run-wrapped sessions (`ag-` prefix) are touched — an
+ * NOT a daemon poll — the 5-minute `tmux-reconcile` routine that used to call this
+ * was deleted (RUSH-2495). It survives as the version-skew ONE-SHOT: the daemon
+ * calls it once at startup (`runDaemon` in `../daemon.js`) and once from the
+ * upgrade-time migration (`runMigration` in `../migrate.js`), so a session a
+ * pre-fix binary left with a stale hook still self-heals without a live poller.
+ * `ensureSessionHookRepaired` covers the steady-state gap between those two
+ * points by repairing a single session right before it's attached to. The
+ * per-session `@ag_hook_schema` marker makes both paths a cheap no-op once a
+ * session is current. Only run-wrapped sessions (`ag-` prefix) are touched — an
  * externally-created session on the socket keeps whatever hook it set.
  */
 export async function reconcileSessionHooks(socket?: string): Promise<{ scanned: number; reconciled: number }> {
@@ -611,15 +640,28 @@ export async function reconcileSessionHooks(socket?: string): Promise<{ scanned:
   let reconciled = 0;
   for (const s of sessions) {
     if (!s.name.startsWith('ag-')) continue; // only run-wrapped sessions
-    if (await readHookSchema(s.name, sock) === String(AGENT_HOOK_SCHEMA)) continue;
-    const agentPane = s.meta?.pane ?? await lowestPaneId(s.name, sock);
-    if (!agentPane) continue;
-    const installed = await setSessionHook(s.name, 'pane-died', agentPaneDiedHook(s.name, agentPane), sock);
-    if (!installed) continue;
-    await markSessionHookSchema(s.name, sock);
-    reconciled++;
+    if (await repairSessionHookIfStale(s.name, sock, s.meta)) reconciled++;
   }
   return { scanned: sessions.length, reconciled };
+}
+
+/**
+ * Repair a single managed session's `pane-died` hook right before it is
+ * attached to, so a legacy session left by a pre-fix binary self-heals on the
+ * next touch instead of waiting for the next daemon-startup/upgrade one-shot
+ * (RUSH-2435). Only `ag-`-prefixed (run-wrapped) sessions are touched; a no-op
+ * for anything else. Best-effort — never throws, so a repair failure can never
+ * block the attach it is protecting.
+ */
+export async function ensureSessionHookRepaired(name: string, socket?: string): Promise<void> {
+  if (!name.startsWith('ag-')) return;
+  const sock = socket ?? getDefaultSocketPath();
+  if (!fs.existsSync(sock)) return;
+  try {
+    await repairSessionHookIfStale(name, sock, readSessionMeta(name) ?? undefined);
+  } catch {
+    // best-effort — an attach must never fail because a repair attempt did
+  }
 }
 
 /**

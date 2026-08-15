@@ -40,7 +40,7 @@ import { isPromptCancelled } from './utils.js';
 import { focusAction } from './focus.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { attachTmux, runTmux } from '../lib/tmux/binary.js';
-import { paneExitStatus } from '../lib/tmux/session.js';
+import { ensureSessionHookRepaired, paneExitStatus } from '../lib/tmux/session.js';
 import { getDefaultSocketPath } from '../lib/tmux/paths.js';
 import { sshExec, sshStream, assertValidSshTarget, shellQuote } from '../lib/ssh-exec.js';
 import { enumerateGhosttyTabs, assignGhosttyTabs } from '../lib/session/ghostty-tabs.js';
@@ -341,6 +341,10 @@ export async function jumpTo(s: ActiveSession, self: string, fallback: Unreachab
       return;
     }
     console.log(chalk.gray(`Attaching ${shortId(s)} (tmux ${tgt}) — Ctrl-b d to detach.`));
+    // Repair a legacy/stale pane-died hook before the attach client takes over
+    // — the 5-min daemon reconcile that used to cover this was deleted;
+    // attach-time repair is what closes the gap now (RUSH-2435).
+    if (session) await ensureSessionHookRepaired(session, socket);
     process.exit(await attachTmux({ socket, args: ['attach-session', '-t', tgt] }));
   }
 

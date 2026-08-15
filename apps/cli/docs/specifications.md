@@ -2610,20 +2610,27 @@ nothing but its own view cache.
   authentication health are first-party account state and run as one in-process
   daemon service (`lib/account-state-service.ts`); explicit CLI refreshes enter
   the same cross-process per-account lease (`lib/refresh-coordinator.ts`). The
-  watchdog, device-probe, tmux-reconcile, launch-health, session-cache-warm, and
-  auto-dispatch ticks (RUSH-2353) were
-  formerly hardcoded `setInterval`s inside `runDaemon()` — a second, unowned
-  scheduling path duplicating what routines already provide (declaration, run
-  history, pause, device pin). They are now **daemon-owned built-in routines**
-  (`lib/builtin-routines.ts`, RUSH-2465): the definitions live in daemon code and
-  are injected as the lowest layer of `listJobs()`, below project > user > system,
-  so a same-named on-disk file (a `~/.agents/routines/` override) still shadows
-  them. Each `command:` invokes the migrated tick body (`lib/daemon-ticks.ts`) via
-  `agents __daemon-tick <name>`, fired by the same pid-claimed `JobScheduler` as
-  every other routine — one scheduler, one executor, still declared/listed/
-  run-tracked/pausable/device-pinnable, but no longer shipped from the
-  `gh:phnx-labs/.agents-system` config repo every install pulls (only
-  `check-updates` remains a system routine there).
+  watchdog, device-probe, session-cache-warm, and auto-dispatch ticks
+  (RUSH-2353) were briefly promoted to **daemon-owned built-in routines**
+  (`lib/builtin-routines.ts`, RUSH-2465) — declarations injected as the lowest
+  layer of `listJobs()` so `agents routines list`/`pause`/`devices` could manage
+  them like any other routine, each `command:` invoking the migrated tick body
+  via `agents __daemon-tick <name>`. That registry was **reverted** (RUSH-2495):
+  `builtin-routines.ts`, the `__daemon-tick` entrypoint, and `JobConfig.builtin`
+  are gone. `watchdog`, `device-probe`, and `session-cache-warm` are again plain
+  hardcoded `setInterval`s inside `runDaemon()` (`runWatchdogTick`,
+  `runDeviceProbeTick`, `runActiveSessionsWarm`) — invisible to `agents
+  routines`, but still the single daemon-owned scheduler/executor SING-1
+  requires, since nothing else calls them. `auto-dispatch` and `launch-health`
+  were deleted outright with no replacement. **`tmux-reconcile`** (the 5-minute
+  poll that retrofitted a stale `pane-died` hook onto managed tmux sessions) was
+  also deleted, but — unlike `auto-dispatch`/`launch-health` — its job is
+  covered without a poll (RUSH-2435): the daemon repairs every managed session's
+  hook once at startup, `ensureSessionHookRepaired` (`lib/tmux/session.ts`)
+  repairs a single session right before each of `agents run
+  --resume`/`focus`/`go`/`tmux attach` attaches to it, and `runMigration`
+  (`lib/migrate.ts`) repairs the fleet again at upgrade time as the
+  version-skew one-shot.
 - **SING-1a (MUST).** Ordinary usage/auth consumers MUST be cache-only. This
   includes routing (`agents run` and teams), `view`, `versions`, `usage`, device
   inventory, and UI consumers. A missing snapshot MUST render as stale or

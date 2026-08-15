@@ -2329,4 +2329,17 @@ export async function runMigration(): Promise<void> {
   // infinite-exec-loop). Also runs after the bucket moves so it scans the
   // canonical HISTORY_DIR/versions tree.
   repairSelfReferentialBinShims();
+
+  // Version-skew one-shot (RUSH-2435): retrofit the current pane-died hook
+  // onto any managed tmux session an older binary left with a stale one. Runs
+  // at upgrade time in addition to the daemon-startup call (daemon.ts) so a
+  // machine that upgrades without immediately restarting its daemon still
+  // repairs on the next `agents` invocation. Idempotent/non-destructive.
+  try {
+    const { reconcileSessionHooks } = await import('./tmux/session.js');
+    const { isTmuxInstalled } = await import('./tmux/binary.js');
+    if (isTmuxInstalled()) await reconcileSessionHooks();
+  } catch {
+    // best-effort — a migration must never fail because tmux wasn't reachable
+  }
 }

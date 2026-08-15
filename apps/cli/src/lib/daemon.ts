@@ -803,6 +803,23 @@ export async function runDaemon(): Promise<void> {
     log('WARN', `device config migration failed: ${(err as Error).message}`);
   }
 
+  // Version-skew one-shot (RUSH-2435): retrofit the current pane-died hook onto
+  // any managed tmux session a pre-fix binary left with a stale one. The 5-min
+  // `tmux-reconcile` routine that used to run this on a poll was deleted
+  // (RUSH-2495) — startup + `ensureSessionHookRepaired` at attach time
+  // (tmux/session.ts) now cover what that poll used to. Idempotent and
+  // non-destructive: a session already at the current schema is a no-op.
+  try {
+    const { reconcileSessionHooks } = await import('./tmux/session.js');
+    const { isTmuxInstalled } = await import('./tmux/binary.js');
+    if (isTmuxInstalled()) {
+      const r = await reconcileSessionHooks();
+      if (r.reconciled > 0) log('INFO', `tmux: retrofitted pane-died hook on ${r.reconciled}/${r.scanned} session(s)`);
+    }
+  } catch (err) {
+    log('WARN', `tmux hook reconcile failed: ${(err as Error).message}`);
+  }
+
   // Per-service toggles live outside device-config so they can be checked by
   // service clients (e.g. secrets) without loading the whole config stack.
   let servicesConfig = readDaemonServicesConfig();

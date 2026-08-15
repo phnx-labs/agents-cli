@@ -583,35 +583,30 @@ On upgrade, explicit legacy `enabled:` and `devices:` values are materialized
 once into the current host's routine membership. Subsequent toggles edit only the
 device manifest.
 
-### Built-in daemon routines
+### Daemon-core housekeeping (not a routine you manage)
 
-Six routines are **daemon-owned built-ins** — their definitions live in the CLI
-itself (`lib/builtin-routines.ts`), not in a `~/.agents/routines/` file:
-`session-cache-warm`, `device-probe`, `auto-dispatch`, `watchdog`,
-`tmux-reconcile`, and `launch-health`. They are the
-daemon's own housekeeping (cache warming, the watchdog, self-heal), fired by the
-same scheduler via `agents __daemon-tick <name>`. `agents routines list` shows them
-with a `(built-in)` tag, and `--json` carries `builtin: true`.
+The daemon's own housekeeping — session-cache warming, device probing, and the
+watchdog — runs as plain `setInterval` timers in `lib/daemon.ts`
+(`runActiveSessionsWarm`, `runDeviceProbeTick`, `runWatchdogTick`), not as
+entries under `agents routines`. This replaced an earlier `builtin-routines.ts`
+registry that surfaced them as `(built-in)`-tagged routines with
+`agents routines pause`/`devices` support; that registry, the
+`__daemon-tick <name>` entrypoint, and the `JobConfig.builtin` field were torn
+out (RUSH-2495) because they doubled a scheduling layer the plain timers already
+covered. `agents routines list` no longer shows them — housekeeping is invisible
+to that command, not degraded.
 
-Usage and authentication health are first-party account state rather than
-schedulable work. One in-process daemon service owns those refresh timers, so
-they cannot drift from the running daemon or be duplicated by routine catch-up.
-
-They behave like any other routine — enable/disable and pin them by name:
-
-```bash
-agents routines list                          # shows the 6, tagged (built-in)
-agents routines pause watchdog                # device-activation manifest, by name
-agents routines devices auto-dispatch --set yosemite-s0   # owner-pin a shared-input job
-```
-
-They are the **lowest** definition layer, so a same-named file always wins:
-dropping `~/.agents/routines/watchdog.yml` overrides the built-in entirely. Running
-`agents routines edit <name>` on a built-in **materializes** a real file from the
-built-in definition (the `(built-in)` tag then disappears, because it is now a
-normal file-backed routine you own). Built-ins are excluded from missed-fire
-catch-up (a missed 3–6 min housekeeping tick is redone by the next tick, not
-replayed).
+The `auto-dispatch` and `launch-health` routines, and the **5-minute
+`tmux-reconcile` poll** that used to retrofit a stale `pane-died` hook onto
+managed tmux sessions, were deleted in the same pass and have **no** daemon-core
+replacement timer. `tmux-reconcile`'s job is instead covered by two
+lifecycle-enforcement points that don't need a poll (RUSH-2435): the daemon
+repairs every managed session's hook once at startup, and `agents run
+--resume`/`agents focus`/`agents go`/`agents tmux attach` each repair the ONE
+session they're about to attach to right before attaching
+(`ensureSessionHookRepaired`, `lib/tmux/session.ts`). A version-skew one-shot at
+upgrade time (`runMigration`, `lib/migrate.ts`) covers a machine that upgrades
+without immediately restarting its daemon.
 
 ### Legacy device allowlists
 

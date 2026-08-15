@@ -31,6 +31,7 @@ import {
   attachTmux,
   capturePane,
   createSession,
+  ensureSessionHookRepaired,
   getDefaultSocketPath,
   getTmuxVersion,
   hasSession,
@@ -189,6 +190,10 @@ export function registerTmuxCommands(program: Command): void {
         console.error(chalk.red('attach requires a TTY. Run this from an interactive shell.'));
         process.exit(1);
       }
+      // Repair a legacy/stale pane-died hook before handing the session to an
+      // attach client — the 5-min daemon reconcile that used to cover this was
+      // deleted; attach-time repair is what closes the gap now (RUSH-2435).
+      await ensureSessionHookRepaired(name, socket);
       const code = await attachTmux({ socket, args: ['attach-session', '-t', `=${name}`] });
       process.exit(code);
     });

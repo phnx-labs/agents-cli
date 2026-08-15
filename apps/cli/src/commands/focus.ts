@@ -19,7 +19,7 @@ import chalk from 'chalk';
 import { confirm } from '@inquirer/prompts';
 import { gatherLiveTargets, pickLiveTarget, pickLiveTargets, jumpTo, probeAttachRail, refuseFallback, type AttachRailLiveness, type UnreachableFallback } from './go.js';
 import { sessionProcessIsLocal, sessionProcessHost, shortIdFromName, type ActiveSession } from '../lib/session/active.js';
-import { attachTmux, getDefaultSocketPath, hasSession, runTmux } from '../lib/tmux/index.js';
+import { attachTmux, ensureSessionHookRepaired, getDefaultSocketPath, hasSession, runTmux } from '../lib/tmux/index.js';
 import { SESSION_AGENTS, isAgentTmuxAlias, type SessionMeta, type SessionAgentId } from '../lib/session/types.js';
 import {
   buildSessionRecoveryCommand,
@@ -531,6 +531,10 @@ async function attachLiveTmuxAlias(selector: string): Promise<boolean> {
     return true;
   }
   console.log(chalk.gray(`Attaching ${selector} — Ctrl-b d to detach.`));
+  // Repair a legacy/stale pane-died hook before handing the session to an
+  // attach client — the 5-min daemon reconcile that used to cover this was
+  // deleted; attach-time repair is what closes the gap now (RUSH-2435).
+  await ensureSessionHookRepaired(selector, socket);
   const code = await attachTmux({ socket, args: ['attach-session', '-t', `=${selector}`] });
   process.exitCode = code;
   return true;
