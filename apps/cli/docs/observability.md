@@ -1,6 +1,6 @@
 # Observability
 
-Using agents-cli as a programmatic observability layer for agent fleets.
+Using agi-cli as a programmatic observability layer for agent fleets.
 
 `agents feed` and `agents mailboxes` share one fleet-comms visual language (masthead + glyphs from `comms-render`) so the two operator surfaces read as one product.
 
@@ -86,7 +86,7 @@ soft-join later.
 
 **Writing from outside the CLI — `agents events emit`.** In-process code calls
 `emit()` or `appendActivityEvent()` directly, but the producers that most need to
-record events are not agents-cli processes at all (AGI EXT, the VS Code extension
+record events are not agi-cli processes at all (AGI EXT, the VS Code extension
 host, a shell guard, any external tool). They pipe JSONL — one JSON object per
 line — into `agents events emit --source <name>`:
 
@@ -904,7 +904,7 @@ Em/en dashes in title or body are scrubbed to ASCII ` - ` on the way out (phone
 and plain-text clients render them poorly).
 
 ```bash
-# Inside an agents-cli run (AGENT_SESSION_ID / AGENTS_MAILBOX_DIR already set):
+# Inside an agi-cli run (AGENT_SESSION_ID / AGENTS_MAILBOX_DIR already set):
 agents feed post --title "CHANGELOG pushed" "Watching CI and mac-mini E2E"
 agents feed post --title "Cover ready" "render at ./out/cover.png" --attach ./out/cover.png
 agents feed post --title "Ready for review" "PR opened, waiting on prix-cloud" --json
@@ -1256,7 +1256,7 @@ logic changes, so a new metric never reports stale numbers beside fresh ones.
   harnesses group under `unattributed:<agent>`.
 - **Sessions under 2 messages or 1 minute are excluded**, matching `/insights` so the
   two reports count comparable populations. The excluded count is always printed.
-- **No branch collapsing.** `/insights` merges conversation branches; agents-cli is
+- **No branch collapsing.** `/insights` merges conversation branches; agi-cli is
   file-per-session throughout, so session counts read slightly higher here.
 - **`--narrative` is the only path that sends your data to a model.** It pipes the
   *aggregate* (never raw transcripts, unlike `/insights`) through a headless

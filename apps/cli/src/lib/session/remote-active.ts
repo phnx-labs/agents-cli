@@ -71,6 +71,15 @@ export interface RemoteActiveResult {
   sessions: ActiveSession[];
   /** How many peer machines we attempted to reach (drives the empty-fleet tip). */
   deviceCount: number;
+  /**
+   * Peer device names that were unreachable, timed out, or lacked the CLI —
+   * distinct from a peer that answered with zero sessions. Named so an empty
+   * fleet-wide result can say WHICH peers went unheard rather than reading
+   * identical to "the fleet is genuinely idle" (RUSH-2507).
+   */
+  skipped: string[];
+  /** True when the device list itself could not be loaded — no peer was even attempted. */
+  discoveryFailed: boolean;
 }
 
 /**
@@ -89,5 +98,10 @@ export async function gatherRemoteActive(hosts?: string[], opts?: { quiet?: bool
     parse: parseRemoteActive,
     quiet: opts?.quiet,
   });
-  return { sessions: result.items, deviceCount: result.deviceCount };
+  return {
+    sessions: result.items,
+    deviceCount: result.deviceCount,
+    skipped: result.skipped,
+    discoveryFailed: result.discoveryFailed,
+  };
 }

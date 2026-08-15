@@ -24,6 +24,7 @@
 import * as fs from 'fs';
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import { formatBytes } from '../lib/format.js';
 import { confirm } from '@inquirer/prompts';
 import type { AgentId } from '../lib/types.js';
 import {
@@ -192,13 +193,6 @@ function parseTarget(arg: string | undefined): ParsedTarget {
   console.log(chalk.gray(`Available types: ${ALL_TYPES.join(', ')}`));
   console.log(chalk.gray(formatAgentError(arg)));
   process.exit(1);
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 async function runTrashPrune(options: PruneOptions): Promise<void> {

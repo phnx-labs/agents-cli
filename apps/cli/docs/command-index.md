@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_89 command groups · 544 commands._
+_90 command groups · 553 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -587,6 +587,7 @@ agents projects for-cwd [cwd]  Resolve a directory to its defined project name (
 agents projects import         Import project definitions from Linear (via the `linear` CLI).
 agents projects link <name>    Attach an external tracker to a project definition (writes linear.projectId into the YAML).
 agents projects list           List defined projects (definitions only by default; no session scan).
+agents projects pull <name>    Fast-forward every fleet checkout of a named project to its remote default branch.
 agents projects rm <name>      Delete a project definition. Never touches the repo.
 agents projects save           Create or update one project from a complete ProjectDef JSON object on stdin.
 agents projects set <name>     Change one field on a project definition, preserving everything else.
@@ -664,6 +665,19 @@ agents resume <session> [prompt]  Resume a session by id, tmux alias, or exact l
 
 ```
 agents roster  Live agent roster (alias of `agents sessions --active`). Who is running right now.
+```
+
+## route — Named routers -- reusable, task-typed allowlists of harnesses x models/tiers x linked accounts.
+
+```
+agents route                                            Named routers -- reusable, task-typed allowlists of harnesses x models/tiers x linked accounts.
+agents route allow <name> <harness> <models...>         Set (replace) a harness's eligible model/tier allowlist under a router.
+agents route create <name>                              Create a named router with an initial harness + tier allowlist.
+agents route link-account <name> <harness> <account>    Link a durable credential account to a harness under a router.
+agents route list                                       List every configured router.
+agents route rm <name>                                  Delete a router.
+agents route show <name>                                Show a router's harness/model/account allowlist, weights, and hijack flag.
+agents route unlink-account <name> <harness> <account>  Unlink a durable credential account from a harness under a router.
 ```
 
 ## routines — Schedule agents to run on a cron schedule or at a specific time. The daemon starts at install/upgrade and on setup when daemon.enabled is not false; routines add also ensures it is running.

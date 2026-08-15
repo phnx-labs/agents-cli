@@ -47,6 +47,13 @@ export interface PickerConfig<T> {
   filter: (query: string) => Array<T | Separator>;
   labelFor: (item: T, query: string) => string;
   buildPreview?: (item: T) => string;
+  /**
+   * Called once with a repaint trigger for the open prompt. An async preview
+   * source (e.g. a remote row's digest arriving over SSH) invokes the trigger
+   * when data `buildPreview` reported as pending is now ready, so the pane
+   * refreshes without a keypress. The trigger is inert after the prompt closes.
+   */
+  registerPreviewRepaint?: (repaint: () => void) => void;
   shortIdFor?: (item: T) => string;
   pageSize?: number;
   initialSearch?: string;
@@ -229,6 +236,15 @@ export function itemPicker<T>(config: PickerConfig<T>): Promise<PickedItem<T> | 
     const [status, setStatus] = useState<'idle' | 'done'>('idle');
     const [searchTerm, setSearchTerm] = useState(cfg.initialSearch ?? '');
     const [previewOpen, setPreviewOpen] = useState(Boolean(cfg.buildPreview));
+    // An async preview source repaints the pane by bumping this nonce; the
+    // counter lives in a ref because the trigger closure would otherwise hold a
+    // stale value and the second repaint would silently no-op (the same
+    // stale-closure trap dynamicPicker's reloadNonce documents).
+    const [, setPreviewNonce] = useState(0);
+    const previewNonce = useRef(0);
+    useEffect(() => {
+      cfg.registerPreviewRepaint?.(() => setPreviewNonce((previewNonce.current += 1)));
+    }, []);
     const prefix = usePrefix({ status, theme });
 
     const results = useMemo(() => {
@@ -546,6 +562,8 @@ export interface DynamicPickerConfig<T, F, A = never> {
   /** Client-side text filter over the loaded pool (the `S` search). */
   matches?: (item: T, query: string) => boolean;
   buildPreview?: (item: T) => string;
+  /** See {@link PickerConfig.registerPreviewRepaint}. */
+  registerPreviewRepaint?: (repaint: () => void) => void;
   /** Dim summary of the current filter state, rendered in the header. */
   headerFor?: (filter: F) => string;
   /** The hotkey-legend help line; receives the mode so it can adapt. */
@@ -658,6 +676,13 @@ export function dynamicPicker<T, F, A = never>(config: DynamicPickerConfig<T, F,
     // changed) can keep the cursor where the user left it. Snapping back to the
     // top every time you star a row would make the key unusable for a second one.
     const loadedFilter = useRef<F | undefined>(undefined);
+    // Async preview repaint — same ref-counter shape as reloadNonce above, but
+    // it only re-renders (buildPreview runs in render) without re-running load.
+    const [, setPreviewNonce] = useState(0);
+    const previewNonce = useRef(0);
+    useEffect(() => {
+      cfg.registerPreviewRepaint?.(() => setPreviewNonce((previewNonce.current += 1)));
+    }, []);
 
     useEffect(() => {
       const my = ++gen.current;

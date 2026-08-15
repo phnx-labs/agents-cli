@@ -95,6 +95,11 @@ never waits for `agents sessions`, attachment-directory scans, or image decode.
   screenshot so the image bytes are uploaded at create time and embedded in the
   issue description — screenshot paths never pass through an LLM-authored shell
   string.
+- The helper resolves the standalone `linear` executable before dispatching the
+  ticket agent. It prefers `~/.local/bin/linear`, then checks standard Homebrew
+  locations and the inherited `PATH`. A missing or non-executable CLI stops
+  immediately with the install path instead of reporting a generic create
+  failure after the agent has run.
 - **Run** fans out to every selected agent with `agents run <agent> --mode auto
   --balanced --notify --name <slug-of-your-note>`, so the resulting sessions
   appear in normal `agents sessions` and menu-bar surfaces instead of as opaque
@@ -459,12 +464,16 @@ daemon dies.
 calls `checkDaemonLiveness()` on every fire, independent of whether the dropdown
 is ever opened:
 
-- Liveness is the same cheap, synchronous `AgentsCLI.daemonPid()` probe
-  `menuWillOpen` already uses (a pid-file read + `kill(pid, 0)`; no CLI spawn).
-- A debounce of `daemonDownTickThreshold` (3) consecutive dead ticks — about
+- Liveness combines the cheap `AgentsCLI.daemonPid()` probe with the daemon's
+  one-minute heartbeat. A PID that remains alive while its heartbeat is stale
+  for three daemon ticks is `wedged`, not healthy.
+- A debounce of `daemonDownTickThreshold` (3) consecutive unhealthy ticks — about
   30 seconds — must elapse before alerting, so a routine restart (a version
   upgrade, an `agents doctor` self-heal, a crash-relaunch) never pages the user
   for a blip.
+- A wedged daemon is restarted once through `agents daemon restart`; the helper
+  fails closed when the heartbeat is missing, malformed, or belongs to another
+  PID, so ambiguous state never terminates a live process.
 - Once past the threshold it fires **one** notification per outage —
   `"Scheduler stopped — routines won't run"` — via `Notifier.post` directly
   (this persistent process's own `NSUserNotificationCenter` delivery, the same

@@ -1005,9 +1005,27 @@ export function displayHomePath(dir: string): string {
  *   3. Genuinely diverged (local commits not on tracking) → `rebase` onto the
  *      tracking ref (same outcome as {@link syncRepoGit}, without a second pull).
  */
+export interface PullRepoOptions {
+  /**
+   * `'default-branch-fast-forward'` — strict mode for `projects pull`:
+   *   - Blocks immediately if the tree is dirty (no remote read needed).
+   *   - Fetches origin, resolves the remote default branch, and refuses if the
+   *     current branch is not the remote default.
+   *   - Refuses if HEAD is ahead of the upstream (local commits not on remote).
+   *   - Fast-forwards only (`merge --ff-only`). NEVER rebases.
+   *   - NEVER installs git hook symlinks (read-only model path).
+   *
+   * `'preserve-local'` (default) — the existing behavior: tolerates dirty trees
+   * when the incoming diff does not collide, and rebases a diverged branch.
+   */
+  mode?: 'preserve-local' | 'default-branch-fast-forward';
+}
+
 export async function pullRepo(
   dir: string,
+  options: PullRepoOptions = {},
 ): Promise<{ success: boolean; commit: string; error?: string; branch?: string }> {
+  const strict = options.mode === 'default-branch-fast-forward';
   try {
     const git = simpleGit(dir);
 
@@ -1047,14 +1065,24 @@ export async function pullRepo(
     }
 
     const status = await git.status();
+    // Strict mode (projects pull): refuse a dirty tree immediately — no fetch
+    // needed to know the answer, and the caller must not risk touching staged
+    // or modified files with an incoming fast-forward.
+    const isDirty = !status.isClean();
+    if (strict && isDirty) {
+      return {
+        success: false,
+        commit: '',
+        error: `Blocked: dirty working tree. Commit or discard local changes before pulling.\n\n  cd ${displayHomePath(dir)} && git status`,
+      };
+    }
     // A dirty tree is not decided here: whether a fast-forward is safe depends
     // on what is actually incoming, and that needs a fetched upstream ref. The
     // gate therefore sits just before the integrate step below. The exception is
     // a repo with no remote at all — there is nothing to fast-forward from, so
     // the dirt is the whole answer and the resolution below would only fail
     // with a less useful message.
-    const isDirty = !status.isClean();
-    if (isDirty && (await git.getRemotes()).length === 0) {
+    if (!strict && isDirty && (await git.getRemotes()).length === 0) {
       return {
         success: false,
         commit: '',
@@ -1064,13 +1092,13 @@ export async function pullRepo(
 
     const branch = status.current || 'main';
 
-    // Resolve the upstream ref to fast-forward against. Prefer the local
-    // branch's tracking config; otherwise ask origin for its default branch.
+    // Resolve the upstream ref to fast-forward against.
+    // Strict mode: always fetch origin and resolve its default branch — then
+    // verify the current branch IS the remote default (refuse otherwise).
+    // Preserve-local mode: prefer the local branch's tracking config; only
+    // fetch when no tracking is set.
     let tracking = status.tracking;
-    if (!tracking) {
-      // No tracking config: fetch origin so its HEAD is known, then ask which
-      // branch it points at. This path only ever concerns origin — a branch with
-      // no upstream has no other remote to consult.
+    if (strict || !tracking) {
       try {
         await git.fetch('origin');
         await git.raw(['remote', 'set-head', 'origin', '--auto']);
@@ -1078,6 +1106,19 @@ export async function pullRepo(
         tracking = sym.trim();
       } catch {
         tracking = `origin/${branch}`;
+      }
+    }
+    // Strict: the checkout must be on the remote default branch — never pull a
+    // feature branch across the fleet unattended.
+    if (strict) {
+      const sep = tracking.indexOf('/');
+      const expectedBranch = sep > 0 ? tracking.slice(sep + 1) : tracking;
+      if (branch !== expectedBranch) {
+        return {
+          success: false,
+          commit: '',
+          error: `Blocked: HEAD is on "${branch}" but origin defaults to "${expectedBranch}". Switch to "${expectedBranch}" before pulling.`,
+        };
       }
     }
 
@@ -1126,17 +1167,35 @@ export async function pullRepo(
       (await git.raw(['rev-list', '--count', `HEAD..${tracking}`])).trim(),
       10,
     );
-    const canFastForward =
-      Number.isFinite(aheadCount) &&
-      Number.isFinite(behindCount) &&
-      aheadCount === 0 &&
-      behindCount > 0;
+    // Both counts are the ONLY inputs to the fast-forward decision, so a count
+    // we cannot read is a refusal, not a reason to guess. Fail here rather than
+    // downstream: an unreadable count used to fall through to the rebase arm in
+    // preserve-local mode, and to a "HEAD diverged" message in strict mode that
+    // named the wrong cause.
+    if (!Number.isFinite(aheadCount) || !Number.isFinite(behindCount)) {
+      return {
+        success: false,
+        commit: '',
+        error: `Could not read how far HEAD is from ${tracking} — 'git rev-list --count' returned no usable count. Check the checkout, then pull again:\n\n  cd ${displayHomePath(dir)} && git status`,
+      };
+    }
 
-    // Dirty tree: same rule `syncRepoGit` applies, from the same function — a
-    // fast-forward that touches nothing the author is holding may proceed; a
-    // rebase or a colliding path may not. Refusing on any dirt at all is what
-    // used to strand merged changes on every box that had an unrelated edit.
-    if (isDirty) {
+    const canFastForward = aheadCount === 0 && behindCount > 0;
+
+    // Strict: block if HEAD has local commits not on the remote — fast-forward
+    // requires the local tip to be an ancestor of the remote tip.
+    if (strict && aheadCount > 0) {
+      return {
+        success: false,
+        commit: '',
+        error: `Blocked: HEAD is ${aheadCount} commit${aheadCount === 1 ? '' : 's'} ahead of ${tracking}. Push or discard local commits before pulling.`,
+      };
+    }
+
+    // Dirty tree (preserve-local only): same rule `syncRepoGit` applies —
+    // a fast-forward that touches nothing the author is holding may proceed; a
+    // rebase or a colliding path may not. Strict mode already refused above.
+    if (!strict && isDirty) {
       const refusal = await dirtyTreeRefusal(git, status, tracking);
       if (refusal) {
         return {
@@ -1155,6 +1214,14 @@ export async function pullRepo(
         // Diverged (or local-only commits). Rebase onto the tracking tip —
         // same outcome as `git pull --rebase <remote> <branch>` without
         // re-fetching or consulting FETCH_HEAD.
+        //
+        // PRESERVE-LOCAL ONLY — strict mode can never reach this arm, so the
+        // fleet pull never rewrites history. Strict has already returned for
+        // every case that leaves `canFastForward` false: an identical local and
+        // remote ref, `aheadCount > 0` (which is also what "diverged" means),
+        // and a count that would not parse. That leaves `aheadCount === 0` with
+        // a differing ref, i.e. `behindCount > 0` — a fast-forward. Keep those
+        // three returns above intact if you change this.
         await git.raw(['rebase', tracking]);
       }
     } catch (err) {
@@ -1173,7 +1240,9 @@ export async function pullRepo(
       };
     }
 
-    installGithooksSymlinks(dir);
+    // Strict mode never installs git hook symlinks — the command is a read-model
+    // operation (update pointers only; never reconfigure the checkout).
+    if (!strict) installGithooksSymlinks(dir);
 
     const log = await git.log({ maxCount: 1 });
     return {

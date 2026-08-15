@@ -226,7 +226,14 @@ describe('resolveProfileEnv fails fast in a headless context', () => {
       };
       // Past the guard the read reaches the real platform path (helper absent
       // in a source checkout / item absent on CI) — never the headless error.
-      expect(() => resolveProfileEnv(p)).toThrow(/^(?!.*non-interactive).*$/);
+      let message = '';
+      try {
+        resolveProfileEnv(p);
+      } catch (err) {
+        message = err instanceof Error ? err.message : String(err);
+      }
+      expect(message).toBeTruthy();
+      expect(message).not.toContain('non-interactive');
     } finally {
       setKeychainHeadlessDetectorForTest(null);
     }

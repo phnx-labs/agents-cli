@@ -38,6 +38,7 @@ export type ResourceKind =
   | 'subagents'
   | 'workflows'
   | 'profiles'
+  | 'routers'
   | 'secrets';
 
 /** A resource resolved with its origin. */

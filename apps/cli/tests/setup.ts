@@ -17,7 +17,44 @@ import * as path from 'node:path';
 import { afterAll } from 'vitest';
 import { seedHermeticE2eWinHost } from './seed-e2e-win-host.js';
 
+// The REAL developer home, captured before anything below overrides it — the
+// baseline every leak tripwire in this file compares against.
+const realHome = process.env.HOME ?? os.homedir();
+const realUserAgentsDir = path.join(realHome, '.agents');
+
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-vitest-'));
+
+// RUSH-2639: state.ts (`const HOME = process.env.HOME ?? os.homedir()`,
+// state.ts:37) and several sibling modules (agents.ts:38 `const HOME =
+// os.homedir()`, hooks.ts, shims.ts) capture HOME as a MODULE-LEVEL constant
+// at import time. Every per-directory escape hatch below (AGENTS_DEVICES_DIR
+// etc.) only covers the specific spot that has already leaked once; it does
+// nothing for the dozens of other HOME-derived paths (~/.agents/hooks,
+// ~/.agents/routines, ~/.claude/settings.json, …) a test never anticipated.
+// Redirecting HOME itself — the ONE thing every one of those constants is
+// computed from — makes it structurally impossible for anything in this fork
+// to resolve into the real home, instead of catching leaks one path at a time
+// after the fact. This must run BEFORE the test file's own imports (setup
+// files do, in every fork) so state.ts/agents.ts/etc. capture the sandbox,
+// not the real HOME. On POSIX, os.homedir() itself reads $HOME, so this also
+// covers every call site that reaches for os.homedir() directly rather than
+// process.env.HOME. On win32, os.homedir() reads USERPROFILE, so that is
+// pinned too — the pair is what keeps this fork's HOME resolution consistent
+// across platforms.
+//
+// This is also what closes the "dangling /tmp/agents-vitest-*" class from a
+// different angle: a test that spawns a subprocess via `env: {...process.env}`
+// (the common, easy-to-miss pattern) now inherits the sandboxed HOME for
+// free, with no per-test HOME override to remember.
+const sandboxHome = path.join(tmp, 'home');
+fs.mkdirSync(sandboxHome, { recursive: true });
+process.env.HOME = sandboxHome;
+process.env.USERPROFILE = sandboxHome;
+// Several paths intentionally distinguish an agent's isolated HOME from the
+// active installation home via AGENTS_REAL_HOME. Pin that canonical seam too:
+// child processes launched through login shells/service managers may restore
+// HOME to the account home, but they still inherit AGENTS_REAL_HOME.
+process.env.AGENTS_REAL_HOME = sandboxHome;
 
 // Broker: pin the socket dir to a fork-private temp path so nothing in this
 // fork — nor any CLI subprocess it spawns with inherited env — can reach the
@@ -55,7 +92,7 @@ if (e2eWinHost) {
     host: e2eWinHost,
     devicesDir: process.env.AGENTS_DEVICES_DIR,
     realRegistryPath: path.join(
-      process.env.HOME ?? os.homedir(),
+      realHome,
       '.agents',
       '.history',
       'devices',
@@ -95,7 +132,7 @@ process.env.AGENTS_STATE_DIR = path.join(tmp, 'state');
 // Leak tripwire: the REAL events log must not grow while this fork runs.
 // CI-only — on a dev machine live agents append to it concurrently, so the
 // check would false-positive locally; CI homes are quiet.
-const realEventsLog = path.join(process.env.HOME ?? os.homedir(), '.agents', 'events.jsonl');
+const realEventsLog = path.join(realUserAgentsDir, 'events.jsonl');
 const sizeBefore = fs.existsSync(realEventsLog) ? fs.statSync(realEventsLog).size : 0;
 
 // Leak tripwire (RUSH-2042): the REAL device registry must not change while
@@ -103,7 +140,7 @@ const sizeBefore = fs.existsSync(realEventsLog) ? fs.statSync(realEventsLog).siz
 // modified, or removed entry — is a hermeticity breach; a full content compare
 // needs no fixture-name allowlist to stay in sync. On a dev machine live fleet
 // agents may legitimately update it mid-run, so the check is CI-only.
-const realDevicesRegistry = path.join(process.env.HOME ?? os.homedir(), '.agents', '.history', 'devices', 'registry.json');
+const realDevicesRegistry = path.join(realUserAgentsDir, '.history', 'devices', 'registry.json');
 const devicesRegistryBefore: string | null = fs.existsSync(realDevicesRegistry)
   ? fs.readFileSync(realDevicesRegistry, 'utf-8')
   : null;
@@ -113,11 +150,35 @@ const devicesRegistryBefore: string | null = fs.existsSync(realDevicesRegistry)
 // above: a live daemon probe legitimately reconciles this dir every ~3 min on a
 // dev machine. The AGENTS_STATE_DIR pin is the actual fix; this catches a code
 // path that resolves the sentinel dir some other way.
-const realDevicesPending = path.join(
-  process.env.HOME ?? os.homedir(), '.agents', '.cache', 'state', 'devices-pending',
-);
+const realDevicesPending = path.join(realUserAgentsDir, '.cache', 'state', 'devices-pending');
 const devicesPendingBefore: string | null = fs.existsSync(realDevicesPending)
   ? fs.readdirSync(realDevicesPending).sort().join(',')
+  : null;
+
+// Leak tripwire (RUSH-2639): a shallow fingerprint (name + size + mtime) of
+// every direct child of the REAL ~/.agents. The three tripwires above each
+// hard-code one known hot spot; this one is generic — it catches a write
+// ANYWHERE directly under the real user dir (a stray agents.yaml, a hooks/
+// dir, a routines/ entry, …) without needing to name the path in advance.
+// Same CI-only rule as the others: a dev box may have a live daemon touching
+// its own real ~/.agents concurrently.
+function snapshotTopLevel(dir: string): string | null {
+  if (!fs.existsSync(dir)) return null;
+  return fs.readdirSync(dir).sort().map((name) => {
+    const st = fs.statSync(path.join(dir, name));
+    return `${name}:${st.size}:${st.mtimeMs}`;
+  }).join('|');
+}
+const userAgentsTopLevelBefore = snapshotTopLevel(realUserAgentsDir);
+
+// Leak tripwire (RUSH-2639): the native Claude config lives OUTSIDE
+// ~/.agents entirely (~/.claude/settings.json), which is exactly the file
+// this ticket named — a hook-registration test that resolved a version home
+// from the real (un-redirected) HOME wrote its fixture hook entries straight
+// into the developer's actual Claude settings.
+const realClaudeSettings = path.join(realHome, '.claude', 'settings.json');
+const claudeSettingsBefore = fs.existsSync(realClaudeSettings)
+  ? fs.statSync(realClaudeSettings).mtimeMs
   : null;
 
 afterAll(() => {
@@ -153,6 +214,28 @@ afterAll(() => {
           `instead of the fork-private AGENTS_STATE_DIR. Because AGENTS_DEVICES_DIR makes the ` +
           `registry and ignore list read EMPTY under test, the leaking path marks every ` +
           `tailnet node as new and the operator's ignore list appears to have been lost.`,
+        );
+      }
+
+      const userAgentsTopLevelAfter = snapshotTopLevel(realUserAgentsDir);
+      if (userAgentsTopLevelAfter !== userAgentsTopLevelBefore) {
+        throw new Error(
+          `hermeticity leak (RUSH-2639): the real user dir (${realUserAgentsDir}) gained, lost, ` +
+          `or modified a top-level entry during this test file. Some code path resolved a HOME-` +
+          `derived path against the real HOME instead of the fork-private sandbox HOME set at the ` +
+          `top of tests/setup.ts. Before: ${userAgentsTopLevelBefore}. After: ${userAgentsTopLevelAfter}.`,
+        );
+      }
+
+      const claudeSettingsAfter = fs.existsSync(realClaudeSettings)
+        ? fs.statSync(realClaudeSettings).mtimeMs
+        : null;
+      if (claudeSettingsAfter !== claudeSettingsBefore) {
+        throw new Error(
+          `hermeticity leak (RUSH-2639): the real Claude settings (${realClaudeSettings}) changed ` +
+          `during this test file — a test wrote hook entries into the developer's REAL settings.json ` +
+          `instead of a fork-private version home. Set HOME (or use the setup default) before ` +
+          `importing any hook-registration or agent-install code path.`,
         );
       }
     }

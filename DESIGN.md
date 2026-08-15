@@ -1,7 +1,7 @@
 ---
 version: alpha
-name: "agents-cli"
-description: "The meta harness engineering system for agents. A Phoenix Labs OSS product (Apache-2.0), terminal-coded — NOT the Rush/Swarmify brand. Two surfaces, one identity: a chalk-colored terminal CLI and the agents-cli.sh web landing, both a dark #0a0a0a canvas with a single neon-lime accent. The web is monospace-dominant (JetBrains Mono wordmark over a system ui-monospace body); the CLI speaks in chalk-semantic ANSI color."
+name: "agi-cli"
+description: "The meta harness engineering system for agents. A Phoenix Labs OSS product (Apache-2.0), terminal-coded — NOT the Rush/Swarmify brand. Two surfaces, one identity: a chalk-colored terminal CLI and the agi-cli.sh web landing, both a dark #0a0a0a canvas with a single neon-lime accent. The web is monospace-dominant (JetBrains Mono wordmark over a system ui-monospace body); the CLI speaks in chalk-semantic ANSI color."
 
 colors:
   # Brand — one lime on black. #a3e635 is THE accent (confirmed on the live
@@ -9,7 +9,7 @@ colors:
   brand: "#a3e635"
   brand-tint: "rgba(163,230,53,0.04)"   # faint lime wash on hover rows / panels
 
-  # Surfaces — near-black ladder (computed from the live agents-cli.sh).
+  # Surfaces — near-black ladder (computed from the live agi-cli.sh).
   bg: "#0a0a0a"          # canvas
   bg-well: "#0f0f0f"     # recessed
   bg-panel: "#141414"    # raised panel
@@ -82,20 +82,20 @@ components:
 
 ## Overview
 
-agents-cli is a **terminal-first tool that also wears a web face**. The same brand shows up in two mediums, and the design job is to make them feel like one product:
+agi-cli is a **terminal-first tool that also wears a web face**. The same brand shows up in two mediums, and the design job is to make them feel like one product:
 
 - **The terminal** — the primary surface. Thousands of lines of `chalk`-colored output, spinners, and aligned monospace tables. This is where the tool lives.
-- **The web** — the [agents-cli.sh](https://agents-cli.sh) landing page. The same identity rendered in HTML, and it leans *harder* into the terminal aesthetic than the CLI: `#0a0a0a` canvas, one neon-lime accent, and monospace almost everywhere — a JetBrains Mono wordmark over a system `ui-monospace` body. The page reads like a `man` page that happens to be a website.
+- **The web** — the [agi-cli.sh](https://agi-cli.sh) landing page. The same identity rendered in HTML, and it leans *harder* into the terminal aesthetic than the CLI: `#0a0a0a` canvas, one neon-lime accent, and monospace almost everywhere — a JetBrains Mono wordmark over a system `ui-monospace` body. The page reads like a `man` page that happens to be a website.
 
-> **Not the Rush/Swarmify brand.** agents-cli is Phoenix Labs OSS and terminal-coded; it does not use Swarmify's Geist/coral system. The Swarmify VS Code extension mirrors this *palette* (lime on black) but is a separate product with its own design doc — don't import its tokens here.
+> **Not the Rush/Swarmify brand.** agi-cli is Phoenix Labs OSS and terminal-coded; it does not use Swarmify's Geist/coral system. The Swarmify VS Code extension mirrors this *palette* (lime on black) but is a separate product with its own design doc — don't import its tokens here.
 
 The through-line across both surfaces is **quiet, dense, high-signal**. The tool is mostly gray — secondary text, paths, hints — so that the rare colored element (a lime success, a red failure, a lime call-to-action) carries real weight. The brand personality is a *developer-first performance instrument*: the landing headline is "The meta harness engineering system for agents," and the hero stat is "4.3× FASTER." Nothing is decorative; every glyph and color is a status signal.
 
-![agents-cli.sh landing — the live web surface: lime "agents" wordmark on #0a0a0a, monospace throughout, and the parallel-speedup panel with the 4.3× lime badge](assets/design/landing.png)
+![agi-cli.sh landing — the live web surface: lime "agi-cli" wordmark on #0a0a0a, monospace throughout, and the parallel-speedup panel with the 4.3× lime badge](assets/design/landing.png)
 
-*The live [agents-cli.sh](https://agents-cli.sh) hero (captured in Brave). Tokens below are computed from this page.*
+*The live [agi-cli.sh](https://agi-cli.sh) hero (captured in Brave). Tokens below are computed from this page.*
 
-![agents-cli brand tokens — accent, surfaces, text hierarchy, CLI terminal semantic palette, and type](assets/design/brand.png)
+![agi-cli brand tokens — accent, surfaces, text hierarchy, CLI terminal semantic palette, and type](assets/design/brand.png)
 
 ## Colors
 
@@ -103,7 +103,7 @@ There are two color systems, because there are two renderers.
 
 ### Web (live landing)
 
-The brand is **one lime on a near-black canvas.** `#a3e635` — confirmed on the live site as `rgb(163,230,53)` — is the *only* accent, used sparingly for the wordmark, CTAs, and highlights (plus a `rgba(163,230,53,0.04)` wash on hover rows). Surfaces are a tight near-black ladder: `#0a0a0a` canvas → `#0f0f0f` well → `#141414` panel, hairlined in `#333333`. Text steps down `#e8e8e8` → `#d8d8d8` → `#888888` → `#666666` → `#333333`. (All values computed from the live agents-cli.sh, not a mockup.)
+The brand is **one lime on a near-black canvas.** `#a3e635` — confirmed on the live site as `rgb(163,230,53)` — is the *only* accent, used sparingly for the wordmark, CTAs, and highlights (plus a `rgba(163,230,53,0.04)` wash on hover rows). Surfaces are a tight near-black ladder: `#0a0a0a` canvas → `#0f0f0f` well → `#141414` panel, hairlined in `#333333`. Text steps down `#e8e8e8` → `#d8d8d8` → `#888888` → `#666666` → `#333333`. (All values computed from the live agi-cli.sh, not a mockup.)
 
 ### Terminal (ANSI via chalk)
 
@@ -121,7 +121,7 @@ The CLI never hardcodes hex — it uses `chalk`'s semantic ANSI names, so output
 
 `magenta` and `blue` appear rarely (~24× / ~22×) as one-off accents; reach for them almost never. The dominance of gray is the point: **the terminal is calm by default, and color is the exception that means something.**
 
-![agents-cli terminal — a representative session showing each semantic color role in context](assets/design/terminal.png)
+![agi-cli terminal — a representative session showing each semantic color role in context](assets/design/terminal.png)
 
 *Representative render (JetBrains Mono; role hexes from `demo/src` — lime success, cyan names, gray hints, red/yellow status). Actual colors resolve to the user's terminal theme.*
 

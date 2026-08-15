@@ -35,6 +35,7 @@ import {
   buildAutoRunLaunchCommand,
   buildResumeInput,
 } from '../core/resumeInBest';
+import { runStaggered, RESTORE_MAX_CONCURRENCY, RESTORE_STAGGER_MS } from '../core/restoreThrottle';
 import * as os from 'os';
 import * as fsSync from 'fs';
 import { randomUUID } from 'crypto';
@@ -1962,10 +1963,9 @@ async function openSingleAgent(
   });
 
   if (command) {
-    // Prefix the launch command with `exec` so the shell replaces itself with
-    // the agent runner. When the agent exits the terminal process exits too,
-    // which causes VS Code to close the tab automatically.
-    // wrapNativeAgentCommand is a no-op for shell tabs.
+    // wrapNativeAgentCommand exits the shell (closing the tab) on a clean exit
+    // but leaves it open with a readable status line on a launch failure
+    // (RUSH-2593). No-op for shell tabs.
     await sendCommandWhenReady(terminal, wrapNativeAgentCommand(command, agentKey === 'shell'));
     readiness.armAgentReady(terminal, agentKey && sessionId
       ? { agentKey, sessionId, cwd }
@@ -3375,9 +3375,9 @@ export async function openSingleAgentWithQueue(
   }
 
   if (command) {
-    // Always an agent-terminal here, never a shell tab. Apply exec so the shell
-    // replaces itself with the runner and VS Code closes the tab when the agent
-    // exits. isShell is always false here.
+    // Always an agent-terminal here, never a shell tab (isShell is always
+    // false). wrapNativeAgentCommand closes the tab on a clean exit but keeps
+    // it open with a readable status line on a launch failure (RUSH-2593).
     await sendCommandWhenReady(terminal, wrapNativeAgentCommand(command, false));
   }
 
@@ -4914,10 +4914,17 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
     return;
   }
 
-  // Recreate terminals with proper properties
+  // Recreate terminals with proper properties.
   // Note: With isTransient: true, VS Code won't auto-restore terminals,
-  // so we don't need to close "broken" restores - we're the only restore path
-  for (const session of toRestore) {
+  // so we don't need to close "broken" restores - we're the only restore path.
+  //
+  // RUSH-2477: bound the restore. A crash-restart reopens every persisted tab at
+  // once, and firing one resume per tab with no cap or stagger is a thundering
+  // herd — N tabs became N near-simultaneous resume processes within seconds of
+  // boot, which is what overwhelmed the resume path (DB-lock crash, boot-time
+  // fleet fan-out). `runStaggered` restores at most RESTORE_MAX_CONCURRENCY at a
+  // time, each start after the first spaced by RESTORE_STAGGER_MS.
+  const restoreOne = async (session: typeof toRestore[number]): Promise<void> => {
     // Handle shell separately (no built-in def)
     let agentConfig: Omit<import('./agents.vscode').AgentConfig, 'count'>;
     let displayTitle: string;
@@ -4929,7 +4936,7 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
       const def = getBuiltInByPrefix(session.prefix);
       if (!def) {
         console.log(`[RESTORE] Unknown prefix: ${session.prefix}, skipping`);
-        continue;
+        return;
       }
       agentConfig = createAgentConfig(context.extensionPath, def.title, def.command, def.icon, def.prefix);
       displayTitle = def.title;
@@ -5001,7 +5008,12 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
         });
       }
     }
-  }
+  };
+
+  await runStaggered(toRestore, restoreOne, {
+    concurrency: RESTORE_MAX_CONCURRENCY,
+    staggerMs: RESTORE_STAGGER_MS,
+  });
 
   terminals.clearPersistedSessions(workspacePath);
   console.log(`[RESTORE] Restored ${toRestore.length} agent terminal(s)`);

@@ -121,6 +121,77 @@ describe.skipIf(process.platform === 'win32')('dispatchAction notify (resolves t
 });
 
 /**
+ * RUSH-2500: dispatchAction run/routine must return ok:false (not ok:true) when
+ * executeJobDetached returns a skipped/blocked RunMeta. Before the fix the return
+ * was unconditionally ok:true, so monitors logs showed "skipped" while monitors
+ * runs showed "ok" — the two surfaces disagreed and the action never ran.
+ *
+ * Uses a child process (same shape as the daemon-survival test) so HOME is set
+ * before any module-level state constants are resolved, letting us plant a fake
+ * active run without touching the real ~/.agents/.history.
+ */
+describe('dispatchAction run (skipped run returns ok:false)', () => {
+  const tsxBin = path.resolve('node_modules/.bin/tsx');
+  let home: string;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'monitor-dispatch-skip-'));
+  });
+
+  afterEach(() => fs.rmSync(home, { recursive: true, force: true }));
+
+  it('returns ok:false and the skip reason when executeJobDetached returns status:skipped', () => {
+    // Plant a fake "running" run so allocateRoutineAttempt hits the active_run
+    // skip gate and returns proceed:false without launching an agent process.
+    const monitorName = 'test-skip-monitor';
+    const activeRunId = 'fake-run-001';
+    const metaDir = path.join(home, '.agents', '.history', 'runs', monitorName, activeRunId);
+    fs.mkdirSync(metaDir, { recursive: true });
+    fs.writeFileSync(path.join(metaDir, 'meta.json'), JSON.stringify({
+      jobName: monitorName,
+      runId: activeRunId,
+      status: 'running',
+      startedAt: new Date().toISOString(),
+      // No pid — triggers the startedAt-within-timeout branch in activeRoutineRun.
+    }));
+
+    const moduleUrl = pathToFileURL(path.resolve('src/lib/monitors/dispatch.ts')).href;
+    const fixture = path.join(home, 'run-skip.mts');
+    fs.writeFileSync(fixture,
+      `import { dispatchAction } from ${JSON.stringify(moduleUrl)};\n` +
+      `const monitor = {\n` +
+      `  name: ${JSON.stringify(monitorName)},\n` +
+      `  enabled: true,\n` +
+      `  source: { type: 'command', command: 'echo x' },\n` +
+      `  condition: { mode: 'on-change' },\n` +
+      `  action: { type: 'run', agent: 'claude', prompt: 'test {event}' },\n` +
+      `} as any;\n` +
+      `const event = {\n` +
+      `  monitorName: ${JSON.stringify(monitorName)},\n` +
+      `  firedAt: '2026-08-15T12:00:00.000Z',\n` +
+      `  summary: 'test event',\n` +
+      `  payload: {},\n` +
+      `} as any;\n` +
+      `const result = await dispatchAction(monitor, event);\n` +
+      `console.log(JSON.stringify(result));\n`,
+    );
+
+    const child = spawnSync(tsxBin, [fixture], {
+      encoding: 'utf-8',
+      env: { ...process.env, HOME: home },
+    });
+
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim());
+    // Before the fix: ok: true (executeJobDetached's skipped return was ignored).
+    // After the fix: ok: false with the runner's errorMessage.
+    expect(result.ok).toBe(false);
+    expect(result.kind).toBe('run');
+    expect(result.error).toMatch(/skipped/i);
+  });
+});
+
+/**
  * The daemon-survival guarantee, proven in a real child process — the same shape
  * as the review's live repro. An in-process assertion can't distinguish "returned
  * a result" from "would have exited", so this runs dispatchAction for real and

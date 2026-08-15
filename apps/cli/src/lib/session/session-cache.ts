@@ -504,7 +504,14 @@ export interface LoadFleetActiveSessionsOptions {
   maxAgeMs?: number;
   nowMs?: number;
   /** Live fleet gather (local + remote). Required — this module does not own SSH. */
-  gather: () => Promise<{ sessions: ActiveSession[]; remoteDeviceCount: number }>;
+  gather: () => Promise<{
+    sessions: ActiveSession[];
+    remoteDeviceCount: number;
+    /** Peer names that went unheard on this gather (RUSH-2507). Undefined when the gather didn't compute it. */
+    remoteSkipped?: string[];
+    /** True when the device list itself could not be loaded — no peer was even attempted. */
+    remoteDiscoveryFailed?: boolean;
+  }>;
   readCache?: typeof readActiveSessionsCache;
   writeCache?: typeof writeActiveSessionsCache;
 }
@@ -514,6 +521,14 @@ export interface LoadFleetActiveSessionsResult {
   remoteDeviceCount: number;
   servedFromCache: boolean;
   capturedAt: number;
+  /**
+   * Diagnostics from the gather that produced this result. Only populated on a
+   * live gather (`servedFromCache: false`) — a cache hit serves a prior
+   * snapshot that never persisted these fields, so they read `undefined`
+   * ("not probed this call") rather than falsely claiming a clean fleet.
+   */
+  remoteSkipped?: string[];
+  remoteDiscoveryFailed?: boolean;
 }
 
 /**
@@ -578,6 +593,8 @@ export async function loadFleetActiveSessions(
     remoteDeviceCount: live.remoteDeviceCount,
     servedFromCache: false,
     capturedAt: snap.capturedAt,
+    remoteSkipped: live.remoteSkipped,
+    remoteDiscoveryFailed: live.remoteDiscoveryFailed,
   };
 }
 

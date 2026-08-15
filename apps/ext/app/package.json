@@ -6,7 +6,7 @@
   "author": "Muqsit Nawaz <dev@muqsitnawaz.com>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/phnx-labs/agents-cli",
+    "url": "https://github.com/phnx-labs/agi-cli",
     "directory": "apps/ext/app"
   },
   "main": "dist/main.js",

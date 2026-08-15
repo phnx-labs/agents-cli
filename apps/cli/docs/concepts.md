@@ -17,6 +17,7 @@ A **DotAgents repo** is a directory with a canonical layout that defines resourc
   mcp/             # MCP server definitions (YAML, one file per server)
   permissions/     # Permission groups (YAML)
   profiles/        # Model/endpoint bundles (YAML)
+  routers/         # Named router allowlists: harnesses x models/tiers x accounts (YAML)
   subagents/       # Subagent definitions (Markdown)
   agents.yaml      # Version pins and repo metadata
 ```
@@ -47,11 +48,12 @@ A **resource** is any named item inside a DotAgents repo. Resources are typed by
 | `mcp` | MCP server definitions (transport, command, args, env) | Merged into each agent's settings file |
 | `permissions` | Allow/deny tool permission groups | Converted to each agent's native format |
 | `profiles` | Model + endpoint + auth bundles | YAML, consumed by `agents run` and shims |
+| `routers` | Named, task-typed allowlists of harnesses x models/tiers x linked accounts (a router is a generalization of a profile) | YAML, consumed by the Agent Router |
 | `subagents` | Subagent workflow definitions | `.md` files |
 
 Resources are installed once in `~/.agents/` and synced to every supported agent's native format automatically. Sync happens when you run `agents use`, `agents repos pull`, or explicitly via `agents sync`.
 
-To inspect what's installed, use the per-kind listers — `agents commands list`, `agents skills list`, `agents hooks list`, `agents mcp list`, `agents permissions list`, `agents subagents list`, `agents profiles list`. For a single merged cross-kind table — every resource with its winning layer resolved across project → user → extras → system — run `agents view --merged`.
+To inspect what's installed, use the per-kind listers — `agents commands list`, `agents skills list`, `agents hooks list`, `agents mcp list`, `agents permissions list`, `agents subagents list`, `agents profiles list`, `agents route list`. For a single merged cross-kind table — every resource with its winning layer resolved across project → user → extras → system — run `agents view --merged`.
 
 To inspect a single repo on its own — its git state plus per-kind resource counts — use `agents repos view <repo>` (`system`, `user`, `project`, or an extra-repo alias). Omit the name for an interactive picker. It renders without opening anything; add `--brief` for the header only or `--json` for machine-readable output.
 

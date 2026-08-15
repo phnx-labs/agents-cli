@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Refactor: sessions and the core modules of apps/cli</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:5px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span></div>
+<h1>Refactor: sessions and the core modules of apps/cli</h1>
+
+<div class="meta" aria-label="Artifact metadata"><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">refactor-sessions-core</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Phoenix Labs</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fleet</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">unpublished</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-14</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a href="#purpose"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#what-the-scan-measured"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>What the scan measured</a><a href="#current-architecture"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Current architecture</a><a href="#proposed-changes"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Risks</a><a href="#documentation-drift-the-scan-turned-up"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Documentation drift the scan turned up</a><a href="#to-do"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>To-do</a><a href="#tracking"><span class="toc-index">11&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h1>Refactor: sessions and the core modules of <code>apps/cli</code></h1>
+<p><strong>Kicker:</strong> architecture scan · <code>apps/cli/src</code> · 712 files · 269,147 lines · 3,498 import edges</p>
+<p><strong>Problem statement:</strong> The sessions domain layer lives inside a command file. Six
+per-harness capabilities are dispatched by hand-written <code>if (agent === …)</code> chains that
+disagree with each other about which harnesses they cover — and two of those
+disagreements are live defects today. 308 of 712 files sit in one import cycle.</p>
+<h2 id="focus-for-review">Focus for review</h2>
+<p>Four calls are yours. Everything else I land without asking.</p>
+<ul>
+<li><strong>Move 1 — lift the sessions domain out of <code>commands/sessions.ts</code> into <code>lib/session/</code>.</strong> Of 6,197 lines, ~290 are actual commander wiring. 111 exported symbols. It is the single most-churned file in the repo (135 commits/90d) and extracting it dissolves an 11-file import cycle outright. <strong>One PR, or split by concern (query / gather / serialize / resume / render)?</strong></li>
+<li><strong>Move 2 — registry-ize the per-harness chains.</strong> Six capabilities dispatch by name chain instead of a table, and the drift is no longer theoretical: <code>agents permissions list</code> returns nothing for 10 of 13 allowlist-capable harnesses, and antigravity MCP sync resolves a config path then writes nothing. <code>SUBAGENT_TARGETS</code> already proves the pattern in this repo. <strong>Do all six, or start with the two that are actively broken?</strong></li>
+<li><strong>Move 6 — reorganize the flat <code>lib/</code> root</strong> (193 files, no subdirectories). Cheapest to execute, most disruptive to the 10 open PRs. <strong>Do you want it at all, and if so should it wait for the PR queue to drain?</strong></li>
+<li><strong>How far on the 308-file cycle.</strong> I measured that no single edge cut breaks it — it needs a layer rule inside <code>lib/</code>, which is Move 6 plus lint enforcement. <strong>Worth the churn, or settle for shrinking it to 279 with the cheap cuts?</strong></li>
+</ul>
+<p>Scope note: every move here is behavior-preserving except the bug fixes called out
+explicitly in Move 2. No command, flag, or output changes otherwise.</p>
+<h2 id="purpose">Purpose</h2>
+<p>You asked to focus on sessions and the other core modules. I scanned <code>apps/cli/src</code> —
+the published <code>@phnx-labs/agents-cli</code> — built its import graph, measured which files
+agents and commits actually touch over 90 days, censused the per-harness dispatch
+surface, and ranked the structural moves by <code>harm x exposure</code>. Below: the ranked list,
+the evidence, and the diffs.</p>
+<h2 id="what-the-scan-measured">What the scan measured</h2>
+<table>
+<thead>
+<tr>
+<th>Signal</th>
+<th>Method</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Import graph</td>
+<td>static parse of every <code>import</code> / <code>export from</code> / <code>import()</code> in <code>src</code></td>
+<td>712 non-test files, 269,147 loc, 3,498 edges</td>
+</tr>
+<tr>
+<td>True cycles</td>
+<td>Tarjan SCC, file level</td>
+<td>4 cycles: <strong>308</strong>, <strong>11</strong>, 4, 2 files</td>
+</tr>
+<tr>
+<td>Layering inversion</td>
+<td><code>lib/*</code> importing <code>commands/*</code></td>
+<td>92 edges — 82 from the lazy command registry (legitimate), <strong>10 real violations</strong></td>
+</tr>
+<tr>
+<td>Agent traffic</td>
+<td><code>tool_calls</code> in <code>~/.agents/.history/sessions/sessions.db</code>, 90d</td>
+<td><code>commands/sessions.ts</code> #3 by reads</td>
+</tr>
+<tr>
+<td>Commit churn</td>
+<td><code>git log --since=90.days --name-only</code></td>
+<td><code>commands/sessions.ts</code> <strong>#1 (135 commits)</strong>, <code>lib/agents.ts</code> #3 (92), <code>lib/session/discover.ts</code> #10 (64)</td>
+</tr>
+<tr>
+<td>Per-harness dispatch</td>
+<td>census of <code>agent === '…'</code> / <code>switch (agent)</code> across <code>src</code></td>
+<td>6 capabilities on hand-written chains, membership disagreeing</td>
+</tr>
+<tr>
+<td>Test net</td>
+<td>tests covering the move targets</td>
+<td>100 in <code>lib/session/</code>, 17 for <code>commands/sessions*</code></td>
+</tr>
+</tbody></table>
+<p>Baseline <code>tsc --noEmit</code> on the scan worktree: <strong>exit 0</strong>.</p>
+<h2 id="current-architecture">Current architecture</h2>
+<figure>
+<svg viewBox="0 0 900 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Current import structure of apps/cli/src: a 308-file cycle, an 11-file sessions cycle, 10 upward imports, and six per-harness dispatch chains that disagree">
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#94a3b8"></path></marker>
+    <marker id="arR" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#ef4444"></path></marker>
+  </defs>
+  <text x="14" y="24" font-family="JetBrains Mono, monospace" font-size="13" fill="#94a3b8">apps/cli/src — today</text>
+
+  <rect x="30" y="44" width="380" height="126" rx="6" fill="#1e293b" stroke="#475569"></rect>
+  <text x="46" y="68" font-family="JetBrains Mono, monospace" font-size="13" fill="#e2e8f0">commands/ — 127 files · 74,049 loc</text>
+  <rect x="46" y="82" width="348" height="72" rx="4" fill="#3f1d1d" stroke="#ef4444"></rect>
+  <text x="60" y="102" font-family="JetBrains Mono, monospace" font-size="12" fill="#fca5a5">sessions.ts — 6,197 loc · 111 exports</text>
+  <text x="60" y="120" font-family="JetBrains Mono, monospace" font-size="11" fill="#fca5a5">~290 lines are commander wiring (5,658–5,945)</text>
+  <text x="60" y="137" font-family="JetBrains Mono, monospace" font-size="11" fill="#fca5a5">the other 5,900 are domain + presentation</text>
+  <text x="60" y="150" font-family="JetBrains Mono, monospace" font-size="10" fill="#fca5a5">201 console. · 281 chalk. calls interleaved</text>
+
+  <rect x="490" y="44" width="380" height="126" rx="6" fill="#1e293b" stroke="#475569"></rect>
+  <text x="506" y="68" font-family="JetBrains Mono, monospace" font-size="13" fill="#e2e8f0">lib/ root — 193 flat files · 86,496 loc</text>
+  <text x="506" y="90" font-family="JetBrains Mono, monospace" font-size="11" fill="#94a3b8">routine-* ×11 · project-* ×11 · account-* ×9</text>
+  <text x="506" y="107" font-family="JetBrains Mono, monospace" font-size="11" fill="#94a3b8">feed-* ×6 · usage-* ×5 · event-* ×5</text>
+  <text x="506" y="129" font-family="JetBrains Mono, monospace" font-size="11" fill="#f59e0b">agents.ts ⇄ versions.ts ⇄ capabilities.ts</text>
+  <text x="506" y="146" font-family="JetBrains Mono, monospace" font-size="10" fill="#f59e0b">capabilities.ts duplicates compareVersions to dodge this cycle</text>
+  <text x="506" y="161" font-family="JetBrains Mono, monospace" font-size="10" fill="#94a3b8">no subdirectories, no layer boundary</text>
+
+  <rect x="30" y="196" width="840" height="88" rx="6" fill="#3f1d1d" stroke="#ef4444" stroke-dasharray="5 3"></rect>
+  <text x="46" y="220" font-family="JetBrains Mono, monospace" font-size="13" fill="#fca5a5">308-file import cycle — 43% of the source tree in one strongly-connected component</text>
+  <text x="46" y="241" font-family="JetBrains Mono, monospace" font-size="11" fill="#fca5a5">spans commands/ and lib/ alike · no single edge cut breaks it (measured, not assumed)</text>
+  <text x="46" y="259" font-family="JetBrains Mono, monospace" font-size="11" fill="#fca5a5">already costing duplication: 5× compareVersions · 5× formatBytes · 4× formatAge · 3× formatDuration</text>
+  <text x="46" y="276" font-family="JetBrains Mono, monospace" font-size="11" fill="#fca5a5">cutting the central agents.ts → versions.ts knot alone leaves it at 308 — it needs a layer rule, not an edge fix</text>
+
+  <rect x="30" y="306" width="270" height="86" rx="6" fill="#3f1d1d" stroke="#ef4444"></rect>
+  <text x="44" y="329" font-family="JetBrains Mono, monospace" font-size="12" fill="#fca5a5">11-file cycle</text>
+  <text x="44" y="348" font-family="JetBrains Mono, monospace" font-size="10" fill="#fca5a5">the sessions command family:</text>
+  <text x="44" y="364" font-family="JetBrains Mono, monospace" font-size="10" fill="#fca5a5">sessions.ts ⇄ go · focus · attach ·</text>
+  <text x="44" y="378" font-family="JetBrains Mono, monospace" font-size="10" fill="#fca5a5">detach · reconnect · sessions-{5}</text>
+
+  <rect x="316" y="306" width="270" height="86" rx="6" fill="#3f1d1d" stroke="#ef4444"></rect>
+  <text x="330" y="329" font-family="JetBrains Mono, monospace" font-size="12" fill="#fca5a5">10 upward imports</text>
+  <text x="330" y="348" font-family="JetBrains Mono, monospace" font-size="10" fill="#fca5a5">3 snapshot builders in lib/ import</text>
+  <text x="330" y="362" font-family="JetBrains Mono, monospace" font-size="10" fill="#fca5a5">commands/sessions.ts for its domain fns</text>
+  <text x="330" y="378" font-family="JetBrains Mono, monospace" font-size="10" fill="#fca5a5">3 more import commands/utils.ts</text>
+
+  <rect x="602" y="306" width="268" height="86" rx="6" fill="#3f1d1d" stroke="#ef4444"></rect>
+  <text x="616" y="329" font-family="JetBrains Mono, monospace" font-size="12" fill="#fca5a5">6 name-chain capabilities</text>
+  <text x="616" y="348" font-family="JetBrains Mono, monospace" font-size="10" fill="#fca5a5">mcp · permissions · workflows · hooks</text>
+  <text x="616" y="362" font-family="JetBrains Mono, monospace" font-size="10" fill="#fca5a5">routine mode-flags · session resume</text>
+  <text x="616" y="378" font-family="JetBrains Mono, monospace" font-size="10" fill="#fca5a5">membership disagrees → 2 live defects</text>
+
+  <path d="M 490 118 L 420 118" stroke="#ef4444" stroke-width="2" marker-end="url(#arR)"></path>
+  <path d="M 410 140 L 490 140" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#ar)"></path>
+  <text x="424" y="110" font-family="JetBrains Mono, monospace" font-size="10" fill="#ef4444">10 upward</text>
+  <text x="418" y="158" font-family="JetBrains Mono, monospace" font-size="10" fill="#94a3b8">613 edges (correct direction)</text>
+
+  <text x="14" y="428" font-family="JetBrains Mono, monospace" font-size="11" fill="#64748b">Every number is read off the import graph — no estimates.</text>
+  <text x="14" y="447" font-family="JetBrains Mono, monospace" font-size="11" fill="#64748b">lib/session/ itself is clean: 57 files, 28,445 loc, zero internal cycles. The library is fine; half of it never moved in.</text>
+</svg>
+<figcaption>Current structure. The sessions <em>library</em> is healthy; the sessions <em>domain</em> is stranded in a command file, and the flat <code>lib/</code> root has no layer boundary to hold the graph acyclic.</figcaption>
+</figure><h2 id="proposed-changes">Proposed Changes</h2>
+<h3>The ranked moves</h3>
+<p>Harm = what the structure costs on every change. Exposure = how much traffic it sees.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Move</th>
+<th>Harm</th>
+<th>Exposure</th>
+<th>Sequence</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>Extract the sessions domain from <code>commands/sessions.ts</code> → <code>lib/session/</code></td>
+<td>dissolves the 11-file cycle (measured 11 → 4) and 3 of 10 upward imports</td>
+<td>#1 churn file in the repo</td>
+<td>first</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Registry-ize the six per-harness dispatch chains</td>
+<td><strong>two live defects today</strong>; a new harness silently gets no MCP, no permissions read, no workflows</td>
+<td>spans <code>mcp.ts</code>, <code>permissions.ts</code>, <code>workflows.ts</code>, <code>hooks.ts</code>, <code>runner.ts</code></td>
+<td>after 1, per-capability</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Merge the duplicate MCP subsystem in <code>agents.ts</code> into <code>mcp.ts</code></td>
+<td>~725 duplicated lines, byte-identical type, duplicated Hermes writer</td>
+<td><code>agents.ts</code> #3 churn</td>
+<td>folds into Move 2's MCP slice</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Collapse the duplicated utilities to canonical homes</td>
+<td>latent semantic divergence in a capability gate</td>
+<td>12 files</td>
+<td>independent, cheap</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Cut the 10 upward <code>lib/ → commands/</code> imports</td>
+<td>308 → 279 SCC (measured)</td>
+<td>8 lib files</td>
+<td>independent, cheap</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Reorganize the flat <code>lib/</code> root</td>
+<td>the only move that makes the 279-file blob tractable</td>
+<td>every file in <code>lib/</code></td>
+<td><strong>last</strong></td>
+</tr>
+</tbody></table>
+<p>Moves 4 and 5 are reversible and need no design call — those land without asking.</p>
+<h3>Move 1 — lift the sessions domain out of the command file</h3>
+<h4>5.1 What the file actually is</h4>
+<p><code>registerSessionsCommands</code> — the only thing a command file should export — occupies
+lines <strong>5,658–5,945</strong>. Everything above it, <em>and 233 more lines below it</em>, is domain
+logic. 111 exported symbols in total.</p>
+<pre><code>commands/sessions.ts:2640   sessionsAction  — 741 lines, the largest function in the file
+commands/sessions.ts:5658   export function registerSessionsCommands(program: Command): void {
+commands/sessions.ts:5945   end of wiring
+commands/sessions.ts:5987   findClaudeHistoryEntry  — Claude-only domain logic, stranded after the wiring
+</code></pre>
+<p>Grouped by concern:</p>
+<table>
+<thead>
+<tr>
+<th>Target module</th>
+<th>Source lines</th>
+<th>Symbols include</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>lib/session/gather.ts</code></td>
+<td>1,537–1,846</td>
+<td><code>gatherActiveSessions</code>, <code>backfillActiveRowsFromIndex</code>, <code>isRunningLiveSession</code>, <code>matchesLiveStatus</code></td>
+</tr>
+<tr>
+<td><code>lib/session/active.ts</code> <em>(exists)</em></td>
+<td>1,057–1,348</td>
+<td><code>groupActiveSessions</code>, <code>groupSessionsByMachine</code>, <code>dedupeByMachineSession</code>, <code>mergeLocalFirst</code>, <code>isAwaitingUser</code></td>
+</tr>
+<tr>
+<td><code>lib/session/serialize.ts</code></td>
+<td>830–1,347</td>
+<td><code>serializeActiveSessionsForJson</code>, <code>serializeSessionPickerRows</code>, <code>serializeSessionsJson</code></td>
+</tr>
+<tr>
+<td><code>lib/session/query.ts</code></td>
+<td>4,753–4,975</td>
+<td><code>resolveSessionQuery</code>, <code>filterSessionsByQuery</code>, <code>parseAgentFilter</code>, <code>scoreSessionQuery</code></td>
+</tr>
+<tr>
+<td><code>lib/session/fleet-query.ts</code></td>
+<td>5,249–5,658</td>
+<td><code>resolveSessionAcrossFleet</code>, <code>fleetCandidatesByQuery</code>, <code>metadataResolveOutcome</code></td>
+</tr>
+<tr>
+<td><code>lib/session/resume-command.ts</code> <em>(exists, 8 lines)</em></td>
+<td>4,520–4,664</td>
+<td><code>buildResumeCommand</code>, <code>resumeArgv</code>, <code>resumeSpawnInvocation</code></td>
+</tr>
+<tr>
+<td><code>lib/session/render.ts</code> <em>(exists, 1,162 lines)</em></td>
+<td>379–1,057, 3,381–3,866, 4,185–4,370</td>
+<td><code>renderActiveRowLines</code>, <code>flatSessionRow</code>, <code>pickerColumnsFor</code>, <code>formatPickerLabel</code></td>
+</tr>
+</tbody></table>
+<p>Four of those seven targets <strong>already exist</strong>. <code>lib/session/resume-command.ts</code> is an
+8-line placeholder holding one function while the real 145-line resume logic sits in the
+command file. This move finishes a split the codebase already started.</p>
+<h4>5.2 Why it is first — measured, not argued</h4>
+<p>The 11-file cycle exists only because sibling command files import domain functions from
+<code>commands/sessions.ts</code> while it imports their <code>registerX</code> functions. I measured the
+extraction's effect on the graph directly:</p>
+<pre><code>baseline SCCs:                                 308, 11, 4, 2
+after cutting every import OF sessions.ts:     308,  4, 4, 2    ← the 11-file cycle is gone
+after also cutting the 10 upward lib→commands:  279,  4,     2
+</code></pre>
+<h4>5.3 A bug this move exposes: two disagreeing answers to "can this harness resume?"</h4>
+<p><code>lib/exec.ts:947</code> documents <code>AGENT_COMMANDS[agent].resume</code> as <strong>"the single source of
+truth"</strong> for native resume. It declares a resume form for 8 harnesses:</p>
+<pre><code>exec.ts:696  claude   resume: { flag: '--resume' }
+exec.ts:701  codex    resume: { subcommand: 'resume' }
+exec.ts:735  cursor   resume: { flag: '--resume', since: '2026.7.23' }
+exec.ts:767  pi       resume: { flag: '--resume' }
+exec.ts:859  grok     resume: { flag: '--resume', since: '0.2.91' }
+exec.ts:872  kimi     resume: { flag: '--session', since: '0.19.2' }
+exec.ts:890  droid    resume: { flag: '--resume', headlessFlag: '--session-id', since: '0.186.0' }
+exec.ts:921  muse     resume: { flag: '--session-id' }
+</code></pre>
+<p><code>commands/sessions.ts:4633</code> hardcodes a second, independent switch — and returns <code>null</code>
+for four harnesses the registry says are resumable:</p>
+<pre><code>commands/sessions.ts:4652-4660
+    case 'grok':
+    case 'kimi':
+    case 'droid':
+    case 'cursor':
+      // Grok (and some others) sessions are captured artifacts, not resumable the same way.
+      return null;
+</code></pre>
+<p><code>commands/sessions.ts</code> never imports <code>AGENT_COMMANDS</code> or <code>nativeResume</code>. The two answers
+have drifted, and the comment explaining why is stale for cursor, grok, kimi, and droid.
+Moving this logic to <code>lib/session/resume-command.ts</code> puts it next to the registry it
+should have been reading.</p>
+<h4>5.4 The diff shape</h4>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- a/apps/cli/src/commands/sessions.ts</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/apps/cli/src/commands/sessions.ts</span></span><span class="cd-line cd-hunk"><span class="cd-sign"></span><span class="cd-code">@@</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">export async function gatherActiveSessions(</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  options: SessionsOptions,</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">): Promise&lt;ActiveSession[]&gt; {</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  // ~300 lines of fleet fan-out, dedupe, backfill</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">}</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">import { gatherActiveSessions } from '../lib/session/gather.js';</span></span></pre></div><div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- a/apps/cli/src/lib/session/resume-command.ts</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/apps/cli/src/lib/session/resume-command.ts</span></span><span class="cd-line cd-hunk"><span class="cd-sign"></span><span class="cd-code">@@</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">export function buildCanonicalResumeCommand(sessionId: string): string[] {</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  return ['agents', 'resume', sessionId];</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">}</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> </span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">/**</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> * Per-harness resume argv. Reads AGENT_COMMANDS — the single source of truth —</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> * instead of the second hardcoded switch this replaces.</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> */</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">export function buildResumeCommand(session: SessionMeta): string[] | null {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  if (!nativeResume(session.agent, session.version)) return null;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  …</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">}</span></span></pre></div><div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- a/apps/cli/src/lib/menubar/snapshot.ts</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/apps/cli/src/lib/menubar/snapshot.ts</span></span><span class="cd-line cd-hunk"><span class="cd-sign"></span><span class="cd-code">@@</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">import { backfillActiveRowsFromIndex, isRunningLiveSession,</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">         serializeActiveSessionsForJson, serializeSessionsJson } from '../../commands/sessions.js';</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">import { backfillActiveRowsFromIndex, isRunningLiveSession } from '../session/gather.js';</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">import { serializeActiveSessionsForJson, serializeSessionsJson } from '../session/serialize.js';</span></span></pre></div><p>The 17 <code>commands/sessions*.test.ts</code> files move with their subjects. The 100 tests in
+<code>lib/session/</code> are the net that proves behavior was preserved.</p>
+<h4>5.5 Cleanups inside <code>lib/session/</code> that ride along</h4>
+<table>
+<thead>
+<tr>
+<th>Duplication</th>
+<th>Occurrences</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>JSONL read-stream scaffold</td>
+<td>6× in <code>discover.ts</code> (<code>:2815</code>, <code>:3310</code>, <code>:3769</code>, <code>:4102</code>, <code>:4409</code>, <code>:4618</code>) — two of them near line-for-line identical</td>
+<td>one <code>readJsonlUntil(path, reducer, predicate)</code> helper</td>
+</tr>
+<tr>
+<td>"is this pid alive"</td>
+<td>3× (<code>active.ts:699</code>, <code>detached.ts:82</code>, <code>db.ts:1417</code>) with <strong>two different</strong> pid-reuse defenses — a tolerance window vs an exact start-time match</td>
+<td>share one primitive; <code>db.ts</code>'s lock-scoped copy can stay</td>
+</tr>
+<tr>
+<td><code>id.slice(0, 8)</code></td>
+<td>9× despite <code>short-id.ts:19 deriveShortId()</code> existing <em>specifically</em> because that raw pattern was buggy on prefix-only ids</td>
+<td>call <code>deriveShortId</code></td>
+</tr>
+<tr>
+<td>Ad-hoc Claude path</td>
+<td><code>commands/sessions.ts:5988</code> builds <code>~/.claude/history.jsonl</code> directly, bypassing <code>discover.ts:1041 getAgentSessionDirs()</code> — so it misses version-home and backup installs</td>
+<td>use the canonical resolver</td>
+</tr>
+</tbody></table>
+<h3>Move 2 — registry-ize the per-harness chains</h3>
+<p>The repo already documents the target pattern, and already executed it once.
+<code>subagents-registry.ts:6-10</code>:</p>
+<blockquote>
+<p>Generic install / list / detect / orphan / remove logic iterates the table instead of
+the near-identical <code>else if (agent === '...')</code> chains that used to be copy-pasted
+across <code>subagents.ts</code>, the staleness writer, and the staleness detector — roughly
+O(agents x operations) arms.</p>
+</blockquote>
+<p>Six capabilities never got that treatment. Membership per chain, against the harnesses
+the capability table marks capable:</p>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Chains</th>
+<th>Arms per chain</th>
+<th>Silently omitted</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>MCP</strong></td>
+<td>3 (<code>resources/mcp.ts:143</code>, <code>mcp.ts:749</code>, <code>mcp.ts:1039</code>)</td>
+<td>11 / 12 / 9</td>
+<td>different sets per chain; <code>capabilities.mcp</code> is <code>true</code> for every harness</td>
+</tr>
+<tr>
+<td><strong>Permissions</strong></td>
+<td>write <code>permissions.ts:1613</code> (13 arms) vs read <code>:1383</code> and export <code>:2130</code> (3 arms each)</td>
+<td>13 vs 3</td>
+<td>10 harnesses readable-but-not-readable</td>
+</tr>
+<tr>
+<td><strong>Workflows</strong></td>
+<td>4 functions in <code>workflows.ts</code> (<code>:1016</code>, <code>:1025</code>, <code>:1196</code>, <code>:1270</code>)</td>
+<td>~5 each, ~20 arms total</td>
+<td>must move in lockstep or list/sync/remove diverge</td>
+</tr>
+<tr>
+<td><strong>Hooks</strong></td>
+<td><code>hooks.ts:1993</code> → 11 registrars at <code>:2155–3768</code></td>
+<td>12</td>
+<td>1,629 lines, 43% of the file</td>
+</tr>
+<tr>
+<td><strong>Routine mode flags</strong></td>
+<td><code>runner.ts:585</code> duplicating <code>AGENT_COMMANDS.modeFlags</code></td>
+<td>7</td>
+<td>9+ harnesses get no mode flag at all</td>
+</tr>
+<tr>
+<td><strong>Session resume</strong></td>
+<td><code>commands/sessions.ts:4633</code> duplicating <code>AGENT_COMMANDS.resume</code></td>
+<td>12</td>
+<td>4 harnesses wrongly marked non-resumable (§5.3)</td>
+</tr>
+</tbody></table>
+<h4>6.1 Two of these are live defects — verified</h4>
+<p><strong>(a) Antigravity MCP sync resolves a path, then writes nothing.</strong>
+<code>resources/mcp.ts:155-157</code> returns a real config path for antigravity:</p>
+<pre><code>    case 'antigravity':
+      // agy nests under ~/.gemini/antigravity-cli/ (shared parent with Gemini, distinct subdir).
+      return path.join(versionHome, '.gemini', 'antigravity-cli', 'mcp_config.json');
+</code></pre>
+<p><code>mcp.ts:749 writeMcpConfig</code> has <strong>no antigravity case and no <code>default</code> arm</strong> — verified
+by reading every <code>case</code> label in the switch and grepping the function body for
+<code>default:</code> (zero matches). The sync path resolves the path, falls through the switch,
+and returns. No error, no warning, no write.</p>
+<p><strong>(b) <code>agents permissions list</code> / <code>export</code> is blind to 10 of 13 harnesses.</strong></p>
+<pre><code>permissions.ts:1389   switch (agentId) {
+permissions.ts:1390     case 'claude':
+permissions.ts:1392     case 'opencode':
+permissions.ts:1394     case 'codex':
+permissions.ts:1396     default:
+permissions.ts:1397       return null;
+</code></pre>
+<p>The <em>write</em> path (<code>applyPermissionsToVersion</code>, <code>permissions.ts:1613</code>) handles 13
+harnesses. So permissions are written for cursor, antigravity, grok, goose, kimi, droid,
+copilot, kiro, openclaw and hermes — and then <code>agents permissions list</code> (which calls
+<code>readAgentPermissions</code> from <code>commands/permissions.ts:115</code> and <code>:198</code>) reports nothing for
+any of them.</p>
+<p>Both get their own ticket and a test that pins the registry against <code>capableAgents(...)</code>,
+which is what stops this class from recurring.</p>
+<h4>6.2 The diff shape</h4>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- /dev/null</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/apps/cli/src/lib/mcp-registry.ts</span></span><span class="cd-line cd-hunk"><span class="cd-sign"></span><span class="cd-code">@@</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">/**</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> * One entry per MCP-capable harness: where its config lives, and how to read and</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> * write it. Replaces three independently-maintained switches whose membership had</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> * already drifted apart (antigravity had a path but no writer).</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> */</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">export const MCP_TARGETS = {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  claude:      { path: ['.claude', 'settings.json'],                 codec: claudeSchema },</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  antigravity: { path: ['.gemini', 'antigravity-cli', 'mcp_config.json'], codec: claudeSchema },</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  …</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">} as const satisfies Partial&lt;Record&lt;AgentId, McpTarget&gt;&gt;;</span></span></pre></div><div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- a/apps/cli/src/lib/mcp.ts</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/apps/cli/src/lib/mcp.ts</span></span><span class="cd-line cd-hunk"><span class="cd-sign"></span><span class="cd-code">@@</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  switch (agentId) {</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">    case 'claude': case 'cursor': case 'kimi': case 'droid': case 'pi': case 'warp': { … }</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">    …ten more arms, no default…</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  }</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  const target = MCP_TARGETS[agentId];</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  if (!target) {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    throw new Error(`mcp: ${agentId} is marked mcp-capable but has no MCP_TARGETS entry`);</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  }</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  target.codec.write(resolveTargetPath(target, versionHome), server);</span></span></pre></div><div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- /dev/null</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/apps/cli/src/lib/mcp-registry.test.ts</span></span><span class="cd-line cd-hunk"><span class="cd-sign"></span><span class="cd-code">@@</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">// The test that stops this class of drift from recurring.</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">it('has an MCP_TARGETS entry for every mcp-capable agent', () =&gt; {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  for (const agent of capableAgents('mcp')) {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    expect(MCP_TARGETS[agent], `${agent} is mcp-capable but has no target`).toBeDefined();</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  }</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">});</span></span></pre></div><p>The <code>throw</code> is deliberate. Today an unlisted harness falls off the end of the chain and
+<code>installMcpServers</code> returns <code>{ success: true, applied: [], errors: [] }</code> — the
+silent-no-op-that-reports-success shape the repo's own review conventions ban.</p>
+<h3>Moves 3–5 — the reversible tier</h3>
+<p><strong>Move 3 — <code>agents.ts</code> reimplements MCP alongside <code>mcp.ts</code>.</strong> <code>agents.ts:2526–3251</code>
+(~725 lines) duplicates the dedicated module. The type is byte-identical in both:</p>
+<pre><code>agents.ts:2625-2630   export interface McpTargetOperationResult { agentId; version?; success; error? }
+mcp.ts:50-55          export interface McpTargetOperationResult { agentId; version?; success; error? }
+</code></pre>
+<p>as is the Hermes writer (<code>agents.ts:2763-2771</code> vs <code>mcp.ts:622-651</code>). A per-agent MCP
+format change has to be made twice today. This folds into Move 2's MCP slice.</p>
+<p><strong>Move 4 — collapse the duplicated utilities.</strong></p>
+<table>
+<thead>
+<tr>
+<th>Symbol</th>
+<th>Copies</th>
+<th>Canonical home</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>compareVersions</code></td>
+<td>5 — <code>agent-spec/primitives.ts:50</code>, <code>capabilities.ts:24</code>, <code>commands.ts:60</code>, <code>bootstrap.ts:336</code>, <code>commands/view.ts:213</code></td>
+<td><code>lib/agent-spec/primitives.ts</code></td>
+</tr>
+<tr>
+<td><code>formatBytes</code></td>
+<td>5 — <code>commands/prune.ts:197</code>, <code>commands/share.ts:185</code>, <code>commands/inspect.ts:870</code>, <code>commands/sessions.ts:373</code>, <code>lib/browser/sessions-list.ts:122</code></td>
+<td><code>lib/format.ts</code></td>
+</tr>
+<tr>
+<td><code>formatAge</code></td>
+<td>4 — <code>commands/pty.ts:435</code>, <code>commands/browser.ts:2260</code>, <code>commands/browser-picker.ts:24</code>, <code>commands/tmux.ts:460</code></td>
+<td><code>lib/format.ts</code></td>
+</tr>
+<tr>
+<td><code>formatDuration</code></td>
+<td>3 — <code>commands/browser.ts:2276</code>, <code>lib/routine-notify.ts:65</code>, <code>lib/session/render.ts:268</code></td>
+<td><code>lib/format.ts</code></td>
+</tr>
+<tr>
+<td><code>truncate</code></td>
+<td>3 — <code>lib/events.ts:621</code>, <code>lib/format.ts:84</code>, <code>lib/deeplink/url.ts:94</code></td>
+<td><code>lib/format.ts</code></td>
+</tr>
+<tr>
+<td><code>expandHome</code></td>
+<td>2 — <code>lib/secrets/index.ts:1670</code>, <code>lib/browser/service.ts:260</code></td>
+<td><code>lib/paths.ts</code></td>
+</tr>
+<tr>
+<td><code>~/.local/bin/{droid,muse}</code> literal</td>
+<td>3 — <code>versions.ts:1084</code>/<code>:1095</code>, <code>shims.ts:698</code>/<code>:714</code>, <code>shims.ts:1230</code>/<code>:1241</code></td>
+<td>the <code>AGENTS</code> registry</td>
+</tr>
+</tbody></table>
+<p><code>compareVersions</code> is worth singling out, because the code documents <em>why</em> the duplicate
+exists:</p>
+<pre><code>capabilities.ts:21-23
+ * Compare semver-like versions ("0.116.0" vs "0.115.9"). Local copy to avoid
+ * importing versions.ts (which imports agents.ts, which imports this file).
+</code></pre>
+<p>The cycle is already costing duplicated code. The duplicate also drops the canonical
+version's OpenClaw <code>-N</code> rebuild-suffix tiebreak — <strong>verified latent, not live</strong>: no
+<code>since</code>/<code>until</code> gate in <code>AGENTS</code> currently uses a <code>-N</code> version string, so no capability
+gate misfires today. The stated reason is stale regardless: the canonical
+<code>compareVersions</code> lives in <code>agent-spec/primitives.ts</code>, a leaf module, not <code>versions.ts</code>.</p>
+<p><strong>Move 5 — cut the 10 upward imports.</strong> They are not equal, and I measured which ones
+actually hold the cycle together:</p>
+<table>
+<thead>
+<tr>
+<th>Edge</th>
+<th>Cost to cut</th>
+<th>Effect on the 308-file SCC</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>lib/drift-sync.ts</code>, <code>lib/refresh.ts</code>, <code>lib/secrets/list-filter.ts</code> → <code>commands/utils.ts</code></td>
+<td>trivial — the 3 symbols are generic</td>
+<td><strong>none</strong> — landed already, cycle stayed 308</td>
+</tr>
+<tr>
+<td><code>lib/computer/dispatch.ts</code> → <code>commands/computer-actions.ts</code></td>
+<td>move <code>resolveTargetPidDecision</code>, <code>emitComputerAction</code> into <code>lib/computer/</code></td>
+<td>these 4 together: <strong>308 → 279</strong></td>
+</tr>
+<tr>
+<td><code>lib/menubar/snapshot.ts</code> → <code>commands/routines.ts</code></td>
+<td>move <code>buildRoutineListJson</code> into <code>lib/routines.ts</code></td>
+<td>”</td>
+</tr>
+<tr>
+<td><code>lib/smart-launch.ts</code> → <code>commands/ssh.ts</code></td>
+<td>move <code>collectFleetHarnesses</code> into <code>lib/devices/</code></td>
+<td>”</td>
+</tr>
+<tr>
+<td><code>lib/snapshot.ts</code> → <code>commands/view.ts</code></td>
+<td>move the <code>ViewJsonAgent</code> type into <code>lib/types.ts</code></td>
+<td>”</td>
+</tr>
+<tr>
+<td><code>lib/{,menubar/,factory/}snapshot.ts</code> → <code>commands/sessions.ts</code></td>
+<td>gated on Move 1</td>
+<td>none alone; Move 1 kills the 11-file cycle</td>
+</tr>
+</tbody></table>
+<p>Corrected from an earlier draft of this plan, which credited the <code>commands/utils.ts</code>
+cuts with the 308 → 279 drop. They are worth doing — they remove the layering
+inversion — but the drop comes from the other four, each of which needs a small
+extraction of its own.</p>
+<p>The three symbols <code>lib/</code> needed from <code>commands/utils.ts</code> (<code>isInteractiveTerminal</code>,
+<code>isPromptCancelled</code>, <code>parseCommaSeparatedList</code>) are generic and now live in
+<code>lib/format.ts</code>, re-exported from <code>commands/utils.ts</code> for its ~50 command-layer
+callers — the pattern that file already used for <code>VersionNotInstalledError</code>.</p>
+<h3>Move 6 — reorganize the flat <code>lib/</code> root</h3>
+<p>193 files, no subdirectories, 86,496 lines. The filenames already name the directories:</p>
+<table>
+<thead>
+<tr>
+<th>Latent directory</th>
+<th>Files today</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>lib/routines/</code></td>
+<td><code>routines</code>, <code>routine-activation</code>, <code>routine-context</code>, <code>routine-notify</code>, <code>routine-notify-owner</code>, <code>routine-process-cleanup</code>, <code>routine-readiness</code>, <code>routines-format</code>, <code>routines-placement</code>, <code>routines-project</code>, <code>scheduler</code></td>
+</tr>
+<tr>
+<td><code>lib/projects/</code></td>
+<td><code>projects</code>, <code>project-doctor</code>, <code>project-focus</code>, <code>project-import</code>, <code>project-key</code>, <code>project-launch</code>, <code>project-probe</code>, <code>project-resources</code>, <code>project-root</code>, <code>project-schedule</code>, <code>project-status</code></td>
+</tr>
+<tr>
+<td><code>lib/accounts/</code></td>
+<td><code>account-catalog</code>, <code>account-provider-registry</code>, <code>account-registry</code>, <code>account-schema</code>, <code>account-state-service</code>, <code>claude-account-token</code>, <code>auth-health</code>, <code>rotate</code>, <code>signin-badge</code></td>
+</tr>
+<tr>
+<td><code>lib/feed/</code></td>
+<td><code>feed</code>, <code>feed-broadcast</code>, <code>feed-outcome</code>, <code>feed-policy</code>, <code>feed-post</code>, <code>feed-ranking</code></td>
+</tr>
+<tr>
+<td><code>lib/usage/</code></td>
+<td><code>usage</code>, <code>usage-backoff</code>, <code>usage-fleet</code>, <code>usage-refresh</code>, <code>byok-usage</code></td>
+</tr>
+<tr>
+<td><code>lib/events/</code></td>
+<td><code>events</code>, <code>events-ingest</code>, <code>event-families</code>, <code>event-provenance</code>, <code>event-stream</code></td>
+</tr>
+</tbody></table>
+<p>My hesitation is not technical. There are 10 open PRs on this repo and a 60-file rename
+conflicts with all of them. It is also the only move that makes the 279-file blob
+tractable, because the blob has no single bad edge — I measured that cutting the central
+<code>agents.ts → versions.ts</code> knot leaves it at 308. Breaking it needs a layer rule
+(<code>lib/core/</code> may not import <code>lib/features/</code>) that a flat directory cannot express and a
+lint rule cannot enforce.</p>
+<h3>Sequence</h3>
+<pre><code>Move 4 (utility collapse) ──┐
+Move 5 (upward imports)   ──┘ land now, no design call needed
+
+Move 1 (sessions domain)  ──┐
+Move 2 (registries)       ──┼── independent of each other, parallel-safe
+Move 3 (MCP merge)        ──┘ (folds into Move 2)
+                             └──&gt; Move 6 (tree reorg) — last, after the PR queue drains
+</code></pre>
+<p>Cycles first, tree moves last.</p>
+<h2 id="public-interface">Public Interface</h2>
+<p>Every move is behavior-preserving. The CLI surface — commands, flags, output shapes — is
+unchanged, with two deliberate exceptions, both of which make the surface match what it
+already claims:</p>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Today</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>agents permissions list &lt;agent&gt;</code></td>
+<td>returns nothing for cursor, antigravity, grok, goose, kimi, droid, copilot, kiro, openclaw, hermes</td>
+<td>returns the permissions the write path already wrote</td>
+</tr>
+<tr>
+<td>MCP sync for antigravity</td>
+<td>resolves a config path, writes nothing, reports success</td>
+<td>writes the config, or fails loud</td>
+</tr>
+<tr>
+<td><code>agents sessions resume</code> for cursor / grok / kimi / droid</td>
+<td>refuses (<code>buildResumeCommand</code> returns <code>null</code>)</td>
+<td>follows <code>AGENT_COMMANDS</code>, the documented single source of truth</td>
+</tr>
+<tr>
+<td>everything else</td>
+<td>—</td>
+<td>byte-identical</td>
+</tr>
+</tbody></table>
+<p>No exported symbol leaves the package surface: <code>commands/sessions.ts</code> is not a public
+entry point, and the moved functions keep their names at their new paths.</p>
+<h2 id="validation">Validation</h2>
+<p>Each move is proven behavior-preserving by the tests that already exist, not by new ones:</p>
+<table>
+<thead>
+<tr>
+<th>Move</th>
+<th>Proof</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1 — sessions domain</td>
+<td>100 tests in <code>lib/session/</code> + 17 <code>commands/sessions*.test.ts</code> move with their subjects and must stay green unmodified. A test that needs editing means the move was not a move.</td>
+</tr>
+<tr>
+<td>2 — registries</td>
+<td>per-capability completeness test pinning the registry against <code>capableAgents(cap)</code> — the mechanism that stops the drift recurring. Plus a regression test per live defect.</td>
+</tr>
+<tr>
+<td>4 — utility collapse</td>
+<td><code>compareVersions</code> gains coverage for the OpenClaw <code>-N</code> tiebreak the duplicates drop</td>
+</tr>
+<tr>
+<td>5 — upward imports</td>
+<td>the import-graph script re-runs and must report SCCs <code>279, 4, 2</code></td>
+</tr>
+<tr>
+<td>all</td>
+<td><code>tsc --noEmit</code> (baseline: exit 0) and <code>bun run test:remote</code> on a crabbox</td>
+</tr>
+</tbody></table>
+<p>The graph script itself is the acceptance check: it is re-run after each move and its
+cycle counts must match the numbers predicted in this plan.</p>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Severity</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Move 6 conflicts with all 10 open PRs</td>
+<td>high</td>
+<td>sequence it last, after the queue drains; it is the one move gated on timing rather than design</td>
+</tr>
+<tr>
+<td>A "pure move" silently changes behavior via import-order side effects</td>
+<td>medium</td>
+<td>move files whole, never retype them; the 117 existing tests are the net; review the diff as <code>git log --follow</code> renames</td>
+</tr>
+<tr>
+<td>Move 2 fixing a silent no-op surfaces errors users never saw</td>
+<td>medium</td>
+<td>intended — but it means antigravity MCP sync starts writing where it previously did nothing; call it out in the CHANGELOG rather than shipping it as a quiet fix</td>
+</tr>
+<tr>
+<td>The resume-registry fix enables resume for 4 harnesses that were refused</td>
+<td>medium</td>
+<td>gate on <code>nativeResume(agent, version)</code> so the version floors in <code>AGENT_COMMANDS</code> apply; test each of the four</td>
+</tr>
+<tr>
+<td>Scan ran against <code>origin/main</code> at the time of the scan; the repo moves fast</td>
+<td>low</td>
+<td>re-run the graph script at the head of each move PR and diff the numbers</td>
+</tr>
+</tbody></table>
+<aside class="artifact-callout"><strong>Load-bearing takeaway:</strong> the sessions <em>library</em> is well built — 57 files, zero internal cycles. The problem is that its domain layer never moved in, and six per-harness capabilities are dispatched by hand-written name chains that have already drifted into two live defects. Move 1 and Move 2 are the plan; the rest is cleanup.</aside><h2 id="documentation-drift-the-scan-turned-up">Documentation drift the scan turned up</h2>
+<p>The scan read <code>apps/cli/docs/</code> as claims and checked each against the code. Four are
+wrong about behavior, not just stale pointers — all verified directly:</p>
+<table>
+<thead>
+<tr>
+<th>Claim</th>
+<th>Doc</th>
+<th>Reality</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>"<code>SESSION_AGENTS</code> — <strong>exactly these 12</strong>"</td>
+<td><code>specifications.md:163</code>, restated in <code>architecture.md:155</code></td>
+<td>13 today. <code>lib/session/types.ts:17</code> includes <code>muse</code>. A reader concludes Muse sessions aren't discoverable — false.</td>
+</tr>
+<tr>
+<td><code>agents sessions sync</code> exists, and <code>SES-IF-2</code> requires <code>sync --json</code> to emit a documented shape</td>
+<td><code>specifications.md:817</code>, <code>:834</code></td>
+<td>No <code>sync</code> is registered under <code>sessions</code> — verified, zero matches. <code>sync</code> is an unrelated top-level command the spec's own coverage inventory lists as <em>Unspecified</em>. The spec contradicts itself.</td>
+</tr>
+<tr>
+<td><code>@agents/session-tracker</code> writes the authoritative live-identity record at <code>terminals/sessions/&lt;pid&gt;.json</code></td>
+<td><code>architecture.md:107-123</code>, root <code>CLAUDE.md:33</code>, <code>packages/session-tracker/AGENTS.md</code></td>
+<td>Production reads <code>~/.agents/.cache/state/sessions/&lt;pid&gt;.json</code> (<code>lib/session/hook-sessions.ts:12</code>, <code>:59</code>). Three independent in-code comments state the documented package is <strong>not deployed on the fleet and its directory stays empty</strong>. The real path appears in none of the docs.</td>
+</tr>
+<tr>
+<td><code>attach</code> / <code>focus</code> / <code>go</code> / <code>reconnect</code> are first-class sessions verbs</td>
+<td><code>specifications.md:817</code></td>
+<td><code>655b22512</code> retired them behind <code>resume</code>; all four are hidden and three print deprecation warnings. That commit updated the README, <code>AGENTS.md</code>, and the command index, but never touched <code>specifications.md</code>.</td>
+</tr>
+</tbody></table>
+<p>Plus systemic locator rot: every <code>file:line</code> citation spot-checked in the Sessions
+section points 130–350 lines away from the symbol it names (<code>buildSessionDescription</code>
+cited at <code>:343</code>, actually <code>:504</code>; <code>getAgentSessionDirs</code> cited at <code>:772</code>, actually
+<code>:1037</code>; <code>deriveShortId</code> cited as living in <code>db.ts</code>, actually <code>short-id.ts:17</code>). The
+described behavior is almost always still right — only the pointers are wrong, which
+argues for a mechanical re-audit rather than a manual one.</p>
+<p>The first two land in the reversible tier. The <code>session-tracker</code> one is a real
+architectural question — the docs describe a component that is not running — and gets a
+ticket rather than a doc patch.</p>
+<h2 id="to-do">To-do</h2>
+<div class="checklist"><div class="checklist-head">5 / 13 done</div><ul class="checklist-items"><li class="cl-item cl-done"><span class="cl-box">✓</span><span class="cl-text">Build the import graph, cycle census, and upward-import list for <code>apps/cli/src</code></span></li><li class="cl-item cl-done"><span class="cl-box">✓</span><span class="cl-text">Measure agent traffic and commit churn over 90 days</span></li><li class="cl-item cl-done"><span class="cl-box">✓</span><span class="cl-text">Census the sessions surface, the core-module responsibilities, and the per-harness chains</span></li><li class="cl-item cl-done"><span class="cl-box">✓</span><span class="cl-text">Verify the two live defects against the code rather than taking the scan's word</span></li><li class="cl-item cl-done"><span class="cl-box">✓</span><span class="cl-text">Confirm the baseline typecheck is green before touching anything</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>Pick on Moves 1, 2 and 6</strong> ← you</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Land Moves 4 + 5 (reversible tier) as one behavior-preserving PR</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">File tickets for the two live defects found in §6.1</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Land Move 1 — sessions domain extraction</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Land Move 2 — per-harness registries, one capability per PR</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Land Move 6 — <code>lib/</code> tree reorganization, if approved</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Fix the verified doc drift in §10 (<code>SESSION_AGENTS</code> count, phantom <code>sessions sync</code>)</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">File a ticket for the <code>session-tracker</code> / <code>state/sessions</code> documentation gap</span></li></ul></div>
+<h2 id="tracking">Tracking</h2>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Where</th>
+<th>State</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Moves 4 + 5 (reversible tier) — canonical <code>formatBytes</code> / <code>compareVersions</code>, 3 upward imports cut, doc drift fixed</td>
+<td><a href="https://github.com/phnx-labs/agi-cli/pull/2682">PR #2682</a></td>
+<td>open</td>
+</tr>
+<tr>
+<td><code>agents permissions list</code> blind to 10 of 13 harnesses (§6.1b)</td>
+<td><a href="https://linear.app/rush/issue/RUSH-2676">RUSH-2676</a></td>
+<td>Todo</td>
+</tr>
+<tr>
+<td>Antigravity MCP sync writes nothing, reports success (§6.1a)</td>
+<td><a href="https://linear.app/rush/issue/RUSH-2677">RUSH-2677</a></td>
+<td>Todo</td>
+</tr>
+<tr>
+<td>Move 1 — sessions domain extraction</td>
+<td>ticket on pick</td>
+<td>awaiting scope decision</td>
+</tr>
+<tr>
+<td>Move 2 — remaining four per-harness registries</td>
+<td>ticket on pick</td>
+<td>awaiting scope decision</td>
+</tr>
+<tr>
+<td>Move 6 — <code>lib/</code> tree reorganization</td>
+<td>deferred</td>
+<td>until the open-PR queue drains</td>
+</tr>
+</tbody></table>
+<p>The scan's own tooling lives at <code>.agents/artifacts/2026-08-14/</code> alongside this plan; the
+import-graph and cycle scripts are re-runnable and are the acceptance check for each move.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGl0bGU6ICJSZWZhY3Rvcjogc2Vzc2lvbnMgYW5kIHRoZSBjb3JlIG1vZHVsZXMgb2YgYXBwcy9jbGkiCnN1cmZhY2U6IGludGVybmFsCiMgUHJvdmVuYW5jZSBwaW5uZWQgdG8gbmV1dHJhbCB2YWx1ZXMgb24gcHVycG9zZTogdGhpcyBhcnRpZmFjdCBpcyBjb21taXR0ZWQgdG8gYQojIFBVQkxJQyByZXBvLCBzbyB0aGUgcmVuZGVyZXIgbXVzdCBub3QgYXV0by1maWxsIHRoZSBhdXRob3JpbmcgaG9zdCBvciBvcGVyYXRvci4KaHVtYW46IFBob2VuaXggTGFicwpob3N0OiBmbGVldApzZXNzaW9uOiB1bnB1Ymxpc2hlZAotLS0KCiMgUmVmYWN0b3I6IHNlc3Npb25zIGFuZCB0aGUgY29yZSBtb2R1bGVzIG9mIGBhcHBzL2NsaWAKCioqS2lja2VyOioqIGFyY2hpdGVjdHVyZSBzY2FuIMK3IGBhcHBzL2NsaS9zcmNgIMK3IDcxMiBmaWxlcyDCtyAyNjksMTQ3IGxpbmVzIMK3IDMsNDk4IGltcG9ydCBlZGdlcwoKKipQcm9ibGVtIHN0YXRlbWVudDoqKiBUaGUgc2Vzc2lvbnMgZG9tYWluIGxheWVyIGxpdmVzIGluc2lkZSBhIGNvbW1hbmQgZmlsZS4gU2l4CnBlci1oYXJuZXNzIGNhcGFiaWxpdGllcyBhcmUgZGlzcGF0Y2hlZCBieSBoYW5kLXdyaXR0ZW4gYGlmIChhZ2VudCA9PT0g4oCmKWAgY2hhaW5zIHRoYXQKZGlzYWdyZWUgd2l0aCBlYWNoIG90aGVyIGFib3V0IHdoaWNoIGhhcm5lc3NlcyB0aGV5IGNvdmVyIOKAlCBhbmQgdHdvIG9mIHRob3NlCmRpc2FncmVlbWVudHMgYXJlIGxpdmUgZGVmZWN0cyB0b2RheS4gMzA4IG9mIDcxMiBmaWxlcyBzaXQgaW4gb25lIGltcG9ydCBjeWNsZS4KCiMjIEZvY3VzIGZvciByZXZpZXcKCkZvdXIgY2FsbHMgYXJlIHlvdXJzLiBFdmVyeXRoaW5nIGVsc2UgSSBsYW5kIHdpdGhvdXQgYXNraW5nLgoKLSAqKk1vdmUgMSDigJQgbGlmdCB0aGUgc2Vzc2lvbnMgZG9tYWluIG91dCBvZiBgY29tbWFuZHMvc2Vzc2lvbnMudHNgIGludG8gYGxpYi9zZXNzaW9uL2AuKiogT2YgNiwxOTcgbGluZXMsIH4yOTAgYXJlIGFjdHVhbCBjb21tYW5kZXIgd2lyaW5nLiAxMTEgZXhwb3J0ZWQgc3ltYm9scy4gSXQgaXMgdGhlIHNpbmdsZSBtb3N0LWNodXJuZWQgZmlsZSBpbiB0aGUgcmVwbyAoMTM1IGNvbW1pdHMvOTBkKSBhbmQgZXh0cmFjdGluZyBpdCBkaXNzb2x2ZXMgYW4gMTEtZmlsZSBpbXBvcnQgY3ljbGUgb3V0cmlnaHQuICoqT25lIFBSLCBvciBzcGxpdCBieSBjb25jZXJuIChxdWVyeSAvIGdhdGhlciAvIHNlcmlhbGl6ZSAvIHJlc3VtZSAvIHJlbmRlcik/KioKLSAqKk1vdmUgMiDigJQgcmVnaXN0cnktaXplIHRoZSBwZXItaGFybmVzcyBjaGFpbnMuKiogU2l4IGNhcGFiaWxpdGllcyBkaXNwYXRjaCBieSBuYW1lIGNoYWluIGluc3RlYWQgb2YgYSB0YWJsZSwgYW5kIHRoZSBkcmlmdCBpcyBubyBsb25nZXIgdGhlb3JldGljYWw6IGBhZ2VudHMgcGVybWlzc2lvbnMgbGlzdGAgcmV0dXJucyBub3RoaW5nIGZvciAxMCBvZiAxMyBhbGxvd2xpc3QtY2FwYWJsZSBoYXJuZXNzZXMsIGFuZCBhbnRpZ3Jhdml0eSBNQ1Agc3luYyByZXNvbHZlcyBhIGNvbmZpZyBwYXRoIHRoZW4gd3JpdGVzIG5vdGhpbmcuIGBTVUJBR0VOVF9UQVJHRVRTYCBhbHJlYWR5IHByb3ZlcyB0aGUgcGF0dGVybiBpbiB0aGlzIHJlcG8uICoqRG8gYWxsIHNpeCwgb3Igc3RhcnQgd2l0aCB0aGUgdHdvIHRoYXQgYXJlIGFjdGl2ZWx5IGJyb2tlbj8qKgotICoqTW92ZSA2IOKAlCByZW9yZ2FuaXplIHRoZSBmbGF0IGBsaWIvYCByb290KiogKDE5MyBmaWxlcywgbm8gc3ViZGlyZWN0b3JpZXMpLiBDaGVhcGVzdCB0byBleGVjdXRlLCBtb3N0IGRpc3J1cHRpdmUgdG8gdGhlIDEwIG9wZW4gUFJzLiAqKkRvIHlvdSB3YW50IGl0IGF0IGFsbCwgYW5kIGlmIHNvIHNob3VsZCBpdCB3YWl0IGZvciB0aGUgUFIgcXVldWUgdG8gZHJhaW4/KioKLSAqKkhvdyBmYXIgb24gdGhlIDMwOC1maWxlIGN5Y2xlLioqIEkgbWVhc3VyZWQgdGhhdCBubyBzaW5nbGUgZWRnZSBjdXQgYnJlYWtzIGl0IOKAlCBpdCBuZWVkcyBhIGxheWVyIHJ1bGUgaW5zaWRlIGBsaWIvYCwgd2hpY2ggaXMgTW92ZSA2IHBsdXMgbGludCBlbmZvcmNlbWVudC4gKipXb3J0aCB0aGUgY2h1cm4sIG9yIHNldHRsZSBmb3Igc2hyaW5raW5nIGl0IHRvIDI3OSB3aXRoIHRoZSBjaGVhcCBjdXRzPyoqCgpTY29wZSBub3RlOiBldmVyeSBtb3ZlIGhlcmUgaXMgYmVoYXZpb3ItcHJlc2VydmluZyBleGNlcHQgdGhlIGJ1ZyBmaXhlcyBjYWxsZWQgb3V0CmV4cGxpY2l0bHkgaW4gTW92ZSAyLiBObyBjb21tYW5kLCBmbGFnLCBvciBvdXRwdXQgY2hhbmdlcyBvdGhlcndpc2UuCgojIyBQdXJwb3NlCgpZb3UgYXNrZWQgdG8gZm9jdXMgb24gc2Vzc2lvbnMgYW5kIHRoZSBvdGhlciBjb3JlIG1vZHVsZXMuIEkgc2Nhbm5lZCBgYXBwcy9jbGkvc3JjYCDigJQKdGhlIHB1Ymxpc2hlZCBgQHBobngtbGFicy9hZ2VudHMtY2xpYCDigJQgYnVpbHQgaXRzIGltcG9ydCBncmFwaCwgbWVhc3VyZWQgd2hpY2ggZmlsZXMKYWdlbnRzIGFuZCBjb21taXRzIGFjdHVhbGx5IHRvdWNoIG92ZXIgOTAgZGF5cywgY2Vuc3VzZWQgdGhlIHBlci1oYXJuZXNzIGRpc3BhdGNoCnN1cmZhY2UsIGFuZCByYW5rZWQgdGhlIHN0cnVjdHVyYWwgbW92ZXMgYnkgYGhhcm0geCBleHBvc3VyZWAuIEJlbG93OiB0aGUgcmFua2VkIGxpc3QsCnRoZSBldmlkZW5jZSwgYW5kIHRoZSBkaWZmcy4KCiMjIFdoYXQgdGhlIHNjYW4gbWVhc3VyZWQKCnwgU2lnbmFsIHwgTWV0aG9kIHwgUmVzdWx0IHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IEltcG9ydCBncmFwaCB8IHN0YXRpYyBwYXJzZSBvZiBldmVyeSBgaW1wb3J0YCAvIGBleHBvcnQgZnJvbWAgLyBgaW1wb3J0KClgIGluIGBzcmNgIHwgNzEyIG5vbi10ZXN0IGZpbGVzLCAyNjksMTQ3IGxvYywgMyw0OTggZWRnZXMgfAp8IFRydWUgY3ljbGVzIHwgVGFyamFuIFNDQywgZmlsZSBsZXZlbCB8IDQgY3ljbGVzOiAqKjMwOCoqLCAqKjExKiosIDQsIDIgZmlsZXMgfAp8IExheWVyaW5nIGludmVyc2lvbiB8IGBsaWIvKmAgaW1wb3J0aW5nIGBjb21tYW5kcy8qYCB8IDkyIGVkZ2VzIOKAlCA4MiBmcm9tIHRoZSBsYXp5IGNvbW1hbmQgcmVnaXN0cnkgKGxlZ2l0aW1hdGUpLCAqKjEwIHJlYWwgdmlvbGF0aW9ucyoqIHwKfCBBZ2VudCB0cmFmZmljIHwgYHRvb2xfY2FsbHNgIGluIGB+Ly5hZ2VudHMvLmhpc3Rvcnkvc2Vzc2lvbnMvc2Vzc2lvbnMuZGJgLCA5MGQgfCBgY29tbWFuZHMvc2Vzc2lvbnMudHNgICMzIGJ5IHJlYWRzIHwKfCBDb21taXQgY2h1cm4gfCBgZ2l0IGxvZyAtLXNpbmNlPTkwLmRheXMgLS1uYW1lLW9ubHlgIHwgYGNvbW1hbmRzL3Nlc3Npb25zLnRzYCAqKiMxICgxMzUgY29tbWl0cykqKiwgYGxpYi9hZ2VudHMudHNgICMzICg5MiksIGBsaWIvc2Vzc2lvbi9kaXNjb3Zlci50c2AgIzEwICg2NCkgfAp8IFBlci1oYXJuZXNzIGRpc3BhdGNoIHwgY2Vuc3VzIG9mIGBhZ2VudCA9PT0gJ+KApidgIC8gYHN3aXRjaCAoYWdlbnQpYCBhY3Jvc3MgYHNyY2AgfCA2IGNhcGFiaWxpdGllcyBvbiBoYW5kLXdyaXR0ZW4gY2hhaW5zLCBtZW1iZXJzaGlwIGRpc2FncmVlaW5nIHwKfCBUZXN0IG5ldCB8IHRlc3RzIGNvdmVyaW5nIHRoZSBtb3ZlIHRhcmdldHMgfCAxMDAgaW4gYGxpYi9zZXNzaW9uL2AsIDE3IGZvciBgY29tbWFuZHMvc2Vzc2lvbnMqYCB8CgpCYXNlbGluZSBgdHNjIC0tbm9FbWl0YCBvbiB0aGUgc2NhbiB3b3JrdHJlZTogKipleGl0IDAqKi4KCiMjIEN1cnJlbnQgYXJjaGl0ZWN0dXJlCgo8ZmlndXJlPgo8c3ZnIHZpZXdCb3g9IjAgMCA5MDAgNTAwIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iQ3VycmVudCBpbXBvcnQgc3RydWN0dXJlIG9mIGFwcHMvY2xpL3NyYzogYSAzMDgtZmlsZSBjeWNsZSwgYW4gMTEtZmlsZSBzZXNzaW9ucyBjeWNsZSwgMTAgdXB3YXJkIGltcG9ydHMsIGFuZCBzaXggcGVyLWhhcm5lc3MgZGlzcGF0Y2ggY2hhaW5zIHRoYXQgZGlzYWdyZWUiPgogIDxkZWZzPgogICAgPG1hcmtlciBpZD0iYXIiIG1hcmtlcldpZHRoPSI5IiBtYXJrZXJIZWlnaHQ9IjkiIHJlZlg9IjgiIHJlZlk9IjMiIG9yaWVudD0iYXV0byI+PHBhdGggZD0iTTAsMCBMMCw2IEw4LDMgeiIgZmlsbD0iIzk0YTNiOCIvPjwvbWFya2VyPgogICAgPG1hcmtlciBpZD0iYXJSIiBtYXJrZXJXaWR0aD0iOSIgbWFya2VySGVpZ2h0PSI5IiByZWZYPSI4IiByZWZZPSIzIiBvcmllbnQ9ImF1dG8iPjxwYXRoIGQ9Ik0wLDAgTDAsNiBMOCwzIHoiIGZpbGw9IiNlZjQ0NDQiLz48L21hcmtlcj4KICA8L2RlZnM+CiAgPHRleHQgeD0iMTQiIHk9IjI0IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyIgZmlsbD0iIzk0YTNiOCI+YXBwcy9jbGkvc3JjIOKAlCB0b2RheTwvdGV4dD4KCiAgPHJlY3QgeD0iMzAiIHk9IjQ0IiB3aWR0aD0iMzgwIiBoZWlnaHQ9IjEyNiIgcng9IjYiIGZpbGw9IiMxZTI5M2IiIHN0cm9rZT0iIzQ3NTU2OSIvPgogIDx0ZXh0IHg9IjQ2IiB5PSI2OCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNlMmU4ZjAiPmNvbW1hbmRzLyDigJQgMTI3IGZpbGVzIMK3IDc0LDA0OSBsb2M8L3RleHQ+CiAgPHJlY3QgeD0iNDYiIHk9IjgyIiB3aWR0aD0iMzQ4IiBoZWlnaHQ9IjcyIiByeD0iNCIgZmlsbD0iIzNmMWQxZCIgc3Ryb2tlPSIjZWY0NDQ0Ii8+CiAgPHRleHQgeD0iNjAiIHk9IjEwMiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNmY2E1YTUiPnNlc3Npb25zLnRzIOKAlCA2LDE5NyBsb2MgwrcgMTExIGV4cG9ydHM8L3RleHQ+CiAgPHRleHQgeD0iNjAiIHk9IjEyMCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNmY2E1YTUiPn4yOTAgbGluZXMgYXJlIGNvbW1hbmRlciB3aXJpbmcgKDUsNjU44oCTNSw5NDUpPC90ZXh0PgogIDx0ZXh0IHg9IjYwIiB5PSIxMzciIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjZmNhNWE1Ij50aGUgb3RoZXIgNSw5MDAgYXJlIGRvbWFpbiArIHByZXNlbnRhdGlvbjwvdGV4dD4KICA8dGV4dCB4PSI2MCIgeT0iMTUwIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2ZjYTVhNSI+MjAxIGNvbnNvbGUuIMK3IDI4MSBjaGFsay4gY2FsbHMgaW50ZXJsZWF2ZWQ8L3RleHQ+CgogIDxyZWN0IHg9IjQ5MCIgeT0iNDQiIHdpZHRoPSIzODAiIGhlaWdodD0iMTI2IiByeD0iNiIgZmlsbD0iIzFlMjkzYiIgc3Ryb2tlPSIjNDc1NTY5Ii8+CiAgPHRleHQgeD0iNTA2IiB5PSI2OCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNlMmU4ZjAiPmxpYi8gcm9vdCDigJQgMTkzIGZsYXQgZmlsZXMgwrcgODYsNDk2IGxvYzwvdGV4dD4KICA8dGV4dCB4PSI1MDYiIHk9IjkwIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzk0YTNiOCI+cm91dGluZS0qIMOXMTEgwrcgcHJvamVjdC0qIMOXMTEgwrcgYWNjb3VudC0qIMOXOTwvdGV4dD4KICA8dGV4dCB4PSI1MDYiIHk9IjEwNyIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM5NGEzYjgiPmZlZWQtKiDDlzYgwrcgdXNhZ2UtKiDDlzUgwrcgZXZlbnQtKiDDlzU8L3RleHQ+CiAgPHRleHQgeD0iNTA2IiB5PSIxMjkiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjZjU5ZTBiIj5hZ2VudHMudHMg4oeEIHZlcnNpb25zLnRzIOKHhCBjYXBhYmlsaXRpZXMudHM8L3RleHQ+CiAgPHRleHQgeD0iNTA2IiB5PSIxNDYiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIiBmaWxsPSIjZjU5ZTBiIj5jYXBhYmlsaXRpZXMudHMgZHVwbGljYXRlcyBjb21wYXJlVmVyc2lvbnMgdG8gZG9kZ2UgdGhpcyBjeWNsZTwvdGV4dD4KICA8dGV4dCB4PSI1MDYiIHk9IjE2MSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM5NGEzYjgiPm5vIHN1YmRpcmVjdG9yaWVzLCBubyBsYXllciBib3VuZGFyeTwvdGV4dD4KCiAgPHJlY3QgeD0iMzAiIHk9IjE5NiIgd2lkdGg9Ijg0MCIgaGVpZ2h0PSI4OCIgcng9IjYiIGZpbGw9IiMzZjFkMWQiIHN0cm9rZT0iI2VmNDQ0NCIgc3Ryb2tlLWRhc2hhcnJheT0iNSAzIi8+CiAgPHRleHQgeD0iNDYiIHk9IjIyMCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNmY2E1YTUiPjMwOC1maWxlIGltcG9ydCBjeWNsZSDigJQgNDMlIG9mIHRoZSBzb3VyY2UgdHJlZSBpbiBvbmUgc3Ryb25nbHktY29ubmVjdGVkIGNvbXBvbmVudDwvdGV4dD4KICA8dGV4dCB4PSI0NiIgeT0iMjQxIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2ZjYTVhNSI+c3BhbnMgY29tbWFuZHMvIGFuZCBsaWIvIGFsaWtlIMK3IG5vIHNpbmdsZSBlZGdlIGN1dCBicmVha3MgaXQgKG1lYXN1cmVkLCBub3QgYXNzdW1lZCk8L3RleHQ+CiAgPHRleHQgeD0iNDYiIHk9IjI1OSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNmY2E1YTUiPmFscmVhZHkgY29zdGluZyBkdXBsaWNhdGlvbjogNcOXIGNvbXBhcmVWZXJzaW9ucyDCtyA1w5cgZm9ybWF0Qnl0ZXMgwrcgNMOXIGZvcm1hdEFnZSDCtyAzw5cgZm9ybWF0RHVyYXRpb248L3RleHQ+CiAgPHRleHQgeD0iNDYiIHk9IjI3NiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNmY2E1YTUiPmN1dHRpbmcgdGhlIGNlbnRyYWwgYWdlbnRzLnRzIOKGkiB2ZXJzaW9ucy50cyBrbm90IGFsb25lIGxlYXZlcyBpdCBhdCAzMDgg4oCUIGl0IG5lZWRzIGEgbGF5ZXIgcnVsZSwgbm90IGFuIGVkZ2UgZml4PC90ZXh0PgoKICA8cmVjdCB4PSIzMCIgeT0iMzA2IiB3aWR0aD0iMjcwIiBoZWlnaHQ9Ijg2IiByeD0iNiIgZmlsbD0iIzNmMWQxZCIgc3Ryb2tlPSIjZWY0NDQ0Ii8+CiAgPHRleHQgeD0iNDQiIHk9IjMyOSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNmY2E1YTUiPjExLWZpbGUgY3ljbGU8L3RleHQ+CiAgPHRleHQgeD0iNDQiIHk9IjM0OCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiNmY2E1YTUiPnRoZSBzZXNzaW9ucyBjb21tYW5kIGZhbWlseTo8L3RleHQ+CiAgPHRleHQgeD0iNDQiIHk9IjM2NCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiNmY2E1YTUiPnNlc3Npb25zLnRzIOKHhCBnbyDCtyBmb2N1cyDCtyBhdHRhY2ggwrc8L3RleHQ+CiAgPHRleHQgeD0iNDQiIHk9IjM3OCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiNmY2E1YTUiPmRldGFjaCDCtyByZWNvbm5lY3Qgwrcgc2Vzc2lvbnMtezV9PC90ZXh0PgoKICA8cmVjdCB4PSIzMTYiIHk9IjMwNiIgd2lkdGg9IjI3MCIgaGVpZ2h0PSI4NiIgcng9IjYiIGZpbGw9IiMzZjFkMWQiIHN0cm9rZT0iI2VmNDQ0NCIvPgogIDx0ZXh0IHg9IjMzMCIgeT0iMzI5IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2ZjYTVhNSI+MTAgdXB3YXJkIGltcG9ydHM8L3RleHQ+CiAgPHRleHQgeD0iMzMwIiB5PSIzNDgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIiBmaWxsPSIjZmNhNWE1Ij4zIHNuYXBzaG90IGJ1aWxkZXJzIGluIGxpYi8gaW1wb3J0PC90ZXh0PgogIDx0ZXh0IHg9IjMzMCIgeT0iMzYyIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2ZjYTVhNSI+Y29tbWFuZHMvc2Vzc2lvbnMudHMgZm9yIGl0cyBkb21haW4gZm5zPC90ZXh0PgogIDx0ZXh0IHg9IjMzMCIgeT0iMzc4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2ZjYTVhNSI+MyBtb3JlIGltcG9ydCBjb21tYW5kcy91dGlscy50czwvdGV4dD4KCiAgPHJlY3QgeD0iNjAyIiB5PSIzMDYiIHdpZHRoPSIyNjgiIGhlaWdodD0iODYiIHJ4PSI2IiBmaWxsPSIjM2YxZDFkIiBzdHJva2U9IiNlZjQ0NDQiLz4KICA8dGV4dCB4PSI2MTYiIHk9IjMyOSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNmY2E1YTUiPjYgbmFtZS1jaGFpbiBjYXBhYmlsaXRpZXM8L3RleHQ+CiAgPHRleHQgeD0iNjE2IiB5PSIzNDgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIiBmaWxsPSIjZmNhNWE1Ij5tY3AgwrcgcGVybWlzc2lvbnMgwrcgd29ya2Zsb3dzIMK3IGhvb2tzPC90ZXh0PgogIDx0ZXh0IHg9IjYxNiIgeT0iMzYyIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2ZjYTVhNSI+cm91dGluZSBtb2RlLWZsYWdzIMK3IHNlc3Npb24gcmVzdW1lPC90ZXh0PgogIDx0ZXh0IHg9IjYxNiIgeT0iMzc4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2ZjYTVhNSI+bWVtYmVyc2hpcCBkaXNhZ3JlZXMg4oaSIDIgbGl2ZSBkZWZlY3RzPC90ZXh0PgoKICA8cGF0aCBkPSJNIDQ5MCAxMTggTCA0MjAgMTE4IiBzdHJva2U9IiNlZjQ0NDQiIHN0cm9rZS13aWR0aD0iMiIgbWFya2VyLWVuZD0idXJsKCNhclIpIi8+CiAgPHBhdGggZD0iTSA0MTAgMTQwIEwgNDkwIDE0MCIgc3Ryb2tlPSIjOTRhM2I4IiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhcikiLz4KICA8dGV4dCB4PSI0MjQiIHk9IjExMCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiNlZjQ0NDQiPjEwIHVwd2FyZDwvdGV4dD4KICA8dGV4dCB4PSI0MTgiIHk9IjE1OCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM5NGEzYjgiPjYxMyBlZGdlcyAoY29ycmVjdCBkaXJlY3Rpb24pPC90ZXh0PgoKICA8dGV4dCB4PSIxNCIgeT0iNDI4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzY0NzQ4YiI+RXZlcnkgbnVtYmVyIGlzIHJlYWQgb2ZmIHRoZSBpbXBvcnQgZ3JhcGgg4oCUIG5vIGVzdGltYXRlcy48L3RleHQ+CiAgPHRleHQgeD0iMTQiIHk9IjQ0NyIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM2NDc0OGIiPmxpYi9zZXNzaW9uLyBpdHNlbGYgaXMgY2xlYW46IDU3IGZpbGVzLCAyOCw0NDUgbG9jLCB6ZXJvIGludGVybmFsIGN5Y2xlcy4gVGhlIGxpYnJhcnkgaXMgZmluZTsgaGFsZiBvZiBpdCBuZXZlciBtb3ZlZCBpbi48L3RleHQ+Cjwvc3ZnPgo8ZmlnY2FwdGlvbj5DdXJyZW50IHN0cnVjdHVyZS4gVGhlIHNlc3Npb25zIDxlbT5saWJyYXJ5PC9lbT4gaXMgaGVhbHRoeTsgdGhlIHNlc3Npb25zIDxlbT5kb21haW48L2VtPiBpcyBzdHJhbmRlZCBpbiBhIGNvbW1hbmQgZmlsZSwgYW5kIHRoZSBmbGF0IDxjb2RlPmxpYi88L2NvZGU+IHJvb3QgaGFzIG5vIGxheWVyIGJvdW5kYXJ5IHRvIGhvbGQgdGhlIGdyYXBoIGFjeWNsaWMuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCiMjIFByb3Bvc2VkIENoYW5nZXMKCiMjIyBUaGUgcmFua2VkIG1vdmVzCgpIYXJtID0gd2hhdCB0aGUgc3RydWN0dXJlIGNvc3RzIG9uIGV2ZXJ5IGNoYW5nZS4gRXhwb3N1cmUgPSBob3cgbXVjaCB0cmFmZmljIGl0IHNlZXMuCgp8ICMgfCBNb3ZlIHwgSGFybSB8IEV4cG9zdXJlIHwgU2VxdWVuY2UgfAp8IC0tLSB8IC0tLSB8IC0tLSB8IC0tLSB8IC0tLSB8CnwgMSB8IEV4dHJhY3QgdGhlIHNlc3Npb25zIGRvbWFpbiBmcm9tIGBjb21tYW5kcy9zZXNzaW9ucy50c2Ag4oaSIGBsaWIvc2Vzc2lvbi9gIHwgZGlzc29sdmVzIHRoZSAxMS1maWxlIGN5Y2xlIChtZWFzdXJlZCAxMSDihpIgNCkgYW5kIDMgb2YgMTAgdXB3YXJkIGltcG9ydHMgfCAjMSBjaHVybiBmaWxlIGluIHRoZSByZXBvIHwgZmlyc3QgfAp8IDIgfCBSZWdpc3RyeS1pemUgdGhlIHNpeCBwZXItaGFybmVzcyBkaXNwYXRjaCBjaGFpbnMgfCAqKnR3byBsaXZlIGRlZmVjdHMgdG9kYXkqKjsgYSBuZXcgaGFybmVzcyBzaWxlbnRseSBnZXRzIG5vIE1DUCwgbm8gcGVybWlzc2lvbnMgcmVhZCwgbm8gd29ya2Zsb3dzIHwgc3BhbnMgYG1jcC50c2AsIGBwZXJtaXNzaW9ucy50c2AsIGB3b3JrZmxvd3MudHNgLCBgaG9va3MudHNgLCBgcnVubmVyLnRzYCB8IGFmdGVyIDEsIHBlci1jYXBhYmlsaXR5IHwKfCAzIHwgTWVyZ2UgdGhlIGR1cGxpY2F0ZSBNQ1Agc3Vic3lzdGVtIGluIGBhZ2VudHMudHNgIGludG8gYG1jcC50c2AgfCB+NzI1IGR1cGxpY2F0ZWQgbGluZXMsIGJ5dGUtaWRlbnRpY2FsIHR5cGUsIGR1cGxpY2F0ZWQgSGVybWVzIHdyaXRlciB8IGBhZ2VudHMudHNgICMzIGNodXJuIHwgZm9sZHMgaW50byBNb3ZlIDIncyBNQ1Agc2xpY2UgfAp8IDQgfCBDb2xsYXBzZSB0aGUgZHVwbGljYXRlZCB1dGlsaXRpZXMgdG8gY2Fub25pY2FsIGhvbWVzIHwgbGF0ZW50IHNlbWFudGljIGRpdmVyZ2VuY2UgaW4gYSBjYXBhYmlsaXR5IGdhdGUgfCAxMiBmaWxlcyB8IGluZGVwZW5kZW50LCBjaGVhcCB8CnwgNSB8IEN1dCB0aGUgMTAgdXB3YXJkIGBsaWIvIOKGkiBjb21tYW5kcy9gIGltcG9ydHMgfCAzMDgg4oaSIDI3OSBTQ0MgKG1lYXN1cmVkKSB8IDggbGliIGZpbGVzIHwgaW5kZXBlbmRlbnQsIGNoZWFwIHwKfCA2IHwgUmVvcmdhbml6ZSB0aGUgZmxhdCBgbGliL2Agcm9vdCB8IHRoZSBvbmx5IG1vdmUgdGhhdCBtYWtlcyB0aGUgMjc5LWZpbGUgYmxvYiB0cmFjdGFibGUgfCBldmVyeSBmaWxlIGluIGBsaWIvYCB8ICoqbGFzdCoqIHwKCk1vdmVzIDQgYW5kIDUgYXJlIHJldmVyc2libGUgYW5kIG5lZWQgbm8gZGVzaWduIGNhbGwg4oCUIHRob3NlIGxhbmQgd2l0aG91dCBhc2tpbmcuCgojIyMgTW92ZSAxIOKAlCBsaWZ0IHRoZSBzZXNzaW9ucyBkb21haW4gb3V0IG9mIHRoZSBjb21tYW5kIGZpbGUKCiMjIyMgNS4xIFdoYXQgdGhlIGZpbGUgYWN0dWFsbHkgaXMKCmByZWdpc3RlclNlc3Npb25zQ29tbWFuZHNgIOKAlCB0aGUgb25seSB0aGluZyBhIGNvbW1hbmQgZmlsZSBzaG91bGQgZXhwb3J0IOKAlCBvY2N1cGllcwpsaW5lcyAqKjUsNjU44oCTNSw5NDUqKi4gRXZlcnl0aGluZyBhYm92ZSBpdCwgKmFuZCAyMzMgbW9yZSBsaW5lcyBiZWxvdyBpdCosIGlzIGRvbWFpbgpsb2dpYy4gMTExIGV4cG9ydGVkIHN5bWJvbHMgaW4gdG90YWwuCgpgYGAKY29tbWFuZHMvc2Vzc2lvbnMudHM6MjY0MCAgIHNlc3Npb25zQWN0aW9uICDigJQgNzQxIGxpbmVzLCB0aGUgbGFyZ2VzdCBmdW5jdGlvbiBpbiB0aGUgZmlsZQpjb21tYW5kcy9zZXNzaW9ucy50czo1NjU4ICAgZXhwb3J0IGZ1bmN0aW9uIHJlZ2lzdGVyU2Vzc2lvbnNDb21tYW5kcyhwcm9ncmFtOiBDb21tYW5kKTogdm9pZCB7CmNvbW1hbmRzL3Nlc3Npb25zLnRzOjU5NDUgICBlbmQgb2Ygd2lyaW5nCmNvbW1hbmRzL3Nlc3Npb25zLnRzOjU5ODcgICBmaW5kQ2xhdWRlSGlzdG9yeUVudHJ5ICDigJQgQ2xhdWRlLW9ubHkgZG9tYWluIGxvZ2ljLCBzdHJhbmRlZCBhZnRlciB0aGUgd2lyaW5nCmBgYAoKR3JvdXBlZCBieSBjb25jZXJuOgoKfCBUYXJnZXQgbW9kdWxlIHwgU291cmNlIGxpbmVzIHwgU3ltYm9scyBpbmNsdWRlIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IGBsaWIvc2Vzc2lvbi9nYXRoZXIudHNgIHwgMSw1MzfigJMxLDg0NiB8IGBnYXRoZXJBY3RpdmVTZXNzaW9uc2AsIGBiYWNrZmlsbEFjdGl2ZVJvd3NGcm9tSW5kZXhgLCBgaXNSdW5uaW5nTGl2ZVNlc3Npb25gLCBgbWF0Y2hlc0xpdmVTdGF0dXNgIHwKfCBgbGliL3Nlc3Npb24vYWN0aXZlLnRzYCAqKGV4aXN0cykqIHwgMSwwNTfigJMxLDM0OCB8IGBncm91cEFjdGl2ZVNlc3Npb25zYCwgYGdyb3VwU2Vzc2lvbnNCeU1hY2hpbmVgLCBgZGVkdXBlQnlNYWNoaW5lU2Vzc2lvbmAsIGBtZXJnZUxvY2FsRmlyc3RgLCBgaXNBd2FpdGluZ1VzZXJgIHwKfCBgbGliL3Nlc3Npb24vc2VyaWFsaXplLnRzYCB8IDgzMOKAkzEsMzQ3IHwgYHNlcmlhbGl6ZUFjdGl2ZVNlc3Npb25zRm9ySnNvbmAsIGBzZXJpYWxpemVTZXNzaW9uUGlja2VyUm93c2AsIGBzZXJpYWxpemVTZXNzaW9uc0pzb25gIHwKfCBgbGliL3Nlc3Npb24vcXVlcnkudHNgIHwgNCw3NTPigJM0LDk3NSB8IGByZXNvbHZlU2Vzc2lvblF1ZXJ5YCwgYGZpbHRlclNlc3Npb25zQnlRdWVyeWAsIGBwYXJzZUFnZW50RmlsdGVyYCwgYHNjb3JlU2Vzc2lvblF1ZXJ5YCB8CnwgYGxpYi9zZXNzaW9uL2ZsZWV0LXF1ZXJ5LnRzYCB8IDUsMjQ54oCTNSw2NTggfCBgcmVzb2x2ZVNlc3Npb25BY3Jvc3NGbGVldGAsIGBmbGVldENhbmRpZGF0ZXNCeVF1ZXJ5YCwgYG1ldGFkYXRhUmVzb2x2ZU91dGNvbWVgIHwKfCBgbGliL3Nlc3Npb24vcmVzdW1lLWNvbW1hbmQudHNgICooZXhpc3RzLCA4IGxpbmVzKSogfCA0LDUyMOKAkzQsNjY0IHwgYGJ1aWxkUmVzdW1lQ29tbWFuZGAsIGByZXN1bWVBcmd2YCwgYHJlc3VtZVNwYXduSW52b2NhdGlvbmAgfAp8IGBsaWIvc2Vzc2lvbi9yZW5kZXIudHNgICooZXhpc3RzLCAxLDE2MiBsaW5lcykqIHwgMzc54oCTMSwwNTcsIDMsMzgx4oCTMyw4NjYsIDQsMTg14oCTNCwzNzAgfCBgcmVuZGVyQWN0aXZlUm93TGluZXNgLCBgZmxhdFNlc3Npb25Sb3dgLCBgcGlja2VyQ29sdW1uc0ZvcmAsIGBmb3JtYXRQaWNrZXJMYWJlbGAgfAoKRm91ciBvZiB0aG9zZSBzZXZlbiB0YXJnZXRzICoqYWxyZWFkeSBleGlzdCoqLiBgbGliL3Nlc3Npb24vcmVzdW1lLWNvbW1hbmQudHNgIGlzIGFuCjgtbGluZSBwbGFjZWhvbGRlciBob2xkaW5nIG9uZSBmdW5jdGlvbiB3aGlsZSB0aGUgcmVhbCAxNDUtbGluZSByZXN1bWUgbG9naWMgc2l0cyBpbiB0aGUKY29tbWFuZCBmaWxlLiBUaGlzIG1vdmUgZmluaXNoZXMgYSBzcGxpdCB0aGUgY29kZWJhc2UgYWxyZWFkeSBzdGFydGVkLgoKIyMjIyA1LjIgV2h5IGl0IGlzIGZpcnN0IOKAlCBtZWFzdXJlZCwgbm90IGFyZ3VlZAoKVGhlIDExLWZpbGUgY3ljbGUgZXhpc3RzIG9ubHkgYmVjYXVzZSBzaWJsaW5nIGNvbW1hbmQgZmlsZXMgaW1wb3J0IGRvbWFpbiBmdW5jdGlvbnMgZnJvbQpgY29tbWFuZHMvc2Vzc2lvbnMudHNgIHdoaWxlIGl0IGltcG9ydHMgdGhlaXIgYHJlZ2lzdGVyWGAgZnVuY3Rpb25zLiBJIG1lYXN1cmVkIHRoZQpleHRyYWN0aW9uJ3MgZWZmZWN0IG9uIHRoZSBncmFwaCBkaXJlY3RseToKCmBgYApiYXNlbGluZSBTQ0NzOiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIDMwOCwgMTEsIDQsIDIKYWZ0ZXIgY3V0dGluZyBldmVyeSBpbXBvcnQgT0Ygc2Vzc2lvbnMudHM6ICAgICAzMDgsICA0LCA0LCAyICAgIOKGkCB0aGUgMTEtZmlsZSBjeWNsZSBpcyBnb25lCmFmdGVyIGFsc28gY3V0dGluZyB0aGUgMTAgdXB3YXJkIGxpYuKGkmNvbW1hbmRzOiAgMjc5LCAgNCwgICAgIDIKYGBgCgojIyMjIDUuMyBBIGJ1ZyB0aGlzIG1vdmUgZXhwb3NlczogdHdvIGRpc2FncmVlaW5nIGFuc3dlcnMgdG8gImNhbiB0aGlzIGhhcm5lc3MgcmVzdW1lPyIKCmBsaWIvZXhlYy50czo5NDdgIGRvY3VtZW50cyBgQUdFTlRfQ09NTUFORFNbYWdlbnRdLnJlc3VtZWAgYXMgKioidGhlIHNpbmdsZSBzb3VyY2Ugb2YKdHJ1dGgiKiogZm9yIG5hdGl2ZSByZXN1bWUuIEl0IGRlY2xhcmVzIGEgcmVzdW1lIGZvcm0gZm9yIDggaGFybmVzc2VzOgoKYGBgCmV4ZWMudHM6Njk2ICBjbGF1ZGUgICByZXN1bWU6IHsgZmxhZzogJy0tcmVzdW1lJyB9CmV4ZWMudHM6NzAxICBjb2RleCAgICByZXN1bWU6IHsgc3ViY29tbWFuZDogJ3Jlc3VtZScgfQpleGVjLnRzOjczNSAgY3Vyc29yICAgcmVzdW1lOiB7IGZsYWc6ICctLXJlc3VtZScsIHNpbmNlOiAnMjAyNi43LjIzJyB9CmV4ZWMudHM6NzY3ICBwaSAgICAgICByZXN1bWU6IHsgZmxhZzogJy0tcmVzdW1lJyB9CmV4ZWMudHM6ODU5ICBncm9rICAgICByZXN1bWU6IHsgZmxhZzogJy0tcmVzdW1lJywgc2luY2U6ICcwLjIuOTEnIH0KZXhlYy50czo4NzIgIGtpbWkgICAgIHJlc3VtZTogeyBmbGFnOiAnLS1zZXNzaW9uJywgc2luY2U6ICcwLjE5LjInIH0KZXhlYy50czo4OTAgIGRyb2lkICAgIHJlc3VtZTogeyBmbGFnOiAnLS1yZXN1bWUnLCBoZWFkbGVzc0ZsYWc6ICctLXNlc3Npb24taWQnLCBzaW5jZTogJzAuMTg2LjAnIH0KZXhlYy50czo5MjEgIG11c2UgICAgIHJlc3VtZTogeyBmbGFnOiAnLS1zZXNzaW9uLWlkJyB9CmBgYAoKYGNvbW1hbmRzL3Nlc3Npb25zLnRzOjQ2MzNgIGhhcmRjb2RlcyBhIHNlY29uZCwgaW5kZXBlbmRlbnQgc3dpdGNoIOKAlCBhbmQgcmV0dXJucyBgbnVsbGAKZm9yIGZvdXIgaGFybmVzc2VzIHRoZSByZWdpc3RyeSBzYXlzIGFyZSByZXN1bWFibGU6CgpgYGAKY29tbWFuZHMvc2Vzc2lvbnMudHM6NDY1Mi00NjYwCiAgICBjYXNlICdncm9rJzoKICAgIGNhc2UgJ2tpbWknOgogICAgY2FzZSAnZHJvaWQnOgogICAgY2FzZSAnY3Vyc29yJzoKICAgICAgLy8gR3JvayAoYW5kIHNvbWUgb3RoZXJzKSBzZXNzaW9ucyBhcmUgY2FwdHVyZWQgYXJ0aWZhY3RzLCBub3QgcmVzdW1hYmxlIHRoZSBzYW1lIHdheS4KICAgICAgcmV0dXJuIG51bGw7CmBgYAoKYGNvbW1hbmRzL3Nlc3Npb25zLnRzYCBuZXZlciBpbXBvcnRzIGBBR0VOVF9DT01NQU5EU2Agb3IgYG5hdGl2ZVJlc3VtZWAuIFRoZSB0d28gYW5zd2VycwpoYXZlIGRyaWZ0ZWQsIGFuZCB0aGUgY29tbWVudCBleHBsYWluaW5nIHdoeSBpcyBzdGFsZSBmb3IgY3Vyc29yLCBncm9rLCBraW1pLCBhbmQgZHJvaWQuCk1vdmluZyB0aGlzIGxvZ2ljIHRvIGBsaWIvc2Vzc2lvbi9yZXN1bWUtY29tbWFuZC50c2AgcHV0cyBpdCBuZXh0IHRvIHRoZSByZWdpc3RyeSBpdApzaG91bGQgaGF2ZSBiZWVuIHJlYWRpbmcuCgojIyMjIDUuNCBUaGUgZGlmZiBzaGFwZQoKYGBgZGlmZgotLS0gYS9hcHBzL2NsaS9zcmMvY29tbWFuZHMvc2Vzc2lvbnMudHMKKysrIGIvYXBwcy9jbGkvc3JjL2NvbW1hbmRzL3Nlc3Npb25zLnRzCkBACi1leHBvcnQgYXN5bmMgZnVuY3Rpb24gZ2F0aGVyQWN0aXZlU2Vzc2lvbnMoCi0gIG9wdGlvbnM6IFNlc3Npb25zT3B0aW9ucywKLSk6IFByb21pc2U8QWN0aXZlU2Vzc2lvbltdPiB7Ci0gIC8vIH4zMDAgbGluZXMgb2YgZmxlZXQgZmFuLW91dCwgZGVkdXBlLCBiYWNrZmlsbAotfQoraW1wb3J0IHsgZ2F0aGVyQWN0aXZlU2Vzc2lvbnMgfSBmcm9tICcuLi9saWIvc2Vzc2lvbi9nYXRoZXIuanMnOwpgYGAKCmBgYGRpZmYKLS0tIGEvYXBwcy9jbGkvc3JjL2xpYi9zZXNzaW9uL3Jlc3VtZS1jb21tYW5kLnRzCisrKyBiL2FwcHMvY2xpL3NyYy9saWIvc2Vzc2lvbi9yZXN1bWUtY29tbWFuZC50cwpAQAogZXhwb3J0IGZ1bmN0aW9uIGJ1aWxkQ2Fub25pY2FsUmVzdW1lQ29tbWFuZChzZXNzaW9uSWQ6IHN0cmluZyk6IHN0cmluZ1tdIHsKICAgcmV0dXJuIFsnYWdlbnRzJywgJ3Jlc3VtZScsIHNlc3Npb25JZF07CiB9CisKKy8qKgorICogUGVyLWhhcm5lc3MgcmVzdW1lIGFyZ3YuIFJlYWRzIEFHRU5UX0NPTU1BTkRTIOKAlCB0aGUgc2luZ2xlIHNvdXJjZSBvZiB0cnV0aCDigJQKKyAqIGluc3RlYWQgb2YgdGhlIHNlY29uZCBoYXJkY29kZWQgc3dpdGNoIHRoaXMgcmVwbGFjZXMuCisgKi8KK2V4cG9ydCBmdW5jdGlvbiBidWlsZFJlc3VtZUNvbW1hbmQoc2Vzc2lvbjogU2Vzc2lvbk1ldGEpOiBzdHJpbmdbXSB8IG51bGwgeworICBpZiAoIW5hdGl2ZVJlc3VtZShzZXNzaW9uLmFnZW50LCBzZXNzaW9uLnZlcnNpb24pKSByZXR1cm4gbnVsbDsKKyAg4oCmCit9CmBgYAoKYGBgZGlmZgotLS0gYS9hcHBzL2NsaS9zcmMvbGliL21lbnViYXIvc25hcHNob3QudHMKKysrIGIvYXBwcy9jbGkvc3JjL2xpYi9tZW51YmFyL3NuYXBzaG90LnRzCkBACi1pbXBvcnQgeyBiYWNrZmlsbEFjdGl2ZVJvd3NGcm9tSW5kZXgsIGlzUnVubmluZ0xpdmVTZXNzaW9uLAotICAgICAgICAgc2VyaWFsaXplQWN0aXZlU2Vzc2lvbnNGb3JKc29uLCBzZXJpYWxpemVTZXNzaW9uc0pzb24gfSBmcm9tICcuLi8uLi9jb21tYW5kcy9zZXNzaW9ucy5qcyc7CitpbXBvcnQgeyBiYWNrZmlsbEFjdGl2ZVJvd3NGcm9tSW5kZXgsIGlzUnVubmluZ0xpdmVTZXNzaW9uIH0gZnJvbSAnLi4vc2Vzc2lvbi9nYXRoZXIuanMnOworaW1wb3J0IHsgc2VyaWFsaXplQWN0aXZlU2Vzc2lvbnNGb3JKc29uLCBzZXJpYWxpemVTZXNzaW9uc0pzb24gfSBmcm9tICcuLi9zZXNzaW9uL3NlcmlhbGl6ZS5qcyc7CmBgYAoKVGhlIDE3IGBjb21tYW5kcy9zZXNzaW9ucyoudGVzdC50c2AgZmlsZXMgbW92ZSB3aXRoIHRoZWlyIHN1YmplY3RzLiBUaGUgMTAwIHRlc3RzIGluCmBsaWIvc2Vzc2lvbi9gIGFyZSB0aGUgbmV0IHRoYXQgcHJvdmVzIGJlaGF2aW9yIHdhcyBwcmVzZXJ2ZWQuCgojIyMjIDUuNSBDbGVhbnVwcyBpbnNpZGUgYGxpYi9zZXNzaW9uL2AgdGhhdCByaWRlIGFsb25nCgp8IER1cGxpY2F0aW9uIHwgT2NjdXJyZW5jZXMgfCBGaXggfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgSlNPTkwgcmVhZC1zdHJlYW0gc2NhZmZvbGQgfCA2w5cgaW4gYGRpc2NvdmVyLnRzYCAoYDoyODE1YCwgYDozMzEwYCwgYDozNzY5YCwgYDo0MTAyYCwgYDo0NDA5YCwgYDo0NjE4YCkg4oCUIHR3byBvZiB0aGVtIG5lYXIgbGluZS1mb3ItbGluZSBpZGVudGljYWwgfCBvbmUgYHJlYWRKc29ubFVudGlsKHBhdGgsIHJlZHVjZXIsIHByZWRpY2F0ZSlgIGhlbHBlciB8CnwgImlzIHRoaXMgcGlkIGFsaXZlIiB8IDPDlyAoYGFjdGl2ZS50czo2OTlgLCBgZGV0YWNoZWQudHM6ODJgLCBgZGIudHM6MTQxN2ApIHdpdGggKip0d28gZGlmZmVyZW50KiogcGlkLXJldXNlIGRlZmVuc2VzIOKAlCBhIHRvbGVyYW5jZSB3aW5kb3cgdnMgYW4gZXhhY3Qgc3RhcnQtdGltZSBtYXRjaCB8IHNoYXJlIG9uZSBwcmltaXRpdmU7IGBkYi50c2AncyBsb2NrLXNjb3BlZCBjb3B5IGNhbiBzdGF5IHwKfCBgaWQuc2xpY2UoMCwgOClgIHwgOcOXIGRlc3BpdGUgYHNob3J0LWlkLnRzOjE5IGRlcml2ZVNob3J0SWQoKWAgZXhpc3RpbmcgKnNwZWNpZmljYWxseSogYmVjYXVzZSB0aGF0IHJhdyBwYXR0ZXJuIHdhcyBidWdneSBvbiBwcmVmaXgtb25seSBpZHMgfCBjYWxsIGBkZXJpdmVTaG9ydElkYCB8CnwgQWQtaG9jIENsYXVkZSBwYXRoIHwgYGNvbW1hbmRzL3Nlc3Npb25zLnRzOjU5ODhgIGJ1aWxkcyBgfi8uY2xhdWRlL2hpc3RvcnkuanNvbmxgIGRpcmVjdGx5LCBieXBhc3NpbmcgYGRpc2NvdmVyLnRzOjEwNDEgZ2V0QWdlbnRTZXNzaW9uRGlycygpYCDigJQgc28gaXQgbWlzc2VzIHZlcnNpb24taG9tZSBhbmQgYmFja3VwIGluc3RhbGxzIHwgdXNlIHRoZSBjYW5vbmljYWwgcmVzb2x2ZXIgfAoKIyMjIE1vdmUgMiDigJQgcmVnaXN0cnktaXplIHRoZSBwZXItaGFybmVzcyBjaGFpbnMKClRoZSByZXBvIGFscmVhZHkgZG9jdW1lbnRzIHRoZSB0YXJnZXQgcGF0dGVybiwgYW5kIGFscmVhZHkgZXhlY3V0ZWQgaXQgb25jZS4KYHN1YmFnZW50cy1yZWdpc3RyeS50czo2LTEwYDoKCj4gR2VuZXJpYyBpbnN0YWxsIC8gbGlzdCAvIGRldGVjdCAvIG9ycGhhbiAvIHJlbW92ZSBsb2dpYyBpdGVyYXRlcyB0aGUgdGFibGUgaW5zdGVhZCBvZgo+IHRoZSBuZWFyLWlkZW50aWNhbCBgZWxzZSBpZiAoYWdlbnQgPT09ICcuLi4nKWAgY2hhaW5zIHRoYXQgdXNlZCB0byBiZSBjb3B5LXBhc3RlZAo+IGFjcm9zcyBgc3ViYWdlbnRzLnRzYCwgdGhlIHN0YWxlbmVzcyB3cml0ZXIsIGFuZCB0aGUgc3RhbGVuZXNzIGRldGVjdG9yIOKAlCByb3VnaGx5Cj4gTyhhZ2VudHMgeCBvcGVyYXRpb25zKSBhcm1zLgoKU2l4IGNhcGFiaWxpdGllcyBuZXZlciBnb3QgdGhhdCB0cmVhdG1lbnQuIE1lbWJlcnNoaXAgcGVyIGNoYWluLCBhZ2FpbnN0IHRoZSBoYXJuZXNzZXMKdGhlIGNhcGFiaWxpdHkgdGFibGUgbWFya3MgY2FwYWJsZToKCnwgQ2FwYWJpbGl0eSB8IENoYWlucyB8IEFybXMgcGVyIGNoYWluIHwgU2lsZW50bHkgb21pdHRlZCB8CnwgLS0tIHwgLS0tIHwgLS0tIHwgLS0tIHwKfCAqKk1DUCoqIHwgMyAoYHJlc291cmNlcy9tY3AudHM6MTQzYCwgYG1jcC50czo3NDlgLCBgbWNwLnRzOjEwMzlgKSB8IDExIC8gMTIgLyA5IHwgZGlmZmVyZW50IHNldHMgcGVyIGNoYWluOyBgY2FwYWJpbGl0aWVzLm1jcGAgaXMgYHRydWVgIGZvciBldmVyeSBoYXJuZXNzIHwKfCAqKlBlcm1pc3Npb25zKiogfCB3cml0ZSBgcGVybWlzc2lvbnMudHM6MTYxM2AgKDEzIGFybXMpIHZzIHJlYWQgYDoxMzgzYCBhbmQgZXhwb3J0IGA6MjEzMGAgKDMgYXJtcyBlYWNoKSB8IDEzIHZzIDMgfCAxMCBoYXJuZXNzZXMgcmVhZGFibGUtYnV0LW5vdC1yZWFkYWJsZSB8CnwgKipXb3JrZmxvd3MqKiB8IDQgZnVuY3Rpb25zIGluIGB3b3JrZmxvd3MudHNgIChgOjEwMTZgLCBgOjEwMjVgLCBgOjExOTZgLCBgOjEyNzBgKSB8IH41IGVhY2gsIH4yMCBhcm1zIHRvdGFsIHwgbXVzdCBtb3ZlIGluIGxvY2tzdGVwIG9yIGxpc3Qvc3luYy9yZW1vdmUgZGl2ZXJnZSB8CnwgKipIb29rcyoqIHwgYGhvb2tzLnRzOjE5OTNgIOKGkiAxMSByZWdpc3RyYXJzIGF0IGA6MjE1NeKAkzM3NjhgIHwgMTIgfCAxLDYyOSBsaW5lcywgNDMlIG9mIHRoZSBmaWxlIHwKfCAqKlJvdXRpbmUgbW9kZSBmbGFncyoqIHwgYHJ1bm5lci50czo1ODVgIGR1cGxpY2F0aW5nIGBBR0VOVF9DT01NQU5EUy5tb2RlRmxhZ3NgIHwgNyB8IDkrIGhhcm5lc3NlcyBnZXQgbm8gbW9kZSBmbGFnIGF0IGFsbCB8CnwgKipTZXNzaW9uIHJlc3VtZSoqIHwgYGNvbW1hbmRzL3Nlc3Npb25zLnRzOjQ2MzNgIGR1cGxpY2F0aW5nIGBBR0VOVF9DT01NQU5EUy5yZXN1bWVgIHwgMTIgfCA0IGhhcm5lc3NlcyB3cm9uZ2x5IG1hcmtlZCBub24tcmVzdW1hYmxlICjCpzUuMykgfAoKIyMjIyA2LjEgVHdvIG9mIHRoZXNlIGFyZSBsaXZlIGRlZmVjdHMg4oCUIHZlcmlmaWVkCgoqKihhKSBBbnRpZ3Jhdml0eSBNQ1Agc3luYyByZXNvbHZlcyBhIHBhdGgsIHRoZW4gd3JpdGVzIG5vdGhpbmcuKioKYHJlc291cmNlcy9tY3AudHM6MTU1LTE1N2AgcmV0dXJucyBhIHJlYWwgY29uZmlnIHBhdGggZm9yIGFudGlncmF2aXR5OgoKYGBgCiAgICBjYXNlICdhbnRpZ3Jhdml0eSc6CiAgICAgIC8vIGFneSBuZXN0cyB1bmRlciB+Ly5nZW1pbmkvYW50aWdyYXZpdHktY2xpLyAoc2hhcmVkIHBhcmVudCB3aXRoIEdlbWluaSwgZGlzdGluY3Qgc3ViZGlyKS4KICAgICAgcmV0dXJuIHBhdGguam9pbih2ZXJzaW9uSG9tZSwgJy5nZW1pbmknLCAnYW50aWdyYXZpdHktY2xpJywgJ21jcF9jb25maWcuanNvbicpOwpgYGAKCmBtY3AudHM6NzQ5IHdyaXRlTWNwQ29uZmlnYCBoYXMgKipubyBhbnRpZ3Jhdml0eSBjYXNlIGFuZCBubyBgZGVmYXVsdGAgYXJtKiog4oCUIHZlcmlmaWVkCmJ5IHJlYWRpbmcgZXZlcnkgYGNhc2VgIGxhYmVsIGluIHRoZSBzd2l0Y2ggYW5kIGdyZXBwaW5nIHRoZSBmdW5jdGlvbiBib2R5IGZvcgpgZGVmYXVsdDpgICh6ZXJvIG1hdGNoZXMpLiBUaGUgc3luYyBwYXRoIHJlc29sdmVzIHRoZSBwYXRoLCBmYWxscyB0aHJvdWdoIHRoZSBzd2l0Y2gsCmFuZCByZXR1cm5zLiBObyBlcnJvciwgbm8gd2FybmluZywgbm8gd3JpdGUuCgoqKihiKSBgYWdlbnRzIHBlcm1pc3Npb25zIGxpc3RgIC8gYGV4cG9ydGAgaXMgYmxpbmQgdG8gMTAgb2YgMTMgaGFybmVzc2VzLioqCgpgYGAKcGVybWlzc2lvbnMudHM6MTM4OSAgIHN3aXRjaCAoYWdlbnRJZCkgewpwZXJtaXNzaW9ucy50czoxMzkwICAgICBjYXNlICdjbGF1ZGUnOgpwZXJtaXNzaW9ucy50czoxMzkyICAgICBjYXNlICdvcGVuY29kZSc6CnBlcm1pc3Npb25zLnRzOjEzOTQgICAgIGNhc2UgJ2NvZGV4JzoKcGVybWlzc2lvbnMudHM6MTM5NiAgICAgZGVmYXVsdDoKcGVybWlzc2lvbnMudHM6MTM5NyAgICAgICByZXR1cm4gbnVsbDsKYGBgCgpUaGUgKndyaXRlKiBwYXRoIChgYXBwbHlQZXJtaXNzaW9uc1RvVmVyc2lvbmAsIGBwZXJtaXNzaW9ucy50czoxNjEzYCkgaGFuZGxlcyAxMwpoYXJuZXNzZXMuIFNvIHBlcm1pc3Npb25zIGFyZSB3cml0dGVuIGZvciBjdXJzb3IsIGFudGlncmF2aXR5LCBncm9rLCBnb29zZSwga2ltaSwgZHJvaWQsCmNvcGlsb3QsIGtpcm8sIG9wZW5jbGF3IGFuZCBoZXJtZXMg4oCUIGFuZCB0aGVuIGBhZ2VudHMgcGVybWlzc2lvbnMgbGlzdGAgKHdoaWNoIGNhbGxzCmByZWFkQWdlbnRQZXJtaXNzaW9uc2AgZnJvbSBgY29tbWFuZHMvcGVybWlzc2lvbnMudHM6MTE1YCBhbmQgYDoxOThgKSByZXBvcnRzIG5vdGhpbmcgZm9yCmFueSBvZiB0aGVtLgoKQm90aCBnZXQgdGhlaXIgb3duIHRpY2tldCBhbmQgYSB0ZXN0IHRoYXQgcGlucyB0aGUgcmVnaXN0cnkgYWdhaW5zdCBgY2FwYWJsZUFnZW50cyguLi4pYCwKd2hpY2ggaXMgd2hhdCBzdG9wcyB0aGlzIGNsYXNzIGZyb20gcmVjdXJyaW5nLgoKIyMjIyA2LjIgVGhlIGRpZmYgc2hhcGUKCmBgYGRpZmYKLS0tIC9kZXYvbnVsbAorKysgYi9hcHBzL2NsaS9zcmMvbGliL21jcC1yZWdpc3RyeS50cwpAQAorLyoqCisgKiBPbmUgZW50cnkgcGVyIE1DUC1jYXBhYmxlIGhhcm5lc3M6IHdoZXJlIGl0cyBjb25maWcgbGl2ZXMsIGFuZCBob3cgdG8gcmVhZCBhbmQKKyAqIHdyaXRlIGl0LiBSZXBsYWNlcyB0aHJlZSBpbmRlcGVuZGVudGx5LW1haW50YWluZWQgc3dpdGNoZXMgd2hvc2UgbWVtYmVyc2hpcCBoYWQKKyAqIGFscmVhZHkgZHJpZnRlZCBhcGFydCAoYW50aWdyYXZpdHkgaGFkIGEgcGF0aCBidXQgbm8gd3JpdGVyKS4KKyAqLworZXhwb3J0IGNvbnN0IE1DUF9UQVJHRVRTID0geworICBjbGF1ZGU6ICAgICAgeyBwYXRoOiBbJy5jbGF1ZGUnLCAnc2V0dGluZ3MuanNvbiddLCAgICAgICAgICAgICAgICAgY29kZWM6IGNsYXVkZVNjaGVtYSB9LAorICBhbnRpZ3Jhdml0eTogeyBwYXRoOiBbJy5nZW1pbmknLCAnYW50aWdyYXZpdHktY2xpJywgJ21jcF9jb25maWcuanNvbiddLCBjb2RlYzogY2xhdWRlU2NoZW1hIH0sCisgIOKApgorfSBhcyBjb25zdCBzYXRpc2ZpZXMgUGFydGlhbDxSZWNvcmQ8QWdlbnRJZCwgTWNwVGFyZ2V0Pj47CmBgYAoKYGBgZGlmZgotLS0gYS9hcHBzL2NsaS9zcmMvbGliL21jcC50cworKysgYi9hcHBzL2NsaS9zcmMvbGliL21jcC50cwpAQAotICBzd2l0Y2ggKGFnZW50SWQpIHsKLSAgICBjYXNlICdjbGF1ZGUnOiBjYXNlICdjdXJzb3InOiBjYXNlICdraW1pJzogY2FzZSAnZHJvaWQnOiBjYXNlICdwaSc6IGNhc2UgJ3dhcnAnOiB7IOKApiB9Ci0gICAg4oCmdGVuIG1vcmUgYXJtcywgbm8gZGVmYXVsdOKApgotICB9CisgIGNvbnN0IHRhcmdldCA9IE1DUF9UQVJHRVRTW2FnZW50SWRdOworICBpZiAoIXRhcmdldCkgeworICAgIHRocm93IG5ldyBFcnJvcihgbWNwOiAke2FnZW50SWR9IGlzIG1hcmtlZCBtY3AtY2FwYWJsZSBidXQgaGFzIG5vIE1DUF9UQVJHRVRTIGVudHJ5YCk7CisgIH0KKyAgdGFyZ2V0LmNvZGVjLndyaXRlKHJlc29sdmVUYXJnZXRQYXRoKHRhcmdldCwgdmVyc2lvbkhvbWUpLCBzZXJ2ZXIpOwpgYGAKCmBgYGRpZmYKLS0tIC9kZXYvbnVsbAorKysgYi9hcHBzL2NsaS9zcmMvbGliL21jcC1yZWdpc3RyeS50ZXN0LnRzCkBACisvLyBUaGUgdGVzdCB0aGF0IHN0b3BzIHRoaXMgY2xhc3Mgb2YgZHJpZnQgZnJvbSByZWN1cnJpbmcuCitpdCgnaGFzIGFuIE1DUF9UQVJHRVRTIGVudHJ5IGZvciBldmVyeSBtY3AtY2FwYWJsZSBhZ2VudCcsICgpID0+IHsKKyAgZm9yIChjb25zdCBhZ2VudCBvZiBjYXBhYmxlQWdlbnRzKCdtY3AnKSkgeworICAgIGV4cGVjdChNQ1BfVEFSR0VUU1thZ2VudF0sIGAke2FnZW50fSBpcyBtY3AtY2FwYWJsZSBidXQgaGFzIG5vIHRhcmdldGApLnRvQmVEZWZpbmVkKCk7CisgIH0KK30pOwpgYGAKClRoZSBgdGhyb3dgIGlzIGRlbGliZXJhdGUuIFRvZGF5IGFuIHVubGlzdGVkIGhhcm5lc3MgZmFsbHMgb2ZmIHRoZSBlbmQgb2YgdGhlIGNoYWluIGFuZApgaW5zdGFsbE1jcFNlcnZlcnNgIHJldHVybnMgYHsgc3VjY2VzczogdHJ1ZSwgYXBwbGllZDogW10sIGVycm9yczogW10gfWAg4oCUIHRoZQpzaWxlbnQtbm8tb3AtdGhhdC1yZXBvcnRzLXN1Y2Nlc3Mgc2hhcGUgdGhlIHJlcG8ncyBvd24gcmV2aWV3IGNvbnZlbnRpb25zIGJhbi4KCiMjIyBNb3ZlcyAz4oCTNSDigJQgdGhlIHJldmVyc2libGUgdGllcgoKKipNb3ZlIDMg4oCUIGBhZ2VudHMudHNgIHJlaW1wbGVtZW50cyBNQ1AgYWxvbmdzaWRlIGBtY3AudHNgLioqIGBhZ2VudHMudHM6MjUyNuKAkzMyNTFgCih+NzI1IGxpbmVzKSBkdXBsaWNhdGVzIHRoZSBkZWRpY2F0ZWQgbW9kdWxlLiBUaGUgdHlwZSBpcyBieXRlLWlkZW50aWNhbCBpbiBib3RoOgoKYGBgCmFnZW50cy50czoyNjI1LTI2MzAgICBleHBvcnQgaW50ZXJmYWNlIE1jcFRhcmdldE9wZXJhdGlvblJlc3VsdCB7IGFnZW50SWQ7IHZlcnNpb24/OyBzdWNjZXNzOyBlcnJvcj8gfQptY3AudHM6NTAtNTUgICAgICAgICAgZXhwb3J0IGludGVyZmFjZSBNY3BUYXJnZXRPcGVyYXRpb25SZXN1bHQgeyBhZ2VudElkOyB2ZXJzaW9uPzsgc3VjY2VzczsgZXJyb3I/IH0KYGBgCgphcyBpcyB0aGUgSGVybWVzIHdyaXRlciAoYGFnZW50cy50czoyNzYzLTI3NzFgIHZzIGBtY3AudHM6NjIyLTY1MWApLiBBIHBlci1hZ2VudCBNQ1AKZm9ybWF0IGNoYW5nZSBoYXMgdG8gYmUgbWFkZSB0d2ljZSB0b2RheS4gVGhpcyBmb2xkcyBpbnRvIE1vdmUgMidzIE1DUCBzbGljZS4KCioqTW92ZSA0IOKAlCBjb2xsYXBzZSB0aGUgZHVwbGljYXRlZCB1dGlsaXRpZXMuKioKCnwgU3ltYm9sIHwgQ29waWVzIHwgQ2Fub25pY2FsIGhvbWUgfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgYGNvbXBhcmVWZXJzaW9uc2AgfCA1IOKAlCBgYWdlbnQtc3BlYy9wcmltaXRpdmVzLnRzOjUwYCwgYGNhcGFiaWxpdGllcy50czoyNGAsIGBjb21tYW5kcy50czo2MGAsIGBib290c3RyYXAudHM6MzM2YCwgYGNvbW1hbmRzL3ZpZXcudHM6MjEzYCB8IGBsaWIvYWdlbnQtc3BlYy9wcmltaXRpdmVzLnRzYCB8CnwgYGZvcm1hdEJ5dGVzYCB8IDUg4oCUIGBjb21tYW5kcy9wcnVuZS50czoxOTdgLCBgY29tbWFuZHMvc2hhcmUudHM6MTg1YCwgYGNvbW1hbmRzL2luc3BlY3QudHM6ODcwYCwgYGNvbW1hbmRzL3Nlc3Npb25zLnRzOjM3M2AsIGBsaWIvYnJvd3Nlci9zZXNzaW9ucy1saXN0LnRzOjEyMmAgfCBgbGliL2Zvcm1hdC50c2AgfAp8IGBmb3JtYXRBZ2VgIHwgNCDigJQgYGNvbW1hbmRzL3B0eS50czo0MzVgLCBgY29tbWFuZHMvYnJvd3Nlci50czoyMjYwYCwgYGNvbW1hbmRzL2Jyb3dzZXItcGlja2VyLnRzOjI0YCwgYGNvbW1hbmRzL3RtdXgudHM6NDYwYCB8IGBsaWIvZm9ybWF0LnRzYCB8CnwgYGZvcm1hdER1cmF0aW9uYCB8IDMg4oCUIGBjb21tYW5kcy9icm93c2VyLnRzOjIyNzZgLCBgbGliL3JvdXRpbmUtbm90aWZ5LnRzOjY1YCwgYGxpYi9zZXNzaW9uL3JlbmRlci50czoyNjhgIHwgYGxpYi9mb3JtYXQudHNgIHwKfCBgdHJ1bmNhdGVgIHwgMyDigJQgYGxpYi9ldmVudHMudHM6NjIxYCwgYGxpYi9mb3JtYXQudHM6ODRgLCBgbGliL2RlZXBsaW5rL3VybC50czo5NGAgfCBgbGliL2Zvcm1hdC50c2AgfAp8IGBleHBhbmRIb21lYCB8IDIg4oCUIGBsaWIvc2VjcmV0cy9pbmRleC50czoxNjcwYCwgYGxpYi9icm93c2VyL3NlcnZpY2UudHM6MjYwYCB8IGBsaWIvcGF0aHMudHNgIHwKfCBgfi8ubG9jYWwvYmluL3tkcm9pZCxtdXNlfWAgbGl0ZXJhbCB8IDMg4oCUIGB2ZXJzaW9ucy50czoxMDg0YC9gOjEwOTVgLCBgc2hpbXMudHM6Njk4YC9gOjcxNGAsIGBzaGltcy50czoxMjMwYC9gOjEyNDFgIHwgdGhlIGBBR0VOVFNgIHJlZ2lzdHJ5IHwKCmBjb21wYXJlVmVyc2lvbnNgIGlzIHdvcnRoIHNpbmdsaW5nIG91dCwgYmVjYXVzZSB0aGUgY29kZSBkb2N1bWVudHMgKndoeSogdGhlIGR1cGxpY2F0ZQpleGlzdHM6CgpgYGAKY2FwYWJpbGl0aWVzLnRzOjIxLTIzCiAqIENvbXBhcmUgc2VtdmVyLWxpa2UgdmVyc2lvbnMgKCIwLjExNi4wIiB2cyAiMC4xMTUuOSIpLiBMb2NhbCBjb3B5IHRvIGF2b2lkCiAqIGltcG9ydGluZyB2ZXJzaW9ucy50cyAod2hpY2ggaW1wb3J0cyBhZ2VudHMudHMsIHdoaWNoIGltcG9ydHMgdGhpcyBmaWxlKS4KYGBgCgpUaGUgY3ljbGUgaXMgYWxyZWFkeSBjb3N0aW5nIGR1cGxpY2F0ZWQgY29kZS4gVGhlIGR1cGxpY2F0ZSBhbHNvIGRyb3BzIHRoZSBjYW5vbmljYWwKdmVyc2lvbidzIE9wZW5DbGF3IGAtTmAgcmVidWlsZC1zdWZmaXggdGllYnJlYWsg4oCUICoqdmVyaWZpZWQgbGF0ZW50LCBub3QgbGl2ZSoqOiBubwpgc2luY2VgL2B1bnRpbGAgZ2F0ZSBpbiBgQUdFTlRTYCBjdXJyZW50bHkgdXNlcyBhIGAtTmAgdmVyc2lvbiBzdHJpbmcsIHNvIG5vIGNhcGFiaWxpdHkKZ2F0ZSBtaXNmaXJlcyB0b2RheS4gVGhlIHN0YXRlZCByZWFzb24gaXMgc3RhbGUgcmVnYXJkbGVzczogdGhlIGNhbm9uaWNhbApgY29tcGFyZVZlcnNpb25zYCBsaXZlcyBpbiBgYWdlbnQtc3BlYy9wcmltaXRpdmVzLnRzYCwgYSBsZWFmIG1vZHVsZSwgbm90IGB2ZXJzaW9ucy50c2AuCgoqKk1vdmUgNSDigJQgY3V0IHRoZSAxMCB1cHdhcmQgaW1wb3J0cy4qKiBUaGV5IGFyZSBub3QgZXF1YWwsIGFuZCBJIG1lYXN1cmVkIHdoaWNoIG9uZXMKYWN0dWFsbHkgaG9sZCB0aGUgY3ljbGUgdG9nZXRoZXI6Cgp8IEVkZ2UgfCBDb3N0IHRvIGN1dCB8IEVmZmVjdCBvbiB0aGUgMzA4LWZpbGUgU0NDIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IGBsaWIvZHJpZnQtc3luYy50c2AsIGBsaWIvcmVmcmVzaC50c2AsIGBsaWIvc2VjcmV0cy9saXN0LWZpbHRlci50c2Ag4oaSIGBjb21tYW5kcy91dGlscy50c2AgfCB0cml2aWFsIOKAlCB0aGUgMyBzeW1ib2xzIGFyZSBnZW5lcmljIHwgKipub25lKiog4oCUIGxhbmRlZCBhbHJlYWR5LCBjeWNsZSBzdGF5ZWQgMzA4IHwKfCBgbGliL2NvbXB1dGVyL2Rpc3BhdGNoLnRzYCDihpIgYGNvbW1hbmRzL2NvbXB1dGVyLWFjdGlvbnMudHNgIHwgbW92ZSBgcmVzb2x2ZVRhcmdldFBpZERlY2lzaW9uYCwgYGVtaXRDb21wdXRlckFjdGlvbmAgaW50byBgbGliL2NvbXB1dGVyL2AgfCB0aGVzZSA0IHRvZ2V0aGVyOiAqKjMwOCDihpIgMjc5KiogfAp8IGBsaWIvbWVudWJhci9zbmFwc2hvdC50c2Ag4oaSIGBjb21tYW5kcy9yb3V0aW5lcy50c2AgfCBtb3ZlIGBidWlsZFJvdXRpbmVMaXN0SnNvbmAgaW50byBgbGliL3JvdXRpbmVzLnRzYCB8IOKAnSB8CnwgYGxpYi9zbWFydC1sYXVuY2gudHNgIOKGkiBgY29tbWFuZHMvc3NoLnRzYCB8IG1vdmUgYGNvbGxlY3RGbGVldEhhcm5lc3Nlc2AgaW50byBgbGliL2RldmljZXMvYCB8IOKAnSB8CnwgYGxpYi9zbmFwc2hvdC50c2Ag4oaSIGBjb21tYW5kcy92aWV3LnRzYCB8IG1vdmUgdGhlIGBWaWV3SnNvbkFnZW50YCB0eXBlIGludG8gYGxpYi90eXBlcy50c2AgfCDigJ0gfAp8IGBsaWIveyxtZW51YmFyLyxmYWN0b3J5L31zbmFwc2hvdC50c2Ag4oaSIGBjb21tYW5kcy9zZXNzaW9ucy50c2AgfCBnYXRlZCBvbiBNb3ZlIDEgfCBub25lIGFsb25lOyBNb3ZlIDEga2lsbHMgdGhlIDExLWZpbGUgY3ljbGUgfAoKQ29ycmVjdGVkIGZyb20gYW4gZWFybGllciBkcmFmdCBvZiB0aGlzIHBsYW4sIHdoaWNoIGNyZWRpdGVkIHRoZSBgY29tbWFuZHMvdXRpbHMudHNgCmN1dHMgd2l0aCB0aGUgMzA4IOKGkiAyNzkgZHJvcC4gVGhleSBhcmUgd29ydGggZG9pbmcg4oCUIHRoZXkgcmVtb3ZlIHRoZSBsYXllcmluZwppbnZlcnNpb24g4oCUIGJ1dCB0aGUgZHJvcCBjb21lcyBmcm9tIHRoZSBvdGhlciBmb3VyLCBlYWNoIG9mIHdoaWNoIG5lZWRzIGEgc21hbGwKZXh0cmFjdGlvbiBvZiBpdHMgb3duLgoKVGhlIHRocmVlIHN5bWJvbHMgYGxpYi9gIG5lZWRlZCBmcm9tIGBjb21tYW5kcy91dGlscy50c2AgKGBpc0ludGVyYWN0aXZlVGVybWluYWxgLApgaXNQcm9tcHRDYW5jZWxsZWRgLCBgcGFyc2VDb21tYVNlcGFyYXRlZExpc3RgKSBhcmUgZ2VuZXJpYyBhbmQgbm93IGxpdmUgaW4KYGxpYi9mb3JtYXQudHNgLCByZS1leHBvcnRlZCBmcm9tIGBjb21tYW5kcy91dGlscy50c2AgZm9yIGl0cyB+NTAgY29tbWFuZC1sYXllcgpjYWxsZXJzIOKAlCB0aGUgcGF0dGVybiB0aGF0IGZpbGUgYWxyZWFkeSB1c2VkIGZvciBgVmVyc2lvbk5vdEluc3RhbGxlZEVycm9yYC4KCiMjIyBNb3ZlIDYg4oCUIHJlb3JnYW5pemUgdGhlIGZsYXQgYGxpYi9gIHJvb3QKCjE5MyBmaWxlcywgbm8gc3ViZGlyZWN0b3JpZXMsIDg2LDQ5NiBsaW5lcy4gVGhlIGZpbGVuYW1lcyBhbHJlYWR5IG5hbWUgdGhlIGRpcmVjdG9yaWVzOgoKfCBMYXRlbnQgZGlyZWN0b3J5IHwgRmlsZXMgdG9kYXkgfAp8IC0tLSB8IC0tLSB8CnwgYGxpYi9yb3V0aW5lcy9gIHwgYHJvdXRpbmVzYCwgYHJvdXRpbmUtYWN0aXZhdGlvbmAsIGByb3V0aW5lLWNvbnRleHRgLCBgcm91dGluZS1ub3RpZnlgLCBgcm91dGluZS1ub3RpZnktb3duZXJgLCBgcm91dGluZS1wcm9jZXNzLWNsZWFudXBgLCBgcm91dGluZS1yZWFkaW5lc3NgLCBgcm91dGluZXMtZm9ybWF0YCwgYHJvdXRpbmVzLXBsYWNlbWVudGAsIGByb3V0aW5lcy1wcm9qZWN0YCwgYHNjaGVkdWxlcmAgfAp8IGBsaWIvcHJvamVjdHMvYCB8IGBwcm9qZWN0c2AsIGBwcm9qZWN0LWRvY3RvcmAsIGBwcm9qZWN0LWZvY3VzYCwgYHByb2plY3QtaW1wb3J0YCwgYHByb2plY3Qta2V5YCwgYHByb2plY3QtbGF1bmNoYCwgYHByb2plY3QtcHJvYmVgLCBgcHJvamVjdC1yZXNvdXJjZXNgLCBgcHJvamVjdC1yb290YCwgYHByb2plY3Qtc2NoZWR1bGVgLCBgcHJvamVjdC1zdGF0dXNgIHwKfCBgbGliL2FjY291bnRzL2AgfCBgYWNjb3VudC1jYXRhbG9nYCwgYGFjY291bnQtcHJvdmlkZXItcmVnaXN0cnlgLCBgYWNjb3VudC1yZWdpc3RyeWAsIGBhY2NvdW50LXNjaGVtYWAsIGBhY2NvdW50LXN0YXRlLXNlcnZpY2VgLCBgY2xhdWRlLWFjY291bnQtdG9rZW5gLCBgYXV0aC1oZWFsdGhgLCBgcm90YXRlYCwgYHNpZ25pbi1iYWRnZWAgfAp8IGBsaWIvZmVlZC9gIHwgYGZlZWRgLCBgZmVlZC1icm9hZGNhc3RgLCBgZmVlZC1vdXRjb21lYCwgYGZlZWQtcG9saWN5YCwgYGZlZWQtcG9zdGAsIGBmZWVkLXJhbmtpbmdgIHwKfCBgbGliL3VzYWdlL2AgfCBgdXNhZ2VgLCBgdXNhZ2UtYmFja29mZmAsIGB1c2FnZS1mbGVldGAsIGB1c2FnZS1yZWZyZXNoYCwgYGJ5b2stdXNhZ2VgIHwKfCBgbGliL2V2ZW50cy9gIHwgYGV2ZW50c2AsIGBldmVudHMtaW5nZXN0YCwgYGV2ZW50LWZhbWlsaWVzYCwgYGV2ZW50LXByb3ZlbmFuY2VgLCBgZXZlbnQtc3RyZWFtYCB8CgpNeSBoZXNpdGF0aW9uIGlzIG5vdCB0ZWNobmljYWwuIFRoZXJlIGFyZSAxMCBvcGVuIFBScyBvbiB0aGlzIHJlcG8gYW5kIGEgNjAtZmlsZSByZW5hbWUKY29uZmxpY3RzIHdpdGggYWxsIG9mIHRoZW0uIEl0IGlzIGFsc28gdGhlIG9ubHkgbW92ZSB0aGF0IG1ha2VzIHRoZSAyNzktZmlsZSBibG9iCnRyYWN0YWJsZSwgYmVjYXVzZSB0aGUgYmxvYiBoYXMgbm8gc2luZ2xlIGJhZCBlZGdlIOKAlCBJIG1lYXN1cmVkIHRoYXQgY3V0dGluZyB0aGUgY2VudHJhbApgYWdlbnRzLnRzIOKGkiB2ZXJzaW9ucy50c2Aga25vdCBsZWF2ZXMgaXQgYXQgMzA4LiBCcmVha2luZyBpdCBuZWVkcyBhIGxheWVyIHJ1bGUKKGBsaWIvY29yZS9gIG1heSBub3QgaW1wb3J0IGBsaWIvZmVhdHVyZXMvYCkgdGhhdCBhIGZsYXQgZGlyZWN0b3J5IGNhbm5vdCBleHByZXNzIGFuZCBhCmxpbnQgcnVsZSBjYW5ub3QgZW5mb3JjZS4KCiMjIyBTZXF1ZW5jZQoKYGBgCk1vdmUgNCAodXRpbGl0eSBjb2xsYXBzZSkg4pSA4pSA4pSQCk1vdmUgNSAodXB3YXJkIGltcG9ydHMpICAg4pSA4pSA4pSYIGxhbmQgbm93LCBubyBkZXNpZ24gY2FsbCBuZWVkZWQKCk1vdmUgMSAoc2Vzc2lvbnMgZG9tYWluKSAg4pSA4pSA4pSQCk1vdmUgMiAocmVnaXN0cmllcykgICAgICAg4pSA4pSA4pS84pSA4pSAIGluZGVwZW5kZW50IG9mIGVhY2ggb3RoZXIsIHBhcmFsbGVsLXNhZmUKTW92ZSAzIChNQ1AgbWVyZ2UpICAgICAgICDilIDilIDilJggKGZvbGRzIGludG8gTW92ZSAyKQogICAgICAgICAgICAgICAgICAgICAgICAgICAgIOKUlOKUgOKUgD4gTW92ZSA2ICh0cmVlIHJlb3JnKSDigJQgbGFzdCwgYWZ0ZXIgdGhlIFBSIHF1ZXVlIGRyYWlucwpgYGAKCkN5Y2xlcyBmaXJzdCwgdHJlZSBtb3ZlcyBsYXN0LgoKIyMgUHVibGljIEludGVyZmFjZQoKRXZlcnkgbW92ZSBpcyBiZWhhdmlvci1wcmVzZXJ2aW5nLiBUaGUgQ0xJIHN1cmZhY2Ug4oCUIGNvbW1hbmRzLCBmbGFncywgb3V0cHV0IHNoYXBlcyDigJQgaXMKdW5jaGFuZ2VkLCB3aXRoIHR3byBkZWxpYmVyYXRlIGV4Y2VwdGlvbnMsIGJvdGggb2Ygd2hpY2ggbWFrZSB0aGUgc3VyZmFjZSBtYXRjaCB3aGF0IGl0CmFscmVhZHkgY2xhaW1zOgoKfCBTdXJmYWNlIHwgVG9kYXkgfCBBZnRlciB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCBgYWdlbnRzIHBlcm1pc3Npb25zIGxpc3QgPGFnZW50PmAgfCByZXR1cm5zIG5vdGhpbmcgZm9yIGN1cnNvciwgYW50aWdyYXZpdHksIGdyb2ssIGdvb3NlLCBraW1pLCBkcm9pZCwgY29waWxvdCwga2lybywgb3BlbmNsYXcsIGhlcm1lcyB8IHJldHVybnMgdGhlIHBlcm1pc3Npb25zIHRoZSB3cml0ZSBwYXRoIGFscmVhZHkgd3JvdGUgfAp8IE1DUCBzeW5jIGZvciBhbnRpZ3Jhdml0eSB8IHJlc29sdmVzIGEgY29uZmlnIHBhdGgsIHdyaXRlcyBub3RoaW5nLCByZXBvcnRzIHN1Y2Nlc3MgfCB3cml0ZXMgdGhlIGNvbmZpZywgb3IgZmFpbHMgbG91ZCB8CnwgYGFnZW50cyBzZXNzaW9ucyByZXN1bWVgIGZvciBjdXJzb3IgLyBncm9rIC8ga2ltaSAvIGRyb2lkIHwgcmVmdXNlcyAoYGJ1aWxkUmVzdW1lQ29tbWFuZGAgcmV0dXJucyBgbnVsbGApIHwgZm9sbG93cyBgQUdFTlRfQ09NTUFORFNgLCB0aGUgZG9jdW1lbnRlZCBzaW5nbGUgc291cmNlIG9mIHRydXRoIHwKfCBldmVyeXRoaW5nIGVsc2UgfCDigJQgfCBieXRlLWlkZW50aWNhbCB8CgpObyBleHBvcnRlZCBzeW1ib2wgbGVhdmVzIHRoZSBwYWNrYWdlIHN1cmZhY2U6IGBjb21tYW5kcy9zZXNzaW9ucy50c2AgaXMgbm90IGEgcHVibGljCmVudHJ5IHBvaW50LCBhbmQgdGhlIG1vdmVkIGZ1bmN0aW9ucyBrZWVwIHRoZWlyIG5hbWVzIGF0IHRoZWlyIG5ldyBwYXRocy4KCiMjIFZhbGlkYXRpb24KCkVhY2ggbW92ZSBpcyBwcm92ZW4gYmVoYXZpb3ItcHJlc2VydmluZyBieSB0aGUgdGVzdHMgdGhhdCBhbHJlYWR5IGV4aXN0LCBub3QgYnkgbmV3IG9uZXM6Cgp8IE1vdmUgfCBQcm9vZiB8CnwgLS0tIHwgLS0tIHwKfCAxIOKAlCBzZXNzaW9ucyBkb21haW4gfCAxMDAgdGVzdHMgaW4gYGxpYi9zZXNzaW9uL2AgKyAxNyBgY29tbWFuZHMvc2Vzc2lvbnMqLnRlc3QudHNgIG1vdmUgd2l0aCB0aGVpciBzdWJqZWN0cyBhbmQgbXVzdCBzdGF5IGdyZWVuIHVubW9kaWZpZWQuIEEgdGVzdCB0aGF0IG5lZWRzIGVkaXRpbmcgbWVhbnMgdGhlIG1vdmUgd2FzIG5vdCBhIG1vdmUuIHwKfCAyIOKAlCByZWdpc3RyaWVzIHwgcGVyLWNhcGFiaWxpdHkgY29tcGxldGVuZXNzIHRlc3QgcGlubmluZyB0aGUgcmVnaXN0cnkgYWdhaW5zdCBgY2FwYWJsZUFnZW50cyhjYXApYCDigJQgdGhlIG1lY2hhbmlzbSB0aGF0IHN0b3BzIHRoZSBkcmlmdCByZWN1cnJpbmcuIFBsdXMgYSByZWdyZXNzaW9uIHRlc3QgcGVyIGxpdmUgZGVmZWN0LiB8CnwgNCDigJQgdXRpbGl0eSBjb2xsYXBzZSB8IGBjb21wYXJlVmVyc2lvbnNgIGdhaW5zIGNvdmVyYWdlIGZvciB0aGUgT3BlbkNsYXcgYC1OYCB0aWVicmVhayB0aGUgZHVwbGljYXRlcyBkcm9wIHwKfCA1IOKAlCB1cHdhcmQgaW1wb3J0cyB8IHRoZSBpbXBvcnQtZ3JhcGggc2NyaXB0IHJlLXJ1bnMgYW5kIG11c3QgcmVwb3J0IFNDQ3MgYDI3OSwgNCwgMmAgfAp8IGFsbCB8IGB0c2MgLS1ub0VtaXRgIChiYXNlbGluZTogZXhpdCAwKSBhbmQgYGJ1biBydW4gdGVzdDpyZW1vdGVgIG9uIGEgY3JhYmJveCB8CgpUaGUgZ3JhcGggc2NyaXB0IGl0c2VsZiBpcyB0aGUgYWNjZXB0YW5jZSBjaGVjazogaXQgaXMgcmUtcnVuIGFmdGVyIGVhY2ggbW92ZSBhbmQgaXRzCmN5Y2xlIGNvdW50cyBtdXN0IG1hdGNoIHRoZSBudW1iZXJzIHByZWRpY3RlZCBpbiB0aGlzIHBsYW4uCgojIyBSaXNrcwoKfCBSaXNrIHwgU2V2ZXJpdHkgfCBNaXRpZ2F0aW9uIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IE1vdmUgNiBjb25mbGljdHMgd2l0aCBhbGwgMTAgb3BlbiBQUnMgfCBoaWdoIHwgc2VxdWVuY2UgaXQgbGFzdCwgYWZ0ZXIgdGhlIHF1ZXVlIGRyYWluczsgaXQgaXMgdGhlIG9uZSBtb3ZlIGdhdGVkIG9uIHRpbWluZyByYXRoZXIgdGhhbiBkZXNpZ24gfAp8IEEgInB1cmUgbW92ZSIgc2lsZW50bHkgY2hhbmdlcyBiZWhhdmlvciB2aWEgaW1wb3J0LW9yZGVyIHNpZGUgZWZmZWN0cyB8IG1lZGl1bSB8IG1vdmUgZmlsZXMgd2hvbGUsIG5ldmVyIHJldHlwZSB0aGVtOyB0aGUgMTE3IGV4aXN0aW5nIHRlc3RzIGFyZSB0aGUgbmV0OyByZXZpZXcgdGhlIGRpZmYgYXMgYGdpdCBsb2cgLS1mb2xsb3dgIHJlbmFtZXMgfAp8IE1vdmUgMiBmaXhpbmcgYSBzaWxlbnQgbm8tb3Agc3VyZmFjZXMgZXJyb3JzIHVzZXJzIG5ldmVyIHNhdyB8IG1lZGl1bSB8IGludGVuZGVkIOKAlCBidXQgaXQgbWVhbnMgYW50aWdyYXZpdHkgTUNQIHN5bmMgc3RhcnRzIHdyaXRpbmcgd2hlcmUgaXQgcHJldmlvdXNseSBkaWQgbm90aGluZzsgY2FsbCBpdCBvdXQgaW4gdGhlIENIQU5HRUxPRyByYXRoZXIgdGhhbiBzaGlwcGluZyBpdCBhcyBhIHF1aWV0IGZpeCB8CnwgVGhlIHJlc3VtZS1yZWdpc3RyeSBmaXggZW5hYmxlcyByZXN1bWUgZm9yIDQgaGFybmVzc2VzIHRoYXQgd2VyZSByZWZ1c2VkIHwgbWVkaXVtIHwgZ2F0ZSBvbiBgbmF0aXZlUmVzdW1lKGFnZW50LCB2ZXJzaW9uKWAgc28gdGhlIHZlcnNpb24gZmxvb3JzIGluIGBBR0VOVF9DT01NQU5EU2AgYXBwbHk7IHRlc3QgZWFjaCBvZiB0aGUgZm91ciB8CnwgU2NhbiByYW4gYWdhaW5zdCBgb3JpZ2luL21haW5gIGF0IHRoZSB0aW1lIG9mIHRoZSBzY2FuOyB0aGUgcmVwbyBtb3ZlcyBmYXN0IHwgbG93IHwgcmUtcnVuIHRoZSBncmFwaCBzY3JpcHQgYXQgdGhlIGhlYWQgb2YgZWFjaCBtb3ZlIFBSIGFuZCBkaWZmIHRoZSBudW1iZXJzIHwKCjxhc2lkZSBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+PHN0cm9uZz5Mb2FkLWJlYXJpbmcgdGFrZWF3YXk6PC9zdHJvbmc+IHRoZSBzZXNzaW9ucyA8ZW0+bGlicmFyeTwvZW0+IGlzIHdlbGwgYnVpbHQg4oCUIDU3IGZpbGVzLCB6ZXJvIGludGVybmFsIGN5Y2xlcy4gVGhlIHByb2JsZW0gaXMgdGhhdCBpdHMgZG9tYWluIGxheWVyIG5ldmVyIG1vdmVkIGluLCBhbmQgc2l4IHBlci1oYXJuZXNzIGNhcGFiaWxpdGllcyBhcmUgZGlzcGF0Y2hlZCBieSBoYW5kLXdyaXR0ZW4gbmFtZSBjaGFpbnMgdGhhdCBoYXZlIGFscmVhZHkgZHJpZnRlZCBpbnRvIHR3byBsaXZlIGRlZmVjdHMuIE1vdmUgMSBhbmQgTW92ZSAyIGFyZSB0aGUgcGxhbjsgdGhlIHJlc3QgaXMgY2xlYW51cC48L2FzaWRlPgoKIyMgRG9jdW1lbnRhdGlvbiBkcmlmdCB0aGUgc2NhbiB0dXJuZWQgdXAKClRoZSBzY2FuIHJlYWQgYGFwcHMvY2xpL2RvY3MvYCBhcyBjbGFpbXMgYW5kIGNoZWNrZWQgZWFjaCBhZ2FpbnN0IHRoZSBjb2RlLiBGb3VyIGFyZQp3cm9uZyBhYm91dCBiZWhhdmlvciwgbm90IGp1c3Qgc3RhbGUgcG9pbnRlcnMg4oCUIGFsbCB2ZXJpZmllZCBkaXJlY3RseToKCnwgQ2xhaW0gfCBEb2MgfCBSZWFsaXR5IHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8ICJgU0VTU0lPTl9BR0VOVFNgIOKAlCAqKmV4YWN0bHkgdGhlc2UgMTIqKiIgfCBgc3BlY2lmaWNhdGlvbnMubWQ6MTYzYCwgcmVzdGF0ZWQgaW4gYGFyY2hpdGVjdHVyZS5tZDoxNTVgIHwgMTMgdG9kYXkuIGBsaWIvc2Vzc2lvbi90eXBlcy50czoxN2AgaW5jbHVkZXMgYG11c2VgLiBBIHJlYWRlciBjb25jbHVkZXMgTXVzZSBzZXNzaW9ucyBhcmVuJ3QgZGlzY292ZXJhYmxlIOKAlCBmYWxzZS4gfAp8IGBhZ2VudHMgc2Vzc2lvbnMgc3luY2AgZXhpc3RzLCBhbmQgYFNFUy1JRi0yYCByZXF1aXJlcyBgc3luYyAtLWpzb25gIHRvIGVtaXQgYSBkb2N1bWVudGVkIHNoYXBlIHwgYHNwZWNpZmljYXRpb25zLm1kOjgxN2AsIGA6ODM0YCB8IE5vIGBzeW5jYCBpcyByZWdpc3RlcmVkIHVuZGVyIGBzZXNzaW9uc2Ag4oCUIHZlcmlmaWVkLCB6ZXJvIG1hdGNoZXMuIGBzeW5jYCBpcyBhbiB1bnJlbGF0ZWQgdG9wLWxldmVsIGNvbW1hbmQgdGhlIHNwZWMncyBvd24gY292ZXJhZ2UgaW52ZW50b3J5IGxpc3RzIGFzICpVbnNwZWNpZmllZCouIFRoZSBzcGVjIGNvbnRyYWRpY3RzIGl0c2VsZi4gfAp8IGBAYWdlbnRzL3Nlc3Npb24tdHJhY2tlcmAgd3JpdGVzIHRoZSBhdXRob3JpdGF0aXZlIGxpdmUtaWRlbnRpdHkgcmVjb3JkIGF0IGB0ZXJtaW5hbHMvc2Vzc2lvbnMvPHBpZD4uanNvbmAgfCBgYXJjaGl0ZWN0dXJlLm1kOjEwNy0xMjNgLCByb290IGBDTEFVREUubWQ6MzNgLCBgcGFja2FnZXMvc2Vzc2lvbi10cmFja2VyL0FHRU5UUy5tZGAgfCBQcm9kdWN0aW9uIHJlYWRzIGB+Ly5hZ2VudHMvLmNhY2hlL3N0YXRlL3Nlc3Npb25zLzxwaWQ+Lmpzb25gIChgbGliL3Nlc3Npb24vaG9vay1zZXNzaW9ucy50czoxMmAsIGA6NTlgKS4gVGhyZWUgaW5kZXBlbmRlbnQgaW4tY29kZSBjb21tZW50cyBzdGF0ZSB0aGUgZG9jdW1lbnRlZCBwYWNrYWdlIGlzICoqbm90IGRlcGxveWVkIG9uIHRoZSBmbGVldCBhbmQgaXRzIGRpcmVjdG9yeSBzdGF5cyBlbXB0eSoqLiBUaGUgcmVhbCBwYXRoIGFwcGVhcnMgaW4gbm9uZSBvZiB0aGUgZG9jcy4gfAp8IGBhdHRhY2hgIC8gYGZvY3VzYCAvIGBnb2AgLyBgcmVjb25uZWN0YCBhcmUgZmlyc3QtY2xhc3Mgc2Vzc2lvbnMgdmVyYnMgfCBgc3BlY2lmaWNhdGlvbnMubWQ6ODE3YCB8IGA2NTViMjI1MTJgIHJldGlyZWQgdGhlbSBiZWhpbmQgYHJlc3VtZWA7IGFsbCBmb3VyIGFyZSBoaWRkZW4gYW5kIHRocmVlIHByaW50IGRlcHJlY2F0aW9uIHdhcm5pbmdzLiBUaGF0IGNvbW1pdCB1cGRhdGVkIHRoZSBSRUFETUUsIGBBR0VOVFMubWRgLCBhbmQgdGhlIGNvbW1hbmQgaW5kZXgsIGJ1dCBuZXZlciB0b3VjaGVkIGBzcGVjaWZpY2F0aW9ucy5tZGAuIHwKClBsdXMgc3lzdGVtaWMgbG9jYXRvciByb3Q6IGV2ZXJ5IGBmaWxlOmxpbmVgIGNpdGF0aW9uIHNwb3QtY2hlY2tlZCBpbiB0aGUgU2Vzc2lvbnMKc2VjdGlvbiBwb2ludHMgMTMw4oCTMzUwIGxpbmVzIGF3YXkgZnJvbSB0aGUgc3ltYm9sIGl0IG5hbWVzIChgYnVpbGRTZXNzaW9uRGVzY3JpcHRpb25gCmNpdGVkIGF0IGA6MzQzYCwgYWN0dWFsbHkgYDo1MDRgOyBgZ2V0QWdlbnRTZXNzaW9uRGlyc2AgY2l0ZWQgYXQgYDo3NzJgLCBhY3R1YWxseQpgOjEwMzdgOyBgZGVyaXZlU2hvcnRJZGAgY2l0ZWQgYXMgbGl2aW5nIGluIGBkYi50c2AsIGFjdHVhbGx5IGBzaG9ydC1pZC50czoxN2ApLiBUaGUKZGVzY3JpYmVkIGJlaGF2aW9yIGlzIGFsbW9zdCBhbHdheXMgc3RpbGwgcmlnaHQg4oCUIG9ubHkgdGhlIHBvaW50ZXJzIGFyZSB3cm9uZywgd2hpY2gKYXJndWVzIGZvciBhIG1lY2hhbmljYWwgcmUtYXVkaXQgcmF0aGVyIHRoYW4gYSBtYW51YWwgb25lLgoKVGhlIGZpcnN0IHR3byBsYW5kIGluIHRoZSByZXZlcnNpYmxlIHRpZXIuIFRoZSBgc2Vzc2lvbi10cmFja2VyYCBvbmUgaXMgYSByZWFsCmFyY2hpdGVjdHVyYWwgcXVlc3Rpb24g4oCUIHRoZSBkb2NzIGRlc2NyaWJlIGEgY29tcG9uZW50IHRoYXQgaXMgbm90IHJ1bm5pbmcg4oCUIGFuZCBnZXRzIGEKdGlja2V0IHJhdGhlciB0aGFuIGEgZG9jIHBhdGNoLgoKIyMgVG8tZG8KCi0gW3hdIEJ1aWxkIHRoZSBpbXBvcnQgZ3JhcGgsIGN5Y2xlIGNlbnN1cywgYW5kIHVwd2FyZC1pbXBvcnQgbGlzdCBmb3IgYGFwcHMvY2xpL3NyY2AKLSBbeF0gTWVhc3VyZSBhZ2VudCB0cmFmZmljIGFuZCBjb21taXQgY2h1cm4gb3ZlciA5MCBkYXlzCi0gW3hdIENlbnN1cyB0aGUgc2Vzc2lvbnMgc3VyZmFjZSwgdGhlIGNvcmUtbW9kdWxlIHJlc3BvbnNpYmlsaXRpZXMsIGFuZCB0aGUgcGVyLWhhcm5lc3MgY2hhaW5zCi0gW3hdIFZlcmlmeSB0aGUgdHdvIGxpdmUgZGVmZWN0cyBhZ2FpbnN0IHRoZSBjb2RlIHJhdGhlciB0aGFuIHRha2luZyB0aGUgc2NhbidzIHdvcmQKLSBbeF0gQ29uZmlybSB0aGUgYmFzZWxpbmUgdHlwZWNoZWNrIGlzIGdyZWVuIGJlZm9yZSB0b3VjaGluZyBhbnl0aGluZwotIFsgXSAqKlBpY2sgb24gTW92ZXMgMSwgMiBhbmQgNioqIOKGkCB5b3UKLSBbIF0gTGFuZCBNb3ZlcyA0ICsgNSAocmV2ZXJzaWJsZSB0aWVyKSBhcyBvbmUgYmVoYXZpb3ItcHJlc2VydmluZyBQUgotIFsgXSBGaWxlIHRpY2tldHMgZm9yIHRoZSB0d28gbGl2ZSBkZWZlY3RzIGZvdW5kIGluIMKnNi4xCi0gWyBdIExhbmQgTW92ZSAxIOKAlCBzZXNzaW9ucyBkb21haW4gZXh0cmFjdGlvbgotIFsgXSBMYW5kIE1vdmUgMiDigJQgcGVyLWhhcm5lc3MgcmVnaXN0cmllcywgb25lIGNhcGFiaWxpdHkgcGVyIFBSCi0gWyBdIExhbmQgTW92ZSA2IOKAlCBgbGliL2AgdHJlZSByZW9yZ2FuaXphdGlvbiwgaWYgYXBwcm92ZWQKLSBbIF0gRml4IHRoZSB2ZXJpZmllZCBkb2MgZHJpZnQgaW4gwqcxMCAoYFNFU1NJT05fQUdFTlRTYCBjb3VudCwgcGhhbnRvbSBgc2Vzc2lvbnMgc3luY2ApCi0gWyBdIEZpbGUgYSB0aWNrZXQgZm9yIHRoZSBgc2Vzc2lvbi10cmFja2VyYCAvIGBzdGF0ZS9zZXNzaW9uc2AgZG9jdW1lbnRhdGlvbiBnYXAKCiMjIFRyYWNraW5nCgp8IEl0ZW0gfCBXaGVyZSB8IFN0YXRlIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IE1vdmVzIDQgKyA1IChyZXZlcnNpYmxlIHRpZXIpIOKAlCBjYW5vbmljYWwgYGZvcm1hdEJ5dGVzYCAvIGBjb21wYXJlVmVyc2lvbnNgLCAzIHVwd2FyZCBpbXBvcnRzIGN1dCwgZG9jIGRyaWZ0IGZpeGVkIHwgW1BSICMyNjgyXShodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnaS1jbGkvcHVsbC8yNjgyKSB8IG9wZW4gfAp8IGBhZ2VudHMgcGVybWlzc2lvbnMgbGlzdGAgYmxpbmQgdG8gMTAgb2YgMTMgaGFybmVzc2VzICjCpzYuMWIpIHwgW1JVU0gtMjY3Nl0oaHR0cHM6Ly9saW5lYXIuYXBwL3J1c2gvaXNzdWUvUlVTSC0yNjc2KSB8IFRvZG8gfAp8IEFudGlncmF2aXR5IE1DUCBzeW5jIHdyaXRlcyBub3RoaW5nLCByZXBvcnRzIHN1Y2Nlc3MgKMKnNi4xYSkgfCBbUlVTSC0yNjc3XShodHRwczovL2xpbmVhci5hcHAvcnVzaC9pc3N1ZS9SVVNILTI2NzcpIHwgVG9kbyB8CnwgTW92ZSAxIOKAlCBzZXNzaW9ucyBkb21haW4gZXh0cmFjdGlvbiB8IHRpY2tldCBvbiBwaWNrIHwgYXdhaXRpbmcgc2NvcGUgZGVjaXNpb24gfAp8IE1vdmUgMiDigJQgcmVtYWluaW5nIGZvdXIgcGVyLWhhcm5lc3MgcmVnaXN0cmllcyB8IHRpY2tldCBvbiBwaWNrIHwgYXdhaXRpbmcgc2NvcGUgZGVjaXNpb24gfAp8IE1vdmUgNiDigJQgYGxpYi9gIHRyZWUgcmVvcmdhbml6YXRpb24gfCBkZWZlcnJlZCB8IHVudGlsIHRoZSBvcGVuLVBSIHF1ZXVlIGRyYWlucyB8CgpUaGUgc2NhbidzIG93biB0b29saW5nIGxpdmVzIGF0IGAuYWdlbnRzL2FydGlmYWN0cy8yMDI2LTA4LTE0L2AgYWxvbmdzaWRlIHRoaXMgcGxhbjsgdGhlCmltcG9ydC1ncmFwaCBhbmQgY3ljbGUgc2NyaXB0cyBhcmUgcmUtcnVubmFibGUgYW5kIGFyZSB0aGUgYWNjZXB0YW5jZSBjaGVjayBmb3IgZWFjaCBtb3ZlLgo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

@@ -475,9 +475,25 @@ const ACTIVE_MTIME_WINDOW_MS = 2 * 60_000;
 /**
  * Bound on the tmux `list-panes` call in {@link listTmuxAgentSessions}. A wedged
  * tmux server would otherwise hang the whole `--active` scan (the other sources
- * can't run past it); on timeout the tmux source degrades to empty.
+ * can't run past it); on timeout the tmux source throws {@link TmuxDiscoveryDegradedError}.
  */
 const TMUX_LIST_PANES_TIMEOUT_MS = 5_000;
+
+/**
+ * Thrown by {@link listTmuxAgentSessions} when the socket exists (a server has
+ * run) but tmux could not be asked for its truth — spawn failure, timeout, or a
+ * nonzero exit. Distinct from a missing socket, which means no server ever ran
+ * and is genuinely empty, not degraded. `getActiveSessions` still swallows this
+ * to `[]` so its return type stays a plain session array, but
+ * {@link describeActiveDiscoveryHealth} re-probes and surfaces it so the empty
+ * case a real fleet sweep found (RUSH-2507) reads differently from a clean one.
+ */
+export class TmuxDiscoveryDegradedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TmuxDiscoveryDegradedError';
+  }
+}
 
 /**
  * A live process can only borrow an indexed session file if that transcript
@@ -1917,6 +1933,9 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
   const { readSessionMeta } = await import('../tmux/session.js');
   const { runTmux } = await import('../tmux/binary.js');
   const socket = getDefaultSocketPath();
+  // No server has ever run on this socket — genuinely nothing to report, not
+  // a degraded read. Distinct from the throws below, which mean tmux truth
+  // exists but could not be read (RUSH-2507).
   if (!fs.existsSync(socket)) return [];
 
   let res;
@@ -1926,14 +1945,22 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
       args: ['list-panes', '-a', '-F', ['#{pane_id}', '#{session_name}', '#{pane_pid}', '#{pane_dead}', '#{pane_current_path}'].join(TMUX_FIELD_SEP)],
       throwOnError: false,
       // A wedged tmux server must not hang the whole active-session scan. The
-      // catch below turns a timeout into an empty tmux source (the other sources
-      // still report) rather than a frozen `agents sessions --active`.
+      // catch below turns a timeout into a DEGRADED-tmux-source signal (the
+      // other sources still report) rather than a frozen `agents sessions
+      // --active` — and, crucially, no longer collapses into the same silent
+      // `[]` a genuinely-idle socket returns (RUSH-2507).
       timeoutMs: TMUX_LIST_PANES_TIMEOUT_MS,
     });
-  } catch {
-    return [];
+  } catch (err) {
+    throw new TmuxDiscoveryDegradedError(
+      `tmux list-panes on ${socket} did not answer: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
-  if (res.code !== 0) return [];
+  if (res.code !== 0) {
+    throw new TmuxDiscoveryDegradedError(
+      `tmux list-panes on ${socket} exited ${res.code}: ${res.stderr.trim() || res.stdout.trim()}`,
+    );
+  }
 
   // Index live launches by the pane they target, so a pane we did NOT wrap (a
   // split) resolves to its own agent. Newest launch wins a pane (pid reuse), and
@@ -2089,6 +2116,31 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
   foldExecutionMachine(merged, recordedMachineLookup(merged), machineId());
   annotateOrchestratorLabels(merged);
   return merged;
+}
+
+/** Local discovery sources probed by {@link describeActiveDiscoveryHealth}. */
+export interface ActiveDiscoveryHealth {
+  /** Sources that failed on the probe (currently only `'tmux'`). Empty = nothing degraded locally. */
+  degradedSources: string[];
+}
+
+/**
+ * Cheap post-hoc health probe for the local discovery sources. `getActiveSessions`
+ * always swallows a source failure to `[]` so its return type stays a plain
+ * session array — this re-probes the same sources and reports which ones threw,
+ * so a caller that got an empty list back can tell "genuinely nothing running"
+ * apart from "a source errored and got silently folded into empty" (RUSH-2507).
+ * Intended for the empty-result branch only, not the hot path — it repeats a
+ * `list-panes` call `getActiveSessions` already made.
+ */
+export async function describeActiveDiscoveryHealth(): Promise<ActiveDiscoveryHealth> {
+  const degradedSources: string[] = [];
+  try {
+    await listTmuxAgentSessions();
+  } catch (err) {
+    if (err instanceof TmuxDiscoveryDegradedError) degradedSources.push('tmux');
+  }
+  return { degradedSources };
 }
 
 /**

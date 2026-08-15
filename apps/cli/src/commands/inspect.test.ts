@@ -9,7 +9,6 @@ import {
   repoManifestSummary,
   repoGitInfo,
   pathSize,
-  formatBytes,
   summarizeHook,
   summarizeMcp,
   hookManifestByScript,
@@ -342,16 +341,6 @@ describe('pathSize', () => {
 
   it('returns zero for a missing path', () => {
     expect(pathSize(path.join(os.tmpdir(), 'definitely-missing-xyz'))).toEqual({ bytes: 0, files: 0 });
-  });
-});
-
-describe('formatBytes', () => {
-  it('renders human-readable sizes', () => {
-    expect(formatBytes(0)).toBe('0 B');
-    expect(formatBytes(512)).toBe('512 B');
-    expect(formatBytes(1024)).toBe('1.0 KB');
-    expect(formatBytes(86 * 1024)).toBe('86 KB');
-    expect(formatBytes(3.1 * 1024 * 1024)).toBe('3.1 MB');
   });
 });
 

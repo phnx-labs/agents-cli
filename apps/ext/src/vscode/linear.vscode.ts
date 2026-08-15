@@ -1,14 +1,14 @@
 import * as vscode from 'vscode';
-import { exec, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import { UnifiedTask, CycleInfo, linearToUnifiedTask, extractRepoNameFromLabels } from '../core/tasks';
 import type { LinearProjectLite } from '../core/linearProjects';
+import { resolveLinearBin } from '../core/linearBin';
 import { getSettings, resolveGithubOwner } from './settings.vscode';
 
 const execFileAsync = promisify(execFile);
-const execAsync = promisify(exec);
 
 const LINEAR_CONFIG = path.join(
   process.env.HOME || '',
@@ -19,14 +19,8 @@ let cachedLinearPath: string | null = null;
 
 async function findLinearCli(): Promise<string | null> {
   if (cachedLinearPath !== null) return cachedLinearPath || null;
-  try {
-    const { stdout } = await execAsync('which linear');
-    cachedLinearPath = stdout.trim();
-    return cachedLinearPath || null;
-  } catch {
-    cachedLinearPath = '';
-    return null;
-  }
+  cachedLinearPath = resolveLinearBin() ?? '';
+  return cachedLinearPath || null;
 }
 
 export async function isLinearAvailable(_context: vscode.ExtensionContext): Promise<boolean> {

@@ -15,6 +15,9 @@ export default defineConfig({
     // Hermeticity (#910): every fork gets a temp-pinned broker socket, events
     // sink, and broker-off defaults BEFORE the test file's imports run.
     setupFiles: ['./tests/setup.ts'],
+    // RUSH-2639: sweep stale agents-vitest-* temp dirs left by killed workers
+    // from past runs, once per whole suite (see tests/global-setup.ts).
+    globalSetup: ['./tests/global-setup.ts'],
     include: ['tests/**/*.test.ts', 'src/**/__tests__/**/*.test.ts', 'src/**/*.test.ts', 'scripts/**/*.test.ts'],
     testTimeout: 30000,
     // RUSH-2215 / Windows CI: full suite can finish 0 failed tests but still

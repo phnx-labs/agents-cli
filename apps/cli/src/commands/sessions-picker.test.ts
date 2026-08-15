@@ -12,7 +12,18 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
-import { buildPreview, extractTiming, formatTodoCompact, githubRepoUrlFromCwd, relativizeDir } from './sessions-picker.js';
+import {
+  buildPreview,
+  clearPreviewMemoryCacheForTest,
+  clearRemoteDigestCacheForTest,
+  extractTiming,
+  formatTodoCompact,
+  githubRepoUrlFromCwd,
+  relativizeDir,
+  sanitizeRemoteDigest,
+  setPeerDigestFetcherForTest,
+  setRemotePreviewRepaint,
+} from './sessions-picker.js';
 import { limitPreviewHeight, pickerPageSize, PREVIEW_MIN_ROWS } from '../lib/picker.js';
 import { _resetLinearWorkspaceCache } from '../lib/session/linear.js';
 import type { SessionEvent, SessionMeta, TodoProgress } from '../lib/session/types.js';
@@ -409,6 +420,135 @@ describe('remote preview body — richer, and sanitized', () => {
     expect(out).not.toContain('\x1b[31m');
     expect(out).not.toContain('\x1b]0;');
     expect(stripVTControlCharacters(out)).toContain('red plan title');
+  });
+});
+
+/**
+ * A remote row's pane fetches the peer's already-computed digest over SSH and
+ * renders the full compact preview — the metadata-only card is only the
+ * pending/failed state, not the destination (the "remote sessions show no real
+ * preview" gap).
+ */
+describe('remote preview — fetched peer digest fills the pane', () => {
+  const remote = (over: Partial<SessionMeta>): SessionMeta =>
+    mk({ machine: 'peerbox', _remote: true, ...over } as Partial<SessionMeta>);
+
+  const digest = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    schemaVersion: 1,
+    firstUser: 'Fix the fan-out preview',
+    lastAssistant: 'Landed the fix in remote-list.ts and verified the pane.',
+    filesRead: 3,
+    toolCalls: 7,
+    planFile: '',
+    subAgentCount: 0,
+    toolTags: [],
+    changes: { created: 1, modified: 2, deleted: 0 },
+    dirs: ['apps/cli/src'],
+    repos: ['agents-cli'],
+    artifacts: [],
+    skills: [{ name: 'review', count: 2 }],
+    plugins: [],
+    hooks: [],
+    links: [],
+    errorCount: 0,
+    toolHistogram: [{ tool: 'Bash', count: 4 }],
+    ...over,
+  });
+
+  afterEach(() => {
+    setPeerDigestFetcherForTest(undefined);
+    setRemotePreviewRepaint(undefined);
+    clearRemoteDigestCacheForTest();
+    clearPreviewMemoryCacheForTest();
+  });
+
+  it('kicks off the fetch on first render and shows the fetching note meanwhile', async () => {
+    let resolveFetch!: (v: unknown) => void;
+    setPeerDigestFetcherForTest(() => new Promise((resolve) => { resolveFetch = resolve; }));
+    const session = remote({ id: 'pend-1', topic: 'Fix the fan-out preview' });
+
+    const first = stripVTControlCharacters(buildPreview(session));
+    expect(first).toContain('fetching preview from peerbox over SSH');
+    expect(first).toContain('on peerbox');
+
+    resolveFetch(digest());
+    await new Promise((r) => setImmediate(r));
+
+    const after = stripVTControlCharacters(buildPreview(session));
+    expect(after).not.toContain('fetching preview');
+    expect(after).toContain('Fix the fan-out preview');
+    expect(after).toContain('Landed the fix in remote-list.ts');
+    expect(after).toContain('apps/cli/src');
+    expect(after).toContain('review');
+  });
+
+  it('repaints the open picker when the digest lands', async () => {
+    setPeerDigestFetcherForTest(async () => digest());
+    const repaint = vi.fn();
+    setRemotePreviewRepaint(repaint);
+    buildPreview(remote({ id: 'repaint-1' }));
+    await new Promise((r) => setImmediate(r));
+    expect(repaint).toHaveBeenCalled();
+  });
+
+  it('falls back to the metadata card when the peer cannot answer, without re-fetching per keystroke', async () => {
+    const fetcher = vi.fn(async () => undefined);
+    setPeerDigestFetcherForTest(fetcher);
+    const session = remote({ id: 'fail-1', topic: 'peer is asleep' });
+
+    buildPreview(session);
+    await new Promise((r) => setImmediate(r));
+    const after = stripVTControlCharacters(buildPreview(session));
+    expect(after).toContain('on peerbox');
+    expect(after).not.toContain('fetching preview');
+    expect(after).toContain('peer is asleep'); // metadata-only Prompt line
+
+    buildPreview(session);
+    expect(fetcher).toHaveBeenCalledTimes(1); // failed entry is cached, not retried per render
+  });
+
+  it('scrubs terminal escapes from every peer-supplied digest string', async () => {
+    setPeerDigestFetcherForTest(async () => digest({
+      firstUser: '\x1b[31mred prompt\x1b[0m',
+      lastAssistant: '\x1b]0;pwned\x07done',
+      dirs: ['\x1b[2Jsrc'],
+      skills: [{ name: '\x1b[31mevil\x1b[0m', count: 1 }],
+    }));
+    const session = remote({ id: 'scrub-1' });
+    buildPreview(session);
+    await new Promise((r) => setImmediate(r));
+    const out = buildPreview(session);
+    expect(out).not.toContain('\x1b[31m');
+    expect(out).not.toContain('\x1b]0;');
+    expect(out).not.toContain('\x1b[2J');
+    expect(stripVTControlCharacters(out)).toContain('red prompt');
+  });
+});
+
+describe('sanitizeRemoteDigest — version-skew and shape defense', () => {
+  it('rejects a non-object and a digest with the wrong schemaVersion', () => {
+    expect(sanitizeRemoteDigest(undefined)).toBeUndefined();
+    expect(sanitizeRemoteDigest('nope')).toBeUndefined();
+    expect(sanitizeRemoteDigest([])).toBeUndefined();
+    expect(sanitizeRemoteDigest({ schemaVersion: 2 })).toBeUndefined();
+  });
+
+  it('coerces malformed fields instead of throwing', () => {
+    const d = sanitizeRemoteDigest({
+      schemaVersion: 1,
+      firstUser: 42,
+      toolCalls: 'many',
+      dirs: [1, 'src', null],
+      todos: { items: [{ content: 'step', status: 'bogus' }, 'junk'], done: '3', total: 5 },
+      links: [{ url: 'file:///etc/passwd', label: 'x' }, { url: 'https://github.com/a/b', label: 'a/b' }],
+    });
+    expect(d).toBeDefined();
+    expect(d!.firstUser).toBe('');
+    expect(d!.toolCalls).toBe(0);
+    expect(d!.dirs).toEqual(['src']);
+    expect(d!.todos).toEqual({ items: [{ content: 'step', status: 'pending', activeForm: undefined }], done: 0, total: 5, activeForm: undefined });
+    // Non-http(s) URLs never become OSC 8 hyperlinks.
+    expect(d!.links).toEqual([{ kind: 'other', url: 'https://github.com/a/b', label: 'a/b' }]);
   });
 });
 

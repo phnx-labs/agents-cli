@@ -333,12 +333,83 @@ A local workspace probe always feeds this footer (cheap, no SSH). The full per-h
 | `agents projects import --from-linear` | Import the workspace's Linear projects (via the `linear` CLI) as definitions. See [Importing](#importing--from-linear). There is no ext import path — `~/.agents/factory/projects.json` is never read. |
 | `agents projects set <name> [--repo\|--root\|--path\|--description\|--goal objective:measure\|--add-dir\|--rm-dir\|--slug]` | Change one field, preserving every other. `--goal` (repeatable) replaces the goals list. `--add-dir` / `--rm-dir` (both repeatable) bind and unbind directories; `--slug` names the remote for a single `--add-dir` whose origin cannot be read. Removals apply before additions, so `--rm-dir old --add-dir new` re-points a directory in one command. Use this rather than `add --force`, which rebuilds the definition from flags alone. |
 | `agents projects rm <name> [--json]` | Delete the definition (never touches the repo). `--json` prints `{ ok, name, removed }` (or `{ ok: false, name, error }` on failure). |
+| `agents projects pull <name> [--device name...] [--devices a,b,c] [--json]` | Fast-forward every fleet checkout of a named project to its remote default branch. See [Pulling every reachable checkout](#pulling-every-reachable-checkout). |
 
 `agents teams create <team> --project <name>` binds a whole team to a project.
 
 `agents run --project <name>` is unchanged in spelling — it just resolves richer
 definitions now, and attaches the project's other directories as `--add-dir`
 grants.
+
+## Pulling every reachable checkout
+
+`agents projects pull <name>` fast-forwards every fleet checkout of a named project to
+its remote's default branch. It extends the `status` fleet fan-out — the same directory
+set that `status` probes is the set `pull` updates.
+
+```bash
+agents projects pull rush                        # pull every checkout in the project
+agents projects pull rush --device yosemite-s0  # scope to one device
+agents projects pull rush --devices s0,s1       # scope to multiple devices
+agents projects pull rush --json                # machine-readable results
+```
+
+**Safety contract — what pull will and will not do:**
+
+- **Only fast-forwards** — no rebase, no reset, no history rewrite.
+- **Dirty trees are blocked immediately.** The fetch is never attempted when there are
+  uncommitted changes.
+- **Only checkouts on the remote's default branch** are eligible. A checkout on
+  `feature/x` is blocked and reported.
+- **Local commits ahead of upstream block the pull.** The checkout must be strictly
+  behind (or equal to) its upstream before it is updated.
+- **Missing checkouts are skipped** — never cloned. If a project directory does not
+  exist on a device, it is reported as `missing` and the command moves on.
+- **The declared repo slug is verified first, on every device.** A bound directory whose
+  `origin` is a different repo than the project declares is blocked, as is one whose
+  `origin` cannot be resolved to an `owner/repo` slug at all — the checkout cannot be
+  confirmed to be the right repo, so it is never fast-forwarded.
+- **Git hooks are never installed** during a pull.
+
+Blocked (`blocked`) and failed (`failed`) checkouts drive a non-zero exit code.
+Missing checkouts (`missing`) do not.
+
+**Per-device output:**
+
+```
+rush
+  yosemite-m1
+    ✓ ~/src/github.com/phnx-labs/rush updated (main) a1b2c3d4→e5f6a7b8
+    · ~/src/github.com/phnx-labs/rush-infra already current (main)
+  yosemite-s0
+    ? ~/src/github.com/phnx-labs/rush missing — skipped
+  2 updated · 1 current · 1 missing
+```
+
+The fan-out uses the same `gatherRemoteAgentsJson` seam as `status`, with a
+120-second per-device timeout (vs the default 12s) to allow for large repos and
+slow links.
+
+### Devices that did not answer, and devices that answered unverifiably
+
+These are different states and the command keeps them apart:
+
+| State | Meaning | Reported as | Exit code |
+|---|---|---|---|
+| `unavailable` | The device never answered — offline, no `agents` CLI, or past the 120s budget. Nothing ran there. | `unavailable: <names>` | unaffected |
+| `unverified` | The device answered, but its response failed verification (wrong machine id, a target fingerprint that does not match the targets that were sent, or a malformed row). It already ran a real pull whose outcome cannot be read. | `unverified: <names>` | **non-zero** |
+
+An unverifiable answer is worse than silence, so it is never folded into the results as
+a device with nothing to report. Under `--json` both notes go to **stderr** (the JSON on
+stdout stays a clean result array), matching `projects status --json`.
+
+**How the fan-out stays verifiable.** Each peer runs the hidden
+`agents projects pull-local --json --targets <json>`, where `--targets` carries the full
+`{path, expectedSlug}` list — not bare paths. Both halves of a target have to cross that
+boundary: `expectedSlug` is what makes the peer refuse a directory hosting a different
+repo, and it is hashed into the target fingerprint the caller checks the peer's envelope
+against. A peer that cannot decode its targets exits non-zero rather than pulling a
+guessed subset.
 
 ## Importing — from Linear
 

@@ -116,6 +116,53 @@ export function humanDuration(ms: number): string {
 }
 
 /**
+ * Human-readable byte size. Previously copy-pasted into five files
+ * (`commands/prune.ts`, `commands/share.ts`, `commands/inspect.ts`,
+ * `commands/sessions.ts`, `lib/browser/sessions-list.ts`) — this is the
+ * canonical home.
+ */
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let size = n / 1024;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit++;
+  }
+  return `${size < 10 ? size.toFixed(1) : Math.round(size)} ${units[unit]}`;
+}
+
+/**
+ * True when an error came from the user cancelling a prompt (Ctrl+C).
+ *
+ * Lives here rather than in `commands/utils.ts` so `lib/` callers
+ * (`drift-sync.ts`, `refresh.ts`) don't have to import upward out of `lib/`
+ * into the command layer. `commands/utils.ts` re-exports it.
+ */
+export function isPromptCancelled(err: unknown): boolean {
+  return err instanceof Error && (
+    err.name === 'ExitPromptError' ||
+    err.message.includes('force closed') ||
+    err.message.includes('User force closed')
+  );
+}
+
+/** True when stdin/stdout are attached to a real terminal. */
+export function isInteractiveTerminal(): boolean {
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+}
+
+/** Parse a comma-separated CLI list, trimming whitespace and dropping empties. */
+export function parseCommaSeparatedList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+/**
  * Visible column width of `s`, ignoring ANSI SGR color codes (e.g. chalk
  * wrappers). Matches the full CSI sequence including the `\x1b` escape.
  */

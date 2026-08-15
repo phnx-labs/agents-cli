@@ -80,11 +80,11 @@ Every existing product is **vertical**, not horizontal.
 
 ---
 
-## Does agents-cli meet the criteria?
+## Does agi-cli meet the criteria?
 
 Every layer of the toolchain maps to a concrete implementation in the codebase.
 
-| Layer | agents-cli feature | Evidence |
+| Layer | agi-cli feature | Evidence |
 |---|---|---|
 | 1. Versions | `agents add/use/prune claude@2.0.65` -> `~/.agents/versions/{agent}/{version}/home/`, symlink swap + auto-backup to `~/.agents/backups/{agent}/{timestamp}/` on switch | `src/lib/versions.ts`, `src/lib/shims.ts` |
 | 2. Config source-of-truth | Central `AGENTS.md` symlinked to CLAUDE.md / GEMINI.md / .cursorrules; `memory-compile.ts` inlines `@path` imports for agents without native support | `src/lib/memory.ts:37-58`, `src/lib/memory-compile.ts:20-24` |
@@ -96,7 +96,7 @@ Every layer of the toolchain maps to a concrete implementation in the codebase.
 | 8. Cloud dispatch | Unified `agents cloud run/list/status/logs/cancel/message` across Rush / Codex / Factory, shared SQLite task index, SSE streaming | `src/lib/cloud/*`, `src/commands/cloud.ts:57-100` |
 | 9. Scheduler | `agents routines add daily-digest --schedule "0 9 * * 1-5"`, sandboxed runner, daemon auto-start | `src/lib/scheduler.ts`, `src/lib/runner.ts`, `src/commands/routines.ts` |
 
-**Verdict:** yes -- agents-cli is the shape. Every one of the 9 layers is implemented, and every top-10 pain point from the research maps to an existing feature.
+**Verdict:** yes -- agi-cli is the shape. Every one of the 9 layers is implemented, and every top-10 pain point from the research maps to an existing feature.
 
 ---
 
@@ -104,7 +104,7 @@ Every layer of the toolchain maps to a concrete implementation in the codebase.
 
 Three holes remain. Nobody else has filled them either.
 
-1. **Cost / quota observability across providers.** Research flagged this hard (Claude quota burning in 19 min, Codex Cloud 5x cost). agents-cli tracks cloud tasks but has no unified "you burned $N today across Claude + Codex + Rush" view. This is the next visible hole -- and the one competitors will notice last.
+1. **Cost / quota observability across providers.** Research flagged this hard (Claude quota burning in 19 min, Codex Cloud 5x cost). agi-cli tracks cloud tasks but has no unified "you burned $N today across Claude + Codex + Rush" view. This is the next visible hole -- and the one competitors will notice last.
 
 2. **Cross-agent session resume.** `agents sessions` reads and searches across agents but doesn't port state from a Claude session into a Codex one. This is what Ctx and Memorix are bolting on as single-feature products.
 

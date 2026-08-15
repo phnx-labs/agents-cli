@@ -86,23 +86,24 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // Devices under high load — this Mac (native getloadavg) + fresh fleet peers.
     private var badgeLoaded: [LoadedDevice] = []
 
-    // Daemon-down watchdog. The only other proactive "routines won't run"
+    // Daemon-health watchdog. The only other proactive "routines won't run"
     // signal is `notifyOverdue` (src/lib/overdue.ts), fired from INSIDE
     // `runDaemon()` on startup — so it can never fire while the daemon itself
     // is down, the exact circularity this closes. This helper is a SEPARATE
     // launchd KeepAlive service that stays alive when the daemon dies, so it
     // is the one thing that can notice and say so. Polled every `tick()`
     // (independent of menu-open) via the cheap, synchronous `daemonPid()`
-    // (a pid-file read + `kill(pid, 0)` — no CLI spawn), and delivered through
+    // (pid + heartbeat reads with no CLI spawn), and delivered through
     // this process's own `Notifier`, not a spawned `--notify` child, so the
     // alert cannot depend on anything the dead daemon would have provided.
-    private var daemonDeadTicks = 0
+    private var daemonUnhealthyTicks = 0
+    private var daemonUnhealthyState: DaemonLiveness?
     private var daemonDownNotified = false
-    /// True once `daemonDeadTicks` has crossed the threshold; drives the
+    /// True once `daemonUnhealthyTicks` has crossed the threshold; drives the
     /// always-visible badge (see `refreshBadge`), independent of whether the
     /// dropdown is ever opened.
     private var schedulerDown = false
-    /// Consecutive dead ticks (~10s apart) required before alerting. A daemon
+    /// Consecutive unhealthy ticks (~10s apart) required before alerting. A daemon
     /// restart — a version upgrade, `agents doctor` self-heal, a crash the
     /// launchd-equivalent auto-relaunches — is down for a few seconds; this
     /// debounce absorbs that blip instead of paging the user for a non-event.
@@ -257,15 +258,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// on the main thread here just like `menuWillOpen` already does.
     ///
     /// Fires once per outage, only after `daemonDownTickThreshold` consecutive
-    /// dead ticks — covers both a daemon that dies mid-session (an
+    /// unhealthy ticks — covers both a daemon that dies mid-session (an
     /// alive→dead transition) and one that is already down when the helper
     /// itself (re)launches (a reboot, a crash before the helper started).
     /// Resets the moment the daemon comes back, so the next real outage
     /// alerts again.
     private func checkDaemonLiveness() {
-        let alive = AgentsCLI.daemonPid() != nil
-        if alive {
-            daemonDeadTicks = 0
+        let liveness = AgentsCLI.daemonLiveness()
+        if liveness == .running {
+            daemonUnhealthyTicks = 0
+            daemonUnhealthyState = nil
             daemonDownNotified = false
             if schedulerDown {
                 schedulerDown = false
@@ -273,16 +275,27 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             }
             return
         }
-        daemonDeadTicks += 1
-        if daemonDeadTicks >= Self.daemonDownTickThreshold && !schedulerDown {
+        if daemonUnhealthyState == liveness {
+            daemonUnhealthyTicks += 1
+        } else {
+            daemonUnhealthyState = liveness
+            daemonUnhealthyTicks = 1
+            daemonDownNotified = false
+        }
+        if daemonUnhealthyTicks >= Self.daemonDownTickThreshold && !schedulerDown {
             schedulerDown = true
             refreshBadge()
         }
-        guard daemonDeadTicks == Self.daemonDownTickThreshold, !daemonDownNotified else { return }
+        guard daemonUnhealthyTicks == Self.daemonDownTickThreshold, !daemonDownNotified else { return }
         daemonDownNotified = true
+        if liveness == .wedged {
+            AgentsCLI.restartDaemon()
+        }
         Notifier.post(
-            title: "Scheduler stopped — routines won't run",
-            body: "Restart it from the menu bar, or run: agents routines start",
+            title: liveness == .wedged ? "Scheduler froze — restarting it" : "Scheduler stopped — routines won't run",
+            body: liveness == .wedged
+                ? "The daemon heartbeat stayed stale after sleep/wake. agents-cli started a clean replacement."
+                : "Restart it from the menu bar, or run: agents routines start",
             url: URL(fileURLWithPath: "\(NSHomeDirectory())/.agents/.history/runs").absoluteString
         )
     }

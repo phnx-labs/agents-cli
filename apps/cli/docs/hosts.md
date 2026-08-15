@@ -75,9 +75,10 @@ on the machine you are sitting at — including through `agents ssh auto` and th
 generic `--host auto` passthrough, which resolve `auto` via the same pool.
 
 Roles live in the fleet-**shared** `fleet.devices.<name>.config.role` block of
-`~/.agents/agents.yaml` and travel with `agents repo push` / `pull`; the device
-registry under `~/.agents/devices/` is per-machine and gitignored, so it could
-never hold a fleet-wide answer. `agents devices list` tags marked rows, and
+`~/.agents/agents.yaml` and travel with `agents repo push` / `pull`; the
+per-device files under `~/.agents/devices/` are written only by the machine they
+name — that is what keeps them conflict-free — so they could never hold a
+fleet-wide answer about a *different* box. `agents devices list` tags marked rows, and
 `agents devices list --json` carries `role` plus an `autoPool` boolean per
 device.
 

@@ -16,6 +16,7 @@ import {
   assertValidSessionName,
   capturePane,
   createSession,
+  ensureSessionHookRepaired,
   hasSession,
   killAll,
   killSession,
@@ -432,6 +433,43 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     // The non-run session was never touched (no marker stamped).
     const r = await runTmux({ socket, args: ['show-options', '-v', '-t', 'user-made', '@ag_hook_schema'], throwOnError: false });
     expect(r.stdout.trim()).toBe('');
+  });
+
+  // RUSH-2435: the 5-minute tmux-reconcile poll that used to retrofit a stale
+  // hook was deleted (RUSH-2495) with nothing replacing it — a legacy session
+  // could sit unrepaired indefinitely. ensureSessionHookRepaired is the
+  // steady-state fix: a single-session repair called right before attach.
+  it('ensureSessionHookRepaired retrofits a stale hook on the ONE session named', async () => {
+    await createSession({ name: 'ag-repair-one', cmd: 'sleep 30', socket });
+    await setSessionHook('ag-repair-one', 'pane-died', 'detach-client -s =ag-repair-one', socket);
+    const before = (await runTmux({ socket, args: ['show-options', '-v', '-t', 'ag-repair-one', '@ag_hook_schema'], throwOnError: false })).stdout.trim();
+    expect(before).toBe('');
+
+    await ensureSessionHookRepaired('ag-repair-one', socket);
+
+    const marker = (await runTmux({ socket, args: ['show-options', '-v', '-t', 'ag-repair-one', '@ag_hook_schema'] })).stdout.trim();
+    expect(marker).toBe(String(AGENT_HOOK_SCHEMA));
+  });
+
+  it('ensureSessionHookRepaired is a no-op for a non-run (non `ag-`) session', async () => {
+    await createSession({ name: 'user-made-2', cmd: 'sleep 30', socket });
+    await setSessionHook('user-made-2', 'pane-died', 'detach-client -s =user-made-2', socket);
+
+    await ensureSessionHookRepaired('user-made-2', socket);
+
+    const marker = (await runTmux({ socket, args: ['show-options', '-v', '-t', 'user-made-2', '@ag_hook_schema'], throwOnError: false })).stdout.trim();
+    expect(marker).toBe('');
+  });
+
+  it('prepareSessionForResume repairs a stale hook on the session it decides to attach', async () => {
+    await createSession({ name: 'ag-resume-repair', cmd: 'sleep 30', socket });
+    await setSessionHook('ag-resume-repair', 'pane-died', 'detach-client -s =ag-resume-repair', socket);
+
+    const decision = await prepareSessionForResume('ag-resume-repair', socket);
+    expect(decision.decision).toBe('attach');
+
+    const marker = (await runTmux({ socket, args: ['show-options', '-v', '-t', 'ag-resume-repair', '@ag_hook_schema'] })).stdout.trim();
+    expect(marker).toBe(String(AGENT_HOOK_SCHEMA));
   });
 });
 

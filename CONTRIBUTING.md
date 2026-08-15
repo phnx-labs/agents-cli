@@ -1,12 +1,12 @@
-# Contributing to agents-cli
+# Contributing to agi-cli
 
 Thanks for your interest in contributing. This guide covers the setup, conventions, and PR process.
 
 ## Setup
 
 ```bash
-git clone https://github.com/phnx-labs/agents-cli
-cd agents-cli/apps/cli
+git clone https://github.com/phnx-labs/agi-cli
+cd agi-cli/apps/cli
 bun install
 bun run build
 bun run test

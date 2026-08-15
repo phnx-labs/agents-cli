@@ -866,11 +866,11 @@ cat > "$SHIM_TMP/package.json" <<EOF
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/phnx-labs/agents-cli.git"
+    "url": "git+https://github.com/phnx-labs/agi-cli.git"
   },
   "homepage": "https://agents-cli.sh",
   "bugs": {
-    "url": "https://github.com/phnx-labs/agents-cli/issues"
+    "url": "https://github.com/phnx-labs/agi-cli/issues"
   }
 }
 EOF
