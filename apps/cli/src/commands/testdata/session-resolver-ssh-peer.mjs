@@ -71,6 +71,21 @@ if (mode === 'old-peer') {
 }
 fs.chmodSync(shimBin, 0o755);
 
+// RUSH-2750: `bash -lc` is a LOGIN shell, and on macOS every login bash sources
+// `/etc/profile`, which runs `/usr/libexec/path_helper` -- that rebuilds PATH
+// from `/etc/paths` + `/etc/paths.d/*` and appends whatever PATH was already
+// set (this shimDir) at the very END, after `/opt/homebrew/bin` (Homebrew's own
+// `/etc/paths.d` entry). On a box with a real `agents` install there, the real
+// binary silently wins over this shim and the fixture never sees the CLI it
+// asked for. `/etc/profile` sources `~/.bash_profile` next (HOME is `peerHome`
+// here), so writing one there runs strictly after path_helper and can safely
+// re-prepend the shim -- effective only for this fixture's throwaway peerHome,
+// never the real user's shell.
+fs.writeFileSync(
+  path.join(peerHome, '.bash_profile'),
+  `export PATH="${shimDir}:$PATH"\n`,
+);
+
 // RUSH-2639: this exec channel is exactly the "child process launched through
 // a login-shell-like boundary" class the fork-private AGENTS_* isolation vars
 // exist for (see tests/setup.ts). The env below used to start from scratch
