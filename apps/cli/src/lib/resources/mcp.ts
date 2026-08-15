@@ -16,6 +16,7 @@ import * as yaml from 'yaml';
 import type { AgentId, Layer, ResolvedItem, ResourceHandler, ResourceKind } from './types.js';
 import { capableAgents } from '../capabilities.js';
 import { getProjectMcpConfigPath } from '../agents.js';
+import { mcpTarget } from '../mcp-registry.js';
 import { writeMcpConfig } from '../mcp.js';
 import {
   getSystemMcpDir,
@@ -138,38 +139,13 @@ function scanMcpDir(dir: string): { name: string; path: string; item: McpItem }[
 
 /**
  * Get the config file path for MCP for a given agent.
- * Different agents use different config formats and locations.
+ *
+ * Reads `MCP_TARGETS` so this handler cannot answer with a different file than
+ * the writer, the parser, and the staleness detector use. Returns null for an
+ * agent with no MCP target.
  */
 export function getMcpConfigPath(agent: AgentId, versionHome: string): string | null {
-  switch (agent) {
-    case 'claude':
-      return path.join(versionHome, '.claude', 'settings.json');
-    case 'codex':
-      return path.join(versionHome, '.codex', 'config.toml');
-    case 'opencode':
-      return path.join(versionHome, '.config', 'opencode', 'opencode.jsonc');
-    case 'cursor':
-      return path.join(versionHome, '.cursor', 'mcp.json');
-    case 'openclaw':
-      return path.join(versionHome, '.openclaw', 'openclaw.json');
-    case 'antigravity':
-      // agy nests under ~/.gemini/antigravity-cli/ (shared parent with Gemini, distinct subdir).
-      return path.join(versionHome, '.gemini', 'antigravity-cli', 'mcp_config.json');
-    case 'grok':
-      return path.join(versionHome, '.grok', 'mcp.json');
-    case 'hermes':
-      return path.join(versionHome, '.hermes', 'config.yaml');
-    case 'pi':
-      // omp reads user-scope MCP from ~/.omp/agent/.mcp.json (Claude schema).
-      return path.join(versionHome, '.omp', 'agent', '.mcp.json');
-    case 'muse':
-      return path.join(versionHome, '.config', 'muse', 'settings.json');
-    case 'warp':
-      // Oz reads user-scope MCP from ~/.warp/.mcp.json (Claude schema).
-      return path.join(versionHome, '.warp', '.mcp.json');
-    default:
-      return null;
-  }
+  return mcpTarget(agent)?.home(versionHome) ?? null;
 }
 
 /**
