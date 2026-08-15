@@ -359,6 +359,29 @@ describe('sync --json reports a refused write (RUSH-2700)', () => {
     expect(declined.join('\n')).toContain('copilot');
   });
 
+  it('umbrella: declined propagates through refresh and stdout stays one JSON object', () => {
+    // The other half of the fix, and the one with no run evidence until now:
+    // refresh() returned void, so runUmbrellaSync could not report a decline
+    // even in principle. refresh only reaches an agent that has a global
+    // default set, which is why `use` runs first — without it refresh
+    // `continue`s past copilot and nothing is ever declined.
+    const home = homeWithRefusableMcp();
+    const use = spawnSync('bun', [INDEX, 'use', 'copilot@1.0.0'], {
+      encoding: 'utf-8',
+      env: { ...process.env, HOME: home, AGENTS_NO_UPDATE_CHECK: '1' },
+    });
+    expect(use.status, use.stderr).toBe(0);
+
+    const { stdout } = run(['sync', '--local', '--json', '--yes'], home);
+
+    // Exactly one JSON object on stdout: the fleet roster's parser breaks on a
+    // stray line, and this file exists because of a prior incident (see header).
+    const payload = JSON.parse(stdout.trim());
+    expect(payload.mode).toBe('umbrella');
+    expect(payload.ok, 'a refused write is not a clean umbrella sync').toBe(false);
+    expect((payload.declined ?? []).join('\n')).toContain('cannot write MCP config');
+  });
+
   it('agent-all: ok stays true when nothing was refused', () => {
     // The negative control. kimi's MCP format IS implemented, so the very same
     // server writes cleanly — proving `ok: false` above tracks the decline and
