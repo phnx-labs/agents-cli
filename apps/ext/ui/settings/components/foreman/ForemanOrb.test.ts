@@ -15,10 +15,12 @@ import { join } from 'node:path'
 const orbPath = join(import.meta.dir, 'ForemanOrb.tsx')
 const indexCssPath = join(import.meta.dir, '../../index.css')
 const floorCssPath = join(import.meta.dir, '../mission-control/floor.css')
+const panelCssPath = join(import.meta.dir, '../panel/panel.css')
 
 const orb = readFileSync(orbPath, 'utf8')
 const indexCss = readFileSync(indexCssPath, 'utf8')
 const floorCss = readFileSync(floorCssPath, 'utf8')
+const panelCss = readFileSync(panelCssPath, 'utf8')
 
 /** The persistent overlay stack, from the real values in ForemanOrb.tsx. */
 const ORB_SIZE_ACTIVE = 56 // OrbBlob: `const size = big ? 56 : 40`
@@ -58,6 +60,14 @@ describe('Foreman overlay does not cover the surface behind it', () => {
 
   test('the Fleet detail column reserves that clearance', () => {
     const rule = floorCss.match(/\.swarmify-root \.detail-col \{[^}]*\}/)
+    expect(rule).not.toBeNull()
+    expect(rule![0]).toContain('padding-bottom: var(--foreman-overlay-clear)')
+  })
+
+  test('the Panel tab reserves that clearance', () => {
+    // Rendered as a sibling of the overlay (App.tsx), full height, own scrollbar —
+    // its bottom-right corner is under the orb exactly like the detail column's.
+    const rule = panelCss.match(/\.sw-panel-tab \{[^}]*\}/)
     expect(rule).not.toBeNull()
     expect(rule![0]).toContain('padding-bottom: var(--foreman-overlay-clear)')
   })

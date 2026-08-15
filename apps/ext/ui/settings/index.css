@@ -297,9 +297,11 @@ input[type="number"]::-webkit-inner-spin-button {
 /* The orb root is `position: fixed; bottom: 16; right: 16` (ForemanOrb.tsx), so it
    floats over whatever bottom-right scroll region is behind it. Scroll regions it
    covers reserve this much bottom padding so their last line stays readable.
-   Measured: orb 40px (56px while listening/speaking) + 10px gap + speaker chip 19px
-   + 10px gap + one-row composer 36px = 133px at the orb's largest, + the 16px bottom
-   offset + 11px breathing room. Keep this in sync with OrbBlob's `size`. */
+   Measured at the orb's largest: orb 56px (40px at rest, 56px while listening or
+   speaking) + 10px gap + speaker chip 19px + 10px gap + one-row composer 36px =
+   131px, + the 16px bottom offset = 147px, + 13px breathing room. ForemanOrb.test.ts
+   recomputes that floor from these same parts and fails if the value drops below it,
+   so keep both in sync with OrbBlob's `size` and the composer's inline style. */
 :root {
   --foreman-overlay-clear: 160px;
 }
