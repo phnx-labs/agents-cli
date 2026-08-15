@@ -6,6 +6,17 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+- **Crash-restart no longer reopens every tab in a thundering herd (RUSH-2477).**
+  `restoreAgentTerminals` reopened each persisted tab and fired its resume with no
+  cap or stagger, so N crashed tabs became N near-simultaneous resume processes
+  within seconds of boot — the trigger that overwhelmed the resume path (DB-lock
+  crashes, boot-time fleet fan-out). Restore is now bounded and staggered through a
+  new pure `runStaggered` helper (`src/core/restoreThrottle.ts`): at most
+  `RESTORE_MAX_CONCURRENCY` (2) tabs restore at once, and each start after the first
+  is spaced by `RESTORE_STAGGER_MS` (300ms). A tab that fails to restore no longer
+  strands the rest of the batch. Source: `apps/ext/src/core/restoreThrottle.ts`,
+  `apps/ext/src/vscode/extension.ts`.
+
 - **A failed agent launch no longer closes the terminal before you can read
   why (RUSH-2593).** Native-mode tabs prefixed the launch command with `exec`
   (RUSH-2026) so the shell process was replaced by the agent runner — closing

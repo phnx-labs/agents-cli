@@ -35,6 +35,7 @@ import {
   buildAutoRunLaunchCommand,
   buildResumeInput,
 } from '../core/resumeInBest';
+import { runStaggered, RESTORE_MAX_CONCURRENCY, RESTORE_STAGGER_MS } from '../core/restoreThrottle';
 import * as os from 'os';
 import * as fsSync from 'fs';
 import { randomUUID } from 'crypto';
@@ -4913,10 +4914,17 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
     return;
   }
 
-  // Recreate terminals with proper properties
+  // Recreate terminals with proper properties.
   // Note: With isTransient: true, VS Code won't auto-restore terminals,
-  // so we don't need to close "broken" restores - we're the only restore path
-  for (const session of toRestore) {
+  // so we don't need to close "broken" restores - we're the only restore path.
+  //
+  // RUSH-2477: bound the restore. A crash-restart reopens every persisted tab at
+  // once, and firing one resume per tab with no cap or stagger is a thundering
+  // herd — N tabs became N near-simultaneous resume processes within seconds of
+  // boot, which is what overwhelmed the resume path (DB-lock crash, boot-time
+  // fleet fan-out). `runStaggered` restores at most RESTORE_MAX_CONCURRENCY at a
+  // time, each start after the first spaced by RESTORE_STAGGER_MS.
+  const restoreOne = async (session: typeof toRestore[number]): Promise<void> => {
     // Handle shell separately (no built-in def)
     let agentConfig: Omit<import('./agents.vscode').AgentConfig, 'count'>;
     let displayTitle: string;
@@ -4928,7 +4936,7 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
       const def = getBuiltInByPrefix(session.prefix);
       if (!def) {
         console.log(`[RESTORE] Unknown prefix: ${session.prefix}, skipping`);
-        continue;
+        return;
       }
       agentConfig = createAgentConfig(context.extensionPath, def.title, def.command, def.icon, def.prefix);
       displayTitle = def.title;
@@ -5000,7 +5008,12 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
         });
       }
     }
-  }
+  };
+
+  await runStaggered(toRestore, restoreOne, {
+    concurrency: RESTORE_MAX_CONCURRENCY,
+    staggerMs: RESTORE_STAGGER_MS,
+  });
 
   terminals.clearPersistedSessions(workspacePath);
   console.log(`[RESTORE] Restored ${toRestore.length} agent terminal(s)`);

@@ -36,7 +36,8 @@ import {
 } from './sessions.js';
 import { resolveBackend, CONFIRM_THRESHOLD } from './sessions-resume.js';
 import { runOnPeer } from '../lib/session/remote-list.js';
-import { discoverSessions } from '../lib/session/discover.js';
+import { discoverSessions, resolveIndexedSessionById } from '../lib/session/discover.js';
+import { machineId } from '../lib/session/sync/config.js';
 import { collectSessionCandidates, normalizeDeviceSeed } from './sessions-browser.js';
 import { buildPreview } from './sessions-picker.js';
 import { multiItemPicker } from '../lib/picker.js';
@@ -255,6 +256,32 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
       process.exitCode = 1;
       return;
     }
+
+    // RUSH-2477: an id selector for a LOCAL indexed session resolves against the
+    // WAL index alone — a plain read, no write-heavy discovery scan (none of
+    // `tryClaimScan`/`releaseScan`'s `BEGIN IMMEDIATE` writer lock) and no
+    // boot-time fleet SSH fan-out. This is the crash-restart storm path: dozens
+    // of `sessions resume <id>` at once must not each take the writer lock or
+    // dial the not-yet-up tailnet. A genuine miss, an ambiguous prefix, or a
+    // peer-owned row falls through to the fleet resolver below unchanged — the
+    // narrow win is the exact case the storm hits, with no behaviour change for
+    // a session that lives on another box.
+    if (idLookup && hosts.length === 0 && looksLikeIdSelector(textSelector)) {
+      const self = machineId();
+      const localMatch = dedupeSessionsByLogicalId(
+        await resolveIndexedSessionById(textSelector),
+        self,
+      );
+      if (localMatch.length === 1 && !sessionProcessHost(localMatch[0], self)) {
+        // Local live index only (ps/tmux, no fleet sweep) so a still-live pane is
+        // still joined instead of resumed as a copy; a crashed session has no live
+        // row and recovers in place.
+        const { activeById } = await gatherLiveTargets(true, { statuses: [] });
+        await focusResolvedSession(localMatch[0], activeById, self, fallback, opts.attachOnly === true);
+        return;
+      }
+    }
+
     const { sessions, liveById, self, unreachable } = await collectSessionCandidates({
       running: opts.active === true || statuses.length > 0,
       statuses,
