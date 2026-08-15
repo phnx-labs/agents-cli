@@ -371,7 +371,11 @@ function allocateRoutineAttempt(config: JobConfig, trigger: RoutineTrigger): Att
     };
   }
 
-  if (!config.workflow && config.agent && ROUTINE_AGENT_IDS.includes(config.agent) && isAgentHardDeprecated(config.agent)) {
+  // Gate on deprecation alone, not ROUTINE_AGENT_IDS membership — a retired
+  // harness leaves the command table (gemini did), and the legacy routine must
+  // still land a visible 'blocked' record, never a generic buildJobCommand
+  // failure (RUSH-2202).
+  if (!config.workflow && config.agent && isAgentHardDeprecated(config.agent)) {
     const reason = hardDeprecationError(config.agent);
     return {
       proceed: false,
@@ -607,16 +611,6 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
       return dir.replace(/^~/, os.homedir());
     });
     cmd.push(...codexPolicyArgs(policyMode, [...codexEditWritableRoots(), ...routineRoots]));
-
-    appendModelAndReasoning(cmd, config);
-  }
-
-  if (config.agent === 'gemini') {
-    if (mode === 'edit') {
-      cmd.push('--approval-mode', 'auto_edit');
-    } else if (mode === 'skip') {
-      cmd.push('--yolo');
-    }
 
     appendModelAndReasoning(cmd, config);
   }
@@ -1046,7 +1040,10 @@ export async function resolveRoutineLaunch(
     };
   }
 
-  const strategy = getConfiguredRunStrategy(agent, cwd);
+  // A per-routine strategy travels with the definition and beats the firing
+  // box's ambient run.<agent>.strategy — otherwise selection policy silently
+  // depends on whichever device fires the job (RUSH-2719).
+  const strategy = config.strategy ?? getConfiguredRunStrategy(agent, cwd);
   let version: string | undefined;
   let rotation: RotateResult | null = null;
   let exhausted: RotateCandidate[] | undefined;
@@ -1429,7 +1426,7 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   // remote run to completion when possible.
   {
     const { resolvePlacementTarget } = await import('./routines-placement.js');
-    const target = resolvePlacementTarget(config);
+    const target = await resolvePlacementTarget(config);
     const placed = await dispatchPlacedJob(config, target, attempt);
     if (placed) return placed;
   }
@@ -2007,7 +2004,7 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
   // sends the finish notification only for local detached runs below (RUSH-2030).
   {
     const { resolvePlacementTarget } = await import('./routines-placement.js');
-    const target = resolvePlacementTarget(config);
+    const target = await resolvePlacementTarget(config);
     if (target.mode === 'host' || target.mode === 'cloud') {
       await assertRoutineAccountLocalForPlacement(config, target.mode);
     }

@@ -24,8 +24,9 @@ import {
   type ContextFsProbe,
 } from './routine-context.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
-import type { AgentId } from './types.js';
+import type { AgentId, RunStrategy } from './types.js';
 import { ALL_AGENT_IDS, ROUTINE_AGENT_IDS } from './agents.js';
+import { RUN_STRATEGIES } from './accounting/rotate.js';
 import type { LoopConfig } from './loop.js';
 import { machineId, normalizeHost } from './machine-id.js';
 import { resolveActor } from './actor.js';
@@ -400,6 +401,16 @@ export interface JobConfig {
   allow?: JobAllowConfig;
   config?: Record<string, unknown>;
   version?: string;
+  /**
+   * Explicit per-routine version/account selection strategy — the same
+   * vocabulary as `agents run --strategy` (RUN_STRATEGIES). Overrides
+   * `run.<agent>.strategy` from the FIRING device's own agents.yaml
+   * (getConfiguredRunStrategy) so a routine's selection policy travels with the
+   * definition instead of depending on whichever box happens to fire it.
+   * Conflicts with `version:` (an exact pin leaves nothing to select) —
+   * validateJob rejects the pair.
+   */
+  strategy?: RunStrategy;
   /**
    * Pin this routine to a signed-in account by identity (its login email, or its
    * account key) instead of rotating. At launch it resolves to whichever
@@ -1327,6 +1338,17 @@ export function validateJob(config: Partial<JobConfig>): string[] {
       errors.push(`resume is only supported for agents with native --resume (${RESUMABLE_AGENTS.join(', ')}); got '${config.agent}'`);
     }
   }
+  if (config.strategy !== undefined) {
+    if (!RUN_STRATEGIES.includes(config.strategy)) {
+      errors.push(`strategy must be one of: ${RUN_STRATEGIES.join(', ')}`);
+    }
+    if (!hasAgent) {
+      errors.push('strategy only applies to agent routines (drop it for workflow/command routines)');
+    }
+    if (config.version) {
+      errors.push(`strategy ${config.strategy} conflicts with version ${config.version} — an exact pin leaves nothing to select; drop strategy or the version pin`);
+    }
+  }
   if (config.mode && !['plan', 'edit', 'auto', 'skip', 'full'].includes(config.mode)) {
     errors.push("mode must be plan, edit, auto, or skip ('full' accepted as alias for skip)");
   }
@@ -1360,6 +1382,11 @@ export function validateJob(config: Partial<JobConfig>): string[] {
   }
   if (strategy === 'host' && (!config.host || config.host.trim() === '')) {
     errors.push("hostStrategy: host requires host: (set via --run-on or host: in YAML)");
+  }
+  // `host: auto` is fire-time fleet placement (resolveDeviceAuto), never a
+  // literal SSH target — it is only meaningful under hostStrategy: fleet.
+  if (config.host === 'auto' && strategy !== 'fleet') {
+    errors.push("host: auto requires hostStrategy: fleet (set via --run-on auto) — 'auto' is a fire-time device pick, not a machine name");
   }
   // Remote placement (host/fleet/cloud) can't carry workflow/loop/command yet —
   // those live on the firing machine.

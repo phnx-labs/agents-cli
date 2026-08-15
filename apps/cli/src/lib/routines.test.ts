@@ -83,7 +83,7 @@ describe('validateJob — resume', () => {
   });
 
   it('rejects resume on an agent without native --resume', () => {
-    const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'gemini', resume: 'sess-1' }));
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'kimi', resume: 'sess-1' }));
     expect(errors.some((e) => /resume is only supported for agents with native --resume/.test(e))).toBe(true);
   });
 
@@ -1176,5 +1176,41 @@ describe('duplicate project names in a file-created YAML routine', () => {
     } finally {
       deleteJob(name);
     }
+  });
+});
+
+describe('validateJob — per-routine strategy + host:auto (RUSH-2719)', () => {
+  it('accepts each RUN_STRATEGIES value on an agent routine', () => {
+    for (const strategy of ['pinned', 'available', 'balanced'] as const) {
+      expect(validateJob(baseJob({ schedule: '0 3 * * *', agent: 'claude', strategy }))).toEqual([]);
+    }
+  });
+
+  it('rejects an unknown strategy value', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'claude', strategy: 'chaotic' as never }));
+    expect(errors.some((e) => e.startsWith('strategy must be one of:'))).toBe(true);
+  });
+
+  it('rejects strategy combined with an exact version pin', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'claude', strategy: 'balanced', version: '2.1.207' }));
+    expect(errors.some((e) => e.includes('conflicts with version 2.1.207'))).toBe(true);
+  });
+
+  it('rejects strategy on a command routine (nothing to select)', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: undefined, prompt: undefined, command: 'echo ok', strategy: 'balanced' }));
+    expect(errors.some((e) => e.includes('strategy only applies to agent routines'))).toBe(true);
+  });
+
+  it("accepts host: 'auto' under hostStrategy: fleet", () => {
+    expect(validateJob(baseJob({
+      schedule: '0 3 * * *', agent: 'claude', hostStrategy: 'fleet', host: 'auto', devices: ['zion'],
+    }))).toEqual([]);
+  });
+
+  it("rejects host: 'auto' under hostStrategy: host — auto is a fire-time pick, not a machine", () => {
+    const errors = validateJob(baseJob({
+      schedule: '0 3 * * *', agent: 'claude', hostStrategy: 'host', host: 'auto', devices: ['zion'],
+    }));
+    expect(errors.some((e) => e.includes("host: auto requires hostStrategy: fleet"))).toBe(true);
   });
 });

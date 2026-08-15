@@ -842,6 +842,33 @@ describeSpawn('detached routine fires record a perf.timing sample (agent.run)', 
   });
 });
 
+describeSpawn('resolveRoutineLaunch — per-routine strategy override (RUSH-2719)', () => {
+  it('config.strategy is what resolveRunVersion receives, beating the firing box config', async () => {
+    let seenStrategy: string | undefined;
+    const plan = await resolveRoutineLaunch({ ...baseConfig(), strategy: 'available' }, process.cwd(), {
+      resolveRunVersion: async (_agent, strategy) => {
+        seenStrategy = strategy;
+        return { version: '2.1.219', rotation: null };
+      },
+    });
+    expect(seenStrategy).toBe('available');
+    expect(plan.chain[0]).toEqual({ agent: 'claude', version: '2.1.219' });
+  });
+
+  it('an explicit version pin still short-circuits before any strategy resolution', async () => {
+    let called = false;
+    const plan = await resolveRoutineLaunch({ ...baseConfig(), version: '2.1.207' }, process.cwd(), {
+      resolveRunVersion: async () => {
+        called = true;
+        return { version: 'x', rotation: null };
+      },
+    });
+    expect(called).toBe(false);
+    expect(plan.pinned).toBe(true);
+    expect(plan.chain[0]).toEqual({ agent: 'claude', version: '2.1.207' });
+  });
+});
+
 describeSpawn('resolveRoutineLaunch — zero-healthy accounts fail the routine loud (RUSH-2132)', () => {
   function acct(version: string): RotateCandidate {
     return {
