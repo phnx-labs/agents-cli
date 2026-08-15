@@ -309,7 +309,7 @@ function summarizeOutputResult(json: unknown): string {
  * Covers both payload shapes: the umbrella carries a flat `declined`, the
  * per-agent modes carry one per version.
  */
-export function summarizeSyncResult(json: unknown): string {
+function summarizeSyncResult(json: unknown): string {
   const p = json as { declined?: unknown; versions?: Array<{ declined?: unknown }> } | null;
   const flat = Array.isArray(p?.declined) ? p!.declined as unknown[] : [];
   const perVersion = Array.isArray(p?.versions)
