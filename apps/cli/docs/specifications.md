@@ -160,9 +160,9 @@ SSH access (§7); rendering sessions that no harness produced.
 #### 3.1 Discovery & harness parsing
 
 - **SES-1 (MUST).** The canonical session-capable harness set is
-  `SESSION_AGENTS` — exactly these 12, in display order: `claude, codex, gemini,
-  antigravity, opencode, openclaw, rush, hermes, grok, kimi, droid, cursor`
-  (`lib/session/types.ts:14`). Adding harness discovery MUST extend this set (and
+  `SESSION_AGENTS` — exactly these 13, in display order: `claude, codex, gemini,
+  antigravity, opencode, openclaw, rush, hermes, grok, kimi, droid, cursor, muse`
+  (`lib/session/types.ts:17`). Adding harness discovery MUST extend this set (and
   its parser + `dispatchAgentScan` arm), not special-case a caller.
 - **SES-2 (MUST).** Each harness's transcript location + on-disk format is fixed
   and MUST be parsed from its native shape (JSONL / single-JSON / SQLite / CLI
@@ -814,9 +814,10 @@ SSH access (§7); rendering sessions that no harness produced.
 
 #### 4.1 Command surface
 
-The command surface (bare `sessions [query]`, `preview`, `tail`, `sync`, `resume`, `focus`,
-`detach`, `attach`, `inject`, `export`, `import`, `migrate`/`relocate`,
-`migrations`, `backfill tools`, `fork`) with flags is the reference in
+The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `detach`,
+`inject`, `export`, `render`, `import`, `migrate`/`relocate`, `migrations`,
+`backfill tools`/`backfill resources`, `fork`, `bookmark`, `stats`, `insights`,
+`optimize`, `watch`) with flags is the reference in
 [sessions.md](sessions.md); this spec governs the guarantees behind it.
 
 #### 4.2 Machine-readable output (STABLE — agents depend on these)
@@ -831,8 +832,8 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `sync`, `resume
 - **SES-IF-2 (MUST).** `sessions --active --json` MUST emit `ActiveSession[]` with
   `ticketId`/`project`/`prLink` always present as keys (test
   `sessions.serialize.test.ts:76-115`); `tail --json` MUST pass raw JSONL through
-  one event per line (`commands/sessions-tail.ts:229-232`); `sync --json`,
-  `inject --json`, `migrations --json` emit their documented shapes.
+  one event per line (`commands/sessions-tail.ts:229-232`); `inject --json` and
+  `migrations --json` emit their documented shapes.
 - **SES-IF-2a (MUST).** `sessions --resolve <selector> --json` MUST resolve a full
   id, unique id prefix, or keyword query from indexed `SessionMeta` rows without
   parsing or rendering transcript events. It MUST search the online fleet unless

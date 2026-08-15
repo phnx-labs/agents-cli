@@ -13,7 +13,7 @@ import * as path from 'path';
 import { spawn, type ChildProcess } from 'child_process';
 import { Option, type Command } from 'commander';
 import chalk from 'chalk';
-import { truncate, padRight, humanDuration } from '../lib/format.js';
+import { truncate, padRight, humanDuration, formatBytes } from '../lib/format.js';
 import { sanitizeForTerminal, redactSecrets } from '../lib/redact.js';
 import { resolveProjectKey } from '../lib/project-key.js';
 import { listProjectDefs, resolveProjectNameForCwd, type ProjectDef } from '../lib/projects.js';
@@ -368,12 +368,6 @@ function resolvePathFilter(query: string): string {
     ? path.join(os.homedir(), query.slice(1))
     : query;
   return path.resolve(expanded);
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 async function renderArtifactsForSession(

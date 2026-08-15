@@ -19,7 +19,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { truncate, termLink } from '../lib/format.js';
+import { truncate, termLink, formatBytes } from '../lib/format.js';
 import * as yaml from 'yaml';
 import type { AgentId, CapabilityName, DiscoveredPlugin, ManifestHook, HookMatches, HookCache } from '../lib/types.js';
 import { AGENTS, getCliState, resolveAgentName } from '../lib/agents.js';
@@ -867,14 +867,6 @@ function itemsSize(items: ResourceItem[]): { bytes: number; files: number } {
 }
 
 /** Human byte size: "84 KB", "3.1 MB". */
-export function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let v = n / 1024, i = 0;
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-  return `${v >= 10 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
-}
-
 export interface ManifestSummary {
   /** `run.<agent>.strategy` pairs from agents.yaml. */
   strategies: Array<{ agent: string; strategy: string }>;

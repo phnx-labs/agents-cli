@@ -6,6 +6,7 @@
 // (commands/artifacts-setup.ts), which calls `runShareProvision` below.
 
 import { existsSync } from 'node:fs';
+import { formatBytes } from '../lib/format.js';
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import {
@@ -182,18 +183,6 @@ export async function runShareList(
 }
 
 /** Human-readable bytes, e.g. `1.2 KB`, `640 B`. */
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  const units = ['KB', 'MB', 'GB'];
-  let value = n / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
-}
-
 export function formatShareList(result: ShareListResult, json = false): string {
   if (json) return JSON.stringify(result, null, 2);
   if (result.count === 0) {

@@ -8,6 +8,7 @@
  */
 
 import * as fs from 'fs';
+import { compareVersions } from './agent-spec/primitives.js';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { AGENTS, ensureCommandsDir, agentConfigDirName, resolveAgentName } from './agents.js';
@@ -56,17 +57,6 @@ export type CommandApplyFailReason = 'unsupported' | 'agent_excluded' | 'too_old
 export type CommandApplyResult =
   | { ok: true }
   | { ok: false; reason: CommandApplyFailReason; need?: string };
-
-function compareVersions(a: string, b: string): number {
-  const aParts = a.split('.').map((n) => parseInt(n, 10) || 0);
-  const bParts = b.split('.').map((n) => parseInt(n, 10) || 0);
-  for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
-    const aVal = aParts[i] || 0;
-    const bVal = bParts[i] || 0;
-    if (aVal !== bVal) return aVal - bVal;
-  }
-  return 0;
-}
 
 function parseAgentsField(raw: unknown): AgentId[] | undefined {
   if (raw == null) return undefined;
