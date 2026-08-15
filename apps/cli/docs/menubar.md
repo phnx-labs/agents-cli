@@ -95,6 +95,11 @@ never waits for `agents sessions`, attachment-directory scans, or image decode.
   screenshot so the image bytes are uploaded at create time and embedded in the
   issue description — screenshot paths never pass through an LLM-authored shell
   string.
+- The helper resolves the standalone `linear` executable before dispatching the
+  ticket agent. It prefers `~/.local/bin/linear`, then checks standard Homebrew
+  locations and the inherited `PATH`. A missing or non-executable CLI stops
+  immediately with the install path instead of reporting a generic create
+  failure after the agent has run.
 - **Run** fans out to every selected agent with `agents run <agent> --mode auto
   --balanced --notify --name <slug-of-your-note>`, so the resulting sessions
   appear in normal `agents sessions` and menu-bar surfaces instead of as opaque
