@@ -93,6 +93,10 @@ export interface ShareListItem {
   repo: string | null;
   /** Count of retained prior versions under this slug (see `share revisions`). */
   revisionCount: number;
+  /** Arbitrary `--meta key=value` entries attached at publish time (RUSH-2683)
+   * — everything that isn't a reserved provenance/label key. `{}` when none
+   * were set, or when the deployed Worker predates this field. */
+  meta: Record<string, string>;
 }
 
 export interface ShareListResult {
@@ -116,6 +120,18 @@ const OUTDATED_TEMPLATE_HINT =
 async function defaultListingFetch(url: string): Promise<{ status: number; contentType: string; body: string }> {
   const res = await fetch(url, { headers: { accept: 'application/json' } });
   return { status: res.status, contentType: res.headers.get('content-type') ?? '', body: await res.text() };
+}
+
+/** Normalize the Worker's `meta` field (arbitrary `--meta key=value` entries,
+ * RUSH-2683) into a plain string record — `{}` for a missing/malformed field
+ * (a deployed Worker that predates it, or a non-object value), never throws. */
+function parseMetaField(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    out[k] = String(v);
+  }
+  return out;
 }
 
 /** Parse the Worker's listing JSON into a validated result, failing loud (with the
@@ -148,6 +164,7 @@ export function parseShareListing(user: string, body: string): ShareListResult {
       host: item.host == null ? null : String(item.host),
       repo: item.repo == null ? null : String(item.repo),
       revisionCount: typeof item.revisionCount === 'number' ? item.revisionCount : 0,
+      meta: parseMetaField(item.meta),
     };
   });
   return { user, count: objects.length, objects };
@@ -241,6 +258,15 @@ function applyShareListFilters(
 }
 
 /** Human-readable bytes, e.g. `1.2 KB`, `640 B`. */
+/** Render an arbitrary `--meta` map as `k=v k2=v2` for a human table row, or
+ * undefined when there's nothing to show (RUSH-2683). */
+function formatMetaPairs(meta: Record<string, string> | undefined): string | undefined {
+  if (!meta) return undefined;
+  const entries = Object.entries(meta);
+  if (entries.length === 0) return undefined;
+  return entries.map(([k, v]) => `${k}=${v}`).join(' ');
+}
+
 export function formatShareList(result: ShareListResult, json = false): string {
   if (json) return JSON.stringify(result, null, 2);
   if (result.count === 0) {
@@ -255,9 +281,11 @@ export function formatShareList(result: ShareListResult, json = false): string {
     if (o.agent) bits.push(o.agent);
     if (o.revisionCount > 0) bits.push(`${o.revisionCount} ${o.revisionCount === 1 ? 'revision' : 'revisions'}`);
     if (o.expiresAt) bits.push(`expires ${o.expiresAt.slice(0, 10)}`);
-    const meta = bits.join(' · ');
+    const metaPairs = formatMetaPairs(o.meta);
+    if (metaPairs) bits.push(metaPairs);
+    const line = bits.join(' · ');
     const title = o.label ? `${chalk.bold(o.label)}\n  ` : '';
-    return `${title}${chalk.cyan(o.slug)}  ${chalk.dim(meta)}\n  ${chalk.green(o.url)}`;
+    return `${title}${chalk.cyan(o.slug)}  ${chalk.dim(line)}\n  ${chalk.green(o.url)}`;
   });
   return [header, ...rows].join('\n');
 }
@@ -278,6 +306,10 @@ export interface ShareRevisionItem {
   session: string | null;
   host: string | null;
   repo: string | null;
+  /** Arbitrary `--meta key=value` entries attached at publish time (RUSH-2683)
+   * — everything that isn't a reserved provenance/label key. `{}` when none
+   * were set, or when the deployed Worker predates this field. */
+  meta: Record<string, string>;
 }
 
 export interface ShareRevisionsResult {
@@ -314,6 +346,7 @@ export function parseShareRevisions(key: string, body: string): ShareRevisionsRe
       session: item.session == null ? null : String(item.session),
       host: item.host == null ? null : String(item.host),
       repo: item.repo == null ? null : String(item.repo),
+      meta: parseMetaField(item.meta),
     };
   });
   return { key, count: revisions.length, revisions };
@@ -365,6 +398,8 @@ export function formatShareRevisions(result: ShareRevisionsResult, json = false)
     const bits = [r.uploadedAt ? r.uploadedAt.slice(0, 10) : 'unknown', formatBytes(r.size)];
     if (r.agent) bits.push(r.agent);
     if (r.label) bits.push(r.label);
+    const metaPairs = formatMetaPairs(r.meta);
+    if (metaPairs) bits.push(metaPairs);
     return `${chalk.cyan(r.uploadedAt || r.key)}  ${chalk.dim(bits.join(' · '))}\n  ${chalk.green(r.url)}`;
   });
   return [header, ...rows].join('\n');
@@ -700,7 +735,7 @@ ${SHARE_DELETE_NOTES}
     // of scope here (a pre-existing instance of it already affects --json/
     // --github-user on list/update/delete — tracked as a follow-up).
     .option('--label-contains <substr>', 'filter to shares whose label contains this text (case-insensitive)')
-    .option('--json', 'emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt, label, agent, session, host, repo, revisionCount)')
+    .option('--json', 'emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt, label, agent, session, host, repo, revisionCount, meta)')
     .action(async (opts: { githubUser?: string; agent?: string; session?: string; labelContains?: string; json?: boolean }) => {
       try {
         const result = await runShareList({
@@ -746,13 +781,22 @@ ${SHARE_DELETE_NOTES}
 
   const shareRevisionsCmd = shareCmd
     .command('revisions <target>')
-    .description('Show the retained prior versions of a published slug, newest first (human table; --json for scripts).')
-    .option('--github-user <user>', 'GitHub username for resolving a bare-slug target (default: resolved from gh/git config)')
-    .option('--json', 'emit the machine-readable revision list')
-    .action(async (target: string, opts: { githubUser?: string; json?: boolean }) => {
+    .description('Show the retained prior versions of a published slug, newest first (human table; --revisions-json for scripts).')
+    // Named --for-user / --revisions-json, not --github-user / --json: `share
+    // <file>` (the parent) already owns both those long names, and commander's
+    // argv scanner resolves an option name against the WHOLE ancestor chain —
+    // a same-named child option is silently dropped even when it parses alone
+    // (verified with a real program.parseAsync(), see share.test.ts). Unlike
+    // `list`'s pre-existing --json/--github-user collision (RUSH-2687, left
+    // as a tracked follow-up because it predates this diff), `revisions` is
+    // brand-new here, so it gets non-colliding names from the start instead
+    // of shipping a silently-broken flag.
+    .option('--for-user <user>', 'GitHub username for resolving a bare-slug target (default: resolved from gh/git config)')
+    .option('--revisions-json', 'emit the machine-readable revision list')
+    .action(async (target: string, opts: { forUser?: string; revisionsJson?: boolean }) => {
       try {
-        const result = await runShareRevisions(target, { githubUser: opts.githubUser });
-        console.log(formatShareRevisions(result, Boolean(opts.json)));
+        const result = await runShareRevisions(target, { githubUser: opts.forUser });
+        console.log(formatShareRevisions(result, Boolean(opts.revisionsJson)));
       } catch (e) {
         console.error(chalk.red((e as Error).message));
         process.exitCode = 1;
@@ -767,6 +811,10 @@ ${SHARE_DELETE_NOTES}
       # By <user>/<slug> or full URL, same target forms as 'agents unshare'
       agents artifacts share revisions octocat/q3-report
       agents artifacts share revisions https://share.agents-cli.sh/octocat/q3-report
+
+      # Machine-readable, and a bare slug resolved against another namespace
+      agents artifacts share revisions q3-report --revisions-json
+      agents artifacts share revisions q3-report --for-user octocat
     `,
     notes: `
   A revision is created automatically on every republish of an existing slug

@@ -21,6 +21,7 @@ import {
   parseMetaEntries,
   assertMetadataSize,
   deriveLabel,
+  sanitizeLabel,
   RESERVED_META_KEYS,
 } from './publish.js';
 import { renderWorkerScript } from './worker-template.js';
@@ -394,6 +395,76 @@ describe('publishToEndpoint', () => {
     expect(ok.url).toContain('/spend');
     expect(uploads).toBe(1);
   });
+
+  it('refuses a credential in --meta unless --force, even when the file body is clean (RUSH-2683 review fix)', async () => {
+    // --label and --meta land in PUBLIC customMetadata (visible in the
+    // gallery, `share list --json`, `share revisions`) exactly like the file
+    // body — the pre-publish scan previously ran on the body only, so a
+    // credential-shaped --meta value or --label sailed straight through with
+    // no --force gate at all.
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-scan-meta-')), 'report.html');
+    writeFileSync(htmlPath, '<h1>Clean body, no secrets here</h1>');
+    let uploads = 0;
+    await expect(
+      publishToEndpoint(
+        htmlPath,
+        { baseUrl: 'https://share.example', token: 'tok' },
+        {
+          slug: 'meta-secret',
+          githubUser: 'octocat',
+          cover: false,
+          meta: { note: 'AKIAABCDEFGHIJKLMNOP' },
+          uploader: async () => {
+            uploads++;
+            return { ok: true, status: 200 };
+          },
+        },
+      ),
+    ).rejects.toThrow(/Refusing to publish.*credential/);
+    expect(uploads).toBe(0);
+
+    // --force bypasses this gate too.
+    const ok = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'meta-secret',
+        githubUser: 'octocat',
+        cover: false,
+        force: true,
+        meta: { note: 'AKIAABCDEFGHIJKLMNOP' },
+        uploader: async () => {
+          uploads++;
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    expect(ok.url).toContain('/meta-secret');
+    expect(uploads).toBe(1);
+  });
+
+  it('refuses an email in an explicit --label unless --force (RUSH-2683 review fix)', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-scan-label-')), 'report.html');
+    writeFileSync(htmlPath, '<h1>Clean body</h1>');
+    let uploads = 0;
+    await expect(
+      publishToEndpoint(
+        htmlPath,
+        { baseUrl: 'https://share.example', token: 'tok' },
+        {
+          slug: 'label-secret',
+          githubUser: 'octocat',
+          cover: false,
+          label: 'contact: alice@example.com',
+          uploader: async () => {
+            uploads++;
+            return { ok: true, status: 200 };
+          },
+        },
+      ),
+    ).rejects.toThrow(/Refusing to publish.*email/);
+    expect(uploads).toBe(0);
+  });
 });
 
 describe('resolveShareProvenance (RUSH-2683)', () => {
@@ -482,6 +553,32 @@ describe('deriveLabel (RUSH-2683)', () => {
   it('never throws or blocks on an empty file', () => {
     expect(deriveLabel('/tmp/empty.html', Buffer.alloc(0))).toBe('empty.html'.replace(/\.[^.]+$/, ''));
   });
+
+  it('collapses a multi-line <title> to a single line (RUSH-2683 review fix)', () => {
+    // `[^<]{1,200}` in the <title> regex matches newlines, and .trim() only
+    // strips leading/trailing whitespace — a multi-line title used to reach
+    // Headers.set() as-is, which throws an unhandled TypeError and crashes
+    // the whole publish. deriveLabel must return a single-line string.
+    const html = '<html><head><title>Fleet\nStatus\n  Report</title></head></html>';
+    const label = deriveLabel('/tmp/plan.html', Buffer.from(html));
+    expect(label).toBe('Fleet Status Report');
+    expect(label).not.toMatch(/\n/);
+    expect(() => new Headers({ 'x-share-label': label })).not.toThrow();
+  });
+});
+
+describe('sanitizeLabel (RUSH-2683 review fix)', () => {
+  it('collapses embedded newlines and internal runs of whitespace to a single space', () => {
+    expect(sanitizeLabel('Fleet\nStatus\tReport')).toBe('Fleet Status Report');
+  });
+
+  it('trims leading/trailing whitespace', () => {
+    expect(sanitizeLabel('  Q3 Report  ')).toBe('Q3 Report');
+  });
+
+  it('is a no-op on an already-clean single-line label', () => {
+    expect(sanitizeLabel('Fleet Plan')).toBe('Fleet Plan');
+  });
 });
 
 describe('publishToEndpoint provenance / label / meta / revision headers (RUSH-2683)', () => {
@@ -515,6 +612,29 @@ describe('publishToEndpoint provenance / label / meta / revision headers (RUSH-2
     expect(JSON.parse(headersSeen['x-share-meta'])).toEqual({ kind: 'plan', ticket: 'RUSH-2683' });
     expect(result.label).toBe('Fleet Plan');
     expect(result.labelSource).toBe('explicit');
+  });
+
+  it('sanitizes an explicit --label with an embedded newline instead of crashing on Headers.set() (RUSH-2683 review fix)', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-label-newline-')), 'x.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    let headersSeen: Record<string, string> = {};
+    const result = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'label-newline',
+        githubUser: 'octocat',
+        cover: false,
+        label: 'Fleet\nStatus Report',
+        provenance: {},
+        uploader: async (_u, _b, headers) => {
+          headersSeen = headers;
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    expect(headersSeen['x-share-label']).toBe('Fleet Status Report');
+    expect(result.label).toBe('Fleet Status Report');
   });
 
   it('derives a label and marks it derived when --label is omitted', async () => {

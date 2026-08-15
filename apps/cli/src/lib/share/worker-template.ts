@@ -63,8 +63,12 @@ export default {
       const contentType = request.headers.get('content-type') || 'text/html; charset=utf-8';
       // Provenance (RUSH-2683): captured client-side from the exec env/git/clock,
       // never invented here — a header is simply absent when the CLI had nothing
-      // to say. --meta entries ride one JSON header; reserved keys are applied
-      // AFTER meta so a stray collision can never clobber real provenance.
+      // to say. --meta entries ride one JSON header; reserved keys are stripped
+      // from that JSON UNCONDITIONALLY (not just overwritten when a provenance
+      // header happens to be present) so a same-named x-share-meta entry can
+      // never smuggle through on a publish that carries no agent/session/host/
+      // repo/date at all — e.g. a human publishing outside an agent session, or
+      // outside a git checkout.
       const agent = request.headers.get('x-share-agent') || '';
       const session = request.headers.get('x-share-session') || '';
       const host = request.headers.get('x-share-host') || '';
@@ -83,6 +87,12 @@ export default {
         }
       }
       const customMetadata = { ...extraMeta };
+      // Strip every reserved key UNCONDITIONALLY before re-applying the real
+      // provenance below — an if(value)-guarded overwrite alone leaves a
+      // same-named --meta entry in place whenever the real header is absent.
+      for (const reservedKey of RESERVED_METADATA_KEYS) {
+        delete customMetadata[reservedKey];
+      }
       if (expiresAt) customMetadata['expires-at'] = expiresAt;
       if (visibility === 'unlisted') customMetadata['visibility'] = 'unlisted';
       if (agent) customMetadata['agent'] = agent;
@@ -284,6 +294,7 @@ async function renderListing(bucket, origin, user, method) {
       host: (o.customMetadata && o.customMetadata['host']) || null,
       repo: (o.customMetadata && o.customMetadata['repo']) || null,
       revisionCount: revisionCounts[o.key] || 0,
+      meta: extraMetaOf(o.customMetadata),
     }));
   // Newest first, so the human table and any script reads the freshest share top.
   items.sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : a.publishedAt > b.publishedAt ? -1 : 0));
@@ -318,6 +329,7 @@ async function renderRevisions(bucket, origin, key, method) {
     session: (o.customMetadata && o.customMetadata['session']) || null,
     host: (o.customMetadata && o.customMetadata['host']) || null,
     repo: (o.customMetadata && o.customMetadata['repo']) || null,
+    meta: extraMetaOf(o.customMetadata),
   }));
   // Newest first — the most recently replaced version leads.
   items.sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : a.uploadedAt > b.uploadedAt ? -1 : 0));
@@ -329,6 +341,27 @@ async function renderRevisions(bucket, origin, key, method) {
     status: 200,
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=30' },
   });
+}
+
+// The customMetadata keys the CLI sets automatically (provenance + label) —
+// never a real \`--meta key=value\` entry (the CLI rejects a colliding key
+// before it ever reaches this Worker; see RESERVED_META_KEYS in publish.ts).
+// One list, reused both to strip a same-named --meta collision on write and
+// to split arbitrary --meta entries back out on read.
+var RESERVED_METADATA_KEYS = ['expires-at', 'visibility', 'agent', 'session', 'host', 'repo', 'date', 'label', 'label-source'];
+
+// Everything in customMetadata that ISN'T one of the reserved provenance/label
+// keys above — i.e. the caller's own \`--meta key=value\` entries. Surfaced on
+// every read route (listing, revisions) so a value stored with \`--meta
+// kind=plan --meta ticket=RUSH-2683\` is actually visible again, not just
+// write-only (RUSH-2683 review fix).
+function extraMetaOf(customMetadata) {
+  var out = {};
+  if (!customMetadata) return out;
+  for (var k in customMetadata) {
+    if (RESERVED_METADATA_KEYS.indexOf(k) === -1) out[k] = customMetadata[k];
+  }
+  return out;
 }
 
 function escapeHtml(s) {

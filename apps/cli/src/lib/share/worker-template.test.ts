@@ -225,6 +225,38 @@ describe('worker JSON listing route (GET /<user>?format=json)', () => {
     expect(payload.objects[0]).toMatchObject({ label: null, agent: null, session: null, host: null, repo: null });
   });
 
+  it('strips a same-named --meta key even when the CLI sent NO provenance header at all (RUSH-2683 review fix)', async () => {
+    // Regression guard: the reserved-key merge used to be
+    // `customMetadata = { ...extraMeta }` followed by `if (agent)
+    // customMetadata.agent = agent` — an overwrite that only fires when the
+    // real provenance header is PRESENT. A human publishing outside an agent
+    // session and outside a git checkout sends no x-share-agent/session/host/
+    // repo/date headers at all, so a smuggled --meta agent=… (or session=…,
+    // host=…, repo=…, date=…) previously survived untouched into public
+    // customMetadata. The fix strips every reserved key unconditionally
+    // before re-applying the real headers, so this must come back null/absent
+    // regardless of whether the CLI sent any provenance.
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/no-provenance', '<h1>no provenance</h1>', {
+      'x-share-meta': JSON.stringify({
+        kind: 'plan',
+        agent: 'smuggled-agent',
+        session: 'smuggled-session',
+        host: 'smuggled-host',
+        repo: 'smuggled-repo',
+        date: 'smuggled-date',
+        label: 'smuggled-label',
+        'label-source': 'smuggled-source',
+      }),
+    });
+    const res = await worker.default.fetch(new Request('https://share.test/octocat?format=json'), env);
+    const payload = await res.json();
+    expect(payload.objects[0]).toMatchObject({
+      label: null, agent: null, session: null, host: null, repo: null,
+    });
+  });
+
   it('accepts arbitrary --meta entries via x-share-meta, and a real provenance header always wins over a same-named --meta key', async () => {
     const worker = await loadWorker();
     const { env } = makeEnv();
@@ -238,6 +270,35 @@ describe('worker JSON listing route (GET /<user>?format=json)', () => {
     // this pins the Worker's independent defense — reserved fields are applied
     // AFTER meta, so a genuine x-share-agent header always wins.
     expect(payload.objects[0].agent).toBe('claude');
+  });
+
+  it('returns arbitrary --meta entries under objects[].meta, with reserved keys excluded (RUSH-2683 review fix)', async () => {
+    // --meta was write-only before this fix: stored in customMetadata but never
+    // returned by any read route, so a value published with `--meta kind=plan
+    // --meta ticket=RUSH-2683` couldn't be read back via `share list --json`.
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/meta-visible', '<h1>meta</h1>', {
+      'x-share-agent': 'claude',
+      'x-share-label': 'Fleet Plan',
+      'x-share-meta': JSON.stringify({ kind: 'plan', ticket: 'RUSH-2683' }),
+    });
+    const res = await worker.default.fetch(new Request('https://share.test/octocat?format=json'), env);
+    const payload = await res.json();
+    expect(payload.objects[0].meta).toEqual({ kind: 'plan', ticket: 'RUSH-2683' });
+    // Reserved keys never leak into the meta map even though they live in the
+    // same customMetadata object under the hood.
+    expect(payload.objects[0].meta.agent).toBeUndefined();
+    expect(payload.objects[0].meta.label).toBeUndefined();
+  });
+
+  it('meta is {} when no --meta entries were sent', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/no-meta', '<h1>plain</h1>');
+    const res = await worker.default.fetch(new Request('https://share.test/octocat?format=json'), env);
+    const payload = await res.json();
+    expect(payload.objects[0].meta).toEqual({});
   });
 
   it('omits unlisted pages from the JSON listing and HTML gallery, but still serves the direct URL (RUSH-2443)', async () => {
@@ -356,6 +417,21 @@ describe('revision retention (RUSH-2683 — R2 has no native object versioning)'
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('returns arbitrary --meta entries under revisions[].meta, with reserved keys excluded (RUSH-2683 review fix)', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/plan-meta', '<h1>v1</h1>', {
+      'x-share-agent': 'claude',
+      'x-share-meta': JSON.stringify({ kind: 'plan', ticket: 'RUSH-2683' }),
+    });
+    await put(worker, env, 'octocat/plan-meta', '<h1>v2</h1>');
+
+    const res = await worker.default.fetch(new Request('https://share.test/octocat/plan-meta?revisions=json'), env);
+    const payload = await res.json();
+    expect(payload.revisions[0].meta).toEqual({ kind: 'plan', ticket: 'RUSH-2683' });
+    expect(payload.revisions[0].meta.agent).toBeUndefined();
   });
 
   it('returns an empty revisions array for a slug that was only ever published once', async () => {

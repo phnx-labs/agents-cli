@@ -192,6 +192,19 @@ export function assertMetadataSize(customMetadata: Record<string, string>): void
 }
 
 /**
+ * Collapse a label to a single line before it goes into the `x-share-label`
+ * header or public customMetadata. `<title>[^<]{1,200}</title>` matches
+ * newlines (`[^<]` excludes only `<`), and `.trim()` only strips leading/
+ * trailing whitespace, not embedded newlines — a multi-line `<title>` (or an
+ * explicit `--label`/`--title` the caller typed with a literal newline) was
+ * previously passed straight into `Headers.set()` unsanitized, which throws
+ * an unhandled `TypeError: Invalid value` and crashes the publish outright.
+ */
+export function sanitizeLabel(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
  * Best-effort human title when `--label` is omitted: the HTML `<title>`, else a
  * Markdown frontmatter `title:`, else the filename. Always returns something —
  * a headless publish must never hang waiting on a prompt for one.
@@ -199,15 +212,15 @@ export function assertMetadataSize(customMetadata: Record<string, string>): void
 export function deriveLabel(filePath: string, body: Buffer): string {
   const text = body.toString('utf8');
   const htmlTitle = /<title[^>]*>([^<]{1,200})<\/title>/i.exec(text);
-  if (htmlTitle?.[1]?.trim()) return htmlTitle[1].trim();
+  if (htmlTitle?.[1]?.trim()) return sanitizeLabel(htmlTitle[1]);
   const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
   if (frontmatter) {
     const titleLine = /^title:\s*(.+)$/m.exec(frontmatter[1]);
     const cleaned = titleLine?.[1]?.trim().replace(/^["']|["']$/g, '').trim();
-    if (cleaned) return cleaned;
+    if (cleaned) return sanitizeLabel(cleaned);
   }
   const base = basename(filePath).replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim();
-  return base || basename(filePath);
+  return sanitizeLabel(base || basename(filePath));
 }
 
 /** Default auto-expire for unflagged publishes — accidental links decay (RUSH-2443). */
@@ -326,7 +339,7 @@ export function formatSensitiveContentError(hits: SensitiveHit[]): string {
         ? 'email addresses'
         : 'credential-shaped strings';
   return (
-    `Refusing to publish: the file contains ${what} (${samples}). ` +
+    `Refusing to publish: found ${what} (${samples}) in the file, label, or metadata. ` +
     `Shares are world-readable by URL — pass --force to publish anyway, ` +
     `or --unlisted --expire 12h to bound the blast radius.`
   );
@@ -512,19 +525,32 @@ export async function publishToEndpoint(
   let coverUrl: string | undefined;
   const isHtml = /\.html?$/i.test(filePath);
 
-  // Pre-publish scan (RUSH-2443): refuse emails / credential-shaped strings
-  // unless --force. Runs on the raw file before analytics/cover mutation so a
-  // beacon injection never triggers a false positive. Binary media is a no-op.
+  const explicitLabel = opts.label?.trim();
+  // sanitizeLabel here (not just inside deriveLabel) covers an explicit
+  // --label/--title the caller typed with an embedded newline — deriveLabel
+  // is only reached when --label is omitted.
+  const label = explicitLabel ? sanitizeLabel(explicitLabel) : deriveLabel(filePath, body);
+  const labelSource: 'explicit' | 'derived' = explicitLabel ? 'explicit' : 'derived';
+
+  // Pre-publish scan (RUSH-2443/RUSH-2683): refuse emails / credential-shaped
+  // strings unless --force. Runs on the raw file body AND on every piece of
+  // free-text metadata that lands in public customMetadata — --label (explicit
+  // or derived) and every --meta value. Metadata is visible in the gallery,
+  // `share list --json`, and `share revisions` just like the page itself, so a
+  // credential smuggled in there is exactly as exposed as one in the body; it
+  // must not have a free pass around this gate. Runs before analytics/cover
+  // mutation so a beacon injection never triggers a false positive on the body
+  // scan. Binary media bodies are a no-op for the body scan.
   if (opts.force !== true) {
-    const hits = scanShareContent(body);
+    const hits = [
+      ...scanShareContent(body),
+      ...scanShareContent(label),
+      ...Object.values(meta).flatMap((v) => scanShareContent(v)),
+    ];
     if (hits.length > 0) {
       throw new Error(formatSensitiveContentError(hits));
     }
   }
-
-  const explicitLabel = opts.label?.trim();
-  const label = explicitLabel || deriveLabel(filePath, body);
-  const labelSource: 'explicit' | 'derived' = explicitLabel ? 'explicit' : 'derived';
 
   // Validate the FULL customMetadata payload before any network call — fail
   // fast, not mid-upload.
