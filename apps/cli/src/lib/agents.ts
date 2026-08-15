@@ -1224,7 +1224,9 @@ export function isSelfUpdatingAgent(agent: AgentId): boolean {
 }
 
 export function isAgentHardDeprecated(agent: AgentId): boolean {
-  return AGENTS[agent].deprecated?.hard === true;
+  // Tolerate ids outside the registry (legacy YAML, test fixtures): an unknown
+  // agent is not hard-deprecated — its own validation rejects it elsewhere.
+  return AGENTS[agent]?.deprecated?.hard === true;
 }
 
 // Capability-filtered agent lists used to live here as `*_CAPABLE_AGENTS`

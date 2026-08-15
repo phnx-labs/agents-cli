@@ -115,40 +115,10 @@ describe('buildJobCommand', () => {
     });
   });
 
-  describe('gemini', () => {
-    it('builds basic command', () => {
-      const cmd = buildJobCommand(makeConfig({ agent: 'gemini' }), 'hello');
-      expect(cmd[0]).toBe('gemini');
-      expect(cmd).toContain('hello');
-    });
-
-    it('adds --approval-mode auto_edit in edit mode', () => {
-      const cmd = buildJobCommand(makeConfig({ agent: 'gemini', mode: 'edit' }), 'hello');
-      expect(cmd).toContain('--approval-mode');
-      expect(cmd[cmd.indexOf('--approval-mode') + 1]).toBe('auto_edit');
-    });
-
-    it('adds --yolo in skip mode (formerly full)', () => {
-      const cmd = buildJobCommand(makeConfig({ agent: 'gemini', mode: 'skip' }), 'hello');
-      expect(cmd).toContain('--yolo');
-    });
-
-    it("legacy 'full' alias still produces --yolo for gemini", () => {
-      const cmd = buildJobCommand(makeConfig({ agent: 'gemini', mode: 'full' as any }), 'hello');
-      expect(cmd).toContain('--yolo');
-    });
-
-    it('does not add --yolo in plan mode', () => {
-      const cmd = buildJobCommand(makeConfig({ agent: 'gemini', mode: 'plan' }), 'hello');
-      expect(cmd).not.toContain('--yolo');
-    });
-
-    it('adds --model flag when config.model is set', () => {
-      const config = makeConfig({ agent: 'gemini', config: { model: 'gemini-2.5-pro' } });
-      const cmd = buildJobCommand(config, 'hello');
-      const modelIdx = cmd.indexOf('--model');
-      expect(modelIdx).toBeGreaterThan(-1);
-      expect(cmd[modelIdx + 1]).toBe('gemini-2.5-pro');
+  describe('gemini (hard-deprecated — no longer a routine target, RUSH-2719)', () => {
+    it('buildJobCommand refuses gemini: it left ROUTINE_AGENT_COMMANDS', () => {
+      expect(() => buildJobCommand(makeConfig({ agent: 'gemini' }), 'hello'))
+        .toThrow('Unsupported agent for daemon jobs: gemini');
     });
   });
 
