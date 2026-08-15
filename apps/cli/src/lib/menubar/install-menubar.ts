@@ -25,10 +25,21 @@ import { getRuntimeStateDir, getHelpersDir } from '../state.js';
 import { getCliVersion, resolveAgentsBin, resolveInstalledLayout } from '../version.js';
 import { copyAppBundle, withInstallLock } from '../app-bundle-install.js';
 import { compareVersions } from '../agent-spec/primitives.js';
+import { namespacedServiceLabel, serviceManifestHomeEnv } from '../service-manifest.js';
 
 const APP_BUNDLE_NAME = 'MenubarHelper.app';
 const INSTALL_DIR_NAME = 'agents-cli';
-const SERVICE_LABEL = 'com.phnx-labs.agents-menubar';
+const SERVICE_LABEL_BASE = 'com.phnx-labs.agents-menubar';
+
+/**
+ * launchd Label for this process's helper — the production identifier for a
+ * real invocation, namespaced under a redirected HOME (RUSH-2639). launchd
+ * routes bootout/bootstrap/kickstart by identifier alone, so without this a
+ * hermetic test fork's own teardown boots out the operator's live helper.
+ */
+function serviceLabel(): string {
+  return namespacedServiceLabel(SERVICE_LABEL_BASE);
+}
 
 /**
  * Minimum seconds between launchd restarts of the helper (`ThrottleInterval`).
@@ -100,7 +111,7 @@ export function resolveInstalledMenubarExecutable(): string | null {
 
 /** ~/Library/LaunchAgents/com.phnx-labs.agents-menubar.plist */
 function servicePlistPath(): string {
-  return path.join(os.homedir(), 'Library', 'LaunchAgents', `${SERVICE_LABEL}.plist`);
+  return path.join(os.homedir(), 'Library', 'LaunchAgents', `${serviceLabel()}.plist`);
 }
 
 /** Sticky opt-out marker written by `agents menubar disable`. */
@@ -275,8 +286,16 @@ export function generateServicePlist(execPath: string): string {
   // Bake interpreter + entry + bin so the GUI helper can reach the CLI with no
   // login PATH. AgentsCLI.swift prefers [AGENTS_NODE, AGENTS_ENTRY] when both
   // exist, else falls back to AGENTS_BIN, else probes well-known paths.
+  //
+  // HOME is baked for the same reason (RUSH-2639, see service-manifest.ts):
+  // launchd applies this dict on top of the LOGIN SESSION's environment, not the
+  // environment of whoever called `launchctl bootstrap`. Without the key the
+  // helper resolves the account home and every `agents` call it makes bootstraps
+  // that home's `~/.agents` — which is how a hermetic test fork's helper wrote
+  // into the runner's real home.
   const env: Record<string, string> = {
     PATH: `/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${path.dirname(process.execPath)}:${home}/.local/bin`,
+    ...serviceManifestHomeEnv(),
   };
   const node = process.execPath;
   const entry = resolveCliEntry();
@@ -296,7 +315,7 @@ export function generateServicePlist(execPath: string): string {
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${SERVICE_LABEL}</string>
+  <string>${serviceLabel()}</string>
   <key>ProgramArguments</key>
   <array>
     <string>${xmlEscape(execPath)}</string>
@@ -335,7 +354,7 @@ export function restartMenubarLaunchAgent(
   plist: string,
   exec: (cmd: string, args: readonly string[], opts: { stdio: ['ignore', 'ignore', 'ignore'] }) => Buffer = execFileSync,
 ): void {
-  const serviceTarget = `gui/${uid}/${SERVICE_LABEL}`;
+  const serviceTarget = `gui/${uid}/${serviceLabel()}`;
   const opts: { stdio: ['ignore', 'ignore', 'ignore'] } = { stdio: ['ignore', 'ignore', 'ignore'] };
   try { exec('launchctl', ['bootout', serviceTarget], opts); } catch { /* may not be loaded */ }
   try { exec('launchctl', ['bootstrap', `gui/${uid}`, plist], opts); } catch { /* best effort */ }
@@ -468,7 +487,7 @@ export function disableMenubarService(): void {
   if (!onDarwin()) return;
   const plist = servicePlistPath();
   const uid = process.getuid?.() ?? 0;
-  try { execFileSync('launchctl', ['bootout', `gui/${uid}/${SERVICE_LABEL}`], { stdio: ['ignore', 'ignore', 'ignore'] }); }
+  try { execFileSync('launchctl', ['bootout', `gui/${uid}/${serviceLabel()}`], { stdio: ['ignore', 'ignore', 'ignore'] }); }
   catch { try { execFileSync('launchctl', ['unload', '-w', plist], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* not loaded */ } }
   try { fs.unlinkSync(plist); } catch { /* already gone */ }
   try {
@@ -769,7 +788,7 @@ export function runMenubarSetup(): SetupResult {
 
   installAndStartService(exec);
   step('login item', before.serviceInstalled ? 'ok' : 'changed',
-    `${SERVICE_LABEL} — starts at login, restarts if it dies`);
+    `${serviceLabel()} — starts at login, restarts if it dies`);
 
   // launchd's bootstrap+kickstart is asynchronous; give the status item a beat
   // to claim the lock before counting instances, or `setup` reports zero on a
