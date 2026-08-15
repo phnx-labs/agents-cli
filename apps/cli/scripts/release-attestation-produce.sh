@@ -77,6 +77,11 @@ TREE="$(git -C "$REPO_ROOT" rev-parse "$SHA^{tree}")"
 
 STORE="${STORE:-${RELEASE_ATTESTATION_DIR:-$REPO_ROOT/.release-attestations}}"
 mkdir -p "$STORE"
+# Resolve to an absolute path NOW, while cwd is still stable -- the rest of
+# this script cd's into the throwaway worktree below, and a relative $STORE
+# would then resolve there instead, silently writing (and losing, on cleanup)
+# the attestation in the wrong directory.
+STORE="$(cd "$STORE" && pwd)"
 
 WT="$(mktemp -d "${TMPDIR:-/tmp}/agents-cli-attest-produce.XXXXXX")"
 cleanup() {
@@ -113,6 +118,13 @@ green "Suite passed."
 if [[ "$(uname)" == "Darwin" ]] && command -v agents >/dev/null 2>&1 \
   && [[ -x scripts/sign-cli-binary.sh ]]; then
   bold "Signing + notarizing the CLI binary and helper apps..."
+  # Unlocks rush-signing.keychain-db and authorizes codesign/notarytool to use
+  # the Developer ID key non-interactively; without it a headless `agents
+  # secrets exec` hits errSecInternalComponent (the key ACL prompts for UI
+  # approval that a headless session can never answer). Same preamble
+  # release.sh's own privileged phase sources before any signing call.
+  # shellcheck source=scripts/headless-sign-context.sh
+  . scripts/headless-sign-context.sh
   agents secrets exec apple.com -- scripts/sign-cli-binary.sh \
     || die "CLI binary sign/notarize failed"
   agents secrets exec apple.com -- bash -c '
@@ -143,10 +155,16 @@ else
 fi
 green "Packed $TGZ_NAME (sha256:$TGZ_DIGEST)"
 
+# suite is "selected", not "full" or a producer-invented name: release.sh
+# never passes --suite to `release-attestation.sh require`
+# (bind_tree_lock_policy defaults an unset --suite to "selected"), so a record
+# tagged anything else is invisible to it, key-for-key correct on tree/lock/
+# policy or not. Running the full suite here satisfies "selected" -- it is a
+# superset -- but the record must still speak the consumer's vocabulary.
 ATTEST_TMP="$(mktemp "${TMPDIR:-/tmp}/agents-cli-attest.XXXXXX.json")"
 scripts/release-attestation.sh identity --repo-root "$WT" --commit "$SHA" \
   | jq --arg name "$TGZ_NAME" --arg digest "sha256:$TGZ_DIGEST" \
-      '. + {schemaVersion: 1, suite: "full", conclusion: "pass", tarball: {filename: $name, digest: $digest}}' \
+      '. + {schemaVersion: 1, suite: "selected", conclusion: "pass", tarball: {filename: $name, digest: $digest}}' \
   > "$ATTEST_TMP"
 
 DEST_JSON="$(scripts/release-attestation.sh write --dir "$STORE" --file "$ATTEST_TMP")" \

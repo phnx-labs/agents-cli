@@ -102,14 +102,24 @@ lockfile_digest_of() {
 
 policy_version_of() {
   local root="$1"
-  local concat="" f
+  local concat="" f rel
   for f in \
     "$root/apps/cli/vitest.config.ts" \
     "$root/apps/cli/ci/test-ownership.yaml" \
     "$root/scripts/ci-scope.ts"
   do
     [[ -f "$f" ]] || continue
-    concat+="$(file_sha256 "$f")  $f"$'\n'
+    # Label with the path RELATIVE to $root, not $f itself: release.sh re-execs
+    # into a freshly-named throwaway worktree on every invocation
+    # (.agents/worktrees/release-v<version>-<pid>), and any producer runs in
+    # its own separate worktree too, so no two callers ever share one literal
+    # $root. Hashing the absolute path made this digest un-reproducible
+    # across every real caller pair -- identical file content at two
+    # different checkouts of the exact same commit hashed to different
+    # policyVersion values, so no attestation any producer wrote could ever
+    # satisfy release.sh's own require() call.
+    rel="${f#"$root"/}"
+    concat+="$(file_sha256 "$f")  $rel"$'\n'
   done
   [[ -n "$concat" ]] || die "no policy inputs found under $root"
   printf 'sha256:%s\n' "$(str_sha256 "$concat")"

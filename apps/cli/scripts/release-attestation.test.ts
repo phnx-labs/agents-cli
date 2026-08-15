@@ -109,6 +109,27 @@ describeUnix('release-attestation.sh', () => {
     expect(id.platform).toBeTruthy();
   });
 
+  it('policyVersion depends only on file content, not the --repo-root checkout path (RUSH-2749)', () => {
+    // release.sh re-execs into a freshly-named throwaway worktree on every
+    // invocation (.agents/worktrees/release-v<version>-<pid>), and a
+    // producer runs in its own separate worktree too -- so no two real
+    // callers ever share one literal --repo-root. policy_version_of used to
+    // hash the absolute file PATH alongside its content, so identical files
+    // at two different checkouts of the exact same commit produced two
+    // different policyVersion values, and no attestation any producer wrote
+    // could ever satisfy release.sh's own require() call.
+    const { root, commit } = initRepo();
+    const idA = JSON.parse(sh(['identity', '--repo-root', root], root).out);
+
+    const clone = tmp('rel-attest-clone-');
+    spawnSync('git', ['clone', '-q', root, clone]);
+    git(clone, 'checkout', '-q', commit);
+    const idB = JSON.parse(sh(['identity', '--repo-root', clone], clone).out);
+
+    expect(idA.policyVersion).toBe(idB.policyVersion);
+    expect(idA.lockfileDigest).toBe(idB.lockfileDigest);
+  });
+
   it('require accepts the exact tree/toolchain/lock/policy key and rejects a parent tree', () => {
     const { root, tree } = initRepo();
     const id = JSON.parse(sh(['identity', '--repo-root', root], root).out);

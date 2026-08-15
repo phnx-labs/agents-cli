@@ -127,7 +127,12 @@ describe('release-attestation-produce.sh', () => {
 
     expect(record.schemaVersion).toBe(1);
     expect(record.conclusion).toBe('pass');
-    expect(record.suite).toBe('full');
+    // release.sh's own `require` calls never pass --suite, so
+    // bind_tree_lock_policy defaults to "selected" -- a record tagged
+    // anything else is invisible to the consumer regardless of matching
+    // tree/lock/policy. Assert the actual consumer contract below, not just
+    // this literal, so a producer/consumer drift here fails the suite.
+    expect(record.suite).toBe('selected');
     expect(record.candidateTree).toBe(git(fx.caller, 'rev-parse', 'HEAD^{tree}'));
     expect(record.lockfileDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(record.policyVersion).toMatch(/^sha256:[0-9a-f]{64}$/);
@@ -141,8 +146,57 @@ describe('release-attestation-produce.sh', () => {
     const actualDigest = spawnSync('sha256sum', [tgzPath], { encoding: 'utf-8' }).stdout.trim().split(/\s+/)[0];
     expect(record.tarball.digest).toBe(`sha256:${actualDigest}`);
 
-    // The isolated worktree used to run the suite must not survive the run.
-    expect(git(fx.caller, 'worktree', 'list')).toBe(`${fx.caller}  ${fx.headCommit.slice(0, 7)} [main]`);
+    // The isolated worktree used to run the suite must not survive the run --
+    // only the caller checkout itself is left registered. `git worktree list`
+    // column-aligns its whitespace by path length, so match on content, not
+    // an exact padded string (that padding differs by tmpdir path length,
+    // which differs on CI vs locally).
+    const worktrees = git(fx.caller, 'worktree', 'list')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    expect(worktrees).toHaveLength(1);
+    expect(worktrees[0]).toMatch(new RegExp(`^${fx.caller.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+${fx.headCommit.slice(0, 7)}`));
+
+    // The actual consumer: release.sh's require call (no --suite, no
+    // --bun/--node/--platform) must find and accept what the producer wrote.
+    const required = spawnSync(
+      'bash',
+      [ATTEST_SCRIPT, 'require', '--dir', fx.store, '--tree', record.candidateTree, '--repo-root', fx.caller],
+      { encoding: 'utf-8' },
+    );
+    expect(required.status, required.stdout + required.stderr).toBe(0);
+  });
+
+  it('survives a relative --dir: the attestation lands outside the throwaway worktree, not inside it', () => {
+    const root = tmp('attest-produce-relative-dir-');
+    const fx = buildFixture(root);
+    const relativeStore = '.release-attestations';
+    const result = spawnSync(
+      'bash',
+      [
+        path.join(fx.caller, 'apps/cli/scripts/release-attestation-produce.sh'),
+        fx.headCommit,
+        '--repo-root',
+        fx.caller,
+        '--dir',
+        relativeStore,
+      ],
+      { encoding: 'utf-8', env: { ...process.env, PATH: `${fx.fakebin}:${process.env.PATH}` } },
+    );
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+
+    // The script cd's to its own apps/cli directory before resolving --dir
+    // (matching how release.sh's own docs invoke release-attestation.sh with
+    // a relative path from apps/cli), so a relative --dir resolves there --
+    // NOT wherever the caller happened to be, and NOT inside the throwaway
+    // worktree the script deletes on exit.
+    const resolvedStore = path.join(fx.caller, 'apps/cli', relativeStore);
+    expect(fs.existsSync(resolvedStore)).toBe(true);
+    const jsonFile = fs.readdirSync(resolvedStore).find((f) => f.endsWith('.json'));
+    expect(jsonFile).toBeTruthy();
+    const tgzFile = fs.readdirSync(resolvedStore).find((f) => f.endsWith('.tgz'));
+    expect(tgzFile).toBeTruthy();
   });
 
   it('never writes an attestation for a red suite (fail closed)', () => {
