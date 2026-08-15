@@ -1285,7 +1285,7 @@ agents sessions reap --json      # { reaped, sessions, details, processes, proce
 ```
 
 The routines daemon runs the same sweep every 5 minutes
-([`src/lib/daemon.ts`](../src/lib/daemon.ts) `runDeadPaneReap`), and `killSession`
+([`src/lib/daemon/daemon.ts`](../src/lib/daemon/daemon.ts) `runDeadPaneReap`), and `killSession`
 collects a session's helpers as it tears that session down, so an agent that exits
 normally leaves nothing behind without waiting for a tick.
 
