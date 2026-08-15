@@ -88,7 +88,7 @@ export async function runUsageRefreshTick(): Promise<void> {
   }
 
   const { runUsageRefresh, buildLocalUsageAccounts } = await import('./usage-refresh.js');
-  const { writeClaudeUsageCache } = await import('./usage.js');
+  const { writeClaudeUsageCache } = await import('./accounting/usage.js');
   const { usageRateLimitedUntil } = await import('./usage-backoff.js');
   const r = await runUsageRefresh({
     listAccounts: buildLocalUsageAccounts,

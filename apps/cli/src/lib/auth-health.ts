@@ -28,7 +28,7 @@ import {
   probeKimiStatus,
   USAGE_HEADLESS_SCOPE_MARKER,
   type ProviderProbe,
-} from './usage.js';
+} from './accounting/usage.js';
 import { getVersionHomePath, listInstalledVersions } from './versions.js';
 import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
 

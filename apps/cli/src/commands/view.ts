@@ -42,7 +42,7 @@ import {
   getUsageInfoByIdentity,
   getUsageLookupKey,
   isUsageHeadlessScopeError,
-} from '../lib/usage.js';
+} from '../lib/accounting/usage.js';
 import { readManifest } from '../lib/manifest.js';
 import {
   listInstalledVersions,
@@ -76,7 +76,7 @@ import { listNativeAccounts } from '../lib/account-registry.js';
 import { isGitRepo, getGitSyncStatus } from '../lib/git.js';
 import { getCentralRulesFileName } from '../lib/rules/rules.js';
 import { composeRulesFromState, type ComposedSubrule } from '../lib/rules/compose.js';
-import { getConfiguredRunStrategy } from '../lib/rotate.js';
+import { getConfiguredRunStrategy } from '../lib/accounting/rotate.js';
 import { resolveRunDefaults } from '../lib/run-defaults.js';
 import { resolveConfiguredModel, type ConfiguredModelSource } from '../lib/models.js';
 import type { ResourceItemJson, ResourceSection, SyncState, VersionResourcesJson, ViewJsonAgent, ViewJsonVersion } from '../lib/view-types.js';

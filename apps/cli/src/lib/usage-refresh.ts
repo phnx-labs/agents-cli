@@ -60,7 +60,7 @@ import {
   type UsageSnapshot,
   type UsageInfo,
   type UsageIdentityInput,
-} from './usage.js';
+} from './accounting/usage.js';
 import { getAccountInfo } from './agents.js';
 import { listInstalledVersions, getVersionHomePath } from './versions.js';
 import type { AgentId } from './types.js';
@@ -267,7 +267,7 @@ export async function buildLocalUsageAccounts(): Promise<LocalUsageAccount[]> {
         // only, never the interactive login (see loadClaudeOauth); no setup-token
         // reads as "usage pending".
         fetch: async () => {
-          const { getUsageInfoForIdentity } = await import('./usage.js');
+          const { getUsageInfoForIdentity } = await import('./accounting/usage.js');
           return getUsageInfoForIdentity({
             agentId,
             home: fetchInput.home,

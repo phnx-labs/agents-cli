@@ -25,8 +25,8 @@ import { resolveDispatchRepos, normalizeProviderStatus, MAX_IMAGES_PER_DISPATCH 
 import { parseSSE } from './stream.js';
 import { listInstalledVersions, getVersionHomePath } from '../versions.js';
 import { getAccountInfo } from '../agents.js';
-import { loadClaudeOauth } from '../usage.js';
-import { selectBalancedVersion } from '../rotate.js';
+import { loadClaudeOauth } from '../accounting/usage.js';
+import { selectBalancedVersion } from '../accounting/rotate.js';
 
 const PROXY_BASE = process.env.RUSH_PROXY_BASE ?? 'https://api.prix.dev';
 const PROXY_HOST = new URL(PROXY_BASE).host;

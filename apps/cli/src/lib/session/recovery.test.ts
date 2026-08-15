@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
-import type { RotateCandidate } from '../rotate.js';
+import type { RotateCandidate } from '../accounting/rotate.js';
 import type { SessionMeta } from './types.js';
 import {
   SessionRecoveryError,

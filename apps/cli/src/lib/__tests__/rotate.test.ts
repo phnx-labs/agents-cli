@@ -5,8 +5,8 @@ import {
   pickBalancedCandidate,
   readinessFromCandidate,
   type RotateCandidate,
-} from '../rotate.js';
-import type { UsageSnapshot } from '../usage.js';
+} from '../accounting/rotate.js';
+import type { UsageSnapshot } from '../accounting/usage.js';
 
 function usage(usedPercent: number): UsageSnapshot {
   return {

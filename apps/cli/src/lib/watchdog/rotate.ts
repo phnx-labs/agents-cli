@@ -39,7 +39,7 @@ import {
   pickHarnessWeighted,
   earliestResetAcross,
   formatNoHealthyHarnessError,
-} from '../rotate.js';
+} from '../accounting/rotate.js';
 import { resolveWatchdogSessionPath } from './read.js';
 
 // --- detection ---------------------------------------------------------------

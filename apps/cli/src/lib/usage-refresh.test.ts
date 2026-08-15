@@ -19,7 +19,7 @@ import {
   setHeadroomCachePathForTest,
   type HeadroomEntry,
 } from './usage-refresh.js';
-import { setClaudeUsageCachePathForTest, writeClaudeUsageCache, readClaudeUsageCache, type UsageSnapshot } from './usage.js';
+import { setClaudeUsageCachePathForTest, writeClaudeUsageCache, readClaudeUsageCache, type UsageSnapshot } from './accounting/usage.js';
 
 const NOW = 1_800_000_000_000;
 
