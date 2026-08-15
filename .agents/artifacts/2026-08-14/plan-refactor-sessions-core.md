@@ -543,4 +543,14 @@ ticket rather than a doc patch.
 
 ## Tracking
 
-Filled in when the moves are picked and their tickets exist.
+| Item | Where | State |
+| --- | --- | --- |
+| Moves 4 + 5 (reversible tier) — canonical `formatBytes` / `compareVersions`, 3 upward imports cut, doc drift fixed | [PR #2682](https://github.com/phnx-labs/agi-cli/pull/2682) | open |
+| `agents permissions list` blind to 10 of 13 harnesses (§6.1b) | [RUSH-2676](https://linear.app/rush/issue/RUSH-2676) | Todo |
+| Antigravity MCP sync writes nothing, reports success (§6.1a) | [RUSH-2677](https://linear.app/rush/issue/RUSH-2677) | Todo |
+| Move 1 — sessions domain extraction | ticket on pick | awaiting scope decision |
+| Move 2 — remaining four per-harness registries | ticket on pick | awaiting scope decision |
+| Move 6 — `lib/` tree reorganization | deferred | until the open-PR queue drains |
+
+The scan's own tooling lives at `.agents/artifacts/2026-08-14/` alongside this plan; the
+import-graph and cycle scripts are re-runnable and are the acceptance check for each move.
