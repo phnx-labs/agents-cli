@@ -638,7 +638,7 @@ describePosix('buildTmuxAgentCommand (env-preserving pane command)', () => {
 });
 
 // resolveLaunchId is the one place that decides AGENT_LAUNCH_ID for a run. A
-// `--host` launcher forwards an id it controls so ONE correlation key spans the
+// `--device` launcher forwards an id it controls so ONE correlation key spans the
 // SSH hop (RUSH-2034); every local run passes none and gets a fresh mint. The
 // adopt-vs-mint decision is what lets the launcher resolve a non-Claude agent's
 // real remote session id from the hook record afterwards.

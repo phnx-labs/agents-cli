@@ -1,5 +1,5 @@
 /**
- * RUSH-2216: `agents sync --host all` fans out with an injected `--json` flag
+ * RUSH-2216: `agents sync --device all` fans out with an injected `--json` flag
  * (see lib/hosts/passthrough.ts `buildFleetForwardedArgs`). Remotes that do not
  * accept `--json` fail every peer with `error: unknown option '--json'`.
  *
@@ -279,7 +279,7 @@ describe('agents sync --json (RUSH-2216 fleet fan-out)', () => {
 
     // The regression this catches: before the fix, commander rejected the flag
     // with status 1 and "unknown option '--json'" on stderr, and empty/non-JSON
-    // stdout — which is what every remote showed under `agents sync --host all`.
+    // stdout — which is what every remote showed under `agents sync --device all`.
     expect(stderr).not.toMatch(/unknown option ['"]--json['"]/);
     expect(stdout.trim().length).toBeGreaterThan(0);
     // Must not leak human reconcile chatter — fleet parses the entire stdout

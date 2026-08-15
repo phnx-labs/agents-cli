@@ -11,7 +11,7 @@
  * does not need a helper to have been running at dispatch time either.
  *
  * Armed once via `process.on('exit')` so it covers every way the run command
- * terminates — local spawn, `--host` dispatch, `--lease` box, the error path —
+ * terminates — local spawn, `--device` dispatch, `--lease` box, the error path —
  * rather than being sprinkled over ~50 `process.exit` call sites where the next
  * new exit path would silently miss it.
  */

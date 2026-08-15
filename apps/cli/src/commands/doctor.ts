@@ -108,10 +108,8 @@ interface DoctorOptions {
   fix?: boolean;
   adopt?: string;
   release?: string;
-  host?: string;
   device?: string;
   devices?: boolean;
-  hosts?: boolean;
   check?: boolean;
   quiet?: boolean;
 }
@@ -272,9 +270,9 @@ interface FleetTarget {
 }
 
 async function resolveFleetTargets(opts: DoctorOptions): Promise<FleetTarget[]> {
-  const singleName = opts.host || opts.device;
+  const singleName = opts.device;
   if (singleName) {
-    // --device / --host as a single-device filter: resolve through the device
+    // --device as a single-device filter: resolve through the device
     // registry first, then the general host registry, then ad-hoc user@host.
     const registry = await loadDevices();
     const deviceProfile = registry[singleName];
@@ -483,7 +481,7 @@ export function asFleetInventory(value: unknown): FleetInventory | null {
 }
 
 async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
-  const singleName = opts.host || opts.device;
+  const singleName = opts.device;
   const targets = await resolveFleetTargets(opts);
   const localName = machineId();
   const results: DeviceDoctorResult[] = [];
@@ -1696,8 +1694,7 @@ export function registerDoctorCommand(program: Command): void {
     .option('--cwd <path>', 'Resolution cwd for project layer detection (default: process.cwd())')
     .option('--adopt <agent>', "Take over the agent's native launcher that shadows the shim (symlink it to the version-managed shim; reversible with --release)")
     .option('--release <agent>', 'Undo --adopt: restore the native launcher agents-cli previously adopted')
-    .option('--devices', 'Check agent readiness AND cross-device harness divergence (missing resources/versions, repo drift) on every registered device (alias --hosts)')
-    .option('--hosts', 'Alias of --devices')
+    .option('--devices', 'Check agent readiness AND cross-device harness divergence (missing resources/versions, repo drift) on every registered device')
     .option('--check', 'CI drift gate: exit non-zero when any installed version is out of sync (stale or never-synced), zero when clean. Combine with --devices to gate the whole fleet.')
     .option('--refresh', 'Bypass the cached overview snapshot: recompute the bare `doctor --json` overview live and refresh the shared cache that the menu-bar and other pollers read')
     .option('-q, --quiet', 'With --check, suppress per-version lines; print only the one-line verdict');
@@ -1754,7 +1751,7 @@ export function registerDoctorCommand(program: Command): void {
           console.error(chalk.red('Cannot combine --check with a target argument.'));
           process.exit(1);
         }
-        if (opts.devices || opts.hosts) {
+        if (opts.devices) {
           await runDevicesCheck(opts, cwd);
         } else {
           runCheckGate(opts, cwd);
@@ -1762,7 +1759,7 @@ export function registerDoctorCommand(program: Command): void {
         return;
       }
 
-      if (opts.devices || opts.hosts) {
+      if (opts.devices) {
         if (target) {
           console.error(chalk.red('Cannot combine --devices with a target argument.'));
           process.exit(1);

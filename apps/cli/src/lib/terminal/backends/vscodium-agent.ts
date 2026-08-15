@@ -7,7 +7,7 @@
  * the editor CLI's `--open-url` flag. The extension opens an editor-tab terminal
  * in `cwd`, runs `command`, and its shell-adoption promotes a resume command
  * (e.g. `claude --resume <id>`) to the matching agent chip. Driving the editor
- * CLI (not macOS `open`) means this works over `--host` SSH and on Linux, needs
+ * CLI (not macOS `open`) means this works over `--device` SSH and on Linux, needs
  * no OS URL-scheme handler registration, and sends the command into an
  * already-interactive login shell — so no `zsh -ilc` wrap (the other backends'
  * wrapper) is applied here.

@@ -1,7 +1,7 @@
 /**
  * Consent gate for driving THIS machine's browser from another fleet machine.
  *
- * `browser --host <device>` routes a browser command to `<device>` over SSH (the
+ * `browser --device <device>` routes a browser command to `<device>` over SSH (the
  * fleet passthrough) and runs `agents browser ...` there. Every such remote
  * invocation carries the {@link FLEET_REMOTE_ENV} marker, set once at the fleet
  * dispatch site (`maybeRunOnHost`). A machine only accepts being driven when its
@@ -18,7 +18,7 @@ import { getConfigValue } from '../device-config.js';
 /** Env marker set on every remote `agents` invocation by `buildRemoteAgentsInvocation`. */
 export const FLEET_REMOTE_ENV = 'AGENTS_FLEET_REMOTE';
 
-/** True when this process was dispatched to this machine by a fleet `--host` run. */
+/** True when this process was dispatched to this machine by a fleet `--device` run. */
 export function isFleetRemoteInvocation(env: NodeJS.ProcessEnv = process.env): boolean {
   return env[FLEET_REMOTE_ENV] === '1';
 }
@@ -50,7 +50,7 @@ export function assertRemoteControlAllowed(opts?: {
 
   const who = env.AGENTS_ACTOR_HOST || env.AGENTS_ACTOR || 'A fleet machine';
   throw new Error(
-    `${who} tried to drive this machine's browser over \`browser --host\`, but remote ` +
+    `${who} tried to drive this machine's browser over \`browser --device\`, but remote ` +
       `browser control is off here. To allow it, run on THIS machine:\n` +
       `  agents browser remote-control on`,
   );

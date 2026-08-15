@@ -7,7 +7,7 @@
  * (offline → fail fast instead of a 2-minute hang), platform-aware exec
  * (PowerShell on Windows), and password-from-bundle auth via an askpass shim.
  * Rendering the registry to an ssh_config include also lets plain ssh / scp /
- * rsync / `agents sessions --host` resolve the same logical names.
+ * rsync / `agents sessions --device` resolve the same logical names.
  */
 
 import type { Command } from 'commander';
@@ -2274,7 +2274,7 @@ is refused with a clear message instead of self-dialing.
 An interactive login with no command mirrors the home-relative directory you
 launched from — 'agents ssh yosemite-s0' from ~/src/app lands in ~/src/app on
 the target when it exists, else the remote home. Same portable-cwd rule as
-'agents run --host'. Passing a command keeps the remote home.
+'agents run --device'. Passing a command keeps the remote home.
 `)
     .action(async (name: string, cmd: string[]) => {
       // Hidden askpass bridge: ssh execs the shim, which re-invokes us here.
@@ -2339,7 +2339,7 @@ the target when it exists, else the remote home. Same portable-cwd rule as
         const pinned = addr ? isHostPinned(addr) : false;
         // Interactive login (no cmd): mirror the caller's project directory on
         // the target when the same home-relative checkout exists there, matching
-        // `agents run --host` (deriveMirroredCwd). Best-effort — a missing dir
+        // `agents run --device` (deriveMirroredCwd). Best-effort — a missing dir
         // falls back to the remote home. An explicit `cmd` keeps its cwd (RUSH-2412).
         const mirrorCwd = cmd.length === 0 ? deriveMirroredCwd(process.cwd()) : undefined;
         const { args, env } = buildSshInvocation(device, cmd, shim, { pinned }, { interactiveCwd: mirrorCwd });

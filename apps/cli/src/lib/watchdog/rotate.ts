@@ -186,7 +186,7 @@ export function exitSequenceFor(agent: string): string[] {
  * host (affinity) → harness (cross-harness headroom) → account (balanced) and
  * exits nonzero when every layer is exhausted. Ported from apps/ext
  * autoRotate.ts buildAutoRotateLaunchCommand. A terminal on a REMOTE device
- * rotates ON that device (`--host`); a local terminal omits it. `--session-id`
+ * rotates ON that device (`--device`); a local terminal omits it. `--session-id`
  * is honored only when the CLI picks claude (existing claude-only semantics)
  * and ignored otherwise — passing it unconditionally keeps the terminal's
  * AGENT_SESSION_ID aligned with the session Claude actually creates.
@@ -194,7 +194,7 @@ export function exitSequenceFor(agent: string): string[] {
 export function buildRotateLaunchCommand(opts: { host?: string; sessionId: string }): string {
   let cmd = 'agents run auto --interactive';
   if (opts.host) {
-    cmd += ` --host ${shellQuoteHost(opts.host)}`;
+    cmd += ` --device ${shellQuoteHost(opts.host)}`;
   }
   cmd += ` --session-id ${opts.sessionId}`;
   return cmd;

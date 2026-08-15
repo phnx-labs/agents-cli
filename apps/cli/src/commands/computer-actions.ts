@@ -252,9 +252,9 @@ export function electronWebviewTip(appLabel: string): string {
 
 // Print the CDP steer when the target is a known Electron app. Keyed off --bundle
 // (the recommended way to target); a frontmost-resolved target without --bundle is
-// left alone to avoid a second RPC on the hot path. Skipped for remote --host.
-function warnIfElectronWebview(opts: { bundle?: string; host?: string }): void {
-  if (opts.host) return;
+// left alone to avoid a second RPC on the hot path. Skipped for remote --device.
+function warnIfElectronWebview(opts: { bundle?: string; device?: string }): void {
+  if (opts.device) return;
   if (opts.bundle && isElectronApp(opts.bundle)) console.error(electronWebviewTip(opts.bundle));
 }
 
@@ -269,20 +269,21 @@ function emit(result: Record<string, unknown>, json: boolean, human: () => strin
 // Record one `computer.action` per verb invocation, one call site per command
 // below. Session/agent/machine identity is stamped for free by emitEvent's
 // provenance floor (events.ts resolveProvenance) — this only carries the
-// action-specific facts: which verb, against which target pid/bundle/host.
+// action-specific facts: which verb, against which target pid/bundle/device.
 // NOTE: the field is `targetPid`, never `pid` — `pid` is a reserved envelope
 // key (the emitting process's OWN pid, events.ts RESERVED_META_KEYS) that
 // sanitizePayload() silently strips from the payload before it can collide.
+// emitComputerAction lives in lib/computer/actions.ts (re-exported above).
 
-// Add the shared --pid/--bundle/--host target options to a verb. `--host` routes
-// the verb at a remote Windows device: the `computer` preAction hook hydrates
-// COMPUTER_HELPER_TCP from the tunnel `start --host` recorded, so withClient's
-// openComputerClient() transparently selects the TCP transport.
+// Add the shared --pid/--bundle/--device target options to a verb. `--device`
+// routes the verb at a remote Windows device: the `computer` preAction hook
+// hydrates COMPUTER_HELPER_TCP from the tunnel `start --device` recorded, so
+// withClient's openComputerClient() transparently selects the TCP transport.
 function addTargetOpts(cmd: Command): Command {
   return cmd
     .option('--bundle <id>', 'Bundle id of the target app (default: frontmost allow-listed app)')
     .option('--pid <n>', 'Target pid directly (overrides --bundle)', (v) => parseInt(v, 10))
-    .option('--host <device>', 'Drive a remote Windows device (requires `agents computer start --host <device>` first)');
+    .option('--device <name>', 'Drive a remote Windows device (requires `agents computer start --device <name>` first)');
 }
 
 // Add the shared --id/--x/--y element-or-coords options to a verb.
@@ -293,7 +294,7 @@ function addElementOrCoordOpts(cmd: Command): Command {
     .option('--y <n>', 'Y coordinate (global, points; moves your real cursor, needs app frontmost)', (v) => parseInt(v, 10));
 }
 
-type TargetOpts = { pid?: number; bundle?: string; host?: string; json?: boolean };
+type TargetOpts = { pid?: number; bundle?: string; device?: string; json?: boolean };
 type ElemOpts = TargetOpts & { id?: string; x?: number; y?: number };
 
 export function registerActionCommands(program: Command): void {
@@ -653,9 +654,9 @@ export function registerActionCommands(program: Command): void {
     .option('--bundle <id>', 'Bundle id (e.g. com.apple.TextEdit)')
     .option('--path <p>', 'Path to the .app bundle')
     .option('--name <s>', 'App name (resolved via /Applications and LaunchServices)')
-    .option('--host <device>', 'Drive a remote Windows device (requires `agents computer start --host <device>` first)')
+    .option('--device <name>', 'Drive a remote Windows device (requires `agents computer start --device <name>` first)')
     .option('--json', 'Emit JSON')
-    .action(async (opts: { bundle?: string; path?: string; name?: string; host?: string; json?: boolean }) => {
+    .action(async (opts: { bundle?: string; path?: string; name?: string; device?: string; json?: boolean }) => {
       if (!opts.bundle && !opts.path && !opts.name) {
         console.error('pass one of --bundle, --path, --name');
         process.exit(1);

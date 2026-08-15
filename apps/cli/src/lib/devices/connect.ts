@@ -97,7 +97,7 @@ export function wrapRemoteCommand(device: DeviceProfile, cmd: string[]): string 
  * (`mirrorCwd` is undefined, or resolves to the home root itself) so the caller
  * keeps the plain no-command interactive login.
  *
- * This is the interactive analogue of `agents run --host`'s cwd mirroring, and
+ * This is the interactive analogue of `agents run --device`'s cwd mirroring, and
  * it reuses the SAME machinery so there is no second resolver: the portable
  * `mirrorCwd` comes from `deriveMirroredCwd`, and — for POSIX — the best-effort
  * `cd` comes from `remoteCdPrefix({ mirror: true })`, whose `|| cd "$HOME"`
@@ -177,7 +177,7 @@ export function deviceIdentityArgs(device: DeviceProfile): string[] {
  * interactive login (no `cmd`) — from `deriveMirroredCwd(process.cwd())`. When
  * it names a real home-relative sub-path, the login starts there via
  * {@link buildInteractiveShellCommand} (best-effort — a missing dir falls back
- * to the remote home), matching `agents run --host`. It is ignored when a `cmd`
+ * to the remote home), matching `agents run --device`. It is ignored when a `cmd`
  * is given: an explicit command keeps its current cwd (the remote home) and its
  * behavior unchanged (RUSH-2412).
  */

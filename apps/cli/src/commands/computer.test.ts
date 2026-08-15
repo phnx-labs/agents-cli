@@ -61,7 +61,7 @@ describe('reconcileScreenshotExt', () => {
 describe('shouldBlockOffPlatform', () => {
   it('never blocks on macOS (local Accessibility path)', () => {
     expect(shouldBlockOffPlatform({ platform: 'darwin', tcpConfigured: false })).toBe(false);
-    expect(shouldBlockOffPlatform({ platform: 'darwin', tcpConfigured: true, host: 'win-mini' })).toBe(false);
+    expect(shouldBlockOffPlatform({ platform: 'darwin', tcpConfigured: true, device: 'win-mini' })).toBe(false);
   });
 
   it('blocks off macOS with no remote path configured', () => {
@@ -75,9 +75,9 @@ describe('shouldBlockOffPlatform', () => {
     expect(shouldBlockOffPlatform({ platform: 'linux', tcpConfigured: true })).toBe(false);
   });
 
-  it('does NOT block off macOS when a --host remote device is given', () => {
+  it('does NOT block off macOS when a --device remote device is given', () => {
     // The remote path resolves its own endpoint before the client opens.
-    expect(shouldBlockOffPlatform({ platform: 'linux', tcpConfigured: false, host: 'win-mini' })).toBe(false);
+    expect(shouldBlockOffPlatform({ platform: 'linux', tcpConfigured: false, device: 'win-mini' })).toBe(false);
   });
 });
 
@@ -115,13 +115,13 @@ describe('emitComputerRunTaskMarker — computer.action run marker (RUSH-2432)',
 
   it('records the run verb, bundle, and host against the real event log', () => {
     _resetForTest(eventsPath());
-    emitComputerRunTaskMarker({ task: 'open Notes and write a haiku', bundle: 'com.apple.notes', host: 'win-mini' });
+    emitComputerRunTaskMarker({ task: 'open Notes and write a haiku', bundle: 'com.apple.notes', device: 'win-mini' });
 
     const recs = query({ eventTypes: ['computer.action'] });
     expect(recs).toHaveLength(1);
     expect(recs[0].command).toBe('run');
     expect(recs[0].bundle).toBe('com.apple.notes');
-    expect(recs[0].host).toBe('win-mini');
+    expect(recs[0].device).toBe('win-mini');
     expect(recs[0].task).toBe('open Notes and write a haiku');
     expect(recs[0].invocationId).toEqual(expect.any(String));
     expect((recs[0].invocationId as string).length).toBeGreaterThan(0);

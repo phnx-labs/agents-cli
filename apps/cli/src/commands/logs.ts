@@ -2,7 +2,7 @@
  * `agents logs` — unified, discoverable run-log viewer + audit trail.
  *
  * Resolves a run across two substrates and shows (or `-f` follows) its log:
- *  - host-dispatch tasks (`agents run --host`) → combined-stdout log, offset-tailed
+ *  - host-dispatch tasks (`agents run --device`) → combined-stdout log, offset-tailed
  *  - sessions (the local index) → transcript, tailed via the sessions tailer
  *
  * Subcommands:
@@ -14,7 +14,7 @@
  * transcript / raw stdout is opt-in behind `--full` (alias `-m/--markdown`).
  *
  * `[id]`/`--session` load directly (host task tried first, then session). With no
- * id, `--host`/`--agent`/`--version` filter a merged candidate list; one match is
+ * id, `--device`/`--agent`/`--version` filter a merged candidate list; one match is
  * shown, several open the fuzzy picker (or, non-TTY, print the list).
  *
  * Additive: `agents devices ps`/`stop` and `agents sessions tail` are unchanged and
@@ -36,7 +36,7 @@ import {
 import { addEventsReadOptions, runEventsCommand, type EventsOptions } from './events.js';
 
 interface LogsOptions {
-  host?: string;
+  device?: string;
   agent?: string;
   version?: string;
   session?: string;
@@ -143,21 +143,21 @@ async function runLogs(id: string | undefined, opts: LogsOptions): Promise<void>
   const wantVersion = opts.version ?? version;
 
   // Host tasks carry no session-index metadata; sessions carry no host tag.
-  // So --host scopes to dispatched tasks, and --version to sessions.
+  // So --device scopes to dispatched tasks, and --version to sessions.
   const candidates: Candidate[] = [];
 
   let tasks = listTasks();
-  if (opts.host) tasks = tasks.filter((t) => t.host === opts.host);
+  if (opts.device) tasks = tasks.filter((t) => t.host === opts.device);
   if (agent) tasks = tasks.filter((t) => t.agent === agent);
   for (const t of tasks) candidates.push({ kind: 'task', task: t });
 
-  if (!opts.host) {
+  if (!opts.device) {
     const sessions = await discoverSessions({ agent, version: wantVersion, limit: 50 });
     for (const s of sessions) candidates.push({ kind: 'session', session: s });
   }
 
   if (candidates.length === 0) {
-    console.error(chalk.yellow('No matching runs. Dispatch one: agents run <agent> "<task>" [--host <name>]'));
+    console.error(chalk.yellow('No matching runs. Dispatch one: agents run <agent> "<task>" [--device <name>]'));
     process.exit(1);
   }
 
@@ -282,7 +282,7 @@ export function registerLogsCommand(program: Command): void {
   const logsCmd = program
     .command('logs [id]')
     .description('Show a run log, audit trail, or stats. Subcommands: audit, stats, rotate.')
-    .option('--host <name>', 'Scope to runs dispatched to a host')
+    .option('--device <name>', 'Scope to runs dispatched to a device')
     .option('-a, --agent <agent>', 'Filter by agent (e.g. claude, codex@0.116.0)')
     .option('--version <version>', 'Filter by agent version')
     .option('--session <id>', 'Select a session/run by id (same as the positional id)')

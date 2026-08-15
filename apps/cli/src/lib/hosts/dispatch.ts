@@ -5,7 +5,7 @@
  * remote log and its exit code to a sibling `.exit` file, so progress survives a
  * dropped connection (followed via offset-tail in progress.ts). This is the
  * offload win: the process/thread/file fan-out happens on the host, not the
- * laptop. `agents run` uses it; `agents teams start --watch --host` reuses the
+ * laptop. `agents run` uses it; `agents teams start --watch --device` reuses the
  * same core so a remote team supervisor keeps running after you disconnect.
  */
 
@@ -638,7 +638,7 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
   });
 }
 
-/** Dispatch an `agents run <agent> "<prompt>"` onto a host (the `run --host` path). */
+/** Dispatch an `agents run <agent> "<prompt>"` onto a host (the `run --device` path). */
 export async function dispatchToHost(host: Host, opts: DispatchOptions): Promise<DispatchResult> {
   const target = sshTargetFor(host);
   // Concrete agent@version pins fail loud before we print "Dispatched" and
@@ -672,7 +672,7 @@ export interface CommandDispatchOptions {
 
 /**
  * Dispatch an arbitrary long-running `agents <command>` onto a host detached —
- * used for `teams start --watch --host`, whose supervisor must outlive the SSH
+ * used for `teams start --watch --device`, whose supervisor must outlive the SSH
  * connection. Reachability is assumed (the caller has already resolved the host);
  * a launch failure surfaces the remote stderr.
  */

@@ -86,7 +86,7 @@ interface SyncOpts {
   allowExecSurfaces?: boolean;
   /**
    * Machine-readable output. Also required by the fleet fan-out path
-   * (`agents sync --host all`), which injects `--json` on every peer so the
+   * (`agents sync --device all`), which injects `--json` on every peer so the
    * roster can parse per-device results. Without this option registered,
    * remotes reject the flag with `unknown option '--json'` (RUSH-2216).
    */
@@ -216,7 +216,7 @@ export function addSelectorOptions(cmd: Command): Command {
 export function registerSyncCommand(program: Command): void {
   const cmd = addHostOption(program.command('sync [agentSpec] [repo]'))
     .summary('Make this machine current, or sync resources into one agent')
-    .description('With an [agentSpec], syncs resources (commands, skills, hooks, rules, MCPs, plugins, etc.) into that installed agent version — previews changes and lets you pick. e.g. "claude", "claude@2.1.142", a selector: @latest / @oldest / @pinned (= @default), or @all for every installed version.\n\nAppend a [repo] (or pass --repo) to scope the sync to a single DotAgent repo — system / user / project / <alias>. e.g. "agents sync claude@all system" reconciles only the system repo\'s resources into every installed Claude.\n\nGive a DotAgent repo name ALONE — "agents sync system" / "agents sync user" / "agents sync <alias>" — to git-sync that one repo: git pull --rebase against origin when the tree is clean; when it is dirty, fast-forward anyway if no incoming path is uncommitted, else refuse and name what collided. The user repo and extra aliases also push local commits up; the system repo is a pull-only mirror.\n\nWith NO agent, runs the umbrella verb: fetch the config repos then reconcile them into every installed agent. Secrets are opt-in — add --secrets to pull secret bundles. Session transcripts are queryable live via "agents sessions --host <machine>", or moved with "agents sessions export/import". Also: --cloud (fetch only), --local (reconcile only).')
+    .description('With an [agentSpec], syncs resources (commands, skills, hooks, rules, MCPs, plugins, etc.) into that installed agent version — previews changes and lets you pick. e.g. "claude", "claude@2.1.142", a selector: @latest / @oldest / @pinned (= @default), or @all for every installed version.\n\nAppend a [repo] (or pass --repo) to scope the sync to a single DotAgent repo — system / user / project / <alias>. e.g. "agents sync claude@all system" reconciles only the system repo\'s resources into every installed Claude.\n\nGive a DotAgent repo name ALONE — "agents sync system" / "agents sync user" / "agents sync <alias>" — to git-sync that one repo: git pull --rebase against origin when the tree is clean; when it is dirty, fast-forward anyway if no incoming path is uncommitted, else refuse and name what collided. The user repo and extra aliases also push local commits up; the system repo is a pull-only mirror.\n\nWith NO agent, runs the umbrella verb: fetch the config repos then reconcile them into every installed agent. Secrets are opt-in — add --secrets to pull secret bundles. Session transcripts are queryable live via "agents sessions --device <machine>", or moved with "agents sessions export/import". Also: --cloud (fetch only), --local (reconcile only).')
     .option('--agent <agent>', 'Agent identifier (legacy form; prefer the positional spec)')
     .option('--agent-version <version>', 'Version to sync into (legacy form; prefer "agent@version" or --version)')
     .option('--repo <name>', 'Scope the sync to a single DotAgent repo: system / user / project / <alias> (also accepted as a positional)')
@@ -228,7 +228,7 @@ export function registerSyncCommand(program: Command): void {
     .option('--quiet', 'Suppress all output (exit code indicates success)', false)
     .option('--dry-run', 'Show what would be synced without making any changes', false)
     .option('--allow-exec-surfaces', 'Allow syncing plugin exec surfaces (scripts, binaries) — off by default for safety', false)
-    .option('--json', 'Emit machine-readable JSON (also accepted so fleet fan-out via --host all can parse each peer)', false)
+    .option('--json', 'Emit machine-readable JSON (also accepted so fleet fan-out via --device all can parse each peer)', false)
     // Umbrella verb (no agent given): make this machine current.
     .option('--repos', 'Umbrella: git-pull ~/.agents + enabled ~/.agents-* extras', false)
     .option('--secrets', 'Umbrella: pull encrypted secret bundles from the remote', false)
@@ -606,7 +606,7 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   if (!agentId) {
     // No agent specified → the umbrella verb: make this machine current
     // (fetch repos + secrets + sessions, then reconcile all installed agents).
-    // This is the path fleet fan-out (`--host all`) hits with injected --json.
+    // This is the path fleet fan-out (`--device all`) hits with injected --json.
     await runUmbrella(opts, quiet, outLog, errLog, json);
     return;
   }

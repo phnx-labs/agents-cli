@@ -261,7 +261,7 @@ export function registerSessionsBackfillCommand(sessionsCmd: Command): void {
   tools.action(async (_options: unknown, command: Command) => {
     const options = command.optsWithGlobals() as ToolBackfillOptions;
     if (options.local && (options.fleet || mergeHosts(options).length > 0)) {
-      console.error(chalk.red('--local cannot be combined with --fleet, --host, or --device.'));
+      console.error(chalk.red('--local cannot be combined with --fleet or --device.'));
       process.exitCode = 1;
       return;
     }

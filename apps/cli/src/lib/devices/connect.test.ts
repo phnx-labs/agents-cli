@@ -78,7 +78,7 @@ describe('wrapRemoteCommand', () => {
 
 describe('buildInteractiveShellCommand', () => {
   // RUSH-2412: an interactive `agents ssh <device>` mirrors the caller's
-  // home-relative project dir on the target, matching `agents run --host`.
+  // home-relative project dir on the target, matching `agents run --device`.
   it('POSIX: best-effort cd into the mirrored dir, then exec a login shell', () => {
     const cmd = buildInteractiveShellCommand(dev({ name: 'l', shell: 'posix' }), '~/src/github.com/muqsitnawaz/agents-cli');
     // `"$HOME"` stays unquoted so the REMOTE shell expands it (target home may

@@ -6,7 +6,7 @@
  * one session in place), this opens a checkbox picker, then asks where the
  * chosen sessions should resume. By default each session opens in its own tab in
  * the terminal you're in — iTerm / Ghostty / tmux, locally or on a remote host
- * via --host. `--splits` opts into packing two sessions side by side per tab.
+ * via --device. `--splits` opts into packing two sessions side by side per tab.
  */
 import * as fs from 'fs';
 import chalk from 'chalk';
@@ -51,7 +51,7 @@ export interface ResumeOptions {
   teams?: boolean;
   since?: string;
   limit?: string;
-  host?: string;
+  device?: string;
   iterm?: boolean;
   ghostty?: boolean;
   tmux?: boolean;
@@ -73,7 +73,7 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
     .option('--teams', 'Include team-spawned sessions (hidden by default)')
     .option('--since <time>', 'Only sessions newer than this (e.g., 2h, 7d, 4w, or ISO date)')
     .option('-n, --limit <n>', 'Maximum number of sessions to load into the picker', '200')
-    .option('--host <alias>', 'Open on the session origin host over SSH; the host must match every selected session')
+    .option('--device <alias>', 'Open on the session origin device over SSH; the device must match every selected session')
     .option('--iterm', 'Force the iTerm backend')
     .option('--ghostty', 'Force the Ghostty backend')
     .option('--tmux', 'Force the tmux backend')
@@ -102,7 +102,7 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
       agents sessions resume --ghostty
       agents sessions resume --vscodium
       agents sessions resume --splits
-      agents sessions resume --host zion --tmux
+      agents sessions resume --device zion --tmux
     `,
     notes: `
       - This is the ONE verb for getting back in. It detects the state: a live tmux pane is attached, a headless session comes to the foreground, an ended one recovers on its owning device.
@@ -112,8 +112,8 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
       - With no identity selector, space toggles a session, enter confirms, and tab toggles the preview pane.
       - Layout: one tab per session by default. --splits packs session pairs side by side in each tab.
       - Backend: auto-detected from the terminal you're in (iTerm / Ghostty / tmux); override with --iterm/--ghostty/--tmux/--vscodium.
-      - --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --host too).
-      - --host <alias> opens the terminal surface on that host only when it is the selected sessions' origin; recovery never migrates a session to another device.
+      - --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --device too).
+      - --device <alias> opens the terminal surface on that device only when it is the selected sessions' origin; recovery never migrates a session to another device.
       - Recovery runs on the session's origin device: exact healthy origin uses native resume; otherwise a healthy version of the same harness receives /continue <id>.
     `,
   });
@@ -131,7 +131,7 @@ async function sessionsResumeAction(query: string | undefined, options: ResumeOp
   }
 
   if (query && isDirectResumeSelector(query)) {
-    await dispatchSessionLifecycleInPlace(query.trim(), options.host ? [options.host] : [], options.attachOnly === true, options.local === true);
+    await dispatchSessionLifecycleInPlace(query.trim(), options.device ? [options.device] : [], options.attachOnly === true, options.local === true);
     return;
   }
 
@@ -180,8 +180,8 @@ async function sessionsResumeAction(query: string | undefined, options: ResumeOp
   }
   if (!chosen || chosen.length === 0) return;
 
-  if (options.host) {
-    const requestedHost = options.host;
+  if (options.device) {
+    const requestedHost = options.device;
     const mismatches = chosen
       .map((session) => resumeHostMismatch(session, requestedHost))
       .filter((message): message is string => message !== null);
@@ -195,7 +195,7 @@ async function sessionsResumeAction(query: string | undefined, options: ResumeOp
   // 2. Route every selection through the owning device's recovery resolver.
   const items: Array<SurfaceItem & { session: SessionMeta }> = [];
   for (const s of chosen) {
-    const command = buildSessionRecoveryCommand(s, !!options.host);
+    const command = buildSessionRecoveryCommand(s, !!options.device);
     const cwd = s.cwd && fs.existsSync(s.cwd) ? s.cwd : process.cwd();
     items.push({ session: s, cwd, command });
   }
@@ -226,7 +226,7 @@ async function sessionsResumeAction(query: string | undefined, options: ResumeOp
   // 5b. Fan out through the engine. Full-width tabs are the default for batch
   // recovery; callers can explicitly opt into pairs of side-by-side panes.
   const packing = resolveResumePacking(options);
-  const where = options.host ? `${backend} on ${options.host}` : backend;
+  const where = options.device ? `${backend} on ${options.device}` : backend;
   // Terminal.app has no scriptable split, so its buildSplit opens a tab. Say so
   // when the user actually asked for panes — the layout silently not happening
   // is worse than one line of warning.
@@ -245,7 +245,7 @@ async function sessionsResumeAction(query: string | undefined, options: ResumeOp
       sessionId: it.session.id || undefined,
       title: it.session.label || it.session.topic || undefined,
     })),
-    { backend, host: options.host, packing },
+    { backend, host: options.device, packing },
   );
 
   let opened = 0;
@@ -295,7 +295,7 @@ export function buildSessionLifecycleArgs(
 ): string[] {
   return [
     'sessions', 'focus', selector,
-    ...hosts.flatMap(host => ['--host', host]),
+    ...hosts.flatMap(host => ['--device', host]),
     ...(attachOnly ? ['--attach-only'] : []),
     ...(local ? ['--local'] : []),
   ];
@@ -326,7 +326,7 @@ export function resumeHostMismatch(
   const origin = sessionOriginDevice(session, self);
   return sessionRecoveryDestinationMatches(session, requestedHost, self)
     ? null
-    : `Session ${session.shortId} originated on ${origin}; --host ${requestedHost} cannot move recovery to another device.`;
+    : `Session ${session.shortId} originated on ${origin}; --device ${requestedHost} cannot move recovery to another device.`;
 }
 
 /**
@@ -348,7 +348,7 @@ export async function resolveBackend(
       : undefined;
   if (forced) return forced;
   // Remote defaults to tmux (headless, no GUI session assumptions); override with a backend flag.
-  if (options.host) return 'tmux';
+  if (options.device) return 'tmux';
 
   const available = availableBackends(ctx);
   if (available.length === 0) return 'inplace';

@@ -666,7 +666,7 @@ describe('Claude usage scoping', () => {
     }
   });
 
-  // Linux/CI-scoped regression guard for `agents view --host <linux>`: the fallback
+  // Linux/CI-scoped regression guard for `agents view --device <linux>`: the fallback
   // exists because a headless Linux Claude CLI writes its OAuth to .credentials.json
   // instead of a keychain. On Windows CI loadClaudeOauth returns undefined here (a
   // runner-environment divergence, not a product path this test targets), so assert
@@ -674,7 +674,7 @@ describe('Claude usage scoping', () => {
   it.skipIf(process.platform === 'win32')('falls back to <home>/.claude/.credentials.json when the keychain has no item (Linux/CI)', async () => {
     // A fresh temp home yields a unique hashed keychain service, so the keychain
     // read misses and loadClaudeOauth must fall back to the file the Linux Claude
-    // CLI writes. This is the regression guard for `agents view --host <linux>`
+    // CLI writes. This is the regression guard for `agents view --device <linux>`
     // rendering no usage bars.
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-usage-oauth-file-'));
     const claudeDir = path.join(home, '.claude');

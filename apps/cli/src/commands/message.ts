@@ -7,7 +7,7 @@
  *   - parked headless (no rail) → `agents run --resume <id> -- <answer>`
  *   - cloud task → provider.message()
  *
- * Cross-host is handled one layer up: `--host <h>` routes the whole command over
+ * Cross-host is handled one layer up: `--device <h>` routes the whole command over
  * ssh via `REMOTE_PASSTHROUGH` (see src/lib/hosts/passthrough.ts), so the box is
  * written on the host that actually owns the agent. A caller who doesn't already
  * know the host (a detached `agents run --device <h> --no-follow` dispatch) is
@@ -182,9 +182,9 @@ async function deliverViaResume(route: AnswerRoute, mailboxId: string): Promise<
  * while `agents devices ps` shows the same dispatch running with a live remote
  * pid — the only recovery was kill-and-redispatch, losing all context.
  *
- * Re-spawns `agents message <remoteRef> <text> --host <host>` through
- * `getAgentsInvocation`, so it re-enters via the SAME `--host` REMOTE_PASSTHROUGH
- * choke point (`lib/hosts/passthrough.ts`) any explicit `--host` caller uses,
+ * Re-spawns `agents message <remoteRef> <text> --device <host>` through
+ * `getAgentsInvocation`, so it re-enters via the SAME `--device` REMOTE_PASSTHROUGH
+ * choke point (`lib/hosts/passthrough.ts`) any explicit `--device` caller uses,
  * and resolves against the remote box's own active sessions.
  */
 async function deliverViaHostReroute(
@@ -192,7 +192,7 @@ async function deliverViaHostReroute(
   text: string,
   opts: { from?: string; as?: string; surface?: string; ttl?: string },
 ): Promise<void> {
-  const argv = ['message', route.remoteRef, text, '--host', route.host];
+  const argv = ['message', route.remoteRef, text, '--device', route.host];
   if (opts.from) argv.push('--from', opts.from);
   if (opts.as) argv.push('--as', opts.as);
   if (opts.surface) argv.push('--surface', opts.surface);

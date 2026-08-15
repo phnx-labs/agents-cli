@@ -135,15 +135,20 @@ export async function runActiveSessionsWarmTick(
  * across processes via the DB scan claim, so a foreground `agents sessions*` and
  * this tick never double-scan. The daemon is the single scheduled executor,
  * consistent with the one-scheduler rule.
+ *
+ * Calls `scanSessionsIncremental`, NOT `discoverSessions` (RUSH-2691). A bare
+ * `discoverSessions()` ends in a listing query that defaults its cwd filter to
+ * `process.cwd()` — the daemon's, i.e. `$HOME` — and caps at 50, so its row count
+ * described "sessions whose cwd is exactly $HOME", which is 0 on a normal box no
+ * matter how much the scan indexed. The tick reported that 0 every 20s while
+ * still paying for the query's existence check and Linear fetch. Scanning
+ * directly reports what was actually parsed and skips the query entirely.
  */
-export async function runSessionIndexWarmTick(
-  deps: { discover?: () => Promise<{ length: number }> } = {},
-): Promise<{ indexed: number }> {
-  const discover = deps.discover
-    ?? (async () => {
-      const { discoverSessions } = await import('./session/discover.js');
-      return discoverSessions();
-    });
-  const rows = await discover();
-  return { indexed: rows.length };
+export async function runSessionIndexWarmTick(): Promise<{ indexed: number; claimed: boolean }> {
+  const { scanSessionsIncremental } = await import('./session/discover.js');
+  const { claimed, scanned } = await scanSessionsIncremental();
+  // A skipped claim is not a failure — a foreground `agents sessions*` is
+  // scanning right now and this tick would be a duplicate.
+  if (!claimed) return { indexed: 0, claimed: false };
+  return { indexed: scanned, claimed: true };
 }

@@ -69,7 +69,7 @@ describe('stripClixml', () => {
   });
 });
 
-/** Decode the PowerShell script a Windows `--host` invocation ships, by pulling
+/** Decode the PowerShell script a Windows `--device` invocation ships, by pulling
  * the base64 payload off `powershell -NoProfile -EncodedCommand <b64>` and
  * reversing the UTF-16LE encoding — the exact bytes the remote PowerShell runs. */
 function decodeWindows(cmd: string): string {
@@ -97,15 +97,15 @@ function decodeRemoteArgv(forwarded: string[], remoteCwd?: string): string[] {
 }
 
 describe('stripRoutingFlags', () => {
-  it('keeps the command name and drops --host with a separate value', () => {
-    expect(stripRoutingFlags(['view', '--host', 'mac', 'claude'], SPECS)).toEqual(['view', 'claude']);
+  it('keeps the command name and drops --device with a separate value', () => {
+    expect(stripRoutingFlags(['view', '--device', 'mac', 'claude'], SPECS)).toEqual(['view', 'claude']);
   });
 
   it('drops the --host=value glued form', () => {
     expect(stripRoutingFlags(['view', '--host=mac', '--json'], SPECS)).toEqual(['view', '--json']);
   });
 
-  it('drops -H with a separate value and the glued short form', () => {
+  it('drops -H (legacy --host short form) with a separate value and the glued form', () => {
     expect(stripRoutingFlags(['view', '-H', 'mac'], SPECS)).toEqual(['view']);
     expect(stripRoutingFlags(['view', '-Hmac', '--json'], SPECS)).toEqual(['view', '--json']);
   });
@@ -118,9 +118,9 @@ describe('stripRoutingFlags', () => {
     ]);
   });
 
-  it('drops the --device alias and its value so it never leaks to the remote binary', () => {
-    // --device is an alias of --host; forwarding it would re-trigger routing on
-    // the remote (which only knows --host). Both space and =value forms go.
+  it('drops --device and its value so it never leaks to the remote binary', () => {
+    // --device forwarded to the remote would re-trigger routing there.
+    // Both space and =value forms are stripped.
     expect(stripRoutingFlags(['message', 'abc', 'hi', '--device', 'yosemite-s0'], SPECS)).toEqual([
       'message',
       'abc',
@@ -133,12 +133,17 @@ describe('stripRoutingFlags', () => {
     ]);
   });
 
+  it('drops -D (--device short form) with a separate value and the glued form', () => {
+    expect(stripRoutingFlags(['view', '-D', 'mac'], SPECS)).toEqual(['view']);
+    expect(stripRoutingFlags(['view', '-Dmac', '--json'], SPECS)).toEqual(['view', '--json']);
+  });
+
   it('drops the valueless --no-tty without consuming the next token', () => {
     expect(stripRoutingFlags(['view', '--no-tty', 'claude'], SPECS)).toEqual(['view', 'claude']);
   });
 
   it('does not mistake a positional that merely contains "host" for the flag', () => {
-    expect(stripRoutingFlags(['teams', 'add', 't', 'claude', 'fix the host header', '--host', 'mac'], SPECS)).toEqual([
+    expect(stripRoutingFlags(['teams', 'add', 't', 'claude', 'fix the host header', '--device', 'mac'], SPECS)).toEqual([
       'teams',
       'add',
       't',
@@ -177,7 +182,7 @@ describe('buildRemoteAgentsInvocation (two-layer quoting is injection-safe)', ()
   });
 });
 
-describe('secrets export --host push command (cross-platform)', () => {
+describe('secrets export --device push command (cross-platform)', () => {
   // The keychain export push drives `agents secrets import --from -` on the
   // remote (`--from -` reads the .env off ssh stdin — the cross-platform
   // replacement for the POSIX-only `/dev/stdin`; `import` auto-creates the

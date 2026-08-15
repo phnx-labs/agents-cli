@@ -111,7 +111,7 @@ describe('HostCloudProvider.status/message — task lookup', () => {
     saveTask(baseTask({ status: 'completed' }));
     const err = await provider.message('abcd1234', 'and now the report').catch((e) => e as Error);
     expect((err as Error).message).toMatch(/no session id to resume/);
-    expect((err as Error).message).toMatch(/agents run codex .* --host gpu-box/);
+    expect((err as Error).message).toMatch(/agents run codex .* --device gpu-box/);
   });
 
   it('list projects every sidecar; terminal tasks skip the ssh probe entirely', async () => {

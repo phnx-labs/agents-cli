@@ -1,7 +1,7 @@
 /**
  * `agents run <agent> [prompt] --cloud` — the vendor-cloud placement for a run.
  *
- * One of three run placements: local (default), machine (--host/--device,
+ * One of three run placements: local (default), machine (--device,
  * --lease), cloud (--cloud). Routing goes through the cloud provider registry
  * exactly like `agents cloud run --agent <agent>`: the agent's native
  * `cloudProvider` wins, `--provider` overrides. The dispatch itself is the

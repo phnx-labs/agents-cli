@@ -184,7 +184,7 @@ interface SessionsOptions extends SessionFilterOptions {
   /** Force local-only: skip the cross-machine SSH fan-out (both the default
    * listing and --active). */
   local?: boolean;
-  /** --device <target...> — alias for --host; resolves against the device registry. */
+  /** --device <target...> — values from the `--device` flag; resolves against the device registry. */
   device?: string[];
   /** --devices <target...> — plural alias for --device; a bare `all`/`fleet` value
    * means "search the whole fleet" (already the default), so it never errors. */
@@ -1168,7 +1168,7 @@ export function dedupeByMachineSession(sessions: ActiveSession[]): ActiveSession
 }
 
 /**
- * Narrow a gathered live set to the machines an explicit `--host`/`--device`
+ * Narrow a gathered live set to the machines an explicit `--device`
  * scope named. The gather picks which boxes to ASK; this asserts what the answer
  * may contain, and the two are not the same question: a host-dispatched run is
  * reported by the box that dispatched it while executing somewhere else, so
@@ -1447,7 +1447,7 @@ async function enrichTmuxLocators(local: ActiveSession[], surfaces: GhosttySurfa
   } catch { /* non-fatal */ }
 }
 
-/** Normalize a `--host`/`--device` token (`alias`, `user@host`, `host.domain`)
+/** Normalize a `--device` token (`alias`, `user@host`, `host.domain`)
  * to the machine id the fan-out and registry key off. */
 function hostToken(h: string): string {
   return normalizeHost(h.split('@').pop() || h);
@@ -1455,7 +1455,7 @@ function hostToken(h: string): string {
 
 /**
  * Whether the local machine's sessions belong in an `--active` view. Local is
- * included by default; an explicit `--host`/`--device` list scopes the view to
+ * included by default; an explicit `--device` list scopes the view to
  * exactly those machines, so local is dropped unless it is itself named (by
  * alias or `user@host`, matched on the normalized machine id). Exported for
  * unit testing without touching SSH or the live process table.
@@ -1466,7 +1466,7 @@ export function shouldIncludeLocal(hosts: string[] | undefined, self: string): b
 }
 
 /**
- * The peers to dial for an `--active` view. No `--host` → `undefined`, which
+ * The peers to dial for an `--active` view. No `--device` → `undefined`, which
  * tells `gatherRemoteActive` to sweep the registered online devices. An
  * explicit list → exactly those, minus this machine (its sessions come from the
  * local seed, so dialing self would be a wasted SSH and a spurious "unreachable"
@@ -1482,9 +1482,9 @@ export function remoteHostsToDial(hosts: string[] | undefined, self: string): st
 /**
  * The fleet-wide live-session set behind every `--active` surface. Local sessions
  * come from `getActiveSessions()` and (unless `--local`) the registered online
- * devices from `ag devices` are folded in over SSH. An explicit `--host`/`--device`
+ * devices from `ag devices` are folded in over SSH. An explicit `--device`
  * list SCOPES the sweep to exactly those machines — the local machine is included
- * only when it is itself named — so `--host` is a filter, not an addition.
+ * only when it is itself named — so `--device` is a filter, not an addition.
  *
  * This is the single gather: the static renderer AND the interactive browser both
  * call it, so the browser can never disagree with `--active --json` about which
@@ -1494,7 +1494,7 @@ export function remoteHostsToDial(hosts: string[] | undefined, self: string): st
  * RUSH-2062: default path is cache-first against the daemon-warmed shared
  * snapshot (`session-cache.ts`). Menubar / Factory / watchdog / CLI share one
  * warm result instead of each re-running the full SSH fan-out. `forceRefresh`
- * (or `AGENTS_SESSIONS_FORCE_REFRESH=1`) re-gathers live; scoped `--host` lists
+ * (or `AGENTS_SESSIONS_FORCE_REFRESH=1`) re-gathers live; scoped `--device` lists
  * always gather live so a filter never returns a wrong unscoped snapshot.
  */
 export async function gatherActiveSessions(
@@ -1788,8 +1788,8 @@ function useInteractiveBrowser(options: SessionsOptions): boolean {
 /**
  * A bare interactive fleet listing — no query, no render/filter flag — that the
  * `runSessionBrowser` picker can represent. The single predicate shared by the
- * bare-browser branch and the `--host` early-return guard so they can't drift:
- * when this holds, an explicit `--host`/`--device` scope is folded into the
+ * bare-browser branch and the `--device` early-return guard so they can't drift:
+ * when this holds, an explicit `--device` scope is folded into the
  * browser (preview-rich, selectable) instead of the legacy per-host raw stream.
  */
 export function isBareBrowserListing(options: SessionsOptions, query: string | undefined): boolean {
@@ -2644,7 +2644,7 @@ async function sessionsAction(
   }
 
   // Normalize convenience flags before any routing reads them: per-agent
-  // shorthands fold into --agent, and --device is an alias for --host (both
+  // shorthands fold into --agent; --device and --devices (both
   // resolve against the same device registry).
   applyAgentShorthands(options);
   try {
@@ -2654,7 +2654,7 @@ async function sessionsAction(
     process.exitCode = 1;
     return;
   }
-  // --device / --devices both alias --host. A bare `all` / `fleet` sentinel means
+  // --device / --devices values are merged into options.host for internal routing. A bare `all` / `fleet` sentinel means
   // "search every peer" — which is already the default — so it resolves to no
   // explicit host set rather than erroring on a device literally named "all".
   const deviceTargets = [...(options.device ?? []), ...(options.devices ?? [])]
@@ -2742,7 +2742,7 @@ async function sessionsAction(
       await runRemoteSessionsJson(options.host);
       return;
     }
-    // A bare interactive `--host`/`--device <box>` listing falls through to the
+    // A bare interactive `--device`/`--device <box>` listing falls through to the
     // fleet browser below, which folds the named host(s) into the same merged,
     // preview-rich, selectable view as the local listing (via gatherRemoteList).
     // A query, a render/filter flag, or a non-interactive caller keeps the legacy
@@ -4284,7 +4284,7 @@ export function formatPickerLabel(
 /** Hints rotated above the picker so the flags/features stay discoverable. */
 const PICKER_TIPS: string[] = [
   'Tip: narrow with -a/--agent (e.g. -a codex), or --project <name> for another folder.',
-  "Tip: --all searches every directory; -H/--host <machine> folds in another box's sessions.",
+  "Tip: --all searches every directory; -D/--device <machine> folds in another box's sessions.",
   'Tip: just type to fuzzy-search prompts and responses; press space to preview a session.',
   'Tip: --since 2d / --until <date> bound the time window; pass a session id to open it directly.',
 ];
@@ -4361,7 +4361,7 @@ export async function handlePickedSession(picked: PickedSession): Promise<void> 
   if (isIdlessLiveRow(picked.session)) {
     const where = picked.session.machine ? ` on ${picked.session.machine}` : '';
     console.log(chalk.yellow(`This session hasn't reported a session id yet — nothing to open${where}.`));
-    console.log(chalk.gray(`Watch for it with: agents sessions --active${picked.session.machine ? ` --host ${picked.session.machine}` : ''}`));
+    console.log(chalk.gray(`Watch for it with: agents sessions --active${picked.session.machine ? ` --device ${picked.session.machine}` : ''}`));
     return;
   }
   // Reading and resuming are on DIFFERENT machines' terms, and conflating them
@@ -5557,7 +5557,7 @@ export async function resolveSessionMetadata(
  * groups the rows to distinct machines, then:
  *
  *   - exactly one logical session → delegate rendering to one peer via `runOnPeer`
- *     (its transcript and agent binary live there — a local `--host` hop would
+ *     (its transcript and agent binary live there — a local `--device` hop would
  *     re-discover locally and dead-end), returning `'rendered'`.
  *   - more than one logical session → print every full-id candidate with its
  *     machine labels, returning `{ kind: 'conflict' }`.
@@ -5705,8 +5705,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--flat', 'Plain flat table (one row per session) instead of the grouped project overview')
     .option('--no-live', 'Do not enrich the listing with live status/preview for running sessions')
     .option('--cloud', 'Source sessions from Rush Cloud (captured runs) instead of local disk')
-    .option('-H, --host <target...>', 'Run this query on remote machine(s) over SSH (host alias or user@host; repeatable)')
-    .option('--device <target...>', 'Alias for --host (device alias from `agents devices`; repeatable). `--device all` searches the whole fleet (the default).')
+    .option('-D, --device <target...>', 'Run this query on remote machine(s) over SSH (device alias from `agents devices`, user@host, or `all` to search the whole fleet; repeatable)')
     .addOption(new Option('--devices <target...>', 'Plural alias for --device (accepts `all`/`fleet`).').hideHelp())
     .option('--fleet', 'With --include tools: query every registered online compute device and merge compact matches')
     .option('--count', 'With one program:<name> tool query: count static occurrences, containing calls, and sessions')
@@ -5792,10 +5791,10 @@ export function registerSessionsCommands(program: Command): void {
       agents sessions --resolve d3470b57 --json
 
       # Search another machine's sessions live over SSH (no sync needed)
-      agents sessions "auth bug" --last 3 --host yosemite-s1
+      agents sessions "auth bug" --last 3 --device yosemite-s1
 
       # Fan the same query out across several machines
-      agents sessions --all "deploy script" --host box-a --host box-b
+      agents sessions --all "deploy script" --device box-a --device box-b
     `,
     notes: `
       Session lifecycle — ONE verb gets you back in, it detects the state:
@@ -5807,7 +5806,7 @@ export function registerSessionsCommands(program: Command): void {
       - The interactive listing and every live-status flag fold in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; single-id lookups stay local.
       - --all is not a device flag: it widens historical directory and time filters. Fleet collection is already the default. A status flag (--working/--idle/--waiting/--orphan/--crashed/--closed/--abandoned/--queued/--unknown) implies --active; combine status flags for a union.
       - --version <version> requires --agent and is equivalent to --agent <agent@version>.
-      - --host runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.
+      - --device runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.
       - --in-team matches both ends of the lineage: the session that ran 'agents teams create/add', and (with --teams) that team's teammates. In the interactive list, 't' cycles the same filter over the teams in view.
       - --include and --exclude are mutually exclusive.
       - With --include tools, repeat --query for same-session AND across distinct calls. Fields: tool, program, input, output, status, exit, error.
@@ -5861,8 +5860,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('-a, --agent <agent>', 'Narrow the ID to one agent type/version')
     .option('-p, --project <name>', 'Narrow the ID to one project')
     .option('--local', 'Only this machine; do not resolve the ID across the fleet')
-    .option('-H, --host <target...>', 'Resolve only on the named device(s)')
-    .option('--device <target...>', 'Alias for --host')
+    .option('-D, --device <target...>', 'Resolve only on the named device(s)')
     .option('--json', 'Output the session preview as JSON');
 
   setHelpSections(previewCmd, {

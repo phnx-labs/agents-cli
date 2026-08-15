@@ -33,7 +33,7 @@ describe('isDirectResumeSelector', () => {
 describe('buildSessionLifecycleArgs', () => {
   it('routes an identity through focus and preserves source-device scope', () => {
     expect(buildSessionLifecycleArgs('ag-codex-c1f3d813', ['yosemite-s0'])).toEqual([
-      'sessions', 'focus', 'ag-codex-c1f3d813', '--host', 'yosemite-s0',
+      'sessions', 'focus', 'ag-codex-c1f3d813', '--device', 'yosemite-s0',
     ]);
   });
 
@@ -61,7 +61,7 @@ describe('buildSessionLifecycleArgs', () => {
 
   it('keeps both the host scope and the flag together', () => {
     expect(buildSessionLifecycleArgs('019fd114', ['zion'], true)).toEqual([
-      'sessions', 'focus', '019fd114', '--host', 'zion', '--attach-only',
+      'sessions', 'focus', '019fd114', '--device', 'zion', '--attach-only',
     ]);
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Generic `--host` passthrough — the single choke point that runs an allowlisted
+ * Generic `--device` passthrough — the single choke point that runs an allowlisted
  * `agents <command>` on a remote host instead of locally. Called once from
  * `index.ts` before commander parses; returns `true` when it handled the
  * invocation (the local command must then NOT run).
@@ -10,10 +10,10 @@
  * long-running case — `teams start --watch` — dispatches detached so the remote
  * supervisor outlives a dropped connection.
  *
- * Commands with their own richer `--host` handling (`run`/`sessions`/`feed`/
+ * Commands with their own richer `--device` handling (`run`/`sessions`/`feed`/
  * `computer`/`secrets`/`logs`/…) are listed in {@link OWN_HOST_COMMANDS} and
  * fall through to their local actions. Everything else either routes via this
- * table or, when `--host`/`--device` is present, exits with a clear
+ * table or, when `--device` is present, exits with a clear
  * "not supported" message — never commander's raw `unknown option`.
  */
 
@@ -60,7 +60,7 @@ interface RemoteSpec {
 
 /**
  * First-class groups that run transparently on a remote via SSH when
- * `--host`/`--device` is present. Keep both canonical names and aliases
+ * `--device` is present. Keep both canonical names and aliases
  * (`repo`/`repos`, `exec`/`run`) so either argv form routes the same way.
  *
  * Prefer adding here over per-command SSH code — this is the single choke point.
@@ -132,14 +132,14 @@ export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
 };
 
 /**
- * Commands that register and interpret `--host`/`--device` themselves — must
+ * Commands that register and interpret `--device` themselves — must
  * fall through to local commander even when the flag is present. Do not add
  * these to {@link REMOTE_PASSTHROUGH}.
  */
 export const OWN_HOST_COMMANDS = new Set([
   'run',
   'exec', // deprecated alias of run
-  'harness', // `--host <agent>` names the host CLI to run under, not a remote device
+  'harness', // `--host <agent>` names the host CLI to run under (not a device routing flag)
   'harnesses',
   'sessions',
   'feed',
@@ -175,7 +175,7 @@ function syntheticHost(target: string): Host {
   return { name: target, provider: 'local', source: 'ssh-config' };
 }
 
-/** Resolve a `--host` value to a Host: enrolled name → capability tag → raw target. */
+/** Resolve a `--device` value to a Host: enrolled name → capability tag → raw target. */
 async function resolveTargetHost(name: string, any: boolean): Promise<Host> {
   const enrolled = await resolveHost(name);
   if (enrolled) return enrolled;
@@ -469,13 +469,13 @@ export async function runFleetPassthrough(
 }
 
 /**
- * Route `agents <command> … --host <name>` to a remote if the command is
- * host-routable and a `--host` (or its `--device` alias) was given. Returns
- * `false` (run locally) when neither flag is present, the command owns its own
- * host handling, the target is this very machine, or placement flags need the
- * local action. Returns `true` after printing a clear error when the flag is
- * present on a command that is neither routable nor self-handling — so the user
- * never sees commander's raw `unknown option '--host'`.
+ * Route `agents <command> … --device <name>` to a remote if the command is
+ * device-routable and `--device` (or a fleet sentinel `--hosts`/`--devices`) was
+ * given. Returns `false` (run locally) when no routing flag is present, the
+ * command owns its own device handling, the target is this very machine, or
+ * placement flags need the local action. Returns `true` after printing a clear
+ * error when the flag is present on a command that is neither routable nor
+ * self-handling — so the user never sees commander's raw `unknown option`.
  *
  * @param command the resolved subcommand name (`process.argv`'s first non-flag).
  * @param allArgs `process.argv.slice(2)` — the command name followed by its args.
@@ -485,27 +485,25 @@ export async function maybeRunOnHost(
   allArgs: string[],
   opts?: FleetPassthroughOptions,
 ): Promise<boolean> {
-  const hostFlag = flagValue(allArgs, 'host', 'H');
-  const deviceFlag = flagValue(allArgs, 'device');
+  const deviceFlag = flagValue(allArgs, 'device', 'D');
   const hostsFlag = flagValue(allArgs, 'hosts');
   const devicesFlag = flagValue(allArgs, 'devices');
-  let hostName = hostFlag ?? deviceFlag;
-  const fleetAll = isFleetAllSentinel(hostFlag, deviceFlag, hostsFlag, devicesFlag);
+  let hostName = deviceFlag;
+  const fleetAll = isFleetAllSentinel(undefined, deviceFlag, hostsFlag, devicesFlag);
   // Proceed when any routing flag is present, including the plural fleet flags
   // that may carry the `all` sentinel.
   if (!hostName && !hostsFlag && !devicesFlag) return false;
 
-  // Commands with their own richer --host semantics must reach local commander
-  // BEFORE any single-target conflict gate. sessions/feed merge --host and
-  // --device into a multi-host list; rejecting "conflicting" pairs would break
-  // `agents sessions --host a --device b` / `agents feed --host a --device b`.
+  // Commands with their own richer --device semantics must reach local commander
+  // directly. sessions/feed handle multi-host lists themselves; fall through so
+  // those flags reach the local action.
   if (OWN_HOST_COMMANDS.has(command)) return false;
 
   // Placement, not routing: `teams add`/`teams create` read `--device`/`--devices`
-  // (and `--host`/`--hosts`) as WHERE to place a teammate / the team pool — the
+  // (and `--hosts`) as WHERE to place a teammate / the team pool — the
   // command itself always runs locally on the orchestrator. Bail before the
   // generic teams routing below so those flags reach the local action. Every
-  // other teams subcommand (`status`/`logs`/`stop`/…) keeps `--host` routing.
+  // other teams subcommand (`status`/`logs`/`stop`/…) keeps `--device` routing.
   // Find the subcommand = the first non-flag token AFTER `teams` (robust to any
   // leading global flags), then bail for the add/create aliases.
   if (command === 'teams') {
@@ -519,7 +517,7 @@ export async function maybeRunOnHost(
   // `--hosts` / `--devices` are command-level fleet flags unless their value is
   // the `all` sentinel, which this module fans out generically. On `routines`,
   // a non-all `--devices` value is placement (which devices may run the routine).
-  if (allArgs.includes('--hosts') && hostsFlag?.toLowerCase() !== 'all') return false;
+  if (allArgs.includes('--hosts') && hostsFlag?.toLowerCase() !== 'all') return false; // legacy plural sentinel; prefer --devices
   if (allArgs.includes('--devices')) {
     if (devicesFlag === undefined) return false; // malformed, let commander error
     const isAll = devicesFlag.toLowerCase() === 'all';
@@ -528,8 +526,8 @@ export async function maybeRunOnHost(
 
   // A command that does not exist is an unknown-command error, not a routing
   // error. The router runs BEFORE commander parses, so without this gate a typo
-  // (`agents session resume --host box`) was answered with "does not support
-  // --host/--device" — a true statement about a command the user never typed,
+  // (`agents session resume --device box`) was answered with "does not support
+  // --device" — a true statement about a command the user never typed,
   // and the exact opposite of the truth for the `sessions` they meant, which
   // does support it. Fall through so commander reports `unknown command` (and
   // its did-you-mean). RUSH-2022.
@@ -541,23 +539,19 @@ export async function maybeRunOnHost(
     // no remote semantics — say so clearly instead of falling through.
     console.error(
       chalk.red(
-        `\`agents ${command}\` does not support --host/--device (no remote interpretation).`,
+        `\`agents ${command}\` does not support --device (no remote interpretation).`,
       ) +
         chalk.gray(
-          ' Run without the flag, or use a host-routable group (repos, view, sync, teams, doctor, …).',
+          ' Run without the flag, or use a device-routable group (repos, view, sync, teams, doctor, …).',
         ),
     );
     process.exitCode = 1;
     return true;
   }
 
-  // Reject a conflicting --host/--device pair before either the fleet fan-out
-  // or single-target path runs. Equal values (e.g. both `all`) are allowed.
-  if (hostFlag && deviceFlag && hostFlag !== deviceFlag) {
-    console.error(chalk.red('Conflicting --host/--device values — pass just one.'));
-    process.exitCode = 1;
-    return true;
-  }
+  // Reject duplicate --device flags before either the fleet fan-out
+  // or single-target path runs. (Conflict detection: only --device exists now.)
+  // No conflict gate needed — a single canonical flag cannot conflict with itself.
 
   // Generic fleet fan-out for the `all` sentinel — before single-host resolution
   // so `all` is never treated as a literal hostname.
@@ -566,7 +560,7 @@ export async function maybeRunOnHost(
   }
 
   // After the bailouts and fleet fan-out above, the only remaining path is a
-  // single-target --host/--device. Guard for the type checker: plural non-all
+  // single-target --device. Guard for the type checker: plural non-all
   // flags and bare flags were already handled.
   if (!hostName) return false;
 
@@ -589,10 +583,10 @@ export async function maybeRunOnHost(
 
   // Running against your own machine is just a local run — skip the SSH round-trip.
   // Match EVERY identity the box answers to (short id, loopback, tailscale
-  // dnsName), not just machineId() — a `--host <self-dnsName>` used to slip past a
+  // dnsName), not just machineId() — a `--device <self-dnsName>` used to slip past a
   // short-hostname-only check and self-SSH (RUSH-2114). Strip the routing flags
   // from process.argv so the local command never sees an unregistered
-  // `--host`/`--device` and dies with "unknown option".
+  // `--device` and dies with "unknown option".
   if (isSelfHost(hostName)) {
     const stripped = stripRoutingFlags(allArgs, STRIP_SPECS);
     process.argv = [process.argv[0], process.argv[1], ...stripped];
@@ -656,21 +650,21 @@ export async function maybeRunOnHost(
 }
 
 /**
- * `--host` passthrough for a **standalone binary** whose command name is fixed by
+ * `--device` passthrough for a **standalone binary** whose command name is fixed by
  * the binary itself (the `browser`/`computer` bins, `dist/browser.js` etc.) rather
  * than being the first argv token.
  *
- * `agents browser … --host <box>` routes through {@link maybeRunOnHost} in
+ * `agents browser … --device <box>` routes through {@link maybeRunOnHost} in
  * index.ts, but the standalone `browser` binary never enters index.ts — so without
- * this it dropped `--host` entirely (commander errored with `unknown option
- * '--host'`). This wires the identical routing: it synthesizes the implicit command
+ * this it dropped `--device` entirely (commander errored with `unknown option
+ * '--device'`). This wires the identical routing: it synthesizes the implicit command
  * token (`browser`) at the front of the argv so the remote invocation builds as
  * `agents browser …`, delegates to {@link maybeRunOnHost}, and returns `true` when
  * it dispatched the run to a remote (the local program must then NOT parse).
  *
  * On a local / self-host fall-through it rewrites `process.argv` to the ORIGINAL
  * args minus the routing flags — never the synthetic command token — so the
- * standalone commander program parses cleanly and never sees an unknown `--host`.
+ * standalone commander program parses cleanly and never sees an unknown `--device`.
  * When no routing flag is present it leaves `process.argv` untouched (the common
  * case), so an unrelated flag like `--no-tty` is never stripped from a purely local
  * run.

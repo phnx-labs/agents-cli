@@ -74,7 +74,7 @@ agents sessions tail <session-id>
 # Press Ctrl+C to stop
 
 # Or the unified viewer: resolves a session id OR a host-dispatch run (from
-# `agents run --host`), and -f follows either (a session tail here is
+# `agents run --device`), and -f follows either (a session tail here is
 # `sessions tail` under the hood)
 agents sessions <id>     # show the transcript
 agents sessions tail <id> # follow a live one (claude/codex)

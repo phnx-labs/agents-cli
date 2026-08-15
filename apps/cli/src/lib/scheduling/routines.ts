@@ -162,7 +162,7 @@ export interface JobAllowConfig {
 
 /**
  * Where a routine's job body executes when the daemon fires it.
- * Distinct from `devices` (which daemon may *fire*) and from the CLI `--host`
+ * Distinct from `devices` (which daemon may *fire*) and from the CLI `--device`
  * remote-management passthrough (manage routines *on* another machine).
  */
 export type HostStrategy = 'local' | 'host' | 'fleet' | 'cloud';
@@ -366,7 +366,7 @@ export interface JobConfig {
    * registered host, device, capability tag, or user@host) instead of locally.
    * Distinct from `devices`: `devices` says which daemon may FIRE the job,
    * `host` says where the dispatched run EXECUTES. CLI flag: `--run-on`
-   * (`--host` on routines commands already means "manage routines on that
+   * (`--device` on routines commands already means "manage routines on that
    * machine" via the remote passthrough).
    *
    * When `hostStrategy` is set, it owns placement semantics; `host` is then
@@ -382,7 +382,7 @@ export interface JobConfig {
    *              double-fire; the firing pin stays on `devices`)
    * - `cloud`  — dispatch via the agent's native cloud provider
    *
-   * CLI flag: `--placement` (not `--host`, which is the remote-management
+   * CLI flag: `--placement` (not `--device`, which is the remote-management
    * passthrough). Omitted strategy falls back to `host` when `host:` is set,
    * otherwise `local`.
    */
@@ -876,7 +876,7 @@ export function placementRequiresFiringPin(strategy: HostStrategy): boolean {
 export interface JobEligibilityResult {
   /** Full human message, e.g. "Job 'NAME' can only run on: a, b". */
   message: string;
-  /** One-line copy-paste suggestion, e.g. "agents routines run NAME --host a". */
+  /** One-line copy-paste suggestion, e.g. "agents routines run NAME --device a". */
   suggestion: string;
   /** Comma-separated allowed devices label, e.g. "a, b". */
   allowedLabel: string;
@@ -901,7 +901,7 @@ export function checkJobDeviceEligibility(
   // refuse the run for exactly the same reason.
   const firstHost = routineOwnerDevice(config) ?? allowed[0] ?? 'HOST';
   const message = `Job '${config.name}' can only run on: ${allowedLabel}`;
-  const suggestion = `agents routines run ${config.name} --host ${firstHost}`;
+  const suggestion = `agents routines run ${config.name} --device ${firstHost}`;
   return { message, suggestion, allowedLabel, firstHost };
 }
 

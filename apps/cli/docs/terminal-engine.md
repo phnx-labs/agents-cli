@@ -99,18 +99,18 @@ natively via the surface configuration; iTerm/tmux `cd` inside the wrapped shell
   └──────┴──────┘  └──────┴──────┘  └──────┘
 ```
 
-## Remote (`--host`)
+## Remote (`--device`)
 
 `runRemote` serializes the backend argv into one POSIX-quoted string and runs it
 through [`sshExec`](../src/lib/ssh-exec.ts) — the same hardened primitive
-`agents sessions --host` and the browser driver use (target-injection guard,
+`agents sessions --device` and the browser driver use (target-injection guard,
 connection multiplexing). Host aliases resolve via the `~/.ssh/config.d/agents`
-include that `agents devices` / `agents hosts` maintain, so `--host zion` "just
+include that `agents devices` / `agents hosts` maintain, so `--device zion` "just
 works".
 
 Caveat: driving a GUI app (iTerm/Ghostty) over SSH needs the remote user logged
 into the Mac's GUI session — `osascript` reaches the app through it. `tmux` over
-`--host` is unconditional (headless), which is why remote defaults to `tmux`.
+`--device` is unconditional (headless), which is why remote defaults to `tmux`.
 `vscodium-agent` also needs a running editor: `codium --open-url` forwards the URL
 to the already-open VSCodium instance over its user-scoped IPC socket, so it works
 from an SSH session as the same user (no `osascript`, no new window spawned).
@@ -178,7 +178,7 @@ terminal instead of running here; `--terminal <backend>` forces one and errors o
 an unknown id rather than quietly auto-detecting. The tab re-invokes the caller's
 own argv with the flag stripped ([`run-surface.ts`](../src/lib/terminal/run-surface.ts)),
 so `--mode`, `--cwd` and a `--` passthrough ride along and only one place knows
-how to spell a run. It cannot combine with `--host` (that opens a tab here, not
+how to spell a run. It cannot combine with `--device` (that opens a tab here, not
 there) and exits non-zero when no terminal could be opened.
 
 ```bash
@@ -218,7 +218,7 @@ await openSurfaces(items, {
 | Flag | Effect |
 |---|---|
 | `--iterm` / `--ghostty` / `--tmux` / `--vscodium` / `--terminal-app` | Force a backend (else auto-detect / prompt). `--terminal-app` is spelled apart from `run --terminal`, which means "open in a terminal", not "use Terminal.app". |
-| `--host <alias>` | Open on the selected sessions' origin host over SSH (defaults to `tmux`); a different host is refused. |
+| `--device <alias>` | Open on the selected sessions' origin host over SSH (defaults to `tmux`); a different host is refused. |
 | `--splits` | Pack two sessions side by side per tab (default is one tab per session). |
 
 Every selected harness goes through the shared session-recovery command. Native
@@ -249,7 +249,7 @@ codium --open-url 'vscodium://swarmify.swarm-ext/spawn?p=<base64url(JSON)>'
   two-per-tab packing as the other backends.
 - **Why `--open-url`, not `open`** — the editor CLI forwards the URL to the
   running instance. That needs no OS URL-scheme handler registration, works on
-  Linux, and flows over `--host` (the SSH session reaches the same user's editor).
+  Linux, and flows over `--device` (the SSH session reaches the same user's editor).
   The per-product scheme must match the CLI: `codium`→`vscodium://`,
   `cursor`→`cursor://`, `code`→`vscode://` (see `EDITOR_VARIANTS` /
   `makeVscodiumAgentBackend`).

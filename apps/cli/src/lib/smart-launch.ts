@@ -1,5 +1,5 @@
 /**
- * Device placement for `--device auto` / `--host auto`.
+ * Device placement for `--device auto`.
  *
  * Explicit auto placement probes live fleet health and harness readiness.
  * Historical affinity remains for generic host resolution callers.
@@ -116,7 +116,7 @@ export interface DeviceAffinityOptions {
 }
 
 export interface DeviceAffinityPlan {
-  /** null means run locally (do not pass --host). */
+  /** null means run locally (do not pass --device). */
   host: string | null;
   deviceCandidates: WeightedCandidate[];
   pickedDeviceKey: string | null;
@@ -233,7 +233,7 @@ export async function resolveDeviceAuto(
  * Resolve host for `--device auto`. Does NOT pick harness or accounts.
  *
  * Draws from the same automatic-placement pool as {@link resolveDeviceAuto}, so
- * `agents ssh auto`, the generic `--host auto` passthrough, and `matchHost`'s
+ * `agents ssh auto`, the generic `--device auto` passthrough, and `matchHost`'s
  * `auto` sentinel honour device roles too. Throws when roles leave the pool
  * empty — a `null` host here means "run locally", which for a box marked
  * `personal` is the outcome the mark exists to prevent.
@@ -331,7 +331,7 @@ export type DeviceAutoApplyResult = {
 };
 
 /**
- * Apply `--device auto` / `--host auto` (and deprecated `--smart`) onto run options.
+ * Apply `--device auto` (and deprecated `--smart`) onto run options.
  * Mutates `options` in place. Placement failures propagate without rewriting
  * `auto`, so callers fail loud instead of silently launching locally.
  */

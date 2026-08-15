@@ -560,7 +560,7 @@ describe('detectSpawnedTeam — rejects prose and flag values', () => {
   });
 
   it('ignores a single-character doc placeholder', () => {
-    expect(detectSpawnedTeam('`agents teams create t --host <name>`')).toBeUndefined();
+    expect(detectSpawnedTeam('`agents teams create t --device <name>`')).toBeUndefined();
   });
 
   it('ignores an English article after the sub-verb', () => {

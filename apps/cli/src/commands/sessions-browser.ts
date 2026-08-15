@@ -219,7 +219,7 @@ export function browserFilterToArgv(f: BrowserFilter, query = ''): string[] {
   return a;
 }
 
-/** Normalize a `--host`/`--device` token (`alias`, `user@host`, `host.domain`) to
+/** Normalize a `--device`/`--device` token (`alias`, `user@host`, `host.domain`) to
  * the canonical machine id the rows carry in `.machine`, so a flag seed matches
  * (the `d` hotkey already cycles canonical ids). Mirrors sessions.ts `hostToken`. */
 export function normalizeDeviceSeed(host: string | undefined): string | undefined {
@@ -327,7 +327,7 @@ function copyToClipboard(text: string): boolean {
  * The live index is fetched separately/lazily — it's the slow part and only the
  * running filter needs it, so a bare browse stays instant.
  *
- * `hosts` is the explicit `--host`/`--device` scope (if any): it restricts which
+ * `hosts` is the explicit `--device`/`--device` scope (if any): it restricts which
  * peers are dialed and whether local is included, honoring the flag's "scope,
  * not add" contract instead of always sweeping the whole fleet. */
 async function fetchRawPool(

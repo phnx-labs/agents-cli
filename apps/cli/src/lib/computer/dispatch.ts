@@ -114,7 +114,7 @@ function toRpcParams(verb: string, input: Record<string, unknown>, pid?: number)
 // the same `computer.action` event those commands emit — otherwise a session
 // that only used the loop reads back usedComputer=false even though it drove
 // real actions (reviewer-flagged regression on #1864).
-export function makeVerbDispatcher(client: ComputerClient, context: { host?: string } = {}): VerbDispatcher {
+export function makeVerbDispatcher(client: ComputerClient, context: { device?: string } = {}): VerbDispatcher {
   return async (call: VerbCall): Promise<VerbResult> => {
     const verb = call.name;
     const input = call.input ?? {};
@@ -133,7 +133,7 @@ export function makeVerbDispatcher(client: ComputerClient, context: { host?: str
     const params = toRpcParams(verb, input, pid);
     const res = await client.call(method, params);
     if (res.error) return { ok: false, error: `${res.error.code}: ${res.error.message}` };
-    emitComputerAction(verb, pid, { bundle: input.bundle as string | undefined, host: context.host });
+    emitComputerAction(verb, pid, { bundle: input.bundle as string | undefined, device: context.device });
     return { ok: true, result: res.result ?? {} };
   };
 }

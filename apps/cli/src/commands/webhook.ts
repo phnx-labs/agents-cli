@@ -53,10 +53,10 @@ export function registerWebhooksCommand(program: Command): void {
     .command('serve')
     .description('Receive signed GitHub/Linear webhooks on /hooks/<source> and fire matching routines.')
     .requiredOption('--secrets-bundle <name>', 'agents secrets bundle containing GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET')
-    .option('--host <addr>', `Bind address (default ${DEFAULT_HOST})`, DEFAULT_HOST)
+    .option('--bind <addr>', `Bind address (default ${DEFAULT_HOST})`, DEFAULT_HOST)
     .option('-p, --port <n>', `Local port (default ${DEFAULT_PORT})`, String(DEFAULT_PORT))
     .option('--rate-limit <n>', 'Accepted deliveries per source per minute', '60')
-    .action(async (opts: { secretsBundle: string; host?: string; port?: string; rateLimit?: string }) => {
+    .action(async (opts: { secretsBundle: string; bind?: string; port?: string; rateLimit?: string }) => {
       let secrets: WebhookSecrets;
       try {
         secrets = readWebhookSecrets(opts.secretsBundle);
@@ -70,7 +70,7 @@ export function registerWebhooksCommand(program: Command): void {
 
       try {
         const server = startWebhookServer({
-          host: opts.host ?? DEFAULT_HOST,
+          host: opts.bind ?? DEFAULT_HOST,
           port,
           secrets,
           rateLimitPerMinute: rateLimit,
@@ -99,7 +99,7 @@ export function registerWebhooksCommand(program: Command): void {
         await waitForListening(server);
         const address = server.address();
         const bound = typeof address === 'object' && address ? address.port : port;
-        console.log(`${chalk.green('agents webhooks')} ${chalk.dim('→')} ${chalk.cyan(`http://${opts.host ?? DEFAULT_HOST}:${bound}`)}`);
+        console.log(`${chalk.green('agents webhooks')} ${chalk.dim('→')} ${chalk.cyan(`http://${opts.bind ?? DEFAULT_HOST}:${bound}`)}`);
         console.log(chalk.dim('signed · localhost by default · endpoints: /hooks/github, /hooks/linear · acks 202 then dispatches · Ctrl-C to stop'));
         console.log(chalk.dim('for a supervised receiver that survives reboot: agents daemon webhooks add --secrets-bundle <name>'));
 

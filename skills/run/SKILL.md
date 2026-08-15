@@ -200,22 +200,22 @@ agents run claude "..." --verbose
 
 ## Offload to another machine
 
-`agents run --host <name>` runs the agent on a registered host over SSH instead
+`agents run --device <name>` runs the agent on a registered host over SSH instead
 of locally (see the `devices` skill). It follows live by default; `--no-follow`
 detaches and returns immediately.
 
 ```bash
-agents run claude "profile this build" --host gpu-box   # follows live
-agents run claude "..." --host gpu-box --no-follow       # detach
+agents run claude "profile this build" --device gpu-box   # follows live
+agents run claude "..." --device gpu-box --no-follow       # detach
 
 agents hosts ps          # list dispatched runs
 agents hosts stop <id>   # terminate a hung/detached run (alias: kill)
-agents hosts logs --host gpu-box   # pick a host-dispatch run
+agents hosts logs --device gpu-box   # pick a host-dispatch run
 agents hosts logs <id> -f        # follow a host-task log
 agents sessions <id>             # session transcript
 ```
 
-Run options follow a strict forwarding contract on `--host` runs — nothing
+Run options follow a strict forwarding contract on `--device` runs — nothing
 silently drops at the SSH boundary:
 
 - **Forwarded** (same behavior remote as local): `--mode --model --name
@@ -224,13 +224,13 @@ silently drops at the SSH boundary:
   <passthrough>`.
 - **Rejected loud** (exit non-zero before dispatch): `--secrets/--secrets-keys/
   --allow-expired` (Keychain values never cross SSH implicitly — provision with
-  `agents secrets export --host` instead), bare `--resume` (the picker can't
+  `agents secrets export --device` instead), bare `--resume` (the picker can't
   cross a detached dispatch — pass a concrete id),
   `--resume-checkpoint`.
 - **Local-only** (consumed by the dispatching side): `--quiet --no-follow
-  --cwd/--project/--remote-cwd --host/--device/--any --lease`.
+  --cwd/--project/--remote-cwd --device/--any --lease`.
 
-Hosts are also a task backend (`agents cloud run "…" --host <name>` — see the
+Hosts are also a task backend (`agents cloud run "…" --device <name>` — see the
 `cloud` skill) and a routines placement target (`agents routines add …
 --run-on <name>` — see the `routines` skill).
 
@@ -246,7 +246,7 @@ path (`~/…`, `$HOME/…`, or a local-home absolute your shell already expanded
 with different home paths (`/Users/me` → `/home/me`):
 
 ```bash
-agents run claude "..." --host gpu-box --cwd ~/src/github.com/me/app
+agents run claude "..." --device gpu-box --cwd ~/src/github.com/me/app
 #   → runs on gpu-box in $HOME/src/github.com/me/app
 ```
 
@@ -256,8 +256,8 @@ projects root (auto-inferred from the repo you launch inside and cached in
 worktree under `.agents/worktrees/`:
 
 ```bash
-agents run claude "..." --host gpu-box --project app          # → $HOME/…/app
-agents run claude "..." --host gpu-box --project app@fix-bug  # → app/.agents/worktrees/fix-bug
+agents run claude "..." --device gpu-box --project app          # → $HOME/…/app
+agents run claude "..." --device gpu-box --project app@fix-bug  # → app/.agents/worktrees/fix-bug
 agents defaults project-root ~/src/github.com/<user>          # set/show the root
 ```
 
@@ -267,7 +267,7 @@ verbatim (not re-rooted). Precedence: `--remote-cwd` > `--project`/`--cwd`.
 ## Lease a disposable cloud box (`--lease`)
 
 `agents run <agent> "<task>" --lease` runs the agent on a **disposable cloud box**
-(via crabbox) instead of locally, then tears it down. Unlike `--host`, no machine is
+(via crabbox) instead of locally, then tears it down. Unlike `--device`, no machine is
 registered — the box is ephemeral. One-time provider setup, then run:
 
 ```bash
@@ -387,7 +387,7 @@ agents run claude "..." --cwd /path/to/repo
 agents run claude "..." --project app          # shorthand: <root>/app
 ```
 
-`--cwd` sets the working directory locally, and **on the host** for `--host` runs
+`--cwd` sets the working directory locally, and **on the host** for `--device` runs
 (see [Working directory on the host](#working-directory-on-the-host)). `-P, --project
 <slug>[@worktree]` resolves a project name against your cached projects root; set it
 with `agents defaults project-root <path>`.
@@ -412,9 +412,9 @@ Emits a unified event stream; ndjson when combined with `--json`.
 | `--model <id>` | Override model |
 | `--secrets <bundle>` | Inject keychain bundle (repeatable) |
 | `--env KEY=val` | Pass env var (repeatable) |
-| `--cwd <dir>` | Working directory (local, or on the host for `--host` runs) |
+| `--cwd <dir>` | Working directory (local, or on the host for `--device` runs) |
 | `-P, --project <slug>[@wt]` | Project shorthand → cwd from your projects root |
-| `--remote-cwd <dir>` | Explicit host working directory (`--host`; verbatim) |
+| `--remote-cwd <dir>` | Explicit host working directory (`--device`; verbatim) |
 | `--add-dir <dir>` | Extra dir access (Claude, repeatable) |
 | `--json` | ndjson event stream |
 | `--quiet` | Drop preamble |

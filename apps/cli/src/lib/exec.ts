@@ -282,7 +282,7 @@ export interface ExecOptions {
   captureStdoutTail?: boolean;
   /**
    * Print the run's resolved session id to stdout as a one-line sentinel once the
-   * child exits (see hosts/session-marker.ts). Set by the `--host` dispatch so the
+   * child exits (see hosts/session-marker.ts). Set by the `--device` dispatch so the
    * LAUNCHER can relate the remote-created session back to itself — Claude's id is
    * forced up front, but every other agent coins its own id on the remote box, and
    * this marker is how that id rides the followed log home. Headless-only and inert
@@ -389,10 +389,10 @@ export function parseExecEnv(entries: string[]): Record<string, string> | undefi
  * alongside the agent's real session id (terminals/sessions/<pid>.json), so it
  * is what maps a launch to its exact session even when the hook runs under a
  * different pid (tmux pane leaf / cmd.exe wrapper) — and, across an SSH hop, what
- * lets a `--host` launcher resolve the remote-coined id for agents that never
+ * lets a `--device` launcher resolve the remote-coined id for agents that never
  * accept a forced `--session-id`.
  *
- * ADOPT a caller-supplied `AGENT_LAUNCH_ID` (a `--host` launcher forwards one via
+ * ADOPT a caller-supplied `AGENT_LAUNCH_ID` (a `--device` launcher forwards one via
  * `--env` so it controls the key end-to-end); MINT a fresh one otherwise (every
  * local run, which passes none). A malformed inbound value is ignored in favour
  * of a fresh mint — the key must be a real correlation id, never an empty string.
@@ -598,7 +598,7 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
   // (events.ts::resolveProvenance) reads AGENTS_PARENT_SESSION_ID and stamps it on
   // every event the child emits. `options.sessionId` is the CHILD's id, so read the
   // spawner from the live env; guard a same-session resume from naming itself parent.
-  // Local-spawn scope here; forwarding it across the `--host` SSH hop is Phase 4.
+  // Local-spawn scope here; forwarding it across the `--device` SSH hop is Phase 4.
   const spawnerSessionId = process.env.AGENTS_SESSION_ID || process.env.AGENT_SESSION_ID;
   if (spawnerSessionId && spawnerSessionId !== options.sessionId) {
     result.AGENTS_PARENT_SESSION_ID = spawnerSessionId;
@@ -1495,7 +1495,7 @@ export function shouldRecapDeadPane(status: number | undefined, interactive: boo
  * Why this is not `status ?? 0`: an interactive run whose tmux server died mid-
  * work landed on exactly those unknown branches and returned 0, so `agents run`
  * printed a failure banner while handing its caller a success code. The same
- * "1 if unknown" rule already governs the `--host` follow path
+ * "1 if unknown" rule already governs the `--device` follow path
  * (`docs/specifications.md` §Agent execution, exit-code table).
  *
  * @param pane       What `paneExitStatus` read back for the agent pane.
@@ -1757,7 +1757,7 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
     // agent finished or was killed. MUST NOT be reported as success: a caller
     // scripting `agents run` would count a run killed mid-work as a clean
     // finish. Tear down so no orphan session is left, say so, and exit non-zero
-    // — the same "1 if unknown" rule the `--host` follow path already uses.
+    // — the same "1 if unknown" rule the `--device` follow path already uses.
     await killSession(name, socket).catch(() => {});
     // One computation feeds both the banner and the return value — printing a
     // code the caller does not receive is the same defect in miniature.
@@ -1890,7 +1890,7 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
 }
 
 /**
- * Print the run's resolved session id as a one-line stdout sentinel so a `--host`
+ * Print the run's resolved session id as a one-line stdout sentinel so a `--device`
  * launcher can relate the remote-created session back to itself (see the
  * `emitSessionId` option and hosts/session-marker.ts).
  *
@@ -1964,7 +1964,7 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
   // That id is the join key that reconciles this launch's pid-registry entry
   // with the hook's authoritative session id even when the hook runs under a
   // different pid (tmux pane leaf / cmd.exe wrapper) — see pid-registry.ts and
-  // session/hook-sessions.ts. ADOPT a launch id a `--host` launcher already
+  // session/hook-sessions.ts. ADOPT a launch id a `--device` launcher already
   // forwarded (via `--env AGENT_LAUNCH_ID=…`) so ONE correlation key spans the
   // SSH hop and the launcher can resolve this run's real session id for every
   // agent, not just Claude (RUSH-2034); mint a fresh one for every local run.
@@ -2148,7 +2148,7 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
       // Budget kill resolves with a DISTINCT non-zero exit so CI/headless and
       // teams/cloud can tell a budget termination apart from a normal failure.
       const exitCode = budgetKilled ? BUDGET_KILL_EXIT_CODE : (code ?? 0);
-      // Relate the session id back to a `--host` launcher (see the emitSessionId
+      // Relate the session id back to a `--device` launcher (see the emitSessionId
       // doc). Claude's id is the one we forced; every other agent coined its own,
       // which the SessionStart hook recorded under this run's launchId — resolve
       // and print it as a one-line sentinel that rides the followed log home.

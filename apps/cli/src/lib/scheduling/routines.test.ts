@@ -555,7 +555,7 @@ describe('checkJobDeviceEligibility', () => {
     // entry as written. Suggesting yosemite-s0 here would send the operator to
     // a box that refuses the run for exactly the same reason.
     expect(result!.firstHost).toBe('mac-mini');
-    expect(result!.suggestion).toBe("agents routines run backup --host mac-mini");
+    expect(result!.suggestion).toBe("agents routines run backup --device mac-mini");
   });
 });
 

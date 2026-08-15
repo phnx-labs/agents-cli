@@ -1,7 +1,7 @@
 /**
  * Relate a remote-created session id back to the launching agent.
  *
- * A host dispatch (`agents run --host`) launches `agents run` on the remote box.
+ * A host dispatch (`agents run --device`) launches `agents run` on the remote box.
  * Only Claude accepts a forced `--session-id`, so for every OTHER agent the
  * remote run coins its OWN session id (via its SessionStart hook) and the
  * launcher never learns it — the run is orphaned in `agents sessions`.

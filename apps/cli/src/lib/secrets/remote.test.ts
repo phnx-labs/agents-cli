@@ -164,7 +164,7 @@ describe('remoteSecretsRaw', () => {
   });
 
   it('drives the keychain export push as `import --from -` and forwards the .env over stdin', () => {
-    // This is the transport the `secrets export --host` keychain push uses: it
+    // This is the transport the `secrets export --device` keychain push uses: it
     // pipes the resolved dotenv over ssh stdin to `import --from -` (never the
     // POSIX-only `/dev/stdin`; no `create … || true`, which broke on Windows).
     sshExecMock.mockReturnValue(ok('Imported 2 key(s).'));
@@ -213,7 +213,7 @@ describe('remoteSecretsRaw', () => {
   });
 
   it('tty COMPOSES with secret — a remote `view --reveal` both prompts AND pins the host key (RUSH-2527)', () => {
-    // `tty` must not short-circuit past `secret`: a `view --reveal` over `--host`
+    // `tty` must not short-circuit past `secret`: a `view --reveal` over `--device`
     // allocates a PTY (for the prompt) AND streams the plaintext value back, so
     // it needs the managed host-key pin, not just `-tt` + no-multiplex.
     sshExecMock.mockReturnValue(ok('SECRET_VALUE'));
@@ -467,7 +467,7 @@ describe('verifyRemoteKeychainPush (real read-back over the stubbed SSH boundary
   });
 });
 
-describe('buildRemoteFileImportCommand (secrets export --host --remote-backend file)', () => {
+describe('buildRemoteFileImportCommand (secrets export --device --remote-backend file)', () => {
   const DOTENV = 'APPLE_ID="me@example.com"\nAPPLE_APP_SPECIFIC_PASSWORD="abcd-efgh-ijkl-mnop"\n';
 
   it('with NO passphrase: builds a plain `import --backend file` with NO read/export prologue, .env is the only stdin', () => {

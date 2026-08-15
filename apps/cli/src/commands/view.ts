@@ -1963,7 +1963,7 @@ Examples:
 
   # One call: full inventory + what's synced on a host (installed agents,
   # versions, accounts, usage, and per-version resource sync-state)
-  agents view claude --host yosemite-s0 --json --resources all
+  agents view claude --device yosemite-s0 --json --resources all
   agents view claude --json --resources skills,plugins   # just those sections
 
   # Prune older versions that duplicate an account already used by a newer version

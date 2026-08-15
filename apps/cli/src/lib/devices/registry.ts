@@ -272,7 +272,7 @@ export async function loadDevices(): Promise<DeviceRegistry> {
 
 /**
  * Synchronous {@link loadDevices} for callers already on a sync path (e.g. the
- * `agents sessions --host` fan-out builds its ssh command strings synchronously
+ * `agents sessions --device` fan-out builds its ssh command strings synchronously
  * and only needs the target's platform to pick POSIX vs PowerShell). Same
  * missing-file/corruption contract as {@link loadDevices}.
  */

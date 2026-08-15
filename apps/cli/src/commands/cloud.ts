@@ -116,9 +116,9 @@ Examples:
     .option('--model <model>', 'Model override')
     .option('--env <id>', 'Codex Cloud environment ID')
     .option('--computer <name>', 'Factory/Droid computer target')
-    .option('--host <name>', 'One of your machines as the target (a registered host, device, capability tag, or user@host). Implies --provider host.')
-    .option('--remote-cwd <dir>', 'Working directory on the host (--provider host only)')
-    .option('--any', 'With --host <cap> (a capability tag), pick any matching host instead of erroring when several match')
+    .option('--device <name>', 'One of your machines as the target (a registered device, capability tag, or user@host). Implies --provider host.')
+    .option('--remote-cwd <dir>', 'Working directory on the device (--provider host only)')
+    .option('--any', 'With --device <cap> (a capability tag), pick any matching device instead of erroring when several match')
     .option('--autonomy <level>', 'Factory/Droid autonomy: low, medium, high (default high)')
     .option('--mode <mode>', 'Execution mode (e.g., plan, edit, full)')
     .option(
@@ -161,9 +161,9 @@ Examples:
   # Codex Cloud
   agents cloud run "add auth tests" --provider codex --env env_abc123
 
-  # One of your own machines (agents devices), over SSH
-  agents cloud run "run the nightly benchmark" --host gpu-box --agent claude
-  agents cloud run "rebuild the index" --host gpu --any --remote-cwd ~/proj
+  # One of your own machines (agents hosts / agents devices), over SSH
+  agents cloud run "run the nightly benchmark" --device gpu-box --agent claude
+  agents cloud run "rebuild the index" --device gpu --any --remote-cwd ~/proj
 
   # Default provider (set in ~/.agents/agents.yaml)
   agents cloud run "refactor auth module" --repo user/repo
@@ -179,13 +179,13 @@ Examples:
         hint: 'agents cloud run "<task>" --repo <owner/repo>',
       });
 
-      // --host names one of YOUR machines as the target — that only means
+      // --device names one of YOUR machines as the target — that only means
       // something to the host provider, so it implies --provider host rather
       // than silently riding along to a cloud backend that would ignore it.
-      if (options.host && options.provider && options.provider !== 'host') {
-        die(`--host targets your own machines (--provider host), not ${options.provider}. Drop --host, or use --provider host.`, 1, { json });
+      if (options.device && options.provider && options.provider !== 'host') {
+        die(`--device targets your own machines (--provider host), not ${options.provider}. Drop --device, or use --provider host.`, 1, { json });
       }
-      const explicitProvider = (options.provider as string | undefined) ?? (options.host ? 'host' : undefined);
+      const explicitProvider = (options.provider as string | undefined) ?? (options.device ? 'host' : undefined);
 
       // Agent-aware: with no --provider, the agent routes to its native cloud
       // (claude→rush, codex→codex, droid→factory, antigravity→antigravity).
@@ -213,7 +213,7 @@ Examples:
       };
       if (options.env) dispatchOptions.providerOptions!.env = options.env as string;
       if (options.computer) dispatchOptions.providerOptions!.computer = options.computer as string;
-      if (options.host) dispatchOptions.providerOptions!.host = options.host as string;
+      if (options.device) dispatchOptions.providerOptions!.host = options.device as string;
       if (options.remoteCwd) dispatchOptions.providerOptions!.remoteCwd = options.remoteCwd as string;
       if (options.any) dispatchOptions.providerOptions!.any = true;
       if (options.autonomy) dispatchOptions.providerOptions!.autonomy = options.autonomy as string;
@@ -260,10 +260,10 @@ Examples:
           prompt,
         };
         if (repoValues[0]) routine.repo = repoValues[0];
-        // --host controls where the enabled local receiver dispatches the run.
+        // --device controls where the enabled local receiver dispatches the run.
         // Device activation remains in this receiver's device manifest.
-        if (options.host) {
-          routine.host = options.host as string;
+        if (options.device) {
+          routine.host = options.device as string;
           if (options.remoteCwd) routine.remoteCwd = options.remoteCwd as string;
         }
         writeJob(routine);

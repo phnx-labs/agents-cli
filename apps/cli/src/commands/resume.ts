@@ -104,7 +104,7 @@ export function registerResumeCommand(program: Command): void {
         }
         // `runOnPeer` is the existing transport for "this session's transcript
         // and agent binary are on that box" (lib/session/remote-list.ts) — the
-        // same one the picker already uses. Not the `--host` passthrough: that
+        // same one the picker already uses. Not the `--device` passthrough: that
         // one re-discovers locally and marks the run AGENTS_FLEET_REMOTE, which
         // a long-lived resumed session must not inherit.
         const { runOnPeer } = await import('../lib/session/remote-list.js');

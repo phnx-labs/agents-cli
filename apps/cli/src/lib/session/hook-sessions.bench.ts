@@ -3,7 +3,7 @@
  * two on-disk sources `agents sessions --active` joins a `ps`-discovered pid
  * against on every ~3s poll (active.ts:1490 "The ~3s poll must not re-read
  * the dir ... per candidate") and exec.ts:1953/1708 reads once per
- * `--host`-dispatched non-Claude run --
+ * `--device`-dispatched non-Claude run --
  *
  *   - loadHookSessionIndex() (hook-sessions.ts:126) -- readdirSync + one
  *     readFileSync+JSON.parse PER FILE over ~/.agents/.cache/terminals/sessions/.

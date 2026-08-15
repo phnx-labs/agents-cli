@@ -1234,12 +1234,12 @@ describeRoutines('routines devices no-flags nonTTY names --set/--clear', () => {
   });
 });
 
-describeRoutines('routines list --host self runs locally', () => {
-  it('exits 0 and lists when --host matches AGENTS_SYNC_MACHINE_ID', () => {
+describeRoutines('routines list --device self runs locally', () => {
+  it('exits 0 and lists when --device matches AGENTS_SYNC_MACHINE_ID', () => {
     const job = { ...baseJob, devices: ['zion'] };
     const home = makeHome({ jobs: [job], registry });
     try {
-      const res = run(home, ['list', '--host', 'zion'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
+      const res = run(home, ['list', '--device', 'zion'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
       expect(res.status).toBe(0);
       expect(res.stdout).toContain('test-job');
     } finally {
@@ -1248,13 +1248,12 @@ describeRoutines('routines list --host self runs locally', () => {
   });
 });
 
-describeRoutines('routines --help documents --host and --device', () => {
-  it('help output contains --host and --device', () => {
+describeRoutines('routines --help documents --device', () => {
+  it('help output contains --device', () => {
     const home = makeHome();
     try {
       const res = run(home, ['--help']);
       const output = res.stdout + res.stderr;
-      expect(output).toContain('--host');
       expect(output).toContain('--device');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
@@ -1395,25 +1394,22 @@ describeRoutines('routines run wrong-host exact output', () => {
       // The suggested host is the OWNER (lowest normalized name), not the first
       // entry as written — the old suggestion pointed at a box that would refuse
       // the run for exactly the same reason.
-      expect(output).toContain('  agents routines run test-job --host mac-mini');
+      expect(output).toContain('  agents routines run test-job --device mac-mini');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
 });
 
-describeRoutines('routines list --help documents --host and --device once each', () => {
-  it('lists each routing flag exactly once', () => {
+describeRoutines('routines list --help documents --device once', () => {
+  it('lists the routing flag exactly once', () => {
     const home = makeHome();
     try {
       const res = run(home, ['list', '--help']);
       expect(res.status).toBe(0);
       const output = res.stdout + res.stderr;
-      expect(output).toContain('--host');
       expect(output).toContain('--device');
-      const hostMatches = output.match(/^\s+-H, --host /gm) ?? [];
-      const deviceMatches = output.match(/^\s+--device /gm) ?? [];
-      expect(hostMatches.length).toBe(1);
+      const deviceMatches = output.match(/^\s+-D, --device /gm) ?? [];
       expect(deviceMatches.length).toBe(1);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
@@ -1434,7 +1430,7 @@ function directSubcommandNames(home: string): string[] {
     .filter((name): name is string => Boolean(name));
 }
 
-describeRoutines('routines subcommand --help documents --host and --device once each', () => {
+describeRoutines('routines subcommand --help documents --device once each', () => {
   it('derives every direct command from routines --help and checks local help', () => {
     const home = makeHome();
     try {
@@ -1444,9 +1440,7 @@ describeRoutines('routines subcommand --help documents --host and --device once 
         const res = run(home, [name, '--help']);
         expect(res.status).toBe(0);
         const output = res.stdout + res.stderr;
-        const hostMatches = output.match(/^\s+-H, --host /gm) ?? [];
-        const deviceMatches = output.match(/^\s+--device /gm) ?? [];
-        expect(hostMatches.length).toBe(1);
+        const deviceMatches = output.match(/^\s+-D, --device /gm) ?? [];
         expect(deviceMatches.length).toBe(1);
       }
     } finally {
@@ -1457,12 +1451,12 @@ describeRoutines('routines subcommand --help documents --host and --device once 
   }, 90_000);
 });
 
-describeRoutines('routines run --host SELF follows the normal local eligibility path', () => {
+describeRoutines('routines run --device SELF follows the normal local eligibility path', () => {
   it('passes device eligibility when self is in the allowlist', () => {
     const job = { ...baseJob, devices: ['zion'] };
     const home = makeHome({ jobs: [job], registry });
     try {
-      const res = run(home, ['run', 'test-job', '--host', 'zion'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
+      const res = run(home, ['run', 'test-job', '--device', 'zion'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
       // Eligibility passes; the run then fails because no claude version is
       // configured in the isolated HOME. The important thing is it did not fail
       // with the device-mismatch message.

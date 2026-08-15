@@ -438,15 +438,15 @@ describe('emitComputerAction — computer.action event (#11)', () => {
     expect(recs[0].id).toBe('@e3');
   });
 
-  it('carries a remote --host target and an undefined target pid (e.g. a duration-only wait)', () => {
+  it('carries a remote --device target and an undefined target pid (e.g. a duration-only wait)', () => {
     _resetForTest(eventsPath());
-    emitComputerAction('wait', undefined, { host: 'win-mini' }, { durationMs: 500, satisfied: true });
+    emitComputerAction('wait', undefined, { device: 'win-mini' }, { durationMs: 500, satisfied: true });
 
     const recs = query({ eventTypes: ['computer.action'] });
     expect(recs).toHaveLength(1);
     expect(recs[0].command).toBe('wait');
     expect(recs[0].targetPid).toBeUndefined();
-    expect(recs[0].host).toBe('win-mini');
+    expect(recs[0].device).toBe('win-mini');
     expect(recs[0].durationMs).toBe(500);
     expect(recs[0].satisfied).toBe(true);
   });

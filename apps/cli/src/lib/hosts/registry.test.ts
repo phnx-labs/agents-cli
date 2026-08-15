@@ -1,14 +1,14 @@
 /**
- * resolveHost fall-through: the unified `--host` / `--device` resolution.
+ * resolveHost fall-through: the unified `--device` / `--device` resolution.
  *
  * The real bugs this guards against:
  *   1. A machine registered ONLY via `agents devices sync` must be reachable by
- *      `--host <name>` — the whole point of unifying devices and hosts. Before
+ *      `--device <name>` — the whole point of unifying devices and hosts. Before
  *      this, resolveHost consulted only the hosts registry and errored.
  *   2. The device's ssh target must be `user@dnsName` (dnsName preferred over ip).
  *   3. An ad-hoc `user@host` must resolve without any registration.
  *   4. A bare unknown name must return null (NOT be misread as an ad-hoc target)
- *      so capability-tag routing (`resolveHostByCap`, e.g. `--host gpu`) stays
+ *      so capability-tag routing (`resolveHostByCap`, e.g. `--device gpu`) stays
  *      reachable.
  *   5. A password-auth device can't offload over BatchMode ssh — it must throw a
  *      typed, actionable error rather than dispatch a run that would hang.

@@ -126,7 +126,7 @@ export function registerBrowserCommand(program: Command): void {
       agents browser stream --task "$AGENTS_BROWSER_TASK"
 
       # Drive another machine's browser (needs its consent — see remote-control)
-      agents browser start --host zion
+      agents browser start --device zion
 
       # Browse a task-heavy profile's captures: one row per task, not per file
       agents browser sessions
@@ -753,7 +753,7 @@ function registerTaskCommands(browser: Command): void {
   browser
     .command('remote-control [state]')
     .description(
-      "Allow or deny other fleet machines driving THIS machine's browser over `browser --host`. " +
+      "Allow or deny other fleet machines driving THIS machine's browser over `browser --device`. " +
         '`on`/`off` to set (device-local, never synced); no argument prints the current value. Default off.',
     )
     .option('--json', 'Output as JSON')
@@ -785,8 +785,8 @@ function registerTaskCommands(browser: Command): void {
       console.log(`Remote browser control (this machine) is now ${value ? 'on' : 'off'}.`);
       console.log(
         value
-          ? 'Other fleet machines can now drive this browser via `browser --host <this-device>`.'
-          : 'Cross-machine `browser --host` drives to this machine are refused.',
+          ? 'Other fleet machines can now drive this browser via `browser --device <this-device>`.'
+          : 'Cross-machine `browser --device` drives to this machine are refused.',
       );
     });
 
@@ -838,7 +838,7 @@ function registerTaskCommands(browser: Command): void {
     .option('--duration <sec>', 'Recording duration cap in seconds (with --record; default 60)', (v) => parseInt(v, 10))
     .option('--max-mb <mb>', 'Recording size cap in MB (with --record; default 25)', (v) => parseInt(v, 10))
     .action(async (opts) => {
-      // Consent gate: a fleet-remote `browser --host <this-machine> start` may
+      // Consent gate: a fleet-remote `browser --device <this-machine> start` may
       // only open a browser here if the owner opted in. Refuse before we resolve
       // or auto-create any profile. Local starts are never gated.
       try {

@@ -5,7 +5,7 @@
  * bin symlink into the npm global-bin dir; under nvm (and other per-user node
  * prefixes) that dir is absent from a *non-interactive login* shell's PATH, so
  * `bash -lc 'agents …'` fails with command-not-found. That breaks every
- * consumer that drives a login shell on the box: `agents secrets export --host`
+ * consumer that drives a login shell on the box: `agents secrets export --device`
  * (which runs `bash -lc 'agents secrets import …'` on the remote) and the
  * routines daemon (`src/lib/daemon.ts`, which falls back to bare `agents`).
  *
@@ -80,7 +80,7 @@ export function ensureLocalBinSymlink(
 /**
  * Absolute path to `bash`. We probe bash specifically — NOT the user's $SHELL —
  * because the consumers we are healing run `bash -lc` regardless of login shell:
- * `secrets export --host` builds `bash -lc 'agents secrets import …'` for the
+ * `secrets export --device` builds `bash -lc 'agents secrets import …'` for the
  * remote, and the routines daemon resolves `agents` the same way. On a box whose
  * login shell is zsh, zsh's login PATH may lack ~/.local/bin while bash's
  * includes it (Debian/Ubuntu ~/.profile) — so probing $SHELL would give the

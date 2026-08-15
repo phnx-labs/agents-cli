@@ -64,7 +64,7 @@ describe('hasNoBrowserDisqualifyingFlags — which views the browser can represe
   });
 
   it('--cloud disqualifies: it lists provider tasks and has no host scope', () => {
-    // Without this, `--device box --cloud` fell through the --host guard and
+    // Without this, `--device box --cloud` fell through the device routing guard and
     // reached runCloudSessions, which silently drops the device the user named.
     expect(hasNoBrowserDisqualifyingFlags({ cloud: true }, undefined)).toBe(false);
   });

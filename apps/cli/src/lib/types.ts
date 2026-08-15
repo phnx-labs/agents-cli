@@ -1056,7 +1056,7 @@ export interface Meta {
    */
   deviceConfig?: Record<string, unknown>;
   /**
-   * Agent-host registry keyed by host name (the `--host`/`--device` dispatch overlay). Portable user
+   * Agent-host registry keyed by host name (the `--device`/`--device` dispatch overlay). Portable user
    * config synced with `agents repo push/pull`. For `ssh-config` hosts this is
    * just an overlay (caps/os) — the connection details stay in ~/.ssh/config and
    * are never copied. `inline` hosts carry their own address/user.

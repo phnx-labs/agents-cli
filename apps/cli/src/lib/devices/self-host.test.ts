@@ -1,10 +1,10 @@
 /**
- * isSelfHost — the self-identity check that gates `--host` dispatch and the
+ * isSelfHost — the self-identity check that gates `--device` dispatch and the
  * fleet fan-out (RUSH-2114). The old check compared only machineId() (short
  * hostname), so a target referenced by its tailscale dnsName self-SSH'd to the
  * local box and orphaned. These tests pin the fix through the REAL device
  * registry IO (no mocking): the box is matched by every alias it answers to, and
- * — the safety-critical half — a genuine PEER is never matched (else `--host
+ * — the safety-critical half — a genuine PEER is never matched (else `--device
  * <peer>` would wrongly run locally).
  */
 import { describe, expect, it } from 'vitest';
@@ -52,7 +52,7 @@ describe('isSelfHost (RUSH-2114)', () => {
     expect(isSelfHost('::1')).toBe(true);
   });
 
-  it('does NOT match a genuine peer by short name OR dnsName (would break --host to real remotes)', () => {
+  it('does NOT match a genuine peer by short name OR dnsName (would break --device to real remotes)', () => {
     expect(isSelfHost('yosemite-s0')).toBe(false);
     expect(isSelfHost(PEER_DNS)).toBe(false);
   });

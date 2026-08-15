@@ -141,7 +141,7 @@ prompt: "Drain the local work queue"
 
 **Double-fire guard.** `host` / `fleet` / `cloud` require a `devices` pin naming which daemon may *fire* the job. Without it every fleet daemon would fire and each dispatch once. Add and sync auto-pin `devices` to this machine when you omit `--devices`. For `fleet`, that pin is **firing only** — the body still runs on any online fleet device (`pickFleetDevice` does not filter by `devices`). `devices --clear` refuses for off-box strategies. Bare `host:` (without `hostStrategy`) still works and implies `host` strategy (and still needs a pin).
 
-`--host` on `agents routines` is the remote-management passthrough ("manage routines **on** that machine") — do not overload it for placement. Use `--placement` / `--run-on`.
+`--device` on `agents routines` is the remote-management passthrough ("manage routines **on** that machine") — do not overload it for placement. Use `--placement` / `--run-on`.
 
 ### Ending a recurring routine
 
@@ -622,8 +622,8 @@ against that device's local state.
 
 ```bash
 agents routines resume drain
-agents routines resume drain --host yosemite-s0
-agents routines pause drain --host mac-mini
+agents routines resume drain --device yosemite-s0
+agents routines pause drain --device mac-mini
 agents routines devices drain --set yosemite-s0,mac-mini
 agents routines devices drain --clear   # disable everywhere
 ```
@@ -734,7 +734,7 @@ On a device not in the allowlist the job is fully inert:
 - it is never counted overdue, so `catchup` won't fire it and the daemon won't nag
 - detached daemon fires and one-shot `--at` jobs skip it
 - `agents routines run <name>` errors, naming the allowed devices and offering a
-  ready-to-paste `--host <device>` command to run it remotely
+  ready-to-paste `--device <device>` command to run it remotely
 
 `agents routines list` shows the allowlist in a **Devices** column. Unrestricted
 jobs display the word `all`; restricted lists are grayed when the local machine
@@ -910,27 +910,26 @@ identity is separate.
 
 ### Remote Routing
 
-`--host <device>` (alias: `--device`) routes any `routines` subcommand to a remote
-machine over SSH, so you can query or trigger a job on another box without an
-explicit `agents ssh` call:
+`--device <name>` routes any `routines` subcommand to a remote machine over SSH,
+so you can query or trigger a job on another box without an explicit `agents ssh` call:
 
 ```bash
 # List another device's routines
-agents routines list --host yosemite-s0
+agents routines list --device yosemite-s0
 
 # Trigger a job on a specific machine right now
-agents routines run drain --host yosemite-s0
+agents routines run drain --device yosemite-s0
 
 # Create a job pre-assigned to two hosts, then confirm it looks right on one
 agents routines add drain --schedule "0 3 * * *" --agent claude \
-  --devices yosemite-s0 --prompt "Drain queue" --host yosemite-s0
+  --devices yosemite-s0 --prompt "Drain queue" --device yosemite-s0
 ```
 
 When you try to run a job on a host outside its allowlist, the CLI prints:
 
 ```
 Job 'drain' can only run on: yosemite-s0, mac-mini
-  agents routines run drain --host yosemite-s0
+  agents routines run drain --device yosemite-s0
 ```
 
 ## Sandbox Isolation
@@ -1416,7 +1415,7 @@ spawn, that prompt never runs.
 ```bash
 # Lifecycle
 agents routines list                  # List all jobs with next run + status
-agents routines list --host yosemite-s0  # List another device's routines
+agents routines list --device yosemite-s0  # List another device's routines
 agents routines add <name> --schedule "0 9 * * *" --agent claude --prompt "..."  # Inline
 agents routines add <name> --devices yosemite-s0 --schedule "0 3 * * *" \
   --agent claude --prompt "..."       # Add with device allowlist
@@ -1443,7 +1442,7 @@ agents routines devices <name> --clear                 # Disable on every regist
 
 # Execution
 agents routines run <name>            # Run immediately in foreground
-agents routines run <name> --host yosemite-s0  # Run on a specific remote device
+agents routines run <name> --device yosemite-s0  # Run on a specific remote device
 agents routines view <name>           # Show job config
 agents routines runs <name>           # Attempt history (session optional)
 agents routines stats                 # Run count/failed/missed/avg/p50/p95 duration, every job

@@ -544,12 +544,10 @@ function renderCards(rows: RepoRow[], cols: number): void {
 export interface RepoStatusOptions {
   verbose?: boolean;
   json?: boolean;
-  /** Fan out across every reachable fleet device (`--devices-all`/`--hosts-all`). */
+  /** Fan out across every reachable fleet device (`--devices-all`). */
   devicesAll?: boolean;
-  hostsAll?: boolean;
-  /** `all`, or a comma-separated device list (`--devices`/`--hosts`). */
+  /** `all`, or a comma-separated device list (`--devices`). */
   devices?: string;
-  hosts?: string;
 }
 
 /**
@@ -666,14 +664,14 @@ type DeviceIntent = { all: true } | { hosts: string[] };
 
 /**
  * Read the device-scope flags into an intent, or null for the default local-only
- * run. `--devices-all`/`--hosts-all` (and `--devices all`/`--hosts all`) sweep
- * every reachable peer; `--devices box1,box2` targets an explicit list. A peer
- * carrying {@link NO_REPO_FANOUT_ENV} never fans out again (recursion guard).
+ * run. `--devices-all` (and `--devices all`) sweeps every reachable peer;
+ * `--devices box1,box2` targets an explicit list. A peer carrying
+ * {@link NO_REPO_FANOUT_ENV} never fans out again (recursion guard).
  */
 export function resolveDeviceIntent(opts: RepoStatusOptions): DeviceIntent | null {
   if (process.env[NO_REPO_FANOUT_ENV] === '1') return null;
-  if (opts.devicesAll || opts.hostsAll) return { all: true };
-  const val = opts.devices ?? opts.hosts;
+  if (opts.devicesAll) return { all: true };
+  const val = opts.devices;
   if (val === undefined) return null;
   const v = val.trim();
   if (v === '' || v.toLowerCase() === 'all') return { all: true };
@@ -794,22 +792,20 @@ function formatRepoTarget(alias: string, dir: string, branch?: string): string {
 
 /**
  * Register the fleet device-scope flags shared by `repo list` / `repo status`.
- * `--devices-all` (alias `--hosts-all`) sweeps every reachable device;
- * `--devices <who>` (alias `--hosts`) takes `all` or a comma-separated list.
- * A single `--host`/`--device` is handled upstream by maybeRunOnHost, which
- * streams that one box's `agents repo status` — these are the aggregating forms.
+ * `--devices-all` sweeps every reachable device; `--devices <who>` takes `all`
+ * or a comma-separated list. A single `--device` is handled upstream by
+ * maybeRunOnHost, which streams that one box's `agents repo status` — these are
+ * the aggregating forms.
  */
 function addDeviceStatusOptions(cmd: Command): Command {
   return cmd
-    .option('--devices-all', 'Report repo sync state across ALL reachable fleet devices (alias: --hosts-all).')
-    .option('--hosts-all', 'Alias of --devices-all.')
-    .option('--devices <who>', 'Fleet devices to report on: "all", or a comma-separated device list (alias: --hosts).')
-    .option('--hosts <who>', 'Alias of --devices.');
+    .option('--devices-all', 'Report repo sync state across ALL reachable fleet devices.')
+    .option('--devices <who>', 'Fleet devices to report on: "all", or a comma-separated device list.');
 }
 
 /** Register the `agents repos` command tree (`repo` is a convenience alias). */
 export function registerRepoCommands(program: Command): void {
-  // addHostOption on the group so --help documents --host/--device; remote
+  // addHostOption on the group so --help documents --device; remote
   // routing is handled pre-parse by maybeRunOnHost (passthrough.ts).
   const repoCmd = addHostOption(
     program

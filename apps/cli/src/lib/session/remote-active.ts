@@ -7,7 +7,7 @@
  * it came from so the renderer can bucket by computer.
  *
  * Peers are the registered, online devices from `ag devices` (or an explicit
- * `--host` list). `--local` on the remote invocation is critical: it stops the
+ * `--device` list). `--local` on the remote invocation is critical: it stops the
  * peer from fanning out to *its* devices, so the sweep never recurses.
  *
  * A dead or slow host is skipped with a stderr note, never fatal — one asleep
@@ -84,7 +84,7 @@ export interface RemoteActiveResult {
 
 /**
  * Gather active sessions from other machines. With an explicit `hosts` list
- * (from `--host`), fan out to exactly those. Otherwise sweep the registered,
+ * (from `--device`), fan out to exactly those. Otherwise sweep the registered,
  * online devices from `ag devices`, excluding this machine and any without an
  * address. Results from all peers run in parallel and are flattened.
  * `opts.quiet` suppresses the per-device stderr line for callers that report

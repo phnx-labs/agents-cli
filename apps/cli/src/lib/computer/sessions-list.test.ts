@@ -112,7 +112,7 @@ describe('groupIntoComputerRuns', () => {
     expect(rows[0].task).toBeUndefined();
   });
 
-  it('reports the best-known bundle and a remote --host target across the run', () => {
+  it('reports the best-known bundle and a remote --device target across the run', () => {
     const actions = [
       action({ pid: 1, tsMs: 1000, bundle: undefined, host: 'win-mini' }),
       action({ pid: 1, tsMs: 2000, bundle: 'com.apple.notes', host: undefined }),
@@ -307,7 +307,7 @@ describe('listComputerActions + buildComputerSessionRows (real event log)', () =
     expect(ledgerRows[0].linkStatus).toBe('unlinked');
   });
 
-  it('carries the remote --host target through to the row', () => {
+  it('carries the remote --device target through to the row', () => {
     for (const k of ENV_KEYS) delete process.env[k];
     _resetForTest(eventsPath());
     emit('computer.action', { command: 'click', host: 'win-mini' });

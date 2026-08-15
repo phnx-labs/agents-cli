@@ -7,7 +7,7 @@
  * — the documented silent-failure class in `remote-dispatch-mutation-safety`.
  *
  * Reuses the same SSH fabric (SSH_OPTS, deviceIdentityArgs, resolveDeviceTarget)
- * that `agents ssh` and `--host` dispatch use.
+ * that `agents ssh` and `--device` dispatch use.
  */
 
 import type { Command } from 'commander';

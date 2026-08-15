@@ -1,7 +1,7 @@
 /**
  * Reconcile a local host-task record against the remote run's ground truth.
  *
- * A detached `--host` run outlives the local follower: it keeps running and
+ * A detached `--device` run outlives the local follower: it keeps running and
  * writes its exit code to `<id>.exit` on the host even if the laptop sleeps or
  * the SSH connection drops mid-follow. When that happens the local record is
  * left at `status:'running'` forever, because the only path that finalizes it

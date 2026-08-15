@@ -552,7 +552,7 @@ Examples:
     .option('--force', 'Overwrite an existing profile with the same name')
     .addHelpText('after', '\nTo build a custom harness from a host CLI + model in one shot, use `agents harness add`.\n')
     .action(async (name: string, opts: AddProfileOptions) => {
-      // Preset-only surface here — `--host` on `profiles` is reserved for remote
+      // Preset-only surface here — `--device` on `profiles` is reserved for remote
       // device routing (see lib/hosts/passthrough.ts). The host+model one-shot
       // lives on `agents harness add`, which owns its own `--host`.
       try {

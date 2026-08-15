@@ -2,7 +2,7 @@
  * `agents feed` -- operator inbox + agent status posts.
  *
  * Default (`agents feed`): list open blocks (decisions agents are waiting on).
- * Aggregates block records from the local feed store and, with --host, from
+ * Aggregates block records from the local feed store and, with --device, from
  * reachable remote hosts via SSH passthrough. Each block carries enough
  * identity for `agents message` to route a reply back to the right agent.
  *
@@ -435,8 +435,7 @@ export function registerFeedCommand(program: Command): void {
     .option('--flat', 'List one block per agent instead of grouping by outcome')
     .option('--all', 'Include stalls/FYIs that policy would suppress (default: hide them)')
     .option('--local', 'Only this machine -- skip the cross-machine SSH fan-out')
-    .option('-H, --host <target...>', 'Scope to remote machine(s) over SSH; repeatable')
-    .option('--device <target...>', 'Alias for --host; repeatable')
+    .option('-D, --device <target...>', 'Scope to remote machine(s) over SSH; repeatable')
     .option('--project <name>', 'Scope the feed to one project/repo (matches cwd basename, case-insensitive)')
     .option('--dispatch', 'Run stall suppression + default-on-no-answer policy and urgent notifications')
     .option('--pause <id>', 'Pause a runaway/needy local process (SIGSTOP) or cancel a cloud task')
@@ -565,16 +564,14 @@ export function registerFeedCommand(program: Command): void {
       flat?: boolean;
       all?: boolean;
       local?: boolean;
-      host?: string[];
       device?: string[];
       dispatch?: boolean;
       pause?: string;
       kill?: string;
     }) => {
-      if (opts.device?.length) opts.host = [...(opts.host ?? []), ...opts.device];
       const self = machineId();
       const filter = resolveFeedFilter(opts.filter);
-      const includeLocal = shouldIncludeLocalFeed(opts.host, self);
+      const includeLocal = shouldIncludeLocalFeed(opts.device, self);
       const setupWarnings: string[] = [];
       if (includeLocal) {
         // Feed and activity hooks are independent -- install both, and register
@@ -605,7 +602,7 @@ export function registerFeedCommand(program: Command): void {
         if (filter === 'all') {
           console.log();
           renderUpdatesView(await gatherStatusPosts({
-            limit: UPDATES_VIEW_LIMIT, hosts: opts.host, local: opts.local, includeLocal, self, project: opts.project,
+            limit: UPDATES_VIEW_LIMIT, hosts: opts.device, local: opts.local, includeLocal, self, project: opts.project,
           }), opts.project);
           return;
         }
@@ -622,7 +619,7 @@ export function registerFeedCommand(program: Command): void {
         }
         const updates = await gatherStatusPosts({
           limit: opts.json ? UPDATES_JSON_LIMIT : UPDATES_VIEW_LIMIT,
-          hosts: opts.host,
+          hosts: opts.device,
           local: opts.local,
           includeLocal,
           self,
@@ -705,8 +702,8 @@ export function registerFeedCommand(program: Command): void {
       let blocks = visibleLocalBlocks;
       const forceLocal = opts.local === true || process.env[FEED_NO_FANOUT_ENV] === '1';
       if (!forceLocal) {
-        const remoteHosts = remoteFeedHostsToDial(opts.host, self);
-        if (!opts.host?.length || (remoteHosts && remoteHosts.length > 0)) {
+        const remoteHosts = remoteFeedHostsToDial(opts.device, self);
+        if (!opts.device?.length || (remoteHosts && remoteHosts.length > 0)) {
           const remote = await gatherRemoteAgentsJson({
             // Bare --json stays a block array so older peers and scripts keep working.
             args: ['feed', '--json'],

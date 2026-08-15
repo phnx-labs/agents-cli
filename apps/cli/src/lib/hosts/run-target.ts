@@ -1,12 +1,12 @@
 /**
  * Shared host-run dispatch — the one path every surface uses to run an agent on
- * another machine: `agents run --host` (commands/exec.ts), the `host` cloud
+ * another machine: `agents run --device` (commands/exec.ts), the `host` cloud
  * provider (`agents cloud run --provider host`), and host-placed routines.
  *
  * Wraps the two steps every caller needs and previously lived inline in
- * exec.ts's `--host` branch:
+ * exec.ts's `--device` branch:
  *   1. resolution — name → capability tag → error, with the same fall-through
- *      semantics as `agents run --host` (only "Multiple hosts tagged…" is a
+ *      semantics as `agents run --device` (only "Multiple hosts tagged…" is a
  *      resolution verdict; "no host tagged" degrades to unknown-host), and
  *   2. headless dispatch — session-id mint (Claude only), detached SSH launch,
  *      and LOCAL session-index registration so the run shows in `agents sessions`.
@@ -36,7 +36,7 @@ export class HostResolutionError extends Error {
 }
 
 /**
- * Resolve a `--host` value the way `agents run` does: exact name (providers →
+ * Resolve a `--device` value the way `agents run` does: exact name (providers →
  * devices → `user@host`), then capability tag. Throws `HostResolutionError`
  * for an ambiguous tag or an unknown name; lets `DeviceOffloadUnsupportedError`
  * (password-auth device) propagate untouched for the top-level catch.

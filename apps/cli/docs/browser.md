@@ -295,12 +295,12 @@ agents browser gc             # actually close it
 agents browser gc --idle-minutes 5   # override the idle window for this run
 ```
 
-### Driving another machine's browser (`--host`) and consent
+### Driving another machine's browser (`--device`) and consent
 
-Any `agents browser` command takes the fleet `--host <device>` flag (same as
+Any `agents browser` command takes the fleet `--device <name>` flag (same as
 `agents sessions`/`teams`/`run`): it runs the command on that device over SSH and
 drives *its* browser, streaming the output back. No hand-built `ssh://` profile
-needed — `agents browser start --host zion` starts a task on `zion`'s own daemon.
+needed — `agents browser start --device zion` starts a task on `zion`'s own daemon.
 
 Because that lets one machine open a browser on another, the **target decides**
 whether it allows it:
@@ -313,9 +313,9 @@ whether it allows it:
 
 Consent is a **per-device setting** (the `browser.remote-control` config key,
 stored centrally under `fleet.devices.<machine>.config` in `~/.agents/agents.yaml`)
-and **off by default**: a `browser --host <this-machine> start` from
+and **off by default**: a `browser --device <this-machine> start` from
 elsewhere is refused with a message naming how to enable it, until the owner runs
-`agents browser remote-control on` here. Local starts (no `--host`) are never gated.
+`agents browser remote-control on` here. Local starts (no `--device`) are never gated.
 
 ### Navigation
 
@@ -421,7 +421,7 @@ disk under `~/.agents/.cache/browser/<profile>/sessions/<task>/`; nothing copies
 them into the database, and the listing counts captures by reading that
 directory rather than trusting a stored tally.
 
-**Known gap — `--host` drives record no session.** `agents browser start --host
+**Known gap — `--device` drives record no session.** `agents browser start --device
 <device>` runs the CLI on the remote box, and the SSH dispatch forwards only
 `AGENTS_ACTOR*` and `AGENT_TERMINAL_ID` — not `AGENT_SESSION_ID`. A task started
 that way therefore records no session and lists as `unlinked`. Local drives are

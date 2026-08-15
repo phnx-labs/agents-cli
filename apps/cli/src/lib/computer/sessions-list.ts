@@ -91,7 +91,7 @@ export interface ComputerAction {
   /** The driven app's pid, when resolved. */
   targetPid?: number;
   bundle?: string;
-  /** `--host <device>` target when this action drove a remote daemon. */
+  /** `--device <device>` target when this action drove a remote daemon. */
   host?: string;
   /** Truncated `--task` text; only ever present on a `verb: 'run'` marker. */
   task?: string;
@@ -167,7 +167,7 @@ export interface ComputerRunRow {
    *  the driven one (see `remoteHost`). */
   machine: string;
   machineId?: string;
-  /** `--host <device>` target when the run drove a remote (Windows) daemon. */
+  /** `--device <device>` target when the run drove a remote (Windows) daemon. */
   remoteHost?: string;
   /** Best-known target app bundle across the run's actions. */
   bundle?: string;
@@ -324,7 +324,7 @@ function appendPrunedRunsFromDb(rows: ComputerRunRow[], limit?: number): void {
 /** Build task-first rows from the real ledger, resolving each row's owning
  *  session against the live indexes. The interactive picker's (and the
  *  flat/`--json` printer's) data source. `machine` narrows to rows whose
- *  invoking hostname, machineId, or `--host` target contains the substring. */
+ *  invoking hostname, machineId, or `--device` target contains the substring. */
 export function buildComputerSessionRows(opts: { limit?: number; machine?: string } = {}): ComputerRunRow[] {
   const actions = listComputerActions({ limit: opts.limit });
   const index = buildLaunchSessionIndex();

@@ -3,8 +3,8 @@
 > Status: **accepted** · Related: [hosts.md](hosts.md), [optimizations.md](optimizations.md#opt-02-ssh-transport--one-multiplexed-engine), [concepts.md](concepts.md#devices--hosts)
 
 A design record for *how `agents` talks to remote machines over SSH*. Every
-remote surface — `run --host`, `view/usage/cost/doctor/inspect/list/sync --host`,
-`sessions -H`, `teams … --host`, remote `secrets`, the browser CDP tunnel — moves
+remote surface — `run --device`, `view/usage/cost/doctor/inspect/list/sync --device`,
+`sessions -D`, `teams … --device`, remote `secrets`, the browser CDP tunnel — moves
 bytes over the system `ssh`. This doc pins down the one transport they all share,
 and why it is a set of shared primitives rather than a daemon.
 
@@ -47,7 +47,7 @@ passed it. The un-multiplexed callers were precisely the hot ones:
 
 | # | Where | Cost before |
 |---|---|---|
-| P1 | `followHostTask` ([`progress.ts`](../src/lib/hosts/progress.ts)) — the poll behind every `run --host` / `teams … --watch` | **2 un-muxed ssh / 1.5 s ≈ 4,800 process spawns/hour**, per followed job |
+| P1 | `followHostTask` ([`progress.ts`](../src/lib/hosts/progress.ts)) — the poll behind every `run --device` / `teams … --watch` | **2 un-muxed ssh / 1.5 s ≈ 4,800 process spawns/hour**, per followed job |
 | P2 | `ensureHostReady` ([`ready.ts`](../src/lib/hosts/ready.ts)) — runs before every dispatch | **3 sequential connections** (reachable + version + agent listing), 2 un-muxed |
 | P3 | `sshExec`/`sshStream` default | multiplexing opt-in; the common paths skipped it |
 | P4 | `runRemoteSessions` ([`session/remote.ts`](../src/lib/session/remote.ts)) | a **private copy** of the ssh options with no multiplexing |
@@ -106,14 +106,14 @@ UserKnownHostsFile=<managed store>   StrictHostKeyChecking=accept-new  ← first
 `agents ssh <device>` learns the key on first connect (`accept-new`, written into
 the managed store) and verifies it with `StrictHostKeyChecking=yes` on every
 subsequent connect — a later key swap is refused, not re-accepted. Native OAuth
-and session credentials never cross this transport: `run --host --copy-creds`
+and session credentials never cross this transport: `run --device --copy-creds`
 is retained only as a fail-loud deprecated flag. Explicit portable provider
 account sync (`agents accounts sync <account> --device <device>`) requires the destination
 to already be present in the managed store and uses a fresh, non-multiplexed SSH
 connection. A registered device earns its pin by connecting once with
 `agents ssh <device>` and verifying the host before syncing an account.
 **Remaining:** the broad `accept-new` baseline still governs
-non-credential fan-outs (`sessions --host`, the browser driver, `fleet run`),
+non-credential fan-outs (`sessions --device`, the browser driver, `fleet run`),
 which still use OpenSSH default `~/.ssh/known_hosts`, not the managed store, so
 they neither pin into it nor verify against it. Wiring those call sites onto the
 managed store (so they verify strictly too) is follow-up.
@@ -124,12 +124,12 @@ Multiplexing (§2) only reuses a socket when two calls hand `ssh` the **same
 target string** — `%C` hashes local-host/remote/port/user, so `mac-mini`,
 `muqsit@mac-mini.<tailnet>.ts.net`, and a stale `~/.ssh/config` LAN IP for the
 same box each hash to a different `cm-%C` socket and never share the master. A
-`--host`/`--device` token therefore has to resolve to one canonical target no
+`--device` token therefore has to resolve to one canonical target no
 matter which subcommand typed it.
 
 It used to resolve through **two** disagreeing chains: a local-provider-first
-`resolveHost` (`run --host`, the generic passthrough, teams placement, doctor,
-funnel, remote secrets) and a devices-only `resolveSshTarget` (`sessions --host`,
+`resolveHost` (`run --device`, the generic passthrough, teams placement, doctor,
+funnel, remote secrets) and a devices-only `resolveSshTarget` (`sessions --device`,
 session bundles, `agents ssh`). They emitted different strings for the same
 machine — `resolveHost` let an ssh-config stanza win and dialed its bare name,
 while the devices chain dialed the Tailscale `user@dnsName` — so the two never
@@ -156,7 +156,7 @@ device can't be made dispatchable by shadowing it with an inline entry.
 
 `agents ssh <device>` with **no command** lands you in the same home-relative
 directory you launched from, when that checkout exists on the target — the same
-portable-cwd rule `agents run --host` already applies. From
+portable-cwd rule `agents run --device` already applies. From
 `~/src/app` on the laptop, `agents ssh yosemite-s0` starts the remote login shell
 in `~/src/app` on yosemite-s0; when that path is absent it falls back to the
 remote home, and the login always succeeds.
@@ -166,7 +166,7 @@ There is **one** resolver behind both surfaces. The caller cwd becomes a portabl
 under the local home has a meaningful remote analogue; anything else mirrors
 nothing and keeps the remote home). For POSIX targets the interactive-login
 builder [`buildInteractiveShellCommand`](../src/lib/devices/connect.ts) reuses the
-same best-effort [`remoteCdPrefix`](../src/lib/project-root.ts) mirror `--host`
+same best-effort [`remoteCdPrefix`](../src/lib/project-root.ts) mirror `--device`
 runs use — `{ cd "$HOME"/<dir> || cd "$HOME"; } &&` — then `exec "$SHELL" -l` so
 prompt, startup files, and login behavior match a plain `ssh <host>`.
 `"$HOME"` stays unquoted so the *remote* shell expands it (the target home may
@@ -251,7 +251,7 @@ across runs. Each number is wall-clock on the laptop:
 
 | Path | Before | After | Win |
 |---|---|---|---|
-| P3 · repeated `--host` (per call) | ~444 ms | **~75 ms** | **~6–7×** |
+| P3 · repeated `--device` (per call) | ~444 ms | **~75 ms** | **~6–7×** |
 | P2 · readiness per dispatch | 1.5–1.8 s | **~0.8 s** | **~2×** |
 | P1 · follow loop (per cycle) | ~706 ms | **~33 ms**, then **1 ssh per follow** | **~21–23×** for bounded polls; persistent follow removes per-cycle spawns |
 

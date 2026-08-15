@@ -186,7 +186,7 @@ const COMPUTER_INVOCATION_ID = randomUUID();
 export function emitComputerAction(
   verb: string,
   targetPid: number | undefined,
-  opts: { bundle?: string; host?: string },
+  opts: { bundle?: string; device?: string },
   extra: Record<string, unknown> = {},
 ): void {
   emitEvent('computer.action', {
@@ -194,7 +194,7 @@ export function emitComputerAction(
     invocationId: COMPUTER_INVOCATION_ID,
     targetPid,
     bundle: opts.bundle,
-    host: opts.host,
+    device: opts.device,
     ...extra,
   });
   try {

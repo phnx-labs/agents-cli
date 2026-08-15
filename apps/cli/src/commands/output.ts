@@ -231,9 +231,9 @@ async function computeLocalPayload(options: OutputOptions, includePrs: boolean):
   };
 }
 
-/** Fetch one remote device's payload by re-invoking `agents output --json --host <name>`. */
+/** Fetch one remote device's payload by re-invoking `agents output --json --device <name>`. */
 async function fetchRemotePayload(device: string, options: OutputOptions): Promise<OutputPayload> {
-  const args = ['output', '--json', '--no-prs', '--host', device, '--since', options.since ?? '7d'];
+  const args = ['output', '--json', '--no-prs', '--device', device, '--since', options.since ?? '7d'];
   if (options.by) args.push('--by', options.by);
   if (options.reposDir) args.push('--repos-dir', options.reposDir);
   for (const a of options.author ?? []) args.push('--author', a);

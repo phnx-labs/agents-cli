@@ -640,7 +640,7 @@ Fields:
 | `cwd` | Recorded at spawn | Normalized absolute path |
 | `gitBranch` | Recorded at spawn | `null` outside a repo |
 | `topic` | First user prompt (truncated) | Best headline for a session |
-| `label` | The session name — one field, several sources | Priority: agent-generated title / Claude `/rename`, else the launch handle seeded by `agents run --name <slug>` (interactive, headless, `--host`, or a teams teammate), else `null` (listing falls back to `topic`). `agents sessions <ref>` resolves against it. |
+| `label` | The session name — one field, several sources | Priority: agent-generated title / Claude `/rename`, else the launch handle seeded by `agents run --name <slug>` (interactive, headless, `--device`, or a teams teammate), else `null` (listing falls back to `topic`). `agents sessions <ref>` resolves against it. |
 | `tokenCount` | Parsed from usage events | `null` for agents that don't log it |
 | `model` | Parsed from transcript metadata or assistant events | `null` for harnesses that don't record it; shortened in the static flat list |
 | `costUsd` | Σ tokens × per-model price, at scan time | `null` when the model is unknown/unpriced; see `agents cost` |
@@ -916,7 +916,7 @@ full picker behavior and the retention/privacy note.
 `agents sessions --active` answers "what is running right now, everywhere". It sweeps
 the local machine (`getActiveSessions`) and, unless `--local`, every registered online
 device over SSH, through one shared gather — `gatherActiveSessions` in
-`src/commands/sessions.ts`. `--host`/`--device` **scopes** that sweep to the named
+`src/commands/sessions.ts`. `--device` **scopes** that sweep to the named
 machines rather than adding to it.
 
 The scope is enforced against the machine a session **executes** on, not the box
@@ -950,7 +950,7 @@ daemon publishes this host's local active set on a short tick; menubar, the ext,
 watchdog, and CLI share it instead of each re-running the full gather. Live status
 stays inside that short window (`forceRefresh` / `AGENTS_SESSIONS_FORCE_REFRESH=1`
 re-gathers). Immutable identity fields are memoized by transcript mtime and never
-carry live status. `sessions --host` is likewise cache-first in
+carry live status. `sessions --device` is likewise cache-first in
 `src/lib/session/remote.ts` (a reachable host skips SSH while the cache is fresh;
 unreachable still falls back to any age).
 
@@ -1050,28 +1050,28 @@ content 1.0   # everything else
 ## Remote Sessions over SSH
 
 Discovery is local-only — every path is rooted at `os.homedir()`, so a machine
-sees only its own transcripts. `--host` runs the query on another machine instead:
+sees only its own transcripts. `--device` runs the query on another machine instead:
 
 ```
 # Browse another machine's sessions in the interactive picker (previews + resume)
-agents sessions --host yosemite-s1        # or --device yosemite-s1
+agents sessions --device yosemite-s1
 
 # Search another machine's sessions live (no sync, always current)
-agents sessions "auth bug" --last 3 --host yosemite-s1
+agents sessions "auth bug" --last 3 --device yosemite-s1
 
 # Fan the same query across several machines
-agents sessions --all "deploy script" --host box-a --host box-b
+agents sessions --all "deploy script" --device box-a --device box-b
 ```
 
-A **bare** `--host`/`--device <box>` listing on a TTY folds that box into the same
+A **bare** `--device <box>` listing on a TTY folds that box into the same
 interactive fleet browser as the local view — preview-rich and selectable — rather
-than the legacy per-host raw stream. The stream is still used for a `--host` *query*
-(`agents sessions "term" --host <box>`), a render/filter flag, `--json`, or a
+than the legacy per-host raw stream. The stream is still used for a `--device` *query*
+(`agents sessions "term" --device <box>`), a render/filter flag, `--json`, or a
 non-interactive caller (piped/`--no-interactive`).
 
 It works by invoking the **remote's own** `agents sessions` against its already-built
 index over SSH — `ssh -o BatchMode=yes <host> bash -lc 'agents sessions …'`
-(`src/lib/session/remote.ts`). `--host` is stripped before forwarding so there is no
+(`src/lib/session/remote.ts`). `--device` is stripped before forwarding so there is no
 recursion; the target must be a host alias or `user@host` (validated against
 `SSH_TARGET_RE` to block argv-flag smuggling). SSH access is the only auth — if you
 can `ssh <host>`, you own the box; there is no identity layer.
@@ -1087,7 +1087,7 @@ would skip the very fan-out the scope needs. A peer that fails to answer is name
 the browser header — the full-screen picker repaints over the fan-out's stderr note,
 so an asleep box would otherwise be indistinguishable from an empty result.
 
-**`--host` is the default cross-machine recall path.** Online machines are the norm,
+**`--device` is the default cross-machine recall path.** Online machines are the norm,
 so a live pull covers almost all recall with zero storage, zero lag, and no daemon —
 always current, nothing to configure beyond SSH. Export/import (below) is the
 mechanism for the case a live pull can't reach: a machine that is
@@ -1124,7 +1124,7 @@ never decided from partial fleet state.
 `--all` is implicit because historical resolution must not inherit the SSH login
 directory or recent-session window.
 
-`--host` names *which* box to look on. When you already have a full session id but
+`--device` names *which* box to look on. When you already have a full session id but
 **not** the box, `agents sessions <uuid>` finds it for you. A unique short prefix works
 the same way: `agents sessions d3470b57` fans the **id lookup** out to the online fleet
 (the same `gatherRemoteList` SSH sweep the listing uses), resolves the prefix to its full
@@ -1545,13 +1545,13 @@ and only then kills the source.
 agents sessions migrate --auto
 
 # Move a specific session onto a named host / device / warm box slug
-agents sessions migrate a1b2c3d4 --host yosemite-s1
+agents sessions migrate a1b2c3d4 --device yosemite-s1
 
 # Provision a fresh ephemeral box and move onto it
 agents sessions migrate --lease
 
 # Copy (don't stop the source), and let the running agent wrap up its own dirty tree
-agents sessions migrate --host box-a --keep --agent-wrapup
+agents sessions migrate --device box-a --keep --agent-wrapup
 ```
 
 The flow reuses existing primitives rather than reinventing transport or resume:
@@ -1563,7 +1563,7 @@ The flow reuses existing primitives rather than reinventing transport or resume:
    (`src/lib/session/migrate-targets.ts`): eligible = reachable, dispatchable, not this
    machine and not the source; ranked by platform-match-with-source, then a warm fleet
    worker over a fresh box, then live headroom (idle > light > busy > loaded, from the
-   `agents devices` stats cache). `--host <name>` names one; `--lease` provisions a
+   `agents devices` stats cache). `--device <name>` names one; `--lease` provisions a
    fresh box (`crabboxWarmup`).
 3. **Verify + bootstrap.** `readyProbe()` checks the target can run the session's
    agent+version; a missing agents-cli is bootstrapped (`bootstrapAgentsCli`).
@@ -1611,7 +1611,7 @@ three lines, its lineage. Source: `src/commands/sessions-migrate.ts`,
 
 `agents sessions insights` analyzes the last 30 days by default across every indexed
 session-capable harness. The existing `agents insights` spelling is an alias. Repeat
-`--agent` to compare a subset, use the standard `--host`/`--device` routing flags for a
+`--agent` to compare a subset, use the standard `--device` routing flag for a
 specific machine, and use `--json` for the structured report.
 
 The deterministic report runs offline and includes friction/thrash, owner corrections,
@@ -1732,9 +1732,9 @@ Two harnesses cover the session-query paths; both live in [`bench/`](../bench):
 | Harness | Covers | Gating? |
 |---|---|---|
 | [`bench/sessions-perf.ts`](../bench/sessions-perf.ts) | The local discover/search pipeline: cold/warm `discoverSessions`, a single picker keystroke, 10 successive keystrokes (typing), `searchContentIndex` alone. | No — informational, `continue-on-error` in `bench.yml`. |
-| [`bench/sessions-active-perf.ts`](../bench/sessions-active-perf.ts) | The **distributed** paths: `--active --local` (the RUSH-2118 regression) and `--host <peer>` (the cross-fleet fan-out). | **Yes** for this one step — see below. |
+| [`bench/sessions-active-perf.ts`](../bench/sessions-active-perf.ts) | The **distributed** paths: `--active --local` (the RUSH-2118 regression) and `--device <peer>` (the cross-fleet fan-out). | **Yes** for this one step — see below. |
 
-### `--active --local` and `--host` (`sessions-active-perf.ts`)
+### `--active --local` and `--device` (`sessions-active-perf.ts`)
 
 Two parts, run in one script:
 
@@ -1751,7 +1751,7 @@ Two parts, run in one script:
   should dial) asserts the shim actually observes a real call first — without
   it, a shim that silently stopped intercepting would make the guard pass for
   the wrong reason.
-- **B. `--host <peer>` distributed fan-out.** No live fleet is reachable in
+- **B. `--device <peer>` distributed fan-out.** No live fleet is reachable in
   CI, and GitHub-hosted runners don't run sshd, so the SSH boundary is mocked
   by shimming `ssh` on PATH: it sleeps a configurable per-call latency then
   returns a canned `--active --json` payload. The bench asserts the fan-out
@@ -1780,7 +1780,7 @@ Measured baseline (this repo, 2026-08-04, `bun v24.3.0`):
 ```
 A. --active --local (30 synthetic remote-host teammates): best 2.6ms, 0 ssh calls
    (positive control observed 6 call(s)) — PASS
-B. --host fan-out (8 synthetic peers, 60ms/call): best 68.2ms
+B. --device fan-out (8 synthetic peers, 60ms/call): best 68.2ms
    (parallelism threshold 180ms) — PASS
 ```
 
@@ -1792,7 +1792,7 @@ fan-out specifically.
 
 ## Related
 
-- `agents sessions <id>` / `agents sessions tail` — session transcript content. Host-dispatch stdout: `agents hosts logs <id>`. The event timeline is `agents events` (aliases: `agents logs`, `agents audit`). See [Hosts](hosts.md) and [Observability](observability.md).
+- `agents logs [id]` — one viewer over both a run's log **and** its session transcript: resolves a host-dispatch task (`agents run --device`) or a session by id/`--session`, filters by `--device`/`--agent`/`--version`, and `-f` follows a live one (a session tail is `agents sessions tail` under the hood, claude/codex only). See [Hosts](hosts.md).
 - `agents sessions <id> --artifacts` — list files created/modified in a session
 - `agents teams status` — session state for team-coordinated runs
 - `agents cloud logs <id>` — for remote cloud dispatches (different subsystem)

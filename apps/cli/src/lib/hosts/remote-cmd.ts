@@ -1,5 +1,5 @@
 /**
- * Pure argv helpers for `--host` passthrough — build the remote `agents …`
+ * Pure argv helpers for `--device` passthrough — build the remote `agents …`
  * invocation and strip the local-only routing flags before forwarding.
  *
  * Kept free of any SSH/process side effects so the two-layer quoting and the
@@ -16,7 +16,7 @@ export interface StripSpec {
   long: string;
   /** Optional single-letter short form without the dash, e.g. `H`. */
   short?: string;
-  /** True when the flag takes a following value token (`--host <name>`). */
+  /** True when the flag takes a following value token (`--device <name>`). */
   takesValue: boolean;
 }
 
@@ -50,19 +50,18 @@ export function stripRoutingFlags(args: string[], specs: StripSpec[]): string[] 
 }
 
 /**
- * The routing flags every `--host`-capable command shares. `--device` is a
- * first-class alias of `--host` (the device registry is the source of truth for
- * machine identity — see `agents devices`), mirroring `agents run --device`.
- * Both are stripped before forwarding so the alias never leaks to the remote
- * binary (which would re-trigger routing).
+ * The routing flags every `--device`-capable command shares. Stripped before
+ * forwarding so the flag never leaks to the remote binary (which would
+ * re-trigger routing). `--host`/`-H` are kept for backward-compat strip only
+ * (they are no longer user-facing routing flags).
  */
 export const HOST_ROUTING_SPECS: StripSpec[] = [
+  { long: 'device', short: 'D', takesValue: true },
   { long: 'host', short: 'H', takesValue: true },
-  { long: 'device', takesValue: true },
   { long: 'remote-cwd', takesValue: true },
 ];
 
-/** How one `agents run` option behaves when the run is offloaded with `--host`. */
+/** How one `agents run` option behaves when the run is offloaded with `--device`. */
 export type RunOptionForwarding =
   /** Appended to the remote `agents run` argv — same behavior local or remote. */
   | 'forward'
@@ -72,7 +71,7 @@ export type RunOptionForwarding =
   | 'local-only';
 
 /**
- * The forwarding contract for `agents run … --host`: every option of the `run`
+ * The forwarding contract for `agents run … --device`: every option of the `run`
  * command is classified here, keyed by its commander attribute name. A
  * commander-introspection test (run-forwarding.test.ts) fails when a run
  * option is missing from this table, so a new option can never silently drop
@@ -127,7 +126,6 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   raw: 'local-only', // interactive builder forwards --raw itself
   tmux: 'local-only',
   disableTmux: 'local-only',
-  host: 'local-only',
   device: 'local-only',
   where: 'local-only', // expands into host/lease before dispatch; never re-forwarded
   on: 'local-only',
@@ -143,7 +141,7 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   tailscale: 'local-only', // --tailscale/--no-tailscale gate the lease net mode; never forwarded
   copyCreds: 'local-only', // copies creds TO the host before dispatch — local concern only
   // Cloud placement: chosen and dispatched from THIS machine via the provider
-  // registry; mutually exclusive with --host (placement conflict dies before
+  // registry; mutually exclusive with --device (placement conflict dies before
   // dispatch), so these never have a remote argv to ride.
   cloud: 'local-only',
   provider: 'local-only',
@@ -163,17 +161,17 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
 /** Actionable messages for value-aware rejections, keyed by attribute name. */
 export const RUN_OPTION_REJECT_MESSAGES: Record<string, string> = {
   terminal:
-    '--terminal opens a tab on THIS machine; it cannot be combined with --host. ' +
-    'Drop --terminal to dispatch to the host, or drop --host to open the tab here. ' +
-    'To watch a remote run in a terminal, dispatch it and follow with `agents sessions resume <id>`.',
+    '--terminal opens a tab on THIS machine; it cannot be combined with --device. ' +
+    'Drop --terminal to dispatch to the device, or drop --device to open the tab here. ' +
+    'To watch a remote run in a terminal, dispatch it and follow with `agents sessions focus <id>`.',
   secrets:
     '--secrets cannot cross the SSH boundary — Keychain values are never sent to a host implicitly. ' +
-    'Provision the bundle on the host first (agents secrets export --host <name>), then run without --secrets; ' +
+    'Provision the bundle on the host first (agents secrets export --device <name>), then run without --secrets; ' +
     'workflow frontmatter secrets resolve from the HOST\'s own keychain.',
   secretsKeys: '--secrets-keys applies to --secrets bundles, which cannot cross the SSH boundary (see --secrets).',
   allowExpired: '--allow-expired applies to --secrets bundles, which cannot cross the SSH boundary (see --secrets).',
   resumeCheckpoint: '--resume-checkpoint reads a local checkpoint.json — it cannot resume a run on another machine. Run it locally, or start a fresh --loop run on the host.',
-  resumeBare: '--resume with no id opens the interactive picker, which cannot run across a detached host dispatch. Pass a concrete session id: agents run <agent> --resume <id> --host <name>.',
+  resumeBare: '--resume with no id opens the interactive picker, which cannot run across a detached host dispatch. Pass a concrete session id: agents run <agent> --resume <id> --device <name>.',
 };
 
 /**
@@ -355,7 +353,7 @@ export function windowsAgentsScript(cmd: WindowsAgentsCommand): string {
 /**
  * Build the `ssh <target> <cmd>` string for one `agents …` invocation on a
  * Windows remote: a `powershell -NoProfile -EncodedCommand <base64>` call. The
- * Windows counterpart of `bash -lc '<...>'`, shared by every `--host` site.
+ * Windows counterpart of `bash -lc '<...>'`, shared by every `--device` site.
  */
 export function buildWindowsAgentsCommand(cmd: WindowsAgentsCommand): string {
   return `powershell -NoProfile -EncodedCommand ${encodePowershell(windowsAgentsScript(cmd))}`;
@@ -384,7 +382,7 @@ export function buildWindowsStdinImportCommand(bundle: string, opts: { force?: b
   // starts null so a GetTempFileName that itself throws leaves nothing to remove.
   const script = [
     // Same CLIXML guard as windowsAgentsScript — this builder also runs `& agents …`
-    // and its raw stderr is printed to the user on failure (secrets export --host <win>).
+    // and its raw stderr is printed to the user on failure (secrets export --device <win>).
     POWERSHELL_PROGRESS_SILENCE,
     '$in = [Console]::In.ReadToEnd()',
     '$tmp = $null',

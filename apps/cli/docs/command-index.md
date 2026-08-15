@@ -128,7 +128,7 @@ agents browser record                         Record a video of the page
 agents browser record start                   Start recording — auto-saved under sessions/<task>/recordings/. Bounded by --fps, --duration, --max-mb.
 agents browser record stop                    Stop an in-progress recording
 agents browser refs                           Get DOM refs for interactive elements
-agents browser remote-control [state]         Allow or deny other fleet machines driving THIS machine's browser over `browser --host`. `on`/`off` to set (device-local, never synced); no argument prints the current value. Default off.
+agents browser remote-control [state]         Allow or deny other fleet machines driving THIS machine's browser over `browser --device`. `on`/`off` to set (device-local, never synced); no argument prints the current value. Default off.
 agents browser requests                       Read captured network requests. --format har emits a HAR 1.2 JSON document.
 agents browser responsebody <url-pattern>     Wait for and read a response body by URL pattern
 agents browser screenshot                     Take a screenshot — auto-saved per task; --output only needed when you want a specific path
@@ -181,10 +181,10 @@ agents commands remove [name]  Delete a command from agents (interactive picker 
 agents commands view [name]    Read the full content of a command file with markdown rendering
 ```
 
-## computer — Drive macOS apps via Accessibility, or a remote Windows host with --host — list, screenshot, click, type
+## computer — Drive macOS apps via Accessibility, or a remote Windows device with --device — list, screenshot, click, type
 
 ```
-agents computer              Drive macOS apps via Accessibility, or a remote Windows host with --host — list, screenshot, click, type
+agents computer              Drive macOS apps via Accessibility, or a remote Windows device with --device — list, screenshot, click, type
 agents computer apps         List apps the daemon may drive (allow-listed + running)
 agents computer ax-action    Perform an arbitrary AX action (AXConfirm, AXCancel, AXRaise, ...) on an element
 agents computer click        Click an element (--id) or screen coordinate (--x --y)
@@ -195,16 +195,16 @@ agents computer get-text     Extract visible text from the app (or a subtree via
 agents computer key          Send a key chord, e.g. "cmd+shift+s", "enter", "esc"
 agents computer launch       Launch an app by bundle id, path, or name
 agents computer raise        Bring an app (or a specific window) to the front — switches Spaces for fullscreen windows
-agents computer reload       Reload the allow-list policy (SIGHUP the local daemon) — or restart a remote Windows daemon with --host
+agents computer reload       Reload the allow-list policy (SIGHUP the local daemon) — or restart a remote Windows daemon with --device
 agents computer right-click  Right-click (context menu) an element or coordinate
 agents computer run          Autonomously drive an app from a natural-language task (embedded model loop over the computer verbs)
 agents computer screenshot   Capture a window (default: largest), enumerate windows (--list), or the whole display (--display)
 agents computer scroll       Scroll by a pixel delta at an element or coordinate
 agents computer sessions     Browse computer-driving history, grouped by run — one row per `agents computer` invocation
-agents computer setup        Install the helper — locally to /Applications/ (macOS), or to a remote Windows host with --host
-agents computer start        Activate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --host
-agents computer status       Report install state, daemon state, and Accessibility trust — or a remote Windows daemon with --host
-agents computer stop         Deactivate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --host
+agents computer setup        Install the helper — locally to /Applications/ (macOS), or to a remote Windows device with --device
+agents computer start        Activate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device
+agents computer status       Report install state, daemon state, and Accessibility trust — or a remote Windows daemon with --device
+agents computer stop         Deactivate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device
 agents computer type         Set a field value (--id) or paste at a coordinate (--x --y)
 agents computer type-text    Type an arbitrary unicode string into the focused field (focus first via click/focus)
 agents computer wait         Wait for a duration (--duration) or for an element (--id / --role/--label) to satisfy --until
@@ -749,13 +749,13 @@ agents secrets add [bundle] [key]                  Add a variable to a bundle. D
 agents secrets create [name]                       Create an empty bundle. Name it after what it holds — a website by domain (stripe.com, openai.ai), a desktop app by its binary suffix (slack.app, photoshop.exe) — and pass --description.
 agents secrets delete [name]                       Delete a bundle and purge all its keychain items (use --keep-secrets to retain them).
 agents secrets describe <name> [text...]           Update the description of a bundle. Pass --clear to remove it.
-agents secrets exec <bundle> [command...]          Run a command with the bundle's secrets injected into the environment (use --host to resolve the bundle from a remote machine, ephemerally)
-agents secrets export [bundle]                     Resolve a bundle and print KEY=VALUE lines, push it to a 1Password vault with --to-1password, or push it to remote machine(s) over SSH with --host.
+agents secrets exec <bundle> [command...]          Run a command with the bundle's secrets injected into the environment (use --device to resolve the bundle from a remote machine, ephemerally)
+agents secrets export [bundle]                     Resolve a bundle and print KEY=VALUE lines, push it to a 1Password vault with --to-1password, or push it to remote machine(s) over SSH with --device.
 agents secrets generate [length]                   Generate a random password
 agents secrets get <item> [key]                    Print one secret value for shell hooks/automation. One arg = a raw keychain item by name; two args = one KEY out of a bundle (`get <bundle> <KEY>`). Cross-platform.
 agents secrets import [bundle]                     Import keys into a bundle from a .env file, a 1Password vault, or legacy iCloud Keychain bundles. The bundle is created if it does not exist. Values are stored in the bundle's backend (keychain by default).
 agents secrets import-keyring                      Migrate agents-cli secrets from the OS keyring / Credential Manager into the encrypted file store (headless-safe). Dry-run by default.
-agents secrets list [query]                        List configured secrets bundles, optionally filtered (use --host/--hosts for other machines over SSH)
+agents secrets list [query]                        List configured secrets bundles, optionally filtered (use --device/--devices for other machines over SSH)
 agents secrets lock [names...]                     Wipe bundles from the secrets-agent (forces Touch ID again next read). Default: all.
 agents secrets mcp                                 Run a stdio MCP server exposing get_secret(bundle, key) — hand credentials to an MCP-speaking agent by name at call time, never through the child process environment
 agents secrets migrate                             Interactively migrate legacy YAML bundles into Keychain
@@ -776,7 +776,7 @@ agents secrets set <item>                          Store a raw keychain item by 
 agents secrets start                               Bring up the always-on daemon that hosts the secrets broker (macOS). Survives heavy load; reads connect instantly.
 agents secrets status                              Show which bundles the secrets-agent currently holds and when they lock.
 agents secrets stop                                Lock all bundles and retire any legacy standalone service. The always-on daemon (which hosts the broker) is left running.
-agents secrets unlock [names...]                   Hold a bundle in the secrets-agent after one Touch ID, so concurrent runs read it without re-prompting (macOS). With --host, unlock FILE-backed bundle(s) on a remote (the passphrase prompt surfaces over the SSH TTY); keychain/biometry bundles are GUI-only and can't be remote-unlocked.
+agents secrets unlock [names...]                   Hold a bundle in the secrets-agent after one Touch ID, so concurrent runs read it without re-prompting (macOS). With --device, unlock FILE-backed bundle(s) on a remote (the passphrase prompt surfaces over the SSH TTY); keychain/biometry bundles are GUI-only and can't be remote-unlocked.
 agents secrets view [name]                         Show a bundle. Keychain values are masked by default — pass --reveal to see them.
 ```
 
