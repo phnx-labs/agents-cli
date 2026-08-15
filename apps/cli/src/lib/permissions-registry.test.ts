@@ -132,3 +132,26 @@ describe('exportPermissionsFromPath detects every harness by its own path', () =
     expect(back!.allow).toContain('Bash(git status:*)');
   });
 });
+
+describe('allow and deny never cross on the way back', () => {
+  // The reverse readers rebuild allow/deny from formats that encode polarity
+  // very differently — Grok's `action`, Kimi's `decision`, Kiro's `effect`,
+  // Goose's always_allow/never_allow, Hermes' approvals.deny, OpenClaw's
+  // alsoAllow/deny. A polarity slip in any of them silently turns a deny into a
+  // grant, which is the worst failure this registry could have.
+  for (const agent of capableAgents('allowlist')) {
+    it(`${agent}: an allow-only set never reads back a deny`, () => {
+      const home = makeTempHome();
+      const set: PermissionSet = { name: 'test', allow: ['Bash(git status:*)', 'Read(**)'] };
+      expect(applyPermissionsToVersion(agent, set, home, false, process.cwd()).success).toBe(true);
+      expect(readCanonicalPermissions(agent, 'user', undefined, home)?.deny ?? []).toEqual([]);
+    });
+
+    it(`${agent}: a deny-only set never reads back an allow`, () => {
+      const home = makeTempHome();
+      const set: PermissionSet = { name: 'test', allow: [], deny: ['Bash(rm:*)'] };
+      expect(applyPermissionsToVersion(agent, set, home, false, process.cwd()).success).toBe(true);
+      expect(readCanonicalPermissions(agent, 'user', undefined, home)?.allow ?? []).toEqual([]);
+    });
+  }
+});
