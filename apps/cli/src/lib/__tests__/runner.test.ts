@@ -14,7 +14,7 @@ import { readRunMeta } from '../routines.js';
 import { getRunsDir } from '../state.js';
 import type { JobConfig } from '../routines.js';
 import { getBinaryPath, getVersionDir } from '../versions.js';
-import { rotationFailoverChain, type RotateCandidate, type RotateResult } from '../rotate.js';
+import { rotationFailoverChain, type RotateCandidate, type RotateResult } from '../accounting/rotate.js';
 import { detectRateLimit } from '../exec.js';
 import { buildExecCommand } from '../exec.js';
 import * as activation from '../routine-activation.js';

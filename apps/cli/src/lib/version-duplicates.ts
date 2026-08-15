@@ -9,7 +9,7 @@ import {
 import {
   buildCanonicalUsageContext,
   getUsageLookupKey,
-} from './usage.js';
+} from './accounting/usage.js';
 
 export interface VersionAccountEntry {
   version: string;

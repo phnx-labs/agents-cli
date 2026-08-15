@@ -19,7 +19,7 @@ import * as fs from 'fs';
 import type { AgentId } from '../types.js';
 import { getAccountInfo } from '../agents.js';
 import { getKeychainToken } from '../secrets/index.js';
-import { getClaudeKeychainService } from '../usage.js';
+import { getClaudeKeychainService } from '../accounting/usage.js';
 import { listInstalledVersions, getVersionHomePath } from '../versions.js';
 import { readClaudeCredentialsBlob } from '../cloud/rush.js';
 
