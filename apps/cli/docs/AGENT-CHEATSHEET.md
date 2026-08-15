@@ -30,7 +30,7 @@ Snapshot in [`apps/cli/AGENTS.md`](../AGENTS.md) §Supported harnesses — keep 
 
 ## 5. Version homes isolate every agent version
 
-Each installed agent version lives under `~/.agents/.history/versions/<agent>/<version>/home/`. agents-cli swaps `HOME` to that directory before exec-ing the agent. No config bleed between versions.
+Each installed agent version lives under `~/.agents/.history/versions/<agent>/<version>/home/`. agi-cli swaps `HOME` to that directory before exec-ing the agent. No config bleed between versions.
 
 Source: [`src/lib/versions.ts`](../src/lib/versions.ts), [`src/lib/exec.ts`](../src/lib/exec.ts).
 

@@ -1,10 +1,10 @@
 # agi-cli — Specifications
 
 > Status: **accepted** · Kind: **normative spec** · Scope: the top-level
-> behavioral contracts for the agents-cli subsystems listed in the
+> behavioral contracts for the agi-cli subsystems listed in the
 > [coverage inventory](#coverage-inventory) — not every command group.
 
-This is the **source-of-truth contract** for agents-cli: what a human, an agent,
+This is the **source-of-truth contract** for agi-cli: what a human, an agent,
 or a downstream tool is entitled to rely on, stated as testable requirements —
 one section per major functionality. It exists because features have regressed by
 quietly deviating from an unwritten contract (a harness parser that throws on a
@@ -1499,7 +1499,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
 - **SEC-29 (MUST).** **Unlock once, stays unlocked — the durability contract.** A
   bundle on the `never` tier MUST read silently *forever* once set: through process
   death, system sleep, a full power-off/reboot, an arbitrarily long gap (30+ days),
-  an agents-cli upgrade, **and a macOS upgrade** — with **no Touch ID, no
+  an agi-cli upgrade, **and a macOS upgrade** — with **no Touch ID, no
   passphrase, and no environment variable** — until the value is rotated, the tier
   is changed, or the bundle is deleted. This is achievable only because a `never`
   item carries no biometric ACL (`set-no-acl`,
@@ -1512,7 +1512,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
   locked-screen reads — so "never re-prompts across an OS upgrade" and
   "biometry-gated per read" are mutually exclusive by construction. The `hold` tier
   gives the weaker durability: one prompt, then held silently for the hold window,
-  surviving a broker restart / agents-cli upgrade via the durable no-ACL session
+  surviving a broker restart / agi-cli upgrade via the durable no-ACL session
   store (`lib/secrets/session-store.ts:1-26`) but re-prompting once after the window
   expires or biometrics are re-enrolled.
 - **SEC-29a (MUST NOT).** The default keychain flow MUST NOT require a passphrase or
@@ -2600,7 +2600,7 @@ nothing but its own view cache.
 ### 3. Requirements
 
 - **SING-1 (MUST).** Every fleet-affecting capability MUST have exactly one scheduler
-  and one executor: the agents-cli daemon (`agents __daemon-run`,
+  and one executor: the agi-cli daemon (`agents __daemon-run`,
   `apps/cli/src/lib/daemon.ts`) or a CLI command the daemon or the user drives.
   Status: **Current** for routines (`lib/scheduler.ts`) and rotate
   (`lib/watchdog/rotate.ts`). `agents daemon` is the user-facing runtime

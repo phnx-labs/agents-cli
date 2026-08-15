@@ -1,8 +1,8 @@
 # Competitive Landscape
 
-How agents-cli fits alongside other tools in the AI coding agent ecosystem.
+How agi-cli fits alongside other tools in the AI coding agent ecosystem.
 
-The space is young and moving fast. Many of these tools are excellent and solve real problems. This document maps where they focus and where agents-cli offers something different.
+The space is young and moving fast. Many of these tools are excellent and solve real problems. This document maps where they focus and where agi-cli offers something different.
 
 For product regressions when agents write the code and humans only plan — see
 **[Product acceptance](product-acceptance.md)** (user stories / Product cards).
@@ -13,7 +13,7 @@ For a deep head-to-head with Steve Yegge’s multi-agent factory (Gas Town / Gas
 
 ## What agi-cli does
 
-agents-cli is a developer workstation tool that combines:
+agi-cli is a developer workstation tool that combines:
 
 1. **Version management** -- Pin AI agent CLI versions per project via `agents.yaml`, with shim-based resolution and isolated config per version
 2. **Package management** -- Install and sync skills, MCP servers, slash commands, rules, hooks, and permissions across all agents
@@ -52,7 +52,7 @@ Several strong tools sync agent configurations across agents. The space is activ
 | [Skild](https://github.com/Peiiii/skild) | "npm for AI Agent Skills." Supports 7+ agents, skillsets (bundles), cross-tool sync. | Focused on skill distribution. Does not manage CLI versions or provide unified exec. |
 | [skills.sh](https://skills.sh) | Open agent skills directory by Vercel. Supports 18+ agents. | Discovery and installation of community skills. Does not manage CLI versions. |
 
-agents-cli's config sync is version-aware: when you switch agent versions, configs are backed up and resources are re-synced into the new version's isolated home. This is the integration point none of the above tools address.
+agi-cli's config sync is version-aware: when you switch agent versions, configs are backed up and resources are re-synced into the new version's isolated home. This is the integration point none of the above tools address.
 
 ---
 
@@ -60,10 +60,10 @@ agents-cli's config sync is version-aware: when you switch agent versions, confi
 
 | Tool | What it does | Difference |
 |------|-------------|------------|
-| [Rivet Sandbox Agent SDK](https://sandboxagent.dev) | Unified HTTP API to control Claude Code, Codex, OpenCode, Amp, Cursor, Pi inside sandboxes. 1,300+ stars. | Server-side infrastructure -- designed for running agents in cloud sandboxes, containers, and CI. agents-cli is a local developer tool. Complementary: a team could use agents-cli locally and Rivet in production. |
+| [Rivet Sandbox Agent SDK](https://sandboxagent.dev) | Unified HTTP API to control Claude Code, Codex, OpenCode, Amp, Cursor, Pi inside sandboxes. 1,300+ stars. | Server-side infrastructure -- designed for running agents in cloud sandboxes, containers, and CI. agi-cli is a local developer tool. Complementary: a team could use agi-cli locally and Rivet in production. |
 | [Rivet Actors](https://rivet.dev) | Stateful compute primitives for AI agents. Hierarchical actor trees, message passing, workflows. 5,400+ stars, YC W23. | Full agent orchestration platform, not a CLI tool. Solves "how do I run agents at scale" rather than "how do I manage agent CLIs on my machine." |
 
-agents-cli's `agents run` resolves to the project-pinned version with pre-synced skills and permissions, making it suitable for scripting pipelines locally and in CI.
+agi-cli's `agents run` resolves to the project-pinned version with pre-synced skills and permissions, making it suitable for scripting pipelines locally and in CI.
 
 ---
 
@@ -73,11 +73,11 @@ Multiple mature tools provide cross-agent session viewing.
 
 | Tool | What it does | Difference |
 |------|-------------|------------|
-| [cass](https://github.com/Dicklesworthstone/coding_agent_session_search) | Indexes 11+ agents with BM25 + semantic search. Sub-60ms queries. | Purpose-built search engine for agent sessions. More advanced search than agents-cli's session viewer. |
-| [Agent Sessions](https://github.com/jazzyalex/agent-sessions) | Native macOS app. 8+ agents, live cockpit, rate limit tracking. | Desktop app with rich UI. agents-cli provides CLI-based session access. |
+| [cass](https://github.com/Dicklesworthstone/coding_agent_session_search) | Indexes 11+ agents with BM25 + semantic search. Sub-60ms queries. | Purpose-built search engine for agent sessions. More advanced search than agi-cli's session viewer. |
+| [Agent Sessions](https://github.com/jazzyalex/agent-sessions) | Native macOS app. 8+ agents, live cockpit, rate limit tracking. | Desktop app with rich UI. agi-cli provides CLI-based session access. |
 | [ccmanager](https://github.com/kbwo/ccmanager) | CLI session manager for 8+ agents. Worktree-aware. | Focused session management. Does not handle versions or config. |
 
-agents-cli's session discovery is version-aware -- it finds sessions across all installed versions and backups, not just the active config directory. For teams that need advanced search, pairing with cass makes sense.
+agi-cli's session discovery is version-aware -- it finds sessions across all installed versions and backups, not just the active config directory. For teams that need advanced search, pairing with cass makes sense.
 
 ---
 
@@ -97,18 +97,18 @@ These tools solve adjacent problems worth knowing about.
 ```
                     Local developer machine              Cloud / CI / Production
                     -------------------------            ----------------------
-Version pinning     agents-cli, mise (partial)           --
-Config sync         agents-cli, Agentloom,               --
+Version pinning     agi-cli, mise (partial)           --
+Config sync         agi-cli, Agentloom,               --
                     coder-config, APM, agr
-Skill packages      agents-cli, Skild, skills.sh         --
-Unified exec        agents-cli                           Rivet Sandbox Agent SDK
-Pipelines           agents-cli (routines)                Rivet Actors
+Skill packages      agi-cli, Skild, skills.sh         --
+Unified exec        agi-cli                           Rivet Sandbox Agent SDK
+Pipelines           agi-cli (routines)                Rivet Actors
 Sandboxing          --                                   Rivet agentOS, E2B, Modal
-Session search      agents-cli, cass, ccmanager          --
+Session search      agi-cli, cass, ccmanager          --
 Visual chains       --                                   Ironclad Rivet
 ```
 
-agents-cli is the integrated layer for the developer workstation: one tool that handles versions, packages, config, execution, and team sharing. The tools listed above are excellent at their individual focus areas. For teams that need depth in a specific area (advanced session search, production sandboxing, visual orchestration), they pair well with agents-cli rather than replacing it.
+agi-cli is the integrated layer for the developer workstation: one tool that handles versions, packages, config, execution, and team sharing. The tools listed above are excellent at their individual focus areas. For teams that need depth in a specific area (advanced session search, production sandboxing, visual orchestration), they pair well with agi-cli rather than replacing it.
 
 ---
 

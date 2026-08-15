@@ -6,7 +6,7 @@ Reference documentation for every feature `agents` ships.
 
 | Doc | Why read it |
 |---|---|
-| **[`QUICKSTART.md`](QUICKSTART.md)** | New to agents-cli? Install, add harnesses, smoke-test a team, and set up a fleet — start here if you are a human getting set up. |
+| **[`QUICKSTART.md`](QUICKSTART.md)** | New to agi-cli? Install, add harnesses, smoke-test a team, and set up a fleet — start here if you are a human getting set up. |
 | **[`AGENT-CHEATSHEET.md`](AGENT-CHEATSHEET.md)** | The dozen concepts agents repeatedly need, on one page. Start here if you are an agent touching the codebase. |
 | [`concepts.md`](concepts.md) | DotAgents repos, resource kinds, and the layered resolution model that everything else builds on. |
 | [`architecture.md`](architecture.md) | How the CLI and AGI EXT layer, and the two meanings of "session". |
@@ -19,7 +19,7 @@ Source-grounded: every command, flag, and YAML field is sourced from `src/`. If 
 
 ## Core
 
-How agents-cli is laid out on disk and how it decides what to load.
+How agi-cli is laid out on disk and how it decides what to load.
 
 | Doc | What it covers |
 |---|---|
@@ -32,10 +32,10 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [Observability](observability.md) | The three `--json` sources (sessions / cloud / teams) as a fleet view, plus `agents mailboxes` fleet comms. |
 | [SSH transport](ssh-transport.md) | The one multiplexed engine every `--host` command rides — default connection reuse, keepalive, one-round-trip follow. |
 | [Optimizations](optimizations.md) | Sync manifest, SSH transport, startup profiling, hot-path notes. |
-| [Landscape](landscape.md) | Where agents-cli sits next to similar tools. |
-| [Toolchain thesis](toolchain-thesis.md) | Research synthesis: the nine-layer CLI-agent toolchain, the ranked pain points behind it, and how agents-cli maps onto each. |
+| [Landscape](landscape.md) | Where agi-cli sits next to similar tools. |
+| [Toolchain thesis](toolchain-thesis.md) | Research synthesis: the nine-layer CLI-agent toolchain, the ranked pain points behind it, and how agi-cli maps onto each. |
 | [Product acceptance](product-acceptance.md) | User stories + Product cards: stop product regressions when agents write the code. |
-| [vs Gas Town](vs-gastown.md) | How agents-cli differs from Gas Town (multi-agent factory): parallels, glossary, what users like/dislike. |
+| [vs Gas Town](vs-gastown.md) | How agi-cli differs from Gas Town (multi-agent factory): parallels, glossary, what users like/dislike. |
 
 ## Credentials and model routing
 
