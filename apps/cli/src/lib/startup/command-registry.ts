@@ -251,9 +251,8 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   send: [loadSend],
   notify: [loadSend],
   feed: [loadFeed],
-  // Observe-umbrella aliases of feed / feed --filter updates.
+  // Observe-umbrella alias of feed (the `timeline` alias was removed in RUSH-2692).
   inbox: [loadFeed],
-  timeline: [loadFeed],
   mailboxes: [loadMailboxes],
   mailbox: [loadMailboxes],
   serve: [loadServe],
@@ -309,9 +308,15 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
  * the user never asked for instead of saying the command is gone.
  *
  * `set` moved under `agents models`/`agents config` (RUSH-2579); `share` moved
- * under `agents artifacts share` (RUSH-2580).
+ * under `agents artifacts share` (RUSH-2580); `timeline` was removed as a
+ * duplicated surface — use `agents feed --filter updates` (RUSH-2692).
  */
-export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set(['webhook', 'set', 'share']);
+export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
+  'webhook',
+  'set',
+  'share',
+  'timeline',
+]);
 
 
 /** Whether `name` is a top-level command this CLI registers. See {@link KNOWN_TOP_LEVEL_COMMANDS}. */

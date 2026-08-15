@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_90 command groups · 553 commands._
+_89 command groups · 552 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -300,10 +300,10 @@ agents events rotate  Apply event retention and the storage ceiling immediately
 agents events stats   Show aggregate event statistics
 ```
 
-## feed — Operator inbox + agent status posts (aliases: inbox = needs-you; timeline = --filter updates)
+## feed — Operator inbox + agent status posts (alias: inbox = needs-you). Agent progress = --filter updates
 
 ```
-agents feed                 Operator inbox + agent status posts (aliases: inbox = needs-you; timeline = --filter updates)
+agents feed                 Operator inbox + agent status posts (alias: inbox = needs-you). Agent progress = --filter updates
 agents feed post <text...>  Post a status update to the fleet activity stream (for agents)
 ```
 
@@ -901,12 +901,6 @@ agents teams stop [team] [teammate]               Stop a running teammate. Resum
 ```
 agents tickets       Read work items from the trackers linked to this workspace.
 agents tickets list  List workspace tickets from Linear and GitHub.
-```
-
-## timeline — Agent progress stream (alias of `agents feed --filter updates`). What agents posted recently.
-
-```
-agents timeline  Agent progress stream (alias of `agents feed --filter updates`). What agents posted recently.
 ```
 
 ## tmux — Persistent terminal-multiplexer sessions for agents. Survive editor restarts, share with other tools.

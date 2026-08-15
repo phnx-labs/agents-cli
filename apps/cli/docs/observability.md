@@ -16,8 +16,7 @@ whose *consumer* and *axis* match your question, not whichever you remember firs
 | **`logs`** | **Thin alias of `events`.** Subcommands `audit`/`stats`/`rotate` re-dispatch. Content lives on `sessions` / `hosts logs`. | same events engine | Muscle-memory |
 | **`perf`** | **Latency rollups.** p50/p99 for hooks, CLI commands, and `agent.run` timings. Indexed SQLite — not a full scan of the audit log. Not popularity, not behaviour. | `~/.agents/.cache/perf/perf.db` (disposable) | Humans optimizing boot/run cost + `--json` |
 | **`insights`** | **How work looks — one verb, two engines.** Bare = behavioural report (transcript content, account split). `insights mix` / recipes = cheap counters (harness/model/token/secrets). Former top-level `agents trends` is a deprecated alias of the mix tree only. | behaviour: `sessions.db` + `session_insights`; mix: `sessions.db` + `usage.db` | Human + `--json` |
-| **`feed`** / **`inbox`** | **Needs-you inbox + status posts.** Open blocks (decisions agents are waiting on) + `feed post` milestones. `inbox` ≡ `feed`. Scope with `--project`. | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
-| **`timeline`** | **Progress stream only.** Alias of `feed --filter updates` — deliberate posts, not tool noise. | same as feed updates lane | Humans + `--json` |
+| **`feed`** / **`inbox`** | **Needs-you inbox + status posts.** Open blocks (decisions agents are waiting on) + `feed post` milestones. `inbox` ≡ `feed`. The agent progress stream is `feed --filter updates` (deliberate posts, not tool noise). Scope with `--project`. | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
 | **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
 | **`sessions`** / **`roster`** | **Live agent roster + transcripts.** `roster` ≡ `sessions --active`. Browse/read past transcripts under `sessions`. `sessions stats` = skill/slash invocation leaderboard. | live pid/transcript probe + `sessions.db` | Human + `--json` |
 | **`snapshot`** | **One-process poll.** Inventory + active sessions (+ optional feed/sync). Not `status` (sync-only). | view + active + optional feed | Machines / the ext |
@@ -48,7 +47,7 @@ Thin second names for the product jobs — **no store merge**:
 | Job | Alias | Real command |
 |---|---|---|
 | What needs me? | `agents inbox` | `agents feed` |
-| What did agents post? | `agents timeline` | `agents feed --filter updates` |
+| What did agents post? | — | `agents feed --filter updates` |
 | Who is live? | `agents roster` | `agents sessions --active` |
 
 `agents audit` and `agents logs` **are** aliases of `events` (with default family filters). Do not re-introduce a second store or query path.

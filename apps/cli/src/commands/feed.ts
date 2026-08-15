@@ -428,7 +428,7 @@ export function registerFeedCommand(program: Command): void {
   const feed = program
     .command('feed')
     .description(
-      'Operator inbox + agent status posts (aliases: inbox = needs-you; timeline = --filter updates)',
+      'Operator inbox + agent status posts (alias: inbox = needs-you). Agent progress = --filter updates',
     )
     .option('--json', 'Output as JSON (each block stamped with its outcome + ask class)')
     .option('--filter <view>', 'What to show: needs (default) · updates · all', 'needs')
@@ -806,11 +806,11 @@ export function registerFeedCommand(program: Command): void {
 }
 
 /**
- * `inbox` / `timeline` → feed. Loaded with the feed module so lazy COMMAND_LOADERS
- * for those names also get the real `feed` command registered for re-parse.
+ * `inbox` → feed. Loaded with the feed module so the lazy COMMAND_LOADERS entry
+ * for `inbox` also gets the real `feed` command registered for re-parse.
  */
 function registerFeedObserveAliases(program: Command): void {
-  const reparse = async (alias: 'inbox' | 'timeline'): Promise<void> => {
+  const reparse = async (alias: 'inbox'): Promise<void> => {
     const { expandObserveAlias } = await import('../lib/observe-aliases.js');
     const rest = process.argv.slice(3);
     const expanded = expandObserveAlias(alias, rest);
@@ -829,17 +829,6 @@ function registerFeedObserveAliases(program: Command): void {
     .allowExcessArguments()
     .action(async () => {
       await reparse('inbox');
-    });
-
-  program
-    .command('timeline')
-    .description(
-      'Agent progress stream (alias of `agents feed --filter updates`). What agents posted recently.',
-    )
-    .allowUnknownOption()
-    .allowExcessArguments()
-    .action(async () => {
-      await reparse('timeline');
     });
 }
 

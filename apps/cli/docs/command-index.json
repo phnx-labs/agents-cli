@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 90,
-  "commands": 553,
+  "groups": 89,
+  "commands": 552,
   "root": {
     "name": "agents",
     "path": "",
@@ -8853,7 +8853,7 @@
       "name": "feed",
       "path": "feed",
       "aliases": [],
-      "description": "Operator inbox + agent status posts (aliases: inbox = needs-you; timeline = --filter updates)",
+      "description": "Operator inbox + agent status posts (alias: inbox = needs-you). Agent progress = --filter updates",
       "args": [],
       "options": [
         {
@@ -27216,26 +27216,6 @@
           "subcommands": []
         }
       ]
-    },
-    {
-      "name": "timeline",
-      "path": "timeline",
-      "aliases": [],
-      "description": "Agent progress stream (alias of `agents feed --filter updates`). What agents posted recently.",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": []
     },
     {
       "name": "tmux",
