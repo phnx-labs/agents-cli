@@ -228,6 +228,13 @@ a harness could report a successful sync while nothing was written at all
 - **Fleet fan-out** — `agents sync --device all` injects `--json` per peer, so a
   box that refused a write renders as `N not written` instead of `ok`.
 
+A decline does **not** change the exit code: `agents sync` exits 0 whether or not
+something was refused, on one machine and across the fleet alike. A refusal is a
+partial outcome, not a failed command — the sync did everything it could — and
+`ok: false` plus the rendered block are the reporting channel. Scripts that must
+treat a refusal as failure should read `ok` (or `declined`) from `--json` rather
+than `$?`.
+
 Pruning is **manifest-bounded**, so it never over-deletes:
 
 - **Only agents-installed resources are candidates.** The prune set is
