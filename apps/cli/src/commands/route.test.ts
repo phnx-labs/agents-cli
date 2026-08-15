@@ -86,6 +86,20 @@ describe('agents route create', () => {
     expect(result.exitCode).toBe(1);
     expect(routerExists('research')).toBe(false);
   });
+
+  it('rejects an unknown harness id and writes nothing', async () => {
+    const result = await runRoute(['create', 'research', '--harness', 'not-a-real-harness']);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("unknown harness 'not-a-real-harness'");
+    expect(routerExists('research')).toBe(false);
+  });
+
+  it('rejects an unverifiable model token and writes nothing', async () => {
+    const result = await runRoute(['create', 'research', '--harness', 'claude', '--tier', 'made-up-model-xyz']);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("unknown model 'made-up-model-xyz' for harness 'claude'");
+    expect(routerExists('research')).toBe(false);
+  });
 });
 
 describe('agents route allow', () => {
@@ -93,11 +107,11 @@ describe('agents route allow', () => {
     await runRoute(['create', 'research', '--harness', 'gemini,kimi', '--tier', 'cheap,default']);
     await runRoute(['link-account', 'research', 'kimi', 'work']);
 
-    const result = await runRoute(['allow', 'research', 'kimi', 'kimi-k2']);
+    const result = await runRoute(['allow', 'research', 'kimi', 'best']);
     expect(result.exitCode).toBeNull();
 
     const router = readRouter('research');
-    expect(router.harnesses.kimi.models).toEqual(['kimi-k2']);
+    expect(router.harnesses.kimi.models).toEqual(['best']);
     expect(router.harnesses.kimi.accounts).toEqual(['work']);
     // gemini is untouched by narrowing kimi
     expect(router.harnesses.gemini.models).toEqual(['cheap', 'default']);
@@ -107,6 +121,16 @@ describe('agents route allow', () => {
     await runRoute(['create', 'research', '--harness', 'gemini']);
     await runRoute(['allow', 'research', 'claude', 'best']);
     expect(readRouter('research').harnesses.claude.models).toEqual(['best']);
+  });
+
+  it('rejects an unverifiable model token and leaves the router unchanged', async () => {
+    await runRoute(['create', 'research', '--harness', 'gemini', '--tier', 'cheap']);
+    const before = readRouter('research');
+
+    const result = await runRoute(['allow', 'research', 'gemini', 'made-up-model-xyz']);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("unknown model 'made-up-model-xyz' for harness 'gemini'");
+    expect(readRouter('research')).toEqual(before);
   });
 });
 

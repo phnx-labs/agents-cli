@@ -14,6 +14,11 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { getUserAgentsDir } from './state.js';
 import { resolveResource, listResources } from './resources.js';
+import { ALL_AGENT_IDS } from './agents.js';
+import type { AgentId } from './types.js';
+import { isTierToken, resolveTierMap, MODEL_TIERS } from './model-tiers.js';
+import { getModelCatalog } from './models.js';
+import { resolveVersion } from './versions.js';
 
 /** Per-harness allowlist inside a router: eligible models/tiers + linked accounts. */
 export interface RouterHarnessAllowlist {
@@ -100,6 +105,56 @@ export function deleteRouter(name: string): boolean {
   if (!fs.existsSync(file)) return false;
   fs.unlinkSync(file);
   return true;
+}
+
+/**
+ * Fail-loud token validation (E1 of the Agent Router spec): a router MUST NOT
+ * persist a harness id or model/tier token this machine cannot vouch for.
+ * Throws naming the first invalid token found; the caller (route.ts) never
+ * calls {@link writeRouter} when this throws, so an invalid `create`/`allow`
+ * writes nothing.
+ *
+ * A harness id must be a real, registered agent (`AGENTS` in agents.ts) --
+ * checked regardless of whether that harness is installed on this machine,
+ * since a router is fleet-wide config and the harness may only run
+ * elsewhere. A model/tier token is valid when it is one of the four
+ * cross-harness tier tokens (cheap|default|best|ultra, always installable-
+ * agnostic), OR a concrete model id this machine can actually verify: either
+ * one of the harness's resolved tier rungs (`resolveTierMap` -- covers
+ * curated/no-catalog harnesses like Droid with zero install required) or a
+ * member of its extracted catalog (`getModelCatalog`, when a version of that
+ * harness is installed here). A concrete id for a harness with neither --
+ * not installed here, no curated ladder -- cannot be verified and is
+ * rejected rather than accepted unverified.
+ */
+export function validateRouter(router: Router): void {
+  for (const [harness, allowlist] of Object.entries(router.harnesses)) {
+    if (!(ALL_AGENT_IDS as string[]).includes(harness)) {
+      throw new Error(`router '${router.name}': unknown harness '${harness}'. Known harnesses: ${ALL_AGENT_IDS.join(', ')}.`);
+    }
+    const agent = harness as AgentId;
+    for (const token of allowlist.models) {
+      if (isTierToken(token)) continue;
+
+      const version = resolveVersion(agent) ?? '0.0.0';
+      const tierMap = resolveTierMap(agent, version);
+      const tierRungIds = new Set(
+        MODEL_TIERS.map((t) => tierMap[t].model).filter((m): m is string => m !== null),
+      );
+      if (tierRungIds.has(token)) continue;
+
+      const catalog = getModelCatalog(agent, version);
+      const inCatalog = catalog
+        ? catalog.models.some((m) => m.id === token) || Boolean(catalog.aliases[token])
+        : false;
+      if (inCatalog) continue;
+
+      throw new Error(
+        `router '${router.name}': unknown model '${token}' for harness '${harness}'. ` +
+        `Use a tier token (${MODEL_TIERS.join('|')}) or a model id '${harness}' actually ships.`,
+      );
+    }
+  }
 }
 
 /**

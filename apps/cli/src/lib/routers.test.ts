@@ -12,6 +12,7 @@ import {
   deleteRouter,
   listRouters,
   validateRouterName,
+  validateRouter,
   type Router,
 } from './routers.js';
 
@@ -99,6 +100,40 @@ describe('listRouters', () => {
     fs.writeFileSync(path.join(USER_DIR, 'routers', 'broken.yml'), ': not: valid: yaml: [');
     writeRouter(sampleRouter('good'));
     expect(listRouters().map((r) => r.name)).toEqual(['good']);
+  });
+});
+
+describe('validateRouter', () => {
+  it('accepts tier tokens on any known harness with no install required', () => {
+    const router: Router = {
+      name: 'research',
+      harnesses: { gemini: { models: ['cheap', 'default'] }, kimi: { models: ['best'] } },
+    };
+    expect(() => validateRouter(router)).not.toThrow();
+  });
+
+  it('rejects an unknown harness id', () => {
+    const router: Router = { name: 'research', harnesses: { 'not-a-real-harness': { models: ['best'] } } };
+    expect(() => validateRouter(router)).toThrow(/unknown harness 'not-a-real-harness'/);
+  });
+
+  it('rejects an unverifiable concrete model id for a harness with no installed catalog', () => {
+    // No claude version is installed in this sandboxed test HOME, so a concrete
+    // (non-tier) model id for it cannot be verified and must fail loud.
+    const router: Router = { name: 'research', harnesses: { claude: { models: ['made-up-model-xyz'] } } };
+    expect(() => validateRouter(router)).toThrow(/unknown model 'made-up-model-xyz' for harness 'claude'/);
+  });
+
+  it('accepts a concrete id that matches a curated tier rung with zero install (Droid)', () => {
+    // Droid's tier map is a fixed, install-independent curated ladder
+    // (model-tiers.ts DROID_TIERS) -- 'claude-opus-5' is its best/ultra rung.
+    const router: Router = { name: 'research', harnesses: { droid: { models: ['claude-opus-5'] } } };
+    expect(() => validateRouter(router)).not.toThrow();
+  });
+
+  it('rejects a concrete id that is not one of Droid\'s curated rungs', () => {
+    const router: Router = { name: 'research', harnesses: { droid: { models: ['not-a-real-model'] } } };
+    expect(() => validateRouter(router)).toThrow(/unknown model 'not-a-real-model' for harness 'droid'/);
   });
 });
 

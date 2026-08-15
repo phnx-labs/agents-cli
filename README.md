@@ -549,6 +549,29 @@ Profile YAML has no secrets -- safe to `agents repo push` to a shared repo. `age
 
 ---
 
+## Named routers
+
+A **router** is a reusable, task-typed allowlist -- which harnesses, which models/tiers per harness, and which linked accounts a task may be routed to. It's a generalization of a profile: a profile is a router pinned to one harness and one account.
+
+```bash
+# Scope a router to two harnesses, capped at a tier
+agents route create research --harness gemini,kimi --tier cheap,default
+
+# Narrow one harness's model set
+agents route allow research kimi kimi-k2
+
+# Only these accounts are eligible when routing under this router
+agents route link-account research gemini personal
+agents route link-account research kimi work
+
+agents route show research
+agents route list --json
+```
+
+Router YAML has no secrets -- safe to `agents repo push` to a shared repo. Harness ids and model/tier tokens are validated on `create`/`allow`: an unknown harness or an unverifiable model id fails loud and writes nothing. Routers resolve as a layered resource (project > user > system, same as profiles).
+
+---
+
 ## Run on your own machines
 
 <p align="center">

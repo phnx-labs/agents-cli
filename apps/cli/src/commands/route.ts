@@ -18,6 +18,7 @@ import {
   deleteRouter,
   routerExists,
   routersDir,
+  validateRouter,
   type Router,
 } from '../lib/routers.js';
 import { MODEL_TIERS, isTierToken } from '../lib/model-tiers.js';
@@ -128,6 +129,11 @@ export function registerRouteCommands(program: Command): void {
         task: opts.task,
         harnesses: Object.fromEntries(harnesses.map((h) => [h, { models: [...tiers] }])),
       };
+      try {
+        validateRouter(router);
+      } catch (err) {
+        die((err as Error).message);
+      }
       writeRouter(router);
       console.log(chalk.green(`+ created router "${name}"`) + chalk.gray(`   (${path.join(routersDir(), `${name}.yml`)})`));
     });
@@ -190,8 +196,19 @@ export function registerRouteCommands(program: Command): void {
         die((err as Error).message);
       }
       const existingAccounts = router!.harnesses[harness]?.accounts;
-      router!.harnesses[harness] = { models, ...(existingAccounts ? { accounts: existingAccounts } : {}) };
-      writeRouter(router!);
+      const next: Router = {
+        ...router!,
+        harnesses: {
+          ...router!.harnesses,
+          [harness]: { models, ...(existingAccounts ? { accounts: existingAccounts } : {}) },
+        },
+      };
+      try {
+        validateRouter(next);
+      } catch (err) {
+        die((err as Error).message);
+      }
+      writeRouter(next);
       console.log(chalk.green(`Router '${name}': ${harness} models -> [${models.join(', ')}]`));
     });
 
