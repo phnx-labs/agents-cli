@@ -6,6 +6,16 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+- **A release no longer claims "All running windows are live" without checking any window
+  (RUSH-2724).** `activate.sh` picked the newest editor logs dir, but every
+  `code`/`codium --install-extension` and `--list-extensions` call mints its own logs dir
+  containing no windows — and a release run makes several of those *after* installing. The
+  newest dir was therefore a decoy: the `window*/exthost/exthost.log` glob matched nothing,
+  every window loop iterated zero times, and the script concluded all windows were live
+  having inspected none, while the open Fleet panel still ran the previous bundle. It now
+  picks the newest logs dir that actually holds windows, and reports UNVERIFIED rather than
+  live when it inspects zero. Source: `apps/ext/scripts/activate.sh`.
+
 ## [0.9.324] - 2026-08-15
 
 - **The Fleet panel no longer reports 0 sessions in a second editor window (RUSH-2733).**

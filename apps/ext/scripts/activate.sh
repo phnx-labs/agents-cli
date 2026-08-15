@@ -59,8 +59,37 @@ activation_epoch() {
     date -j -f "%Y-%m-%d %H:%M:%S" "$ts" +%s 2>/dev/null || echo 0
 }
 
+# Newest logs dir that actually holds editor windows.
+#
+# A bare `ls -dt | head -1` is wrong: every `code`/`codium --install-extension`
+# (and --list-extensions) invocation spawns a short-lived process that mints its
+# OWN logs dir containing NO window*/ subdirs. Release runs make several of those
+# AFTER the install, so the newest dir is a decoy — `window*/exthost/exthost.log`
+# then globs to nothing, every window loop iterates zero times, and the script
+# concludes "all windows are live" from an empty set. Skip dirs with no windows.
+# mtime as an epoch. Branch on the platform rather than `stat -f … || stat -c …`:
+# on Linux `stat -f` is "filesystem status" and SUCCEEDS, so the fallback would
+# never run and the caller would parse a block-size table as an integer.
+mtime_epoch() {
+    if [ "$(uname -s)" = "Darwin" ]; then
+        stat -f %m "$1" 2>/dev/null || echo 0
+    else
+        stat -c %Y "$1" 2>/dev/null || echo 0
+    fi
+}
+
 newest_logdir() {
-    ls -dt "$HOME/Library/Application Support/$1/logs"/*/ 2>/dev/null | head -1
+    local base="$HOME/Library/Application Support/$1/logs"
+    local d ep best="" best_ep=0
+    # Quoted glob, not `ls` + word splitting — the path contains a space
+    # ("Application Support"), which splits every entry into two bogus words.
+    for d in "$base"/*/; do
+        [ -d "$d" ] || continue
+        compgen -G "${d}window*/exthost/exthost.log" >/dev/null 2>&1 || continue
+        ep="$(mtime_epoch "$d")"
+        if [ "$ep" -gt "$best_ep" ]; then best_ep="$ep"; best="$d"; fi
+    done
+    echo "$best"
 }
 
 # Reload every window of a running editor (best-effort). Returns 1 if no AX
@@ -141,9 +170,12 @@ for CLI in code codium cursor; do
         fi
     fi
 
-    # Final per-window verdict against the install mtime.
+    # Final per-window verdict against the install mtime. Count what we actually
+    # inspected: a loop that never ran is "unverified", never "live".
+    WINDOWS_SEEN=0
     for EH in "$LOGDIR"window*/exthost/exthost.log; do
         [ -f "$EH" ] || continue
+        WINDOWS_SEEN=$((WINDOWS_SEEN + 1))
         WIN="$(echo "$EH" | grep -oE 'window[0-9]+')"
         EP="$(activation_epoch "$EH")"
         if [ "$EP" -ge "$INSTALL_EP" ]; then
@@ -153,6 +185,10 @@ for CLI in code codium cursor; do
             OVERALL_STALE=1
         fi
     done
+    if [ "$WINDOWS_SEEN" -eq 0 ]; then
+        echo "    $CLI: running, but no window logs to check — treat as UNVERIFIED and reload it"
+        OVERALL_STALE=1
+    fi
 done
 
 echo
