@@ -21,6 +21,7 @@ import {
   hardDeprecationNotice,
   isClaudeCredentialFileBlank,
   resolveAgentName,
+  parseAgentVersionSpec,
   resolveNativeBinaryPath,
   resolveLastActive,
   supportsAccountInspection,
@@ -1321,5 +1322,43 @@ describe('accountOrgBadge', () => {
     expect(accountOrgBadge({ organizationType: null, organizationName: 'Ghost' })).toBeNull();
     expect(accountOrgBadge(null)).toBeNull();
     expect(accountOrgBadge(undefined)).toBeNull();
+  });
+});
+
+describe('parseAgentVersionSpec — the agents run launch-target split at the routines boundary (RUSH-2719)', () => {
+  it('splits agent@version into bare agent + exact version', () => {
+    expect(parseAgentVersionSpec('claude@2.1.207')).toEqual({ agent: 'claude', version: '2.1.207' });
+  });
+
+  it('a bare agent id yields no version field', () => {
+    expect(parseAgentVersionSpec('claude')).toEqual({ agent: 'claude' });
+  });
+
+  it('resolves aliases and single-typo names like resolveAgentName', () => {
+    expect(parseAgentVersionSpec('cladue@2.1.207')).toEqual({ agent: 'claude', version: '2.1.207' });
+  });
+
+  it('an unknown agent returns the agents-run-style error, not an enum dump', () => {
+    const r = parseAgentVersionSpec('gremlin');
+    expect('error' in r && r.error).toMatch(/Unknown agent, profile, or workflow: gremlin/);
+  });
+
+  it('rejects a second @ segment', () => {
+    const r = parseAgentVersionSpec('claude@2.1.207@extra');
+    expect('error' in r && r.error).toMatch(/at most one '@version'/);
+  });
+
+  it('rejects an empty or malformed version token', () => {
+    const empty = parseAgentVersionSpec('claude@');
+    expect('error' in empty && empty.error).toMatch(/Invalid version ''/);
+    const bad = parseAgentVersionSpec('claude@..');
+    expect('error' in bad && bad.error).toMatch(/Invalid version/);
+  });
+
+  it('a hard-deprecated harness still parses so callers can run their own deprecation gate on the BARE id', () => {
+    // The RUSH-2719 quiet bug: resolveAgentName('gemini@1.2.3') is null, so the
+    // add-time deprecation check silently passed a pinned deprecated harness.
+    const r = parseAgentVersionSpec('gemini@1.2.3');
+    expect(r).toEqual({ agent: 'gemini', version: '1.2.3' });
   });
 });
