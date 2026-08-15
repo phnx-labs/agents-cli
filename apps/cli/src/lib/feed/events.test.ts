@@ -544,7 +544,7 @@ describeEventsIo('events', () => {
       const raw = path.join(dayDir, 'events.jsonl');
       fs.writeFileSync(raw, '{"event":"info"}\n');
       const release = await lockfile.lock(raw);
-      const modulePath = path.resolve('src/lib/events.ts');
+      const modulePath = path.resolve('src/lib/feed/events.ts');
       const child = spawn(
         'node',
         ['--import', 'tsx', '-e', `console.log('READY'); const { rotate } = await import(${JSON.stringify(modulePath)}); rotate(365);`],
