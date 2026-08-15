@@ -709,15 +709,20 @@ describe('installMcpServers handled-agent tracking', () => {
     expect(result.success).toBe(true);
     expect(result.applied).toEqual(expect.arrayContaining(['local-server', 'remote-server']));
 
-    const configPath = path.join(versionHome, '.gemini', 'config', 'mcp_config.json');
+    // agy reads ~/.gemini/config/mcp_config.json from the REAL home — only
+    // ~/.gemini/antigravity-cli is symlinked into a version home — so the write
+    // must land there, NOT under the version home (the child ran with HOME=home).
+    const configPath = path.join(home, '.gemini', 'config', 'mcp_config.json');
     expect(fs.existsSync(configPath), `expected agy MCP config at ${configPath}`).toBe(true);
     const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
     expect(config.mcpServers['local-server']).toEqual({ command: 'node', args: ['srv.js'], env: {} });
     // agy keys a remote server `serverUrl` (SSE), not `url`.
     expect(config.mcpServers['remote-server']).toEqual({ serverUrl: 'https://mcp.example.com/sse' });
 
-    // The per-version state dir must NOT be where MCP landed.
+    // Neither the per-version state dir nor a version-home copy of the shared
+    // config dir may be where MCP landed — agy opens neither.
     expect(fs.existsSync(path.join(versionHome, '.gemini', 'antigravity-cli', 'mcp_config.json'))).toBe(false);
+    expect(fs.existsSync(path.join(versionHome, '.gemini', 'config', 'mcp_config.json'))).toBe(false);
   });
 
   it.skipIf(IS_WINDOWS)('writes kimi MCP where the staleness detector reads it back', () => {
@@ -752,5 +757,39 @@ describe('installMcpServers handled-agent tracking', () => {
     expect(result.applied).toContain('kimi-server');
     // The write and the read-back must agree on the file.
     expect(detected).toContain('kimi-server');
+  });
+  it.skipIf(IS_WINDOWS)('refuses a malformed existing config instead of rewriting it from scratch', () => {
+    // The five per-agent installers this replaced parsed unguarded, so a corrupt
+    // config threw and the file survived. writeMcpConfig's catch-and-reset would
+    // have rebuilt hermes' whole config.yaml — which holds far more than MCP —
+    // from `{}`.
+    const home = makeTempHome();
+    const version = '0.1.0';
+    const userMcpDir = path.join(home, '.agents', 'mcp');
+    fs.mkdirSync(userMcpDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(userMcpDir, 'srv.yaml'),
+      ['name: srv', 'transport: stdio', 'command: node', 'args: ["s.js"]', ''].join('\n'),
+      'utf-8'
+    );
+
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'droid', version, 'home');
+    const configPath = path.join(versionHome, '.factory', 'mcp.json');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    const corrupt = '{ "mcpServers": { "keep-me": { "command": "node" } ';  // truncated on purpose
+    fs.writeFileSync(configPath, corrupt, 'utf-8');
+
+    const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { installMcpServers } from ${JSON.stringify(moduleUrl)};
+      console.log(JSON.stringify(installMcpServers('droid', ${JSON.stringify(version)}, ${JSON.stringify(versionHome)})));
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim());
+    expect(result.success).toBe(false);
+    expect(result.errors.join('\n')).toContain('is not valid');
+    // The user's file is byte-identical — nothing was clobbered.
+    expect(fs.readFileSync(configPath, 'utf-8')).toBe(corrupt);
   });
 });

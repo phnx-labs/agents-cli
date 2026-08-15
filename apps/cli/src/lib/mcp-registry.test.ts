@@ -60,6 +60,13 @@ describe('MCP path resolvers agree with the registry', () => {
     }
   });
 
+  it('keeps a HOME-global target pinned to the real home under any root', () => {
+    for (const agent of capableAgents('mcp')) {
+      if (!MCP_TARGETS[agent]!.homeGlobal) continue;
+      expect(getMcpConfigPathForHome(agent, home)).toBe(getMcpConfigPathForHome(agent, '/other/root'));
+    }
+  });
+
   it('resolves the project path from the registry', () => {
     for (const agent of capableAgents('mcp')) {
       expect(getProjectMcpConfigPath(agent, cwd)).toBe(MCP_TARGETS[agent]!.project(cwd));
@@ -74,10 +81,22 @@ describe('MCP path resolvers agree with the registry', () => {
 });
 
 describe('registry paths verified against the harnesses', () => {
-  it('points antigravity at the shared ~/.gemini/config, not its per-version state dir', () => {
-    // agy keeps per-version state in .gemini/antigravity-cli/ but reads MCP,
-    // skills, agents, and global_workflows from the shared .gemini/config/.
-    expect(MCP_TARGETS.antigravity!.home('/h')).toBe(path.join('/h', '.gemini', 'config', 'mcp_config.json'));
+  it('points antigravity at the REAL home, ignoring the version home', () => {
+    // ~/.gemini/antigravity-cli is symlinked into a version home; ~/.gemini/config
+    // is a plain directory agy opens directly, so a version-home path lands where
+    // agy never reads (same reason antigravityWorkflowsDir ignores versionHome).
+    const expected = path.join(process.env.HOME ?? os.homedir(), '.gemini', 'config', 'mcp_config.json');
+    expect(MCP_TARGETS.antigravity!.home('/some/version/home')).toBe(expected);
+    expect(MCP_TARGETS.antigravity!.homeGlobal).toBe(true);
+  });
+
+  it('marks only the HOME-global targets as such', () => {
+    for (const [agent, target] of Object.entries(MCP_TARGETS)) {
+      if (agent === 'antigravity') continue;
+      expect(target!.homeGlobal, `${agent} should be version-scoped`).toBeFalsy();
+      // A version-scoped target must actually vary with its argument.
+      expect(target!.home('/a')).not.toBe(target!.home('/b'));
+    }
   });
 
   it('points grok at config.toml, where [mcp_servers.<name>] lives', () => {

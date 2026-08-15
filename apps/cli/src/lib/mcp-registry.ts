@@ -33,8 +33,14 @@
  *     answered `.kimi-code/settings.json`, so the staleness detector never saw
  *     what the writer had just written.
  */
+import * as os from 'os';
 import * as path from 'path';
 import type { AgentId } from './types.js';
+
+/** The user's real home — read at call time so a test's HOME override applies. */
+function realHome(): string {
+  return process.env.HOME ?? os.homedir();
+}
 
 /**
  * On-disk schema of an agent's MCP config file. One entry per distinct
@@ -69,6 +75,13 @@ export interface McpTarget {
   format: McpFormat | null;
   /** Required when `format` is null: why the write path refuses. */
   unsupportedReason?: string;
+  /**
+   * True when the harness reads this config from the user's REAL home rather
+   * than a per-version home, so `home()` ignores its argument. Callers that
+   * reason about version isolation must check this rather than assuming every
+   * target is version-scoped.
+   */
+  homeGlobal?: boolean;
   /**
    * When set, `installMcpServers` registers through the harness's own CLI
    * (`claude mcp add` / `codex mcp add`) instead of writing the file directly.
@@ -113,11 +126,17 @@ export const MCP_TARGETS: Partial<Record<AgentId, McpTarget>> = {
     format: 'openclaw-json',
   },
   antigravity: {
-    // agy keeps per-version state in ~/.gemini/antigravity-cli/, but reads MCP
-    // (like skills, agents, and global_workflows) from the shared ~/.gemini/config/.
-    home: (h) => path.join(h, '.gemini', 'config', 'mcp_config.json'),
+    // NOT version-isolated, and `home` is deliberately ignored. agy reads MCP
+    // from `~/.gemini/config/mcp_config.json` in the user's REAL home: only
+    // `~/.gemini/antigravity-cli` is symlinked into a version home, while
+    // `~/.gemini/config` is a plain directory agy opens directly. Writing under
+    // a version home therefore lands somewhere agy never reads -- the same
+    // reason `antigravityWorkflowsDir` (lib/workflows.ts) ignores versionHome,
+    // where it is strace-verified against a running agy.
+    home: () => path.join(realHome(), '.gemini', 'config', 'mcp_config.json'),
     project: (cwd) => path.join(cwd, '.gemini', 'config', 'mcp_config.json'),
     format: 'antigravity-json',
+    homeGlobal: true,
   },
   grok: {
     // Grok's MCP servers are [mcp_servers.<name>] tables in config.toml.
