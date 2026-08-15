@@ -1,0 +1,30 @@
+{
+  "runs": [
+    {
+      "id": 9001,
+      "name": "Release",
+      "kind": "release",
+      "event": "workflow_dispatch",
+      "created_at": "2026-08-15T10:00:00Z",
+      "run_started_at": "2026-08-15T10:00:04Z",
+      "conclusion": "success",
+      "jobs": [
+        {
+          "name": "publish",
+          "labels": ["ubuntu-latest"],
+          "runner_group_name": "GitHub Actions",
+          "started_at": "2026-08-15T10:00:04Z",
+          "completed_at": "2026-08-15T10:03:10Z",
+          "conclusion": "success",
+          "steps": [
+            { "name": "Set up job", "started_at": "2026-08-15T10:00:04Z", "completed_at": "2026-08-15T10:00:05Z" },
+            { "name": "Run actions/checkout@sha", "started_at": "2026-08-15T10:00:05Z", "completed_at": "2026-08-15T10:00:12Z" },
+            { "name": "Promote attested tarball", "started_at": "2026-08-15T10:00:12Z", "completed_at": "2026-08-15T10:02:40Z" },
+            { "name": "Install smoke", "started_at": "2026-08-15T10:02:40Z", "completed_at": "2026-08-15T10:03:08Z" },
+            { "name": "Complete job", "started_at": "2026-08-15T10:03:08Z", "completed_at": "2026-08-15T10:03:10Z" }
+          ]
+        }
+      ]
+    }
+  ]
+}
