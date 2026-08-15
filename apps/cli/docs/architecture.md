@@ -264,8 +264,14 @@ byte-tail (`readSessionTailWithRaw`, which also yields tokens/sec), and every ot
 tracked kind (grok, droid, rush, gemini, kimi, hermes, opencode, antigravity, cursor) is
 parsed by its own parser and run through the same `inferSessionState`
 (`computeLiveSignals` → `parseSession`). `findSessionFileForKind` locates the
-transcript for all of them — Claude off disk by cwd, the rest via the session index
-(`latestSessionFileForCwd`). Only an **opaque/untracked** kind or an
+transcript for all of them, and a KNOWN session id always selects that session's
+own file: Claude off disk (`findClaudeSessionFile`), every other tracked kind by
+id against the session index (`indexedSessionFileForId`). `latestSessionFileForCwd`
+— newest indexed transcript in the cwd — is only the fallback for a process whose
+id we do not know; using it with an id in hand handed every co-located
+same-harness agent one stranger's transcript (RUSH-2691). One consequence: a
+non-Claude session has no transcript until the index reaches it, which the
+daemon's warm tick keeps to seconds. Only an **opaque/untracked** kind or an
 unreadable/empty transcript has no rich state, and then one canonical function,
 `resolveFallbackStatus(sessionFile, pidAlive)`, decides the status:
 

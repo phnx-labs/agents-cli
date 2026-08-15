@@ -17,11 +17,18 @@ import * as path from 'path';
 // HOME is redirected BEFORE the session modules load because discover.ts binds
 // `const HOME = os.homedir()` at import time (discover.ts:76); that is why this
 // lives in its own file instead of a suite in daemon-ticks.test.ts.
+//
+// The `process.chdir` calls below are legal only under `pool: 'forks'`
+// (vitest.config.ts) — `process.chdir()` throws in worker threads. If the pool
+// ever changes, this file needs a different way to run from the daemon's cwd.
 
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;
 const originalCwd = process.cwd();
-const testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-index-warm-'));
+// realpath'd — see the note in active.session-file-id.test.ts: macOS os.tmpdir()
+// is a symlink, and the indexed `cwd` is stored raw but queried realpath'd, so an
+// unresolved temp path makes the stored cwd and the asserted cwd differ.
+const testHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-index-warm-')));
 process.env.HOME = testHome;
 process.env.USERPROFILE = testHome;
 
@@ -41,7 +48,10 @@ afterAll(() => {
 /** Write a real Claude transcript for `id`, working in `projectCwd`. */
 function writeTranscript(id: string, projectCwd: string): void {
   fs.mkdirSync(projectCwd, { recursive: true });
-  const projectDir = path.join(testHome, '.claude', 'projects', projectCwd.replace(/[/.]/g, '-'));
+  // Flatten the cwd into one dir segment. The class covers `\` and `:` as well as
+  // `/` and `.` so the name stays a single valid segment on Windows, where the
+  // full suite also runs (tests.yml).
+  const projectDir = path.join(testHome, '.claude', 'projects', projectCwd.replace(/[/\\.:]/g, '-'));
   fs.mkdirSync(projectDir, { recursive: true });
   fs.writeFileSync(
     path.join(projectDir, `${id}.jsonl`),
@@ -74,6 +84,18 @@ describe('runSessionIndexWarmTick (RUSH-2682, RUSH-2691)', () => {
   });
 
   it('is incremental — an unchanged transcript is not re-parsed on the next tick', async () => {
+    // Self-contained on purpose: write a transcript, prove the tick parses it,
+    // THEN prove the next tick reports 0. Asserting only the 0 would pass with
+    // nothing on disk at all — indistinguishable from "the scanner skipped an
+    // unchanged file", and unfailable in the same way as the mock seam this
+    // suite replaced.
+    const id = '44444444-3333-4222-8111-000000000000';
+    writeTranscript(id, path.join(testHome, 'work', 'incremental'));
+
+    const first = await runSessionIndexWarmTick();
+    expect(first.indexed, 'the new transcript must be parsed first').toBeGreaterThan(0);
+    expect(db.getSessionById(id)).not.toBeNull();
+
     const second = await runSessionIndexWarmTick();
     expect(second.claimed).toBe(true);
     expect(second.indexed, 'unchanged files must not be re-parsed').toBe(0);

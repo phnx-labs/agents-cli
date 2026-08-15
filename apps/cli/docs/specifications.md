@@ -259,16 +259,26 @@ SSH access (§7); rendering sessions that no harness produced.
   degraded live-registry read yields no candidates rather than throwing.
   Status: landed (RUSH-2682).
 - **SES-9d (MUST).** The transcript a live row carries MUST be that session's own.
-  When the session id is known, it selects the transcript
-  (`findSessionFileForKind` → `indexedSessionFileForId`, `lib/session/active.ts`);
-  only an id-less process may fall back to the newest indexed transcript in its
-  cwd, and an id the index has not reached yet MUST yield no transcript rather
-  than a co-located sibling's. The cwd fallback answers `WHERE agent = ? AND cwd =
-  ? ORDER BY last_activity DESC LIMIT 1` (`latestSessionFileForCwd`), so with two
-  same-harness agents in one cwd it returns one stranger's transcript to all of
-  them — which under SES-9b renders another session's digest under this session's
-  header and caches it against the wrong id. A row whose indexed `agent` differs
-  from the live process's harness is refused for the same reason.
+  When the session id is known, it selects the transcript: Claude resolves
+  `<id>.jsonl` straight off disk (`findClaudeSessionFile` → `pickSessionFile`),
+  and every other tracked harness resolves the id against the session index
+  (`indexedSessionFileForId`, `lib/session/active.ts`). Only an id-less process
+  may fall back to the newest indexed transcript in its cwd, and an id neither
+  path resolves MUST yield no transcript rather than a co-located sibling's. The
+  cwd fallback answers `WHERE agent = ? AND cwd = ? ORDER BY last_activity DESC
+  LIMIT 1` (`latestSessionFileForCwd`), so with two same-harness agents in one
+  cwd it returns one stranger's transcript to all of them — which under SES-9b
+  renders another session's digest under this session's header and caches it
+  against the wrong id. A row whose indexed `agent` differs from the live
+  process's harness is refused for the same reason.
+
+  Consequence worth stating: because only Claude resolves off disk, a non-Claude
+  live row carries no transcript until the index reaches it, so during that
+  window `computeLiveSignals` returns `{}` and the row shows the
+  `resolveFallbackStatus` `running` rather than a `working` / `waiting_input`
+  distinction (SES-18 still holds — it never reads `unknown`). SES-9c's warm tick
+  is what keeps that window short. This is the deliberate trade: a coarser status
+  for seconds beats a confident render of someone else's conversation.
   Status: landed (RUSH-2691).
 - **SES-9c (SHOULD).** A session started on a machine SHOULD reach that machine's
   transcript index within seconds, not on the next unrelated `agents sessions*`
@@ -278,11 +288,13 @@ SSH access (§7); rendering sessions that no harness produced.
   scan claim. That tick MUST run the scan itself (`scanSessionsIncremental`) and
   MUST NOT route through `discoverSessions`, whose trailing listing query defaults
   its cwd filter to the daemon's cwd and so reports rows indexed rather than
-  transcripts scanned (RUSH-2691). A cold-miss repair that loses the scan claim
-  MUST wait (bounded) for the in-flight scan to finish before reading, not return
-  the pre-scan snapshot — this binds every id/selector repair path, not only the
-  metadata resolver (`discoverSessions({ waitForScan })` → `waitForScanToSettle`,
-  `scanInProgressByLivePid`). Status: landed (RUSH-2682, RUSH-2691).
+  transcripts scanned (RUSH-2691). Every `SESSION_AGENTS` member MUST contribute
+  to that count, including the store-backed harnesses whose scanners index a batch
+  rather than per-file. The id cold-miss repair behind `preview`/`resume`/`focus`
+  MUST wait (bounded) for an in-flight scan to finish before reading, not return
+  the pre-scan snapshot (`discoverSessions({ waitForScan })` → `waitForScanToSettle`,
+  `scanInProgressByLivePid`). Status: landed (RUSH-2682, RUSH-2691);
+  see SES-GAP-9c for the repair paths that do not yet take the wait.
 - **SES-10 (MUST).** A preview string MUST be cleaned of terminal/harness noise
   (OSC titles, CSI/SGR, harness tags, collapsed whitespace) before display
   (`cleanPreview`, `commands/sessions.ts:329-337`), and truncated width-aware
@@ -1028,6 +1040,20 @@ normative — a change that widens/narrows a cell is a spec change.
   ([sessions.md](sessions.md):277-278).
 
 **Known gaps (implemented-vs-intended drift to fix, not to hide):**
+- **SES-GAP-9c.** SES-9c's bounded wait is taken by the id cold-miss repair
+  (`commands/sessions.ts` ~`:2287`) and by nothing else. `richMetaById`
+  (`commands/focus.ts` ~`:922`) is an id repair by its own docstring and does not
+  take it, so a `focus <id>` that collides with the daemon's scan reads the
+  pre-scan snapshot, misses, and falls back to a row carrying no `version` — a
+  non-version-pinned resume. The selector paths in `renderOneSession` /
+  `renderArtifactsGlobal` do not take it either. Widening the wait to those sites
+  is **not** a drop-in: they are not gated on a miss, so the cost would be
+  unconditional, and `WAIT_FOR_SCAN_TIMEOUT_MS` (2s, `session/discover.ts`) is
+  below a measured real scan hold (~3s on a 1.07 GB index), so a collision can pay
+  the full bound and still read the pre-scan snapshot —
+  `waitForScanToSettle`'s `false` return is discarded. Closing this means gating
+  on an actual miss AND either raising the bound past a realistic scan or acting
+  on that `false`. Raised by the RUSH-2691 review.
 - **SES-GAP-1.** `flatSessionRow` (`--flat`) and the picker's `formatPickerLabel`
   both feed `renderTopicCell` (~`commands/sessions.ts:1500`, `:2071` →
   `:1862`) without the `'-'` fallback the other renderers use, so a session with
