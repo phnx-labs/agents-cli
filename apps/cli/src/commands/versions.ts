@@ -27,14 +27,14 @@ import {
   isSelfUpdatingAgent,
 } from '../lib/agents.js';
 import type { AccountInfo } from '../lib/agents.js';
-import type { UsageSnapshot } from '../lib/usage.js';
+import type { UsageSnapshot } from '../lib/accounting/usage.js';
 import {
   formatUsageSummary,
   getUsageInfoForIdentity,
   getUsageInfoByIdentity,
   getUsageLookupKey,
   isUsageHeadlessScopeError,
-} from '../lib/usage.js';
+} from '../lib/accounting/usage.js';
 import { viewAction } from './view.js';
 import { resolveConfiguredModel, formatAgentIdentity } from '../lib/models.js';
 import type { AgentId } from '../lib/types.js';

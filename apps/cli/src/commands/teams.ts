@@ -88,7 +88,7 @@ import { renderSessionLog } from './sessions.js';
 import type { SessionMeta } from '../lib/session/types.js';
 import { buildPreview as buildSessionPreview } from './sessions-picker.js';
 import { parseExecEnv } from '../lib/exec.js';
-import { checkRunAccountReadiness, type AccountReadiness } from '../lib/rotate.js';
+import { checkRunAccountReadiness, type AccountReadiness } from '../lib/accounting/rotate.js';
 import { teamPicker, printTeamTable, type TeamRow } from './teams-picker.js';
 import { teamSpawners, type TeamSpawner } from '../lib/session/db.js';
 import { itemPicker } from '../lib/picker.js';

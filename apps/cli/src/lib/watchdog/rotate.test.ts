@@ -15,7 +15,7 @@ import * as os from 'os';
 import * as path from 'path';
 import type { ActiveSession } from '../session/active.js';
 import type { SessionProvenance } from '../session/provenance.js';
-import type { InjectTarget } from '../terminal/inject.js';
+import type { InjectTarget } from '../terminal/index.js';
 import {
   runWatchdogTick,
   type SmartDecider,

@@ -17,7 +17,7 @@ import { execFile as execFileCallback } from 'child_process';
 import { promisify } from 'util';
 import * as yaml from 'yaml';
 import { getActiveSessions, type ActiveSession } from '../session/active.js';
-import { serializeActiveSessionsForJson } from '../../commands/sessions.js';
+import { serializeActiveSessionsForJson } from '../session/active.js';
 import { readAuthHealthCache, type AuthVerdict } from '../auth-health.js';
 import { readStatsCache } from '../devices/stats-cache.js';
 

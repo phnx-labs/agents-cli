@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { UsageSnapshot, UsageWindow } from '../usage.js';
+import type { UsageSnapshot, UsageWindow } from '../accounting/usage.js';
 import {
   computeReady,
   formatQuota,

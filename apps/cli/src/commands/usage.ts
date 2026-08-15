@@ -24,7 +24,7 @@ import {
 } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { listInstalledVersions, getGlobalDefault, getVersionHomePath } from '../lib/versions.js';
-import { agentReportsUsage, formatUsageSection, getUsageInfoForIdentity } from '../lib/usage.js';
+import { agentReportsUsage, formatUsageSection, getUsageInfoForIdentity } from '../lib/accounting/usage.js';
 
 /** One agent's usage snapshot — the unit the text and --json renderers share. */
 export interface AgentUsageRecord {

@@ -71,7 +71,7 @@ if (IS_DEV_BUILD) {
 // Command registration is lazy: instead of statically importing every command
 // module on each invocation (which loaded the whole ~50-module tree before the
 // first byte of output), the registry maps a command name to a thunk that
-// imports only what that command needs. See src/lib/startup/command-registry.ts.
+// imports only what that command needs. See src/cli/command-registry.ts.
 // Individual load* registrars are not imported here — registerEagerForRequest
 // and the lazy path pull them via COMMAND_LOADERS. The full-tree
 // registerAllEagerCommands path was removed (RUSH-2329): unknown/typo commands
@@ -83,7 +83,7 @@ import {
   KNOWN_TOP_LEVEL_COMMANDS,
   RETIRED_TOP_LEVEL_COMMANDS,
   type ModuleLoader,
-} from './lib/startup/command-registry.js';
+} from './cli/command-registry.js';
 import { closestTopLevelCommand } from './lib/startup/spellcheck.js';
 import { applyGlobalHelpConventions } from './lib/help.js';
 import { renderWhatsNew } from './lib/whats-new.js';

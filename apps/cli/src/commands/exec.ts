@@ -19,7 +19,7 @@ import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection }
 import { getUserAgentsDir, readMeta } from '../lib/state.js';
 import type { CrabboxBox } from '../lib/crabbox/cli.js';
 import { parseLoopInterval } from '../lib/loop.js';
-import type { RotateResult } from '../lib/rotate.js';
+import type { RotateResult } from '../lib/accounting/rotate.js';
 import { AGENTS, resolveAgentName, isAgentHardDeprecated, hardDeprecationError } from '../lib/agents.js';
 import { recordDispatchedRun } from '../lib/audit/log.js';
 import { maybeShowStarNudge } from '../lib/star-nudge.js';
@@ -637,8 +637,7 @@ async function handleTerminalHandoff(
   options: ExecCommandActionOptions,
   prompt: string | undefined,
 ): Promise<void> {
-  const { parseTerminalFlag, openRunInTerminal, toHostSamples } = await import('../lib/terminal/run-surface.js');
-  const { currentContext } = await import('../lib/terminal/index.js');
+  const { parseTerminalFlag, openRunInTerminal, toHostSamples, currentContext } = await import('../lib/terminal/index.js');
 
   const parsed = parseTerminalFlag(options.terminal);
   if (parsed.error) {
@@ -1482,7 +1481,7 @@ export function registerRunCommand(program: Command): void {
         const { detectSignedInRuntimes, resolveClaudeCredentialsBlob, inferLeaseRuntime, profileNeedsBaseRuntimeCredentials } = await import('../lib/crabbox/runtimes.js');
         const { leaseAndRun, leaseWorkspaceId } = await import('../lib/crabbox/lease.js');
         const { boxAddress } = await import('./lease.js');
-        const { getConfiguredRunStrategy, resolveRunVersion } = await import('../lib/rotate.js');
+        const { getConfiguredRunStrategy, resolveRunVersion } = await import('../lib/accounting/rotate.js');
         const { profileExists, readProfile, resolveProfileEnv } = await import('../lib/profiles.js');
 
         const detected = await detectSignedInRuntimes();
@@ -1731,7 +1730,7 @@ export function registerRunCommand(program: Command): void {
         const { runInteractiveOnHost } = await import('../lib/hosts/dispatch.js');
         const { registerInteractiveHostSession } = await import('../lib/hosts/session-index.js');
         const { RUN_OPTION_REJECT_MESSAGES } = await import('../lib/hosts/remote-cmd.js');
-        const { normalizeRunStrategy, RUN_STRATEGIES } = await import('../lib/rotate.js');
+        const { normalizeRunStrategy, RUN_STRATEGIES } = await import('../lib/accounting/rotate.js');
 
         // The forwarding contract (RUN_OPTION_FORWARDING): options that cannot
         // cross the SSH boundary fail loud BEFORE dispatch — never a silent
@@ -2213,7 +2212,7 @@ export function registerRunCommand(program: Command): void {
         import('../lib/profiles.js'),
         import('../lib/secrets/bundles.js'),
         import('../lib/secrets/remote.js'),
-        import('../lib/rotate.js'),
+        import('../lib/accounting/rotate.js'),
         import('../lib/versions.js'),
         import('../lib/plugins.js'),
         import('../lib/workflows.js'),
@@ -2624,7 +2623,7 @@ export function registerRunCommand(program: Command): void {
             // No version pinned: locate the installed version currently signed in
             // as this identity and pin the run to it — do NOT assume the global
             // default holds it (the account may live on another installed copy).
-            const { resolveAccountVersion } = await import('../lib/rotate.js');
+            const { resolveAccountVersion } = await import('../lib/accounting/rotate.js');
             const matched = await resolveAccountVersion(agent, spawnAccount.identityKey);
             if (!matched) {
               console.error(chalk.red(`No installed ${spawnAccount.agent} version is signed in as the identity named by account '${spawnAccount.name}'. Sign in as that identity, or attach a different account.`));
@@ -2788,7 +2787,7 @@ export function registerRunCommand(program: Command): void {
       // Captured from resolveRunVersion below so mid-run rate-limit failover can
       // synthesize a same-agent fallback chain from the other healthy accounts
       // (issue #348). Stays null unless a non-pinned strategy actually rotated.
-      let rotationResult: import('../lib/rotate.js').RotateResult | null = null;
+      let rotationResult: import('../lib/accounting/rotate.js').RotateResult | null = null;
       // Set when the zero-healthy path already announced a deliberate
       // launch-to-sign-in, so the login preflight below does not repeat it.
       let signInLaunch = false;

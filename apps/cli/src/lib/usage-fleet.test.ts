@@ -19,7 +19,7 @@ import {
   setClaudeUsageCachePathForTest,
   writeClaudeUsageCache,
   type UsageSnapshot,
-} from './usage.js';
+} from './accounting/usage.js';
 
 const NOW = 1_800_000_000_000;
 const KEY = 'claude:org=fleet';

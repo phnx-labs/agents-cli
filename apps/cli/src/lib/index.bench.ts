@@ -112,7 +112,7 @@ import {
 // dist/lib/auto-pull.d.ts exists (tsconfig.json declaration:true), so this
 // resolves and type-checks normally -- no @ts-expect-error needed here.
 import { spawnDetachedSync } from '../../dist/lib/auto-pull.js';
-import { loadDoctor, loadVersions, loadPrune, loadSessions } from './startup/command-registry.js';
+import { loadDoctor, loadVersions, loadPrune, loadSessions } from '../cli/command-registry.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPDATE_CHECK_FILE = getUpdateCheckPath();
