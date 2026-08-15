@@ -24,8 +24,13 @@
  * Both were fixed once for the daemon and left unfixed for the menu-bar helper
  * (`lib/menubar/install-menubar.ts`) and the computer helper
  * (`commands/computer.ts`), which is why the leak survived the daemon fix. This
- * module is the single place both rules live, so a fourth manifest cannot ship
- * without them.
+ * module is the single place both rules live, so a new manifest has one obvious
+ * thing to call.
+ *
+ * It is not yet the only consumer of the identifier rule: `lib/secrets/agent.ts`
+ * keeps a literal `SERVICE_LABEL` for its `bootout`. That path is retire-only —
+ * it detects and removes a plist an older version installed and generates none
+ * of its own — so it has no HOME to bake and was deliberately left alone.
  */
 import * as crypto from 'crypto';
 import * as os from 'os';
