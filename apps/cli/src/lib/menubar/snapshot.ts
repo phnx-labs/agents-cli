@@ -55,10 +55,10 @@ export interface MenubarSnapshot {
  * it rides the same 3-minute snapshot poll instead of a second timer.
  */
 async function buildMenubarDevices(): Promise<MenubarDevice[]> {
-  const [reg, prefs] = await Promise.all([
-    loadDevices(),
-    loadAutoLaunchPreferences(),
-  ]);
+  const reg = await loadDevices();
+  // Pass the roster so a fleet-wide default (fleet.defaults.config) reaches
+  // devices that have no doc of their own.
+  const prefs = loadAutoLaunchPreferences(Object.keys(reg));
   const interactiveHost = getConfigValue('interactive.host').value as string | undefined;
   const self = machineId();
   return Object.keys(reg)

@@ -112,9 +112,10 @@ this order:
    (`ssh://`) defaults skip this check: their browser lives on the far host.
 
 The configured default is a **per-device setting**: it lives in this machine's
-`browser.profile` config key (centrally, under `fleet.devices.<machine>.config`
-in `~/.agents/agents.yaml`), so each machine keeps its own choice — the profile
-it points at may hold machine-local logins. Set it once per machine.
+`browser.profile` config key (`devices/<machine>/agents.yaml` `config:`), so
+each machine keeps its own choice — the profile it points at may hold
+machine-local logins. It is machine-local: only this box can set it. Set it
+once per machine.
 
 Safari and Firefox are not supported. They do not implement the Chrome
 DevTools Protocol.
@@ -312,10 +313,11 @@ whether it allows it:
 | `agents browser remote-control off` | Refuse remote drives (the default) |
 
 Consent is a **per-device setting** (the `browser.remote-control` config key,
-stored centrally under `fleet.devices.<machine>.config` in `~/.agents/agents.yaml`)
-and **off by default**: a `browser --device <this-machine> start` from
-elsewhere is refused with a message naming how to enable it, until the owner runs
-`agents browser remote-control on` here. Local starts (no `--device`) are never gated.
+in this machine's `devices/<machine>/agents.yaml` `config:`) and **off by
+default**: a `browser --device <this-machine> start` from elsewhere is refused
+with a message naming how to enable it, until the owner runs
+`agents browser remote-control on` here. The key is machine-local — only this
+box can set it. Local starts (no `--device`) are never gated.
 
 ### Navigation
 

@@ -30,40 +30,77 @@ function writeCentral(yamlText: string) {
   fs.writeFileSync(centralPath(), yamlText);
 }
 
-describe('device doc carries only machine-local pins (config moved to the central fleet block)', () => {
+describe('pins route to the untracked pins file; the tracked doc is operator-only', () => {
   beforeEach(() => {
     TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-state-test-'));
     process.env.HOME = TMP;
     process.env.AGENTS_SYNC_MACHINE_ID = 'testbox';
+    // getDevicesDir() reads this at call time (tests/setup.ts pins it fork-wide).
+    process.env.AGENTS_DEVICES_DIR = path.join(TMP, '.agents', '.history', 'devices');
   });
   afterEach(() => {
     delete process.env.AGENTS_SYNC_MACHINE_ID;
+    delete process.env.AGENTS_DEVICES_DIR;
     try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best-effort */ }
   });
 
-  it('routes agents: pins to the device file and fleet config to central, never crossed', async () => {
+  function pinsPath() {
+    return path.join(TMP, '.agents', '.history', 'devices', 'pins-testbox.json');
+  }
+
+  it('routes agents:/isolatedAgents: to .history pins JSON, never the tracked doc or central', async () => {
     const { updateMeta, readMeta } = await freshState();
 
     updateMeta((m) => ({
       ...m,
       agents: { claude: '2.1.0' },
-      fleet: { devices: { testbox: { config: { maxAgents: 4 } } } },
+      isolatedAgents: { codex: '0.144.6' },
+      fleet: { devices: {}, defaults: { config: { maxAgents: 4 } } },
     }));
 
-    const device = fs.readFileSync(devicePath(), 'utf-8');
-    expect(device).toContain('claude: 2.1.0');
-    // Operator config never lands in the device doc — it is central now.
-    expect(device).not.toContain('maxAgents');
-    expect(device).not.toContain('config:');
-
+    // Pins land in the untracked pins file…
+    const pins = JSON.parse(fs.readFileSync(pinsPath(), 'utf-8'));
+    expect(pins).toEqual({ agents: { claude: '2.1.0' }, isolatedAgents: { codex: '0.144.6' } });
+    // …never in central, and the tracked device doc is not created for pins.
     const central = fs.readFileSync(centralPath(), 'utf-8');
     expect(central).not.toContain('claude: 2.1.0');
     expect(central).toContain('maxAgents: 4');
+    expect(fs.existsSync(devicePath())).toBe(false);
 
-    // Both sides read back through the overlay.
+    // Both read back through the overlay.
     expect(readMeta().agents?.claude).toBe('2.1.0');
-    const fleet = readMeta().fleet;
-    expect((fleet?.devices as Record<string, { config?: Record<string, unknown> }>).testbox.config).toEqual({ maxAgents: 4 });
+    expect(readMeta().isolatedAgents?.codex).toBe('0.144.6');
+    expect(readMeta().fleet?.defaults?.config).toEqual({ maxAgents: 4 });
+  });
+
+  it('writeMeta preserves a config: block device-config wrote into the tracked doc', async () => {
+    const { updateMeta, readMeta } = await freshState();
+
+    // device-config.ts owns config: in the doc; write it directly (its writer).
+    fs.mkdirSync(path.dirname(devicePath()), { recursive: true });
+    fs.writeFileSync(devicePath(), 'config:\n  maxAgents: 4\n');
+
+    updateMeta((m) => ({ ...m, deviceRoutines: ['watchdog'] }));
+
+    const doc = fs.readFileSync(devicePath(), 'utf-8');
+    expect(doc).toContain('maxAgents: 4'); // config survived the meta write
+    expect(doc).toContain('- watchdog');
+    expect(readMeta().deviceRoutines).toEqual(['watchdog']);
+  });
+
+  it('clears pins cleanly (no stale pins file resurrecting them)', async () => {
+    const { updateMeta, readMeta } = await freshState();
+
+    updateMeta((m) => ({ ...m, agents: { claude: '2.1.0' } }));
+    expect(readMeta().agents?.claude).toBe('2.1.0');
+
+    updateMeta((m) => {
+      const { agents, ...rest } = m;
+      void agents;
+      return rest;
+    });
+    expect(readMeta().agents?.claude).toBeUndefined();
+    expect(JSON.parse(fs.readFileSync(pinsPath(), 'utf-8'))).toEqual({});
   });
 
 });

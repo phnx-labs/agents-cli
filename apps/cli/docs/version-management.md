@@ -324,16 +324,16 @@ so the copied config does not depend on the CLI's own tree.
 `use` it sets no global default, creates no bare shim, and never repoints the real
 `~/.<agent>` config symlink.
 
-```yaml
-# ~/.agents/devices/<machine>/agents.yaml   (device-local content; the file syncs,
-# but each machine only ever writes its OWN folder, so pulls never conflict)
-agents:                 # global defaults — own the launcher, shim and config symlink
-  claude: 2.1.220
-isolatedAgents:         # sandbox pointers — own nothing
-  codex: 0.144.6
+```json
+// ~/.agents/.history/devices/pins-<machine>.json   (machine-local runtime state,
+// untracked — auto-written pins in the tracked device doc caused commit churn)
+{
+  "agents": { "claude": "2.1.220" },          // global defaults — own the launcher, shim and config symlink
+  "isolatedAgents": { "codex": "0.144.6" }    // sandbox pointers — own nothing
+}
 ```
 
-Both maps are device-local for the same reason: each names a version installed on
+Both maps are machine-local for the same reason: each names a version installed on
 *this* machine, so syncing either would hand another machine a pointer to a copy it
 does not have.
 

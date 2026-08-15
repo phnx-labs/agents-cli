@@ -208,41 +208,53 @@ reconciles them into each machine's local registry and ignore-list. Approved
 devices resolve their address live from Tailscale; addresses, SSH auth, and
 reachability never enter Git.
 
-**Per-device and fleet-wide settings** live in the central agents.yaml. ONE
-command owns them: `agents devices config <name> [key] [value] [--unset]
-[--json]` — bare opens an interactive settings menu on a TTY (and prints the
-resolved config when piped), `key` reads one value back, `key value` sets it
-with validation, `key --unset` restores the default, and `notes <text>`
-appends a free-form operator note. Device-scope keys split by **who reads
-them**. The ones a PEER reads (`agents.max-concurrent`, `watchdog.enabled`,
-`notes`, the `ssh.*` profile overrides, `platform`, `auto-launch.*`) land in
-`fleet.devices.<name>.config` in `~/.agents/agents.yaml` — central, so any box
-can configure any device and the settings sync + back up with the repo (a
-`fleet.devices: all` declaration upgrades to an explicit roster map on the
-first config write). The ones only the OWNING box reads (`scheduler.enabled`,
-`daemon.enabled`, `tmux.enabled`, `browser.remote-control`,
-`browser.task-idle-minutes`, `browser.profile`)
-stay in that machine's own doc, never sync, and are refused for a peer —
-`browser.remote-control` is a consent flag, and a broken tmux or a paused
-daemon is one machine's state, not fleet policy. The device
-registry stays the **discovery cache** (address, tailscale snapshot,
-reachability); the config's `ssh.*` / `platform` / user values overlay the
-registry profile at dial time (`src/lib/devices/resolve-profile.ts`), so
-`agents ssh`, the ssh_config render, host dispatch, and the `devices list`
-table all honor them. The user-scope key `interactive.host`
-(`config.interactiveHost`), names the device agents show YOU artifacts on
-(browser opens, dashboards), so skills stop guessing "the online macOS box".
-Usage collection has a separate user-scope pin, `usage.primary-host`
-(`config.usagePrimaryHost`), operated only through `agents config set|get|unset|list`.
-`resolveUsagePrimaryHost()` resolves the explicit usage pin first, then falls back to
-`interactive.host`, then to no primary host. The interactive host answers where the
-user sees artifacts; it does not by itself declare that device authoritative for usage.
-The interactive host is marked `★ interactive` in `agents devices list`;
-`list --json` carries each row's effective profile plus its `config` block and
-an `interactive` flag. The retired subcommands (`configure`, `note`, `set`,
-`set-interactive`, `enable`/`disable`/`prefer`/`unprefer`) still work as hidden
-tombstones that forward into `devices config` with a stderr notice. Unset keys
-always mean today's behavior. The key registry is `src/lib/device-config.ts`.
+**Per-device and fleet-wide settings** live in a three-layer store, read in
+order — built-in default < fleet default < per-device value:
+
+| Layer | Home | Tracked | Written by |
+|---|---|---|---|
+| Per-device operator config | `~/.agents/devices/<name>/agents.yaml` → `config:` | yes (syncs via repo push/pull) | `agents devices config <name> …` |
+| Fleet-wide defaults | central `~/.agents/agents.yaml` → `fleet.defaults.config` | yes | `agents devices config --fleet <key> <value>` |
+| Agent pins / machine state | `~/.agents/.history/devices/pins-<host>.json` | no (runtime, like version-resources.json) | auto-pin code paths |
+
+Per-device docs are conflict-free by construction: each machine writes only
+its own folder, and the churny auto-written agent pins no longer share the
+file (they moved to the untracked pins JSON — the root-cause fix that let
+`devices/` be tracked again). ONE command owns the settings: `agents devices
+config <name> [key] [value] [--unset] [--json]` — bare opens an interactive
+settings menu on a TTY (and prints the resolved config when piped), `key`
+reads the effective value back, `key value` sets it with validation,
+`key --unset` removes the device value so the fleet default applies, `notes
+<text>` appends a free-form operator note, and `--fleet` targets the
+fleet-wide defaults layer. `--json` reports each key's `source` (`device` |
+`fleet` | `default`). Device-scope keys: `role` (`worker` \| `personal`; also
+`agents devices role`), `agents.max-concurrent`, `scheduler.enabled`,
+`daemon.enabled`, `watchdog.enabled`, `tmux.enabled`,
+`browser.remote-control`, `browser.profile`, `notes`, the `ssh.*` profile
+overrides, `platform`, `auto-launch.*`. Keys only the owning box reads
+(`scheduler.enabled`, `daemon.enabled`, `tmux.enabled`,
+`browser.remote-control`, `browser.task-idle-minutes`, `browser.profile`) are
+refused for a peer — run them on that box. The device registry stays the **discovery cache** (address,
+tailscale snapshot, reachability); the config's `ssh.*` / `platform` / user
+values overlay the registry profile at dial time
+(`src/lib/devices/resolve-profile.ts`), so `agents ssh`, the ssh_config
+render, host dispatch, and the `devices list` table all honor them. User-scope
+keys live in the central file: `interactive.host` (`config.interactiveHost`)
+names the device agents show YOU artifacts on (browser opens, dashboards), so
+skills stop guessing "the online macOS box"; `auto.pool` (`config.autoPool`)
+selects which devices `--device auto` may pick (`workers` or `all`). Usage
+collection has a separate user-scope pin, `usage.primary-host`
+(`config.usagePrimaryHost`), operated only through `agents config
+set|get|unset|list`. `resolveUsagePrimaryHost()` resolves the explicit usage
+pin first, then falls back to `interactive.host`, then to no primary host. The
+interactive host answers where the user sees artifacts; it does not by itself
+declare that device authoritative for usage. The interactive host is marked
+`★ interactive` in `agents devices list`; `list --json` carries each row's
+effective profile plus its device-layer `config` block and an `interactive`
+flag. The retired subcommands (`configure`, `note`, `set`, `set-interactive`,
+`enable`/`disable`/`prefer`/`unprefer`) still work as hidden tombstones that
+forward into `devices config` with a stderr notice. Unset keys always mean
+today's behavior. The key registry is `src/lib/device-config.ts`.
 
 The keys are consumed, not just stored. `scheduler.enabled=false` keeps the
 routines scheduler from starting on that device — `routines add` skips the

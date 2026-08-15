@@ -631,8 +631,9 @@ agents devices list --live              # force a live probe of every device (al
 agents devices list --full              # add per-device cores and free/total RAM
 agents devices list --no-stats          # instant: names/addresses only, skip the probe
 agents devices config zion interactive.host zion   # the device agents show YOU artifacts on (★ in the list)
-agents devices config mac-mini agents.max-concurrent 4   # per-device settings (central fleet.devices.<name>.config)
+agents devices config mac-mini agents.max-concurrent 4   # per-device settings (tracked devices/<name>/agents.yaml)
 agents devices config mac-mini scheduler.enabled off     # bare `devices config <name>` opens a settings menu (TTY)
+agents devices config --fleet agents.max-concurrent 2    # fleet-wide default every device inherits
 agents devices config mac-mini notes "runs the releases — don't reboot"   # operator notes, repeat to append
 agents ssh mac-mini                     # hardened SSH: fails fast if offline,
                                         # PowerShell on Windows, password-from-Keychain,

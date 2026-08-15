@@ -148,8 +148,8 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
       return;
     }
     case 'browser': {
-      // Device-local default lives in the central fleet.devices.<name>.config
-      // block (same store `agents devices config` / getConfigValue use). Bare
+      // Device-local default lives in the per-device doc's config: block
+      // (same store `agents devices config` / getConfigValue use). Bare
       // browser.profile targets this machine; devices.<name>.browser.profile
       // targets a peer.
       setConfigValue(

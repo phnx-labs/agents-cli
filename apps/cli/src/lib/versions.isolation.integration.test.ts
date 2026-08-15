@@ -66,7 +66,14 @@ describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation
     `;
     const out = execFileSync('bun', ['-e', script], {
       cwd: process.cwd(),
-      env: { ...process.env, HOME: home },
+      env: {
+        ...process.env,
+        HOME: home,
+        // Pins write through getDevicesDir(); pin under this HOME so the vitest
+        // hermetic AGENTS_DEVICES_DIR does not swallow (or leak) agent pins.
+        AGENTS_DEVICES_DIR: path.join(home, '.agents', '.history', 'devices'),
+        AGENTS_SYNC_MACHINE_ID: 'testbox',
+      },
       stdio: ['ignore', 'pipe', 'inherit'],
     }).toString('utf-8');
     return JSON.parse(out.split('__RESULT__')[1]);

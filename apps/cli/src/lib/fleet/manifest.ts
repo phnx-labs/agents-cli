@@ -44,10 +44,16 @@ function validateDefaults(v: unknown, where: string): FleetDefaults {
   if (o.sync !== undefined && !isStringArray(o.sync)) {
     throw new Error(`fleet: ${where}.sync must be a list of scope names (e.g. [user]).`);
   }
+  if (o.config !== undefined && (typeof o.config !== 'object' || o.config === null || Array.isArray(o.config))) {
+    throw new Error(`fleet: ${where}.config must be a mapping of config keys to values.`);
+  }
   return {
     agents: o.agents as string[] | undefined,
     sync: o.sync as string[] | undefined,
     login: validateLogin(o.login, where),
+    // `config:` is operator config (`agents devices config`); inert to the
+    // reconcile engine but part of the manifest shape.
+    config: o.config as Record<string, unknown> | undefined,
   };
 }
 
@@ -69,17 +75,10 @@ export function parseFleetManifest(raw: unknown): FleetManifest {
     const map: Record<string, FleetDeviceOverride> = {};
     for (const [name, ov] of Object.entries(o.devices as Record<string, unknown>)) {
       // An empty entry (`device: {}`) inherits defaults — represent as {}.
-      const merged: FleetDeviceOverride = ov == null ? {} : validateDefaults(ov, `devices.${name}`);
-      // `config:` is the operator-config block (`agents devices config`) —
-      // inert to the reconcile engine but part of the manifest shape.
-      const cfg = ov != null ? (ov as Record<string, unknown>).config : undefined;
-      if (cfg !== undefined) {
-        if (typeof cfg !== 'object' || cfg === null || Array.isArray(cfg)) {
-          throw new Error(`fleet: devices.${name}.config must be a mapping of config keys to values.`);
-        }
-        merged.config = cfg as Record<string, unknown>;
-      }
-      map[name] = merged;
+      // (A per-device `config:` here is the LEGACY #2458 store — parsed through
+      // so reads stay lossless, folded into the per-device doc by the config
+      // migration, never written by current code.)
+      map[name] = ov == null ? {} : validateDefaults(ov, `devices.${name}`);
     }
     devices = map;
   } else {

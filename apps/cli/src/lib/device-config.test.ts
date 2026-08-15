@@ -5,8 +5,8 @@ import * as path from 'path';
 
 // state.ts resolves HOME and the device id at import time, so we point both at a
 // throwaway temp dir and re-import the modules fresh for each test — the REAL
-// central-block read/write path against real files, no mocks
-// (mirrors state.test.ts).
+// three-layer read/write path against real files, no mocks (mirrors
+// state.test.ts).
 let TMP = '';
 
 async function freshModules() {
@@ -19,12 +19,22 @@ async function freshModules() {
 function centralPath() {
   return path.join(TMP, '.agents', 'agents.yaml');
 }
+function deviceDocPath(host = 'testbox') {
+  return path.join(TMP, '.agents', 'devices', host, 'agents.yaml');
+}
 function readCentral(): string {
   return fs.existsSync(centralPath()) ? fs.readFileSync(centralPath(), 'utf-8') : '';
+}
+function readDoc(host = 'testbox'): string {
+  return fs.existsSync(deviceDocPath(host)) ? fs.readFileSync(deviceDocPath(host), 'utf-8') : '';
 }
 function writeCentral(yamlText: string) {
   fs.mkdirSync(path.join(TMP, '.agents'), { recursive: true });
   fs.writeFileSync(centralPath(), yamlText);
+}
+function writeDoc(host: string, yamlText: string) {
+  fs.mkdirSync(path.dirname(deviceDocPath(host)), { recursive: true });
+  fs.writeFileSync(deviceDocPath(host), yamlText);
 }
 
 beforeEach(() => {
@@ -38,19 +48,7 @@ afterEach(() => {
 });
 
 describe('user-scope keys (interactive.host)', () => {
-  it('resolves the usage primary override, interactive fallback, and null default', async () => {
-    const { resolveUsagePrimaryHost, setConfigValue, unsetConfigValue } = await freshModules();
-
-    expect(resolveUsagePrimaryHost()).toBeNull();
-    setConfigValue('interactive.host', 'zion');
-    expect(resolveUsagePrimaryHost()).toBe('zion');
-    setConfigValue('usage.primary-host', 'mac-mini');
-    expect(resolveUsagePrimaryHost()).toBe('mac-mini');
-    unsetConfigValue('usage.primary-host');
-    expect(resolveUsagePrimaryHost()).toBe('zion');
-  });
-
-  it('round-trips through central agents.yaml under config:, never the fleet block', async () => {
+  it('round-trips through central agents.yaml under config:, never the device doc', async () => {
     const { setConfigValue, getConfigValue, unsetConfigValue } = await freshModules();
 
     setConfigValue('interactive.host', 'zion');
@@ -58,186 +56,164 @@ describe('user-scope keys (interactive.host)', () => {
     const central = readCentral();
     expect(central).toContain('config:');
     expect(central).toContain('interactiveHost: zion');
-    expect(central).not.toContain('fleet:');
+    expect(readDoc()).not.toContain('interactiveHost');
 
     const got = getConfigValue('interactive.host');
     expect(got.value).toBe('zion');
-    expect(got.layer).toBe('user');
+    expect(got.source).toBe('user');
 
     unsetConfigValue('interactive.host');
     expect(getConfigValue('interactive.host').value).toBeUndefined();
     expect(readCentral()).not.toContain('interactiveHost');
   });
 
-  it('keeps hand-written comments in central agents.yaml when setting config', async () => {
-    // Anchor on a key that STAYS central. A leading comment belongs to the key
-    // it precedes, so anchoring on one that moves machine-local (projectRoot did)
-    // would delete the comment with it and test the wrong thing.
-    writeCentral('# my hand-written note\nnotify:\n  owner:\n    channel: imessage\n    to: me\n# another comment\n');
-    const { setConfigValue } = await freshModules();
-
-    setConfigValue('interactive.host', 'zion');
-
-    const central = readCentral();
-    expect(central).toContain('# my hand-written note');
-    expect(central).toContain('# another comment');
-    expect(central).toContain('channel: imessage');
-    expect(central).toContain('interactiveHost: zion');
-  });
-
-  it('moves projectRoot out of the shared file on the next write', async () => {
-    // projectRoot is inferred from whatever directory the CLI happened to run in
-    // (lib/project-root.ts), so it is machine state, not fleet policy. It now
-    // lives in this machine's own doc and is dropped from the synced file.
-    writeCentral('projectRoot: ~/src\n');
-    const { setConfigValue, readMeta } = await freshModules();
-
-    setConfigValue('interactive.host', 'zion');
-
-    expect(readCentral()).not.toContain('projectRoot');
-    // ...and the value itself is not lost — it is read back from the device doc.
-    expect(readMeta().projectRoot).toBe('~/src');
+  it('rejects --fleet for a user-scope key (already fleet-wide)', async () => {
+    const { setConfigValue, unsetConfigValue } = await freshModules();
+    expect(() => setConfigValue('interactive.host', 'zion', { fleet: true })).toThrow(/user-scope/);
+    expect(() => unsetConfigValue('interactive.host', { fleet: true })).toThrow(/user-scope/);
   });
 });
 
-describe('device-scope keys (central fleet.devices.<name>.config block)', () => {
-  it('round-trips through the central fleet block for this machine', async () => {
+describe('device-scope keys (per-device doc config:)', () => {
+  it('round-trips through devices/<host>/agents.yaml under config:, never central', async () => {
     const { setConfigValue, getConfigValue, unsetConfigValue } = await freshModules();
 
     setConfigValue('agents.max-concurrent', 4);
     setConfigValue('scheduler.enabled', false);
     setConfigValue('notes', ['runs the releases']);
 
-    const central = readCentral();
-    expect(central).toContain('fleet:');
-    expect(central).toContain('testbox:');
-    expect(central).toContain('maxAgents: 4');
-    expect(central).toContain('- runs the releases');
-    // scheduler.enabled is machine-visibility: only this box reads it, so it
-    // stays in this box's own doc and never enters the synced file.
-    expect(central).not.toContain('schedulerEnabled');
-    // Device scope never lands in the user-scope config: block.
-    expect(central).not.toContain('interactiveHost');
+    const doc = readDoc();
+    expect(doc).toContain('config:');
+    expect(doc).toContain('maxAgents: 4');
+    expect(doc).toContain('schedulerEnabled: false');
+    expect(doc).toContain('- runs the releases');
 
-    expect(getConfigValue('agents.max-concurrent')).toMatchObject({ value: 4, layer: 'device' });
-    expect(getConfigValue('scheduler.enabled')).toMatchObject({ value: false, layer: 'device' });
-    expect(getConfigValue('notes')).toMatchObject({ value: ['runs the releases'], layer: 'device' });
+    const central = readCentral();
+    expect(central).not.toContain('maxAgents');
+    expect(central).not.toContain('schedulerEnabled');
+
+    expect(getConfigValue('agents.max-concurrent')).toMatchObject({ value: 4, source: 'device' });
+    expect(getConfigValue('scheduler.enabled')).toMatchObject({ value: false, source: 'device' });
+    expect(getConfigValue('notes')).toMatchObject({ value: ['runs the releases'], source: 'device' });
 
     unsetConfigValue('agents.max-concurrent');
     expect(getConfigValue('agents.max-concurrent').value).toBeUndefined();
     // The other device-scope keys survive an unset of a sibling key.
     expect(getConfigValue('scheduler.enabled').value).toBe(false);
-    expect(readCentral()).not.toContain('maxAgents');
+    expect(readDoc()).not.toContain('maxAgents');
   });
 
-  it('targets another device in the same central block — no per-device files', async () => {
+  it('targets another device by writing its doc in place (devices/ tree syncs)', async () => {
     const { setConfigValue, getConfigValue, unsetConfigValue } = await freshModules();
 
     setConfigValue('agents.max-concurrent', 2, { device: 'mac-mini' });
-    setConfigValue('notes', ['do not reboot'], { device: 'mac-mini' });
 
-    const central = readCentral();
-    expect(central).toContain('mac-mini:');
-    expect(central).toContain('maxAgents: 2');
-    expect(central).toContain('- do not reboot');
-    // Both are shared-visibility, so a peer's values live centrally and no
-    // per-device doc is needed for them.
-    expect(fs.existsSync(path.join(TMP, '.agents', 'devices'))).toBe(false);
+    expect(readDoc('mac-mini')).toContain('maxAgents: 2');
+    expect(readDoc()).not.toContain('maxAgents');
+    expect(readCentral()).not.toContain('maxAgents');
 
     expect(getConfigValue('agents.max-concurrent', { device: 'mac-mini' }).value).toBe(2);
     expect(getConfigValue('agents.max-concurrent').value).toBeUndefined();
 
     unsetConfigValue('agents.max-concurrent', { device: 'mac-mini' });
     expect(getConfigValue('agents.max-concurrent', { device: 'mac-mini' }).value).toBeUndefined();
-    // Unsetting a key that was never set is a no-op — no block created.
-    unsetConfigValue('agents.max-concurrent', { device: 'ghost' });
-    expect(readCentral()).not.toContain('ghost');
+    // Unsetting the last key removes the doc entirely (no empty tracked file).
+    expect(fs.existsSync(deviceDocPath('mac-mini'))).toBe(false);
+    // Unsetting a key that was never set is a no-op — no doc created.
+    unsetConfigValue('watchdog.enabled', { device: 'ghost' });
+    expect(fs.existsSync(deviceDocPath('ghost'))).toBe(false);
   });
 
-  it('preserves other fleet.devices fields across a config write', async () => {
-    writeCentral('fleet:\n  devices:\n    mac-mini:\n      agents:\n        - claude@latest\n');
-    const { setConfigValue, getConfigValue } = await freshModules();
+  it('preserves a doc’s routines: list across a config write', async () => {
+    const { setConfigValue } = await freshModules();
+    writeDoc('mac-mini', 'routines:\n  - watchdog\n');
 
-    // A shared-visibility key, because a peer's machine-local key is refused by
-    // design — the point here is that the write preserves sibling fields.
-    setConfigValue('agents.max-concurrent', 3, { device: 'mac-mini' });
+    setConfigValue('watchdog.enabled', false, { device: 'mac-mini' });
 
-    const central = readCentral();
-    expect(central).toContain('- claude@latest');
-    expect(central).toContain('maxAgents: 3');
-    expect(getConfigValue('agents.max-concurrent', { device: 'mac-mini' }).value).toBe(3);
-  });
-
-  it('upgrades fleet.devices: all to an explicit roster map on a config write', async () => {
-    // A registered roster, so the upgrade expands 'all' to it. getDevicesDir()
-    // reads AGENTS_DEVICES_DIR at call time (tests/setup.ts pins it fork-wide),
-    // so point it at this test's dir.
-    const prevDevicesDir = process.env.AGENTS_DEVICES_DIR;
-    const devicesDir = path.join(TMP, '.agents', '.history', 'devices');
-    process.env.AGENTS_DEVICES_DIR = devicesDir;
-    fs.mkdirSync(devicesDir, { recursive: true });
-    const now = new Date().toISOString();
-    const profile = (name: string) => ({
-      name, platform: 'macos', shell: 'posix',
-      address: { via: 'tailscale', dnsName: `${name}.example.ts.net` },
-      auth: { method: 'key' }, createdAt: now, updatedAt: now,
-    });
-    fs.writeFileSync(
-      path.join(devicesDir, 'registry.json'),
-      JSON.stringify({ testbox: profile('testbox'), 'mac-mini': profile('mac-mini') }),
-    );
-    writeCentral('fleet:\n  devices: all\n');
-    const { setConfigValue, readMeta } = await freshModules();
-
-    try {
-      setConfigValue('agents.max-concurrent', 3, { device: 'mac-mini' });
-
-      const fleet = readMeta().fleet;
-      expect(fleet?.devices).not.toBe('all');
-      const devices = fleet?.devices as Record<string, { config?: Record<string, unknown> }>;
-      expect(Object.keys(devices).sort()).toEqual(['mac-mini', 'testbox']);
-      expect(devices['mac-mini'].config).toEqual({ maxAgents: 3 });
-    } finally {
-      if (prevDevicesDir === undefined) delete process.env.AGENTS_DEVICES_DIR;
-      else process.env.AGENTS_DEVICES_DIR = prevDevicesDir;
-    }
-  });
-
-  it('drops the fleet block entirely when an unset empties a block it created', async () => {
-    const { setConfigValue, unsetConfigValue } = await freshModules();
-
-    setConfigValue('agents.max-concurrent', 2, { device: 'mac-mini' });
-    expect(readCentral()).toContain('fleet:');
-
-    unsetConfigValue('agents.max-concurrent', { device: 'mac-mini' });
-    expect(readCentral()).not.toContain('fleet:');
+    const doc = readDoc('mac-mini');
+    expect(doc).toContain('- watchdog');
+    expect(doc).toContain('watchdogEnabled: false');
   });
 });
 
-describe('browser.profile is machine-local', () => {
-  it('set/get/unset land in this machine\'s own doc, never the synced file', async () => {
+describe('fleet-defaults layer (central fleet.defaults.config)', () => {
+  it('--fleet writes land centrally under fleet.defaults.config', async () => {
+    const { setConfigValue, getConfigValue, unsetConfigValue } = await freshModules();
+
+    setConfigValue('scheduler.enabled', false, { fleet: true });
+
+    const central = readCentral();
+    expect(central).toContain('fleet:');
+    expect(central).toContain('defaults:');
+    expect(central).toContain('schedulerEnabled: false');
+    // The fleet write materializes devices as an explicit EMPTY map (never
+    // 'all') so `agents apply` targets nothing until a roster is declared.
+    const { readMeta } = await freshModules();
+    expect(readMeta().fleet?.devices).toEqual({});
+
+    expect(getConfigValue('scheduler.enabled', { fleet: true })).toMatchObject({ value: false, source: 'fleet' });
+
+    unsetConfigValue('scheduler.enabled', { fleet: true });
+    expect(getConfigValue('scheduler.enabled', { fleet: true }).value).toBeUndefined();
+    // The emptied block goes away entirely.
+    expect(readCentral()).not.toContain('fleet:');
+  });
+
+  it('layering: built-in default < fleet default < device value', async () => {
+    const { setConfigValue, getConfigValue, unsetConfigValue } = await freshModules();
+
+    // Unset everywhere → built-in default.
+    expect(getConfigValue('watchdog.enabled')).toMatchObject({ value: undefined, source: 'default' });
+
+    // Fleet default applies to every device.
+    setConfigValue('watchdog.enabled', false, { fleet: true });
+    expect(getConfigValue('watchdog.enabled', { device: 'mac-mini' })).toMatchObject({ value: false, source: 'fleet' });
+
+    // A device value wins over the fleet default.
+    setConfigValue('watchdog.enabled', true, { device: 'mac-mini' });
+    expect(getConfigValue('watchdog.enabled', { device: 'mac-mini' })).toMatchObject({ value: true, source: 'device' });
+    // …only on that device.
+    expect(getConfigValue('watchdog.enabled', { device: 'zion' })).toMatchObject({ value: false, source: 'fleet' });
+
+    // Unsetting the device key falls back to the fleet default.
+    unsetConfigValue('watchdog.enabled', { device: 'mac-mini' });
+    expect(getConfigValue('watchdog.enabled', { device: 'mac-mini' })).toMatchObject({ value: false, source: 'fleet' });
+  });
+
+  it('a pre-existing fleet.devices map survives a --fleet defaults write', async () => {
+    writeCentral('fleet:\n  devices:\n    mac-mini:\n      agents:\n        - claude@latest\n');
+    const { setConfigValue, readMeta } = await freshModules();
+
+    setConfigValue('agents.max-concurrent', 2, { fleet: true });
+
+    const fleet = readMeta().fleet;
+    expect(fleet?.defaults?.config).toEqual({ maxAgents: 2 });
+    const devices = fleet?.devices as Record<string, unknown>;
+    expect(devices['mac-mini']).toEqual({ agents: ['claude@latest'] });
+  });
+});
+
+describe('browser.profile is a device-scope key in the per-device doc', () => {
+  it('set/get/unset land under devices/<self>/agents.yaml config.defaultBrowserProfile', async () => {
     const { setConfigValue, getConfigValue, unsetConfigValue } = await freshModules();
 
     setConfigValue('browser.profile', 'comet-local');
 
-    // Nothing off-box resolves another machine's default browser profile, so it
-    // belongs in the gitignored per-machine doc — keeping it out of the file all
-    // 13 machines share.
-    const localPath = path.join(TMP, '.agents', 'devices', 'testbox', 'agents.yaml');
-    expect(fs.readFileSync(localPath, 'utf-8')).toContain('defaultBrowserProfile: comet-local');
+    expect(readDoc()).toContain('defaultBrowserProfile: comet-local');
     expect(readCentral()).not.toContain('defaultBrowserProfile');
 
     const got = getConfigValue('browser.profile');
     expect(got.value).toBe('comet-local');
-    expect(got.layer).toBe('device');
+    expect(got.source).toBe('device');
 
     unsetConfigValue('browser.profile');
     expect(getConfigValue('browser.profile').value).toBeUndefined();
+    expect(readDoc()).not.toContain('defaultBrowserProfile');
   });
 });
 
 describe('ssh.* / platform / auto-launch keys', () => {
-  it('round-trip each new key class through the central block', async () => {
+  it('round-trip each new key class through the per-device doc', async () => {
     const { setConfigValue, getConfigValue, unsetConfigValue } = await freshModules();
 
     setConfigValue('ssh.user', 'muqsit', { device: 'win-mini' });
@@ -267,6 +243,16 @@ describe('ssh.* / platform / auto-launch keys', () => {
     expect(() => setConfigValue('ssh.auth', 'magic')).toThrow(/key \| password/);
     expect(() => setConfigValue('platform', 'plan9')).toThrow(/windows \| linux \| macos \| unknown/);
   });
+
+  it('the merged hot path (readDeviceConfigValues) layers fleet defaults under device values', async () => {
+    const { setConfigValue, readDeviceConfigValues } = await freshModules();
+    setConfigValue('ssh.user', 'fleetops', { fleet: true });
+    setConfigValue('platform', 'linux', { fleet: true });
+    setConfigValue('platform', 'windows', { device: 'win-mini' });
+
+    expect(readDeviceConfigValues('win-mini')).toMatchObject({ sshUser: 'fleetops', platform: 'windows' });
+    expect(readDeviceConfigValues('zion')).toMatchObject({ sshUser: 'fleetops', platform: 'linux' });
+  });
 });
 
 describe('validation', () => {
@@ -294,11 +280,11 @@ describe('validation', () => {
 });
 
 describe('listConfig', () => {
-  it('reports every known key with its value and setting layer', async () => {
+  it('reports every known key with its effective value and source layer', async () => {
     const { listConfig, setConfigValue } = await freshModules();
     setConfigValue('interactive.host', 'zion');
     setConfigValue('scheduler.enabled', true);
-    setConfigValue('watchdog.enabled', false);
+    setConfigValue('watchdog.enabled', false, { fleet: true });
 
     const entries = listConfig();
     const byName = Object.fromEntries(entries.map((e) => [e.spec.name, e]));
@@ -325,11 +311,10 @@ describe('listConfig', () => {
       'usage.primary-host',
       'watchdog.enabled',
     ]);
-    expect(byName['interactive.host']).toMatchObject({ value: 'zion', layer: 'user' });
-    expect(byName['scheduler.enabled']).toMatchObject({ value: true, layer: 'device' });
-    expect(byName['watchdog.enabled']).toMatchObject({ value: false, layer: 'device' });
-    expect(byName['notes'].value).toBeUndefined();
-    expect(byName['notes'].layer).toBeUndefined();
+    expect(byName['interactive.host']).toMatchObject({ value: 'zion', source: 'user' });
+    expect(byName['scheduler.enabled']).toMatchObject({ value: true, source: 'device' });
+    expect(byName['watchdog.enabled']).toMatchObject({ value: false, source: 'fleet' });
+    expect(byName['notes']).toMatchObject({ value: undefined, source: 'default' });
   });
 });
 
@@ -348,6 +333,12 @@ describe('scheduler gate (scheduler.enabled=false on this device)', () => {
     expect(isSchedulerEnabled()).toBe(true);
   });
 
+  it('a fleet-wide default gates this machine too', async () => {
+    const { isSchedulerEnabled, setConfigValue } = await freshModules();
+    setConfigValue('scheduler.enabled', false, { fleet: true });
+    expect(isSchedulerEnabled()).toBe(false);
+  });
+
   it('assertSchedulerEnabled throws naming the setting and the fix', async () => {
     const { assertSchedulerEnabled, setConfigValue } = await freshModules();
     setConfigValue('scheduler.enabled', false);
@@ -357,10 +348,8 @@ describe('scheduler gate (scheduler.enabled=false on this device)', () => {
     );
   });
 
-  it('cannot be set for a peer at all — it is machine-local', async () => {
+  it('a peer’s scheduler.enabled cannot be written — it is machine-local', async () => {
     const { isSchedulerEnabled, setConfigValue } = await freshModules();
-    // Previously this was settable for a peer and simply ignored locally. Now it
-    // is refused outright, so a peer's value can never gate this machine.
     expect(() => setConfigValue('scheduler.enabled', false, { device: 'mac-mini' }))
       .toThrow(/machine-local/);
     expect(isSchedulerEnabled()).toBe(true);
@@ -433,20 +422,43 @@ describe('resolveBrowserTaskIdleMs (browser.task-idle-minutes, RUSH-2622)', () =
 });
 
 describe('readMaxConcurrentCaps', () => {
-  it('reads caps from the central block, omitting uncapped devices', async () => {
+  it('reads caps from device docs + the fleet default, omitting uncapped devices', async () => {
     const { readMaxConcurrentCaps, setConfigValue } = await freshModules();
-    setConfigValue('agents.max-concurrent', 4);                         // self (testbox)
-    setConfigValue('agents.max-concurrent', 2, { device: 'mac-mini' }); // peer
+    setConfigValue('agents.max-concurrent', 4);                            // self (testbox)
+    setConfigValue('agents.max-concurrent', 2, { device: 'mac-mini' });    // peer doc
+    setConfigValue('agents.max-concurrent', 6, { fleet: true });           // fleet default
 
     expect(readMaxConcurrentCaps(['testbox', 'mac-mini', 'zion'])).toEqual({
       testbox: 4,
       'mac-mini': 2,
+      zion: 6, // fleet default applies to a device with no own cap
     });
   });
 
   it('returns {} when no device has a cap', async () => {
     const { readMaxConcurrentCaps } = await freshModules();
     expect(readMaxConcurrentCaps(['testbox', 'ghost'])).toEqual({});
+  });
+});
+
+describe('device doc corruption contract', () => {
+  it('rejects valid-but-non-map YAML with the corruption error, not a later TypeError', async () => {
+    const { getConfigValue, setConfigValue } = await freshModules();
+    writeDoc('mac-mini', 'just a string\n');
+    expect(() => getConfigValue('agents.max-concurrent', { device: 'mac-mini' }))
+      .toThrow(/Device config corrupted.*expected a YAML map/);
+    expect(() => setConfigValue('agents.max-concurrent', 2, { device: 'mac-mini' }))
+      .toThrow(/Device config corrupted/);
+
+    writeDoc('mac-mini', '- a\n- b\n');
+    expect(() => getConfigValue('agents.max-concurrent', { device: 'mac-mini' }))
+      .toThrow(/Device config corrupted.*got a list/);
+  });
+
+  it('still parses a header-only (empty) doc as empty', async () => {
+    const { getConfigValue } = await freshModules();
+    writeDoc('mac-mini', '# agents-cli metadata\n');
+    expect(getConfigValue('agents.max-concurrent', { device: 'mac-mini' }).value).toBeUndefined();
   });
 });
 
@@ -457,12 +469,12 @@ describe('auto-launch accessors', () => {
     expect(isAutoLaunchPreferred('zion')).toBe(false);
   });
 
-  it('persist through the central block and invert to a removal', async () => {
+  it('persist through the per-device doc and invert to a removal', async () => {
     const { setAutoLaunchEnabled, isAutoLaunchEnabled, setAutoLaunchPreferred, isAutoLaunchPreferred, loadAutoLaunchPreferences } = await freshModules();
 
     setAutoLaunchEnabled('zion', false);
     expect(isAutoLaunchEnabled('zion')).toBe(false);
-    expect(readCentral()).toContain('autoLaunchEnabled: false');
+    expect(readDoc('zion')).toContain('autoLaunchEnabled: false');
 
     setAutoLaunchPreferred('mac-mini', true);
     expect(isAutoLaunchPreferred('mac-mini')).toBe(true);
@@ -475,106 +487,45 @@ describe('auto-launch accessors', () => {
     setAutoLaunchEnabled('zion', true);
     setAutoLaunchPreferred('mac-mini', false);
     expect(loadAutoLaunchPreferences()).toEqual({});
-    expect(readCentral()).not.toContain('autoLaunch');
+    expect(readDoc('zion')).not.toContain('autoLaunch');
+  });
+
+  it('layers the fleet default under device flags, reaching doc-less devices via the roster', async () => {
+    const { setConfigValue, loadAutoLaunchPreferences } = await freshModules();
+
+    setConfigValue('auto-launch.preferred', true, { fleet: true });
+    // A doc-less device only appears when the caller passes the roster.
+    expect(loadAutoLaunchPreferences()).toEqual({});
+    expect(loadAutoLaunchPreferences(['zion'])).toEqual({ zion: { preferred: true } });
+
+    // A device entry wins over the fleet default.
+    setConfigValue('auto-launch.enabled', false, { fleet: true });
+    setConfigValue('auto-launch.enabled', true, { device: 'mac-mini' });
+    const prefs = loadAutoLaunchPreferences(['zion', 'mac-mini']);
+    expect(prefs.zion).toEqual({ preferred: true, enabled: false });
+    expect(prefs['mac-mini'].enabled).toBeUndefined(); // explicit device true wins → not disabled
+    expect(prefs['mac-mini'].preferred).toBe(true); // fleet default still inherits
   });
 });
 
-describe('every device-scope key declares who reads it', () => {
-  /**
-   * The discriminated union already makes a missing `visibility` a COMPILE
-   * error. This is the runtime backstop plus the record of intent: a key's tier
-   * decides whether it lands in the fleet-shared agents.yaml or the owning box's
-   * own doc, and getting it wrong is how operator config drifted into the shared
-   * file twice (once for agent pins, once for device config).
-   */
-  it('assigns a valid visibility to every device key, and none to user keys', async () => {
-    const { CONFIG_KEYS } = await freshModules();
-    for (const spec of CONFIG_KEYS) {
-      if (spec.scope === 'device') {
-        expect(['shared', 'machine'], `${spec.name} must declare a visibility`).toContain(spec.visibility);
-      } else {
-        expect(spec.visibility, `${spec.name} is user-scope and must not declare one`).toBeUndefined();
-      }
-    }
-  });
+describe('listConfiguredDeviceRoles (roster reaches doc-less devices)', () => {
+  it('a fleet-default role only reaches a device with no per-device doc when the caller passes the roster', async () => {
+    const { setConfigValue, listConfiguredDeviceRoles } = await freshModules();
 
-  it('keeps the self-read keys machine-local — browser.remote-control is a consent flag', async () => {
-    const { CONFIG_KEYS } = await freshModules();
-    const vis = (name: string) => CONFIG_KEYS.find((s: { name: string }) => s.name === name)?.visibility;
+    setConfigValue('role', 'worker', { fleet: true });
 
-    // Nothing off-box reads these; storing them centrally syncs one machine's
-    // choice to the rest. For browser.remote-control that is a security bug —
-    // the flag gates whether OTHER machines may drive this box's browser.
-    for (const name of ['browser.remote-control', 'browser.profile', 'scheduler.enabled', 'daemon.enabled']) {
-      expect(vis(name), `${name} must be machine-local`).toBe('machine');
-    }
+    // 'zion' has never had a per-device doc written — the bare, doc-scan-only
+    // call (no roster) must not see it. This is the gap #2622's non-author
+    // review flagged: a fleet-wide `role` default silently dropped a doc-less
+    // device from the `--device auto` worker allowlist.
+    expect(listConfiguredDeviceRoles()).toEqual({});
+    expect(listConfiguredDeviceRoles(['zion'])).toEqual({ zion: 'worker' });
 
-    // A peer resolves these BEFORE it can dial the box, so they cannot be
-    // machine-local — there is no way to ask the box for them first.
-    for (const name of ['ssh.user', 'ssh.auth', 'platform', 'agents.max-concurrent']) {
-      expect(vis(name), `${name} is read by peers and must be shared`).toBe('shared');
-    }
-  });
-});
-
-describe('machine-visibility keys never reach the fleet-shared file', () => {
-  it('writes browser.remote-control to the local doc, not agents.yaml', async () => {
-    const { setConfigValue, getConfigValue } = await freshModules();
-
-    setConfigValue('browser.remote-control', true);
-
-    // The consent flag gates whether OTHER machines may drive this box's
-    // browser. It lands in this machine's gitignored doc; if it reached the
-    // synced agents.yaml, one box's opt-in would propagate to the fleet on pull.
-    expect(readCentral()).not.toContain('browserRemoteControl');
-    const localDoc = fs.readFileSync(
-      path.join(TMP, '.agents', 'devices', 'testbox', 'agents.yaml'), 'utf-8',
-    );
-    expect(localDoc).toContain('browserRemoteControl: true');
-    expect(getConfigValue('browser.remote-control').value).toBe(true);
-  });
-
-  it('still writes a shared key centrally so peers can read it', async () => {
-    const { setConfigValue } = await freshModules();
-    setConfigValue('ssh.user', 'muqsit', { device: 'mac-mini' });
-    // A peer resolves ssh.user BEFORE it can dial mac-mini, so this one must
-    // stay in the synced file.
-    expect(readCentral()).toContain('sshUser: muqsit');
-  });
-
-  it('refuses to read or set a machine-local key for a peer, and names the fix', async () => {
-    const { getConfigValue, setConfigValue } = await freshModules();
-    expect(() => getConfigValue('browser.remote-control', { device: 'mac-mini' }))
-      .toThrow(/machine-local/);
-    expect(() => setConfigValue('browser.remote-control', true, { device: 'mac-mini' }))
-      .toThrow(/agents ssh mac-mini/);
-  });
-
-  it('honors a value an older CLI left centrally until it is overwritten', async () => {
-    // The migration is additive, so a pre-upgrade central value must keep working
-    // rather than silently reverting to the default on the first read.
-    fs.mkdirSync(path.join(TMP, '.agents'), { recursive: true });
-    fs.writeFileSync(
-      path.join(TMP, '.agents', 'agents.yaml'),
-      'fleet:\n  devices:\n    testbox:\n      config:\n        browserRemoteControl: true\n',
-    );
-    const { getConfigValue } = await freshModules();
-    expect(getConfigValue('browser.remote-control').value).toBe(true);
-  });
-});
-
-describe('the machine-local key leaf stays pinned to the registry', () => {
-  it('MACHINE_LOCAL_YAML_KEYS equals the machine-visibility keys in CONFIG_KEYS', async () => {
-    // devices/config-migration.ts cannot import CONFIG_KEYS (device-config imports
-    // it, so that would cycle), so the set is duplicated in a zero-dep leaf. This
-    // is the pin that stops the two drifting — a new machine-visibility key that
-    // is not added to the leaf would still be folded into the shared file.
-    const { CONFIG_KEYS } = await freshModules();
-    const { MACHINE_LOCAL_YAML_KEYS } = await import('./config-machine-keys.js');
-    const fromRegistry = CONFIG_KEYS
-      .filter((s: { scope: string; visibility?: string }) => s.scope === 'device' && s.visibility === 'machine')
-      .map((s: { yamlKey: string }) => s.yamlKey)
-      .sort();
-    expect([...MACHINE_LOCAL_YAML_KEYS].sort()).toEqual(fromRegistry);
+    // A device's own mark still wins over the fleet default, roster or not.
+    setConfigValue('role', 'personal', { device: 'mac-mini' });
+    expect(listConfiguredDeviceRoles(['zion', 'mac-mini'])).toEqual({
+      zion: 'worker',
+      'mac-mini': 'personal',
+    });
   });
 });

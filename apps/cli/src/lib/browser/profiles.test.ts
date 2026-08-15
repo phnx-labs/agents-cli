@@ -1,14 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+
+// A real temp root for the device-config store: browser.profile lives in this
+// machine's per-device doc (devices/<machineId()>/agents.yaml config:), read
+// through the REAL lib/device-config.ts against this dir.
+const TEST_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-browser-profiles-test-'));
 
 vi.mock('../state.js', () => ({
-  getBrowserRuntimeDir: vi.fn(() => '/tmp/agents-browser-test'),
+  getBrowserRuntimeDir: vi.fn(() => path.join(TEST_ROOT, 'browser-runtime')),
   readMeta: vi.fn(() => ({ browser: {} })),
   writeMeta: vi.fn(),
   // device-config.js (the browser.profile store) reads/writes through these.
   updateMeta: vi.fn(),
   META_HEADER: '',
-  getUserAgentsDir: vi.fn(() => '/tmp/agents-browser-test/.agents'),
-  getDevicesAutoLaunchPath: vi.fn(() => '/tmp/agents-browser-test/auto-launch.json'),
+  getUserAgentsDir: vi.fn(() => path.join(TEST_ROOT, '.agents')),
+  getDevicesAutoLaunchPath: vi.fn(() => path.join(TEST_ROOT, 'auto-launch.json')),
+  getDevicePinsPath: vi.fn(() => path.join(TEST_ROOT, 'pins.json')),
 }));
 
 vi.mock('./chrome.js', () => ({
@@ -35,10 +44,18 @@ import type { BrowserProfileConfig } from '../types.js';
 import { readMeta, writeMeta, updateMeta } from '../state.js';
 import { machineId } from '../machine-id.js';
 
-/** The configured default profile, fixtured where it really lives: this machine's
- * central fleet.devices.<self>.config block (lib/device-config.ts). */
+/** Write this machine's per-device doc with the given default browser profile —
+ * where browser.profile really lives (lib/device-config.ts). */
+function writeDeviceDefaultProfile(name: string): void {
+  const dir = path.join(TEST_ROOT, '.agents', 'devices', machineId());
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'agents.yaml'), `config:\n  defaultBrowserProfile: ${name}\n`);
+}
+
+/** The configured default profile: the doc fixture + the in-memory store. */
 function withDefaultProfile(store: { browser: Record<string, BrowserProfileConfig> }, name: string) {
-  return { ...store, fleet: { devices: { [machineId()]: { config: { defaultBrowserProfile: name } } } } };
+  writeDeviceDefaultProfile(name);
+  return store;
 }
 
 /**
@@ -408,6 +425,8 @@ describe('profile YAML round-trip', () => {
 describe('ensureDefaultBrowserProfile', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // No carried-over device default between tests.
+    fs.rmSync(path.join(TEST_ROOT, '.agents', 'devices'), { recursive: true, force: true });
   });
 
   it('auto-picks the first installed browser and persists a default profile', async () => {

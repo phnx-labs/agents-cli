@@ -698,6 +698,21 @@ function parseArgs(argv: string[]): {
   return out;
 }
 
+/**
+ * Vitest exits 1 on an unhandled "Worker exited unexpectedly" even when
+ * every test file and every test passed. The required Linux `test` check
+ * then stays red on a green suite (measured twice on #2622, 863 files /
+ * 12206 tests passed, 0 failed).
+ */
+export function isVitestWorkerCrashWithZeroFailures(output: string): boolean {
+  if (!/Worker exited unexpectedly/.test(output)) return false;
+  const testFilesLine = output.match(/^\s*Test Files\s+.+$/m)?.[0] ?? '';
+  const testsLine = output.match(/^\s*Tests\s+.+$/m)?.[0] ?? '';
+  if (!testFilesLine || !testsLine) return false;
+  if (/\bfailed\b/.test(testFilesLine) || /\bfailed\b/.test(testsLine)) return false;
+  return /\bpassed\b/.test(testsLine);
+}
+
 function runCmd(spec: RunCommand): void {
   const proc = Bun.spawnSync({
     cmd: spec.cmd,

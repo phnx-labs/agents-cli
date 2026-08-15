@@ -146,7 +146,7 @@ describe('buildSshInvocation', () => {
       '/shim',
     );
     expect(args.slice(args.indexOf('-i'), args.indexOf('-i') + 4)).toEqual(['-i', '/keys/fleet worker', '-o', 'IdentitiesOnly=yes']);
-    expect(deviceIdentityArgs(dev({ auth: { method: 'password', identityFile: '/ignored' } }))).toEqual([]);
+    expect(deviceIdentityArgs(dev({ name: 'pw', auth: { method: 'password', identityFile: '/ignored' } }))).toEqual([]);
   });
 
   it('password auth wires the askpass shim and disables pubkey + extra prompts', () => {

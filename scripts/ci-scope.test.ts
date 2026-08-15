@@ -13,6 +13,7 @@ import {
   IMPACT_BUDGET_SEC,
   canReuseProof,
   changedFilesBetween,
+  isVitestWorkerCrashWithZeroFailures,
   classifyCiScope,
   commandForTestFile,
   commandsForPlan,
@@ -472,4 +473,44 @@ test('changedFilesBetween keeps both sides of a cross-component rename', () => {
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
+});
+
+describe('isVitestWorkerCrashWithZeroFailures', () => {
+  const greenWithWorkerCrash = `
+ Test Files  863 passed | 6 skipped (870)
+      Tests  12206 passed | 112 skipped (12318)
+   Start at  14:31:12
+   Duration  667.12s
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Error: Worker exited unexpectedly
+ ❯ process.<anonymous> ../../node_modules/vitest/dist/chunks/cli-api.B7PN_QUv.js
+`;
+
+  const realFailures = `
+ Test Files  2 failed | 861 passed (863)
+      Tests  3 failed | 12203 passed (12206)
+   Start at  14:31:12
+   Duration  667.12s
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Error: Worker exited unexpectedly
+`;
+
+  test('treats a worker crash after a fully green suite as non-fatal', () => {
+    expect(isVitestWorkerCrashWithZeroFailures(greenWithWorkerCrash)).toBe(true);
+  });
+
+  test('does not swallow a worker crash that also has failed tests', () => {
+    expect(isVitestWorkerCrashWithZeroFailures(realFailures)).toBe(false);
+  });
+
+  test('ignores a green suite that did not crash a worker', () => {
+    expect(isVitestWorkerCrashWithZeroFailures(`
+ Test Files  863 passed | 6 skipped (870)
+      Tests  12206 passed | 112 skipped (12318)
+`)).toBe(false);
+  });
 });

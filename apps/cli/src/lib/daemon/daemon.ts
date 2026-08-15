@@ -870,14 +870,15 @@ export async function runDaemon(): Promise<void> {
   anchorDaemonCwd();
   warnEphemeralDaemonRoot();
 
-  // Fold legacy per-device config stores into the central
-  // fleet.devices.<name>.config block (idempotent, cheap no-op once folded).
-  // The daemon boots via `agents __daemon-run`, which bypasses bootstrap's
-  // migration sentinel — so the daemon runs this itself so its scheduler/
-  // watchdog gates read the converged store.
+  // Converge the device-config/pins stores (legacy central block /
+  // auto-launch.json / tracked-doc pins → per-device docs + pins file).
+  // Idempotent, cheap no-op once folded. The daemon boots via
+  // `agents __daemon-run`, which bypasses bootstrap's migration sentinel — so
+  // the daemon runs this itself so its scheduler/watchdog gates read the
+  // converged store.
   try {
-    const { migrateDeviceConfigToCentral } = await import('../devices/config-migration.js');
-    migrateDeviceConfigToCentral();
+    const { migrateDeviceConfigStores } = await import('../devices/config-migration.js');
+    migrateDeviceConfigStores();
   } catch (err) {
     log('WARN', `device config migration failed: ${(err as Error).message}`);
   }

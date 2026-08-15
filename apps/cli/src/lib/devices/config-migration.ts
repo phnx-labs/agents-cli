@@ -1,81 +1,67 @@
 /**
- * One-time migration: fold per-device config from the legacy stores into the
- * central `fleet.devices.<name>.config` block of `~/.agents/agents.yaml`.
+ * One-time migration to the current device-config + pins layout:
  *
- * Only SHARED-visibility keys move — the ones a peer reads. Machine-visibility
- * keys (see lib/config-machine-keys.ts) stay in the per-device doc, which is
- * exactly where the machine-local read path now looks for them.
+ *   (a) central `fleet.devices.<name>.config` (the short-lived #2458 store)
+ *       folds into each per-device doc's `config:` block — central wins
+ *       (newest intent) — and is stripped from central;
+ *   (b) legacy `.history/devices/auto-launch.json` flags fold into the doc
+ *       `config:` too (oldest store — only fills keys not already set);
+ *   (c) a top-level `defaultBrowserProfile:` in a device doc folds into that
+ *       doc's `config:`;
+ *   (d) agent pins (`agents:` / `isolatedAgents:`) leave the TRACKED
+ *       per-device docs: THIS machine's pins move to the untracked
+ *       `.history/devices/pins-<host>.json` (pins file wins on conflict — it
+ *       is the destination); peers' pins are simply dropped from the tracked
+ *       file (each peer owns/rewrites its own pins locally).
  *
- * Legacy sources (both pre-unification):
- *   - `~/.agents/devices/<name>/agents.yaml` — the `config:` map and the
- *     top-level `defaultBrowserProfile:` field. Agent pins (`agents:`,
- *     `isolatedAgents:`), `routines:`, and machine-visibility config STAY in the
- *     per-device doc — only shared operator config moves.
- *   - `~/.agents/.history/devices/auto-launch.json` — AGI EXT auto-launch
- *     enabled/preferred flags, becoming `autoLaunchEnabled` /
- *     `autoLaunchPreferred` config keys.
+ * What stays put: a device doc's existing `config:` (already the right home)
+ * and its `routines:` list (operator-owned, read cross-device by
+ * routine-activation.ts).
  *
- * The fold is ADDITIVE: the central block is written and the legacy stores are
- * left exactly as they were, so a box still on the previous CLI keeps reading
- * what it always read. The central-wins merge makes a re-run a byte no-op.
+ * Order is crash-safe: destination writes (pins file, device doc) land BEFORE
+ * the source strip (central), so a crash mid-fold re-folds on the next run and
+ * the destination-wins merges make that a no-op. Idempotent — after a
+ * successful run none of the legacy locations hold data, so re-running is a
+ * cheap existence check. A doc that fails to parse is LOUDLY skipped (left
+ * untouched) so the next run retries — never silently emptied, same corruption
+ * contract the device registry keeps.
  *
- * Invoked only from a lifecycle entry point — `runMigration()` (fresh installs)
- * and daemon boot. It must NEVER hang off a config read or write: agents.yaml is
- * tracked and shared by the whole fleet, so a migration on the read path lets an
- * ordinary `agents config get` dirty it on every machine.
+ * Invoked from three places so every install converges regardless of entry
+ * point: `runMigration()` (fresh / sentinel-less installs), daemon boot, and
+ * the first `lib/device-config.ts` read/write in a process.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import {
+  META_HEADER,
   getDevicesAutoLaunchPath,
+  getDevicePinsPath,
   getUserAgentsDir,
+  readMeta,
   updateMeta,
+  withMetaLock,
 } from '../state.js';
-import { loadDevicesSync } from './registry.js';
-import { MACHINE_LOCAL_YAML_KEYS } from '../config-machine-keys.js';
+import { atomicWriteFileSync } from '../fs-atomic.js';
+import { machineId } from '../machine-id.js';
 import type { FleetDeviceOverride, FleetManifest } from '../fleet/types.js';
 
-/** Config folded out of one legacy store, keyed by device name. */
-type ConfigFolds = Record<string, Record<string, unknown>>;
-
-/**
- * The `fleet.devices` map a config write should edit. A missing block starts
- * empty; the literal `'all'` upgrades to an explicit map of the
- * currently-registered roster so a config write never silently narrows what
- * `agents apply` targets. (The dynamic "new devices join automatically"
- * semantics of `'all'` do not survive the upgrade — per-device config is
- * inherently a map.)
- */
-export function fleetDevicesMapForWrite(fleet: FleetManifest | undefined): Record<string, FleetDeviceOverride> {
-  if (fleet && fleet.devices !== 'all') return { ...fleet.devices };
-  if (fleet?.devices !== 'all') return {};
-  // devices === 'all': expand to the registered roster.
-  const roster = loadDevicesSync();
-  const devices: Record<string, FleetDeviceOverride> = {};
-  for (const name of Object.keys(roster)) devices[name] = {};
-  return devices;
+/** One parsed device doc under ~/.agents/devices/. */
+interface DeviceDoc {
+  name: string;
+  path: string;
+  doc: Record<string, unknown>;
 }
 
-function mergeFold(folds: ConfigFolds, device: string, values: Record<string, unknown>): void {
-  folds[device] = { ...folds[device], ...values };
-}
-
-/**
- * Read every legacy device doc, returning the config to fold per device.
- * A doc that fails to parse is LOUDLY skipped (and left untouched) so the next
- * run retries — never silently emptied, same corruption contract the device
- * registry keeps.
- */
-function collectDeviceDocFolds(devicesRoot: string): { folds: ConfigFolds; docs: Array<{ name: string; path: string; doc: Record<string, unknown> }> } {
-  const folds: ConfigFolds = {};
-  const docs: Array<{ name: string; path: string; doc: Record<string, unknown> }> = [];
+/** Read every device doc. A doc that fails to parse is loudly skipped. */
+function readDeviceDocs(devicesRoot: string): DeviceDoc[] {
+  const docs: DeviceDoc[] = [];
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(devicesRoot, { withFileTypes: true });
   } catch {
-    return { folds, docs }; // no devices/ tree — nothing to fold
+    return docs; // no devices/ tree — nothing to fold
   }
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
@@ -93,53 +79,43 @@ function collectDeviceDocFolds(devicesRoot: string): { folds: ConfigFolds; docs:
       console.error(`device config migration: ${docPath} is not a YAML map; leaving it for manual repair`);
       continue;
     }
-    const doc = parsed as Record<string, unknown>;
-    const config: Record<string, unknown> = {};
-    if (doc.config !== undefined) {
-      if (typeof doc.config !== 'object' || doc.config === null || Array.isArray(doc.config)) {
-        console.error(`device config migration: ${docPath} has a non-map config: block; leaving it for manual repair`);
-        continue;
-      }
-      Object.assign(config, doc.config as Record<string, unknown>);
-    }
-    if (typeof doc.defaultBrowserProfile === 'string') {
-      config.defaultBrowserProfile = doc.defaultBrowserProfile;
-    }
-    // Machine-visibility keys are NOT folded. Two reasons, both load-bearing:
-    //
-    //  1. They already live exactly where they belong. `config:` in this doc is
-    //     the machine-local store the new read path uses (state.ts overlays it
-    //     as `deviceConfig`), so folding would only copy them into the shared
-    //     file this whole change exists to keep clean.
-    //  2. Copying a PEER's would be a leak. `browserRemoteControl` is a consent
-    //     flag gating whether other machines may drive that box's browser;
-    //     hoisting one box's opt-in into the synced file spreads it to the fleet.
-    //     Each machine keeps its own, in its own doc.
-    for (const key of Object.keys(config)) {
-      if (MACHINE_LOCAL_YAML_KEYS.has(key)) delete config[key];
-    }
-    if (Object.keys(config).length === 0) continue;
-    mergeFold(folds, entry.name, config);
-    docs.push({ name: entry.name, path: docPath, doc });
+    docs.push({ name: entry.name, path: docPath, doc: parsed as Record<string, unknown> });
   }
-  return { folds, docs };
+  return docs;
 }
 
-/** Read the legacy auto-launch.json, returning the flags to fold per device. */
-function collectAutoLaunchFolds(autoLaunchPath: string): ConfigFolds {
-  const folds: ConfigFolds = {};
+/** Write a device doc, or remove it (and its dir) when nothing remains. */
+function writeDeviceDoc(docPath: string, doc: Record<string, unknown>): void {
+  try {
+    if (Object.keys(doc).length === 0) {
+      fs.rmSync(docPath, { force: true });
+      try {
+        fs.rmdirSync(path.dirname(docPath));
+      } catch { /* not empty — other files live in the device dir */ }
+    } else {
+      fs.mkdirSync(path.dirname(docPath), { recursive: true });
+      atomicWriteFileSync(docPath, META_HEADER + yaml.stringify(doc));
+    }
+  } catch (err) {
+    console.error(`device config migration: could not rewrite ${docPath} (${(err as Error).message}); a later run retries`);
+  }
+}
+
+/** The legacy auto-launch.json flags, keyed by device name ({} when absent). */
+function readAutoLaunchFlags(autoLaunchPath: string): Record<string, Record<string, unknown>> {
+  const out: Record<string, Record<string, unknown>> = {};
   let raw: string;
   try {
     raw = fs.readFileSync(autoLaunchPath, 'utf-8');
   } catch {
-    return folds; // absent — nothing to fold
+    return out; // absent — nothing to fold
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
     console.error(`device config migration: could not parse ${autoLaunchPath} (${(err as Error).message}); leaving it for a later retry`);
-    return folds;
+    return out;
   }
   const devices = (parsed as { devices?: unknown })?.devices;
   if (devices && typeof devices === 'object' && !Array.isArray(devices)) {
@@ -147,56 +123,173 @@ function collectAutoLaunchFolds(autoLaunchPath: string): ConfigFolds {
       const config: Record<string, unknown> = {};
       if (pref?.enabled === false) config.autoLaunchEnabled = false;
       if (pref?.preferred === true) config.autoLaunchPreferred = true;
-      if (Object.keys(config).length > 0) mergeFold(folds, name, config);
+      if (Object.keys(config).length > 0) out[name] = config;
     }
   }
-  return folds;
+  return out;
+}
+
+function isConfigMap(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
 /**
- * Fold the legacy per-device config stores into the central
- * `fleet.devices.<name>.config` block. Safe to call on every boot / config
- * access: cheap no-op once the legacy stores are stripped.
+ * Fold every legacy device-config/pins location into the current layout. Safe
+ * to call on every boot / config access: cheap no-op once folded.
  */
-export function migrateDeviceConfigToCentral(): void {
+export function migrateDeviceConfigStores(): void {
   const devicesRoot = path.join(getUserAgentsDir(), 'devices');
   const autoLaunchPath = getDevicesAutoLaunchPath();
+  const self = machineId();
 
-  const { folds: docFolds, docs } = collectDeviceDocFolds(devicesRoot);
-  const autoFolds = collectAutoLaunchFolds(autoLaunchPath);
-  const folds: ConfigFolds = {};
-  for (const [name, config] of Object.entries(docFolds)) mergeFold(folds, name, config);
-  for (const [name, config] of Object.entries(autoFolds)) mergeFold(folds, name, config);
-  if (Object.keys(folds).length === 0) return;
+  // ── 1. Gather ────────────────────────────────────────────────────────────
+  // Central per-device config (the #2458 store).
+  const fleet = readMeta().fleet;
+  const centralDevices: Record<string, FleetDeviceOverride> =
+    fleet && fleet.devices !== 'all' ? fleet.devices : {};
+  const centralHasConfig = Object.values(centralDevices).some(
+    (ov) => ov?.config && Object.keys(ov.config).length > 0,
+  );
 
-  // 1. Central write FIRST. A `fleet.devices: all` declaration upgrades to an
-  //    explicit map of the currently-registered roster so `agents apply` keeps
-  //    targeting the same devices. A key already present centrally WINS over
-  //    the legacy value — a re-fold after a mid-migration crash is then a
-  //    no-op, and a value written by a newer CLI is never clobbered.
-  updateMeta((m) => {
-    const devices = fleetDevicesMapForWrite(m.fleet);
-    for (const [name, config] of Object.entries(folds)) {
-      const prev = devices[name] ?? {};
-      devices[name] = { ...prev, config: { ...config, ...prev.config } };
+  const autoLaunchFlags = readAutoLaunchFlags(autoLaunchPath);
+  const docs = readDeviceDocs(devicesRoot);
+
+  const pinsPath = getDevicePinsPath();
+  let selfPins: { agents?: Record<string, string>; isolatedAgents?: Record<string, string> } = {};
+  try {
+    selfPins = (JSON.parse(fs.readFileSync(pinsPath, 'utf-8')) as typeof selfPins) || {};
+  } catch { /* absent or malformed — the fold below recreates it */ }
+
+  // ── 1b. Plan (pure) — so a converged install never takes the meta lock or
+  //    rewrites a byte-identical doc on every boot.
+  const plans: Array<{ name: string; path: string; next: Record<string, unknown> }> = [];
+  for (const { name, path: docPath, doc } of docs) {
+    const plan = planDeviceDocFold(name, docPath, doc, centralDevices[name]?.config, autoLaunchFlags[name]);
+    if (plan) plans.push(plan);
+  }
+  const docNames = new Set(docs.map((d) => d.name));
+  const newDocs: Array<{ path: string; doc: Record<string, unknown> }> = [];
+  for (const [name, ov] of Object.entries(centralDevices)) {
+    if (docNames.has(name) || !isConfigMap(ov?.config)) continue;
+    newDocs.push({ path: path.join(devicesRoot, name, 'agents.yaml'), doc: { config: { ...autoLaunchFlags[name], ...ov.config } } });
+  }
+  for (const [name, flags] of Object.entries(autoLaunchFlags)) {
+    if (docNames.has(name) || isConfigMap(centralDevices[name]?.config)) continue;
+    newDocs.push({ path: path.join(devicesRoot, name, 'agents.yaml'), doc: { config: { ...flags } } });
+  }
+  const selfDoc = docs.find((d) => d.name === self);
+  const docAgents = isConfigMap(selfDoc?.doc.agents) ? (selfDoc!.doc.agents as Record<string, string>) : undefined;
+  const docIsolated = isConfigMap(selfDoc?.doc.isolatedAgents)
+    ? (selfDoc!.doc.isolatedAgents as Record<string, string>)
+    : undefined;
+  const hasDestinationWork = plans.length > 0 || newDocs.length > 0 || docAgents !== undefined || docIsolated !== undefined;
+
+  const autoLaunchPending = fs.existsSync(autoLaunchPath);
+  if (!centralHasConfig && !hasDestinationWork && !autoLaunchPending) return;
+
+  // ── 2. Destination writes FIRST (crash-safe), under the meta lock so they
+  //    serialize against writeMetaUnlocked's own read-merge-write of the doc.
+  //    Only taken when there IS a write — a converged install never locks
+  //    (taking it would create a default central agents.yaml as a side effect).
+  if (hasDestinationWork) {
+    withMetaLock(() => {
+      // 2a. THIS machine's pins: doc pins merge INTO the pins file (pins file
+      //     wins — it is the destination, and a re-fold after a crash must not
+      //     clobber pins the new CLI already wrote).
+      if (docAgents || docIsolated) {
+        const pins: typeof selfPins = { ...selfPins };
+        if (docAgents) pins.agents = { ...docAgents, ...selfPins.agents };
+        if (docIsolated) pins.isolatedAgents = { ...docIsolated, ...selfPins.isolatedAgents };
+        try {
+          fs.mkdirSync(path.dirname(pinsPath), { recursive: true });
+          atomicWriteFileSync(pinsPath, JSON.stringify(pins, null, 2) + '\n');
+        } catch (err) {
+          console.error(`device config migration: could not write ${pinsPath} (${(err as Error).message}); a later run retries`);
+        }
+      }
+      // 2b/2c. The planned doc rewrites + creations.
+      for (const plan of plans) writeDeviceDoc(plan.path, plan.next);
+      for (const nd of newDocs) writeDeviceDoc(nd.path, nd.doc);
+    });
+  }
+
+  // ── 3. Source strips LAST ────────────────────────────────────────────────
+  // 3a. Central: drop every devices.<name>.config block (now folded into the
+  //     device docs). Overrides left with no other fields are dropped; an
+  //     emptied fleet block (no defaults/secrets/routines) goes away entirely.
+  if (centralHasConfig) {
+    updateMeta((m) => {
+      const devices = m.fleet?.devices;
+      if (!devices || devices === 'all') return m;
+      const nextDevices: Record<string, FleetDeviceOverride> = {};
+      for (const [name, ov] of Object.entries(devices)) {
+        const rest = { ...ov };
+        delete rest.config;
+        if (Object.keys(rest).length > 0) nextDevices[name] = rest;
+      }
+      const fleet: FleetManifest = { ...m.fleet, devices: nextDevices };
+      if (Object.keys(nextDevices).length === 0 && !fleet.defaults && !fleet.secrets && !fleet.routines) {
+        const { fleet: _, ...rest } = m;
+        void _;
+        return rest;
+      }
+      return { ...m, fleet };
+    });
+  }
+
+  // 3b. The legacy auto-launch.json.
+  if (autoLaunchPending) {
+    try {
+      fs.rmSync(autoLaunchPath, { force: true });
+    } catch (err) {
+      console.error(`device config migration: could not remove ${autoLaunchPath} (${(err as Error).message}); a later run retries`);
     }
-    const fleet: FleetManifest = { ...m.fleet, devices };
-    return { ...m, fleet };
-  });
+  }
+}
 
-  // 2. The legacy stores are deliberately LEFT IN PLACE.
-  //
-  //    This migration used to delete them — `fs.rmSync` on the device doc and
-  //    `fs.rmdirSync` on its directory. Deleting is what made the fold unsafe
-  //    to run anywhere: it had to win a race against every other machine's copy
-  //    of the same shared file, and a box on an older CLI that re-created the
-  //    doc would be stripped again on the next command.
-  //
-  //    An additive fold has neither problem. The central block is written; the
-  //    source is untouched; a box still running the previous CLI keeps reading
-  //    what it always read. The now-redundant legacy copy is pruned in a later
-  //    release by one explicit operator command, not by 13 machines each
-  //    deciding to delete on their own schedule.
-  void docs;
-  void autoLaunchPath;
+/** Shallow-set equality for folded doc content (values compared deep via JSON). */
+function sameDocContent(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  const ak = Object.keys(a);
+  const bk = Object.keys(b);
+  if (ak.length !== bk.length) return false;
+  return ak.every((k) => k in b && JSON.stringify(a[k]) === JSON.stringify(b[k]));
+}
+
+/**
+ * Compute a device doc's post-fold content: merge the config layers (oldest
+ * auto-launch.json flags < the doc's own config: < the central #2458 block —
+ * newest wins), fold a top-level defaultBrowserProfile into config:, and strip
+ * pins from the tracked file. Returns null when the doc is corrupt (loudly —
+ * left for manual repair) or the fold would not change its content.
+ */
+function planDeviceDocFold(
+  name: string,
+  docPath: string,
+  doc: Record<string, unknown>,
+  centralConfig: unknown,
+  autoFlags: Record<string, unknown> | undefined,
+): { name: string; path: string; next: Record<string, unknown> } | null {
+  const config: Record<string, unknown> = {};
+  Object.assign(config, autoFlags);
+  if (doc.config !== undefined) {
+    if (!isConfigMap(doc.config)) {
+      console.error(`device config migration: ${docPath} has a non-map config: block; leaving it for manual repair`);
+      return null;
+    }
+    Object.assign(config, doc.config);
+  }
+  if (typeof doc.defaultBrowserProfile === 'string' && config.defaultBrowserProfile === undefined) {
+    config.defaultBrowserProfile = doc.defaultBrowserProfile;
+  }
+  if (isConfigMap(centralConfig)) Object.assign(config, centralConfig);
+
+  const next: Record<string, unknown> = {};
+  // Preserve fields the migration does not own (routines:, anything else).
+  for (const [k, v] of Object.entries(doc)) {
+    if (k === 'config' || k === 'defaultBrowserProfile' || k === 'agents' || k === 'isolatedAgents') continue;
+    next[k] = v;
+  }
+  if (Object.keys(config).length > 0) next.config = config;
+
+  return sameDocContent(next, doc) ? null : { name, path: docPath, next };
 }

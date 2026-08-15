@@ -30,10 +30,17 @@ describe('resolveInstallation', () => {
   beforeEach(() => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-resolve-'));
     process.env.HOME = home;
+    // getGlobalDefault reads pins via AGENTS_DEVICES_DIR (fork-wide in setup.ts).
+    // Scope pins to this home so a prior setGlobalDefault cannot leak a pin into
+    // "no default refuses to pick".
+    process.env.AGENTS_DEVICES_DIR = path.join(home, '.agents', '.history', 'devices');
+    process.env.AGENTS_SYNC_MACHINE_ID = 'resolve-testbox';
   });
 
   afterEach(() => {
     delete process.env.HOME;
+    delete process.env.AGENTS_DEVICES_DIR;
+    delete process.env.AGENTS_SYNC_MACHINE_ID;
     fs.rmSync(home, { recursive: true, force: true });
   });
 

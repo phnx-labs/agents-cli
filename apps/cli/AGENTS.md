@@ -408,8 +408,9 @@ resolve placement through the CLI rather than scoring devices themselves); a
 the allowlist off. When roles leave the pool empty, **both** resolvers throw
 (`formatEmptyAutoPoolError`): a `null` host means "run locally", which on a
 `personal` box is the outcome the mark exists to prevent. Unlike the machine-local
-keys, `role` is **shared**: it lives in the central `fleet.devices.<name>.config`
-block and syncs, because every box has to agree on where agents may land.
+keys, `role` is **shared**: it lives in that device's tracked
+`devices/<name>/agents.yaml` `config.role` and syncs with `agents repo
+push/pull`, because every box has to agree on where agents may land.
 
 The vocabulary stops at `worker | personal` on purpose. A paired cockpit's
 `control` role is the pre-existing `DeviceRole` in

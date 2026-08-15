@@ -33,9 +33,9 @@ function runRealMigration(): void {
   );
 }
 
-/** Path to this machine's per-device pin file after the split migration. */
+/** Path to this machine's pins file after the split migration (runtime JSON, untracked). */
 function devicePinsFile(): string {
-  return path.join(userDir, 'devices', 'testdev', 'agents.yaml');
+  return path.join(userDir, '.history', 'devices', 'pins-testdev.json');
 }
 
 describe('runMigration', () => {
@@ -289,7 +289,7 @@ describe('runMigration', () => {
       expect(meta).toContain('capture-session');
       expect(meta).toContain('script: capture.sh');
       // The pin was split out to the per-device file; central keeps hooks:.
-      expect(fs.readFileSync(devicePinsFile(), 'utf-8')).toMatch(/agents:\s*\n\s+claude:/);
+      expect(fs.readFileSync(devicePinsFile(), 'utf-8')).toMatch(/"agents":\s*\{[^}]*"claude"/);
     });
 
     it('creates agents.yaml when only hooks.yaml exists', () => {
@@ -333,7 +333,7 @@ describe('runMigration', () => {
       runRealMigration();
 
       // Pin split to the per-device file on the first run; second run is a no-op.
-      expect(fs.readFileSync(devicePinsFile(), 'utf-8')).toContain('claude: 2.1.0');
+      expect(fs.readFileSync(devicePinsFile(), 'utf-8')).toContain('"claude": "2.1.0"');
     });
   });
 

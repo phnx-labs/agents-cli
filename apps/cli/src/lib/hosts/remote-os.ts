@@ -4,9 +4,9 @@
  * in `remote-cmd.ts` for how the string is consumed.
  *
  * Three sources, in priority order:
- *   1. The central config `platform` key (`fleet.devices.<name>.config.platform`
- *      in agents.yaml) — the operator's explicit override, set with
- *      `agents devices config <name> platform <os>`.
+ *   1. The config `platform` key (the per-device doc's config.platform,
+ *      over the `fleet.defaults.config` fleet default) — the operator's
+ *      explicit override, set with `agents devices config <name> platform <os>`.
  *   2. The device registry `platform` (`windows`/`linux`/`macos`), which is
  *      populated fleet-wide by Tailscale sync — the reliable answer for a box
  *      like `win-mini` that was discovered, not hand-enrolled.

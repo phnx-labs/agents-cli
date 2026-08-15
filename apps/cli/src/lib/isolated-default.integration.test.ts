@@ -18,13 +18,31 @@ describe.skipIf(process.platform === 'win32')('isolated default', () => {
   const B = '9.9.5';
 
   const versionDir = (v: string) => path.join(home, '.agents', '.history', 'versions', 'codex', v);
-  /** The pointer is device-local, like global pins: ~/.agents/devices/<id>/agents.yaml */
+  /** Pins file under this test home (must match the subprocess AGENTS_DEVICES_DIR). */
+  const devicesDir = () => path.join(home, '.agents', '.history', 'devices');
+  /** Agent pins live in untracked `.history/devices/pins-<host>.json`, not the tracked device doc. */
   const devicePins = () => {
-    const dir = path.join(home, '.agents', 'devices');
-    const ids = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
-    return ids.length ? path.join(dir, ids[0], 'agents.yaml') : '';
+    const dir = devicesDir();
+    if (!fs.existsSync(dir)) return '';
+    const pins = fs.readdirSync(dir).filter((n) => n.startsWith('pins-') && n.endsWith('.json'));
+    return pins.length ? path.join(dir, pins[0]) : '';
   };
   const shimsDir = () => path.join(home, '.agents', '.cache', 'shims');
+
+  /** Env for CLI / library subprocesses: HOME-scoped devices dir so pins don't land in the vitest hermetic AGENTS_DEVICES_DIR. */
+  function childEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+    return {
+      ...process.env,
+      HOME: home,
+      AGENTS_REAL_HOME: home,
+      AGENTS_DEVICES_DIR: devicesDir(),
+      AGENTS_SYNC_MACHINE_ID: 'testbox',
+      SHELL: '/bin/bash',
+      AGENTS_NO_NUDGE: '1',
+      FORCE_COLOR: '0',
+      ...extra,
+    };
+  }
 
   function plant(v: string, { isolated = true } = {}) {
     const binDir = path.join(versionDir(v), 'node_modules', '.bin');
@@ -39,7 +57,7 @@ describe.skipIf(process.platform === 'win32')('isolated default', () => {
     try {
       const out = execFileSync('bun', [path.resolve(process.cwd(), 'src/index.ts'), ...args], {
         cwd: process.cwd(),
-        env: { ...process.env, HOME: home, AGENTS_REAL_HOME: home, SHELL: '/bin/bash', AGENTS_NO_NUDGE: '1', FORCE_COLOR: '0' },
+        env: childEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
       }).toString('utf-8');
       return { out, status: 0 };
@@ -57,7 +75,7 @@ describe.skipIf(process.platform === 'win32')('isolated default', () => {
     `;
     const out = execFileSync('bun', ['-e', script], {
       cwd: process.cwd(),
-      env: { ...process.env, HOME: home, AGENTS_REAL_HOME: home, SHELL: '/bin/bash' },
+      env: childEnv(),
       stdio: ['ignore', 'pipe', 'inherit'],
     }).toString();
     return JSON.parse(out.split('__R__')[1]);
@@ -83,19 +101,21 @@ describe.skipIf(process.platform === 'win32')('isolated default', () => {
     plant(A);
     expect(run('use', `codex@${A}`).status).toBe(0);
 
-    // Recorded device-locally under isolatedAgents — a pointer to a version
-    // installed on THIS machine, so it must not sync, exactly like a global pin.
-    const meta = fs.readFileSync(devicePins(), 'utf-8');
-    expect(meta).toContain('isolatedAgents');
-    // ...and never in the central doc that syncs across machines.
+    // Recorded in the untracked pins JSON under isolatedAgents — a pointer to a
+    // version installed on THIS machine, so it must not sync, exactly like a
+    // global pin. Never lands in the tracked per-device doc or central agents.yaml.
+    const pinsPath = devicePins();
+    expect(pinsPath).not.toBe('');
+    const pins = fs.readFileSync(pinsPath, 'utf-8');
+    expect(pins).toContain('isolatedAgents');
     expect(fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8'))
       .not.toContain('isolatedAgents');
     // The five adopting side effects of a normal `use` are all absent.
     const shims = fs.existsSync(shimsDir()) ? fs.readdirSync(shimsDir()) : [];
     expect(shims).not.toContain('codex');
     expect(fs.existsSync(path.join(home, '.codex'))).toBe(false);
-    // ...and no global default was recorded for codex.
-    expect(meta).not.toMatch(/^agents:\s*\n\s+codex:/m);
+    // ...and no global default was recorded for codex in the pins file.
+    expect(JSON.parse(pins).agents?.codex).toBeUndefined();
   }, 120_000);
 
   it('a global default still wins — the isolated pointer is only a fallback', () => {

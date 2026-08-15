@@ -162,7 +162,9 @@ export function formatNoHealthyDeviceError(
   const target = agent ? `can run ${agent}` : "for 'run auto'";
   // Name the role narrowing when there is one: a fleet where every box but two
   // is filtered out by a worker mark reads as "the fleet is down" without it.
-  const marked = describeAutoPool();
+  // Roster on `pool` so a fleet-wide role default reaches a doc-less device
+  // in this error's own candidate set, not just the ones with a doc.
+  const marked = describeAutoPool({ roster: pool });
   const poolNote = marked ? ` [pool: ${marked}]` : '';
   return `agents: no healthy device ${target}${poolNote} — excluded: ${excluded}; earliest window resets unknown`;
 }

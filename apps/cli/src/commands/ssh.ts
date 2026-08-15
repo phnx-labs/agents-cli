@@ -143,6 +143,7 @@ import {
   listConfiguredDeviceRoles,
   setConfiguredDeviceRole,
   type ConfigKeySpec,
+  type ConfigEntry,
   type ConfiguredDeviceRole,
 } from '../lib/device-config.js';
 import { filterAutoPool, listWorkerDevices } from '../lib/devices/pool.js';
@@ -151,7 +152,13 @@ import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 /** One-line summary of a device for `list`. `isSelf` marks the machine this
  * command is running on so it stands out from the rest of the tailnet.
  * `isInteractive` marks the configured interactive host (`devices config <name> interactive.host`). */
-function deviceSummary(d: DeviceProfile, isSelf = false, stats?: DeviceStats, isInteractive = false): string {
+function deviceSummary(
+  d: DeviceProfile,
+  isSelf = false,
+  stats?: DeviceStats,
+  isInteractive = false,
+  roles?: Record<string, ConfiguredDeviceRole>,
+): string {
   d = resolveDeviceProfile(d);
   const addr = hostNameFor(d) ?? chalk.gray('no address');
   // Prefer a fresh live verdict (this run's probe, else the written-back
@@ -168,7 +175,9 @@ function deviceSummary(d: DeviceProfile, isSelf = false, stats?: DeviceStats, is
   const name = isSelf ? chalk.bold.cyan(d.name.padEnd(16)) : chalk.bold(d.name.padEnd(16));
   const here = isSelf ? chalk.cyan('  ← this machine') : '';
   const interactive = isInteractive ? chalk.yellow('  ★ interactive') : '';
-  const role = roleTag(d.name, listConfiguredDeviceRoles());
+  // `roles` defaults to a single-device roster so a fleet-wide `role` default
+  // still reaches this device even when it has no per-device doc of its own.
+  const role = roleTag(d.name, roles ?? listConfiguredDeviceRoles([d.name]));
   return `${marker}${name} ${String(d.platform).padEnd(8)} ${(d.user ? d.user + '@' : '') + addr}  ${online}${reach}${here}${interactive}${role}`;
 }
 
@@ -214,9 +223,12 @@ function renderDeviceTable(
   full = false,
   interactiveHost?: string,
 ): string[] {
-  if (!statsMap) return names.map((n) => deviceSummary(reg[n], n === self, undefined, n === interactiveHost));
+  if (!statsMap) {
+    const roles = listConfiguredDeviceRoles(names);
+    return names.map((n) => deviceSummary(reg[n], n === self, undefined, n === interactiveHost, roles));
+  }
 
-  const deviceRoles = listConfiguredDeviceRoles();
+  const deviceRoles = listConfiguredDeviceRoles(names);
   const lines: string[] = [];
   const head =
     '  ' +
@@ -577,11 +589,14 @@ async function probeRemoteHealth(target: FleetStatusTarget): Promise<Omit<FleetH
   };
 }
 
-/** Effective device-scoped config, keyed by the canonical YAML key. */
+/** Device-layer config only (not fleet defaults), keyed by the canonical YAML key. */
 function deviceConfigJson(name: string): Record<string, unknown> | undefined {
   const config: Record<string, unknown> = {};
   for (const entry of listConfig({ device: name })) {
-    if (entry.spec.scope !== 'device' || entry.value === undefined) continue;
+    // The device's OWN layer only — a fleet-default value is not this
+    // device's setting (the effective profile fields already carry the
+    // merged view via resolveDeviceProfile).
+    if (entry.source !== 'device') continue;
     config[entry.spec.yamlKey] = entry.value;
   }
   return Object.keys(config).length > 0 ? config : undefined;
@@ -1264,16 +1279,38 @@ function registerDevicesCommands(program: Command): void {
   const deviceConfigEntries = (name: string) =>
     listConfig({ device: name }).filter((e) => e.spec.scope === 'device');
 
+  /** Render one entry's effective value with its layer tag. */
+  const entryValueText = (e: ConfigEntry): string => {
+    if (e.source === 'default') return chalk.gray('— (default)');
+    const tag = e.source === 'fleet' ? chalk.yellow('  (fleet default)') : e.source === 'user' ? chalk.gray('  (user scope)') : '';
+    return chalk.cyan(JSON.stringify(e.value)) + tag;
+  };
+
   /** Print the full resolved config for a device (bare invocation, non-menu). */
   const printDevicesConfig = (name: string, json: boolean): void => {
     const entries = deviceConfigEntries(name);
     if (json) {
       const config: Record<string, unknown> = {};
-      for (const e of entries) if (e.value !== undefined) config[e.spec.name] = e.value;
+      for (const e of entries) config[e.spec.name] = { value: e.value ?? null, source: e.source };
       writeJson({ device: name, config });
       return;
     }
     console.log(chalk.bold(`Config for '${name}'`));
+    for (const e of entries) {
+      console.log(`  ${e.spec.name.padEnd(24)} ${entryValueText(e)}${chalk.gray(`  ${e.spec.description}`)}`);
+    }
+  };
+
+  /** Print the fleet-wide defaults layer (`config --fleet`, bare). */
+  const printFleetConfig = (json: boolean): void => {
+    const entries = listConfig({ fleet: true }).filter((e) => e.spec.scope === 'device');
+    if (json) {
+      const config: Record<string, unknown> = {};
+      for (const e of entries) config[e.spec.name] = { value: e.value ?? null, source: e.source };
+      writeJson({ fleet: true, config });
+      return;
+    }
+    console.log(chalk.bold('Fleet-wide config defaults') + chalk.gray('  (every device inherits these unless it overrides the key)'));
     for (const e of entries) {
       const value = e.value === undefined ? chalk.gray('— (default)') : chalk.cyan(JSON.stringify(e.value));
       console.log(`  ${e.spec.name.padEnd(24)} ${value}${chalk.gray(`  ${e.spec.description}`)}`);
@@ -1283,26 +1320,66 @@ function registerDevicesCommands(program: Command): void {
   /**
    * The `devices config` engine — shared by the config command's action and
    * every tombstone. `quiet` performs the write with no output (a tombstone
-   * that prints its own legacy shape). Throws on a bad key/value; callers map
-   * that to exit 1.
+   * that prints its own legacy shape). `fleet` targets the fleet-wide defaults
+   * layer instead of a device (`name` is then unused). Throws on a bad
+   * key/value; callers map that to exit 1.
    */
   const runDevicesConfig = async (
-    name: string,
+    name: string | undefined,
     key: string | undefined,
     valueParts: string[],
-    opts: { unset?: boolean; json?: boolean; quiet?: boolean },
+    opts: { unset?: boolean; json?: boolean; quiet?: boolean; fleet?: boolean },
   ): Promise<void> => {
     const spec = key ? configKeySpec(key) : undefined; // unknown key → throw listing the valid keys
+
+    // ── Fleet-defaults layer (`--fleet`): no device involved.
+    if (opts.fleet) {
+      if (spec && spec.scope === 'user') {
+        throw new Error(`Config key '${spec.name}' is user-scope (already fleet-wide) — --fleet does not apply.`);
+      }
+      if (opts.unset) {
+        if (!spec) throw new Error('--unset needs a key: agents devices config --fleet <key> --unset');
+        unsetConfigValue(spec!.name, { fleet: true });
+        if (opts.quiet) return;
+        if (opts.json) writeJson({ fleet: true, key: spec!.name, value: null, source: 'default' });
+        else console.log(chalk.green(`Unset ${spec!.name}`) + chalk.gray(' in the fleet defaults.'));
+        return;
+      }
+      if (spec && valueParts.length > 0) {
+        let value: unknown;
+        if (spec.type === 'string-list') {
+          const existing = (getConfigValue(spec.name, { fleet: true }).value as string[] | undefined) ?? [];
+          value = [...existing, valueParts.join(' ')];
+        } else {
+          value = parseConfigValueInput(spec, valueParts.join(' '));
+        }
+        setConfigValue(spec.name, value, { fleet: true });
+        if (opts.quiet) return;
+        if (opts.json) writeJson({ fleet: true, key: spec.name, value, source: 'fleet' });
+        else console.log(chalk.green(`Set ${spec.name} = ${JSON.stringify(value)}`) + chalk.gray(' as the fleet-wide default.'));
+        return;
+      }
+      if (spec) {
+        const entry = getConfigValue(spec.name, { fleet: true });
+        if (opts.quiet) return;
+        if (opts.json) writeJson({ fleet: true, key: spec.name, value: entry.value ?? null, source: entry.source });
+        else console.log(`  ${spec.name.padEnd(24)} ${entryValueText(entry)}${chalk.gray(`  ${spec.description}`)}`);
+        return;
+      }
+      printFleetConfig(Boolean(opts.json));
+      return;
+    }
+
     // User-scope keys (interactive.host) are stored centrally — the device name
     // is syntax only, so an unregistered name is not an error for them.
-    if (!spec || spec.scope === 'device') await mustGetDevice(name);
+    if (!spec || spec.scope === 'device') await mustGetDevice(name!);
 
     if (opts.unset) {
       if (!spec) throw new Error('--unset needs a key: agents devices config <name> <key> --unset');
       unsetConfigValue(spec.name, { device: name });
       if (opts.quiet) return;
-      if (opts.json) writeJson({ device: name, key: spec.name, value: null });
-      else console.log(chalk.green(`Unset ${spec.name}`) + chalk.gray(` on '${name}' — back to the default.`));
+      if (opts.json) writeJson({ device: name, key: spec.name, value: null, source: 'default' });
+      else console.log(chalk.green(`Unset ${spec.name}`) + chalk.gray(` on '${name}' — falls back to the fleet default / built-in behavior.`));
       return;
     }
 
@@ -1317,7 +1394,7 @@ function registerDevicesCommands(program: Command): void {
       }
       setConfigValue(spec.name, value, { device: name });
       if (opts.quiet) return;
-      if (opts.json) writeJson({ device: name, key: spec.name, value });
+      if (opts.json) writeJson({ device: name, key: spec.name, value, source: 'device' });
       else console.log(chalk.green(`Set ${spec.name} = ${JSON.stringify(value)}`) + chalk.gray(` on '${name}'.`));
       return;
     }
@@ -1326,35 +1403,34 @@ function registerDevicesCommands(program: Command): void {
       const entry = getConfigValue(spec.name, { device: name });
       if (opts.quiet) return;
       if (opts.json) {
-        writeJson({ device: name, key: spec.name, value: entry.value ?? null });
-      } else if (entry.value === undefined) {
-        console.log(`  ${spec.name.padEnd(24)} ${chalk.gray('— (default)')}${chalk.gray(`  ${spec.description}`)}`);
+        writeJson({ device: name, key: spec.name, value: entry.value ?? null, source: entry.source });
       } else {
-        console.log(`  ${spec.name.padEnd(24)} ${chalk.cyan(JSON.stringify(entry.value))}${chalk.gray(`  ${spec.description}`)}`);
+        console.log(`  ${spec.name.padEnd(24)} ${entryValueText(entry)}${chalk.gray(`  ${spec.description}`)}`);
       }
       return;
     }
 
     // Bare: TTY → the interactive settings menu; piped/--json → print.
     if (opts.json || !isInteractiveTerminal()) {
-      printDevicesConfig(name, Boolean(opts.json));
+      printDevicesConfig(name!, Boolean(opts.json));
       return;
     }
-    await runDevicesConfigMenu(name);
+    await runDevicesConfigMenu(name!);
   };
 
   /**
    * The `devices role` engine — read or write the fleet-wide role mark, and say
    * what it does to automatic placement.
    *
-   * A role written here lands in the SHARED block (`fleet.devices.<name>.config.role`)
-   * because every box has to agree on it. The vocabulary is deliberately
-   * `worker | personal` only: a paired cockpit's `control` role lives in the
-   * per-machine device registry, is written by `agents devices pair-ios`, and is
-   * what the existing dial-exclusion filters (`isControlDevice`) read. Accepting
-   * `control` here too would promise a fleet-wide dial exclusion this key cannot
-   * deliver — those filters read each box's own registry, so the mark would only
-   * hold on the machine that ran the command.
+   * A role written here lands in that device's tracked per-device doc
+   * (`devices/<name>/agents.yaml` `config.role`) and syncs with repo
+   * push/pull. The vocabulary is deliberately `worker | personal` only: a
+   * paired cockpit's `control` role lives in the per-machine device registry,
+   * is written by `agents devices pair-ios`, and is what the existing
+   * dial-exclusion filters (`isControlDevice`) read. Accepting `control` here
+   * too would promise a fleet-wide dial exclusion this key cannot deliver —
+   * those filters read each box's own registry, so the mark would only hold
+   * on the machine that ran the command.
    */
   const runDevicesRole = async (
     name: string | undefined,
@@ -1363,9 +1439,12 @@ function registerDevicesCommands(program: Command): void {
   ): Promise<void> => {
     if (!name) {
       if (role) throw new Error('Name a device: agents devices role <name> <worker|personal>');
-      const roles = listConfiguredDeviceRoles();
-      const mode = autoPoolMode();
       const reg = await loadDevices();
+      // The full registered roster, not just online — a fleet-wide `role`
+      // default must reach a registered device even when it has no per-device
+      // doc of its own, or it silently falls out of the worker allowlist.
+      const roles = listConfiguredDeviceRoles(Object.keys(reg));
+      const mode = autoPoolMode();
       const online = Object.entries(reg)
         .filter(([, d]) => d?.tailscale?.online !== false)
         .map(([n]) => n);
@@ -1408,12 +1487,17 @@ function registerDevicesCommands(program: Command): void {
     // configuredDeviceRole's key spec validates the value; a bad one throws with
     // the accepted list, which the command's catch turns into exit 1.
     setConfiguredDeviceRole(name, role as ConfiguredDeviceRole);
+    // Full registered roster, mirroring the bare-listing branch above — a
+    // fleet-wide `role` default must reach a doc-less registered device here
+    // too, or `autoPoolWorkers` under-reports the allowlist right after this
+    // write changed it.
+    const roles = listConfiguredDeviceRoles(Object.keys(await loadDevices()));
     if (opts.json) {
-      writeJson({ device: name, role, autoPoolWorkers: listWorkerDevices() });
+      writeJson({ device: name, role, autoPoolWorkers: listWorkerDevices({ roles }) });
       return;
     }
     console.log(chalk.green(`Marked '${name}' role=${role}.`));
-    const workers = listWorkerDevices();
+    const workers = listWorkerDevices({ roles });
     if (workers.length > 0) {
       console.log(chalk.gray(`\`--device auto\` now picks only from: ${workers.join(', ')}`));
     } else {
@@ -1422,7 +1506,9 @@ function registerDevicesCommands(program: Command): void {
     console.log(chalk.gray('Sync it to the fleet with `agents repo push`.'));
   };
 
-  /** The interactive settings menu: pick a key, edit it, repeat. TTY-only. */
+  /** The interactive settings menu: pick a key, edit it, repeat. TTY-only.
+   * Shows EFFECTIVE values (with a fleet tag when inherited); edits always
+   * write the device layer. */
   const runDevicesConfigMenu = async (name: string): Promise<void> => {
     const { select, input, confirm } = await import('@inquirer/prompts');
     const DONE = '__done__';
@@ -1430,13 +1516,13 @@ function registerDevicesCommands(program: Command): void {
       for (;;) {
         const entries = deviceConfigEntries(name);
         const picked = await select<string>({
-          message: `Config for '${name}' — pick a key to edit:`,
+          message: `Config for '${name}' — pick a key to edit (writes the device layer):`,
           pageSize: Math.min(entries.length + 1, 20),
           choices: [
             ...entries.map((e) => {
               const value =
-                e.value !== undefined
-                  ? chalk.cyan(JSON.stringify(e.value))
+                e.source !== 'default'
+                  ? entryValueText(e)
                   : chalk.gray(
                       e.spec.defaultValue !== undefined
                         ? `default: ${JSON.stringify(e.spec.defaultValue)}`
@@ -1483,16 +1569,27 @@ function registerDevicesCommands(program: Command): void {
   };
 
   const configCmd = devicesCmd
-    .command('config <name> [key] [value...]')
+    .command('config [name] [key] [value...]')
     .description(
       'Get, set, or unset a device’s settings (scheduler, agent cap, ssh overrides, auto-launch, notes). ' +
         'Bare opens an interactive settings menu (TTY) or prints the resolved config (piped). ' +
-        'Stored centrally in ~/.agents/agents.yaml under fleet.devices.<name>.config — synced, so any box can configure any device.',
+        'Per-device values live in the tracked devices/<name>/agents.yaml config: block; --fleet targets the ' +
+        'fleet-wide defaults (central fleet.defaults.config) every device inherits unless it overrides the key.',
     )
-    .option('--unset', 'reset the key to its default (removes the stored value)')
-    .option('--json', 'output machine-readable JSON')
-    .action(async (name: string, key: string | undefined, valueParts: string[] | undefined, opts: { unset?: boolean; json?: boolean }) => {
+    .option('--fleet', 'target the fleet-wide defaults layer instead of a device (first positional is the key)')
+    .option('--unset', 'reset the key at that layer (a device key then inherits the fleet default)')
+    .option('--json', 'output machine-readable JSON (each key carries its source: device | fleet | default)')
+    .action(async (name: string | undefined, key: string | undefined, valueParts: string[] | undefined, opts: { fleet?: boolean; unset?: boolean; json?: boolean }) => {
       try {
+        if (opts.fleet) {
+          // Positionals shift left: the first one is the key, the rest the value.
+          const fleetValue = [key, ...(valueParts ?? [])].filter((v): v is string => v !== undefined);
+          await runDevicesConfig(undefined, name, fleetValue, opts);
+          return;
+        }
+        if (!name) {
+          throw new Error('Missing device name. Usage: agents devices config <name> [key] [value] — or --fleet <key> <value> for the fleet-wide defaults.');
+        }
         await runDevicesConfig(name, key, valueParts ?? [], opts);
       } catch (err: any) {
         console.error(chalk.red(err.message));
@@ -1502,10 +1599,13 @@ function registerDevicesCommands(program: Command): void {
   setHelpSections(configCmd, {
     examples: `
       agents devices config mac-mini                            # settings menu (TTY) / print config (piped)
-      agents devices config mac-mini agents.max-concurrent 4    # cap concurrent agents
+      agents devices config mac-mini agents.max-concurrent 4    # cap concurrent agents on mac-mini
       agents devices config mac-mini scheduler.enabled off      # no routines firing there
-      agents devices config mac-mini scheduler.enabled          # read one key back
-      agents devices config mac-mini scheduler.enabled --unset  # back to the default
+      agents devices config mac-mini scheduler.enabled          # read the effective value back
+      agents devices config mac-mini scheduler.enabled --unset  # inherit the fleet default again
+      agents devices config --fleet scheduler.enabled off       # fleet-wide default (all devices)
+      agents devices config --fleet agents.max-concurrent 2     # every box caps at 2 unless it overrides
+      agents devices config --fleet                             # print the fleet defaults layer
       agents devices config mac-mini notes "runs the releases"  # append an operator note
       agents devices config win-mini ssh.auth password          # password auth…
       agents devices config win-mini ssh.bundle muqsit          # …from this secrets bundle
@@ -1514,7 +1614,7 @@ function registerDevicesCommands(program: Command): void {
       agents devices config mac-mini auto-launch.enabled off    # exclude from AGI EXT auto-launch
       agents devices config mac-mini auto-launch.preferred on   # boost in auto-launch ranking
       agents devices config zion interactive.host zion          # user scope: where agents show YOU artifacts
-      agents devices config mac-mini --json                     # machine-readable
+      agents devices config mac-mini --json                     # machine-readable, per-key source
     `,
     notes: `
       Keys: role (worker|personal), see 'agents devices role',
@@ -1526,16 +1626,21 @@ function registerDevicesCommands(program: Command): void {
       auto-launch.enabled, auto-launch.preferred — plus the user-scope
       interactive.host (stored centrally; the device name is syntax only).
 
+      Three layers, read in order — built-in default < fleet default
+      (--fleet, central fleet.defaults.config) < per-device value
+      (devices/<name>/agents.yaml config:). Both files are tracked and sync
+      with 'agents repo push/pull'; per-device files are conflict-free because
+      each machine writes only its own folder. --unset removes the value at
+      the targeted layer, so a device key falls back to the fleet default.
+
       Booleans take on/off (or true/false). 'notes' appends one entry per
-      invocation. Values a PEER reads land in ~/.agents/agents.yaml under
-      fleet.devices.<name>.config and sync with 'agents repo push/pull'. The
-      keys only the owning box reads — scheduler.enabled, daemon.enabled,
-      tmux.enabled, browser.remote-control, browser.task-idle-minutes,
-      browser.profile — stay in that machine's own doc, never sync, and can
-      only be set on the device itself.
-      ssh.* / platform / user overlay the discovered registry profile at dial
-      time. scheduler.enabled / daemon.enabled take effect when the daemon
-      reloads or restarts on that device.
+      invocation. ssh.* / platform / user overlay the discovered registry
+      profile at dial time. scheduler.enabled / daemon.enabled take effect
+      when the daemon reloads or restarts on that device. Machine-local keys
+      (scheduler.enabled, daemon.enabled, tmux.enabled, browser.remote-control,
+      browser.task-idle-minutes, browser.profile) can only be read or set on
+      the device itself; --fleet still writes a fleet-wide default those boxes
+      inherit until they override.
 
       The retired subcommands still work and forward here: configure, note,
       set, set-interactive, enable, disable, prefer, unprefer.
@@ -1568,9 +1673,10 @@ function registerDevicesCommands(program: Command): void {
       agents devices role --json                   # machine-readable
     `,
     notes: `
-      Roles are stored fleet-wide in ~/.agents/agents.yaml under
-      fleet.devices.<name>.config.role and travel with 'agents repo push/pull',
-      so a mark set on one box is the whole fleet's answer.
+      Roles live in that device's tracked per-device doc
+      (devices/<name>/agents.yaml config.role) and travel with
+      'agents repo push/pull', so a mark set on one box is the whole fleet's
+      answer.
 
       Effect on '--device auto' (agents run, teams, agents ssh auto, and the AGI
       EXT launch commands, which all resolve placement through the CLI):
@@ -1791,7 +1897,7 @@ function registerDevicesCommands(program: Command): void {
     }
 
     if (opts.json) {
-      const jsonRoles = listConfiguredDeviceRoles();
+      const jsonRoles = listConfiguredDeviceRoles(names);
       const autoPool = new Set(filterAutoPool(names, { roles: jsonRoles }));
       process.stdout.write(JSON.stringify(names.map((name) => {
         const config = deviceConfigJson(name);

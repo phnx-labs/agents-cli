@@ -495,8 +495,14 @@ function terminateRoutineTree(pid: number | null): void {
     killTree(pid);
     return;
   }
+  // Detached spawn makes the child a new process-group leader; kill the group.
+  // If setsid has not landed yet (or the pid is not a leader), -pid fails with
+  // ESRCH and the child stays up — also kill the pid itself.
   try {
     process.kill(-pid, 'SIGKILL');
+  } catch { /* not a group leader, or already exited */ }
+  try {
+    process.kill(pid, 'SIGKILL');
   } catch { /* already exited */ }
 }
 

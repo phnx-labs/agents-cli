@@ -243,7 +243,7 @@ agents devices accounts                        Per device, one row per account: 
 agents devices add <name> <target>             Add a device manually (target is user@host or host).
 agents devices apply                           Reconcile the fleet to a declared profile: install agents and sync config.
 agents devices capture                         Snapshot the live environment (roster names, agents, browser, secret-bundle names, routines) into agents.yaml fleet:.
-agents devices config <name> [key] [value...]  Get, set, or unset a device’s settings (scheduler, agent cap, ssh overrides, auto-launch, notes). Bare opens an interactive settings menu (TTY) or prints the resolved config (piped). Stored centrally in ~/.agents/agents.yaml under fleet.devices.<name>.config — synced, so any box can configure any device.
+agents devices config [name] [key] [value...]  Get, set, or unset a device’s settings (scheduler, agent cap, ssh overrides, auto-launch, notes). Bare opens an interactive settings menu (TTY) or prints the resolved config (piped). Per-device values live in the tracked devices/<name>/agents.yaml config: block; --fleet targets the fleet-wide defaults (central fleet.defaults.config) every device inherits unless it overrides the key.
 agents devices harnesses                       Per device, one row per installed agent@version: account, signed-in, quota, and a single ready verdict. SSH-probes each online box.
 agents devices ignore <name>                   Dismiss a node and sync the decision through agents.yaml fleet.discovery (also removes it locally).
 agents devices lease                           Manage the disposable cloud boxes used by `agents run --lease`.

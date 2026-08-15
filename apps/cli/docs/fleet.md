@@ -64,7 +64,7 @@ Hand-authoring `fleet:` is optional — `agents fleet capture` (alias of
 ```
 agents fleet capture              # write agents.yaml → fleet:
 agents fleet capture --dry-run    # print the block, write nothing
-agents fleet capture --from-pins  # record per-device agents from devices/<name>/agents.yaml
+agents fleet capture --from-pins  # also record THIS machine's pinned agents (pins are machine-local, never synced)
 ```
 
 It records device **names** (the roster), the source machine's own agents as

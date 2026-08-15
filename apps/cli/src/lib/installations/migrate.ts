@@ -22,7 +22,7 @@ import { migrateLegacyRoutineActivation, listJobs, validateJob } from '../schedu
 import { setConfigValue } from '../device-config.js';
 import { enabledRoutineNames, replaceEnabledRoutines } from '../routine-activation.js';
 import { evaluateActivationReadiness } from '../routine-readiness.js';
-import { migrateDeviceConfigToCentral } from '../devices/config-migration.js';
+import { migrateDeviceConfigStores } from '../devices/config-migration.js';
 // Two constants only, never the read/write API — migrations still operate on raw
 // YAML so they never take the meta lock or prime the meta cache mid-migration.
 import { DEFAULT_BROWSER_PROFILE_NAME } from '../browser/profiles.js';
@@ -609,22 +609,32 @@ function migratePermissionSetsToPresets(): void {
  * switching is owned by `agents use`, not the migrator.
  */
 function repairAgentConfigSymlinks(): void {
-  // Version pins live in the per-device file post-split (~/.agents/devices/<machine>/
-  // agents.yaml); central agents.yaml may still carry them mid-transition. Read
-  // device first (authoritative), then central, first-seen-agent wins.
+  // Version pins live in the machine-local pins JSON (~/.agents/.history/
+  // devices/pins-<machine>.json); the tracked device doc and central
+  // agents.yaml may still carry them mid-transition. Read pins first
+  // (authoritative), then the legacy locations, first-seen-agent wins.
   const defaults: Array<{ agent: string; version: string }> = [];
-  const collectPins = (file: string): void => {
+  const seen = new Set<string>();
+  const collectJsonPins = (file: string): void => {
+    let pins: { agents?: Record<string, string> };
+    try { pins = JSON.parse(fs.readFileSync(file, 'utf-8')) as typeof pins; } catch { return; }
+    for (const [agent, version] of Object.entries(pins?.agents ?? {})) {
+      if (!seen.has(agent)) { seen.add(agent); defaults.push({ agent, version }); }
+    }
+  };
+  const collectYamlPins = (file: string): void => {
     let text: string;
     try { text = fs.readFileSync(file, 'utf-8'); } catch { return; }
     const block = text.match(/^agents:\s*\n((?:  [^\n]*\n)+)/m);
     if (!block) return;
     for (const line of block[1].split('\n')) {
       const m = line.match(/^\s+([a-z][a-z0-9_-]*):\s*([^\s#]+)/);
-      if (m && !defaults.some((d) => d.agent === m[1])) defaults.push({ agent: m[1], version: m[2] });
+      if (m && !seen.has(m[1])) { seen.add(m[1]); defaults.push({ agent: m[1], version: m[2] }); }
     }
   };
-  collectPins(path.join(USER_DIR, 'devices', machineId(), 'agents.yaml'));
-  collectPins(path.join(USER_DIR, 'agents.yaml'));
+  collectJsonPins(path.join(USER_DIR, '.history', 'devices', `pins-${machineId()}.json`));
+  collectYamlPins(path.join(USER_DIR, 'devices', machineId(), 'agents.yaml'));
+  collectYamlPins(path.join(USER_DIR, 'agents.yaml'));
   if (defaults.length === 0) return;
 
   let repaired = 0;
@@ -1505,8 +1515,8 @@ function migrateVersionResourcesToPatterns(): void {
 /**
  * Split the machine-local fields out of the committed central agents.yaml so it
  * becomes portable and syncs cleanly (no more skip-worktree band-aid):
- *   agents:   -> ~/.agents/devices/<machineId>/agents.yaml  (committed, per-device)
- *   versions: -> ~/.agents/.history/version-resources.json   (gitignored, machine-local)
+ *   agents:   -> ~/.agents/.history/devices/pins-<machineId>.json  (untracked, machine-local)
+ *   versions: -> ~/.agents/.history/version-resources.json         (gitignored, machine-local)
  * Then clear any externally-set skip-worktree bit. Idempotent: no-op once central
  * carries neither field. Operates on raw YAML (never through state.ts).
  */
@@ -1529,16 +1539,18 @@ function migrateSplitDeviceLocalMeta(): void {
   // Only rewrite central when it actually carries machine-local fields — a
   // machine whose agents.yaml is already portable-only is left untouched.
   if (hasLocal) {
-    // agents: -> per-device file (merge, existing device entries win).
+    // agents: -> machine-local pins JSON (merge, existing pins win).
     if (agents && Object.keys(agents).length > 0) {
-      const devicePath = path.join(USER_DIR, 'devices', machineId(), 'agents.yaml');
-      let existing: Record<string, string> = {};
+      const pinsPath = path.join(USER_DIR, '.history', 'devices', `pins-${machineId()}.json`);
+      let existing: { agents?: Record<string, string> } = {};
       try {
-        const dm = yaml.parse(fs.readFileSync(devicePath, 'utf-8')) as { agents?: Record<string, string> };
-        if (dm?.agents) existing = dm.agents;
+        existing = (JSON.parse(fs.readFileSync(pinsPath, 'utf-8')) as { agents?: Record<string, string> }) || {};
       } catch { /* absent */ }
-      fs.mkdirSync(path.dirname(devicePath), { recursive: true });
-      atomicWriteFileSync(devicePath, HEADER + yaml.stringify({ agents: { ...agents, ...existing } }));
+      fs.mkdirSync(path.dirname(pinsPath), { recursive: true });
+      atomicWriteFileSync(
+        pinsPath,
+        JSON.stringify({ ...existing, agents: { ...agents, ...existing.agents } }, null, 2) + '\n',
+      );
     }
 
     // versions: -> machine-local history JSON (merge, existing wins).
@@ -1551,7 +1563,7 @@ function migrateSplitDeviceLocalMeta(): void {
     }
 
     // Strip machine-local fields from central and rewrite (portable only) — after
-    // the device/history writes above, so a crash never loses data.
+    // the pins/history writes above, so a crash never loses data.
     delete meta.agents;
     delete meta.versions;
     atomicWriteFileSync(metaFile, HEADER + yaml.stringify(meta));
@@ -1565,7 +1577,7 @@ function migrateSplitDeviceLocalMeta(): void {
   } catch { /* not a git repo / bit not set */ }
 
   if (hasLocal) {
-    console.error('Split agents.yaml: agents: -> devices/, versions: -> .history/version-resources.json');
+    console.error('Split agents.yaml: agents: -> .history/devices/pins-*.json, versions: -> .history/version-resources.json');
   }
 }
 
@@ -2269,13 +2281,14 @@ export async function runMigration(): Promise<void> {
   // migrateSplitDeviceLocalMeta so the device file is already in its canonical
   // location before this merges an entry into it.
   migrateMachineLocalBrowserProfileOutOfCentral();
-  // Fold per-device operator config (device-doc config:/defaultBrowserProfile
-  // and .history/devices/auto-launch.json) into the central
-  // fleet.devices.<name>.config block. After migrateSplitDeviceLocalMeta so the
-  // device docs are in their canonical location. Also invoked on daemon boot
-  // and on the first device-config read/write in a process, so sentinel'd
-  // installs (which skip this whole run) still converge.
-  migrateDeviceConfigToCentral();
+  // Converge the device-config/pins stores: fold the central
+  // fleet.devices.<name>.config block + legacy auto-launch.json into the
+  // per-device docs' config:, and extract pins from tracked docs into the
+  // untracked pins JSON. After migrateSplitDeviceLocalMeta so the pins file is
+  // in its canonical location. Also invoked on daemon boot and on the first
+  // device-config read/write in a process, so sentinel'd installs (which skip
+  // this whole run) still converge.
+  migrateDeviceConfigStores();
   // Bucket moves: collapse runtime state into ~/.agents/.history and ~/.agents/.cache.
   migrateRuntimeToHistory();
   migrateLegacySessionMarkersToBookmarks();

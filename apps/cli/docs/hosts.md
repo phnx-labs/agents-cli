@@ -73,13 +73,12 @@ reachable, `--device auto` fails loud naming the fix rather than quietly running
 on the machine you are sitting at — including through `agents ssh auto` and the
 generic `--device auto` passthrough, which resolve `auto` via the same pool.
 
-Roles live in the fleet-**shared** `fleet.devices.<name>.config.role` block of
-`~/.agents/agents.yaml` and travel with `agents repo push` / `pull`; the
-per-device files under `~/.agents/devices/` are written only by the machine they
-name — that is what keeps them conflict-free — so they could never hold a
-fleet-wide answer about a *different* box. `agents devices list` tags marked rows, and
-`agents devices list --json` carries `role` plus an `autoPool` boolean per
-device.
+Roles live in that device's tracked `devices/<name>/agents.yaml` `config.role`
+and travel with `agents repo push` / `pull`. Per-device files are
+conflict-free because each machine writes only its own folder; a role set
+from any box writes that device's folder, not a shared central map.
+`agents devices list` tags marked rows, and `agents devices list --json`
+carries `role` plus an `autoPool` boolean per device.
 
 ### `agents run auto` — all three routing layers
 

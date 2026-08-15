@@ -29,6 +29,14 @@ export interface FleetDefaults {
   sync?: string[];
   /** Login propagation strategy. Default `'sync'`. */
   login?: FleetLoginMode;
+  /**
+   * Fleet-wide config defaults (`agents devices config --fleet <key> <value>`)
+   * — the middle layer of the device-config store: built-in default <
+   * `fleet.defaults.config` < per-device `devices/<name>/agents.yaml`
+   * `config:`. Inert to the reconcile engine (apply never pushes it; it takes
+   * effect through the config read path). Names and non-secret values only.
+   */
+  config?: Record<string, unknown>;
 }
 
 /** Per-device override; any omitted field inherits from `defaults`. */
@@ -37,12 +45,10 @@ export interface FleetDeviceOverride {
   sync?: string[];
   login?: FleetLoginMode;
   /**
-   * Operator config for this device, written by `agents devices config <name>`
-   * — the device-scope keys of the `lib/device-config.ts` registry (maxAgents,
-   * schedulerEnabled, ssh*, autoLaunch*, notes, …). This is the ONE store for
-   * per-device settings: central, synced, and backed up with agents.yaml.
-   * LEAK-FREE like the rest of the manifest — names and non-secret values only
-   * (a secrets-bundle NAME is fine; a credential value never is).
+   * LEGACY home of per-device operator config (#2458); the current store is the
+   * per-device doc `devices/<name>/agents.yaml` `config:` block. Existing
+   * values are folded into the device doc by lib/devices/config-migration.ts
+   * and stripped here — current code never writes this field.
    */
   config?: Record<string, unknown>;
 }
