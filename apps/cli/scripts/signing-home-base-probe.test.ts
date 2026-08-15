@@ -168,7 +168,7 @@ describe('signing home-base probe: it cannot advance a release', () => {
 
 describe('release.sh: the preflight gates the mutating phases', () => {
   it('calls assert_signing_home_base before the crabbox, PR, merge, and tag push', () => {
-    const lines = fs.readFileSync(RELEASE, 'utf-8').split('\n');
+    const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
     const lineOf = (needle: RegExp) => {
       const i = lines.findIndex((l) => needle.test(l));
       expect(i, `expected to find ${needle} in release.sh`).toBeGreaterThanOrEqual(0);
@@ -200,7 +200,7 @@ describe('release.sh: the preflight gates the mutating phases', () => {
 function runAssert(probeExit: 'fail' | 'pass'): { status: number | null; out: string } {
   // Extract the function definition (from its header to the first line that is a
   // bare `}` at column 0) rather than sourcing release.sh, which executes.
-  const lines = fs.readFileSync(RELEASE, 'utf-8').split('\n');
+  const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
   const start = lines.findIndex((l) => l.startsWith('assert_signing_home_base() {'));
   expect(start, 'assert_signing_home_base() { not found').toBeGreaterThanOrEqual(0);
   const end = lines.findIndex((l, i) => i > start && l === '}');
