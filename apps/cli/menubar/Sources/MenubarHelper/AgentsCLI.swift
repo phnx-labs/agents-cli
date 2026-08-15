@@ -63,6 +63,13 @@ enum AgentsCLI {
         return kill(pid_t(pid), 0) == 0 ? pid : nil
     }
 
+    static func daemonLiveness() -> DaemonLiveness {
+        let pid = daemonPid()
+        let path = "\(home)/.agents/.cache/helpers/daemon/heartbeat.json"
+        let heartbeat = FileManager.default.contents(atPath: path)
+        return DaemonLiveness.classify(pid: pid, heartbeatData: heartbeat)
+    }
+
     // Routines are secondary and fetched only when the menu opens. This shells
     // the CLI, but `routines list` does NOT trigger the sessions re-index — it
     // only computes cron next-run, which is cheap. Session data never comes from
@@ -174,6 +181,7 @@ enum AgentsCLI {
 
     static func startScheduler() { runDetached(argv(["routines", "start"])) }
     static func stopDaemon() { runDetached(argv(["routines", "stop"])) }
+    static func restartDaemon() { runDetached(argv(["daemon", "restart"])) }
 
     // NEW DEVICES actions. `register` adds the pending node to the registry;
     // `ignore` dismisses it for good. Both clear the pending sentinel CLI-side,
@@ -266,8 +274,28 @@ enum AgentsCLI {
         return found.sorted { $0.mtime > $1.mtime }.prefix(limit).map { $0.path }
     }
 
-    static func linearSkillBinary() -> String {
-        "\(home)/.agents/skills/linear/scripts/linear"
+    static let linearNotFoundMessage = "Linear CLI not found. Install it at ~/.local/bin/linear."
+
+    static func executable(named name: String, in directories: [String]) -> String? {
+        for directory in directories {
+            let candidate = (directory as NSString).appendingPathComponent(name)
+            var isDirectory: ObjCBool = false
+            let exists = FileManager.default.fileExists(atPath: candidate, isDirectory: &isDirectory)
+            if exists, !isDirectory.boolValue,
+               FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
+        }
+        return nil
+    }
+
+    static func linearSearchDirectories(home: String = home, path: String? = env["PATH"]) -> [String] {
+        var directories = ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin"]
+        if let path { directories += path.split(separator: ":").map(String.init) }
+        var seen = Set<String>()
+        return directories.filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    static func linearBinary(home: String = home, path: String? = env["PATH"]) -> String? {
+        executable(named: "linear", in: linearSearchDirectories(home: home, path: path))
     }
 
     // MARK: Linear tickets in the quick-dispatch panel
@@ -275,7 +303,8 @@ enum AgentsCLI {
     // `linear projects --json`, so the panel can scope its ticket list to the
     // project behind the picked repo (LinearTickets.resolveProject).
     static func linearProjectsAsync(completion: @escaping ([LinearProject]?) -> Void) {
-        runMonitored([linearSkillBinary(), "projects", "--json"]) { text, ok in
+        guard let binary = linearBinary() else { completion(nil); return }
+        runMonitored([binary, "projects", "--json"]) { text, ok in
             guard ok, let data = text.data(using: .utf8),
                   let projects = try? JSONDecoder().decode([LinearProject].self, from: data) else {
                 completion(nil)
@@ -290,8 +319,8 @@ enum AgentsCLI {
     // pick up next" is not the cycle order Linear returns. `--all` drops the CLI's
     // default per-agent filter so a ticket delegated to another agent is still
     // offered.
-    static func linearTicketArgs(project: String) -> [String] {
-        [linearSkillBinary(), "tasks", "--all",
+    static func linearTicketArgs(project: String, binary: String) -> [String] {
+        [binary, "tasks", "--all",
          "--project", project,
          "--status", "open",
          "--cycle", "all",
@@ -300,7 +329,8 @@ enum AgentsCLI {
 
     static func linearTicketsAsync(project: String,
                                    completion: @escaping ([LinearTicket]?) -> Void) {
-        runMonitored(linearTicketArgs(project: project)) { text, ok in
+        guard let binary = linearBinary() else { completion(nil); return }
+        runMonitored(linearTicketArgs(project: project, binary: binary)) { text, ok in
             guard ok, let data = text.data(using: .utf8),
                   let decoded = try? JSONDecoder().decode(LinearTasksResponse.self, from: data) else {
                 completion(nil)
@@ -498,8 +528,8 @@ enum AgentsCLI {
     // Build the deterministic `linear create` argv for a parsed ticket draft,
     // appending every selected screenshot as `--image <path>` so paths pass
     // through Swift argv (safe for spaces/`@` in CleanShot filenames).
-    static func ticketCreateArgs(draft: TicketDraft, screenshotPaths: [String]) -> [String] {
-        var args = [linearSkillBinary(), "create", draft.title,
+    static func ticketCreateArgs(draft: TicketDraft, screenshotPaths: [String], binary: String) -> [String] {
+        var args = [binary, "create", draft.title,
                     "--priority", draft.priority,
                     "--project", draft.project,
                     "--label", draft.label,
@@ -541,6 +571,10 @@ enum AgentsCLI {
     }
 
     static func dispatchTicketAgent(note: String, screenshotPaths: [String], agent: String? = nil, cwd: String? = nil) {
+        guard let linear = linearBinary() else {
+            Notifier.post(title: "Cannot create ticket", body: linearNotFoundMessage)
+            return
+        }
         let prompt = ticketAgentPrompt(note: note, screenshotPaths: screenshotPaths)
         let agent = agent ?? env["AGENTS_ISSUE_AGENT"] ?? "claude"
         Notifier.post(title: "Filing ticket…", body: shortenForNotice(note), agent: agent)
@@ -554,7 +588,7 @@ enum AgentsCLI {
                               agent: agent)
                 return
             }
-            let args = ticketCreateArgs(draft: draft, screenshotPaths: screenshotPaths)
+            let args = ticketCreateArgs(draft: draft, screenshotPaths: screenshotPaths, binary: linear)
             guard let descriptionData = draft.description.data(using: .utf8) else {
                 Notifier.post(title: "Ticket agent finished", body: "Could not encode description.", agent: agent)
                 return
@@ -564,7 +598,7 @@ enum AgentsCLI {
                 guard createOk, let completion = ticketCompletion(output: createOutput) else {
                     Notifier.post(title: "Ticket creation failed",
                                   body: createOk ? "Could not confirm a ticket was created."
-                                               : "linear create exited with an error.",
+                                               : ticketCreateFailureMessage(createOutput),
                                   agent: agent)
                     return
                 }
@@ -646,6 +680,14 @@ enum AgentsCLI {
     private static func shortenForNotice(_ s: String) -> String {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
         return t.count > 80 ? String(t.prefix(79)) + "…" : t
+    }
+
+    static func ticketCreateFailureMessage(_ output: String) -> String {
+        let detail = output
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty }
+        return detail.map { shortenForNotice($0) } ?? "linear create exited with an error."
     }
 
     // Seed `agents run --name` from the user's own task text — the first few words,
@@ -784,12 +826,12 @@ enum AgentsCLI {
         let inPipe = Pipe()
         p.standardOutput = out
         p.standardInput = inPipe
-        p.standardError = FileHandle.nullDevice
+        p.standardError = out
         do {
             try p.run()
             monitored.append(p)
         } catch {
-            DispatchQueue.main.async { onFinish("", false) }
+            DispatchQueue.main.async { onFinish(error.localizedDescription, false) }
             return
         }
         // Feed stdin and drain stdout off the main thread, for the same reason as

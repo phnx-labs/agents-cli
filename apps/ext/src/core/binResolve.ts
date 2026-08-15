@@ -8,7 +8,7 @@
 // Resolving to an absolute path up front removes any dependence on the child
 // process's PATH-lookup semantics.
 
-import { existsSync, statSync } from 'fs';
+import { accessSync, constants, existsSync, statSync } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
@@ -38,7 +38,10 @@ export function resolveExecutable(name: string, dirs: string[] = commonBinDirs()
   for (const dir of dirs) {
     const full = path.join(dir, name);
     try {
-      if (existsSync(full) && statSync(full).isFile()) return full;
+      if (existsSync(full) && statSync(full).isFile()) {
+        accessSync(full, constants.X_OK);
+        return full;
+      }
     } catch { /* unreadable dir — skip */ }
   }
   return null;

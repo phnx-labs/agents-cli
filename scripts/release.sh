@@ -68,7 +68,7 @@ done
 case "$ARCH" in arm64|x64|universal) ;; *) die "invalid arch: $ARCH" ;; esac
 
 TAG="agents-dbg-v${VERSION}"
-REPO="${GITHUB_REPOSITORY:-phnx-labs/agents-cli}"
+REPO="${GITHUB_REPOSITORY:-phnx-labs/agi-cli}"
 ZIP_NAME="agents-dbg-${VERSION}-${ARCH}.zip"
 DMG_NAME="agents-dbg-${VERSION}-${ARCH}.dmg"
 ZIP_PATH="$APP_DIR/release/$ZIP_NAME"

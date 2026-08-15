@@ -13,7 +13,7 @@ const fs = require('fs');
 const pkg = JSON.parse(fs.readFileSync('apps/ext/app/package.json', 'utf8'));
 const repository = pkg.repository;
 const url = typeof repository === 'string' ? repository : repository?.url;
-if (!url || !url.includes('github.com/phnx-labs/agents-cli')) {
+if (!url || !url.includes('github.com/phnx-labs/agi-cli')) {
   throw new Error('apps/ext/app/package.json must declare repository metadata so electron-builder works from git worktrees');
 }
 NODE

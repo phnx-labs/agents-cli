@@ -240,17 +240,23 @@ export function buildAgentLaunchCommand(
 }
 
 /**
- * Wrap a native-mode agent launch command with `exec` so the shell process is
- * replaced by the agent runner. When the runner exits the terminal process exits
- * too, which causes VS Code to close the tab automatically — mirroring the
- * pane-died behaviour tmux mode already has.
+ * Wrap a native-mode agent launch command so the outcome decides whether the
+ * tab closes. On a clean exit (status 0 — the agent ran and the user quit it,
+ * or the runner otherwise finished normally) the wrapper `exit`s the shell,
+ * which closes the VS Code tab automatically — mirroring the pane-died
+ * behaviour tmux mode already has. On a nonzero exit (a launch failure: the
+ * remote host is unreachable, the CLI rejects the invocation, the binary is
+ * missing) the wrapper leaves the interactive shell running instead of
+ * exiting, so the tab — and the error text already printed into it — stays on
+ * screen for the user to read (RUSH-2593: an `exec`-replaced process died on a
+ * bad remote launch and the terminal closed before anyone could see why).
  *
- * Shell tabs must NOT be exec-prefixed: the user drives them interactively and
- * keeping the parent shell alive is the expected behaviour.
+ * Shell tabs must NOT be wrapped: the user drives them interactively and
+ * keeping the parent shell alive on any exit is the expected behaviour.
  */
 export function wrapNativeAgentCommand(command: string, isShell: boolean): string {
   if (!command || isShell) return command;
-  return `exec ${command}`;
+  return `${command}; ec=$?; if [ "$ec" -eq 0 ]; then exit 0; else echo "Agent exited with status $ec — terminal kept open so you can read the error above."; fi`;
 }
 
 // The launch contract (apps/ext/AGENTS.md § "Launch contract"): EVERY agent

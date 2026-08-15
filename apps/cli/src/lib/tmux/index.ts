@@ -36,6 +36,8 @@ export {
   capturePane,
   readSessionMeta,
   TmuxSessionError,
+  reconcileSessionHooks,
+  ensureSessionHookRepaired,
   type SessionMeta,
   type CreateSessionOptions,
   type ListedSession,

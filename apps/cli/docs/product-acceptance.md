@@ -143,7 +143,7 @@ agents <cmd> …
 
 ---
 
-## Examples (agents-cli shaped)
+## Examples (agi-cli shaped)
 
 ### 1. Sessions host column
 

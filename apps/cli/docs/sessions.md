@@ -702,6 +702,17 @@ cross-machine rows (interactive, headless, teams, and sub-agent sessions share
 the same path). The picker preview also shows the originating user prompt and a
 width-capped `Dirs:` line of directories touched.
 
+A row another device owns (`_remote` — its transcript is on the peer's disk)
+gets the same full pane, not a metadata stub: the picker fetches that peer's
+already-computed digest over SSH (`fetchPeerPreviewDigest` in
+`src/lib/session/remote-list.ts` runs the peer's own `sessions preview <id>
+--local --json`) the first time the row is previewed and repaints the pane in
+place when it lands. While the fetch is in flight the pane shows the metadata
+card plus a `fetching preview from <device> over SSH…` note; a peer that cannot
+answer (asleep, unregistered, version-skewed) leaves the metadata card, cached
+so arrowing over the row does not re-dial it. Peer-supplied digest strings are
+scrubbed of terminal escapes before rendering (`sanitizeRemoteDigest`).
+
 Both renders of a session — the picker quick preview and the full summary —
 share one extraction module (`src/lib/session/highlights.ts`) for the "what did
 this session use and produce" lines, so they never disagree:

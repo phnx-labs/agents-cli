@@ -9,6 +9,9 @@
  */
 
 import { AGENTS, MANAGED_AGENT_IDS } from './agents.js';
+// agent-spec/primitives is a leaf module — importing it creates no cycle, and it
+// is the only compareVersions that honors OpenClaw's `-N` rebuild suffix.
+import { compareVersions } from './agent-spec/primitives.js';
 import type {
   AgentId,
   Capability,
@@ -16,21 +19,6 @@ import type {
   CapabilityResult,
   RulesCapability,
 } from './types.js';
-
-/**
- * Compare semver-like versions ("0.116.0" vs "0.115.9"). Local copy to avoid
- * importing versions.ts (which imports agents.ts, which imports this file).
- */
-function compareVersions(a: string, b: string): number {
-  const aParts = a.split('.').map((n) => parseInt(n, 10) || 0);
-  const bParts = b.split('.').map((n) => parseInt(n, 10) || 0);
-  for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
-    const aVal = aParts[i] || 0;
-    const bVal = bParts[i] || 0;
-    if (aVal !== bVal) return aVal - bVal;
-  }
-  return 0;
-}
 
 function getCapability(agent: AgentId, cap: CapabilityName): Capability | RulesCapability | undefined {
   // Guard against unknown agent ids (e.g. a caller passing "claude@2.1.168"

@@ -24,7 +24,7 @@ import type { AgentId } from '../lib/types.js';
 import { enrichTeamOrigins, safeTeamText, shouldShowTeamSessions } from '../lib/session/team-filter.js';
 import { listBookmarks, toggleBookmark } from '../lib/session/bookmarks.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
-import { buildPreview } from './sessions-picker.js';
+import { buildPreview, setRemotePreviewRepaint } from './sessions-picker.js';
 import {
   formatPickerLabel,
   pickerColumnsFor,
@@ -795,6 +795,9 @@ export async function runSessionBrowser(
       const body = buildPreview(s);
       return headline ? `${headline}\n${body}` : body;
     },
+    // A remote row's digest arrives over SSH after the pane painted — this is
+    // what lets its completion swap the metadata card for the full preview.
+    registerPreviewRepaint: setRemotePreviewRepaint,
     headerFor: (f) =>
       unreachable.length > 0
         ? `${headerFor(f)} · ${chalk.yellow(`${unreachable.join(', ')}: unreachable`)}`
@@ -837,7 +840,8 @@ export async function runSessionBrowser(
       }
       return undefined;
     },
-  });
+    // A late digest fetch must not poke a closed prompt.
+  }).finally(() => setRemotePreviewRepaint(undefined));
 
   if (!picked) return;
   if (picked.action === 'focus') {

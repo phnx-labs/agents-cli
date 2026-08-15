@@ -617,6 +617,44 @@ export async function resolvePeerTarget(machine: string): Promise<{ target: stri
   return undefined;
 }
 
+/** Interactive ceiling for a picker-driven peer preview fetch. Tighter than the
+ * fan-out's 60s: the user is arrowing through rows, and a peer that can't
+ * answer a one-session digest in this window should degrade to the metadata
+ * card rather than hold a "fetching…" pane open. */
+const PEER_PREVIEW_TIMEOUT_MS = 15_000;
+
+/**
+ * Fetch one remote session's preview digest from its owning peer — the data
+ * behind the picker pane for a `_remote` row, whose transcript file this
+ * machine cannot parse. Runs the peer's own `agents sessions preview <id>
+ * --local --json` (the same envelope `agents sessions preview` already
+ * delegates to for a remote id) and returns its `preview` object, verbatim and
+ * UNSANITIZED — the caller owns scrubbing peer-supplied strings before any of
+ * them reach a TTY. Undefined on every failure: unregistered machine, SSH
+ * error, timeout, version-skewed peer with no `--json` preview envelope.
+ */
+export async function fetchPeerPreviewDigest(
+  sessionId: string,
+  machine: string,
+  timeoutMs = PEER_PREVIEW_TIMEOUT_MS,
+): Promise<unknown | undefined> {
+  const peer = await resolvePeerTarget(machine);
+  if (!peer) return undefined;
+  const cmd = remoteListCommand(['sessions', 'preview', sessionId, '--local', '--json'], peer.os);
+  const capture = await sshCapture(peer.target, cmd, timeoutMs);
+  if (capture.code !== 0) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripClixml(capture.stdout));
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+  const preview = (parsed as { preview?: unknown }).preview;
+  if (!preview || typeof preview !== 'object' || Array.isArray(preview)) return undefined;
+  return preview;
+}
+
 /**
  * Run `agents <args>` ON a peer over SSH, attached to this terminal (inherited
  * stdio). `args` is the full arg vector after the binary — callers pass e.g.

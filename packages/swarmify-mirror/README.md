@@ -15,4 +15,4 @@ npm uninstall -g @companion/agents-cli
 npm install -g @phnx-labs/agents-cli
 ```
 
-Docs and source: <https://github.com/phnx-labs/agents-cli>
+Docs and source: <https://github.com/phnx-labs/agi-cli>

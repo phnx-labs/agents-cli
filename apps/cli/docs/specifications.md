@@ -1,10 +1,10 @@
-# agents-cli — Specifications
+# agi-cli — Specifications
 
 > Status: **accepted** · Kind: **normative spec** · Scope: the top-level
-> behavioral contracts for the agents-cli subsystems listed in the
+> behavioral contracts for the agi-cli subsystems listed in the
 > [coverage inventory](#coverage-inventory) — not every command group.
 
-This is the **source-of-truth contract** for agents-cli: what a human, an agent,
+This is the **source-of-truth contract** for agi-cli: what a human, an agent,
 or a downstream tool is entitled to rely on, stated as testable requirements —
 one section per major functionality. It exists because features have regressed by
 quietly deviating from an unwritten contract (a harness parser that throws on a
@@ -160,9 +160,9 @@ SSH access (§7); rendering sessions that no harness produced.
 #### 3.1 Discovery & harness parsing
 
 - **SES-1 (MUST).** The canonical session-capable harness set is
-  `SESSION_AGENTS` — exactly these 12, in display order: `claude, codex, gemini,
-  antigravity, opencode, openclaw, rush, hermes, grok, kimi, droid, cursor`
-  (`lib/session/types.ts:14`). Adding harness discovery MUST extend this set (and
+  `SESSION_AGENTS` — exactly these 13, in display order: `claude, codex, gemini,
+  antigravity, opencode, openclaw, rush, hermes, grok, kimi, droid, cursor, muse`
+  (`lib/session/types.ts:17`). Adding harness discovery MUST extend this set (and
   its parser + `dispatchAgentScan` arm), not special-case a caller.
 - **SES-2 (MUST).** Each harness's transcript location + on-disk format is fixed
   and MUST be parsed from its native shape (JSONL / single-JSON / SQLite / CLI
@@ -814,9 +814,10 @@ SSH access (§7); rendering sessions that no harness produced.
 
 #### 4.1 Command surface
 
-The command surface (bare `sessions [query]`, `preview`, `tail`, `sync`, `resume`, `focus`,
-`detach`, `attach`, `inject`, `export`, `import`, `migrate`/`relocate`,
-`migrations`, `backfill tools`, `fork`) with flags is the reference in
+The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `detach`,
+`inject`, `export`, `render`, `import`, `migrate`/`relocate`, `migrations`,
+`backfill tools`/`backfill resources`, `fork`, `bookmark`, `stats`, `insights`,
+`optimize`, `watch`) with flags is the reference in
 [sessions.md](sessions.md); this spec governs the guarantees behind it.
 
 #### 4.2 Machine-readable output (STABLE — agents depend on these)
@@ -831,8 +832,8 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `sync`, `resume
 - **SES-IF-2 (MUST).** `sessions --active --json` MUST emit `ActiveSession[]` with
   `ticketId`/`project`/`prLink` always present as keys (test
   `sessions.serialize.test.ts:76-115`); `tail --json` MUST pass raw JSONL through
-  one event per line (`commands/sessions-tail.ts:229-232`); `sync --json`,
-  `inject --json`, `migrations --json` emit their documented shapes.
+  one event per line (`commands/sessions-tail.ts:229-232`); `inject --json` and
+  `migrations --json` emit their documented shapes.
 - **SES-IF-2a (MUST).** `sessions --resolve <selector> --json` MUST resolve a full
   id, unique id prefix, or keyword query from indexed `SessionMeta` rows without
   parsing or rendering transcript events. It MUST search the online fleet unless
@@ -1499,7 +1500,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
 - **SEC-29 (MUST).** **Unlock once, stays unlocked — the durability contract.** A
   bundle on the `never` tier MUST read silently *forever* once set: through process
   death, system sleep, a full power-off/reboot, an arbitrarily long gap (30+ days),
-  an agents-cli upgrade, **and a macOS upgrade** — with **no Touch ID, no
+  an agi-cli upgrade, **and a macOS upgrade** — with **no Touch ID, no
   passphrase, and no environment variable** — until the value is rotated, the tier
   is changed, or the bundle is deleted. This is achievable only because a `never`
   item carries no biometric ACL (`set-no-acl`,
@@ -1512,7 +1513,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
   locked-screen reads — so "never re-prompts across an OS upgrade" and
   "biometry-gated per read" are mutually exclusive by construction. The `hold` tier
   gives the weaker durability: one prompt, then held silently for the hold window,
-  surviving a broker restart / agents-cli upgrade via the durable no-ACL session
+  surviving a broker restart / agi-cli upgrade via the durable no-ACL session
   store (`lib/secrets/session-store.ts:1-26`) but re-prompting once after the window
   expires or biometrics are re-enrolled.
 - **SEC-29a (MUST NOT).** The default keychain flow MUST NOT require a passphrase or
@@ -2600,7 +2601,7 @@ nothing but its own view cache.
 ### 3. Requirements
 
 - **SING-1 (MUST).** Every fleet-affecting capability MUST have exactly one scheduler
-  and one executor: the agents-cli daemon (`agents __daemon-run`,
+  and one executor: the agi-cli daemon (`agents __daemon-run`,
   `apps/cli/src/lib/daemon.ts`) or a CLI command the daemon or the user drives.
   Status: **Current** for routines (`lib/scheduler.ts`) and rotate
   (`lib/watchdog/rotate.ts`). `agents daemon` is the user-facing runtime
@@ -2610,20 +2611,27 @@ nothing but its own view cache.
   authentication health are first-party account state and run as one in-process
   daemon service (`lib/account-state-service.ts`); explicit CLI refreshes enter
   the same cross-process per-account lease (`lib/refresh-coordinator.ts`). The
-  watchdog, device-probe, tmux-reconcile, launch-health, session-cache-warm, and
-  auto-dispatch ticks (RUSH-2353) were
-  formerly hardcoded `setInterval`s inside `runDaemon()` — a second, unowned
-  scheduling path duplicating what routines already provide (declaration, run
-  history, pause, device pin). They are now **daemon-owned built-in routines**
-  (`lib/builtin-routines.ts`, RUSH-2465): the definitions live in daemon code and
-  are injected as the lowest layer of `listJobs()`, below project > user > system,
-  so a same-named on-disk file (a `~/.agents/routines/` override) still shadows
-  them. Each `command:` invokes the migrated tick body (`lib/daemon-ticks.ts`) via
-  `agents __daemon-tick <name>`, fired by the same pid-claimed `JobScheduler` as
-  every other routine — one scheduler, one executor, still declared/listed/
-  run-tracked/pausable/device-pinnable, but no longer shipped from the
-  `gh:phnx-labs/.agents-system` config repo every install pulls (only
-  `check-updates` remains a system routine there).
+  watchdog, device-probe, session-cache-warm, and auto-dispatch ticks
+  (RUSH-2353) were briefly promoted to **daemon-owned built-in routines**
+  (`lib/builtin-routines.ts`, RUSH-2465) — declarations injected as the lowest
+  layer of `listJobs()` so `agents routines list`/`pause`/`devices` could manage
+  them like any other routine, each `command:` invoking the migrated tick body
+  via `agents __daemon-tick <name>`. That registry was **reverted** (RUSH-2495):
+  `builtin-routines.ts`, the `__daemon-tick` entrypoint, and `JobConfig.builtin`
+  are gone. `watchdog`, `device-probe`, and `session-cache-warm` are again plain
+  hardcoded `setInterval`s inside `runDaemon()` (`runWatchdogTick`,
+  `runDeviceProbeTick`, `runActiveSessionsWarm`) — invisible to `agents
+  routines`, but still the single daemon-owned scheduler/executor SING-1
+  requires, since nothing else calls them. `auto-dispatch` and `launch-health`
+  were deleted outright with no replacement. **`tmux-reconcile`** (the 5-minute
+  poll that retrofitted a stale `pane-died` hook onto managed tmux sessions) was
+  also deleted, but — unlike `auto-dispatch`/`launch-health` — its job is
+  covered without a poll (RUSH-2435): the daemon repairs every managed session's
+  hook once at startup, `ensureSessionHookRepaired` (`lib/tmux/session.ts`)
+  repairs a single session right before each of `agents run
+  --resume`/`focus`/`go`/`tmux attach` attaches to it, and `runMigration`
+  (`lib/migrate.ts`) repairs the fleet again at upgrade time as the
+  version-skew one-shot.
 - **SING-1a (MUST).** Ordinary usage/auth consumers MUST be cache-only. This
   includes routing (`agents run` and teams), `view`, `versions`, `usage`, device
   inventory, and UI consumers. A missing snapshot MUST render as stale or

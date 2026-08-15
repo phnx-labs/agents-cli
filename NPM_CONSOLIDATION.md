@@ -17,11 +17,11 @@ These commands require npm **publish auth** for the `@phnx-labs` and `@companion
 ```bash
 # Deprecate every version of the agi-cli alias.
 npm deprecate "@phnx-labs/agi-cli@*" \
-  "Deprecated: install @phnx-labs/agents-cli instead (same CLI). See https://github.com/phnx-labs/agents-cli"
+  "Deprecated: install @phnx-labs/agents-cli instead (same CLI). See https://github.com/phnx-labs/agi-cli"
 
 # Deprecate every version of the legacy @companion redirect stub.
 npm deprecate "@companion/agents-cli@*" \
-  "Deprecated: install @phnx-labs/agents-cli instead. See https://github.com/phnx-labs/agents-cli"
+  "Deprecated: install @phnx-labs/agents-cli instead. See https://github.com/phnx-labs/agi-cli"
 ```
 
 Notes:

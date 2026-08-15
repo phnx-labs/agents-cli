@@ -43,6 +43,7 @@ import { repoSlugFromPath } from '../core/projectIndex';
 import { matchLinearProject } from '../core/linearProjects';
 import { fetchLinearProjects } from './linear.vscode';
 import { resolveForemanTarget, candidateName } from '../core/foreman.target';
+import { LINEAR_NOT_FOUND_MESSAGE, resolveLinearBin } from '../core/linearBin';
 import * as workspaceConfig from './swarmifyConfig.vscode';
 import { createSymlinksCodebaseWide } from './agentlinks.vscode';
 import { scanMemoryFiles } from './contextFiles';
@@ -766,7 +767,6 @@ async function messageAgentForForeman(
 // Todo status, medium priority — so the voice flow is one command: "create
 // a ticket called X". The CLI parses the resulting first line:
 //   "Created RUSH-585: <title>  [<project> | <assignee>]"
-const LINEAR_SCRIPT_PATH = path.join(homedir(), '.agents/skills/linear/scripts/linear');
 const execFileAsync = promisify(execFile);
 
 async function createTicketForForeman(
@@ -774,6 +774,8 @@ async function createTicketForForeman(
 ): Promise<foreman.ForemanCreateTicketResult> {
   const title = (opts.title ?? '').trim();
   if (!title) return { ok: false, message: 'No title given.' };
+  const linearBin = resolveLinearBin();
+  if (!linearBin) return { ok: false, message: LINEAR_NOT_FOUND_MESSAGE };
 
   const args: string[] = ['create', title];
   if (opts.description) args.push('--description', opts.description);
@@ -782,7 +784,7 @@ async function createTicketForForeman(
   for (const label of opts.labels ?? []) args.push('--label', label);
 
   try {
-    const { stdout } = await execFileAsync(LINEAR_SCRIPT_PATH, args, { timeout: 15_000 });
+    const { stdout } = await execFileAsync(linearBin, args, { timeout: 15_000 });
     const firstLine = (stdout || '').split('\n').find((l) => l.trim().length > 0) ?? '';
     const m = firstLine.match(/Created\s+([A-Z][A-Z0-9]*-\d+):\s*(.+?)(?:\s{2,}\[|$)/);
     if (m) {

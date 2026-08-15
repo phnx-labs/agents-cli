@@ -34,7 +34,7 @@ const Vignette: React.FC = () => (
   />
 );
 
-// Typewriter caption above the terminal. Same mono font as agents-cli.sh.
+// Typewriter caption above the terminal. Same mono font as agi-cli.sh.
 const CaptionOverlay: React.FC<{
   text: string;
   frameInScene: number;
@@ -298,7 +298,7 @@ const Finale: React.FC<{ frameInScene: number; fps: number }> = ({
           background: "rgba(163,230,53,0.04)",
         }}
       >
-        $ curl -fsSL agents-cli.sh | sh
+        $ curl -fsSL agi-cli.sh | sh
       </div>
 
       <div

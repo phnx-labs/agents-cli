@@ -526,7 +526,7 @@ agents teams status my-team --json
 # Full status as JSON (legacy shape — prompt, all paths, all messages)
 agents teams status my-team --json --verbose
 
-# All teams as JSON (used by agents-cli observability layer)
+# All teams as JSON (used by agi-cli observability layer)
 agents teams list --json
 ```
 

@@ -6,6 +6,45 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+## [0.9.321] - 2026-08-14
+
+- **`Agents: Attach` finds your backgrounded agents again (RUSH-2670).** A
+  detached session's stream row names its terminal app in `host` — for a
+  backgrounded agent that is the bare tmux server, so the presentation store
+  (which fell back to `host` when the row had no `machine`) presented it as
+  living on a machine called "tmux". The Attach command's this-machine filter
+  then never matched, and `Agents: Attach` always reported "No backgrounded
+  agents to bring forward" even seconds after a successful Detach. The store
+  now takes device identity from `machine` (offloaded rows) or `sourceDevice`
+  (everything else) and never from the terminal-app `host`. Source:
+  `apps/ext/src/core/sessionPresentationStore.ts`.
+
+## [0.9.320] - 2026-08-14
+
+- **Crash-restart no longer reopens every tab in a thundering herd (RUSH-2477).**
+  `restoreAgentTerminals` reopened each persisted tab and fired its resume with no
+  cap or stagger, so N crashed tabs became N near-simultaneous resume processes
+  within seconds of boot — the trigger that overwhelmed the resume path (DB-lock
+  crashes, boot-time fleet fan-out). Restore is now bounded and staggered through a
+  new pure `runStaggered` helper (`src/core/restoreThrottle.ts`): at most
+  `RESTORE_MAX_CONCURRENCY` (2) tabs restore at once, and each start after the first
+  is spaced by `RESTORE_STAGGER_MS` (300ms). A tab that fails to restore no longer
+  strands the rest of the batch. Source: `apps/ext/src/core/restoreThrottle.ts`,
+  `apps/ext/src/vscode/extension.ts`.
+
+- **A failed agent launch no longer closes the terminal before you can read
+  why (RUSH-2593).** Native-mode tabs prefixed the launch command with `exec`
+  (RUSH-2026) so the shell process was replaced by the agent runner — closing
+  the tab automatically once the runner exited. That was right for a clean
+  exit, but a *launch failure* (an unreachable `--host`, an `agents run`
+  rejection) killed the exec'd process just as fast, and the tab closed before
+  the error text on screen could be read. `wrapNativeAgentCommand` now runs the
+  launch command normally and checks its exit status: 0 still closes the tab
+  (unchanged clean-exit behavior); nonzero prints
+  `Agent exited with status <n> — terminal kept open so you can read the error
+  above.` and leaves the interactive shell running instead of exiting. Source:
+  `apps/ext/src/core/agents.ts` (`wrapNativeAgentCommand`).
+
 - **`Agents: New <Harness>` runs where you say — and defaults to the fleet's worker
   boxes.** The per-harness New commands were hardcoded to this machine. New setting
   `agents.launch.defaultTarget`: `auto` (the default — the CLI picks a device), `local`

@@ -5,7 +5,7 @@
  * bad peer must never throw and blank the whole merged view.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { parseRemoteActive } from '../remote-active.js';
 
 describe('parseRemoteActive', () => {
@@ -85,5 +85,52 @@ describe('parseRemoteActive viewingIn normalization', () => {
       { context: 'terminal', kind: 'claude', status: 'running', sessionId: 'a' },
     ]);
     expect(parseRemoteActive(stdout, 'zion')[0].machine).toBe('zion');
+  });
+});
+
+/**
+ * RUSH-2507: a fleet-wide `--active` sweep where every peer was unreachable
+ * used to print the exact same "No active agent sessions." as a genuinely
+ * idle fleet — `gatherRemoteActive` dropped `skipped`/`discoveryFailed` on the
+ * floor even though `gatherRemoteAgentsJson` already computed them. These pin
+ * that the fields now ride through instead of being silently discarded.
+ */
+describe('gatherRemoteActive — surfaces skipped/discoveryFailed instead of dropping them', () => {
+  it('forwards skipped peer names and a false discoveryFailed on a partial sweep', async () => {
+    vi.resetModules();
+    vi.doMock('../../remote-agents-json.js', () => ({
+      gatherRemoteAgentsJson: vi.fn(async () => ({
+        items: [],
+        deviceCount: 2,
+        skipped: ['yosemite-s0'],
+        parseFailed: [],
+        discoveryFailed: false,
+      })),
+    }));
+    const { gatherRemoteActive } = await import('../remote-active.js');
+    const result = await gatherRemoteActive();
+    expect(result.deviceCount).toBe(2);
+    expect(result.skipped).toEqual(['yosemite-s0']);
+    expect(result.discoveryFailed).toBe(false);
+    vi.doUnmock('../../remote-agents-json.js');
+    vi.resetModules();
+  });
+
+  it('forwards discoveryFailed when the device list itself could not be loaded', async () => {
+    vi.resetModules();
+    vi.doMock('../../remote-agents-json.js', () => ({
+      gatherRemoteAgentsJson: vi.fn(async () => ({
+        items: [],
+        deviceCount: 0,
+        skipped: [],
+        parseFailed: [],
+        discoveryFailed: true,
+      })),
+    }));
+    const { gatherRemoteActive } = await import('../remote-active.js');
+    const result = await gatherRemoteActive();
+    expect(result.discoveryFailed).toBe(true);
+    vi.doUnmock('../../remote-agents-json.js');
+    vi.resetModules();
   });
 });

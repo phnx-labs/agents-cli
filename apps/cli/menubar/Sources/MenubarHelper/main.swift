@@ -92,6 +92,12 @@ if ProcessInfo.processInfo.environment["MENUBAR_DOCTOR_TEST"] == "1" {
     DoctorSelfTest.run()
 }
 
+// Daemon-liveness self-test: prove the separate menubar process distinguishes
+// a fresh heartbeat from the alive-but-frozen sleep/wake failure.
+if ProcessInfo.processInfo.environment["MENUBAR_DAEMON_LIVENESS_TEST"] == "1" {
+    DaemonLivenessSelfTest.run()
+}
+
 // Everything past here installs the status item and registers the global
 // chords, so it must only run where those chords can actually be serviced.
 // Refuses an ssh-started launch or an unrecognized flag — the two ways a helper

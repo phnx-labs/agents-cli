@@ -46,12 +46,20 @@ export class SessionPresentationStore {
   ): RemoteSession[] {
     return this.sessions().flatMap((value) => {
       if (!value || typeof value !== 'object') return [];
-      const row = value as RawActiveSession & { agentType?: string; host?: string };
+      const row = value as RawActiveSession & { agentType?: string; host?: string; sourceDevice?: string };
       const raw = {
         ...row,
         kind: row.kind || row.agentType || '',
       } as RawActiveSession;
-      const machine = typeof raw.machine === 'string' ? raw.machine : row.host;
+      // The CLI row's `host` is the terminal APP hosting the session (codium,
+      // iterm, tmux, ...), never a machine. `machine` is set only for offloaded
+      // sessions; a local row's device identity rides in `sourceDevice`. Using
+      // `host` here made a detached session (whose only terminal is the bare
+      // tmux server) present as living on a machine called "tmux", which broke
+      // every host === local filter (RUSH-2670).
+      const machine = typeof raw.machine === 'string' ? raw.machine
+        : typeof row.sourceDevice === 'string' ? row.sourceDevice
+        : undefined;
       const host = resolveSessionHost(machine, localLabel, normalizeHost(localMachineId), localLabel);
       return [normalizeActiveSession(raw, host, fetchedAt, projectRules)];
     });
@@ -63,10 +71,10 @@ export class SessionPresentationStore {
     const result = new Map<string, string>();
     for (const value of this.sessions()) {
       if (!value || typeof value !== 'object') continue;
-      const row = value as { terminalId?: unknown; sessionId?: unknown; id?: unknown; machine?: unknown; host?: unknown };
+      const row = value as { terminalId?: unknown; sessionId?: unknown; id?: unknown; machine?: unknown; sourceDevice?: unknown };
       const terminalId = typeof row.terminalId === 'string' ? row.terminalId : '';
       const sessionId = typeof row.sessionId === 'string' ? row.sessionId : typeof row.id === 'string' ? row.id : '';
-      const machine = normalizeHost(typeof row.machine === 'string' ? row.machine : typeof row.host === 'string' ? row.host : '');
+      const machine = normalizeHost(typeof row.machine === 'string' ? row.machine : typeof row.sourceDevice === 'string' ? row.sourceDevice : '');
       if (wanted && machine && wanted !== machine) continue;
       if (terminalId && sessionId) result.set(terminalId, sessionId);
     }

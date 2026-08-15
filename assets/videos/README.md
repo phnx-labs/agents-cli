@@ -43,7 +43,7 @@ brew install ffmpeg                                       # if not already
 agents skills add animator                                # ensures the skill is on disk
 ```
 
-For the terminal itself, use **Ghostty** or **iTerm2** with a tight monospace theme — JetBrains Mono 13pt, two-character left padding, no shell prompt clutter. The agents-cli homepage hero (`assets/demo.mp4`) was captured this way; match its look.
+For the terminal itself, use **Ghostty** or **iTerm2** with a tight monospace theme — JetBrains Mono 13pt, two-character left padding, no shell prompt clutter. The agi-cli homepage hero (`assets/demo.mp4`) was captured this way; match its look.
 
 ### Capture
 
@@ -118,4 +118,4 @@ git commit -m "docs(<feature>): add demo clip"
 
 ## Why MP4 not GIF
 
-Modern Safari, Chrome, and Firefox autoplay muted MP4s as cheaply as GIFs, and a 200 KB MP4 looks like a 3 MB GIF. The docs site stays under 1 MB per page even with five embedded clips, which keeps it indexable by users on slow networks. The agents-cli homepage hero (`assets/demo.mp4`) is the same approach scaled up.
+Modern Safari, Chrome, and Firefox autoplay muted MP4s as cheaply as GIFs, and a 200 KB MP4 looks like a 3 MB GIF. The docs site stays under 1 MB per page even with five embedded clips, which keeps it indexable by users on slow networks. The agi-cli homepage hero (`assets/demo.mp4`) is the same approach scaled up.

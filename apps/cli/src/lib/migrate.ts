@@ -23,6 +23,10 @@ import { setConfigValue } from './device-config.js';
 import { enabledRoutineNames, replaceEnabledRoutines } from './routine-activation.js';
 import { evaluateActivationReadiness } from './routine-readiness.js';
 import { migrateDeviceConfigToCentral } from './devices/config-migration.js';
+// Two constants only, never the read/write API — migrations still operate on raw
+// YAML so they never take the meta lock or prime the meta cache mid-migration.
+import { DEFAULT_BROWSER_PROFILE_NAME } from './browser/profiles.js';
+import { META_HEADER as DEVICE_META_HEADER } from './state.js';
 
 const HOME = process.env.HOME ?? os.homedir();
 const USER_DIR = path.join(HOME, '.agents');
@@ -1566,6 +1570,108 @@ function migrateSplitDeviceLocalMeta(): void {
 }
 
 /**
+ * Move the auto-detected `default` browser profile OUT of the committed central
+ * agents.yaml and into this machine's per-device file.
+ *
+ * `browser` is a CENTRAL key because named profiles a user creates are real fleet
+ * config, but the ONE `default` entry inside it is machine-local: its `binary` is
+ * an OS-specific path and its endpoint is a locally-chosen free port.
+ * `createProfile`/`updateProfile` already route that entry to `deviceBrowser`
+ * (`isMachineLocalProfile`, browser/profiles.ts) — but nothing ever removed the
+ * copy older versions had already written into the shared file, and
+ * `serializeCentral` cannot: it deletes whole KEYS that are device-scoped, and
+ * `browser` is not one.
+ *
+ * So the entry sat in the committed file and every box rewrote it with its own
+ * browser. Measured 2026-08-13, all three boxes on 1.22.38 (which HAS the writer
+ * fix) with an empty `deviceBrowser` and a machine-specific `default` in central:
+ *
+ *   zion         browser: chrome    binary: /Applications/Google Chrome.app/...
+ *   yosemite-s1  browser: brave     binary: /opt/brave.com/brave/brave
+ *   mark-1       (same shape)
+ *
+ * `agents repos pull user` refuses when an incoming change touches a locally
+ * modified path, so agents.yaml being permanently dirty wedged the fleet config
+ * sync outright — those boxes sat 5, 8 and 79 commits behind. (RUSH-2161)
+ *
+ * Idempotent: no-op once central carries no `default` entry. The device file is
+ * written FIRST so a crash between the two writes can never lose the profile,
+ * and an entry already in the device file wins (this machine's live value is
+ * newer than the stale central copy by construction).
+ *
+ * Central is edited through a `yaml.Document` rather than re-stringified, so the
+ * hand-written comments in the committed agents.yaml survive — a plain
+ * `yaml.stringify` would drop every one of them and rewrite the whole file,
+ * which is the same churn this migration exists to stop (see `serializeCentral`).
+ */
+export function migrateMachineLocalBrowserProfileOutOfCentral(
+  userDir: string = USER_DIR,
+  machine: string = machineId(),
+): void {
+  const metaFile = path.join(userDir, 'agents.yaml');
+  if (!fs.existsSync(metaFile)) return;
+
+  let doc: yaml.Document.Parsed;
+  try {
+    doc = yaml.parseDocument(fs.readFileSync(metaFile, 'utf-8'));
+  } catch { return; }
+  if (doc.errors.length > 0) return;
+
+  const central = (doc.toJSON() as Record<string, unknown> | null) ?? {};
+  const browser = central.browser;
+  if (!browser || typeof browser !== 'object' || Array.isArray(browser)) return;
+  const entry = (browser as Record<string, unknown>)[DEFAULT_BROWSER_PROFILE_NAME];
+  if (entry === undefined) return;
+
+  // Device file first — a crash before central is rewritten leaves a harmless
+  // duplicate, while the reverse order would drop the profile entirely.
+  const devicePath = path.join(userDir, 'devices', machine, 'agents.yaml');
+  let deviceDoc: Record<string, unknown> = {};
+  try {
+    deviceDoc = (yaml.parse(fs.readFileSync(devicePath, 'utf-8')) as Record<string, unknown>) || {};
+  } catch { /* absent — first write */ }
+  const deviceBrowser = (deviceDoc.browser && typeof deviceDoc.browser === 'object' && !Array.isArray(deviceDoc.browser))
+    ? deviceDoc.browser as Record<string, unknown>
+    : {};
+  if (deviceBrowser[DEFAULT_BROWSER_PROFILE_NAME] === undefined) {
+    deviceBrowser[DEFAULT_BROWSER_PROFILE_NAME] = entry;
+    deviceDoc.browser = deviceBrowser;
+    fs.mkdirSync(path.dirname(devicePath), { recursive: true });
+    atomicWriteFileSync(devicePath, DEVICE_META_HEADER + yaml.stringify(deviceDoc));
+  }
+
+  // Then strip it from the synced file, dropping `browser:` entirely when the
+  // machine-local entry was its only member.
+  doc.deleteIn(['browser', DEFAULT_BROWSER_PROFILE_NAME]);
+  if (Object.keys(browser as Record<string, unknown>).length === 1) {
+    // A comment block sitting directly above `browser:` with no blank line is
+    // attached to that pair's KEY node, so deleting the key takes those lines
+    // with it — including the file header. Re-home them onto whatever key is
+    // now first, or this migration silently destroys the comments it exists to
+    // preserve. (Not `doc.get('browser', true)`: that returns the VALUE node,
+    // which never carries the comment.)
+    type Keyed = { key?: { value?: unknown; commentBefore?: string | null } };
+    const itemsOf = (): Keyed[] => ((doc.contents as { items?: Keyed[] } | null)?.items) ?? [];
+    const idx = itemsOf().findIndex((pair) => pair.key?.value === 'browser');
+    const orphaned = idx >= 0 ? itemsOf()[idx]?.key?.commentBefore ?? undefined : undefined;
+    doc.delete('browser');
+    if (orphaned) {
+      // Deleting shifted the following pair down into `idx`.
+      const next = itemsOf()[idx]?.key;
+      if (next) next.commentBefore = next.commentBefore ? `${orphaned}\n${next.commentBefore}` : orphaned;
+      else doc.commentBefore = orphaned;
+    }
+  }
+  // Everything cleared -> header only, never a bare `{}`. stringifyDoc emits a
+  // FLOW empty map for an empty root, and a later parseDocument inherits that
+  // flow and renders the whole rewritten file inline. serializeCentral guards
+  // the identical case (state.ts, `isEmpty ? META_HEADER : stringifyDoc(doc)`).
+  const remaining = Object.keys((doc.toJSON() as Record<string, unknown> | null) ?? {}).length;
+  atomicWriteFileSync(metaFile, remaining === 0 ? DEVICE_META_HEADER : stringifyDoc(doc));
+  console.error(`Migrated agents.yaml: browser '${DEFAULT_BROWSER_PROFILE_NAME}' profile -> devices/${machine}/agents.yaml`);
+}
+
+/**
  * Rename the legacy `extras-extras/` plugin-marketplace dir to `agents-extras/`
  * inside every installed agent version-home, and rewrite cross-references in
  * `known_marketplaces.json` and the agent's `settings.json`.
@@ -2157,6 +2263,12 @@ export async function runMigration(): Promise<void> {
   // agents.yaml. After migrateVersionResourcesToPatterns so versions: is already
   // in pattern form when it moves to the history file.
   migrateSplitDeviceLocalMeta();
+  // Same split, one level deeper: `browser` stays central (named profiles are
+  // fleet config) but its auto-detected `default` entry is machine-local and was
+  // left behind in the synced file, keeping every box dirty. After
+  // migrateSplitDeviceLocalMeta so the device file is already in its canonical
+  // location before this merges an entry into it.
+  migrateMachineLocalBrowserProfileOutOfCentral();
   // Fold per-device operator config (device-doc config:/defaultBrowserProfile
   // and .history/devices/auto-launch.json) into the central
   // fleet.devices.<name>.config block. After migrateSplitDeviceLocalMeta so the
@@ -2217,4 +2329,17 @@ export async function runMigration(): Promise<void> {
   // infinite-exec-loop). Also runs after the bucket moves so it scans the
   // canonical HISTORY_DIR/versions tree.
   repairSelfReferentialBinShims();
+
+  // Version-skew one-shot (RUSH-2435): retrofit the current pane-died hook
+  // onto any managed tmux session an older binary left with a stale one. Runs
+  // at upgrade time in addition to the daemon-startup call (daemon.ts) so a
+  // machine that upgrades without immediately restarting its daemon still
+  // repairs on the next `agents` invocation. Idempotent/non-destructive.
+  try {
+    const { reconcileSessionHooks } = await import('./tmux/session.js');
+    const { isTmuxInstalled } = await import('./tmux/binary.js');
+    if (isTmuxInstalled()) await reconcileSessionHooks();
+  } catch {
+    // best-effort — a migration must never fail because tmux wasn't reachable
+  }
 }

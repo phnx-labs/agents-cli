@@ -5,7 +5,7 @@
 #
 # Flags:
 #   --asset <name>       Zip asset name (default: agents-dbg-<version>-universal.zip)
-#   --repo <owner/repo>  GitHub release repo (default: phnx-labs/agents-cli)
+#   --repo <owner/repo>  GitHub release repo (default: phnx-labs/agi-cli)
 #   --tap-repo <path>    Existing muqsitnawaz/homebrew-tap checkout
 #   --confirm            Write Casks/ file. Without it, print it.
 #   --push               Commit and push tap changes after writing.
@@ -17,7 +17,7 @@ die() { echo "Error: $1" >&2; exit 1; }
 VERSION=""
 SHA256=""
 ASSET=""
-REPO="${GITHUB_REPOSITORY:-phnx-labs/agents-cli}"
+REPO="${GITHUB_REPOSITORY:-phnx-labs/agi-cli}"
 TAP_REPO="${HOMEBREW_TAP_REPO:-}"
 CONFIRM=0
 PUSH=0

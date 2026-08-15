@@ -5,7 +5,7 @@ harnesses, run a team, then set up devices you can dispatch to. Each step
 names the exact command; run `agents <cmd> --help` if anything below looks
 stale — the code wins over this doc.
 
-## 1. Install agents-cli
+## 1. Install agi-cli
 
 ```bash
 npm install -g @phnx-labs/agents-cli   # or: curl -fsSL agi-cli.sh | sh
@@ -16,7 +16,7 @@ Bun works too (`bun install -g @phnx-labs/agents-cli`). Every command also
 answers to the shorter alias `ag` — `ag view` and `agents view` are the same
 call. Already installed? `agents upgrade` updates the CLI itself (`-y` to
 skip the confirm prompt). `agents update` is a different command — it moves an
-installed agent harness to a new release, not agents-cli.
+installed agent harness to a new release, not agi-cli.
 
 ## 2. Run first-time setup
 
@@ -25,7 +25,7 @@ agents setup
 ```
 
 `agents setup` clones the system config repo into `~/.agents/.system/`,
-imports any agent CLI you already had installed outside agents-cli, and — on
+imports any agent CLI you already had installed outside agi-cli, and — on
 a terminal — walks a re-runnable capability hub: browser, computer (macOS),
 share, secrets, fleet, watchdog, and two preferences (which machine you sit
 at, which browser agents drive here). Everything it touches can also be set
@@ -121,7 +121,7 @@ every teammate to one account unless it genuinely needs a specific version.
 ## 5. What is a fleet?
 
 A fleet is simply your own machines, reachable over Tailscale/SSH, that
-agents-cli can run commands on or dispatch agents to. Two registries back
+agi-cli can run commands on or dispatch agents to. Two registries back
 this:
 
 - **Devices** — your Tailscale nodes, made addressable. `agents devices sync`

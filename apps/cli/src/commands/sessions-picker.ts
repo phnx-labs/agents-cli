@@ -9,7 +9,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import chalk from 'chalk';
 import { truncate, humanDuration } from '../lib/format.js';
-import type { SessionEvent, SessionMeta, TodoProgress } from '../lib/session/types.js';
+import type { SessionEvent, SessionMeta, TodoItem, TodoProgress } from '../lib/session/types.js';
+import { fetchPeerPreviewDigest } from '../lib/session/remote-list.js';
 import { parseSession, sanitizeForTerminal, SNAPSHOT_TODO_TOOLS } from '../lib/session/parse.js';
 import { safeTeamText } from '../lib/session/team-filter.js';
 import { cleanSessionPrompt, extractSessionTopic, isSyntheticUserMessage } from '../lib/session/prompt.js';
@@ -24,9 +25,10 @@ import { extractArtifacts, extractHooks, extractLinks, extractRepos, extractSkil
 import { getSessionPlugins, readSessionPreviewCache, writeSessionPreviewCache, readSessionContent, readArchivedSessionPreview } from '../lib/session/db.js';
 /** A session whose transcript FILE is on another machine (folded in over the
  * live cross-machine fan-out): its `filePath` is on that peer's disk, so the
- * preview can't parse it locally — it shows metadata + a "resume there" note
- * instead. Keys off `_remote`, not the machine tag, so locally-readable synced
- * mirrors still parse their file normally.
+ * preview can't parse it locally — it fetches the peer's digest over SSH and
+ * shows metadata + a "resume there" note until that lands. Keys off `_remote`,
+ * not the machine tag, so locally-readable synced mirrors still parse their
+ * file normally.
  *
  * This is the READ rule and only the read rule. Whether a session may be
  * RESUMED here is a different question with a different answer — a mirror is
@@ -130,6 +132,175 @@ const previewCache = createMemoryCache<string, string>({
   ttlMs: 5 * 60_000,
 });
 
+/**
+ * Peer preview digests for `_remote` rows. A remote row's transcript is on the
+ * peer's disk, so the pane fetches its already-computed digest over SSH (the
+ * peer's `sessions preview <id> --local --json`) the first time the row is
+ * previewed, and renders the full compact preview once it lands. `pending`
+ * marks an in-flight fetch; `failed` marks a peer that couldn't answer, retried
+ * only after the TTL evicts the entry so arrowing over the row doesn't hammer a
+ * dead host.
+ */
+type RemoteDigestEntry =
+  | { state: 'pending' }
+  | { state: 'ready'; digest: SessionPreviewDigest }
+  | { state: 'failed' };
+const remoteDigestCache = createMemoryCache<string, RemoteDigestEntry>({
+  max: 256,
+  ttlMs: 5 * 60_000,
+});
+
+function remoteDigestKey(sessionId: string, machine: string): string {
+  return `${machine}:${sessionId}`;
+}
+
+/**
+ * The open picker's repaint trigger. The peer fetch resolves while the pane is
+ * already painted, so completion has to nudge the picker into re-rendering —
+ * pickers register their trigger here (via `registerPreviewRepaint`) and clear
+ * it when they close, making a late fetch after close a no-op.
+ */
+let remotePreviewRepaint: (() => void) | undefined;
+export function setRemotePreviewRepaint(repaint?: () => void): void {
+  remotePreviewRepaint = repaint;
+}
+
+/** Seam for tests: the real fetcher opens an SSH connection to the peer. */
+let peerDigestFetcher: typeof fetchPeerPreviewDigest = fetchPeerPreviewDigest;
+export function setPeerDigestFetcherForTest(fetcher?: typeof fetchPeerPreviewDigest): void {
+  peerDigestFetcher = fetcher ?? fetchPeerPreviewDigest;
+}
+export function clearRemoteDigestCacheForTest(): void {
+  remoteDigestCache.clear();
+}
+
+/**
+ * Look up (or start fetching) the peer digest for a remote row. Returns the
+ * current entry synchronously — `buildPreview` renders whatever state exists
+ * now, and the fetch's completion repaints the pane through the registered
+ * trigger.
+ */
+function remoteDigestForPreview(session: SessionMeta, machine: string): RemoteDigestEntry {
+  const key = remoteDigestKey(session.id, machine);
+  const existing = remoteDigestCache.get(key);
+  if (existing) return existing;
+  const pending: RemoteDigestEntry = { state: 'pending' };
+  remoteDigestCache.set(key, pending);
+  void peerDigestFetcher(session.id, machine)
+    .then((raw) => {
+      const digest = sanitizeRemoteDigest(raw);
+      remoteDigestCache.set(key, digest ? { state: 'ready', digest } : { state: 'failed' });
+    })
+    .catch(() => {
+      remoteDigestCache.set(key, { state: 'failed' });
+    })
+    .then(() => remotePreviewRepaint?.());
+  return pending;
+}
+
+/**
+ * Validate + scrub a peer-supplied preview digest before any of it reaches this
+ * terminal. Peer JSON is untrusted at this boundary — the same rule
+ * `sanitizeMeta` applies to fan-out rows — so every string is stripped of
+ * terminal escapes and every list re-shaped field by field. Anything that
+ * doesn't look like the v1 digest is rejected, so a version-skewed peer
+ * degrades to the metadata card instead of a corrupted pane.
+ */
+export function sanitizeRemoteDigest(raw: unknown): SessionPreviewDigest | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const d = raw as Record<string, unknown>;
+  if (d.schemaVersion !== 1) return undefined;
+
+  const str = (v: unknown): string => (typeof v === 'string' ? sanitizeForTerminal(v) : '');
+  const optStr = (v: unknown): string | undefined => (typeof v === 'string' ? sanitizeForTerminal(v) : undefined);
+  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const optNum = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+  const strList = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').map(sanitizeForTerminal) : [];
+  const objList = <T>(v: unknown, map: (o: Record<string, unknown>) => T | undefined): T[] =>
+    Array.isArray(v)
+      ? v.flatMap((x) => {
+          if (!x || typeof x !== 'object' || Array.isArray(x)) return [];
+          const mapped = map(x as Record<string, unknown>);
+          return mapped === undefined ? [] : [mapped];
+        })
+      : [];
+
+  let todos: TodoProgress | undefined;
+  if (d.todos && typeof d.todos === 'object' && !Array.isArray(d.todos)) {
+    const t = d.todos as Record<string, unknown>;
+    const items = objList<TodoItem>(t.items, (it) => {
+      const content = str(it.content ?? it.text);
+      if (!content) return undefined;
+      const status = it.status === 'completed' || it.status === 'in_progress' ? it.status : 'pending';
+      return { content, status, activeForm: optStr(it.activeForm) };
+    });
+    todos = { items, done: num(t.done), total: num(t.total), activeForm: optStr(t.activeForm) };
+  }
+
+  const changes = d.changes && typeof d.changes === 'object' && !Array.isArray(d.changes)
+    ? {
+        created: num((d.changes as Record<string, unknown>).created),
+        modified: num((d.changes as Record<string, unknown>).modified),
+        deleted: num((d.changes as Record<string, unknown>).deleted),
+      }
+    : { created: 0, modified: 0, deleted: 0 };
+
+  let test: SessionPreviewDigest['test'];
+  if (d.test && typeof d.test === 'object' && !Array.isArray(d.test)) {
+    const t = d.test as Record<string, unknown>;
+    const runner = str(t.runner);
+    if (runner) {
+      test = { runner, ok: t.ok === true, ts: num(t.ts), passed: optNum(t.passed), failed: optNum(t.failed) };
+    }
+  }
+
+  return {
+    schemaVersion: 1,
+    firstUser: str(d.firstUser),
+    lastAssistant: str(d.lastAssistant),
+    filesRead: num(d.filesRead),
+    toolCalls: num(d.toolCalls),
+    planFile: str(d.planFile),
+    todos,
+    subAgentCount: num(d.subAgentCount),
+    toolTags: strList(d.toolTags),
+    changes,
+    dirs: strList(d.dirs),
+    repos: strList(d.repos),
+    artifacts: objList(d.artifacts, (a) => {
+      const p = str(a.path);
+      const basename = str(a.basename);
+      if (!p || !basename) return undefined;
+      const bucket = a.bucket === 'artifacts' || a.bucket === 'plans' || a.bucket === 'reports' ? a.bucket : 'docs';
+      return { path: p, basename, bucket };
+    }),
+    skills: objList(d.skills, (s) => {
+      const name = str(s.name);
+      return name ? { name, count: num(s.count) } : undefined;
+    }),
+    plugins: strList(d.plugins),
+    hooks: objList(d.hooks, (h) => {
+      const name = str(h.name);
+      return name ? { name, event: optStr(h.event), count: num(h.count), failed: num(h.failed) } : undefined;
+    }),
+    links: objList(d.links, (l) => {
+      const url = str(l.url);
+      const label = str(l.label);
+      // Only http(s) URLs render as OSC 8 hyperlinks — anything else a peer
+      // sends (file:, a bare payload) is dropped rather than linkified.
+      return /^https?:\/\//.test(url) && label ? { kind: 'other' as const, url, label } : undefined;
+    }),
+    errorCount: num(d.errorCount),
+    firstError: optStr(d.firstError),
+    toolHistogram: objList(d.toolHistogram, (h) => {
+      const tool = str(h.tool);
+      return tool ? { tool, count: num(h.count) } : undefined;
+    }),
+    test,
+  };
+}
+
 function previewCacheKey(session: SessionMeta, remote: string | undefined): string {
   let fileStamp = '';
   if (!remote && session.filePath) {
@@ -140,10 +311,16 @@ function previewCacheKey(session: SessionMeta, remote: string | undefined): stri
       fileStamp = 'missing';
     }
   }
+  // A remote row's rendered pane depends on the fetched digest's state
+  // (none → pending → ready/failed), so the state rides the key — otherwise the
+  // memoized metadata-only card would keep serving after the digest arrived.
+  const remoteDigestState = remote
+    ? remoteDigestCache.get(remoteDigestKey(session.id, remote))?.state ?? 'none'
+    : '';
   // The transcript stamp invalidates derived activity. Metadata that can change
   // independently (label/ticket/PR/live scanner enrichment) also rides the key.
   return JSON.stringify([
-    remote ?? '', session.id, fileStamp, session.lastActivity, session.label,
+    remote ?? '', remoteDigestState, session.id, fileStamp, session.lastActivity, session.label,
     session.topic, session.ticketId, session.prUrl, session.messageCount,
     session.tokenCount, session.model, session.todos, session.plan,
     session.recentDirectoriesTouched, session.skillsUsed,
@@ -210,13 +387,26 @@ export function buildPreview(session: SessionMeta): string {
   const safe = sanitizeMeta(session);
 
   // Remote session: the transcript is on the peer's disk, so there is nothing to
-  // parse here. Show the metadata header (agent, cwd, msgs, tokens — all carried
-  // over in the fan-out) plus where it lives and how to open it.
+  // parse here. Fetch the peer's already-computed digest over SSH (kicked off on
+  // first render; the pane repaints when it lands) and render the same compact
+  // preview a local row gets. Until it arrives — or when the peer can't answer —
+  // show the metadata header (agent, cwd, msgs, tokens — all carried over in the
+  // fan-out) plus where it lives and how to open it.
   if (remote) {
     const note = '  ' + chalk.gray(`on `) + chalk.bold.white(remote)
       + chalk.gray(` — enter to resume there, or space then enter to read it over SSH`);
+    const entry = remoteDigestForPreview(session, remote);
+    if (entry.state === 'ready') {
+      const body = formatCompactPreview(entry.digest, safe);
+      const output = [formatHeader(safe, []), '', note, body].filter(Boolean).join('\n');
+      previewCache.set(cacheKey, output);
+      return output;
+    }
+    const fetching = entry.state === 'pending'
+      ? '  ' + chalk.gray(`fetching preview from ${remote} over SSH…`)
+      : '';
     const metaBody = formatMetaOnlyBody(safe);
-    const output = [formatHeader(safe, []), '', note, metaBody].filter(Boolean).join('\n');
+    const output = [formatHeader(safe, []), '', note, fetching, metaBody].filter(Boolean).join('\n');
     previewCache.set(cacheKey, output);
     return output;
   }
@@ -979,13 +1169,17 @@ export async function sessionPicker(config: SessionPickerConfig): Promise<Picked
     filter: config.filter,
     labelFor: config.labelFor,
     buildPreview,
+    // A remote row's digest arrives over SSH after the pane painted — this is
+    // what lets its completion swap the metadata card for the full preview.
+    registerPreviewRepaint: setRemotePreviewRepaint,
     shortIdFor: (s) => s.shortId,
     pageSize: config.pageSize,
     initialSearch: config.initialSearch,
     emptyMessage: 'No sessions match.',
     enterHint: config.enterHint ?? 'resume',
     linesAbovePrompt: config.linesAbovePrompt,
-  });
+    // A late digest fetch must not poke a closed prompt.
+  }).finally(() => setRemotePreviewRepaint(undefined));
   if (!picked) return null;
   return { session: picked.item, action: 'resume' };
 }

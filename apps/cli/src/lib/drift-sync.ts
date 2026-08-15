@@ -23,7 +23,7 @@ import { AGENTS } from './agents.js';
 import { pullRepo } from './git.js';
 import { heal, type VersionHealResult } from './heal.js';
 import { promptAgentVersionSelection } from './versions.js';
-import { isInteractiveTerminal, isPromptCancelled } from '../commands/utils.js';
+import { isInteractiveTerminal, isPromptCancelled } from './format.js';
 import {
   computeSyncStatus,
   type UnifiedSyncStatus,

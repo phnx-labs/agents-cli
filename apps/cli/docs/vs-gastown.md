@@ -1,6 +1,6 @@
-# agents-cli vs Gas Town
+# agi-cli vs Gas Town
 
-How [agents-cli](https://github.com/phnx-labs/agents-cli) differs from
+How [agi-cli](https://github.com/phnx-labs/agi-cli) differs from
 [Gas Town](https://github.com/gastownhall/gastown) (also “Gastown”), Steve Yegge’s
 multi-agent orchestration system — plain language, side by side.
 
@@ -21,17 +21,17 @@ Related: [Landscape](landscape.md) · [Teams](teams.md) · [Hooks](hooks.md) · 
 
 | | |
 |---|---|
-| **agents-cli** | Horizontal **workstation toolchain**: pin versions, sync config, run any harness, teams, sessions, fleet, cloud, browser/computer. |
+| **agi-cli** | Horizontal **workstation toolchain**: pin versions, sync config, run any harness, teams, sessions, fleet, cloud, browser/computer. |
 | **Gas Town** | Opinionated **completion factory**: durable work ledger in git, fixed agent roles, patrols, merge queue — scale many workers until the work is *done*. |
 
 Shared genus: a **control plane for many coding agents at once**.  
-Different center of gravity: agents-cli makes *any agent / any machine* operable; Gas Town makes *a swarm of workers finish work* under chaos.
+Different center of gravity: agi-cli makes *any agent / any machine* operable; Gas Town makes *a swarm of workers finish work* under chaos.
 
 ---
 
 ## What each product is
 
-### agents-cli
+### agi-cli
 
 A developer CLI (`agents` / `ag`) that treats Claude, Codex, Gemini, Cursor, OpenCode,
 Grok, Droid, and others as **interchangeable surfaces**:
@@ -65,7 +65,7 @@ people already hand-managing many agents (Yegge’s “Stage 6–7”).
 
 ## Side-by-side overview
 
-| Dimension | agents-cli | Gas Town |
+| Dimension | agi-cli | Gas Town |
 |---|---|---|
 | **Primary job** | Operate many *harnesses* and machines as one toolchain | Finish many *tasks* with many workers |
 | **Core metaphor** | nvm + npm + pm2 for agents | k8s-for-completion + Temporal-ish workflows |
@@ -95,7 +95,7 @@ people already hand-managing many agents (Yegge’s “Stage 6–7”).
          │  unstick / resume mid-run                │
          │  lifecycle hooks (SessionStart, etc.)    │
          └──────────────────────────────────────────┘
- agents-cli only                      Gas Town only
+ agi-cli only                      Gas Town only
  ────────────────                     ──────────────
  version pin / shims                  role hierarchy as product
  cross-agent config fan-out           Beads data plane
@@ -106,7 +106,7 @@ people already hand-managing many agents (Yegge’s “Stage 6–7”).
  AGI EXT (VS Code)                    tmux factory as primary UI
 ```
 
-**Unfair comparisons:** scoring agents-cli on “Refinery quality,” or Gas Town on
+**Unfair comparisons:** scoring agi-cli on “Refinery quality,” or Gas Town on
 “`claude@version` pin,” is a category error. Compare the overlap; list unique
 strengths separately.
 
@@ -117,7 +117,7 @@ strengths separately.
 Gas Town uses theatrical naming. Under the lore, many pieces have boring engineering
 equivalents.
 
-| Plain engineering term | Gas Town | agents-cli |
+| Plain engineering term | Gas Town | agi-cli |
 |---|---|---|
 | Workspace of managed projects | Town (`~/gt`) | Fleet of repos/devices (no single HQ required) |
 | One managed project | Rig | git repo + `agents run` cwd |
@@ -142,13 +142,13 @@ equivalents.
 
 ## Hooks: same word, two meanings
 
-Gas Town overloads **“hook.”** Only one meaning matches agents-cli.
+Gas Town overloads **“hook.”** Only one meaning matches agi-cli.
 
 ### 1. Lifecycle hooks ≈ `agents hooks` (similar)
 
 Shell scripts on agent events: SessionStart, PreToolUse, Stop, etc.
 
-| | agents-cli | Gas Town |
+| | agi-cli | Gas Town |
 |---|---|---|
 | What | Scripts on lifecycle events | Same idea: prime context, inject mail, guards, cost recording |
 | Where | `~/.agents/hooks/` + `agents.yaml` | `~/.gt/hooks-base.json` + role overrides |
@@ -157,13 +157,13 @@ Shell scripts on agent events: SessionStart, PreToolUse, Stop, etc.
 
 So **`agents hooks` ≈ `gt hooks`** for this meaning.
 
-### 2. Work hooks / GUPP ≠ agents-cli (different)
+### 2. Work hooks / GUPP ≠ agi-cli (different)
 
 Each Gas Town agent has a durable **work hook**: “assigned work for this identity.”
 **GUPP** (Gastown Universal Propulsion Principle): if there is work on your hook, you
 must run it — even after session restart.
 
-That is **not** a lifecycle script. Closest agents-cli analogs (none 1:1):
+That is **not** a lifecycle script. Closest agi-cli analogs (none 1:1):
 
 - Task brief on a teammate
 - Open ticket the agent was dispatched with
@@ -186,7 +186,7 @@ workflow steps).
 | Does it show up on GitHub? | Often yes, because the ledger is committed and **pushed with the repo** — but GitHub is transport, not the product |
 | When used? | Constantly: every sling, convoy, molecule step, much of the factory state |
 
-**agents-cli parallel:** Linear / GitHub Issues + PR for work tracking; local/fleet
+**agi-cli parallel:** Linear / GitHub Issues + PR for work tracking; local/fleet
 **session DB** for transcripts. Same idea (“work must live outside chat”), different
 storage choice.
 
@@ -205,7 +205,7 @@ Human goal: ship a medium feature with parallel workers and land it safely.
 5. Polecat `gt done` → Refinery merge queue
 6. Convoy lands → notify Overseer
 
-### agents-cli path
+### agi-cli path
 
 1. Open / claim Linear or GitHub ticket
 2. `agents teams create … --enable-worktrees`
@@ -216,14 +216,14 @@ Human goal: ship a medium feature with parallel workers and land it safely.
 
 **Parallel under the path:** decompose → isolate workers → assign → observe →
 integrate → declare done. Gas Town internalizes PM + merge + babysitting as
-first-class agents. agents-cli keeps PM/merge mostly in GitHub/Linear and focuses
+first-class agents. agi-cli keeps PM/merge mostly in GitHub/Linear and focuses
 the CLI on spawn, isolation, visibility, and multi-harness ops.
 
 ---
 
 ## Layer stack
 
-| Layer | Gas Town emphasis | agents-cli emphasis |
+| Layer | Gas Town emphasis | agi-cli emphasis |
 |---|---|---|
 | Intent in | Talk to Mayor | `agents run` / teams / cloud |
 | Work record | Beads in git | External tracker + session index |
@@ -277,11 +277,11 @@ human-in-the-loop control.
 
 ---
 
-## Product implications for agents-cli
+## Product implications for agi-cli
 
 ### Demand Gas Town proves (build for the overlap)
 
-| User want | agents-cli surface |
+| User want | agi-cli surface |
 |---|---|
 | Don’t hand-manage 10 tabs | `teams`, `sessions --active`, Fleet |
 | Work outlives chat | Tickets + session resume (gap: no Beads-class in-repo ledger) |
@@ -291,7 +291,7 @@ human-in-the-loop control.
 
 ### Pain to avoid (and market against)
 
-| Gas Town pain | agents-cli posture |
+| Gas Town pain | agi-cli posture |
 |---|---|
 | Mad Max dialect | Plain nouns |
 | All-or-nothing factory | Modular layers |
@@ -312,7 +312,7 @@ Scorecard dimensions: time to first useful agent, time to land, parallel efficie
 merge safety, visibility (“who is stuck?”), unstick cost, operator load, harness
 portability, docs honesty.
 
-Skip for v1 score: version pin, multi-cloud, browser/computer (agents-cli wings);
+Skip for v1 score: version pin, multi-cloud, browser/computer (agi-cli wings);
 formula multi-hour unattended runs, Refinery under heavy MQ load (Gas Town wings).
 
 ---
@@ -320,12 +320,12 @@ formula multi-hour unattended runs, Refinery under heavy MQ load (Gas Town wings
 ## Takeaway
 
 Gas Town is an **opinionated completion factory** with theatrical naming.  
-agents-cli is a **multi-harness operations toolchain**.
+agi-cli is a **multi-harness operations toolchain**.
 
 Under the lore, both build the missing control plane for “many coding agents at once.”
 The industry will likely absorb Gas Town’s *patterns* (durable work outside chat,
 role-like specialization, merge discipline at scale) into tools with **boring names
-and less ceremony** — the slot agents-cli already occupies on the horizontal stack.
+and less ceremony** — the slot agi-cli already occupies on the horizontal stack.
 
 ---
 
@@ -335,7 +335,7 @@ Primary product materials:
 
 - [Gas Town README](https://github.com/gastownhall/gastown)
 - [Welcome to Gas Town — Steve Yegge](https://steve-yegge.medium.com/welcome-to-gas-town-4f25ee16dd04)
-- agents-cli docs: this tree, especially [teams](teams.md), [hooks](hooks.md), [sessions](sessions.md), [landscape](landscape.md)
+- agi-cli docs: this tree, especially [teams](teams.md), [hooks](hooks.md), [sessions](sessions.md), [landscape](landscape.md)
 
 Sentiment / field reports (non-exhaustive; views are the authors’):
 
@@ -346,5 +346,5 @@ Sentiment / field reports (non-exhaustive; views are the authors’):
 - [A Day in Gas Town — DoltHub](https://www.dolthub.com/blog/2026-01-15-a-day-in-gas-town/)
 - HN / Reddit threads discussing Beads, complexity, and multi-agent orchestration (2026)
 
-*Last updated: 2026-08-03. Gas Town and agents-cli both move quickly; re-check
+*Last updated: 2026-08-03. Gas Town and agi-cli both move quickly; re-check
 GitHub READMEs before treating operational details as current.*
