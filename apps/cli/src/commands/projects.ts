@@ -72,7 +72,7 @@ import {
   type ProjectWarning,
 } from '../lib/project-status.js';
 import { fetchLinearProjectCounts, type LinearMilestone, type LinearProjectCounts } from '../lib/linear-project-counts.js';
-import { listLinearProjects, pickLinearProject, type LinearPick, type LinearProjectLite } from '../lib/linear-projects.js';
+import { listLinearProjects, nextLinearLink, pickLinearProject, type LinearPick, type LinearProjectLite } from '../lib/linear-projects.js';
 import { checkRepoSlug } from '../lib/project-doctor.js';
 import { formatFocusAreas, readFocusAreas, type FocusArea } from '../lib/project-focus.js';
 import { formatVerdict, scheduleVerdict } from '../lib/project-schedule.js';
@@ -1187,7 +1187,7 @@ export function registerProjectsCommands(program: Command): void {
   // ---- link ----
   projects
     .command('link <name>')
-    .description('Attach an external tracker to a project definition (writes linear.projectId into the YAML).')
+    .description('Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).')
     .option('--linear [query]', 'Bind a Linear project by exact name or id; no value auto-suggests from the def name + repo')
     .action((name: string, opts: { linear?: string | boolean }) => {
       const def = loadProjectDef(name);
@@ -1246,11 +1246,9 @@ export function registerProjectsCommands(program: Command): void {
       if (def.linear?.name && def.linear.name !== p.name) {
         console.log(chalk.gray(`  renaming "${def.linear.name}" → "${p.name}" (Linear is authoritative)`));
       }
-      // `name` is refreshed on every link, never merely preserved: a project
-      // renamed in Linear otherwise keeps its stale label here forever, and
-      // that label is what agents read when they name the project.
-      def.linear = { ...def.linear, projectId: p.id, name: p.name };
-      if (p.url) def.linear.url = p.url;
+      // Assigned, not spread over `def.linear`: a spread would resurrect a url
+      // that nextLinearLink deliberately dropped. The block has no other fields.
+      def.linear = nextLinearLink(def.linear, p);
       writeProjectDef(def);
       console.log(chalk.green(`${def.name} → Linear project "${p.name}" (${p.id})${p.url ? ` ${p.url}` : ''}`));
     });
