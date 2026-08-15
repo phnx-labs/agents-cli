@@ -51,7 +51,6 @@ import {
   checkJobDeviceEligibility,
   normalizeTriggerEvent,
   parseHostStrategy,
-  placementRequiresFiringPin,
   resolveHostStrategy,
   HOST_STRATEGIES,
   computeProjectGroup,
@@ -1240,14 +1239,11 @@ export function registerRoutinesCommands(program: Command): void {
           console.error(chalk.red('--placement host requires --run-on <name>'));
           process.exit(1);
         }
-        // Off-box placement without an explicit firing allowlist auto-pins
-        // firing to this machine — otherwise every fleet daemon fires the job
-        // and each dispatches its own copy (the double-fire class the
-        // placementRequiresFiringPin predicate exists for; docs/routines.md
-        // documented this pin but nothing applied it).
-        if (!devices && hostStrategy && placementRequiresFiringPin(hostStrategy)) {
-          devices = [machineId()];
-        }
+        // No devices auto-pin is needed for off-box placement: under the
+        // per-device activation model (§8), a new routine is activated only on
+        // the creating machine's device manifest (setJobEnabled below), so
+        // exactly one daemon fires it unless it is deliberately enabled
+        // elsewhere — the double-fire guard is structural now.
 
         const config: JobConfig = {
           name: nameOrPath,

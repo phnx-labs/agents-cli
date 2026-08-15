@@ -2139,3 +2139,111 @@ describeRoutines('daemon env isolation — AGENTS_HISTORY_DIR must not leak (RUS
     }
   });
 });
+
+describe('routines add/edit — launch-target parity flags (RUSH-2719)', () => {
+  it('persists --agent claude@2.1.207 as separate agent + version fields', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, [
+        'add', 'pin-job',
+        '--schedule', '*/5 * * * *',
+        '--agent', 'claude@2.1.207',
+        '--prompt', 'Reply OK',
+      ]);
+      expect(res.status, res.stderr).toBe(0);
+      const job = readRoutineYaml(home, 'pin-job');
+      expect(job?.agent).toBe('claude');
+      expect(job?.version).toBe('2.1.207');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a malformed agent spec (two @ segments) and writes no file', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, ['add', 'bad-spec', '--schedule', '0 9 * * *', '--agent', 'claude@1@2', '--prompt', 'hi']);
+      expect(res.status).not.toBe(0);
+      expect(res.stderr).toContain("at most one '@version'");
+      expect(fs.existsSync(path.join(home, '.agents', 'routines', 'bad-spec.yml'))).toBe(false);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects --strategy combined with an @version pin, with agents-run wording', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, ['add', 'conflict-job', '--schedule', '0 9 * * *', '--agent', 'claude@2.1.207', '--strategy', 'balanced', '--prompt', 'hi']);
+      expect(res.status).not.toBe(0);
+      expect(res.stderr).toContain('conflicts with the @2.1.207 pin');
+      expect(fs.existsSync(path.join(home, '.agents', 'routines', 'conflict-job.yml'))).toBe(false);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects --balanced together with --strategy', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, ['add', 'double-strategy', '--schedule', '0 9 * * *', '--agent', 'claude', '--strategy', 'pinned', '--balanced', '--prompt', 'hi']);
+      expect(res.status).not.toBe(0);
+      expect(res.stderr).toContain('--balanced conflicts with --strategy');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('--balanced persists strategy: balanced', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, ['add', 'balanced-job', '--schedule', '0 9 * * *', '--agent', 'claude', '--balanced', '--prompt', 'hi']);
+      expect(res.status, res.stderr).toBe(0);
+      expect(readRoutineYaml(home, 'balanced-job')?.strategy).toBe('balanced');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('--run-on auto persists host: auto + hostStrategy: fleet', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, ['add', 'auto-place', '--schedule', '0 9 * * *', '--agent', 'claude', '--run-on', 'auto', '--prompt', 'hi']);
+      expect(res.status, res.stderr).toBe(0);
+      const job = readRoutineYaml(home, 'auto-place');
+      expect(job?.host).toBe('auto');
+      expect(job?.hostStrategy).toBe('fleet');
+      // No devices field in the definition: activation is per-device manifest
+      // membership (§8), so only the creating machine fires it by default —
+      // the double-fire guard is structural, not a persisted allowlist.
+      expect(job?.devices).toBeUndefined();
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('--run-on auto rejects a conflicting explicit --placement host', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, ['add', 'auto-vs-host', '--schedule', '0 9 * * *', '--agent', 'claude', '--run-on', 'auto', '--placement', 'host', '--prompt', 'hi']);
+      expect(res.status).not.toBe(0);
+      expect(res.stderr).toContain('--run-on auto is fleet placement');
+      expect(fs.existsSync(path.join(home, '.agents', 'routines', 'auto-vs-host.yml'))).toBe(false);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('edit --strategy validates the conflict against the persisted version pin', () => {
+    const home = makeHome({ registry });
+    try {
+      const add = run(home, ['add', 'edit-target', '--schedule', '*/5 * * * *', '--agent', 'claude@2.1.207', '--prompt', 'hi']);
+      expect(add.status, add.stderr).toBe(0);
+      const res = run(home, ['edit', 'edit-target', '--strategy', 'balanced']);
+      expect(res.status).not.toBe(0);
+      expect(res.stderr).toContain('conflicts with version 2.1.207');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
