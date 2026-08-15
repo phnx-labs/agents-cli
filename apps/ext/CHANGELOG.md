@@ -6,6 +6,19 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+## [0.9.321] - 2026-08-14
+
+- **`Agents: Attach` finds your backgrounded agents again (RUSH-2670).** A
+  detached session's stream row names its terminal app in `host` — for a
+  backgrounded agent that is the bare tmux server, so the presentation store
+  (which fell back to `host` when the row had no `machine`) presented it as
+  living on a machine called "tmux". The Attach command's this-machine filter
+  then never matched, and `Agents: Attach` always reported "No backgrounded
+  agents to bring forward" even seconds after a successful Detach. The store
+  now takes device identity from `machine` (offloaded rows) or `sourceDevice`
+  (everything else) and never from the terminal-app `host`. Source:
+  `apps/ext/src/core/sessionPresentationStore.ts`.
+
 ## [0.9.320] - 2026-08-14
 
 - **Crash-restart no longer reopens every tab in a thundering herd (RUSH-2477).**
