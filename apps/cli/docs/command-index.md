@@ -592,7 +592,7 @@ agents projects add <name>     Define a project. Infers root and repo from the c
 agents projects edit <name>    Open the project YAML in $EDITOR (it is hand-editable regardless).
 agents projects for-cwd [cwd]  Resolve a directory to its defined project name (root or a repos[].path/subpath match). Defaults to the current directory.
 agents projects import         Import project definitions from Linear (via the `linear` CLI).
-agents projects link <name>    Attach an external tracker to a project definition (writes linear.projectId into the YAML).
+agents projects link <name>    Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).
 agents projects list           List defined projects (definitions only by default; no session scan).
 agents projects pull <name>    Fast-forward every fleet checkout of a named project to its remote default branch.
 agents projects rm <name>      Delete a project definition. Never touches the repo.

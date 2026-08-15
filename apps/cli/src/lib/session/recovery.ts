@@ -10,7 +10,7 @@ import {
   pickBalancedCandidate,
   readinessFromCandidate,
   type RotateCandidate,
-} from '../rotate.js';
+} from '../accounting/rotate.js';
 import type { AgentId } from '../types.js';
 import { getVersionHomePath } from '../versions.js';
 import type { SessionMeta } from './types.js';

@@ -57,7 +57,14 @@ import {
   projectGroupTitle,
   projectGroupOrder,
   normalizeProjects,
+  buildRoutineListJson,
+  fireConditionLabel,
+  nextRunForDisplay,
+  nextRunLabel,
+  localLatestRun,
+  listJobsForDisplay,
 } from '../lib/routines.js';
+export { buildRoutineListJson } from '../lib/routines.js';
 import type { JobConfig, JobTrigger, LinearTriggerEvent, RunMeta, HostStrategy } from '../lib/routines.js';
 import { listProjectDefs, isSafeProjectName } from '../lib/projects.js';
 import { evaluateActivationReadinessLive } from '../lib/routine-readiness.js';
@@ -114,31 +121,6 @@ export function formatRunDuration(startedAt: string, completedAt: string | null)
  * Human label for what fires a job: its cron schedule, or its event trigger
  * for schedule-less (trigger-only) routines.
  */
-function fireConditionLabel(job: JobConfig): string {
-  if (job.schedule) return humanizeCron(job.schedule, job.timezone);
-  if (job.trigger) {
-    if (job.trigger.type === 'github_event') {
-      const scope = job.trigger.repo
-        ? ` (${job.trigger.repo}${job.trigger.branch ? `@${job.trigger.branch}` : ''})`
-        : '';
-      const filters = [
-        job.trigger.action ? `action=${job.trigger.action}` : null,
-        job.trigger.label ? `label=${job.trigger.label}` : null,
-      ].filter(Boolean).join(', ');
-      return `on github:${job.trigger.event}${scope}${filters ? ` (${filters})` : ''}`;
-    }
-    const filters = [
-      job.trigger.action ? `action=${job.trigger.action}` : null,
-      job.trigger.teamKey ? `team=${job.trigger.teamKey}` : null,
-      job.trigger.label ? `label=${job.trigger.label}` : null,
-      job.trigger.stateTo ? `stateTo=${job.trigger.stateTo}` : null,
-      job.trigger.stateFrom ? `stateFrom=${job.trigger.stateFrom}` : null,
-    ].filter(Boolean).join(', ');
-    return `on linear:${job.trigger.event}${filters ? ` (${filters})` : ''}`;
-  }
-  return '-';
-}
-
 function scheduleLabel(job: JobConfig): string {
   let label = fireConditionLabel(job);
   if (isOneShotRoutine(job)) label = `${label} (one-shot)`;
@@ -152,15 +134,6 @@ function scheduleLabel(job: JobConfig): string {
   return label;
 }
 
-function nextRunForDisplay(job: JobConfig, scheduler: JobScheduler): Date | null {
-  if (isPastOneShotRoutine(job)) return null;
-  return scheduler.getNextRun(job.name);
-}
-
-function nextRunLabel(job: JobConfig, scheduler: JobScheduler, now: Date): string {
-  if (isPastOneShotRoutine(job)) return 'expired';
-  return humanizeNextRun(scheduler.getNextRun(job.name) ?? null, now, job.timezone);
-}
 
 function deviceStateLabel(name: string, registry: DeviceRegistry): string | null {
   const profile = registry[normalizeHost(name)] ?? registry[name];
@@ -208,9 +181,6 @@ function deviceLabel(job: JobConfig, width?: number): { raw: string; display: st
  * history stays readable via `agents routines runs <name>`, and the owning
  * device's status via `agents routines list --device <name>`.
  */
-export function localLatestRun(job: JobConfig): RunMeta | null {
-  return jobRunsOnThisDevice(job) ? getLatestRun(job.name) : null;
-}
 
 export interface RoutineListGroup {
   key: string;
@@ -512,75 +482,6 @@ export function buildRunsJson(runs: RunMeta[]): Record<string, unknown>[] {
  * enabled/disabled picture. Execution paths (`run`/`catchup`/`webhook`) keep
  * using `listAllJobs` so an un-materialised project routine can never fire.
  */
-function listJobsForDisplay(cwd?: string): JobConfig[] {
-  const jobs = listAllJobs(cwd);
-  const seen = new Set(jobs.map((j) => j.name));
-  for (const discovered of discoverProjectRoutines()) {
-    if (seen.has(discovered.name)) continue;
-    seen.add(discovered.name);
-    jobs.push(discovered.config);
-  }
-  return jobs;
-}
-
-export function buildRoutineListJson(): Record<string, unknown>[] {
-  try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
-  const jobs = listJobsForDisplay(process.cwd());
-  if (jobs.length === 0) return [];
-
-  const scheduler = new JobScheduler(async () => {});
-  scheduler.loadAll();
-  try {
-    const overdueSet = new Set<string>();
-    try {
-      for (const job of detectOverdueJobs()) overdueSet.add(job.name);
-    } catch {
-      // Best-effort indicator; never block the list on detection errors.
-    }
-    const now = new Date();
-    const knownProjectNames = new Set(listProjectDefs().map((project) => project.name));
-    return jobs.map((job) => {
-      const latestRun = localLatestRun(job);
-      const enabledDevices = devicesWithRoutineEnabled(job.name);
-      return {
-        name: job.name,
-        agent: job.agent ?? null,
-        workflow: job.workflow ?? null,
-        command: job.command ?? null,
-        repo: job.repo ?? null,
-        schedule: job.schedule ?? null,
-        scheduleHuman: fireConditionLabel(job),
-        trigger: job.trigger ?? null,
-        timezone: job.timezone ?? null,
-        devices: enabledDevices,
-        enabledDevices,
-        host: job.host ?? null,
-        hostStrategy: resolveHostStrategy(job),
-        source: job.source ?? null,
-        sourceRepo: job.source?.repo ?? job.repo ?? null,
-        sourceBranch: job.source?.branch ?? null,
-        runOnce: Boolean(job.runOnce),
-        catchup: job.catchup !== false,
-        oneShot: isOneShotRoutine(job),
-        expired: isPastOneShotRoutine(job, now),
-        runsHere: jobRunsOnThisDevice(job),
-        enabled: job.enabled,
-        overdue: overdueSet.has(job.name),
-        nextRun: nextRunForDisplay(job, scheduler)?.toISOString() ?? null,
-        nextRunHuman: nextRunLabel(job, scheduler, now),
-        lastStatus: latestRun?.status ?? null,
-        exitCode: latestRun?.exitCode ?? null,
-        failureReason: latestRun?.errorMessage ?? null,
-        lastRunStartedAt: latestRun?.startedAt ?? null,
-        lastRunCompletedAt: latestRun?.completedAt ?? null,
-        projects: job.projects ?? [],
-        projectGroup: computeProjectGroup(job.projects, knownProjectNames),
-      };
-    });
-  } finally {
-    scheduler.stopAll();
-  }
-}
 
 /** Detect Ctrl+C or premature stream close during an interactive prompt. */
 function isPromptCancelled(err: unknown): boolean {

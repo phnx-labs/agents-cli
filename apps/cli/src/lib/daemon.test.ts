@@ -44,6 +44,9 @@ import {
   reapStrayDaemons,
   singleShot,
   stopResidueArtifacts,
+  isolatedHomeSuffix,
+  daemonServiceLabel,
+  daemonSystemdUnitName,
 } from './daemon.js';
 import { getDaemonDir } from './state.js';
 import { readSubsystemHealth, recordSubsystemOk, SUBSYSTEM_DAEMON_START } from './daemon-health.js';
@@ -228,6 +231,92 @@ describe('generateLaunchdPlist / generateSystemdUnit — HOME seam (RUSH-2639)',
       }
     },
   );
+});
+
+// RUSH-2639 (residual): baking HOME into the plist/unit content (above) keeps
+// a STARTED daemon inside its sandbox, but launchd/systemd route
+// unload/load/list by the service identifier alone, never by file path — so
+// every hermetic test instance and the real production install shared one
+// literal label/unit name. `launchctl unload <this-instance's-own-plist>`
+// silently kills whatever job the OS already has registered under that same
+// label, confirmed directly against real launchctl with two throwaway plists
+// sharing one label: the second job's own unload (which the code's comment
+// calls "not loaded, expected") tore down the first, still alive under a
+// different path. Namespace the identifier itself under a redirected HOME so
+// two isolated instances (concurrent CI test forks, or a developer's suite
+// racing their own always-on daemon) can never collide on it.
+describe('daemonServiceLabel / daemonSystemdUnitName — isolated-HOME namespacing (RUSH-2639 residual)', () => {
+  let prevHome: string | undefined;
+
+  beforeEach(() => {
+    prevHome = process.env.HOME;
+  });
+
+  afterEach(() => {
+    if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
+  });
+
+  it('two different redirected HOMEs never produce the same launchd label or systemd unit name', () => {
+    const sandboxA = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-2639-label-a-'));
+    const sandboxB = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-2639-label-b-'));
+    try {
+      process.env.HOME = sandboxA;
+      const labelA = daemonServiceLabel();
+      const unitA = daemonSystemdUnitName();
+
+      process.env.HOME = sandboxB;
+      const labelB = daemonServiceLabel();
+      const unitB = daemonSystemdUnitName();
+
+      expect(labelA).not.toBe(labelB);
+      expect(unitA).not.toBe(unitB);
+    } finally {
+      fs.rmSync(sandboxA, { recursive: true, force: true });
+      fs.rmSync(sandboxB, { recursive: true, force: true });
+    }
+  });
+
+  it('the same redirected HOME is deterministic — a retry never orphans the previous label', () => {
+    const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-2639-label-stable-'));
+    try {
+      process.env.HOME = sandboxHome;
+      expect(daemonServiceLabel()).toBe(daemonServiceLabel());
+      expect(daemonSystemdUnitName()).toBe(daemonSystemdUnitName());
+    } finally {
+      fs.rmSync(sandboxHome, { recursive: true, force: true });
+    }
+  });
+
+  it('a redirected HOME namespaces the label under the base production identifier, never replacing it', () => {
+    const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-2639-label-prefix-'));
+    try {
+      process.env.HOME = sandboxHome;
+      expect(daemonServiceLabel()).toMatch(/^com\.phnx-labs\.agents-daemon\.sandbox-[0-9a-f]{12}$/);
+      expect(daemonSystemdUnitName()).toMatch(/^agents-daemon-sandbox-[0-9a-f]{12}\.service$/);
+    } finally {
+      fs.rmSync(sandboxHome, { recursive: true, force: true });
+    }
+  });
+
+  it('generateLaunchdPlist embeds the namespaced label, not the bare production one', () => {
+    const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-2639-label-plist-'));
+    try {
+      process.env.HOME = sandboxHome;
+      const plist = generateLaunchdPlist();
+      expect(plist).toContain(`<string>${daemonServiceLabel()}</string>`);
+      expect(plist).not.toContain('<string>com.phnx-labs.agents-daemon</string>');
+    } finally {
+      fs.rmSync(sandboxHome, { recursive: true, force: true });
+    }
+  });
+
+  it('a HOME matching the real account home (no redirection) is not namespaced', () => {
+    const real = os.userInfo().homedir;
+    process.env.HOME = real;
+    expect(isolatedHomeSuffix()).toBeNull();
+    expect(daemonServiceLabel()).toBe('com.phnx-labs.agents-daemon');
+    expect(daemonSystemdUnitName()).toBe('agents-daemon.service');
+  });
 });
 
 // RUSH-2639: reproduce the actual macOS CI leak end to end. launchd applies a

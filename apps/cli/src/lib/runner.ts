@@ -76,7 +76,7 @@ import {
   formatNoHealthyAccountError,
   type RotateCandidate,
   type RotateResult,
-} from './rotate.js';
+} from './accounting/rotate.js';
 import { readAuthHealth, isDeadVerdict } from './auth-health.js';
 import { machineId } from './machine-id.js';
 import { isSelfUpdatingAgent, ROUTINE_AGENT_COMMANDS as AGENT_COMMANDS, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from './agents.js';

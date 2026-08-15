@@ -37,13 +37,13 @@ import { readSessionActorRecord, writeSessionAliasRecord } from './actor-sidecar
 import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
 import { buildClaudeLabelMap, getAgentSessionDirs } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
-import { latestSessionFileForCwd, findSessionsByShortIds, findSessionMachinesByIds } from './db.js';
+import { latestSessionFileForCwd, findSessionsByShortIds, findSessionMachinesByIds, getSessionById } from './db.js';
 import { extractSessionTopic } from './prompt.js';
 import { readSessionTailWithRaw } from './tail.js';
 import { parseSession } from './parse.js';
 import { computeTokPerSec } from './throughput.js';
 import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type TodoProgress, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
-import { isSessionTrackedAgent, SESSION_AGENTS, AG_TMUX_NAME_RE, type SessionAgentId, type SessionAttachment, type SessionEvent } from './types.js';
+import { isSessionTrackedAgent, SESSION_AGENTS, AG_TMUX_NAME_RE, type SessionAgentId, type SessionAttachment, type SessionEvent, type SessionMeta } from './types.js';
 import { AGENTS } from '../agents.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
 import { loadDevices, type DeviceRegistry } from '../devices/registry.js';
@@ -51,6 +51,8 @@ import { machineId, normalizeHost } from '../machine-id.js';
 import { presenceFromStore, type Presence } from './detached.js';
 import { classifyHostLink, HOST_HEARTBEAT_STALE_MS, type HostLink } from './host-link.js';
 import { mapBounded } from '../concurrency.js';
+import { linearIssueUrl } from './linear.js';
+import { viewingInLabel } from './viewing-in.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -169,6 +171,86 @@ export function filterCachedUnattributed(
 }
 
 export type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
+
+/** The SessionMeta fields the live-row backfill reads — the enrichment a running process cannot report. */
+export type BackfillMeta = Pick<SessionMeta,
+  'version' | 'timestamp' | 'label' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName'
+>;
+
+export function backfillActiveRowsFromMeta(
+  sessions: ActiveSession[],
+  metaById: Map<string, BackfillMeta>,
+): void {
+  for (const s of sessions) {
+    if (!s.sessionId) continue;
+    const m = metaById.get(s.sessionId);
+    if (!m) continue;
+    if (!s.version && m.version) s.version = m.version;
+    if (!s.label && m.label) s.label = m.label;
+    if (!s.ticket && m.ticketId) s.ticket = { id: m.ticketId, url: linearIssueUrl(m.ticketId) };
+    if (!s.pr && m.prUrl) s.pr = { url: m.prUrl, number: m.prNumber };
+    if (!s.startedAtMs && m.timestamp) {
+      const ts = new Date(m.timestamp).getTime();
+      if (!Number.isNaN(ts)) s.startedAtMs = ts;
+    }
+    if (!s.origin && m.origin) s.origin = m.origin;
+    if (!s.routineName && m.routineName) s.routineName = m.routineName;
+  }
+}
+
+function loadBackfillMetaFor(sessions: ActiveSession[]): Map<string, BackfillMeta> {
+  const byId = new Map<string, BackfillMeta>();
+  try {
+    for (const s of sessions) {
+      if (!s.sessionId || byId.has(s.sessionId)) continue;
+      const m = getSessionById(s.sessionId);
+      if (m) byId.set(s.sessionId, m);
+    }
+  } catch {
+    /* enrichment is best-effort — an unavailable DB leaves rows un-backfilled */
+  }
+  return byId;
+}
+
+export function backfillActiveRowsFromIndex(sessions: ActiveSession[]): void {
+  backfillActiveRowsFromMeta(sessions, loadBackfillMetaFor(sessions));
+}
+
+export function isRunningLiveSession(s: ActiveSession): boolean {
+  if (s.status === 'queued' || s.status === 'closed' || s.status === 'crashed') return false;
+  if (s.context === 'cloud') return Boolean(s.cloudProvider) && Boolean(s.cloudTaskId);
+  return Boolean(s.machine) && typeof s.pid === 'number' && s.pid > 0 && s.pidAlive === true;
+}
+
+export function activeSessionProjectKey(s: Pick<ActiveSession, 'cwd' | 'context'>): string {
+  if (s.cwd) return path.basename(s.cwd);
+  return s.context === 'cloud' ? 'cloud' : 'other';
+}
+
+export function serializeActiveSessionsForJson(
+  sessions: ActiveSession[],
+): Array<Omit<ActiveSession, 'viewingIn'> & {
+  ticketId: string | null;
+  project: string;
+  prLink: string | null;
+  viewingIn: string | null;
+}> {
+  return sessions.map((s) => ({
+    ...s,
+    ticketId: s.ticket?.id ?? null,
+    project: activeSessionProjectKey(s),
+    prLink: s.pr?.url ?? null,
+    viewingIn: viewingInLabel(s) ?? null,
+  }));
+}
+
+export function serializeSessionsJson(sessions: SessionMeta[]): string {
+  const serializable = sessions.map((s) => {
+    const { _matchedTerms, _bm25Score, _remote, ...rest } = s;
+    return rest;
+  });
+  return JSON.stringify(serializable, null, 2) + '\n';
+}
 
 /**
  * Every status here is COMPUTED by the framework from observable signals — PID

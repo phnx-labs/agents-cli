@@ -27,8 +27,8 @@ import {
   type RotateResult,
   type FailoverArmingContext,
 } from './rotate.js';
-import { runWithFallback } from './exec.js';
-import type { AgentId } from './types.js';
+import { runWithFallback } from '../exec.js';
+import type { AgentId } from '../types.js';
 import type { UsageSnapshot, UsageWindowKey } from './usage.js';
 
 /**

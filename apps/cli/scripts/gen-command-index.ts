@@ -25,7 +25,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Command } from 'commander';
 import { getHelpSections } from '../src/lib/help.js';
-import { buildFullCommandTree } from '../src/lib/startup/command-registry.js';
+import { buildFullCommandTree } from '../src/cli/command-registry.js';
 
 export interface CommandArg {
   name: string;

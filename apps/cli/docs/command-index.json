@@ -15192,7 +15192,7 @@
           "name": "link",
           "path": "projects link",
           "aliases": [],
-          "description": "Attach an external tracker to a project definition (writes linear.projectId into the YAML).",
+          "description": "Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).",
           "args": [
             {
               "name": "name",

@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { buildRoutineListJson } from '../../commands/routines.js';
-import { backfillActiveRowsFromIndex, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson } from '../../commands/sessions.js';
+import { buildRoutineListJson } from '../routines.js';
+import { backfillActiveRowsFromIndex, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson } from '../session/active.js';
 import { getConfigValue, loadAutoLaunchPreferences } from '../device-config.js';
 import { loadDevices } from '../devices/registry.js';
 import { machineId } from '../machine-id.js';

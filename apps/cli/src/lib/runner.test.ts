@@ -8,7 +8,7 @@ import { getRunDir, readRunMeta, writeRunMeta } from './routines.js';
 import { getVersionHomePath } from './versions.js';
 import type { JobConfig, RunMeta } from './routines.js';
 import { hardDeprecationError } from './agents.js';
-import type { RotateCandidate, RotateResult } from './rotate.js';
+import type { RotateCandidate, RotateResult } from './accounting/rotate.js';
 import { saveTask, hostsCacheDir } from './hosts/tasks.js';
 import { _resetPerfDbForTest, aggregateSamples } from './perf/db.js';
 import * as activation from './routine-activation.js';

@@ -7,7 +7,7 @@
 // single authority on permissions and targeting.
 
 import type { ComputerClient } from '../computer-rpc.js';
-import { resolveTargetPidDecision, emitComputerAction, type AppInfo } from '../../commands/computer-actions.js';
+import { resolveTargetPidDecision, emitComputerAction, type AppInfo } from './actions.js';
 import type { VerbCall, VerbResult, VerbDispatcher } from './loop.js';
 
 // CLI verb -> daemon RPC method. Only the rename cases need listing; the rest

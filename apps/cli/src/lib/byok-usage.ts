@@ -10,7 +10,7 @@
 
 import type { Profile } from './profiles.js';
 import { hasKeychainToken, getKeychainToken } from './secrets/profiles.js';
-import { renderBar, getUsageColor } from './usage.js';
+import { renderBar, getUsageColor } from './accounting/usage.js';
 import chalk from 'chalk';
 import * as fs from 'node:fs';
 import * as path from 'node:path';

@@ -25,11 +25,11 @@ import {
   probeKimiStatus,
   type UsageSnapshot,
 } from './usage.js';
-import type { AccountInfo } from './agents.js';
-import { noteUsageRateLimited, setUsageBackoffDirForTest } from './usage-backoff.js';
-import { setKeychainToken, setKeychainBackendForTest, secretsKeychainItem, type KeychainBackend } from './secrets/index.js';
-import { writeBundle, keychainRef, bundleItemStore } from './secrets/bundles.js';
-import { _resetFileStoreForTest } from './secrets/filestore.js';
+import type { AccountInfo } from '../agents.js';
+import { noteUsageRateLimited, setUsageBackoffDirForTest } from '../usage-backoff.js';
+import { setKeychainToken, setKeychainBackendForTest, secretsKeychainItem, type KeychainBackend } from '../secrets/index.js';
+import { writeBundle, keychainRef, bundleItemStore } from '../secrets/bundles.js';
+import { _resetFileStoreForTest } from '../secrets/filestore.js';
 
 const LEEWAY_MS = 5 * 60 * 1000;
 const NOW = 1_800_000_000_000; // fixed epoch ms so the tests are deterministic

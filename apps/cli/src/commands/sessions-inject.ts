@@ -16,8 +16,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { getActiveSessions } from '../lib/session/active.js';
-import { resolveInjectTargetForSession } from '../lib/terminal/resolve.js';
-import { injectIntoTerminal, type InjectTarget } from '../lib/terminal/index.js';
+import { injectIntoTerminal, resolveInjectTargetForSession, type InjectTarget } from '../lib/terminal/index.js';
 import { setHelpSections } from '../lib/help.js';
 
 interface InjectOptions {
