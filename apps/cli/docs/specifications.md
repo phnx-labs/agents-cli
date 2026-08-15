@@ -1045,7 +1045,8 @@ normative — a change that widens/narrows a cell is a spec change.
   (`commands/focus.ts` ~`:922`) is an id repair by its own docstring and does not
   take it, so a `focus <id>` that collides with the daemon's scan reads the
   pre-scan snapshot, misses, and falls back to a row carrying no `version` — a
-  non-version-pinned resume. The selector paths in `renderOneSession` /
+  non-version-pinned resume. `openFocusTabs` (`commands/focus.ts` ~`:828`) is the
+  same class. The selector paths in `renderOneSession` /
   `renderArtifactsGlobal` do not take it either. Widening the wait to those sites
   is **not** a drop-in: they are not gated on a miss, so the cost would be
   unconditional, and `WAIT_FOR_SCAN_TIMEOUT_MS` (2s, `session/discover.ts`) is

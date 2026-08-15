@@ -397,10 +397,13 @@ export interface IncrementalScanResult {
    * is the steady state on an idle box and does NOT mean the scan was skipped;
    * read `claimed` for that.
    *
-   * Every one of the 13 SESSION_AGENTS contributes: the store-backed harnesses
-   * (OpenCode, OpenClaw) short-circuit on their store's own stamp and, when it
-   * did change, report the rows that re-read — so a tick whose only changed
-   * sessions live in one of those stores no longer reports 0 (RUSH-2691).
+   * Twelve of the 13 SESSION_AGENTS contribute, including OpenCode, whose
+   * scanner filters to sessions whose own per-session stamp changed and reports
+   * that batch — so a tick whose only changed sessions live there no longer
+   * reports 0 (RUSH-2691). OpenClaw is the exception and contributes nothing:
+   * its scanner has no change detection to report (a TTL gate, a fresh stamp
+   * every run, and an entry list rebuilt as the current inventory), so counting
+   * it would overstate rather than measure. See `scanOpenClawIncremental`.
    */
   scanned: number;
 }
@@ -2814,9 +2817,15 @@ async function scanOpenClawIncremental(onProgress?: (p: ScanProgress) => void): 
   }
 
   upsertSessionsBatch(entries);
-  // Same reason as the OpenCode emit above: without it the daemon's warm tick
-  // cannot count what this scanner indexed (RUSH-2691).
-  onProgress?.({ agent: 'openclaw', parsed: entries.length, total: entries.length });
+  // Deliberately NO onProgress emit, unlike every other scanner (RUSH-2691).
+  // This one cannot report a delta: its gate is a 60s TTL (not a store stamp),
+  // `scan` above stamps a fresh `now` on every entry every run, and `entries` is
+  // the CURRENT INVENTORY — running channels plus cron jobs — rebuilt from
+  // scratch each pass. Emitting entries.length would report "how many openclaw
+  // things exist", re-counted every 60s forever, which is a worse lie than
+  // silence: the warm tick's number means "transcripts parsed this scan". Giving
+  // OpenClaw a real per-entry stamp is tracked separately; until then it
+  // contributes 0 and the docblock on IncrementalScanResult says so.
   db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('openclaw_last_scan_ms', ?)`).run(String(Date.now()));
 }
 
