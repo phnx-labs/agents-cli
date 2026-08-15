@@ -17,6 +17,7 @@ import {
   writeRouter,
   deleteRouter,
   routerExists,
+  routerSource,
   routersDir,
   validateRouter,
   type Router,
@@ -24,7 +25,29 @@ import {
 import { MODEL_TIERS, isTierToken } from '../lib/model-tiers.js';
 import { die } from '../lib/format.js';
 import { setHelpSections } from '../lib/help.js';
+import { findAccount } from '../lib/account-registry.js';
 import * as path from 'path';
+
+/**
+ * Read a router that must be safely editable/removable from here: `writeRouter`
+ * and `deleteRouter` only ever touch the user layer, so editing a router that
+ * currently resolves from a project/system layer would silently write to a
+ * user-layer file that stays permanently shadowed (the edit "succeeds" but is
+ * never read back — the router keeps resolving to its project/system copy).
+ * Fails loud instead, naming the layer and pointing at the fix.
+ */
+function requireEditableRouter(name: string): Router {
+  const source = routerSource(name);
+  if (source === null) die(`Router '${name}' not found.`);
+  if (source !== 'user') {
+    die(
+      `Router '${name}' resolves from the '${source}' layer, not 'user' -- ` +
+      `agents route can only edit or remove a user-layer router. Edit its file directly, ` +
+      `or create a user-layer router under a different name.`,
+    );
+  }
+  return readRouter(name);
+}
 
 /** Highest-tier-reached summary for a router's declared model/tier allowlist. */
 function routerTierSummary(router: Router): string {
@@ -189,17 +212,12 @@ export function registerRouteCommands(program: Command): void {
     .command('allow <name> <harness> <models...>')
     .description("Set (replace) a harness's eligible model/tier allowlist under a router.")
     .action((name: string, harness: string, models: string[]) => {
-      let router: Router;
-      try {
-        router = readRouter(name);
-      } catch (err) {
-        die((err as Error).message);
-      }
-      const existingAccounts = router!.harnesses[harness]?.accounts;
+      const router = requireEditableRouter(name);
+      const existingAccounts = router.harnesses[harness]?.accounts;
       const next: Router = {
-        ...router!,
+        ...router,
         harnesses: {
-          ...router!.harnesses,
+          ...router.harnesses,
           [harness]: { models, ...(existingAccounts ? { accounts: existingAccounts } : {}) },
         },
       };
@@ -216,19 +234,15 @@ export function registerRouteCommands(program: Command): void {
     .command('link-account <name> <harness> <account>')
     .description('Link a durable credential account to a harness under a router.')
     .action((name: string, harness: string, account: string) => {
-      let router: Router;
-      try {
-        router = readRouter(name);
-      } catch (err) {
-        die((err as Error).message);
-      }
-      const allowlist = router!.harnesses[harness];
+      if (!findAccount(account)) die(`Unknown account '${account}'.`);
+      const router = requireEditableRouter(name);
+      const allowlist = router.harnesses[harness];
       if (!allowlist) {
         die(`Harness '${harness}' is not part of router '${name}'. Add it first: agents route allow ${name} ${harness} <model|tier>...`);
       }
       allowlist!.accounts = allowlist!.accounts ?? [];
       if (!allowlist!.accounts.includes(account)) allowlist!.accounts.push(account);
-      writeRouter(router!);
+      writeRouter(router);
       console.log(chalk.green(`Router '${name}': linked ${harness} account '${account}'`));
     });
 
@@ -236,18 +250,14 @@ export function registerRouteCommands(program: Command): void {
     .command('unlink-account <name> <harness> <account>')
     .description('Unlink a durable credential account from a harness under a router.')
     .action((name: string, harness: string, account: string) => {
-      let router: Router;
-      try {
-        router = readRouter(name);
-      } catch (err) {
-        die((err as Error).message);
-      }
-      const allowlist = router!.harnesses[harness];
+      if (!findAccount(account)) die(`Unknown account '${account}'.`);
+      const router = requireEditableRouter(name);
+      const allowlist = router.harnesses[harness];
       if (!allowlist) {
         die(`Harness '${harness}' is not part of router '${name}'.`);
       }
       allowlist!.accounts = (allowlist!.accounts ?? []).filter((a) => a !== account);
-      writeRouter(router!);
+      writeRouter(router);
       console.log(chalk.green(`Router '${name}': unlinked ${harness} account '${account}'`));
     });
 
@@ -256,6 +266,11 @@ export function registerRouteCommands(program: Command): void {
     .alias('remove')
     .description('Delete a router.')
     .action((name: string) => {
+      const source = routerSource(name);
+      if (source === null) die(`Router '${name}' not found.`);
+      if (source !== 'user') {
+        die(`Router '${name}' resolves from the '${source}' layer, not 'user' -- agents route rm can only remove a user-layer router.`);
+      }
       const existed = deleteRouter(name);
       if (!existed) die(`Router '${name}' not found.`);
       console.log(chalk.green(`Router '${name}' removed.`));

@@ -2,24 +2,56 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as yaml from 'yaml';
 import { Command } from 'commander';
 import * as state from '../lib/state.js';
 import { registerRouteCommands } from './route.js';
 import { readRouter, routerExists } from '../lib/routers.js';
+import { addAccount } from '../lib/account-registry.js';
+import { setKeychainBackendForTest, type KeychainBackend } from '../lib/secrets/index.js';
+import { _resetFileStoreForTest } from '../lib/secrets/filestore.js';
+
+class MemoryKeychain implements KeychainBackend {
+  store = new Map<string, string>();
+  has(item: string) { return this.store.has(item); }
+  get(item: string): string {
+    const v = this.store.get(item);
+    if (v === undefined) throw new Error(`Keychain item not found: ${item}`);
+    return v;
+  }
+  set(item: string, value: string) { this.store.set(item, value); }
+  delete(item: string) { return this.store.delete(item); }
+  list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
+}
 
 let TEST_ROOT: string;
 let USER_DIR: string;
+let PROJECT_DIR: string;
+let previousMetaIndex: string | undefined;
 
 beforeEach(() => {
   TEST_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'route-cmd-test-'));
   USER_DIR = path.join(TEST_ROOT, '.agents');
+  PROJECT_DIR = path.join(TEST_ROOT, 'project', '.agents');
   fs.mkdirSync(USER_DIR, { recursive: true });
   vi.spyOn(state, 'getUserAgentsDir').mockReturnValue(USER_DIR);
   vi.spyOn(state, 'getSystemAgentsDir').mockReturnValue(path.join(TEST_ROOT, 'system', '.agents'));
   vi.spyOn(state, 'getProjectAgentsDir').mockReturnValue(null);
+
+  previousMetaIndex = process.env.AGENTS_SECRETS_META_INDEX_FILE;
+  process.env.AGENTS_SECRETS_META_INDEX_FILE = path.join(TEST_ROOT, 'bundle-index.json');
+  _resetFileStoreForTest({ fileDir: path.join(TEST_ROOT, 'secrets'), passphrase: 'route-cmd-test' });
+  setKeychainBackendForTest(new MemoryKeychain());
+  // Real, registered accounts every link-account/unlink-account test can reference.
+  addAccount('personal', 'openrouter', 'api-key', 'sk-personal-test', USER_DIR);
+  addAccount('work', 'openrouter', 'api-key', 'sk-work-test', USER_DIR);
 });
 
 afterEach(() => {
+  setKeychainBackendForTest(null);
+  _resetFileStoreForTest();
+  if (previousMetaIndex === undefined) delete process.env.AGENTS_SECRETS_META_INDEX_FILE;
+  else process.env.AGENTS_SECRETS_META_INDEX_FILE = previousMetaIndex;
   vi.restoreAllMocks();
   fs.rmSync(TEST_ROOT, { recursive: true, force: true });
 });
@@ -154,6 +186,65 @@ describe('agents route link-account / unlink-account', () => {
     const result = await runRoute(['link-account', 'research', 'kimi', 'work']);
     expect(result.exitCode).toBe(1);
     expect(readRouter('research').harnesses.kimi).toBeUndefined();
+  });
+
+  it('fails loud linking an account that does not exist in the account registry', async () => {
+    await runRoute(['create', 'research', '--harness', 'gemini']);
+    const result = await runRoute(['link-account', 'research', 'gemini', 'not-a-real-account']);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("Unknown account 'not-a-real-account'");
+    expect(readRouter('research').harnesses.gemini.accounts ?? []).toEqual([]);
+  });
+
+  it('fails loud unlinking an account that does not exist in the account registry', async () => {
+    await runRoute(['create', 'research', '--harness', 'gemini']);
+    await runRoute(['link-account', 'research', 'gemini', 'personal']);
+    const result = await runRoute(['unlink-account', 'research', 'gemini', 'not-a-real-account']);
+    expect(result.exitCode).toBe(1);
+    // the real, already-linked account is untouched
+    expect(readRouter('research').harnesses.gemini.accounts).toEqual(['personal']);
+  });
+});
+
+describe('agents route edit verbs refuse a non-user-layer router (layer-shadow safety)', () => {
+  function writeProjectRouter(): void {
+    fs.mkdirSync(path.join(PROJECT_DIR, 'routers'), { recursive: true });
+    fs.writeFileSync(
+      path.join(PROJECT_DIR, 'routers', 'shared.yml'),
+      yaml.stringify({ name: 'shared', harnesses: { gemini: { models: ['cheap'] } } }),
+    );
+  }
+
+  it('allow refuses to edit a project-layer router rather than silently writing a shadowed user-layer copy', async () => {
+    vi.spyOn(state, 'getProjectAgentsDir').mockReturnValue(PROJECT_DIR);
+    writeProjectRouter();
+
+    const result = await runRoute(['allow', 'shared', 'gemini', 'best']);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("resolves from the 'project' layer");
+    // the project-layer file is untouched, and no shadowing user-layer file was created
+    expect(readRouter('shared', TEST_ROOT).harnesses.gemini.models).toEqual(['cheap']);
+    expect(fs.existsSync(path.join(USER_DIR, 'routers', 'shared.yml'))).toBe(false);
+  });
+
+  it('link-account refuses to edit a project-layer router', async () => {
+    vi.spyOn(state, 'getProjectAgentsDir').mockReturnValue(PROJECT_DIR);
+    writeProjectRouter();
+
+    const result = await runRoute(['link-account', 'shared', 'gemini', 'personal']);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("resolves from the 'project' layer");
+    expect(fs.existsSync(path.join(USER_DIR, 'routers', 'shared.yml'))).toBe(false);
+  });
+
+  it('rm refuses to remove a project-layer router, and it still resolves afterward', async () => {
+    vi.spyOn(state, 'getProjectAgentsDir').mockReturnValue(PROJECT_DIR);
+    writeProjectRouter();
+
+    const result = await runRoute(['rm', 'shared']);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("resolves from the 'project' layer");
+    expect(routerExists('shared', TEST_ROOT)).toBe(true);
   });
 });
 

@@ -65,6 +65,19 @@ export function routerExists(name: string, cwd?: string): boolean {
   return resolveResource('routers', name, cwd) !== null;
 }
 
+/**
+ * The layer a router currently resolves from ('project' | 'user' | 'system' |
+ * an extra-repo alias), or null if it doesn't resolve. `writeRouter` and
+ * `deleteRouter` only ever touch the user layer, so a caller that edits or
+ * removes a router MUST check this first -- editing a router that resolves
+ * from a non-user layer would silently write to a user-layer file that stays
+ * permanently shadowed (the edit "succeeds" but is never read back).
+ */
+export function routerSource(name: string, cwd?: string): string | null {
+  validateRouterName(name);
+  return resolveResource('routers', name, cwd)?.source ?? null;
+}
+
 function parseRouterFile(file: string, name: string): Router {
   const raw = fs.readFileSync(file, 'utf-8');
   const parsed = yaml.parse(raw) as Router;
