@@ -6,6 +6,19 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+- **A failed agent launch no longer closes the terminal before you can read
+  why (RUSH-2593).** Native-mode tabs prefixed the launch command with `exec`
+  (RUSH-2026) so the shell process was replaced by the agent runner — closing
+  the tab automatically once the runner exited. That was right for a clean
+  exit, but a *launch failure* (an unreachable `--host`, an `agents run`
+  rejection) killed the exec'd process just as fast, and the tab closed before
+  the error text on screen could be read. `wrapNativeAgentCommand` now runs the
+  launch command normally and checks its exit status: 0 still closes the tab
+  (unchanged clean-exit behavior); nonzero prints
+  `Agent exited with status <n> — terminal kept open so you can read the error
+  above.` and leaves the interactive shell running instead of exiting. Source:
+  `apps/ext/src/core/agents.ts` (`wrapNativeAgentCommand`).
+
 - **`Agents: New <Harness>` runs where you say — and defaults to the fleet's worker
   boxes.** The per-harness New commands were hardcoded to this machine. New setting
   `agents.launch.defaultTarget`: `auto` (the default — the CLI picks a device), `local`

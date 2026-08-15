@@ -1962,10 +1962,9 @@ async function openSingleAgent(
   });
 
   if (command) {
-    // Prefix the launch command with `exec` so the shell replaces itself with
-    // the agent runner. When the agent exits the terminal process exits too,
-    // which causes VS Code to close the tab automatically.
-    // wrapNativeAgentCommand is a no-op for shell tabs.
+    // wrapNativeAgentCommand exits the shell (closing the tab) on a clean exit
+    // but leaves it open with a readable status line on a launch failure
+    // (RUSH-2593). No-op for shell tabs.
     await sendCommandWhenReady(terminal, wrapNativeAgentCommand(command, agentKey === 'shell'));
     readiness.armAgentReady(terminal, agentKey && sessionId
       ? { agentKey, sessionId, cwd }
@@ -3375,9 +3374,9 @@ export async function openSingleAgentWithQueue(
   }
 
   if (command) {
-    // Always an agent-terminal here, never a shell tab. Apply exec so the shell
-    // replaces itself with the runner and VS Code closes the tab when the agent
-    // exits. isShell is always false here.
+    // Always an agent-terminal here, never a shell tab (isShell is always
+    // false). wrapNativeAgentCommand closes the tab on a clean exit but keeps
+    // it open with a readable status line on a launch failure (RUSH-2593).
     await sendCommandWhenReady(terminal, wrapNativeAgentCommand(command, false));
   }
 

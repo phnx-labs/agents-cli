@@ -19,6 +19,7 @@ import { CLAUDE_TITLE, CODEX_TITLE, GEMINI_TITLE, OPENCODE_TITLE, CURSOR_TITLE, 
 import { CLI_AGENT_META, CliAgentId, isCliAgentId } from './agents.cli';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 describe('BUILT_IN_AGENTS', () => {
   test('every non-shell built-in contributes and registers an Auto command', () => {
@@ -526,32 +527,64 @@ describe('buildAgentLaunchCommand', () => {
   });
 });
 
-describe('wrapNativeAgentCommand (RUSH-2026)', () => {
-  // The exec prefix makes the shell replace itself with the agent runner so VS
-  // Code closes the tab automatically when the agent exits — mirroring tmux
-  // pane-died behaviour.
+describe('wrapNativeAgentCommand (RUSH-2593)', () => {
+  // The wrapped command exits the shell (closing the VS Code tab) on a clean
+  // exit, mirroring tmux pane-died behaviour, but leaves the shell running
+  // with a readable status line when the launch itself fails — so a bad
+  // remote/host launch doesn't close the tab before the error can be read.
 
-  test('agent terminal: command is exec-prefixed', () => {
+  test('agent terminal: command is followed by an exit-code gate, not exec-replaced', () => {
     const cmd = buildAgentLaunchCommand('claude', null);
-    expect(wrapNativeAgentCommand(cmd, false)).toBe(`exec ${cmd}`);
+    const wrapped = wrapNativeAgentCommand(cmd, false);
+    expect(wrapped.startsWith('exec ')).toBe(false);
+    expect(wrapped).toContain(cmd);
+    expect(wrapped).toContain('ec=$?');
+    expect(wrapped).toContain('exit 0');
   });
 
-  test('agent terminal with --host: exec prefix is preserved', () => {
+  test('agent terminal with --host: exit-code gate wraps the full --host command', () => {
     const cmd = buildAgentLaunchCommand('claude', null, undefined, undefined, undefined, undefined, undefined, { host: 'yosemite-s0' });
     const wrapped = wrapNativeAgentCommand(cmd, false);
-    expect(wrapped).toMatch(/^exec agents run claude --interactive/);
+    expect(wrapped.startsWith('exec ')).toBe(false);
+    expect(wrapped).toMatch(/^agents run claude --interactive/);
     expect(wrapped).toContain("--host 'yosemite-s0'");
+    expect(wrapped).toContain('ec=$?');
   });
 
-  test('shell terminal: command is NOT exec-prefixed', () => {
+  test('shell terminal: command is returned unwrapped', () => {
     const shellCmd = 'zsh';
     expect(wrapNativeAgentCommand(shellCmd, true)).toBe(shellCmd);
-    expect(wrapNativeAgentCommand(shellCmd, true)).not.toMatch(/^exec /);
+    expect(wrapNativeAgentCommand(shellCmd, true)).not.toContain('ec=$?');
   });
 
   test('empty command returns empty string unchanged', () => {
     expect(wrapNativeAgentCommand('', false)).toBe('');
     expect(wrapNativeAgentCommand('', true)).toBe('');
+  });
+
+  // Real-shell contract test (no mocking): run the wrapped command through an
+  // actual bash, standing a real exit-0 / exit-nonzero command in for the
+  // agent runner, and assert on what bash actually does — not on a guess
+  // about shell semantics.
+  test('real bash: a clean exit (0) does not print the kept-open message', () => {
+    const wrapped = wrapNativeAgentCommand('true', false);
+    // execFileSync spawns bash directly with argv — no outer shell to
+    // re-interpret the `$?`/`$ec` inside `wrapped` before bash ever sees it.
+    const out = execFileSync('bash', ['-c', wrapped], { encoding: 'utf8' });
+    expect(out).not.toContain('Agent exited with status');
+  });
+
+  test('real bash: a nonzero exit prints a human-readable status line and the shell keeps running past it', () => {
+    // A subshell that exits 7, standing in for a failed `agents run …` launch.
+    // (A bare `exit 7` would terminate bash -c's own shell instead of just
+    // returning a status, which isn't what a failed subprocess launch does.)
+    const wrapped = wrapNativeAgentCommand(`bash -c 'exit 7'`, false);
+    // The wrapped command never itself invokes an outer `exit` on the failure
+    // branch, so appending a marker after it proves the script kept executing
+    // instead of the process dying with the agent (RUSH-2593's actual bug).
+    const out = execFileSync('bash', ['-c', `${wrapped}; echo MARKER_REACHED`], { encoding: 'utf8' });
+    expect(out).toContain('Agent exited with status 7');
+    expect(out).toContain('MARKER_REACHED');
   });
 });
 
@@ -562,7 +595,7 @@ describe('extension tmux removal — spawn command contract', () => {
         buildAgentLaunchCommand(key, null, undefined, undefined, undefined, 'balanced', undefined, { local: true }),
         false,
       );
-      expect(cmd).toMatch(/^exec agents run /);
+      expect(cmd).toMatch(/^agents run /);
       expect(cmd).toContain('--interactive');
       expect(cmd).not.toContain('tmux');
       expect(cmd).not.toContain('agents tmux');
