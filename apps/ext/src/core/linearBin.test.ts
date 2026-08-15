@@ -2,8 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import * as path from 'path';
 import { linearBinDirs, LINEAR_NOT_FOUND_MESSAGE, resolveLinearBin } from './linearBin';
 
-const executableFixture = path.join(import.meta.dir, 'testdata', 'linear-bin', 'executable');
-const nonExecutableFixture = path.join(import.meta.dir, 'testdata', 'linear-bin', 'non-executable');
+const fixtureRoot = path.join(import.meta.dir, 'testdata', 'linear-bin');
+const executableFixture = path.join(fixtureRoot, 'executable');
+const nonExecutableFixture = path.join(fixtureRoot, 'non-executable');
 
 describe('linearBinDirs', () => {
   test('prefers the official user-local installation and dedupes PATH', () => {
@@ -16,6 +17,13 @@ describe('linearBinDirs', () => {
 describe('resolveLinearBin', () => {
   test('resolves a real executable to an absolute path', () => {
     expect(resolveLinearBin([executableFixture])).toBe(path.join(executableFixture, 'linear'));
+  });
+
+  test('resolves the official install when the GUI PATH is empty', () => {
+    const home = path.join(fixtureRoot, 'gui-home');
+    expect(resolveLinearBin(linearBinDirs(home, ''))).toBe(
+      path.join(home, '.local', 'bin', 'linear'),
+    );
   });
 
   test.skipIf(process.platform === 'win32')('rejects a non-executable file', () => {
