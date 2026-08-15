@@ -370,29 +370,12 @@ interface ScanEntry {
  * TTL, no external lock files needed.
  */
 export async function discoverSessions(options?: DiscoverOptions): Promise<SessionMeta[]> {
-  // Touch the DB so the schema is ready and connection is cached for this run.
-  getDB();
+  const { claimed } = await scanSessionsIncremental({
+    agent: options?.agent,
+    onProgress: options?.onProgress,
+  });
 
-  const agents = options?.agent ? [options.agent] : SESSION_AGENTS;
-  const onProgress = options?.onProgress;
-
-  if (tryClaimScan(process.pid)) {
-    try {
-      // Bounded + staggered instead of a single Promise.all: scanning every
-      // agent's dotfile dir (~/.claude, ~/.codex, ~/.gemini, …) simultaneously
-      // reads to behavioral EDR (CrowdStrike Falcon) as a ransomware-style bulk
-      // file-enumeration sweep. Same dirs, same results — just not all at once.
-      await scanAgentsBounded(agents, agent => dispatchAgentScan(agent, onProgress));
-      await scanAgentsBounded(agents, agent => scanRoutineArchivesIncremental(agent, onProgress));
-      // Seed labels from `agents run --name` handles onto the freshly-scanned
-      // rows by id. Runs AFTER the per-agent scans (which applied agent-generated
-      // titles via syncLabels), so a real title always wins and the seed only
-      // backfills sessions that would otherwise be unnamed.
-      seedLabelsFromNames(buildRunNameMap());
-    } finally {
-      releaseScan(process.pid);
-    }
-  } else if (options?.waitForScan) {
+  if (!claimed && options?.waitForScan) {
     // Lost the single-flight claim to another live process (a foreground
     // `agents sessions*` or the daemon's index warm). Rather than return the
     // pre-scan snapshot that just missed, wait (bounded) for that scan to finish
@@ -403,6 +386,71 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
   return queryIndexedSessions(options, {
     skipExistenceCheck: options?.skipExistenceCheck ?? false,
   });
+}
+
+/** What one incremental scan actually did. */
+export interface IncrementalScanResult {
+  /** True when this process won the single-flight claim and ran the scan. */
+  claimed: boolean;
+  /**
+   * Transcripts parsed this scan — i.e. those whose (mtime, size) changed. Zero
+   * is the steady state on an idle box and does NOT mean the scan was skipped;
+   * read `claimed` for that.
+   */
+  scanned: number;
+}
+
+/**
+ * The write half of {@link discoverSessions}: claim the single-flight scan slot,
+ * incrementally index this host's transcript dirs, and report what was parsed.
+ *
+ * Split out so a caller that only wants the index refreshed — the daemon's warm
+ * tick — can run it WITHOUT the listing query `discoverSessions` ends with. That
+ * query is not free: it applies a cwd filter, runs the `archived_at`-writing
+ * existence check, and can issue a Linear fetch, none of which index anything
+ * (RUSH-2691). Keeping one implementation here is also what stops the tick and
+ * the foreground path from drifting apart.
+ */
+export async function scanSessionsIncremental(options?: {
+  agent?: SessionAgentId;
+  onProgress?: (p: ScanProgress) => void;
+}): Promise<IncrementalScanResult> {
+  // Touch the DB so the schema is ready and connection is cached for this run.
+  getDB();
+
+  const agents = options?.agent ? [options.agent] : SESSION_AGENTS;
+  const onProgress = options?.onProgress;
+
+  if (!tryClaimScan(process.pid)) return { claimed: false, scanned: 0 };
+
+  // `parsed` climbs monotonically within one scanner run, so the last value per
+  // (phase, agent) is that scanner's total. Phase-keyed because the dotfile scan
+  // and the routine-archive scan both report under the same agent id.
+  const parsedByPhaseAgent = new Map<string, number>();
+  const track = (phase: string) => (p: ScanProgress) => {
+    parsedByPhaseAgent.set(`${phase}\0${p.agent}`, p.parsed);
+    onProgress?.(p);
+  };
+
+  try {
+    // Bounded + staggered instead of a single Promise.all: scanning every
+    // agent's dotfile dir (~/.claude, ~/.codex, ~/.gemini, …) simultaneously
+    // reads to behavioral EDR (CrowdStrike Falcon) as a ransomware-style bulk
+    // file-enumeration sweep. Same dirs, same results — just not all at once.
+    await scanAgentsBounded(agents, agent => dispatchAgentScan(agent, track('dotfiles')));
+    await scanAgentsBounded(agents, agent => scanRoutineArchivesIncremental(agent, track('routines')));
+    // Seed labels from `agents run --name` handles onto the freshly-scanned
+    // rows by id. Runs AFTER the per-agent scans (which applied agent-generated
+    // titles via syncLabels), so a real title always wins and the seed only
+    // backfills sessions that would otherwise be unnamed.
+    seedLabelsFromNames(buildRunNameMap());
+  } finally {
+    releaseScan(process.pid);
+  }
+
+  let scanned = 0;
+  for (const n of parsedByPhaseAgent.values()) scanned += n;
+  return { claimed: true, scanned };
 }
 
 /**

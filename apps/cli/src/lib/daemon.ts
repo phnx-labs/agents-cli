@@ -1125,7 +1125,13 @@ export async function runDaemon(): Promise<void> {
     if (sessionIndexWarmInFlight) return;
     sessionIndexWarmInFlight = true;
     try {
-      await runSessionIndexWarmTick();
+      const { indexed, claimed } = await runSessionIndexWarmTick();
+      // Log only when the tick did something. A silent tick is what let it
+      // report 0 forever unnoticed (RUSH-2691); a line on every idle 20s tick
+      // would drown the log, so the steady state (claimed, nothing changed)
+      // stays quiet and both interesting outcomes are visible.
+      if (!claimed) log('INFO', 'session-index warm: skipped, another process holds the scan claim');
+      else if (indexed > 0) log('INFO', `session-index warm: indexed ${indexed} transcript(s)`);
     } catch (err) {
       log('WARN', `session-index warm failed: ${(err as Error).message}`);
     } finally {

@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { isFreshFleetAuthSnapshot, runActiveSessionsWarmTick, runSessionIndexWarmTick } from './daemon-ticks.js';
+import { isFreshFleetAuthSnapshot, runActiveSessionsWarmTick } from './daemon-ticks.js';
 import {
   readActiveSessionsCache,
   setActiveSessionsSnapshotPathForTest,
@@ -62,18 +62,9 @@ describe('runActiveSessionsWarmTick', () => {
   });
 });
 
-describe('runSessionIndexWarmTick (RUSH-2682)', () => {
-  it('drives the incremental index scan and reports the row count', async () => {
-    // The daemon is the single scheduled executor that keeps THIS host's index
-    // fresh so a locally-started session is discoverable within seconds.
-    let scanned = 0;
-    const r = await runSessionIndexWarmTick({
-      discover: async () => { scanned++; return { length: 3 }; },
-    });
-    expect(scanned).toBe(1);
-    expect(r.indexed).toBe(3);
-  });
-});
+// `runSessionIndexWarmTick` is covered by daemon-ticks.session-index.test.ts,
+// which must redirect HOME before the session modules load (they capture it at
+// import time) — so it needs its own file rather than a suite here.
 
 describe('usage refresh publisher/subscriber gate', () => {
   it('publishes locally when this host is primary or the pin is absent', () => {
