@@ -1224,7 +1224,7 @@
                 },
                 {
                   "flags": "--json",
-                  "description": "emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt, label, agent, session, host, repo, revisionCount)",
+                  "description": "emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt, label, agent, session, host, repo, revisionCount, meta)",
                   "long": "--json",
                   "required": false,
                   "optional": false,
@@ -1250,7 +1250,7 @@
               "name": "revisions",
               "path": "artifacts share revisions",
               "aliases": [],
-              "description": "Show the retained prior versions of a published slug, newest first (human table; --json for scripts).",
+              "description": "Show the retained prior versions of a published slug, newest first (human table; --revisions-json for scripts).",
               "args": [
                 {
                   "name": "target",
@@ -1261,18 +1261,18 @@
               ],
               "options": [
                 {
-                  "flags": "--github-user <user>",
+                  "flags": "--for-user <user>",
                   "description": "GitHub username for resolving a bare-slug target (default: resolved from gh/git config)",
-                  "long": "--github-user",
+                  "long": "--for-user",
                   "required": true,
                   "optional": false,
                   "variadic": false,
                   "negate": false
                 },
                 {
-                  "flags": "--json",
+                  "flags": "--revisions-json",
                   "description": "emit the machine-readable revision list",
-                  "long": "--json",
+                  "long": "--revisions-json",
                   "required": false,
                   "optional": false,
                   "variadic": false,
@@ -1289,7 +1289,7 @@
                   "negate": false
                 }
               ],
-              "examples": "# Prior versions kept under this slug (bare slug — your own namespace)\n      agents artifacts share revisions q3-report\n\n      # By <user>/<slug> or full URL, same target forms as 'agents unshare'\n      agents artifacts share revisions octocat/q3-report\n      agents artifacts share revisions https://share.agents-cli.sh/octocat/q3-report",
+              "examples": "# Prior versions kept under this slug (bare slug — your own namespace)\n      agents artifacts share revisions q3-report\n\n      # By <user>/<slug> or full URL, same target forms as 'agents unshare'\n      agents artifacts share revisions octocat/q3-report\n      agents artifacts share revisions https://share.agents-cli.sh/octocat/q3-report\n\n      # Machine-readable, and a bare slug resolved against another namespace\n      agents artifacts share revisions q3-report --revisions-json\n      agents artifacts share revisions q3-report --for-user octocat",
               "notes": "A revision is created automatically on every republish of an existing slug\n  (pass --no-revision at publish time to skip it) — this is history, never\n  shown on the public gallery or in 'agents artifacts share list' beyond its\n  count. Each revision's own URL is still directly reachable and honors its own\n  recorded expiry.",
               "subcommands": []
             },
