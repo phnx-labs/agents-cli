@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { buildRoutineListJson } from '../routines.js';
+import { buildRoutineListJson } from '../scheduling/routines.js';
 import { backfillActiveRowsFromIndex, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson } from '../session/active.js';
 import { getConfigValue, loadAutoLaunchPreferences } from '../device-config.js';
 import { loadDevices } from '../devices/registry.js';

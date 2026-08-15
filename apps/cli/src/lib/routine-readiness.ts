@@ -13,8 +13,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as TOML from 'smol-toml';
-import type { JobConfig } from './routines.js';
-import { resolveJobExecutionContext, resolveHostStrategy } from './routines.js';
+import type { JobConfig } from './scheduling/routines.js';
+import { resolveJobExecutionContext, resolveHostStrategy } from './scheduling/routines.js';
 import { evaluateRoutineReadiness, type RoutineReadinessResult, type PlacementMode } from './routine-context.js';
 import { getVersionHomePath, resolveVersion } from './installations/versions.js';
 import { probeLocalFleetAuth } from './auth-health.js';

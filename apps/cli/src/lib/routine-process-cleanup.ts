@@ -4,7 +4,7 @@ import { execFileSync } from 'child_process';
 
 import { isAlive, killTree } from './platform/index.js';
 import { getRunsDir } from './state.js';
-import type { RunMeta } from './routines.js';
+import type { RunMeta } from './scheduling/routines.js';
 
 export interface RoutineProcessCleanupOptions {
   runsDir?: string;

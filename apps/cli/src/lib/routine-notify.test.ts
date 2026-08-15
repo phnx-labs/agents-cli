@@ -8,7 +8,7 @@ import {
   routineFinishNotification,
   routineAgent,
 } from './routine-notify.js';
-import type { JobConfig, RunMeta } from './routines.js';
+import type { JobConfig, RunMeta } from './scheduling/routines.js';
 
 function agentConfig(p: Partial<JobConfig> = {}): JobConfig {
   return {

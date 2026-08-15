@@ -9,7 +9,7 @@
  */
 
 import { jobMatchesWebhook, type IncomingWebhook } from '../../triggers/webhook.js';
-import type { JobConfig, JobTrigger } from '../../routines.js';
+import type { JobConfig, JobTrigger } from '../../scheduling/routines.js';
 import type { MonitorSource, MonitorConfig } from '../config.js';
 import type { Observation } from './types.js';
 

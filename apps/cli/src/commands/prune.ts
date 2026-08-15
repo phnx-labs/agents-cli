@@ -57,7 +57,7 @@ import { resolveAgentName, formatAgentError } from '../lib/agents.js';
 import { pruneDuplicates } from './view.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { getTrashDir } from '../lib/state.js';
-import { previewRunsPrune, pruneRuns, countAllRuns } from '../lib/routines.js';
+import { previewRunsPrune, pruneRuns, countAllRuns } from '../lib/scheduling/routines.js';
 
 type ResourceType = 'commands' | 'skills' | 'hooks' | 'plugins' | 'subagents';
 type StateType = 'trash' | 'sessions' | 'runs';

@@ -7,7 +7,7 @@
  */
 
 import { Cron } from 'croner';
-import type { JobConfig } from './routines.js';
+import type { JobConfig } from './scheduling/routines.js';
 import {
   listJobs,
   deleteJob,
@@ -19,7 +19,7 @@ import {
   jobRunsOnThisDevice,
   hasAmbiguousDevicePin,
   routineOwnerDevice,
-} from './routines.js';
+} from './scheduling/routines.js';
 
 /** A job config paired with its active cron instance. */
 interface ScheduledJob {

@@ -33,7 +33,7 @@ import {
 } from './state.js';
 import { dispatchAction, type DispatchResult } from './dispatch.js';
 import { sendToOwner } from '../notify.js';
-import { readRunMeta } from '../routines.js';
+import { readRunMeta } from '../scheduling/routines.js';
 
 /** How often the engine wakes to check which monitors are due. */
 const TICK_MS = 5_000;

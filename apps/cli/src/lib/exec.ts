@@ -11,7 +11,7 @@ import * as path from 'path';
 import type { AgentId, Mode } from './types.js';
 import { ALL_MODES } from './types.js';
 import { AGENTS, findInPath } from './agents.js';
-import { parseTimeout } from './routines.js';
+import { parseTimeout } from './scheduling/routines.js';
 import { compareVersions, getBinaryPath, getVersionHomePath, isVersionInstalled, listInstalledVersions, resolveVersion } from './installations/versions.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { isTierToken, resolveTier } from './model-tiers.js';

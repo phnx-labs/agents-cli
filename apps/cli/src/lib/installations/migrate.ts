@@ -18,7 +18,7 @@ import { AGENTS, agentConfigDirName, findInPath } from '../agents.js';
 import { createLink } from '../platform/index.js';
 import { foldLegacySystemRepo, copyDirSkipExisting } from '../migrate-fold.js';
 export { foldLegacySystemRepo } from '../migrate-fold.js';
-import { migrateLegacyRoutineActivation, listJobs, validateJob } from '../routines.js';
+import { migrateLegacyRoutineActivation, listJobs, validateJob } from '../scheduling/routines.js';
 import { setConfigValue } from '../device-config.js';
 import { enabledRoutineNames, replaceEnabledRoutines } from '../routine-activation.js';
 import { evaluateActivationReadiness } from '../routine-readiness.js';

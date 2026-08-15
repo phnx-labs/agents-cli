@@ -15,7 +15,7 @@ import {
   resolveFireOutcome,
 } from './state.js';
 import type { MonitorEvent } from './config.js';
-import { writeRunMeta, getJobRunsDir, type RunMeta } from '../routines.js';
+import { writeRunMeta, getJobRunsDir, type RunMeta } from '../scheduling/routines.js';
 
 const NAME = `test-state-${process.pid}-${Date.now()}`;
 

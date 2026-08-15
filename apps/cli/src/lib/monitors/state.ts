@@ -16,7 +16,7 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import { getMonitorsHistoryDir, ensureAgentsDir } from '../state.js';
 import { safeJoin } from '../paths.js';
-import { readRunMeta, type RunMeta } from '../routines.js';
+import { readRunMeta, type RunMeta } from '../scheduling/routines.js';
 import type { MonitorEvent } from './config.js';
 
 /** Persisted last-seen state for one monitor. */

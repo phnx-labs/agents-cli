@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { Meta } from './types.js';
-import type { JobConfig, RunMeta } from './routines.js';
+import type { JobConfig, RunMeta } from './scheduling/routines.js';
 import { registerChannelProvider, type ChannelProvider, type SendOptions } from './channels/registry.js';
 import {
   routineFinishOwnerText,

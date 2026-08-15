@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, mkdirSync, rmSync, writeFileSync, mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { JobConfig, RunMeta } from '../src/lib/routines.js';
+import type { JobConfig, RunMeta } from '../src/lib/scheduling/routines.js';
 
 // Mutable override state lives on globalThis so vitest's hoist of vi.mock
 // above the local const (TDZ error) and Bun's missing vi.hoisted both
@@ -56,7 +56,7 @@ import {
   discoverJobsFromRepo,
   jobExists,
   getRunDir,
-} from '../src/lib/routines.js';
+} from '../src/lib/scheduling/routines.js';
 import { getRoutinesDir, getRunsDir } from '../src/lib/state.js';
 import { ROUTINE_AGENT_IDS } from '../src/lib/agents.js';
 

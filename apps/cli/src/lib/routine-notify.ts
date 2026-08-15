@@ -24,8 +24,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { JobConfig, RunMeta } from './routines.js';
-import { getRunDir } from './routines.js';
+import type { JobConfig, RunMeta } from './scheduling/routines.js';
+import { getRunDir } from './scheduling/routines.js';
 import { notifyDesktop, type DesktopNotification } from './menubar/notify-desktop.js';
 
 type RoutineKind = 'agent' | 'workflow' | 'command';

@@ -9,7 +9,7 @@ import {
   isPastOneShotRoutine,
   oneShotScheduleFireDate,
   parseOneShotLikeSchedule,
-} from '../routines.js';
+} from '../scheduling/routines.js';
 
 let tmpDir = '';
 let runsDir = '';

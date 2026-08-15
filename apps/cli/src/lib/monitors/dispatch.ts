@@ -12,7 +12,7 @@
  */
 
 import { executeJobDetached } from '../runner.js';
-import { readJob, type JobConfig } from '../routines.js';
+import { readJob, type JobConfig } from '../scheduling/routines.js';
 import { sendToOwner } from '../notify.js';
 import type { AgentId, Meta } from '../types.js';
 import type { ActionConfig, MonitorConfig, MonitorEvent } from './config.js';
