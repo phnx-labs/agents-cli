@@ -617,7 +617,12 @@ describe('Claude usage scoping', () => {
   beforeEach(() => {
     const store = new Map<string, string>();
     previousBackend = setKeychainBackendForTest({
-      get: (item) => store.get(item) ?? null,
+      has: (item) => store.has(item),
+      get: (item) => {
+        const v = store.get(item);
+        if (v === undefined) throw new Error(`item not found: ${item}`);
+        return v;
+      },
       set: (item, value) => { store.set(item, value); },
       delete: (item) => store.delete(item),
       list: (prefix) => [...store.keys()].filter((k) => k.startsWith(prefix)),
