@@ -135,8 +135,10 @@ describeRoutines('routines add help', () => {
       const result = run(home, ['add', '--help']);
       expect(result.status).toBe(0);
       expect(result.stdout).toMatch(
-        /Which agent runs this routine: claude, codex, gemini,\s+cursor, kimi, droid/,
+        /Which agent runs this routine: claude, codex,\s+cursor,\s+kimi, droid/,
       );
+      // gemini is hard-deprecated and must never be advertised as a routine target.
+      expect(result.stdout).not.toMatch(/routine: [^.]*gemini/);
       const agentLine = result.stdout.split('\n').find((line) => line.includes('--agent')) ?? '';
       expect(agentLine).not.toContain('antigravity');
       expect(agentLine).not.toContain('opencode');

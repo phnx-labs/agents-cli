@@ -25,7 +25,9 @@ import {
   getDaemonLogPath,
 } from '../lib/daemon.js';
 import { assertSchedulerEnabled, assertDaemonEnabled, isDaemonEnabled } from '../lib/device-config.js';
-import { resolveAgentName, isAgentHardDeprecated, hardDeprecationError, ROUTINE_AGENT_IDS } from '../lib/agents.js';
+import { resolveAgentName, parseAgentVersionSpec, isAgentHardDeprecated, hardDeprecationError, ROUTINE_AGENT_IDS } from '../lib/agents.js';
+import { RUN_STRATEGIES, normalizeRunStrategy } from '../lib/accounting/rotate.js';
+import type { AgentId, RunStrategy } from '../lib/types.js';
 import { humanizeCron, humanizeNextRun, formatRepoLink, REPO_DISPLAY_MAX } from '../lib/routines-format.js';
 import {
   listJobs as listAllJobs,
@@ -49,6 +51,7 @@ import {
   checkJobDeviceEligibility,
   normalizeTriggerEvent,
   parseHostStrategy,
+  placementRequiresFiringPin,
   resolveHostStrategy,
   HOST_STRATEGIES,
   computeProjectGroup,
@@ -942,6 +945,12 @@ export function registerRoutinesCommands(program: Command): void {
       agents routines add drain --schedule "0 3 * * *" --agent claude --placement fleet --prompt "Drain queue"
       agents routines add review --schedule "0 9 * * 1" --agent claude --placement cloud --prompt "Review open PRs"
 
+      # Pin an exact installed version (same agent@version syntax as agents run)
+      agents routines add version-pin --schedule "*/5 * * * *" --agent claude@2.1.207 --cwd /path/to/repo --prompt "Reply OK"
+
+      # Per-routine selection strategy + health-aware fleet placement at each fire
+      agents routines add release-shepherd --schedule "*/5 * * * *" --agent claude --strategy balanced --run-on auto --cwd /path/to/repo --prompt "Own the release through verification"
+
       # Enable a routine (materialises a project routine on first enable)
       agents routines enable security-sweep
       agents routines disable security-sweep
@@ -978,7 +987,15 @@ export function registerRoutinesCommands(program: Command): void {
       Version / credit failover (same semantics as 'agents run'):
         - Omit 'version:' to let the configured run strategy (default: balanced)
           pick a healthy install and skip accounts that are out of credits or
-          rate-limited. Pin with 'version: 2.1.x' when you want one install only.
+          rate-limited. Pin with '--agent claude@2.1.x' (or 'version:' in YAML)
+          when you want one install only; '--strategy pinned|available|balanced'
+          persists a per-routine selection policy that beats the firing box's
+          run.<agent>.strategy config.
+        - Three distinct device flags: '--devices a,b' is the scheduler FIRING
+          allowlist (which daemons may fire this routine); '--run-on <name|auto>'
+          is BODY placement (where the fired job executes — 'auto' re-picks a
+          healthy device at each fire); the parent '--device'/'--host' manages
+          the routine DEFINITION on another machine.
         - Foreground 'agents routines run' re-dispatches to the next healthy
           same-agent account when a mid-run rate/usage limit is detected.
         - Detached/daemon fires use the pre-flight pick only (next tick re-selects).
@@ -1025,7 +1042,9 @@ export function registerRoutinesCommands(program: Command): void {
     .command('add [nameOrPath]')
     .description('Create a new routine from a YAML file or inline flags. Starts the scheduler automatically if it is not already running.')
     .option('-s, --schedule <cron>', 'Cron schedule in standard format (5 fields: minute hour day month weekday)')
-    .option('-a, --agent <agent>', `Which agent runs this routine: ${ROUTINE_AGENT_IDS.join(', ')}`)
+    .option('-a, --agent <agent[@version]>', `Which agent runs this routine: ${ROUTINE_AGENT_IDS.join(', ')}. An @version pins that exact installed version (same syntax as agents run), persisted as separate agent + version fields.`)
+    .option('--strategy <strategy>', `Version/account selection strategy for this routine: ${RUN_STRATEGIES.join(' | ')}. Overrides run.<agent>.strategy from the firing device's config. Conflicts with an @version pin.`)
+    .option('--balanced', 'Shortcut for --strategy balanced.')
     .option('--workflow <name>', 'Run an installed workflow (~/.agents/workflows/<name>) via `agents run`. Mutually exclusive with --agent.')
     .option('--command <sh>', 'Run a plain shell command directly (no agent, no auth, no sandbox) — for deterministic housekeeping routines. Mutually exclusive with --agent and --workflow; --prompt is not used.')
     .option('-p, --prompt <prompt>', 'Task instruction for the agent')
@@ -1034,7 +1053,7 @@ export function registerRoutinesCommands(program: Command): void {
     .option('-t, --timeout <timeout>', 'Kill the agent if it runs longer than this (e.g., 10m, 2h, 3d, 1w; max 1w)', '10m')
     .option('--timezone <tz>', 'Interpret schedule in this timezone (e.g., America/Los_Angeles)')
     .option('--devices <names>', 'Fleet allowlist (comma-separated): only listed devices schedule and fire this routine. Omit for unrestricted.')
-    .option('--run-on <name>', 'BODY placement: execute the job body on this machine over SSH (registered host, device, capability tag, or user@host). Sets hostStrategy=host. Same model as agents run --where device:<name> (docs/concepts.md#placement).')
+    .option('--run-on <name|auto>', "BODY placement: execute the job body on this machine over SSH (registered host, device, capability tag, or user@host), or 'auto' to pick a healthy, signed-in, unloaded fleet device AT EACH FIRE — the same picker as agents run --device auto. Sets hostStrategy=host ('auto' sets fleet). Distinct from the parent --device/--host (which manages this DEFINITION on another machine) and from --devices (the scheduler firing allowlist).")
     .option('--placement <strategy>', `BODY placement strategy: ${HOST_STRATEGIES.join('|')} (default: local, or host when --run-on is set). Maps to the shared Placement model (local|device|fleet|cloud). Not the same as --host (which manages routines on a remote machine).`)
     .option('--run-cwd <dir>', 'Working directory on the --run-on host (--remote-cwd is taken by the remote-management passthrough)')
     .option('--at <time>', 'One-shot mode: run once at this time (e.g., "14:30" or "2026-02-24 09:00"), then disable')
@@ -1111,12 +1130,53 @@ export function registerRoutinesCommands(program: Command): void {
           process.exit(1);
         }
 
-        // Hard-deprecated harnesses cannot be scheduled — refuse at create time so
-        // no new recurring job silently fails against a retired backend.
+        // Normalize `--agent <agent[@version]>` into separate bare agent +
+        // version fields, the same split `agents run` performs. Storing the raw
+        // compound string is the RUSH-2719 bug: validateJob compared
+        // 'claude@2.1.207' against bare AgentIds, and the deprecation gate below
+        // silently missed a hard-deprecated harness pinned with @version.
+        let parsedAgent: { agent: AgentId; version?: string } | undefined;
         if (options.agent) {
-          const routineAgentId = resolveAgentName(options.agent);
-          if (routineAgentId && isAgentHardDeprecated(routineAgentId)) {
-            console.error(chalk.red(hardDeprecationError(routineAgentId)));
+          const parsed = parseAgentVersionSpec(options.agent);
+          if ('error' in parsed) {
+            console.error(chalk.red(parsed.error));
+            process.exit(1);
+          }
+          parsedAgent = parsed;
+          // Hard-deprecated harnesses cannot be scheduled — refuse at create time
+          // so no new recurring job silently fails against a retired backend.
+          if (isAgentHardDeprecated(parsed.agent)) {
+            console.error(chalk.red(hardDeprecationError(parsed.agent)));
+            process.exit(1);
+          }
+        }
+
+        // --strategy / --balanced: per-routine selection policy, same vocabulary
+        // as agents run. Rejected (not warned) against an @version pin: a warning
+        // printed once at add time is easy to miss and the routine then silently
+        // runs pinned forever.
+        let strategy: RunStrategy | undefined;
+        if (options.strategy !== undefined || options.balanced) {
+          if (options.strategy !== undefined && options.balanced) {
+            console.error(chalk.red('--balanced conflicts with --strategy. Use one strategy override.'));
+            process.exit(1);
+          }
+          if (!options.agent) {
+            console.error(chalk.red('--strategy only applies to agent routines (set --agent)'));
+            process.exit(1);
+          }
+          if (options.strategy !== undefined) {
+            const normalized = normalizeRunStrategy(options.strategy);
+            if (!normalized) {
+              console.error(chalk.red(`Invalid strategy: ${options.strategy}. Use ${RUN_STRATEGIES.join(', ')}.`));
+              process.exit(1);
+            }
+            strategy = normalized;
+          } else {
+            strategy = 'balanced';
+          }
+          if (parsedAgent?.version) {
+            console.error(chalk.red(`--strategy ${strategy} conflicts with the @${parsedAgent.version} pin — an exact pin leaves nothing to select; drop --strategy or the @version pin`));
             process.exit(1);
           }
         }
@@ -1168,18 +1228,34 @@ export function registerRoutinesCommands(program: Command): void {
           console.error(chalk.red((err as Error).message));
           process.exit(1);
         }
-        // --run-on implies host strategy when the user didn't pick one.
-        if (options.runOn && !hostStrategy) hostStrategy = 'host';
+        // --run-on implies host strategy when the user didn't pick one;
+        // 'auto' means fleet placement re-picked at each fire, never a literal
+        // SSH target named "auto".
+        if (options.runOn && !hostStrategy) hostStrategy = options.runOn === 'auto' ? 'fleet' : 'host';
+        if (options.runOn === 'auto' && hostStrategy !== 'fleet') {
+          console.error(chalk.red("--run-on auto is fleet placement — drop --placement, or use --placement fleet with it"));
+          process.exit(1);
+        }
         if (hostStrategy === 'host' && !options.runOn) {
           console.error(chalk.red('--placement host requires --run-on <name>'));
           process.exit(1);
+        }
+        // Off-box placement without an explicit firing allowlist auto-pins
+        // firing to this machine — otherwise every fleet daemon fires the job
+        // and each dispatches its own copy (the double-fire class the
+        // placementRequiresFiringPin predicate exists for; docs/routines.md
+        // documented this pin but nothing applied it).
+        if (!devices && hostStrategy && placementRequiresFiringPin(hostStrategy)) {
+          devices = [machineId()];
         }
 
         const config: JobConfig = {
           name: nameOrPath,
           ...(schedule ? { schedule } : {}),
           ...(trigger ? { trigger } : {}),
-          ...(options.agent ? { agent: options.agent } : {}),
+          ...(parsedAgent ? { agent: parsedAgent.agent } : {}),
+          ...(parsedAgent?.version ? { version: parsedAgent.version } : {}),
+          ...(strategy ? { strategy } : {}),
           ...(options.workflow ? { workflow: options.workflow } : {}),
           ...(options.command ? { command: options.command } : {}),
           mode: options.mode,
@@ -1447,7 +1523,9 @@ export function registerRoutinesCommands(program: Command): void {
     .option('--state-from <name>', 'Update the Linear previous-state filter before opening the editor')
     .option('--cwd <path>', 'Set the execution directory and save, without opening an editor')
     .option('--project-anchor <name>', 'Set the execution project anchor and save, without opening an editor')
-    .action(async (name: string | undefined, options: { stateTo?: string; stateFrom?: string; cwd?: string; projectAnchor?: string }) => {
+    .option('--agent <agent[@version]>', 'Set the agent (and optional exact version pin) and save, without opening an editor — same syntax as agents run')
+    .option('--strategy <strategy>', `Set the per-routine version/account selection strategy (${RUN_STRATEGIES.join(' | ')}) and save. Conflicts with an @version pin.`)
+    .action(async (name: string | undefined, options: { stateTo?: string; stateFrom?: string; cwd?: string; projectAnchor?: string; agent?: string; strategy?: string }) => {
       if (!name) {
         name = await pickJob('Select job to edit', undefined, ['agents routines edit <name>']) ?? undefined;
         if (!name) return;
@@ -1460,13 +1538,37 @@ export function registerRoutinesCommands(program: Command): void {
       // and the only edit surface opened $EDITOR — so an agent could never
       // follow its own repair hint (RUSH-2517). Applying and saving directly is
       // what makes that hint true.
-      if (options.cwd !== undefined || options.projectAnchor !== undefined) {
+      if (options.cwd !== undefined || options.projectAnchor !== undefined || options.agent !== undefined || options.strategy !== undefined) {
         if (!existing) {
           console.error(chalk.red(`Routine '${name}' not found. Create it first: agents routines add ${name} --schedule "..." --agent claude --prompt "..."`));
           process.exit(1);
         }
         if (options.cwd !== undefined) existing.cwd = options.cwd;
         if (options.projectAnchor !== undefined) existing.project = options.projectAnchor;
+        if (options.agent !== undefined) {
+          const parsed = parseAgentVersionSpec(options.agent);
+          if ('error' in parsed) {
+            console.error(chalk.red(parsed.error));
+            process.exit(1);
+          }
+          if (isAgentHardDeprecated(parsed.agent)) {
+            console.error(chalk.red(hardDeprecationError(parsed.agent)));
+            process.exit(1);
+          }
+          existing.agent = parsed.agent;
+          // An @version pin replaces any previous pin; a bare agent clears it so
+          // the routine returns to strategy/balanced selection.
+          if (parsed.version) existing.version = parsed.version;
+          else delete existing.version;
+        }
+        if (options.strategy !== undefined) {
+          const normalized = normalizeRunStrategy(options.strategy);
+          if (!normalized) {
+            console.error(chalk.red(`Invalid strategy: ${options.strategy}. Use ${RUN_STRATEGIES.join(', ')}.`));
+            process.exit(1);
+          }
+          existing.strategy = normalized;
+        }
         const errors = validateJob(existing);
         if (errors.length > 0) {
           console.error(chalk.red('Validation errors:'));
