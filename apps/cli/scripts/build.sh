@@ -59,6 +59,20 @@ bun install --silent
 dim "  Compiling TypeScript"
 bun run build >/dev/null 2>&1
 
+# Bundle the session-tracker SessionStart hook helper into the CLI dist.
+# `agents sync` and `agents add` register hook.sh in each harness's native config;
+# that only works if the helper travels with the installed CLI tarball. Build the
+# package here rather than requiring a prior manual build — a conditional copy
+# silently shipped a CLI with the hook permanently disabled on any clean checkout.
+ST_ROOT=../../packages/session-tracker
+[ -d "$ST_ROOT" ] || { echo "error: $ST_ROOT missing — monorepo layout expected" >&2; exit 1; }
+dim "  Building session-tracker hook helper"
+(cd "$ST_ROOT" && bun install --silent && bun run build >/dev/null)
+[ -f "$ST_ROOT/dist/install-hook.js" ] || { echo "error: session-tracker build produced no dist/install-hook.js" >&2; exit 1; }
+mkdir -p dist/session-tracker/dist
+cp -R "$ST_ROOT/dist/"* dist/session-tracker/dist/
+cp "$ST_ROOT/src/hook.sh" dist/session-tracker/dist/hook.sh
+
 # TypeScript emits CLI entrypoints with mode 644. npm pack preserves the mode,
 # and npm install in newer versions does NOT auto-chmod the bin target, so
 # users see `zsh: permission denied: agents` when invoking through the global

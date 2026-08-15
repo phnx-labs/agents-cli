@@ -51,7 +51,7 @@ import {
   uploadToFileInput,
   uploadViaFileChooser,
 } from './upload.js';
-import { emit } from '../events.js';
+import { emit } from '../feed/events.js';
 import { resolveActor } from '../actor.js';
 import { recordBrowserSession } from '../session/db.js';
 import { sshExecAsync } from '../ssh-exec.js';

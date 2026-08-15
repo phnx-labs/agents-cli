@@ -32,8 +32,8 @@ import {
   type EnrichedActivityEvent,
 } from './activity.js';
 import { emit, query, _resetForTest as resetEventsForTest } from './events.js';
-import { resetActorCache } from './actor.js';
-import { resetEventProvenanceForTest } from './event-provenance.js';
+import { resetActorCache } from '../actor.js';
+import { resetEventProvenanceForTest } from '../event-provenance.js';
 
 /** Minimal well-formed enriched event; override any field per test. */
 function ev(partial: Partial<EnrichedActivityEvent>): EnrichedActivityEvent {

@@ -24,10 +24,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { stringifyDoc } from './yaml-io.js';
-import { getFeedDir, getUserAgentsDir } from './state.js';
-import { isAdmin, isHighConsequenceAllowed, isKnownOperator } from './operator.js';
-import { projectKeyFromCwd } from './project-key.js';
+import { stringifyDoc } from '../yaml-io.js';
+import { getFeedDir, getUserAgentsDir } from '../state.js';
+import { isAdmin, isHighConsequenceAllowed, isKnownOperator } from '../operator.js';
+import { projectKeyFromCwd } from '../project-key.js';
 
 export interface BlockOption {
   label: string;

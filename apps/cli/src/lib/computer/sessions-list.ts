@@ -58,7 +58,7 @@
  * `sessionId` doesn't resolve (a rotated/unindexed session) but `launchId`
  * still does via the more authoritative pid registry.
  */
-import { query, truncate, type EventRecord } from '../events.js';
+import { query, truncate, type EventRecord } from '../feed/events.js';
 import { formatRelativeTime } from '../session/relative-time.js';
 import type { SessionMeta } from '../session/types.js';
 import { getSessionById, listComputerSessionRecords, pruneToolSessions } from '../session/db.js';

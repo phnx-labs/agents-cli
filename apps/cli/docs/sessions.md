@@ -1643,7 +1643,7 @@ since the session ran leaves these NULL rather than a stale guess; the row
 (name + count) is written regardless. `repo_root`/`snapshot_sha` are the
 same provenance fields `ResolvedResource`/`DiscoveredPlugin` carry —
 "which DotAgents repo, which git commit" (see
-[`src/lib/resources.ts`](../src/lib/resources.ts)/[`src/lib/plugins.ts`](../src/lib/plugins.ts)).
+[`src/lib/resources.ts`](../src/lib/resources.ts)/[`src/lib/plugins/plugins.ts`](../src/lib/plugins/plugins.ts)).
 
 `agents sessions --skill <name>` / `--plugin <name>` query this table (see
 [Query Flags](#query-flags)); `--skill` matches a bare name or a namespaced

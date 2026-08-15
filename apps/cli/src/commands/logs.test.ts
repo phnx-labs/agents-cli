@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   emit, query, rotate, stats,
   _resetForTest,
-} from '../lib/events.js';
+} from '../lib/feed/events.js';
 
 const tempDirs: string[] = [];
 

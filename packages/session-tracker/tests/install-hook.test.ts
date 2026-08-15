@@ -49,7 +49,7 @@ describe('session tracker hook installation', () => {
     const prevHome = process.env.HOME;
     process.env.HOME = root;
     try {
-      const r = await installHookFor('hermes');
+      const r = await installHookFor('hermes', { home: root });
       expect(r.installed, r.error).toBe(true);
       expect(r.configPath).toBe(configPath);
 
@@ -60,10 +60,10 @@ describe('session tracker hook installation', () => {
       expect(cfg.mcp_servers.demo.command).toBe('x');
 
       // Idempotent: a second install does not duplicate the managed entry.
-      await installHookFor('hermes');
+      await installHookFor('hermes', { home: root });
       const cfg2 = YAML.parse(fs.readFileSync(configPath, 'utf8')) as any;
       const managed = cfg2.hooks.on_session_start.filter((h: any) =>
-        String(h.command).includes('packages/session-tracker/src/hook.sh'),
+        String(h.command).includes('hook.sh'),
       );
       expect(managed.length).toBe(1);
     } finally {
@@ -97,3 +97,32 @@ describe('session tracker hook installation', () => {
     }
   });
 });
+
+
+  it('is idempotent when the hook command uses the built dist path', () => {
+    const root = tmpHome();
+    const result = spawnSync(process.execPath, [
+      path.join(import.meta.dirname, '..', 'dist', 'install-hook.js'),
+      'claude',
+    ], {
+      env: { ...process.env, HOME: root },
+      encoding: 'utf8',
+    });
+    expect(result.status, result.stderr).toBe(0);
+
+    // Run again; the second install should strip the first entry before adding.
+    const result2 = spawnSync(process.execPath, [
+      path.join(import.meta.dirname, '..', 'dist', 'install-hook.js'),
+      'claude',
+    ], {
+      env: { ...process.env, HOME: root },
+      encoding: 'utf8',
+    });
+    expect(result2.status, result2.stderr).toBe(0);
+
+    const cfg = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
+    const managed = cfg.hooks.SessionStart[0].hooks.filter((h: any) =>
+      String(h.command).includes('hook.sh'),
+    );
+    expect(managed.length).toBe(1);
+  });

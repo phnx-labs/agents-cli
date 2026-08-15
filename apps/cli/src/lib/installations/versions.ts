@@ -50,13 +50,13 @@ import { INSTALLATION_RECORD_FILE } from './types.js';
 import { IS_WINDOWS, composeWin32CommandLine } from '../platform/index.js';
 import { listInstalledSubagents, transformSubagentForClaude, syncSubagentToOpenclaw } from '../subagents.js';
 import { listInstalledWorkflows, syncWorkflowToVersion } from '../workflows.js';
-import { parseHookManifest, registerHooksToSettings, selectHookManifest, pruneVersionHomeHookEntriesFromSettings } from '../hooks.js';
+import { parseHookManifest, registerHooksToSettings, selectHookManifest, pruneVersionHomeHookEntriesFromSettings, installSessionTrackerHookSync, installSessionTrackerHook } from '../hooks.js';
 import { supports, explainSkip, capableAgents } from '../capabilities.js';
 import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills, marketplaceSpecForName } from '../plugins/plugins.js';
 import { composeRulesFromState } from '../rules/compose.js';
 import { loadManifest, saveManifest, buildManifest as buildSyncManifest, isStale } from '../staleness/index.js';
 import { pruneRemovedResources, type PrunableKind } from '../staleness/prune.js';
-import { emit } from '../events.js';
+import { emit } from '../feed/events.js';
 import { safeJoin } from '../paths.js';
 import {
   installCommandSkillToVersion,
@@ -1768,6 +1768,10 @@ export async function installVersion(
     // here on; the release it carries is recorded separately so `agents update`
     // can move the release without invalidating any reference to the label.
     createInstallation(agent, installedVersion, installedVersion);
+    const trackerInstall = await installSessionTrackerHook(agent, installedVersion);
+    if (!trackerInstall.installed && trackerInstall.error) {
+      console.warn(`agents: SessionStart hook not installed for ${agent}@${installedVersion}: ${trackerInstall.error}`);
+    }
     // The self-updating binary just changed on disk — drop the cached
     // `--version` so `agents view` reflects the freshly-installed release.
     invalidateLiveVersionCache(agent);
@@ -1938,6 +1942,10 @@ export async function installVersion(
 
   // Freeze this installation's identity (see the installScript branch above).
   createInstallation(agent, healthyVersion, healthyVersion);
+  const trackerInstall = await installSessionTrackerHook(agent, healthyVersion);
+  if (!trackerInstall.installed && trackerInstall.error) {
+    console.warn(`agents: SessionStart hook not installed for ${agent}@${healthyVersion}: ${trackerInstall.error}`);
+  }
   emit('version.install', { agent, version: healthyVersion });
   return { success: true, installedVersion: healthyVersion };
 }
@@ -2973,6 +2981,17 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // `projectSkipped` contract is preserved for callers (RUSH-2320 #4).
   if (projectAgentsDir) {
     result.projectSkipped = syncProjectResourcesToAgent(agent, version, projectAgentsDir).skipped;
+  }
+
+  // Install the shared SessionStart state-writer hook for every hook-capable
+  // harness. This must run even when the rest of the sync is skipped by the
+  // staleness guard, because the hook is registered in the harness's native
+  // config (not in the version-home resource tree the manifest tracks).
+  if (supports(agent, 'hooks', version).ok) {
+    const trackerResult = installSessionTrackerHookSync(agent, version);
+    if (!trackerResult.installed && trackerResult.error) {
+      console.warn(`agents: SessionStart hook not installed for ${agent}@${version}: ${trackerResult.error}`);
+    }
   }
 
   // Fast guard BEFORE getAvailableResources / pattern expansion /

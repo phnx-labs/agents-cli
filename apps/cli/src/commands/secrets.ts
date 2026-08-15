@@ -116,7 +116,7 @@ import { saveSession, deleteBundleSessions, deleteAllSessions } from '../lib/sec
 import { getCliVersionFresh } from '../lib/version.js';
 import { readMeta } from '../lib/state.js';
 import { parseDuration } from '../lib/hooks/cache.js';
-import { emit, query } from '../lib/events.js';
+import { emit, query } from '../lib/feed/events.js';
 import { emitSecretAudit } from '../lib/secrets/audit.js';
 import { SYNC_PASSPHRASE_ENV, resolveSyncPassphraseFromEnv } from '../lib/secrets/sync-passphrase.js';
 import {

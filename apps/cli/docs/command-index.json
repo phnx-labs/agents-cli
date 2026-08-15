@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 90,
-  "commands": 561,
+  "commands": 562,
   "root": {
     "name": "agents",
     "path": "",
@@ -990,6 +990,43 @@
               "negate": true
             },
             {
+              "flags": "--label <text>",
+              "description": "human display title, shown in the gallery and `share list` (default: derived from the HTML <title>, frontmatter title, or filename)",
+              "long": "--label",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--title <text>",
+              "description": "alias of --label",
+              "long": "--title",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--meta <key=value>",
+              "description": "structured metadata (repeatable), e.g. --meta kind=plan --meta ticket=RUSH-2683. Recommended keys: kind (plan|report|visual|screenshot|recording|deck|doc), project, ticket, status (draft|final). Reserved (set automatically, not settable): agent, session, host, repo, date, label",
+              "long": "--meta",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": []
+            },
+            {
+              "flags": "--no-revision",
+              "description": "overwrite an existing slug in place — skip keeping the prior version as a <slug>/rev-<ts> backup (default: keep it, see 'agents artifacts share revisions')",
+              "long": "--no-revision",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
+            },
+            {
               "flags": "--json",
               "description": "emit machine-readable publish result for plan-render hooks and scripts",
               "long": "--json",
@@ -1009,8 +1046,8 @@
               "negate": false
             }
           ],
-          "examples": "# Publish an HTML file — auto OG cover, default 30d expiry, shareable link\n      agents artifacts share ./out/plan.html\n\n      # Hide from the public gallery (direct URL still works) and expire sooner\n      agents artifacts share ./out/report.html --unlisted --expire 12h\n\n      # Permanent public page (opt out of the default 30d expiry)\n      agents artifacts share ./out/landing.html --slug landing --expire never\n\n      # Custom slug, expiring in 7 days\n      agents artifacts share ./out/report.html --slug q3-report --expire 7d\n\n      # Delete by full URL — also takes down the sibling OG cover\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists\n\n      # One-time setup (or join an existing endpoint)\n      agents artifacts setup\n      agents artifacts share join https://share.agents-cli.sh\n\n      # Push a worker-template.ts change out to an already-provisioned endpoint\n      agents artifacts share update",
-          "notes": "Default expiry is 30d so an accidental publish decays. Pass --expire never for\n  a permanent link. --unlisted / --private hides the page from the public gallery\n  and agents artifacts share list; the direct URL is still world-readable\n  (unlisted, not secret). A pre-publish scan refuses emails and credential-shaped\n  strings unless --force is passed.\n\n  A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  agents artifacts share delete === agents unshare (same command, different name).",
+          "examples": "# Publish an HTML file — auto OG cover, default 30d expiry, shareable link\n      agents artifacts share ./out/plan.html\n\n      # Hide from the public gallery (direct URL still works) and expire sooner\n      agents artifacts share ./out/report.html --unlisted --expire 12h\n\n      # Permanent public page (opt out of the default 30d expiry)\n      agents artifacts share ./out/landing.html --slug landing --expire never\n\n      # Custom slug, expiring in 7 days\n      agents artifacts share ./out/report.html --slug q3-report --expire 7d\n\n      # Human title + structured metadata, shown in the gallery and share list\n      agents artifacts share ./out/plan.html --label \"Q3 fleet plan\" --meta kind=plan --meta ticket=RUSH-2683\n\n      # Republish without keeping the previous version as a revision\n      agents artifacts share ./out/plan.html --slug q3-report --no-revision\n\n      # Delete by full URL — also takes down the sibling OG cover and any retained revisions\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Keep retained revisions up too (rare — they're world-readable by URL like the page itself)\n      agents unshare my-plan-a1b2 --keep-revisions\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists\n\n      # One-time setup (or join an existing endpoint)\n      agents artifacts setup\n      agents artifacts share join https://share.agents-cli.sh\n\n      # Push a worker-template.ts change out to an already-provisioned endpoint\n      agents artifacts share update",
+          "notes": "Default expiry is 30d so an accidental publish decays. Pass --expire never for\n  a permanent link. --unlisted / --private hides the page from the public gallery\n  and agents artifacts share list; the direct URL is still world-readable\n  (unlisted, not secret). A pre-publish scan refuses emails and credential-shaped\n  strings unless --force is passed.\n\n  Every publish carries provenance auto-captured from the exec env/git/clock\n  (agent, session, host, repo, date) — never invented, only sent when present —\n  plus a label (explicit --label/--title, else derived from the HTML <title>,\n  frontmatter title, or filename; never blocks on a prompt) and any --meta\n  key=value pairs. Republishing an existing slug keeps the prior version as a\n  retained revision by default; see 'agents artifacts share revisions'.\n\n  A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  Also deletes any retained revisions of the target (RUSH-2683) — a share that was\n  republished at least once leaves its prior version(s) live at their own URL until\n  they're purged too, so leaving them up would defeat the point of taking the page\n  down. Pass --keep-revisions to leave them (they still expire via the bucket's\n  lifecycle rule on their own schedule either way).\n\n  agents artifacts share delete === agents unshare (same command, different name).",
           "subcommands": [
             {
               "name": "analytics",
@@ -1056,6 +1093,15 @@
                   "negate": false
                 },
                 {
+                  "flags": "--keep-revisions",
+                  "description": "leave retained revisions (<slug>/rev-*) in place (default: delete them too)",
+                  "long": "--keep-revisions",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
                   "flags": "--if-exists",
                   "description": "treat an already-missing target as a no-op success instead of an error",
                   "long": "--if-exists",
@@ -1093,8 +1139,8 @@
                   "negate": false
                 }
               ],
-              "examples": "# Delete by full URL — also takes down the sibling OG cover\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists",
-              "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  agents artifacts share delete === agents unshare (same command, different name).",
+              "examples": "# Delete by full URL — also takes down the sibling OG cover and any retained revisions\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Keep retained revisions up too (rare — they're world-readable by URL like the page itself)\n      agents unshare my-plan-a1b2 --keep-revisions\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists",
+              "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  Also deletes any retained revisions of the target (RUSH-2683) — a share that was\n  republished at least once leaves its prior version(s) live at their own URL until\n  they're purged too, so leaving them up would defeat the point of taking the page\n  down. Pass --keep-revisions to leave them (they still expire via the bucket's\n  lifecycle rule on their own schedule either way).\n\n  agents artifacts share delete === agents unshare (same command, different name).",
               "subcommands": []
             },
             {
@@ -1150,8 +1196,35 @@
                   "negate": false
                 },
                 {
+                  "flags": "--agent <name>",
+                  "description": "filter to shares published by this agent/harness (case-insensitive)",
+                  "long": "--agent",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--session <id>",
+                  "description": "filter to shares published from this session id",
+                  "long": "--session",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--label-contains <substr>",
+                  "description": "filter to shares whose label contains this text (case-insensitive)",
+                  "long": "--label-contains",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
                   "flags": "--json",
-                  "description": "emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt)",
+                  "description": "emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt, label, agent, session, host, repo, revisionCount, meta)",
                   "long": "--json",
                   "required": false,
                   "optional": false,
@@ -1169,8 +1242,55 @@
                   "negate": false
                 }
               ],
-              "examples": "# Everything you've published, newest first\n      agents artifacts share list\n\n      # Machine-readable — e.g. pull every still-public URL with jq\n      agents artifacts share list --json | jq -r '.objects[].url'\n\n      # List another namespace\n      agents artifacts share list --github-user octocat",
-              "notes": "Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG\n  covers are omitted (it mirrors the public gallery). It reads the endpoint's JSON\n  listing route, which ships with the current Worker template. If your deployed\n  Worker predates this feature the command says so and points you at 'agents\n  artifacts share update' (RUSH-2449) rather than returning a wrong or empty result\n  — see 'agents artifacts share status' for whether an update is due.",
+              "examples": "# Everything you've published, newest first\n      agents artifacts share list\n\n      # Machine-readable — e.g. pull every still-public URL with jq\n      agents artifacts share list --json | jq -r '.objects[].url'\n\n      # List another namespace\n      agents artifacts share list --github-user octocat\n\n      # Narrow by who/what published it\n      agents artifacts share list --agent claude\n      agents artifacts share list --label-contains \"fleet plan\"",
+              "notes": "Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG\n  covers are omitted (it mirrors the public gallery). It reads the endpoint's JSON\n  listing route, which ships with the current Worker template. If your deployed\n  Worker predates this feature the command says so and points you at 'agents\n  artifacts share update' (RUSH-2449) rather than returning a wrong or empty result\n  — see 'agents artifacts share status' for whether an update is due.\n\n  --agent/--session/--label-contains filter the fetched listing client-side; --json's\n  count reflects the filtered set.",
+              "subcommands": []
+            },
+            {
+              "name": "revisions",
+              "path": "artifacts share revisions",
+              "aliases": [],
+              "description": "Show the retained prior versions of a published slug, newest first (human table; --revisions-json for scripts).",
+              "args": [
+                {
+                  "name": "target",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--for-user <user>",
+                  "description": "GitHub username for resolving a bare-slug target (default: resolved from gh/git config)",
+                  "long": "--for-user",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--revisions-json",
+                  "description": "emit the machine-readable revision list",
+                  "long": "--revisions-json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "# Prior versions kept under this slug (bare slug — your own namespace)\n      agents artifacts share revisions q3-report\n\n      # By <user>/<slug> or full URL, same target forms as 'agents unshare'\n      agents artifacts share revisions octocat/q3-report\n      agents artifacts share revisions https://share.agents-cli.sh/octocat/q3-report\n\n      # Machine-readable, and a bare slug resolved against another namespace\n      agents artifacts share revisions q3-report --revisions-json\n      agents artifacts share revisions q3-report --for-user octocat",
+              "notes": "A revision is created automatically on every republish of an existing slug\n  (pass --no-revision at publish time to skip it) — this is history, never\n  shown on the public gallery or in 'agents artifacts share list' beyond its\n  count. Each revision's own URL is still directly reachable and honors its own\n  recorded expiry.",
               "subcommands": []
             },
             {
@@ -28811,6 +28931,15 @@
           "negate": false
         },
         {
+          "flags": "--keep-revisions",
+          "description": "leave retained revisions (<slug>/rev-*) in place (default: delete them too)",
+          "long": "--keep-revisions",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
           "flags": "--if-exists",
           "description": "treat an already-missing target as a no-op success instead of an error",
           "long": "--if-exists",
@@ -28848,8 +28977,8 @@
           "negate": false
         }
       ],
-      "examples": "# Delete by full URL — also takes down the sibling OG cover\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists",
-      "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  agents artifacts share delete === agents unshare (same command, different name).",
+      "examples": "# Delete by full URL — also takes down the sibling OG cover and any retained revisions\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Keep retained revisions up too (rare — they're world-readable by URL like the page itself)\n      agents unshare my-plan-a1b2 --keep-revisions\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists",
+      "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  Also deletes any retained revisions of the target (RUSH-2683) — a share that was\n  republished at least once leaves its prior version(s) live at their own URL until\n  they're purged too, so leaving them up would defeat the point of taking the page\n  down. Pass --keep-revisions to leave them (they still expire via the bucket's\n  lifecycle rule on their own schedule either way).\n\n  agents artifacts share delete === agents unshare (same command, different name).",
       "subcommands": []
     },
     {

@@ -11,8 +11,8 @@
  * per-session shards (high frequency, one writer each). This module is the
  * single READ surface that merges them; nothing here writes.
  */
-import { query, type EventRecord, type EventType, type EventLevel, levelFor } from './events.js';
-import { readActivityAsEventRecords } from './activity.js';
+import { query, type EventRecord, type EventType, type EventLevel, levelFor } from './feed/events.js';
+import { readActivityAsEventRecords } from './feed/activity.js';
 import { applyFamilies, type EventFamily } from './event-families.js';
 
 export interface UnifiedQuery {

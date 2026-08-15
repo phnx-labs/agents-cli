@@ -25,7 +25,7 @@ vi.mock('../hosts/remote-os.js', () => ({
 
 // Spy on the audit emit so we can assert remote resolves are audited on the
 // initiating host (remote.ts only imports `emit`).
-vi.mock('../events.js', () => ({ emit: emitMock }));
+vi.mock('../feed/events.js', () => ({ emit: emitMock }));
 
 import {
   parseHostsOption,

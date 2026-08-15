@@ -21,7 +21,7 @@ import {
   type AppInfo,
 } from './computer-actions.js';
 import { resolveRpcTimeoutMs, RPC_TIMEOUT_MS, type ComputerClient, type RPCResponse } from '../lib/computer-rpc.js';
-import { query, _resetForTest } from '../lib/events.js';
+import { query, _resetForTest } from '../lib/feed/events.js';
 
 const tempDirs: string[] = [];
 

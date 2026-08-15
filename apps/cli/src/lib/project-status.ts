@@ -17,7 +17,7 @@ import { promisify } from 'util';
 import chalk from 'chalk';
 import type { ActiveSession, ActiveStatus } from './session/active.js';
 import { projectNameForCwd, type ProjectDef } from './projects.js';
-import { readRecentActivity } from './activity.js';
+import { readRecentActivity } from './feed/activity.js';
 
 const execFileAsync = promisify(execFile);
 

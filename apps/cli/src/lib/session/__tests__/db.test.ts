@@ -25,7 +25,7 @@ const {
   SCHEMA_VERSION,
 } = await import('../db.js');
 const { costOfUsage } = await import('../../pricing/index.js');
-const { emit } = await import('../../events.js');
+const { emit } = await import('../../feed/events.js');
 type SessionMeta = import('../types.js').SessionMeta;
 
 // JSONL files live under TEST_HOME so they're isolated and torn down with it.

@@ -19,7 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { getMailboxRootDir } from './state.js';
-import { recordMessageReceipt } from './feed.js';
+import { recordMessageReceipt } from './feed/feed.js';
 import { parseDuration } from './hooks/cache.js';
 
 /** Default delivery TTL for messages enqueued without an explicit one (24 hours). */

@@ -2,11 +2,16 @@
 //
 // One tiny Worker does both sides:
 //   - PUT  /<username>/<slug>  — bearer-gated (WRITE_TOKEN secret); writes the body
-//     to R2 via the BUCKET binding, storing an optional expires-at value in
-//     object metadata.
+//     to R2 via the BUCKET binding, storing an optional expires-at value plus
+//     provenance (agent/session/host/repo/date), a label, and any `--meta`
+//     entries in object metadata. Overwriting an existing slug first copies the
+//     current object to <slug>/rev-<ts>-<rand> (revision history) unless
+//     x-share-no-revision is set.
 //   - GET  /<username>/<slug>  — public; streams the object from R2, 410s (and lazily
 //     deletes) once its expiry has passed. A bucket lifecycle rule is the durable
 //     sweeper; this is the immediate gate.
+//   - GET  /<username>/<slug>?revisions=json — machine-readable history of the
+//     retained prior versions under that slug, newest first.
 //   - GET  /<username>         — public gallery of that user's shares (HTML).
 //   - GET  /<username>?format=json — public machine-readable listing of that user's
 //     ACTIVE shares (`agents artifacts share list`). Same single-segment path as the HTML
@@ -56,9 +61,71 @@ export default {
       // keeping the direct URL world-readable (capability URL, not secret).
       const visibility = (request.headers.get('x-share-visibility') || '').toLowerCase();
       const contentType = request.headers.get('content-type') || 'text/html; charset=utf-8';
-      const customMetadata = {};
+      // Provenance (RUSH-2683): captured client-side from the exec env/git/clock,
+      // never invented here — a header is simply absent when the CLI had nothing
+      // to say. --meta entries ride one JSON header; reserved keys are stripped
+      // from that JSON UNCONDITIONALLY (not just overwritten when a provenance
+      // header happens to be present) so a same-named x-share-meta entry can
+      // never smuggle through on a publish that carries no agent/session/host/
+      // repo/date at all — e.g. a human publishing outside an agent session, or
+      // outside a git checkout.
+      const agent = request.headers.get('x-share-agent') || '';
+      const session = request.headers.get('x-share-session') || '';
+      const host = request.headers.get('x-share-host') || '';
+      const repo = request.headers.get('x-share-repo') || '';
+      const date = request.headers.get('x-share-date') || '';
+      const label = request.headers.get('x-share-label') || '';
+      const labelSource = request.headers.get('x-share-label-source') || '';
+      let extraMeta = {};
+      const metaHeader = request.headers.get('x-share-meta');
+      if (metaHeader) {
+        try {
+          const parsed = JSON.parse(metaHeader);
+          if (parsed && typeof parsed === 'object') extraMeta = parsed;
+        } catch {
+          // malformed --meta header — ignore rather than fail the whole publish
+        }
+      }
+      const customMetadata = { ...extraMeta };
+      // Strip every reserved key UNCONDITIONALLY before re-applying the real
+      // provenance below — an if(value)-guarded overwrite alone leaves a
+      // same-named --meta entry in place whenever the real header is absent.
+      for (const reservedKey of RESERVED_METADATA_KEYS) {
+        delete customMetadata[reservedKey];
+      }
       if (expiresAt) customMetadata['expires-at'] = expiresAt;
       if (visibility === 'unlisted') customMetadata['visibility'] = 'unlisted';
+      if (agent) customMetadata['agent'] = agent;
+      if (session) customMetadata['session'] = session;
+      if (host) customMetadata['host'] = host;
+      if (repo) customMetadata['repo'] = repo;
+      if (date) customMetadata['date'] = date;
+      if (label) customMetadata['label'] = label;
+      if (labelSource) customMetadata['label-source'] = labelSource;
+
+      // Revision retention (RUSH-2683): R2 has no native object versioning, so a
+      // republish over an EXISTING key first copies the current object to
+      // <key>/rev-<ts>-<rand> before the canonical key is overwritten. Default
+      // keep-all; --no-revision (x-share-no-revision) skips it. The random
+      // suffix guards against two rapid overwrites of the same slug colliding on
+      // the millisecond, and against a slug whose canonical key already sits 3+
+      // segments deep (an unsupported shape outside the CLI) landing on the same
+      // literal revision key.
+      const noRevision = !!request.headers.get('x-share-no-revision');
+      if (!noRevision) {
+        const existing = await env.BUCKET.get(path);
+        if (existing) {
+          const existingHeaders = new Headers();
+          if (typeof existing.writeHttpMetadata === 'function') existing.writeHttpMetadata(existingHeaders);
+          const existingContentType = existingHeaders.get('content-type');
+          const revKey = path + '/rev-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+          await env.BUCKET.put(revKey, existing.body, {
+            httpMetadata: existingContentType ? { contentType: existingContentType } : undefined,
+            customMetadata: existing.customMetadata || {},
+          });
+        }
+      }
+
       await env.BUCKET.put(path, request.body, {
         httpMetadata: { contentType },
         customMetadata,
@@ -89,6 +156,13 @@ export default {
         // signal rather than a missing route).
       }
 
+      // Revision history for one canonical <user>/<slug> key (RUSH-2683). Checked
+      // before the plain object GET below so the query param routes even though
+      // the canonical key itself resolves to a real object.
+      if (segments.length === 2 && url.searchParams.get('revisions') === 'json') {
+        return renderRevisions(env.BUCKET, url.origin, path, request.method);
+      }
+
       const obj = await env.BUCKET.get(path);
       if (!obj) return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
       const expiresAt = obj.customMetadata && obj.customMetadata['expires-at'];
@@ -115,6 +189,16 @@ export default {
   },
 };
 
+// A canonical share object's key is exactly 2 segments (<user>/<slug>, or the
+// sibling <user>/<slug>.png OG cover). A retained revision lives a 3rd segment
+// deeper (<user>/<slug>/rev-<ts>-<rand>) — history, not a page in its own
+// right, so every gallery/listing view hides it. A raw external PUT to an
+// already-3-segment-deep path is treated the same way for the same reason:
+// there is no ambiguity to resolve, and the CLI never produces such a key.
+function isRevisionKey(key) {
+  return key.split('/').length > 2;
+}
+
 async function renderGallery(bucket, origin, user, method) {
   const objects = [];
   let cursor;
@@ -125,6 +209,7 @@ async function renderGallery(bucket, origin, user, method) {
   } while (cursor);
 
   const activeObjects = objects.filter(o => {
+    if (isRevisionKey(o.key)) return false;
     if (o.key.endsWith('.png')) return false;
     // Unlisted pages are reachable by direct URL only — never on the gallery.
     if (o.customMetadata && o.customMetadata.visibility === 'unlisted') return false;
@@ -134,7 +219,9 @@ async function renderGallery(bucket, origin, user, method) {
   const items = activeObjects.map(o => {
     const slug = o.key.slice(o.key.indexOf('/') + 1);
     const url = origin + '/' + o.key;
-    return { slug, url, updated: o.uploaded };
+    const label = (o.customMetadata && o.customMetadata['label']) || '';
+    const agent = (o.customMetadata && o.customMetadata['agent']) || '';
+    return { slug, url, updated: o.uploaded, label, agent };
   });
 
   if (method === 'HEAD') {
@@ -149,14 +236,17 @@ async function renderGallery(bucket, origin, user, method) {
     'body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;max-width:720px;margin:48px auto;padding:0 24px;color:#111;background:#fafafa}' +
     'h1{font-size:28px;margin-bottom:8px}a{color:#0a0a0a;text-decoration:none;border-bottom:1px solid #999}' +
     'a:hover{border-color:#111}ul{list-style:none;padding:0}li{margin:16px 0}' +
-    '.slug{font-weight:600}.meta{color:#666;font-size:14px}' +
+    '.slug{font-weight:600}.title{font-weight:600}.meta{color:#666;font-size:14px}' +
     '</style></head><body>' +
     '<h1>@' + escapeHtml(user) + '</h1>' +
     '<p class="meta">' + items.length + ' shared ' + (items.length === 1 ? 'page' : 'pages') + '</p>' +
     '<ul>' +
     items.map(i =>
-      '<li><a class="slug" href="' + escapeHtml(i.url) + '">' + escapeHtml(i.slug) + '</a>' +
-      '<br><span class="meta">' + new Date(i.updated).toISOString().slice(0, 10) + '</span></li>'
+      '<li>' +
+      (i.label ? '<span class="title">' + escapeHtml(i.label) + '</span><br>' : '') +
+      '<a class="slug" href="' + escapeHtml(i.url) + '">' + escapeHtml(i.slug) + '</a>' +
+      '<br><span class="meta">' + new Date(i.updated).toISOString().slice(0, 10) +
+      (i.agent ? ' · ' + escapeHtml(i.agent) : '') + '</span></li>'
     ).join('') +
     '</ul></body></html>';
   return new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=60' } });
@@ -171,11 +261,21 @@ async function renderListing(bucket, origin, user, method) {
     cursor = list.truncated ? list.cursor : undefined;
   } while (cursor);
 
+  // Revisions never appear as their own listing row, but they count toward
+  // their canonical object's revisionCount.
+  const revisionCounts = {};
+  for (const o of objects) {
+    if (!isRevisionKey(o.key)) continue;
+    const canonicalKey = o.key.split('/').slice(0, 2).join('/');
+    revisionCounts[canonicalKey] = (revisionCounts[canonicalKey] || 0) + 1;
+  }
+
   const now = Date.now();
   const items = objects
     .filter(o => {
-      // Mirror the gallery: hide sibling .png OG covers, expired pages, and
-      // unlisted pages — the listing is the machine-readable public surface.
+      // Mirror the gallery: hide revisions, sibling .png OG covers, expired
+      // pages, and unlisted pages — the listing is the machine-readable public surface.
+      if (isRevisionKey(o.key)) return false;
       if (o.key.endsWith('.png')) return false;
       if (o.customMetadata && o.customMetadata.visibility === 'unlisted') return false;
       const expiresAt = o.customMetadata && o.customMetadata['expires-at'];
@@ -188,6 +288,13 @@ async function renderListing(bucket, origin, user, method) {
       contentType: (o.httpMetadata && o.httpMetadata.contentType) || null,
       publishedAt: new Date(o.uploaded).toISOString(),
       expiresAt: (o.customMetadata && o.customMetadata['expires-at']) || null,
+      label: (o.customMetadata && o.customMetadata['label']) || null,
+      agent: (o.customMetadata && o.customMetadata['agent']) || null,
+      session: (o.customMetadata && o.customMetadata['session']) || null,
+      host: (o.customMetadata && o.customMetadata['host']) || null,
+      repo: (o.customMetadata && o.customMetadata['repo']) || null,
+      revisionCount: revisionCounts[o.key] || 0,
+      meta: extraMetaOf(o.customMetadata),
     }));
   // Newest first, so the human table and any script reads the freshest share top.
   items.sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : a.publishedAt > b.publishedAt ? -1 : 0));
@@ -199,6 +306,62 @@ async function renderListing(bucket, origin, user, method) {
     status: 200,
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=30' },
   });
+}
+
+async function renderRevisions(bucket, origin, key, method) {
+  const objects = [];
+  let cursor;
+  do {
+    const list = await bucket.list({ prefix: key + '/rev-', limit: 1000, cursor, include: ['httpMetadata', 'customMetadata'] });
+    objects.push(...(list.objects || []));
+    cursor = list.truncated ? list.cursor : undefined;
+  } while (cursor);
+
+  const items = objects.map(o => ({
+    key: o.key,
+    url: origin + '/' + o.key,
+    size: typeof o.size === 'number' ? o.size : 0,
+    contentType: (o.httpMetadata && o.httpMetadata.contentType) || null,
+    uploadedAt: new Date(o.uploaded).toISOString(),
+    expiresAt: (o.customMetadata && o.customMetadata['expires-at']) || null,
+    label: (o.customMetadata && o.customMetadata['label']) || null,
+    agent: (o.customMetadata && o.customMetadata['agent']) || null,
+    session: (o.customMetadata && o.customMetadata['session']) || null,
+    host: (o.customMetadata && o.customMetadata['host']) || null,
+    repo: (o.customMetadata && o.customMetadata['repo']) || null,
+    meta: extraMetaOf(o.customMetadata),
+  }));
+  // Newest first — the most recently replaced version leads.
+  items.sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : a.uploadedAt > b.uploadedAt ? -1 : 0));
+
+  if (method === 'HEAD') {
+    return new Response(null, { status: 200, headers: { 'content-type': 'application/json; charset=utf-8' } });
+  }
+  return new Response(JSON.stringify({ key, count: items.length, revisions: items }), {
+    status: 200,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=30' },
+  });
+}
+
+// The customMetadata keys the CLI sets automatically (provenance + label) —
+// never a real \`--meta key=value\` entry (the CLI rejects a colliding key
+// before it ever reaches this Worker; see RESERVED_META_KEYS in publish.ts).
+// One list, reused both to strip a same-named --meta collision on write and
+// to split arbitrary --meta entries back out on read.
+var RESERVED_METADATA_KEYS = ['expires-at', 'visibility', 'agent', 'session', 'host', 'repo', 'date', 'label', 'label-source'];
+
+// Everything in customMetadata that ISN'T one of the reserved provenance/label
+// keys above — i.e. the caller's own \`--meta key=value\` entries. Surfaced on
+// every read route (listing, revisions) so a value stored with \`--meta
+// kind=plan --meta ticket=RUSH-2683\` is actually visible again, not just
+// write-only (RUSH-2683 review fix).
+function extraMetaOf(customMetadata) {
+  var out = {};
+  if (!customMetadata) return out;
+  for (var k in customMetadata) {
+    if (RESERVED_METADATA_KEYS.indexOf(k) === -1) out[k] = customMetadata[k];
+  }
+  return out;
 }
 
 function escapeHtml(s) {

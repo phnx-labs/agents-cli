@@ -1186,7 +1186,10 @@ Sources: a command's stdout (`--watch` / `--poll`), an HTTP endpoint (`--poll-ht
 # Publish an HTML artifact to a public link on your own Cloudflare R2 (~$0).
 agents artifacts setup                                      # once: provision bucket + Worker on your CF
 agents artifacts share plan.html --slug fleet --expire 30d  # → https://<base>/fleet
+agents artifacts share plan.html --label "Q3 fleet plan" --meta kind=plan   # human title + structured metadata
 agents artifacts share plan.html --json                     # URL object for plan-render hooks
+agents artifacts share list --agent claude                  # everything published, filterable
+agents artifacts share revisions fleet                      # prior versions kept under a slug
 agents artifacts share status                               # show the endpoint
 agents unshare fleet                                        # take a published link (+ its OG cover) down
 ```
@@ -1203,8 +1206,19 @@ this is effectively free.
 **Fleet mode:** provision one endpoint, then every fleet / cloud / ephemeral agent
 publishes through it with a shared write token — `agents artifacts share join <baseUrl>` uses an
 existing endpoint with no provisioning. `--expire 30d|12h|<date>` auto-expires a link.
-`--json` emits `{ url, coverUrl, expiresAt }` so plan-render automation can publish the
-rendered HTML and post the returned link without scraping terminal text.
+`--json` emits `{ url, coverUrl, expiresAt, label, labelSource }` so plan-render automation can
+publish the rendered HTML and post the returned link without scraping terminal text.
+
+**Every share carries provenance and a title.** Agent/session/host/repo/date are
+captured automatically from the exec env and git — never invented, only sent when
+present. `--label`/`--title` names a share (else one is derived from the HTML
+`<title>`, frontmatter, or filename, with a nudge — never a blocking prompt); `--meta
+key=value` attaches structured metadata (`kind`, `project`, `ticket`, `status`, ...).
+`agents artifacts share list --agent <name> | --session <id> | --label-contains <substr>` filters
+by any of it, so the listing is a real "what have I shared" gallery, not just slugs.
+Republishing an existing slug keeps the prior version as a revision by default
+(`--no-revision` to skip); `agents artifacts share revisions <slug>` shows the retained
+history, newest first.
 
 `agents artifacts share delete <targets...>` (alias `agents unshare`) takes a page down — pass a
 full URL, `<user>/<slug>`, or a bare slug (resolved against your own namespace); several

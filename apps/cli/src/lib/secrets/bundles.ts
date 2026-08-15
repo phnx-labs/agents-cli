@@ -54,7 +54,7 @@ import {
   vaultSetItems,
   vaultSetItem,
 } from './vault.js';
-import { emit } from '../events.js';
+import { emit } from '../feed/events.js';
 import { emitSecretAudit } from './audit.js';
 import { readMeta, getHelpersDir } from '../state.js';
 import { assertNameActiveInResourceProfile, filterNamesForActiveResourceProfile } from '../resource-profiles.js';

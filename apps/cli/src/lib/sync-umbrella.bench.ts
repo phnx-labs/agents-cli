@@ -2,12 +2,12 @@
  * Benchmark for the `agents sync` config-translation hot path: the reconcile
  * stage that turns the DotAgents repos into each agent's native on-disk format.
  *
- * The entry point is sync-umbrella.ts:96 `runUmbrellaSync`, but that function is
+ * The entry point is sync-umbrella.ts:101 `runUmbrellaSync`, but that function is
  * a sequencer, not the cost. Its planner is pure (sync-umbrella.ts:51
  * `planUmbrellaStages`, "Pure -- no I/O"), its repos stage is a `git pull`
- * (sync-umbrella.ts:109 `pullRepo`) and its secrets stage is network + scrypt.
+ * (sync-umbrella.ts:114 `pullRepo`) and its secrets stage is network + scrypt.
  * Every local CPU/IO cost of a bare `agents sync` lives behind one line --
- * sync-umbrella.ts:152 `await refresh({ skipPrompts: yes, quiet })` -- so that is
+ * sync-umbrella.ts:161 `await refresh({ skipPrompts: yes, quiet })` -- so that is
  * what this file measures, decomposed into the four stages refresh.ts actually
  * runs per agent version:
  *

@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import { AGENTS, isAgentHardDeprecated, hardDeprecationError } from '../agents.js';
-import { emit } from '../events.js';
+import { emit } from '../feed/events.js';
 import {
   getBinaryPath,
   invalidateInstalledVersionsCache,

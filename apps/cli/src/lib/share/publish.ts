@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { hostname as osHostname } from 'node:os';
 import { readShareConfig, readWriteToken, type ShareConfig } from './config.js';
 import { resolveGitHubUsername } from '../git.js';
 import { captureCover, OG_WIDTH, OG_HEIGHT, OG_SCALE } from './capture.js';
@@ -64,6 +65,27 @@ export interface PublishOptions {
   uploader?: PutFn;
   /** DI seam for tests — override cover capture (returns a PNG buffer or null). */
   capturer?: (htmlPath: string) => Promise<Buffer | null>;
+  /**
+   * Human display title, shown instead of the slug in the gallery and
+   * `agents artifacts share list`. When omitted, one is derived (HTML `<title>`,
+   * else a Markdown frontmatter `title:`, else the filename) — a share always
+   * carries a label, never a blocking prompt (see {@link deriveLabel}).
+   */
+  label?: string;
+  /**
+   * Structured metadata (`--meta key=value`, repeatable). Keys are validated by
+   * {@link parseMetaEntries} — lowercase `[a-z0-9-]`, and may not collide with
+   * {@link RESERVED_META_KEYS}, which the CLI sets automatically.
+   */
+  meta?: Record<string, string>;
+  /**
+   * Skip revision retention on this publish — overwrite an existing slug's
+   * object in place with no `<slug>/rev-<ts>` backup of the version it replaces
+   * (default: keep it; see docs/share.md §Revisions).
+   */
+  noRevision?: boolean;
+  /** DI seam for tests — override provenance auto-capture (agent/session/host/repo/date). */
+  provenance?: ShareProvenance;
 }
 
 export interface PublishResult {
@@ -72,6 +94,133 @@ export interface PublishResult {
   coverUrl?: string;
   /** True when the page was published with `visibility=unlisted`. */
   unlisted?: boolean;
+  /** The label stored with this share — explicit (`--label`) or derived. */
+  label?: string;
+  /** Whether `label` came from `--label` or was auto-derived. */
+  labelSource?: 'explicit' | 'derived';
+}
+
+export interface ShareProvenance {
+  /** Harness/agent name (`AGENTS_AGENT_NAME`), when publishing from an agent run. */
+  agent?: string;
+  /** Session id (`AGENTS_SESSION_ID` / `AGENT_SESSION_ID`), when publishing from an agent run. */
+  session?: string;
+  /** The machine the publish ran from (`os.hostname()`) — always present. */
+  host?: string;
+  /** git repo name at publish time, absent outside a git checkout — never invented. */
+  repo?: string;
+  /** ISO date (`yyyy-mm-dd`) this publish happened, from the local clock. */
+  date?: string;
+}
+
+/**
+ * Reserved `customMetadata` keys the CLI sets automatically from the exec env,
+ * git, and the local clock (plus `label`/`label-source`) — a `--meta key=value`
+ * may not target any of these (see {@link parseMetaEntries}).
+ */
+export const RESERVED_META_KEYS = ['agent', 'session', 'host', 'repo', 'date', 'label', 'label-source'] as const;
+
+const META_KEY_RE = /^[a-z0-9-]{1,64}$/;
+
+/**
+ * Auto-capture publish provenance from the exec env, git, and the local clock.
+ * Every field is present only when the environment genuinely carries it — a
+ * human running the command by hand outside a git repo yields `session`/`agent`/
+ * `repo` all undefined, never an invented value. `host` is always present
+ * (`os.hostname()` never fails to return something real about where the publish
+ * ran, so it isn't "invented" in the same sense).
+ */
+export function resolveShareProvenance(
+  opts: { env?: NodeJS.ProcessEnv; hostname?: string; dir?: string; now?: Date } = {},
+): ShareProvenance {
+  const env = opts.env ?? process.env;
+  return {
+    session: env.AGENTS_SESSION_ID || env.AGENT_SESSION_ID || undefined,
+    agent: env.AGENTS_AGENT_NAME || undefined,
+    host: opts.hostname ?? osHostname(),
+    repo: gitRepoName(opts.dir ?? process.cwd()),
+    date: (opts.now ?? new Date()).toISOString().slice(0, 10),
+  };
+}
+
+/**
+ * Parse repeated `--meta key=value` CLI args into a validated metadata record.
+ * Keys are lowercase `[a-z0-9-]`, up to 64 characters, and may not collide with
+ * {@link RESERVED_META_KEYS} (the provenance the CLI sets automatically, plus
+ * label/label-source) — throws naming the offending pair on any violation.
+ */
+export function parseMetaEntries(pairs: string[]): Record<string, string> {
+  const meta: Record<string, string> = {};
+  for (const pair of pairs) {
+    const eq = pair.indexOf('=');
+    if (eq <= 0) {
+      throw new Error(`Bad --meta '${pair}'. Expected key=value.`);
+    }
+    const key = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1);
+    if (!META_KEY_RE.test(key)) {
+      throw new Error(
+        `Bad --meta key '${key}'. Keys are lowercase letters, digits, and hyphens, up to 64 characters.`,
+      );
+    }
+    if ((RESERVED_META_KEYS as readonly string[]).includes(key)) {
+      throw new Error(
+        `--meta ${key}=… is reserved (set automatically from your session/git) — pass a different key.`,
+      );
+    }
+    meta[key] = value;
+  }
+  return meta;
+}
+
+/** S3's `x-amz-meta` convention caps user metadata around 2KB; R2 publishes no
+ * hard limit of its own, so stay under that ceiling to keep a share portable to
+ * an S3-compatible mirror. Checked over the FULL customMetadata payload
+ * (provenance + label + --meta combined), since that's what actually gets
+ * written to the object. */
+const MAX_METADATA_BYTES = 2048;
+
+/** Throws when the combined `customMetadata` payload would exceed {@link MAX_METADATA_BYTES}. */
+export function assertMetadataSize(customMetadata: Record<string, string>): void {
+  const bytes = Buffer.byteLength(JSON.stringify(customMetadata), 'utf8');
+  if (bytes > MAX_METADATA_BYTES) {
+    throw new Error(
+      `Share metadata is ${bytes} bytes, over the ${MAX_METADATA_BYTES}-byte cap ` +
+        `(provenance + --label + --meta combined). Trim your --meta values.`,
+    );
+  }
+}
+
+/**
+ * Collapse a label to a single line before it goes into the `x-share-label`
+ * header or public customMetadata. `<title>[^<]{1,200}</title>` matches
+ * newlines (`[^<]` excludes only `<`), and `.trim()` only strips leading/
+ * trailing whitespace, not embedded newlines — a multi-line `<title>` (or an
+ * explicit `--label`/`--title` the caller typed with a literal newline) was
+ * previously passed straight into `Headers.set()` unsanitized, which throws
+ * an unhandled `TypeError: Invalid value` and crashes the publish outright.
+ */
+export function sanitizeLabel(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Best-effort human title when `--label` is omitted: the HTML `<title>`, else a
+ * Markdown frontmatter `title:`, else the filename. Always returns something —
+ * a headless publish must never hang waiting on a prompt for one.
+ */
+export function deriveLabel(filePath: string, body: Buffer): string {
+  const text = body.toString('utf8');
+  const htmlTitle = /<title[^>]*>([^<]{1,200})<\/title>/i.exec(text);
+  if (htmlTitle?.[1]?.trim()) return sanitizeLabel(htmlTitle[1]);
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (frontmatter) {
+    const titleLine = /^title:\s*(.+)$/m.exec(frontmatter[1]);
+    const cleaned = titleLine?.[1]?.trim().replace(/^["']|["']$/g, '').trim();
+    if (cleaned) return sanitizeLabel(cleaned);
+  }
+  const base = basename(filePath).replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim();
+  return sanitizeLabel(base || basename(filePath));
 }
 
 /** Default auto-expire for unflagged publishes — accidental links decay (RUSH-2443). */
@@ -190,7 +339,7 @@ export function formatSensitiveContentError(hits: SensitiveHit[]): string {
         ? 'email addresses'
         : 'credential-shaped strings';
   return (
-    `Refusing to publish: the file contains ${what} (${samples}). ` +
+    `Refusing to publish: found ${what} (${samples}) in the file, label, or metadata. ` +
     `Shares are world-readable by URL — pass --force to publish anyway, ` +
     `or --unlisted --expire 12h to bound the blast radius.`
   );
@@ -212,19 +361,25 @@ function sanitizeSlugPart(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
-/** The project the file belongs to — git repo name, else the cwd's basename. */
-export function detectProject(dir: string = process.cwd()): string {
+/** The current repo's name, or undefined outside a git checkout — never a
+ * fallback guess, since callers that want one (detectProject) supply it themselves. */
+function gitRepoName(dir: string): string | undefined {
   try {
     const top = execFileSync('git', ['-C', dir, 'rev-parse', '--show-toplevel'], {
       stdio: ['ignore', 'pipe', 'ignore'],
     })
       .toString()
       .trim();
-    if (top) return sanitizeSlugPart(basename(top)) || 'share';
+    if (top) return sanitizeSlugPart(basename(top)) || undefined;
   } catch {
-    // not a git repo — fall through to cwd basename
+    // not a git repo
   }
-  return sanitizeSlugPart(basename(dir)) || 'share';
+  return undefined;
+}
+
+/** The project the file belongs to — git repo name, else the cwd's basename. */
+export function detectProject(dir: string = process.cwd()): string {
+  return gitRepoName(dir) ?? (sanitizeSlugPart(basename(dir)) || 'share');
 }
 
 /**
@@ -356,6 +511,8 @@ export async function publishToEndpoint(
   const expiresAt = resolveExpire(opts.expire);
   const unlisted = opts.unlisted === true;
   const pageUrl = `${endpoint.baseUrl.replace(/\/+$/, '')}/${key}`;
+  const provenance = opts.provenance ?? resolveShareProvenance();
+  const meta = opts.meta ?? {};
 
   const put =
     opts.uploader ??
@@ -363,26 +520,63 @@ export async function publishToEndpoint(
       const res = await fetch(u, { method: 'PUT', headers: h, body: new Uint8Array(b) });
       return { ok: res.ok, status: res.status, url: u };
     });
-  const authHeaders = (contentType: string): Record<string, string> => {
-    const h: Record<string, string> = { authorization: `Bearer ${endpoint.token}`, 'content-type': contentType };
-    if (expiresAt) h['x-share-expires-at'] = expiresAt;
-    if (unlisted) h['x-share-visibility'] = 'unlisted';
-    return h;
-  };
 
   let body: Buffer = readFileSync(filePath);
   let coverUrl: string | undefined;
   const isHtml = /\.html?$/i.test(filePath);
 
-  // Pre-publish scan (RUSH-2443): refuse emails / credential-shaped strings
-  // unless --force. Runs on the raw file before analytics/cover mutation so a
-  // beacon injection never triggers a false positive. Binary media is a no-op.
+  const explicitLabel = opts.label?.trim();
+  // sanitizeLabel here (not just inside deriveLabel) covers an explicit
+  // --label/--title the caller typed with an embedded newline — deriveLabel
+  // is only reached when --label is omitted.
+  const label = explicitLabel ? sanitizeLabel(explicitLabel) : deriveLabel(filePath, body);
+  const labelSource: 'explicit' | 'derived' = explicitLabel ? 'explicit' : 'derived';
+
+  // Pre-publish scan (RUSH-2443/RUSH-2683): refuse emails / credential-shaped
+  // strings unless --force. Runs on the raw file body AND on every piece of
+  // free-text metadata that lands in public customMetadata — --label (explicit
+  // or derived) and every --meta value. Metadata is visible in the gallery,
+  // `share list --json`, and `share revisions` just like the page itself, so a
+  // credential smuggled in there is exactly as exposed as one in the body; it
+  // must not have a free pass around this gate. Runs before analytics/cover
+  // mutation so a beacon injection never triggers a false positive on the body
+  // scan. Binary media bodies are a no-op for the body scan.
   if (opts.force !== true) {
-    const hits = scanShareContent(body);
+    const hits = [
+      ...scanShareContent(body),
+      ...scanShareContent(label),
+      ...Object.values(meta).flatMap((v) => scanShareContent(v)),
+    ];
     if (hits.length > 0) {
       throw new Error(formatSensitiveContentError(hits));
     }
   }
+
+  // Validate the FULL customMetadata payload before any network call — fail
+  // fast, not mid-upload.
+  const metadataPreview: Record<string, string> = { ...meta, label, 'label-source': labelSource };
+  if (provenance.agent) metadataPreview.agent = provenance.agent;
+  if (provenance.session) metadataPreview.session = provenance.session;
+  if (provenance.host) metadataPreview.host = provenance.host;
+  if (provenance.repo) metadataPreview.repo = provenance.repo;
+  if (provenance.date) metadataPreview.date = provenance.date;
+  assertMetadataSize(metadataPreview);
+
+  const authHeaders = (contentType: string): Record<string, string> => {
+    const h: Record<string, string> = { authorization: `Bearer ${endpoint.token}`, 'content-type': contentType };
+    if (expiresAt) h['x-share-expires-at'] = expiresAt;
+    if (unlisted) h['x-share-visibility'] = 'unlisted';
+    if (provenance.agent) h['x-share-agent'] = provenance.agent;
+    if (provenance.session) h['x-share-session'] = provenance.session;
+    if (provenance.host) h['x-share-host'] = provenance.host;
+    if (provenance.repo) h['x-share-repo'] = provenance.repo;
+    if (provenance.date) h['x-share-date'] = provenance.date;
+    h['x-share-label'] = label;
+    h['x-share-label-source'] = labelSource;
+    if (Object.keys(meta).length > 0) h['x-share-meta'] = JSON.stringify(meta);
+    if (opts.noRevision) h['x-share-no-revision'] = '1';
+    return h;
+  };
 
   // Analytics: cookieless CF Web Analytics beacon, injected for HTML by default.
   if (isHtml && opts.analytics !== false && opts.analyticsToken) {
@@ -414,6 +608,8 @@ export async function publishToEndpoint(
     url: r.url ?? pageUrl,
     expiresAt,
     coverUrl,
+    label,
+    labelSource,
     ...(unlisted ? { unlisted: true } : {}),
   };
 }

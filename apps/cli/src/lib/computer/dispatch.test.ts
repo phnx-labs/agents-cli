@@ -4,7 +4,7 @@ import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { rpcMethodFor, toRpcParams, makeVerbDispatcher } from './dispatch.js';
 import type { ComputerClient, RPCResponse } from '../computer-rpc.js';
-import { query, _resetForTest } from '../events.js';
+import { query, _resetForTest } from '../feed/events.js';
 
 // The verb -> RPC translation in dispatch.ts is the load-bearing seam behind
 // `computer run`: a single wrong param key silently breaks every gated macOS

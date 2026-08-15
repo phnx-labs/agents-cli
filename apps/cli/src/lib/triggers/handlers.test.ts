@@ -29,7 +29,7 @@ describe('handler config layer', () => {
     process.env.AGENTS_SYSTEM_ROUTINES_DIR = path.join(tmpHome, '.agents', '.system', 'routines');
     eventsFile = path.join(tmpHome, 'events.jsonl');
     process.env.AGENTS_EVENTS_PATH = eventsFile;
-    const events = await import('../events.js');
+    const events = await import('../feed/events.js');
     events._resetForTest(eventsFile);
     handlerMod = await import('./handlers.js');
   });

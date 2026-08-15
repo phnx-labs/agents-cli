@@ -27,7 +27,7 @@ import {
   aggregateHookProfile,
   type HookProfileRow,
 } from '../lib/hooks/profile.js';
-import { query } from '../lib/events.js';
+import { query } from '../lib/feed/events.js';
 import { detectRepeatedGuardBlocks } from '../lib/friction-heuristics.js';
 
 interface PerfGlobalOpts {

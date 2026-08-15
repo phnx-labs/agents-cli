@@ -75,6 +75,9 @@ describe('publishFile with injected uploader', () => {
       githubUser: 'octocat',
       expire: '2030-01-01',
       cover: false,
+      // Suppress auto-captured provenance so this is deterministic regardless
+      // of the ambient env (this repo's own agent sessions set AGENTS_SESSION_ID).
+      provenance: {},
       uploader: async (url, body, headers) => {
         uploads.push({ url, body: body.toString('utf8'), headers });
         return { ok: true, status: 200, url };
@@ -85,6 +88,8 @@ describe('publishFile with injected uploader', () => {
       url: 'https://share.example.com/octocat/rush-1800-report',
       expiresAt: new Date('2030-01-01').toISOString(),
       coverUrl: undefined,
+      label: 'Report',
+      labelSource: 'derived',
     });
     expect(uploads).toEqual([
       {
@@ -94,6 +99,8 @@ describe('publishFile with injected uploader', () => {
           authorization: 'Bearer write-token-1',
           'content-type': 'text/html; charset=utf-8',
           'x-share-expires-at': new Date('2030-01-01').toISOString(),
+          'x-share-label': 'Report',
+          'x-share-label-source': 'derived',
         },
       },
     ]);

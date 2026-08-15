@@ -5,7 +5,7 @@ import {
   summarizeFeedBlocks,
   type SnapshotSessionRow,
 } from './snapshot.js';
-import type { OpenBlock } from './feed.js';
+import type { OpenBlock } from './feed/feed.js';
 import type { ViewJsonAgent } from './view-types.js';
 
 function block(partial: Partial<OpenBlock> & Pick<OpenBlock, 'blockId' | 'sessionId' | 'ts'>): OpenBlock {

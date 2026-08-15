@@ -36,8 +36,8 @@ import {
   type CloudflareRequester,
   setWorkerSecret,
 } from '../lib/share/provision.js';
-import { publishFile, resolveShareUsername, type PublishResult } from '../lib/share/publish.js';
-import { deleteShare, type DeleteShareResult } from '../lib/share/delete.js';
+import { publishFile, resolveShareUsername, parseMetaEntries, type PublishResult } from '../lib/share/publish.js';
+import { deleteShare, resolveDeleteTarget, type DeleteShareResult } from '../lib/share/delete.js';
 import { renderWorkerScript } from '../lib/share/worker-template.js';
 import { analyticsEnabled } from '../lib/share/analytics.js';
 import { resolveGitHubUsername } from '../lib/git.js';
@@ -47,6 +47,10 @@ export function formatSharePublishResult(result: PublishResult, json = false): s
   if (json) return JSON.stringify(result, null, 2);
 
   const lines = [chalk.green(result.url)];
+  if (result.label) {
+    const hint = result.labelSource === 'derived' ? chalk.dim(' (derived — pass --label to set one)') : '';
+    lines.push(chalk.dim(`  "${result.label}"`) + hint);
+  }
   if (result.coverUrl) lines.push(chalk.dim(`  cover ${result.coverUrl}`));
   if (result.expiresAt) lines.push(chalk.dim(`  expires ${new Date(result.expiresAt).toLocaleString()}`));
   else lines.push(chalk.dim('  expires never'));
@@ -75,6 +79,24 @@ export interface ShareListItem {
   publishedAt: string;
   /** ISO auto-expire timestamp, or null for a permanent share. */
   expiresAt: string | null;
+  /** Human display title (explicit `--label` or auto-derived), or null for a
+   * share published before this field existed. */
+  label: string | null;
+  /** Harness/agent name that published this (`AGENTS_AGENT_NAME`), or null. */
+  agent: string | null;
+  /** Session id that published this, or null. */
+  session: string | null;
+  /** Hostname the publish ran from, or null. */
+  host: string | null;
+  /** git repo name at publish time, or null (published outside a git repo, or
+   * before this field existed). */
+  repo: string | null;
+  /** Count of retained prior versions under this slug (see `share revisions`). */
+  revisionCount: number;
+  /** Arbitrary `--meta key=value` entries attached at publish time (RUSH-2683)
+   * — everything that isn't a reserved provenance/label key. `{}` when none
+   * were set, or when the deployed Worker predates this field. */
+  meta: Record<string, string>;
 }
 
 export interface ShareListResult {
@@ -98,6 +120,18 @@ const OUTDATED_TEMPLATE_HINT =
 async function defaultListingFetch(url: string): Promise<{ status: number; contentType: string; body: string }> {
   const res = await fetch(url, { headers: { accept: 'application/json' } });
   return { status: res.status, contentType: res.headers.get('content-type') ?? '', body: await res.text() };
+}
+
+/** Normalize the Worker's `meta` field (arbitrary `--meta key=value` entries,
+ * RUSH-2683) into a plain string record — `{}` for a missing/malformed field
+ * (a deployed Worker that predates it, or a non-object value), never throws. */
+function parseMetaField(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    out[k] = String(v);
+  }
+  return out;
 }
 
 /** Parse the Worker's listing JSON into a validated result, failing loud (with the
@@ -124,6 +158,13 @@ export function parseShareListing(user: string, body: string): ShareListResult {
       contentType: item.contentType == null ? null : String(item.contentType),
       publishedAt: String(item.publishedAt ?? ''),
       expiresAt: item.expiresAt == null ? null : String(item.expiresAt),
+      label: item.label == null ? null : String(item.label),
+      agent: item.agent == null ? null : String(item.agent),
+      session: item.session == null ? null : String(item.session),
+      host: item.host == null ? null : String(item.host),
+      repo: item.repo == null ? null : String(item.repo),
+      revisionCount: typeof item.revisionCount === 'number' ? item.revisionCount : 0,
+      meta: parseMetaField(item.meta),
     };
   });
   return { user, count: objects.length, objects };
@@ -135,7 +176,17 @@ export function parseShareListing(user: string, body: string): ShareListResult {
  * live response proves the route is absent (404 or a non-JSON 200 = the old HTML
  * gallery) — never a silent empty/wrong result. */
 export async function runShareList(
-  opts: { githubUser?: string; config?: ShareConfig; fetchListing?: ListingFetchFn } = {},
+  opts: {
+    githubUser?: string;
+    config?: ShareConfig;
+    fetchListing?: ListingFetchFn;
+    /** Only shares published by this agent/harness (case-insensitive, exact). */
+    agent?: string;
+    /** Only shares published from this session id (exact). */
+    session?: string;
+    /** Only shares whose label contains this text (case-insensitive substring). */
+    label?: string;
+  } = {},
 ): Promise<ShareListResult> {
   const cfg = opts.config ?? readShareConfig();
   if (!cfg) {
@@ -179,10 +230,43 @@ export async function runShareList(
     // the HTML gallery — the deployed template is outdated.
     throw new Error(OUTDATED_TEMPLATE_HINT);
   }
-  return parseShareListing(user, res.body);
+  const parsed = parseShareListing(user, res.body);
+  return applyShareListFilters(parsed, opts);
+}
+
+/** Client-side filtering over an already-fetched listing (RUSH-2683) — the
+ * Worker has no query surface for this, so it narrows the fetched set instead
+ * of a second round trip. `count` reflects the FILTERED set, matching what the
+ * caller actually sees. */
+function applyShareListFilters(
+  result: ShareListResult,
+  filters: { agent?: string; session?: string; label?: string },
+): ShareListResult {
+  let objects = result.objects;
+  if (filters.agent) {
+    const needle = filters.agent.toLowerCase();
+    objects = objects.filter((o) => (o.agent ?? '').toLowerCase() === needle);
+  }
+  if (filters.session) {
+    objects = objects.filter((o) => o.session === filters.session);
+  }
+  if (filters.label) {
+    const needle = filters.label.toLowerCase();
+    objects = objects.filter((o) => (o.label ?? '').toLowerCase().includes(needle));
+  }
+  return { user: result.user, count: objects.length, objects };
 }
 
 /** Human-readable bytes, e.g. `1.2 KB`, `640 B`. */
+/** Render an arbitrary `--meta` map as `k=v k2=v2` for a human table row, or
+ * undefined when there's nothing to show (RUSH-2683). */
+function formatMetaPairs(meta: Record<string, string> | undefined): string | undefined {
+  if (!meta) return undefined;
+  const entries = Object.entries(meta);
+  if (entries.length === 0) return undefined;
+  return entries.map(([k, v]) => `${k}=${v}`).join(' ');
+}
+
 export function formatShareList(result: ShareListResult, json = false): string {
   if (json) return JSON.stringify(result, null, 2);
   if (result.count === 0) {
@@ -193,8 +277,130 @@ export function formatShareList(result: ShareListResult, json = false): string {
     chalk.dim(`  ${result.count} published ${result.count === 1 ? 'page' : 'pages'}`);
   const rows = result.objects.map((o) => {
     const when = o.publishedAt ? o.publishedAt.slice(0, 10) : 'unknown';
-    const meta = `${when} · ${formatBytes(o.size)}${o.expiresAt ? ` · expires ${o.expiresAt.slice(0, 10)}` : ''}`;
-    return `${chalk.cyan(o.slug)}  ${chalk.dim(meta)}\n  ${chalk.green(o.url)}`;
+    const bits = [when, formatBytes(o.size)];
+    if (o.agent) bits.push(o.agent);
+    if (o.revisionCount > 0) bits.push(`${o.revisionCount} ${o.revisionCount === 1 ? 'revision' : 'revisions'}`);
+    if (o.expiresAt) bits.push(`expires ${o.expiresAt.slice(0, 10)}`);
+    const metaPairs = formatMetaPairs(o.meta);
+    if (metaPairs) bits.push(metaPairs);
+    const line = bits.join(' · ');
+    const title = o.label ? `${chalk.bold(o.label)}\n  ` : '';
+    return `${title}${chalk.cyan(o.slug)}  ${chalk.dim(line)}\n  ${chalk.green(o.url)}`;
+  });
+  return [header, ...rows].join('\n');
+}
+
+/** One retained prior version of a slug, as reported by the Worker's
+ * `?revisions=json` route. */
+export interface ShareRevisionItem {
+  /** R2 object key, `<user>/<slug>/rev-<ts>-<rand>`. */
+  key: string;
+  url: string;
+  size: number;
+  contentType: string | null;
+  /** ISO timestamp this version was replaced (when the copy was made). */
+  uploadedAt: string;
+  expiresAt: string | null;
+  label: string | null;
+  agent: string | null;
+  session: string | null;
+  host: string | null;
+  repo: string | null;
+  /** Arbitrary `--meta key=value` entries attached at publish time (RUSH-2683)
+   * — everything that isn't a reserved provenance/label key. `{}` when none
+   * were set, or when the deployed Worker predates this field. */
+  meta: Record<string, string>;
+}
+
+export interface ShareRevisionsResult {
+  /** The canonical `<user>/<slug>` key these are revisions of. */
+  key: string;
+  count: number;
+  revisions: ShareRevisionItem[];
+}
+
+/** Parse the Worker's `?revisions=json` payload, failing loud (with the same
+ * outdated-template hint as {@link parseShareListing}) on an unexpected shape. */
+export function parseShareRevisions(key: string, body: string): ShareRevisionsResult {
+  let data: unknown;
+  try {
+    data = JSON.parse(body);
+  } catch {
+    throw new Error(OUTDATED_TEMPLATE_HINT);
+  }
+  const revisionsRaw = (data as { revisions?: unknown } | null)?.revisions;
+  if (!data || typeof data !== 'object' || !Array.isArray(revisionsRaw)) {
+    throw new Error(OUTDATED_TEMPLATE_HINT);
+  }
+  const revisions: ShareRevisionItem[] = revisionsRaw.map((o) => {
+    const item = o as Record<string, unknown>;
+    return {
+      key: String(item.key ?? ''),
+      url: String(item.url ?? ''),
+      size: typeof item.size === 'number' ? item.size : 0,
+      contentType: item.contentType == null ? null : String(item.contentType),
+      uploadedAt: String(item.uploadedAt ?? ''),
+      expiresAt: item.expiresAt == null ? null : String(item.expiresAt),
+      label: item.label == null ? null : String(item.label),
+      agent: item.agent == null ? null : String(item.agent),
+      session: item.session == null ? null : String(item.session),
+      host: item.host == null ? null : String(item.host),
+      repo: item.repo == null ? null : String(item.repo),
+      meta: parseMetaField(item.meta),
+    };
+  });
+  return { key, count: revisions.length, revisions };
+}
+
+/** Fetch and parse the retained prior versions of one published slug. `target`
+ * accepts the same three forms as `agents unshare` (a full URL, `<user>/<slug>`,
+ * or a bare slug resolved against the caller's own namespace) — reuses
+ * {@link resolveDeleteTarget} rather than re-deriving the key. */
+export async function runShareRevisions(
+  target: string,
+  opts: { githubUser?: string; config?: ShareConfig; fetchListing?: ListingFetchFn } = {},
+): Promise<ShareRevisionsResult> {
+  const cfg = opts.config ?? readShareConfig();
+  if (!cfg) {
+    throw new Error(
+      "Not set up yet. Run 'agents artifacts setup' (provision your own endpoint) or 'agents artifacts share join' (use an existing one).",
+    );
+  }
+  const templateStatus = shareTemplateStatus(cfg);
+  if (templateStatus === 'outdated') {
+    throw new Error(OUTDATED_TEMPLATE_HINT);
+  }
+
+  const { key } = await resolveDeleteTarget(target, { githubUser: opts.githubUser });
+  const revUrl = `${cfg.baseUrl.replace(/\/+$/, '')}/${key}?revisions=json`;
+  const fetchListing = opts.fetchListing ?? defaultListingFetch;
+  const res = await fetchListing(revUrl);
+
+  if (res.status !== 200) {
+    throw new Error(
+      `Revisions lookup failed (${res.status}) for ${revUrl}. Check the endpoint is reachable, or that 'agents artifacts setup' completed.`,
+    );
+  }
+  if (!/application\/json/i.test(res.contentType)) {
+    throw new Error(OUTDATED_TEMPLATE_HINT);
+  }
+  return parseShareRevisions(key, res.body);
+}
+
+export function formatShareRevisions(result: ShareRevisionsResult, json = false): string {
+  if (json) return JSON.stringify(result, null, 2);
+  if (result.count === 0) {
+    return chalk.dim(`No retained revisions for ${result.key} (only the current version exists).`);
+  }
+  const header =
+    chalk.bold(result.key) + chalk.dim(`  ${result.count} retained ${result.count === 1 ? 'revision' : 'revisions'}`);
+  const rows = result.revisions.map((r) => {
+    const bits = [r.uploadedAt ? r.uploadedAt.slice(0, 10) : 'unknown', formatBytes(r.size)];
+    if (r.agent) bits.push(r.agent);
+    if (r.label) bits.push(r.label);
+    const metaPairs = formatMetaPairs(r.meta);
+    if (metaPairs) bits.push(metaPairs);
+    return `${chalk.cyan(r.uploadedAt || r.key)}  ${chalk.dim(bits.join(' · '))}\n  ${chalk.green(r.url)}`;
   });
   return [header, ...rows].join('\n');
 }
@@ -211,11 +417,15 @@ export function formatShareDeleteResult(result: DeleteShareResult, json = false)
         : chalk.dim(`  cover (none) ${result.cover.url}`),
     );
   }
+  if (result.revisions?.length) {
+    lines.push(chalk.dim(`  ${result.revisions.length} retained ${result.revisions.length === 1 ? 'revision' : 'revisions'} deleted`));
+  }
   return lines.join('\n');
 }
 
 interface ShareDeleteCliOpts {
   keepCover?: boolean;
+  keepRevisions?: boolean;
   ifExists?: boolean;
   githubUser?: string;
   json?: boolean;
@@ -239,6 +449,7 @@ export async function runShareDelete(
     try {
       const result = await deleteFn(target, {
         keepCover: opts.keepCover === true,
+        keepRevisions: opts.keepRevisions === true,
         ifExists: opts.ifExists === true,
         githubUser: opts.githubUser,
       });
@@ -262,13 +473,14 @@ export async function runShareDelete(
 function registerShareDeleteOptions(cmd: Command): Command {
   return cmd
     .option('--keep-cover', 'leave the sibling <slug>.png OG cover in place (default: delete it too)')
+    .option('--keep-revisions', 'leave retained revisions (<slug>/rev-*) in place (default: delete them too)')
     .option('--if-exists', 'treat an already-missing target as a no-op success instead of an error')
     .option('--github-user <user>', 'GitHub username for resolving a bare-slug target (default: resolved from gh/git config)')
     .option('--json', 'emit machine-readable results');
 }
 
 const SHARE_DELETE_EXAMPLES = `
-      # Delete by full URL — also takes down the sibling OG cover
+      # Delete by full URL — also takes down the sibling OG cover and any retained revisions
       agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2
 
       # Delete by <user>/<slug>, or a bare slug in your own namespace
@@ -281,6 +493,9 @@ const SHARE_DELETE_EXAMPLES = `
       # Keep the cover image up (rare — you usually want both gone)
       agents unshare my-plan-a1b2 --keep-cover
 
+      # Keep retained revisions up too (rare — they're world-readable by URL like the page itself)
+      agents unshare my-plan-a1b2 --keep-revisions
+
       # Don't error if it's already gone
       agents unshare my-plan-a1b2 --if-exists
 `;
@@ -289,6 +504,12 @@ const SHARE_DELETE_NOTES = `
   A follow-up GET is required to resolve 404 before this reports success — the
   Worker's DELETE is idempotent and returns {"ok":true} even for a key that was
   never there, so that response alone is never proof of a takedown.
+
+  Also deletes any retained revisions of the target (RUSH-2683) — a share that was
+  republished at least once leaves its prior version(s) live at their own URL until
+  they're purged too, so leaving them up would defeat the point of taking the page
+  down. Pass --keep-revisions to leave them (they still expire via the bucket's
+  lifecycle rule on their own schedule either way).
 
   agents artifacts share delete === agents unshare (same command, different name).
 `;
@@ -312,6 +533,15 @@ export function registerShareCommands(artifactsCmd: Command): void {
     .option('--force', 'publish even when the file contains emails or credential-shaped strings')
     .option('--no-cover', 'skip the OG preview image (HTML pages get one by default)')
     .option('--no-analytics', 'skip injecting the Cloudflare Web Analytics beacon')
+    .option('--label <text>', 'human display title, shown in the gallery and `share list` (default: derived from the HTML <title>, frontmatter title, or filename)')
+    .option('--title <text>', 'alias of --label')
+    .option(
+      '--meta <key=value>',
+      'structured metadata (repeatable), e.g. --meta kind=plan --meta ticket=RUSH-2683. Recommended keys: kind (plan|report|visual|screenshot|recording|deck|doc), project, ticket, status (draft|final). Reserved (set automatically, not settable): agent, session, host, repo, date, label',
+      (val: string, prev: string[]) => [...prev, val],
+      [] as string[],
+    )
+    .option('--no-revision', "overwrite an existing slug in place — skip keeping the prior version as a <slug>/rev-<ts> backup (default: keep it, see 'agents artifacts share revisions')")
     .option('--json', 'emit machine-readable publish result for plan-render hooks and scripts')
     .action(async (file: string | undefined, opts: {
       slug?: string;
@@ -322,6 +552,10 @@ export function registerShareCommands(artifactsCmd: Command): void {
       force?: boolean;
       cover?: boolean;
       analytics?: boolean;
+      label?: string;
+      title?: string;
+      meta: string[];
+      revision?: boolean;
       json?: boolean;
     }) => {
       if (!file) {
@@ -334,6 +568,7 @@ export function registerShareCommands(artifactsCmd: Command): void {
         return;
       }
       try {
+        const meta = parseMetaEntries(opts.meta);
         const result = await publishFile(file, {
           slug: opts.slug,
           githubUser: opts.githubUser,
@@ -342,6 +577,9 @@ export function registerShareCommands(artifactsCmd: Command): void {
           force: opts.force,
           cover: opts.cover,
           analytics: opts.analytics,
+          label: opts.label ?? opts.title,
+          meta,
+          noRevision: opts.revision === false,
         });
         console.log(formatSharePublishResult(result, Boolean(opts.json)));
       } catch (e) {
@@ -363,6 +601,12 @@ export function registerShareCommands(artifactsCmd: Command): void {
 
       # Custom slug, expiring in 7 days
       agents artifacts share ./out/report.html --slug q3-report --expire 7d
+
+      # Human title + structured metadata, shown in the gallery and share list
+      agents artifacts share ./out/plan.html --label "Q3 fleet plan" --meta kind=plan --meta ticket=RUSH-2683
+
+      # Republish without keeping the previous version as a revision
+      agents artifacts share ./out/plan.html --slug q3-report --no-revision
 ${SHARE_DELETE_EXAMPLES}
       # One-time setup (or join an existing endpoint)
       agents artifacts setup
@@ -377,6 +621,13 @@ ${SHARE_DELETE_EXAMPLES}
   and agents artifacts share list; the direct URL is still world-readable
   (unlisted, not secret). A pre-publish scan refuses emails and credential-shaped
   strings unless --force is passed.
+
+  Every publish carries provenance auto-captured from the exec env/git/clock
+  (agent, session, host, repo, date) — never invented, only sent when present —
+  plus a label (explicit --label/--title, else derived from the HTML <title>,
+  frontmatter title, or filename; never blocks on a prompt) and any --meta
+  key=value pairs. Republishing an existing slug keeps the prior version as a
+  retained revision by default; see 'agents artifacts share revisions'.
 ${SHARE_DELETE_NOTES}
     `,
   });
@@ -474,10 +725,25 @@ ${SHARE_DELETE_NOTES}
     .command('list')
     .description("List the pages you've published to your share namespace (human table; --json for scripts).")
     .option('--github-user <user>', 'GitHub username whose namespace to list (default: resolved from gh/git config)')
-    .option('--json', 'emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt)')
-    .action(async (opts: { githubUser?: string; json?: boolean }) => {
+    .option('--agent <name>', 'filter to shares published by this agent/harness (case-insensitive)')
+    .option('--session <id>', 'filter to shares published from this session id')
+    // Named --label-contains, not --label: `share <file>` (the parent) already owns
+    // `--label`/`--title`, and commander's argv scanner resolves an option name
+    // against the WHOLE ancestor chain, not per-command — a same-named child option
+    // is silently dropped (verified; see RUSH-2683 PR notes). Fixing that properly
+    // needs `enablePositionalOptions()` on the root program, a CLI-wide change out
+    // of scope here (a pre-existing instance of it already affects --json/
+    // --github-user on list/update/delete — tracked as a follow-up).
+    .option('--label-contains <substr>', 'filter to shares whose label contains this text (case-insensitive)')
+    .option('--json', 'emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt, label, agent, session, host, repo, revisionCount, meta)')
+    .action(async (opts: { githubUser?: string; agent?: string; session?: string; labelContains?: string; json?: boolean }) => {
       try {
-        const result = await runShareList({ githubUser: opts.githubUser });
+        const result = await runShareList({
+          githubUser: opts.githubUser,
+          agent: opts.agent,
+          session: opts.session,
+          label: opts.labelContains,
+        });
         console.log(formatShareList(result, Boolean(opts.json)));
       } catch (e) {
         console.error(chalk.red((e as Error).message));
@@ -495,6 +761,10 @@ ${SHARE_DELETE_NOTES}
 
       # List another namespace
       agents artifacts share list --github-user octocat
+
+      # Narrow by who/what published it
+      agents artifacts share list --agent claude
+      agents artifacts share list --label-contains "fleet plan"
     `,
     notes: `
   Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG
@@ -503,6 +773,55 @@ ${SHARE_DELETE_NOTES}
   Worker predates this feature the command says so and points you at 'agents
   artifacts share update' (RUSH-2449) rather than returning a wrong or empty result
   — see 'agents artifacts share status' for whether an update is due.
+
+  --agent/--session/--label-contains filter the fetched listing client-side; --json's
+  count reflects the filtered set.
+    `,
+  });
+
+  const shareRevisionsCmd = shareCmd
+    .command('revisions <target>')
+    .description('Show the retained prior versions of a published slug, newest first (human table; --revisions-json for scripts).')
+    // Named --for-user / --revisions-json, not --github-user / --json: `share
+    // <file>` (the parent) already owns both those long names, and commander's
+    // argv scanner resolves an option name against the WHOLE ancestor chain —
+    // a same-named child option is silently dropped even when it parses alone
+    // (verified with a real program.parseAsync(), see share.test.ts). Unlike
+    // `list`'s pre-existing --json/--github-user collision (RUSH-2687, left
+    // as a tracked follow-up because it predates this diff), `revisions` is
+    // brand-new here, so it gets non-colliding names from the start instead
+    // of shipping a silently-broken flag.
+    .option('--for-user <user>', 'GitHub username for resolving a bare-slug target (default: resolved from gh/git config)')
+    .option('--revisions-json', 'emit the machine-readable revision list')
+    .action(async (target: string, opts: { forUser?: string; revisionsJson?: boolean }) => {
+      try {
+        const result = await runShareRevisions(target, { githubUser: opts.forUser });
+        console.log(formatShareRevisions(result, Boolean(opts.revisionsJson)));
+      } catch (e) {
+        console.error(chalk.red((e as Error).message));
+        process.exitCode = 1;
+      }
+    });
+
+  setHelpSections(shareRevisionsCmd, {
+    examples: `
+      # Prior versions kept under this slug (bare slug — your own namespace)
+      agents artifacts share revisions q3-report
+
+      # By <user>/<slug> or full URL, same target forms as 'agents unshare'
+      agents artifacts share revisions octocat/q3-report
+      agents artifacts share revisions https://share.agents-cli.sh/octocat/q3-report
+
+      # Machine-readable, and a bare slug resolved against another namespace
+      agents artifacts share revisions q3-report --revisions-json
+      agents artifacts share revisions q3-report --for-user octocat
+    `,
+    notes: `
+  A revision is created automatically on every republish of an existing slug
+  (pass --no-revision at publish time to skip it) — this is history, never
+  shown on the public gallery or in 'agents artifacts share list' beyond its
+  count. Each revision's own URL is still directly reachable and honors its own
+  recorded expiry.
     `,
   });
 

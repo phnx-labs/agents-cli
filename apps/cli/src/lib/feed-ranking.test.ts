@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { OpenBlock, FeedAskStats } from './feed.js';
+import type { OpenBlock, FeedAskStats } from './feed/feed.js';
 import {
   buildSessionSignals,
   needyControlCards,

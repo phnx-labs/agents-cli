@@ -438,11 +438,12 @@ describe('runFleetPassthrough — direct unit tests', () => {
   });
 
   it('uses the sync summarizer for sync command', async () => {
-    // RUSH-2700: this is the WIRING test. The unit tests below exercise
-    // summarizeSyncResult's arithmetic, but deleting the `command === 'sync'`
-    // line in summarizeResult left them all green — restoring the exact bug
-    // (every box rendering a flat `ok`) with no test failing. This drives the
-    // real fan-out so the roster must actually call the summarizer.
+    // RUSH-2700: this is the WIRING test. An earlier revision called
+    // summarizeSyncResult directly, so deleting the `command === 'sync'` line in
+    // summarizeResult restored the exact bug (every box rendering a flat `ok`)
+    // with no test failing. This drives the real fan-out instead, so the roster
+    // must actually dispatch to the summarizer; the describe block below was
+    // rewritten the same way for the same reason.
     console.log = (...args: unknown[]) => logs.push(args.join(' '));
     const registry = fakeRegistry([fakeDevice('mac-mini', 'macos')]);
     const runner = (_device: DeviceProfile, cmd: string[]) => {

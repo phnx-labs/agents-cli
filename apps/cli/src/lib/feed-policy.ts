@@ -23,7 +23,7 @@ import {
   recordParked,
   type OpenBlock,
   type AnswerRecord,
-} from './feed.js';
+} from './feed/feed.js';
 import { enqueue, mailboxDir } from './mailbox.js';
 
 export type BlockClass = 'approval' | 'decision';

@@ -10,7 +10,7 @@
  * This module picks the delivery mechanism from (open feed block × session
  * liveness × runtime rail). Pure — unit-testable without a live PTY.
  */
-import type { OpenBlock, BlockOption } from './feed.js';
+import type { OpenBlock, BlockOption } from './feed/feed.js';
 import type { ActiveSession } from './session/active.js';
 import type { InjectTarget } from './terminal/index.js';
 import { injectTargetFromReplyRail } from './session/inject.js';

@@ -26,7 +26,7 @@ import type { SessionMeta } from '../session/types.js';
 import { getSessionById, listBrowserSessionRecords, pruneToolSessions } from '../session/db.js';
 import { listPidSessionEntries } from '../session/pid-registry.js';
 import { loadHookSessionIndex } from '../session/hook-sessions.js';
-import { readRecentActivity } from '../activity.js';
+import { readRecentActivity } from '../feed/activity.js';
 
 export type ArtifactKind = 'screenshot' | 'pdf' | 'recording' | 'download';
 

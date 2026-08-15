@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { projectKeyFromCwd, repoAgentsDirForCwd, repoRootForCwd, resolveProjectKey } from './project-key.js';
-import { projectFromCwd } from './activity.js';
+import { projectFromCwd } from './feed/activity.js';
 import { overviewProjectKey } from '../commands/sessions.js';
 
 describe('projectKeyFromCwd', () => {

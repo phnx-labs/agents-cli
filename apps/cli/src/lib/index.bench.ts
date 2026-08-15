@@ -98,7 +98,7 @@ import {
   readMeta,
 } from './state.js';
 import { isGitRepo } from './git.js';
-import { emit, redactArgs, _resetForTest } from './events.js';
+import { emit, redactArgs, _resetForTest } from './feed/events.js';
 import { stampProvenance } from './event-provenance.js';
 import { installMenubarLaunchAgentOnUpgrade } from './menubar/install-menubar.js';
 import {
