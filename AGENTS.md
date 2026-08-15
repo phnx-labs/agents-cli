@@ -19,6 +19,30 @@ Claude that's `CLAUDE.md`, a symlink to the same file — and keep going down: t
 component file, not this one, is where component-specific detail lives. Every
 component with a real `AGENTS.md` carries `CLAUDE.md`/`GEMINI.md` symlinks to it.
 
+## Purpose — keep agents running, land work end to end
+
+agents-cli is a power user's control plane for running many coding agents at once and
+driving each one to a **landed** result (merged, shipped, verified), not just started.
+Starting an agent is the easy part. The hard part is that agents stall: they stop
+mid-task, ask a question and idle, make a statement ("I won't continue…") and sit, fail
+to reach for the browser or a secret they already have, or hand work back instead of
+finishing it. Every reliability surface in this repo — the daemon **watchdog**,
+`needs-you` detection, **resume/restore**, session-status truth, and the AGI EXT
+**Fleet** panel — exists for one job: notice an agent that has stopped making progress
+and get it moving again, so work lands end to end without a human babysitting every
+session.
+
+**Design consequence — rank by progress, not by liveness.** A *running* session is
+making progress and needs nothing from the operator. The sessions that need a human are
+the ones that have **stopped** progressing: blocked on a real prompt, stalled on a
+statement, **idle mid-task**, or crashed. Idle-but-unfinished work is the
+**highest-risk** state, not the lowest, because it is the most likely to be silently
+abandoned with no progress ever made. So any status or attention surface (the Fleet
+panel, `sessions`, notifications) surfaces not-progressing work **first** and collapses
+the healthy running set; it never buries idle work below running work. `done` is a
+distinct terminal state from `idle`: an idle session that is genuinely finished is safe
+to fold away, while an idle session that is unfinished is exactly the one to raise.
+
 ## Repo map
 
 ```
