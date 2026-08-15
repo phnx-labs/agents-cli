@@ -396,6 +396,11 @@ export interface IncrementalScanResult {
    * Transcripts parsed this scan — i.e. those whose (mtime, size) changed. Zero
    * is the steady state on an idle box and does NOT mean the scan was skipped;
    * read `claimed` for that.
+   *
+   * Every one of the 13 SESSION_AGENTS contributes: the store-backed harnesses
+   * (OpenCode, OpenClaw) short-circuit on their store's own stamp and, when it
+   * did change, report the rows that re-read — so a tick whose only changed
+   * sessions live in one of those stores no longer reports 0 (RUSH-2691).
    */
   scanned: number;
 }
@@ -646,8 +651,8 @@ function dispatchAgentScan(
     case 'codex': return scanCodexIncremental(onProgress);
     case 'gemini': return scanGeminiIncremental(onProgress);
     case 'antigravity': return scanAntigravityIncremental(onProgress);
-    case 'opencode': return scanOpenCodeIncremental();
-    case 'openclaw': return scanOpenClawIncremental();
+    case 'opencode': return scanOpenCodeIncremental(onProgress);
+    case 'openclaw': return scanOpenClawIncremental(onProgress);
     case 'rush': return scanRushIncremental(onProgress);
     case 'hermes': return scanHermesIncremental(onProgress);
     case 'kimi': return scanKimiIncremental(onProgress);
@@ -2458,7 +2463,7 @@ function openCodeSessionStamp(
 }
 
 /** Scan OpenCode sessions from its SQLite database when the DB file has changed. */
-async function scanOpenCodeIncremental(): Promise<void> {
+async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   if (!fs.existsSync(OPENCODE_DB)) return;
 
   const stat = safeStatSync(OPENCODE_DB);
@@ -2690,6 +2695,12 @@ async function scanOpenCodeIncremental(): Promise<void> {
     }
 
     upsertSessionsBatch(entries);
+    // Report what this scan indexed. OpenCode is one SQLite DB rather than N
+    // transcript files, so the whole batch lands as a single progress emit —
+    // enough for the daemon's warm tick to count it (RUSH-2691); without it a
+    // tick whose only changed sessions were OpenCode's reported 0 and logged
+    // nothing, the same silent-success class this tick exists to remove.
+    onProgress?.({ agent: 'opencode', parsed: entries.length, total: entries.length });
     // Stamp the OpenCode DB itself so we can short-circuit on the next run.
     recordScans([{ filePath: OPENCODE_DB, scan: currentScan }]);
   } catch (err: any) {
@@ -2706,7 +2717,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /** Scan active OpenClaw channels and cron jobs via the openclaw CLI. */
-async function scanOpenClawIncremental(): Promise<void> {
+async function scanOpenClawIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   // Check if openclaw is installed — silently skip if not. `which` is POSIX-only
   // (Windows resolves PATH with `where`), so a bare `which` throws ENOENT on every
   // Windows run and silently disabled the entire OpenClaw scan there — its sessions
@@ -2803,6 +2814,9 @@ async function scanOpenClawIncremental(): Promise<void> {
   }
 
   upsertSessionsBatch(entries);
+  // Same reason as the OpenCode emit above: without it the daemon's warm tick
+  // cannot count what this scanner indexed (RUSH-2691).
+  onProgress?.({ agent: 'openclaw', parsed: entries.length, total: entries.length });
   db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('openclaw_last_scan_ms', ?)`).run(String(Date.now()));
 }
 
