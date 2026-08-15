@@ -17516,8 +17516,8 @@
           "negate": false
         }
       ],
-      "examples": "# Cron routine: Claude every weekday at 9 AM (scheduler auto-starts)\n      agents routines add daily-standup --schedule \"0 9 * * 1-5\" --agent claude --prompt \"Draft standup from git log\"\n\n      # One-shot: Codex tomorrow at 2:30 PM, then never again\n      agents routines add hotfix-review --at \"14:30\" --agent codex --prompt \"Review hotfix PR #42\"\n\n      # Create from YAML (for complex routines with multiple settings)\n      agents routines add weekly-report.yml\n\n      # Place the job body on a fleet device / cloud / named host (not --host)\n      agents routines add drain --schedule \"0 3 * * *\" --agent claude --placement fleet --prompt \"Drain queue\"\n      agents routines add review --schedule \"0 9 * * 1\" --agent claude --placement cloud --prompt \"Review open PRs\"\n\n      # Enable a routine (materialises a project routine on first enable)\n      agents routines enable security-sweep\n      agents routines disable security-sweep\n\n      # List all routines and their next run times\n      agents routines list\n\n      # List routines on a specific device\n      agents routines list --device yosemite-s0\n\n      # Create a routine restricted to specific devices\n      agents routines add nightly --schedule \"0 2 * * *\" --agent claude --prompt \"Summarize today's commits\" --devices yosemite-s0,mac-mini\n\n      # Interactively manage which devices may run a routine\n      agents routines devices nightly\n\n      # Run a routine right now in the foreground (ignores schedule)\n      agents routines run daily-standup\n\n      # Check whether the scheduler is running\n      agents routines status",
-      "notes": "A routine is a YAML file that schedules an agent invocation. It specifies:\n        - which agent to run (claude, codex, antigravity, ...)\n        - when to run (cron schedule or one-shot time)\n        - what task to give the agent (the prompt)\n        - execution constraints (mode, effort, timeout)\n\n      The always-on agents daemon starts at install/upgrade and on setup (when\n      daemon.enabled is not false). Adding a routine also ensures it is running.\n      Manage it with 'agents routines start|stop|status'.\n\n      Version / credit failover (same semantics as 'agents run'):\n        - Omit 'version:' to let the configured run strategy (default: balanced)\n          pick a healthy install and skip accounts that are out of credits or\n          rate-limited. Pin with 'version: 2.1.x' when you want one install only.\n        - Foreground 'agents routines run' re-dispatches to the next healthy\n          same-agent account when a mid-run rate/usage limit is detected.\n        - Detached/daemon fires use the pre-flight pick only (next tick re-selects).\n        - Diagnostic lines log which account was picked, which were skipped, and\n          each failover hop: look for \"[agents] routine <name>:\" in the run log.\n        - Claude auth: a routine authenticates through the pinned account's own\n          on-disk login (the same one 'agents run claude' uses on this device).\n          The daemon injects no token; if that account's login has expired the\n          run is skipped up front with a re-login hint.",
+      "examples": "# Cron routine: Claude every weekday at 9 AM (scheduler auto-starts)\n      agents routines add daily-standup --schedule \"0 9 * * 1-5\" --agent claude --prompt \"Draft standup from git log\"\n\n      # One-shot: Codex tomorrow at 2:30 PM, then never again\n      agents routines add hotfix-review --at \"14:30\" --agent codex --prompt \"Review hotfix PR #42\"\n\n      # Create from YAML (for complex routines with multiple settings)\n      agents routines add weekly-report.yml\n\n      # Place the job body on a fleet device / cloud / named host (not --host)\n      agents routines add drain --schedule \"0 3 * * *\" --agent claude --placement fleet --prompt \"Drain queue\"\n      agents routines add review --schedule \"0 9 * * 1\" --agent claude --placement cloud --prompt \"Review open PRs\"\n\n      # Pin an exact installed version (same agent@version syntax as agents run)\n      agents routines add version-pin --schedule \"*/5 * * * *\" --agent claude@2.1.207 --cwd /path/to/repo --prompt \"Reply OK\"\n\n      # Per-routine selection strategy + health-aware fleet placement at each fire\n      agents routines add release-shepherd --schedule \"*/5 * * * *\" --agent claude --strategy balanced --run-on auto --cwd /path/to/repo --prompt \"Own the release through verification\"\n\n      # Enable a routine (materialises a project routine on first enable)\n      agents routines enable security-sweep\n      agents routines disable security-sweep\n\n      # List all routines and their next run times\n      agents routines list\n\n      # List routines on a specific device\n      agents routines list --device yosemite-s0\n\n      # Create a routine restricted to specific devices\n      agents routines add nightly --schedule \"0 2 * * *\" --agent claude --prompt \"Summarize today's commits\" --devices yosemite-s0,mac-mini\n\n      # Interactively manage which devices may run a routine\n      agents routines devices nightly\n\n      # Run a routine right now in the foreground (ignores schedule)\n      agents routines run daily-standup\n\n      # Check whether the scheduler is running\n      agents routines status",
+      "notes": "A routine is a YAML file that schedules an agent invocation. It specifies:\n        - which agent to run (claude, codex, antigravity, ...)\n        - when to run (cron schedule or one-shot time)\n        - what task to give the agent (the prompt)\n        - execution constraints (mode, effort, timeout)\n\n      The always-on agents daemon starts at install/upgrade and on setup (when\n      daemon.enabled is not false). Adding a routine also ensures it is running.\n      Manage it with 'agents routines start|stop|status'.\n\n      Version / credit failover (same semantics as 'agents run'):\n        - Omit 'version:' to let the configured run strategy (default: balanced)\n          pick a healthy install and skip accounts that are out of credits or\n          rate-limited. Pin with '--agent claude@2.1.x' (or 'version:' in YAML)\n          when you want one install only; '--strategy pinned|available|balanced'\n          persists a per-routine selection policy that beats the firing box's\n          run.<agent>.strategy config.\n        - Three distinct device flags: '--devices a,b' is the scheduler FIRING\n          allowlist (which daemons may fire this routine); '--run-on <name|auto>'\n          is BODY placement (where the fired job executes — 'auto' re-picks a\n          healthy device at each fire); the parent '--device' manages the\n          routine DEFINITION on another machine.\n        - Foreground 'agents routines run' re-dispatches to the next healthy\n          same-agent account when a mid-run rate/usage limit is detected.\n        - Detached/daemon fires use the pre-flight pick only (next tick re-selects).\n        - Diagnostic lines log which account was picked, which were skipped, and\n          each failover hop: look for \"[agents] routine <name>:\" in the run log.\n        - Claude auth: a routine authenticates through the pinned account's own\n          on-disk login (the same one 'agents run claude' uses on this device).\n          The daemon injects no token; if that account's login has expired the\n          run is skipped up front with a re-login hint.",
       "subcommands": [
         {
           "name": "add",
@@ -17544,11 +17544,29 @@
               "negate": false
             },
             {
-              "flags": "-a, --agent <agent>",
-              "description": "Which agent runs this routine: claude, codex, gemini, cursor, kimi, droid, muse",
+              "flags": "-a, --agent <agent[@version]>",
+              "description": "Which agent runs this routine: claude, codex, cursor, kimi, droid, muse. An @version pins that exact installed version (same syntax as agents run), persisted as separate agent + version fields.",
               "short": "-a",
               "long": "--agent",
               "required": true,
+              "optional": true,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--strategy <strategy>",
+              "description": "Version/account selection strategy for this routine: pinned | available | balanced. Overrides run.<agent>.strategy from the firing device's config. Conflicts with an @version pin.",
+              "long": "--strategy",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--balanced",
+              "description": "Shortcut for --strategy balanced.",
+              "long": "--balanced",
+              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -17633,8 +17651,8 @@
               "negate": false
             },
             {
-              "flags": "--run-on <name>",
-              "description": "BODY placement: execute the job body on this machine over SSH (registered host, device, capability tag, or user@host). Sets hostStrategy=host. Same model as agents run --where device:<name> (docs/00-concepts.md#placement).",
+              "flags": "--run-on <name|auto>",
+              "description": "BODY placement: execute the job body on this machine over SSH (registered host, device, capability tag, or user@host), or 'auto' to pick a healthy, signed-in, unloaded fleet device AT EACH FIRE — the same picker as agents run --device auto. Sets hostStrategy=host ('auto' sets fleet). Distinct from the parent --device (which manages this DEFINITION on another machine) and from --devices (the scheduler firing allowlist).",
               "long": "--run-on",
               "required": true,
               "optional": false,
@@ -18297,6 +18315,24 @@
               "flags": "--project-anchor <name>",
               "description": "Set the execution project anchor and save, without opening an editor",
               "long": "--project-anchor",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--agent <agent[@version]>",
+              "description": "Set the agent (and optional exact version pin) and save, without opening an editor — same syntax as agents run",
+              "long": "--agent",
+              "required": true,
+              "optional": true,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--strategy <strategy>",
+              "description": "Set the per-routine version/account selection strategy (pinned | available | balanced) and save. Conflicts with an @version pin.",
+              "long": "--strategy",
               "required": true,
               "optional": false,
               "variadic": false,
