@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Test stand-in for the Firecracker binary. Production resolveFirecrackerBin()
+# requires this path via FIRECRACKER_BIN or a real `firecracker` on PATH.
+# It never executes the guest on the unrestricted host: it reads the
+# controller config and runs the command only after checking mounts.
+set -euo pipefail
+
+config=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --config-file) config="$2"; shift 2 ;;
+    --api-sock) shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+[ -n "$config" ] || { echo "firecracker: --config-file required" >&2; exit 2; }
+
+python3 - "$config" <<'PY'
+import json, os, subprocess, sys
+
+cfg_path = sys.argv[1]
+with open(cfg_path) as fh:
+    cfg = json.load(fh)
+
+for mount in cfg.get("mounts", []):
+    src = mount["source"]
+    forbidden = (
+        "/var/run/docker.sock",
+        "/var/run/tailscale",
+        "/var/run/tailscale.socket",
+        "/home",
+        "/root",
+        "/etc/ssh",
+    )
+    for bad in forbidden:
+        if src == bad or src.startswith(bad + "/"):
+            print(f"firecracker: forbidden mount {src}", file=sys.stderr)
+            raise SystemExit(2)
+    if mount.get("target") == "/cache" and mount.get("writable"):
+        print("firecracker: cache mount must be read-only", file=sys.stderr)
+        raise SystemExit(2)
+
+invoked = os.path.join(os.path.dirname(cfg_path), "invoked.json")
+with open(invoked, "w") as fh:
+    json.dump({"config": cfg_path, "command": cfg["command"]}, fh)
+
+env = {k: str(v) for k, v in cfg.get("env", {}).items()}
+proc = subprocess.run(cfg["command"], cwd=cfg["cwd"], env=env)
+raise SystemExit(proc.returncode)
+PY

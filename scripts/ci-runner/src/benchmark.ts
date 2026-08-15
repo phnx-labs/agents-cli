@@ -5,7 +5,7 @@ import { Broker } from './broker';
 import { runAdmittedJob, requestTemplate } from './execute';
 import { ciLayout } from './paths';
 import { CI_CACHE_HIT_BUDGET_MS, CI_P99_BUDGET_MS, RELEASE_P99_BUDGET_MS, eventToTerminalMs, summarize } from './timing';
-import { initRepo } from './test-repo';
+import { initRepo, useTestFirecracker } from './test-repo';
 
 export interface BenchReport {
   n: number;
@@ -25,6 +25,7 @@ export interface BenchReport {
 }
 
 export function runExecutorBenchmark(jobCount = 64): BenchReport {
+  useTestFirecracker();
   const root = mkdtempSync(join(tmpdir(), 'ci-runner-bench-'));
   try {
     const { gitDir, commit, tree } = initRepo(root, 'bench-src');

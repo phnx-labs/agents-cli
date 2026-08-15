@@ -27,7 +27,9 @@ returns the run id (`checkRunId`).
 Each admitted job:
 
 1. Creates a detached worktree named by candidate tree + check-run id.
-2. Restores a **warm one-use Firecracker** snapshot.
+2. Restores a **warm one-use Firecracker** snapshot and execs `firecracker`
+   (`FIRECRACKER_BIN` or PATH). Missing binary is a hard error — the job
+   never runs on the controller host.
 3. Mounts only that worktree (rw) and the content-addressed Bun cache (ro).
 4. Runs with no signing, npm, GitHub-write, fleet, SSH, or user secrets.
 5. Exposes raw logs only. The controller hashes reports and signs the

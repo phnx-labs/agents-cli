@@ -2,11 +2,26 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FirecrackerPool } from './firecracker';
+import { FirecrackerPool, resolveFirecrackerBin } from './firecracker';
 import { ciLayout } from './paths';
+import { useTestFirecracker } from './test-repo';
 
 describe('FirecrackerPool', () => {
-  test('restores a warm snapshot once and refuses reuse after start or destroy', () => {
+  test('refuses to run on the host when firecracker is missing', () => {
+    const prev = process.env.FIRECRACKER_BIN;
+    delete process.env.FIRECRACKER_BIN;
+    const path = process.env.PATH;
+    process.env.PATH = '/usr/bin:/bin';
+    try {
+      expect(() => resolveFirecrackerBin()).toThrow(/firecracker binary not found/);
+    } finally {
+      process.env.PATH = path;
+      if (prev) process.env.FIRECRACKER_BIN = prev;
+    }
+  });
+
+  test('restores a warm snapshot once and execs the binary; refuses reuse', () => {
+    useTestFirecracker();
     const root = mkdtempSync(join(tmpdir(), 'ci-fc-'));
     try {
       const layout = ciLayout(root);
@@ -15,13 +30,23 @@ describe('FirecrackerPool', () => {
       mkdirSync(work, { recursive: true });
       mkdirSync(cache, { recursive: true });
       const pool = new FirecrackerPool(layout);
-      const vm = pool.restore('job-1', [
+      pool.restore('job-1', [
         { source: work, target: '/work', writable: true },
         { source: cache, target: '/cache', writable: false },
       ]);
-      expect(vm.snapshot).toContain('snapshots/warm');
-      pool.start('job-1');
-      expect(() => pool.start('job-1')).toThrow(/one-use and already started/);
+      const started = pool.start('job-1', {
+        command: ['/bin/echo', 'from-vm'],
+        cwd: work,
+        env: { PATH: '/bin', HOME: work, LANG: 'C', CI: '1' },
+      });
+      expect(started.started).toBe(true);
+      expect(started.exitCode).toBe(0);
+      expect(pool.logs('job-1').stdout).toContain('from-vm');
+      expect(() => pool.start('job-1', {
+        command: ['true'],
+        cwd: work,
+        env: { PATH: '/bin' },
+      })).toThrow(/one-use and already started/);
       expect(() => pool.restore('job-1', [
         { source: work, target: '/work', writable: true },
       ])).toThrow(/cannot be restored twice/);
@@ -33,6 +58,7 @@ describe('FirecrackerPool', () => {
   });
 
   test('refuses a writable cache mount or a host docker socket', () => {
+    useTestFirecracker();
     const root = mkdtempSync(join(tmpdir(), 'ci-fc-'));
     try {
       const layout = ciLayout(root);
@@ -42,10 +68,10 @@ describe('FirecrackerPool', () => {
       expect(() => pool.restore('bad-cache', [
         { source: work, target: '/work', writable: true },
         { source: work, target: '/cache', writable: true },
-      ])).toThrow(/cache mounts must be read-only|exactly one writable/);
+      ])).toThrow(/cache mounts must be read-only/);
       expect(() => pool.restore('docker', [
         { source: '/var/run/docker.sock', target: '/var/run/docker.sock', writable: true },
-      ])).toThrow(/docker.sock|exactly one writable/);
+      ])).toThrow(/docker.sock/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -44,6 +44,24 @@ describe('isolation', () => {
     expect(() => assertWorkerEnv({ ...env, GITHUB_TOKEN: 'ghs_xxx' })).toThrow(/GITHUB_TOKEN/);
   });
 
+  test('rejects path-escape check-run ids and unknown resource classes', () => {
+    expect(() => validateRequestShape(requestTemplate({
+      owner: 'phnx-labs',
+      repo: 'agi-cli',
+      checkRunId: '../../../../tmp/pwn',
+      candidateCommitSha: 'a'.repeat(40),
+      candidateTreeSha: 'a'.repeat(40),
+    }))).toThrow(/not a safe path segment/);
+    expect(() => validateRequestShape(requestTemplate({
+      owner: 'phnx-labs',
+      repo: 'agi-cli',
+      checkRunId: 'ok-1',
+      candidateCommitSha: 'a'.repeat(40),
+      candidateTreeSha: 'a'.repeat(40),
+      resourceClass: 'huge' as 'small',
+    }))).toThrow(/unknown resourceClass/);
+  });
+
   test('forbids docker, tailnet, and host-home mounts', () => {
     expect(() => assertMounts(['/var/run/docker.sock'])).toThrow(/docker.sock/);
     expect(() => assertMounts(['/home/muqsit/.ssh'])).toThrow(/\/home/);

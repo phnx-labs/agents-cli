@@ -1,4 +1,10 @@
-import { FORBIDDEN_REQUEST_FIELDS, type ExecutorRequest, type ForbiddenRequestField } from './types';
+import { assertSafeSegment } from './paths';
+import {
+  FORBIDDEN_REQUEST_FIELDS,
+  RESOURCE_CLASSES,
+  type ExecutorRequest,
+  type ForbiddenRequestField,
+} from './types';
 
 /** Env names that must never enter a worker. */
 export const FORBIDDEN_WORKER_ENV = [
@@ -71,6 +77,26 @@ export function validateRequestShape(input: Record<string, unknown>): ExecutorRe
     throw new Error(
       'fork pull requests are never scheduled on the persistent executor; use the GitHub-hosted isolated lane',
     );
+  }
+  if (!RESOURCE_CLASSES.includes(req.resourceClass)) {
+    throw new Error(`unknown resourceClass ${JSON.stringify(req.resourceClass)}`);
+  }
+  assertSafeSegment(req.owner, 'owner');
+  assertSafeSegment(req.repo, 'repo');
+  assertSafeSegment(req.candidateTreeSha, 'candidateTreeSha');
+  assertSafeSegment(req.checkRunId, 'checkRunId');
+  for (const [label, value] of [
+    ['candidateCommitSha', req.candidateCommitSha],
+    ['selectionBaseSha', req.selectionBaseSha],
+    ['prHeadSha', req.prHeadSha],
+    ['baseSha', req.baseSha],
+  ] as const) {
+    if (!/^[0-9a-f]{40,64}$/.test(value)) {
+      throw new Error(`${label} is not a hex git object: ${JSON.stringify(value)}`);
+    }
+  }
+  if (!/^[0-9a-f]{8,128}$/.test(req.impactPlanDigest)) {
+    throw new Error(`impactPlanDigest is not a hex digest: ${JSON.stringify(req.impactPlanDigest)}`);
   }
   return req;
 }

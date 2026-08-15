@@ -15,13 +15,37 @@ export interface VmRecord {
   mounts: VmMount[];
   destroyed: boolean;
   started: boolean;
+  binary: string;
+  exitCode?: number;
+}
+
+export interface VmLaunch {
+  command: string[];
+  cwd: string;
+  env: Record<string, string>;
+}
+
+export function resolveFirecrackerBin(): string {
+  const fromEnv = process.env.FIRECRACKER_BIN;
+  if (fromEnv) {
+    if (!existsSync(fromEnv)) {
+      throw new Error(`FIRECRACKER_BIN does not exist: ${fromEnv}`);
+    }
+    return fromEnv;
+  }
+  const which = Bun.which('firecracker');
+  if (!which) {
+    throw new Error('firecracker binary not found; refusing to execute untrusted code on the host');
+  }
+  return which;
 }
 
 /**
  * Warm one-use Firecracker lifecycle.
  *
- * The host never hands out a long-lived VM. Restore a warm snapshot, run
- * once, destroy. Re-starting the same id is a bug.
+ * start() always execs the Firecracker binary (FIRECRACKER_BIN or PATH).
+ * Missing binary or missing warm snapshot is a hard error — jobs never
+ * fall through to the controller host.
  */
 export class FirecrackerPool {
   constructor(private readonly layout: CiLayout) {
@@ -30,7 +54,7 @@ export class FirecrackerPool {
     if (!existsSync(marker)) writeFileSync(marker, 'warm-snapshot\n');
   }
 
-  private vmDir(id: string): string {
+  vmDir(id: string): string {
     return join(this.layout.snapshots, 'vms', id);
   }
 
@@ -39,14 +63,16 @@ export class FirecrackerPool {
       throw new Error(`Firecracker vm ${id} already exists; one-use ids cannot be restored twice`);
     }
     assertMounts(mounts.map((mount) => mount.source));
-    const worktrees = mounts.filter((mount) => mount.writable);
-    const caches = mounts.filter((mount) => !mount.writable);
-    if (worktrees.length !== 1) {
+    for (const mount of mounts) {
+      if (mount.target === '/cache' && mount.writable) {
+        throw new Error('cache mounts must be read-only');
+      }
+    }
+    const writable = mounts.filter((mount) => mount.writable);
+    if (writable.length !== 1) {
       throw new Error('one-use vm must mount exactly one writable worktree');
     }
-    if (caches.some((mount) => mount.writable)) {
-      throw new Error('cache mounts must be read-only');
-    }
+    const binary = resolveFirecrackerBin();
     mkdirSync(this.vmDir(id), { recursive: true });
     const record: VmRecord = {
       id,
@@ -54,26 +80,46 @@ export class FirecrackerPool {
       mounts,
       destroyed: false,
       started: false,
+      binary,
     };
     writeFileSync(join(this.vmDir(id), 'vm.json'), JSON.stringify(record, null, 2));
     return record;
   }
 
-  start(id: string): VmRecord {
+  start(id: string, launch: VmLaunch): VmRecord {
     const record = this.read(id);
     if (record.destroyed) throw new Error(`cannot start destroyed vm ${id}`);
     if (record.started) throw new Error(`vm ${id} is one-use and already started`);
+    const binary = resolveFirecrackerBin();
+    const configPath = join(this.vmDir(id), 'config.json');
+    writeFileSync(configPath, JSON.stringify({
+      snapshot: record.snapshot,
+      mounts: record.mounts,
+      command: launch.command,
+      cwd: launch.cwd,
+      env: launch.env,
+    }, null, 2));
+    const sock = join(this.vmDir(id), 'firecracker.sock');
+    const proc = Bun.spawnSync({
+      cmd: [binary, '--config-file', configPath, '--api-sock', sock],
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
     record.started = true;
+    record.binary = binary;
+    record.exitCode = proc.exitCode ?? 1;
     writeFileSync(join(this.vmDir(id), 'vm.json'), JSON.stringify(record, null, 2));
+    writeFileSync(join(this.vmDir(id), 'stdout.log'), Buffer.from(proc.stdout).toString('utf8'));
+    writeFileSync(join(this.vmDir(id), 'stderr.log'), Buffer.from(proc.stderr).toString('utf8'));
+    if (proc.exitCode === null) {
+      throw new Error(`firecracker produced no exit code for vm ${id}`);
+    }
     return record;
   }
 
   destroy(id: string): void {
     const dir = this.vmDir(id);
     if (!existsSync(dir)) return;
-    const record = this.read(id);
-    record.destroyed = true;
-    writeFileSync(join(dir, 'vm.json'), JSON.stringify(record, null, 2));
     rmSync(dir, { recursive: true, force: true });
   }
 
@@ -85,5 +131,13 @@ export class FirecrackerPool {
 
   exists(id: string): boolean {
     return existsSync(join(this.vmDir(id), 'vm.json'));
+  }
+
+  logs(id: string): { stdout: string; stderr: string } {
+    const dir = this.vmDir(id);
+    return {
+      stdout: existsSync(join(dir, 'stdout.log')) ? readFileSync(join(dir, 'stdout.log'), 'utf8') : '',
+      stderr: existsSync(join(dir, 'stderr.log')) ? readFileSync(join(dir, 'stderr.log'), 'utf8') : '',
+    };
   }
 }

@@ -67,6 +67,13 @@ describe('Broker', () => {
 
       broker.complete('a1', 'succeeded');
       expect(broker.read('a2').status).toBe('admitted');
+
+      const other = new Broker({ layout, capacity: { maxSlots: 2, maxPerRepo: 1 } });
+      const a3 = other.submit(requestTemplate({
+        owner: 'phnx-labs', repo: 'alpha', checkRunId: 'a3',
+        candidateCommitSha: 'a'.repeat(40), candidateTreeSha: 'a'.repeat(40),
+      }));
+      expect(a3.status).toBe('queued');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

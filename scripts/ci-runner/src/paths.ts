@@ -54,5 +54,8 @@ export function assertSafeSegment(value: string, label: string): string {
   if (!value || value === '.' || value === '..' || value.includes('/') || value.includes('\\') || value.includes('\0')) {
     throw new Error(`${label} is not a safe path segment: ${JSON.stringify(value)}`);
   }
+  if (!/^[A-Za-z0-9._-]+$/.test(value)) {
+    throw new Error(`${label} is not a safe path segment: ${JSON.stringify(value)}`);
+  }
   return value;
 }

@@ -1,5 +1,13 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+export const TEST_FIRECRACKER = join(import.meta.dir, '../testdata/firecracker');
+
+export function useTestFirecracker(): string {
+  chmodSync(TEST_FIRECRACKER, 0o755);
+  process.env.FIRECRACKER_BIN = TEST_FIRECRACKER;
+  return TEST_FIRECRACKER;
+}
 
 export function git(cwd: string, args: string[]): string {
   const proc = Bun.spawnSync({

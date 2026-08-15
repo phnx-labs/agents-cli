@@ -7,7 +7,9 @@ import { Broker } from './broker';
 import { janitorCompletedRuns, requestTemplate, runAdmittedJob } from './execute';
 import { FirecrackerPool } from './firecracker';
 import { ciLayout } from './paths';
-import { initRepo } from './test-repo';
+import { initRepo, useTestFirecracker } from './test-repo';
+
+useTestFirecracker();
 
 const KEY = 'controller-signing-key-not-for-workers';
 
