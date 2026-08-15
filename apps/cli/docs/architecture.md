@@ -192,7 +192,7 @@ long it must live and how it's read back:
 | Transcripts | `~/.claude/projects/…`, `~/.codex/sessions/…`, … | agent-native files (read-only) | the raw truth; parsed on demand |
 | CLI pid-registry | `~/.agents/.cache/terminals/by-pid/<pid>.json` | ephemeral file | `ag run`/shim write; CLI reads (§3) |
 | Live-session state | `~/.agents/.cache/terminals/sessions/<pid>.json` | ephemeral file | hook writes; extension reads (§3) |
-| Audit log | `~/.agents/.history/events/YYYY-MM-DD/events.jsonl` | dated, locked shared log | `emit()` in [`src/lib/events.ts`](../src/lib/events.ts); `agents events` reads; `agents audit` / `agents logs` are aliases |
+| Audit log | `~/.agents/.history/events/YYYY-MM-DD/events.jsonl` | dated, locked shared log | `emit()` in [`src/lib/feed/events.ts`](../src/lib/feed/events.ts); `agents events` reads; `agents audit` / `agents logs` are aliases |
 | Teams sentinels | `…/agents/<uuid>/exit_code`, `hosts/<id>.log` + `.exit` | ephemeral files | teammate writes exit code; supervisor reads (§6) |
 | Mailbox spool | `~/.agents/.history/mailbox/<id>/…` | append-only dirs | `agents message` / feed; `agents mailboxes` reads |
 

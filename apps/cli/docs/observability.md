@@ -222,7 +222,7 @@ what the sessions index's `usedBrowser`/`usedComputer` columns are built on
 (see [sessions.md](sessions.md)).
 
 Every record carries **attribution** computed once per process
-([`src/lib/events.ts`](../src/lib/events.ts)):
+([`src/lib/feed/events.ts`](../src/lib/feed/events.ts)):
 
 - `osUser` — the OS account that ran it.
 - `transport` — `local`, or `ssh` when `$SSH_CONNECTION` is present.
