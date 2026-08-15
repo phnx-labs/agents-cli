@@ -149,12 +149,12 @@ box concurrently, then renders a grouped-by-OS roster with one row per device
 
 ```
 agents view kimi --device all          # every box's kimi version + account
-agents output --device all             # per-device burn vs shipped output
+agents insights output --device all             # per-device burn vs shipped output
 agents view --device all --json        # machine-readable fleet inventory
 ```
 
 `--devices all` fans out across every registered device. Commands that already register
-`--all-hosts` (e.g. `agents output --all-hosts`) keep their existing behavior.
+`--all-hosts` (e.g. `agents insights output --all-hosts`) keep their existing behavior.
 
 **The router only speaks for commands that exist.** `--device` is handled
 before commander parses, so a group with no remote semantics gets a clear

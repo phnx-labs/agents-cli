@@ -12,7 +12,7 @@ python -m vllm.entrypoints.anthropic \
   --enable-expert-parallel
 
 # 2. Create the profile
-agents profiles create
+agents harness create
 # pick vllm, fill prompts, run smoke test
 agents run my-profile "hello"
 ```
@@ -59,4 +59,4 @@ auth:
 | Tool calls arrive as plain text instead of `tool_use` blocks | Wrong `--tool-call-parser` for the model | Switch to `hermes` / `qwen` / `llama3_json` to match the model family |
 | Stalls or OOM on MoE model | Expert parallelism disabled | Add `--enable-expert-parallel` |
 | 404 on `/v1/messages` | Started the OpenAI endpoint, not the Anthropic one | Re-launch with `vllm.entrypoints.anthropic` |
-| 401 from Claude Code | vLLM was started with `--api-key` and the profile's keychain entry doesn't match | Re-run `agents profiles login vllm` with the same value you passed to `--api-key` |
+| 401 from Claude Code | vLLM was started with `--api-key` and the profile's keychain entry doesn't match | Re-run `agents harness login vllm` with the same value you passed to `--api-key` |

@@ -87,9 +87,9 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
 
   it('still rejects --device on a REAL command that has no remote semantics', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    // The unknown-command gate above must not weaken this: `login` exists, so
+    // The unknown-command gate above must not weaken this: `menubar` exists, so
     // the flag-support error is the correct, honest answer.
-    expect(await maybeRunOnHost('login', ['login', '--device', 'mac'])).toBe(true);
+    expect(await maybeRunOnHost('menubar', ['menubar', '--device', 'mac'])).toBe(true);
     expect(process.exitCode).toBe(1);
   });
 
@@ -379,11 +379,11 @@ describe('runFleetPassthrough — direct unit tests', () => {
     delete process.env.AGENTS_SYNC_MACHINE_ID;
   });
 
-  it('uses the output summarizer for output command', async () => {
+  it('uses the output summarizer for insights output command', async () => {
     console.log = (...args: unknown[]) => logs.push(args.join(' '));
     const registry = fakeRegistry([fakeDevice('mac-mini', 'macos')]);
     const runner = (_device: DeviceProfile, cmd: string[]) => {
-      if (cmd[1] === 'output') {
+      if (cmd[1] === 'insights' && cmd[2] === 'output') {
         return {
           code: 0,
           stdout: JSON.stringify({
@@ -402,8 +402,8 @@ describe('runFleetPassthrough — direct unit tests', () => {
     };
 
     await runFleetPassthrough(
-      'output',
-      ['output', '--device', 'all'],
+      'insights',
+      ['insights', 'output', '--device', 'all'],
       {},
       {
         self: 'zion',

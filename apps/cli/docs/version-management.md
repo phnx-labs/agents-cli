@@ -115,7 +115,7 @@ agents add claude@2.0.65
            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │  installVersion(agent, version)                                     │
-│  src/lib/versions.ts:installVersion()                               │
+│  src/lib/installations/versions.ts:installVersion()                               │
 │                                                                     │
 │  1. Create ~/.agents-system/versions/claude/2.0.65/                        │
 │  2. npm install @anthropic-ai/claude-code@2.0.65                    │

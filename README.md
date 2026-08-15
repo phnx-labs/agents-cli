@@ -378,11 +378,11 @@ agents sessions resume                     # multi-select; packs two sessions pe
 agents sessions resume "auth middleware"   # pre-filter the pool, then choose
 agents sessions resume --tmux              # into persistent tmux — survives editor restarts
 agents sessions resume --device zion --tmux  # resume on another machine over SSH
-agents resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # original harness/version/device/mode
+agents sessions resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # original harness/version/device/mode
 agents run auto --resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # adapt if its account is unavailable
 ```
 
-`agents sessions resume` reopens several sessions in whatever terminal you're in -- auto-detected across iTerm, Ghostty, tmux, and the VSCodium agent-terminal, or forced with `--iterm` / `--ghostty` / `--tmux` / `--vscodium`. `agents resume <id>` resumes one session without requiring you to name its harness: exact IDs take a local SQLite fast path, then resolve fleet-wide and recover on the source device. If the origin version is installed, signed in, healthy, and still owns the indexed transcript, its isolated home performs native resume. Claude launches that native resume from the original project directory recorded before the first turn, so its `projects/<cwd-key>` lookup reaches the conversation even when the session later changed directories. Otherwise a healthy version of the **same harness** starts with `/continue <id>`, which reads the indexed transcript even when the old version home is retained under version trash or the same version number was reinstalled into a new home. It never native-resumes from a different isolated home. Back them with **tmux** and the runs turn durable: detach, close your editor, reboot the GUI -- the session is still alive to `agents tmux attach`. The whole `agents tmux` subsystem (persistent multiplexer sessions that survive editor restarts and can be shared with other tools) sits underneath.
+`agents sessions resume` reopens several sessions in whatever terminal you're in -- auto-detected across iTerm, Ghostty, tmux, and the VSCodium agent-terminal, or forced with `--iterm` / `--ghostty` / `--tmux` / `--vscodium`. `agents sessions resume <id>` resumes one session without requiring you to name its harness: exact IDs take a local SQLite fast path, then resolve fleet-wide and recover on the source device. If the origin version is installed, signed in, healthy, and still owns the indexed transcript, its isolated home performs native resume. Claude launches that native resume from the original project directory recorded before the first turn, so its `projects/<cwd-key>` lookup reaches the conversation even when the session later changed directories. Otherwise a healthy version of the **same harness** starts with `/continue <id>`, which reads the indexed transcript even when the old version home is retained under version trash or the same version number was reinstalled into a new home. It never native-resumes from a different isolated home. Back them with **tmux** and the runs turn durable: detach, close your editor, reboot the GUI -- the session is still alive to `agents tmux attach`. The whole `agents tmux` subsystem (persistent multiplexer sessions that survive editor restarts and can be shared with other tools) sits underneath.
 
 ### Send an agent to the background — and bring it back
 
@@ -516,7 +516,7 @@ Multiple provider accounts to juggle? See [Accounts](#accounts) below.
 ```bash
 # Kimi K2.5 responding inside Claude Code's UI, tools, and skills.
 # No proxy server. No LiteLLM. One OpenRouter key, stored in Keychain.
-agents profiles add kimi
+agents harness add kimi
 agents run kimi "refactor this file"
 ```
 
@@ -545,7 +545,7 @@ auth:
   keychainItem: agents-cli.ollama.token
 ```
 
-Profile YAML has no secrets -- safe to `agents repo push` to a shared repo. `agents profiles presets` lists the full catalog.
+Profile YAML has no secrets -- safe to `agents repo push` to a shared repo. `agents harness list` lists the full catalog.
 
 ---
 
@@ -593,7 +593,7 @@ agents accounts sync work --device gpu-box               # portable provider acc
 agents run claude --device auto "…"                      # affinity-pick host from 14d usage (harness stays claude)
 agents run claude --device auto "…"                        # same — auto is a host value, not a harness name
 agents view kimi --device all                            # fan out across every registered device (grouped-by-OS roster)
-agents output --device all                               # per-device burn vs shipped output across the fleet
+agents insights output --device all                      # per-device burn vs shipped output across the fleet
 agents view --device all --json                          # machine-readable fleet inventory
 agents hosts ps                         # list dispatched runs + terminal status
 agents hosts stop <id>                  # terminate a hung/detached run (alias: kill)
@@ -638,8 +638,8 @@ agents ssh mac-mini                     # hardened SSH: fails fast if offline,
                                         # PowerShell on Windows, password-from-Keychain,
                                         # auto-syncs your terminfo (Ghostty/kitty/…) so
                                         # backspace, colors & clear work on the remote
-agents cp mac-mini:/abs/log.json /tmp/  # fleet file transfer; host:path or abs local
-agents cp -r /tmp/src/ yosemite-s0:~/dst/  # ~ and $HOME expand on the REMOTE, never locally
+scp mac-mini:/abs/log.json /tmp/        # fleet file transfer; host:path or abs local
+scp -r /tmp/src/ yosemite-s0:~/dst/     # ~ and $HOME expand on the REMOTE, never locally
 agents hosts list                       # devices show up here too (one host pool)
 agents hosts add mac-mini --cap gpu     # tag a device for capability routing (`--device` + `--cap gpu`)
 
@@ -869,18 +869,18 @@ White-label the CLI. `agents setup mine` mints a **personally-named binary** —
 
 ```bash
 agents setup mine                      # wizard: pick a name, check off what to disable
-agents mine init jack --disable teams cloud   # or non-interactively
+agents setup mine init jack --disable teams cloud   # or non-interactively
 
 jack run claude "hello"                # every agents verb, under your name
 jack --help                            # help, version, and errors all read "jack"
 ```
 
-Manage brands with `agents mine list | toggle | remove`:
+Manage brands with `agents setup mine list | toggle | remove`:
 
 ```bash
-agents mine toggle jack --disable-plugin rush --disable-skill deploy
-agents mine toggle jack --enable teams
-agents mine remove jack --purge
+agents setup mine toggle jack --disable-plugin rush --disable-skill deploy
+agents setup mine toggle jack --enable teams
+agents setup mine remove jack --purge
 ```
 
 Under the hood, `init` drops a pure pass-through shim in `~/.agents/.cache/shims/<name>` (already on `PATH`) that sets `AGENTS_BRAND` and forwards every argument to the same binary — nothing is copied or forked. The brand's config lives in `~/.agents/agents.yaml` (`brands.<name>`), so it rides `agents repo push/pull` across your fleet. Disabling a command hides it **only** under that brand; plain `agents` / `ag` keep every command. Curated skills/plugins/MCP ride a per-brand [resource profile](apps/cli/docs/profiles.md). Full reference: [Make it yours](apps/cli/docs/mine.md).
@@ -1003,7 +1003,7 @@ agents accounts add deepinfra --provider deepinfra --auth api-key
 agents accounts set-default claude work   # claude uses `work` when --account is omitted
 agents accounts sync work --device yosemite-s0   # explicitly copy the bundle to a worker device
 agents run claude --account work
-agents profiles add deepinfra --account deepinfra
+agents harness add deepinfra --account deepinfra
 ```
 
 One provider account **is** one `agents secrets` bundle -- `agents accounts add` creates it with secrets policy `never`, so a background agent launch on that account never raises Touch ID. `agents accounts` (no subcommand) lists provider bundles next to harness-native signed-in identities so you see both kinds of credential together; `accounts list` / `inspect <name>` / `set-key <name>` (rotate) / `rename` / `remove` manage a bundle by its stable id, independent of its current label.
@@ -1276,7 +1276,7 @@ Two repos with the same shape, different roles:
 
 See [docs/concepts.md](apps/cli/docs/concepts.md) for the full mental model: DotAgents repos, resource kinds, and how resolution works end-to-end.
 
-Other useful commands: `agents doctor` checks CLI availability and resource sync drift, `agents usage` shows available quota/rate-limit data for installed agents, `agents budget` shows cross-vendor spend caps and current spend-to-cap (and enforces pre-flight estimates + a hard-cap kill-switch on every run — see [docs/observability.md](apps/cli/docs/observability.md#budget-guardrails-agents-budget)), `agents import` adopts an existing unmanaged install, `agents trash` lists and restores soft-deleted version directories, and `agents subagents` installs reusable subagent definitions for parent-agent workflows.
+Other useful commands: `agents doctor` checks CLI availability and resource sync drift, `agents usage` shows available quota/rate-limit data for installed agents, `agents config budget` shows cross-vendor spend caps and current spend-to-cap (and enforces pre-flight estimates + a hard-cap kill-switch on every run — see [docs/observability.md](apps/cli/docs/observability.md#budget-guardrails-agents-budget)), `agents import` adopts an existing unmanaged install, `agents trash` lists and restores soft-deleted version directories, and `agents subagents` installs reusable subagent definitions for parent-agent workflows.
 
 ---
 
@@ -1493,7 +1493,7 @@ For full transparency: `agi-cli` keeps a local event log at `~/.agents/.cache/lo
 
 macOS and Linux. Windows via WSL works but isn't first-class yet.
 
-**macOS-only features:** Keychain-based secrets (`agents secrets`, `agents profiles login`) require macOS. Default iCloud sync for bundles requires macOS + iCloud Keychain enabled; use `--no-icloud-sync` for device-local bundles. On Linux, use environment variables or `.env` files for API keys. Native Linux credential store support is planned.
+**macOS-only features:** Keychain-based secrets (`agents secrets`, `agents harness login`) require macOS. Default iCloud sync for bundles requires macOS + iCloud Keychain enabled; use `--no-icloud-sync` for device-local bundles. On Linux, use environment variables or `.env` files for API keys. Native Linux credential store support is planned.
 
 Interactive tmux-backed runs require tmux 3.2 or newer.
 

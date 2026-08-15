@@ -237,7 +237,7 @@ trades correctness guarantees for speed.
 
 | File | Change |
 |------|--------|
-| `src/lib/versions.ts` | Guard + manifest write in `syncResourcesToVersion`; `force?` option; skip dotfiles in `copyDir` |
+| `src/lib/installations/versions.ts` | Guard + manifest write in `syncResourcesToVersion`; `force?` option; skip dotfiles in `copyDir` |
 | `src/lib/rules-compile.ts` | Add `mtime?`/`size?` to `CompileManifest`; two-tier fast path in `isRulesStale` |
 
 ---

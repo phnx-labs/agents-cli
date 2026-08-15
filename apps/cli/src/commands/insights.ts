@@ -12,11 +12,11 @@
  *
  * Sibling observe verbs (stay separate — different questions):
  *
- *   agents cost       what you spent ($ and duration)
- *   agents output     what shipped (burn vs PRs and commits)
- *   agents usage      live quota headroom
- *   agents perf       latency (hooks, CLI commands, agent.run) — not popularity
- *   agents sessions stats  which skills/slash-commands were explicitly invoked
+ *   agents insights cost    what you spent ($ and duration)
+ *   agents insights output  what shipped (burn vs PRs and commits)
+ *   agents usage            live quota headroom
+ *   agents perf             latency (hooks, CLI commands, agent.run) — not popularity
+ *   agents sessions stats   which skills/slash-commands were explicitly invoked
  *
  * Why mix lives here (not a second top-level `trends`): two abstract "analytics"
  * nouns taught agents and humans to guess. One verb, two engines — cheap SQL mix
@@ -69,6 +69,8 @@ import { formatDuration } from '../lib/session/render.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 import type { SessionMeta } from '../lib/session/types.js';
 import { registerMixCommands } from '../lib/analytics/mix-commands.js';
+import { registerCostCommand } from './cost.js';
+import { registerOutputCommand } from './output.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -389,7 +391,7 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
   // shell command TEXT, and not every harness exposes it — the codex parser populates
   // `command` for `exec_command` but not plain `exec`, its dominant tool — so gate on
   // whether we had anything to search rather than on seeing a shell-shaped tool call.
-  // When we did, the count is real, and still disagrees with `agents output`, which
+  // When we did, the count is real, and still disagrees with `agents insights output`, which
   // counts deduped SHAs from git log.
   if (all.shellCommandsSeen > 0) {
     out.push(`  ${chalk.gray(`${all.gitCommits} commits · ${all.gitPushes} pushes (seen in shell commands)`)}`);
@@ -503,7 +505,7 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
   const since = options.since ?? (options.all ? 'all' : '30d');
   const sinceMs = since === 'all' ? undefined : parseTimeFilter(since);
 
-  // Refresh the index first, exactly as `agents cost` does, so a report never silently
+  // Refresh the index first, exactly as `agents insights cost` does, so a report never silently
   // describes a stale picture of disk.
   await discoverSessions({ all: true, since: since === 'all' ? undefined : since, limit: 1 });
   if (options.refresh) clearSessionInsights();
@@ -663,7 +665,8 @@ function configureInsightsCommand(cmd: Command): void {
       Two paths under one verb:
         bare \`agents insights\`     — transcript behaviour (tools, friction, rhythm, by account)
         \`agents insights mix\`      — cheap counters from sessions.db + usage.db
-      Latency is \`agents perf\` (not mix). Quota is \`agents usage\`. Skill/slash popularity
+      Latency is \`agents perf\` (not mix). Quota is \`agents usage\`. Spend is
+      \`agents insights cost\`; shipped output is \`agents insights output\`. Skill/slash popularity
       is \`agents sessions stats\`. \`agents trends\` is a deprecated alias of the mix tree.
 
       The behavioural report parses in-scope transcripts once and caches facets; later runs
@@ -678,7 +681,10 @@ function configureInsightsCommand(cmd: Command): void {
 }
 
 export function registerInsightsCommand(program: Command): void {
-  configureInsightsCommand(program.command('insights'));
+  const cmd = program.command('insights');
+  configureInsightsCommand(cmd);
+  registerCostCommand(cmd);
+  registerOutputCommand(cmd);
 }
 
 export function registerSessionsInsightsCommand(sessions: Command): void {

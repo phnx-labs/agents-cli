@@ -140,6 +140,7 @@ import { registerSecretsSyncCommands } from './secrets-sync.js';
 import { registerSecretsMigrateAclCommand } from './secrets-migrate.js';
 import { registerSecretsImportKeyringCommand } from './secrets-import.js';
 import { registerSecretsRotatePassphraseCommand } from './secrets-rotate-passphrase.js';
+import { registerSecretsVaultCommands } from './secrets-vault.js';
 
 /** Prompt the user for a secret value with masked input. Requires an interactive TTY. */
 async function promptForSecret(message: string): Promise<string> {
@@ -1119,7 +1120,10 @@ export function registerSecretsCommands(program: Command): void {
     { title: 'Raw item commands', names: ['get', 'set'] },
     { title: 'Sync commands', names: ['push', 'pull', 'remote-list'] },
     { title: 'Utilities', names: ['exec', 'mcp', 'generate', 'migrate-acl'] },
+    { title: 'Synced vault', names: ['vault'] },
   ]);
+
+  registerSecretsVaultCommands(cmd);
 
   const listCmd = cmd
     .command('list [query]')
@@ -1509,7 +1513,7 @@ export function registerSecretsCommands(program: Command): void {
         }
         if (bundle.allow_exec) console.log(chalk.yellow('allow_exec: true'));
         if (bundle.backend === 'file') console.log(chalk.gray('backend: file (encrypted at rest; headless reads via a machine-local key, or AGENTS_SECRETS_PASSPHRASE if set — no Touch ID)'));
-        if (bundle.backend === 'vault') console.log(chalk.gray('storage: synced (age-encrypted ~/.agents/vault.age; needs agents login)'));
+        if (bundle.backend === 'vault') console.log(chalk.gray('storage: synced (age-encrypted ~/.agents/vault.age; needs `agents secrets vault unlock`)'));
         if (bundlePolicy(bundle) === 'never') {
           console.log(chalk.red.bold('policy: never — NO biometry ACL; reads are silent (no Touch ID, no user-presence check). Automation-only.'));
         } else {

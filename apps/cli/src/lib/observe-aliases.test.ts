@@ -34,19 +34,8 @@ describe('expandObserveAlias', () => {
     });
   });
 
-  it('maps roster → sessions --active unless --active already set', () => {
-    expect(expandObserveAlias('roster')).toEqual({
-      argv: ['sessions', '--active'],
-      note: expect.stringContaining('sessions --active'),
-    });
-    expect(expandObserveAlias('roster', ['--json', '--local'])).toEqual({
-      argv: ['sessions', '--active', '--json', '--local'],
-      note: expect.stringContaining('roster'),
-    });
-    expect(expandObserveAlias('roster', ['--active', '--waiting'])).toEqual({
-      argv: ['sessions', '--active', '--waiting'],
-      note: expect.stringContaining('roster'),
-    });
+  it('does not expand retired roster (use sessions --active)', () => {
+    expect(expandObserveAlias('roster')).toBeNull();
   });
 
   it('returns null for unknown names', () => {
@@ -65,7 +54,7 @@ describe('flag helpers / alias list', () => {
     expect(hasActiveFlag(['--json'])).toBe(false);
   });
 
-  it('lists the three public observe aliases', () => {
-    expect([...OBSERVE_ALIASES].sort()).toEqual(['inbox', 'roster', 'timeline']);
+  it('lists the public observe aliases (roster retired)', () => {
+    expect([...OBSERVE_ALIASES].sort()).toEqual(['inbox', 'timeline']);
   });
 });

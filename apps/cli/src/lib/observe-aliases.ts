@@ -6,15 +6,15 @@
  *
  *   inbox    → feed                  (needs-you default)
  *   timeline → feed --filter updates (agent progress stream)
- *   roster   → sessions --active     (live agent roster)
  *
+ * `roster` was removed — use `agents sessions --active`.
  * `audit` is NOT an alias here — `agents audit` is already the tamper-evident
  * run-dispatch log. Ops trail = `agents events` (optionally `--audit`).
  */
 
-export type ObserveAlias = 'inbox' | 'timeline' | 'roster';
+export type ObserveAlias = 'inbox' | 'timeline';
 
-export const OBSERVE_ALIASES: readonly ObserveAlias[] = ['inbox', 'timeline', 'roster'] as const;
+export const OBSERVE_ALIASES: readonly ObserveAlias[] = ['inbox', 'timeline'] as const;
 
 export interface ObserveExpandResult {
   /** argv for the real command (no program name): e.g. ['feed', '--filter', 'updates'] */
@@ -55,15 +55,6 @@ export function expandObserveAlias(
       return {
         argv,
         note: 'agents timeline → agents feed --filter updates',
-      };
-    }
-    case 'roster': {
-      const argv = hasActiveFlag(tail)
-        ? ['sessions', ...tail]
-        : ['sessions', '--active', ...tail];
-      return {
-        argv,
-        note: 'agents roster → agents sessions --active',
       };
     }
     default:

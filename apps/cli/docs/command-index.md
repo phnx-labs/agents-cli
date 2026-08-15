@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_90 command groups · 562 commands._
+_78 command groups · 549 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -25,6 +25,7 @@ agents accounts attach <account> <target>   Attach a named account to a native i
 agents accounts clear-default <agent>       Return a harness to native login or balanced account selection
 agents accounts detach <account> <target>   Remove one account attachment
 agents accounts list                        List credential accounts
+agents accounts logout <target>             Sign out a harness-native OAuth login. API-key / setup-token / bearer accounts use `accounts remove` instead.
 agents accounts name <source> <name>        Name a signed-in native installation without copying its OAuth credentials
 agents accounts remove <name>               Remove an account and its device-local credential
 agents accounts rename <old> <new>          Rename an account without changing its stable id
@@ -76,15 +77,6 @@ agents artifacts share update               Re-deploy the Worker script to the c
 agents audit         Alias of `agents events --include runs` — dispatched-run outcomes
 agents audit list    Alias of `agents audit` / `agents events --include runs`
 agents audit verify  Walk the legacy hash-chain file (pre-unification history only)
-```
-
-## bench — Run the same task across agent and model cells, with isolated fixtures and durable JSON results.
-
-```
-agents bench                   Run the same task across agent and model cells, with isolated fixtures and durable JSON results.
-agents bench list              List available benchmark tasks.
-agents bench results [run-id]  Show one saved run, or list saved runs newest first.
-agents bench run [task-id]     Run one task or prompt across an agent × model matrix.
 ```
 
 ## beta — Enable or disable preview features like factory.
@@ -153,13 +145,6 @@ agents browser wait                           Wait for a condition
 agents browser waitdownload                   Wait for a download to complete
 ```
 
-## budget — Show spend caps and current spend-to-cap (issue #346)
-
-```
-agents budget                     Show spend caps and current spend-to-cap (issue #346)
-agents budget set <cap> <amount>  Set a user-global cap. <cap> = per_run | per_day | per_project | per_agent.<agent> | on_exceed | require_confirm_over
-```
-
 ## clis — Declare and install host CLI binaries (gh, higgsfield, glab, ...)
 
 ```
@@ -210,26 +195,16 @@ agents computer type-text    Type an arbitrary unicode string into the focused f
 agents computer wait         Wait for a duration (--duration) or for an element (--id / --role/--label) to satisfy --until
 ```
 
-## config — Get, set, list, and unset run defaults, tier overrides, the projects root, and device options.
+## config — Get, set, list, and unset run defaults, tier overrides, the projects root, device options, and spend caps.
 
 ```
-agents config                    Get, set, list, and unset run defaults, tier overrides, the projects root, and device options.
-agents config get <key>          Get the current value of a config key
-agents config list               List configured config keys and their values
-agents config set <key> <value>  Set a config key
-agents config unset <key>        Unset a config key (restore default behavior)
-```
-
-## cost — Roll up $ cost and duration across local agent sessions
-
-```
-agents cost  Roll up $ cost and duration across local agent sessions
-```
-
-## cp — Copy a file or directory between fleet hosts. Either endpoint may be host:path (remote) or an absolute local path.
-
-```
-agents cp <src> <dst>  Copy a file or directory between fleet hosts. Either endpoint may be host:path (remote) or an absolute local path.
+agents config                            Get, set, list, and unset run defaults, tier overrides, the projects root, device options, and spend caps.
+agents config budget                     Show spend caps and current spend-to-cap (issue #346)
+agents config budget set <cap> <amount>  Set a user-global cap. <cap> = per_run | per_day | per_project | per_agent.<agent> | on_exceed | require_confirm_over
+agents config get <key>                  Get the current value of a config key
+agents config list                       List configured config keys and their values
+agents config set <key> <value>          Set a config key
+agents config unset <key>                Unset a config key (restore default behavior)
 ```
 
 ## daemon — The always-on daemon: secrets broker, browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.
@@ -287,6 +262,7 @@ agents devices rm <name>                       Remove a device from the registry
 agents devices role [name] [role]              Show or set what a device is for: worker (agents run here) or personal (you sit here — never picked automatically). Marking any device worker makes `--device auto` an allowlist over the marked workers.
 agents devices run <cmd...>                    Run a command on every online registered device. Offline devices are skipped. Alias surface: agents fleet run …
 agents devices show <name>                     Show the full profile for one device.
+agents devices snapshot                        One-process poll snapshot: install inventory + active sessions (optional feed/sync). Not the sync-status command — use `agents status` for drift.
 agents devices status                          Fleet health at a glance: online/offline rollup, a NEEDS ATTENTION list (each with its fix command), and quiet per-device rows grouped by OS. Use --verbose for the full auth/CLI/sync grid.
 agents devices stop <id>                       Terminate a running dispatched task from this machine (SIGTERM the remote process group; marks it failed/143).
 agents devices sync                            Ingest `tailscale status --json` into device profiles. In a terminal, opens a checkbox to register/unregister nodes; with --yes, registers every non-ignored node.
@@ -331,7 +307,9 @@ agents harness add [name]                    Create a custom harness from a host
 agents harness edit <name>                   Edit an existing custom harness in place — model, endpoint, auth, version, description, fallback. Omit flags in a terminal for the interactive wizard.
 agents harness fork [source] [name]          Fork a native harness (claude, opencode, ...) or an existing custom one into a new named harness. Omit args in a terminal for the interactive wizard.
 agents harness list                          List custom harnesses, addable presets, and native harnesses.
-agents harness remove <name>                 Delete a custom harness (keychain token is kept).
+agents harness login <provider>              Store or rotate the API key for a provider (e.g., openrouter). Shared across harnesses using that provider.
+agents harness logout <provider>             Remove a stored provider key from keychain
+agents harness remove <name>                 Delete a custom harness (keychain token is kept — use `harness logout <provider>` to remove).
 agents harness rename <old-name> <new-name>  Rename a custom harness (updates forkedFrom lineage on any harness forked from it). Errors on a name collision.
 agents harness view <name>                   Show one custom harness (host, model, provider, auth, path).
 ```
@@ -372,9 +350,11 @@ agents inbox  Needs-you inbox (alias of `agents feed`). Open blocks waiting on y
 ```
 agents insights                    How work looks — behavioural report (default) or counter mix (`mix`, recipes)
 agents insights browser-activity   Mix recipe: browser-activity
+agents insights cost               Roll up $ cost and duration across local agent sessions
 agents insights harness-mix        Mix recipe: harness-mix
 agents insights mix                Counter recipes — harness/model mix, token ratios, resource frequency (sessions index + usage.db)
 agents insights model-mix          Mix recipe: model-mix
+agents insights output             Productivity rollup — token burn vs shipped output (PRs, commits) across agents
 agents insights query              Raw usage-event query (usage.db)
 agents insights recipes            List baked mix-recipe ids
 agents insights resource-mix       Mix recipe: resource-mix
@@ -400,18 +380,6 @@ agents install <identifier>  Install a package: mcp:, skill:, plugin:, or GitHub
 
 ```
 agents list [agent]  List installed agent CLI versions
-```
-
-## login — Unlock synced secrets for this shell session
-
-```
-agents login  Unlock synced secrets for this shell session
-```
-
-## logout — Forget the cached synced-secrets key
-
-```
-agents logout  Forget the cached synced-secrets key
 ```
 
 ## logs — Show a run log, audit trail, or stats. Subcommands: audit, stats, rotate.
@@ -469,16 +437,6 @@ agents menubar status   Show whether AGI Menu is installed and running
 agents message <target> <text>  Send a message to a running or parked agent (mailbox / PTY-select / resume by runtime).
 ```
 
-## mine — White-label the CLI: your own personally-named binary (e.g. `jack`)
-
-```
-agents mine                White-label the CLI: your own personally-named binary (e.g. `jack`)
-agents mine init <name>    Mint your own branded CLI that runs every agents verb under <name>
-agents mine list           Show your brands and what each has turned off
-agents mine remove <name>  Remove a brand (its shim + config)
-agents mine toggle <name>  Enable/disable features for a brand
-```
-
 ## models — Show the cost-tier map (cheap|default|best|ultra) for installed harnesses; pin overrides with `tier set`.
 
 ```
@@ -528,12 +486,6 @@ agents open status      Report whether the agents:// URL scheme handler is regis
 agents open unregister  Remove the agents:// URL scheme handler.
 ```
 
-## output — Productivity rollup — token burn vs shipped output (PRs, commits) across agents
-
-```
-agents output  Productivity rollup — token burn vs shipped output (PRs, commits) across agents
-```
-
 ## perf — Latency rollups from the disposable perf warehouse (hooks, commands, runs)
 
 ```
@@ -570,20 +522,6 @@ agents plugins marketplaces remove [target]   Redirects to 'agents repo remove' 
 agents plugins marketplaces rm [target]       Redirects to 'agents repo rm' — marketplaces follow repos
 agents plugins remove [name]                  Unsync a plugin from all agent versions and optionally delete its source directory
 agents plugins update [name]                  Re-pull a plugin from its original source and re-sync to all versions
-```
-
-## profiles — Named bundles of (host CLI, endpoint, model, auth) — run Kimi/DeepSeek/Qwen/etc through Claude Code without a proxy.
-
-```
-agents profiles                    Named bundles of (host CLI, endpoint, model, auth) — run Kimi/DeepSeek/Qwen/etc through Claude Code without a proxy.
-agents profiles add <name>         Add a profile. If <name> matches a built-in preset, the preset is applied. Prompts for API key (once per provider).
-agents profiles create             Interactive profile creation wizard (any provider, with prompts for endpoints + keys).
-agents profiles list               List configured profiles
-agents profiles login <provider>   Store or rotate the API key for a provider (e.g., openrouter). Shared across profiles using that provider.
-agents profiles logout <provider>  Remove a stored provider key from keychain
-agents profiles presets            List built-in presets (OpenRouter + direct providers)
-agents profiles remove <name>      Delete a profile (keychain token is kept — use `profiles logout <provider>` to remove)
-agents profiles view <name>        Show a profile (env, host, auth source, preset link)
 ```
 
 ## projects — Named multi-repo projects with a progress rollup.
@@ -664,18 +602,6 @@ agents repos view [name]         Show one repo's contents: git state and per-kin
 agents restore <target>  Restore a soft-deleted agent version (e.g. "codex@0.141.0") removed via prune/remove
 ```
 
-## resume — Resume a session by id, tmux alias, or exact label with its original harness, version, device, account, cwd, and mode. Searches the fleet automatically; a local full-id hit resumes with zero SSH.
-
-```
-agents resume <session> [prompt]  Resume a session by id, tmux alias, or exact label with its original harness, version, device, account, cwd, and mode. Searches the fleet automatically; a local full-id hit resumes with zero SSH.
-```
-
-## roster — Live agent roster (alias of `agents sessions --active`). Who is running right now.
-
-```
-agents roster  Live agent roster (alias of `agents sessions --active`). Who is running right now.
-```
-
 ## route — Named routers -- reusable, task-typed allowlists of harnesses x models/tiers x linked accounts.
 
 ```
@@ -728,10 +654,10 @@ agents rules switch <target>  Choose the active rule preset for an agent version
 agents rules view [agent]     Read the full content of a rule file with markdown rendering
 ```
 
-## run — Execute an agent. Pass a prompt for headless runs; omit it to launch the agent interactively.
+## run — Execute an agent. Pass a prompt for headless runs; omit it to launch the agent interactively. With --broadcast, run the same prompt/task across an agent × model matrix.
 
 ```
-agents run <agent> [prompt]  Execute an agent. Pass a prompt for headless runs; omit it to launch the agent interactively.
+agents run [agent] [prompt]  Execute an agent. Pass a prompt for headless runs; omit it to launch the agent interactively. With --broadcast, run the same prompt/task across an agent × model matrix.
 ```
 
 ## search — Find packages (MCP servers, skills) across configured registries
@@ -777,6 +703,9 @@ agents secrets start                               Bring up the always-on daemon
 agents secrets status                              Show which bundles the secrets-agent currently holds and when they lock.
 agents secrets stop                                Lock all bundles and retire any legacy standalone service. The always-on daemon (which hosts the broker) is left running.
 agents secrets unlock [names...]                   Hold a bundle in the secrets-agent after one Touch ID, so concurrent runs read it without re-prompting (macOS). With --device, unlock FILE-backed bundle(s) on a remote (the passphrase prompt surfaces over the SSH TTY); keychain/biometry bundles are GUI-only and can't be remote-unlocked.
+agents secrets vault                               Unlock or lock the age-encrypted synced-secrets file (~/.agents/vault.age)
+agents secrets vault lock                          Forget the cached synced-secrets key
+agents secrets vault unlock                        Unlock synced secrets for this shell session
 agents secrets view [name]                         Show a bundle. Keychain values are masked by default — pass --reveal to see them.
 ```
 
@@ -792,10 +721,10 @@ agents send [text]  Deliver a message through a channel provider (imessage, slac
 agents serve  Read-only local web companion: team diffs, routines, and cloud status (binds 127.0.0.1 only).
 ```
 
-## sessions — Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active` (alias: `agents roster`).
+## sessions — Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active`.
 
 ```
-agents sessions [query]                     Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active` (alias: `agents roster`).
+agents sessions [query]                     Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active`.
 agents sessions backfill                    Populate derived session data explicitly.
 agents sessions backfill resources          Derive historical skill/slash-command usage once into the local SQLite index.
 agents sessions backfill tools              Parse historical tool calls once into the local SQLite index.
@@ -822,7 +751,7 @@ agents sessions migrations                  Show the migration ledger — sessio
 agents sessions optimize                    Compact the session search index (FTS5), reclaiming bloat from repeated re-indexing
 agents sessions preview <id>                Show one rich session card without rendering the full transcript
 agents sessions render <selectors...>       Render one or more sessions as readable, redacted Markdown for review or sharing.
-agents sessions resume [query]              Reopen one session by canonical identity, or multi-select history into terminal tabs/splits.
+agents sessions resume [query] [prompt]     Resume a session by id (strict), or multi-select history into terminal tabs/splits.
 agents sessions stats                       Which skills/commands you actually invoke, and which installed ones are dead weight.
 agents sessions tail [sessionId]            Stream compact live lines from a session file as events are written. Long-running: Ctrl+C to stop. Claude and Codex only.
 agents sessions watch                       Stream canonical live and recoverable session row changes as NDJSON
@@ -831,14 +760,18 @@ agents sessions watch                       Stream canonical live and recoverabl
 ## setup — Set up agents-cli, or re-open the capability onboarding hub.
 
 ```
-agents setup           Set up agents-cli, or re-open the capability onboarding hub.
-agents setup browser   Set up `agents browser` — detect an installed browser and create the default profile.
-agents setup computer  Set up `agents computer` (macOS) — install the signed helper and grant control permissions.
-agents setup fleet     Set up `agents fleet` — discover Tailscale devices, choose auth, render SSH config, and test connectivity.
-agents setup mine      White-label the CLI — mint your own personally-named binary (e.g. `jack`).
-agents setup secrets   Configure `agents secrets` defaults and optionally import existing secrets.
-agents setup status    Show setup readiness for core, browser, computer, secrets, fleet, share, watchdog, and preferences.
-agents setup watchdog  Choose the devices where the daemon watchdog pass runs.
+agents setup                     Set up agents-cli, or re-open the capability onboarding hub.
+agents setup browser             Set up `agents browser` — detect an installed browser and create the default profile.
+agents setup computer            Set up `agents computer` (macOS) — install the signed helper and grant control permissions.
+agents setup fleet               Set up `agents fleet` — discover Tailscale devices, choose auth, render SSH config, and test connectivity.
+agents setup mine                White-label the CLI — mint your own personally-named binary (e.g. `jack`).
+agents setup mine init <name>    Mint your own branded CLI that runs every agents verb under <name>
+agents setup mine list           Show your brands and what each has turned off
+agents setup mine remove <name>  Remove a brand (its shim + config)
+agents setup mine toggle <name>  Enable/disable features for a brand
+agents setup secrets             Configure `agents secrets` defaults and optionally import existing secrets.
+agents setup status              Show setup readiness for core, browser, computer, secrets, fleet, share, watchdog, and preferences.
+agents setup watchdog            Choose the devices where the daemon watchdog pass runs.
 ```
 
 ## skills — Add domain-specific capabilities to agents via packaged SKILL.md files
@@ -849,12 +782,6 @@ agents skills add [source]   Install skills from a source (GitHub, local) or pic
 agents skills list [agent]   Show which skills are installed and which agent versions they are synced to
 agents skills remove [name]  Delete a skill from central storage (interactive picker if no name given)
 agents skills view [name]    Read skill metadata (name, description, rules count)
-```
-
-## snapshot — One-process poll snapshot: install inventory + active sessions (optional feed/sync). Not the sync-status command — use `agents status` for drift.
-
-```
-agents snapshot  One-process poll snapshot: install inventory + active sessions (optional feed/sync). Not the sync-status command — use `agents status` for drift.
 ```
 
 ## ssh — Connect to a registered device. Preflights reachability, picks the right shell, and authenticates (key or password-from-bundle).

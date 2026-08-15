@@ -1590,7 +1590,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
   key and nothing else — and MUST NOT be introduced into, or required by, the
   keychain path (SEC-8 already strips it from every injected child env). The
   age-vault backend (SEC-3) does NOT read it; that backend is gated by
-  `agents login` (`lib/secrets/vault.ts`).
+  `agents secrets vault unlock` (`lib/secrets/vault.ts`).
 - **SEC-29b (MUST).** Transport passphrases MUST use `AGENTS_SYNC_PASSPHRASE`, not
   the file-store master key: `push`/`pull` (SEC-23) and the portable
   `export --to-file` / `import --from-file` envelope seal data for a DIFFERENT

@@ -216,7 +216,7 @@ export function listProfiles(): Profile[] {
     try {
       profiles.push(readProfile(name));
     } catch {
-      // Skip malformed profile files; surfacing via `agents profiles view <name>`.
+      // Skip malformed profile files; surfacing via `agents harness view <name>`.
     }
   }
   return profiles.sort((a, b) => a.name.localeCompare(b.name));

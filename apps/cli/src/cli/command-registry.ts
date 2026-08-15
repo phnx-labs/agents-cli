@@ -56,7 +56,6 @@ export const loadRoutines: ModuleLoader = async () => (await import('../commands
 export const loadMonitors: ModuleLoader = async () => (await import('../commands/monitors.js')).registerMonitorsCommands;
 export const loadProjects: ModuleLoader = async () => (await import('../commands/projects.js')).registerProjectsCommands;
 export const loadRun: ModuleLoader = async () => (await import('../commands/exec.js')).registerRunCommand;
-export const loadResume: ModuleLoader = async () => (await import('../commands/resume.js')).registerResumeCommand;
 export const loadOpen: ModuleLoader = async () => (await import('../commands/open.js')).registerOpenCommand;
 export const loadReconnect: ModuleLoader = async () => (await import('../commands/reconnect.js')).registerReconnectCommand;
 export const loadFork: ModuleLoader = async () => (await import('../commands/fork.js')).registerForkCommand;
@@ -69,28 +68,20 @@ export const loadRestore: ModuleLoader = async () => (await import('../commands/
 export const loadDoctor: ModuleLoader = async () => (await import('../commands/doctor.js')).registerDoctorCommand;
 export const loadApply: ModuleLoader = async () => (await import('../commands/apply.js')).registerApplyCommand;
 export const loadStatus: ModuleLoader = async () => (await import('../commands/status.js')).registerStatusCommand;
-export const loadSnapshot: ModuleLoader = async () => (await import('../commands/snapshot.js')).registerSnapshotCommand;
-export const loadProfiles: ModuleLoader = async () => (await import('../commands/profiles.js')).registerProfilesCommands;
 export const loadRoute: ModuleLoader = async () => (await import('../commands/route.js')).registerRouteCommands;
 export const loadHarness: ModuleLoader = async () => (await import('../commands/harness.js')).registerHarnessCommands;
 export const loadSecrets: ModuleLoader = async () => (await import('../commands/secrets.js')).registerSecretsCommands;
-export const loadLogin: ModuleLoader = async () => (await import('../commands/login.js')).registerLoginCommands;
 export const loadMenubar: ModuleLoader = async () => (await import('../commands/menubar.js')).registerMenubarCommands;
 export const loadBeta: ModuleLoader = async () => (await import('../commands/beta.js')).registerBetaCommands;
 export const loadSync: ModuleLoader = async () => (await import('../commands/sync.js')).registerSyncCommand;
 export const loadRefreshRules: ModuleLoader = async () => (await import('../commands/refresh-rules.js')).registerRefreshRulesCommand;
 export const loadFactory: ModuleLoader = async () => (await import('../commands/factory.js')).registerFactoryCommands;
 export const loadUsage: ModuleLoader = async () => (await import('../commands/usage.js')).registerUsageCommand;
-export const loadCost: ModuleLoader = async () => (await import('../commands/cost.js')).registerCostCommand;
 export const loadInsights: ModuleLoader = async () => (await import('../commands/insights.js')).registerInsightsCommand;
 export const loadPerf: ModuleLoader = async () => (await import('../commands/perf.js')).registerPerfCommand;
-export const loadBench: ModuleLoader = async () => (await import('../commands/bench.js')).registerBenchCommand;
 // Thin deprecated alias of `agents insights mix` — no second mix implementation.
 export const loadTrends: ModuleLoader = async () => (await import('../commands/trends.js')).registerTrendsCommand;
-export const loadOutput: ModuleLoader = async () => (await import('../commands/output.js')).registerOutputCommand;
-export const loadBudget: ModuleLoader = async () => (await import('../commands/budget.js')).registerBudgetCommand;
 export const loadAlias: ModuleLoader = async () => (await import('../commands/alias.js')).registerAliasCommand;
-export const loadMine: ModuleLoader = async () => (await import('../commands/mine.js')).registerMineCommand;
 export const loadPty: ModuleLoader = async () => (await import('../commands/pty.js')).registerPtyCommands;
 export const loadTmux: ModuleLoader = async () => (await import('../commands/tmux.js')).registerTmuxCommands;
 export const loadWatchdog: ModuleLoader = async () => (await import('../commands/watchdog.js')).registerWatchdogCommand;
@@ -120,7 +111,6 @@ export const loadWebhooks: ModuleLoader = async () => (await import('../commands
 export const loadHumans: ModuleLoader = async () => (await import('../commands/humans.js')).registerHumansCommands;
 export const loadAccounts: ModuleLoader = async () => (await import('../commands/accounts.js')).registerAccountsCommand;
 export const loadDaemon: ModuleLoader = async () => (await import('../commands/daemon.js')).registerDaemonCommand;
-export const loadCp: ModuleLoader = async () => (await import('../commands/cp.js')).registerCpCommand;
 
 /**
  * Commands whose modules pull in the SQLite-backed session/cloud stack. They are
@@ -129,13 +119,10 @@ export const loadCp: ModuleLoader = async () => (await import('../commands/cp.js
  * inherit the root's custom help formatter rather than getting the per-command
  * recursive pass. Keeping that ordering preserves their `--help` output exactly.
  */
-// `roster` is an observe-umbrella alias of `sessions --active` — same module,
-// same SQLite stack, same post-help registration order as sessions.
+// `roster` was a sessions --active alias — removed; use sessions --active.
 export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set([
   'sessions',
-  'resume',
   'reconnect',
-  'roster',
   'teams',
   'cloud',
   'message',
@@ -188,7 +175,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   monitors: [loadMonitors],
   projects: [loadProjects],
   run: [loadRun],
-  resume: [loadResume],
   open: [loadOpen],
   reconnect: [loadReconnect],
   fork: [loadFork],
@@ -200,29 +186,20 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   doctor: [loadDoctor],
   apply: [loadApply],
   status: [loadStatus],
-  snapshot: [loadSnapshot],
-  profiles: [loadProfiles],
   route: [loadRoute],
   harness: [loadHarness],
   harnesses: [loadHarness],
   secrets: [loadSecrets],
-  login: [loadLogin],
-  logout: [loadLogin],
   menubar: [loadMenubar],
   beta: [loadBeta],
   sync: [loadSync],
   'refresh-rules': [loadRefreshRules],
   factory: [loadFactory],
   usage: [loadUsage],
-  cost: [loadCost],
   insights: [loadInsights],
   perf: [loadPerf],
-  bench: [loadBench],
   trends: [loadTrends],
-  output: [loadOutput],
-  budget: [loadBudget],
   alias: [loadAlias],
-  mine: [loadMine],
   pty: [loadPty],
   tmux: [loadTmux],
   watchdog: [loadWatchdog],
@@ -244,8 +221,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   uninstall: [loadUninstall],
   upgrade: [loadUpgrade],
   sessions: [loadSessions],
-  // Observe-umbrella alias of sessions --active (same lazy module).
-  roster: [loadSessions],
   teams: [loadTeams],
   tickets: [loadTickets],
   cloud: [loadCloud],
@@ -267,36 +242,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   webhooks: [loadWebhooks],
   humans: [loadHumans],
   daemon: [loadDaemon],
-  cp: [loadCp],
 };
-
-/**
- * Top-level names that {@link COMMAND_LOADERS} does not carry because they are
- * registered inline in src/index.ts — closures over entry-point state (the
- * deprecated aliases and tombstones) plus the internal command. They are
- * real commands, so anything that asks "does this command exist?" must count them.
- */
-/**
- * Every top-level command name the CLI answers to — the loader table plus the
- * inline aliases/tombstones above. This is the "does this command exist?"
- * predicate for code that runs BEFORE commander parses, most importantly the
- * `--host`/`--device` router (lib/hosts/passthrough.ts): without it a typo'd
- * command carrying `--host` reported a flag-support error instead of
- * `unknown command` (RUSH-2022).
- *
- * Commander sub-aliases (`sessions ls`, `teams rm`, …) are deliberately absent —
- * this set is top-level only. `command-registry.test.ts` pins it against the real
- * registered command tree so a new command can never drift out of it.
- */
-/**
- * Former top-level names that must NOT auto-correct (edit-distance 1) into a
- * live command. Without this a pruned surface silently misroutes: the typed
- * name is gone, the spellchecker finds a neighbour, and the CLI runs something
- * the user never asked for instead of saying the command is gone.
- *
- * `set` moved under `agents models`/`agents config` (RUSH-2579); `share` moved
- * under `agents artifacts share` (RUSH-2580).
- */
 
 /**
  * Register every module in {@link COMMAND_LOADERS} onto one fresh program and

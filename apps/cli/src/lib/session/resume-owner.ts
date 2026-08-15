@@ -20,10 +20,10 @@
  * remote session resumed in whatever directory the user happened to be in.
  *
  * Callers act on the answer differently, and the difference is deliberate:
- * `agents resume` and `agents sessions attach` HOP to the owner over SSH, while
+ * `agents sessions resume` and `agents sessions attach` HOP to the owner over SSH, while
  * `resumeSessionInPlace` — the local takeover every routed caller reaches only
  * after deciding — REFUSES. The batch `sessions resume` needs no check of its
- * own: each of its tabs runs the canonical `agents resume <id>`
+ * own: each of its tabs runs the canonical `agents sessions resume <id>`
  * (lib/session/resume-command.ts), which routes itself.
  */
 
@@ -45,7 +45,7 @@ export const RESUME_PINNED_ENV = 'AGENTS_RESUME_PINNED';
 
 /**
  * Whether this process was handed a resume by its owner-routing hop — read once,
- * then cleared so a nested `agents resume` inside the running agent still routes
+ * then cleared so a nested `agents sessions resume` inside the running agent still routes
  * normally.
  */
 export function consumeResumePinned(): boolean {

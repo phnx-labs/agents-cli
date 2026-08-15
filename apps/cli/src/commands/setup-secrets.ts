@@ -97,7 +97,7 @@ function printBackendNotes(backend: SetupSecretsBackend): void {
   } else if (backend === 'file') {
     console.log(chalk.gray('backend: file — encrypted at rest; headless reads need no passphrase by default, via a machine-local key at ~/.agents/.secrets-key/passphrase.'));
   } else {
-    console.log(chalk.gray('backend: vault — synced ~/.agents/vault.age storage; unlock it with agents login.'));
+    console.log(chalk.gray('backend: vault — synced ~/.agents/vault.age storage; unlock it with `agents secrets vault unlock`.'));
   }
 }
 
@@ -174,7 +174,7 @@ async function resolveInteractiveChoices(opts: SetupSecretsOptions): Promise<{
     choices: [
       { name: 'keychain — local OS keychain; reads may ask for Touch ID/device password', value: 'keychain' },
       { name: 'file — passphrase-encrypted file store for headless machines', value: 'file' },
-      { name: 'vault — synced ~/.agents/vault.age file; requires agents login', value: 'vault' },
+      { name: 'vault — synced ~/.agents/vault.age file; requires `agents secrets vault unlock`', value: 'vault' },
     ],
   });
   const policy = opts.policy ? parsePolicy(opts.policy) : await select<SecretsPolicy>({

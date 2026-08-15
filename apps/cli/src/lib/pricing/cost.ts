@@ -49,7 +49,7 @@ export function costOfUsage(u: TokenUsage): number {
  * USD cost of one usage record priced as if caching were OFF: cache-read and
  * cache-write tokens are billed at the model's full INPUT rate rather than their
  * discounted cache rates. This is the "what would this have cost with no prompt
- * caching?" scenario that `agents output --pricing no-cache` models. Output and
+ * caching?" scenario that `agents insights output --pricing no-cache` models. Output and
  * uncached input are unchanged — only the cache tokens are repriced. Returns 0
  * for a missing/unpriced model, exactly like {@link costOfUsage}.
  */

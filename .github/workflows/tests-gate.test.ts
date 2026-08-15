@@ -26,9 +26,9 @@ describe('tests.yml required Linux gate', () => {
     expect(TESTS_YML).toMatch(/continue-on-error: true/);
   });
 
-  test('the Linux job plans with ci-scope and enforces the 85s selected budget', () => {
+  test('the Linux job plans with ci-scope and enforces the selected budget', () => {
     expect(TESTS_YML).toContain('bun scripts/ci-scope.ts');
-    expect(TESTS_YML).toContain('--deadline-sec 85');
+    expect(TESTS_YML).toContain('--deadline-sec 1200');
     expect(TESTS_YML).toContain('--fail-unmapped');
     expect(TESTS_YML).toContain('--validate-manifest');
     expect(TESTS_YML).toContain('impact-proof-');

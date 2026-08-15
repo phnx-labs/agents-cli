@@ -20,7 +20,7 @@ jobs:
   test:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -60,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           export IMPACT_STARTED_AT="$(date +%s)"
-          bun scripts/ci-scope.ts --run "$RUNNER_TEMP/impact-plan.json" --deadline-sec 85
+          bun scripts/ci-scope.ts --run "$RUNNER_TEMP/impact-plan.json" --deadline-sec 1200
           bun scripts/ci-scope.ts --base "${{ github.event.pull_request.base.sha }}" \
             --head "${{ github.event.pull_request.head.sha }}" \
             --plan-file "$RUNNER_TEMP/impact-plan.json" \

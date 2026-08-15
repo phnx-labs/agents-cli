@@ -12,7 +12,7 @@
  *   repos    -> git pull of ~/.agents + enabled ~/.agents-* extras (pullRepo)
  *   secrets  -> listRemoteBundles + pullBundle (needs a passphrase; skipped
  *               cleanly when none is available — tokenized non-interactive auth
- *               arrives with `agents login`, #366/#367)
+ *               arrives with `agents secrets vault unlock`, #366/#367)
  *   reconcile-> refresh({ skipPrompts }) — re-materialize resources into homes
  */
 
@@ -131,7 +131,7 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
       result.secrets = {
         pulled: 0,
         skipped: true,
-        reason: `no passphrase — set ${SYNC_PASSPHRASE_ENV} or run \`agents login\` (#366)`,
+        reason: `no passphrase — set ${SYNC_PASSPHRASE_ENV} or run \`agents secrets vault unlock\` (#366)`,
         errors: [],
       };
       log(`secrets: skipped (no passphrase — set ${SYNC_PASSPHRASE_ENV})`);

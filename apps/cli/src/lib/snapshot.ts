@@ -1,5 +1,5 @@
 /**
- * `agents snapshot` — one-process fleet consumer snapshot.
+ * `agents devices snapshot` — one-process fleet consumer snapshot.
  *
  * Consumers (Factory watchdog, menubar, fleet scripts) used to fork:
  *   agents view <agent> --json  × N harnesses
@@ -50,7 +50,7 @@ export type SnapshotSessionRow = {
 };
 
 /**
- * Stable machine-readable contract for `agents snapshot --json`.
+ * Stable machine-readable contract for `agents devices snapshot --json`.
  * Bump `version` only on breaking shape changes.
  */
 export interface FleetSnapshot {

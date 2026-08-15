@@ -1,11 +1,11 @@
 /**
  * Output command — productivity: token *burn* vs shipped *output*.
  *
- * `agents cost` answers "what did we burn?" (dollars + duration). This joins that
- * burn to what actually shipped — real generated (output) tokens plus PRs and
- * commits across every git identity — so you can see burn-vs-output and ratios
- * like $/PR and output-tokens/$. Pure SQLite + local git/gh, no server, no
- * telemetry — the same offline spirit as `cost`.
+ * Nested as `agents insights output`. `agents insights cost` answers "what did
+ * we burn?" (dollars + duration). This joins that burn to what actually shipped —
+ * real generated (output) tokens plus PRs and commits across every git identity —
+ * so you can see burn-vs-output and ratios like $/PR and output-tokens/$. Pure
+ * SQLite + local git/gh, no server, no telemetry — the same offline spirit as cost.
  *
  * Why not just show `token_count`? Because that number sums cache-read/-write
  * context re-counted every turn and is dominated by cheap re-reads (often ~100x
@@ -103,8 +103,9 @@ interface OutputPayload {
   error?: string;
 }
 
-export function registerOutputCommand(program: Command): void {
-  addHostOption(program.command('output'))
+/** Register `agents insights output` under the insights parent. */
+export function registerOutputCommand(insightsCmd: Command): void {
+  addHostOption(insightsCmd.command('output'))
     .description('Productivity rollup — token burn vs shipped output (PRs, commits) across agents')
     .option('--json', 'Output the rollup as JSON')
     .option('--since <time>', 'Only sessions/commits newer than this: 1h, 24h, 7d, 4w, 1mo, 1y, or ISO date (default 7d)')
@@ -117,12 +118,12 @@ export function registerOutputCommand(program: Command): void {
     .option('--pricing <scenario>', 'Cost scenario: actual (default, cache-discounted) or no-cache (cache read/write billed at the full input rate)')
     .addHelpText('after', `
 Examples:
-  agents output                       Last 7 days: burn, output tokens, PRs, commits, ratios
-  agents output --since 24h           Last 24 hours
-  agents output --since 1mo           Last month  (units: 1h 24h 7d 4w 1mo 1y, or ISO date)
-  agents output --pricing no-cache    Model the burn as if prompt caching were off
-  agents output --all-hosts           Fleet-wide, folding in every online machine
-  agents output --by day --json       Machine-readable daily burn/output rollup
+  agents insights output                       Last 7 days: burn, output tokens, PRs, commits, ratios
+  agents insights output --since 24h           Last 24 hours
+  agents insights output --since 1mo           Last month  (units: 1h 24h 7d 4w 1mo 1y, or ISO date)
+  agents insights output --pricing no-cache    Model the burn as if prompt caching were off
+  agents insights output --all-hosts           Fleet-wide, folding in every online machine
+  agents insights output --by day --json       Machine-readable daily burn/output rollup
 
 Burn (cost) is computed offline from a versioned per-model price table (${PRICING_VERSION}).
 Output tokens are the real generated tokens — NOT the cache-inflated total token count.
@@ -231,9 +232,9 @@ async function computeLocalPayload(options: OutputOptions, includePrs: boolean):
   };
 }
 
-/** Fetch one remote device's payload by re-invoking `agents output --json --device <name>`. */
+/** Fetch one remote device's payload by re-invoking `agents insights output --json --device <name>`. */
 async function fetchRemotePayload(device: string, options: OutputOptions): Promise<OutputPayload> {
-  const args = ['output', '--json', '--no-prs', '--device', device, '--since', options.since ?? '7d'];
+  const args = ['insights', 'output', '--json', '--no-prs', '--device', device, '--since', options.since ?? '7d'];
   if (options.by) args.push('--by', options.by);
   if (options.reposDir) args.push('--repos-dir', options.reposDir);
   for (const a of options.author ?? []) args.push('--author', a);

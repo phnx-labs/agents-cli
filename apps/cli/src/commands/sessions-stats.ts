@@ -162,7 +162,7 @@ async function statsAction(cmd: Command): Promise<void> {
   const sinceMs = opts.since ? parseTimeFilter(opts.since) : undefined;
   const top = resolveTop(opts.top);
 
-  // Warm the incremental index (like `agents cost`) so recent sessions' usage is
+  // Warm the incremental index (like `agents insights cost`) so recent sessions' usage is
   // current before we read. Historical gaps still need the explicit backfill.
   await discoverSessions({ all: true, since: opts.since, limit: 1 });
 

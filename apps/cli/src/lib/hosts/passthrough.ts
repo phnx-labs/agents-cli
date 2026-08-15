@@ -82,11 +82,9 @@ export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   check: {},
   list: {},
   usage: {},
-  cost: {},
   insights: {},
-  output: {},
-  budget: {},
   // config / resources
+  config: {},
   sync: { nonInteractive: ['--yes'] },
   pull: {},
   push: {},
@@ -104,7 +102,6 @@ export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   subagents: {},
   workflows: {},
   models: {},
-  profiles: {},
   defaults: {},
   alias: {},
   // Installations are per-machine, so updating one on a peer means running it
@@ -284,7 +281,7 @@ function formatCompactTokens(n: number): string {
   return String(n);
 }
 
-/** One-line summary of a per-device `agents output --json` payload. */
+/** One-line summary of a per-device `agents insights output --json` payload. */
 function summarizeOutputResult(json: unknown): string {
   const p = json as any;
   const burn = p?.burn;
@@ -323,7 +320,8 @@ function summarizeSyncResult(json: unknown): string {
 /** Best-effort summary of any per-device JSON payload. */
 function summarizeResult(command: string, forwarded: string[], json: unknown): string {
   if (command === 'view') return summarizeViewResult(forwarded, json);
-  if (command === 'output') return summarizeOutputResult(json);
+  // #2621 nested `output` under `insights`; main added a sync declined tally.
+  if (command === 'insights' && forwarded[1] === 'output') return summarizeOutputResult(json);
   if (command === 'sync') return summarizeSyncResult(json);
   return 'ok';
 }

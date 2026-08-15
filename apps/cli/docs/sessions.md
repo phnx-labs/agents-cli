@@ -41,7 +41,7 @@ interchangeable — pick the verb for the intent:
 | Interactive → **headless** (keep working unattended) | `agents sessions detach <id>` |
 | Headless → **interactive** in this terminal | `agents sessions attach <id>` |
 | Reopen one identity directly, or multi-select history into tabs/splits | `agents sessions resume [id-or-alias]` / `agents sessions resume` |
-| Resume one session in its original harness, version, device, cwd, and mode | `agents resume <id>` |
+| Resume one session in its original harness, version, device, cwd, and mode | `agents sessions resume <id>` |
 | Continue one session from a script / `run` path | `agents run <agent> --resume <id> …` |
 
 `focus` is the default “take me there” action. With an id or tmux alias it resolves
@@ -70,7 +70,7 @@ one that most likely just dropped) rather than the fleet picker — the manual
 companion to the automatic reattach that runs when `agents run --device <box>`
 loses its ssh link (see [hosts.md](hosts.md)). `attach` / `detach` are the presence
 pair (foreground ↔ background). Bare `resume` is the multi-open/history path. Top-level
-`agents resume <id-or-label>` is the strict single-session shortcut:
+`agents sessions resume <id-or-label>` is the strict single-session shortcut:
 a full **UUID** checks the local SQLite index first and resolves with **zero** SSH on
 a local hit; only on a local miss does it fan out to registered devices, and there the
 fan-out is cancellable and early-exits — the first peer holding the UUID resolves the
@@ -460,7 +460,7 @@ Attribution is **Claude-only** today: it depends on the per-version home carryin
 Rows carry `account_key` (the org-scoped identity, e.g. `claude:org=<uuid>`),
 `account_org`, and `account` (email, display-only). **Group on `account_key`**: two orgs
 under one email — a Team seat and a personal Max plan — are separate rate-limit buckets.
-`agents cost --by account` and any other `queryUsageRollup({ groupBy: 'account' })`
+`agents insights cost --by account` and any other `queryUsageRollup({ groupBy: 'account' })`
 caller uses it.
 
 What cannot be established is named, not guessed: a signed-out home, a recorded version
@@ -643,7 +643,7 @@ Fields:
 | `label` | The session name — one field, several sources | Priority: agent-generated title / Claude `/rename`, else the launch handle seeded by `agents run --name <slug>` (interactive, headless, `--device`, or a teams teammate), else `null` (listing falls back to `topic`). `agents sessions <ref>` resolves against it. |
 | `tokenCount` | Parsed from usage events | `null` for agents that don't log it |
 | `model` | Parsed from transcript metadata or assistant events | `null` for harnesses that don't record it; shortened in the static flat list |
-| `costUsd` | Σ tokens × per-model price, at scan time | `null` when the model is unknown/unpriced; see `agents cost` |
+| `costUsd` | Σ tokens × per-model price, at scan time | `null` when the model is unknown/unpriced; see `agents insights cost` |
 | `durationMs` | `lastTs − firstTs` over timestamped events | `null` for single-event sessions |
 | `isTeamOrigin` | Set when spawned by `agents teams` | JSONL `entrypoint: 'sdk-cli'` |
 | `spawnedTeam` | The team this session CREATED, read off its `agents teams create/add` command at scan time | `null` for the ~everything that never ran one; the inverse of `isTeamOrigin` |
@@ -1203,7 +1203,7 @@ filename, so a fork copies the transcript to a new-uuid file in the same
 directory, rewrites the embedded per-line `sessionId`, registers the new row via
 `upsertSession`, and labels it (`fork of <original>` by default, via the same
 run-name sidecar as `agents run --name`). The fork resolves immediately by
-`agents sessions` / `agents resume` and is version-pinned like any other session.
+`agents sessions` / `agents sessions resume` and is version-pinned like any other session.
 
 Scope: v1 supports **Claude** (single-file transcript, native `--resume`). Codex
 (single-file) is a natural next step; multi-file agents (grok, kimi) and DB-only

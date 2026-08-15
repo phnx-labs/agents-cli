@@ -415,7 +415,7 @@ async function runInteractiveReconcile(
 /**
  * The umbrella verb: bare `agents sync` (no agent) makes this machine current.
  * Resolves the flags + a secrets passphrase (env-only for now; tokenized auth
- * arrives with `agents login`) and runs the fetch+reconcile stages, then prints
+ * arrives with `agents secrets vault unlock`) and runs the fetch+reconcile stages, then prints
  * a one-line summary. Stage failures are non-fatal and surfaced as warnings.
  */
 async function runUmbrella(

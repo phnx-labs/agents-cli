@@ -5,7 +5,7 @@ Single API key, many open-weight models. `agents-cli` ships built-in OpenRouter 
 ## Quick start
 
 ```bash
-agents profiles create
+agents harness create
 # pick openrouter, fill prompts, run smoke test
 agents run my-profile "hello"
 ```
@@ -13,9 +13,9 @@ agents run my-profile "hello"
 Or use the built-in presets directly:
 
 ```bash
-agents profiles login openrouter        # store key once
-agents profiles add kimi                 # reasoning model, interactive
-agents profiles add kimi-chat            # non-reasoning sibling, print-safe
+agents harness login openrouter        # store key once
+agents harness add kimi                 # reasoning model, interactive
+agents harness add kimi-chat            # non-reasoning sibling, print-safe
 agents run kimi-chat --print "summarize the diff"
 ```
 
@@ -64,6 +64,6 @@ The fix: use `kimi-chat` (non-reasoning) for scripting and pipelines, and `kimi`
 | Symptom | Cause | Fix |
 |---|---|---|
 | `agents run kimi --print "..."` prints nothing | Reasoning model; `--print` consolidator drops thinking blocks | Use `kimi-chat` (or any print-safe preset) for scripted use |
-| 401 / `Invalid API key` | Stale or wrong key in Keychain | `agents profiles login openrouter` to rotate |
+| 401 / `Invalid API key` | Stale or wrong key in Keychain | `agents harness login openrouter` to rotate |
 | `model not found` | Slug typo or model retired | Look up the current slug at openrouter.ai/models |
 | 429 / rate limit | OpenRouter per-key cap | Add credits or slow down |

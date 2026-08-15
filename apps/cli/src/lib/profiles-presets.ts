@@ -2,7 +2,7 @@
  * Built-in profile presets for popular model providers.
  *
  * Each preset bundles a host CLI, API base URL, default model, and provider
- * name so users can `agents profiles add kimi` without manual configuration.
+ * name so users can `agents harness add kimi` without manual configuration.
  */
 
 import type { AgentId } from './types.js';

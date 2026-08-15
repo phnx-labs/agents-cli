@@ -5,7 +5,7 @@ Direct AWS Bedrock — Claude Code talks to Bedrock's Anthropic endpoint without
 ## Quick start
 
 ```bash
-agents profiles create
+agents harness create
 # pick bedrock, fill prompts, run smoke test
 agents run my-profile "hello"
 ```

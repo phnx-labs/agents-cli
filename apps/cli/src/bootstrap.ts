@@ -273,7 +273,7 @@ Packages:
 
 Run and dispatch:
   run <agent|profile> [prompt]    Run an agent. Omit prompt for interactive mode.
-  config                          Configure run defaults, project root, and device options
+  config                          Configure run defaults, project root, device options, and spend caps (config budget)
   teams                           Coordinate multiple agents on shared work
   routines                        Run agents on a cron schedule (scheduler auto-starts)
   daemon                          Runtime status/control for the always-on daemon (secrets broker, browser IPC, scheduler)
@@ -288,21 +288,21 @@ Run and dispatch:
 Observe (read the fleet — no store merge; aliases point at the real readers):
   feed / inbox                    Needs-you inbox (open blocks waiting on you)
   timeline                        Agent progress stream (= feed --filter updates)
-  roster                          Live agents (= sessions --active)
+  sessions --active               Live agents (who is running right now)
   events                          Unified ops + activity event trail
   audit                           Tamper-evident run-dispatch log (not events)
-  snapshot                        One-process inventory + active sessions poll
   status                          Sync/drift only (not the live fleet snapshot)
+  devices snapshot                One-process inventory + active sessions poll
 
-Credentials and profiles:
-  profile                         Activate resource profiles across skills, MCP, permissions, and secrets
-  profiles                        Bundles of (host CLI, endpoint, model, auth)
-  secrets                         Keychain-backed env bundles; use 'secrets exec <bundle> -- <cmd>' to inject into a subprocess
+Credentials:
+  harness                         Custom (host CLI + model + auth) harnesses; replaces former profiles command
+  secrets                         Keychain-backed env bundles; synced vault: secrets vault unlock|lock
+  accounts                        Provider credentials + native OAuth logout
 
 Diagnostics:
   doctor [agent[@version]]        Diagnose CLI availability, sync status, and resource divergence; --check for the CI drift gate
   usage [agent]                   Show rate-limit and quota usage per agent
-  insights                        How work looks — behaviour (default) or counter mix (insights mix)
+  insights                        How work looks — behaviour (default), mix, cost, and output
   perf                            Latency rollups (hooks, commands, runs) from the disposable perf warehouse
 
 Config sync:

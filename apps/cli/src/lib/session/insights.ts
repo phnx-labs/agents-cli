@@ -2,7 +2,7 @@
  * Behavioural facets of a coding session, and the cross-session rollup built from them.
  *
  * This is the engine behind `agents insights`. It answers "how do you work" rather than
- * "what did you spend" (`agents cost`) or "what shipped" (`agents output`), and it is
+ * "what did you spend" (`agents insights cost`) or "what shipped" (`agents insights output`), and it is
  * the only surface that splits any of it by the account that produced the work.
  *
  * Everything here is a pure function of a parsed `SessionEvent[]`, so it is testable

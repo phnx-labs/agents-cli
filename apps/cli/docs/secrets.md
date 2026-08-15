@@ -92,7 +92,7 @@ Secrets solves the problem of getting API keys into agent processes without stor
 
 A bundle is a named container (`prod`, `staging`, `npm-tokens`) that maps env var names to values or typed references. When an agent is spawned with `--secrets <bundle>`, the CLI resolves the bundle, reads all keychain-backed values in a single batch Touch ID prompt, and injects the resulting env map into the child process.
 
-Cross-machine sync has two paths: explicit encrypted push/pull (`agents secrets push/pull`) backed by api.prix.dev, or user-managed file sync with `agents login` plus synced bundles. Push/pull values are sealed with AES-256-GCM before upload. Synced bundles live inside `~/.agents/vault.age`, an age-encrypted file that you copy with iCloud Drive, Dropbox, Syncthing, git, scp, or any other transport.
+Cross-machine sync has two paths: explicit encrypted push/pull (`agents secrets push/pull`) backed by api.prix.dev, or user-managed file sync with `agents secrets vault unlock` plus synced bundles. Push/pull values are sealed with AES-256-GCM before upload. Synced bundles live inside `~/.agents/vault.age`, an age-encrypted file that you copy with iCloud Drive, Dropbox, Syncthing, git, scp, or any other transport.
 
 > **Platform:** cross-platform — macOS Keychain, Linux libsecret, or Windows
 > Credential Manager, each with an AES-256-GCM encrypted-file fallback. The
@@ -101,25 +101,25 @@ Cross-machine sync has two paths: explicit encrypted push/pull (`agents secrets 
 
 ## Synced bundles
 
-Use `agents login` to create or unlock the encrypted synced-secrets file. The
+Use `agents secrets vault unlock` to create or unlock the encrypted synced-secrets file. The
 master password unlock is cached in the OS credential store for 8 hours, then
 `agents secrets` and `agents run` require another login before reading synced
-bundles. `agents logout` clears the cached unlock immediately, and `agents
+bundles. `agents secrets vault lock` clears the cached unlock immediately, and `agents
 whoami` shows the current login status and remaining TTL.
 
 ```bash
-agents login
+agents secrets vault unlock
 agents secrets create hetzner.com --synced
 agents secrets add hetzner.com HCLOUD_TOKEN
 agents run codex "check terraform drift" --secrets hetzner.com
-agents logout
+agents secrets vault lock
 ```
 
 `--synced` is opt-in per bundle. Bundles created without it keep using the
 platform keychain/keyring. There is no built-in transport: copy
-`~/.agents/vault.age` yourself, then run `agents login --join <path>` on another
-machine and enter the same password. `agents login --create` and
-`agents login --join <path>` refuse to replace an existing local vault unless
+`~/.agents/vault.age` yourself, then run `agents secrets vault unlock --join <path>` on another
+machine and enter the same password. `agents secrets vault unlock --create` and
+`agents secrets vault unlock --join <path>` refuse to replace an existing local vault unless
 you pass `--force`.
 
 The synced secrets file is one age-encrypted blob containing bundle metadata and stored
@@ -375,7 +375,7 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | `secrets create [name] --description <text>` | Create with a description | `agents secrets create prod --description "Live API keys"` |
 | `secrets create [name] --allow-exec` | Enable exec: refs in this bundle | `agents secrets create tools --allow-exec` |
 | `secrets create [name] --backend <keychain\|file>` | Storage backend; `file` is encrypted at rest and headless-readable via a machine-local key (or `AGENTS_SECRETS_PASSPHRASE` if set) (see [File-backed bundles](#file-backed-bundles-headless--remote)) | `agents secrets create rush.releases --backend file` |
-| `secrets create [name] --synced` | Store this bundle in the age-encrypted synced-secrets file unlocked by `agents login` | `agents secrets create hetzner.com --synced` |
+| `secrets create [name] --synced` | Store this bundle in the age-encrypted synced-secrets file unlocked by `agents secrets vault unlock` | `agents secrets create hetzner.com --synced` |
 | `secrets create [name] --force` | Overwrite an existing bundle | `agents secrets create prod --force` |
 | `secrets rename <old> <new>` / `mv` | Rename bundle and move all keychain items | `agents secrets rename staging prod` |
 | `secrets rename <old> <new> --force` | Overwrite destination if it exists | `agents secrets rename old new --force` |

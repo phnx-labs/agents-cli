@@ -101,7 +101,7 @@ export function forkSession(source: SessionMeta, opts: { name?: string; now?: st
   // supersedes it), mirroring `agents run --name`.
   recordRunName({ sessionId: newId, name: label, agent: source.agent, cwd: source.cwd });
 
-  // Register the new session so it resolves immediately (by `agents resume`,
+  // Register the new session so it resolves immediately (by `agents sessions resume`,
   // `agents sessions`, etc.) without waiting for the next scan.
   const stamp = opts.now ?? new Date().toISOString();
   const meta: SessionMeta = {

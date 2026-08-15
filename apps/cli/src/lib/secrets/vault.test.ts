@@ -205,7 +205,7 @@ describe('vault login cache', () => {
 
     expect(getVaultSession().loggedIn).toBe(false);
     expect(() => vaultGetItem('agents-cli.secrets.prod.API_KEY'))
-      .toThrow(/Not logged in/);
+      .toThrow(/Synced secrets locked/);
   });
 });
 

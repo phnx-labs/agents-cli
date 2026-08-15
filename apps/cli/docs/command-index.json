@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 90,
-  "commands": 562,
+  "groups": 78,
+  "commands": 549,
   "root": {
     "name": "agents",
     "path": "",
@@ -79,8 +79,8 @@
           "negate": false
         }
       ],
-      "examples": "agents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts name claude@2.1.220 work\nagents accounts attach work claude@2.1.225\nagents accounts view work --json\nagents accounts set-default claude work\nagents accounts sync openrouter-work yosemite-s0\nagents run claude --account work",
-      "notes": "Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never.",
+      "examples": "agents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts name claude@2.1.220 work\nagents accounts attach work claude@2.1.225\nagents accounts view work --json\nagents accounts set-default claude work\nagents accounts sync openrouter-work yosemite-s0\nagents run claude --account work\nagents accounts logout claude",
+      "notes": "Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`.",
       "subcommands": [
         {
           "name": "add",
@@ -254,6 +254,33 @@
               "variadic": false,
               "negate": false
             },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "logout",
+          "path": "accounts logout",
+          "aliases": [],
+          "description": "Sign out a harness-native OAuth login. API-key / setup-token / bearer accounts use `accounts remove` instead.",
+          "args": [
+            {
+              "name": "target",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -1563,167 +1590,6 @@
             {
               "flags": "--json",
               "description": "Output the result as JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
-    },
-    {
-      "name": "bench",
-      "path": "bench",
-      "aliases": [],
-      "description": "Run the same task across agent and model cells, with isolated fixtures and durable JSON results.",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "agents bench list\nagents bench run hello-repo --agent claude,codex --model cheap,default\nagents bench results --json",
-      "notes": "Task definitions live under apps/cli/bench/tasks/<id>/task.json. Custom harness names accepted by agents run are valid --agent values.",
-      "subcommands": [
-        {
-          "name": "list",
-          "path": "bench list",
-          "aliases": [],
-          "description": "List available benchmark tasks.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Emit JSON.",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "results",
-          "path": "bench results",
-          "aliases": [],
-          "description": "Show one saved run, or list saved runs newest first.",
-          "args": [
-            {
-              "name": "run-id",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Emit JSON.",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "run",
-          "path": "bench run",
-          "aliases": [],
-          "description": "Run one task or prompt across an agent × model matrix.",
-          "args": [
-            {
-              "name": "task-id",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--prompt <text>",
-              "description": "Prompt to benchmark instead of a house task.",
-              "long": "--prompt",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--agent <names>",
-              "description": "Comma-separated native agents or custom harness names. Defaults to signed-in native agents.",
-              "long": "--agent",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--model <models>",
-              "description": "Comma-separated model tiers or concrete model ids.",
-              "long": "--model",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--concurrency <n>",
-              "description": "Maximum cells running at once.",
-              "long": "--concurrency",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "3"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit the saved JSON result.",
               "long": "--json",
               "required": false,
               "optional": false,
@@ -4427,69 +4293,6 @@
       ]
     },
     {
-      "name": "budget",
-      "path": "budget",
-      "aliases": [],
-      "description": "Show spend caps and current spend-to-cap (issue #346)",
-      "args": [],
-      "options": [
-        {
-          "flags": "--json",
-          "description": "Emit the budget + spend snapshot as JSON",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "set",
-          "path": "budget set",
-          "aliases": [],
-          "description": "Set a user-global cap. <cap> = per_run | per_day | per_project | per_agent.<agent> | on_exceed | require_confirm_over",
-          "args": [
-            {
-              "name": "cap",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "amount",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
-    },
-    {
       "name": "clis",
       "path": "clis",
       "aliases": [],
@@ -6607,7 +6410,7 @@
       "name": "config",
       "path": "config",
       "aliases": [],
-      "description": "Get, set, list, and unset run defaults, tier overrides, the projects root, and device options.",
+      "description": "Get, set, list, and unset run defaults, tier overrides, the projects root, device options, and spend caps.",
       "args": [],
       "options": [
         {
@@ -6621,9 +6424,72 @@
           "negate": false
         }
       ],
-      "examples": "agents config set run.claude@*.model best\n      agents config set run.claude@*.tier.best claude-opus-4-8\n      agents config set run.claude@2.1.45.model claude-opus-4-8\n      agents config set run.claude@*.mode auto\n      agents config set interactive.host zion\n      agents config set usage.primary-host zion\n      agents config set browser.profile work\n      agents config set project.root ~/src/github.com/<you>\n      agents config set devices.mac-mini.max-agents 4\n      agents config get run.claude@*.model\n      agents config get usage.primary-host\n      agents config unset run.claude@*.tier.best\n      agents config unset usage.primary-host\n      agents config list",
-      "notes": "Every agent/harness reference uses agent@version. Use * for all versions.\n      Tier overrides are part of the run namespace: run.<agent@version>.tier.<tier>.\n      Project root is auto-inferred from the current Git repository when unset.",
+      "examples": "agents config set run.claude@*.model best\n      agents config set run.claude@*.tier.best claude-opus-4-8\n      agents config set run.claude@2.1.45.model claude-opus-4-8\n      agents config set run.claude@*.mode auto\n      agents config set interactive.host zion\n      agents config set usage.primary-host zion\n      agents config set browser.profile work\n      agents config set project.root ~/src/github.com/<you>\n      agents config set devices.mac-mini.max-agents 4\n      agents config get run.claude@*.model\n      agents config get usage.primary-host\n      agents config unset run.claude@*.tier.best\n      agents config unset usage.primary-host\n      agents config list\n      agents config budget\n      agents config budget set per_day 50",
+      "notes": "Every agent/harness reference uses agent@version. Use * for all versions.\n      Tier overrides are part of the run namespace: run.<agent@version>.tier.<tier>.\n      Project root is auto-inferred from the current Git repository when unset.\n      Spend caps live under `agents config budget` (not a top-level command).",
       "subcommands": [
+        {
+          "name": "budget",
+          "path": "config budget",
+          "aliases": [],
+          "description": "Show spend caps and current spend-to-cap (issue #346)",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Emit the budget + spend snapshot as JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "set",
+              "path": "config budget set",
+              "aliases": [],
+              "description": "Set a user-global cap. <cap> = per_run | per_day | per_project | per_agent.<agent> | on_exceed | require_confirm_over",
+              "args": [
+                {
+                  "name": "cap",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                },
+                {
+                  "name": "amount",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            }
+          ]
+        },
         {
           "name": "get",
           "path": "config get",
@@ -6759,135 +6625,6 @@
           "subcommands": []
         }
       ]
-    },
-    {
-      "name": "cost",
-      "path": "cost",
-      "aliases": [],
-      "description": "Roll up $ cost and duration across local agent sessions",
-      "args": [],
-      "options": [
-        {
-          "flags": "-D, --device <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
-          "short": "-D",
-          "long": "--device",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--remote-cwd <dir>",
-          "description": "Working directory on the device for --device runs. Resolves on the REMOTE device — pass a '$HOME'-relative path (single-quoted so your local shell doesn't expand it) or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you). No effect on 'teams add'.",
-          "long": "--remote-cwd",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--no-tty",
-          "description": "Force non-interactive output for --device runs even from a terminal.",
-          "long": "--no-tty",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": true
-        },
-        {
-          "flags": "--any",
-          "description": "With --device <cap> (a capability tag), pick any matching device instead of erroring when several match.",
-          "long": "--any",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--json",
-          "description": "Output the rollup as JSON",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--since <time>",
-          "description": "Only sessions newer than this (e.g., 7d, 4w, or ISO date)",
-          "long": "--since",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--by <dimension>",
-          "description": "Group the breakdown by: agent (default), project, day, or account (the Claude org that produced each session)",
-          "long": "--by",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": []
-    },
-    {
-      "name": "cp",
-      "path": "cp",
-      "aliases": [],
-      "description": "Copy a file or directory between fleet hosts. Either endpoint may be host:path (remote) or an absolute local path.",
-      "args": [
-        {
-          "name": "src",
-          "required": true,
-          "variadic": false,
-          "description": ""
-        },
-        {
-          "name": "dst",
-          "required": true,
-          "variadic": false,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "-r, --recursive",
-          "description": "Copy directories recursively",
-          "short": "-r",
-          "long": "--recursive",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "agents cp yosemite-s0:/abs/data.json /tmp/data.json   # download a file from a fleet host\n      agents cp /tmp/build.tar.gz mac-mini:/abs/deploy/    # upload a local file to a fleet host\n      agents cp -r yosemite-s0:/abs/src/ mac-mini:/abs/dst/ # copy a directory between two fleet hosts\n      agents cp yosemite-s0:~/logs/run.log /tmp/run.log    # ~ is resolved on the remote host",
-      "notes": "Local paths must be absolute (use /abs/path, not ./relative).\n      Remote paths must be absolute after ~ / $HOME expansion.\n      Remote $HOME is resolved on the remote host — never in the local shell.\n      Both local-to-remote and remote-to-local transfers are supported.\n      Remote-to-remote transfers route through the local machine (-3).\n      Devices must be registered: 'agents devices' to list, 'agents devices add' to enroll.",
-      "subcommands": []
     },
     {
       "name": "daemon",
@@ -8645,6 +8382,109 @@
           "subcommands": []
         },
         {
+          "name": "snapshot",
+          "path": "devices snapshot",
+          "aliases": [],
+          "description": "One-process poll snapshot: install inventory + active sessions (optional feed/sync). Not the sync-status command — use `agents status` for drift.",
+          "args": [],
+          "options": [
+            {
+              "flags": "-D, --device <name>",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "short": "-D",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--remote-cwd <dir>",
+              "description": "Working directory on the device for --device runs. Resolves on the REMOTE device — pass a '$HOME'-relative path (single-quoted so your local shell doesn't expand it) or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you). No effect on 'teams add'.",
+              "long": "--remote-cwd",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--no-tty",
+              "description": "Force non-interactive output for --device runs even from a terminal.",
+              "long": "--no-tty",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
+            },
+            {
+              "flags": "--any",
+              "description": "With --device <cap> (a capability tag), pick any matching device instead of erroring when several match.",
+              "long": "--any",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Emit the machine-readable FleetSnapshot contract (version 1)",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--all-hosts",
+              "description": "Include remote devices in the sessions gather (same fan-out as `sessions --active`; default is this machine only)",
+              "long": "--all-hosts",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--with-feed",
+              "description": "Include open feed-block summary (needs-you count + compact rows)",
+              "long": "--with-feed",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--with-sync",
+              "description": "Include UnifiedSyncStatus (same engine as `agents status`; opt-in)",
+              "long": "--with-sync",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--agent <name>",
+              "description": "Restrict inventory to one agent (e.g. claude)",
+              "long": "--agent",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# One-shot inventory + local active sessions (JSON)\n      agents devices snapshot --json\n\n      # Same, plus open feed blocks for needs-you polls\n      agents devices snapshot --json --with-feed\n\n      # Fleet-wide active sessions (matches sessions --active scope)\n      agents devices snapshot --json --all-hosts\n\n      # Inventory for one harness only (an AGI EXT-style usage poll)\n      agents devices snapshot --json --agent claude\n\n      # Run the whole snapshot on another device\n      agents devices snapshot --json --device yosemite-s0",
+          "subcommands": []
+        },
+        {
           "name": "status",
           "path": "devices status",
           "aliases": [],
@@ -9972,12 +9812,75 @@
           "subcommands": []
         },
         {
+          "name": "login",
+          "path": "harness login",
+          "aliases": [],
+          "description": "Store or rotate the API key for a provider (e.g., openrouter). Shared across harnesses using that provider.",
+          "args": [
+            {
+              "name": "provider",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--key-stdin",
+              "description": "Read API key from stdin",
+              "long": "--key-stdin",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "logout",
+          "path": "harness logout",
+          "aliases": [],
+          "description": "Remove a stored provider key from keychain",
+          "args": [
+            {
+              "name": "provider",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
           "name": "remove",
           "path": "harness remove",
           "aliases": [
             "rm"
           ],
-          "description": "Delete a custom harness (keychain token is kept).",
+          "description": "Delete a custom harness (keychain token is kept — use `harness logout <provider>` to remove).",
           "args": [
             {
               "name": "name",
@@ -10625,7 +10528,7 @@
         }
       ],
       "examples": "# Behavioural report — last 30 days, split by Claude account (default)\n      agents insights\n\n      # Which repo is eating the time\n      agents insights --by project --since 90d\n\n      # Counter mix board (harness/model/token/secrets recipes) — former agents trends\n      agents insights mix\n      agents insights mix --days 30\n      agents insights harness-mix --json\n      agents insights query --kind secret --days 7\n\n      # One account only, all of its history\n      agents insights --account \"Turing Labs\" --all\n\n      # Machine-readable, for a dashboard or a slash command\n      agents sessions insights --agent claude --agent codex --json\n\n      # Add a written read on what to change\n      agents insights --narrative",
-      "notes": "Two paths under one verb:\n        bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n        `agents insights mix`      — cheap counters from sessions.db + usage.db\n      Latency is `agents perf` (not mix). Quota is `agents usage`. Skill/slash popularity\n      is `agents sessions stats`. `agents trends` is a deprecated alias of the mix tree.\n\n      The behavioural report parses in-scope transcripts once and caches facets; later runs\n      re-read only files that changed. `--refresh` forces a full re-read.\n\n      `agents insights` is the top-level alias of `agents sessions insights`.\n      Repeat `--agent` to compare several harnesses in one report.\n\n      Everything except `--narrative` is local and makes no network calls.",
+      "notes": "Two paths under one verb:\n        bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n        `agents insights mix`      — cheap counters from sessions.db + usage.db\n      Latency is `agents perf` (not mix). Quota is `agents usage`. Spend is\n      `agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\n      is `agents sessions stats`. `agents trends` is a deprecated alias of the mix tree.\n\n      The behavioural report parses in-scope transcripts once and caches facets; later runs\n      re-read only files that changed. `--refresh` forces a full re-read.\n\n      `agents insights` is the top-level alias of `agents sessions insights`.\n      Repeat `--agent` to compare several harnesses in one report.\n\n      Everything except `--narrative` is local and makes no network calls.",
       "subcommands": [
         {
           "name": "browser-activity",
@@ -10649,6 +10552,90 @@
               "description": "Emit JSON",
               "long": "--json",
               "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "cost",
+          "path": "insights cost",
+          "aliases": [],
+          "description": "Roll up $ cost and duration across local agent sessions",
+          "args": [],
+          "options": [
+            {
+              "flags": "-D, --device <name>",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "short": "-D",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--remote-cwd <dir>",
+              "description": "Working directory on the device for --device runs. Resolves on the REMOTE device — pass a '$HOME'-relative path (single-quoted so your local shell doesn't expand it) or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you). No effect on 'teams add'.",
+              "long": "--remote-cwd",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--no-tty",
+              "description": "Force non-interactive output for --device runs even from a terminal.",
+              "long": "--no-tty",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
+            },
+            {
+              "flags": "--any",
+              "description": "With --device <cap> (a capability tag), pick any matching device instead of erroring when several match.",
+              "long": "--any",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Output the rollup as JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--since <time>",
+              "description": "Only sessions newer than this (e.g., 7d, 4w, or ISO date)",
+              "long": "--since",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--by <dimension>",
+              "description": "Group the breakdown by: agent (default), project, day, or account (the Claude org that produced each session)",
+              "long": "--by",
+              "required": true,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -10768,6 +10755,144 @@
               "description": "Emit JSON",
               "long": "--json",
               "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "output",
+          "path": "insights output",
+          "aliases": [],
+          "description": "Productivity rollup — token burn vs shipped output (PRs, commits) across agents",
+          "args": [],
+          "options": [
+            {
+              "flags": "-D, --device <name>",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "short": "-D",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--remote-cwd <dir>",
+              "description": "Working directory on the device for --device runs. Resolves on the REMOTE device — pass a '$HOME'-relative path (single-quoted so your local shell doesn't expand it) or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you). No effect on 'teams add'.",
+              "long": "--remote-cwd",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--no-tty",
+              "description": "Force non-interactive output for --device runs even from a terminal.",
+              "long": "--no-tty",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
+            },
+            {
+              "flags": "--any",
+              "description": "With --device <cap> (a capability tag), pick any matching device instead of erroring when several match.",
+              "long": "--any",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Output the rollup as JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--since <time>",
+              "description": "Only sessions/commits newer than this: 1h, 24h, 7d, 4w, 1mo, 1y, or ISO date (default 7d)",
+              "long": "--since",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--by <dimension>",
+              "description": "Group the burn/output breakdown by: agent (default), project, day, or account (the Claude org that produced each session)",
+              "long": "--by",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--repos-dir <dir>",
+              "description": "Root scanned for git repos (default ~/src)",
+              "long": "--repos-dir",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--author <email...>",
+              "description": "Count commits by these author emails (default: your git identities)",
+              "long": "--author",
+              "required": true,
+              "optional": false,
+              "variadic": true,
+              "negate": false
+            },
+            {
+              "flags": "--login <login...>",
+              "description": "Count PRs for these GitHub logins (default: current gh user)",
+              "long": "--login",
+              "required": true,
+              "optional": false,
+              "variadic": true,
+              "negate": false
+            },
+            {
+              "flags": "--no-prs",
+              "description": "Skip the GitHub PR lookup (commits only)",
+              "long": "--no-prs",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
+            },
+            {
+              "flags": "--all-hosts",
+              "description": "Aggregate across every online device (ag devices) over SSH",
+              "long": "--all-hosts",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--pricing <scenario>",
+              "description": "Cost scenario: actual (default, cache-discounted) or no-cache (cache read/write billed at the full input rate)",
+              "long": "--pricing",
+              "required": true,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -11447,82 +11572,6 @@
           "variadic": false,
           "negate": false
         },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": []
-    },
-    {
-      "name": "login",
-      "path": "login",
-      "aliases": [],
-      "description": "Unlock synced secrets for this shell session",
-      "args": [],
-      "options": [
-        {
-          "flags": "--create",
-          "description": "Create a new encrypted synced-secrets file at ~/.agents/vault.age",
-          "long": "--create",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--join <path>",
-          "description": "Copy and unlock an existing vault.age file",
-          "long": "--join",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--force",
-          "description": "Replace an existing synced-secrets file when used with --create or --join",
-          "long": "--force",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--password-stdin",
-          "description": "Read the master password from stdin",
-          "long": "--password-stdin",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": []
-    },
-    {
-      "name": "logout",
-      "path": "logout",
-      "aliases": [],
-      "description": "Forget the cached synced-secrets key",
-      "args": [],
-      "options": [
         {
           "flags": "-h, --help",
           "description": "Show help",
@@ -12613,213 +12662,6 @@
       ],
       "notes": "Planes (do not mix them up):\n    message / sessions inject  - CONTROL a running agent (mailbox answer, PTY keystroke, or resume by runtime)\n    send / notify              - DELIVER a message to a human recipient over a channel provider\n    feed post                  - RECORD progress / milestones (optional broadcast may call send/notify)\n\n  <text> here is consumed BY THE TARGET AGENT (an answer, a keystroke, or the\n  argument to a resume) -- it is not a notification a person reads on their\n  phone. To reach the operator instead, use `agents send` / `agents notify`\n  (or a feed.broadcast `channel:` sink).",
       "subcommands": []
-    },
-    {
-      "name": "mine",
-      "path": "mine",
-      "aliases": [],
-      "description": "White-label the CLI: your own personally-named binary (e.g. `jack`)",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "init",
-          "path": "mine init",
-          "aliases": [],
-          "description": "Mint your own branded CLI that runs every agents verb under <name>",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--disable <commands...>",
-              "description": "Built-in commands to hide from this brand (e.g. teams cloud)",
-              "long": "--disable",
-              "required": true,
-              "optional": false,
-              "variadic": true,
-              "negate": false
-            },
-            {
-              "flags": "--force",
-              "description": "Re-mint even if the brand already exists",
-              "long": "--force",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "list",
-          "path": "mine list",
-          "aliases": [
-            "ls"
-          ],
-          "description": "Show your brands and what each has turned off",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "remove",
-          "path": "mine remove",
-          "aliases": [
-            "rm"
-          ],
-          "description": "Remove a brand (its shim + config)",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--purge",
-              "description": "Also delete the brand's resource profile preset",
-              "long": "--purge",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "toggle",
-          "path": "mine toggle",
-          "aliases": [],
-          "description": "Enable/disable features for a brand",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--disable <commands...>",
-              "description": "Hide these built-in commands",
-              "long": "--disable",
-              "required": true,
-              "optional": false,
-              "variadic": true,
-              "negate": false
-            },
-            {
-              "flags": "--enable <commands...>",
-              "description": "Un-hide these built-in commands",
-              "long": "--enable",
-              "required": true,
-              "optional": false,
-              "variadic": true,
-              "negate": false
-            },
-            {
-              "flags": "--disable-plugin <names...>",
-              "description": "Disable these plugins for the brand",
-              "long": "--disable-plugin",
-              "required": true,
-              "optional": false,
-              "variadic": true,
-              "negate": false
-            },
-            {
-              "flags": "--enable-plugin <names...>",
-              "description": "Re-enable these plugins",
-              "long": "--enable-plugin",
-              "required": true,
-              "optional": false,
-              "variadic": true,
-              "negate": false
-            },
-            {
-              "flags": "--disable-skill <names...>",
-              "description": "Disable these skills for the brand",
-              "long": "--disable-skill",
-              "required": true,
-              "optional": false,
-              "variadic": true,
-              "negate": false
-            },
-            {
-              "flags": "--enable-skill <names...>",
-              "description": "Re-enable these skills",
-              "long": "--enable-skill",
-              "required": true,
-              "optional": false,
-              "variadic": true,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
     },
     {
       "name": "models",
@@ -13948,144 +13790,6 @@
       ]
     },
     {
-      "name": "output",
-      "path": "output",
-      "aliases": [],
-      "description": "Productivity rollup — token burn vs shipped output (PRs, commits) across agents",
-      "args": [],
-      "options": [
-        {
-          "flags": "-D, --device <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
-          "short": "-D",
-          "long": "--device",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--remote-cwd <dir>",
-          "description": "Working directory on the device for --device runs. Resolves on the REMOTE device — pass a '$HOME'-relative path (single-quoted so your local shell doesn't expand it) or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you). No effect on 'teams add'.",
-          "long": "--remote-cwd",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--no-tty",
-          "description": "Force non-interactive output for --device runs even from a terminal.",
-          "long": "--no-tty",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": true
-        },
-        {
-          "flags": "--any",
-          "description": "With --device <cap> (a capability tag), pick any matching device instead of erroring when several match.",
-          "long": "--any",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--json",
-          "description": "Output the rollup as JSON",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--since <time>",
-          "description": "Only sessions/commits newer than this: 1h, 24h, 7d, 4w, 1mo, 1y, or ISO date (default 7d)",
-          "long": "--since",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--by <dimension>",
-          "description": "Group the burn/output breakdown by: agent (default), project, day, or account (the Claude org that produced each session)",
-          "long": "--by",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--repos-dir <dir>",
-          "description": "Root scanned for git repos (default ~/src)",
-          "long": "--repos-dir",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--author <email...>",
-          "description": "Count commits by these author emails (default: your git identities)",
-          "long": "--author",
-          "required": true,
-          "optional": false,
-          "variadic": true,
-          "negate": false
-        },
-        {
-          "flags": "--login <login...>",
-          "description": "Count PRs for these GitHub logins (default: current gh user)",
-          "long": "--login",
-          "required": true,
-          "optional": false,
-          "variadic": true,
-          "negate": false
-        },
-        {
-          "flags": "--no-prs",
-          "description": "Skip the GitHub PR lookup (commits only)",
-          "long": "--no-prs",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": true
-        },
-        {
-          "flags": "--all-hosts",
-          "description": "Aggregate across every online device (ag devices) over SSH",
-          "long": "--all-hosts",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--pricing <scenario>",
-          "description": "Cost scenario: actual (default, cache-discounted) or no-cache (cache read/write billed at the full input rate)",
-          "long": "--pricing",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": []
-    },
-    {
       "name": "perf",
       "path": "perf",
       "aliases": [],
@@ -14795,309 +14499,6 @@
               "variadic": false,
               "negate": false
             },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
-    },
-    {
-      "name": "profiles",
-      "path": "profiles",
-      "aliases": [],
-      "description": "Named bundles of (host CLI, endpoint, model, auth) — run Kimi/DeepSeek/Qwen/etc through Claude Code without a proxy.",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "add",
-          "path": "profiles add",
-          "aliases": [],
-          "description": "Add a profile. If <name> matches a built-in preset, the preset is applied. Prompts for API key (once per provider).",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--preset <preset>",
-              "description": "Use a named preset (defaults to <name> if a preset by that name exists)",
-              "long": "--preset",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--version <version>",
-              "description": "Pin the host CLI version (e.g., 2.1.113)",
-              "long": "--version",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--account <name>",
-              "description": "Attach an existing durable credential account",
-              "long": "--account",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--key-stdin",
-              "description": "Read API key from stdin instead of prompting (for scripts/CI)",
-              "long": "--key-stdin",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--force",
-              "description": "Overwrite an existing profile with the same name",
-              "long": "--force",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "create",
-          "path": "profiles create",
-          "aliases": [],
-          "description": "Interactive profile creation wizard (any provider, with prompts for endpoints + keys).",
-          "args": [],
-          "options": [
-            {
-              "flags": "--name <name>",
-              "description": "Profile name (skips the name prompt)",
-              "long": "--name",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--provider <provider>",
-              "description": "Provider preset name (skips the provider prompt)",
-              "long": "--provider",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--no-smoke-test",
-              "description": "Skip the post-create smoke test prompt",
-              "long": "--no-smoke-test",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "list",
-          "path": "profiles list",
-          "aliases": [
-            "ls"
-          ],
-          "description": "List configured profiles",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "login",
-          "path": "profiles login",
-          "aliases": [],
-          "description": "Store or rotate the API key for a provider (e.g., openrouter). Shared across profiles using that provider.",
-          "args": [
-            {
-              "name": "provider",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--key-stdin",
-              "description": "Read API key from stdin",
-              "long": "--key-stdin",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "logout",
-          "path": "profiles logout",
-          "aliases": [],
-          "description": "Remove a stored provider key from keychain",
-          "args": [
-            {
-              "name": "provider",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "presets",
-          "path": "profiles presets",
-          "aliases": [],
-          "description": "List built-in presets (OpenRouter + direct providers)",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "remove",
-          "path": "profiles remove",
-          "aliases": [
-            "rm"
-          ],
-          "description": "Delete a profile (keychain token is kept — use `profiles logout <provider>` to remove)",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "view",
-          "path": "profiles view",
-          "aliases": [
-            "show"
-          ],
-          "description": "Show a profile (env, host, auth source, preset link)",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -17045,118 +16446,6 @@
           "description": ""
         }
       ],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": []
-    },
-    {
-      "name": "resume",
-      "path": "resume",
-      "aliases": [],
-      "description": "Resume a session by id, tmux alias, or exact label with its original harness, version, device, account, cwd, and mode. Searches the fleet automatically; a local full-id hit resumes with zero SSH.",
-      "args": [
-        {
-          "name": "session",
-          "required": true,
-          "variadic": false,
-          "description": ""
-        },
-        {
-          "name": "prompt",
-          "required": false,
-          "variadic": false,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "-m, --mode <mode>",
-          "description": "Override the recorded launch mode",
-          "short": "-m",
-          "long": "--mode",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-i, --interactive",
-          "description": "Resume interactively even when a prompt is provided",
-          "short": "-i",
-          "long": "--interactive",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--headless",
-          "description": "Resume headlessly (a prompt is required)",
-          "long": "--headless",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--cwd <path>",
-          "description": "Override the recorded working directory",
-          "long": "--cwd",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-q, --quiet",
-          "description": "Suppress routing banners",
-          "short": "-q",
-          "long": "--quiet",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--here",
-          "description": "Run on this machine even if the session belongs to another device",
-          "long": "--here",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "# Resume by full id\n      agents resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897\n\n      # Resume and continue headlessly\n      agents resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897 \"finish the tests\"\n\n      # Resume by exact label (auto-resumes the one match)\n      agents resume \"fix the flaky ssh test\"\n\n      # Resume by durable tmux alias or its unique suffix\n      agents resume ag-codex-c1f3d813\n      agents resume c1f3d813\n\n      # Deliberately change permissions\n      agents resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897 --mode edit",
-      "notes": "A full ID resolves from the local session database first (zero SSH) and, on a local miss, fans out with the first peer holding it cancelling the rest. An exact label always consults the fleet (labels are not globally unique) and auto-resumes the one match; a cross-machine label collision surfaces as an ambiguity.\n      A session that ran on another device resumes ON that device over SSH — the harness's conversation state lives there, so running it here would start against state this machine does not have. --here overrides that and runs locally.\n      Use agents run auto --resume <id> when the original account is unavailable and another harness may continue.",
-      "subcommands": []
-    },
-    {
-      "name": "roster",
-      "path": "roster",
-      "aliases": [],
-      "description": "Live agent roster (alias of `agents sessions --active`). Who is running right now.",
-      "args": [],
       "options": [
         {
           "flags": "-h, --help",
@@ -19682,11 +18971,11 @@
       "name": "run",
       "path": "run",
       "aliases": [],
-      "description": "Execute an agent. Pass a prompt for headless runs; omit it to launch the agent interactively.",
+      "description": "Execute an agent. Pass a prompt for headless runs; omit it to launch the agent interactively. With --broadcast, run the same prompt/task across an agent × model matrix.",
       "args": [
         {
           "name": "agent",
-          "required": true,
+          "required": false,
           "variadic": false,
           "description": ""
         },
@@ -19852,6 +19141,52 @@
           "optional": false,
           "variadic": false,
           "negate": false
+        },
+        {
+          "flags": "--broadcast",
+          "description": "Run the same prompt or --task across multiple agents (comma-separated [agent]) × --model cells. Replaces the former `agents bench` group.",
+          "long": "--broadcast",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--task <id>",
+          "description": "With --broadcast: house benchmark task id under apps/cli/bench/tasks/",
+          "long": "--task",
+          "required": true,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--list-tasks",
+          "description": "With --broadcast: list available broadcast task ids",
+          "long": "--list-tasks",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--results [run-id]",
+          "description": "With --broadcast: show one saved matrix run, or list saved runs newest first",
+          "long": "--results",
+          "required": false,
+          "optional": true,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--concurrency <n>",
+          "description": "With --broadcast: maximum cells running at once",
+          "long": "--concurrency",
+          "required": true,
+          "optional": false,
+          "variadic": false,
+          "negate": false,
+          "defaultValue": "3"
         },
         {
           "flags": "--resume [id]",
@@ -20238,8 +19573,8 @@
           "negate": false
         }
       ],
-      "examples": "# Headless, read-only: investigate or summarize without writing files\n      agents run claude \"summarize recent git commits\" --mode plan\n\n      # Headless, can edit: have the agent make changes\n      agents run claude \"fix lint errors in src/\" --mode edit\n\n      # Interactive (TUI) with the pinned default version\n      agents run claude\n\n      # Pick a signed-in account/version for only this run\n      agents run claude@\n\n      # Full-auto: affinity-pick the host, then the harness with the most\n      # account headroom, then a balanced account on it\n      agents run auto \"fix the flaky test\" --mode edit\nagents run auto --device yosemite-s0 \"fix the flaky test\"   # pin the device\n      agents run auto --interactive --device auto --strategy balanced --mode auto\n\n      # Placement (one door — where the body runs). Old flags still work.\n      agents run claude \"…\" --where device:yosemite-s0   # = --device yosemite-s0\n      agents run claude \"…\" --where auto                 # = --device auto\n      agents run claude \"fix CI\" --where lease --mode edit\n\n      # Vendor cloud placement — the agent's own cloud runs the task and\n      # agents cloud list/status/logs tracks it. Fire-and-forget: --no-follow\n      agents run claude \"fix the flaky e2e\" --cloud --repo acme/example\n      agents run codex \"add parser tests\" --cloud --cloud-env env_a1b2c3\n      agents run droid \"QA the onboarding flow\" --cloud --no-follow\n      agents run claude \"…\" --where cloud          # same as --cloud\n\n      # Open the session in a terminal tab — detected from where your sessions\n      # already run (Ghostty / iTerm / Terminal.app); force one with a value\n      agents run claude --terminal\n      agents run claude --terminal ghostty\n\n      # Pipe JSON events to a parser (--quiet drops the preamble)\n      agents run claude \"...\" --json --quiet | jq\n\n      # Bounded run — kill the agent after 30 minutes\n      agents run claude \"generate sales report for yesterday\" --mode plan --timeout 30m\n\n      # Inject a keychain-backed secrets bundle\n      agents run claude \"deploy the worker\" --secrets prod --mode edit\n\n      # Run on a cloud box — reuses a warm box from the repo's profile pool when\n      # one is ready (kept after the run), else leases a fresh box, torn down after\n      agents run claude \"fix the failing tests\" --lease\n\n      # Force a brand-new box (destroyed after), or target a warm box by slug\n      agents run claude \"fix the failing tests\" --lease --fresh\n      agents run claude \"fix the failing tests\" --box warm-one\n\n      # Pass arbitrary native flags to the underlying CLI via -- separator\n      agents run kimi -- --plan --some-kimi-option value\n      agents run claude \"fix the bug\" -- --custom-flag",
-      "notes": "Modes (not every agent supports every mode — run `agents modes <agent>`):\n        plan  read-only investigation; no writes, no shell side-effects\n        edit  may edit files; prompts for shell / risky operations\n        auto  smart classifier auto-approves safe ops, prompts for risky (claude, copilot)\n        skip  bypass every permission prompt (dangerously-skip-permissions)\n        Legacy 'full' is silently rewritten to 'skip'.\n        List per-harness support + native flags: agents modes · agents modes claude\n        Models (cheap|default|best|ultra): agents models <agent[@version]>\n\n      Headless plan support (a prompt makes the run headless):\n        plan works headless on claude, codex, cursor, droid, opencode.\n        kimi, grok, antigravity have no headless plan mode — a headless\n        --mode plan auto-downgrades to --mode auto (with a stderr warning).\n        Interactive plan (omit the prompt) works everywhere it is listed.\n\n      Run strategy (set via --strategy or run.<agent>.strategy in agents.yaml):\n        pinned     use the workspace/global pinned version\n        available  use pinned if it can run right now; otherwise switch to another signed-in version\n        balanced   distribute load across healthy accounts by remaining capacity (default)\n        A version/account is skipped when it is rate-limited right now — any usage window (incl. the 5-hour session window) at 100%, matching the 'agents view' badge.\n        --balanced is shorthand for --strategy balanced. Ignored when @version is pinned, when a profile is used, or with --fallback.\n        Zero healthy accounts under balanced/available exits nonzero naming each\n        excluded account and the earliest window reset — use --strategy pinned to force.\n\n      'auto' harness (agents run auto): picks the host (14d usage affinity,\n      unless --device is given), the harness (installed CLIs weighted by\n      best-account headroom), and the account (the strategy above). Zero\n      healthy accounts on any harness exits nonzero with the earliest reset.\n\n      Account picker: append @ with no version (agents run claude@) to choose one\n        installed account for this run. Rows show identity, login state, plan,\n        and available limits; unsafe accounts stay visible but disabled.\n\n      Fallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. Each entry accepts @version.\n\n      Cloud placement: --cloud sends the run to the agent's native vendor cloud\n        (claude→rush, codex→codex, droid→factory, antigravity→antigravity) — the\n        same dispatch as agents cloud run --agent <agent>, tracked by agents\n        cloud list/status/logs/cancel/message. --provider overrides the routing;\n        --repo/--branch/--cloud-env refine the task. Agents without a native\n        cloud (kimi, grok, cursor, opencode, …) fail loud unless --provider is\n        given. --cloud is mutually exclusive with --device/--lease and with\n        local-run flags (--loop, --resume, --secrets, --terminal, …).\n\n      Resume: --resume <id> resolves full IDs locally first, then fleet-wide, and recovers on the source device with its cwd/mode. The exact healthy origin version uses native resume; otherwise a healthy version of the same harness replays via /continue. agents resume <id> infers the harness too.\n\n      Passthrough: everything after -- is forwarded verbatim to the underlying agent CLI.\n        agents run kimi -- --plan --some-native-flag value",
+      "examples": "# Headless, read-only: investigate or summarize without writing files\n      agents run claude \"summarize recent git commits\" --mode plan\n\n      # Headless, can edit: have the agent make changes\n      agents run claude \"fix lint errors in src/\" --mode edit\n\n      # Interactive (TUI) with the pinned default version\n      agents run claude\n\n      # Pick a signed-in account/version for only this run\n      agents run claude@\n\n      # Full-auto: affinity-pick the host, then the harness with the most\n      # account headroom, then a balanced account on it\n      agents run auto \"fix the flaky test\" --mode edit\nagents run auto --device yosemite-s0 \"fix the flaky test\"   # pin the device\n      agents run auto --interactive --device auto --strategy balanced --mode auto\n\n      # Placement (one door — where the body runs). Old flags still work.\n      agents run claude \"…\" --where device:yosemite-s0   # = --device yosemite-s0\n      agents run claude \"…\" --where auto                 # = --device auto\n      agents run claude \"fix CI\" --where lease --mode edit\n\n      # Vendor cloud placement — the agent's own cloud runs the task and\n      # agents cloud list/status/logs tracks it. Fire-and-forget: --no-follow\n      agents run claude \"fix the flaky e2e\" --cloud --repo acme/example\n      agents run codex \"add parser tests\" --cloud --cloud-env env_a1b2c3\n      agents run droid \"QA the onboarding flow\" --cloud --no-follow\n      agents run claude \"…\" --where cloud          # same as --cloud\n\n      # Open the session in a terminal tab — detected from where your sessions\n      # already run (Ghostty / iTerm / Terminal.app); force one with a value\n      agents run claude --terminal\n      agents run claude --terminal ghostty\n\n      # Pipe JSON events to a parser (--quiet drops the preamble)\n      agents run claude \"...\" --json --quiet | jq\n\n      # Bounded run — kill the agent after 30 minutes\n      agents run claude \"generate sales report for yesterday\" --mode plan --timeout 30m\n\n      # Inject a keychain-backed secrets bundle\n      agents run claude \"deploy the worker\" --secrets prod --mode edit\n\n      # Run on a cloud box — reuses a warm box from the repo's profile pool when\n      # one is ready (kept after the run), else leases a fresh box, torn down after\n      agents run claude \"fix the failing tests\" --lease\n\n      # Force a brand-new box (destroyed after), or target a warm box by slug\n      agents run claude \"fix the failing tests\" --lease --fresh\n      agents run claude \"fix the failing tests\" --box warm-one\n\n      # Broadcast one prompt (or --task) across agents × models\n      agents run --broadcast claude,codex \"say hello\" --model cheap,default\n      agents run --broadcast --task hello-repo --model cheap\n      agents run --broadcast --list-tasks\n      agents run --broadcast --results --json\n\n      # Pass arbitrary native flags to the underlying CLI via -- separator\n      agents run kimi -- --plan --some-kimi-option value\n      agents run claude \"fix the bug\" -- --custom-flag",
+      "notes": "Modes (not every agent supports every mode — run `agents modes <agent>`):\n        plan  read-only investigation; no writes, no shell side-effects\n        edit  may edit files; prompts for shell / risky operations\n        auto  smart classifier auto-approves safe ops, prompts for risky (claude, copilot)\n        skip  bypass every permission prompt (dangerously-skip-permissions)\n        Legacy 'full' is silently rewritten to 'skip'.\n        List per-harness support + native flags: agents modes · agents modes claude\n        Models (cheap|default|best|ultra): agents models <agent[@version]>\n\n      Headless plan support (a prompt makes the run headless):\n        plan works headless on claude, codex, cursor, droid, opencode.\n        kimi, grok, antigravity have no headless plan mode — a headless\n        --mode plan auto-downgrades to --mode auto (with a stderr warning).\n        Interactive plan (omit the prompt) works everywhere it is listed.\n\n      Run strategy (set via --strategy or run.<agent>.strategy in agents.yaml):\n        pinned     use the workspace/global pinned version\n        available  use pinned if it can run right now; otherwise switch to another signed-in version\n        balanced   distribute load across healthy accounts by remaining capacity (default)\n        A version/account is skipped when it is rate-limited right now — any usage window (incl. the 5-hour session window) at 100%, matching the 'agents view' badge.\n        --balanced is shorthand for --strategy balanced. Ignored when @version is pinned, when a profile is used, or with --fallback.\n        Zero healthy accounts under balanced/available exits nonzero naming each\n        excluded account and the earliest window reset — use --strategy pinned to force.\n\n      'auto' harness (agents run auto): picks the host (14d usage affinity,\n      unless --device is given), the harness (installed CLIs weighted by\n      best-account headroom), and the account (the strategy above). Zero\n      healthy accounts on any harness exits nonzero with the earliest reset.\n\n      Account picker: append @ with no version (agents run claude@) to choose one\n        installed account for this run. Rows show identity, login state, plan,\n        and available limits; unsafe accounts stay visible but disabled.\n\n      Fallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. Each entry accepts @version.\n\n      Cloud placement: --cloud sends the run to the agent's native vendor cloud\n        (claude→rush, codex→codex, droid→factory, antigravity→antigravity) — the\n        same dispatch as agents cloud run --agent <agent>, tracked by agents\n        cloud list/status/logs/cancel/message. --provider overrides the routing;\n        --repo/--branch/--cloud-env refine the task. Agents without a native\n        cloud (kimi, grok, cursor, opencode, …) fail loud unless --provider is\n        given. --cloud is mutually exclusive with --device/--lease and with\n        local-run flags (--loop, --resume, --secrets, --terminal, …).\n\n      Resume: --resume <id> resolves full IDs locally first, then fleet-wide, and recovers on the source device with its cwd/mode. The exact healthy origin version uses native resume; otherwise a healthy version of the same harness replays via /continue. agents sessions resume <id> infers the harness too.\n\n      Passthrough: everything after -- is forwarded verbatim to the underlying agent CLI.\n        agents run kimi -- --plan --some-native-flag value",
       "subcommands": []
     },
     {
@@ -22157,6 +21492,105 @@
           "subcommands": []
         },
         {
+          "name": "vault",
+          "path": "secrets vault",
+          "aliases": [],
+          "description": "Unlock or lock the age-encrypted synced-secrets file (~/.agents/vault.age)",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents secrets vault unlock\nagents secrets vault unlock --create\nagents secrets vault unlock --join ~/Downloads/vault.age\nagents secrets vault lock",
+          "notes": "This is the synced vault passphrase cache — not `agents secrets unlock`, which holds keychain bundles in the secrets-agent after Touch ID.\nHarness OAuth sign-out is `agents accounts logout` (OAuth native logins only).",
+          "subcommands": [
+            {
+              "name": "lock",
+              "path": "secrets vault lock",
+              "aliases": [],
+              "description": "Forget the cached synced-secrets key",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "unlock",
+              "path": "secrets vault unlock",
+              "aliases": [],
+              "description": "Unlock synced secrets for this shell session",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--create",
+                  "description": "Create a new encrypted synced-secrets file at ~/.agents/vault.age",
+                  "long": "--create",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--join <path>",
+                  "description": "Copy and unlock an existing vault.age file",
+                  "long": "--join",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--force",
+                  "description": "Replace an existing synced-secrets file when used with --create or --join",
+                  "long": "--force",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--password-stdin",
+                  "description": "Read the master password from stdin",
+                  "long": "--password-stdin",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            }
+          ]
+        },
+        {
           "name": "view",
           "path": "secrets view",
           "aliases": [
@@ -22416,7 +21850,7 @@
       "name": "sessions",
       "path": "sessions",
       "aliases": [],
-      "description": "Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active` (alias: `agents roster`).",
+      "description": "Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active`.",
       "args": [
         {
           "name": "query",
@@ -23523,7 +22957,7 @@
             }
           ],
           "examples": "# Behavioural report — last 30 days, split by Claude account (default)\n      agents insights\n\n      # Which repo is eating the time\n      agents insights --by project --since 90d\n\n      # Counter mix board (harness/model/token/secrets recipes) — former agents trends\n      agents insights mix\n      agents insights mix --days 30\n      agents insights harness-mix --json\n      agents insights query --kind secret --days 7\n\n      # One account only, all of its history\n      agents insights --account \"Turing Labs\" --all\n\n      # Machine-readable, for a dashboard or a slash command\n      agents sessions insights --agent claude --agent codex --json\n\n      # Add a written read on what to change\n      agents insights --narrative",
-          "notes": "Two paths under one verb:\n        bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n        `agents insights mix`      — cheap counters from sessions.db + usage.db\n      Latency is `agents perf` (not mix). Quota is `agents usage`. Skill/slash popularity\n      is `agents sessions stats`. `agents trends` is a deprecated alias of the mix tree.\n\n      The behavioural report parses in-scope transcripts once and caches facets; later runs\n      re-read only files that changed. `--refresh` forces a full re-read.\n\n      `agents insights` is the top-level alias of `agents sessions insights`.\n      Repeat `--agent` to compare several harnesses in one report.\n\n      Everything except `--narrative` is local and makes no network calls.",
+          "notes": "Two paths under one verb:\n        bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n        `agents insights mix`      — cheap counters from sessions.db + usage.db\n      Latency is `agents perf` (not mix). Quota is `agents usage`. Spend is\n      `agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\n      is `agents sessions stats`. `agents trends` is a deprecated alias of the mix tree.\n\n      The behavioural report parses in-scope transcripts once and caches facets; later runs\n      re-read only files that changed. `--refresh` forces a full re-read.\n\n      `agents insights` is the top-level alias of `agents sessions insights`.\n      Repeat `--agent` to compare several harnesses in one report.\n\n      Everything except `--narrative` is local and makes no network calls.",
           "subcommands": [
             {
               "name": "browser-activity",
@@ -24280,13 +23714,19 @@
           "name": "resume",
           "path": "sessions resume",
           "aliases": [],
-          "description": "Reopen one session by canonical identity, or multi-select history into terminal tabs/splits.",
+          "description": "Resume a session by id (strict), or multi-select history into terminal tabs/splits.",
           "args": [
             {
               "name": "query",
               "required": false,
               "variadic": false,
-              "description": "Session id/tmux alias to reopen directly, or text that filters the picker"
+              "description": "Session id/tmux alias/label for strict resume, or text that filters the picker"
+            },
+            {
+              "name": "prompt",
+              "required": false,
+              "variadic": false,
+              "description": "Optional follow-up prompt (strict resume with original harness/version/device)"
             }
           ],
           "options": [
@@ -24393,6 +23833,72 @@
               "negate": false
             },
             {
+              "flags": "--splits",
+              "description": "Pack two sessions side by side per tab (default: one tab per session)",
+              "long": "--splits",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-m, --mode <mode>",
+              "description": "Strict resume: override the recorded launch mode",
+              "short": "-m",
+              "long": "--mode",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-i, --interactive",
+              "description": "Strict resume: interactive even when a prompt is provided",
+              "short": "-i",
+              "long": "--interactive",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--headless",
+              "description": "Strict resume: headless (a prompt is required)",
+              "long": "--headless",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--cwd <path>",
+              "description": "Strict resume: override the recorded working directory",
+              "long": "--cwd",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-q, --quiet",
+              "description": "Strict resume: suppress routing banners",
+              "short": "-q",
+              "long": "--quiet",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--here",
+              "description": "Strict resume: run on this machine even if the session belongs to another device",
+              "long": "--here",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--local",
               "description": "Only this machine (skip the cross-host sweep)",
               "long": "--local",
@@ -24411,15 +23917,6 @@
               "negate": false
             },
             {
-              "flags": "--splits",
-              "description": "Pack two sessions side by side per tab (default: one tab per session)",
-              "long": "--splits",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "-h, --help",
               "description": "Show help",
               "short": "-h",
@@ -24430,8 +23927,8 @@
               "negate": false
             }
           ],
-          "examples": "# Pick several sessions; each opens in its own tab\n      agents sessions resume\n\n      # Pre-filter the pool before selecting (space in the filter → use [query])\n      agents sessions resume \"auth middleware\"\n\n      # Reopen one session from any device by UUID prefix or tmux alias\n      agents sessions resume 019fd114\n      agents sessions resume ag-codex-c1f3d813\n\n      # Attach a living pane only — never resume a copy (the old go)\n      agents sessions resume 019fd114 --attach-only\n\n      # Force a backend / side-by-side splits / a remote host\n      agents sessions resume --ghostty\n      agents sessions resume --vscodium\n      agents sessions resume --splits\n      agents sessions resume --device zion --tmux",
-          "notes": "- This is the ONE verb for getting back in. It detects the state: a live tmux pane is attached, a headless session comes to the foreground, an ended one recovers on its owning device.\n      - A UUID/prefix or ag-<agent>-<suffix> alias bypasses the picker. A live alias attaches by name even when the session index cannot attribute it.\n      - Retired spellings still work for one release and print the replacement: sessions attach, sessions go, reconnect.\n      - Going the other way (foreground -> background) is 'agents sessions detach <id>'.\n      - With no identity selector, space toggles a session, enter confirms, and tab toggles the preview pane.\n      - Layout: one tab per session by default. --splits packs session pairs side by side in each tab.\n      - Backend: auto-detected from the terminal you're in (iTerm / Ghostty / tmux); override with --iterm/--ghostty/--tmux/--vscodium.\n      - --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --device too).\n      - --device <alias> opens the terminal surface on that device only when it is the selected sessions' origin; recovery never migrates a session to another device.\n      - Recovery runs on the session's origin device: exact healthy origin uses native resume; otherwise a healthy version of the same harness receives /continue <id>.",
+          "examples": "# Strict resume by full id (former top-level agents resume)\n      agents sessions resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897\n      agents sessions resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897 \"finish the tests\"\n      agents sessions resume ag-codex-c1f3d813 --mode edit\n\n      # Pick several sessions; each opens in its own tab\n      agents sessions resume\n\n      # Pre-filter the pool before selecting (space in the filter → use [query])\n      agents sessions resume \"auth middleware\"\n\n      # Reopen one session from any device by UUID prefix or tmux alias\n      agents sessions resume 019fd114\n      agents sessions resume ag-codex-c1f3d813\n\n      # Attach a living pane only — never resume a copy (the old go)\n      agents sessions resume 019fd114 --attach-only\n\n      # Force a backend / side-by-side splits / a remote host\n      agents sessions resume --ghostty\n      agents sessions resume --vscodium\n      agents sessions resume --splits\n      agents sessions resume --device zion --tmux",
+          "notes": "- Strict path (id/tmux alias/label + optional prompt/--mode/--headless/--here): restores original harness, version, device, account, cwd, and mode. Searches the fleet; a local full-id hit resumes with zero SSH. Replaces the former top-level agents sessions resume.\n      - Attach a live pane without forking: agents sessions focus <id>.\n      - This is the ONE verb for getting back in. It detects the state: a live tmux pane is attached, a headless session comes to the foreground, an ended one recovers on its owning device.\n      - A UUID/prefix or ag-<agent>-<suffix> alias bypasses the picker. A live alias attaches by name even when the session index cannot attribute it.\n      - Retired spellings still work for one release and print the replacement: sessions attach, sessions go, reconnect.\n      - Going the other way (foreground -> background) is 'agents sessions detach <id>'.\n      - With no identity selector, space toggles a session, enter confirms, and tab toggles the preview pane.\n      - Layout: one tab per session by default. --splits packs session pairs side by side in each tab.\n      - Backend: auto-detected from the terminal you're in (iTerm / Ghostty / tmux); override with --iterm/--ghostty/--tmux/--vscodium.\n      - --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --device too).\n      - --device <alias> opens the terminal surface on that device only when it is the selected sessions' origin; recovery never migrates a session to another device.\n      - Recovery runs on the session's origin device: exact healthy origin uses native resume; otherwise a healthy version of the same harness receives /continue <id>.",
           "subcommands": []
         },
         {
@@ -24828,7 +24325,194 @@
               "negate": false
             }
           ],
-          "subcommands": []
+          "subcommands": [
+            {
+              "name": "init",
+              "path": "setup mine init",
+              "aliases": [],
+              "description": "Mint your own branded CLI that runs every agents verb under <name>",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--disable <commands...>",
+                  "description": "Built-in commands to hide from this brand (e.g. teams cloud)",
+                  "long": "--disable",
+                  "required": true,
+                  "optional": false,
+                  "variadic": true,
+                  "negate": false
+                },
+                {
+                  "flags": "--force",
+                  "description": "Re-mint even if the brand already exists",
+                  "long": "--force",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "list",
+              "path": "setup mine list",
+              "aliases": [
+                "ls"
+              ],
+              "description": "Show your brands and what each has turned off",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "remove",
+              "path": "setup mine remove",
+              "aliases": [
+                "rm"
+              ],
+              "description": "Remove a brand (its shim + config)",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--purge",
+                  "description": "Also delete the brand's resource profile preset",
+                  "long": "--purge",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "toggle",
+              "path": "setup mine toggle",
+              "aliases": [],
+              "description": "Enable/disable features for a brand",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--disable <commands...>",
+                  "description": "Hide these built-in commands",
+                  "long": "--disable",
+                  "required": true,
+                  "optional": false,
+                  "variadic": true,
+                  "negate": false
+                },
+                {
+                  "flags": "--enable <commands...>",
+                  "description": "Un-hide these built-in commands",
+                  "long": "--enable",
+                  "required": true,
+                  "optional": false,
+                  "variadic": true,
+                  "negate": false
+                },
+                {
+                  "flags": "--disable-plugin <names...>",
+                  "description": "Disable these plugins for the brand",
+                  "long": "--disable-plugin",
+                  "required": true,
+                  "optional": false,
+                  "variadic": true,
+                  "negate": false
+                },
+                {
+                  "flags": "--enable-plugin <names...>",
+                  "description": "Re-enable these plugins",
+                  "long": "--enable-plugin",
+                  "required": true,
+                  "optional": false,
+                  "variadic": true,
+                  "negate": false
+                },
+                {
+                  "flags": "--disable-skill <names...>",
+                  "description": "Disable these skills for the brand",
+                  "long": "--disable-skill",
+                  "required": true,
+                  "optional": false,
+                  "variadic": true,
+                  "negate": false
+                },
+                {
+                  "flags": "--enable-skill <names...>",
+                  "description": "Re-enable these skills",
+                  "long": "--enable-skill",
+                  "required": true,
+                  "optional": false,
+                  "variadic": true,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            }
+          ]
         },
         {
           "name": "secrets",
@@ -25140,109 +24824,6 @@
           "subcommands": []
         }
       ]
-    },
-    {
-      "name": "snapshot",
-      "path": "snapshot",
-      "aliases": [],
-      "description": "One-process poll snapshot: install inventory + active sessions (optional feed/sync). Not the sync-status command — use `agents status` for drift.",
-      "args": [],
-      "options": [
-        {
-          "flags": "-D, --device <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
-          "short": "-D",
-          "long": "--device",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--remote-cwd <dir>",
-          "description": "Working directory on the device for --device runs. Resolves on the REMOTE device — pass a '$HOME'-relative path (single-quoted so your local shell doesn't expand it) or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you). No effect on 'teams add'.",
-          "long": "--remote-cwd",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--no-tty",
-          "description": "Force non-interactive output for --device runs even from a terminal.",
-          "long": "--no-tty",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": true
-        },
-        {
-          "flags": "--any",
-          "description": "With --device <cap> (a capability tag), pick any matching device instead of erroring when several match.",
-          "long": "--any",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--json",
-          "description": "Emit the machine-readable FleetSnapshot contract (version 1)",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--all-hosts",
-          "description": "Include remote devices in the sessions gather (same fan-out as `sessions --active`; default is this machine only)",
-          "long": "--all-hosts",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--with-feed",
-          "description": "Include open feed-block summary (needs-you count + compact rows)",
-          "long": "--with-feed",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--with-sync",
-          "description": "Include UnifiedSyncStatus (same engine as `agents status`; opt-in)",
-          "long": "--with-sync",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--agent <name>",
-          "description": "Restrict inventory to one agent (e.g. claude)",
-          "long": "--agent",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "# One-shot inventory + local active sessions (JSON)\n      agents snapshot --json\n\n      # Same, plus open feed blocks for needs-you polls\n      agents snapshot --json --with-feed\n\n      # Fleet-wide active sessions (matches sessions --active scope)\n      agents snapshot --json --all-hosts\n\n      # Inventory for one harness only (an AGI EXT-style usage poll)\n      agents snapshot --json --agent claude\n\n      # Run the whole snapshot on another device\n      agents snapshot --json --device yosemite-s0",
-      "subcommands": []
     },
     {
       "name": "ssh",

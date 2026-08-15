@@ -4397,9 +4397,9 @@ export async function resumeOnOwnerIfRemote(session: SessionMeta): Promise<boole
   const owner = sessionOwnerDevice(session);
   if (!owner) return false;
   console.log(chalk.gray(`Resuming ${session.shortId} on ${owner} over SSH...`));
-  // `agents resume <id>` is the strict single-session path — one pick, one
-  // resume. (`sessions resume <shortId>` would re-open a picker over there.)
-  const rc = await runOnPeer(['resume', session.id], owner, {
+  // `agents sessions resume <id>` is the strict single-session path — one pick, one
+  // resume.
+  const rc = await runOnPeer(['sessions', 'resume', session.id], owner, {
     tty: true,
     env: { [RESUME_PINNED_ENV]: '1' },
   });
@@ -4417,7 +4417,7 @@ export async function resumeOnOwnerIfRemote(session: SessionMeta): Promise<boole
 export async function resumeSessionInPlace(session: SessionMeta): Promise<void> {
   // This function is the LOCAL takeover, and every caller is responsible for
   // routing a peer-owned session before it gets here (the picker above,
-  // `agents resume`, `sessions attach`). Reaching it with one anyway means a
+  // `agents sessions resume`, `sessions attach`). Reaching it with one anyway means a
   // caller skipped that step, so refuse rather than start the harness against
   // state this box does not have — the `fs.existsSync(session.cwd)` fallback
   // just below is exactly how that used to pass unnoticed, quietly swapping in
@@ -4425,7 +4425,7 @@ export async function resumeSessionInPlace(session: SessionMeta): Promise<void> 
   const owner = sessionOwnerDevice(session);
   if (owner) {
     console.error(chalk.red(`Session ${session.shortId} belongs to ${owner} — it cannot resume on this machine.`));
-    console.error(chalk.gray(`  Resume it there: agents resume ${session.id}`));
+    console.error(chalk.gray(`  Resume it there: agents sessions resume ${session.id}`));
     process.exitCode = 1;
     return;
   }
@@ -5455,7 +5455,7 @@ export async function liveMetadataMatches(
   }
 }
 
-/** Reusable local-first resolver for `agents run --resume` and `agents resume`.
+/** Reusable local-first resolver for `agents run --resume` and `agents sessions resume`.
  * Full UUIDs hit the local SQLite index without any SSH fan-out. */
 export async function resolveSessionMetadataValue(
   selector: string,
@@ -5653,7 +5653,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--resolve <selector>', 'Resolve one full ID, unique prefix, or keyword query to safe session metadata (requires --json; searches the fleet unless --local)')
     .addOption(new Option('--resolve-safe-v1 <selector>').hideHelp())
     .description(
-      'Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active` (alias: `agents roster`).',
+      'Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active`.',
     )
     .option('-a, --agent <agent>', 'Filter by agent type and version (e.g., claude, codex@0.116.0)')
     .addOption(
@@ -5921,32 +5921,6 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsInsightsCommand(sessionsCmd);
   registerSessionsOptimizeCommand(sessionsCmd);
   registerSessionsWatchCommand(sessionsCmd);
-
-  // Observe-umbrella alias (Phase 3): roster → sessions --active.
-  registerSessionsObserveAliases(program);
-}
-
-/**
- * `roster` → sessions --active. Registered with the sessions module so the
- * lazy loader for `roster` also registers the real `sessions` command for re-parse.
- */
-function registerSessionsObserveAliases(program: Command): void {
-  program
-    .command('roster')
-    .description('Live agent roster (alias of `agents sessions --active`). Who is running right now.')
-    .allowUnknownOption()
-    .allowExcessArguments()
-    .action(async () => {
-      const { expandObserveAlias } = await import('../lib/observe-aliases.js');
-      const rest = process.argv.slice(3);
-      const expanded = expandObserveAlias('roster', rest);
-      if (!expanded) {
-        console.error(chalk.red('Unknown observe alias: roster'));
-        process.exit(1);
-      }
-      if (process.stderr.isTTY) process.stderr.write(chalk.gray(`${expanded.note}\n`));
-      await program.parseAsync(['node', 'agents', ...expanded.argv]);
-    });
 }
 
 function formatNoSessionsMessage(

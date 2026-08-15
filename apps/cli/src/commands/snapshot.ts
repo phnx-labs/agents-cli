@@ -1,5 +1,5 @@
 /**
- * `agents snapshot` — one-process consumer snapshot for pollers.
+ * `agents devices snapshot` — one-process consumer snapshot for pollers.
  *
  * Replaces the N× `view --json` + `sessions --active --json` (+ optional feed)
  * fork storm with a single command. Does NOT replace `agents status`, which
@@ -86,15 +86,15 @@ function renderHuman(snap: FleetSnapshot): void {
 
   console.log(
     chalk.gray(
-      '\n  Machine-readable: agents snapshot --json\n' +
+      '\n  Machine-readable: agents devices snapshot --json\n' +
         '  Sync-only (unchanged): agents status --json',
     ),
   );
 }
 
-export function registerSnapshotCommand(program: Command): void {
+export function registerSnapshotCommand(devicesCmd: Command): void {
   const cmd = addHostOption(
-    program
+    devicesCmd
       .command('snapshot')
       .description(
         'One-process poll snapshot: install inventory + active sessions (optional feed/sync). Not the sync-status command — use `agents status` for drift.',
@@ -112,19 +112,19 @@ export function registerSnapshotCommand(program: Command): void {
   setHelpSections(cmd, {
     examples: `
       # One-shot inventory + local active sessions (JSON)
-      agents snapshot --json
+      agents devices snapshot --json
 
       # Same, plus open feed blocks for needs-you polls
-      agents snapshot --json --with-feed
+      agents devices snapshot --json --with-feed
 
       # Fleet-wide active sessions (matches sessions --active scope)
-      agents snapshot --json --all-hosts
+      agents devices snapshot --json --all-hosts
 
       # Inventory for one harness only (an AGI EXT-style usage poll)
-      agents snapshot --json --agent claude
+      agents devices snapshot --json --agent claude
 
       # Run the whole snapshot on another device
-      agents snapshot --json --device yosemite-s0
+      agents devices snapshot --json --device yosemite-s0
     `,
   });
 

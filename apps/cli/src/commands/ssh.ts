@@ -116,6 +116,7 @@ import {
 } from '../lib/devices/harness-inventory.js';
 import { crabboxList, crabboxFind, crabboxSshArgv, type CrabboxBox } from '../lib/crabbox/cli.js';
 import { boxAddress, boxStatus, fmtIdleShort, fmtExpiresShort, registerLeaseCommand } from './lease.js';
+import { registerSnapshotCommand } from './snapshot.js';
 import {
   authCellColor,
   formatCheckedAge,
@@ -1138,10 +1139,11 @@ function registerDevicesCommands(program: Command): void {
   });
 
   registerLeaseCommand(devicesCmd);
+  registerSnapshotCommand(devicesCmd);
 
   registerCommandGroups(devicesCmd, [
     { title: 'Discover & register', names: ['sync', 'register', 'add', 'ignore', 'unignore', 'rm'] },
-    { title: 'Inspect', names: ['list', 'show', 'status', 'ping', 'harnesses', 'accounts'] },
+    { title: 'Inspect', names: ['list', 'show', 'status', 'ping', 'harnesses', 'accounts', 'snapshot'] },
     { title: 'Disposable devices', names: ['lease'] },
     { title: 'Configure a device', names: ['config', 'render'] },
     { title: 'Fleet operations', names: ['update', 'run', 'login', 'pair-ios', 'capture', 'apply'] },

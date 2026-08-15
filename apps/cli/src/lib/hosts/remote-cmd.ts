@@ -156,6 +156,14 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   notify: 'local-only',
   // Deprecated alias for --device auto; resolved on the launching box before SSH.
   smart: 'local-only',
+  // Broadcast mode (agents run --broadcast) is its own fan-out dispatch — mutually
+  // exclusive with --host. All broadcast options are local-only; exec.ts handles them
+  // before any SSH dispatch path is reached.
+  broadcast: 'local-only',
+  task: 'local-only',
+  listTasks: 'local-only',
+  results: 'local-only',
+  concurrency: 'local-only',
 };
 
 /** Actionable messages for value-aware rejections, keyed by attribute name. */

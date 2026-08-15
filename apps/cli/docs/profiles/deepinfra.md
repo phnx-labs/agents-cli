@@ -6,7 +6,7 @@ DeepInfra exposes an OpenAI-compatible API. The built-in `deepinfra` profile run
 
 ```bash
 agents accounts add deepinfra --provider deepinfra --auth api-key
-agents profiles add deepinfra --account deepinfra
+agents harness add deepinfra --account deepinfra
 agents run deepinfra "summarize this repository"
 ```
 

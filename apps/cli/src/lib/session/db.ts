@@ -645,7 +645,7 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     // v11 → v12: `output_tokens` — the real generated-token count, kept separate
     // from `token_count` (which sums cache-read/-write and so is dominated by
     // cheap re-counted context). This is the honest "output" metric powering
-    // `agents output`. Additive column; rescan to backfill from transcripts.
+    // `agents insights output`. Additive column; rescan to backfill from transcripts.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'output_tokens')) db.exec(`ALTER TABLE sessions ADD COLUMN output_tokens INTEGER`);
     db.exec(`DELETE FROM scan_ledger;`);
@@ -1092,12 +1092,12 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
 
   if (fromVersion < 37) {
     // v36 -> v37: persist the burn SPLIT (uncached input / cache-read /
-    // cache-write) and a second "no-cache" cost per session, so `agents output`
+    // cache-write) and a second "no-cache" cost per session, so `agents insights output`
     // can report the token split and a --pricing no-cache scenario (RUSH-2287).
     // These are new nullable columns — do NOT flush scan_ledger (adding a column
     // must keep warm session ledgers warm, the contract the v33->v34 note above
     // states). Pre-upgrade rows stay NULL for the split until their transcript is
-    // re-scanned; `agents output` reports the split only where it is present, so
+    // re-scanned; `agents insights output` reports the split only where it is present, so
     // an absent split reads as "not available for this session", never as zero.
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
@@ -2930,7 +2930,7 @@ export interface UsageRollupRow {
   costUsd: number;
   /**
    * USD cost priced as if caching were off (cache read/write at the input rate),
-   * summed from `cost_usd_nocache`. Backs `agents output --pricing no-cache`.
+   * summed from `cost_usd_nocache`. Backs `agents insights output --pricing no-cache`.
    * Equals `costUsd` for rows whose sessions record no cache split (RUSH-2287).
    */
   costUsdNoCache: number;
@@ -3226,7 +3226,7 @@ export function queryAffinityRollup(options: {
 /**
  * Aggregate cost / duration / tokens across sessions, grouped by agent,
  * project, or calendar day. Honors the same filter shape as querySessions
- * (agent, since/until, team-origin) so `agents cost --since 7d --by day`
+ * (agent, since/until, team-origin) so `agents insights cost --since 7d --by day`
  * lines up with what `agents sessions` would list. Ordered by cost desc.
  */
 export function queryUsageRollup(

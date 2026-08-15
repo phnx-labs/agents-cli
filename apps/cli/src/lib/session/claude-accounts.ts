@@ -55,7 +55,7 @@
  *
  * Until that lands, a non-Claude session has a NULL `account_key` and rolls up under
  * `unattributed:<agent>` — named after its harness rather than implying we tried and
- * failed. `--by account` on `agents cost` / `agents output` therefore reports Claude
+ * failed. `--by account` on `agents insights cost` / `agents insights output` therefore reports Claude
  * accounts plus one bucket per other harness.
  */
 

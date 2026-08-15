@@ -1,3 +1,11 @@
+/**
+ * `agents secrets vault` — unlock/lock the age-encrypted synced-secrets file
+ * at ~/.agents/vault.age (distinct from `agents secrets unlock|lock`, which
+ * holds keychain bundles in the secrets-agent).
+ *
+ * Formerly top-level `agents login` / `agents logout`.
+ */
+
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import * as fs from 'fs';
@@ -11,6 +19,7 @@ import {
   vaultExists,
   vaultPath,
 } from '../lib/secrets/vault.js';
+import { setHelpSections } from '../lib/help.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 
 async function promptPassword(message: string): Promise<string> {
@@ -30,7 +39,7 @@ async function readPassword(opts: { passwordStdin?: boolean }, message: string):
   return promptPassword(message);
 }
 
-async function chooseFreshLoginMode(opts: { create?: boolean; join?: string }): Promise<'create' | 'join'> {
+async function chooseFreshMode(opts: { create?: boolean; join?: string }): Promise<'create' | 'join'> {
   if (opts.create && opts.join) throw new Error('--create and --join are mutually exclusive.');
   if (opts.create) return 'create';
   if (opts.join) return 'join';
@@ -39,10 +48,10 @@ async function chooseFreshLoginMode(opts: { create?: boolean; join?: string }): 
   }
   const { select } = await import('@inquirer/prompts');
   return select({
-    message: 'No synced secrets login found. What do you want to do?',
+    message: 'No synced secrets vault found. What do you want to do?',
     choices: [
-      { name: 'Create a new login', value: 'create' as const },
-      { name: 'Join with an existing synced secrets file', value: 'join' as const },
+      { name: 'Create a new vault', value: 'create' as const },
+      { name: 'Join with an existing vault.age file', value: 'join' as const },
     ],
   });
 }
@@ -58,9 +67,23 @@ function formatRemaining(expiresAt: number): string {
   return `${days} day${days === 1 ? '' : 's'}`;
 }
 
-export function registerLoginCommands(program: Command): void {
-  program
-    .command('login')
+/** Register `agents secrets vault unlock|lock` under the secrets parent. */
+export function registerSecretsVaultCommands(secretsCmd: Command): void {
+  const vault = secretsCmd
+    .command('vault')
+    .description('Unlock or lock the age-encrypted synced-secrets file (~/.agents/vault.age)');
+
+  setHelpSections(vault, {
+    examples: `agents secrets vault unlock
+agents secrets vault unlock --create
+agents secrets vault unlock --join ~/Downloads/vault.age
+agents secrets vault lock`,
+    notes: `This is the synced vault passphrase cache — not \`agents secrets unlock\`, which holds keychain bundles in the secrets-agent after Touch ID.
+Harness OAuth sign-out is \`agents accounts logout\` (OAuth native logins only).`,
+  });
+
+  vault
+    .command('unlock')
     .description('Unlock synced secrets for this shell session')
     .option('--create', 'Create a new encrypted synced-secrets file at ~/.agents/vault.age')
     .option('--join <path>', 'Copy and unlock an existing vault.age file')
@@ -76,11 +99,11 @@ export function registerLoginCommands(program: Command): void {
           unlock(password);
           const session = getVaultSession();
           const ttl = session.loggedIn ? formatRemaining(session.expiresAt) : '8 hours';
-          console.log(chalk.green(`Logged in. Synced secrets unlocked for ${ttl}.`));
+          console.log(chalk.green(`Unlocked. Synced secrets available for ${ttl}.`));
           return;
         }
 
-        const mode = await chooseFreshLoginMode(opts);
+        const mode = await chooseFreshMode(opts);
         if (mode === 'join') {
           let source = opts.join;
           if (!source) {
@@ -93,13 +116,13 @@ export function registerLoginCommands(program: Command): void {
           }
           const password = await readPassword(opts, 'Master password');
           joinVault(password, source, { overwrite: opts.force });
-          console.log(chalk.green(`Logged in. Copied synced secrets file to ${vaultPath()}.`));
+          console.log(chalk.green(`Unlocked. Copied synced secrets file to ${vaultPath()}.`));
           return;
         }
 
         const password = await readPassword(opts, 'Choose a master password');
         createVault(password, { overwrite: opts.force });
-        console.log(chalk.green(`Logged in. Created synced secrets file at ${vaultPath()}.`));
+        console.log(chalk.green(`Unlocked. Created synced secrets file at ${vaultPath()}.`));
       } catch (err) {
         if (isPromptCancelled(err)) return;
         console.error(chalk.red((err as Error).message));
@@ -107,11 +130,11 @@ export function registerLoginCommands(program: Command): void {
       }
     });
 
-  program
-    .command('logout')
+  vault
+    .command('lock')
     .description('Forget the cached synced-secrets key')
     .action(() => {
       clearVaultKey();
-      console.log(chalk.green('Logged out. Synced secrets are locked.'));
+      console.log(chalk.green('Locked. Synced secrets require unlock again.'));
     });
 }
