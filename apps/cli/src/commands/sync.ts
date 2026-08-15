@@ -976,7 +976,7 @@ function printSyncDetail(result: SyncResult, agent: AgentId, version: string, cw
     .filter(([, names]) => names.length > 0)
     .map(([kind, names]) => ({ kind, items: names }));
 
-  if (lines.length === 0 && prunedLines.length === 0) {
+  if (lines.length === 0 && prunedLines.length === 0 && result.declined.length === 0) {
     console.log(chalk.gray(`Already in sync — ${agentLabel(agent)}@${version}`));
     if (kept) console.log(chalk.gray(kept));
     return;
@@ -1002,6 +1002,13 @@ function printSyncDetail(result: SyncResult, agent: AgentId, version: string, cw
     console.log(chalk.yellow(`Pruned from ${agentLabel(agent)}@${version} (removed from source):`));
     const kindWidth = Math.max(...prunedLines.map(l => l.kind.length));
     for (const { kind, items } of prunedLines) printKindLine(kind, items, kindWidth, chalk.yellow);
+  }
+
+  // A resource agents-cli refused to write is reported, never swallowed — an
+  // empty synced list on its own reads as "nothing to do" (RUSH-2677).
+  if (result.declined.length > 0) {
+    console.log(chalk.yellow(`Not written to ${agentLabel(agent)}@${version}:`));
+    for (const reason of result.declined) console.log(`  ${chalk.yellow(reason)}`);
   }
 
   if (kept) console.log(chalk.gray(kept));

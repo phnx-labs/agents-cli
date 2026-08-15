@@ -30,6 +30,14 @@ export interface WriteArgs<Sel> {
 export interface WriteResult {
   /** Names actually written. Empty array = write produced nothing (not an error). */
   synced: string[];
+  /**
+   * Per-item failures the writer could not complete, as user-facing sentences.
+   *
+   * `synced: []` alone cannot distinguish "nothing to do" from "refused to
+   * write and said why", which is how an unwritable harness reported success
+   * for its whole life (RUSH-2677). A writer that declines MUST say so here.
+   */
+  errors?: string[];
 }
 
 /**
