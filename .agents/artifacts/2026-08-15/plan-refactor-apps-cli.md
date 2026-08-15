@@ -75,7 +75,7 @@ The upward edges that close the cycle, exactly:
 
 ```ts
 // library code importing command implementations — the edges to invert
-lib/startup/command-registry.ts  →  import('../../commands/view.js')  // ×46, lazy
+lib/startup/command-registry.ts  →  import('../../commands/view.js')  // one of 83 lazy command loaders
 lib/menubar/snapshot.ts          →  buildRoutineListJson from '../../commands/routines.js'
 lib/factory/snapshot.ts          →  serializeActiveSessionsForJson from '../../commands/sessions.js'
 lib/computer/dispatch.ts         →  emitComputerAction from '../../commands/computer-actions.js'
