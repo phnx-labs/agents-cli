@@ -271,7 +271,10 @@ enum AgentsCLI {
     static func executable(named name: String, in directories: [String]) -> String? {
         for directory in directories {
             let candidate = (directory as NSString).appendingPathComponent(name)
-            if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
+            var isDirectory: ObjCBool = false
+            let exists = FileManager.default.fileExists(atPath: candidate, isDirectory: &isDirectory)
+            if exists, !isDirectory.boolValue,
+               FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
         }
         return nil
     }
