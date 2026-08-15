@@ -298,6 +298,9 @@ export function ForemanOrb({ vscode }: ForemanOrbProps) {
         {speakerMuted ? 'silent' : 'voice'}
       </button>
 
+      {/* The placeholder must fit one row at width 260 — a longer hint wraps to a
+          second line that this rows={1} box then clips. Dictation is taught by the
+          orb's own press-and-hold title, not by the placeholder. */}
       <textarea
         className="foreman-orb-smart-input"
         value={smartInput}
@@ -308,7 +311,7 @@ export function ForemanOrb({ vscode }: ForemanOrbProps) {
             submitSmart()
           }
         }}
-        placeholder="Ask Foreman… (type or dictate, Enter to send)"
+        placeholder="Ask Foreman… (Enter to send)"
         rows={1}
         aria-label="Ask Foreman in smart mode"
         style={{

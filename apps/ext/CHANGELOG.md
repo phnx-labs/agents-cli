@@ -6,6 +6,30 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+## [0.9.324] - 2026-08-15
+
+- **The Fleet panel no longer reports 0 sessions in a second editor window (RUSH-2733).**
+  One window per machine wins the monitor lease and owns the single `agents sessions watch
+  --json` child; that stream emits a `reset` once at startup and only deltas afterwards, so
+  every other window depends on the host replaying a synthetic `reset` when it reports in.
+  The host registered its request handler as `(payload) => handleRequest(payload)`, dropping
+  the `socket` the broadcast server passes — and the replay is guarded by `if (socket)`, so
+  it silently never ran. Follower windows were ACKed, received only deltas for rows they
+  never had, and rendered "0 agents running" while agents were running. Source:
+  `apps/ext/src/monitor/host.ts`.
+
+## [0.9.323] - 2026-08-15
+
+- **The Foreman orb no longer covers the Fleet session detail.** The orb, its speaker
+  chip and its composer are a `position: fixed` bottom-right overlay, so the newest
+  Activity line in the session detail column rendered underneath them and could not be
+  scrolled clear (measured: 48-71px of the live `Bash:` line covered at a 430px column).
+  The detail column now reserves the overlay's footprint. The composer's placeholder is
+  also shortened to `Ask Foreman… (Enter to send)` — the old hint wrapped to a second
+  line that the one-row input clipped (measured 17px). Source:
+  `apps/ext/ui/settings/components/mission-control/floor.css`, `index.css`,
+  `components/foreman/ForemanOrb.tsx`.
+
 - **Fleet sessions list ranks by progress — idle work no longer hides below running.**
   The state-grouped Sessions list now surfaces a **Needs attention** band (live sessions
   that have stopped progressing — waiting on input, stalled, idle, or failed) *above* the

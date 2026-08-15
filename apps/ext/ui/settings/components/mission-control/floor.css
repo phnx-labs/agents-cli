@@ -214,7 +214,10 @@
 /* ============ LAYOUT: FEED (3-pane: scope . feed . detail) ============ */
 .swarmify-root .feed-col { flex: 1; min-width: 0; overflow: auto; display: flex; justify-content: center; }
 .swarmify-root .feed { width: 100%; max-width: 820px; padding: 14px 18px 60px; }
-.swarmify-root .detail-col { flex: 0 0 430px; border-left: 1px solid var(--ds-border); overflow: auto; background: var(--ds-bg-panel); }
+/* The Foreman orb + composer float over this column's bottom-right corner, so the
+   newest Activity line landed underneath them and could not be scrolled clear.
+   Pad the scroll region by the overlay's footprint (index.css). */
+.swarmify-root .detail-col { flex: 0 0 430px; border-left: 1px solid var(--ds-border); overflow: auto; padding-bottom: var(--foreman-overlay-clear); background: var(--ds-bg-panel); }
 .swarmify-root .detail-empty { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--ds-text-faint); font-size: 12px; padding: 20px; text-align: center; }
 /* Detail-pane artifacts row: the selected agent's outputs (PR / CI / team / tickets),
    color-coded per the mockup — blue PR, green CI, violet team, amber created tickets. */

@@ -147,7 +147,7 @@ jobs:
     needs: scope
     if: needs.scope.outputs.windows == 'true'
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 8
     defaults:
       run:
         working-directory: apps/cli
@@ -156,14 +156,12 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - run: bun install --frozen-lockfile
       - run: bun run build
-      # Run the full Vitest suite on Windows so the gate reflects real Windows
-      # regressions, not a hand-picked slice (RUSH-2215). The POSIX-only
-      # integration tests that used to collapse the run — openclaw `which`+`sh`
-      # delivery, ssh ControlMaster multiplexing, `#!/bin/sh` PATH stubs, bash
-      # release-script checks, sqlite-locked teardown — now skip on win32 (expanded RUSH-2215 quarantine) with a
-      # stated reason (describe/it.skipIf), so the suite runs green and a genuine
-      # Windows break stops standing out from the noise instead of hiding in it.
-      - run: bun run test
+      # Smoke only — path/hooks/shims. Linux shards own the full suite.
+      # A full unsharded `bun run test` on windows-latest is ~21 minutes
+      # (855 files, no --shard) and was restarting on every push, so PRs
+      # sat on the required `test` aggregator for hours. RUSH-2215's full
+      # Windows suite lives in #2707, not this required PR gate.
+      - run: bun run test -- src/lib/platform src/lib/hooks src/lib/binary-shadow.test.ts src/lib/shims.test.ts src/lib/shims.device-pins.test.ts
 
   test:
     needs: [scope, cli-preflight, cli-test-shard, cli-docs, ext, session-tracker, windows]

@@ -14,21 +14,24 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_89 command groups · 552 commands._
+_89 command groups · 559 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
 ```
 agents accounts                             Browse native logins and manage provider account bundles
 agents accounts add <name>                  Add a durable API key, setup token, or bearer token
+agents accounts attach <account> <target>   Attach a named account to a native installation or custom harness
 agents accounts clear-default <agent>       Return a harness to native login or balanced account selection
-agents accounts inspect <name>              Show safe account metadata
+agents accounts detach <account> <target>   Remove one account attachment
 agents accounts list                        List credential accounts
+agents accounts name <source> <name>        Name a signed-in native installation without copying its OAuth credentials
 agents accounts remove <name>               Remove an account and its device-local credential
 agents accounts rename <old> <new>          Rename an account without changing its stable id
 agents accounts set-default <agent> <name>  Use a provider account for a harness when --account is omitted
 agents accounts set-key <name>              Rotate an account credential without changing its identity
-agents accounts sync <name>                 Copy one provider account bundle to a worker device
+agents accounts sync <name> [device]        Copy one provider account bundle to a worker device
+agents accounts view <name>                 Show safe account metadata, custody, and attachments
 ```
 
 ## add — Download and install agent CLI versions. Enables subsidized API usage through managed binaries.
@@ -46,10 +49,10 @@ agents alias list                       Show installed aliases
 agents alias remove <name>              Delete an alias shim
 ```
 
-## apply — Reconcile the fleet to a declared profile: install agents, sync config, propagate login.
+## apply — Reconcile the fleet to a declared profile: install agents and sync config.
 
 ```
-agents apply  Reconcile the fleet to a declared profile: install agents, sync config, propagate login.
+agents apply  Reconcile the fleet to a declared profile: install agents and sync config.
 ```
 
 ## artifacts — Publish agent-made artifacts (plans, reports, visuals) to your own Cloudflare R2 and get a shareable link (~$0).
@@ -248,6 +251,10 @@ agents daemon services list               List every daemon service and whether 
 agents daemon start                       Start the daemon. Bypasses daemon.enabled — this is the deliberate override.
 agents daemon status                      Identity (state/pid/uptime/binary), duplicate daemons, daemons running deleted code, and per-service health.
 agents daemon stop                        Stop the daemon.
+agents daemon webhooks                    Signed webhook receivers this box hosts as a supervised daemon service.
+agents daemon webhooks add                Declare a receiver on this box. Replaces any receiver already on the same port.
+agents daemon webhooks list               List the receivers declared for this box.
+agents daemon webhooks remove <port>      Stop hosting the receiver bound to this port.
 ```
 
 ## devices — Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale. Alias: fleet.
@@ -257,7 +264,7 @@ _aliases: fleet_
 agents devices                                 Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale. Alias: fleet.
 agents devices accounts                        Per device, one row per account: which harnesses share it, signed-in, quota, and ready. The identity lens on `agents devices harnesses`.
 agents devices add <name> <target>             Add a device manually (target is user@host or host).
-agents devices apply                           Reconcile the fleet to a declared profile: install agents, sync config, propagate login.
+agents devices apply                           Reconcile the fleet to a declared profile: install agents and sync config.
 agents devices capture                         Snapshot the live environment (roster names, agents, browser, secret-bundle names, routines) into agents.yaml fleet:.
 agents devices config <name> [key] [value...]  Get, set, or unset a device’s settings (scheduler, agent cap, ssh overrides, auto-launch, notes). Bare opens an interactive settings menu (TTY) or prints the resolved config (piped). Stored centrally in ~/.agents/agents.yaml under fleet.devices.<name>.config — synced, so any box can configure any device.
 agents devices harnesses                       Per device, one row per installed agent@version: account, signed-in, quota, and a single ready verdict. SSH-probes each online box.
@@ -585,7 +592,7 @@ agents projects add <name>     Define a project. Infers root and repo from the c
 agents projects edit <name>    Open the project YAML in $EDITOR (it is hand-editable regardless).
 agents projects for-cwd [cwd]  Resolve a directory to its defined project name (root or a repos[].path/subpath match). Defaults to the current directory.
 agents projects import         Import project definitions from Linear (via the `linear` CLI).
-agents projects link <name>    Attach an external tracker to a project definition (writes linear.projectId into the YAML).
+agents projects link <name>    Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).
 agents projects list           List defined projects (definitions only by default; no session scan).
 agents projects pull <name>    Fast-forward every fleet checkout of a named project to its remote default branch.
 agents projects rm <name>      Delete a project definition. Never touches the repo.

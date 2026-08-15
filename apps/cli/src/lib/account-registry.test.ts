@@ -5,7 +5,27 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { secretsKeychainItem, setKeychainBackendForTest, setKeychainToken, type KeychainBackend } from './secrets/index.js';
 import { writeBundleWithItems } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
-import { addAccount, inspectAccount, readAccountRegistry, removeAccount, renameAccount, resolveAccountSelection, resolveCredentialAccount, setAccountSecret } from './account-registry.js';
+import { addAccount, findUnifiedAccount, inspectAccount, readAccountRegistry, removeAccount, renameAccount, resolveAccountSelection, resolveCredentialAccount, resolveSpawnAccount, setAccountSecret, type AccountRegistryDocument } from './account-registry.js';
+
+describe('findUnifiedAccount does not touch the provider store for a native lookup', () => {
+  // A registry whose every access throws — stands in for a device whose provider
+  // bundle read / legacy migration / keychain decrypt would fail (the real crash).
+  const poisoned = new Proxy({} as AccountRegistryDocument, {
+    get() { throw new Error('provider registry accessed'); },
+  });
+  const meta = {
+    accounts: { native: { 'id-1': { id: 'id-1', name: 'work', agent: 'claude' as const, identityKey: 'claude:user=1', scope: 'version' as const } } },
+  };
+
+  it('returns a native account without reading the provider registry', () => {
+    expect(findUnifiedAccount('work', meta, poisoned)).toMatchObject({ kind: 'native', name: 'work', agent: 'claude' });
+    expect(findUnifiedAccount('id-1', meta, poisoned)).toMatchObject({ kind: 'native', id: 'id-1' });
+  });
+
+  it('reaches the provider registry only when the name is not a native account', () => {
+    expect(() => findUnifiedAccount('not-native', meta, poisoned)).toThrow('provider registry accessed');
+  });
+});
 
 class MemoryKeychain implements KeychainBackend {
   values = new Map<string, string>();
@@ -107,6 +127,77 @@ describe('credential account registry (bundle-canonical)', () => {
     expect(resolveAccountSelection(undefined, 'codex', meta)).toBeUndefined();
     expect(resolveAccountSelection(undefined, 'claude', meta, { useDefault: false })).toBeUndefined();
     expect(resolveAccountSelection('profile-override', 'claude', meta, { useDefault: false })).toBe('profile-override');
+  });
+
+  it('resolves exact installation and device-scoped bindings before a harness default', () => {
+    const meta = {
+      accounts: {
+        defaults: { claude: 'default-work' },
+        bindings: { 'claude@2.1.220': 'native-work', cursor: 'cursor-device' },
+      },
+    };
+    expect(resolveAccountSelection(undefined, 'claude', meta, { target: 'claude@2.1.220' })).toBe('native-work');
+    expect(resolveAccountSelection(undefined, 'claude', meta, { target: 'claude@2.1.225' })).toBe('default-work');
+    expect(resolveAccountSelection(undefined, 'cursor', meta, { target: 'cursor@latest' })).toBe('cursor-device');
+    expect(resolveAccountSelection('one-run', 'claude', meta, { target: 'claude@2.1.220' })).toBe('one-run');
+  });
+
+  it('resolveSpawnAccount classifies provider (with env) vs native (no keychain read), following bindings', () => {
+    addAccount('prov', 'cursor', 'api-key', 'device-key', root);
+    // Provider selection resolves the injected env at spawn time.
+    const provider = resolveSpawnAccount('prov', 'cursor', '1.0.0', { accounts: {} }, { base: root });
+    expect(provider).toMatchObject({ kind: 'provider', name: 'prov' });
+    expect(provider?.kind === 'provider' && provider.env).toEqual({ CURSOR_API_KEY: 'device-key' });
+
+    // An exact agent@version binding selects a native account, classified from
+    // meta alone — no provider bundle / keychain read (base is a temp home).
+    const meta = {
+      accounts: {
+        native: { n1: { id: 'n1', name: 'work', agent: 'claude' as const, identityKey: 'claude:user=1', scope: 'version' as const } },
+        bindings: { 'claude@2.1.220': 'n1' },
+      },
+    };
+    const native = resolveSpawnAccount(undefined, 'claude', '2.1.220', meta, { base: root });
+    expect(native).toMatchObject({ kind: 'native', name: 'work', agent: 'claude', identityKey: 'claude:user=1', scope: 'version' });
+    // A different version is not covered by the exact binding → nothing selected.
+    expect(resolveSpawnAccount(undefined, 'claude', '2.1.225', meta, { base: root })).toBeNull();
+  });
+
+  it('resolveSpawnAccount binds a custom harness by its raw profile name, not agent@version', () => {
+    addAccount('or', 'openrouter', 'api-key', 'sk-or', root);
+    const doc = readAccountRegistry(root);
+    const account = doc.accounts[Object.keys(doc.accounts)[0]];
+    // A profile named 'deepseek' running on the claude host, bound by profile name.
+    const meta = { accounts: { bindings: { deepseek: account.id } } };
+    // With the profile target, the deepseek binding is found...
+    const viaProfile = resolveSpawnAccount(undefined, 'claude', '2.1.220', meta, { base: root, target: 'deepseek' });
+    expect(viaProfile).toMatchObject({ kind: 'provider', name: 'or' });
+    // ...while the same run keyed on agent@version (no profile) sees no binding.
+    expect(resolveSpawnAccount(undefined, 'claude', '2.1.220', meta, { base: root })).toBeNull();
+  });
+
+  it('resolveSpawnAccount refuses a native account on a provider-backed harness (explicit --account override)', () => {
+    // `agents run deepseek --account work`: deepseek hosts on claude with an
+    // OpenRouter provider, so a native claude login must be rejected before spawn
+    // — otherwise the provider env would still be injected under a native claim.
+    const meta = {
+      accounts: { native: { n1: { id: 'n1', name: 'work', agent: 'claude' as const, identityKey: 'claude:user=1', scope: 'version' as const } } },
+    };
+    expect(() => resolveSpawnAccount('work', 'claude', '2.1.220', meta, { base: root, provider: 'openrouter' }))
+      .toThrow('cannot run under a provider-backed harness (openrouter)');
+    // Without a provider (a bare native run) the same account resolves fine.
+    expect(resolveSpawnAccount('work', 'claude', '2.1.220', meta, { base: root })).toMatchObject({ kind: 'native', name: 'work' });
+  });
+
+  it('resolveSpawnAccount refuses a native account bound to a different harness', () => {
+    const meta = {
+      accounts: {
+        native: { n1: { id: 'n1', name: 'work', agent: 'claude' as const, identityKey: 'k', scope: 'version' as const } },
+        bindings: { codex: 'n1' },
+      },
+    };
+    expect(() => resolveSpawnAccount(undefined, 'codex', '1.0.0', meta, { base: root }))
+      .toThrow('is a claude login and cannot authenticate the codex harness');
   });
 
   it('rotates a credential without changing the stable id or name', () => {

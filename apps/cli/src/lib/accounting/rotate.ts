@@ -7,8 +7,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { AgentId, RunStrategy } from './types.js';
-import type { FallbackEntry } from './exec.js';
+import type { AgentId, RunStrategy } from '../types.js';
+import type { FallbackEntry } from '../exec.js';
 import {
   accountDisplayLabel,
   getAccountInfo,
@@ -16,20 +16,20 @@ import {
   ALL_AGENT_IDS,
   type AccountInfo,
   type CredentialPresence,
-} from './agents.js';
-import { readMeta, writeMeta, getHelpersDir } from './state.js';
-import { listInstalledVersions, getVersionHomePath, resolveVersion } from './versions.js';
-import { getProjectRunConfigs } from './run-config.js';
-import { emit } from './events.js';
+} from '../agents.js';
+import { readMeta, writeMeta, getHelpersDir } from '../state.js';
+import { listInstalledVersions, getVersionHomePath, resolveVersion } from '../versions.js';
+import { getProjectRunConfigs } from '../run-config.js';
+import { emit } from '../events.js';
 import {
   getUsageInfoByIdentity,
   getUsageLookupKey,
   deriveUsageStatusFromSnapshot,
   type UsageSnapshot,
 } from './usage.js';
-import { readAccountHeadroom } from './fleet-cache.js';
-import { machineId } from './machine-id.js';
-import { readAuthHealthCache, authCacheKey, isDeadVerdict, type AuthVerdict } from './auth-health.js';
+import { readAccountHeadroom } from '../fleet-cache.js';
+import { machineId } from '../machine-id.js';
+import { readAuthHealthCache, authCacheKey, isDeadVerdict, type AuthVerdict } from '../auth-health.js';
 
 function getRotateDir(): string {
   const dir = path.join(getHelpersDir(), 'rotate');

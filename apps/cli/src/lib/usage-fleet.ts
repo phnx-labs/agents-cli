@@ -23,7 +23,7 @@ import {
   writeClaudeUsageCache,
   type UsageSnapshot,
   type UsageWindow,
-} from './usage.js';
+} from './accounting/usage.js';
 
 export const USAGE_FLEET_VERSION = 1;
 export const USAGE_FLEET_FILE = '.usage-fleet.json';

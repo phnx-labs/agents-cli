@@ -19,6 +19,7 @@ export type DaemonServiceId =
   | 'scheduler'
   | 'monitors'
   | 'browser-ipc'
+  | 'webhook-receiver'
   | 'self-heal'
   | 'keychain-reap'
   | 'account-state'
@@ -53,6 +54,11 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'browser-ipc',
     title: 'Browser IPC',
     description: 'Keeps a supervised browser automation IPC socket available for sessions.',
+  },
+  {
+    id: 'webhook-receiver',
+    title: 'Webhook receiver',
+    description: 'Hosts signed GitHub/Linear webhook ingress declared in daemon/webhooks.yaml, drawing signing secrets from the broker; binds nothing when no receivers are declared.',
   },
   {
     id: 'self-heal',

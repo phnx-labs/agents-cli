@@ -30,7 +30,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { InjectTarget } from '../terminal/inject.js';
+import type { InjectTarget } from '../terminal/index.js';
 import type { ActiveSession } from '../session/active.js';
 import { readMeta, writeMeta } from '../state.js';
 import {
@@ -39,7 +39,7 @@ import {
   pickHarnessWeighted,
   earliestResetAcross,
   formatNoHealthyHarnessError,
-} from '../rotate.js';
+} from '../accounting/rotate.js';
 import { resolveWatchdogSessionPath } from './read.js';
 
 // --- detection ---------------------------------------------------------------

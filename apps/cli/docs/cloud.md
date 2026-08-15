@@ -144,7 +144,6 @@ agents cloud providers
 | `--mode <mode>` | Execution mode (`plan`, `edit`, `full`) |
 | `-b, --balanced` | Shortcut for `--strategy balanced` |
 | `--strategy <strategy>` | Account selection strategy for factory: `balanced` — rotates across all healthy accounts on rate-limit |
-| `--upload-account-tokens` | Upload Claude OAuth credentials to Rush Cloud on first dispatch |
 | `--json` | Structured JSON output |
 | `--no-follow` | Dispatch and exit without streaming output |
 

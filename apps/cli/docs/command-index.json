@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 89,
-  "commands": 552,
+  "commands": 559,
   "root": {
     "name": "agents",
     "path": "",
@@ -79,8 +79,8 @@
           "negate": false
         }
       ],
-      "examples": "agents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts inspect work --json\nagents accounts set-default claude work\nagents accounts sync work --device yosemite-s0\nagents run claude --account work",
-      "notes": "Provider accounts are durable credentials independent of agent versions. Harness-native auth remains managed by each harness and is not copied or renamed by agents-cli.",
+      "examples": "agents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts name claude@2.1.220 work\nagents accounts attach work claude@2.1.225\nagents accounts view work --json\nagents accounts set-default claude work\nagents accounts sync openrouter-work yosemite-s0\nagents run claude --account work",
+      "notes": "Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never.",
       "subcommands": [
         {
           "name": "add",
@@ -146,6 +146,39 @@
           "subcommands": []
         },
         {
+          "name": "attach",
+          "path": "accounts attach",
+          "aliases": [],
+          "description": "Attach a named account to a native installation or custom harness",
+          "args": [
+            {
+              "name": "account",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "target",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
           "name": "clear-default",
           "path": "accounts clear-default",
           "aliases": [],
@@ -173,28 +206,25 @@
           "subcommands": []
         },
         {
-          "name": "inspect",
-          "path": "accounts inspect",
+          "name": "detach",
+          "path": "accounts detach",
           "aliases": [],
-          "description": "Show safe account metadata",
+          "description": "Remove one account attachment",
           "args": [
             {
-              "name": "name",
+              "name": "account",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "target",
               "required": true,
               "variadic": false,
               "description": ""
             }
           ],
           "options": [
-            {
-              "flags": "--json",
-              "description": "Machine-readable output",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -224,6 +254,39 @@
               "variadic": false,
               "negate": false
             },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "name",
+          "path": "accounts name",
+          "aliases": [],
+          "description": "Name a signed-in native installation without copying its OAuth credentials",
+          "args": [
+            {
+              "name": "source",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -377,12 +440,18 @@
               "required": true,
               "variadic": false,
               "description": ""
+            },
+            {
+              "name": "device",
+              "required": false,
+              "variadic": false,
+              "description": ""
             }
           ],
           "options": [
             {
               "flags": "--device <device>",
-              "description": "Destination device or SSH host",
+              "description": "Deprecated destination form; use the positional device",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -393,6 +462,44 @@
               "flags": "--force",
               "description": "Replace matching keys on the destination",
               "long": "--force",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "view",
+          "path": "accounts view",
+          "aliases": [
+            "inspect"
+          ],
+          "description": "Show safe account metadata, custody, and attachments",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Machine-readable output",
+              "long": "--json",
               "required": false,
               "optional": false,
               "variadic": false,
@@ -580,7 +687,7 @@
       "name": "apply",
       "path": "apply",
       "aliases": [],
-      "description": "Reconcile the fleet to a declared profile: install agents, sync config, propagate login.",
+      "description": "Reconcile the fleet to a declared profile: install agents and sync config.",
       "args": [],
       "options": [
         {
@@ -650,7 +757,7 @@
         },
         {
           "flags": "--no-login",
-          "description": "Do not propagate logins",
+          "description": "Deprecated no-op: native logins are always device-local",
           "long": "--no-login",
           "required": false,
           "optional": false,
@@ -686,7 +793,7 @@
           "negate": false
         }
       ],
-      "examples": "# Preview what would change across the fleet\n      agents apply --plan -f agents.yaml\n\n      # Bring every device to the profile (installs, syncs, propagates login)\n      ag apply -f agents.yaml\n\n      # One device only\n      agents apply --device yosemite-s1 -y\n\n      # Replicate every claude version on this machine onto a fresh box\n      agents apply --agent claude@all --device yosemite-s0 -y\n\n      # Install a specific pinned version on one device\n      agents apply --agent claude@2.1.207 --device yosemite-s0",
+      "examples": "# Preview what would change across the fleet\n      agents apply --plan -f agents.yaml\n\n      # Bring every device to the profile (installs + config sync; native login stays local)\n      ag apply -f agents.yaml\n\n      # One device only\n      agents apply --device yosemite-s1 -y\n\n      # Replicate every claude version on this machine onto a fresh box\n      agents apply --agent claude@all --device yosemite-s0 -y\n\n      # Install a specific pinned version on one device\n      agents apply --agent claude@2.1.207 --device yosemite-s0",
       "subcommands": []
     },
     {
@@ -6600,7 +6707,7 @@
           "negate": false
         }
       ],
-      "examples": "# Identity, duplicates, and per-service health in one view\n      agents daemon status\n\n      # Machine-readable status (for scripts / AGI EXT)\n      agents daemon status --json\n\n      # Start / stop / restart the daemon process\n      agents daemon start\n      agents daemon stop\n      agents daemon restart\n\n      # Persist the daemon off — nothing auto-starts it until re-enabled\n      agents daemon disable\n      agents daemon enable\n\n      # Reload config (SIGHUP) without restarting — picks up routine/scheduler-gate changes\n      agents daemon reload\n\n      # Just the two hosted services (secrets broker, browser IPC)\n      agents daemon services\n\n      # Manage public ingress for daemon-world webhook receivers\n      agents daemon funnel status yosemite-s0\n      agents daemon funnel up yosemite-s0 --local-port 8787 --port 443\n\n      # Tail the daemon's own log, warnings and up, from the last hour\n      agents daemon logs -f --level warn --since 1h\n\n      # One-shot health check for scripts (non-zero exit on problems)\n      agents daemon doctor",
+      "examples": "# Identity, duplicates, and per-service health in one view\n      agents daemon status\n\n      # Machine-readable status (for scripts / AGI EXT)\n      agents daemon status --json\n\n      # Start / stop / restart the daemon process\n      agents daemon start\n      agents daemon stop\n      agents daemon restart\n\n      # Persist the daemon off — nothing auto-starts it until re-enabled\n      agents daemon disable\n      agents daemon enable\n\n      # Reload config (SIGHUP) without restarting — picks up routine/scheduler-gate changes\n      agents daemon reload\n\n      # Every hosted service (secrets broker, browser IPC, webhook receiver, ...)\n      agents daemon services\n\n      # Host a signed webhook receiver here, supervised and restarted on crash\n      agents daemon webhooks add --secrets-bundle linear-webhook\n      agents daemon webhooks list\n\n      # Manage public ingress for daemon-world webhook receivers\n      agents daemon funnel status yosemite-s0\n      agents daemon funnel up yosemite-s0 --local-port 8787 --port 443\n\n      # Tail the daemon's own log, warnings and up, from the last hour\n      agents daemon logs -f --level warn --since 1h\n\n      # One-shot health check for scripts (non-zero exit on problems)\n      agents daemon doctor",
       "notes": "There is no 'agents daemon jobs' — scheduled work is 'agents routines',\n      always. Use 'agents routines stats' for per-routine failure detail.\n\n      'disable' is a persisted kill switch: it stops routines/add,\n      routines/start, routines/catchup, and webhook triggers from auto-starting\n      the daemon (daemon.enabled: false in ~/.agents/devices/<host>/agents.yaml).\n      'agents daemon start' still starts it explicitly, same as\n      'systemctl start' on a disabled unit.",
       "subcommands": [
         {
@@ -7101,6 +7208,151 @@
             }
           ],
           "subcommands": []
+        },
+        {
+          "name": "webhooks",
+          "path": "daemon webhooks",
+          "aliases": [],
+          "description": "Signed webhook receivers this box hosts as a supervised daemon service.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Emit as JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# What this box hosts today\n      agents daemon webhooks list\n\n      # Host a receiver on the default port, signing secrets from a bundle\n      agents daemon webhooks add --secrets-bundle linear-webhook\n\n      # A second receiver on its own port, publicly exposed via Tailscale Funnel\n      agents daemon webhooks add --secrets-bundle gh-webhook --port 8788 --funnel-port 443\n\n      # Apply the change (the running daemon rebinds on restart)\n      agents daemon restart\n\n      # Stop hosting the receiver bound to a port\n      agents daemon webhooks remove 8788",
+          "notes": "The bundle must hold GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET\n      ('agents secrets add <bundle> LINEAR_WEBHOOK_SECRET'). The daemon reads it\n      through the secrets broker, so a hosted receiver needs no\n      AGENTS_SECRETS_PASSPHRASE and no nohup. A LOCKED bundle fails that receiver\n      loud in 'agents daemon logs' rather than binding unverified ingress.\n\n      Port is the identity: a second 'add' on the same port edits that receiver.\n      Funnel ports are limited by Tailscale to 443, 8443, and 10000.",
+          "subcommands": [
+            {
+              "name": "add",
+              "path": "daemon webhooks add",
+              "aliases": [],
+              "description": "Declare a receiver on this box. Replaces any receiver already on the same port.",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--secrets-bundle <name>",
+                  "description": "agents secrets bundle holding GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET",
+                  "long": "--secrets-bundle",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-p, --port <n>",
+                  "description": "Local bind port (default 8787)",
+                  "short": "-p",
+                  "long": "--port",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--rate-limit <n>",
+                  "description": "Accepted deliveries per source per minute (default 60)",
+                  "long": "--rate-limit",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--funnel-port <n>",
+                  "description": "Expose publicly on this Tailscale Funnel port (443 | 8443 | 10000)",
+                  "long": "--funnel-port",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "list",
+              "path": "daemon webhooks list",
+              "aliases": [],
+              "description": "List the receivers declared for this box.",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "Emit as JSON",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "remove",
+              "path": "daemon webhooks remove",
+              "aliases": [],
+              "description": "Stop hosting the receiver bound to this port.",
+              "args": [
+                {
+                  "name": "port",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            }
+          ]
         }
       ]
     },
@@ -7249,7 +7501,7 @@
           "name": "apply",
           "path": "devices apply",
           "aliases": [],
-          "description": "Reconcile the fleet to a declared profile: install agents, sync config, propagate login.",
+          "description": "Reconcile the fleet to a declared profile: install agents and sync config.",
           "args": [],
           "options": [
             {
@@ -7319,7 +7571,7 @@
             },
             {
               "flags": "--no-login",
-              "description": "Do not propagate logins",
+              "description": "Deprecated no-op: native logins are always device-local",
               "long": "--no-login",
               "required": false,
               "optional": false,
@@ -14940,7 +15192,7 @@
           "name": "link",
           "path": "projects link",
           "aliases": [],
-          "description": "Attach an external tracker to a project definition (writes linear.projectId into the YAML).",
+          "description": "Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).",
           "args": [
             {
               "name": "name",
@@ -19910,7 +20162,7 @@
         },
         {
           "flags": "--copy-creds",
-          "description": "With --host, copy the picked runtime credentials (and Claude OAuth token) to the host, then shred them after the run. Opt-in per run.",
+          "description": "Deprecated refusal: native OAuth/session credentials cannot be copied between devices. Use `agents accounts sync <account> --device <device>` for a portable provider credential.",
           "long": "--copy-creds",
           "required": false,
           "optional": false,
@@ -20857,6 +21109,24 @@
               "flags": "--force",
               "description": "Overwrite an existing key in the bundle",
               "long": "--force",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--policy <policy>",
+              "description": "Set the bundle prompt policy as part of this import (always, hold, or never)",
+              "long": "--policy",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--i-understand",
+              "description": "Confirm an import with policy never (no biometry ACL)",
+              "long": "--i-understand",
               "required": false,
               "optional": false,
               "variadic": false,

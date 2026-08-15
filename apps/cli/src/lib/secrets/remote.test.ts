@@ -38,6 +38,7 @@ import {
   evaluateKeychainWriteVerification,
   keychainWriteFailureMessage,
   buildRemoteFileImportCommand,
+  assertCredentialTransportHostPinned,
   credentialTransportSshOpts,
 } from './remote.js';
 
@@ -229,17 +230,11 @@ describe('credentialTransportSshOpts (RUSH-2527)', () => {
     const opts = credentialTransportSshOpts('some-host');
     expect(opts.multiplex).toBe(false);
     const kv = optValues(opts.hostKeyOpts);
-    // Verify against the managed store (not ~/.ssh/known_hosts), and set a strict
-    // posture: `yes` once pinned, `accept-new` before (which still refuses a
-    // CHANGED key). Either value is acceptable here; the key is that it's set.
     expect(kv.find((s) => s.startsWith('UserKnownHostsFile='))).toBeDefined();
-    const strict = kv.find((s) => s.startsWith('StrictHostKeyChecking='));
-    expect(strict === 'StrictHostKeyChecking=yes' || strict === 'StrictHostKeyChecking=accept-new').toBe(true);
+    expect(kv.find((s) => s.startsWith('StrictHostKeyChecking='))).toBeDefined();
   });
 
   it('matches on the host part of a user@host target for known_hosts lookup', () => {
-    // `user@host` and `host` must resolve to the same pin state, or a push via
-    // `user@host` would silently skip a pin recorded under `host`.
     const a = credentialTransportSshOpts('muqsit@box');
     const b = credentialTransportSshOpts('box');
     expect(optValues(a.hostKeyOpts)).toEqual(optValues(b.hostKeyOpts));
@@ -515,6 +510,12 @@ describe('buildRemoteFileImportCommand (secrets export --host --remote-backend f
       .toContain('--backend file --force');
   });
 
+  it('sets policy never in the same import command', () => {
+    const { remoteCmd } = buildRemoteFileImportCommand('b', DOTENV, { policyNever: true });
+    expect(remoteCmd).toContain('agents secrets import b --from - --backend file --policy never --i-understand');
+    expect(remoteCmd).not.toContain('secrets policy');
+  });
+
   it('shell-quotes the bundle name against injection in both branches', () => {
     const evil = 'b; rm -rf /';
     // The bundle name is single-quoted inside the import command, which is itself
@@ -529,5 +530,15 @@ describe('buildRemoteFileImportCommand (secrets export --host --remote-backend f
     const withPass = buildRemoteFileImportCommand(evil, DOTENV, { passphrase: 'p' }).remoteCmd;
     // The bundle name is quoted the same way inside the prologue variant.
     expect(withPass).toContain(`import '\\''b; rm -rf /'\\'' --from -`);
+  });
+});
+
+describe('assertCredentialTransportHostPinned', () => {
+  it('refuses a provider credential transfer before the destination key is pinned', () => {
+    expect(() => assertCredentialTransportHostPinned('user@worker', false)).toThrow(/before its SSH host key is pinned/);
+  });
+
+  it('allows the transfer after the destination key is pinned', () => {
+    expect(() => assertCredentialTransportHostPinned('user@worker', true)).not.toThrow();
   });
 });

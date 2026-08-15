@@ -44,6 +44,9 @@ import {
   reapStrayDaemons,
   singleShot,
   stopResidueArtifacts,
+  isolatedHomeSuffix,
+  daemonServiceLabel,
+  daemonSystemdUnitName,
 } from './daemon.js';
 import { getDaemonDir } from './state.js';
 import { readSubsystemHealth, recordSubsystemOk, SUBSYSTEM_DAEMON_START } from './daemon-health.js';
@@ -157,6 +160,274 @@ describe('generateLaunchdPlist', () => {
     expect(plist).not.toContain('CLAUDE_CODE_OAUTH_TOKEN');
     expect(plist).not.toContain('sk-ant-oat01-abc123');
   });
+});
+
+// RUSH-2639 (reopened from the 1.22.40 macOS release CI legs): launchd does
+// NOT inherit `launchctl load`'s caller's process environment, so a plist
+// whose EnvironmentVariables dict carries only PATH lets a launchd-started
+// daemon resolve HOME against the login session's real value regardless of
+// what HOME the process that generated (and loaded) the plist was running
+// under. Under the hermetic test harness (tests/setup.ts redirects HOME to a
+// fork-private sandbox) that meant a launchd-started daemon silently escaped
+// the sandbox and bootstrapped a real ~/.agents on the CI runner — see
+// tests/setup.ts:222's hermeticity tripwire, which caught exactly this:
+// "Before: null. After: .cache:...|.history:...|.system:...|routines:...".
+describe('generateLaunchdPlist / generateSystemdUnit — HOME seam (RUSH-2639)', () => {
+  let prevHome: string | undefined;
+  let prevRealHome: string | undefined;
+
+  beforeEach(() => {
+    prevHome = process.env.HOME;
+    prevRealHome = process.env.AGENTS_REAL_HOME;
+  });
+
+  afterEach(() => {
+    if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
+    if (prevRealHome === undefined) delete process.env.AGENTS_REAL_HOME; else process.env.AGENTS_REAL_HOME = prevRealHome;
+  });
+
+  it('bakes the CALLER\'s HOME into the plist EnvironmentVariables dict, not just PATH', () => {
+    const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-2639-home-'));
+    process.env.HOME = sandboxHome;
+    delete process.env.AGENTS_REAL_HOME;
+    try {
+      const plist = generateLaunchdPlist();
+      expect(plist).toMatch(new RegExp(`<key>HOME</key>\\s*<string>${sandboxHome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</string>`));
+      // With AGENTS_REAL_HOME unset, it falls back to the same sandbox HOME —
+      // never to os.homedir()'s un-redirected real value.
+      expect(plist).toMatch(new RegExp(`<key>AGENTS_REAL_HOME</key>\\s*<string>${sandboxHome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</string>`));
+    } finally {
+      fs.rmSync(sandboxHome, { recursive: true, force: true });
+    }
+  });
+
+  it('honors a distinct AGENTS_REAL_HOME rather than collapsing it into HOME', () => {
+    const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-2639-home-'));
+    const activeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-2639-real-'));
+    process.env.HOME = sandboxHome;
+    process.env.AGENTS_REAL_HOME = activeHome;
+    try {
+      const plist = generateLaunchdPlist();
+      expect(plist).toContain(`<key>HOME</key>\n    <string>${sandboxHome}</string>`);
+      expect(plist).toContain(`<key>AGENTS_REAL_HOME</key>\n    <string>${activeHome}</string>`);
+    } finally {
+      fs.rmSync(sandboxHome, { recursive: true, force: true });
+      fs.rmSync(activeHome, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'bakes the CALLER\'s HOME into the systemd unit, not just PATH',
+    () => {
+      const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-2639-home-'));
+      process.env.HOME = sandboxHome;
+      delete process.env.AGENTS_REAL_HOME;
+      try {
+        const unit = generateSystemdUnit();
+        expect(unit).toContain(`Environment=HOME=${sandboxHome}`);
+        expect(unit).toContain(`Environment=AGENTS_REAL_HOME=${sandboxHome}`);
+      } finally {
+        fs.rmSync(sandboxHome, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+// RUSH-2639 (residual): baking HOME into the plist/unit content (above) keeps
+// a STARTED daemon inside its sandbox, but launchd/systemd route
+// unload/load/list by the service identifier alone, never by file path — so
+// every hermetic test instance and the real production install shared one
+// literal label/unit name. `launchctl unload <this-instance's-own-plist>`
+// silently kills whatever job the OS already has registered under that same
+// label, confirmed directly against real launchctl with two throwaway plists
+// sharing one label: the second job's own unload (which the code's comment
+// calls "not loaded, expected") tore down the first, still alive under a
+// different path. Namespace the identifier itself under a redirected HOME so
+// two isolated instances (concurrent CI test forks, or a developer's suite
+// racing their own always-on daemon) can never collide on it.
+describe('daemonServiceLabel / daemonSystemdUnitName — isolated-HOME namespacing (RUSH-2639 residual)', () => {
+  let prevHome: string | undefined;
+
+  beforeEach(() => {
+    prevHome = process.env.HOME;
+  });
+
+  afterEach(() => {
+    if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
+  });
+
+  it('two different redirected HOMEs never produce the same launchd label or systemd unit name', () => {
+    const sandboxA = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-2639-label-a-'));
+    const sandboxB = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-2639-label-b-'));
+    try {
+      process.env.HOME = sandboxA;
+      const labelA = daemonServiceLabel();
+      const unitA = daemonSystemdUnitName();
+
+      process.env.HOME = sandboxB;
+      const labelB = daemonServiceLabel();
+      const unitB = daemonSystemdUnitName();
+
+      expect(labelA).not.toBe(labelB);
+      expect(unitA).not.toBe(unitB);
+    } finally {
+      fs.rmSync(sandboxA, { recursive: true, force: true });
+      fs.rmSync(sandboxB, { recursive: true, force: true });
+    }
+  });
+
+  it('the same redirected HOME is deterministic — a retry never orphans the previous label', () => {
+    const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-2639-label-stable-'));
+    try {
+      process.env.HOME = sandboxHome;
+      expect(daemonServiceLabel()).toBe(daemonServiceLabel());
+      expect(daemonSystemdUnitName()).toBe(daemonSystemdUnitName());
+    } finally {
+      fs.rmSync(sandboxHome, { recursive: true, force: true });
+    }
+  });
+
+  it('a redirected HOME namespaces the label under the base production identifier, never replacing it', () => {
+    const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-2639-label-prefix-'));
+    try {
+      process.env.HOME = sandboxHome;
+      expect(daemonServiceLabel()).toMatch(/^com\.phnx-labs\.agents-daemon\.sandbox-[0-9a-f]{12}$/);
+      expect(daemonSystemdUnitName()).toMatch(/^agents-daemon-sandbox-[0-9a-f]{12}\.service$/);
+    } finally {
+      fs.rmSync(sandboxHome, { recursive: true, force: true });
+    }
+  });
+
+  it('generateLaunchdPlist embeds the namespaced label, not the bare production one', () => {
+    const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-2639-label-plist-'));
+    try {
+      process.env.HOME = sandboxHome;
+      const plist = generateLaunchdPlist();
+      expect(plist).toContain(`<string>${daemonServiceLabel()}</string>`);
+      expect(plist).not.toContain('<string>com.phnx-labs.agents-daemon</string>');
+    } finally {
+      fs.rmSync(sandboxHome, { recursive: true, force: true });
+    }
+  });
+
+  it('a HOME matching the real account home (no redirection) is not namespaced', () => {
+    const real = os.userInfo().homedir;
+    process.env.HOME = real;
+    expect(isolatedHomeSuffix()).toBeNull();
+    expect(daemonServiceLabel()).toBe('com.phnx-labs.agents-daemon');
+    expect(daemonSystemdUnitName()).toBe('agents-daemon.service');
+  });
+});
+
+// RUSH-2639: reproduce the actual macOS CI leak end to end. launchd applies a
+// plist's EnvironmentVariables dict on top of the login session's OWN
+// environment — never the environment of whatever process called `launchctl
+// load` — so a shim that (like every other shim in this file) simply execs the
+// program with `env: {...process.env}` inherited is unrealistic here and would
+// never have caught this bug: it silently hands the daemon child the CALLING
+// test's sandboxed HOME regardless of what the plist says. This shim instead
+// parses the real generated plist and applies ONLY its ProgramArguments /
+// EnvironmentVariables against a deliberately foreign base env (no HOME at
+// all) — the same shape launchd actually uses — so the assertion only passes
+// when `generateLaunchdPlist()` itself carries HOME/AGENTS_REAL_HOME.
+describe.skipIf(process.platform !== 'darwin')('startDaemon — launchd does not inherit the caller env (RUSH-2639)', () => {
+  let tmpHome = '';
+  const saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join('/tmp', 'agd-2639-launchd-'));
+    for (const k of ['HOME', 'PATH', 'AGENTS_DAEMON_DIR', 'AGENTS_REAL_HOME']) saved[k] = process.env[k];
+  });
+
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    if (tmpHome) fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it('a launchd-started daemon resolves the SANDBOX HOME baked into the plist, never the login session default', () => {
+    const daemonDir = path.join(tmpHome, 'daemon');
+    const shimDir = path.join(tmpHome, 'bin');
+    fs.mkdirSync(daemonDir, { recursive: true });
+    fs.mkdirSync(shimDir, { recursive: true });
+
+    const lockPath = path.join(daemonDir, 'daemon.lock');
+    const pidPath = path.join(daemonDir, 'daemon.pid');
+    const resultPath = path.join(tmpHome, 'observed-home.json');
+    // The stand-in "daemon": records what HOME it was actually launched with,
+    // then behaves exactly like the other launchd-shim test's child.
+    const childPath = path.join(tmpHome, 'fake-daemon.mjs');
+    fs.writeFileSync(childPath, [
+      `import fs from 'fs';`,
+      `setTimeout(() => {`,
+      `  fs.writeFileSync(process.env.AGD_RESULT, JSON.stringify({ observedHome: process.env.HOME || null, observedRealHome: process.env.AGENTS_REAL_HOME || null }));`,
+      `  fs.writeFileSync(process.env.AGD_PID, String(process.pid));`,
+      `  setTimeout(() => {}, 3000);`,
+      `}, 400);`,
+    ].join('\n'), 'utf-8');
+
+    // A minimal parser+launcher standing in for launchd: reads the REAL plist
+    // `startDaemon()` wrote, pulls only its <key>EnvironmentVariables</key>
+    // dict, and spawns the stand-in child with that dict as the WHOLE
+    // environment plus a foreign base (no HOME) — never `process.env` of
+    // whatever called `launchctl load`. This is what makes the test able to
+    // fail: without the RUSH-2639 fix, EnvironmentVariables carries only PATH,
+    // so the child would see no HOME at all instead of the sandbox HOME.
+    const launcherPath = path.join(tmpHome, 'fake-launchd.mjs');
+    fs.writeFileSync(launcherPath, [
+      `import fs from 'fs';`,
+      `import { spawn } from 'child_process';`,
+      `const plistPath = process.argv[2];`,
+      `const xml = fs.readFileSync(plistPath, 'utf-8');`,
+      `const envSection = xml.match(/<key>EnvironmentVariables<\\/key>\\s*<dict>([\\s\\S]*?)<\\/dict>/)?.[1] || '';`,
+      `const pairs = [...envSection.matchAll(/<key>([^<]+)<\\/key>\\s*<string>([^<]*)<\\/string>/g)];`,
+      `const plistEnv = Object.fromEntries(pairs.map((m) => [m[1], m[2]]));`,
+      // A "foreign login session" base — deliberately WITHOUT HOME, so the
+      // only way the child ever sees the sandbox HOME is via the plist.
+      `const loginSessionEnv = { PATH: '/usr/bin:/bin', AGD_RESULT: process.env.AGD_RESULT, AGD_PID: process.env.AGD_PID };`,
+      `spawn(process.execPath, [process.env.AGD_CHILD], { env: { ...loginSessionEnv, ...plistEnv }, detached: true, stdio: 'ignore' }).unref();`,
+    ].join('\n'), 'utf-8');
+
+    const shim = [
+      '#!/bin/sh',
+      'for a in "$@"; do',
+      '  if [ "$a" = "load" ]; then',
+      `    "${process.execPath}" "${launcherPath}" "$2" >/dev/null 2>&1 &`,
+      '  fi',
+      'done',
+      'exit 0',
+    ].join('\n');
+    const shimPath = path.join(shimDir, 'launchctl');
+    fs.writeFileSync(shimPath, shim, 'utf-8');
+    fs.chmodSync(shimPath, 0o755);
+
+    const sandboxHome = path.join(tmpHome, 'sandbox-home');
+    fs.mkdirSync(sandboxHome, { recursive: true });
+    process.env.HOME = sandboxHome;
+    process.env.AGENTS_REAL_HOME = sandboxHome;
+    process.env.AGENTS_DAEMON_DIR = daemonDir;
+    process.env.PATH = `${shimDir}${path.delimiter}${saved.PATH ?? ''}`;
+    process.env.AGD_CHILD = childPath;
+    process.env.AGD_LOCK = lockPath;
+    process.env.AGD_PID = pidPath;
+    process.env.AGD_RESULT = resultPath;
+
+    try {
+      const res = startDaemon(DIST_ENTRY);
+      expect(res.method).toBe('launchd');
+      expect(res.pid).toBeTruthy();
+
+      const recorded = JSON.parse(fs.readFileSync(resultPath, 'utf-8'));
+      expect(recorded.observedHome).toBe(sandboxHome);
+      expect(recorded.observedRealHome).toBe(sandboxHome);
+    } finally {
+      for (const k of ['AGD_CHILD', 'AGD_LOCK', 'AGD_PID', 'AGD_RESULT']) delete process.env[k];
+      const pid = fs.existsSync(pidPath) ? parseInt(fs.readFileSync(pidPath, 'utf-8').trim(), 10) : NaN;
+      if (!isNaN(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+    }
+  }, 30_000);
 });
 
 // RUSH-2418: crash-loop prevention had no application-level guarantee at all —

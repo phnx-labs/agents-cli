@@ -23,7 +23,8 @@ import type { SessionAgentId, SessionMeta, ViewMode } from '../lib/session/types
 import { SESSION_AGENTS } from '../lib/session/types.js';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session/artifacts.js';
 import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
-import { getActiveSessions, describeActiveDiscoveryHealth, sessionProcessIsLocal, type ActiveSession } from '../lib/session/active.js';
+import { getActiveSessions, describeActiveDiscoveryHealth, sessionProcessIsLocal, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, type ActiveSession, type BackfillMeta } from '../lib/session/active.js';
+export { activeSessionProjectKey, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, type BackfillMeta } from '../lib/session/active.js';
 import { enumerateGhosttyTabs, assignGhosttyTabs, type GhosttySurface } from '../lib/session/ghostty-tabs.js';
 import { mapPanesToTargets, listClients } from '../lib/tmux/session.js';
 import { resolveViewingIn, viewingInLabel } from '../lib/session/viewing-in.js';
@@ -595,64 +596,6 @@ export function indexActiveBySessionId(active: ActiveSession[]): Map<string, Act
   return byId;
 }
 
-/** The SessionMeta fields the live-row backfill reads — the enrichment a running process cannot report. */
-export type BackfillMeta = Pick<SessionMeta,
-  'version' | 'timestamp' | 'label' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName'
->;
-
-/**
- * Backfill display-only fields onto live rows from the indexed SessionMeta, by
- * full session id (RUSH-2205). A running process reports no agent version, and a
- * live orphan row usually carries no ticket/PR/label/start-time; the historical
- * index does. Only a field the live row LACKS is filled — the live signal always
- * wins when present. Pure (no I/O) so the join is unit-tested against fixtures;
- * the DB read that builds `metaById` is the caller's concern.
- */
-export function backfillActiveRowsFromMeta(
-  sessions: ActiveSession[],
-  metaById: Map<string, BackfillMeta>,
-): void {
-  for (const s of sessions) {
-    if (!s.sessionId) continue;
-    const m = metaById.get(s.sessionId);
-    if (!m) continue;
-    if (!s.version && m.version) s.version = m.version;
-    if (!s.label && m.label) s.label = m.label;
-    if (!s.ticket && m.ticketId) s.ticket = { id: m.ticketId, url: linearIssueUrl(m.ticketId) };
-    if (!s.pr && m.prUrl) s.pr = { url: m.prUrl, number: m.prNumber };
-    if (!s.startedAtMs && m.timestamp) {
-      const ts = new Date(m.timestamp).getTime();
-      if (!Number.isNaN(ts)) s.startedAtMs = ts;
-    }
-    if (!s.origin && m.origin) s.origin = m.origin;
-    if (!s.routineName && m.routineName) s.routineName = m.routineName;
-  }
-}
-
-/**
- * Build the id→meta index the live-row backfill needs, reading the historical
- * session DB by full id. Best-effort: a missing or locked DB yields an empty map
- * so the live view still renders (mirrors {@link maybeLiveIndex}). Deduplicates
- * ids so N rows in one session cost one query.
- */
-function loadBackfillMetaFor(sessions: ActiveSession[]): Map<string, BackfillMeta> {
-  const byId = new Map<string, BackfillMeta>();
-  try {
-    for (const s of sessions) {
-      if (!s.sessionId || byId.has(s.sessionId)) continue;
-      const m = getSessionById(s.sessionId);
-      if (m) byId.set(s.sessionId, m);
-    }
-  } catch {
-    /* enrichment is best-effort — an unavailable DB leaves rows un-backfilled */
-  }
-  return byId;
-}
-
-/** Add indexed display metadata to active rows for non-renderer consumers. */
-export function backfillActiveRowsFromIndex(sessions: ActiveSession[]): void {
-  backfillActiveRowsFromMeta(sessions, loadBackfillMetaFor(sessions));
-}
 
 /**
  * The live decoration for a listing row: a status glyph and the latest-turn
@@ -765,11 +708,6 @@ export function isAwaitingUser(s: ActiveSession): boolean {
  *     both carry a genuinely alive pid; unknown liveness (an older peer's
  *     row, or a pid that could never be resolved) does not.
  */
-export function isRunningLiveSession(s: ActiveSession): boolean {
-  if (s.status === 'queued' || s.status === 'closed' || s.status === 'crashed') return false;
-  if (s.context === 'cloud') return Boolean(s.cloudProvider) && Boolean(s.cloudTaskId);
-  return Boolean(s.machine) && typeof s.pid === 'number' && s.pid > 0 && s.pidAlive === true;
-}
 
 /** Width of the live status column — `crashed` is the longest word it renders. */
 const LIVE_STATUS_W = 8;
@@ -809,35 +747,35 @@ function modelLabel(model?: string): string {
 }
 
 /**
+ * The single project/group key for an active session row (RUSH-2688). It is the
+ * ONE derivation every project-grouped consumer of `--active`/the menubar snapshot
+ * shares, so a session is bucketed the same way everywhere:
+ *
+ *   - A real working dir → its `basename` — the same key SessionMeta derives (see
+ *     discover.ts), so the active view and the history view join identically on
+ *     (ticketId + project).
+ *   - A row with NO local cwd (a cloud task, a provider-run job) → an explicit
+ *     bucket keyed by context: `cloud` for a cloud row, else `other`.
+ *
+ * It never falls back to `kind` (the harness — 'codex', 'claude') or `machine`
+ * (the box it runs on): neither is a project, and letting either stand in for the
+ * key is exactly what leaked a Codex cloud task under a 'codex' group and a bogus
+ * machine label in the menubar. No fallback chain — one explicit bucket.
+ */
+/**
  * The row shape `agents sessions --active --json` emits. RUSH-1981: a watcher
  * joins active sessions on ticketId + project, but the raw ActiveSession nests
  * the ticket (`ticket.id`) and carries no `project` at all — so a naive join
  * silently drops every row. Emit both as flat, always-present top-level keys
- * (null when unknown) alongside the raw fields, so every active row is joinable.
- * `project` uses the same derivation SessionMeta does — basename(cwd) (see
- * discover.ts) — so the active view and the history view join identically.
+ * alongside the raw fields, so every active row is joinable. `project` is the
+ * canonical {@link activeSessionProjectKey} — basename(cwd), or an explicit
+ * `cloud`/`other` bucket for a row with no local cwd, never the harness/machine.
  *
  * `viewingIn` flattens to the same display string the row renderer prints —
  * `'codium tab 3'` / `'detached'` / null — so a consumer can tell a watched
  * session from an orphaned one (its terminal died, the agent is still running)
  * without re-implementing the tmux client lookup.
  */
-export function serializeActiveSessionsForJson(
-  sessions: ActiveSession[],
-): Array<Omit<ActiveSession, 'viewingIn'> & {
-  ticketId: string | null;
-  project: string | null;
-  prLink: string | null;
-  viewingIn: string | null;
-}> {
-  return sessions.map((s) => ({
-    ...s,
-    ticketId: s.ticket?.id ?? null,
-    project: s.cwd ? path.basename(s.cwd) : null,
-    prLink: s.pr?.url ?? null,
-    viewingIn: viewingInLabel(s) ?? null,
-  }));
-}
 
 export interface SessionPickerJsonRow extends SessionMeta {
   state: ActiveSession['status'] | 'inactive';
@@ -1287,13 +1225,6 @@ export function mergeLocalFirst(sessions: SessionMeta[], localMachine: string): 
  * newline. The single seam shared by the local `--json` path and the
  * `--json --host` remote fan-out so both emit byte-identical row shapes.
  */
-export function serializeSessionsJson(sessions: SessionMeta[]): string {
-  const serializable = sessions.map((s) => {
-    const { _matchedTerms, _bm25Score, _remote, ...rest } = s;
-    return rest;
-  });
-  return JSON.stringify(serializable, null, 2) + '\n';
-}
 
 /** The intentionally small metadata contract emitted by `sessions --resolve`.
  * It includes only launch identity needed to route/resume. Transcript paths,

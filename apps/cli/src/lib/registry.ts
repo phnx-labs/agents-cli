@@ -611,11 +611,18 @@ export function sha256OfFile(file: string): string {
 }
 
 /**
- * Parse an 'owner/repo' slug from a git remote URL (https or scp-style ssh).
- * Returns null if the URL is not a recognizable GitHub-style remote.
+ * Parse an 'owner/repo' slug from a git remote URL (https or scp-style ssh) or
+ * a filesystem-path remote whose path is slug-shaped (`…/github.com/owner/repo`).
+ * Returns null if the remote is not a recognizable GitHub-style shape.
+ *
+ * Backslashes are folded to forward slashes first: a real git URL never
+ * contains one, but a local-path remote on Windows does
+ * (`C:\…\github.com\org\a.git`), and without the fold the same remote that
+ * parses as `org/a` on POSIX returns null on win32 — which made the
+ * projects-pull slug verification fail closed as `blocked` there (RUSH-2694).
  */
 export function parseOwnerRepoFromRemote(remoteUrl: string): string | null {
-  const s = remoteUrl.trim().replace(/\.git$/, '');
+  const s = remoteUrl.trim().replace(/\\/g, '/').replace(/\.git$/, '');
   // https://github.com/owner/repo  or  git@github.com:owner/repo
   const m = s.match(/github\.com[/:]([^/]+\/[^/]+)$/);
   return m ? m[1] : null;

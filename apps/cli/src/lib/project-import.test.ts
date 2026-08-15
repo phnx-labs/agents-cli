@@ -75,18 +75,18 @@ describe('buildLinearImportCandidates', () => {
       name: 'agents-cli',
       root: '~/src/agents-cli',
       repo: 'muqsitnawaz/agents-cli',
-      linear: { projectId: 'lin_1', url: 'https://linear.app/x/project/agents-cli' },
+      linear: { projectId: 'lin_1', name: 'Agents CLI', url: 'https://linear.app/x/project/agents-cli' },
     });
   });
 
   it('writes name + linear only when no local checkout matches', () => {
     const r = buildLinearImportCandidates([{ id: 'lin_2', name: 'Marketing Site' }], new Map(), deps, { force: false });
-    expect(r.defs[0]).toEqual({ name: 'marketing-site', linear: { projectId: 'lin_2' } });
+    expect(r.defs[0]).toEqual({ name: 'marketing-site', linear: { projectId: 'lin_2', name: 'Marketing Site' } });
   });
 
   it('does NOT auto-bind on a containment-only match', () => {
     const r = buildLinearImportCandidates([{ id: 'lin_3', name: 'Agents' }], new Map(), deps, { force: false });
-    expect(r.defs[0]).toEqual({ name: 'agents', linear: { projectId: 'lin_3' } });
+    expect(r.defs[0]).toEqual({ name: 'agents', linear: { projectId: 'lin_3', name: 'Agents' } });
   });
 
   it('does NOT bind a slashed display name to the checkout after the slash', () => {
@@ -96,7 +96,7 @@ describe('buildLinearImportCandidates', () => {
       { localDirs: ['web', 'agents-cli'], resolveRoot: (d) => `~/src/${d}`, resolveOrigin: (d) => `someone/${d}` },
       { force: false },
     );
-    expect(r.defs[0]).toEqual({ name: 'rush-web', linear: { projectId: 'lin_rw' } });
+    expect(r.defs[0]).toEqual({ name: 'rush-web', linear: { projectId: 'lin_rw', name: 'Rush / Web' } });
   });
 
   it('preserves hand-set fields on an existing def and overwrites only linear', () => {
@@ -108,8 +108,21 @@ describe('buildLinearImportCandidates', () => {
       name: 'agents-cli',
       description: 'the CLI',
       contexts: [{ path: 'apps/cli', purpose: 'the package' }],
-      linear: { projectId: 'lin_1' },
+      linear: { projectId: 'lin_1', name: 'Agents CLI' },
     });
+  });
+
+  it('refreshes a stale linear.name when the Linear project was renamed', () => {
+    // The bug on THIS path: import never wrote `linear.name` at all, so a def
+    // re-imported after a board rename (here "Agents CLI" -> "AGI") kept
+    // whatever label an older version had left behind. (The sibling `link`
+    // command had the same outcome via a different mechanism — it spread the
+    // prior block — and is covered in linear-projects.test.ts.)
+    const existing = new Map<string, ProjectDef>([
+      ['agents-cli', { name: 'agents-cli', linear: { projectId: 'lin_1', name: 'Agents CLI' } }],
+    ]);
+    const r = buildLinearImportCandidates([{ id: 'lin_1', name: 'AGI' }], existing, noLocal, { force: false });
+    expect(r.defs[0].linear).toEqual({ projectId: 'lin_1', name: 'AGI' });
   });
 
   it('re-imports idempotently — the same name overwrites in place', () => {
@@ -135,7 +148,7 @@ describe('buildLinearImportCandidates', () => {
       { force: false },
     );
     expect(names(r)).toEqual(['rush-web']);
-    expect(r.defs[0].linear).toEqual({ projectId: 'a' });
+    expect(r.defs[0].linear).toEqual({ projectId: 'a', name: 'Rush Web' });
     expect(r.skipped).toEqual([{ name: 'rush/web', reason: 'another Linear project already claimed the name "rush-web"' }]);
   });
 

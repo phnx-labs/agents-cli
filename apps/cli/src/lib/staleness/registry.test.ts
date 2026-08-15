@@ -148,11 +148,13 @@ describe('staleness/registry', () => {
     expect(DETECTORS.subagents.kiro).toBeDefined();
   });
 
-  it('goose has workflows and permissions writers + detectors', () => {
+  it('goose has workflows writers + detectors, and no permissions ones', () => {
     expect(WRITERS.workflows.goose).toBeDefined();
     expect(DETECTORS.workflows.goose).toBeDefined();
-    expect(WRITERS.permissions.goose).toBeDefined();
-    expect(DETECTORS.permissions.goose).toBeDefined();
+    // Permissions support was removed — the registry must not offer a writer
+    // for a capability the table reports as unsupported.
+    expect(WRITERS.permissions.goose).toBeUndefined();
+    expect(DETECTORS.permissions.goose).toBeUndefined();
   });
 
   it('droid has a generic skills writer + detector', () => {

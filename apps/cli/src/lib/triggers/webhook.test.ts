@@ -363,7 +363,125 @@ describe('webhook signature verification', () => {
   });
 });
 
+/**
+ * The receiver acks 202 BEFORE dispatching (RUSH-2548), so a test that asserts
+ * on dispatch must wait for the settle callback rather than the HTTP response.
+ * `hit` is wired to both onDelivery and onDeliveryError so a failed settle
+ * releases the waiter too — otherwise a regression hangs instead of failing.
+ */
+function settleWaiter() {
+  let settled = 0;
+  let waiters: { target: number; release: () => void }[] = [];
+  return {
+    /** Wire to onDelivery AND onDeliveryError. */
+    hit: () => {
+      settled += 1;
+      waiters = waiters.filter((w) => {
+        if (settled < w.target) return true;
+        w.release();
+        return false;
+      });
+    },
+    /** Resolve once `target` deliveries have settled (already-past targets resolve now). */
+    until: (target: number): Promise<void> => (settled >= target
+      ? Promise.resolve()
+      : new Promise<void>((release) => { waiters.push({ target, release }); })),
+  };
+}
+
 describe('startWebhookServer', () => {
+  it('acks a signed delivery before the agent dispatch completes', async () => {
+    const secret = 'linear-secret';
+    const jobs = [
+      job({
+        name: 'linear-agent',
+        trigger: { type: 'linear_event', event: 'Issue', action: 'update', teamKey: 'RUSH', label: 'agent' },
+      }),
+    ];
+    // A dispatch that only completes when the test says so — standing in for the
+    // real 15-20s agent run that used to hold the HTTP socket open past Linear's
+    // delivery timeout. If the ack still waited on dispatch, the request below
+    // would never return and this test would time out rather than pass.
+    let signalDispatchStarted!: () => void;
+    const dispatchStarted = new Promise<void>((resolve) => { signalDispatchStarted = resolve; });
+    let releaseDispatch!: () => void;
+    const dispatchDone = new Promise<void>((resolve) => { releaseDispatch = resolve; });
+    const waiter = settleWaiter();
+    let dispatches = 0;
+    const server = startWebhookServer({
+      secrets: { linear: secret },
+      onDelivery: waiter.hit,
+      onDeliveryError: waiter.hit,
+      fire: {
+        jobs,
+        dispatch: async (config: JobConfig): Promise<RunMeta> => {
+          dispatches += 1;
+          signalDispatchStarted();
+          await dispatchDone;
+          return {
+            jobName: config.name,
+            runId: `run-${config.name}`,
+            agent: config.agent,
+            pid: 1234,
+            status: 'running',
+            startedAt: new Date().toISOString(),
+            completedAt: null,
+            exitCode: null,
+          };
+        },
+      },
+    });
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const address = server.address();
+    if (!address || typeof address !== 'object') throw new Error('server did not bind');
+    try {
+      const payload = Buffer.from(JSON.stringify(linearIssueWebhook(['agent']).payload));
+      const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+      const send = () => new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = http.request({
+          host: '127.0.0.1',
+          port: address.port,
+          path: '/hooks/linear',
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'content-length': String(payload.length),
+            'linear-signature': sig,
+            'linear-delivery': 'delivery-async',
+          },
+        }, (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c) => chunks.push(c as Buffer));
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf-8') }));
+        });
+        req.on('error', reject);
+        req.end(payload);
+      });
+
+      const response = await send();
+
+      // The ack arrived while dispatch is provably still in flight.
+      await dispatchStarted;
+      expect(response.status).toBe(202);
+      expect(JSON.parse(response.body)).toMatchObject({ ok: true, accepted: true, deliveryId: 'linear:delivery-async' });
+
+      // The async window is exactly where dedup can regress: `deliveryStore.seen`
+      // reports only COMPLETED deliveries, so between the ack and the settle it
+      // says false and only the in-flight set stops a retry re-firing the job.
+      // Retry the SAME delivery id here, while dispatch is still held open.
+      const midFlightRetry = await send();
+      expect(midFlightRetry.status).toBe(200);
+      expect(JSON.parse(midFlightRetry.body)).toMatchObject({ ok: true, duplicate: true });
+
+      releaseDispatch();
+      await waiter.until(1);
+      // One dispatch, not two — the retry above was absorbed, not queued behind it.
+      expect(dispatches).toBe(1);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('rejects unsigned public deliveries and accepts signed Linear deliveries once', async () => {
     const secret = 'linear-secret';
     const jobs = [
@@ -373,8 +491,11 @@ describe('startWebhookServer', () => {
       }),
     ];
     const dispatched: string[] = [];
+    const waiter = settleWaiter();
     const server = startWebhookServer({
       secrets: { linear: secret },
+      onDelivery: waiter.hit,
+      onDeliveryError: waiter.hit,
       fire: {
         jobs,
         dispatch: async (config: JobConfig): Promise<RunMeta> => {
@@ -415,7 +536,10 @@ describe('startWebhookServer', () => {
       });
 
       expect((await send({})).status).toBe(401);
-      expect((await send({ 'linear-signature': sig, 'linear-delivery': 'delivery-1' })).status).toBe(200);
+      expect((await send({ 'linear-signature': sig, 'linear-delivery': 'delivery-1' })).status).toBe(202);
+      // The delivery is only "seen" once it settles, so wait for that before
+      // asserting that a retry of the same id is a duplicate.
+      await waiter.until(1);
       const duplicate = await send({ 'linear-signature': sig, 'linear-delivery': 'delivery-1' });
       expect(duplicate.status).toBe(200);
       expect(JSON.parse(duplicate.body).duplicate).toBe(true);
@@ -434,8 +558,11 @@ describe('startWebhookServer', () => {
       }),
     ];
     const dispatched: string[] = [];
+    const waiter = settleWaiter();
     const server = startWebhookServer({
       secrets: { linear: secret },
+      onDelivery: waiter.hit,
+      onDeliveryError: waiter.hit,
       fire: {
         jobs,
         dispatch: async (config: JobConfig): Promise<RunMeta> => {
@@ -485,8 +612,9 @@ describe('startWebhookServer', () => {
 
       const fresh = Buffer.from(JSON.stringify(linearIssueWebhook(['agent']).payload));
       const retry = await send(fresh);
-      expect(retry.status).toBe(200);
+      expect(retry.status).toBe(202);
       expect(JSON.parse(retry.body).duplicate).toBeUndefined();
+      await waiter.until(1);
       expect(dispatched).toEqual(['linear-agent']);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -502,9 +630,12 @@ describe('startWebhookServer', () => {
       }),
     ];
     const dispatched: string[] = [];
+    const waiter = settleWaiter();
     const server = startWebhookServer({
       secrets: { linear: secret },
       rateLimitPerMinute: 1,
+      onDelivery: waiter.hit,
+      onDeliveryError: waiter.hit,
       fire: {
         jobs,
         dispatch: async (config: JobConfig): Promise<RunMeta> => {
@@ -549,7 +680,8 @@ describe('startWebhookServer', () => {
 
       expect((await send({})).status).toBe(401);
       expect((await send({})).status).toBe(401);
-      expect((await send(signedHeaders)).status).toBe(200);
+      expect((await send(signedHeaders)).status).toBe(202);
+      await waiter.until(1);
       expect(dispatched).toEqual(['linear-agent']);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -570,8 +702,11 @@ describe('startWebhookServer', () => {
     ];
     const dispatched: string[] = [];
     let shouldFailFollowup = true;
+    const waiter = settleWaiter();
     const server = startWebhookServer({
       secrets: { linear: secret },
+      onDelivery: waiter.hit,
+      onDeliveryError: waiter.hit,
       fire: {
         jobs,
         dispatch: async (config: JobConfig): Promise<RunMeta> => {
@@ -618,10 +753,16 @@ describe('startWebhookServer', () => {
         req.end(payload);
       });
 
-      expect((await send()).status).toBe(400);
+      // The failing dispatch no longer surfaces as a 4xx — the delivery was
+      // already acked. What still holds is the LEDGER: the delivery is not
+      // marked complete, so a retry of the same id re-runs only the match that
+      // failed, and the one after that is a plain duplicate.
+      expect((await send()).status).toBe(202);
+      await waiter.until(1);
       const retry = await send();
-      expect(retry.status).toBe(200);
+      expect(retry.status).toBe(202);
       expect(JSON.parse(retry.body).duplicate).toBeUndefined();
+      await waiter.until(2);
       const duplicate = await send();
       expect(duplicate.status).toBe(200);
       expect(JSON.parse(duplicate.body).duplicate).toBe(true);
@@ -711,8 +852,16 @@ describe('startWebhookServer', () => {
         'utf-8',
       );
 
+      const waiter = settleWaiter();
+      let settledHandlers: Array<{ handlerName: string; exitCode?: number; output?: string }> = [];
       const server = startWebhookServer({
         secrets: { linear: secret },
+        // Handler results ride the settle callback now, not the HTTP body.
+        onDelivery: (_webhook, _fired, handlers) => {
+          settledHandlers = handlers as typeof settledHandlers;
+          waiter.hit();
+        },
+        onDeliveryError: waiter.hit,
         fire: { jobs: [], dispatch: async (): Promise<RunMeta> => { throw new Error('should not dispatch routine'); } },
       });
       await new Promise<void>((resolve) => server.once('listening', resolve));
@@ -745,12 +894,13 @@ describe('startWebhookServer', () => {
           req.end(payload);
         });
 
-        expect(body.status).toBe(200);
-        const handlers = body.parsed.handlers as Array<{ handlerName: string; exitCode?: number; output?: string }>;
-        expect(handlers).toHaveLength(1);
-        expect(handlers[0].handlerName).toBe('linear-agent');
-        expect(handlers[0].exitCode).toBe(0);
-        expect(handlers[0].output).toContain('RUSH-1459');
+        expect(body.status).toBe(202);
+        expect(body.parsed.accepted).toBe(true);
+        await waiter.until(1);
+        expect(settledHandlers).toHaveLength(1);
+        expect(settledHandlers[0].handlerName).toBe('linear-agent');
+        expect(settledHandlers[0].exitCode).toBe(0);
+        expect(settledHandlers[0].output).toContain('RUSH-1459');
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }

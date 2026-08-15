@@ -2742,6 +2742,15 @@ export interface SyncResult {
    * repo-scope reconcile that ran the prune pass; empty otherwise.
    */
   pruned: Record<PrunableKind, string[]>;
+  /**
+   * Resources this sync refused to write, as user-facing sentences (RUSH-2677).
+   *
+   * An empty `mcp`/`subagents`/… list means "nothing to write"; it cannot also
+   * mean "declined and here is why", which is how a harness with no config
+   * writer reported a clean sync while writing nothing. The rendering command
+   * MUST surface these — a decline nobody prints is the silent no-op again.
+   */
+  declined: string[];
 }
 
 /**
@@ -2939,7 +2948,7 @@ export function mergeRepoScopedSelections(repos: string[], cwd: string = process
  */
 export function syncResourcesToVersion(agent: AgentId, version: string, selection?: ResourceSelection, options: { projectDir?: string; cwd?: string; force?: boolean; available?: AvailableResources; prune?: boolean; allowExecSurfaces?: boolean } = {}): SyncResult {
   if (isAgentHardDeprecated(agent)) {
-    return { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [], pruned: { commands: [], skills: [] } };
+    return { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [], pruned: { commands: [], skills: [] }, declined: [] };
   }
 
   const agentConfig = AGENTS[agent];
@@ -2952,7 +2961,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // "full sync; persist the staleness manifest after."
   const userPassedSelection = selection !== undefined;
 
-  const result: SyncResult = { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [], pruned: { commands: [], skills: [] } };
+  const result: SyncResult = { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [], pruned: { commands: [], skills: [] }, declined: [] };
   const cwd = options.cwd || process.cwd();
   const projectAgentsDir = options.projectDir || getProjectAgentsDir(cwd);
   const userAgentsDir = getUserAgentsDir();
@@ -3346,6 +3355,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   if (mcpToSync.length > 0 && mcpWriter) {
     const r = mcpWriter.write({ version, versionHome, selection: mcpToSync, cwd });
     result.mcp = r.synced;
+    if (r.errors?.length) result.declined.push(...r.errors.map((e) => `mcp: ${e}`));
     // mcp patterns already written via ensureVersionResourcePatterns above.
   }
 

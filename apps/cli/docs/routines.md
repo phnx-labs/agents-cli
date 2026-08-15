@@ -29,7 +29,8 @@ agents daemon status --json  # same, machine-readable
 agents daemon start | stop | restart
 agents daemon enable | disable   # persisted device kill switch — see below
 agents daemon reload             # SIGHUP: reload routines + re-evaluate scheduler.enabled
-agents daemon services           # secrets broker + browser IPC only
+agents daemon services           # every hosted service + per-service toggles
+agents daemon webhooks list      # the signed webhook receivers this box hosts
 agents daemon logs -f --level warn --since 1h
 agents daemon doctor             # one-shot check, non-zero exit on problems
 ```
@@ -346,10 +347,36 @@ agents routines add ux-tests \
   --prompt "Run Playwright E2E and visual regression checks, then comment the results on the PR."
 ```
 
-Run the localhost receiver with signing keys from an `agents secrets` bundle:
+#### Hosting the receiver — supervised (recommended) or foreground
+
+**Supervised.** Declare the receiver on the ingress box and the daemon hosts it
+as the `webhook-receiver` service, so it comes back after a reboot and after a
+crash:
 
 ```bash
-agents webhook serve --secrets-bundle webhooks --port 8787
+agents daemon webhooks add --secrets-bundle webhooks --port 8787 --funnel-port 443
+agents daemon webhooks list
+agents daemon restart      # bind the change
+```
+
+The declarations live in `~/.agents/daemon/webhooks.yaml` — per-box operational
+state, deliberately outside the fleet-synced config, because a public receiver
+runs on exactly one machine. Port is the identity: a second `add` on a port
+edits that receiver. `agents daemon webhooks remove <port>` stops hosting it. A
+box with no declarations binds nothing, and the whole service can be turned off
+with `agents daemon services disable webhook-receiver`.
+
+The daemon resolves each receiver's signing secret through the secrets broker,
+so a hosted receiver needs no `AGENTS_SECRETS_PASSPHRASE` and no `nohup`. A
+bundle that is locked or holds neither webhook secret **fails that receiver
+loud** in `agents daemon logs` rather than binding ingress it cannot verify; the
+other receivers are unaffected.
+
+**Foreground.** For a one-off or for testing, run the receiver yourself — same
+HTTP surface, no supervision:
+
+```bash
+agents webhooks serve --secrets-bundle webhooks --port 8787
 ```
 
 The bundle may contain `GITHUB_WEBHOOK_SECRET`, `LINEAR_WEBHOOK_SECRET`, or both.
@@ -358,6 +385,33 @@ unsigned deliveries, dedupes repeated delivery IDs, rate-limits each source, and
 binds `127.0.0.1` by default. Keep webhook signing keys in `agents secrets`; do
 not put keys in webhook URLs, path segments, query strings, routine YAML, or
 Funnel commands.
+
+#### The ack is asynchronous
+
+A verified delivery is answered `202 {"ok":true,"accepted":true,"deliveryId":…}`
+**immediately**, and the matched routines and handlers are dispatched after the
+response. Dispatch starts an agent run and takes 15-20 seconds, which exceeds
+Linear's delivery timeout — the receiver used to hold the socket open across it,
+so every real delivery logged a timeout and a retry on Linear's side.
+
+What this changes for a caller: the HTTP body no longer carries `fired` /
+`runs` / `handlers`, and a dispatch failure no longer surfaces as a 4xx. Fired
+routines appear in `agents daemon logs` (or the foreground receiver's stdout)
+and in the `webhook.fired` event; a failure after the ack is logged and emitted
+as `webhook.failed`.
+
+**A dispatch that fails after the ack does not retry itself.** The 4xx was what
+made GitHub and Linear re-send a delivery, and a sender does not retry a 202. The
+per-job ledger still records exactly which matches completed and the delivery
+stays unmarked, so re-sending it from the provider's UI runs only what did not —
+but nothing triggers that automatically. Watch `agents daemon logs` for
+`dispatch failed after ack`.
+
+Dedup is unchanged. `<source>:<delivery-id>` is still the key, a retry of a
+settled delivery is still answered `200 {"duplicate":true}`, and per-job marking
+still means a retry finishes only the matches that failed. A retry that arrives
+while the first is *still dispatching* is also answered as a duplicate, so the
+async window cannot double-fire.
 
 Expose the receiver publicly from a Linux/macOS Tailscale node with Funnel:
 
@@ -382,10 +436,12 @@ Operational runbook:
    If a key already exists, replace the matching `add` command with
    `agents secrets rotate webhooks <KEY>`.
 
-2. Start the receiver on the ingress host and leave it bound to localhost:
+2. Host the receiver on the ingress host, bound to localhost:
 
    ```bash
-   agents webhook serve --secrets-bundle webhooks --host 127.0.0.1 --port 8787
+   agents daemon webhooks add --secrets-bundle webhooks --port 8787
+   agents daemon restart
+   agents daemon webhooks list
    ```
 
 3. Enable Funnel only after the receiver is listening:
@@ -397,7 +453,7 @@ Operational runbook:
 
 4. Rotate a signing key source by source. Set the new source secret in the
    `webhooks` bundle, update the provider webhook configuration to sign with the
-   new value, restart `agents webhook serve`, then send one signed test delivery
+   new value, run `agents daemon restart`, then send one signed test delivery
    before deleting the old provider secret.
 
 5. Disable public ingress before stopping or moving the receiver:
@@ -533,14 +589,13 @@ For GitHub webhooks the context includes `repository`, `pull_request`, and
 
 #### mac-mini ingress with funnel
 
-Handlers are fired by the same `agents webhook serve` receiver as routine
-triggers. On a headless Mac (e.g. `mac-mini`), expose it publicly with
-Tailscale Funnel:
+Handlers are fired by the same receiver as routine triggers. On a headless Mac
+(e.g. `mac-mini`), host it under the daemon and expose it with Tailscale Funnel:
 
 ```bash
 # On mac-mini
-agents webhook serve --secrets-bundle webhooks --port 8787 &
-agents daemon funnel up mac-mini --local-port 8787 --port 443
+agents daemon webhooks add --secrets-bundle webhooks --port 8787 --funnel-port 443
+agents daemon restart
 ```
 
 Then point Linear/GitHub at `https://mac-mini.<tailnet>.ts.net/hooks/<source>`.

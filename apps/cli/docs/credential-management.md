@@ -36,7 +36,14 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
    stores, syncs, or references a harness's interactive OAuth login. Not for usage,
    not for fleet sync, not for account selection. It is never written to the keychain
    by us and never copied across devices. It stays on the box that minted it and
-   refreshes itself there.
+   refreshes itself there. Enforced on the transfer paths too (RUSH-2527): neither
+   `agents run --host --copy-creds` nor `agents run --lease` serializes a native
+   login (Claude OAuth + codex/grok/gemini `auth.json`) to another device — both
+   **refuse** and steer to a portable provider account, sharing the one
+   `isNativeOAuthRuntime` predicate (`src/lib/hosts/credentials.ts` →
+   `buildHostCredentialScript`, `src/lib/crabbox/runtimes.ts` →
+   `buildCredentialScript`; SING-1b). Portable account bundles still cross the
+   fleet through the explicit `agents accounts sync` path.
 
 3. **The only credential agents-cli manages is a deliberate, durable credential.** A
    long-lived, **non-rotating** OAuth setup-token / API key / bearer token
@@ -72,6 +79,61 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
    harness**, including the hard ones (Droid, Kimi). Solution decided per credential
    *type*, not per agent name.
 
+## One account namespace: provider credentials and named native logins (RUSH-2527)
+
+An **account** is one authorization identity, and it comes in two kinds that share
+a single name namespace (`meta.accounts`):
+
+- **Provider credential accounts** — a durable API key, setup token, or bearer
+  token the CLI stores as a policy-`never` secrets bundle (invariant 4 above).
+  Created with `agents accounts add`; portable, so `accounts sync` copies it.
+- **Native account records** — a durable *name* for a harness's own signed-in
+  login. `agents accounts name <source> <name>` (e.g.
+  `agents accounts name claude@2.1.220 work`) records **metadata only** — a stable
+  id, the harness, the identity key, and a friendly label — in `meta.accounts.native`.
+  The harness-owned OAuth/session credential is **never copied**, so a native
+  account cannot be `sync`ed. A native lookup reads only `meta`, never the provider
+  bundle store or the keychain.
+
+**Only a safely-identifiable native login is nameable/attachable.**
+`account-capabilities.ts` is the canonical table, and it is deliberately
+conservative — a `NativeAccount` stores no device-id discriminator, so a login
+whose identity can't be proven unique across synced metadata is marked
+**unsupported** rather than falsely supported:
+
+| Harness | Native account naming |
+|---|---|
+| Claude, Codex, Grok | **supported** — version-scoped, strong account key; attach to an exact `agent@version` |
+| Muse | **conditional** — version-scoped, email-only; nameable only when the login exposes an email |
+| Antigravity, Kimi, Droid, OpenCode | **unsupported** — device-scoped but opaque/singleton; the identity can't be proven distinct across devices (Droid exposes no account key; Antigravity/OpenCode can alias two credentials as one) |
+| Cursor | **unsupported (blocked)** — multi-account isolation unresolved; use its API-key provider account instead |
+| everything else | **unsupported** / discovery-only |
+
+`agents accounts name`/`attach` refuse an unsupported harness. For a supported
+(version-scoped) login, `attach` validates the target is currently signed in to the
+same identity before binding, and injects no secret or env.
+
+The commands read like the task, object first:
+
+| Command | Behavior |
+|---|---|
+| `agents accounts` / `list` | Unified list: provider account bundles + named native logins |
+| `agents accounts name <agent@version> <name>` | Name a signed-in native installation |
+| `agents accounts add <name> --provider <p> --auth <t>` | Store a provider credential account |
+| `agents accounts view <account>` (alias `inspect`) | Show one account — kind, custody, and its attachments |
+| `agents accounts attach <account> <target>` | Bind an account to a target. A **native** account attaches only to a supported `agent@version` installation. A **provider** account attaches to an `agent@version`, a bare harness id, or an existing custom-harness profile. Typos and unsupported targets are rejected before binding. |
+| `agents accounts detach <account> <target>` | Remove one attachment |
+| `agents accounts rename <old> <new>` / `remove <name>` | Rename or remove either kind; `remove` refuses while a binding, a per-harness default, or a harness profile still references the account |
+| `agents accounts sync <account> <device>` | Copy a provider account bundle to a worker (native records have no bytes to copy) |
+
+`set-default` / `clear-default` remain the per-harness-default spelling and are
+consulted after an exact `agent@version` or device-scoped binding.
+`resolveAccountSelection` orders resolution: explicit `--account` → exact target
+binding → device-scoped binding → per-harness default. Runtime injection of the
+resolved account (live-fingerprint validation for native, env for provider) and
+the fleet inventory labels are wired by the runtime/fleet-auth track; fleet
+credential transport is owned by the credential-transport track.
+
 ## What is "held" and shared (the ingredients)
 
 | ingredient | where | shared across fleet? | why safe |
@@ -86,8 +148,8 @@ deliberately created with `agents accounts add` and explicitly pushed with
 
 ## How each surface changes
 
-- **`agents apply`** stops copying login files. `FLEET_AUTH_FILES` loses its copy
-  role; the `push-login` / `--recv-auth` login-materialize path is removed. Per
+- **`agents apply`** does not copy login files. `FLEET_AUTH_FILES` is inventory
+  metadata only; fleet apply has no native-login materialization path. Per
   agent per box `apply` surfaces: "logged in" / "log in on this box" (interactive or
   `agents fleet login`) / "add or sync a provider account (`agents accounts add` /
   `sync`)" — driven by whether the box has its own login or a declared account

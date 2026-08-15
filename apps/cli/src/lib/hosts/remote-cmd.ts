@@ -375,8 +375,9 @@ export function buildWindowsAgentsCommand(cmd: WindowsAgentsCommand): string {
  * (Credential Manager, or the headless file store when there's no logon
  * session), matching a local `agents secrets import`.
  */
-export function buildWindowsStdinImportCommand(bundle: string, opts: { force?: boolean } = {}): string {
+export function buildWindowsStdinImportCommand(bundle: string, opts: { force?: boolean; policyNever?: boolean } = {}): string {
   const force = opts.force ? ' --force' : '';
+  const policy = opts.policyNever ? ' --policy never --i-understand' : '';
   // Create AND write the temp file INSIDE the try so its finally always cleans
   // up: if GetTempFileName succeeds but WriteAllText (or the import) then throws,
   // the secret-bearing temp file would otherwise be left behind (RUSH-1764). $tmp
@@ -388,7 +389,7 @@ export function buildWindowsStdinImportCommand(bundle: string, opts: { force?: b
     '$in = [Console]::In.ReadToEnd()',
     '$tmp = $null',
     `try { $tmp = [System.IO.Path]::GetTempFileName(); [System.IO.File]::WriteAllText($tmp, $in); ` +
-      `& agents secrets import ${powershellQuote(bundle)} --from $tmp${force}; $code = $LASTEXITCODE } ` +
+      `& agents secrets import ${powershellQuote(bundle)} --from $tmp${force}${policy}; $code = $LASTEXITCODE } ` +
       `finally { if ($tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } }`,
     'if ($null -eq $code) { $code = 1 }',
     'exit $code',

@@ -105,18 +105,13 @@ UserKnownHostsFile=<managed store>   StrictHostKeyChecking=accept-new  ← first
 
 `agents ssh <device>` learns the key on first connect (`accept-new`, written into
 the managed store) and verifies it with `StrictHostKeyChecking=yes` on every
-subsequent connect — a later key swap is refused, not re-accepted. `run --host
---copy-creds` **refuses** a host that isn't pinned there and, when it does run,
-prepends the strict host-key opts (they must come *before* the baseline —
-`sshConnectOpts` — because ssh honors the first value seen for each option) over a
-fresh, non-multiplexed connection, so credentials never ride an unverified
-connect. A registered device earns its pin the ordinary way — connect once with
-`agents ssh <device>`. But a bare `~/.ssh/config` `Host` alias (or ad-hoc literal)
-is **not** a registered device, so `agents ssh <alias>` dead-ends at "Unknown
-device" and could never pin it; for that case the `--copy-creds` gate pins the
-target itself with `pinHostKey` (ssh-keyscan against the alias's real
-`HostName`/`Port`, resolved via `ssh -G`) before shipping anything, so
-`--copy-creds` works for ssh-config-alias hosts instead of dead-ending.
+subsequent connect — a later key swap is refused, not re-accepted. Native OAuth
+and session credentials never cross this transport: `run --host --copy-creds`
+is retained only as a fail-loud deprecated flag. Explicit portable provider
+account sync (`agents accounts sync <account> --device <device>`) requires the destination
+to already be present in the managed store and uses a fresh, non-multiplexed SSH
+connection. A registered device earns its pin by connecting once with
+`agents ssh <device>` and verifying the host before syncing an account.
 **Remaining:** the broad `accept-new` baseline still governs
 non-credential fan-outs (`sessions --host`, the browser driver, `fleet run`),
 which still use OpenSSH default `~/.ssh/known_hosts`, not the managed store, so

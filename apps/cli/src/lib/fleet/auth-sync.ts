@@ -1,13 +1,7 @@
 /**
- * Login/token propagation — the "one login instead of ~48 OAuth flows" core of
- * `agents apply`.
- *
- * A source machine that is already signed in to a set of harnesses has portable
- * credential files on disk (verified per-agent locations below). `snapshotAuth`
- * captures those; `materializeAuth` writes them into the corresponding paths on
- * a target device. Transport is the caller's job — `apply` streams the bundle
- * over the existing (encrypted, authenticated) SSH channel via `sshExec`'s
- * stdin `input`, so no app-layer crypto is layered on top of SSH here.
+ * Native-login inventory for `agents apply` and `agents fleet login`.
+ * Native OAuth/session files are identified only to report device readiness;
+ * agents-cli never serializes or materializes them on another device.
  *
  * Honest boundary: on macOS, claude and antigravity keep their tokens in the
  * login keychain, ACL-bound to the harness process — unreadable by us. Those are
@@ -16,7 +10,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { AuthFilePayload, AuthBundle, AuthSnapshotResult } from './types.js';
+import type { AuthFilePayload, AuthSnapshotResult } from './types.js';
 
 /** A portable credential file location, relative to $HOME. */
 interface AuthFileSpec {
@@ -56,11 +50,19 @@ export const KEYCHAIN_BOUND_ON_MAC: ReadonlySet<string> = new Set(['claude', 'an
  */
 export const SINGLE_USE_ROTATING_REFRESH_AGENTS: ReadonlySet<string> = new Set(['droid']);
 
-/** True when `agent`'s portable credential file(s) are safe to copy between
- *  machines. Single-use rotating refresh tokens are never safe; keychain-bound
- *  tokens are handled separately by the caller via {@link KEYCHAIN_BOUND_ON_MAC}. */
-export function isCredentialSafeToPropagate(agent: string): boolean {
-  return !SINGLE_USE_ROTATING_REFRESH_AGENTS.has(agent);
+/**
+ * Whether `agent`'s login may be copied between machines by `apply`. Always
+ * **false** now (RUSH-2527): every `FLEET_AUTH_FILES` entry is a native,
+ * rotating OAuth / session login, and the fleet-auth contract forbids copying any
+ * of them between devices (`docs/specifications.md` SING-1b) — not just the
+ * single-use-rotating subset (`SINGLE_USE_ROTATING_REFRESH_AGENTS`) that first
+ * motivated this gate. `apply` therefore never propagates a login; it surfaces
+ * per-box login / portable-account guidance instead. `snapshotAuth` reads no
+ * credential file as a result, so a native login never leaves its origin box.
+ * The `agent` parameter is retained for the stable call signature.
+ */
+export function isCredentialSafeToPropagate(_agent: string): boolean {
+  return false;
 }
 
 /** True when the agent stores credentials in portable files we can read. This
@@ -250,78 +252,4 @@ export function snapshotAuth(agents: string[], opts: SnapshotOptions): AuthSnaps
   }
 
   return { files, bound };
-}
-
-/** Assemble the plaintext bundle shipped to a target. */
-export function buildAuthBundle(source: string, files: AuthFilePayload[]): AuthBundle {
-  return { v: 1, source, files };
-}
-
-export interface MaterializeOptions {
-  /** Home directory to write credential files into. */
-  home: string;
-}
-
-export interface MaterializeResult {
-  /** Agent ids that received at least one file. */
-  written: string[];
-  /** `rel: reason` for any file that failed. */
-  errors: string[];
-}
-
-/**
- * Write a captured auth bundle into a target home. Parent dirs are created; the
- * captured POSIX mode is restored (0600 for credentials). Writing through an
- * existing symlink lands in the agent's active version home, which is exactly
- * what per-version credential carry-forward expects.
- */
-export function materializeAuth(bundle: AuthBundle, opts: MaterializeOptions): MaterializeResult {
-  const written = new Set<string>();
-  const errors: string[] = [];
-
-  for (const f of bundle.files) {
-    const abs = path.join(opts.home, f.rel);
-    try {
-      fs.mkdirSync(path.dirname(abs), { recursive: true });
-      fs.writeFileSync(abs, Buffer.from(f.contentB64, 'base64'));
-      fs.chmodSync(abs, f.mode || 0o600);
-      written.add(f.agent);
-    } catch (e) {
-      errors.push(`${f.rel}: ${(e as Error).message}`);
-    }
-  }
-
-  return { written: [...written], errors };
-}
-
-/** Parse + validate a bundle received on stdin (the remote `--_recv-auth` path). */
-export function parseAuthBundle(raw: string): AuthBundle {
-  let doc: unknown;
-  try {
-    doc = JSON.parse(raw);
-  } catch (e) {
-    throw new Error(`auth bundle is not valid JSON: ${(e as Error).message}`);
-  }
-  if (typeof doc !== 'object' || doc === null) throw new Error('auth bundle must be an object.');
-  const o = doc as Record<string, unknown>;
-  if (o.v !== 1) throw new Error(`unsupported auth bundle version ${JSON.stringify(o.v)}.`);
-  if (typeof o.source !== 'string') throw new Error('auth bundle missing source.');
-  if (!Array.isArray(o.files)) throw new Error('auth bundle missing files[].');
-  for (const f of o.files) {
-    if (
-      typeof f !== 'object' || f === null ||
-      typeof (f as AuthFilePayload).agent !== 'string' ||
-      typeof (f as AuthFilePayload).rel !== 'string' ||
-      typeof (f as AuthFilePayload).contentB64 !== 'string' ||
-      typeof (f as AuthFilePayload).mode !== 'number'
-    ) {
-      throw new Error('auth bundle has a malformed file entry.');
-    }
-    // Reject path traversal — rel must stay under $HOME.
-    const rel = (f as AuthFilePayload).rel;
-    if (rel.startsWith('/') || rel.split('/').includes('..')) {
-      throw new Error(`auth bundle rejected unsafe path: ${rel}`);
-    }
-  }
-  return doc as AuthBundle;
 }

@@ -8,6 +8,7 @@
  */
 
 import { spawn, execFileSync } from 'child_process';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -24,6 +25,7 @@ import { notifyRoutineStart, notifyRoutineFinish, notifyRoutineStartFailed } fro
 import { notifyOwnerRoutineFinish, notifyOwnerRoutineStartFailed } from './routine-notify-owner.js';
 import { BrowserService } from './browser/service.js';
 import { BrowserIPCServer, getSocketPath as getBrowserIpcSocketPath } from './browser/ipc.js';
+import { startHostedWebhookReceivers, type HostedWebhookReceivers } from './daemon-webhooks.js';
 import { secretsBrokerSocketPath, brokerPidAlive } from './secrets/agent.js';
 import { redactSecrets } from './redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from './cli-entry.js';
@@ -44,6 +46,56 @@ const LOG_MAX_SIZE = 5 * 1024 * 1024; // 5 MB
 const LOG_ROTATE_COUNT = 3;
 const PLIST_NAME = 'com.phnx-labs.agents-daemon';
 const SYSTEMD_UNIT = 'agents-daemon.service';
+
+/**
+ * RUSH-2639 (residual): launchd/systemd route `unload`/`load`/`list` by the
+ * service identifier ALONE, never by the plist/unit file's path. Baking the
+ * caller's HOME into the plist content (the earlier RUSH-2639 fix, above)
+ * keeps the STARTED daemon inside its sandbox, but every hermetic-test
+ * instance and every real interactive install still share the one literal
+ * `PLIST_NAME`/`SYSTEMD_UNIT` string. `startDaemonLocked`'s own `unload`
+ * before `load` is written to be a no-op ("not loaded, expected") for a
+ * plist that has never been loaded — but confirmed on darwin: when a
+ * DIFFERENT plist is already loaded under that same label, `unload
+ * <this-instance's-own-never-loaded-path>` still tears down the OTHER job
+ * (verified directly against real launchctl with two throwaway plists
+ * sharing one label — the second job's own `unload` silently kills the
+ * first, still alive under a different path). On a machine running several
+ * hermetic test forks at once (CI) — or a developer's own suite next to
+ * their real always-on daemon — that "other job" is a live daemon with
+ * DIFFERENT baked-in state.
+ *
+ * Namespace the identifier itself whenever HOME has been redirected away
+ * from the account's real home. `os.userInfo().homedir` reads the OS/passwd
+ * record directly and ignores `$HOME` (unlike `os.homedir()`, which honors
+ * it), so comparing the two detects exactly this redirection — true for
+ * every hermetic test process, false for every real interactive/production
+ * invocation, so a real user's daemon keeps registering under the unchanged
+ * production identifier.
+ */
+export function isolatedHomeSuffix(): string | null {
+  try {
+    const effective = path.resolve(process.env.HOME || os.homedir());
+    const real = path.resolve(os.userInfo().homedir);
+    if (effective === real) return null;
+    return crypto.createHash('sha256').update(effective).digest('hex').slice(0, 12);
+  } catch {
+    return null;
+  }
+}
+
+/** launchd Label for this process's daemon — namespaced under a redirected HOME. */
+export function daemonServiceLabel(): string {
+  const suffix = isolatedHomeSuffix();
+  return suffix ? `${PLIST_NAME}.sandbox-${suffix}` : PLIST_NAME;
+}
+
+/** systemd --user unit name for this process's daemon — namespaced under a redirected HOME. */
+export function daemonSystemdUnitName(): string {
+  const suffix = isolatedHomeSuffix();
+  return suffix ? `agents-daemon-sandbox-${suffix}.service` : SYSTEMD_UNIT;
+}
+
 const MONITOR_TICK_MS = 60_000;
 /**
  * How often to re-scan for missed fires. Deliberately slower than the monitor
@@ -246,11 +298,11 @@ export function getDaemonLogPath(): string {
 }
 
 function getLaunchdPlistPath(): string {
-  return path.join(os.homedir(), 'Library', 'LaunchAgents', `${PLIST_NAME}.plist`);
+  return path.join(os.homedir(), 'Library', 'LaunchAgents', `${daemonServiceLabel()}.plist`);
 }
 
 function getSystemdUnitPath(): string {
-  return path.join(os.homedir(), '.config', 'systemd', 'user', `${SYSTEMD_UNIT}`);
+  return path.join(os.homedir(), '.config', 'systemd', 'user', daemonSystemdUnitName());
 }
 
 /** Read the stored daemon PID from disk. Returns null if not present or invalid. */
@@ -1276,6 +1328,27 @@ export async function runDaemon(): Promise<void> {
     log('INFO', 'Browser IPC service disabled');
   }
 
+  // 5th hosted service: signed webhook receiver(s) + their funnel (RUSH-2548).
+  // Started after the broker (above) so it resolves each receiver's signing
+  // secret headlessly — no AGENTS_SECRETS_PASSPHRASE, no nohup. Binds nothing
+  // unless daemon/webhooks.yaml declares a receiver, so an unconfigured box no-ops.
+  let webhookReceivers: HostedWebhookReceivers | null = null;
+  if (isEnabled('webhook-receiver')) {
+    try {
+      webhookReceivers = await startHostedWebhookReceivers({ log });
+      log(
+        'INFO',
+        webhookReceivers.count > 0
+          ? `Webhook receiver hosting ${webhookReceivers.count} receiver(s)`
+          : 'Webhook receiver service enabled; no receivers declared in daemon/webhooks.yaml',
+      );
+    } catch (err) {
+      log('WARN', `Webhook receiver host skipped: ${(err as Error).message}`);
+    }
+  } else {
+    log('INFO', 'Webhook receiver service disabled');
+  }
+
   runMonitorTick();
   const monitorInterval = setInterval(runMonitorTick, MONITOR_TICK_MS);
 
@@ -1483,6 +1556,7 @@ export async function runDaemon(): Promise<void> {
     stopScheduler();
     monitorEngine?.stop();
     await browserIPC?.stop();
+    await webhookReceivers?.close();
     clearInterval(monitorInterval);
     if (healInterval) clearInterval(healInterval);
     if (healKickoff) clearTimeout(healKickoff);
@@ -1543,19 +1617,36 @@ export function writeOwnerOnlyServiceManifest(filePath: string, content: string)
  * credential at all. Routine runs authenticate through the per-account
  * CLAUDE_CONFIG_DIR login on this device, exactly like an interactive
  * `agents run`, so no credential ever touches the service manifest.
+ *
+ * RUSH-2639: launchd does NOT inherit `launchctl load`'s caller's process
+ * environment — a spawned daemon only ever sees the login session's default
+ * env plus whatever this dict adds/overrides. Before this fix the dict carried
+ * only PATH, so HOME resolved to the launchd session's own value regardless of
+ * what HOME the process that generated (and loaded) the plist was running
+ * under. In production that's a no-op (the login session's HOME already is the
+ * real HOME), but under a hermetic test harness that redirects HOME to a
+ * fork-private sandbox, a launchd-started daemon silently escaped the sandbox
+ * and bootstrapped `~/.agents` (.cache/.history/.system/routines) in the
+ * developer's/runner's REAL home. Baking HOME (and the AGENTS_REAL_HOME seam
+ * every version-home consumer honors, see tests/setup.ts) into the plist at
+ * generation time makes the launchd child inherit the SAME home the caller
+ * resolved, exactly like the plain detached-spawn path already does via
+ * `env: {...process.env}`.
  */
 export function generateLaunchdPlist(
   agentsBin: string = getAgentsBinPath(),
 ): string {
   const launch = getDaemonLaunch(agentsBin);
   const logPath = getDaemonLogPath();
+  const home = process.env.HOME || os.homedir();
+  const realHome = process.env.AGENTS_REAL_HOME || home;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${PLIST_NAME}</string>
+  <string>${daemonServiceLabel()}</string>
   <key>ProgramArguments</key>
   <array>
 ${[launch.command, ...launch.args].map((arg) => `    <string>${xmlEscape(arg)}</string>`).join('\n')}
@@ -1574,6 +1665,10 @@ ${[launch.command, ...launch.args].map((arg) => `    <string>${xmlEscape(arg)}</
   <dict>
     <key>PATH</key>
     <string>${daemonPathValue(agentsBin, ['/usr/local/bin', '/usr/bin', '/bin', '/opt/homebrew/bin', `${os.homedir()}/.bun/bin`])}</string>
+    <key>HOME</key>
+    <string>${xmlEscape(home)}</string>
+    <key>AGENTS_REAL_HOME</key>
+    <string>${xmlEscape(realHome)}</string>
   </dict>
 </dict>
 </plist>`;
@@ -1591,12 +1686,21 @@ function systemdExecArg(value: string): string {
  * credential at all. Routine runs authenticate through the per-account
  * CLAUDE_CONFIG_DIR login on this device, exactly like an interactive
  * `agents run`, so no credential ever touches the unit file.
+ *
+ * RUSH-2639: same seam as `generateLaunchdPlist` — a systemd --user unit is
+ * started by the user's systemd instance, not the process that generated the
+ * unit, so HOME is whatever that session provides unless this file pins it.
+ * Baking HOME (and AGENTS_REAL_HOME) in at generation time keeps a
+ * hermetic-test-started unit inside its sandbox instead of resolving against
+ * the real account home.
  */
 export function generateSystemdUnit(
   agentsBin: string = getAgentsBinPath(),
 ): string {
   const launch = getDaemonLaunch(agentsBin);
   const execStart = [launch.command, ...launch.args].map(systemdExecArg).join(' ');
+  const home = process.env.HOME || os.homedir();
+  const realHome = process.env.AGENTS_REAL_HOME || home;
 
   return `[Unit]
 Description=Agents Daemon - Scheduled Job Runner
@@ -1610,6 +1714,8 @@ ExecStart=${execStart}
 Restart=always
 RestartSec=${DAEMON_THROTTLE_SECONDS}
 Environment=PATH=${daemonPathValue(agentsBin, ['/usr/local/bin', '/usr/bin', '/bin'])}
+Environment=HOME=${home}
+Environment=AGENTS_REAL_HOME=${realHome}
 
 [Install]
 WantedBy=default.target`;
@@ -1630,13 +1736,13 @@ export { getAgentsBinPath };
 function readServiceManagerPid(platform: NodeJS.Platform = os.platform()): number | null {
   try {
     if (platform === 'linux') {
-      const out = execFileSync('systemctl', ['--user', 'show', '-p', 'MainPID', '--value', SYSTEMD_UNIT],
+      const out = execFileSync('systemctl', ['--user', 'show', '-p', 'MainPID', '--value', daemonSystemdUnitName()],
         { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
       const pid = parseInt(out, 10);
       return !isNaN(pid) && pid > 0 ? pid : null;
     }
     if (platform === 'darwin') {
-      const out = execFileSync('launchctl', ['list', PLIST_NAME],
+      const out = execFileSync('launchctl', ['list', daemonServiceLabel()],
         { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
       const m = out.match(/"PID"\s*=\s*(\d+)/);
       if (m) {
@@ -1825,8 +1931,8 @@ function startDaemonLocked(agentsBin: string, releaseLock: () => void): { pid: n
       writeOwnerOnlyServiceManifest(unitPath, generateSystemdUnit(agentsBin));
 
       execFileSync('systemctl', ['--user', 'daemon-reload'], { encoding: 'utf-8' });
-      execFileSync('systemctl', ['--user', 'enable', SYSTEMD_UNIT], { encoding: 'utf-8' });
-      execFileSync('systemctl', ['--user', 'start', SYSTEMD_UNIT], { encoding: 'utf-8' });
+      execFileSync('systemctl', ['--user', 'enable', daemonSystemdUnitName()], { encoding: 'utf-8' });
+      execFileSync('systemctl', ['--user', 'start', daemonSystemdUnitName()], { encoding: 'utf-8' });
 
       // Launch issued — the child needs this lock to claim (RUSH-2417).
       releaseLock();
@@ -2194,8 +2300,8 @@ export function stopDaemon(): DaemonStopResult {
 
   if (platform === 'linux') {
     try {
-      execFileSync('systemctl', ['--user', 'stop', SYSTEMD_UNIT], { encoding: 'utf-8' });
-      execFileSync('systemctl', ['--user', 'disable', SYSTEMD_UNIT], { encoding: 'utf-8' });
+      execFileSync('systemctl', ['--user', 'stop', daemonSystemdUnitName()], { encoding: 'utf-8' });
+      execFileSync('systemctl', ['--user', 'disable', daemonSystemdUnitName()], { encoding: 'utf-8' });
     } catch (err: any) {
       if (process.env.AGENTS_DEBUG) {
         console.error(`[debug] systemctl stop failed: ${err.message}`);

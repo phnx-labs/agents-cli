@@ -15,7 +15,7 @@ import * as os from 'os';
 import * as path from 'path';
 import type { ActiveSession } from '../session/active.js';
 import type { SessionProvenance, MuxLocation } from '../session/provenance.js';
-import type { InjectTarget } from '../terminal/inject.js';
+import type { InjectTarget } from '../terminal/index.js';
 import type { WatchdogCandidate } from './watchdog.js';
 import type { OpenBlock } from '../feed.js';
 import {

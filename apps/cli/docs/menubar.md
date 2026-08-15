@@ -37,6 +37,24 @@ stamp `machine` on a local row (unlike the CLI's own local gather), the
 snapshot self-stamps this machine's id before filtering — see
 `computeMenubarSnapshot` in `src/lib/menubar/snapshot.ts`.
 
+**Header shows the installed version (RUSH-2688).** The dropdown's top row reads
+`agents-cli <version>` — the version `agents --version` prints, carried on the
+snapshot (`cliVersion`) and resolved at runtime, not compiled into the helper. A
+helper that outlived an `agents` upgrade therefore shows the older version at a
+glance. Until the first snapshot lands (and against a CLI too old to emit the
+field) the row falls back to the bare `agents-cli`.
+
+**Project grouping never leaks the harness or a machine (RUSH-2688).** The ACTIVE
+section groups by project: a real working dir → its repo (worktree-aware, so a
+`.agents/worktrees/<slug>` session groups under the enclosing repo). A session
+with **no local cwd** — a cloud task — groups under its own repo when the provider
+names one (reduced to the bare name, so a cloud task for `phnx-labs/agents-cli`
+lands with local `agents-cli` work), else the explicit **`cloud`** bucket. It
+never borrows the harness/provider name (`codex`) or a machine name as a group —
+neither is a project. The one derivation is `activeSessionProjectKey`
+(`src/commands/sessions.ts`) for the serialized rows and `LocalState.groupKey`
+for the menu's cold-start reads.
+
 macOS only. It is auto-enabled for every user (see [Lifecycle](#lifecycle)); opt
 out with `agents menubar disable`.
 

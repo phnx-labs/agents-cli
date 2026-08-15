@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import { buildCredentialScript, pickRuntimes, resolveClaudeCredentialsBlob, inferLeaseRuntime, profileNeedsBaseRuntimeCredentials, type DetectedRuntime } from './runtimes.js';
+import { assertNoNativeOAuthTransfer, buildCredentialScript, isNativeOAuthRuntime, LEASE_RUNTIMES, pickRuntimes, refusedNativeOAuthRuntimes, resolveClaudeCredentialsBlob, inferLeaseRuntime, profileNeedsBaseRuntimeCredentials, type DetectedRuntime } from './runtimes.js';
+import type { AgentId } from '../types.js';
 import { getPreset } from '../profiles-presets.js';
 import { profileFromPreset } from '../profiles.js';
 
@@ -51,68 +52,59 @@ describe('inferLeaseRuntime', () => {
   });
 });
 
-describe('buildCredentialScript', () => {
-  let tmpDir: string;
-  let claudeCred: string;
+describe('buildCredentialScript — native OAuth transfer is refused (SING-1b)', () => {
+  const detected = (id: AgentId): DetectedRuntime => ({ id, label: id, email: `${id}@x.com`, signedIn: true, credPath: `/tmp/${id}.json` });
+  // The exact OAuth blob --lease used to write onto the box; it must never surface.
+  const OAUTH_BLOB = '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-SECRET","refreshToken":"rt-SECRET"}}';
 
-  beforeAll(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-cred-'));
-    claudeCred = path.join(tmpDir, 'claude.json');
-    fs.writeFileSync(claudeCred, '{"oauthAccount":{"emailAddress":"a@b.com"}}');
-  });
-  afterAll(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
-
-  it('writes the picked runtime token via a quoted heredoc + chmod 600', () => {
-    const detected: DetectedRuntime[] = [
-      { id: 'claude', label: 'Claude Code', email: 'a@b.com', signedIn: true, credPath: claudeCred },
-    ];
-    const script = buildCredentialScript(['claude'], detected);
-    expect(script).toContain('cat > "$HOME/.claude.json" <<');
-    expect(script).toContain('{"oauthAccount":{"emailAddress":"a@b.com"}}');
-    expect(script).toContain('chmod 600 "$HOME/.claude.json"');
-    // Quoted heredoc delimiter → no shell expansion of the token body.
-    expect(script).toMatch(/<<'AGENTS_LEASE_CRED_EOF_[0-9a-f]+'/);
+  it('classifies every LEASE_RUNTIMES entry as native OAuth (nothing slips through)', () => {
+    for (const cred of LEASE_RUNTIMES) expect(isNativeOAuthRuntime(cred.id)).toBe(true);
+    expect(LEASE_RUNTIMES.map((c) => c.id).sort()).toEqual(['claude', 'codex', 'gemini', 'grok']);
   });
 
-  it('skips runtimes with no local credential', () => {
-    const detected: DetectedRuntime[] = [
-      { id: 'codex', label: 'Codex CLI', email: null, signedIn: false, credPath: null },
-    ];
-    expect(buildCredentialScript(['codex'], detected)).toBe('');
+  it('refuses each native runtime (claude/codex/gemini/grok) instead of serializing its login', () => {
+    for (const id of ['claude', 'codex', 'gemini', 'grok'] as AgentId[]) {
+      expect(() => buildCredentialScript([id], [detected(id)])).toThrow(/Refusing to copy native OAuth/i);
+    }
   });
 
-  it('creates the parent dir for nested remote paths (codex)', () => {
-    const codexCred = path.join(tmpDir, 'codex.json');
-    fs.writeFileSync(codexCred, '{"tokens":{}}');
-    const detected: DetectedRuntime[] = [
-      { id: 'codex', label: 'Codex CLI', email: 'x@y.com', signedIn: true, credPath: codexCred },
-    ];
-    const script = buildCredentialScript(['codex'], detected);
-    expect(script).toContain('mkdir -p "$HOME/.codex"');
-    expect(script).toContain('cat > "$HOME/.codex/auth.json" <<');
+  it('refuses BEFORE reading any file or emitting the OAuth blob, and steers to accounts sync', () => {
+    // credPath points nowhere; the refusal must precede the fs read, so the box's
+    // token never enters a --script-stdin body.
+    try {
+      buildCredentialScript(['claude'], [detected('claude')], { claudeCredentialsJson: OAUTH_BLOB });
+      throw new Error('expected a refusal');
+    } catch (e) {
+      const msg = (e as Error).message;
+      expect(msg).toContain('agents accounts sync');
+      expect(msg).toContain('SING-1b');
+      expect(msg).not.toContain('sk-ant-oat01-SECRET');
+      expect(msg).not.toContain('rt-SECRET');
+    }
   });
 
-  it('writes .claude/.credentials.json (0600) alongside the config when a claude blob is supplied', () => {
-    const detected: DetectedRuntime[] = [
-      { id: 'claude', label: 'Claude Code', email: 'a@b.com', signedIn: true, credPath: claudeCred },
-    ];
-    const token = '{"claudeAiOauth":{"accessToken":"tok"}}';
-    const script = buildCredentialScript(['claude'], detected, { claudeCredentialsJson: token });
-    // config still copied...
-    expect(script).toContain('cat > "$HOME/.claude.json" <<');
-    // ...plus the token, which is what actually logs the box in.
-    expect(script).toContain('mkdir -p "$HOME/.claude"');
-    expect(script).toContain('cat > "$HOME/.claude/.credentials.json" <<');
-    expect(script).toContain(token);
-    expect(script).toContain('chmod 600 "$HOME/.claude/.credentials.json"');
+  it('an empty runtime set is a no-op — nothing to copy, nothing forbidden', () => {
+    expect(buildCredentialScript([], [])).toBe('');
   });
 
-  it('omits the credentials write when no claude blob is supplied (back-compat)', () => {
-    const detected: DetectedRuntime[] = [
-      { id: 'claude', label: 'Claude Code', email: 'a@b.com', signedIn: true, credPath: claudeCred },
+  it('does NOT refuse a native runtime that is not signed in locally (nothing to copy)', () => {
+    // credPath null and no claude blob → nothing would transfer → no refusal, so a
+    // --lease of a not-signed-in runtime still bootstraps. This is why the fail-fast
+    // guard keys on refusedNativeOAuthRuntimes, not on the runtime id alone.
+    const notSignedIn: DetectedRuntime[] = [
+      { id: 'claude', label: 'Claude Code', email: null, signedIn: false, credPath: null },
     ];
-    expect(buildCredentialScript(['claude'], detected)).not.toContain('.credentials.json');
-    expect(buildCredentialScript(['claude'], detected, { claudeCredentialsJson: null })).not.toContain('.credentials.json');
+    expect(refusedNativeOAuthRuntimes(['claude'], notSignedIn)).toEqual([]);
+    expect(() => assertNoNativeOAuthTransfer(['claude'], notSignedIn)).not.toThrow();
+    expect(buildCredentialScript(['claude'], notSignedIn)).toBe('');
+  });
+
+  it('assertNoNativeOAuthTransfer / refusedNativeOAuthRuntimes flag a signed-in native runtime', () => {
+    const signedIn: DetectedRuntime[] = [detected('claude'), detected('codex')];
+    expect(refusedNativeOAuthRuntimes(['claude', 'codex'], signedIn).sort()).toEqual(['claude', 'codex']);
+    expect(() => assertNoNativeOAuthTransfer(['claude'], signedIn)).toThrow(/Refusing to copy native OAuth/i);
+    // A Claude OAuth blob alone (no credPath) is also enough to refuse.
+    expect(refusedNativeOAuthRuntimes(['claude'], [{ id: 'claude', label: 'c', email: null, signedIn: true, credPath: null }], { claudeCredentialsJson: OAUTH_BLOB })).toEqual(['claude']);
   });
 });
 

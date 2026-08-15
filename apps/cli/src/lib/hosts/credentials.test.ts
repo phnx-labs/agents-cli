@@ -1,106 +1,112 @@
+/**
+ * `--copy-creds` MUST NOT copy a native OAuth / session login to another device
+ * (docs/specifications.md SING-1b). These tests prove the transfer path is gone:
+ * for any signed-in native runtime the builder REFUSES loudly (steering to the
+ * portable `agents accounts sync` path) and never serializes the credential —
+ * the OAuth blob and the runtime auth files never appear in any produced script.
+ */
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { buildHostCredentialScript, wrapHostCommandWithCredentials } from './credentials.js';
-import type { DetectedRuntime } from '../crabbox/runtimes.js';
+import {
+  buildHostCredentialScript,
+  wrapHostCommandWithCredentials,
+  isNativeOAuthRuntime,
+} from './credentials.js';
+import { LEASE_RUNTIMES, type DetectedRuntime } from '../crabbox/runtimes.js';
+import type { AgentId } from '../types.js';
 
-function tempCredFile(contents: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-creds-'));
-  const file = path.join(dir, 'cred.json');
-  fs.writeFileSync(file, contents);
-  return file;
+/** A signed-in native runtime, with a plausible on-disk credential path. */
+function detected(id: AgentId): DetectedRuntime {
+  return { id, label: id, email: `${id}@example.com`, signedIn: true, credPath: `/tmp/${id}-cred.json` };
 }
 
-describe('buildHostCredentialScript', () => {
-  it('writes credentials and shreds the expected paths for each runtime', () => {
-    const detected: DetectedRuntime[] = [
-      {
-        id: 'claude',
-        label: 'Claude Code',
-        email: 'a@b.com',
-        signedIn: true,
-        credPath: tempCredFile('{"account":"claude"}'),
-      },
-      {
-        id: 'codex',
-        label: 'Codex CLI',
-        email: null,
-        signedIn: true,
-        credPath: tempCredFile('{"account":"codex"}'),
-      },
-    ];
+// The exact OAuth blob a --copy-creds run used to ship; it must never surface.
+const OAUTH_BLOB = '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-SECRET","refreshToken":"rt-SECRET"}}';
 
-    const { setup, teardown } = buildHostCredentialScript({
-      runtimes: ['claude', 'codex'],
-      detected,
-      claudeCredentialsJson: '{"claudeAiOauth":{"accessToken":"abc"}}',
-    });
-
-    expect(setup).toContain('cat > "$HOME/.claude.json"');
-    expect(setup).toContain('{"account":"claude"}');
-    expect(setup).toContain('cat > "$HOME/.claude/.credentials.json"');
-    expect(setup).toContain('{"claudeAiOauth":{"accessToken":"abc"}}');
-    expect(setup).toContain('cat > "$HOME/.codex/auth.json"');
-    expect(setup).toContain('{"account":"codex"}');
-
-    expect(teardown).toContain('rm -f "$HOME/.claude.json"');
-    expect(teardown).toContain('rm -f "$HOME/.claude/.credentials.json"');
-    expect(teardown).toContain('rm -f "$HOME/.codex/auth.json"');
+describe('buildHostCredentialScript — native OAuth transfer is refused (SING-1b)', () => {
+  it('every runtime --copy-creds handles is classified native OAuth', () => {
+    // The refusal is only complete if the classifier covers the whole set the
+    // path ever transferred — else a runtime could slip through unguarded.
+    for (const cred of LEASE_RUNTIMES) {
+      expect(isNativeOAuthRuntime(cred.id)).toBe(true);
+    }
+    expect(LEASE_RUNTIMES.map((c) => c.id).sort()).toEqual(['claude', 'codex', 'gemini', 'grok']);
   });
 
-  it('skips the claude OAuth token file when no token is provided', () => {
-    const detected: DetectedRuntime[] = [
-      {
-        id: 'claude',
-        label: 'Claude Code',
-        email: 'a@b.com',
-        signedIn: true,
-        credPath: tempCredFile('{"account":"claude"}'),
-      },
-    ];
+  it('throws for a native runtime instead of serializing its login, and steers to accounts sync', () => {
+    expect(() =>
+      buildHostCredentialScript({
+        runtimes: ['claude'],
+        detected: [detected('claude')],
+        claudeCredentialsJson: OAUTH_BLOB,
+      }),
+    ).toThrow(/Refusing to copy native OAuth/i);
 
-    const { setup } = buildHostCredentialScript({
-      runtimes: ['claude'],
-      detected,
-    });
-    expect(setup).toContain('cat > "$HOME/.claude.json"');
-    expect(setup).not.toContain('cat > "$HOME/.claude/.credentials.json"');
+    // The steer names the portable, non-rotating path.
+    try {
+      buildHostCredentialScript({ runtimes: ['claude'], detected: [detected('claude')], claudeCredentialsJson: OAUTH_BLOB });
+      throw new Error('expected a refusal');
+    } catch (e) {
+      const msg = (e as Error).message;
+      expect(msg).toContain('agents accounts sync');
+      expect(msg).toContain('SING-1b');
+      // Proof the credential is never echoed, even into the refusal itself.
+      expect(msg).not.toContain('sk-ant-oat01-SECRET');
+      expect(msg).not.toContain('rt-SECRET');
+    }
+  });
+
+  it('refuses codex / grok / gemini native auth files too', () => {
+    for (const id of ['codex', 'grok', 'gemini'] as AgentId[]) {
+      expect(() => buildHostCredentialScript({ runtimes: [id], detected: [detected(id)] })).toThrow(
+        /Refusing to copy native OAuth/i,
+      );
+    }
+  });
+
+  it('refuses a mixed set and names every forbidden runtime', () => {
+    try {
+      buildHostCredentialScript({
+        runtimes: ['claude', 'codex'],
+        detected: [detected('claude'), detected('codex')],
+        claudeCredentialsJson: OAUTH_BLOB,
+      });
+      throw new Error('expected a refusal');
+    } catch (e) {
+      const msg = (e as Error).message;
+      expect(msg).toContain('claude');
+      expect(msg).toContain('codex');
+    }
+  });
+
+  it('an empty runtime set is a no-op — nothing to provision, nothing forbidden', () => {
+    expect(buildHostCredentialScript({ runtimes: [], detected: [] })).toEqual({ setup: '', teardown: '' });
   });
 });
 
-describe('wrapHostCommandWithCredentials', () => {
-  it('wraps an inner command with credential setup, teardown, and exit-code capture', () => {
-    const detected: DetectedRuntime[] = [
-      {
-        id: 'claude',
-        label: 'Claude Code',
-        email: 'a@b.com',
-        signedIn: true,
-        credPath: tempCredFile('{"account":"claude"}'),
-      },
-    ];
+describe('wrapHostCommandWithCredentials — the native OAuth never reaches the wire', () => {
+  it('fails loud before producing any remote script containing the credential', () => {
+    let produced: string | null = null;
+    try {
+      produced = wrapHostCommandWithCredentials('agents run claude "hi" --quiet', {
+        runtimes: ['claude'],
+        detected: [detected('claude')],
+        claudeCredentialsJson: OAUTH_BLOB,
+      });
+    } catch (e) {
+      expect((e as Error).message).toMatch(/Refusing to copy native OAuth/i);
+    }
+    // No script was ever built, so the OAuth blob and the credential-file writes
+    // it used to emit can never have been serialized or sent.
+    expect(produced).toBeNull();
+  });
 
-    const wrapped = wrapHostCommandWithCredentials('cd "$HOME"/proj && agents run claude "hi" --quiet', {
-      runtimes: ['claude'],
-      detected,
-      claudeCredentialsJson: '{"claudeAiOauth":{"accessToken":"abc"}}',
-    });
-
+  it('wraps a no-credential run normally (no runtimes → no refusal)', () => {
+    const wrapped = wrapHostCommandWithCredentials('echo hi', { runtimes: [], detected: [] });
     expect(wrapped).toContain('set -uo pipefail');
-    expect(wrapped).toContain('cat > "$HOME/.claude.json"');
-    expect(wrapped).toContain('cat > "$HOME/.claude/.credentials.json"');
-    expect(wrapped).toContain('cd "$HOME"/proj && agents run claude "hi" --quiet');
-    expect(wrapped).toContain('rc=$?');
-    expect(wrapped).toContain('rm -f "$HOME/.claude.json"');
-    expect(wrapped).toContain('rm -f "$HOME/.claude/.credentials.json"');
+    expect(wrapped).toContain('echo hi');
     expect(wrapped).toContain('exit $rc');
-
-    // Setup comes before the inner command, teardown after.
-    expect(wrapped.indexOf('cat > "$HOME/.claude.json"')).toBeLessThan(
-      wrapped.indexOf('agents run claude'),
-    );
-    expect(wrapped.indexOf('agents run claude')).toBeLessThan(wrapped.indexOf('rc=$?'));
-    expect(wrapped.indexOf('rc=$?')).toBeLessThan(wrapped.indexOf('rm -f'));
+    // No credential file write and no OAuth blob anywhere.
+    expect(wrapped).not.toContain('.credentials.json');
+    expect(wrapped).not.toContain('claudeAiOauth');
   });
 });

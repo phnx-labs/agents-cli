@@ -10,7 +10,7 @@
  */
 
 import type { ReplyRail } from './provenance.js';
-import type { InjectTarget } from '../terminal/inject.js';
+import type { InjectTarget } from '../terminal/index.js';
 
 /**
  * Map a session's `ReplyRail` to an engine `InjectTarget`. Today only tmux rails

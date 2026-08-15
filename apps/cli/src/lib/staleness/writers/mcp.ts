@@ -17,7 +17,9 @@ function buildMcpWriter(agent: AgentId): ResourceWriter<string[]> {
     agent,
     write({ version, versionHome, selection, cwd }: WriteArgs<string[]>): WriteResult {
       const r = installMcpServers(agent, version, versionHome, selection, { cwd });
-      return { synced: r.applied };
+      // Forward r.errors: dropping them is what let a harness with no config
+      // writer report a clean sync while writing nothing (RUSH-2677).
+      return { synced: r.applied, ...(r.errors.length ? { errors: r.errors } : {}) };
     },
   };
 }

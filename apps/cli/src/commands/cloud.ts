@@ -147,10 +147,6 @@ Examples:
       '--strategy <strategy>',
       'Account selection strategy for the factory: balanced. Sends all healthy accounts so the factory pod rotates between them on rate-limit.',
     )
-    .option(
-      '--upload-account-tokens',
-      'Upload Claude OAuth credentials to Rush Cloud on first dispatch (consent recorded for future runs).',
-    )
     .option('--json', 'Structured JSON output')
     .option('--no-follow', 'Dispatch and exit without streaming output')
     .addHelpText('after', `
@@ -225,7 +221,6 @@ Examples:
       if (options.balanced || (options.strategy as string) === 'balanced') {
         dispatchOptions.providerOptions!.strategy = 'balanced';
       }
-      if (options.uploadAccountTokens) dispatchOptions.providerOptions!.uploadAccountTokens = true;
 
       // --on <event>: register this run as an event trigger instead of
       // dispatching now. We parse + validate the event, attach it to

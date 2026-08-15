@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   normalizeProjectKey,
   matchLinearProject,
+  nextLinearLink,
   pickLinearProject,
   type LinearProjectLite,
 } from './linear-projects.js';
@@ -71,5 +72,60 @@ describe('pickLinearProject', () => {
   it('no match is none, and an empty query is none', () => {
     expect(pickLinearProject('totally-unrelated', PROJECTS)).toEqual({ kind: 'none' });
     expect(pickLinearProject('   ', PROJECTS)).toEqual({ kind: 'none' });
+  });
+});
+
+describe('nextLinearLink', () => {
+  it('refreshes a stale name when the Linear project was renamed', () => {
+    // The bug this exists for: `link` wrote `{ ...prior, projectId: p.id }`, so
+    // a project renamed on the board ("Agents CLI" -> "AGI") kept its old label
+    // in the YAML forever, and that label is what the status card, the AGI EXT
+    // Fleet panel, and agents naming the work all read.
+    const prior = { projectId: 'lin_1', name: 'Agents CLI' };
+    expect(nextLinearLink(prior, { id: 'lin_1', name: 'AGI' })).toEqual({ projectId: 'lin_1', name: 'AGI' });
+  });
+
+  it('writes name and id on a first link', () => {
+    expect(nextLinearLink(undefined, { id: 'lin_1', name: 'AGI' })).toEqual({ projectId: 'lin_1', name: 'AGI' });
+  });
+
+  it('keeps a stored url when re-linking the SAME project without one', () => {
+    // A list row omitting `url` says nothing about whether that project has a
+    // page — so re-linking the same id must not discard what we already stored.
+    const prior = { projectId: 'lin_1', name: 'AGI', url: 'https://linear.app/x/project/agi' };
+    expect(nextLinearLink(prior, { id: 'lin_1', name: 'AGI' })).toEqual({
+      projectId: 'lin_1',
+      name: 'AGI',
+      url: 'https://linear.app/x/project/agi',
+    });
+  });
+
+  it('drops the old url when re-linking to a DIFFERENT project that has none', () => {
+    // Carrying it over would leave the def pointing at the previous project's
+    // page beside the new project's name — and the status card prefers `url`
+    // over the id, so the one clickable field would go to the wrong project.
+    const prior = { projectId: 'lin_old', name: 'Rush CLI', url: 'https://linear.app/x/project/rush-cli' };
+    expect(nextLinearLink(prior, { id: 'lin_new', name: 'Rush' })).toEqual({ projectId: 'lin_new', name: 'Rush' });
+  });
+
+  it('drops a url the prior block carried WITHOUT a projectId', () => {
+    // `projects add --linear <url>` writes `{ url }` and no projectId
+    // (commands/projects.ts). Guarding on `prior.projectId` being truthy would
+    // read that as "same project" and keep a url the user pasted for something
+    // else — and the status card prefers url over the id.
+    const prior = { url: 'https://linear.app/acme/project/old-thing' };
+    expect(nextLinearLink(prior, { id: 'lin_new', name: 'New Thing' })).toEqual({
+      projectId: 'lin_new',
+      name: 'New Thing',
+    });
+  });
+
+  it('takes the incoming url when the new row carries one', () => {
+    const prior = { projectId: 'lin_old', name: 'Rush CLI', url: 'https://linear.app/x/project/rush-cli' };
+    expect(nextLinearLink(prior, { id: 'lin_new', name: 'Rush', url: 'https://linear.app/x/project/rush' })).toEqual({
+      projectId: 'lin_new',
+      name: 'Rush',
+      url: 'https://linear.app/x/project/rush',
+    });
   });
 });

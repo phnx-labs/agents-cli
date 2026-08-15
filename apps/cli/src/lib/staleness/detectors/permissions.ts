@@ -143,28 +143,6 @@ function buildGrokDetector(): ResourceDetector {
   };
 }
 
-function buildGooseDetector(): ResourceDetector {
-  return {
-    kind: 'permissions',
-    agent: 'goose',
-    list({ versionHome }: DetectArgs): string[] {
-      const permissionsPath = path.join(versionHome, '.config', 'goose', 'permission.yaml');
-      if (!fs.existsSync(permissionsPath)) return [];
-      try {
-        const config = yaml.parse(fs.readFileSync(permissionsPath, 'utf-8')) as {
-          user?: { always_allow?: unknown[]; ask_before?: unknown[]; never_allow?: unknown[] };
-        } | null;
-        const user = config?.user;
-        const count =
-          (Array.isArray(user?.always_allow) ? user.always_allow.length : 0) +
-          (Array.isArray(user?.ask_before) ? user.ask_before.length : 0) +
-          (Array.isArray(user?.never_allow) ? user.never_allow.length : 0);
-        if (count > 0) return discoverPermissionGroups().map(g => g.name);
-      } catch { /* parse fail */ }
-      return [];
-    },
-  };
-}
 
 function buildKimiDetector(): ResourceDetector {
   return {
@@ -315,7 +293,6 @@ const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   opencode: buildOpenCodeDetector,
   antigravity: buildAntigravityDetector,
   grok: buildGrokDetector,
-  goose: buildGooseDetector,
   kimi: buildKimiDetector,
   cursor: buildCursorDetector,
   droid: buildDroidDetector,

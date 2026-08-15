@@ -134,7 +134,6 @@ export type FleetActionKind =
   | 'upgrade-cli'
   | 'add-agent'
   | 'sync-config'
-  | 'push-login'
   | 'needs-login'
   /** Push a declared secrets bundle to the device over SSH. Opt-in only
    * (`--provision-secrets`) and gated on a pinned host key, because this moves

@@ -1,17 +1,16 @@
 /**
  * `agents apply` (alias `ag apply`) — reconcile the whole fleet to a declared
- * profile in one command: install agents-cli + agents, sync config, and
- * propagate login so a machine that's signed in once seeds every device. Kills
- * the "6 hosts x ~8 harnesses = ~48 OAuth flows" slog.
+ * profile in one command: install agents-cli + agents and sync config. Native
+ * harness logins remain device-local; portable provider credentials move only
+ * through explicit `agents accounts sync`.
  *
  * The manifest is the `fleet:` block of any `-f` file (default `agents.yaml`).
  */
 
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { Command, Option } from 'commander';
+import { Command } from 'commander';
 import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';
 import { machineId } from '../lib/session/sync/config.js';
@@ -19,7 +18,7 @@ import { loadDevices, isControlDevice, type DeviceProfile } from '../lib/devices
 import { isHostPinned, managedKnownHostsPath } from '../lib/devices/known-hosts.js';
 import { ensureDevicesRegistered } from '../lib/devices/sync.js';
 import { readFleetFile, resolveDesired } from '../lib/fleet/manifest.js';
-import { snapshotAuth, materializeAuth, parseAuthBundle, KEYCHAIN_BOUND_ON_MAC, isCredentialSafeToPropagate } from '../lib/fleet/auth-sync.js';
+import { snapshotAuth } from '../lib/fleet/auth-sync.js';
 import {
   agentIdOf,
   diffFleet,
@@ -45,7 +44,6 @@ interface ApplyOptions {
   agent?: string[]; // --agent claude@all codex@latest (variadic)
   only?: string;
   login?: boolean; // Commander sets false for --no-login
-  recvAuth?: boolean; // hidden internal receiver
   provisionSecrets?: boolean;
   force?: boolean;
 }
@@ -59,24 +57,6 @@ function localCliVersion(): string {
   } catch {
     return '';
   }
-}
-
-async function readStdin(): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const c of process.stdin) chunks.push(c as Buffer);
-  return Buffer.concat(chunks).toString('utf-8');
-}
-
-/** Hidden path: receive an auth bundle on stdin and materialize it locally. */
-async function runRecvAuth(): Promise<void> {
-  const raw = await readStdin();
-  const bundle = parseAuthBundle(raw);
-  const res = materializeAuth(bundle, { home: os.homedir() });
-  if (res.errors.length > 0) {
-    console.error(`recv-auth: ${res.errors.length} error(s): ${res.errors.join('; ')}`);
-    process.exit(1);
-  }
-  console.log(`recv-auth: wrote login for ${res.written.join(', ') || '(nothing)'}`);
 }
 
 function confirm(question: string): Promise<boolean> {
@@ -95,7 +75,7 @@ function confirm(question: string): Promise<boolean> {
 const ONLY_KINDS: Record<string, Set<string>> = {
   agents: new Set(['install-cli', 'upgrade-cli', 'add-agent']),
   config: new Set(['sync-config']),
-  login: new Set(['push-login', 'needs-login']),
+  login: new Set(['needs-login']),
 };
 
 /** Render the device x dimension matrix (cribbed from `doctor --devices`). */
@@ -108,9 +88,8 @@ function renderPlan(plan: FleetPlan): void {
     const acts = row.actions.filter((a) => kinds.includes(a.kind));
     if (acts.length === 0) return chalk.green(`ok ${okLabel}`);
     if (acts.some((a) => a.kind === 'needs-login')) {
-      const push = acts.filter((a) => a.kind === 'push-login').length;
       const need = acts.filter((a) => a.kind === 'needs-login').length;
-      return chalk.yellow(`${push} push · ${need} manual`);
+      return chalk.yellow(`${need} manual`);
     }
     return chalk.cyan('↑ ' + acts.map((a) => a.agent ?? a.kind.replace('-cli', '')).join(','));
   };
@@ -135,7 +114,7 @@ function renderPlan(plan: FleetPlan): void {
     const configCell = row.probe.reachable
       ? (row.actions.some((a) => a.kind === 'sync-config') ? chalk.cyan('↑ sync') : chalk.green('ok'))
       : chalk.gray('-');
-    const loginCell = cell(row, ['push-login', 'needs-login'], `${row.desired.agents.length}/${row.desired.agents.length}`);
+    const loginCell = cell(row, ['needs-login'], `${row.desired.agents.length}/${row.desired.agents.length}`);
     const secretsCell = (() => {
       if (!anySecrets) return '';
       if (!row.probe.reachable) return chalk.gray('- offline');
@@ -160,28 +139,18 @@ function renderPlan(plan: FleetPlan): void {
     console.log(chalk.gray('  secrets: not pushed. `--provision-secrets` pushes declared bundles to devices whose host key is pinned.'));
   }
 
-  // Distinguish *why* a login can't be propagated: macOS keychain-bound,
-  // single-use rotating refresh token (never copied), or the source simply not
-  // being signed in to that agent (no portable file).
-  const bound: string[] = [];
-  const rotating: string[] = [];
-  const noToken: string[] = [];
-  for (const r of rows) {
-    for (const a of r.loginBlocked) {
-      const tag = `${a}@${r.device}`;
-      if (!isCredentialSafeToPropagate(a)) rotating.push(tag);
-      else if (r.probe.platform === 'macos' && KEYCHAIN_BOUND_ON_MAC.has(a)) bound.push(tag);
-      else noToken.push(tag);
-    }
-  }
-  if (rotating.length > 0) {
-    console.log(chalk.yellow(`  manual login needed (single-use rotating refresh token): ${rotating.join(', ')}`));
-  }
-  if (bound.length > 0) {
-    console.log(chalk.yellow(`  manual login needed (macOS keychain-bound): ${bound.join(', ')}`));
-  }
-  if (noToken.length > 0) {
-    console.log(chalk.yellow(`  manual login needed (no portable token on source): ${noToken.join(', ')}`));
+  // `apply` no longer propagates ANY login (SING-1b: a native OAuth / session
+  // login is never copied between devices). Every login:sync agent that has a
+  // login to establish is surfaced here with the one honest reason + the portable
+  // alternative — never a silent skip.
+  const needsLogin = [...new Set(rows.flatMap((r) => r.loginBlocked.map((a) => `${a}@${r.device}`)))];
+  if (needsLogin.length > 0) {
+    console.log(
+      chalk.yellow(
+        `  manual login needed — a native OAuth login is never copied between devices (SING-1b); ` +
+        `log in on the box itself, or sync a portable provider account (\`agents accounts sync\`): ${needsLogin.join(', ')}`,
+      ),
+    );
   }
   // Secrets bundles are declared once for the fleet; surface the distinct set the
   // gate did NOT push, so a refusal is never silent. "never pushed" used to be
@@ -292,8 +261,7 @@ async function runApply(opts: ApplyOptions): Promise<void> {
     secretsBundles: manifest.secrets?.bundles,
     provisionSecrets: opts.provisionSecrets === true,
     forceSecrets: opts.force === true,
-    // Same bar as `exec --copy-creds` (EXEC-34): credential values only ever go
-    // to a host whose key we already pinned.
+    // Portable secret values only ever go to a host whose key is already pinned.
     isHostPinned: (device) => isHostPinned(device, managedKnownHostsPath()),
   });
 
@@ -369,7 +337,7 @@ function reportResults(results: DeviceApplyResult[]): void {
  */
 export function configureApplyCommand(cmd: Command): Command {
   return cmd
-    .description('Reconcile the fleet to a declared profile: install agents, sync config, propagate login.')
+    .description('Reconcile the fleet to a declared profile: install agents and sync config.')
     .option('-f, --file <path>', 'Manifest file carrying a fleet: block (default: agents.yaml)')
     .option('--plan', 'Show the reconcile plan and exit (no changes)')
     .option('--dry-run', 'Alias for --plan')
@@ -377,16 +345,11 @@ export function configureApplyCommand(cmd: Command): Command {
     .option('--device <name>', 'Scope the apply to a single device')
     .option('--agent <specs...>', 'Override the roster for targeted device(s): install these specs instead of the manifest\'s. Use `claude@all` to replicate every version installed on this machine.')
     .option('--only <dims>', 'Limit to dimensions: comma list of agents,config,login')
-    .option('--no-login', 'Do not propagate logins')
+    .option('--no-login', 'Deprecated no-op: native logins are always device-local')
     .option('--provision-secrets', "Push the manifest's declared secrets bundles to each device (OFF by default; moves credential values over SSH, and only to a device whose host key is already pinned)")
     .option('--force', 'With --provision-secrets: re-push a bundle the device already has')
-    .addOption(new Option('--recv-auth', 'internal: receive an auth bundle on stdin').hideHelp())
     .action(async (opts: ApplyOptions) => {
       try {
-        if (opts.recvAuth) {
-          await runRecvAuth();
-          return;
-        }
         await runApply(opts);
       } catch (e) {
         console.error(chalk.red((e as Error).message));
@@ -402,7 +365,7 @@ export function registerApplyCommand(program: Command): void {
       # Preview what would change across the fleet
       agents apply --plan -f agents.yaml
 
-      # Bring every device to the profile (installs, syncs, propagates login)
+      # Bring every device to the profile (installs + config sync; native login stays local)
       ag apply -f agents.yaml
 
       # One device only

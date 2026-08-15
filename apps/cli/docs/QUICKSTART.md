@@ -158,8 +158,8 @@ agents devices config worker-1 interactive.host            # print the current i
 ```
 
 Once several machines are registered, reconcile them all to one profile —
-same agents installed, same config synced, logins propagated from whichever
-box is already signed in:
+same agents installed and same config synced. Native logins remain local to
+each box; portable provider accounts move only through explicit account sync:
 
 ```yaml
 # agents.yaml -- add a fleet: block
@@ -168,7 +168,7 @@ fleet:
   defaults:
     agents: [claude@latest, codex@latest]
     sync: [user]                      # config scopes to reconcile
-    login: sync                       # propagate logins where the token is portable
+    login: sync                       # report per-device login/account readiness; never copies native OAuth
 ```
 
 ```bash
@@ -177,9 +177,8 @@ agents apply               # reconcile the fleet (confirms first; -y to skip)
 ```
 
 `agents apply` is the fleet-wide counterpart to config sync: it installs
-missing agents, syncs the named config scopes, and propagates logins so one
-signed-in host seeds the rest — instead of running N harnesses' OAuth flows
-on every machine by hand. Keep the machine you actually work from lighter than
+missing agents, syncs the named config scopes, and reports boxes that still need
+an interactive login or provider account. Keep the machine you actually work from lighter than
 your worker boxes: point long-running teams and routines at `--devices
 worker-1,worker-2` rather than piling everything onto your daily driver.
 

@@ -12,8 +12,8 @@ import { Command } from 'commander';
 import { registerArtifactsCommands } from './artifacts.js';
 import { isDirectProvisionRequest } from './artifacts-setup.js';
 import { DEFAULT_CF_BUNDLE } from '../lib/share/config.js';
+import { buildFullCommandTree } from '../cli/command-registry.js';
 import {
-  buildFullCommandTree,
   isKnownTopLevelCommand,
   RETIRED_TOP_LEVEL_COMMANDS,
 } from '../lib/startup/command-registry.js';
