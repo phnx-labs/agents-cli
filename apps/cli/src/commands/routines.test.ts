@@ -203,6 +203,11 @@ function startIsolatedDaemon(home: string): { child: ReturnType<typeof spawn>; p
       ...process.env,
       HOME: home,
       USERPROFILE: home,
+      // Without this override the daemon inherits the parent vitest process's real
+      // AGENTS_HISTORY_DIR (pointing at ~/.agents/.history). The daemon's SIGTERM
+      // sweep then reads live session records from the production history directory
+      // and kills real tmux-wrapped processes every five-minute tick (RUSH-2545).
+      AGENTS_HISTORY_DIR: path.join(home, '.agents', '.history'),
       AGENTS_SKIP_MIGRATION: '1',
     },
     detached: true,
@@ -2092,6 +2097,48 @@ describeRoutines('routines edit — headless context repair', () => {
       expect(edited.status).not.toBe(0);
       expect(edited.stderr).toContain('not found');
     } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+// RUSH-2545 regression: the daemon spawned by startIsolatedDaemon must carry an
+// AGENTS_HISTORY_DIR confined to the test's tmpHome. Without this override the daemon
+// inherited the parent vitest process's real production AGENTS_HISTORY_DIR
+// (~/.agents/.history), and its SIGTERM sweep killed live tmux-wrapped Claude and
+// cgraph-mcp processes on every five-minute tick while the test suite ran.
+describeRoutines('daemon env isolation — AGENTS_HISTORY_DIR must not leak (RUSH-2545)', () => {
+  it('daemon process carries AGENTS_HISTORY_DIR inside the test tmpHome, not the real production dir', async () => {
+    const home = makeHome();
+    let daemon: ReturnType<typeof startIsolatedDaemon> | undefined;
+    let pid: number | null = null;
+    try {
+      daemon = startIsolatedDaemon(home);
+      pid = await daemon.pidPromise;
+      expect(pid).not.toBeNull();
+
+      // On Linux, /proc/<pid>/environ is the ground truth for what a detached child
+      // actually inherited. macOS lacks /proc — the fix applies, the assertion is skipped.
+      if (process.platform === 'linux' && pid !== null) {
+        const expectedHistoryDir = path.join(home, '.agents', '.history');
+        let actualHistoryDir: string | undefined;
+        try {
+          const environ = fs.readFileSync(`/proc/${pid}/environ`, 'utf-8');
+          const entry = environ.split('\0').find((v) => v.startsWith('AGENTS_HISTORY_DIR='));
+          if (entry) actualHistoryDir = entry.slice('AGENTS_HISTORY_DIR='.length);
+        } catch {
+          // /proc/<pid>/environ unreadable — skip env assertion
+        }
+        if (actualHistoryDir !== undefined) {
+          // Before the RUSH-2545 fix, this was the real production AGENTS_HISTORY_DIR
+          // inherited from the parent vitest process — not the test's tmpHome.
+          expect(actualHistoryDir).toBe(expectedHistoryDir);
+          expect(actualHistoryDir).not.toBe(process.env.AGENTS_HISTORY_DIR ?? '');
+        }
+      }
+    } finally {
+      if (daemon) await stopIsolatedDaemon(daemon.child);
+      if (pid !== null) expect(isProcessAlive(pid)).toBe(false);
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
