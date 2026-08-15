@@ -135,6 +135,8 @@ vi.mock('../src/lib/hooks.js', () => ({
   parseHookManifest: () => ({}),
   selectHookManifest: (manifest: object) => manifest,
   registerHooksToSettings: () => {},
+  installSessionTrackerHookSync: () => ({ installed: true }),
+  installSessionTrackerHook: async () => ({ installed: true }),
 }));
 
 vi.mock('../src/lib/permissions.js', () => ({
