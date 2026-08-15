@@ -1056,20 +1056,43 @@ export function resolveFallbackStatus(
  * (+ optional session uuid), so they resolve straight off disk. Every OTHER
  * tracked harness — Codex (date-partitioned), plus grok / droid / rush / gemini /
  * kimi / hermes / opencode / antigravity / cursor (per-session dirs, SQLite, single-JSON)
- * — is resolved through the session index by cwd: the newest indexed transcript
- * for that cwd, bounded by ACTIVE_SESSION_STALE_MS so a live pid never borrows a
- * weeks-old transcript. This is what lets a live NON-claude/codex agent get a real
- * status instead of falling through to `unknown` (the file feeds
+ * — is resolved through the session index. When the session id is KNOWN, that id
+ * selects the transcript. Only an id-less process falls back to the newest indexed
+ * transcript for that cwd, bounded by ACTIVE_SESSION_STALE_MS so a live pid never
+ * borrows a weeks-old transcript. This is what lets a live NON-claude/codex agent
+ * get a real status instead of falling through to `unknown` (the file feeds
  * {@link computeLiveSignals}). An opaque kind we don't track still yields undefined
  * here and degrades honestly to a live `running`.
+ *
+ * The id branch exists because the cwd fallback is only safe when there is nothing
+ * better: it answers `WHERE agent = ? AND cwd = ? ORDER BY last_activity DESC LIMIT 1`
+ * (`latestSessionFileForCwd`), so with two same-harness agents in ONE cwd — routine on
+ * this fleet — every one of them resolves to whichever transcript was touched last.
+ * That is the same "one stranger's transcript" hazard the id-less tmux pane already
+ * refuses to guess at (see `listTmuxAgentSessions`), and since RUSH-2682 it reaches
+ * further than a status badge: the live row now backs `sessions preview <id>`, so the
+ * guess renders session B's digest under session A's header and caches it against A.
+ * An id we cannot resolve yields undefined — the honest "not indexed here" render —
+ * rather than a neighbour's transcript (RUSH-2691).
  */
 export function findSessionFileForKind(kind: string, cwd?: string, sessionId?: string): string | undefined {
   if (!cwd) return undefined;
   if (kind === 'claude') return findClaudeSessionFile(cwd, sessionId);
-  if (isSessionTrackedAgent(kind)) {
-    return latestSessionFileForCwd(kind, cwd, { maxAgeMs: ACTIVE_SESSION_STALE_MS });
-  }
-  return undefined;
+  if (!isSessionTrackedAgent(kind)) return undefined;
+  if (sessionId) return indexedSessionFileForId(kind, sessionId);
+  return latestSessionFileForCwd(kind, cwd, { maxAgeMs: ACTIVE_SESSION_STALE_MS });
+}
+
+/**
+ * The indexed transcript for one exact session id, or undefined when the index has
+ * not reached it yet. The `agent` guard rejects a row that belongs to a different
+ * harness than the live process claims: those cannot be the same conversation, and
+ * returning it would reintroduce the misattribution this function exists to avoid.
+ */
+function indexedSessionFileForId(kind: string, sessionId: string): string | undefined {
+  const row = getSessionById(sessionId);
+  if (!row || row.agent !== kind) return undefined;
+  return row.filePath || undefined;
 }
 
 /** Recover the session UUID from a transcript filename (Claude `<uuid>.jsonl`, Codex `rollout-…-<uuid>.jsonl`). */
