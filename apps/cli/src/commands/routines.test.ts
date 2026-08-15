@@ -14,8 +14,8 @@ import * as yaml from 'yaml';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
 import { buildRunsJson, groupRoutineJobsByProject } from './routines.js';
-import type { JobConfig } from '../lib/routines.js';
-import type { RunMeta } from '../lib/routines.js';
+import type { JobConfig } from '../lib/scheduling/routines.js';
+import type { RunMeta } from '../lib/scheduling/routines.js';
 
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');

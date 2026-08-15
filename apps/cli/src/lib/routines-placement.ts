@@ -10,8 +10,8 @@
  * pin for fleet/host/cloud strategies (applied at add/sync time).
  */
 
-import type { JobConfig, HostStrategy } from './routines.js';
-import { resolveHostStrategy } from './routines.js';
+import type { JobConfig, HostStrategy } from './scheduling/routines.js';
+import { resolveHostStrategy } from './scheduling/routines.js';
 import { machineId, normalizeHost } from './machine-id.js';
 import { loadDevicesSync, type DevicePlatform } from './devices/registry.js';
 import { planFleetTargets } from './devices/fleet.js';

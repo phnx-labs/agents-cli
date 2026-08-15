@@ -3,8 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import type { JobConfig, RunMeta } from '../routines.js';
-import { assertShellSubstitutionSupported, substituteWebhookPrompt } from '../routines.js';
+import type { JobConfig, RunMeta } from '../scheduling/routines.js';
+import { assertShellSubstitutionSupported, substituteWebhookPrompt } from '../scheduling/routines.js';
 import type { IncomingWebhook } from './webhook.js';
 
 describe('handler config layer', () => {

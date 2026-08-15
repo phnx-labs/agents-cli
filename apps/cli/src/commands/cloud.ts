@@ -14,8 +14,8 @@ import { renderStream } from '../lib/cloud/stream.js';
 import type { CloudProviderId, CloudTaskStatus, DispatchOptions } from '../lib/cloud/types.js';
 import { MAX_IMAGES_PER_DISPATCH } from '../lib/cloud/types.js';
 import { resolveCloudPrompt, executeCloudDispatch } from '../lib/cloud/dispatch.js';
-import type { JobConfig, JobTrigger } from '../lib/routines.js';
-import { normalizeTriggerEvent, validateTrigger, writeJob, setJobEnabled, jobExists, GITHUB_TRIGGER_EVENTS } from '../lib/routines.js';
+import type { JobConfig, JobTrigger } from '../lib/scheduling/routines.js';
+import { normalizeTriggerEvent, validateTrigger, writeJob, setJobEnabled, jobExists, GITHUB_TRIGGER_EVENTS } from '../lib/scheduling/routines.js';
 import { emit } from '../lib/feed/events.js';
 
 /** Return a chalk color function appropriate for the given task status. */

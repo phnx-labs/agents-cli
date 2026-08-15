@@ -28,7 +28,7 @@
 
 import * as os from 'os';
 import type { Meta } from './types.js';
-import type { JobConfig, RunMeta } from './routines.js';
+import type { JobConfig, RunMeta } from './scheduling/routines.js';
 import { routineKind } from './routine-notify.js';
 import { readMeta } from './state.js';
 import { getOwnerFromHumans } from './humans.js';

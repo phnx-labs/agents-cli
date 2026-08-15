@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JobScheduler } from './scheduler.js';
-import { writeJob, deleteJob, type JobConfig } from './routines.js';
+import { writeJob, deleteJob, type JobConfig } from './scheduling/routines.js';
 import * as activation from './routine-activation.js';
 import { getUserAgentsDir } from './state.js';
 
