@@ -23,7 +23,7 @@ import type { SessionAgentId, SessionMeta, ViewMode } from '../lib/session/types
 import { SESSION_AGENTS } from '../lib/session/types.js';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session/artifacts.js';
 import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
-import { getActiveSessions, sessionProcessIsLocal, type ActiveSession } from '../lib/session/active.js';
+import { getActiveSessions, describeActiveDiscoveryHealth, sessionProcessIsLocal, type ActiveSession } from '../lib/session/active.js';
 import { enumerateGhosttyTabs, assignGhosttyTabs, type GhosttySurface } from '../lib/session/ghostty-tabs.js';
 import { mapPanesToTargets, listClients } from '../lib/tmux/session.js';
 import { resolveViewingIn, viewingInLabel } from '../lib/session/viewing-in.js';
@@ -1573,7 +1573,13 @@ export function remoteHostsToDial(hosts: string[] | undefined, self: string): st
  */
 export async function gatherActiveSessions(
   opts: { local?: boolean; hosts?: string[]; forceRefresh?: boolean } = {},
-): Promise<{ sessions: ActiveSession[]; remoteDeviceCount: number }> {
+): Promise<{
+  sessions: ActiveSession[];
+  remoteDeviceCount: number;
+  /** Peer names that went unheard on this gather (RUSH-2507). Undefined when unknown (e.g. a cache hit). */
+  remoteSkipped?: string[];
+  remoteDiscoveryFailed?: boolean;
+}> {
   const forceRefresh = opts.forceRefresh === true
     || process.env.AGENTS_SESSIONS_FORCE_REFRESH === '1';
   // Scoped host lists are not represented in the unscoped fleet/local snapshot
@@ -1598,7 +1604,12 @@ export async function gatherActiveSessions(
       forceRefresh,
       gather: () => gatherActiveSessionsLive({ local: false }),
     });
-    return { sessions: loaded.sessions, remoteDeviceCount: loaded.remoteDeviceCount };
+    return {
+      sessions: loaded.sessions,
+      remoteDeviceCount: loaded.remoteDeviceCount,
+      remoteSkipped: loaded.remoteSkipped,
+      remoteDiscoveryFailed: loaded.remoteDiscoveryFailed,
+    };
   }
 
   return gatherActiveSessionsLive(opts);
@@ -1611,7 +1622,12 @@ export async function gatherActiveSessions(
  */
 async function gatherActiveSessionsLive(
   opts: { local?: boolean; hosts?: string[] } = {},
-): Promise<{ sessions: ActiveSession[]; remoteDeviceCount: number }> {
+): Promise<{
+  sessions: ActiveSession[];
+  remoteDeviceCount: number;
+  remoteSkipped: string[];
+  remoteDiscoveryFailed: boolean;
+}> {
   const self = machineId();
   // An explicit --host/--device list scopes the view: seed local sessions only
   // when no hosts are named, or when this machine is one of the named targets.
@@ -1625,6 +1641,8 @@ async function gatherActiveSessionsLive(
   for (const s of local) if (!s.machine) s.machine = self;
 
   let remoteDeviceCount = 0;
+  let remoteSkipped: string[] = [];
+  let remoteDiscoveryFailed = false;
   let merged = local;
   if (!opts.local) {
     const remoteHosts = remoteHostsToDial(opts.hosts, self);
@@ -1633,6 +1651,8 @@ async function gatherActiveSessionsLive(
     if (!opts.hosts?.length || (remoteHosts && remoteHosts.length > 0)) {
       const remote = await gatherRemoteActive(remoteHosts);
       remoteDeviceCount = remote.deviceCount;
+      remoteSkipped = remote.skipped;
+      remoteDiscoveryFailed = remote.discoveryFailed;
       merged = dedupeByMachineSession([...local, ...remote.sessions]);
     }
   }
@@ -1644,7 +1664,38 @@ async function gatherActiveSessionsLive(
   return {
     sessions: filterActiveSessionsByHostScope(merged, opts.hosts, self),
     remoteDeviceCount,
+    remoteSkipped,
+    remoteDiscoveryFailed,
   };
+}
+
+/**
+ * Explain an empty `--active` result instead of the old flat
+ * "No active agent sessions." either way (RUSH-2507: a live fleet sweep found
+ * ~41 running agents while this printed the same line as a genuinely idle
+ * fleet). Re-probes local tmux health only now, on the empty path, and names
+ * any remote peer that went unheard rather than silently folding it into
+ * "nothing running".
+ */
+async function describeEmptyActiveDiscovery(
+  opts: { local?: boolean; hosts?: string[] },
+  remoteSkipped: string[] | undefined,
+  remoteDiscoveryFailed: boolean | undefined,
+): Promise<string> {
+  const parts: string[] = [];
+  if (!opts.hosts?.length || opts.local) {
+    const health = await describeActiveDiscoveryHealth();
+    if (health.degradedSources.length > 0) {
+      parts.push(`local discovery is degraded (${health.degradedSources.join(', ')} unreachable) — sessions may be hidden, run \`agents doctor\` to diagnose`);
+    }
+  }
+  if (remoteDiscoveryFailed) {
+    parts.push('the device list could not be loaded — no peer was reachable to sweep');
+  } else if (remoteSkipped && remoteSkipped.length > 0) {
+    parts.push(`${remoteSkipped.length} peer(s) went unheard (${remoteSkipped.join(', ')}) — sessions there may be hidden`);
+  }
+  if (parts.length === 0) return 'No active agent sessions.';
+  return `No active agent sessions found, but discovery was degraded: ${parts.join('; ')}.`;
 }
 
 /**
@@ -1666,7 +1717,7 @@ async function renderActiveSessions(
 ): Promise<void> {
   const self = machineId();
   const gathered = await gatherActiveSessions(opts);
-  const { remoteDeviceCount } = gathered;
+  const { remoteDeviceCount, remoteSkipped, remoteDiscoveryFailed } = gathered;
   // Backfill agent version, refs, created time, and routine provenance from the
   // historical index. Routine filtering needs that provenance before it narrows
   // the live pool; doing it here also enriches both JSON and human output.
@@ -1700,7 +1751,11 @@ async function renderActiveSessions(
   }
 
   if (sessions.length === 0) {
-    console.log(chalk.gray(waitingOnly ? 'No sessions waiting on input.' : 'No active agent sessions.'));
+    if (waitingOnly) {
+      console.log(chalk.gray('No sessions waiting on input.'));
+      return;
+    }
+    console.log(chalk.gray(await describeEmptyActiveDiscovery(opts, remoteSkipped, remoteDiscoveryFailed)));
     if (!opts.local && !opts.hosts?.length && remoteDeviceCount === 0) printCrossMachineTip();
     return;
   }
