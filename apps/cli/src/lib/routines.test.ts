@@ -575,6 +575,48 @@ describe('readJobFile fails closed on legacy singular device key', () => {
   });
 });
 
+/**
+ * `dispatchedBy: 'monitor'` makes jobRunsOnThisDevice skip this device's routine
+ * activation manifest (RUSH-2681). That is correct for the job a monitor
+ * synthesizes at dispatch, which has no definition file — but a routine YAML
+ * carrying the key would fire on every box regardless of activation, on every
+ * path, since the daemon's load path never calls validateJob. Both ends of the
+ * schema boundary are closed.
+ */
+describe('readJobFile fails closed on the runtime-only dispatchedBy marker', () => {
+  it('returns null for a YAML file that contains dispatchedBy:', () => {
+    ensureAgentsDir();
+    const name = '__test-readjob-dispatchedby__';
+    const file = path.join(getRoutinesDir(), `${name}.yml`);
+    try {
+      fs.writeFileSync(file, yaml.stringify({
+        name, schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', dispatchedBy: 'monitor',
+      }));
+      expect(readJob(name)).toBeNull();
+    } finally {
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+    }
+  });
+
+  it('writeJob never persists the marker, so a round-trip cannot smuggle it in', () => {
+    ensureAgentsDir();
+    const name = '__test-writejob-dispatchedby__';
+    const file = path.join(getRoutinesDir(), `${name}.yml`);
+    try {
+      writeJob({
+        name, schedule: '0 3 * * *', agent: 'claude', prompt: 'hi',
+        mode: 'auto', effort: 'auto', timeout: '10m', enabled: true,
+        dispatchedBy: 'monitor',
+      } as JobConfig);
+      expect(fs.readFileSync(file, 'utf-8')).not.toContain('dispatchedBy');
+      // Still readable — the marker was dropped, not turned into an inert file.
+      expect(readJob(name)?.prompt).toBe('hi');
+    } finally {
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+    }
+  });
+});
+
 describe('writeJob extension handling', () => {
   function fullConfig(name: string): JobConfig {
     return {

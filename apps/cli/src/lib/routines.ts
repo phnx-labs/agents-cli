@@ -350,7 +350,12 @@ export interface JobConfig {
    *
    * Deliberately narrow: a monitor's `routine` action fires a REAL routine, which
    * keeps its activation gate, so a routine defined but not activated on this
-   * device is still refused. Never written to a routine YAML.
+   * device is still refused.
+   *
+   * Runtime-only, enforced at both ends of the schema boundary: `writeJob`
+   * strips it, and `readJobFileResult` refuses a definition that carries it
+   * (a hand-authored one would otherwise fire on every box regardless of
+   * activation, since the daemon's load path never calls `validateJob`).
    */
   dispatchedBy?: 'monitor';
 }
@@ -945,6 +950,19 @@ export function readJobFileResult(filePath: string): RoutineReadResult {
     return { config: null, problem: '`devices:` must be a list — routine is inert' };
   }
 
+  // Fail closed on `dispatchedBy`. It is a runtime-only marker set by
+  // lib/monitors/dispatch.ts on a job that has no definition file, and it makes
+  // `jobRunsOnThisDevice` SKIP this device's routine activation manifest. A
+  // routine YAML carrying it would therefore fire on every box regardless of
+  // activation, on every path (scheduler, overdue, webhook) — the same
+  // unrestricted-and-silent outcome the `devices:` guard above exists to
+  // prevent, and the daemon's load path never calls validateJob. It is never
+  // written back (writeJob deletes it), so its presence here means hand-authored
+  // state, not drift.
+  if (Object.prototype.hasOwnProperty.call(parsed, 'dispatchedBy')) {
+    return { config: null, problem: '`dispatchedBy:` is a runtime-only monitor marker, not a routine field — routine is inert' };
+  }
+
   return {
     config: {
       ...JOB_DEFAULTS,
@@ -1002,6 +1020,10 @@ export function writeJob(config: JobConfig): void {
   if (output.runOnce === false || output.runOnce === undefined) delete output.runOnce;
   if (output.catchup === true || output.catchup === undefined) delete output.catchup;
   delete output.devices;
+  // Runtime-only monitor marker — a definition on disk must never carry it (see
+  // the read-side guard in readJobFileResult), so strip it at the one schema
+  // boundary rather than trusting every caller.
+  delete output.dispatchedBy;
   // Persist projects in canonical form: deduplicated, first-seen order, field
   // omitted when nothing survives. This is the schema boundary, so a routine
   // written from any path (add, edit, enable/disable re-write) lands canonical

@@ -203,10 +203,12 @@ describe('dispatchAction run (skipped run returns ok:false)', () => {
  *
  * Real path, in a child process so HOME is set before the state module resolves
  * its path constants: the manifest is materialized through the real writer
- * (`replaceEnabledRoutines`), then `dispatchAction` runs for real. The assertion
- * is on the eligibility gate specifically — with no agent installed under the
- * temp HOME the run stops at the LATER readiness gate (runner.ts:373+), which is
- * itself proof that it got PAST the eligibility gate at runner.ts:363.
+ * (`replaceEnabledRoutines`), then `dispatchAction` runs for real. The assertions
+ * are on the two gates this fix opens, not on the agent's exit: the run record
+ * must carry neither `skipReason: "wrong_owner"` (the eligibility gate,
+ * runner.ts:363) nor `readiness.code: "execution_context_missing"` (the readiness
+ * gate behind it). Whatever the spawned agent then does under a temp HOME is not
+ * what is being asserted.
  */
 describe('dispatchAction run (the routines activation manifest does not refuse a monitor)', () => {
   const tsxBin = path.resolve('node_modules/.bin/tsx');
