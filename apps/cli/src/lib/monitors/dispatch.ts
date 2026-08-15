@@ -59,8 +59,11 @@ export async function dispatchAction(
       ...(monitor.runOn ? { host: monitor.runOn } : {}),
     };
     try {
-      const meta = await executeJobDetached(job);
-      return { kind: 'run', ok: true, runId: meta.runId };
+      const runMeta = await executeJobDetached(job);
+      if (runMeta.status === 'skipped' || runMeta.status === 'blocked') {
+        return { kind: 'run', ok: false, runId: runMeta.runId, error: runMeta.errorMessage ?? runMeta.status };
+      }
+      return { kind: 'run', ok: true, runId: runMeta.runId };
     } catch (err) {
       return { kind: 'run', ok: false, error: (err as Error).message };
     }
@@ -74,8 +77,11 @@ export async function dispatchAction(
     // Inject the event into the routine's prompt so the fired routine sees it.
     const fired: JobConfig = { ...routine, prompt: injectEvent(routine.prompt ?? '', event) };
     try {
-      const meta = await executeJobDetached(fired);
-      return { kind: 'routine', ok: true, runId: meta.runId };
+      const runMeta = await executeJobDetached(fired);
+      if (runMeta.status === 'skipped' || runMeta.status === 'blocked') {
+        return { kind: 'routine', ok: false, runId: runMeta.runId, error: runMeta.errorMessage ?? runMeta.status };
+      }
+      return { kind: 'routine', ok: true, runId: runMeta.runId };
     } catch (err) {
       return { kind: 'routine', ok: false, error: (err as Error).message };
     }
