@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
-import type { JobConfig } from './routines.js';
+import type { JobConfig } from './scheduling/routines.js';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import { buildRemoteWorkspaceProbe, evaluateActivationReadiness, parseRemoteProjectSnapshot, probeOutputHasSentinel } from './routine-readiness.js';

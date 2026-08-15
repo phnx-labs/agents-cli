@@ -2,8 +2,8 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { executeJob, executeJobDetached } from './runner.js';
-import { slotRunId, claimRunSlot, getRunDir, getJobRunsDir, readRunMeta } from './routines.js';
-import type { JobConfig, RunMeta } from './routines.js';
+import { slotRunId, claimRunSlot, getRunDir, getJobRunsDir, readRunMeta } from './scheduling/routines.js';
+import type { JobConfig, RunMeta } from './scheduling/routines.js';
 import * as activation from './routine-activation.js';
 
 const describeSpawn = process.platform === 'win32' ? describe.skip : describe;

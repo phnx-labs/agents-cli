@@ -66,7 +66,7 @@ import {
   listJobs,
   type JobConfig,
   type RunMeta,
-} from '../lib/routines.js';
+} from '../lib/scheduling/routines.js';
 import {
   routineDeviceIndex,
   currentRoutineDevice,

@@ -41,7 +41,7 @@ import {
 import { formatRelativeTime } from '../lib/session/relative-time.js';
 import { evaluateMonitorOnce, POLL_SOURCE_TYPES } from '../lib/monitors/engine.js';
 import { listFires, readState, readLiveness, type MonitorLiveness } from '../lib/monitors/state.js';
-import { listRuns, getLatestRun, getRunDir } from '../lib/routines.js';
+import { listRuns, getLatestRun, getRunDir } from '../lib/scheduling/routines.js';
 import { getMonitorsDir } from '../lib/state.js';
 import { IS_WINDOWS } from '../lib/platform/index.js';
 import { safeJoin } from '../lib/paths.js';

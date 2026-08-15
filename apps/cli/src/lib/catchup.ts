@@ -43,7 +43,7 @@ import {
   getRunDir,
   type JobConfig,
   type RunMeta,
-} from './routines.js';
+} from './scheduling/routines.js';
 import { detectOverdueJobs, type OverdueJob } from './overdue.js';
 import { executeJobDetached } from './runner.js';
 

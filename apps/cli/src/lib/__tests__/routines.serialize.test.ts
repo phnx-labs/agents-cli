@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import * as yaml from 'yaml';
-import { serializeJob } from '../routines.js';
+import { serializeJob } from '../scheduling/routines.js';
 
 // A representative on-disk routine: quoted cron scalar and a folded prompt block —
 // exactly the formatting a full re-stringify would destroy.

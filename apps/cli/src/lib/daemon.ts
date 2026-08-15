@@ -14,7 +14,7 @@ import * as os from 'os';
 import { getDaemonDir } from './state.js';
 import { isolatedHomeSuffix, namespacedServiceLabel, serviceManifestHomeEnv } from './service-manifest.js';
 import { isAlive, killTree, backgroundSpawnOptions, waitForExit } from './platform/index.js';
-import { listJobs as listAllJobs, type JobConfig } from './routines.js';
+import { listJobs as listAllJobs, type JobConfig } from './scheduling/routines.js';
 import { syncAllProjectRoutines } from './routines-project.js';
 import { JobScheduler } from './scheduler.js';
 import { MonitorEngine } from './monitors/engine.js';

@@ -14,9 +14,9 @@ import {
   materialisedProjectRoots,
   expandProjectPath,
 } from '../routines-project.js';
-import { listJobs, readJob, setJobEnabled, resolveHostStrategy, parseHostStrategy, placementRequiresFiringPin } from '../routines.js';
+import { listJobs, readJob, setJobEnabled, resolveHostStrategy, parseHostStrategy, placementRequiresFiringPin } from '../scheduling/routines.js';
 import { resolvePlacementTarget, pickFleetDevice } from '../routines-placement.js';
-import type { JobConfig } from '../routines.js';
+import type { JobConfig } from '../scheduling/routines.js';
 
 let tmpDir = '';
 let projectDir = '';
