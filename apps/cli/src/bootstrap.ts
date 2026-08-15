@@ -375,6 +375,7 @@ import {
   resolveMultiInstallInventory,
   remediateStaleAgentsCliInstalls,
   resolveRunningPackageRoot,
+  manualUninstallCommand,
   type UpdateCheckCache,
 } from './lib/self-update.js';
 const UPDATE_CHECK_FILE = getUpdateCheckPath();
@@ -428,9 +429,22 @@ function maybeWarnMultiInstall(): void {
   for (const info of inventory) {
     console.error(chalk.gray(`  ${info.packageRoot}  ${info.version}  (${info.note})`));
   }
-  console.error(chalk.gray(
-    'Upgrades apply to the running copy. Purge npx-cache / legacy / pre-1.22.30 copies with: agents doctor --fix',
-  ));
+  // RUSH-2705: only advertise `agents doctor --fix` for copies it will really
+  // delete. A healthy duplicate (>=1.22.30, not npx-cache, not legacy) is
+  // deliberately never auto-purged, so pointing at --fix for it is a remedy
+  // that no-ops forever — name the manual removal command instead.
+  const peers = inventory.filter((info) => !info.running);
+  console.error(chalk.gray('Upgrades apply to the running copy.'));
+  if (peers.some((info) => info.autoPurgeable)) {
+    console.error(chalk.gray(
+      'Purge npx-cache / legacy / pre-1.22.30 copies with: agents doctor --fix',
+    ));
+  }
+  for (const peer of peers.filter((info) => !info.autoPurgeable)) {
+    console.error(chalk.gray(
+      `Remove the ${peer.version} copy at ${peer.packageRoot} with: ${manualUninstallCommand(peer.packageRoot)}`,
+    ));
+  }
 
   try {
     fs.mkdirSync(path.dirname(sentinel), { recursive: true });
@@ -867,6 +881,13 @@ async function runUpgrade(version: string | undefined, options: UpgradeOptions):
           if (purge.failed.length > 0) {
             console.log(chalk.yellow(
               `Could not purge ${purge.failed.length} stale install${purge.failed.length === 1 ? '' : 's'}; re-run agents doctor --fix.`,
+            ));
+          }
+          // RUSH-2705: healthy duplicates are never auto-purged — name the
+          // command that removes them instead of leaving a silent nag behind.
+          for (const u of purge.unresolved) {
+            console.log(chalk.gray(
+              `Duplicate ${u.version} at ${u.packageRoot} left in place; remove it with: ${u.manualRemoveCommand}`,
             ));
           }
         } catch {
