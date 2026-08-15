@@ -636,7 +636,11 @@ describe('installMcpServers handled-agent tracking', () => {
     expect(config.mcp?.servers?.['server-b']).toEqual({ command: 'node', args: ['b.js'], env: {} });
   });
 
-  it.skipIf(IS_WINDOWS)('does not report fake success for agents with no config writer', () => {
+  it.skipIf(IS_WINDOWS)('fails loud for an agent whose config format is not implemented', () => {
+    // RUSH-2677: copilot is mcp-capable but agents-cli has no verified schema for
+    // its mcp-config.json. It used to return `success: true` with an empty
+    // `applied` -- a silent no-op the sync surface could not distinguish from a
+    // real write. It must now say why it wrote nothing.
     const home = makeTempHome();
     const version = '0.1.0';
     const userMcpDir = path.join(home, '.agents', 'mcp');
@@ -661,7 +665,92 @@ describe('installMcpServers handled-agent tracking', () => {
 
     expect(child.status, child.stderr).toBe(0);
     const result = JSON.parse(child.stdout.trim());
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
     expect(result.applied).not.toContain('user-server');
+    expect(result.errors.join('\n')).toContain('copilot');
+    expect(result.errors.join('\n')).toContain('cannot write MCP config');
+  });
+
+  it.skipIf(IS_WINDOWS)('writes antigravity MCP into the shared ~/.gemini/config it actually reads', () => {
+    // RUSH-2677: antigravity resolved a config path and then fell through the
+    // writer switch entirely -- no file, no error, reported as success. It also
+    // resolved the per-version .gemini/antigravity-cli/ state dir rather than the
+    // shared .gemini/config/ agy reads MCP from.
+    const home = makeTempHome();
+    const version = '1.0.16';
+    const userMcpDir = path.join(home, '.agents', 'mcp');
+    fs.mkdirSync(userMcpDir, { recursive: true });
+
+    fs.writeFileSync(
+      path.join(userMcpDir, 'local-server.yaml'),
+      ['name: local-server', 'transport: stdio', 'command: node', 'args: ["srv.js"]', ''].join('\n'),
+      'utf-8'
+    );
+    fs.writeFileSync(
+      path.join(userMcpDir, 'remote-server.yaml'),
+      ['name: remote-server', 'transport: http', 'url: https://mcp.example.com/sse', ''].join('\n'),
+      'utf-8'
+    );
+
+    const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'antigravity', version, 'home');
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { installMcpServers } from ${JSON.stringify(moduleUrl)};
+      const result = installMcpServers('antigravity', ${JSON.stringify(version)}, ${JSON.stringify(versionHome)});
+      console.log(JSON.stringify(result));
+    `], {
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim());
+    expect(result.errors).toEqual([]);
+    expect(result.success).toBe(true);
+    expect(result.applied).toEqual(expect.arrayContaining(['local-server', 'remote-server']));
+
+    const configPath = path.join(versionHome, '.gemini', 'config', 'mcp_config.json');
+    expect(fs.existsSync(configPath), `expected agy MCP config at ${configPath}`).toBe(true);
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    expect(config.mcpServers['local-server']).toEqual({ command: 'node', args: ['srv.js'], env: {} });
+    // agy keys a remote server `serverUrl` (SSE), not `url`.
+    expect(config.mcpServers['remote-server']).toEqual({ serverUrl: 'https://mcp.example.com/sse' });
+
+    // The per-version state dir must NOT be where MCP landed.
+    expect(fs.existsSync(path.join(versionHome, '.gemini', 'antigravity-cli', 'mcp_config.json'))).toBe(false);
+  });
+
+  it.skipIf(IS_WINDOWS)('writes kimi MCP where the staleness detector reads it back', () => {
+    // The installer wrote .kimi-code/mcp.json while the path resolver answered
+    // .kimi-code/settings.json, so a synced server was reported as missing forever.
+    const home = makeTempHome();
+    const version = '0.29.0';
+    const userMcpDir = path.join(home, '.agents', 'mcp');
+    fs.mkdirSync(userMcpDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(userMcpDir, 'kimi-server.yaml'),
+      ['name: kimi-server', 'transport: stdio', 'command: node', 'args: ["k.js"]', ''].join('\n'),
+      'utf-8'
+    );
+
+    const mcpUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
+    const agentsUrl = pathToFileURL(path.resolve('dist/lib/agents.js')).href;
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'kimi', version, 'home');
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { installMcpServers } from ${JSON.stringify(mcpUrl)};
+      import { getMcpConfigPathForHome, parseMcpConfig } from ${JSON.stringify(agentsUrl)};
+      const result = installMcpServers('kimi', ${JSON.stringify(version)}, ${JSON.stringify(versionHome)});
+      const detected = Object.keys(parseMcpConfig('kimi', getMcpConfigPathForHome('kimi', ${JSON.stringify(versionHome)})));
+      console.log(JSON.stringify({ result, detected }));
+    `], {
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+
+    expect(child.status, child.stderr).toBe(0);
+    const { result, detected } = JSON.parse(child.stdout.trim());
+    expect(result.applied).toContain('kimi-server');
+    // The write and the read-back must agree on the file.
+    expect(detected).toContain('kimi-server');
   });
 });

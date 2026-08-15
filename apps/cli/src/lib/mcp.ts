@@ -19,6 +19,7 @@ import { getMcpDir, getUserMcpDir, getProjectAgentsDir, getVersionsDir, getUserA
 import { getBinaryPath, getVersionHomePath } from './versions.js';
 import { IS_WINDOWS, execFileShellSpec } from './platform/index.js';
 import { AGENTS, getMcpConfigPathForHome, getProjectMcpConfigPath } from './agents.js';
+import { MCP_TARGETS, mcpWriteUnsupportedReason } from './mcp-registry.js';
 import { isCapable } from './capabilities.js';
 
 /**
@@ -490,18 +491,15 @@ function registerMcpCommand(
   try {
     validateMcpServerName(name);
     if (agentId === 'hermes') {
-      const server: InstalledMcpServer = {
+      // Hermes has no `mcp add` CLI; write its YAML config directly.
+      const home = options.home || os.homedir();
+      writeMcpConfig(agentId, getMcpConfigPathForHome(agentId, home), [{
         name,
-        path: '',
-        config: {
-          name,
-          transport: transport === 'http' ? 'http' : 'stdio',
-          ...(transport === 'http'
-            ? { url: commandSpec.command }
-            : { command: commandSpec.command, args: commandSpec.args }),
-        },
-      };
-      installMcpToHermesConfig(server, options.home || os.homedir());
+        transport: transport === 'http' ? 'http' : 'stdio',
+        ...(transport === 'http'
+          ? { url: commandSpec.command }
+          : { command: commandSpec.command, args: commandSpec.args }),
+      }], 'merge');
       return { success: true };
     }
     const bin = options.binary || AGENTS[agentId].cliCommand;
@@ -520,178 +518,6 @@ function registerMcpCommand(
 }
 
 /**
- * Install MCP server to Cursor config file.
- */
-function installMcpToCursorConfig(server: InstalledMcpServer, versionHome: string): void {
-  const configPath = path.join(versionHome, '.cursor', 'mcp.json');
-
-  let config: Record<string, unknown> = {};
-  if (fs.existsSync(configPath)) {
-    config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-  }
-
-  if (!config.mcpServers || typeof config.mcpServers !== 'object') {
-    config.mcpServers = {};
-  }
-
-  const mcpServers = config.mcpServers as Record<string, unknown>;
-
-  if (server.config.transport === 'stdio') {
-    mcpServers[server.name] = {
-      command: server.config.command,
-      args: server.config.args || [],
-      env: server.config.env || {},
-    };
-  } else {
-    mcpServers[server.name] = {
-      url: server.config.url,
-    };
-  }
-
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-}
-
-/**
- * Install MCP server to OpenCode config file.
- */
-function installMcpToKimiConfig(server: InstalledMcpServer, versionHome: string): void {
-  const configPath = path.join(versionHome, '.kimi-code', 'mcp.json');
-
-  let config: Record<string, unknown> = {};
-  if (fs.existsSync(configPath)) {
-    config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-  }
-
-  if (!config.mcpServers || typeof config.mcpServers !== 'object') {
-    config.mcpServers = {};
-  }
-
-  const mcpServers = config.mcpServers as Record<string, unknown>;
-
-  if (server.config.transport === 'stdio') {
-    mcpServers[server.name] = {
-      command: server.config.command,
-      args: server.config.args || [],
-      env: server.config.env || {},
-    };
-  } else {
-    mcpServers[server.name] = {
-      url: server.config.url,
-    };
-  }
-
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-}
-
-/**
- * Install MCP server to Factory AI Droid config (`~/.factory/mcp.json`).
- * Droid uses the standard `mcpServers` JSON shape, same as Kimi/Claude.
- */
-function installMcpToFactoryConfig(server: InstalledMcpServer, versionHome: string): void {
-  const configPath = path.join(versionHome, '.factory', 'mcp.json');
-
-  let config: Record<string, unknown> = {};
-  if (fs.existsSync(configPath)) {
-    config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-  }
-
-  if (!config.mcpServers || typeof config.mcpServers !== 'object') {
-    config.mcpServers = {};
-  }
-
-  const mcpServers = config.mcpServers as Record<string, unknown>;
-
-  if (server.config.transport === 'stdio') {
-    mcpServers[server.name] = {
-      command: server.config.command,
-      args: server.config.args || [],
-      env: server.config.env || {},
-    };
-  } else {
-    mcpServers[server.name] = {
-      url: server.config.url,
-    };
-  }
-
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-}
-
-function installMcpToHermesConfig(server: InstalledMcpServer, versionHome: string): void {
-  const configPath = path.join(versionHome, '.hermes', 'config.yaml');
-
-  let config: Record<string, unknown> = {};
-  if (fs.existsSync(configPath)) {
-    const parsed = yaml.parse(fs.readFileSync(configPath, 'utf-8'));
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      config = parsed as Record<string, unknown>;
-    }
-  }
-
-  if (!config.mcp_servers || typeof config.mcp_servers !== 'object' || Array.isArray(config.mcp_servers)) {
-    config.mcp_servers = {};
-  }
-
-  const mcpServers = config.mcp_servers as Record<string, unknown>;
-  if (server.config.transport === 'stdio') {
-    mcpServers[server.name] = {
-      command: server.config.command,
-      args: server.config.args || [],
-      ...(server.config.env && { env: server.config.env }),
-    };
-  } else {
-    mcpServers[server.name] = {
-      url: server.config.url,
-    };
-  }
-
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, yaml.stringify(config), 'utf-8');
-}
-
-function installMcpToOpenCodeConfig(server: InstalledMcpServer, versionHome: string): void {
-  const configPath = path.join(versionHome, '.config', 'opencode', 'opencode.jsonc');
-
-  let config: Record<string, unknown> = {};
-  if (fs.existsSync(configPath)) {
-    const content = fs.readFileSync(configPath, 'utf-8');
-    // Strip JSONC comments
-    const jsonContent = content.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
-    try {
-      config = JSON.parse(jsonContent);
-    } catch {
-      config = {};
-    }
-  }
-
-  if (!config.mcp || typeof config.mcp !== 'object') {
-    config.mcp = {};
-  }
-
-  const mcpServers = config.mcp as Record<string, unknown>;
-
-  if (server.config.transport === 'stdio') {
-    // OpenCode uses command as array
-    const commandArray = [server.config.command, ...(server.config.args || [])];
-    mcpServers[server.name] = {
-      type: 'local',
-      command: commandArray,
-      ...(server.config.env && { env: server.config.env }),
-    };
-  } else {
-    mcpServers[server.name] = {
-      type: 'remote',
-      url: server.config.url,
-    };
-  }
-
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-}
-
-/**
  * MCP server shaped for direct config-file serialization.
  */
 export interface WritableMcpServer {
@@ -704,32 +530,25 @@ export interface WritableMcpServer {
   headers?: Record<string, string>;
 }
 
-/**
- * Agents whose config file format is implemented by `writeMcpConfig`.
- * Others are intentionally skipped until their schema is added.
- */
-function writeMcpConfigSupportsAgent(agentId: AgentId): boolean {
-  switch (agentId) {
-    case 'claude':
-    case 'cursor':
-    case 'kimi':
-    case 'droid':
-    case 'openclaw':
-    case 'codex':
-    case 'grok':
-    case 'opencode':
-    case 'hermes':
-    case 'pi':
-    case 'muse':
-    case 'warp':
-      return true;
-    default:
-      return false;
-  }
+/** Project a discovered MCP server config into the writer's input shape. */
+function toWritableServer(server: InstalledMcpServer): WritableMcpServer {
+  return {
+    name: server.config.name,
+    transport: server.config.transport,
+    command: server.config.command,
+    args: server.config.args,
+    env: server.config.env,
+    url: server.config.url,
+  };
 }
 
 /**
  * Serialize MCP servers into an agent-specific config file.
+ *
+ * The format comes from `MCP_TARGETS` (lib/mcp-registry.ts), so a harness whose
+ * schema is not implemented **throws** here rather than falling through the
+ * switch and returning as if it had written something. `installMcpServers`
+ * catches that and reports it as an error, never as a silent success.
  *
  * `mode: 'overwrite'` replaces the whole MCP section (used for tool-managed
  * version-home configs). `mode: 'merge'` updates/adds the provided server
@@ -746,18 +565,16 @@ export function writeMcpConfig(
     return;
   }
 
-  switch (agentId) {
-    case 'claude':
-    case 'cursor':
-    case 'kimi':
-    case 'droid':
-    // omp reads the same Claude `{ "mcpServers": {...} }` schema from .mcp.json
-    // (stdio: command/args/env; http/sse: url/headers — transport inferred from
-    // command/url presence).
-    case 'pi':
-    // Oz reads the same Claude `{ "mcpServers": {...} }` schema from
-    // `.warp/.mcp.json` (stdio + http with headers).
-    case 'warp': {
+  const unsupported = mcpWriteUnsupportedReason(agentId);
+  if (unsupported) {
+    throw new Error(`cannot write MCP config: ${unsupported}`);
+  }
+
+  switch (MCP_TARGETS[agentId]!.format) {
+    // Claude's `{ "mcpServers": {...} }` schema, shared by cursor, kimi, droid,
+    // omp (.mcp.json) and Oz (.warp/.mcp.json): stdio carries command/args/env,
+    // remote carries url + optional headers.
+    case 'claude-json': {
       let config: Record<string, unknown> = {};
       if (fs.existsSync(configPath)) {
         try {
@@ -793,7 +610,43 @@ export function writeMcpConfig(
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
       break;
     }
-    case 'openclaw': {
+    case 'antigravity-json': {
+      // agy reads ~/.gemini/config/mcp_config.json. Same `mcpServers` map as
+      // Claude for stdio, but a remote server is keyed `serverUrl` (SSE) and
+      // carries no headers — see agy's bundled docs/mcp_servers.md.
+      let config: Record<string, unknown> = {};
+      if (fs.existsSync(configPath)) {
+        try {
+          config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        } catch {
+          config = {};
+        }
+      }
+
+      const mcpServers: Record<string, unknown> =
+        mode === 'merge' && config.mcpServers && typeof config.mcpServers === 'object'
+          ? { ...(config.mcpServers as Record<string, unknown>) }
+          : {};
+
+      for (const server of servers) {
+        if (server.transport === 'stdio') {
+          mcpServers[server.name] = {
+            command: server.command,
+            args: server.args || [],
+            env: server.env || {},
+          };
+        } else {
+          mcpServers[server.name] = { serverUrl: server.url };
+        }
+      }
+
+      config.mcpServers = mcpServers;
+
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+      break;
+    }
+    case 'openclaw-json': {
       let config: Record<string, unknown> = {};
       if (fs.existsSync(configPath)) {
         try {
@@ -836,8 +689,7 @@ export function writeMcpConfig(
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
       break;
     }
-    case 'codex':
-    case 'grok': {
+    case 'toml': {
       let config: Record<string, unknown> = {};
       if (fs.existsSync(configPath)) {
         try {
@@ -873,7 +725,7 @@ export function writeMcpConfig(
       fs.writeFileSync(configPath, TOML.stringify(config), 'utf-8');
       break;
     }
-    case 'opencode': {
+    case 'opencode-jsonc': {
       let config: Record<string, unknown> = {};
       if (fs.existsSync(configPath)) {
         try {
@@ -912,7 +764,7 @@ export function writeMcpConfig(
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
       break;
     }
-    case 'hermes': {
+    case 'yaml': {
       let config: Record<string, unknown> = {};
       if (fs.existsSync(configPath)) {
         try {
@@ -950,7 +802,7 @@ export function writeMcpConfig(
       fs.writeFileSync(configPath, yaml.stringify(config), 'utf-8');
       break;
     }
-    case 'muse': {
+    case 'muse-json': {
       // Muse Code settings.json: requires schema_version: 1; MCP lives under
       // mcp_servers with an explicit transport (stdio | streamable_http).
       // See https://dev.meta.ai/docs/muse-code/extending#mcp
@@ -1036,72 +888,28 @@ export function installMcpServers(
     let handled = false;
 
     try {
-      if (agentId === 'claude') {
+      const target = MCP_TARGETS[agentId];
+      if (target?.cli === 'claude') {
         installMcpViaClaude(binaryPath, server, versionHome);
         handled = true;
-      } else if (agentId === 'codex') {
+      } else if (target?.cli === 'codex') {
         installMcpViaCodex(binaryPath, server, versionHome);
         handled = true;
-      } else if (agentId === 'cursor') {
-        installMcpToCursorConfig(server, versionHome);
-        handled = true;
-      } else if (agentId === 'opencode') {
-        installMcpToOpenCodeConfig(server, versionHome);
-        handled = true;
-      } else if (agentId === 'openclaw') {
-        // OpenClaw has no install CLI; write the JSON config directly.
-        // Use merge because this loop runs once per server.
-        const userConfigPath = getMcpConfigPathForHome(agentId, versionHome);
-        const writableServer: WritableMcpServer = {
-          name: server.config.name,
-          transport: server.config.transport,
-          command: server.config.command,
-          args: server.config.args,
-          env: server.config.env,
-          url: server.config.url,
-        };
-        writeMcpConfig(agentId, userConfigPath, [writableServer], 'merge');
-        handled = true;
-      } else if (agentId === 'grok') {
-        // Grok has no working `grok mcp add` CLI, so write the TOML config
-        // directly into the version-home directory for all scopes.
-        // Use merge because this loop runs once per server.
-        const userConfigPath = getMcpConfigPathForHome(agentId, versionHome);
-        const writableServer: WritableMcpServer = {
-          name: server.config.name,
-          transport: server.config.transport,
-          command: server.config.command,
-          args: server.config.args,
-          env: server.config.env,
-          url: server.config.url,
-        };
-        writeMcpConfig(agentId, userConfigPath, [writableServer], 'merge');
-        handled = true;
-      } else if (agentId === 'kimi') {
-        installMcpToKimiConfig(server, versionHome);
-        handled = true;
-      } else if (agentId === 'droid') {
-        installMcpToFactoryConfig(server, versionHome);
-        handled = true;
-      } else if (agentId === 'hermes') {
-        installMcpToHermesConfig(server, versionHome);
+      } else {
+        // No harness CLI for this agent (or none that works — `grok mcp add`
+        // does not register into the version home), so write its config file
+        // directly. `writeMcpConfig` throws for a harness whose format is not
+        // implemented, which the catch below turns into a reported error rather
+        // than a silent success. Merge, because this loop runs once per server.
+        writeMcpConfig(agentId, getMcpConfigPathForHome(agentId, versionHome), [toWritableServer(server)], 'merge');
         handled = true;
       }
 
       // Project-layer servers also get merged into the agent's project-level
       // config (e.g., .mcp.json, .codex/config.toml) so the CLI discovers them
       // when run inside the repo.
-      if (server.scope === 'project' && options.cwd && writeMcpConfigSupportsAgent(agentId)) {
-        const projectConfigPath = getProjectMcpConfigPath(agentId, options.cwd);
-        const writableServer: WritableMcpServer = {
-          name: server.config.name,
-          transport: server.config.transport,
-          command: server.config.command,
-          args: server.config.args,
-          env: server.config.env,
-          url: server.config.url,
-        };
-        writeMcpConfig(agentId, projectConfigPath, [writableServer], 'merge');
+      if (server.scope === 'project' && options.cwd) {
+        writeMcpConfig(agentId, getProjectMcpConfigPath(agentId, options.cwd), [toWritableServer(server)], 'merge');
         handled = true;
       }
 
