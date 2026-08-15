@@ -2711,6 +2711,19 @@ nothing but its own view cache.
 - **SING-5e (MUST).** Run metadata MUST be allocated before pre-spawn work so every
   blocked, skipped, failed, timed-out, missed, and completed attempt remains
   inspectable without requiring an archived session transcript.
+- **SING-5f (MUST).** The routine activation manifest of SING-5a governs ROUTINES
+  only. A job a monitor synthesizes for its `run` action (`lib/monitors/dispatch.ts`)
+  has no definition and no manifest membership, so it MUST NOT be gated on that
+  manifest; its exactly-once ownership is the monitor's own `device:` pin
+  (`monitorRunsOnThisDevice`, `lib/monitors/config.ts`), resolved before dispatch.
+  The exemption MUST be carried by an explicit marker on the dispatched job
+  (`dispatchedBy: 'monitor'`, read by `jobRunsOnThisDevice`, `lib/routines.ts`) and
+  MUST NOT be inferred from whether a routine of that name exists. Monitor names
+  MUST NOT be written into a device's routine manifest. A monitor's `routine`
+  action fires a real routine and MUST still honour SING-5a: a routine defined but
+  not activated on the firing device is refused. Landed (RUSH-2681); before it,
+  every monitor `run` action recorded `skipReason: "wrong_owner"` with an empty
+  allowlist and no action ever executed.
 - **SING-6 (MUST).** A new fleet-affecting feature MUST be implemented in
   `apps/cli` (daemon routine and/or command) first; the UI PR adds rendering and
   control wiring only. If the feature seemingly requires UI-side execution, SING-3

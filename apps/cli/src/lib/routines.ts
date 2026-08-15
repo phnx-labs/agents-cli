@@ -335,6 +335,24 @@ export interface JobConfig {
    * - Absent/empty — routine belongs to no project ("Operations" group).
    */
   projects?: string[];
+  /**
+   * Set only by `lib/monitors/dispatch.ts` on the one-off job it synthesizes for
+   * a monitor's `run` action. Such a job is NOT a routine: it has no definition
+   * file, `agents routines` never lists it, and its name can therefore never
+   * appear in this device's routine activation manifest
+   * (`~/.agents/devices/<machine>/agents.yaml` → `routines:`). Gating it on that
+   * manifest refused every monitor action fleet-wide with `wrong_owner` and an
+   * empty allowlist (RUSH-2681), so {@link jobRunsOnThisDevice} skips the
+   * manifest for it. Exactly-once ownership is already resolved BEFORE dispatch
+   * by the monitor's own `device:` pin (`monitorRunsOnThisDevice`,
+   * `lib/monitors/config.ts`) — re-gating here was double-gating on the wrong
+   * key.
+   *
+   * Deliberately narrow: a monitor's `routine` action fires a REAL routine, which
+   * keeps its activation gate, so a routine defined but not activated on this
+   * device is still refused. Never written to a routine YAML.
+   */
+  dispatchedBy?: 'monitor';
 }
 
 /**
@@ -618,10 +636,17 @@ export function finalizeRunMeta(
  * `normalizeHost` so `Yosemite-S0`, `yosemite-s0.tailnet.ts.net`, and
  * `yosemite-s0` all agree. Every fire path (cron scheduler, webhook,
  * catchup/overdue, manual run) gates on this.
+ *
+ * A monitor-dispatched job ({@link JobConfig.dispatchedBy} `=== 'monitor'`) skips
+ * the routine activation manifest: it is not a routine, so its name can never be
+ * a member and the lookup could only ever answer "not activated here"
+ * (RUSH-2681). Its ownership was already decided by the monitor's `device:` pin.
  */
-export function jobRunsOnThisDevice(config: Pick<JobConfig, 'name' | 'devices'>): boolean {
-  const activated = routineEnabledOnThisDevice(config.name);
-  if (activated !== null) return activated;
+export function jobRunsOnThisDevice(config: Pick<JobConfig, 'name' | 'devices' | 'dispatchedBy'>): boolean {
+  if (config.dispatchedBy !== 'monitor') {
+    const activated = routineEnabledOnThisDevice(config.name);
+    if (activated !== null) return activated;
+  }
   const owner = routineOwnerDevice(config);
   // Unrestricted: no pin means fleet-wide by design (`watchdog`, `check-updates`).
   if (owner === null) return true;
@@ -745,7 +770,7 @@ export interface JobEligibilityResult {
  * sync. Scheduler/webhook/overdue paths continue to use jobRunsOnThisDevice.
  */
 export function checkJobDeviceEligibility(
-  config: Pick<JobConfig, 'name' | 'devices'>,
+  config: Pick<JobConfig, 'name' | 'devices' | 'dispatchedBy'>,
 ): JobEligibilityResult | null {
   if (jobRunsOnThisDevice(config)) return null;
   const allowed = (config.devices ?? []).map((d) => normalizeHost(d));

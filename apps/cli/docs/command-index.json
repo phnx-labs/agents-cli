@@ -12908,6 +12908,15 @@
               "negate": false
             },
             {
+              "flags": "--cwd <path>",
+              "description": "Working directory for --run, home-relative or ~/… (default: the execution target's home)",
+              "long": "--cwd",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--rate-limit <spec>",
               "description": "Auto-pause if it fires more than N/<interval> (e.g. 5/1m)",
               "long": "--rate-limit",

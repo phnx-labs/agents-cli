@@ -196,6 +196,10 @@ agents monitors remove <name>
 - `--run-on <host>` — execute the ACTION on a different machine over SSH, distinct
   from the owner that fires it. With no owner pin, it pins the owner to this
   machine to avoid duplicate fires across the fleet.
+- `--cwd <path>` — working directory for a `--run` action, home-relative or
+  `~/…`. Defaults to the execution target's home, which stays portable across a
+  `--run-on` hop. A monitor owns no project, so without this the run would be
+  blocked at readiness with `execution_context_missing` (RUSH-2681).
 
 ## The `test` dry-run (the DX centerpiece)
 
@@ -270,6 +274,17 @@ escalate again, on the first good check).
   is a follow-up: the top-level `--device` flag names the OWNER here, which
   collides with the shared `--host`/`--device` routing alias, so monitors
   interpret `--device` locally rather than routing.
+- **The owner pin is the ONLY ownership gate a monitor action passes.** A `run`
+  action synthesizes a one-off job and hands it to the routines dispatch seam
+  (`executeJobDetached`), which normally also checks the per-device ROUTINES
+  activation manifest (`~/.agents/devices/<machine>/agents.yaml` → `routines:`).
+  A monitor is not a routine and can never be a member of that list, so the
+  synthesized job carries `dispatchedBy: 'monitor'` and `jobRunsOnThisDevice`
+  (lib/routines.ts) skips the manifest for it — without that marker every monitor
+  action was refused as `wrong_owner` with an empty allowlist and never ran
+  (RUSH-2681). A `routine` action fires a REAL routine, which keeps its
+  activation gate: a routine defined but not activated on this device is still
+  refused. Monitor names are never written into the routines manifest.
 
 ## Hygiene
 
