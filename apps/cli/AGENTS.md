@@ -55,7 +55,7 @@ elsewhere; route through `supports()`.
 
 ### 4. No fallback logic for legacy layouts
 
-[`src/lib/migrate.ts`](src/lib/migrate.ts) folds legacy paths ONCE at install time.
+[`src/lib/installations/migrate.ts`](src/lib/installations/migrate.ts) folds legacy paths ONCE at install time.
 The bootstrap gate that invokes `runMigration()` then writes the `.migrated` sentinel
 (`MIGRATED_SENTINEL_FILE`, [`src/lib/state.ts`](src/lib/state.ts)), keyed to the
 migration SCHEMA version, so the scan short-circuits next run — `runMigration()` itself
@@ -76,7 +76,7 @@ agents register a hook.
 
 DAG-style, boundary contracts, `--watch` supervisor, `--worktree` isolation, optional
 `--cloud` dispatch. The old `mcp__Swarm__*` surface was folded into teams
-(`migrateLegacySwarmToTeams()` in `src/lib/migrate.ts`). Don't reach for Swarm — gone.
+(`migrateLegacySwarmToTeams()` in `src/lib/installations/migrate.ts`). Don't reach for Swarm — gone.
 
 ### 7. Every agent conversation is a session; execution ledgers link to it
 
@@ -159,7 +159,7 @@ the installer only ever fetches the *current* release and the binary self-update
 place. `isSelfUpdatingAgent()` ([`src/lib/agents.ts`](src/lib/agents.ts)) is the single
 predicate for "no pinnable semver"; route every such decision through it, never a
 scattered `=== 'droid'`. Its narrower cousin `isGlobalBinaryAgent()`
-([`src/lib/versions.ts`](src/lib/versions.ts)) — computed by probing whether
+([`src/lib/installations/versions.ts`](src/lib/installations/versions.ts)) — computed by probing whether
 `getBinaryPath` ignores the version arg — is true only when the agent resolves to ONE
 global binary (droid). For those, `listInstalledVersions` collapses the phantom
 per-version dirs to a single canonical entry, `reconcileStaleLatestForAgent` folds the

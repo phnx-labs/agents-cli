@@ -79,7 +79,7 @@ swallowed.
 ### Layer 1 — install-integrity gate
 
 After a successful `npm install`, `installVersion()`
-([`src/lib/versions.ts`](../src/lib/versions.ts)) probes the resolved binary via
+([`src/lib/installations/versions.ts`](../src/lib/installations/versions.ts)) probes the resolved binary via
 `verifyInstalledBinaryLaunches()`. If it can't launch, the install returns
 `success: false` and its `node_modules` is removed — so a gutted install is
 **never** recorded as healthy and its caller never sets it as the default pin.
@@ -201,11 +201,11 @@ difference:
 
 | Piece | Location |
 |---|---|
-| `ensureAgentRunnable()` — the self-heal engine | [`src/lib/versions.ts`](../src/lib/versions.ts) |
+| `ensureAgentRunnable()` — the self-heal engine | [`src/lib/installations/versions.ts`](../src/lib/installations/versions.ts) |
 | `resolveLaunchBinary()` — the not-installed probe | [`src/lib/exec.ts`](../src/lib/exec.ts) |
-| `verifyInstalledBinaryLaunches()` — the launch probe | [`src/lib/versions.ts`](../src/lib/versions.ts) |
-| `isMissingBinarySignature()` — the "broken" classifier | [`src/lib/versions.ts`](../src/lib/versions.ts) |
-| `installVersion(..., { clean })` — Layer 1 gate + wipe-then-reinstall | [`src/lib/versions.ts`](../src/lib/versions.ts) |
+| `verifyInstalledBinaryLaunches()` — the launch probe | [`src/lib/installations/versions.ts`](../src/lib/installations/versions.ts) |
+| `isMissingBinarySignature()` — the "broken" classifier | [`src/lib/installations/versions.ts`](../src/lib/installations/versions.ts) |
+| `installVersion(..., { clean })` — Layer 1 gate + wipe-then-reinstall | [`src/lib/installations/versions.ts`](../src/lib/installations/versions.ts) |
 | Self-heal wiring on the run path | [`src/commands/exec.ts`](../src/commands/exec.ts) |
 | `runInTmux()` dead-pane recap (Layer 3) | [`src/lib/exec.ts`](../src/lib/exec.ts) |
 | Tests | `src/lib/versions-integrity.test.ts`, `src/lib/tmux/session.test.ts`, `src/lib/exec.test.ts` |
