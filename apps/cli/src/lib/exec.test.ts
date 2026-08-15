@@ -157,6 +157,33 @@ function idx(cmd: string[], tok: string): number {
   return cmd.indexOf(tok);
 }
 
+/**
+ * Run `fn` with `keys` absent from `process.env`, restoring whatever was
+ * there afterwards. `buildExecEnv` starts from `{...process.env}` and only
+ * conditionally overwrites a handful of keys (AGENT_SESSION_ID,
+ * AGENTS_MAILBOX_DIR, DISABLE_AUTOUPDATER, ...) — a test asserting one of
+ * those is `undefined` for a case that doesn't set it is really asserting
+ * "buildExecEnv doesn't inject a value on top of nothing", which only holds
+ * when the process actually started with nothing there. This test suite runs
+ * inside real `agents run`-launched sessions (including this very repo's own
+ * dev loop), which carry every one of these vars in their own environment —
+ * so an un-isolated assertion here passes on a clean CI runner and fails the
+ * moment it runs inside a live agent session (RUSH-2749).
+ */
+function withClearedEnv<T>(keys: string[], fn: () => T): T {
+  const prev = new Map(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) delete process.env[key];
+  try {
+    return fn();
+  } finally {
+    for (const key of keys) {
+      const value = prev.get(key);
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
 describe('buildExecEnv — AGENTS_MAILBOX_DIR wiring (mailbox loop-closer)', () => {
   it('points the agent at its own box, keyed by sessionId', () => {
     const sid = '96aa7271-0c8f-4ed7-8811-1ad1d305e46e';
@@ -169,9 +196,11 @@ describe('buildExecEnv — AGENTS_MAILBOX_DIR wiring (mailbox loop-closer)', () 
   });
 
   it('sets nothing when there is no session id (nothing to key a box on)', () => {
-    const env = buildExecEnv(execOpts({ agent: 'claude' }));
-    expect(env.AGENTS_MAILBOX_DIR).toBeUndefined();
-    expect(env.AGENT_SESSION_ID).toBeUndefined();
+    withClearedEnv(['AGENT_SESSION_ID', 'AGENTS_SESSION_ID', 'AGENTS_MAILBOX_DIR'], () => {
+      const env = buildExecEnv(execOpts({ agent: 'claude' }));
+      expect(env.AGENTS_MAILBOX_DIR).toBeUndefined();
+      expect(env.AGENT_SESSION_ID).toBeUndefined();
+    });
   });
 
   it('lets a caller override the box via options.env (how the loop pins the run-level box)', () => {
@@ -229,8 +258,10 @@ describe('buildExecEnv — Claude Code auto-updater suppression for pinned manag
   });
 
   it('leaves codex untouched — no DISABLE_AUTOUPDATER injected', () => {
-    const env = buildExecEnv(execOpts({ agent: 'codex', version: '0.20.0' }));
-    expect(env.DISABLE_AUTOUPDATER).toBeUndefined();
+    withClearedEnv(['DISABLE_AUTOUPDATER'], () => {
+      const env = buildExecEnv(execOpts({ agent: 'codex', version: '0.20.0' }));
+      expect(env.DISABLE_AUTOUPDATER).toBeUndefined();
+    });
   });
 });
 
