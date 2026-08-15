@@ -136,22 +136,53 @@ describe('exportPermissionsFromPath detects every harness by its own path', () =
 describe('allow and deny never cross on the way back', () => {
   // The reverse readers rebuild allow/deny from formats that encode polarity
   // very differently — Grok's `action`, Kimi's `decision`, Kiro's `effect`,
-  // Hermes' approvals.deny, OpenClaw's
-  // alsoAllow/deny. A polarity slip in any of them silently turns a deny into a
-  // grant, which is the worst failure this registry could have.
+  // Hermes' approvals.deny, OpenClaw's alsoAllow/deny. A polarity slip in any of
+  // them silently turns a deny into a grant, which is the worst failure this
+  // registry could have.
+
+  /**
+   * Harnesses whose format cannot record a SUB-COMMAND deny like `Bash(rm:*)`,
+   * verified by driving the real writer and reading the file it produced:
+   *
+   *   codex     — writes sandbox settings only; deny rules go to a separate
+   *               agents-deny.rules Starlark file the reader does not parse
+   *   openclaw  — tool-level only, so a sub-command rule is skipped by design
+   *   copilot   — records approvals (grants); its config has no deny list
+   *
+   * They legitimately read back as `null` for a deny-only set. Asserting
+   * non-null for them would be asserting a lie.
+   */
+  const CANNOT_EXPRESS_SUBCOMMAND_DENY = new Set(['codex', 'openclaw', 'copilot']);
+
   for (const agent of capableAgents('allowlist')) {
     it(`${agent}: an allow-only set never reads back a deny`, () => {
       const home = makeTempHome();
       const set: PermissionSet = { name: 'test', allow: ['Bash(git status:*)', 'Read(**)'] };
       expect(applyPermissionsToVersion(agent, set, home, false, process.cwd()).success).toBe(true);
-      expect(readCanonicalPermissions(agent, 'user', undefined, home)?.deny ?? []).toEqual([]);
+      const back = readCanonicalPermissions(agent, 'user', undefined, home);
+      // not.toBeNull() first — `?.deny ?? []` also passes when the read path
+      // returns null, which would make this assert nothing at all. Every
+      // harness can express an allow, so absence here is a real failure.
+      expect(back, `${agent} wrote an allow-only set that reads back as absent`).not.toBeNull();
+      expect(back!.deny ?? []).toEqual([]);
     });
 
     it(`${agent}: a deny-only set never reads back an allow`, () => {
       const home = makeTempHome();
       const set: PermissionSet = { name: 'test', allow: [], deny: ['Bash(rm:*)'] };
       expect(applyPermissionsToVersion(agent, set, home, false, process.cwd()).success).toBe(true);
-      expect(readCanonicalPermissions(agent, 'user', undefined, home)?.allow ?? []).toEqual([]);
+      const back = readCanonicalPermissions(agent, 'user', undefined, home);
+
+      if (CANNOT_EXPRESS_SUBCOMMAND_DENY.has(agent)) {
+        // Nothing recorded is the honest outcome — but it must be NOTHING, not
+        // a grant invented out of a deny.
+        expect(back?.allow ?? []).toEqual([]);
+        return;
+      }
+
+      expect(back, `${agent} wrote a deny-only set that reads back as absent`).not.toBeNull();
+      expect(back!.allow ?? []).toEqual([]);
+      expect(back!.deny ?? []).not.toEqual([]);
     });
   }
 });

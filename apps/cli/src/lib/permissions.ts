@@ -1980,7 +1980,14 @@ export function detectPermissionAgentFromPath(filePath: string): AgentId | null 
 
   for (const [agent, target] of Object.entries(PERMISSION_TARGETS)) {
     const agentId = agent as AgentId;
-    const candidates = [target!.home(''), ...(target!.project ? [target!.project('')] : [])];
+    // `altSuffixes` first: home()/project() may probe the filesystem to choose
+    // between accepted spellings, and with an empty root that probe resolves
+    // against process.cwd() -- so detection must not depend on it.
+    const candidates = [
+      ...(target!.altSuffixes ?? []),
+      target!.home(''),
+      ...(target!.project ? [target!.project('')] : []),
+    ];
     for (const candidate of candidates) {
       const suffix = candidate.split(path.sep).join('/').replace(/^\/+/, '');
       if (!suffix) continue;

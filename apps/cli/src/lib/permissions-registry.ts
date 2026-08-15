@@ -279,6 +279,16 @@ export interface PermissionTarget {
   toCanonical(configPath: string): PermissionSet | null;
   /** One line naming what this harness's shape loses on the way back. */
   lossyBecause: string;
+  /**
+   * Extra path suffixes this harness's config may use, for DETECTION only.
+   *
+   * `home()`/`project()` may probe the filesystem to pick between accepted
+   * spellings, which is correct when resolving a real root but meaningless for
+   * detection — `detectPermissionAgentFromPath` passes `''`, so the probe would
+   * resolve against `process.cwd()` and make the same input detect differently
+   * depending on where the CLI was run. Detection reads these instead.
+   */
+  altSuffixes?: string[];
 }
 
 /**
@@ -312,6 +322,7 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
       path.join(h, '.config', 'opencode', 'opencode.json'),
     ),
     project: (cwd) => existingOr(path.join(cwd, 'opencode.jsonc'), path.join(cwd, 'opencode.json')),
+    altSuffixes: [path.join('.config', 'opencode', 'opencode.json'), 'opencode.json'],
     lossyBecause: 'OpenCode gates Bash only, so non-Bash rules were never written',
     toCanonical(configPath) {
       const config = readJson(configPath);
