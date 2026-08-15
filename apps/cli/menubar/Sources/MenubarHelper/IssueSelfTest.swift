@@ -232,19 +232,22 @@ enum IssueSelfTest {
         let fixture = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("menubar-linear-test-\(ProcessInfo.processInfo.processIdentifier)",
                                     isDirectory: true)
-        let executable = fixture.appendingPathComponent("linear")
-        let blocked = fixture.appendingPathComponent("blocked")
+        let blockedDirectory = fixture.appendingPathComponent("blocked", isDirectory: true)
+        let workingDirectory = fixture.appendingPathComponent("working", isDirectory: true)
+        let executable = workingDirectory.appendingPathComponent("linear")
+        let directoryNamedLinear = blockedDirectory.appendingPathComponent("linear", isDirectory: true)
         try? FileManager.default.createDirectory(at: fixture, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
         try? Data("#!/bin/sh\nexit 0\n".utf8).write(to: executable)
-        try? Data("not executable\n".utf8).write(to: blocked)
         try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: blocked.path)
+        try? FileManager.default.createDirectory(at: directoryNamedLinear, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: fixture) }
 
         check("resolves a real executable from supplied directories",
-              AgentsCLI.executable(named: "linear", in: [fixture.path]) == executable.path)
-        check("rejects a non-executable file",
-              AgentsCLI.executable(named: "blocked", in: [fixture.path]) == nil)
+              AgentsCLI.executable(named: "linear", in: [workingDirectory.path]) == executable.path)
+        check("skips an executable directory and falls back to a real file",
+              AgentsCLI.executable(named: "linear", in: [blockedDirectory.path, workingDirectory.path])
+                  == executable.path)
         check("missing executable resolves to nil",
               AgentsCLI.executable(named: "definitely-not-linear", in: [fixture.path]) == nil)
         check("missing CLI copy is actionable",
