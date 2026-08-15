@@ -6,6 +6,8 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+## [0.9.324] - 2026-08-15
+
 - **The Fleet panel no longer reports 0 sessions in a second editor window (RUSH-2733).**
   One window per machine wins the monitor lease and owns the single `agents sessions watch
   --json` child; that stream emits a `reset` once at startup and only deltas afterwards, so
