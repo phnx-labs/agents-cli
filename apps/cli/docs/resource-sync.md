@@ -243,7 +243,7 @@ directly into the agent's config.
 ```
 Source: ~/.agents/mcp/*.yaml       Per-agent destinations:
 
-┌────────────────────┐             Agy     → <home>/.gemini/antigravity-cli/mcp_config.json
+┌────────────────────┐             Agy     → <home>/.gemini/config/mcp_config.json
 │ github.yaml        │                      · key: mcpServers.<name> = {command,args,env}
 │ ───────            │
 │ name: github       │                      · key: mcpServers.<name> = {command,args,env}
