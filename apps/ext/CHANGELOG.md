@@ -6,6 +6,8 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+## [0.9.320] - 2026-08-14
+
 - **Crash-restart no longer reopens every tab in a thundering herd (RUSH-2477).**
   `restoreAgentTerminals` reopened each persisted tab and fired its resume with no
   cap or stagger, so N crashed tabs became N near-simultaneous resume processes
