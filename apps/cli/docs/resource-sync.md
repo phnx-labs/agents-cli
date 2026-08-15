@@ -320,7 +320,19 @@ groups ending in `-deny` (e.g. `99-deny.yaml`) contribute to `deny` even
 though their YAML lists appear under `allow`
 (`permissions.ts:230-235`).
 
-Per-agent conversion is lossy in both directions:
+Reading back — `agents permissions list <agent>` and `agents permissions export`
+— goes through `PERMISSION_TARGETS` (`lib/permissions-registry.ts`), one entry
+per allowlist-capable harness declaring its config path and how to project that
+file onto the canonical `PermissionSet`. A completeness test pins the key set to
+`capableAgents('allowlist')`, so a harness the write path handles can never be
+one the read path silently reports as empty (RUSH-2676). The registry also owns
+the canonical↔native tool vocabularies that the forward serializers below
+import, so the two directions cannot disagree about what `fs_read` or
+`developer__shell` means.
+
+Per-agent conversion is lossy in both directions — the reverse projection
+recovers a set that grants the same access, not the byte-identical rules that
+were written, and each target names its own loss in a `lossyBecause` line:
 
 - Claude's native format is closest to canonical — near 1:1 passthrough
   (`permissions.ts:362-369`).
