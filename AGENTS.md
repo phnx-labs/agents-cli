@@ -170,6 +170,13 @@ them (see [§Code review conventions](#code-review-conventions-the-reviewer-must
 
 ## CI and release latency are correctness requirements
 
+**Status: target, not yet met.** As of 2026-08-15 the required Tests workflow runs a
+p50 of 6.1 minutes and a p90 of 15.8 minutes — see
+`.agents/artifacts/2026-08-15/plan-ci-release-near-instant.md` for the full baseline
+and the RUSH-2666 implementation plan that gets from here to the numbers below. Until
+that plan lands, treat this section as the acceptance bar new CI/release work is
+judged against, not a description of what CI does today.
+
 The required pull-request check has a hard end-to-end **P99 of 90 seconds**, measured
 from the GitHub event timestamp until the single required check reaches a terminal
 state. Ten seconds is the cache-hit target. A required job that cannot fit inside the
@@ -195,10 +202,12 @@ post-merge/nightly coverage. It must not silently expand the pull-request gate.
 - Slow integration, broad regression, mutation, packaging, and rare-platform suites
   remain valuable but run after merge or nightly. They do not block the required PR
   result or consume fast-lane capacity.
-- Windows is not a required pull-request or release platform. Its smoke suite is
-  best-effort and post-merge while support demand is measured; it must never block a
-  merge or ordinary release. Remove Windows-only code and the supported-platform claim
-  when no demonstrated usage justifies the maintenance cost.
+- Windows must not remain a required pull-request or release platform (it still is
+  today — `.github/workflows/tests.yml`'s required aggregator waits on the `windows`
+  job). Its smoke suite becomes best-effort and post-merge while support demand is
+  measured; it must never block a merge or ordinary release. Remove Windows-only code
+  and the supported-platform claim when no demonstrated usage justifies the
+  maintenance cost.
 - Keep only tests that protect a distinct product invariant or regression. Delete
   duplicate assertions, implementation-detail tests, constant/trivial-guard tests, and
   tests whose removal does not reduce meaningful mutation or defect coverage.
