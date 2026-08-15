@@ -33,7 +33,7 @@
 import type { AgentId } from '../types.js';
 import { crabboxFind, crabboxList, crabboxStatusReady, crabboxWarmup, crabboxWaitReady, crabboxRunScript, crabboxStop, poolReusableBoxes, type CrabboxBox } from './cli.js';
 import * as yaml from 'yaml';
-import { buildCredentialScript, buildHomeFileWriteScript, CLAUDE_TOKEN_REMOTE, type DetectedRuntime } from './runtimes.js';
+import { assertNoNativeOAuthTransfer, buildCredentialScript, buildHomeFileWriteScript, CLAUDE_TOKEN_REMOTE, type DetectedRuntime } from './runtimes.js';
 import { LEASE_AGENT_MARKER, leasePhaseSentinel } from './progress.js';
 import { copySetupToBox } from './setup-copy.js';
 import { DEFAULT_CRABBOX_PROFILE } from './config.js';
@@ -359,6 +359,15 @@ function reapExpiredPoolStrays(opts: LeaseRunOptions, keepSlug: string): number 
 }
 
 export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult> {
+  // SING-1b, FAIL FAST: `buildBootstrapScript` below refuses to copy a native OAuth
+  // login (via `buildCredentialScript`), but that runs only AFTER a box has been
+  // leased — and a `--fresh` box would leak because the throw escapes the teardown
+  // `finally`. Refuse HERE, before any box is provisioned or paid for, mirroring how
+  // `--copy-creds` refuses before it opens an SSH connection.
+  assertNoNativeOAuthTransfer(opts.credentialRuntimes ?? opts.runtimes, opts.detected, {
+    claudeCredentialsJson: opts.claudeCredentialsJson,
+  });
+
   const startedAt = Date.now();
   let box: CrabboxBox;
   // A box this run did NOT provision — either the caller named it (`--box`) or

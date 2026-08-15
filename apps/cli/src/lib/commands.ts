@@ -18,7 +18,7 @@ import { normalizeAliases } from './resource-aliases.js';
 import { markdownToToml } from './convert.js';
 import { getCommandsDir, getUserCommandsDir, getEnabledExtraRepos, getProjectAgentsDir, getSkillsDir, getTrashCommandsDir } from './state.js';
 import { getEffectiveHome, getVersionHomePath, listInstalledVersions, resolveVersion } from './versions.js';
-import { discoverPlugins } from './plugins.js';
+import { discoverPlugins } from './plugins/plugins.js';
 import type { AgentId, CommandInstallation } from './types.js';
 import {
   commandSkillMatches,

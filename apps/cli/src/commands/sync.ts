@@ -463,13 +463,15 @@ async function runUmbrella(
 
     if (json) {
       emitJson({
-        ok: true,
+        // A refused resource is not a clean sync (RUSH-2700).
+        ok: result.declined.length === 0,
         mode: 'umbrella',
         plan: result.plan,
         repos: result.repos,
         secrets: result.secrets,
         devices: result.devices,
         reconciled: result.reconciled,
+        declined: result.declined,
       });
       return;
     }
@@ -677,7 +679,8 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     }
     if (json) {
       emitJson({
-        ok: true,
+        // Any version that refused a write makes the whole run not-ok (RUSH-2700).
+        ok: versions.every(({ result }) => result.declined.length === 0),
         mode: 'agent-all',
         agent: agentId,
         repo: repoScope,
@@ -693,6 +696,7 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
           plugins: result.plugins,
           workflows: result.workflows,
           pruned: result.pruned,
+          declined: result.declined,
         })),
       });
     }

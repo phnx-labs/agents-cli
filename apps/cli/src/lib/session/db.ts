@@ -22,7 +22,7 @@ import { persistToolCalls, toolEvidenceSourcePath } from './tool-store.js';
 import { buildClaudeAccountIndex, resolveClaudeAccount } from './claude-accounts.js';
 import { extractSkills, extractSlashCommands } from './highlights.js';
 import { resolveResource } from '../resources.js';
-import { discoverPlugins } from '../plugins.js';
+import { discoverPlugins } from '../plugins/plugins.js';
 import { machineId } from '../machine-id.js';
 import type { DiscoveredPlugin } from '../types.js';
 

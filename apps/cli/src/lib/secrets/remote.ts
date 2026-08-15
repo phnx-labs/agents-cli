@@ -43,15 +43,23 @@ function hostKeyLookupName(target: string): string {
  *   - **Managed pinned host keys.** Verify against the CLI-owned known_hosts
  *     store (`known-hosts.ts`), not `~/.ssh/known_hosts`. A CHANGED key on a
  *     known host is refused (`StrictHostKeyChecking` `yes` once pinned,
- *     `accept-new` — which still refuses a changed key, only learns a genuinely
- *     new one — before that). So a machine-in-the-middle swapping a pinned host's
- *     key can never receive or return a secret.
+ *     `accept-new` before that). Callers that copy durable provider credentials
+ *     must separately require an existing pin before invoking this transport.
  *   - **No multiplex reuse.** `multiplex: false` — a credential channel never
  *     leaves a persistent `ControlMaster` socket lingering (60s `ControlPersist`)
  *     that any other `agents` invocation to that host would silently reuse.
  */
 export function credentialTransportSshOpts(target: string): { hostKeyOpts: string[]; multiplex: false } {
   return { hostKeyOpts: hostKeyCheckingOpts(isHostPinned(hostKeyLookupName(target))), multiplex: false };
+}
+
+/** Refuse durable credential transfer until the destination SSH key is pinned. */
+export function assertCredentialTransportHostPinned(target: string, pinned = isHostPinned(hostKeyLookupName(target))): void {
+  if (pinned) return;
+  throw new Error(
+    `Refusing to transfer provider credentials to '${target}' before its SSH host key is pinned. ` +
+    `Connect once with 'agents ssh ${target}' and verify the host, then retry.`,
+  );
 }
 
 /**
@@ -489,10 +497,11 @@ export function verifyRemoteKeychainPush(
 export function buildRemoteFileImportCommand(
   bundle: string,
   dotenv: string,
-  opts: { passphrase?: string; force?: boolean } = {},
+  opts: { passphrase?: string; force?: boolean; policyNever?: boolean } = {},
 ): { remoteCmd: string; input: string } {
   const force = opts.force ? ' --force' : '';
-  const importCmd = `agents secrets import ${shellQuote(bundle)} --from - --backend file${force}`;
+  const policy = opts.policyNever ? ' --policy never --i-understand' : '';
+  const importCmd = `agents secrets import ${shellQuote(bundle)} --from - --backend file${force}${policy}`;
   const passphrase = opts.passphrase ?? '';
   if (passphrase) {
     // Opt-in shared passphrase: read it off the FIRST stdin line, export it, then

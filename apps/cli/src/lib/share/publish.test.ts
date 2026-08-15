@@ -1,5 +1,6 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -16,6 +17,12 @@ import {
   publishFile,
   publishToEndpoint,
   buildShareKey,
+  resolveShareProvenance,
+  parseMetaEntries,
+  assertMetadataSize,
+  deriveLabel,
+  sanitizeLabel,
+  RESERVED_META_KEYS,
 } from './publish.js';
 import { renderWorkerScript } from './worker-template.js';
 
@@ -85,6 +92,9 @@ describe('publishFile', () => {
       githubUser: 'octocat',
       expire: '2030-01-01',
       cover: false,
+      // Suppress auto-captured provenance (agent/session/host/repo/date) so the
+      // test is deterministic regardless of the ambient env it runs in.
+      provenance: {},
       config: {
         baseUrl: 'https://share.example',
         accountId: 'acct',
@@ -102,6 +112,8 @@ describe('publishFile', () => {
       url: 'https://share.example/octocat/plan-render-output',
       expiresAt: '2030-01-01T00:00:00.000Z',
       coverUrl: undefined,
+      label: 'Plan',
+      labelSource: 'derived',
     });
     expect(uploads).toEqual([
       {
@@ -111,6 +123,8 @@ describe('publishFile', () => {
           authorization: 'Bearer token',
           'content-type': 'text/html; charset=utf-8',
           'x-share-expires-at': '2030-01-01T00:00:00.000Z',
+          'x-share-label': 'Plan',
+          'x-share-label-source': 'derived',
         },
       },
     ]);
@@ -381,7 +395,324 @@ describe('publishToEndpoint', () => {
     expect(ok.url).toContain('/spend');
     expect(uploads).toBe(1);
   });
+
+  it('refuses a credential in --meta unless --force, even when the file body is clean (RUSH-2683 review fix)', async () => {
+    // --label and --meta land in PUBLIC customMetadata (visible in the
+    // gallery, `share list --json`, `share revisions`) exactly like the file
+    // body — the pre-publish scan previously ran on the body only, so a
+    // credential-shaped --meta value or --label sailed straight through with
+    // no --force gate at all.
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-scan-meta-')), 'report.html');
+    writeFileSync(htmlPath, '<h1>Clean body, no secrets here</h1>');
+    let uploads = 0;
+    await expect(
+      publishToEndpoint(
+        htmlPath,
+        { baseUrl: 'https://share.example', token: 'tok' },
+        {
+          slug: 'meta-secret',
+          githubUser: 'octocat',
+          cover: false,
+          meta: { note: 'AKIAABCDEFGHIJKLMNOP' },
+          uploader: async () => {
+            uploads++;
+            return { ok: true, status: 200 };
+          },
+        },
+      ),
+    ).rejects.toThrow(/Refusing to publish.*credential/);
+    expect(uploads).toBe(0);
+
+    // --force bypasses this gate too.
+    const ok = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'meta-secret',
+        githubUser: 'octocat',
+        cover: false,
+        force: true,
+        meta: { note: 'AKIAABCDEFGHIJKLMNOP' },
+        uploader: async () => {
+          uploads++;
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    expect(ok.url).toContain('/meta-secret');
+    expect(uploads).toBe(1);
+  });
+
+  it('refuses an email in an explicit --label unless --force (RUSH-2683 review fix)', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-scan-label-')), 'report.html');
+    writeFileSync(htmlPath, '<h1>Clean body</h1>');
+    let uploads = 0;
+    await expect(
+      publishToEndpoint(
+        htmlPath,
+        { baseUrl: 'https://share.example', token: 'tok' },
+        {
+          slug: 'label-secret',
+          githubUser: 'octocat',
+          cover: false,
+          label: 'contact: alice@example.com',
+          uploader: async () => {
+            uploads++;
+            return { ok: true, status: 200 };
+          },
+        },
+      ),
+    ).rejects.toThrow(/Refusing to publish.*email/);
+    expect(uploads).toBe(0);
+  });
 });
+
+describe('resolveShareProvenance (RUSH-2683)', () => {
+  it('reads session/agent from env, host from the override, repo from git', () => {
+    const gitDir = mkdtempSync(join(tmpdir(), 'share-prov-git-'));
+    initGitRepo(gitDir);
+    const p = resolveShareProvenance({
+      env: { AGENTS_SESSION_ID: 'sess-1', AGENTS_AGENT_NAME: 'claude' } as NodeJS.ProcessEnv,
+      hostname: 'zion',
+      dir: gitDir,
+      now: new Date('2026-08-14T12:00:00.000Z'),
+    });
+    expect(p.session).toBe('sess-1');
+    expect(p.agent).toBe('claude');
+    expect(p.host).toBe('zion');
+    expect(p.repo).toBe(basename(gitDir).toLowerCase());
+    expect(p.date).toBe('2026-08-14');
+  });
+
+  it('falls back to AGENT_SESSION_ID when AGENTS_SESSION_ID is unset', () => {
+    const p = resolveShareProvenance({ env: { AGENT_SESSION_ID: 'sess-legacy' } as NodeJS.ProcessEnv, dir: mkdtempSync(join(tmpdir(), 'share-prov-')) });
+    expect(p.session).toBe('sess-legacy');
+  });
+
+  it('leaves session/agent/repo undefined outside an agent run and outside git — never invented', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'share-prov-nogit-'));
+    const p = resolveShareProvenance({ env: {} as NodeJS.ProcessEnv, dir });
+    expect(p.session).toBeUndefined();
+    expect(p.agent).toBeUndefined();
+    expect(p.repo).toBeUndefined();
+    // host and date are always present — real facts about where/when the publish ran.
+    expect(p.host).toBeTruthy();
+    expect(p.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe('parseMetaEntries (RUSH-2683)', () => {
+  it('parses valid key=value pairs', () => {
+    expect(parseMetaEntries(['kind=plan', 'ticket=RUSH-2683'])).toEqual({ kind: 'plan', ticket: 'RUSH-2683' });
+  });
+
+  it('allows = inside the value', () => {
+    expect(parseMetaEntries(['query=a=b=c'])).toEqual({ query: 'a=b=c' });
+  });
+
+  it('rejects a pair with no =', () => {
+    expect(() => parseMetaEntries(['kindplan'])).toThrow(/Bad --meta/);
+  });
+
+  it('rejects an uppercase or symbol-bearing key', () => {
+    expect(() => parseMetaEntries(['Kind=plan'])).toThrow(/lowercase/);
+    expect(() => parseMetaEntries(['kind.x=plan'])).toThrow(/lowercase/);
+  });
+
+  it('rejects every reserved key', () => {
+    for (const key of RESERVED_META_KEYS) {
+      expect(() => parseMetaEntries([`${key}=x`]), key).toThrow(/reserved/);
+    }
+  });
+});
+
+describe('assertMetadataSize (RUSH-2683)', () => {
+  it('accepts a small payload', () => {
+    expect(() => assertMetadataSize({ label: 'Q3 report', agent: 'claude' })).not.toThrow();
+  });
+
+  it('refuses a payload over the 2KB cap', () => {
+    expect(() => assertMetadataSize({ blob: 'x'.repeat(3000) })).toThrow(/over the 2048-byte cap/);
+  });
+});
+
+describe('deriveLabel (RUSH-2683)', () => {
+  it('prefers the HTML <title>', () => {
+    expect(deriveLabel('/tmp/plan.html', Buffer.from('<html><head><title>Fleet Plan</title></head></html>'))).toBe('Fleet Plan');
+  });
+
+  it('falls back to a Markdown frontmatter title', () => {
+    const body = Buffer.from('---\ntitle: Q3 Report\nkind: plan\n---\n# body\n');
+    expect(deriveLabel('/tmp/report.md', body)).toBe('Q3 Report');
+  });
+
+  it('falls back to the filename when neither is present', () => {
+    expect(deriveLabel('/tmp/fleet-status-report.html', Buffer.from('<h1>no title tag</h1>'))).toBe('fleet status report');
+  });
+
+  it('never throws or blocks on an empty file', () => {
+    expect(deriveLabel('/tmp/empty.html', Buffer.alloc(0))).toBe('empty.html'.replace(/\.[^.]+$/, ''));
+  });
+
+  it('collapses a multi-line <title> to a single line (RUSH-2683 review fix)', () => {
+    // `[^<]{1,200}` in the <title> regex matches newlines, and .trim() only
+    // strips leading/trailing whitespace — a multi-line title used to reach
+    // Headers.set() as-is, which throws an unhandled TypeError and crashes
+    // the whole publish. deriveLabel must return a single-line string.
+    const html = '<html><head><title>Fleet\nStatus\n  Report</title></head></html>';
+    const label = deriveLabel('/tmp/plan.html', Buffer.from(html));
+    expect(label).toBe('Fleet Status Report');
+    expect(label).not.toMatch(/\n/);
+    expect(() => new Headers({ 'x-share-label': label })).not.toThrow();
+  });
+});
+
+describe('sanitizeLabel (RUSH-2683 review fix)', () => {
+  it('collapses embedded newlines and internal runs of whitespace to a single space', () => {
+    expect(sanitizeLabel('Fleet\nStatus\tReport')).toBe('Fleet Status Report');
+  });
+
+  it('trims leading/trailing whitespace', () => {
+    expect(sanitizeLabel('  Q3 Report  ')).toBe('Q3 Report');
+  });
+
+  it('is a no-op on an already-clean single-line label', () => {
+    expect(sanitizeLabel('Fleet Plan')).toBe('Fleet Plan');
+  });
+});
+
+describe('publishToEndpoint provenance / label / meta / revision headers (RUSH-2683)', () => {
+  it('sends provenance, an explicit label, and --meta as x-share-* headers', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-prov-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    let headersSeen: Record<string, string> = {};
+    const result = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'prov',
+        githubUser: 'octocat',
+        cover: false,
+        label: 'Fleet Plan',
+        meta: { kind: 'plan', ticket: 'RUSH-2683' },
+        provenance: { agent: 'claude', session: 'sess-1', host: 'zion', repo: 'agents-cli', date: '2026-08-14' },
+        uploader: async (_u, _b, headers) => {
+          headersSeen = headers;
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    expect(headersSeen['x-share-agent']).toBe('claude');
+    expect(headersSeen['x-share-session']).toBe('sess-1');
+    expect(headersSeen['x-share-host']).toBe('zion');
+    expect(headersSeen['x-share-repo']).toBe('agents-cli');
+    expect(headersSeen['x-share-date']).toBe('2026-08-14');
+    expect(headersSeen['x-share-label']).toBe('Fleet Plan');
+    expect(headersSeen['x-share-label-source']).toBe('explicit');
+    expect(JSON.parse(headersSeen['x-share-meta'])).toEqual({ kind: 'plan', ticket: 'RUSH-2683' });
+    expect(result.label).toBe('Fleet Plan');
+    expect(result.labelSource).toBe('explicit');
+  });
+
+  it('sanitizes an explicit --label with an embedded newline instead of crashing on Headers.set() (RUSH-2683 review fix)', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-label-newline-')), 'x.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    let headersSeen: Record<string, string> = {};
+    const result = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'label-newline',
+        githubUser: 'octocat',
+        cover: false,
+        label: 'Fleet\nStatus Report',
+        provenance: {},
+        uploader: async (_u, _b, headers) => {
+          headersSeen = headers;
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    expect(headersSeen['x-share-label']).toBe('Fleet Status Report');
+    expect(result.label).toBe('Fleet Status Report');
+  });
+
+  it('derives a label and marks it derived when --label is omitted', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-derived-')), 'x.html');
+    writeFileSync(htmlPath, '<html><head><title>Auto Title</title></head></html>');
+    let headersSeen: Record<string, string> = {};
+    const result = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'derived',
+        githubUser: 'octocat',
+        cover: false,
+        provenance: {},
+        uploader: async (_u, _b, headers) => {
+          headersSeen = headers;
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    expect(headersSeen['x-share-label']).toBe('Auto Title');
+    expect(headersSeen['x-share-label-source']).toBe('derived');
+    expect(result.labelSource).toBe('derived');
+  });
+
+  it('sends x-share-no-revision when --no-revision is set', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-norev-')), 'x.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    let headersSeen: Record<string, string> = {};
+    await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'norev',
+        githubUser: 'octocat',
+        cover: false,
+        noRevision: true,
+        provenance: {},
+        uploader: async (_u, _b, headers) => {
+          headersSeen = headers;
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    expect(headersSeen['x-share-no-revision']).toBe('1');
+  });
+
+  it('refuses a publish whose combined metadata exceeds the size cap, before any upload', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-bigmeta-')), 'x.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    let uploads = 0;
+    await expect(
+      publishToEndpoint(
+        htmlPath,
+        { baseUrl: 'https://share.example', token: 'tok' },
+        {
+          slug: 'bigmeta',
+          githubUser: 'octocat',
+          cover: false,
+          provenance: {},
+          meta: { blob: 'x'.repeat(3000) },
+          uploader: async () => {
+            uploads++;
+            return { ok: true, status: 200 };
+          },
+        },
+      ),
+    ).rejects.toThrow(/over the 2048-byte cap/);
+    expect(uploads).toBe(0);
+  });
+});
+
+function initGitRepo(dir: string): void {
+  // detectProject/gitRepoName shell out to `git rev-parse --show-toplevel`; make
+  // the temp dir a real (if trivial) git repo so that path is exercised for real
+  // rather than mocked.
+  execFileSync('git', ['-C', dir, 'init', '-q']);
+}
 
 function expectedProject(dir: string): string {
   return basename(dir).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');

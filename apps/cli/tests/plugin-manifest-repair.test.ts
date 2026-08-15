@@ -19,7 +19,7 @@ import * as os from 'os';
 import {
   repairableManifestFields,
   repairPluginManifestFile,
-} from '../src/lib/plugin-marketplace.js';
+} from '../src/lib/plugins/plugin-marketplace.js';
 
 let TMP: string;
 let manifestPath: string;

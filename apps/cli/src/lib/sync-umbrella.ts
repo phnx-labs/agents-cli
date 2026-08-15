@@ -71,6 +71,11 @@ export interface UmbrellaResult {
   secrets?: { pulled: number; skipped: boolean; reason?: string; errors: string[] };
   devices?: { synced: number; pending: number; skipped: boolean };
   reconciled: boolean;
+  /**
+   * Resources the reconcile stage refused to write, as user-facing sentences.
+   * Empty when nothing was declined — never conflated with "nothing to do".
+   */
+  declined: string[];
 }
 
 export interface RunUmbrellaArgs {
@@ -96,7 +101,7 @@ export interface RunUmbrellaArgs {
 export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaResult> {
   const { flags, log, yes, passphrase, quiet = false } = args;
   const plan = planUmbrellaStages(flags);
-  const result: UmbrellaResult = { plan, reconciled: false };
+  const result: UmbrellaResult = { plan, reconciled: false, declined: [] };
 
   if (plan.fetchRepos) {
     const dirs = [
@@ -153,8 +158,9 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
 
   if (plan.reconcile) {
     const { refresh } = await import('./refresh.js');
-    await refresh({ skipPrompts: yes, quiet });
+    const refreshed = await refresh({ skipPrompts: yes, quiet });
     result.reconciled = true;
+    result.declined = refreshed.declined;
 
     // Keep already-registered devices' reachability current, and surface newly
     // appeared tailnet nodes as "pending" for the menu-bar Register/Ignore gate

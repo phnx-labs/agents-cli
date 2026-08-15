@@ -129,31 +129,34 @@ describe('buildBootstrapScript', () => {
     expect(script).toContain("agents run 'kimi' 'hi' --quiet");
   });
 
-  it('copies base runtime credentials for a profile only when requested', () => {
+  it('REFUSES to copy a base runtime native credential (SING-1b) — the profile auth is portable, the native login is not', () => {
+    // A profile-dispatch run carries its own portable auth (ANTHROPIC_BASE_URL /
+    // AUTH_TOKEN), which is fine. But `credentialRuntimes: ['claude']` ALSO asks
+    // to copy the native Claude OAuth login to the leased box — that is the
+    // forbidden transfer, so the bootstrap must refuse rather than serialize it.
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-profile-'));
     const credPath = path.join(tmpDir, 'claude.json');
     fs.writeFileSync(credPath, '{"oauthAccount":{"emailAddress":"a@b.com"}}');
     const detectedWithCred: DetectedRuntime[] = [{ ...detected[0], credPath }];
-    const script = buildBootstrapScript({
-      agent: 'internal-claude',
-      prompt: 'hi',
-      runtimes: ['claude'],
-      credentialRuntimes: ['claude'],
-      detected: detectedWithCred,
-      claudeCredentialsJson: '{"claudeAiOauth":{"accessToken":"tok"}}',
-      dispatchProfile: {
-        name: 'internal-claude',
-        agent: 'claude',
-        env: {
-          ANTHROPIC_BASE_URL: 'https://gateway.example.test',
-          ANTHROPIC_MODEL: 'claude-sonnet-4-5',
-        },
-      },
-    });
     try {
-      expect(script).toContain('cat > "$HOME/.claude/.credentials.json" <<');
-      expect(script).toContain('rm -f "$HOME/.claude/.credentials.json"');
-      expect(script).toContain('rm -f "$HOME/.agents/profiles/internal-claude.yml"');
+      expect(() =>
+        buildBootstrapScript({
+          agent: 'internal-claude',
+          prompt: 'hi',
+          runtimes: ['claude'],
+          credentialRuntimes: ['claude'],
+          detected: detectedWithCred,
+          claudeCredentialsJson: '{"claudeAiOauth":{"accessToken":"tok"}}',
+          dispatchProfile: {
+            name: 'internal-claude',
+            agent: 'claude',
+            env: {
+              ANTHROPIC_BASE_URL: 'https://gateway.example.test',
+              ANTHROPIC_MODEL: 'claude-sonnet-4-5',
+            },
+          },
+        }),
+      ).toThrow(/Refusing to copy native OAuth/i);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -244,6 +247,22 @@ describe('buildBootstrapScript', () => {
     expect(script).toContain('export HOME="$BOX_HOME"/\'lease-homes/agents-cli-task-a\'');
     expect(script).toContain('ln -sfn "$BOX_HOME/.agents/.system" "$HOME/.agents/.system"');
     expect(script.indexOf('cd "$WORKSPACE_DIR"')).toBeLessThan(script.indexOf("agents run 'claude'"));
+  });
+});
+
+describe('leaseAndRun — refuses a native OAuth copy BEFORE leasing a box (SING-1b, no leak)', () => {
+  it('rejects a signed-in native runtime before any crabbox interaction', async () => {
+    // credPath is SET, so `assertNoNativeOAuthTransfer` at the very top of
+    // leaseAndRun throws — before crabboxFind / crabboxWarmup ever runs, so no box
+    // is leased (nothing to pay for or leak). If the refusal lived only inside
+    // buildBootstrapScript (post-warmup), this call would instead reach the crabbox
+    // layer and fail with a different error (or hang on a real lease).
+    const signedIn: DetectedRuntime[] = [
+      { id: 'claude', label: 'Claude Code', email: 'a@b.com', signedIn: true, credPath: '/tmp/claude-signedin.json' },
+    ];
+    await expect(
+      leaseAndRun({ agent: 'claude', prompt: 'hi', runtimes: ['claude'], detected: signedIn }),
+    ).rejects.toThrow(/Refusing to copy native OAuth/i);
   });
 });
 

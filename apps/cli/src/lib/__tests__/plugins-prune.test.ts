@@ -17,7 +17,7 @@ import * as crypto from 'crypto';
 import {
   cleanOrphanedPluginSkills,
   removePluginSkillFromVersion,
-} from '../plugins.js';
+} from '../plugins/plugins.js';
 import { getVersionsDir, getTrashPluginsDir } from '../state.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

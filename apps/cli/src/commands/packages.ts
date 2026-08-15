@@ -40,7 +40,7 @@ import {
   discoverSkillsFromRepo,
   installSkill,
   installSkillCentrally,
-} from '../lib/skills.js';
+} from '../lib/plugins/skills.js';
 import {
   discoverHooksFromRepo,
   installHooks,
@@ -488,7 +488,7 @@ delegate to the same underlying installers.
             pluginSupportsAgent,
             syncPluginToVersion,
             pluginResourceGroups,
-          } = await import('../lib/plugins.js');
+          } = await import('../lib/plugins/plugins.js');
           const { listInstalledVersions, getGlobalDefault, getVersionHomePath, syncResourcesToVersion } =
             await import('../lib/versions.js');
           const { agentLabel } = await import('../lib/agents.js');

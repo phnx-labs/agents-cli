@@ -297,10 +297,34 @@ function summarizeOutputResult(json: unknown): string {
   return parts.length ? parts.join(' · ') : 'ok';
 }
 
+/**
+ * Summarize a `sync` payload, surfacing anything the peer REFUSED to write.
+ *
+ * The fan-out injects `--json`, so each peer returns the corrected `ok` and
+ * `declined` from RUSH-2700 — but the roster rendered a flat `ok` regardless,
+ * so `agents sync --device all` printed a green row for every box even when a
+ * harness's config was never written. That is the fleet-wide silent success
+ * this ticket exists to remove, one layer above where it was fixed.
+ *
+ * Covers both payload shapes: the umbrella carries a flat `declined`, the
+ * per-agent modes carry one per version.
+ */
+function summarizeSyncResult(json: unknown): string {
+  const p = json as { declined?: unknown; versions?: Array<{ declined?: unknown }> } | null;
+  const flat = Array.isArray(p?.declined) ? p!.declined as unknown[] : [];
+  const perVersion = Array.isArray(p?.versions)
+    ? p!.versions.flatMap((v) => (Array.isArray(v?.declined) ? v.declined as unknown[] : []))
+    : [];
+  const declined = [...flat, ...perVersion];
+  if (declined.length === 0) return 'ok';
+  return `${declined.length} not written`;
+}
+
 /** Best-effort summary of any per-device JSON payload. */
 function summarizeResult(command: string, forwarded: string[], json: unknown): string {
   if (command === 'view') return summarizeViewResult(forwarded, json);
   if (command === 'output') return summarizeOutputResult(json);
+  if (command === 'sync') return summarizeSyncResult(json);
   return 'ok';
 }
 

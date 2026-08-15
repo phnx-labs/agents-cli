@@ -52,7 +52,7 @@ import { listInstalledSubagents, transformSubagentForClaude, syncSubagentToOpenc
 import { listInstalledWorkflows, syncWorkflowToVersion } from './workflows.js';
 import { parseHookManifest, registerHooksToSettings, selectHookManifest, pruneVersionHomeHookEntriesFromSettings } from './hooks.js';
 import { supports, explainSkip, capableAgents } from './capabilities.js';
-import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills, marketplaceSpecForName } from './plugins.js';
+import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills, marketplaceSpecForName } from './plugins/plugins.js';
 import { composeRulesFromState } from './rules/compose.js';
 import { loadManifest, saveManifest, buildManifest as buildSyncManifest, isStale } from './staleness/index.js';
 import { pruneRemovedResources, type PrunableKind } from './staleness/prune.js';

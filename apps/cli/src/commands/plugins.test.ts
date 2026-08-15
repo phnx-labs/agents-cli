@@ -4,9 +4,9 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { inspectPluginCapabilities } from '../lib/plugins.js';
+import { inspectPluginCapabilities } from '../lib/plugins/plugins.js';
 import { shouldRefusePluginInstall, collectMarketplaceRows } from './plugins.js';
-import { discoverMarketplaces } from '../lib/plugin-marketplace.js';
+import { discoverMarketplaces } from '../lib/plugins/plugin-marketplace.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');

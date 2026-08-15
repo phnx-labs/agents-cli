@@ -26,6 +26,8 @@ import {
   findFreeProfilePort,
   createProfile,
   ensureDefaultBrowserProfile,
+  formatProfilesTable,
+  padColumn,
 } from './profiles.js';
 import { findBrowserPath, findFirstInstalledBrowser, isPortInUse } from './chrome.js';
 import type { BrowserProfile } from './types.js';
@@ -37,6 +39,24 @@ import { machineId } from '../machine-id.js';
  * central fleet.devices.<self>.config block (lib/device-config.ts). */
 function withDefaultProfile(store: { browser: Record<string, BrowserProfileConfig> }, name: string) {
   return { ...store, fleet: { devices: { [machineId()]: { config: { defaultBrowserProfile: name } } } } };
+}
+
+/**
+ * The two profile maps as they sit on disk: `browser` is the fleet-synced
+ * agents.yaml block, `deviceBrowser` is this machine's own devices/<name> file.
+ */
+type ProfileStore = {
+  browser: Record<string, BrowserProfileConfig>;
+  deviceBrowser?: Record<string, BrowserProfileConfig>;
+};
+
+/**
+ * Read a written profile from whichever map it landed in. `createProfile` is
+ * machine-local by default (RUSH-2716), so a test asserting field round-tripping
+ * should not also be asserting the store — the store has its own tests below.
+ */
+function storedProfile(store: ProfileStore, name: string): BrowserProfileConfig {
+  return (store.deviceBrowser?.[name] ?? store.browser[name]) as BrowserProfileConfig;
 }
 
 function profile(endpoints: string[]): BrowserProfile {
@@ -259,11 +279,12 @@ describe('profile YAML round-trip', () => {
   });
 
   it('preserves electron / binary / targetFilter through write -> read', async () => {
-    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: {} };
+    const store: ProfileStore = { browser: {} };
     vi.mocked(readMeta).mockImplementation(() => store as any);
     vi.mocked(writeMeta).mockImplementation((meta: any) => {
       // Persist exactly what createProfile passes — this mirrors disk YAML.
       store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
     });
 
     const input: BrowserProfile = {
@@ -277,7 +298,7 @@ describe('profile YAML round-trip', () => {
 
     await createProfile(input);
 
-    const stored = store.browser['canva'];
+    const stored = storedProfile(store, 'canva');
     expect(stored.browser).toBe('custom');
     expect(stored.binary).toBe('/Applications/Canva.app/Contents/MacOS/Canva');
     expect(stored.electron).toBe(true);
@@ -294,10 +315,11 @@ describe('profile YAML round-trip', () => {
   });
 
   it('does not write electron/binary/targetFilter when they are unset', async () => {
-    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: {} };
+    const store: ProfileStore = { browser: {} };
     vi.mocked(readMeta).mockImplementation(() => store as any);
     vi.mocked(writeMeta).mockImplementation((meta: any) => {
       store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
     });
 
     await createProfile({
@@ -306,17 +328,18 @@ describe('profile YAML round-trip', () => {
       endpoints: ['cdp://127.0.0.1:9301'],
     });
 
-    const stored = store.browser['plain'];
+    const stored = storedProfile(store, 'plain');
     expect('binary' in stored).toBe(false);
     expect('electron' in stored).toBe(false);
     expect('targetFilter' in stored).toBe(false);
   });
 
   it('allows spaces in browser binaries used by ssh endpoints', async () => {
-    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: {} };
+    const store: ProfileStore = { browser: {} };
     vi.mocked(readMeta).mockImplementation(() => store as any);
     vi.mocked(writeMeta).mockImplementation((meta: any) => {
       store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
     });
 
     await expect(
@@ -327,14 +350,15 @@ describe('profile YAML round-trip', () => {
         endpoints: ['ssh://remote-host:9222'],
       })
     ).resolves.toBeUndefined();
-    expect(store.browser['remote-comet'].binary).toBe('/Applications/Comet Beta.app/Contents/MacOS/Comet Beta');
+    expect(storedProfile(store, 'remote-comet').binary).toBe('/Applications/Comet Beta.app/Contents/MacOS/Comet Beta');
   });
 
   it('skips local browser binary validation for ssh endpoints', async () => {
-    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: {} };
+    const store: ProfileStore = { browser: {} };
     vi.mocked(readMeta).mockImplementation(() => store as any);
     vi.mocked(writeMeta).mockImplementation((meta: any) => {
       store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
     });
 
     await createProfile({
@@ -345,11 +369,11 @@ describe('profile YAML round-trip', () => {
     });
 
     expect(findBrowserPath).not.toHaveBeenCalled();
-    expect(store.browser['remote-linux-chrome'].binary).toBe('/opt/google/chrome/chrome');
+    expect(storedProfile(store, 'remote-linux-chrome').binary).toBe('/opt/google/chrome/chrome');
   });
 
   it('rejects shell metacharacters in browser binaries used by ssh endpoints', async () => {
-    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: {} };
+    const store: ProfileStore = { browser: {} };
     vi.mocked(readMeta).mockImplementation(() => store as any);
 
     await expect(
@@ -363,7 +387,7 @@ describe('profile YAML round-trip', () => {
   });
 
   it('rejects shell metacharacters in per-endpoint ssh binary overrides', async () => {
-    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: {} };
+    const store: ProfileStore = { browser: {} };
     vi.mocked(readMeta).mockImplementation(() => store as any);
 
     await expect(
@@ -387,7 +411,7 @@ describe('ensureDefaultBrowserProfile', () => {
   });
 
   it('auto-picks the first installed browser and persists a default profile', async () => {
-    const store: { browser: Record<string, BrowserProfileConfig>; deviceBrowser?: Record<string, BrowserProfileConfig> } =
+    const store: ProfileStore =
       { browser: {} };
     vi.mocked(readMeta).mockImplementation(() => store as any);
     vi.mocked(writeMeta).mockImplementation((meta: any) => {
@@ -415,7 +439,7 @@ describe('ensureDefaultBrowserProfile', () => {
       binary: '/custom/path/to/brave',
       endpoints: ['cdp://127.0.0.1:9333'],
     };
-    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: { default: existing } };
+    const store: ProfileStore = { browser: { default: existing } };
     vi.mocked(readMeta).mockImplementation(() => store as any);
     const writeSpy = vi.mocked(writeMeta);
 
@@ -436,7 +460,7 @@ describe('ensureDefaultBrowserProfile', () => {
     };
     // The stale copy arrived from another machine via the SHARED map — that is
     // exactly how a macOS-written default reaches a Linux box.
-    const store: { browser: Record<string, BrowserProfileConfig>; deviceBrowser?: Record<string, BrowserProfileConfig> } =
+    const store: ProfileStore =
       { browser: { default: stale } };
     vi.mocked(readMeta).mockImplementation(() => store as any);
     vi.mocked(writeMeta).mockImplementation((meta: any) => {
@@ -473,6 +497,7 @@ describe('ensureDefaultBrowserProfile', () => {
     vi.mocked(readMeta).mockImplementation(() => store as any);
     vi.mocked(writeMeta).mockImplementation((meta: any) => {
       store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
     });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.mocked(findBrowserPath).mockImplementationOnce(() => {
@@ -548,6 +573,7 @@ describe('ensureDefaultBrowserProfile', () => {
     vi.mocked(readMeta).mockImplementation(() => store as any);
     vi.mocked(writeMeta).mockImplementation((meta: any) => {
       store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
     });
     vi.mocked(isPortInUse).mockReturnValue(false);
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -617,7 +643,7 @@ describe('createProfile port collision (local-port-scoped)', () => {
   });
 
   it('rejects two local cdp:// profiles on the same port', async () => {
-    const store: { browser: Record<string, BrowserProfileConfig> } = {
+    const store: ProfileStore = {
       browser: {
         existing: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9222'] },
       },
@@ -637,7 +663,7 @@ describe('createProfile port collision (local-port-scoped)', () => {
     // After the SSH-tunnel-port change, ssh://host?port=N binds local N too,
     // so cdp://127.0.0.1:N and ssh://host?port=N do collide locally even
     // though their (host, port) tuples differ.
-    const store: { browser: Record<string, BrowserProfileConfig> } = {
+    const store: ProfileStore = {
       browser: {
         remote: { browser: 'comet', endpoints: ['ssh://remote-host:9222'] },
       },
@@ -656,7 +682,7 @@ describe('createProfile port collision (local-port-scoped)', () => {
   it('rejects two ssh:// profiles on the same port even across different hosts', async () => {
     // remote-host's 9222 tunnel binds local 9222; mac-studio's tunnel would
     // want local 9222 too. Local resource, single owner.
-    const store: { browser: Record<string, BrowserProfileConfig> } = {
+    const store: ProfileStore = {
       browser: {
         mini: { browser: 'comet', endpoints: ['ssh://remote-host:9222'] },
       },
@@ -673,7 +699,7 @@ describe('createProfile port collision (local-port-scoped)', () => {
   });
 
   it('allows ssh:// profiles on different ports to the same host', async () => {
-    const store: { browser: Record<string, BrowserProfileConfig> } = {
+    const store: ProfileStore = {
       browser: {
         first: { browser: 'comet', endpoints: ['ssh://remote-host?port=9222'] },
       },
@@ -681,6 +707,7 @@ describe('createProfile port collision (local-port-scoped)', () => {
     vi.mocked(readMeta).mockImplementation(() => store as any);
     vi.mocked(writeMeta).mockImplementation((meta: any) => {
       store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
     });
 
     await expect(
@@ -690,11 +717,11 @@ describe('createProfile port collision (local-port-scoped)', () => {
         endpoints: ['ssh://remote-host?port=9300'],
       })
     ).resolves.toBeUndefined();
-    expect(store.browser['second']).toBeTruthy();
+    expect(storedProfile(store, 'second')).toBeTruthy();
   });
 
   it('rejects two ssh:// profiles on the same remote host:port', async () => {
-    const store: { browser: Record<string, BrowserProfileConfig> } = {
+    const store: ProfileStore = {
       browser: {
         first: { browser: 'comet', endpoints: ['ssh://remote-host:9222'] },
       },
@@ -708,5 +735,187 @@ describe('createProfile port collision (local-port-scoped)', () => {
         endpoints: ['ssh://remote-host:9222'],
       })
     ).rejects.toThrow(/Local port 9222 is already used by profile "first"/);
+  });
+});
+
+describe('createProfile storage scope (RUSH-2716)', () => {
+  function wire(): ProfileStore {
+    const store: ProfileStore = { browser: {} };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+    vi.mocked(writeMeta).mockImplementation((meta: any) => {
+      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
+    });
+    vi.mocked(updateMeta).mockImplementation((updates: any) => {
+      const meta = vi.mocked(readMeta)() as any;
+      const next = typeof updates === 'function' ? updates(meta) : { ...meta, ...updates };
+      vi.mocked(writeMeta)(next);
+      return next;
+    });
+    return store;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(findBrowserPath).mockReturnValue(
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    );
+  });
+
+  it('writes a NEW profile to this machine only, never the fleet-synced map', async () => {
+    const store = wire();
+
+    await createProfile({ name: 'throwaway', browser: 'chrome', endpoints: ['cdp://127.0.0.1:9401'] });
+
+    // The whole point of RUSH-2716: an ad-hoc profile an agent mints must not
+    // sync to every machine as junk.
+    expect(store.deviceBrowser!['throwaway'].browser).toBe('chrome');
+    expect(store.browser['throwaway']).toBeUndefined();
+  });
+
+  it('writes to the fleet-synced map when --fleet is passed', async () => {
+    const store = wire();
+
+    await createProfile(
+      { name: 'shared', browser: 'chrome', endpoints: ['cdp://127.0.0.1:9402'] },
+      { fleet: true },
+    );
+
+    expect(store.browser['shared'].browser).toBe('chrome');
+    expect(store.deviceBrowser?.['shared']).toBeUndefined();
+  });
+
+  it('keeps the auto `default` machine-local even when --fleet is passed', async () => {
+    const store = wire();
+
+    await createProfile(
+      { name: 'default', browser: 'chrome', endpoints: ['cdp://127.0.0.1:9403'] },
+      { fleet: true },
+    );
+
+    // Its binary path and port are this box's; syncing it is the rewrite loop
+    // RUSH-2161 fixed, so the flag must not be able to re-open that hole.
+    expect(store.deviceBrowser!['default'].browser).toBe('chrome');
+    expect(store.browser['default']).toBeUndefined();
+  });
+
+  it('does not migrate an EXISTING fleet profile when a new local one is added', async () => {
+    const store = wire();
+    store.browser = { legacy: { browser: 'brave', endpoints: ['cdp://127.0.0.1:9410'] } };
+
+    await createProfile({ name: 'fresh', browser: 'chrome', endpoints: ['cdp://127.0.0.1:9411'] });
+
+    expect(store.browser['legacy'].browser).toBe('brave');
+    expect(store.deviceBrowser!['fresh']).toBeTruthy();
+  });
+
+  it('listProfilesWithScope reports where each profile actually lives', async () => {
+    const store = wire();
+    store.browser = { shared: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9420'] } };
+    store.deviceBrowser = { mine: { browser: 'brave', endpoints: ['cdp://127.0.0.1:9421'] } };
+
+    const { listProfilesWithScope } = await import('./profiles.js');
+    const scoped = await listProfilesWithScope();
+
+    expect(scoped.find((s) => s.profile.name === 'shared')!.scope).toBe('fleet');
+    expect(scoped.find((s) => s.profile.name === 'mine')!.scope).toBe('local');
+  });
+
+  it('reports `local` for a name present in BOTH maps — the copy actually used', async () => {
+    const store = wire();
+    store.browser = { dup: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9430'] } };
+    store.deviceBrowser = { dup: { browser: 'brave', endpoints: ['cdp://127.0.0.1:9431'] } };
+
+    const { listProfilesWithScope } = await import('./profiles.js');
+    const scoped = await listProfilesWithScope();
+
+    expect(scoped).toHaveLength(1);
+    expect(scoped[0].scope).toBe('local');
+    expect(scoped[0].profile.browser).toBe('brave');
+  });
+});
+
+describe('formatProfilesTable (RUSH-2710)', () => {
+  const row = (name: string, scope: 'local' | 'fleet' = 'local', description?: string) => ({
+    profile: { name, browser: 'chrome', endpoints: ['cdp://127.0.0.1:9222'], description } as BrowserProfile,
+    scope,
+  });
+
+  /** Column start offsets, so alignment is asserted rather than eyeballed. */
+  function browserColumnOffsets(lines: string[]): number[] {
+    return lines
+      .filter((l) => l.includes('chrome') || l.includes('BROWSER'))
+      .map((l) => l.indexOf(l.includes('BROWSER') ? 'BROWSER' : 'chrome'));
+  }
+
+  it('keeps columns aligned when a name is far longer than the old 20-char pad', () => {
+    // The exact defect: `padEnd(20)` returns a 34-char name unchanged, so every
+    // later column on that row shifted right.
+    const long = 'a-really-long-profile-name-here';
+    expect(long.length).toBeGreaterThan(20);
+    const lines = formatProfilesTable([row('short'), row(long)]);
+
+    const offsets = browserColumnOffsets(lines);
+    expect(new Set(offsets).size).toBe(1);
+  });
+
+  it('truncates a name past the column cap with an ellipsis instead of overflowing', () => {
+    const huge = 'x'.repeat(60);
+    const lines = formatProfilesTable([row(huge)]);
+    const dataLine = lines.find((l) => l.includes('…'))!;
+
+    expect(dataLine).toBeTruthy();
+    expect(dataLine).not.toContain(huge);
+    const offsets = browserColumnOffsets(lines);
+    expect(new Set(offsets).size).toBe(1);
+  });
+
+  it('marks the CONFIGURED default with `*`, not by writing "default" in the row', () => {
+    const lines = formatProfilesTable([row('work'), row('default')], 'work');
+    const workRow = lines.find((l) => l.includes('work'))!;
+    const defaultRow = lines.find((l) => / default/.test(l) && !l.includes('work'))!;
+
+    // The marked row is the configured one...
+    expect(workRow.startsWith('*')).toBe(true);
+    // ...and the profile NAMED `default` is NOT marked, which is exactly the
+    // ambiguity RUSH-2710 reported: the two meanings are now distinguishable.
+    expect(defaultRow.startsWith('*')).toBe(false);
+    expect(lines.some((l) => l.includes("this machine's default profile (work)"))).toBe(true);
+  });
+
+  it('shows no marker at all when no default is configured', () => {
+    const lines = formatProfilesTable([row('work'), row('default')]);
+    expect(lines.some((l) => l.startsWith('*'))).toBe(false);
+  });
+
+  it('names the store each profile lives in', () => {
+    const lines = formatProfilesTable([row('mine', 'local'), row('shared', 'fleet')]);
+    expect(lines.find((l) => l.includes('mine'))).toMatch(/local/);
+    expect(lines.find((l) => l.includes('shared'))).toMatch(/fleet/);
+  });
+
+  it('keeps columns aligned with a description column present', () => {
+    const lines = formatProfilesTable([
+      row('short', 'local', 'a description'),
+      row('a-really-long-profile-name-here', 'local', 'another much longer description here'),
+    ]);
+    const offsets = browserColumnOffsets(lines);
+    expect(new Set(offsets).size).toBe(1);
+  });
+});
+
+describe('padColumn', () => {
+  it('pads a short value to the exact width', () => {
+    expect(padColumn('ab', 5)).toBe('ab   ');
+  });
+
+  it('returns an exact-width value untouched', () => {
+    expect(padColumn('abcde', 5)).toBe('abcde');
+  });
+
+  it('truncates an over-long value TO the width — padEnd alone does not', () => {
+    expect(padColumn('abcdefgh', 5)).toBe('abcd…');
+    expect(padColumn('abcdefgh', 5)).toHaveLength(5);
+    expect('abcdefgh'.padEnd(5)).toHaveLength(8); // the bug being fixed
   });
 });

@@ -9,6 +9,7 @@ import { getVersionHomePath, listInstalledVersions } from '../lib/versions.js';
 import { nativeAccountCapability, nativeAccountNameable, nativeIdentityKey } from '../lib/account-capabilities.js';
 import { profileExists, readProfile, type Profile } from '../lib/profiles.js';
 import { pushBundleToHost } from '../lib/secrets/push.js';
+import { assertCredentialTransportHostPinned, resolveHostSshTarget } from '../lib/secrets/remote.js';
 import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
 import { runDevicesAccounts } from './ssh.js';
 import { discoverNativeAccounts } from '../lib/account-catalog.js';
@@ -244,11 +245,13 @@ export function registerAccountsCommand(program: Command): void {
     .description('Copy one provider account bundle to a worker device')
     .option('--device <device>', 'Deprecated destination form; use the positional device')
     .option('--force', 'Replace matching keys on the destination')
-    .action((name: string, deviceArg: string | undefined, o: { device?: string; force?: boolean }) => {
+    .action(async (name: string, deviceArg: string | undefined, o: { device?: string; force?: boolean }) => {
       const device = deviceArg ?? o.device;
       if (!device) throw new Error('Missing destination device. Usage: agents accounts sync <account> <device>.');
       const account = findAccount(name);
       if (!account) throw new Error(`Unknown provider account '${name}'.`);
+      const sshTarget = await resolveHostSshTarget(device);
+      assertCredentialTransportHostPinned(sshTarget);
       const remoteBackend = resolveRemoteOsSync(device) === 'win32' ? 'keychain' : 'file';
       const literalValues = {
         ACCOUNT_ID: account.id,

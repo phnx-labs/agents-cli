@@ -2,6 +2,7 @@
  * Path classification + normalization, platform-aware.
  */
 import * as os from 'os';
+import * as path from 'path';
 
 /** Windows drive-letter absolute path: `C:\` or `C:/`. */
 const WIN_DRIVE_RE = /^[a-zA-Z]:[\\/]/;
@@ -73,6 +74,17 @@ export function isWindowsAbsolutePath(p: string): boolean {
  */
 export function toPosix(p: string): string {
   return p.replace(/\\/g, '/');
+}
+
+/**
+ * Fold forward slashes to the platform's native separator. The inverse of
+ * {@link toPosix}: use when a path from a source that emits POSIX separators on
+ * every OS — notably `git`, whose `rev-parse` prints `C:/Users/...` on Windows —
+ * must become a native filesystem path so it compares equal to one built with
+ * `path.*`. On POSIX (`path.sep === '/'`) it returns the value unchanged.
+ */
+export function toNativePath(p: string, sep: string = path.sep): string {
+  return sep === '/' ? p : p.replace(/\//g, sep);
 }
 
 /**

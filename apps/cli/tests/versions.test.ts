@@ -104,7 +104,7 @@ vi.mock('../src/lib/state.js', () => {
 });
 
 // Mock external dependencies that syncResourcesToVersion calls
-vi.mock('../src/lib/plugins.js', () => ({
+vi.mock('../src/lib/plugins/plugins.js', () => ({
   discoverPlugins: () => [],
   syncPluginToVersion: () => ({ success: false }),
   isPluginSynced: () => false,

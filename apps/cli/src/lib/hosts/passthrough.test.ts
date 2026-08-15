@@ -437,6 +437,47 @@ describe('runFleetPassthrough — direct unit tests', () => {
     expect(output).toContain('3.4K output tokens');
   });
 
+  it('uses the sync summarizer for sync command', async () => {
+    // RUSH-2700: this is the WIRING test. The unit tests below exercise
+    // summarizeSyncResult's arithmetic, but deleting the `command === 'sync'`
+    // line in summarizeResult left them all green — restoring the exact bug
+    // (every box rendering a flat `ok`) with no test failing. This drives the
+    // real fan-out so the roster must actually call the summarizer.
+    console.log = (...args: unknown[]) => logs.push(args.join(' '));
+    const registry = fakeRegistry([fakeDevice('mac-mini', 'macos')]);
+    const runner = (_device: DeviceProfile, cmd: string[]) => {
+      if (cmd[1] === 'sync') {
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            ok: false,
+            mode: 'umbrella',
+            reconciled: true,
+            declined: ['Copilot@1.0.0: mcp: github: cannot write MCP config: copilot: schema not verified'],
+          }),
+          stderr: '',
+        };
+      }
+      return { code: 1, stdout: '', stderr: 'unexpected' };
+    };
+
+    await runFleetPassthrough(
+      'sync',
+      ['sync', '--device', 'all'],
+      {},
+      {
+        self: 'zion',
+        loadDevices: async () => registry,
+        runner,
+        localRunner: () => ({ code: 0, stdout: '{}', stderr: '' }),
+      },
+    );
+
+    const output = logs.join('\n');
+    expect(output).toContain('mac-mini');
+    expect(output).toContain('1 not written');
+  });
+
   it('marks a remote fan-out target with AGENTS_FLEET_REMOTE, but never the self target', async () => {
     console.log = () => {};
     const registry = fakeRegistry([fakeDevice('zion', 'macos'), fakeDevice('mac-mini', 'macos')]);
@@ -545,5 +586,72 @@ describe('maybeRunStandaloneOnHost — standalone binary --host routing (RUSH-22
     expect(remoteCmds).toHaveLength(1);
     expect(remoteCmds[0]).toContain('browser');
     expect(remoteCmds[0]).toContain('start');
+  });
+});
+
+/**
+ * RUSH-2700: `agents sync --device all` injects `--json` per peer and gets back
+ * the corrected `ok` / `declined`, but the roster rendered a flat `ok`
+ * regardless — so every box showed green even where a harness's config was
+ * never written. That is the fleet-wide silent success the ticket exists to
+ * remove, one layer above where the payload was fixed.
+ */
+describe('sync fan-out roster surfaces a refused write', () => {
+  // Driven through the real fan-out, never by calling the summarizer directly:
+  // a direct call cannot tell whether `summarizeResult` actually dispatches to
+  // it, which is how the first version of these tests stayed green with the
+  // wiring deleted.
+  async function syncRoster(payload: unknown): Promise<string> {
+    const captured: string[] = [];
+    console.log = (...args: unknown[]) => captured.push(args.join(' '));
+    const registry = fakeRegistry([fakeDevice('mac-mini', 'macos')]);
+    await runFleetPassthrough(
+      'sync',
+      ['sync', '--device', 'all'],
+      {},
+      {
+        self: 'zion',
+        loadDevices: async () => registry,
+        runner: (_d: DeviceProfile, cmd: string[]) =>
+          cmd[1] === 'sync'
+            ? { code: 0, stdout: JSON.stringify(payload), stderr: '' }
+            : { code: 1, stdout: '', stderr: 'unexpected' },
+        localRunner: () => ({ code: 0, stdout: '{}', stderr: '' }),
+      },
+    );
+    return captured.join('\n');
+  }
+
+  it('reports the count for an umbrella payload', async () => {
+    const out = await syncRoster({
+      mode: 'umbrella',
+      ok: false,
+      declined: ['Copilot@1.0.0: mcp: github: cannot write MCP config: copilot: ...'],
+    });
+    expect(out).toContain('1 not written');
+  });
+
+  it('reports the count across versions for an agent-all payload', async () => {
+    const out = await syncRoster({
+      mode: 'agent-all',
+      ok: false,
+      versions: [
+        { version: '1.0.0', declined: ['mcp: a: cannot write MCP config: copilot: ...'] },
+        { version: '1.1.0', declined: ['mcp: b: cannot write MCP config: copilot: ...'] },
+      ],
+    });
+    expect(out).toContain('2 not written');
+  });
+
+  it('stays ok when nothing was refused', async () => {
+    expect(await syncRoster({ mode: 'umbrella', ok: true, declined: [] })).not.toContain('not written');
+    expect(await syncRoster({ mode: 'agent-all', ok: true, versions: [{ declined: [] }] })).not.toContain('not written');
+  });
+
+  it('stays ok for a peer whose payload predates the field', async () => {
+    // An older agents-cli on the far side sends no `declined`; the roster must
+    // render as before rather than throw.
+    expect(await syncRoster({ mode: 'umbrella', ok: true })).not.toContain('not written');
+    expect(await syncRoster(null)).not.toContain('not written');
   });
 });

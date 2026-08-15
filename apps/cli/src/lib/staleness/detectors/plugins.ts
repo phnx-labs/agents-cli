@@ -5,7 +5,7 @@
  */
 import type { AgentId } from '../../types.js';
 import { capableAgents } from '../../capabilities.js';
-import { discoverPlugins, isPluginSynced } from '../../plugins.js';
+import { discoverPlugins, isPluginSynced } from '../../plugins/plugins.js';
 import type { ResourceDetector, DetectArgs } from './types.js';
 import { lazyAgentMap } from '../writers/lazy-map.js';
 

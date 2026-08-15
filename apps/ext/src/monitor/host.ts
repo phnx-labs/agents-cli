@@ -32,6 +32,7 @@ import {
 import { ReadinessDetector } from './readinessDetector';
 import { SessionCliStream } from './sessionCliStream';
 import { SessionCliReplay } from './sessionCliStream';
+import type { SessionCliStreamOptions } from './sessionCliStream';
 import type { Socket } from 'net';
 
 /** Enable + configure the centralized presentation detectors. */
@@ -40,6 +41,13 @@ export interface MonitorDetectorOptions {
   readiness?: boolean;
   /** Consume the canonical agents-cli session stream. Default true. */
   sessionCli?: boolean;
+  /**
+   * Supply the watch child instead of spawning `agents sessions watch --json`.
+   * `SessionCliStream` already accepts this; the host forwards it so a test can
+   * drive the real stream/replay path from a real child process without
+   * depending on an installed CLI.
+   */
+  spawnSessionWatch?: SessionCliStreamOptions['spawnWatch'];
 }
 
 export interface MonitorHostOptions {
@@ -69,7 +77,10 @@ export class MonitorHost {
     this.detectorOpts = options.detectors;
     this.server = new MonitorBroadcastServer({
       socketPath: options.socketPath,
-      onRequest: (payload) => this.handleRequest(payload),
+      // Forward the socket: handleRequest replays the retained session-cli reset
+      // to THIS follower's socket, and without it that replay silently no-ops
+      // (`if (socket)` below), leaving every follower window at zero sessions.
+      onRequest: (payload, socket) => this.handleRequest(payload, socket),
     });
   }
 
@@ -116,6 +127,7 @@ export class MonitorHost {
           this.broadcast(MONITOR_FACT.sessionCli, event);
         },
         onError: (message) => console.error(`[MONITOR] ${message}`),
+        ...(opts.spawnSessionWatch ? { spawnWatch: opts.spawnSessionWatch } : {}),
       });
       this.sessionCliStream.start();
     }

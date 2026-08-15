@@ -42,15 +42,15 @@ import {
   getVersionHomePath,
   compareVersions,
 } from './versions.js';
-import { discoverPlugins, marketplaceSpecForName } from './plugins.js';
+import { discoverPlugins, marketplaceSpecForName } from './plugins/plugins.js';
 import type { DiscoveredPlugin } from './types.js';
-import { pluginInstallDir, repairableManifestFields } from './plugin-marketplace.js';
+import { pluginInstallDir, repairableManifestFields } from './plugins/plugin-marketplace.js';
 import { markdownToToml } from './convert.js';
 import { listCommandsInVersionHome, getVersionCommandsDir, listPluginCommandNames } from './commands.js';
 import { shouldInstallCommandAsSkill, commandSkillMatches, commandSkillName } from './command-skills.js';
 import { gooseCommandMatches, gooseCommandsDir } from './goose-commands.js';
 import { supports } from './capabilities.js';
-import { listSkillsInVersionHome, getVersionSkillsDir } from './skills.js';
+import { listSkillsInVersionHome, getVersionSkillsDir } from './plugins/skills.js';
 import { listHookEntriesFromDir, type HookWiringReport } from './hooks.js';
 import { getResourceInventory, type ResourceInventory } from './resource-inventory.js';
 

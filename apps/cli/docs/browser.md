@@ -52,24 +52,38 @@ an agent run; every subsequent command in that process reads it without
 
 ### 1. Create a profile
 
-A profile names a browser + CDP endpoint pair. The profile definition lives in
-the central `~/.agents/agents.yaml` (the `browser:` map) and syncs across the
-fleet with `agents repo push/pull`, so the same name resolves on every machine.
+A profile names a browser + CDP endpoint pair. **A new profile is machine-local
+by default** (RUSH-2716): it is written to this machine's own
+`~/.agents/devices/<machine>/agents.yaml` under `browser:`, and no other machine
+sees it. That is the right default because a profile pins an OS-specific
+`binary:` path and a locally chosen CDP port, so a synced copy is wrong on every
+other box — and because agents create throwaway profiles freely, syncing each one
+filled the shared file with junk.
+
+Pass `--fleet` for a profile that really is fleet config — a remote `ssh://`
+endpoint, or a shape you want on every machine. That writes it to the central
+`~/.agents/agents.yaml` `browser:` map, which syncs with `agents repo push/pull`
+so the same name resolves everywhere.
+
 Runtime state — the Chrome `chrome-data` cookie jar — lives separately under
 `~/.agents/.cache/browser/<profile>@<endpoint>/`, which is gitignored and
 per-machine, so each machine logs in once.
 
 ```bash
-# Minimal: let agents pick a free port and auto-detect the binary
+# Minimal: let agents pick a free port and auto-detect the binary (machine-local)
 agents browser profiles create work --browser chrome
 
 # Pin an endpoint explicitly
 agents browser profiles create work --browser chrome --endpoint "cdp://127.0.0.1:9222"
 
-# Remote host via SSH
-agents browser profiles create staging --browser chrome \
+# Remote host via SSH, shared with every machine
+agents browser profiles create staging --browser chrome --fleet \
   --endpoint "ssh://deploy@staging.example.com?port=9222"
 ```
+
+Existing profiles are **not** migrated: `--fleet` only decides where a NEW entry
+is written, so a profile created before this change keeps syncing. `agents
+browser profiles list` shows a `SCOPE` column (`local` / `fleet`) for each one.
 
 If you skip `--profile` on `agents browser start`, the profile is resolved in
 this order:
@@ -148,8 +162,9 @@ the same device-local `browser remote-control` consent gate as the ordinary
 
 | Command | Description |
 |---------|-------------|
-| `agents browser profiles list` | List all configured profiles (marks the machine's default) |
-| `agents browser profiles create <name>` | Create a new profile (see flags below) |
+| `agents browser profiles list` | List all configured profiles with their `SCOPE` (`local` / `fleet`). A `*` marks this machine's configured default — which is NOT the same thing as the profile named `default`. `--json` adds `scope` + `isConfiguredDefault` |
+| `agents browser profiles create <name>` | Create a new profile, machine-local unless `--fleet` (see flags below) |
+| `agents browser profiles prune` | Remove dead machine-local profiles — browser not installed here, or never started (see below) |
 | `agents browser profiles show <name>` | Show profile details |
 | `agents browser profiles set-default [name]` | Set the profile a bare `start` (and `--profile default`) uses; `--unset` to clear; no name prints the current value. Device-local. |
 | `agents browser profiles logins` | Per profile: `SERVICE \| ACCOUNT \| CREDS` — live session, the signed-in account (plaintext username, never decrypts), and whether login creds are in the profile's secrets bundle |
@@ -161,6 +176,7 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | Flag | Description |
 |------|-------------|
 | `-b, --browser <type>` | Required. One of: `chrome`, `comet`, `chromium`, `brave`, `edge`, `custom` |
+| `--fleet` | Store in the synced `agents.yaml` so every machine sees it. Default is machine-local |
 | `-e, --endpoint <url>` | CDP endpoint URL (repeatable). Auto-assigned if omitted |
 | `-s, --secrets <bundle>` | Secrets bundle for this profile: injected as env vars at launch, AND the credential store for `browser type --secret` (keys `<PREFIX>_USERNAME`/`<PREFIX>_PASSWORD`). Warns if the bundle doesn't exist yet |
 | `-d, --description <text>` | Human-readable description |
@@ -170,6 +186,39 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | `--binary <path>` | Absolute path to browser binary (required for `--browser custom`) |
 | `--electron` | Treat as an Electron desktop app; never creates new targets |
 | `--target-filter <expr>` | Pick the visible CDP page target. Format: `url:<substring>` or `title:<substring>`. Requires `--electron` |
+
+### Cleaning up dead profiles (`prune`)
+
+Profiles accumulate — an agent mints one for a task and never removes it.
+`agents browser profiles prune` removes the ones that are provably dead:
+
+| Reason | Meaning |
+|--------|---------|
+| `binary-missing` | The profile's browser/binary is not installed on this machine, so it cannot launch here at all |
+| `never-used` | No runtime dir has ever been created for it (`~/.agents/.cache/browser/<name>*` is absent) |
+
+```bash
+agents browser profiles prune --dry-run   # preview; changes nothing
+agents browser profiles prune             # apply
+agents browser profiles prune --json      # machine-readable plan
+```
+
+Four guards, each because removing that profile would be wrong rather than untidy:
+
+- **In use** — a live browser, an SSH tunnel, or an open task on *any* of its
+  runtime dirs, composite (`<name>@<endpoint>`) dirs included.
+- **This machine's configured default** — a bare `agents browser start` resolves
+  to it.
+- **The auto `default`** — regenerated on demand, so pruning it is pure churn.
+- **Fleet-synced profiles** — skipped unless you pass `--fleet`, because deleting
+  one removes it from **every** machine.
+
+Removing a profile drops its config entry and wipes its cache dirs, exactly like
+`profiles delete`.
+
+> A profile config records no creation time, so one you created seconds ago and
+> have not started yet is indistinguishable from an abandoned one and reports
+> `never-used`. Preview with `--dry-run` first.
 
 ### Session lifecycle
 
@@ -376,8 +425,12 @@ instead — the stable, scriptable surface `--json` also uses.
 
 ## Profile Schema
 
-Profiles are stored in the agents metadata layer, not as standalone YAML files.
-Use `agents browser profiles show <name> --json` to inspect the full config.
+Profiles are stored in the agents metadata layer, not as standalone YAML files —
+in the `browser:` map of either this machine's `~/.agents/devices/<machine>/agents.yaml`
+(the default) or the fleet-synced `~/.agents/agents.yaml` (`--fleet`). Both maps
+use the identical schema below, and a machine-local entry wins a name collision.
+Use `agents browser profiles show <name> --json` to inspect the full config, or
+`agents browser profiles list --json` to see which store each one is in.
 The fields map to:
 
 | Field | Type | Description |
