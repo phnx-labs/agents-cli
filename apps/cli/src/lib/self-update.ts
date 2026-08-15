@@ -529,8 +529,9 @@ export interface MultiInstallInventoryEntry {
   /**
    * True when a bare `agents doctor --fix` deletes this copy (RUSH-2415:
    * npx-cache / unsafe-legacy / pre-1.22.30 with a fixed peer). False for the
-   * running copy and for healthy duplicates --fix will not touch — those need
-   * the manual command from manualUninstallCommand() (RUSH-2705).
+   * running copy and for any duplicate --fix will not touch — a healthy
+   * >=1.22.30 peer, or a pre-1.22.30 copy with no fixed peer to fall back to;
+   * both need the manual command from manualUninstallCommand() (RUSH-2705/2713).
    */
   autoPurgeable: boolean;
 }
@@ -814,9 +815,13 @@ export interface RemediateStaleInstallsResult extends PurgeRemovableInstallsResu
   inventory: MultiInstallInventoryEntry[];
   candidates: RemovableAgentsCliInstall[];
   /**
-   * Duplicates detected but deliberately left alone (healthy >=1.22.30
-   * globals). The caller must surface manualRemoveCommand — otherwise the
-   * multi-install warning keeps firing with no working remedy (RUSH-2705).
+   * Duplicates detected but NOT auto-purged, for either reason:
+   *   1. a healthy >=1.22.30 global (safe, just redundant), or
+   *   2. a pre-1.22.30 copy left alone only because no fixed peer exists to fall
+   *      back to (the anti-stranding guard) — this one is genuinely vulnerable,
+   *      not healthy.
+   * Either way the caller must surface manualRemoveCommand — otherwise the
+   * multi-install warning keeps firing with no working remedy (RUSH-2705/2713).
    */
   unresolved: UnresolvedDuplicateInstall[];
 }

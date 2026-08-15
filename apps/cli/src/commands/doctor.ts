@@ -1407,12 +1407,14 @@ function renderStaleInstallPurgeText(purge: RemediateStaleInstallsResult): void 
       `  ${chalk.red('hold  ')} ${chalk.gray(`${f.packageRoot}  ${f.version}  — ${f.error}`)}`,
     );
   }
-  // RUSH-2705: a healthy duplicate (>=1.22.30, not npx-cache, not legacy) is
-  // deliberately never auto-purged, so --fix must hand back the command that
-  // does remove it instead of ending on a bare "everything in sync".
+  // RUSH-2705/2713: a duplicate --fix cannot auto-purge — either a healthy
+  // >=1.22.30 peer, OR a pre-1.22.30 copy left alone only because no fixed peer
+  // exists to fall back to (that one is NOT healthy). Either way, hand back the
+  // command that removes it instead of ending on a bare "everything in sync".
+  // Don't call it "healthy" — that would understate a genuinely vulnerable copy.
   for (const u of purge.unresolved) {
     console.log(
-      `  ${chalk.yellow('manual')} ${chalk.gray(`${u.packageRoot}  ${u.version}  — a healthy duplicate --fix will not delete; remove it with:`)}`,
+      `  ${chalk.yellow('manual')} ${chalk.gray(`${u.packageRoot}  ${u.version}  — --fix will not delete this copy; remove it with:`)}`,
     );
     console.log(`         ${chalk.bold(u.manualRemoveCommand)}`);
   }
