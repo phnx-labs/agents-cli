@@ -35,3 +35,27 @@ export function isHeadlessSecretsContext(
   if (runtime === 'headless' || runtime === 'teams' || runtime === 'terminal') return true;
   return false;
 }
+
+/**
+ * True when this process runs structurally inside a coding-agent session: any
+ * `agents run` launch (AGENTS_RUNTIME / AGENT_SESSION_ID ride the child env —
+ * exec.ts buildExecEnv — and are inherited by every shell the agent spawns), or
+ * a harness's own tool shell launched outside agents-cli (Claude Code stamps
+ * CLAUDECODE on its Bash tool).
+ *
+ * Distinct from isHeadlessSecretsContext above on both axes: it is
+ * platform-independent (no biometry involved), and a TTY does not clear it (an
+ * agent inside tmux has one). Its job is the materialization boundary, not the
+ * prompt boundary: a command that would PRINT a plaintext value refuses under
+ * an agent, because anything printed lands in the agent's context and session
+ * transcript. The agent path to secret values is injection — `secrets exec`,
+ * `run --secrets` — which places them only in a child process env.
+ */
+export function isAgentInvocationContext(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(
+    env.AGENTS_RUNTIME ||
+    env.AGENT_SESSION_ID ||
+    env.AGENTS_SESSION_ID ||
+    env.CLAUDECODE,
+  );
+}

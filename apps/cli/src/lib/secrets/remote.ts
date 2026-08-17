@@ -227,10 +227,16 @@ export async function remoteResolveEnv(
   opts: { osLookupName?: string } = {},
 ): Promise<Record<string, string>> {
   assertValidSshTarget(target);
+  // AGENTS_SECRETS_REMOTE_TRANSPORT is the marker that lets the remote's
+  // `export --plaintext --format json` emit at all — the public shell-eval
+  // export mode was removed (RUSH-2774), and this machine-to-machine resolve is
+  // the only surviving caller of the JSON emitter. Riding the legacy argv keeps
+  // a new driver compatible with an old remote during a fleet rollout.
   const remoteCmd = buildRemoteAgentsInvocation(
     ['secrets', 'export', bundle, '--plaintext', '--format', 'json'],
     undefined,
     osForTarget(target, opts.osLookupName),
+    { AGENTS_SECRETS_REMOTE_TRANSPORT: '1' },
   );
   // Resolving a remote bundle streams its plaintext values back over ssh stdout,
   // so this read is secret-bearing: pin the managed host key and never leave a
@@ -344,9 +350,10 @@ function isLockedKeychainReadBackError(stderr: string): boolean {
  * metadata `noAcl` last — bundles.ts writeBundleWithItems). The metadata-only bundle
  * then fails every later read with the confusing `Bundle '<b>' key '<k>': stored
  * item '<item>' not found` (bundles.ts resolveBundleEnv). We catch it by reading
- * the bundle back the same way a release will (`secrets export --plaintext --format
- * json`, driven headlessly on the remote so its `agentOnly` guard FAILS FAST before
- * any keychain read — no Touch ID prompt) and confirming every pushed key returned.
+ * the bundle back the same way a later `secrets exec`/resolve will (the marker-gated
+ * json transport, driven headlessly on the remote so its `agentOnly` guard FAILS FAST
+ * before any keychain read — no Touch ID prompt) and confirming every pushed key
+ * returned.
  *
  * Pure so both branches are unit-testable without a real locked keychain: inject the
  * "read-back failed / key absent" condition through `readBack`.
@@ -418,10 +425,11 @@ export function keychainWriteFailureMessage(
 /**
  * Read a bundle back from a remote over SSH (headlessly, so it fails fast rather
  * than prompting Touch ID) and confirm the pushed keys materialized. Drives the
- * remote's own `secrets export <bundle> --plaintext --format json` — the same read
- * a headless release performs — but keeps only the KEY NAMES; the plaintext values
- * are dropped immediately and never retained or logged. Returns a verification
- * verdict; the caller renders `keychainWriteFailureMessage` on failure.
+ * remote's marker-gated json transport (`secrets export <bundle> --plaintext
+ * --format json` under AGENTS_SECRETS_REMOTE_TRANSPORT) but keeps only the KEY
+ * NAMES; the plaintext values are dropped immediately and never retained or
+ * logged. Returns a verification verdict; the caller renders
+ * `keychainWriteFailureMessage` on failure.
  */
 export function verifyRemoteKeychainPush(
   target: string,
@@ -433,6 +441,8 @@ export function verifyRemoteKeychainPush(
     ['secrets', 'export', bundle, '--plaintext', '--format', 'json'],
     undefined,
     osForTarget(target, opts.osLookupName),
+    // Same transport marker as remoteResolveEnv — see the comment there (RUSH-2774).
+    { AGENTS_SECRETS_REMOTE_TRANSPORT: '1' },
   );
   // This read-back streams the just-pushed plaintext over ssh stdout, so it is
   // as secret-bearing as the push itself — the push path passes `secret: true`

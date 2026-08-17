@@ -434,8 +434,8 @@ describe('bundleEnvToDotenv', () => {
   });
 });
 
-describe('secrets export --format json', () => {
-  function runSecrets(home: string, args: string[]): ReturnType<typeof spawnSync> {
+describe('secrets export (transport-only json; shell print mode removed, RUSH-2774)', () => {
+  function runSecrets(home: string, args: string[], extraEnv: Record<string, string | undefined> = {}): ReturnType<typeof spawnSync> {
     return spawnSync('node', ['--import', 'tsx', 'src/index.ts', 'secrets', ...args], {
       cwd: path.resolve(__dirname, '../..'),
       encoding: 'utf-8',
@@ -447,31 +447,116 @@ describe('secrets export --format json', () => {
         USERPROFILE: home,
         AGENTS_SECRETS_PASSPHRASE: 'rush-668-test',
         AGENTS_NO_USAGE_TRACK: '1',
+        // This suite itself often runs inside an agent session; those inherited
+        // markers must not leak into the spawned CLI, or every materialization
+        // test would exercise the agent-refusal branch instead of its subject.
+        AGENTS_RUNTIME: undefined,
+        AGENT_SESSION_ID: undefined,
+        AGENTS_SESSION_ID: undefined,
+        CLAUDECODE: undefined,
+        ...extraEnv,
       },
     });
   }
 
-  it.skipIf(!keychainHelperAvailable)('prints injected process env keys for account-suffixed bundle keys', ({ skip }) => {
+  function seedGithubBundle(): string {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-secrets-json-'));
+    fs.mkdirSync(path.join(home, '.agents/.system'), { recursive: true });
+    spawnSync('git', ['init', '--quiet'], {
+      cwd: path.join(home, '.agents/.system'),
+      encoding: 'utf-8',
+    });
+    expect(runSecrets(home, ['create', 'github.com', '--backend', 'file']).status).toBe(0);
+    expect(runSecrets(home, ['add', 'github.com', 'GITHUB_USERNAME.work', '--value', 'workbot']).status).toBe(0);
+    return home;
+  }
+
+  it.skipIf(!keychainHelperAvailable)('emits json for the remote-resolve transport (marker set, non-agent env)', ({ skip }) => {
     // Belt-and-suspenders: the release matrix has shown `it.skipIf` failing to
     // keep a test off a runner, so also skip explicitly at runtime.
     if (!keychainHelperAvailable) {
       skip();
       return;
     }
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-secrets-json-'));
+    const home = seedGithubBundle();
     try {
-      fs.mkdirSync(path.join(home, '.agents/.system'), { recursive: true });
-      spawnSync('git', ['init', '--quiet'], {
-        cwd: path.join(home, '.agents/.system'),
-        encoding: 'utf-8',
+      const exported = runSecrets(home, ['export', 'github.com', '--plaintext', '--format', 'json'], {
+        AGENTS_SECRETS_REMOTE_TRANSPORT: '1',
       });
-      expect(runSecrets(home, ['create', 'github.com', '--backend', 'file']).status).toBe(0);
-      expect(runSecrets(home, ['add', 'github.com', 'GITHUB_USERNAME.work', '--value', 'workbot']).status).toBe(0);
-
-      const exported = runSecrets(home, ['export', 'github.com', '--plaintext', '--format', 'json']);
-
       expect(exported.status, exported.stderr).toBe(0);
       expect(JSON.parse(exported.stdout)).toEqual({ GITHUB_USERNAME: 'workbot' });
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!keychainHelperAvailable)('refuses the same invocation without the transport marker — the eval surface is gone', ({ skip }) => {
+    if (!keychainHelperAvailable) {
+      skip();
+      return;
+    }
+    const home = seedGithubBundle();
+    try {
+      const noMarker = runSecrets(home, ['export', 'github.com', '--plaintext', '--format', 'json']);
+      expect(noMarker.status).toBe(1);
+      expect(noMarker.stderr).toMatch(/export no longer prints values/);
+      expect(noMarker.stdout).not.toContain('workbot');
+
+      // Bare export (the old `--plaintext`-nag path) gets the same refusal with
+      // the paved alternatives named.
+      const bare = runSecrets(home, ['export', 'github.com']);
+      expect(bare.status).toBe(1);
+      expect(bare.stderr).toMatch(/agents secrets exec github\.com -- <cmd>/);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!keychainHelperAvailable)('refuses the transport shape inside an agent session even with the marker', ({ skip }) => {
+    if (!keychainHelperAvailable) {
+      skip();
+      return;
+    }
+    const home = seedGithubBundle();
+    try {
+      const res = runSecrets(home, ['export', 'github.com', '--plaintext', '--format', 'json'], {
+        AGENTS_SECRETS_REMOTE_TRANSPORT: '1',
+        AGENT_SESSION_ID: 'test-session',
+      });
+      expect(res.status).toBe(1);
+      expect(res.stdout).not.toContain('workbot');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!keychainHelperAvailable)('secrets get <bundle> <KEY> is removed and points at exec', ({ skip }) => {
+    if (!keychainHelperAvailable) {
+      skip();
+      return;
+    }
+    const home = seedGithubBundle();
+    try {
+      const res = runSecrets(home, ['get', 'github.com', 'GITHUB_USERNAME.work']);
+      expect(res.status).toBe(1);
+      expect(res.stderr).toMatch(/has been removed/);
+      expect(res.stderr).toMatch(/secrets exec github\.com -- printenv/);
+      expect(res.stdout).not.toContain('workbot');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!keychainHelperAvailable)('raw-item get refuses inside an agent session', ({ skip }) => {
+    if (!keychainHelperAvailable) {
+      skip();
+      return;
+    }
+    const home = seedGithubBundle();
+    try {
+      const res = runSecrets(home, ['get', 'some-raw-item'], { CLAUDECODE: '1' });
+      expect(res.status).toBe(1);
+      expect(res.stderr).toMatch(/inside an agent session/);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -561,7 +646,7 @@ describe('secrets list/view --json (agent discovery, RUSH-1834)', () => {
     }
   });
 
-  it.skipIf(!keychainHelperAvailable)('view --json --reveal fails fast in a non-TTY without --plaintext (same gate as the human view)', ({ skip }) => {
+  it.skipIf(!keychainHelperAvailable)('view --json --reveal fails fast outside an interactive terminal — the old --plaintext escape is gone (RUSH-2774)', ({ skip }) => {
     if (!keychainHelperAvailable) {
       skip();
       return;
@@ -570,7 +655,14 @@ describe('secrets list/view --json (agent discovery, RUSH-1834)', () => {
     try {
       const res = runSecrets(home, ['view', 'github.com', '--json', '--reveal']);
       expect(res.status).toBe(1);
-      expect(res.stderr).toMatch(/--reveal in a non-TTY requires --plaintext/);
+      expect(res.stderr).toMatch(/interactive terminal outside an agent session/);
+      expect(res.stdout).not.toContain('sk-live-xyz');
+
+      // `--plaintext` no longer exists on view; passing it is an unknown option,
+      // not a reveal escape.
+      const escape = runSecrets(home, ['view', 'github.com', '--json', '--reveal', '--plaintext']);
+      expect(escape.status).not.toBe(0);
+      expect(escape.stdout).not.toContain('sk-live-xyz');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

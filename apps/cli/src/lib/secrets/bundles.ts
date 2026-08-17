@@ -1448,7 +1448,7 @@ export function resolveBundleEnv(bundle: SecretsBundle, _opts: ResolveBundleOpti
  * path in index.ts can share it without a bundles↔index import cycle. See that
  * module for the full contract.
  */
-export { isHeadlessSecretsContext } from './headless.js';
+export { isHeadlessSecretsContext, isAgentInvocationContext } from './headless.js';
 
 /**
  * Read a bundle's metadata AND resolve its env in a single Touch ID prompt.

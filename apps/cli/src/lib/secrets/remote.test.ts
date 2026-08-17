@@ -247,7 +247,9 @@ describe('remoteResolveEnv', () => {
     const env = await remoteResolveEnv('yosemite-s1', 'r2.backups');
     expect(env).toEqual({ FOO: 'bar', BAZ: 'qux' });
     const [, remoteCmd, opts] = sshExecMock.mock.calls[0];
-    expect(remoteCmd).toBe(`bash -lc 'agents secrets export r2.backups --plaintext --format json'`);
+    // The transport marker is what lets the remote's json emitter print at all —
+    // the public shell-eval export mode was removed (RUSH-2774).
+    expect(remoteCmd).toBe(`bash -lc 'export AGENTS_SECRETS_REMOTE_TRANSPORT=1; agents secrets export r2.backups --plaintext --format json'`);
     expect(opts.input).toBeUndefined();
     // The plaintext streams back over ssh stdout, so this read is secret-bearing:
     // it pins the managed host key and refuses to multiplex (RUSH-2527).
@@ -430,6 +432,7 @@ describe('verifyRemoteKeychainPush (real read-back over the stubbed SSH boundary
     // It drove the same read a headless release performs.
     const [, remoteCmd] = sshExecMock.mock.calls[0];
     expect(remoteCmd).toContain('agents secrets export apple.com --plaintext --format json');
+    expect(remoteCmd).toContain('AGENTS_SECRETS_REMOTE_TRANSPORT=1');
   });
 
   it('flags locked-keychain when the remote headless read-back fails with the not-unlocked guard', () => {

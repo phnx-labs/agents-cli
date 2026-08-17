@@ -43,6 +43,7 @@ import {
   listBundles,
   healKeychainBundleMetadataAclOnce,
   isHeadlessSecretsContext,
+  isAgentInvocationContext,
   migrateLegacyBundles,
   parseDotenv,
   readAndResolveBundleEnv,
@@ -135,7 +136,6 @@ import {
   importSyncedBundle,
   type SyncedBundleCandidate,
 } from '../lib/secrets/icloud-import.js';
-import { getVaultSession, vaultExists } from '../lib/secrets/vault.js';
 import { registerSecretsSyncCommands } from './secrets-sync.js';
 import { registerSecretsMigrateAclCommand } from './secrets-migrate.js';
 import { registerSecretsImportKeyringCommand } from './secrets-import.js';
@@ -1059,14 +1059,17 @@ export function registerSecretsCommands(program: Command): void {
       # Stop a noisy automation bundle from prompting every run: ask once a week
       agents secrets policy prod hold
 
-      # Eval the bundle into your current shell
-      eval "$(agents secrets export prod --plaintext)"
+      # Run a one-off command with secrets injected (values ride the child env, never stdout)
+      agents secrets exec prod -- ./deploy.sh
+
+      # Need one value inside a script? Read it under injection, not with a printer
+      agents secrets exec prod -- printenv STRIPE_API_KEY
+
+      # Deliberately reveal values at your terminal (interactive only)
+      agents secrets view prod --reveal
 
       # Push the bundle to remote machine(s) over SSH (lands as a native bundle there)
       agents secrets export prod --device yosemite-s0 --device yosemite-s1 --force
-
-      # Run a one-off command with secrets injected
-      agents secrets exec prod -- ./deploy.sh
     `,
     notes: `
       Bundles are containers; secrets are the variables inside them. Keychain values
@@ -1363,13 +1366,22 @@ export function registerSecretsCommands(program: Command): void {
     .command('view [name]')
     .alias('show')
     .description('Show a bundle. Keychain values are masked by default — pass --reveal to see them.')
-    .option('--reveal', 'Print keychain-backed values in the clear (TTY only unless --plaintext)')
-    .option('--plaintext', 'Allow --reveal in non-interactive shells (use with care)')
+    .option('--reveal', 'Print keychain-backed values in the clear (interactive terminal only)')
     .option('--json', 'Emit machine-readable JSON (values masked unless --reveal) instead of the human view')
     .option('--device <target>', 'Show a bundle on a remote device over SSH (enrolled `agents hosts` name, ssh-config alias, or user@host)')
     .option('--devices <list>', 'Comma-separated devices to show in one shot, e.g. yosemite-s0,yosemite-s1')
-    .action(async (name: string | undefined, opts: { reveal?: boolean; plaintext?: boolean; json?: boolean; device?: string; devices?: string }) => {
+    .action(async (name: string | undefined, opts: { reveal?: boolean; json?: boolean; device?: string; devices?: string }) => {
       try {
+        // `--reveal` is a deliberate HUMAN reveal: interactive terminal only, and
+        // never inside an agent session (an agent under tmux has a TTY, so the
+        // env markers are the load-bearing check). The old `--plaintext` escape
+        // that allowed a piped/non-TTY reveal is removed (RUSH-2774) — printed
+        // values land in an agent's context and session transcript.
+        if (opts.reveal && (isAgentInvocationContext() || !isInteractiveTerminal())) {
+          console.error(chalk.red('--reveal prints values in the clear and needs a real interactive terminal outside an agent session.'));
+          console.error(chalk.dim('Run the consuming command under injection instead: agents secrets exec <bundle> -- <cmd>'));
+          process.exit(1);
+        }
         const targets = parseHostsOption({ device: opts.device, devices: opts.devices });
         if (targets.length > 0) {
           if (!name) {
@@ -1378,12 +1390,12 @@ export function registerSecretsCommands(program: Command): void {
           }
           const args = ['view', name];
           if (opts.reveal) args.push('--reveal');
-          if (opts.plaintext) args.push('--plaintext');
           if (opts.json) args.push('--json');
           // With --reveal, force a TTY so the remote keychain prompt can surface
-          // (and the remote's "--reveal in a non-TTY needs --plaintext" gate is
-          // satisfied) — only when this side is itself interactive.
-          const tty = Boolean(opts.reveal) && Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY);
+          // and the remote's own interactive-terminal gate is satisfied. The
+          // early gate above already proved this side is an interactive,
+          // non-agent terminal.
+          const tty = Boolean(opts.reveal);
           // `--reveal` streams the plaintext value back over ssh stdout — a
           // secret-bearing read that must pin the host key and not multiplex,
           // whether it runs on the interactive (tty) or `--plaintext` non-tty path.
@@ -1424,14 +1436,10 @@ export function registerSecretsCommands(program: Command): void {
         emitSecretAudit({ event: 'secrets.view', bundle: bundle.name, operation: opts.json ? 'view --json' : 'view', source: 'view', status: 'success' });
         if (opts.json) {
           // Machine-readable discovery for agents. Values are null unless --reveal
-          // (which still routes through the same non-TTY/plaintext gate + audit
-          // event as the human path). Gated on the explicit flag, not stdout.isTTY,
-          // so a piped human view never silently swaps formats.
+          // (already gated above: interactive terminal, outside an agent session).
+          // Gated on the explicit flag, not stdout.isTTY, so a piped human view
+          // never silently swaps formats.
           const reveal = Boolean(opts.reveal);
-          if (reveal && !isInteractiveTerminal() && !opts.plaintext) {
-            console.error(chalk.red('--reveal in a non-TTY requires --plaintext.'));
-            process.exit(1);
-          }
           const revealed = new Map<string, string>();
           if (reveal) {
             const { env } = readAndResolveBundleEnv(bundle.name, {
@@ -1543,10 +1551,6 @@ export function registerSecretsCommands(program: Command): void {
           return;
         }
         const reveal = Boolean(opts.reveal);
-        if (reveal && !isInteractiveTerminal() && !opts.plaintext) {
-          console.error(chalk.red('--reveal in a non-TTY requires --plaintext.'));
-          process.exit(1);
-        }
         // An explicit human `view --reveal` at a terminal is a deliberate value
         // access: resolve interactively (one Touch ID) so a locked bundle shows
         // its values. Under an agent (AGENTS_RUNTIME) or headless (no TTY) it
@@ -1616,48 +1620,39 @@ export function registerSecretsCommands(program: Command): void {
 
   cmd
     .command('get <item> [key]')
-    .description('Print one secret value for shell hooks/automation. One arg = a raw keychain item by name; two args = one KEY out of a bundle (`get <bundle> <KEY>`). Cross-platform.')
+    .description('Print one raw keychain item by name, for shell hooks/automation. Cross-platform. Bundle values are never printed — run commands under `agents secrets exec` instead.')
     .action((item: string, key: string | undefined) => {
-      if (key === undefined) {
-        // Raw keychain item path — unchanged.
-        try {
-          // Routes through the platform keychain layer: macOS reads bare items
-          // via /usr/bin/security (no Touch ID), Linux via secret-tool with the
-          // encrypted-file fallback. The value goes to stdout (newline-terminated
-          // so `$(agents secrets get NAME)` captures it cleanly); diagnostics go
-          // to stderr so they never pollute the captured value.
-          const value = getKeychainToken(item);
-          // Raw item reads bypass readAndResolveBundleEnv, so audit here too.
-          // `item` is the keychain service name, never the value.
-          emitSecretAudit({ event: 'secrets.get', item, source: 'raw-item', status: 'success' });
-          process.stdout.write(value.endsWith('\n') ? value : `${value}\n`);
-        } catch {
-          // Missing item is a normal, quiet outcome for a hook probe: exit 1,
-          // print nothing to stdout. Callers test the exit code / empty capture.
-          process.exit(1);
-        }
-        return;
+      if (key !== undefined) {
+        // The bundle-key form (`get <bundle> <KEY>`) is REMOVED (RUSH-2774): a
+        // one-liner that prints a bundle credential is the exfiltration path
+        // this change closes, for every caller. The injection replacement is
+        // just as short for a human script and never touches this stdout.
+        console.error(chalk.red(`'secrets get <bundle> <KEY>' has been removed — printing a bundle value to stdout is the exfiltration path this blocks.`));
+        console.error(chalk.dim(`Use: agents secrets exec ${item} -- printenv ${key}   (or run the consuming command directly under exec)`));
+        process.exit(1);
       }
-      // Bundle-key path: `get <bundle> <KEY>` prints exactly one resolved value.
-      // Ungated like the raw path (it IS the automation primitive); the
-      // `secrets.get` audit event is emitted inside readAndResolveBundleEnv.
+      // Raw keychain item path — a single ad-hoc token, not a credential bundle.
+      // Still refused inside an agent session: whatever is printed here enters
+      // the agent's context and session transcript (RUSH-2774).
+      if (isAgentInvocationContext()) {
+        console.error(chalk.red('refusing to print a secret value inside an agent session — printed values land in the agent context and transcript.'));
+        console.error(chalk.dim('Run the consuming command under injection instead: agents secrets exec <bundle> -- <cmd>'));
+        process.exit(1);
+      }
       try {
-        if (!bundleExists(item) && !(vaultExists() && !getVaultSession().loggedIn)) {
-          console.error(chalk.red(`Secrets bundle '${item}' not found.`));
-          process.exit(1);
-        }
-        // `secrets get` is the scriptable automation primitive ($(agents secrets
-        // get bundle KEY)). Every read is broker-only; a locked bundle points at
-        // the explicit unlock command instead of raising Touch ID.
-        const { env } = readAndResolveBundleEnv(item, { caller: 'secrets get', keys: [key], keyMode: 'storage', agentOnly: true });
-        if (!(key in env)) {
-          console.error(chalk.red(`Key '${key}' not in bundle '${item}'.`));
-          process.exit(1);
-        }
-        const value = env[key];
+        // Routes through the platform keychain layer: macOS reads bare items
+        // via /usr/bin/security (no Touch ID), Linux via secret-tool with the
+        // encrypted-file fallback. The value goes to stdout (newline-terminated
+        // so `$(agents secrets get NAME)` captures it cleanly); diagnostics go
+        // to stderr so they never pollute the captured value.
+        const value = getKeychainToken(item);
+        // Raw item reads bypass readAndResolveBundleEnv, so audit here too.
+        // `item` is the keychain service name, never the value.
+        emitSecretAudit({ event: 'secrets.get', item, source: 'raw-item', status: 'success' });
         process.stdout.write(value.endsWith('\n') ? value : `${value}\n`);
-      } catch (err) {
-        console.error(chalk.red((err as Error).message));
+      } catch {
+        // Missing item is a normal, quiet outcome for a hook probe: exit 1,
+        // print nothing to stdout. Callers test the exit code / empty capture.
         process.exit(1);
       }
     });
@@ -2279,14 +2274,19 @@ Examples:
 
   cmd
     .command('export [bundle]')
-    .description('Resolve a bundle and print KEY=VALUE lines, push it to a 1Password vault with --to-1password, or push it to remote machine(s) over SSH with --device.')
-    .option('--plaintext', 'Acknowledge that the resolved values will be printed in the clear (shell export mode)')
+    .description('Move a bundle without exposing it: push to remote machine(s) over SSH with --device, to a 1Password vault with --to-1password, or to an encrypted file with --to-file.')
+    // Both transport flags are hidden, not documented: the ONLY caller is the
+    // machine-to-machine SSH resolve (remoteResolveEnv / verifyRemoteKeychainPush),
+    // which sets AGENTS_SECRETS_REMOTE_TRANSPORT=1 on the remote invocation. The
+    // old public shell-eval mode (`eval "$(agents secrets export … --plaintext)"`)
+    // was the top agent-exfiltration path and is removed (RUSH-2774).
+    .addOption(new Option('--plaintext', 'internal remote-resolve transport').hideHelp())
+    .addOption(new Option('--format <json>', 'internal remote-resolve transport').hideHelp())
     .option('--to-1password', 'Push every key in the bundle as a PASSWORD item in a 1Password vault')
     .option('--vault <name>', '1Password vault name (used with --to-1password)')
     .option('--device <target...>', 'Push the bundle over SSH to this device (host alias or user@host); repeatable for multiple machines')
     .option('--remote-backend <backend>', 'Backend for the bundle on the remote device (with --device): keychain (default) or file. file is headless-readable via the remote\'s machine-local key; it forwards AGENTS_SECRETS_PASSPHRASE over stdin only if set (opt-in).', 'keychain')
     .option('--force', 'Overwrite existing keys/items on the target (used with --to-1password and --device)')
-    .option('--format <shell|json>', 'Output for --plaintext export: shell (default) or json (lossless, machine-readable; used by remote resolve)', 'shell')
     .option('--to-file <path>', `Write the bundle as an AES-256-GCM encrypted offline file (needs ${SYNC_PASSPHRASE_ENV}; symmetric counterpart of import --from-file)`)
     .action(async (bundleName: string | undefined, opts: {
       plaintext?: boolean;
@@ -2299,7 +2299,7 @@ Examples:
       toFile?: string;
     }) => {
       try {
-        const { readAndResolveBundleEnv, bundleToEnvPrefix, isReservedEnvName } = await import('../lib/secrets/bundles.js');
+        const { readAndResolveBundleEnv } = await import('../lib/secrets/bundles.js');
         const resolvedBundleName = bundleName ?? (await pickBundleName('export'));
 
         if (opts.toFile) {
@@ -2406,41 +2406,37 @@ Examples:
           return;
         }
 
-        if (opts.format && opts.format !== 'shell' && opts.format !== 'json') {
-          console.error(chalk.red(`Invalid --format ${JSON.stringify(opts.format)}. Expected 'shell' or 'json'.`));
+        // The shell-eval print mode (`eval "$(agents secrets export … --plaintext)"`)
+        // is REMOVED (RUSH-2774): a whole bundle printed to stdout lands in a
+        // coding agent's context and session transcript, and it was the single
+        // most-copied exfiltration one-liner on the fleet. The sole surviving
+        // stdout emitter is the machine-to-machine SSH resolve transport, which
+        // requires the remote-invocation marker AND a non-agent context — both
+        // set only by remoteResolveEnv / verifyRemoteKeychainPush building the
+        // remote command. Everything else gets the refusal with the paved paths.
+        const isTransportCall =
+          process.env.AGENTS_SECRETS_REMOTE_TRANSPORT === '1' &&
+          Boolean(opts.plaintext) &&
+          opts.format === 'json' &&
+          !isAgentInvocationContext();
+        if (!isTransportCall) {
+          console.error(chalk.red('export no longer prints values. Pick a destination:'));
+          console.error(chalk.red('  --device <host> | --to-1password | --to-file <path>'));
+          console.error(chalk.dim(`Run a command with the values injected instead:  agents secrets exec ${resolvedBundleName} -- <cmd>`));
+          console.error(chalk.dim(`Reveal one value at your terminal:               agents secrets view ${resolvedBundleName} --reveal`));
           process.exit(1);
         }
-        if (!opts.plaintext) {
-          console.error(chalk.red('export prints secrets in the clear and requires --plaintext (works for TTY and pipes alike).'));
-          process.exit(1);
-        }
-        // `agents secrets export --plaintext` is what release/CI scripts eval.
-        // Every caller is broker-only, including a plain shell, so export never
-        // raises Touch ID on the interactive user's screen.
+        // Machine-readable form consumed by `remoteResolveEnv` over SSH: single
+        // object of injected env KEY -> value; values verbatim. Broker-only, so a
+        // headless remote read fails fast rather than raising Touch ID. The
+        // resolve emits its own `secrets.get` audit on the remote; no export
+        // event here — that would tally every peer pull as an export.
         const { env } = readAndResolveBundleEnv(resolvedBundleName, {
-          caller: `export to shell`,
+          caller: 'remote resolve transport',
           keyMode: 'process',
           agentOnly: true,
         });
-        if (opts.format === 'json') {
-          // Machine-readable form consumed by `remoteResolveEnv` over SSH.
-          // Single object of injected env KEY -> value; values verbatim.
-          process.stdout.write(JSON.stringify(env));
-          return;
-        }
-        const prefix = bundleToEnvPrefix(resolvedBundleName);
-        for (const [k, v] of Object.entries(env)) {
-          const exportKey = isReservedEnvName(k) ? `${prefix}_${k}` : k;
-          const needsQuotes = /[\s$`"'\\|&;<>(){}[\]!#~]/.test(v);
-          const output = needsQuotes ? `'${v.replace(/'/g, `'\\''`)}'` : v;
-          process.stdout.write(`export ${exportKey}=${output}\n`);
-        }
-        // Record the shell export (the `eval "$(...)"` path). The `--format json`
-        // branch above is the machine-to-machine remote-resolve transport (already
-        // counted as an access on this machine by the resolve above), so it is
-        // deliberately not counted here as an export — that would tally every peer
-        // pull as an export.
-        emitSecretAudit({ event: 'secrets.export', bundle: resolvedBundleName, operation: 'export --plaintext', source: 'shell', status: 'success', keyCount: Object.keys(env).length });
+        process.stdout.write(JSON.stringify(env));
       } catch (err) {
         if (isPromptCancelled(err)) return;
         console.error(chalk.red((err as Error).message));
