@@ -1,35 +1,42 @@
 /**
- * Terminal text wrapping — one shared helper for the whole CLI.
+ * Terminal word-wrap — one shared helper for the whole CLI.
  *
- * The session preview (and anywhere else that renders variable-length text into
- * a fixed-width terminal) must wrap through THIS, never a per-field truncate or
- * ad-hoc slice. It wraps on word boundaries, respects existing newlines, and
- * hanging-indents continuation lines so they align under the value, not the label.
+ * Multi-line word wrapping is the gap the single-line helpers in
+ * `session/width.ts` (`truncateToWidth`, `padToWidth`) do not fill. Anywhere that
+ * renders variable-length text into a fixed-width terminal wraps through THIS,
+ * never a per-field slice.
+ *
+ * Width is measured with `stringWidth` (from the canonical `session/width.ts`),
+ * NOT `String.length`: the text this wraps is routinely ANSI-coloured (chalk /
+ * marked-terminal output) and may carry OSC-8 hyperlinks, where `.length`
+ * over-counts the invisible escape bytes. Words are split on whitespace, so a
+ * wrap boundary always falls between escape sequences, never inside one.
  */
 
-/** Columns of the attached terminal, or 80 when not a TTY (piped / CI). */
-export function termCols(fallback = 80): number {
-  const c = process.stdout?.columns;
-  return typeof c === 'number' && c > 0 ? c : fallback;
-}
+import { stringWidth } from './session/width.js';
 
 /**
- * Hard-wrap `text` to `cols` columns.
+ * Hard-wrap `text` to `cols` visible columns.
  *
  * - Splits on existing newlines first (each paragraph wraps independently).
- * - Wraps on whitespace; a single word longer than the available width is
- *   emitted on its own line rather than split mid-word.
+ * - Wraps on whitespace; a single word wider than the available width is emitted
+ *   on its own line rather than split mid-word (and never mid-escape).
+ * - Width is the visible display width via `stringWidth`, so ANSI colour and
+ *   OSC-8 hyperlink escapes do not inflate the count.
  * - `hangingIndent` pads every line AFTER the first with that many spaces, so a
  *   labelled value ("Latest  <text>") keeps its continuation lines aligned under
- *   the value. The available width is `cols - indent`, floored at a small
- *   minimum (8) so a pathologically large indent still makes forward progress —
- *   the floor guards the indent, it does NOT override a legitimately small cols.
+ *   the value. The wrapping width is `cols - indent`.
+ * - Floor: when `hangingIndent` is set, the width is floored at 8 so a
+ *   pathologically large indent still makes forward progress. With no indent the
+ *   floor is 1, so a legitimately small `cols` is respected, never overridden. A
+ *   non-finite `cols` degrades to the floor rather than silently disabling wrap.
  *
  * Returns the wrapped lines (never mutates input). An empty string yields [''].
  */
 export function wrapToWidth(text: string, cols: number, hangingIndent = 0): string[] {
   const indent = Math.max(0, Math.trunc(hangingIndent));
-  const width = Math.max(8, cols - indent);
+  const floor = indent > 0 ? 8 : 1;
+  const width = Number.isFinite(cols) ? Math.max(floor, cols - indent) : floor;
   const pad = ' '.repeat(indent);
   const out: string[] = [];
 
@@ -40,17 +47,22 @@ export function wrapToWidth(text: string, cols: number, hangingIndent = 0): stri
       continue;
     }
     let line = '';
+    let lineWidth = 0;
     for (const word of words) {
-      if (line.length === 0) {
+      const wordWidth = stringWidth(word);
+      if (line === '') {
         line = word;
-      } else if (line.length + 1 + word.length > width) {
+        lineWidth = wordWidth;
+      } else if (lineWidth + 1 + wordWidth > width) {
         out.push(line);
         line = word;
+        lineWidth = wordWidth;
       } else {
         line = `${line} ${word}`;
+        lineWidth += 1 + wordWidth;
       }
     }
-    if (line.length > 0) out.push(line);
+    if (line !== '') out.push(line);
   }
   if (out.length === 0) out.push('');
   return out.map((l, i) => (i === 0 ? l : pad + l));

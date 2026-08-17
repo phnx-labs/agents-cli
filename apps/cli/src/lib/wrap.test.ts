@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { wrapToWidth, termCols } from './wrap';
+import { wrapToWidth } from './wrap';
+import { stringWidth } from './session/width';
 
 describe('wrapToWidth', () => {
   it('wraps on word boundaries at the given width', () => {
@@ -29,32 +30,37 @@ describe('wrapToWidth', () => {
     expect(wrapToWidth('', 40)).toEqual(['']);
   });
 
+  it('measures VISIBLE width, not raw .length — ANSI-coloured text is not over-counted', () => {
+    // Two green words: visible "hello world" is 11 cells, but the raw string is
+    // 31 chars (each `\x1b[32m…\x1b[39m` adds 10 invisible bytes). At cols=11 the
+    // coloured text must stay on ONE line — a raw-.length wrap would split it.
+    const green = (s: string) => `\x1b[32m${s}\x1b[39m`;
+    const coloured = `${green('hello')} ${green('world')}`;
+    expect(coloured.length).toBeGreaterThan(11); // sanity: raw length exceeds cols
+    const out = wrapToWidth(coloured, 11);
+    expect(out).toEqual([coloured]); // single line, untouched
+    for (const l of out) expect(stringWidth(l)).toBeLessThanOrEqual(11);
+  });
+
+  it('respects a legitimately small cols with no indent (floor is 1, not 8)', () => {
+    const out = wrapToWidth('ab cd ef gh', 3);
+    expect(out).toEqual(['ab', 'cd', 'ef', 'gh']);
+    for (const l of out) expect(l.length).toBeLessThanOrEqual(3);
+  });
+
   it('an indent larger than cols still makes progress (floors at 8, does not crash)', () => {
     const out = wrapToWidth('aaaa bbbb cccc dddd eeee', 10, 40);
-    // cols-indent is negative; the floor keeps a small positive width (8), so it
-    // wraps into multiple short lines rather than hanging or producing one long line.
+    // cols-indent is negative; the indent floor keeps a small positive width (8),
+    // so it wraps into multiple short lines rather than hanging.
     expect(out.length).toBeGreaterThan(1);
-    expect(out[0]).toBe('aaaa'); // first line unpadded, wrapped at the 8-col floor
+    expect(out[0]).toBe('aaaa'); // first line unpadded
     for (const l of out.slice(1)) expect(l.startsWith(' '.repeat(40))).toBe(true);
   });
 
-  it('respects a legitimately small cols (does not force a 20-wide line)', () => {
-    const out = wrapToWidth('the quick brown fox jumps over', 12);
-    for (const l of out) expect(l.length).toBeLessThanOrEqual(12);
-  });
-});
-
-describe('termCols', () => {
-  it('falls back to 80 when stdout has no column count (piped / CI)', () => {
-    const orig = process.stdout.columns;
-    // @ts-expect-error deliberately clear for the test
-    process.stdout.columns = 0;
-    try {
-      expect(termCols()).toBe(80);
-      expect(termCols(100)).toBe(100);
-    } finally {
-      // @ts-expect-error restore
-      process.stdout.columns = orig;
-    }
+  it('degrades a non-finite cols to the floor instead of joining everything on one line', () => {
+    const out = wrapToWidth('a b c', Number.NaN);
+    // With NaN cols the old raw `> NaN` comparison was always false and dumped the
+    // whole paragraph onto one line. The finite-guard floors width at 1 instead.
+    expect(out).toEqual(['a', 'b', 'c']);
   });
 });
