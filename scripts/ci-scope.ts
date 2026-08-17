@@ -76,9 +76,12 @@ interface OwnershipGroup {
    * no new `agents sessions <verb>` could merge; `cli-full` would have handed a large
    * and busy area a 20-minute allowance instead, which is the opposite of the point.
    *
-   * Only ever RAISES the ceiling: groups that set nothing keep the 85s default, and
-   * the highest budget among the matched groups wins. Keep any value here justified
-   * by a measured run, not a round number.
+   * Only ever RAISES the ceiling — enforced, not merely asserted: the resolution
+   * clamps at {@link IMPACT_BUDGET_SEC}, so a group cannot tighten the gate for
+   * itself, and the highest budget among the matched groups wins because the run
+   * executes the union of their selections. A malformed value throws at manifest
+   * load rather than coercing to the default. Keep any value here justified by a
+   * measured run, not a round number.
    */
   budget_sec?: number;
 }
@@ -141,6 +144,18 @@ export function loadOwnershipManifest(path = DEFAULT_MANIFEST): OwnershipManifes
   parsed.areas ??= [];
   parsed.groups ??= [];
   parsed.testless ??= [];
+  // Fail loud on a malformed budget rather than coercing it. A string, a zero, or a
+  // negative would otherwise be swallowed by truthiness and silently fall back to
+  // the default — a gate that reads stricter than the manifest says is exactly the
+  // kind of quiet disagreement this policy file exists to prevent.
+  for (const group of parsed.groups) {
+    if (group.budget_sec === undefined) continue;
+    if (typeof group.budget_sec !== 'number' || !Number.isFinite(group.budget_sec) || group.budget_sec <= 0) {
+      throw new Error(
+        `invalid budget_sec on group '${group.id}' in ${path}: expected a positive number, got ${JSON.stringify(group.budget_sec)}`,
+      );
+    }
+  }
   return parsed;
 }
 
@@ -483,7 +498,10 @@ export function selectImpact(input: SelectImpactInput): ImpactPlan {
           : 'cli-full')
         : group.suite;
       if (groupSuite === 'cli-full') suite = 'cli-full';
-      if (group.budget_sec && group.budget_sec > budgetSec) budgetSec = group.budget_sec;
+      // Clamped at the default, so the docblock's "only ever RAISES" is enforced by
+      // the code rather than asserted by a comment: a group cannot tighten the gate
+      // for itself, only ask for more room.
+      if (group.budget_sec) budgetSec = Math.max(budgetSec, group.budget_sec, IMPACT_BUDGET_SEC);
       for (const test of group.tests ?? []) {
         addTest(selected, mapping, file, test, `owner:${group.id}`);
         mark();

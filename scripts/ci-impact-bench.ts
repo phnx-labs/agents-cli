@@ -18,7 +18,7 @@ const report = {
   checks: plan.checks,
   suite: plan.suite,
   unmapped: plan.unmapped,
-  budget_sec: IMPACT_BUDGET_SEC,
+  budget_sec: plan.budget_sec ?? IMPACT_BUDGET_SEC,
   vitest_files: cmds
     .filter((c) => c.cmd.some((part) => part.includes('vitest.mjs')))
     .flatMap((c) => {

@@ -238,6 +238,51 @@ describe('selectImpact policy', () => {
     expect(plan.budget_sec).toBe(180);
   });
 
+  test('a budget below the default cannot tighten the gate', () => {
+    // The docblock promises budget_sec only ever RAISES the ceiling. Enforce it in
+    // code: a group asking for less than IMPACT_BUDGET_SEC gets the default.
+    const dir = mkdtempSync(join(tmpdir(), 'budget-floor-'));
+    try {
+      mkdirSync(join(dir, 'apps/cli/ci'), { recursive: true });
+      writeFileSync(join(dir, 'apps/cli/ci/test-ownership.yaml'), [
+        'policy_version: impact-v1',
+        'areas: []',
+        'testless: []',
+        'groups:',
+        '  - id: tiny',
+        '    when: [apps/cli/src/tiny.ts]',
+        '    budget_sec: 10',
+      ].join('\n'));
+      const manifest = loadOwnershipManifest(join(dir, 'apps/cli/ci/test-ownership.yaml'));
+      const plan = selectImpact({ files: ['apps/cli/src/tiny.ts'], repoRoot: dir, related: false, manifest });
+      expect(plan.budget_sec).toBe(IMPACT_BUDGET_SEC);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a malformed budget_sec fails loud instead of silently defaulting', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'budget-bad-'));
+    try {
+      mkdirSync(join(dir, 'apps/cli/ci'), { recursive: true });
+      const path = join(dir, 'apps/cli/ci/test-ownership.yaml');
+      for (const bad of ['"soon"', '-30', '0']) {
+        writeFileSync(path, [
+          'policy_version: impact-v1',
+          'areas: []',
+          'testless: []',
+          'groups:',
+          '  - id: bad',
+          '    when: [apps/cli/src/bad.ts]',
+          `    budget_sec: ${bad}`,
+        ].join('\n'));
+        expect(() => loadOwnershipManifest(path)).toThrow(/invalid budget_sec on group 'bad'/);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('lockfile selects the explicit cli-full group', () => {
     const plan = selectImpact({
       files: ['apps/cli/bun.lock'],
