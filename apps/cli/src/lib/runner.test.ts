@@ -51,6 +51,25 @@ function baseConfig(partial: Partial<JobConfig> = {}): JobConfig {
   } as JobConfig;
 }
 
+describe('routine model flags', () => {
+  it.each([
+    ['claude', '--model'],
+    ['codex', '--model'],
+    ['cursor', '--model'],
+    ['kimi', '--model'],
+    ['droid', '-m'],
+    ['muse', '--model'],
+  ] as const)('uses the canonical %s model flag', (agent, modelFlag) => {
+    const cmd = buildJobCommand(baseConfig({
+      agent,
+      config: { model: 'test-model' },
+    }), 'inspect');
+
+    expect(cmd).toContain(modelFlag);
+    expect(cmd[cmd.indexOf(modelFlag) + 1]).toBe('test-model');
+  });
+});
+
 describe('Codex routine permission profiles', () => {
   it('keeps plan read-only with network and on-request approvals', () => {
     const cmd = buildJobCommand(baseConfig({ agent: 'codex', mode: 'plan' }), 'inspect');

@@ -56,6 +56,7 @@ import {
   type ExecOptions,
   type ExecEffort,
   type FallbackEntry,
+  AGENT_COMMANDS,
 } from './exec.js';
 import { resolveActor } from './actor.js';
 import type { LoopDeps } from './loop.js';
@@ -79,7 +80,7 @@ import {
 } from './accounting/rotate.js';
 import { readAuthHealth, isDeadVerdict } from './auth-health.js';
 import { machineId } from './machine-id.js';
-import { isSelfUpdatingAgent, ROUTINE_AGENT_COMMANDS as AGENT_COMMANDS, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from './agents.js';
+import { isSelfUpdatingAgent, ROUTINE_AGENT_COMMANDS, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from './agents.js';
 
 /** Result of a completed job execution, including metadata and optional report. */
 export interface RunResult {
@@ -582,7 +583,7 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
     return cmd;
   }
 
-  const template = AGENT_COMMANDS[agent];
+  const template = ROUTINE_AGENT_COMMANDS[agent];
   if (!template) {
     throw new Error(`Unsupported agent for daemon jobs: ${agent}`);
   }
@@ -695,7 +696,7 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
 }
 
 /**
- * Append --model and reasoning flags to a command being assembled.
+ * Append the agent's canonical model flag and reasoning flags to a command.
  *
  * Pass-through model resolution: validates against the installed (agent, version)
  * catalog when possible and writes a warning to stderr on miss, but never blocks.
@@ -706,14 +707,18 @@ function appendModelAndReasoning(cmd: string[], config: JobConfig): void {
   const agent = config.agent!;
   const model = config.config?.model as string | undefined;
   if (model) {
+    const modelFlag = AGENT_COMMANDS[agent].modelFlag;
+    if (!modelFlag) {
+      throw new Error(`Agent ${agent} does not support routine model selection`);
+    }
     if (config.version) {
       const resolved = resolveModel(agent, config.version, model);
       if (resolved.warning) {
         process.stderr.write(`[agents] ${resolved.warning}\n`);
       }
-      cmd.push('--model', resolved.forwarded);
+      cmd.push(modelFlag, resolved.forwarded);
     } else {
-      cmd.push('--model', model);
+      cmd.push(modelFlag, model);
     }
   }
 
