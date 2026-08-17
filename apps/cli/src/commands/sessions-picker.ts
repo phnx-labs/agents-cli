@@ -18,6 +18,8 @@ import { linkPath, linkUrl, relativeToCwd, shortenModel } from '../lib/session/r
 import { linearIssueUrl } from '../lib/session/linear.js';
 import { extractTodoProgress, WORKTREE_RE } from '../lib/session/state.js';
 import { renderMarkdown } from '../lib/markdown.js';
+import { wrapToWidth } from '../lib/wrap.js';
+import { terminalWidth, stringWidth } from '../lib/session/width.js';
 import { itemPicker } from '../lib/picker.js';
 import { createMemoryCache } from '../lib/memory-cache.js';
 import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult } from '../lib/session/digest.js';
@@ -486,7 +488,6 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
   if (totalTokens !== undefined) {
     line3.push(chalk.bold.white(formatTokens(totalTokens)) + chalk.gray(' tokens'));
   }
-  if (session.label) line3.push(chalk.white(session.label));
   if (session.filePath) line3.push(chalk.gray(linkPath(session.filePath, session.id)));
   else line3.push(chalk.gray(session.id));
 
@@ -502,7 +503,18 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
     line4.push(chalk.blue(linkUrl(session.prUrl, label)));
   }
 
+  // Lead with the session's human title — an agent-generated name / `/rename`,
+  // else the `--name` launch handle (both in `label`), falling back to the
+  // derived `topic`. Wrapped to the pane so a long title never overflows the
+  // edge; nothing renders when neither is set. The header sits at column 0, so
+  // it wraps to the full terminal width.
+  const title = (session.label || session.topic || '').trim();
+  const titleLines = title
+    ? wrapToWidth(title, terminalWidth()).map(l => chalk.bold.white(l))
+    : [];
+
   return [
+    ...titleLines,
     line1.join(DOT),
     line2.join(DOT),
     line3.join(DOT),
@@ -926,7 +938,9 @@ function formatCompactPreview(digest: SessionPreviewDigest, session: SessionMeta
 
   if (lastAssistant) {
     const maxLines = todosRendered.length > 0 || compact ? LAST_RESPONSE_MAX_LINES_WITH_TODOS : LAST_RESPONSE_MAX_LINES;
-    const rendered = renderLastResponse(lastAssistant, maxLines);
+    // Content sits at column 4 (outer body indent + the '  ' prefix below), so
+    // wrap it to the pane minus that indent.
+    const rendered = renderLastResponse(lastAssistant, maxLines, terminalWidth() - 4);
     if (rendered.length > 0) {
       lines.push('');
       lines.push(chalk.cyan('Last response:'));
@@ -1105,7 +1119,11 @@ export function relativizeDir(filePath: string, cwd?: string): string | undefine
   return dir || undefined;
 }
 
-function renderLastResponse(content: string, maxLines: number = LAST_RESPONSE_MAX_LINES): string[] {
+export function renderLastResponse(
+  content: string,
+  maxLines: number = LAST_RESPONSE_MAX_LINES,
+  width: number = terminalWidth(),
+): string[] {
   const cleaned = stripTags(content).trim();
   if (!cleaned) return [];
 
@@ -1116,7 +1134,15 @@ function renderLastResponse(content: string, maxLines: number = LAST_RESPONSE_MA
     rendered = cleaned;
   }
 
-  const all = rendered.replace(/\s+$/, '').split('\n');
+  // `marked-terminal` runs with `reflowText` off, so a paragraph with no hard
+  // breaks renders as one long line that overflows the pane. Wrap any line whose
+  // VISIBLE width exceeds the budget; leave lines that already fit untouched so
+  // rendered-markdown indentation (lists, code blocks) is preserved. The text is
+  // ANSI-coloured, so width is measured with `stringWidth`, never `String.length`.
+  const all = rendered
+    .replace(/\s+$/, '')
+    .split('\n')
+    .flatMap(line => (stringWidth(line) <= width ? [line] : wrapToWidth(line, width)));
   // Drop leading/trailing empty lines
   while (all.length && !all[0].trim()) all.shift();
   while (all.length && !all[all.length - 1].trim()) all.pop();

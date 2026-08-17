@@ -20,10 +20,12 @@ import {
   formatTodoCompact,
   githubRepoUrlFromCwd,
   relativizeDir,
+  renderLastResponse,
   sanitizeRemoteDigest,
   setPeerDigestFetcherForTest,
   setRemotePreviewRepaint,
 } from './sessions-picker.js';
+import { stringWidth } from '../lib/session/width.js';
 import { limitPreviewHeight, pickerPageSize, PREVIEW_MIN_ROWS } from '../lib/picker.js';
 import { _resetLinearWorkspaceCache } from '../lib/session/linear.js';
 import type { SessionEvent, SessionMeta, TodoProgress } from '../lib/session/types.js';
@@ -655,5 +657,42 @@ describe('buildPreview fits the picker preview slot at default height (RUSH-2198
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('formatHeader — leads with the session title (RUSH-2757)', () => {
+  it('puts the label on the FIRST line, above the agent line', () => {
+    const out = stripVTControlCharacters(buildPreview(mk({ label: 'Land the guard hardening' })));
+    const lines = out.split('\n').filter(l => l.trim().length > 0);
+    expect(lines[0]).toBe('Land the guard hardening');
+    // The agent line ("Claude …") must come after the title, not before it.
+    expect(out.indexOf('Land the guard hardening')).toBeLessThan(out.indexOf('Claude'));
+  });
+
+  it('falls back to the derived topic when there is no label', () => {
+    const out = stripVTControlCharacters(buildPreview(mk({ topic: 'Refactor the session picker' })));
+    const lines = out.split('\n').filter(l => l.trim().length > 0);
+    expect(lines[0]).toBe('Refactor the session picker');
+  });
+
+  it('renders no title line when neither label nor topic is set', () => {
+    const out = stripVTControlCharacters(buildPreview(mk({})));
+    const lines = out.split('\n').filter(l => l.trim().length > 0);
+    // First content line is the agent line, not an empty/blank title.
+    expect(lines[0].startsWith('Claude')).toBe(true);
+  });
+});
+
+describe('renderLastResponse — wraps overflowing lines to the pane (RUSH-2757)', () => {
+  it('wraps a long single-line paragraph so no visible line exceeds the width', () => {
+    const long = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ');
+    const out = renderLastResponse(long, 50, 40);
+    expect(out.length).toBeGreaterThan(1); // it actually wrapped, not one long line
+    for (const l of out) expect(stringWidth(l)).toBeLessThanOrEqual(40);
+  });
+
+  it('leaves a line that already fits untouched (preserves rendered indentation)', () => {
+    const out = renderLastResponse('short enough', 50, 80);
+    expect(out).toEqual(['short enough']);
   });
 });
