@@ -6,6 +6,17 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+## [0.9.326] - 2026-08-17
+
+- **Device auto-launch reads the two-layer device-config store (PR #2622).**
+  `deviceAutoLaunch.ts` now resolves per-device operator config from the tracked
+  `devices/<name>/agents.yaml` `config:` blocks plus the central
+  `fleet.defaults.config` fleet-wide defaults layer (written by
+  `agents devices config --fleet …`), with a per-device entry winning over the
+  defaults — replacing the retired single `fleet.devices.<name>.config` map. A
+  corrupt config file still degrades to the documented defaults (every device
+  enabled, none preferred, uncapped) with a note on the extension log.
+
 ## [0.9.325] - 2026-08-15
 
 - **A release no longer claims "All running windows are live" without checking any window
