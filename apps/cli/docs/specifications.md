@@ -1684,11 +1684,14 @@ and `export --device` inject yet CAN prompt interactively, while the raw-item
 | `secrets get <item>` (raw item) | **Materialize** (ungated scripting primitive — deliberate SEC-9b exemption) | never | `commands/secrets.ts` get action |
 | `list` / `view` (default) / all CRUD / `unlock` / `lock` / `status` / `push` / `pull` | **Neither** (metadata/status/counts only) | only `unlock` prompts | e.g. `commands/secrets.ts` list/view/unlock |
 
-Rule of thumb (normative): **no `agents secrets` command materializes a value
-inside an agent session** (SEC-9b) — if a value appears in an agent's transcript
-it traveled through `secrets exec`'s child choosing to print (e.g.
-`exec <b> -- env`), a deliberate composition the value-free audit stream records.
-Injection and MCP never materialize (`secrets-trust-boundaries.md`).
+Rule of thumb (normative): **no `agents secrets` command materializes a BUNDLE
+value inside an agent session** (SEC-9b) — if a bundle value appears in an
+agent's transcript it traveled through `secrets exec`'s child choosing to print
+(e.g. `exec <b> -- env`), a deliberate composition the value-free audit stream
+records. The two narrow exceptions print single values, never bundles: the
+raw-item `get <item>` (the deliberate SEC-9b exemption fleet shell hooks rely
+on) and the marker-gated SSH transport (SEC-9c, unreachable from an agent
+context). Injection and MCP never materialize (`secrets-trust-boundaries.md`).
 
 #### 4.3 stdout / stderr / exit discipline
 
