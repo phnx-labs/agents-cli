@@ -62,6 +62,7 @@ describe('SessionPresentationStore', () => {
         machine: 'yosemite-s1',
         topic: 'Compact the PageHeader across every page',
         label: '',
+        cwd: '/home/muqsit/src/github.com/muqsitnawaz/svatlas',
         sourceDevice: 'yosemite-s1',
         status: 'running',
         context: 'terminal',
@@ -71,6 +72,7 @@ describe('SessionPresentationStore', () => {
       machine: 'yosemite-s1',
       topic: 'Compact the PageHeader across every page',
       label: '',
+      cwd: '/home/muqsit/src/github.com/muqsitnawaz/svatlas',
     });
     expect(store.liveSession('missing')).toBeUndefined();
   });

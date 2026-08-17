@@ -15,7 +15,7 @@ import { AgentsHtmlReaderProvider } from './htmlReader';
 import * as git from './git.vscode';
 import { AgentSettings, hasLoginEnabled, PromptEntry, QUICK_LAUNCH_SLOT_KEYS, getQuickLaunchSlot, QuickLaunchSlot, QuickLaunchSlotKey } from '../core/settings';
 import { listRegisteredDevices } from './deviceHealth.vscode';
-import { normalizeHost } from '../core/remoteSessions';
+import { isDerivedSessionName, normalizeHost } from '../core/remoteSessions';
 import * as settings from './settings.vscode';
 import * as swarm from './swarm.vscode';
 import {
@@ -3596,9 +3596,10 @@ async function fetchAndSetAutoLabel(
     const live = sessionPresentationStore.liveSession(sessionId);
     if (live) {
       const topic = live.topic.trim() && !isScaffoldingTopic(live.topic) ? live.topic.trim() : null;
-      // A real /rename title has a space ("Fix Fleet Login"). Claude's derived
-      // `<dirname>-<n>` placeholder does not — skip those so we summarize.
-      const label = live.label.trim() && live.label.includes(' ') ? live.label.trim() : null;
+      // Reuse isDerivedSessionName so a real one-word /rename ("RUSH-2058",
+      // "Auth") is kept and only Claude's `<dirname>-<n>` placeholder is dropped.
+      const rawLabel = live.label.trim();
+      const label = rawLabel && !isDerivedSessionName(rawLabel, live.cwd) ? rawLabel : null;
       if (label || topic) {
         const applied = await applyLabelSource(terminal, { label, topic });
         if (applied) return applied;

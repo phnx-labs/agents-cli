@@ -87,7 +87,7 @@ export class SessionPresentationStore {
    * this is how they recover it (and a title) once the watch stream indexes
    * the session.
    */
-  liveSession(sessionId: string): { machine: string; topic: string; label: string } | undefined {
+  liveSession(sessionId: string): { machine: string; topic: string; label: string; cwd: string } | undefined {
     const wanted = sessionId.trim();
     if (!wanted) return undefined;
     for (const value of this.sessions()) {
@@ -101,6 +101,7 @@ export class SessionPresentationStore {
         prompt?: unknown;
         firstUserMessage?: unknown;
         label?: unknown;
+        cwd?: unknown;
       };
       const id = typeof row.sessionId === 'string' ? row.sessionId
         : typeof row.id === 'string' ? row.id : '';
@@ -113,7 +114,8 @@ export class SessionPresentationStore {
         : typeof row.firstUserMessage === 'string' ? row.firstUserMessage
         : '';
       const label = typeof row.label === 'string' ? row.label : '';
-      return { machine, topic, label };
+      const cwd = typeof row.cwd === 'string' ? row.cwd : '';
+      return { machine, topic, label, cwd };
     }
     return undefined;
   }

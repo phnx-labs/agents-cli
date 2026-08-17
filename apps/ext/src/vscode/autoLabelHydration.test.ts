@@ -82,6 +82,8 @@ describe('RUSH-2411 auto-label-after-remote-hydration wiring', () => {
     expect(vscodeSource).toMatch(/args\.push\('--device', host\)/);
     expect(vscodeSource).not.toMatch(/\['sessions', sessionId, '--host'/);
     expect(extensionSource).toContain('sessionPresentationStore.liveSession');
+    expect(extensionSource).toContain('isDerivedSessionName(rawLabel, live.cwd)');
+    expect(extensionSource).not.toContain("live.label.includes(' ')");
   });
 });
 
