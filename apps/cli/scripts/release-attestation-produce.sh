@@ -196,3 +196,66 @@ cp "$TGZ_NAME" "$DEST_DIR/$TGZ_NAME"
 
 green "Wrote $DEST_JSON"
 green "Tarball at $DEST_DIR/$TGZ_NAME"
+
+# ----- Helper manifest (RUSH-2766) -----
+# release.sh consumes $STORE/release-manifest.json at require_helpers (:231)
+# and upload_release_proof (:976), but until now nothing produced it -- same
+# consumer-without-producer class as the attestation itself was before this
+# script existed (RUSH-2749). The manifest is a SINGLE file per store dir,
+# carried forward across producer runs: a helper whose input digest still
+# matches the recorded one keeps its already-attested record untouched; one
+# that drifted is only re-recorded when a freshly built+signed asset for it
+# is actually on disk in this worktree. This producer builds/signs keychain
+# and menubar itself (the Darwin block above); computer-mac is signed by the
+# separate native/computer-mac release path
+# (scripts/publish-computer-helper-mac.sh) and is never rebuilt here, so a
+# drifted computer-mac digest with no prior record to carry forward fails
+# closed with the exact command to run, rather than shipping a stale or
+# missing helper record.
+if [[ -x scripts/release-manifest.sh ]]; then
+  bold "Updating the helper manifest..."
+  MANIFEST_FILE="$STORE/release-manifest.json"
+  CLI_VERSION_MANIFEST="$(jq -r .version package.json)"
+  if [[ ! -f "$MANIFEST_FILE" ]]; then
+    scripts/release-manifest.sh new --cli-version "$CLI_VERSION_MANIFEST" --cli-tree "$TREE" \
+      > "$MANIFEST_FILE"
+  fi
+
+  manifest_asset_sha256() {
+    local f="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+      sha256sum "$f" | awk '{print $1}'
+    else
+      shasum -a 256 "$f" | awk '{print $1}'
+    fi
+  }
+
+  for helper in computer-mac keychain menubar; do
+    helper_digest="$(scripts/release-manifest.sh input-digest --repo-root "$WT" --helper "$helper")" \
+      || die "could not compute input digest for helper $helper"
+    recorded_digest="$(jq -r --arg n "$helper" '.helpers[$n].inputDigest // empty' "$MANIFEST_FILE")"
+    if [[ -n "$recorded_digest" && "$recorded_digest" == "$helper_digest" ]]; then
+      gray "helper $helper unchanged (${helper_digest#sha256:}) -- carrying forward its attested record"
+      continue
+    fi
+
+    case "$helper" in
+      keychain) asset="bin/Agents CLI.app/Contents/MacOS/Agents CLI" ;;
+      menubar)  asset="bin/MenubarHelper.app/Contents/MacOS/MenubarHelper" ;;
+      computer-mac)
+        die "helper computer-mac input changed but this producer never rebuilds it -- run 'agents secrets exec apple.com -- scripts/publish-computer-helper-mac.sh' on a macOS signing box, then re-run this producer so the new digest is recorded"
+        ;;
+    esac
+    [[ -f "$asset" ]] \
+      || die "helper $helper input changed but no freshly signed asset at '$asset' -- run this producer on a macOS signing box"
+    asset_digest="sha256:$(manifest_asset_sha256 "$asset")"
+    scripts/release-manifest.sh put --file "$MANIFEST_FILE" --helper "$helper" \
+      --helper-version "$CLI_VERSION_MANIFEST" --input-digest "$helper_digest" \
+      --asset-digest "$asset_digest" --asset-path "$asset" --platform darwin \
+      >/dev/null || die "failed to record helper $helper in the manifest"
+    green "Recorded fresh $helper record (input ${helper_digest#sha256:})"
+  done
+  green "Manifest at $MANIFEST_FILE"
+else
+  gray "No scripts/release-manifest.sh in this tree -- skipping helper manifest production."
+fi

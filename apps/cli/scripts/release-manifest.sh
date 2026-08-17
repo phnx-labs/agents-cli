@@ -125,15 +125,23 @@ helper_paths() {
   esac
 }
 
+# Hashes $path (a file or a directory tree) with each entry keyed by its path
+# RELATIVE to $root, never the absolute path. input_digest_of's digest is
+# recorded once (by the producer) and re-verified elsewhere (require_helpers,
+# on a different machine or a differently-pid-suffixed worktree) -- an
+# absolute path bakes in that machine/worktree's on-disk location, so the
+# recorded digest can never match a re-derivation anywhere else (RUSH-2766).
 hash_tree() {
-  local path="$1" out="" f
+  local root="$1" path="$2" out="" f rel
   if [[ -f "$path" ]]; then
-    printf '%s  %s\n' "$(file_sha256 "$path")" "$path"
+    rel="${path#"$root"/}"
+    printf '%s  %s\n' "$(file_sha256 "$path")" "$rel"
     return 0
   fi
   [[ -d "$path" ]] || die "helper input missing: $path -- no fallback rebuild"
   while IFS= read -r -d '' f; do
-    out+="$(file_sha256 "$f")  $f"$'\n'
+    rel="${f#"$root"/}"
+    out+="$(file_sha256 "$f")  $rel"$'\n'
   done < <(find "$path" -type f -print0 | sort -z)
   printf '%s' "$out"
 }
@@ -145,7 +153,7 @@ input_digest_of() {
   assert_helper "$name"
   concat=""
   while IFS= read -r p; do
-    concat+="$(hash_tree "$p")"
+    concat+="$(hash_tree "$root" "$p")"
   done < <(helper_paths "$root" "$name")
   printf 'sha256:%s\n' "$(str_sha256 "$concat")"
 }

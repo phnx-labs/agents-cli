@@ -88,3 +88,31 @@ RUSH-2666 moved build/sign to attestation time. Off a macOS signing box, `npm
 pack`'s own prepack gates fail closed instead of attesting an unsigned
 tarball, so the producer must run on a provisioned home base (`mac-mini`) to
 produce a real, publishable attestation.
+
+### The helper manifest is produced here too (RUSH-2766)
+
+`release-attestation-produce.sh` also writes/updates
+`$RELEASE_ATTESTATION_DIR/release-manifest.json` — the file `release.sh`
+`require`s at :231 and uploads at :976, which nothing wrote before this
+(same consumer-without-producer gap RUSH-2749 fixed for the attestation
+itself). It is a single file per store dir, carried forward across runs:
+
+- A helper (`computer-mac` / `keychain` / `menubar`) whose `input-digest`
+  still matches the recorded one keeps its existing record untouched.
+- `keychain` and `menubar` are rebuilt+signed by this script's own Darwin
+  block, so a changed digest for either is re-recorded from the fresh
+  `bin/Agents CLI.app` / `bin/MenubarHelper.app` on disk.
+- `computer-mac` is never rebuilt here — it ships from the separate
+  `native/computer-mac` release path
+  (`agents secrets exec apple.com -- scripts/publish-computer-helper-mac.sh`).
+  A drifted `computer-mac` digest with no prior record to carry forward fails
+  the producer closed, naming that exact command, rather than shipping a
+  stale or missing helper record.
+
+`hash_tree` (in `release-manifest.sh`) hashes every helper input keyed by its
+path **relative to `--repo-root`**, not the absolute path — the prior
+absolute-path keying meant a digest recorded in one worktree could never
+match the same recomputation in a different one (or on a different machine),
+so `require_helpers` structurally could not pass. v1.22.40 was finished by
+hand-recomputing the manifest inside a fixed-path worktree on `mac-mini` and
+re-uploading it; that workaround is no longer needed.

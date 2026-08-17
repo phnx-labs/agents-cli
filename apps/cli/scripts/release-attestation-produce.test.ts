@@ -13,6 +13,7 @@ import path from 'node:path';
 
 const PRODUCE_SCRIPT = path.resolve(__dirname, 'release-attestation-produce.sh');
 const ATTEST_SCRIPT = path.resolve(__dirname, 'release-attestation.sh');
+const MANIFEST_SCRIPT = path.resolve(__dirname, 'release-manifest.sh');
 const roots: string[] = [];
 
 function tmp(prefix: string): string {
@@ -262,5 +263,147 @@ describe('release-attestation-produce.sh', () => {
     });
     expect(result.status).not.toBe(0);
     expect(result.stderr).toMatch(/usage:/);
+  });
+});
+
+// Extends the base fixture with a real (copied, not faked) release-manifest.sh
+// plus minimal source trees for all three known helpers -- computer-mac at repo
+// root, keychain + menubar under apps/cli -- so the producer's helper-manifest
+// step (RUSH-2766) has real inputs to hash. keychain/menubar's "signed" assets
+// are plain placeholder files standing in for what the Darwin-only sign block
+// would have built; the manifest step only checks the files exist and hashes
+// them, so this is enough to exercise it on Linux CI without a real signing box.
+function buildManifestFixture(root: string): ReturnType<typeof buildFixture> & {
+  manifestDigests: Record<'computer-mac' | 'keychain' | 'menubar', string>;
+} {
+  const fx = buildFixture(root);
+  const { caller } = fx;
+
+  fs.mkdirSync(path.join(caller, 'native/computer-mac/Sources'), { recursive: true });
+  fs.mkdirSync(path.join(caller, 'native/computer-mac/scripts'), { recursive: true });
+  fs.writeFileSync(path.join(caller, 'native/computer-mac/Sources/dummy.swift'), '// dummy\n');
+  fs.writeFileSync(path.join(caller, 'native/computer-mac/scripts/build.sh'), '#!/usr/bin/env bash\n');
+  fs.writeFileSync(path.join(caller, 'native/computer-mac/Package.swift'), '// swift package\n');
+
+  fs.writeFileSync(path.join(caller, 'apps/cli/scripts/build-keychain-helper.sh'), '#!/usr/bin/env bash\n');
+  fs.writeFileSync(path.join(caller, 'apps/cli/scripts/keychain-entitlements.plist'), '<plist/>\n');
+  fs.writeFileSync(path.join(caller, 'apps/cli/scripts/verify-keychain-helper.sh'), '#!/usr/bin/env bash\n');
+  fs.copyFileSync(MANIFEST_SCRIPT, path.join(caller, 'apps/cli/scripts/release-manifest.sh'));
+  fs.chmodSync(path.join(caller, 'apps/cli/scripts/release-manifest.sh'), 0o755);
+
+  fs.mkdirSync(path.join(caller, 'apps/cli/menubar/Sources'), { recursive: true });
+  fs.mkdirSync(path.join(caller, 'apps/cli/menubar/scripts'), { recursive: true });
+  fs.writeFileSync(path.join(caller, 'apps/cli/menubar/Sources/dummy.swift'), '// dummy\n');
+  fs.writeFileSync(path.join(caller, 'apps/cli/menubar/scripts/build.sh'), '#!/usr/bin/env bash\n');
+  fs.writeFileSync(path.join(caller, 'apps/cli/menubar/Package.swift'), '// swift package\n');
+
+  fs.mkdirSync(path.join(caller, 'apps/cli/bin/Agents CLI.app/Contents/MacOS'), { recursive: true });
+  fs.writeFileSync(path.join(caller, "apps/cli/bin/Agents CLI.app/Contents/MacOS/Agents CLI"), 'fake-keychain-binary\n');
+  fs.mkdirSync(path.join(caller, 'apps/cli/bin/MenubarHelper.app/Contents/MacOS'), { recursive: true });
+  fs.writeFileSync(path.join(caller, 'apps/cli/bin/MenubarHelper.app/Contents/MacOS/MenubarHelper'), 'fake-menubar-binary\n');
+
+  git(caller, 'add', '-A');
+  git(caller, 'commit', '-q', '-m', 'add helper manifest fixture');
+  git(caller, 'push', '-q', '-u', 'origin', 'main');
+  const headCommit = git(caller, 'rev-parse', 'HEAD');
+
+  const digestFor = (helper: string) => {
+    const r = spawnSync('bash', [MANIFEST_SCRIPT, 'input-digest', '--repo-root', caller, '--helper', helper], {
+      encoding: 'utf-8',
+    });
+    if (r.status !== 0) throw new Error(`input-digest ${helper} failed: ${r.stdout}${r.stderr}`);
+    return r.stdout.trim();
+  };
+
+  return {
+    ...fx,
+    headCommit,
+    manifestDigests: {
+      'computer-mac': digestFor('computer-mac'),
+      keychain: digestFor('keychain'),
+      menubar: digestFor('menubar'),
+    },
+  };
+}
+
+function seedManifest(store: string, helpers: Record<string, { inputDigest: string }>) {
+  fs.mkdirSync(store, { recursive: true });
+  const manifest = {
+    schemaVersion: 1,
+    cliVersion: '9.9.8',
+    cliTree: 'seed-tree',
+    helpers: Object.fromEntries(
+      Object.entries(helpers).map(([name, { inputDigest }]) => [
+        name,
+        {
+          helperVersion: 'prev-1.0.0',
+          inputDigest,
+          assetDigest: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+          assetUrl: '',
+          assetPath: '',
+          signerTeam: '2HTP252L87',
+          architecture: 'universal',
+          platform: 'darwin',
+        },
+      ]),
+    ),
+  };
+  fs.writeFileSync(path.join(store, 'release-manifest.json'), JSON.stringify(manifest));
+}
+
+describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => {
+  it('carries forward an unchanged helper and records fresh digests for changed ones', () => {
+    const root = tmp('attest-produce-manifest-');
+    const fx = buildManifestFixture(root);
+    // Pre-seed only computer-mac, matching its current digest -- it must be
+    // carried forward untouched (this producer never rebuilds it). keychain
+    // and menubar have no prior record, so they must be freshly recorded from
+    // the "signed" assets committed into the fixture.
+    seedManifest(fx.store, { 'computer-mac': { inputDigest: fx.manifestDigests['computer-mac'] } });
+
+    const result = runProduce(fx);
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(result.stdout + result.stderr).toContain('helper computer-mac unchanged');
+
+    const manifestFile = path.join(fx.store, 'release-manifest.json');
+    expect(fs.existsSync(manifestFile)).toBe(true);
+    const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf-8'));
+
+    // computer-mac: untouched, still the seeded placeholder record.
+    expect(manifest.helpers['computer-mac'].helperVersion).toBe('prev-1.0.0');
+    expect(manifest.helpers['computer-mac'].inputDigest).toBe(fx.manifestDigests['computer-mac']);
+
+    // keychain / menubar: freshly recorded against the committed placeholder
+    // "signed" binaries, keyed by the SAME digest a second, independent
+    // checkout computes (proving the RUSH-2766 relative-path fix: the
+    // producer hashed inside a throwaway $WT, the test hashed the caller
+    // clone -- different absolute paths, same relative tree).
+    for (const helper of ['keychain', 'menubar'] as const) {
+      expect(manifest.helpers[helper].inputDigest).toBe(fx.manifestDigests[helper]);
+      expect(manifest.helpers[helper].assetDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+      expect(manifest.helpers[helper].helperVersion).toBe('9.9.9');
+    }
+
+    // The actual consumer: release-manifest.sh require must accept what the
+    // producer wrote, against the SAME caller checkout used to compute the
+    // expected digests above.
+    const required = spawnSync(
+      'bash',
+      [MANIFEST_SCRIPT, 'require', '--file', manifestFile, '--repo-root', fx.caller],
+      { encoding: 'utf-8' },
+    );
+    expect(required.status, required.stdout + required.stderr).toBe(0);
+  });
+
+  it('fails closed when computer-mac drifts with no prior record to carry forward', () => {
+    const root = tmp('attest-produce-manifest-drift-');
+    const fx = buildManifestFixture(root);
+    // No seeded manifest at all: computer-mac has no recorded digest, and this
+    // producer never rebuilds it, so it must refuse rather than ship a stale
+    // or missing helper record.
+    const result = runProduce(fx);
+    expect(result.status).not.toBe(0);
+    expect(result.stdout + result.stderr).toContain('helper computer-mac input changed');
+    expect(result.stdout + result.stderr).toContain('publish-computer-helper-mac.sh');
   });
 });
