@@ -332,9 +332,31 @@ describe('commandsForPlan', () => {
       suite: 'selected',
     }, REPO);
     expect(cmds).toHaveLength(1);
-    expect(cmds[0].cmd.slice(0, 4)).toEqual(['node', './node_modules/vitest/vitest.mjs', 'run', '--']);
+    expect(cmds[0].cmd.slice(0, 3)).toEqual(['node', './node_modules/vitest/vitest.mjs', 'run']);
     expect(cmds[0].cmd).toContain('src/lib/state.test.ts');
     expect(cmds[0].cmd.join(' ')).not.toContain('--shard');
+  });
+
+  // RUSH-2666 (wave 6): vitest's CLI treats every arg after a literal `--`
+  // as opaque pass-through, not a file filter. `vitest run -- state.test.ts`
+  // silently falls back to the full `include` glob. Measured on PR #2770:
+  // the plan selected 3 files, the `--` invocation ran all 864 (883.72s)
+  // instead of the selected files (~13s single-file). Guard the exact
+  // token shape so this regression can't sneak back in.
+  test('vitest invocations never carry a bare `--` before the file list', () => {
+    const single = commandForTestFile('apps/cli/src/lib/state.test.ts', REPO);
+    expect(single.cmd).not.toContain('--');
+
+    const batched = commandsForPlan({
+      ...selectImpact({ files: ['apps/cli/src/lib/state.ts'], repoRoot: REPO, related: false }),
+      tests: [
+        { file: 'apps/cli/src/lib/state.test.ts', reason: 'companion' },
+        { file: 'apps/cli/src/commands/webhook.test.ts', reason: 'companion' },
+      ],
+      checks: [],
+      suite: 'selected',
+    }, REPO);
+    for (const c of batched) expect(c.cmd).not.toContain('--');
   });
 });
 

@@ -60,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           export IMPACT_STARTED_AT="$(date +%s)"
-          bun scripts/ci-scope.ts --run "$RUNNER_TEMP/impact-plan.json" --deadline-sec 1200
+          bun scripts/ci-scope.ts --run "$RUNNER_TEMP/impact-plan.json"
           bun scripts/ci-scope.ts --base "${{ github.event.pull_request.base.sha }}" \
             --head "${{ github.event.pull_request.head.sha }}" \
             --plan-file "$RUNNER_TEMP/impact-plan.json" \

@@ -28,10 +28,15 @@ describe('tests.yml required Linux gate', () => {
 
   test('the Linux job plans with ci-scope and enforces the selected budget', () => {
     expect(TESTS_YML).toContain('bun scripts/ci-scope.ts');
-    expect(TESTS_YML).toContain('--deadline-sec 1200');
     expect(TESTS_YML).toContain('--fail-unmapped');
     expect(TESTS_YML).toContain('--validate-manifest');
     expect(TESTS_YML).toContain('impact-proof-');
+    // RUSH-2666 (wave 6): the workflow must NOT pass --deadline-sec here.
+    // ci-scope.ts's own --run path already picks 1200s for a cli-full plan
+    // and IMPACT_BUDGET_SEC (85s) for a selected plan; a hardcoded
+    // `--deadline-sec 1200` in the workflow overrides that and silently
+    // disables the 85s selected-run budget check on every PR.
+    expect(TESTS_YML).not.toContain('--deadline-sec');
   });
 
   test('fork code stays on GitHub-hosted runners', () => {

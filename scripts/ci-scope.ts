@@ -551,7 +551,12 @@ export function commandForTestFile(file: string, repoRoot: string): RunCommand {
   if (f.startsWith('apps/cli/') && f.endsWith('.test.ts')) {
     return {
       cwd: join(repoRoot, 'apps/cli'),
-      cmd: ['node', './node_modules/vitest/vitest.mjs', 'run', '--', f.slice('apps/cli/'.length)],
+      // No `--` before the path: vitest's CLI treats args after `--` as an
+      // opaque pass-through, not a filter, so the file list is silently
+      // dropped and vitest falls back to its full `include` glob. Measured
+      // on PR #2770 (RUSH-2666): the plan selected 3 files, the `--`
+      // invocation ran all 864, "Selected proof" took 15m21s instead of ~13s.
+      cmd: ['node', './node_modules/vitest/vitest.mjs', 'run', f.slice('apps/cli/'.length)],
     };
   }
   if (f.startsWith('packages/session-tracker/') && f.endsWith('.test.ts')) {
@@ -577,9 +582,10 @@ export function commandsForPlan(plan: ImpactPlan, repoRoot: string): RunCommand[
       .filter((f) => f.startsWith('apps/cli/') && f.endsWith('.test.ts'))
       .map((f) => f.slice('apps/cli/'.length));
     if (cliTests.length) {
+      // No `--` — see commandForTestFile above for why.
       out.push({
         cwd: cli,
-        cmd: ['node', './node_modules/vitest/vitest.mjs', 'run', '--', ...cliTests],
+        cmd: ['node', './node_modules/vitest/vitest.mjs', 'run', ...cliTests],
       });
     }
   }
