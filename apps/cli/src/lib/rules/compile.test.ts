@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -241,5 +241,38 @@ describe('compileRulesForProject', () => {
     const after = fs.lstatSync(claudePath);
 
     expect(after.ino).toBe(before.ino);
+  });
+});
+
+describe('compileRulesForProject — reserved roots (RUSH-2725)', () => {
+  it('refuses to compile $HOME as a project when ~/.agents is the user layer', async () => {
+    // The user layer's own home satisfies the `<cwd>/.agents/rules` existence
+    // test, so without the guard $HOME compiled as a "project" — writing
+    // ~/AGENTS.md and injecting the whole ruleset twice per session. state.ts
+    // captures HOME at import, so re-import the module graph with HOME pointed
+    // at the fixture.
+    const prevHome = process.env.HOME;
+    process.env.HOME = tmpDir;
+    vi.resetModules();
+    try {
+      fs.mkdirSync(path.join(tmpDir, '.agents', 'rules', 'subrules'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, '.agents', 'rules', 'rules.yaml'),
+        'presets:\n  default:\n    subrules: [user]\n'
+      );
+      fs.writeFileSync(path.join(tmpDir, '.agents', 'rules', 'subrules', 'user.md'), 'USER_LAYER_FRAGMENT');
+
+      const { compileRulesForProject: compileFresh } = await import('./compile.js');
+      const result = compileFresh(tmpDir, { layers: projectOnlyLayers(tmpDir) });
+
+      expect(result.compiled).toBe(false);
+      expect(result.agentsPath).toBe('');
+      expect(fs.existsSync(path.join(tmpDir, 'AGENTS.md'))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, 'CLAUDE.md'))).toBe(false);
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      vi.resetModules();
+    }
   });
 });

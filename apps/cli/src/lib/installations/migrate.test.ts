@@ -1071,3 +1071,47 @@ notify:
     expect(fs.existsSync(path.join(noBrowser, 'devices'))).toBe(false);
   });
 });
+
+describe('removeHomeCompiledProjectRules (RUSH-2725)', () => {
+  it('removes the compiled ~/AGENTS.md, its symlinks, and header-carrying copies; keeps user-authored files', async () => {
+    const { removeHomeCompiledProjectRules } = await import('./migrate.js');
+    const { COMPILED_HEADER_PROJECT } = await import('../rules/compile.js');
+    const home = makeTempHistoryDir();
+    const compiled = COMPILED_HEADER_PROJECT + '# Composed ruleset\n';
+    fs.writeFileSync(path.join(home, 'AGENTS.md'), compiled);
+    fs.symlinkSync('AGENTS.md', path.join(home, 'CLAUDE.md'));
+    // Symlink-less-filesystem fallback: a copy of AGENTS.md, same header.
+    fs.writeFileSync(path.join(home, 'GEMINI.md'), compiled);
+    // User-authored per-agent file: no compiled header, must survive.
+    fs.writeFileSync(path.join(home, 'MEMORY.md'), '# my own notes\n');
+
+    removeHomeCompiledProjectRules(home);
+
+    expect(fs.existsSync(path.join(home, 'AGENTS.md'))).toBe(false);
+    expect(fs.existsSync(path.join(home, 'CLAUDE.md'))).toBe(false);
+    expect(fs.existsSync(path.join(home, 'GEMINI.md'))).toBe(false);
+    expect(fs.readFileSync(path.join(home, 'MEMORY.md'), 'utf8')).toBe('# my own notes\n');
+  });
+
+  it('leaves a hand-authored ~/AGENTS.md and its symlinks alone', async () => {
+    const { removeHomeCompiledProjectRules } = await import('./migrate.js');
+    const home = makeTempHistoryDir();
+    fs.writeFileSync(path.join(home, 'AGENTS.md'), '# authored by the user\n');
+    fs.symlinkSync('AGENTS.md', path.join(home, 'CLAUDE.md'));
+
+    removeHomeCompiledProjectRules(home);
+
+    expect(fs.readFileSync(path.join(home, 'AGENTS.md'), 'utf8')).toBe('# authored by the user\n');
+    expect(fs.existsSync(path.join(home, 'CLAUDE.md'))).toBe(true);
+  });
+
+  it('is a no-op when ~/AGENTS.md does not exist', async () => {
+    const { removeHomeCompiledProjectRules } = await import('./migrate.js');
+    const home = makeTempHistoryDir();
+    fs.symlinkSync('AGENTS.md', path.join(home, 'CLAUDE.md')); // dangling — not ours to judge
+
+    removeHomeCompiledProjectRules(home);
+
+    expect(fs.lstatSync(path.join(home, 'CLAUDE.md')).isSymbolicLink()).toBe(true);
+  });
+});

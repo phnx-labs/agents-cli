@@ -13,7 +13,7 @@ import * as os from 'os';
 import * as crypto from 'crypto';
 import { AGENTS, agentConfigDirName } from '../agents.js';
 import type { AgentId } from '../types.js';
-import { getResolvedRulesDir, getVersionsDir } from '../state.js';
+import { getResolvedRulesDir, getVersionsDir, isReservedAgentsDir } from '../state.js';
 import { composeRules, composeRulesFromState, type RulesLayer } from './compose.js';
 
 // Match `@path` preceded by start-of-string or whitespace. This avoids
@@ -25,7 +25,7 @@ const COMPILED_HEADER =
   '<!-- Auto-compiled by agents-cli from ~/.agents/rules/AGENTS.md + imports.\n' +
   '     Edit the source files under ~/.agents/rules/ — edits to this file will be overwritten on next sync. -->\n\n';
 
-const COMPILED_HEADER_PROJECT =
+export const COMPILED_HEADER_PROJECT =
   '<!-- Auto-compiled by agents-cli from .agents/rules/AGENTS.md + imports.\n' +
   '     Edit the source files under .agents/rules/ — edits to this file will be overwritten on next sync. -->\n\n';
 
@@ -284,6 +284,14 @@ export function compileRulesForProject(
   };
 
   if (!fs.existsSync(projectRulesDir)) return empty;
+
+  // The user layer's own home satisfies the rules-dir test — ~/.agents/rules
+  // exists on every configured machine — which compiled $HOME as a "project",
+  // wrote ~/AGENTS.md (+ per-agent symlinks), and injected the whole ruleset
+  // into every session twice: once as global memory, once as "project" memory
+  // (RUSH-2725). Reserved roots (user layer, system layer, or a checkout of
+  // either canonical DotAgents repo) never compile as a project.
+  if (isReservedAgentsDir(path.join(cwd, '.agents'))) return empty;
 
   let composed: { content: string; subrules: { sourcePath: string }[] };
   try {

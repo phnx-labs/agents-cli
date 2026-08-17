@@ -122,7 +122,7 @@ const LEGACY_SYSTEM_DIR = getLegacySystemAgentsDir();
 const MIGRATED_SENTINEL_FILE = getMigratedSentinelPath();
 // Mirrors `sentinelValue` in bootstrap.ts — keep in sync or the bench measures the
 // non-short-circuiting path that a real (already-migrated) install never takes.
-const MIGRATION_SENTINEL_VALUE = 'v20';
+const MIGRATION_SENTINEL_VALUE = 'v21';
 
 describe('checkForUpdates — maybeWarnMultiInstall (index.ts:535-575): the PATH + known-install-root scan', () => {
   bench('resolveRunningPackageRoot(__dirname) — real path math, no fs walk when not a bunfs virtual path (self-update.ts:177)', () => {

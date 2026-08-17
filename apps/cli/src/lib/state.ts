@@ -290,6 +290,21 @@ function isUserOrSystemRepoCheckout(agentsPath: string): boolean {
   return canonicalDotAgentsRepoSlugs().has(origin);
 }
 
+/**
+ * True when `agentsPath` is a reserved `.agents` root that must never be
+ * treated as a project layer: the user repo (~/.agents), the system repo
+ * (~/.agents/.system), or a git checkout of either canonical DotAgents repo.
+ * `getProjectAgentsDir` skips these while walking up; direct-cwd callers
+ * (`compileRulesForProject`) consult the same predicate so `$HOME` — whose
+ * `.agents/rules` is the user layer itself — can never compile as a
+ * "project" (RUSH-2725).
+ */
+export function isReservedAgentsDir(agentsPath: string): boolean {
+  return isSamePath(agentsPath, SYSTEM_AGENTS_DIR)
+    || isSamePath(agentsPath, USER_AGENTS_DIR)
+    || isUserOrSystemRepoCheckout(agentsPath);
+}
+
 /** Walk up from startPath to find a project-scoped .agents/ directory (skipping both roots). */
 export function getProjectAgentsDir(startPath: string = process.cwd()): string | null {
   let dir = path.resolve(startPath);
@@ -297,8 +312,7 @@ export function getProjectAgentsDir(startPath: string = process.cwd()): string |
   while (true) {
     const agentsPath = path.join(dir, '.agents');
     if (fs.existsSync(agentsPath) && fs.statSync(agentsPath).isDirectory()) {
-      if (!isSamePath(agentsPath, SYSTEM_AGENTS_DIR) && !isSamePath(agentsPath, USER_AGENTS_DIR)
-          && !isUserOrSystemRepoCheckout(agentsPath)) {
+      if (!isReservedAgentsDir(agentsPath)) {
         return agentsPath;
       }
     }

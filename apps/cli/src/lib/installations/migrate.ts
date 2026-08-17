@@ -27,6 +27,7 @@ import { migrateDeviceConfigStores } from '../devices/config-migration.js';
 // YAML so they never take the meta lock or prime the meta cache mid-migration.
 import { DEFAULT_BROWSER_PROFILE_NAME } from '../browser/profiles.js';
 import { META_HEADER as DEVICE_META_HEADER } from '../state.js';
+import { COMPILED_HEADER_PROJECT } from '../rules/compile.js';
 
 const HOME = process.env.HOME ?? os.homedir();
 const USER_DIR = path.join(HOME, '.agents');
@@ -2237,6 +2238,53 @@ export function migrateKimiSubagentsToMarkdown(versionsDir?: string): void {
   }
 }
 
+/**
+ * Remove the compiled "project" ruleset the compiler used to write into $HOME
+ * (RUSH-2725). `compileRulesForProject` treated any cwd with `.agents/rules`
+ * as a project — and the user layer at ~/.agents satisfies that test — so it
+ * wrote ~/AGENTS.md plus per-agent symlinks, and every session under $HOME
+ * then loaded the entire ruleset twice (global memory + "project" memory).
+ * The compiler now refuses reserved roots; this removes the artifact already
+ * on disk. Only files we provably own are touched: an AGENTS.md carrying the
+ * compiled-project header, symlinks pointing at it, and copy-fallback files
+ * (symlink-less filesystems) carrying the same header.
+ */
+export function removeHomeCompiledProjectRules(homeDir: string = HOME): void {
+  const agentsPath = path.join(homeDir, 'AGENTS.md');
+  let agentsLstat: fs.Stats;
+  try { agentsLstat = fs.lstatSync(agentsPath); } catch { return; }
+  if (!agentsLstat.isFile()) return;
+  let content = '';
+  try { content = fs.readFileSync(agentsPath, 'utf8'); } catch { return; }
+  if (!content.startsWith(COMPILED_HEADER_PROJECT)) return;
+
+  const seen = new Set<string>(['AGENTS.md']);
+  for (const agent of Object.values(AGENTS)) {
+    const fname = agent.instructionsFile;
+    if (seen.has(fname) || fname.includes('/') || fname.includes('\\')) continue;
+    seen.add(fname);
+    const linkPath = path.join(homeDir, fname);
+    let lstat: fs.Stats;
+    try { lstat = fs.lstatSync(linkPath); } catch { continue; }
+    if (lstat.isSymbolicLink()) {
+      let target = '';
+      try { target = fs.readlinkSync(linkPath); } catch { continue; }
+      if (target === 'AGENTS.md') {
+        try { fs.unlinkSync(linkPath); } catch { /* next run retries */ }
+      }
+    } else if (lstat.isFile()) {
+      // Symlink-less filesystems got a copy of AGENTS.md instead — same header.
+      let copy = '';
+      try { copy = fs.readFileSync(linkPath, 'utf8'); } catch { continue; }
+      if (copy.startsWith(COMPILED_HEADER_PROJECT)) {
+        try { fs.unlinkSync(linkPath); } catch { /* next run retries */ }
+      }
+    }
+  }
+
+  try { fs.unlinkSync(agentsPath); } catch { /* next run retries */ }
+}
+
 /** Run all idempotent migrations. Safe to call multiple times. */
 export async function runMigration(): Promise<void> {
   // MUST run first: every other migrator reads SYSTEM_DIR (the new path).
@@ -2330,6 +2378,10 @@ export async function runMigration(): Promise<void> {
   // Fold the legacy watchdog enable sentinel into `watchdog.enabled` config so a
   // user who opted in under the old build stays opted in after upgrading.
   migrateWatchdogSentinelToConfig();
+  // Delete the compiled "project" ruleset older builds wrote into $HOME — the
+  // duplicate-injection artifact of RUSH-2725. The compiler no longer writes
+  // it; this cleans up what is already on every machine.
+  removeHomeCompiledProjectRules();
   // Deactivate any routine whose execution context no longer resolves ready, so
   // an anchor-less agent/workflow routine cannot keep firing-and-failing after the
   // fold (RUSH-2290). Runs AFTER the tick/watchdog routines are added so those
