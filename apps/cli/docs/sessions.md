@@ -890,6 +890,30 @@ selectors produce one document separated by horizontal rules. `--json` emits the
 selected ids, harnesses, redaction/reasoning settings, and Markdown strings for
 machine consumers.
 
+### Shareable link (`sessions share`)
+
+`agents sessions share <session>` is the same document with a publish on the end of
+it: it renders one session, wraps it in a self-contained branded HTML page, and
+publishes it to your share endpoint, printing the link.
+
+```bash
+agents sessions share a1b2c3d4                   # → https://share.agents-cli.sh/<you>/session-a1b2c3d4
+agents sessions share a1b2c3d4 --public          # also list it in your gallery
+agents sessions share a1b2c3d4 --reasoning fold  # reasoning in collapsible sections
+```
+
+The slug is `session-<shortId>`, so re-sharing one session updates one URL and keeps
+the prior page as a revision. It takes one session at a time — several transcripts on
+one page give the reader no way to reference the one that matters.
+
+Three things differ from `agents artifacts share`, because a transcript is not a plan:
+the page is **unlisted** unless `--public` (the URL stays world-readable — a
+capability URL, not a secret), **emails are masked** on top of the render's own
+redaction so the publish scan passes without `--force`, and **raw HTML in the body is
+escaped** so a session that printed a `<script>` tag does not ship an executable one.
+`sessions render` is unaffected by all three. Full detail:
+[`share.md` §Sharing a session](share.md#sharing-a-session).
+
 ## Live sessions (`--active`) and the interactive browser
 
 **`--browser` switches to a different pool entirely.** `agents sessions --browser`

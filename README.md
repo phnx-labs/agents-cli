@@ -285,6 +285,9 @@ agents sessions a1b2c3d4 --markdown
 # Render a shareable, redacted Markdown transcript with the session preview on top
 agents sessions render a1b2c3d4 -o session.md
 
+# Or publish it as a link in one step (unlisted + redacted by default)
+agents sessions share a1b2c3d4
+
 # Just the last 3 turns, user messages only
 agents sessions a1b2c3d4 --last 3 --include user
 
@@ -368,6 +371,8 @@ Each live session resolves to `working`, `waiting_input` (with why -- a question
 Landing on a session cold? `agents sessions <id>` prints a catch-up digest: an inferred title, files changed grouped by directory (created / modified / deleted), a histogram of which tools did the work (including parsed Bash commands -- `git`, `npm`, `ffmpeg`, `ssh`, and so on), and the last test verdict -- the signals to reload a task in seconds.
 
 Sharing a session uses `agents sessions render <id> -o session.md`, not the raw harness JSONL. The document starts with that same preview, then presents user and assistant turns, fenced commands, structured tool arguments, and bounded tool output. Credential-shaped values and local home paths are redacted by default; `--no-redact` is for local-only inspection.
+
+`agents sessions share <id>` goes one step further and publishes that document as a self-contained web page on your own share endpoint, printing the link. It is **unlisted** unless you pass `--public` — a transcript carries file paths, command output, and error text that a plan does not, so it stays out of your public gallery by default, and emails are masked on top of the render's own redaction. The slug is `session-<shortId>`, so re-sharing one session updates one URL.
 
 ### Resume anywhere — and stay resumed
 
