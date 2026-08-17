@@ -1,0 +1,26 @@
+{
+  "kind": "ownership-and-public-surface-graph",
+  "nodes": [
+    {"id": "agents-cli", "role": "canonical CLI and AGI EXT monorepo"},
+    {"id": "agents-cli-web", "role": "agents-cli.sh site source"},
+    {"id": "agi-cli-web", "role": "agi-cli.sh site source"},
+    {"id": "agents", "role": "Rush product monorepo with harness and rush/cli Go modules"},
+    {"id": "linear-cli", "role": "Linear-specific tracker CLI"},
+    {"id": "tickets-cli", "role": "multi-provider tracker prototype"},
+    {"id": "svatlas", "role": "standalone product with OpenSpec behavior source"},
+    {"id": "swarm", "role": "frozen extension archive"},
+    {"id": "swarmify", "role": "byte-identical frozen extension archive"}
+  ],
+  "edges": [
+    {"from": "agents-cli-web", "to": "agents-cli", "type": "documents", "evidence": "README.md:24-26"},
+    {"from": "agi-cli-web", "to": "agents-cli", "type": "documents", "evidence": "README.md:23-25"},
+    {"from": "agents-cli-web", "to": "agi-cli-web", "type": "live redirect", "evidence": "HTTPS probe: agents-cli.sh redirects to agi-cli.sh"},
+    {"from": "swarm", "to": "agents-cli/apps/ext", "type": "deprecated pointer", "evidence": "extension/AGENTS.md:3-7; target path is stale"},
+    {"from": "swarmify", "to": "agents-cli/apps/ext", "type": "deprecated pointer", "evidence": "extension/AGENTS.md:3-7; target path is stale"},
+    {"from": "agents/rush/cli", "to": "agents/harness", "type": "Go module replace dependency", "evidence": "rush/cli imports the harness module"},
+    {"from": "agents/harness/config", "to": "agents/rush/cli/internal/metadata", "type": "shared metadata contract", "evidence": "duplicated agentSlugPattern and agent_extensions row semantics"},
+    {"from": "linear-cli", "to": "Linear", "type": "tracker API"},
+    {"from": "tickets-cli", "to": "Linear/GitHub/Jira", "type": "multi-provider tracker API"}
+  ],
+  "caveat": "This graph records cross-repository ownership and public-surface relationships. The repositories do not form one build graph."
+}

@@ -1,0 +1,29 @@
+{
+  "repo": "agents-cli",
+  "scope": "apps/cli",
+  "analyzed_commit": "f03f9f1156ae39d208908917562adf7d2c8bc63b",
+  "latest_checked_commit": "7cafb8e4a",
+  "latest_delta": "Two sessions-preview commits; neither touches the launch-planning or module-boundary evidence in this report.",
+  "modules": 55,
+  "module_edges": 288,
+  "cycles": 1,
+  "cycle_nodes": 43,
+  "cycle_caveat": "Directory aggregation joins parent and child modules; this SCC is not proof of a runtime cycle and is not proposed as work.",
+  "god_modules": [
+    {"module": "src/lib", "files": 189, "loc": 68619, "fan_in": 1084, "fan_out": 227},
+    {"module": "src/lib/session", "files": 61, "loc": 29157, "fan_in": 254, "fan_out": 101},
+    {"module": "src/lib/devices", "files": 26, "loc": 6644, "fan_in": 107, "fan_out": 59}
+  ],
+  "extraction_candidates": [
+    {"module": "src/lib/terminal", "files": 17, "loc": 1640, "cohesion": 0.85},
+    {"module": "src/lib/monitors", "files": 15, "loc": 1949, "cohesion": 0.58},
+    {"module": "src/lib/self-heal", "files": 7, "loc": 400, "cohesion": 0.55}
+  ],
+  "provider_patterns": {"families": 105, "contract_exemplars": 2, "partial": 54, "bypassed": 9, "missing": 40, "collapsible_arms": 3431},
+  "accepted_signal": "runner.ts duplicates harness launch planning already owned by exec.ts; the Droid model flag contradiction reproduced and is corrected in PR 2764.",
+  "rejected_signals": [
+    "Do not re-propose the already-landed cycle-break work from the 2026-08-15 plan.",
+    "Do not move core types or state: RUSH-2746 measured 587 import edits without a boundary gain.",
+    "Do not extract terminal before the launch-planning seam is unified."
+  ]
+}

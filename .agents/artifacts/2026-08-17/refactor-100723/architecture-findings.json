@@ -1,0 +1,57 @@
+[
+  {
+    "rank": 1,
+    "title": "One agents-cli launch planner",
+    "repo": "agents-cli",
+    "current": "exec.ts owns AGENT_COMMANDS and buildExecCommand, while runner.ts still owns six mode branches and a second routine command table.",
+    "evidence": ["apps/cli/src/lib/exec.ts:654-682", "apps/cli/src/lib/exec.ts:1082-1233", "apps/cli/src/lib/runner.ts:559-694", "RUSH-2746"],
+    "incident": "runner.ts emitted --model for Droid while exec.ts declares -m; PR 2764 corrects the symptom.",
+    "target": "runner.ts passes routine lifecycle inputs into the canonical exec launch planner and keeps only scheduling, sandbox-home, spawn, timeout, and transcript lifecycle.",
+    "boundary": "Exclude command jobs, workflow frontmatter launches, resume routing, and Codex Cloud transport."
+  },
+  {
+    "rank": 2,
+    "title": "One website source for both CLI domains",
+    "repos": ["agents-cli-web", "agi-cli-web"],
+    "current": "Both repositories claim to be the official site for the same npm package; agents-cli.sh currently redirects to agi-cli.sh.",
+    "evidence": ["agents-cli-web/README.md:24-26", "agi-cli-web/README.md:23-25", "163 shared paths: 78 byte-identical and 85 divergent", "7 agents-cli-web-only paths", "66 agi-cli-web-only paths"],
+    "target": "Keep agi-cli-web as the source, merge any still-required seven unique alias-repo paths, and replace agents-cli-web with redirect/deployment configuration plus an archival README.",
+    "decision": "Canonical repository selection is a product/governance gate."
+  },
+  {
+    "rank": 3,
+    "title": "Split hooks.ts behind one adapter registry",
+    "repo": "agents-cli",
+    "current": "hooks.ts is 3,899 lines and combines discovery, installation, runtime repair, manifest parsing, and per-harness settings writers for eleven harness families.",
+    "evidence": ["apps/cli/src/lib/hooks.ts:47-1880", "apps/cli/src/lib/hooks.ts:1884-3626", "apps/cli/src/lib/hooks.ts:3775-3898", "apps/cli/src/lib/hooks/: existing cache and match modules"],
+    "target": "Keep hooks.ts as a compatibility facade; move discovery/install, runtime diagnostics, manifest handling, and one adapter per harness into src/lib/hooks, selected through one complete adapter registry.",
+    "boundary": "Moves-only first; no hook event, settings shape, capability, or installed-file change."
+  },
+  {
+    "rank": 4,
+    "title": "One Rush agent-extension metadata contract",
+    "repo": "agents",
+    "current": "The harness reader and rush/cli writer duplicate the agent slug regex and describe the same agent_extensions row rules from opposite sides.",
+    "evidence": ["harness/config/agent_extensions.go:14-19", "rush/cli/internal/metadata/agent_extensions.go:9-25", "rush/cli/internal/metadata/agent_extensions.go:28-49"],
+    "target": "Put slug validation and row semantics in one harness-owned Go package already reachable from rush/cli; both reader and writer consume it.",
+    "boundary": "Do not merge the two Go modules or move database ownership."
+  },
+  {
+    "rank": 5,
+    "title": "Split the linear-cli executable by command family",
+    "repo": "linear-cli",
+    "current": "The extensionless linear entrypoint is 4,944 lines and its test file is 2,019 lines; the generic analyzers under-counted both because they omit extensionless source.",
+    "evidence": ["linear:4944", "test_linear.py:2019", "surface.json:54 commands", "README.md:151"],
+    "target": "Keep one executable entrypoint but extract parser/transport, task read/write, project/milestone, comment, relation, and delegation command modules with matching test files.",
+    "boundary": "Preserve every command name, JSON shape, config path, and delegate-only ownership model."
+  },
+  {
+    "rank": 6,
+    "title": "Collapse duplicate frozen extension archives",
+    "repos": ["swarm", "swarmify"],
+    "current": "Both repositories are the exact same commit and tree and both point contributors at removed agents-cli/apps/factory.",
+    "evidence": ["commit f14d50b826637262a82d095a18bf6d14abb3826e", "tree 07bea7d459c85e6393614ebe5de08d77d246feea", "extension/AGENTS.md:3-7", "agents-cli/apps/ext/AGENTS.md:3-10"],
+    "target": "Correct both redirects to agents-cli/apps/ext, retain one archived GitHub repository as the historical URL, and archive the duplicate.",
+    "decision": "Which repository URL remains the archive is a governance gate."
+  }
+]

@@ -1,0 +1,137 @@
+[
+  {
+    "id":"agents-cli-one-engine",
+    "repo":"agents-cli",
+    "claim":"Agent execution enters through one engine: buildExecEnv then execAgent or runWithFallback.",
+    "source_file":"agents-cli/AGENTS.md",
+    "source_line":81,
+    "kind":"singularity",
+    "check":"rg -n 'buildExecEnv|execAgent|runWithFallback' apps/cli/src"
+  },
+  {
+    "id":"agents-cli-cli-owns-state",
+    "repo":"agents-cli",
+    "claim":"apps/cli owns session, team, run, cloud, and SSH state; apps/ext consumes the CLI surface.",
+    "source_file":"agents-cli/AGENTS.md",
+    "source_line":110,
+    "kind":"ownership",
+    "check":"rg -n 'sessions watch --json|agents (sessions|teams|run|cloud)' apps/ext"
+  },
+  {
+    "id":"agents-cli-single-scheduler",
+    "repo":"agents-cli",
+    "claim":"Fleet-affecting work has one scheduler and one executor in the agents-cli daemon or a CLI command it drives.",
+    "source_file":"agents-cli/AGENTS.md",
+    "source_line":117,
+    "kind":"singularity",
+    "check":"rg -n 'setInterval|setTimeout|cron|schedule' apps/ext/src apps/ext/ui/src"
+  },
+  {
+    "id":"agents-cli-teams-run-boundary",
+    "repo":"agents-cli",
+    "claim":"Teams and run share execution through the agents run command line, not a shared in-process library.",
+    "source_file":"agents-cli/apps/cli/docs/architecture.md",
+    "source_line":208,
+    "kind":"layering",
+    "check":"rg -n 'agents run|runCommand|spawn.*run' apps/cli/src/commands/teams.ts apps/cli/src/lib/teams"
+  },
+  {
+    "id":"agents-cli-account-state",
+    "repo":"agents-cli",
+    "claim":"Account state is daemon-owned and live state is published once then streamed.",
+    "source_file":"agents-cli/apps/cli/docs/architecture.md",
+    "source_line":227,
+    "kind":"ownership",
+    "check":"rg -n 'usage|auth.*health|active-session|publish' apps/cli/src/lib/daemon.ts apps/cli/src/lib/daemon apps/cli/src/lib/session"
+  },
+  {
+    "id":"agents-two-go-modules",
+    "repo":"agents",
+    "claim":"The monorepo has exactly two Go modules: harness and rush/cli.",
+    "source_file":"agents/README.md",
+    "source_line":62,
+    "kind":"layout",
+    "check":"git ls-files 'go.mod' '*/go.mod' '*/*/go.mod'"
+  },
+  {
+    "id":"agents-metadata-source",
+    "repo":"agents",
+    "claim":"The Rush metadata database is the source of truth for artifact metadata.",
+    "source_file":"agents/AGENTS.md",
+    "source_line":454,
+    "kind":"ownership",
+    "check":"rg -n 'metadata\\.db|artifact.*metadata' rush/app/src rush/cli"
+  },
+  {
+    "id":"agents-cli-web-official",
+    "repo":"agents-cli-web",
+    "claim":"agents-cli-web is the website and documentation deployed at agents-cli.sh, not CLI source.",
+    "source_file":"agents-cli-web/README.md",
+    "source_line":24,
+    "kind":"ownership",
+    "check":"rg -n 'agents-cli\\.sh|@phnx-labs/agents-cli' README.md package.json scripts"
+  },
+  {
+    "id":"agi-cli-web-official",
+    "repo":"agi-cli-web",
+    "claim":"agi-cli-web is the website and documentation deployed at agi-cli.sh, not CLI source.",
+    "source_file":"agi-cli-web/README.md",
+    "source_line":23,
+    "kind":"ownership",
+    "check":"rg -n 'agi-cli\\.sh|agents-cli\\.sh|@phnx-labs/agents-cli' README.md package.json scripts"
+  },
+  {
+    "id":"swarm-deprecated",
+    "repo":"swarm",
+    "claim":"The repository is frozen history; Agents extension development moved into agents-cli.",
+    "source_file":"swarm/AGENTS.md",
+    "source_line":3,
+    "kind":"process",
+    "check":"git log -1 --format='%cI'; rg -n 'swarm-ext|apps/(factory|ext)' AGENTS.md README.md"
+  },
+  {
+    "id":"swarmify-deprecated",
+    "repo":"swarmify",
+    "claim":"The repository is frozen history; Agents extension development moved into agents-cli.",
+    "source_file":"swarmify/AGENTS.md",
+    "source_line":3,
+    "kind":"process",
+    "check":"git log -1 --format='%cI'; rg -n 'swarm-ext|apps/(factory|ext)' AGENTS.md README.md"
+  },
+  {
+    "id":"linear-delegate-ownership",
+    "repo":"linear-cli",
+    "claim":"delegate is the only agent ownership model; there is no agent-label lane.",
+    "source_file":"linear-cli/README.md",
+    "source_line":151,
+    "kind":"singularity",
+    "check":"rg -n 'delegateId|delegate|agent:' linear"
+  },
+  {
+    "id":"tickets-multi-provider",
+    "repo":"tickets-cli",
+    "claim":"tickets-cli extends the linear-cli pattern across Linear, GitHub Issues, and Jira with agent-lane labels.",
+    "source_file":"tickets-cli/README.md",
+    "source_line":3,
+    "kind":"existence",
+    "check":"rg -n 'linear|github|jira|agent:' tickets"
+  },
+  {
+    "id":"svatlas-spec-source",
+    "repo":"svatlas",
+    "claim":"openspec/specs is the behavior source of truth and must be read before src.",
+    "source_file":"svatlas/AGENTS.md",
+    "source_line":129,
+    "kind":"process",
+    "check":"test -f openspec/specs/product-surface/spec.md"
+  },
+  {
+    "id":"svatlas-founders-index",
+    "repo":"svatlas",
+    "claim":"Founders list queries go through /api/founders to people_index, never a client-composed PostgREST URL.",
+    "source_file":"svatlas/openspec/specs/product-surface/spec.md",
+    "source_line":374,
+    "kind":"layering",
+    "check":"rg -n '/api/founders|people_index|from\\([\"'\"']people[\"'\"']\\)' src"
+  }
+]

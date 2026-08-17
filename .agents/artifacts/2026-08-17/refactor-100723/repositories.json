@@ -1,0 +1,11 @@
+[
+  {"repo":"agents-cli","head":"f03f9f1156ae39d208908917562adf7d2c8bc63b","tree":"659174b7e6571afeefcbe2c4ee64ef50136e764f","tracked_files":2965,"origin":"https://github.com/phnx-labs/agents-cli"},
+  {"repo":"agents","head":"fa33d0a961a20fdc9755abc3d639a17f310af0ac","tree":"29823acb02cb5d54133f6e93905eac64ee3d114e","tracked_files":9917,"origin":"https://github.com/muqsitnawaz/agents"},
+  {"repo":"agents-cli-web","head":"749e4c42371810254d8482bb3a010470290544c7","tree":"db0b233716274b216883838f79927911457bfea2","tracked_files":170,"origin":"https://github.com/phnx-labs/agents-cli-web"},
+  {"repo":"agi-cli-web","head":"80b0507b41e22dbcabbbec6b82ea4b246999118a","tree":"595f573891a7ede2cd2129e4ec840fd123de400b","tracked_files":229,"origin":"https://github.com/phnx-labs/agi-cli-web"},
+  {"repo":"linear-cli","head":"3762a6744b3cc72cf05198182bda5c16fdbcd87b","tree":"487049c21b93d0d5f7e3b4e3e8692052ac465fbb","tracked_files":37,"origin":"https://github.com/phnx-labs/linear-cli"},
+  {"repo":"svatlas","head":"21d942179def5cef34dbae97a35fc8538e71cde2","tree":"a4a4f373ba84d24bbbc74b0c9e59ecd09192077d","tracked_files":214,"origin":"https://github.com/phnx-labs/svatlas"},
+  {"repo":"swarm","head":"f14d50b826637262a82d095a18bf6d14abb3826e","tree":"07bea7d459c85e6393614ebe5de08d77d246feea","tracked_files":506,"origin":"https://github.com/muqsitnawaz/swarm"},
+  {"repo":"swarmify","head":"f14d50b826637262a82d095a18bf6d14abb3826e","tree":"07bea7d459c85e6393614ebe5de08d77d246feea","tracked_files":506,"origin":"https://github.com/muqsitnawaz/swarmify"},
+  {"repo":"tickets-cli","head":"a90baa2fd46292396b9f979de7073a97fbea8953","tree":"c374667a1f63ca1bd48b96be2d90f1dfcbbf9775","tracked_files":6,"origin":"https://github.com/phnx-labs/tickets-cli"}
+]

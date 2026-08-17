@@ -1,0 +1,18 @@
+{
+  "formula": "priority = structural_harm (1-5) × exposure (1-5)",
+  "moves": [
+    {"rank":1,"move":"One agents-cli launch planner","harm":5,"exposure":5,"score":25,"status":"structural implementation gated; symptom fixed in PR 2764"},
+    {"rank":2,"move":"One website source for both CLI domains","harm":5,"exposure":4,"score":20,"status":"canonical-repository decision required"},
+    {"rank":3,"move":"Split hooks.ts behind one adapter registry","harm":4,"exposure":5,"score":20,"status":"ready after launch-planner move"},
+    {"rank":4,"move":"One Rush agent-extension metadata contract","harm":4,"exposure":4,"score":16,"status":"ready after plan approval"},
+    {"rank":5,"move":"Split the linear-cli executable by command family","harm":4,"exposure":2,"score":8,"status":"ready after plan approval"},
+    {"rank":6,"move":"Collapse duplicate frozen extension archives","harm":5,"exposure":1,"score":5,"status":"archive URL decision required"}
+  ],
+  "rejected": [
+    {"candidate":"agents seven-module SCC","reason":"Reverse edges come from a build-ignored catalog generator, tests, and an example; not a demonstrated production cycle."},
+    {"candidate":"regroup svatlas src/lib","reason":"Fresh main already contains commit f572283 and domain directories; OpenSpec and substantive AGENTS documentation also landed. RUSH-2672 is stale for the code-refactor scope."},
+    {"candidate":"move agents-cli core types/state","reason":"RUSH-2746 measured 587 import edits without a useful new boundary."},
+    {"candidate":"retire tickets-cli","reason":"No workspace caller was found, but it has a distinct multi-provider contract; absence is insufficient proof of no external consumers."},
+    {"candidate":"extract agents-cli terminal package now","reason":"The launch-planning ownership seam is higher priority and package extraction would widen the first change."}
+  ]
+}

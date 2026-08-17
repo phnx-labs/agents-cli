@@ -1,0 +1,17 @@
+[
+  {"id":"agents-cli-one-engine","status":"verified","evidence":"AGENTS.md:81 and apps/cli/src/lib/exec.ts:654-682; runner drift is the ranked launch-planner move."},
+  {"id":"agents-cli-cli-owns-state","status":"verified","evidence":"AGENTS.md:110 and apps/ext/AGENTS.md:3-10."},
+  {"id":"agents-cli-single-scheduler","status":"verified-with-caveat","evidence":"AGENTS.md:117-124; extension timers found by the check are presentation/read loops, not a second fleet executor."},
+  {"id":"agents-cli-teams-run-boundary","status":"verified","evidence":"apps/cli/docs/architecture.md:208-214."},
+  {"id":"agents-cli-account-state","status":"verified","evidence":"apps/cli/docs/architecture.md:227-248."},
+  {"id":"agents-two-go-modules","status":"verified","evidence":"README.md:62; tracked go.mod inventory returns harness/go.mod and rush/cli/go.mod."},
+  {"id":"agents-metadata-source","status":"verified","evidence":"AGENTS.md:454 and harness/config/agent_extensions.go:21-40."},
+  {"id":"agents-cli-web-official","status":"drift","evidence":"README.md:24-26 claims agents-cli.sh ownership, but the live domain redirects to agi-cli.sh and the two source trees diverge."},
+  {"id":"agi-cli-web-official","status":"verified-with-conflict","evidence":"README.md:23-25 and the live redirect make agi-cli-web the current canonical site candidate; agents-cli-web still claims the alias independently."},
+  {"id":"swarm-deprecated","status":"drift","evidence":"extension/AGENTS.md:3-7 correctly says frozen but points to removed apps/factory instead of apps/ext."},
+  {"id":"swarmify-deprecated","status":"drift","evidence":"extension/AGENTS.md:3-7 has the same stale target; both repositories share commit and tree hashes."},
+  {"id":"linear-delegate-ownership","status":"verified","evidence":"README.md:151 and the linear executable's delegate paths."},
+  {"id":"tickets-multi-provider","status":"verified","evidence":"README.md:3-5; no workspace caller was found, so retirement is not yet justified."},
+  {"id":"svatlas-spec-source","status":"verified","evidence":"AGENTS.md:129 states OpenSpec is the behavior source of truth."},
+  {"id":"svatlas-founders-index","status":"verified","evidence":"openspec/specs/product-surface/spec.md:373-381 names /api/founders to people_index and cites implementation files."}
+]
