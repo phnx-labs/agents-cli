@@ -60,32 +60,47 @@ export function escapeHtml(text: string): string {
  * and an exact-string gate cannot be widened by crafted input the way a tag parser
  * can. Anything else — including `<details onclick=…>` — still escapes.
  */
-const ALLOWED_RAW_HTML = new Set([
-  '<details>',
-  '</details>',
-  '<summary>Reasoning</summary>',
-]);
+/**
+ * Sentinel standing in for one folded reasoning block while the document goes
+ * through marked. Deliberately not valid Markdown or HTML, and any pre-existing
+ * occurrence in the transcript is neutralized before substitution.
+ */
+const FOLD_SENTINEL = 'aGeNtSfOlDbLoCk';
+
+/** The exact block `session/render.ts` pushes on its `fold` branch. */
+const FOLD_BLOCK = /<details>\n<summary>Reasoning<\/summary>\n\n([\s\S]*?)\n\n<\/details>/g;
 
 /**
- * True only when every non-blank line of the token is one of {@link ALLOWED_RAW_HTML}.
+ * Lift every folded reasoning block out of the Markdown, leaving a sentinel.
  *
- * Line-wise rather than whole-token, because marked hands the same markup over in
- * several shapes depending on what surrounds it — `<details>\n<summary>…</summary>\n\n`
- * as one opening token, `</details>` with or without a trailing newline. Matching the
- * whole raw missed the closing tag in a real document while passing on an isolated
- * block, which is precisely the drift this gate must not have.
+ * `renderer.html` escapes raw HTML unconditionally — the transcript body is model
+ * and tool output, so nothing in it may round-trip as markup. That also escaped
+ * the `<details>` wrapper `--reasoning fold` emits, which is why the disclosure
+ * element has to be reconstructed here instead of allowlisted through.
  *
- * Still an exact-string set, so nothing with an attribute, a URL, or extra content
- * can pass: any addition changes the line and it escapes.
+ * Allowlisting was tried twice and is the wrong shape: marked hands the same
+ * markup over as several different raw strings depending on context (a whole-token
+ * gate passed the opening tag and escaped the closing one in a real document), and
+ * a bare `<details>` in ordinary prose is a complete INLINE html token — so prose
+ * that merely mentions the tag would emit a live, unclosed element that swallows
+ * every later turn into it. Reconstructing both ends here makes the pairing
+ * structural: it cannot be unbalanced by anything the transcript contains.
  */
-function isAllowedRawHtml(raw: string): boolean {
-  const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
-  return lines.length > 0 && lines.every((line) => ALLOWED_RAW_HTML.has(line));
+export function liftFoldBlocks(markdown: string): { text: string; blocks: string[] } {
+  const blocks: string[] = [];
+  // A transcript that literally contains the sentinel must not be able to forge a
+  // disclosure element, so break any occurrence before inserting our own.
+  const safe = markdown.split(FOLD_SENTINEL).join(`${FOLD_SENTINEL[0]}​${FOLD_SENTINEL.slice(1)}`);
+  const text = safe.replace(FOLD_BLOCK, (_match, inner: string) => {
+    blocks.push(inner);
+    return `${FOLD_SENTINEL}${blocks.length - 1}${FOLD_SENTINEL}`;
+  });
+  return { text, blocks };
 }
 
 function safeRenderer(): Renderer {
   const renderer = new Renderer();
-  renderer.html = ({ raw }) => (isAllowedRawHtml(raw) ? raw : escapeHtml(raw));
+  renderer.html = ({ raw }) => escapeHtml(raw);
   const isSafeHref = (href: string): boolean => /^(https?:|mailto:|#|\/)/i.test(href.trim());
   renderer.link = ({ href, title, tokens }) => {
     const text = renderer.parser.parseInline(tokens);
@@ -167,10 +182,19 @@ export function renderSessionHtmlDocument(
   const title = sessionPageTitle(session, markdown);
   // The <h1> is re-rendered as the page header, so drop it from the body to
   // avoid printing the title twice.
-  const body = marked.parse(markdown.replace(/^#\s+.+\n/, ''), {
-    renderer: safeRenderer(),
-    async: false,
-  }) as string;
+  const { text, blocks } = liftFoldBlocks(markdown.replace(/^#\s+.+\n/, ''));
+  const render = (md: string): string =>
+    marked.parse(md, { renderer: safeRenderer(), async: false }) as string;
+  // Reconstruct each disclosure element around its own separately-rendered
+  // content, so the open/close pairing is ours and cannot be unbalanced by the
+  // transcript.
+  const body = blocks.reduce(
+    (html, inner, i) => html.replace(
+      new RegExp(`<p>${FOLD_SENTINEL}${i}${FOLD_SENTINEL}</p>`),
+      `<details><summary>Reasoning</summary>\n${render(inner)}</details>`,
+    ),
+    render(text),
+  );
   const chips = buildChips(session)
     .map((c) => `<span class="chip"><span class="k">${escapeHtml(c.label)}</span>${escapeHtml(c.value)}</span>`)
     .join('\n      ');

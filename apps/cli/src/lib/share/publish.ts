@@ -239,9 +239,12 @@ const HEADER_TRANSLITERATIONS: Array<[RegExp, string]> = [
 export function toHeaderValue(text: string): string {
   let safe = text;
   for (const [pattern, replacement] of HEADER_TRANSLITERATIONS) safe = safe.replace(pattern, replacement);
-  // eslint-disable-next-line no-control-regex
   safe = safe.replace(/[^\x20-\x7E\xA0-\xFF]/g, '').replace(/\s+/g, ' ').trim();
-  return safe || '(unnamed)';
+  // An input that was empty to begin with stays empty — `--meta note=` means an
+  // empty note, not an unnamed one. The marker is only for a value that HAD
+  // content and lost all of it to the latin1 fold.
+  if (safe) return safe;
+  return text.trim() ? '(unnamed)' : '';
 }
 
 /**

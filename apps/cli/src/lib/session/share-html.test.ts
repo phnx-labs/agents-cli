@@ -66,6 +66,42 @@ describe('renderSessionHtmlDocument', () => {
     expect(body).toContain('the model weighed two options');
   });
 
+  it('closes the disclosure element, so a later turn is not swallowed into it', () => {
+    // An unclosed <details> makes the browser nest everything after it inside the
+    // collapsed element: the page showed the reasoning toggle and then nothing.
+    // Assert the PAIR, and assert on the closing tag specifically — a test that
+    // only checks `not.toContain('&lt;details&gt;')` passes while `&lt;/details&gt;`
+    // is on the page.
+    const session = meta({ filePath: path.join(TESTDATA, 'claude-thinking.jsonl') });
+    const html = renderSessionHtmlDocument(session, renderSessionMarkdownDocument(session, { reasoning: 'fold' }));
+    const count = (re: RegExp) => (html.match(re) || []).length;
+
+    expect(count(/<details>/g)).toBe(1);
+    expect(count(/<\/details>/g)).toBe(1);
+    expect(count(/&lt;\/?details&gt;/g)).toBe(0);
+    // The turn that follows the reasoning is still a sibling, not a child.
+    expect(html).toContain('off by one');
+  });
+
+  it('escapes a details tag that only appears in prose, and keeps what follows visible', () => {
+    // `<details>` on its own is a complete INLINE html token, so a transcript that
+    // merely discusses the tag used to emit a live, unclosed element that hid every
+    // later turn.
+    const html = renderSessionHtmlDocument(
+      meta(),
+      'Use a <details> element to collapse it.\n\n## Assistant\n\nthe turn after it\n',
+    );
+    expect(html).not.toMatch(/<details>/);
+    expect(html).toContain('&lt;details&gt;');
+    expect(html).toContain('the turn after it');
+  });
+
+  it('cannot be tricked into forging a disclosure element with the sentinel', () => {
+    const html = renderSessionHtmlDocument(meta(), 'aGeNtSfOlDbLoCk0aGeNtSfOlDbLoCk and more text\n');
+    expect(html).not.toMatch(/<details>/);
+    expect(html).toContain('and more text');
+  });
+
   it('stays matched to what the real fold renderer emits', () => {
     // The allowlist is an exact-string gate, so it silently stops working if
     // session/render.ts ever changes its fold markup. Drive the real producer.
@@ -111,15 +147,19 @@ describe('renderSessionHtmlDocument', () => {
     expect(html).not.toContain('whether the caller compensates');
   });
 
-  it('still escapes a details tag that carries anything at all', () => {
-    // The allowlist is exact-match on the token's raw source, so it cannot be
-    // widened into a tag parser by crafted input.
-    const body = (() => {
-      const html = renderSessionHtmlDocument(meta(), '<details onclick="alert(1)">\n<summary>x</summary>\n\n');
-      return html.slice(html.indexOf('<main>'), html.indexOf('</main>'));
-    })();
-    expect(body).not.toContain('onclick="alert(1)"');
-    expect(body).toContain('&lt;details onclick=');
+  it('escapes every near-miss variant of the fold wrapper', () => {
+    // Only the exact block session/render.ts emits is lifted; anything else is
+    // ordinary untrusted text.
+    for (const variant of [
+      '<details onclick="alert(1)">\n<summary>Reasoning</summary>\n\nx\n\n</details>',
+      '<DETAILS>\n<summary>Reasoning</summary>\n\nx\n\n</details>',
+      '<details id=a>\n<summary>Reasoning</summary>\n\nx\n\n</details>',
+      '<details>\n<summary>Notes</summary>\n\nx\n\n</details>',
+    ]) {
+      const html = renderSessionHtmlDocument(meta(), variant);
+      expect(html).not.toMatch(/<details[ >]/i);
+      expect(html).not.toContain('onclick="alert(1)"');
+    }
   });
 
   it('drops a javascript: link target but keeps its text', () => {

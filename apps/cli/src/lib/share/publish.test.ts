@@ -1152,9 +1152,13 @@ describe('toHeaderValue', () => {
     }
   });
 
-  it('degrades a value with nothing left to a marker, never an empty header', () => {
+  it('degrades a value that HAD content and lost it all to a marker', () => {
     expect(toHeaderValue('会話の記録')).toBe('(unnamed)');
-    expect(toHeaderValue('')).toBe('(unnamed)');
+  });
+
+  it('leaves an empty value empty — `--meta note=` means empty, not unnamed', () => {
+    expect(toHeaderValue('')).toBe('');
+    expect(toHeaderValue('   ')).toBe('');
   });
 
   it('keeps latin1 accents, which headers can carry', () => {
