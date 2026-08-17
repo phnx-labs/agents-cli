@@ -96,6 +96,29 @@ describe('renderSessionHtmlDocument', () => {
     expect(html).toContain('the turn after it');
   });
 
+  it('keeps a dollar sequence in the reasoning intact, and never prints the sentinel', () => {
+    // String.replace expands `$&`, "$`", `$'` and `$n` in a STRING replacement,
+    // and marked turns `& < > " '` into entities — so reasoning containing bash
+    // ANSI-C quoting spliced the matched sentinel back into the published page
+    // and ate the next character. Trigger set: `$` followed by any of & < > " '.
+    const thinking: SessionEvent = {
+      type: 'thinking',
+      agent: 'claude',
+      timestamp: '2026-08-17T10:00:00.000Z',
+      content: "Use $'\\n' with sed $& and make $< to see it.",
+    };
+    const folded = renderConversationMarkdown([thinking], { reasoning: 'fold' });
+    const html = renderSessionHtmlDocument(meta(), folded);
+
+    expect(html).not.toContain('aGeNtSfOlDbLoCk');
+    expect(html).toContain('$&#39;');   // the apostrophe after $ survived
+    expect(html).toContain('$&amp;');
+    expect(html).toContain('$&lt;');
+    // And the element is still well-formed around it.
+    expect((html.match(/<details>/g) || []).length).toBe(1);
+    expect((html.match(/<\/details>/g) || []).length).toBe(1);
+  });
+
   it('cannot be tricked into forging a disclosure element with the sentinel', () => {
     const html = renderSessionHtmlDocument(meta(), 'aGeNtSfOlDbLoCk0aGeNtSfOlDbLoCk and more text\n');
     expect(html).not.toMatch(/<details>/);

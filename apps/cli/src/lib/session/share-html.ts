@@ -66,6 +66,11 @@ export function escapeHtml(text: string): string {
  * occurrence in the transcript is neutralized before substitution.
  */
 const FOLD_SENTINEL = 'aGeNtSfOlDbLoCk';
+// The neutralization below is only sound because this literal is BORDER-FREE: its
+// first character occurs nowhere else in it, so no occurrence can overlap another
+// and splitting on it cannot leave a fresh one behind. A bordered literal (`aba`
+// splits into a leftover `a` + `ba`) is defeatable. Keep that property if you
+// ever change the string.
 
 /** The exact block `session/render.ts` pushes on its `fold` branch. */
 const FOLD_BLOCK = /<details>\n<summary>Reasoning<\/summary>\n\n([\s\S]*?)\n\n<\/details>/g;
@@ -191,7 +196,13 @@ export function renderSessionHtmlDocument(
   const body = blocks.reduce(
     (html, inner, i) => html.replace(
       new RegExp(`<p>${FOLD_SENTINEL}${i}${FOLD_SENTINEL}</p>`),
-      `<details><summary>Reasoning</summary>\n${render(inner)}</details>`,
+      // A FUNCTION replacement, never a string one. String.replace expands `$&`,
+      // `` $` ``, `$'` and `$n` inside a string replacement, and marked turns
+      // `& < > " '` into entities — so reasoning text containing `$'` (bash
+      // ANSI-C quoting), `$&` (sed), or `$<` (make) would splice the matched
+      // sentinel back into the page and destroy the character after it. A
+      // function's return value is inserted verbatim.
+      () => `<details><summary>Reasoning</summary>\n${render(inner)}</details>`,
     ),
     render(text),
   );
