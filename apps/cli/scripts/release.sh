@@ -257,21 +257,17 @@ run_home_base_phase() {
 # box. Defined here (before the --home-base-phase dispatch) so that entrypoint,
 # which exits before the trigger-box preflight, can reach it.
 resolve_npm_auth() {
-  local bundle_out token_line
-  # Read the npmjs.com bundle via the globally-installed `agents` (homebrew). We
-  # resolve the token BEFORE the build, so the worktree's own dist/ does not exist
-  # yet -- there is no local build to prefer, and the headless context sourced
-  # above has already set AGENTS_SECRETS_PASSPHRASE so this resolves silently.
+  # Read NPM_TOKEN from the npmjs.com bundle via the globally-installed `agents`
+  # (homebrew). We resolve the token BEFORE the build, so the worktree's own
+  # dist/ does not exist yet -- there is no local build to prefer, and the
+  # headless context sourced above has already set AGENTS_SECRETS_PASSPHRASE so
+  # this resolves silently. The value is captured from `secrets exec` injection
+  # (the printenv-capture idiom, docs/secrets.md) -- the plaintext export mode
+  # was removed (RUSH-2774).
   command -v agents >/dev/null || die "'agents' CLI not on PATH (needed to read npmjs.com secrets bundle on $RELEASE_HOME_BASE)"
-  bundle_out="$(agents secrets export npmjs.com --plaintext 2>/dev/null || true)"
-  [[ -n "$bundle_out" ]] \
-    || die "no 'npmjs.com' secrets bundle on $RELEASE_HOME_BASE -- the home base must hold the publish token (agents secrets create npmjs.com && agents secrets add npmjs.com NPM_TOKEN)"
-  token_line="$(printf '%s\n' "$bundle_out" | grep -E '^export NPM_TOKEN=' | head -1)"
-  [[ -n "$token_line" ]] || die "secrets bundle 'npmjs.com' is missing key NPM_TOKEN"
-  NPM_TOKEN="${token_line#export NPM_TOKEN=}"
-  NPM_TOKEN="${NPM_TOKEN%\"}"; NPM_TOKEN="${NPM_TOKEN#\"}"
-  NPM_TOKEN="${NPM_TOKEN%\'}"; NPM_TOKEN="${NPM_TOKEN#\'}"
-  [[ -n "$NPM_TOKEN" ]] || die "NPM_TOKEN resolved to empty string on $RELEASE_HOME_BASE"
+  NPM_TOKEN="$(agents secrets exec npmjs.com -- printenv NPM_TOKEN 2>/dev/null || true)"
+  [[ -n "$NPM_TOKEN" ]] \
+    || die "could not resolve NPM_TOKEN from the 'npmjs.com' secrets bundle on $RELEASE_HOME_BASE (agents secrets create npmjs.com && agents secrets add npmjs.com NPM_TOKEN)"
 
   NPMRC_TMP="$(mktemp "${TMPDIR:-/tmp}/agents-cli-npmrc.XXXXXX")"
   chmod 600 "$NPMRC_TMP"

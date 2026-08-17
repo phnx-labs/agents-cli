@@ -34,11 +34,21 @@ die() { echo "error: $*" >&2; exit 1; }
 # local Keychain — CI passes them in via env, so we don't require it there.
 command -v crabbox >/dev/null || die "crabbox not installed"
 
-# Load Hetzner token. Prefer an already-set HCLOUD_TOKEN (CI workflow path);
-# otherwise fall back to the agents-cli Keychain bundle (local dev path).
-if [[ -z "${HCLOUD_TOKEN:-}" ]]; then
+# Load credentials. Prefer already-set env vars (CI workflow path); otherwise
+# re-enter this script under chained `agents secrets exec` so the bundle values
+# ride the child process env and never touch stdout (RUSH-2774 — the old
+# `eval "$(agents secrets export … --plaintext)"` pattern put whole bundles into
+# agent transcripts). Each bundle is probed with a real resolve first, so a
+# locked/absent bundle is skipped exactly like the old per-bundle `|| true`.
+if [[ -z "${SANDBOX_SECRETS_EXEC:-}" && -z "${HCLOUD_TOKEN:-}" ]]; then
   command -v agents >/dev/null || die "HCLOUD_TOKEN not set and agents-cli not installed"
-  eval "$(agents secrets export hetzner.com --plaintext 2>/dev/null)" || die "Failed to load hetzner.com secrets"
+  chain=()
+  for b in hetzner.com github.com anthropic.com; do
+    if agents secrets exec "$b" -- true 2>/dev/null; then chain+=(agents secrets exec "$b" --); fi
+  done
+  if [[ ${#chain[@]} -gt 0 ]]; then
+    SANDBOX_SECRETS_EXEC=1 exec "${chain[@]}" "$0" "$@"
+  fi
 fi
 [[ -n "${HCLOUD_TOKEN:-}" ]] || die "HCLOUD_TOKEN is empty after secret resolution"
 export HCLOUD_TOKEN
@@ -48,7 +58,8 @@ export HCLOUD_TOKEN
 # works regardless of whether the App is installed on a user or an org.
 # TOKEN_REPO env var (required) picks which installation.
 generate_github_token() {
-  eval "$(agents secrets export github.com --plaintext 2>/dev/null)" || return 1
+  # APP_ID / APP_PRIVATE_KEY arrive via the github.com link of the secrets-exec
+  # chain at the top of this script (or CI env) — never printed to stdout.
   [[ -n "${APP_ID:-}" && -n "${APP_PRIVATE_KEY:-}" ]] || return 1
 
   local target_repo="${TOKEN_REPO:?TOKEN_REPO must be set (e.g. owner/.agents) to pick the GitHub App installation}"
@@ -114,10 +125,8 @@ if [[ -z "${GITHUB_TOKEN:-}" ]]; then
 fi
 [[ -n "$GITHUB_TOKEN" ]] || echo "warn: no GITHUB_TOKEN available (private repos won't clone)" >&2
 
-# Load Claude token for running agents on sandbox. Honor a pre-set env var first.
-if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && command -v agents >/dev/null; then
-  eval "$(agents secrets export anthropic.com --plaintext 2>/dev/null)" || true
-fi
+# Claude token for running agents on sandbox: a pre-set env var (CI), or the
+# anthropic.com link of the secrets-exec chain at the top. Optional either way.
 CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}"
 
 # List the slugs of running boxes matching $PROFILE, one per line (oldest

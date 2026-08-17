@@ -340,21 +340,26 @@ if { [ $PUBLISH_VSCE -eq 1 ] && [ -z "${VSCE_PAT:-}" ]; } || { [ $PUBLISH_OVSX -
         echo "       Either export them or install agents-cli to read keychain bundle 'vs-marketplace'." >&2
         exit 1
     fi
-    # `agents secrets export` requires --plaintext to emit values (TTY or pipe).
-    eval "$(agents secrets export vs-marketplace --plaintext 2>/dev/null)" || {
-        echo "Error: failed to export 'vs-marketplace' bundle." >&2
-        echo "       Create with: agents secrets create vs-marketplace" >&2
-        echo "       Then add VSCE_PAT and OVSX_PAT keys." >&2
-        exit 1
-    }
+    # Re-enter this script under `agents secrets exec` so VSCE_PAT/OVSX_PAT ride
+    # the child process env and never touch stdout (RUSH-2774 — the plaintext
+    # export mode was removed). The sentinel stops a loop when the bundle lacks
+    # the keys; the checks below then fail with the create/add hint.
+    if [ -z "${EXT_RELEASE_SECRETS_EXEC:-}" ]; then
+        EXT_RELEASE_SECRETS_EXEC=1 exec agents secrets exec vs-marketplace -- "$0" "$@" || {
+            echo "Error: failed to resolve the 'vs-marketplace' bundle." >&2
+            echo "       Create with: agents secrets create vs-marketplace" >&2
+            echo "       Then add VSCE_PAT and OVSX_PAT keys." >&2
+            exit 1
+        }
+    fi
 fi
 
 if [ $PUBLISH_VSCE -eq 1 ] && [ -z "${VSCE_PAT:-}" ]; then
-    echo "Error: VSCE_PAT not set after exporting vs-marketplace bundle." >&2
+    echo "Error: VSCE_PAT not present in the vs-marketplace bundle (agents secrets add vs-marketplace VSCE_PAT / OVSX_PAT)." >&2
     exit 1
 fi
 if [ $PUBLISH_OVSX -eq 1 ] && [ -z "${OVSX_PAT:-}" ]; then
-    echo "Error: OVSX_PAT not set after exporting vs-marketplace bundle." >&2
+    echo "Error: OVSX_PAT not present in the vs-marketplace bundle (agents secrets add vs-marketplace VSCE_PAT / OVSX_PAT)." >&2
     exit 1
 fi
 
