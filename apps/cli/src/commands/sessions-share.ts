@@ -23,7 +23,7 @@ import { knownSecretValuesFromEnv, redactEmails } from '../lib/redact.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { renderSessionHtmlDocument } from '../lib/session/share-html.js';
 import type { SessionMeta } from '../lib/session/types.js';
-import { publishFile } from '../lib/share/publish.js';
+import { publishFile, type PublishOptions } from '../lib/share/publish.js';
 import { renderSessionMarkdownDocument, type ReasoningMode } from './sessions-render.js';
 import { selectSessions } from './sessions-export.js';
 import { parseAgentFilter } from './sessions.js';
@@ -55,6 +55,29 @@ function parseReasoning(value: string): ReasoningMode {
 /** `session-<shortId>` — stable per session, so re-sharing updates the same URL. */
 export function defaultSessionSlug(session: SessionMeta): string {
   return `session-${session.shortId || session.id}`;
+}
+
+/**
+ * Map the command's flags onto {@link PublishOptions}.
+ *
+ * Extracted so the defaults are testable directly. `unlisted` in particular is the
+ * security-relevant one — it inverts the parent command's public-by-default
+ * behavior, and a test that re-implements this mapping would still pass with it
+ * flipped.
+ */
+export function buildSharePublishOptions(
+  session: SessionMeta,
+  options: Pick<ShareOptions, 'public' | 'slug' | 'label' | 'expire' | 'force' | 'cover'>,
+): PublishOptions {
+  return {
+    slug: options.slug ?? defaultSessionSlug(session),
+    unlisted: options.public !== true,
+    expire: options.expire,
+    force: options.force === true,
+    cover: options.cover !== false,
+    label: options.label,
+    meta: { kind: 'session' },
+  };
 }
 
 export function registerSessionsShareCommand(sessionsCmd: Command): void {
@@ -128,7 +151,7 @@ Manage published sessions with 'agents artifacts share list' and
 
     const session = sessions[0];
     const redact = globals.redact !== false;
-    const rendered = renderSessionMarkdownDocument(session, {
+    const markdown = renderSessionMarkdownDocument(session, {
       redact,
       reasoning,
       knownSecrets: redact ? knownSecretValuesFromEnv() : undefined,
@@ -136,11 +159,16 @@ Manage published sessions with 'agents artifacts share list' and
     // Emails on top of what the renderer masks. Almost every real transcript
     // carries a few — git author addresses, `gh api user`, a pasted log — and
     // publishToEndpoint refuses a body containing any (RUSH-2428). Masking them
-    // here means the published page genuinely does not carry them; the
-    // alternative, telling people to pass --force, would train everyone to
-    // bypass the gate that also catches real credentials.
-    const markdown = redact ? redactEmails(rendered) : rendered;
-    const html = renderSessionHtmlDocument(session, markdown, { redacted: redact });
+    // means the published page genuinely does not carry them; the alternative,
+    // telling people to pass --force, would train everyone to bypass the gate
+    // that also catches real credentials.
+    //
+    // Applied to the RENDERED PAGE, not the Markdown, so the text that is masked
+    // is exactly the text `scanShareContent` will scan. Markdown escaping stands
+    // between the two: `foo\@example.com` hides from the pattern in the Markdown
+    // and reappears as a live address once marked drops the backslash.
+    const page = renderSessionHtmlDocument(session, markdown, { redacted: redact });
+    const html = redact ? redactEmails(page) : page;
 
     // A real file on disk is what publishFile() takes, and the OG capturer opens
     // it in a browser. 0600 + a per-run directory keeps the intermediate off a
@@ -149,15 +177,7 @@ Manage published sessions with 'agents artifacts share list' and
     const file = path.join(dir, `${defaultSessionSlug(session)}.html`);
     try {
       fs.writeFileSync(file, html, { mode: 0o600 });
-      const result = await publishFile(file, {
-        slug: options.slug ?? defaultSessionSlug(session),
-        unlisted: options.public !== true,
-        expire: options.expire,
-        force: options.force === true,
-        cover: options.cover !== false,
-        label: options.label,
-        meta: { kind: 'session' },
-      });
+      const result = await publishFile(file, buildSharePublishOptions(session, options));
 
       if (globals.json) {
         process.stdout.write(JSON.stringify({

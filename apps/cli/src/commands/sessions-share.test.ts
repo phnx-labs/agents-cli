@@ -3,11 +3,12 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { describe, expect, it } from 'vitest';
-import { publishToEndpoint } from '../lib/share/publish.js';
+import { publishToEndpoint, scanShareContent } from '../lib/share/publish.js';
+import { redactEmails } from '../lib/redact.js';
 import { renderSessionHtmlDocument } from '../lib/session/share-html.js';
 import type { SessionMeta } from '../lib/session/types.js';
 import { renderSessionMarkdownDocument } from './sessions-render.js';
-import { defaultSessionSlug } from './sessions-share.js';
+import { buildSharePublishOptions, defaultSessionSlug } from './sessions-share.js';
 
 const TESTDATA = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../lib/session/testdata/render');
 
@@ -32,6 +33,46 @@ describe('defaultSessionSlug', () => {
 
   it('falls back to the full id when a session carries no short id', () => {
     expect(defaultSessionSlug(meta({ shortId: '' }))).toBe('session-a1b2c3d4-0000-0000-0000-000000000000');
+  });
+});
+
+describe('buildSharePublishOptions', () => {
+  it('is unlisted unless --public — the one default that must not silently invert', () => {
+    expect(buildSharePublishOptions(meta(), {}).unlisted).toBe(true);
+    expect(buildSharePublishOptions(meta(), { public: false }).unlisted).toBe(true);
+    expect(buildSharePublishOptions(meta(), { public: true }).unlisted).toBe(false);
+  });
+
+  it('tags the share as a session so `artifacts share list --agent/--session` can find it', () => {
+    expect(buildSharePublishOptions(meta(), {}).meta).toEqual({ kind: 'session' });
+  });
+
+  it('passes the remaining flags through without inventing values', () => {
+    expect(buildSharePublishOptions(meta(), {})).toMatchObject({
+      slug: 'session-a1b2c3d4',
+      expire: undefined,   // publishToEndpoint applies the 30d default
+      force: false,
+      cover: true,
+      label: undefined,
+    });
+    expect(buildSharePublishOptions(meta(), { slug: 'custom', label: 'Title', expire: 'never', force: true, cover: false }))
+      .toMatchObject({ slug: 'custom', label: 'Title', expire: 'never', force: true, cover: false });
+  });
+});
+
+describe('email masking runs on the artifact the scanner scans', () => {
+  it('catches an address Markdown escaping hid from a Markdown-stage mask', () => {
+    // `foo\@example.com` does not match the email pattern in Markdown (the
+    // backslash breaks the local part), but marked drops the backslash, so the
+    // published HTML carries a live address the publish scan then refuses.
+    const markdown = 'contact foo\\@example.com for context';
+    const page = renderSessionHtmlDocument(meta(), markdown);
+    expect(page).toContain('foo@example.com');           // survived the Markdown stage
+    expect(scanShareContent(page).some((h) => h.kind === 'email')).toBe(true);
+
+    const masked = redactEmails(page);
+    expect(masked).not.toContain('foo@example.com');
+    expect(scanShareContent(masked).filter((h) => h.kind === 'email')).toEqual([]);
   });
 });
 

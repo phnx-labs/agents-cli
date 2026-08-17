@@ -616,7 +616,16 @@ export async function publishToEndpoint(
     if (provenance.date) h['x-share-date'] = toHeaderValue(provenance.date);
     h['x-share-label'] = toHeaderValue(label);
     h['x-share-label-source'] = labelSource;
-    if (Object.keys(meta).length > 0) h['x-share-meta'] = toHeaderValue(JSON.stringify(meta));
+    // Per VALUE, before JSON.stringify — folding the serialized form would rewrite
+    // a curly quote inside a value into a bare `"`, which is structural in JSON and
+    // makes the Worker's JSON.parse throw. It swallows that error, so every --meta
+    // key would silently vanish on a 200.
+    if (Object.keys(meta).length > 0) {
+      const headerMeta = Object.fromEntries(
+        Object.entries(meta).map(([k, v]) => [toHeaderValue(k), toHeaderValue(v)]),
+      );
+      h['x-share-meta'] = JSON.stringify(headerMeta);
+    }
     if (opts.noRevision) h['x-share-no-revision'] = '1';
     return h;
   };

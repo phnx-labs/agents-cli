@@ -48,9 +48,29 @@ export function escapeHtml(text: string): string {
  * visible text, and non-http(s) link schemes are dropped so `javascript:` cannot
  * ride in through a Markdown link.
  */
+/**
+ * The only raw HTML the transcript renderer itself emits: `--reasoning fold` wraps
+ * each thinking block in a disclosure element (`session/render.ts` — the `fold`
+ * branch pushes `<details>\n<summary>Reasoning</summary>` and `</details>`).
+ *
+ * Escaping those along with everything else published `&lt;details&gt;` as visible
+ * text and no collapsing, so `--reasoning fold` shipped broken. They are allowed
+ * back through by EXACT match on the token's raw source, not by parsing tags:
+ * attribute-free `details`/`summary` carry no script, no URL, and no event handler,
+ * and an exact-string gate cannot be widened by crafted input the way a tag parser
+ * can. Anything else — including `<details onclick=…>` — still escapes.
+ */
+const ALLOWED_RAW_HTML = new Set([
+  '<details>\n<summary>Reasoning</summary>\n\n',
+  '<details>',
+  '<summary>Reasoning</summary>',
+  '</summary>',
+  '</details>',
+]);
+
 function safeRenderer(): Renderer {
   const renderer = new Renderer();
-  renderer.html = ({ raw }) => escapeHtml(raw);
+  renderer.html = ({ raw }) => (ALLOWED_RAW_HTML.has(raw) ? raw : escapeHtml(raw));
   const isSafeHref = (href: string): boolean => /^(https?:|mailto:|#|\/)/i.test(href.trim());
   renderer.link = ({ href, title, tokens }) => {
     const text = renderer.parser.parseInline(tokens);

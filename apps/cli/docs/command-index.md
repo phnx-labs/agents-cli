@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_77 command groups · 548 commands._
+_77 command groups · 549 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -752,6 +752,7 @@ agents sessions optimize                    Compact the session search index (FT
 agents sessions preview <id>                Show one rich session card without rendering the full transcript
 agents sessions render <selectors...>       Render one or more sessions as readable, redacted Markdown for review or sharing.
 agents sessions resume [query] [prompt]     Resume a session by id (strict), or multi-select history into terminal tabs/splits.
+agents sessions share <session>             Publish one session as a redacted, self-contained web page and print the link.
 agents sessions stats                       Which skills/commands you actually invoke, and which installed ones are dead weight.
 agents sessions tail [sessionId]            Stream compact live lines from a session file as events are written. Long-running: Ctrl+C to stop. Claude and Codex only.
 agents sessions watch                       Stream canonical live and recoverable session row changes as NDJSON

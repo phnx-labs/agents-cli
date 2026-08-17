@@ -2,8 +2,9 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { describe, expect, it } from 'vitest';
 import { renderSessionMarkdownDocument } from '../../commands/sessions-render.js';
+import { renderConversationMarkdown } from './render.js';
 import { buildChips, escapeHtml, formatDuration, renderSessionHtmlDocument, sessionPageTitle } from './share-html.js';
-import type { SessionMeta } from './types.js';
+import type { SessionEvent, SessionMeta } from './types.js';
 
 const TESTDATA = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'testdata/render');
 
@@ -47,6 +48,51 @@ describe('renderSessionHtmlDocument', () => {
     expect(body).toContain('&lt;script&gt;');
     expect(body).toContain('&lt;img src=x onerror=alert(1)&gt;');
     expect(body).toContain('alert(document.cookie)');
+  });
+
+  it('lets --reasoning fold actually collapse, instead of printing escaped tags', () => {
+    // The exact block session/render.ts pushes on the `fold` branch. Escaping it
+    // along with everything else published "&lt;details&gt;" as visible text and no
+    // disclosure widget, so the documented flag shipped broken.
+    const folded = '<details>\n<summary>Reasoning</summary>\n\nthe model weighed two options\n\n</details>';
+    const html = renderSessionHtmlDocument(meta(), folded);
+    const body = html.slice(html.indexOf('<main>'), html.indexOf('</main>'));
+
+    expect(body).toContain('<details>');
+    expect(body).toContain('<summary>Reasoning</summary>');
+    expect(body).toContain('</details>');
+    expect(body).not.toContain('&lt;details&gt;');
+    // The reasoning text itself still renders as ordinary Markdown inside it.
+    expect(body).toContain('the model weighed two options');
+  });
+
+  it('stays matched to what the real fold renderer emits', () => {
+    // The allowlist is an exact-string gate, so it silently stops working if
+    // session/render.ts ever changes its fold markup. Drive the real producer.
+    const thinking: SessionEvent = {
+      type: 'thinking',
+      agent: 'claude',
+      timestamp: '2026-08-17T10:00:00.000Z',
+      content: 'weighing two options',
+    };
+    const folded = renderConversationMarkdown([thinking], { reasoning: 'fold' });
+    const html = renderSessionHtmlDocument(meta(), folded);
+    const body = html.slice(html.indexOf('<main>'), html.indexOf('</main>'));
+
+    expect(folded).toContain('<details>');
+    expect(body).toContain('<details>');
+    expect(body).not.toContain('&lt;details&gt;');
+  });
+
+  it('still escapes a details tag that carries anything at all', () => {
+    // The allowlist is exact-match on the token's raw source, so it cannot be
+    // widened into a tag parser by crafted input.
+    const body = (() => {
+      const html = renderSessionHtmlDocument(meta(), '<details onclick="alert(1)">\n<summary>x</summary>\n\n');
+      return html.slice(html.indexOf('<main>'), html.indexOf('</main>'));
+    })();
+    expect(body).not.toContain('onclick="alert(1)"');
+    expect(body).toContain('&lt;details onclick=');
   });
 
   it('drops a javascript: link target but keeps its text', () => {

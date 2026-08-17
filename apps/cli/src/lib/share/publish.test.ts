@@ -1161,3 +1161,28 @@ describe('toHeaderValue', () => {
     expect(toHeaderValue('Malmö café')).toBe('Malmö café');
   });
 });
+
+describe('x-share-meta survives a value the header folder rewrites', () => {
+  it('transliterates each value before JSON.stringify, so the Worker can still parse it', async () => {
+    // Folding the SERIALIZED json rewrote a curly quote inside a value into a bare
+    // `"`, which is structural in JSON. The Worker swallows the parse error, so
+    // every --meta key vanished silently on a 200 — worse than the loud throw the
+    // ByteString fix replaced.
+    const dir = mkdtempSync(join(tmpdir(), 'share-meta-'));
+    const file = join(dir, 'page.html');
+    writeFileSync(file, '<html><head><title>t</title></head><body>ok</body></html>');
+    const sent: Record<string, string>[] = [];
+    await publishToEndpoint(file, { baseUrl: 'https://share.example', token: 't' }, {
+      slug: 'meta-page',
+      githubUser: 'octocat',
+      cover: false,
+      analytics: false,
+      meta: { note: 'the “plan” is done', who: 'it’s me' },
+      uploader: async (url, _b, headers) => { sent.push(headers); return { ok: true, status: 200, url }; },
+    });
+    const header = sent[0]['x-share-meta'];
+    expect(() => JSON.parse(header)).not.toThrow();
+    expect(JSON.parse(header)).toEqual({ note: 'the "plan" is done', who: "it's me" });
+    expect([...header].every((ch) => ch.codePointAt(0)! <= 255)).toBe(true);
+  });
+});
