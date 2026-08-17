@@ -6,6 +6,19 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+- **The markdown Reader renders again instead of a blank pane.** The reader
+  webview (`agents.markdownEditor`) loaded the Vite editor bundle with a
+  classic `<script>` tag, but the bundle is an ES module carrying top-level
+  const bindings — prosemirror-view's `const chrome` browser sniff — which in
+  a classic script collide with the webview's global `chrome` binding and
+  throw `SyntaxError: Identifier 'chrome' has already been declared` before
+  React mounts. Every `.md` opened through Reader showed an empty page. The
+  script tag now carries `type="module"` (matching the Fleet dashboard
+  webview, which already did), the HTML shell moved to a pure
+  `buildEditorWebviewHtml` in `src/core/editorHtml.ts`, and a regression test
+  pins the module attribute. Source: `src/vscode/customEditor.ts`,
+  `src/core/editorHtml.ts`.
+
 - **Offloaded tabs get auto-labels again (`--device auto` / Pick Host).** Default
   `New Claude` emits `--device auto` and never records which box the CLI picked,
   so the label poller scanned this laptop's `~/.claude` for a transcript that

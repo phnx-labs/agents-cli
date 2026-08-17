@@ -5,6 +5,7 @@ import * as os from 'os';
 import { execFile } from 'child_process';
 import { maybePromptForAgentSymlinks } from './agentlinks.vscode';
 import { resolvePdfEngine, buildPdfArgs } from '../core/pdfEngine';
+import { buildEditorWebviewHtml } from '../core/editorHtml';
 
 // Track spawned agent terminals per document URI
 const documentAgents = new Map<string, vscode.Terminal>();
@@ -572,28 +573,13 @@ ${bodyHtml}
       vscode.Uri.joinPath(this.context.extensionUri, 'assets', 'agents.png')
     );
 
-    const nonce = getNonce();
-
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none';
-    style-src ${webview.cspSource} 'unsafe-inline';
-    script-src 'nonce-${nonce}';
-    img-src ${webview.cspSource} https: data:;
-    media-src data:;
-    font-src ${webview.cspSource};
-    connect-src https:;">
-  <link href="${styleUri}" rel="stylesheet">
-  <title>Agents Markdown Editor</title>
-</head>
-<body>
-  <div id="root" data-agents-icon="${agentsIconUri}"></div>
-  <script nonce="${nonce}" src="${scriptUri}"></script>
-</body>
-</html>`;
+    return buildEditorWebviewHtml({
+      scriptUri: scriptUri.toString(),
+      styleUri: styleUri.toString(),
+      agentsIconUri: agentsIconUri.toString(),
+      cspSource: webview.cspSource,
+      nonce: getNonce(),
+    });
   }
 }
 
