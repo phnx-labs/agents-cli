@@ -62,7 +62,7 @@ interface OwnershipGroup {
   when: string[];
   tests?: string[];
   checks?: string[];
-  suite?: 'selected' | 'cli-full';
+  suite?: 'selected' | 'cli-full' | 'metadata-gated';
 }
 
 interface OwnershipArea {
@@ -163,6 +163,44 @@ export function gitRevParse(ref: string, cwd: string): string {
     throw new Error(Buffer.from(proc.stderr).toString('utf8').trim() || `git rev-parse ${ref} failed`);
   }
   return Buffer.from(proc.stdout).toString('utf8').trim();
+}
+
+function gitShowFile(ref: string, file: string, cwd: string): string | null {
+  const proc = Bun.spawnSync({
+    cmd: ['git', 'show', `${ref}:${file}`],
+    cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  if (proc.exitCode !== 0) return null;
+  return Buffer.from(proc.stdout).toString('utf8');
+}
+
+export type PackageJsonChangeKind = 'version-only' | 'dependency' | 'unknown';
+
+/**
+ * A `package.json` diff is `version-only` only when every key besides
+ * `version` is byte-identical before vs after. Missing refs, unreadable
+ * blobs, and unparsable JSON all fall back to `unknown` — the caller treats
+ * that the same as a real dependency change (fail-closed, RUSH-2666).
+ */
+export function classifyPackageJsonChange(
+  file: string,
+  repoRoot: string,
+  baseSha?: string,
+  headSha?: string,
+): PackageJsonChangeKind {
+  if (!baseSha || !headSha) return 'unknown';
+  const before = gitShowFile(baseSha, file, repoRoot);
+  const after = gitShowFile(headSha, file, repoRoot);
+  if (before === null || after === null) return 'unknown';
+  try {
+    const { version: _beforeVersion, ...beforeRest } = JSON.parse(before) as Record<string, unknown>;
+    const { version: _afterVersion, ...afterRest } = JSON.parse(after) as Record<string, unknown>;
+    return JSON.stringify(beforeRest) === JSON.stringify(afterRest) ? 'version-only' : 'dependency';
+  } catch {
+    return 'unknown';
+  }
 }
 
 export function changedFilesBetween(base: string, head: string, cwd = process.cwd()): string[] {
@@ -420,7 +458,12 @@ export function selectImpact(input: SelectImpactInput): ImpactPlan {
     }
 
     for (const group of groups) {
-      if (group.suite === 'cli-full') suite = 'cli-full';
+      const groupSuite = group.suite === 'metadata-gated'
+        ? (classifyPackageJsonChange(file, repoRoot, input.baseSha, input.headSha) === 'version-only'
+          ? 'selected'
+          : 'cli-full')
+        : group.suite;
+      if (groupSuite === 'cli-full') suite = 'cli-full';
       for (const test of group.tests ?? []) {
         addTest(selected, mapping, file, test, `owner:${group.id}`);
         mark();

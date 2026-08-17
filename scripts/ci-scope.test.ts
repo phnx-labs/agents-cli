@@ -15,6 +15,7 @@ import {
   changedFilesBetween,
   isVitestWorkerCrashWithZeroFailures,
   classifyCiScope,
+  classifyPackageJsonChange,
   commandForTestFile,
   commandsForPlan,
   companionCandidates,
@@ -263,6 +264,118 @@ describe('selectImpact policy', () => {
     const result = validateOwnershipManifest(MANIFEST, REPO);
     expect(result.missingTests).toEqual([]);
     expect(result.unmapped).toEqual([]);
+  });
+});
+
+describe('metadata-class diffs stop selecting the full suite (RUSH-2666)', () => {
+  function initPackageJsonHistory(before: object, after: object): { repo: string; base: string; head: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'agents-ci-pkg-'));
+    const repo = join(dir, 'repo');
+    mkdirSync(repo);
+    git(repo, 'init', '-b', 'main');
+    writeFixture(repo, 'apps/cli/package.json', `${JSON.stringify(before, null, 2)}\n`);
+    git(repo, 'add', 'apps/cli/package.json');
+    git(repo, 'commit', '-m', 'base');
+    const base = git(repo, 'rev-parse', 'HEAD');
+    writeFixture(repo, 'apps/cli/package.json', `${JSON.stringify(after, null, 2)}\n`);
+    git(repo, 'add', 'apps/cli/package.json');
+    git(repo, 'commit', '-m', 'head');
+    const head = git(repo, 'rev-parse', 'HEAD');
+    return { repo, base, head };
+  }
+
+  test('classifyPackageJsonChange: a version-only bump is version-only', () => {
+    const { repo, base, head } = initPackageJsonHistory(
+      { name: '@phnx-labs/agents-cli', version: '1.22.35', dependencies: { chalk: '^5.0.0' } },
+      { name: '@phnx-labs/agents-cli', version: '1.22.36', dependencies: { chalk: '^5.0.0' } },
+    );
+    try {
+      expect(classifyPackageJsonChange('apps/cli/package.json', repo, base, head)).toBe('version-only');
+    } finally {
+      rmSync(dirname(repo), { recursive: true, force: true });
+    }
+  });
+
+  test('classifyPackageJsonChange: a dependency edit is not metadata', () => {
+    const { repo, base, head } = initPackageJsonHistory(
+      { name: '@phnx-labs/agents-cli', version: '1.22.35', dependencies: { chalk: '^5.0.0' } },
+      { name: '@phnx-labs/agents-cli', version: '1.22.36', dependencies: { chalk: '^5.1.0' } },
+    );
+    try {
+      expect(classifyPackageJsonChange('apps/cli/package.json', repo, base, head)).toBe('dependency');
+    } finally {
+      rmSync(dirname(repo), { recursive: true, force: true });
+    }
+  });
+
+  test('classifyPackageJsonChange: no base/head shas fails closed to unknown', () => {
+    expect(classifyPackageJsonChange('apps/cli/package.json', REPO)).toBe('unknown');
+  });
+
+  test('a version-only package.json bump selects the minimal set, never cli-full', () => {
+    const { repo, base, head } = initPackageJsonHistory(
+      { name: '@phnx-labs/agents-cli', version: '1.22.35' },
+      { name: '@phnx-labs/agents-cli', version: '1.22.36' },
+    );
+    try {
+      const plan = selectImpact({
+        files: ['apps/cli/package.json'],
+        repoRoot: repo,
+        manifest: MANIFEST,
+        related: false,
+        baseSha: base,
+        headSha: head,
+      });
+      expect(plan.suite).toBe('selected');
+      expect(plan.unmapped).toEqual([]);
+      expect(plan.tests.map((t) => t.file)).toEqual(['apps/cli/src/lib/version.test.ts']);
+      expect(plan.checks).toEqual(['typecheck']);
+    } finally {
+      rmSync(dirname(repo), { recursive: true, force: true });
+    }
+  });
+
+  test('a dependency-changing package.json diff still fails safe to cli-full', () => {
+    const { repo, base, head } = initPackageJsonHistory(
+      { name: '@phnx-labs/agents-cli', version: '1.22.35', dependencies: { chalk: '^5.0.0' } },
+      { name: '@phnx-labs/agents-cli', version: '1.22.35', dependencies: { chalk: '^5.1.0' } },
+    );
+    try {
+      const plan = selectImpact({
+        files: ['apps/cli/package.json'],
+        repoRoot: repo,
+        manifest: MANIFEST,
+        related: false,
+        baseSha: base,
+        headSha: head,
+      });
+      expect(plan.suite).toBe('cli-full');
+    } finally {
+      rmSync(dirname(repo), { recursive: true, force: true });
+    }
+  });
+
+  test('a package.json diff with no base/head shas fails closed to cli-full', () => {
+    const plan = selectImpact({
+      files: ['apps/cli/package.json'],
+      repoRoot: REPO,
+      manifest: MANIFEST,
+      related: false,
+    });
+    expect(plan.suite).toBe('cli-full');
+  });
+
+  test('a CHANGELOG-only diff selects nothing, never cli-full', () => {
+    const plan = selectImpact({
+      files: ['CHANGELOG.md', 'apps/cli/CHANGELOG.md'],
+      repoRoot: REPO,
+      manifest: MANIFEST,
+      related: false,
+    });
+    expect(plan.suite).toBe('selected');
+    expect(plan.unmapped).toEqual([]);
+    expect(plan.tests).toEqual([]);
+    expect(plan.checks).toEqual(['docs']);
   });
 });
 

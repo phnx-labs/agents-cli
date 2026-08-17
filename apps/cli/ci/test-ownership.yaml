@@ -85,12 +85,24 @@ groups:
   - id: toolchain
     when:
       - apps/cli/bun.lock
-      - apps/cli/package.json
       - apps/cli/vitest.config.ts
       - apps/cli/tsconfig.json
       - apps/cli/tests/setup.ts
       - apps/cli/tests/global-setup.ts
     suite: cli-full
+    checks: [typecheck]
+
+  # A version-only edit (release bump) is metadata: RUSH-2666. A dependency,
+  # script, or field change in package.json still routes to cli-full because
+  # the diff itself decides — see classifyPackageJsonChange in ci-scope.ts.
+  # When base/head shas are unavailable to diff, this fails closed to
+  # cli-full too.
+  - id: toolchain-metadata
+    when:
+      - apps/cli/package.json
+    suite: metadata-gated
+    tests:
+      - apps/cli/src/lib/version.test.ts
     checks: [typecheck]
 
   - id: impact-policy
