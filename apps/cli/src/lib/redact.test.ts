@@ -7,8 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { redactSecrets, redactEmails, knownSecretValuesFromEnv, sanitizeForTerminal } from './redact.js';
-import { scanShareContent } from './share/publish.js';
+import { redactSecrets, knownSecretValuesFromEnv, sanitizeForTerminal } from './redact.js';
 
 // Token fixtures are ASSEMBLED FROM FRAGMENTS at runtime (via `j`) so no
 // contiguous token literal ever appears in this source file — GitHub push
@@ -140,23 +139,5 @@ describe('knownSecretValuesFromEnv', () => {
     expect(values).not.toContain('/home/someone');
     expect(values).not.toContain('/usr/bin:/bin');
     expect(values).not.toContain('ab');
-  });
-});
-
-describe('redactEmails', () => {
-  it('masks every address so a published page clears the share gate', () => {
-    const text = 'author alice@example.com committed; see bob.smith+tag@sub.domain.co.uk for context';
-    const masked = redactEmails(text);
-    expect(masked).toBe('author [EMAIL] committed; see [EMAIL] for context');
-    // The share publisher's own scanner must find nothing left to refuse.
-    expect(scanShareContent(masked).filter((hit) => hit.kind === 'email')).toEqual([]);
-  });
-
-  it('drops the domain too — a personal domain identifies its owner', () => {
-    expect(redactEmails('muqsit@some-personal-domain.dev')).toBe('[EMAIL]');
-  });
-
-  it('leaves ordinary text alone', () => {
-    expect(redactEmails('scoped @mentions and a@b are not addresses')).toBe('scoped @mentions and a@b are not addresses');
   });
 });

@@ -23,6 +23,7 @@ import {
   deriveLabel,
   sanitizeLabel,
   toHeaderValue,
+  redactEmails,
   RESERVED_META_KEYS,
 } from './publish.js';
 import { renderWorkerScript } from './worker-template.js';
@@ -1188,5 +1189,23 @@ describe('x-share-meta survives a value the header folder rewrites', () => {
     expect(() => JSON.parse(header)).not.toThrow();
     expect(JSON.parse(header)).toEqual({ note: 'the "plan" is done', who: "it's me" });
     expect([...header].every((ch) => ch.codePointAt(0)! <= 255)).toBe(true);
+  });
+});
+
+describe('redactEmails', () => {
+  it('clears the very scan it sits next to — the two share one pattern by construction', () => {
+    const text = 'author alice@example.com committed; ping bob.smith+tag@sub.domain.co.uk';
+    const masked = redactEmails(text);
+    expect(masked).toBe('author [EMAIL] committed; ping [EMAIL]');
+    expect(scanShareContent(masked).filter((hit) => hit.kind === 'email')).toEqual([]);
+  });
+
+  it('drops the domain too — a personal domain identifies its owner', () => {
+    expect(redactEmails('someone@their-own-domain.dev')).toBe('[EMAIL]');
+  });
+
+  it('leaves ordinary text alone', () => {
+    expect(redactEmails('scoped @mentions and a@b are not addresses'))
+      .toBe('scoped @mentions and a@b are not addresses');
   });
 });
