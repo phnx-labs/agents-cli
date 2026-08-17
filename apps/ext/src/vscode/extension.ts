@@ -3575,14 +3575,15 @@ async function fetchAndSetAutoLabel(
   entry: terminals.EditorTerminal,
   opts: FetchAutoLabelOpts = {}
 ): Promise<string | undefined> {
-  if (!entry.sessionId) return entry.autoLabel;
+  const sessionId = entry.sessionId;
+  if (!sessionId) return entry.autoLabel;
   if (!opts.force && entry.autoLabel) return entry.autoLabel;
 
   // `--device auto` never records which box the CLI picked. The watch stream
   // does: stamp the machine so every later lookup (label, resume, identity)
   // routes to the transcript's owner instead of scanning this laptop.
-  if (!entry.host && entry.sessionId) {
-    const live = sessionPresentationStore.liveSession(entry.sessionId);
+  if (!entry.host) {
+    const live = sessionPresentationStore.liveSession(sessionId);
     if (live?.machine && !isLocalDeviceName(live.machine)) {
       terminals.setHost(terminal, live.machine);
       entry = terminals.getByTerminal(terminal) ?? entry;
@@ -3592,7 +3593,7 @@ async function fetchAndSetAutoLabel(
   // Prefer the live stream (already has topic/label, no extra subprocess).
   // Falls through when the row is not indexed yet or carries only scaffolding.
   if (!opts.useFullConversation) {
-    const live = sessionPresentationStore.liveSession(entry.sessionId);
+    const live = sessionPresentationStore.liveSession(sessionId);
     if (live) {
       const topic = live.topic.trim() && !isScaffoldingTopic(live.topic) ? live.topic.trim() : null;
       // A real /rename title has a space ("Fix Fleet Login"). Claude's derived
@@ -3626,7 +3627,7 @@ async function fetchAndSetAutoLabel(
     //    even before its first turn is recorded. Codex/Gemini/Opencode don't
     //    persist an equivalent, so they fall through to the summary path.
     if (entry.agentType === 'claude') {
-      const persistedName = await readClaudeSessionName(entry.sessionId);
+      const persistedName = await readClaudeSessionName(sessionId);
       if (persistedName) {
         const claudeLabel = ticket ? `${ticket} ${persistedName}` : persistedName;
         terminals.setAutoLabel(terminal, claudeLabel);
