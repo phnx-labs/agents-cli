@@ -19,7 +19,7 @@ import * as path from 'path';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { setHelpSections } from '../lib/help.js';
-import { knownSecretValuesFromEnv } from '../lib/redact.js';
+import { knownSecretValuesFromEnv, redactEmails } from '../lib/redact.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { renderSessionHtmlDocument } from '../lib/session/share-html.js';
 import type { SessionMeta } from '../lib/session/types.js';
@@ -128,11 +128,18 @@ Manage published sessions with 'agents artifacts share list' and
 
     const session = sessions[0];
     const redact = globals.redact !== false;
-    const markdown = renderSessionMarkdownDocument(session, {
+    const rendered = renderSessionMarkdownDocument(session, {
       redact,
       reasoning,
       knownSecrets: redact ? knownSecretValuesFromEnv() : undefined,
     });
+    // Emails on top of what the renderer masks. Almost every real transcript
+    // carries a few — git author addresses, `gh api user`, a pasted log — and
+    // publishToEndpoint refuses a body containing any (RUSH-2428). Masking them
+    // here means the published page genuinely does not carry them; the
+    // alternative, telling people to pass --force, would train everyone to
+    // bypass the gate that also catches real credentials.
+    const markdown = redact ? redactEmails(rendered) : rendered;
     const html = renderSessionHtmlDocument(session, markdown, { redacted: redact });
 
     // A real file on disk is what publishFile() takes, and the OG capturer opens

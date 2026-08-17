@@ -83,6 +83,31 @@ export function redactSecrets(text: string, knownValues?: readonly string[]): st
 }
 
 /**
+ * Email addresses. Deliberately NOT part of {@link redactSecrets}: an email is
+ * not a credential, and a transcript rendered for a private gist or local review
+ * reads better with the real author addresses intact.
+ *
+ * It becomes a leak the moment the text is PUBLISHED — a world-readable page
+ * carrying seven of them is the RUSH-2428 incident, and why `publishToEndpoint`
+ * refuses a body that contains any. So the publish paths mask them here rather
+ * than making the operator reach for `--force`, which would train everyone to
+ * bypass the gate that catches real credentials.
+ *
+ * The pattern matches {@link scanShareContent}'s, so masking with this function
+ * is sufficient to clear that gate rather than merely reducing the hit count.
+ */
+const EMAIL_PATTERN = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+
+/**
+ * Mask every email address in `text`. The whole address goes, domain included —
+ * a personal domain identifies its owner as surely as the local part does, and
+ * keeping it would buy the reader nothing.
+ */
+export function redactEmails(text: string): string {
+  return text.replace(EMAIL_PATTERN, '[EMAIL]');
+}
+
+/**
  * Secret values already present in the environment (e.g. an injected secrets
  * bundle), selected by secret-shaped var NAME. These are the "known" values fed
  * to {@link redactSecrets} so an exported transcript can't leak a live
