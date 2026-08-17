@@ -35,6 +35,11 @@ vi.mock('./state.js', () => ({
   // Point at directories that won't exist so only the project layer is active.
   get getUserRulesDir() { return () => path.join(USER_DIR, 'rules'); },
   get getResolvedRulesDir() { return () => path.join(SYSTEM_DIR, 'rules'); },
+  // rules/compile.ts refuses reserved roots (RUSH-2725). Mirror the real
+  // exclusion against this test's fake user/system layers.
+  get isReservedAgentsDir() { return (agentsPath: string) =>
+    path.resolve(agentsPath) === path.resolve(USER_DIR)
+    || path.resolve(agentsPath) === path.resolve(SYSTEM_DIR); },
 }));
 
 import { runLaunchSync } from './project-launch.js';
