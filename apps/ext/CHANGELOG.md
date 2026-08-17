@@ -4,7 +4,7 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
-## [Unreleased]
+## [0.9.327] - 2026-08-17
 
 - **The markdown Reader renders again instead of a blank pane.** The reader
   webview (`agents.markdownEditor`) loaded the Vite editor bundle with a
