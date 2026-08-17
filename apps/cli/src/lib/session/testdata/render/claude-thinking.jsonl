@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"Why is the retry loop dropping the last attempt?"},"timestamp":"2026-08-17T10:00:00.000Z","cwd":"/Users/alice/private","sessionId":"render-claude-thinking"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"The loop condition is `i < retries - 1`, so the final attempt never runs. Worth checking whether the caller compensates by passing retries+1."},{"type":"text","text":"The bound is off by one: `i < retries - 1` skips the last attempt."}]},"timestamp":"2026-08-17T10:00:01.000Z"}

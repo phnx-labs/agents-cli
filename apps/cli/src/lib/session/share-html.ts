@@ -61,16 +61,31 @@ export function escapeHtml(text: string): string {
  * can. Anything else — including `<details onclick=…>` — still escapes.
  */
 const ALLOWED_RAW_HTML = new Set([
-  '<details>\n<summary>Reasoning</summary>\n\n',
   '<details>',
-  '<summary>Reasoning</summary>',
-  '</summary>',
   '</details>',
+  '<summary>Reasoning</summary>',
 ]);
+
+/**
+ * True only when every non-blank line of the token is one of {@link ALLOWED_RAW_HTML}.
+ *
+ * Line-wise rather than whole-token, because marked hands the same markup over in
+ * several shapes depending on what surrounds it — `<details>\n<summary>…</summary>\n\n`
+ * as one opening token, `</details>` with or without a trailing newline. Matching the
+ * whole raw missed the closing tag in a real document while passing on an isolated
+ * block, which is precisely the drift this gate must not have.
+ *
+ * Still an exact-string set, so nothing with an attribute, a URL, or extra content
+ * can pass: any addition changes the line and it escapes.
+ */
+function isAllowedRawHtml(raw: string): boolean {
+  const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
+  return lines.length > 0 && lines.every((line) => ALLOWED_RAW_HTML.has(line));
+}
 
 function safeRenderer(): Renderer {
   const renderer = new Renderer();
-  renderer.html = ({ raw }) => (ALLOWED_RAW_HTML.has(raw) ? raw : escapeHtml(raw));
+  renderer.html = ({ raw }) => (isAllowedRawHtml(raw) ? raw : escapeHtml(raw));
   const isSafeHref = (href: string): boolean => /^(https?:|mailto:|#|\/)/i.test(href.trim());
   renderer.link = ({ href, title, tokens }) => {
     const text = renderer.parser.parseInline(tokens);

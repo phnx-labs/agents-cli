@@ -84,6 +84,33 @@ describe('renderSessionHtmlDocument', () => {
     expect(body).not.toContain('&lt;details&gt;');
   });
 
+  it('collapses reasoning through the WHOLE document path, from a real transcript', () => {
+    // The unit above drives renderConversationMarkdown directly. This one goes
+    // through renderSessionMarkdownDocument — what the command actually calls —
+    // parsing a transcript that carries a real `thinking` block, because no
+    // session on this fleet records one and the escaping bug hid there.
+    const session = meta({
+      shortId: 'think001',
+      filePath: path.join(TESTDATA, 'claude-thinking.jsonl'),
+    });
+    const folded = renderSessionMarkdownDocument(session, { reasoning: 'fold' });
+    const html = renderSessionHtmlDocument(session, folded);
+    const body = html.slice(html.indexOf('<main>'), html.indexOf('</main>'));
+
+    expect(body).toContain('<details>');
+    expect(body).toContain('<summary>Reasoning</summary>');
+    expect(body).toContain('</details>');
+    expect(body).not.toContain('&lt;details&gt;');
+    expect(body).toContain('off by one');
+  });
+
+  it('omits reasoning entirely by default, so a share does not leak it unasked', () => {
+    const session = meta({ filePath: path.join(TESTDATA, 'claude-thinking.jsonl') });
+    const html = renderSessionHtmlDocument(session, renderSessionMarkdownDocument(session));
+    expect(html).not.toContain('<details>');
+    expect(html).not.toContain('whether the caller compensates');
+  });
+
   it('still escapes a details tag that carries anything at all', () => {
     // The allowlist is exact-match on the token's raw source, so it cannot be
     // widened into a tag parser by crafted input.
