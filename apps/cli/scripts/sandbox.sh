@@ -37,9 +37,9 @@ command -v crabbox >/dev/null || die "crabbox not installed"
 # Load credentials. Prefer already-set env vars (CI workflow path); otherwise
 # re-enter this script under chained `agents secrets exec` so the bundle values
 # ride the child process env and never touch stdout (RUSH-2774 — the old
-# `eval "$(agents secrets export … --plaintext)"` pattern put whole bundles into
-# agent transcripts). Each bundle is probed with a real resolve first, so a
-# locked/absent bundle is skipped exactly like the old per-bundle `|| true`.
+# eval-a-plaintext-dump pattern put whole bundles into agent transcripts).
+# Each bundle is probed with a real resolve first, so a locked/absent bundle is
+# skipped exactly like the old per-bundle `|| true`.
 if [[ -z "${SANDBOX_SECRETS_EXEC:-}" && -z "${HCLOUD_TOKEN:-}" ]]; then
   command -v agents >/dev/null || die "HCLOUD_TOKEN not set and agents-cli not installed"
   chain=()
