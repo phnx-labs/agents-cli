@@ -101,10 +101,27 @@ export function buildChips(session: SessionMeta): Chip[] {
   return chips;
 }
 
-/** The page's `<title>` — `deriveLabel()` reads this as the share's gallery label. */
+/** Longest title that stays one readable line in the header and the gallery. */
+const TITLE_MAX = 90;
+
+/**
+ * The page's `<title>` — `deriveLabel()` reads this as the share's gallery label.
+ *
+ * The document heading is derived from the session's first prompt, which in a real
+ * session is routinely a pasted URL plus a file path plus the actual request. Left
+ * whole it renders as a three-line wall above the transcript and an unreadable
+ * gallery row, so it is collapsed to one line and cut at a word boundary. `--label`
+ * overrides it outright.
+ */
 export function sessionPageTitle(session: SessionMeta, markdown: string): string {
-  const heading = /^#\s+(.+)$/m.exec(markdown)?.[1]?.trim();
-  return heading || `${session.agent} session ${session.shortId || session.id}`;
+  const heading = /^#\s+(.+)$/m.exec(markdown)?.[1]?.replace(/\s+/g, ' ').trim();
+  if (!heading) return `${session.agent} session ${session.shortId || session.id}`;
+  if (heading.length <= TITLE_MAX) return heading;
+  const cut = heading.slice(0, TITLE_MAX);
+  const lastSpace = cut.lastIndexOf(' ');
+  // A single unbroken token longer than the cap (a URL) has no boundary to cut on;
+  // a hard slice beats returning the whole thing.
+  return `${(lastSpace > TITLE_MAX / 2 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
 }
 
 export function renderSessionHtmlDocument(

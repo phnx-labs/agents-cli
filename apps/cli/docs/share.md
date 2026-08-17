@@ -35,6 +35,45 @@ against an already-configured endpoint offers to update the deployed Worker in p
 instead of only "keep" or "reconfigure from scratch" — see
 [Updating the deployed Worker](#updating-the-deployed-worker).
 
+## Sharing a session
+
+`agents sessions share <id>` is the same publish path with a transcript on the front of
+it — one verb instead of `sessions render` → an HTML pass → `artifacts share`:
+
+```bash
+agents sessions share a1b2c3d4                      # → unlisted, redacted link
+agents sessions share a1b2c3d4 --public             # also list it in your gallery
+agents sessions share a1b2c3d4 --reasoning fold     # keep reasoning in collapsible sections
+agents sessions share a1b2c3d4 --expire never       # a link that does not decay
+```
+
+It renders the session with
+[`renderSessionMarkdownDocument`](../src/commands/sessions-render.ts) (the same redacted
+document `agents sessions render` writes), wraps it in a self-contained branded page
+([`src/lib/session/share-html.ts`](../src/lib/session/share-html.ts) — inline style, no CDN,
+no artifacts-cli dependency), and publishes it under `session-<shortId>` so re-sharing one
+session updates one URL and keeps the prior page as a
+[revision](#revisions).
+
+Three things differ from `agents artifacts share`, all because a transcript is not a plan:
+
+| | `artifacts share` | `sessions share` |
+|---|---|---|
+| Gallery | public by default | **unlisted** by default; `--public` opts in |
+| Emails | refused by the [scan](#security) | **masked** before publish (`redactEmails`) |
+| Raw HTML in the body | published as authored | escaped; non-`http(s)` link schemes dropped |
+
+**Unlisted by default** because a transcript carries file paths, command output, and error
+text that a plan does not — the URL is still world-readable, so unlisted is a capability
+URL, not a secret. **Emails are masked** rather than left to `--force`: nearly every real
+transcript carries a git author address, and a gate that must be bypassed on nearly every
+use is a gate nobody reads. `agents sessions render` is unchanged — it still leaves emails
+intact for a private gist. **HTML is escaped** because the page body is model and tool
+output: a session that merely printed a `<script>` tag must not ship an executable one.
+
+Manage published sessions with the ordinary `agents artifacts share list` /
+`agents artifacts share delete <slug>`.
+
 ## Architecture
 
 ```
@@ -244,6 +283,7 @@ synced config exists and the token is already available.
 | Command | What it does |
 |---|---|
 | `agents artifacts share <file> [--slug s] [--github-user u] [--expire spec] [--unlisted\|--private] [--force] [--no-cover] [--no-analytics] [--label text] [--meta k=v ...] [--no-revision] [--json]` | Publish `<file>` under your GitHub-username namespace (default expiry **30d**); print the link, or emit `{ url, coverUrl, expiresAt, unlisted?, label, labelSource }` for plan-render hooks with `--json`. `--unlisted`/`--private` hides from the gallery; `--force` bypasses the email/credential scan. HTML pages get an auto OG cover unless `--no-cover` and a CF Web Analytics beacon unless `--no-analytics`. `--label`/`--title` sets a human title (else derived); `--meta` attaches structured metadata; republishing an existing slug keeps the prior version unless `--no-revision` (see [Provenance, labels, and metadata](#provenance-labels-and-metadata) and [Revisions](#revisions)). |
+| `agents sessions share <session> [--public] [--slug s] [--label text] [--expire spec] [--reasoning omit\|fold\|include] [--force] [--no-cover]` | Render one session as a redacted, self-contained page and publish it under `session-<shortId>`; print the link, or the full publish result with `--json`. **Unlisted unless `--public`**, and emails are masked before the scan runs (see [Sharing a session](#sharing-a-session)). |
 | `agents artifacts share list [--github-user u] [--agent name] [--session id] [--label-contains substr] [--json]` | List the ACTIVE pages in your namespace, newest first — human table, or the raw listing with `--json` (see [Listing your shares](#listing-your-shares) below). `--agent`/`--session`/`--label-contains` narrow the fetched list client-side. |
 | `agents artifacts share revisions <target> [--for-user u] [--revisions-json]` | Show the retained prior versions of one published slug, newest first (see [Revisions](#revisions)). Flags named `--for-user`/`--revisions-json`, not `--github-user`/`--json` — see the note below. |
 | `agents artifacts share delete <targets...>` / `agents unshare <targets...>` | Take a published page down (see [Deleting a share](#deleting-a-share) below). |

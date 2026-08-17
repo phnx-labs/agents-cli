@@ -138,6 +138,29 @@ describe('sessionPageTitle', () => {
   it('falls back to the session identity when the document has no heading', () => {
     expect(sessionPageTitle(meta(), 'no heading here')).toBe('claude session a1b2c3d4');
   });
+
+  it('collapses a multi-line first prompt to one readable line', () => {
+    // A real session c016eaec titled itself with a pasted URL + a screenshot path +
+    // the request, and rendered as a three-line wall above the transcript.
+    const heading = 'https://github.com/phnx-labs/.agents-system -- [HOME]/Screenshots/CleanShot 2026-08-17 at [EMAIL] -- Hey Claude, can you please help me protect this';
+    const title = sessionPageTitle(meta(), `# ${heading}\n\nbody\n`);
+    expect(title.length).toBeLessThanOrEqual(91);
+    expect(title.endsWith('…')).toBe(true);
+    expect(title).not.toContain('\n');
+    // Cut on a word boundary, not mid-word.
+    expect(heading.startsWith(title.slice(0, -1))).toBe(true);
+    expect(title.slice(0, -1).endsWith(' ')).toBe(false);
+  });
+
+  it('leaves a short title untouched', () => {
+    expect(sessionPageTitle(meta(), '# Fix the retry bug\n')).toBe('Fix the retry bug');
+  });
+
+  it('hard-cuts a single unbroken token that has no word boundary', () => {
+    const url = `https://example.com/${'a'.repeat(200)}`;
+    const title = sessionPageTitle(meta(), `# ${url}\n`);
+    expect(title).toBe(`${url.slice(0, 90)}…`);
+  });
 });
 
 describe('escapeHtml', () => {
