@@ -82,18 +82,36 @@ runs, so the one key that unlocks everything never reaches the executed command.
 
 ### Path B — materialization (the value is printed → agent + transcript)
 
-Three commands exist to put plaintext *on stdout* on purpose:
+Two commands exist to put plaintext *on stdout* on purpose, and both are gated to
+a **human at a real interactive terminal, outside any agent session** (RUSH-2774):
 
-- `agents secrets export <bundle> --plaintext` — prints `KEY=VALUE` lines (for
-  `eval "$(...)"`).
-- `agents secrets view <bundle> --reveal` — unmasks values (`--plaintext` also
-  required in a non-interactive shell).
-- `agents secrets get <bundle> <KEY>` — prints one value (`src/commands/secrets.ts:1058`).
+- `agents secrets view <bundle> --reveal` — unmasks values.
+- `agents secrets get <item>` — prints one raw keychain item
+  (`src/commands/secrets.ts:1648`).
 
-When an agent runs any of these, the plaintext is in its Bash tool output — which
-means it is in the model's context **and** written verbatim to the session `.jsonl`.
-That is the moment a key crosses boundary #2. These commands are legitimate (a human
-at a TTY evaluating a bundle), but for an *agent* they are the ones to avoid.
+Both refuse outright — before resolving anything — when `isAgentInvocationContext()`
+sees an agent marker (`AGENTS_RUNTIME`, `AGENT_SESSION_ID`, `AGENTS_SESSION_ID`,
+`CLAUDECODE`) or when there is no TTY. `view --reveal` additionally has no
+non-interactive escape hatch left: the old `--plaintext` flag that allowed a
+piped/non-TTY reveal is gone. And the bundle-key form, `agents secrets get
+<bundle> <KEY>`, is removed unconditionally — it always refuses and names
+`agents secrets exec <bundle> -- printenv <KEY>` instead. `export`'s old
+shell-eval mode (`eval "$(agents secrets export <bundle> --plaintext)"`) is
+removed the same way: `export` without a destination flag (`--device` /
+`--to-1password` / `--to-file`) refuses and names `secrets exec` / `view
+--reveal`.
+
+When a human runs `view --reveal` or `get <item>` at a terminal, the plaintext is
+legitimate one-off output. When anything tries to run either from *inside* an
+agent session, the refusal is the point: an agent's shell tool output lands in
+the model's context **and** is written verbatim to the session `.jsonl`, so
+letting either command through would cross boundary #2 by construction. The one
+surviving stdout emitter beyond those two is a machine-to-machine transport, not
+a human- or agent-facing command: the SSH remote-resolve path
+(`export <bundle> --plaintext --format json`) that `remoteResolveEnv` /
+`verifyRemoteKeychainPush` build internally, gated on the hidden
+`AGENTS_SECRETS_REMOTE_TRANSPORT=1` marker AND the same agent-context refusal —
+nobody types this form by hand.
 
 ## Seen-vs-not-seen, by command
 
@@ -102,13 +120,16 @@ at a TTY evaluating a bundle), but for an *agent* they are the ones to avoid.
 | `agents secrets exec <b> -- <cmd>` | child process env | **No** | **No** |
 | `agents run --secrets <b>` | agent run's env | **No** | **No** |
 | `agents secrets list` / `view <b>` | masked (`••••`) | No (masked) | No |
-| `agents secrets export <b> --plaintext` | **stdout** | **Yes** | **Yes** |
-| `agents secrets view <b> --reveal` | **stdout** | **Yes** | **Yes** |
-| `agents secrets get <b> <KEY>` | **stdout** | **Yes** | **Yes** |
+| `agents secrets view <b> --reveal` | **stdout** (human terminal only; refuses in an agent session) | **No** — refuses | **No** — refuses |
+| `agents secrets get <item>` | **stdout** (human shell only; refuses in an agent session) | **No** — refuses | **No** — refuses |
+| `agents secrets export <b> --plaintext` (shell-eval mode) | *removed* (RUSH-2774) | n/a | n/a |
+| `agents secrets get <bundle> <KEY>` (bundle-key form) | *removed* (RUSH-2774) | n/a | n/a |
 
-**Rule of thumb for agent-driven flows:** use `exec` / `--secrets`. If you see
-`--plaintext`, `--reveal`, or `get` in an agent's transcript, a key entered its
-context there.
+**Rule of thumb for agent-driven flows:** use `exec` / `--secrets`. `view
+--reveal` and `get <item>` now refuse to run at all inside an agent session, so a
+key can no longer enter an agent's transcript through either of them — the
+former ungated printers (`export --plaintext`, `get <bundle> <KEY>`) are gone
+outright.
 
 ## The transcript corollary
 
@@ -122,6 +143,12 @@ boundary seen from two sides.
 
 ## How the boundary is enforced (not just documented)
 
+- **Agent-context refusal on every materializing command.** `isAgentInvocationContext()`
+  (`src/lib/secrets/headless.ts`) checks for `AGENTS_RUNTIME`, `AGENT_SESSION_ID`,
+  `AGENTS_SESSION_ID`, or `CLAUDECODE` — present regardless of TTY, since an agent
+  running inside tmux still has one. `view --reveal` and `get <item>` both consult
+  it before resolving anything and refuse outright when it is set. This is what
+  makes Path B a human-only path rather than an advisory one.
 - **Headless no-prompt.** In a non-interactive/agent context, resolution takes the
   `agentOnly` / `isHeadlessSecretsContext()` path (e.g. `src/commands/secrets.ts:1052`,
   `:1642`) — a background agent process must not silently raise a Touch ID sheet on
@@ -155,11 +182,15 @@ restated here because they bound *this* boundary too:
 ## Decision
 
 Keep the two paths **structurally separate and named**: Path A (`exec` / `--secrets`)
-is the default for every agent-driven flow and never materializes; Path B (`export
---plaintext` / `view --reveal` / `get`) exists only for deliberate human-at-a-TTY use.
-The design guarantee is that *reaching for a normal secrets-injecting command cannot
-accidentally print a secret into an agent's context* — materialization is always an
-explicit, differently-named opt-in.
+is the default for every agent-driven flow and never materializes; Path B
+(`view --reveal` / `get <item>`) exists only for deliberate human-at-a-TTY use, and
+that restriction is now **enforced, not just advisory** — both refuse outright
+under an agent invocation context, and the two commands that used to materialize
+with no such gate (`export --plaintext` shell-eval, `get <bundle> <KEY>`) are
+removed outright (RUSH-2774). The design guarantee is that *reaching for a normal
+secrets-injecting command cannot accidentally print a secret into an agent's
+context* — materialization is no longer an opt-in an agent could reach for at
+all, only a refusal-gated command a human can run at a real terminal.
 
 ## See also
 

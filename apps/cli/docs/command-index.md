@@ -676,9 +676,9 @@ agents secrets create [name]                       Create an empty bundle. Name 
 agents secrets delete [name]                       Delete a bundle and purge all its keychain items (use --keep-secrets to retain them).
 agents secrets describe <name> [text...]           Update the description of a bundle. Pass --clear to remove it.
 agents secrets exec <bundle> [command...]          Run a command with the bundle's secrets injected into the environment (use --device to resolve the bundle from a remote machine, ephemerally)
-agents secrets export [bundle]                     Resolve a bundle and print KEY=VALUE lines, push it to a 1Password vault with --to-1password, or push it to remote machine(s) over SSH with --device.
+agents secrets export [bundle]                     Move a bundle without exposing it: push to remote machine(s) over SSH with --device, to a 1Password vault with --to-1password, or to an encrypted file with --to-file.
 agents secrets generate [length]                   Generate a random password
-agents secrets get <item> [key]                    Print one secret value for shell hooks/automation. One arg = a raw keychain item by name; two args = one KEY out of a bundle (`get <bundle> <KEY>`). Cross-platform.
+agents secrets get <item> [key]                    Print one raw keychain item by name, for shell hooks/automation. Cross-platform. Bundle values are never printed — run commands under `agents secrets exec` instead.
 agents secrets import [bundle]                     Import keys into a bundle from a .env file, a 1Password vault, or legacy iCloud Keychain bundles. The bundle is created if it does not exist. Values are stored in the bundle's backend (keychain by default).
 agents secrets import-keyring                      Migrate agents-cli secrets from the OS keyring / Credential Manager into the encrypted file store (headless-safe). Dry-run by default.
 agents secrets list [query]                        List configured secrets bundles, optionally filtered (use --device/--devices for other machines over SSH)

@@ -112,11 +112,11 @@ agents secrets add x.com SOCIAL_GETRUSH_PASSWORD --type password \
 
 Key naming: uppercase the handle, replace non-alphanumerics with `_`, suffix with `_USERNAME` / `_PASSWORD` (plus `_TOTP_SECRET` if the account has 2FA).
 
-To pick an account, run `agents secrets view x.com` — notes print in the clear while values stay masked. Reveal only the pair you need:
+To pick an account, run `agents secrets view x.com` — notes print in the clear while values stay masked, so you can read the key names and choose the right account without seeing any value. Then inject just that pair into the command that needs it — never print it:
 
 ```bash
 agents secrets view x.com                  # read notes, choose the account
-agents secrets export x.com --plaintext | grep '^SOCIAL_GETRUSH_'
+agents secrets exec x.com --keys SOCIAL_GETRUSH_USERNAME,SOCIAL_GETRUSH_PASSWORD -- ./login-helper
 ```
 
 ## "I have a .env file I want to import"
@@ -171,13 +171,13 @@ On a **locked** keychain bundle:
 | You run | Touch ID? |
 |---|---|
 | `secrets list`, `secrets view` (no `--reveal`) | never — metadata / masked values only |
-| `secrets view --reveal`, `secrets exec` **at your terminal** | one sheet, then reveals / runs (a deliberate human reveal/run) |
-| `secrets get`, `secrets export` (any variant) | **never** — automation primitives for `$(…)` / `eval`; they fail fast to `agents secrets unlock` instead |
+| `secrets view --reveal`, `secrets exec` **at your terminal, outside an agent session** | one sheet, then reveals / runs (a deliberate human reveal/run) |
+| `secrets get <item>`, `secrets export` (`--to-file` / `--to-1password`) | **never** — automation primitives; fail fast to `agents secrets unlock` instead. `export` with no destination flag refuses outright and names `exec` / `view --reveal`; `get` also refuses outright inside an agent session |
 | `secrets unlock` | one sheet — the deliberate unlock |
 | anything an **agent** launches (`AGENTS_RUNTIME`) or any no-TTY context | never — resolves broker-only, fails fast if not held |
 | anything on an **already-unlocked** bundle | never — served from the broker |
 
-So a sheet only ever appears for a deliberate human action (`unlock`, or a `view --reveal` / `exec` you type) on a *locked* bundle. `get`/`export` stay silent so they never block a script mid-pipeline.
+So a sheet only ever appears for a deliberate human action (`unlock`, or a `view --reveal` / `exec` you type) on a *locked* bundle. `get`/`export` stay silent so they never block a script mid-pipeline — `export` now also refuses without a real destination (`--device` / `--to-1password` / `--to-file`), so it never prints a bundle to stdout.
 
 For a machine running lots of agents, run `agents secrets start` once — it installs the broker as a persistent background service (launchd) that stays up across the session, so a cold-started broker can't get starved under load. It self-heals onto new code after `npm i -g` upgrades. `agents secrets status` shows whether it's installed.
 

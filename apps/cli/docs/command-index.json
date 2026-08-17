@@ -19662,7 +19662,7 @@
           "negate": false
         }
       ],
-      "examples": "# Create a bundle\n      agents secrets create prod --description \"Production keys for the api stack\"\n\n      # Add a keychain-backed secret (prompts for the value)\n      agents secrets add prod STRIPE_API_KEY\n\n      # Add a non-sensitive literal\n      agents secrets add prod LOG_LEVEL --value info\n\n      # Inject the bundle into an agent run\n      agents run claude \"deploy the worker\" --secrets prod\n\n      # See what's in the bundle (values masked); shows its policy, held state, and usage\n      agents secrets view prod\n\n      # Order the list by how recently / how often each bundle is used\n      agents secrets list --sort used\n      agents secrets list --sort uses\n\n      # Stop a noisy automation bundle from prompting every run: ask once a week\n      agents secrets policy prod hold\n\n      # Eval the bundle into your current shell\n      eval \"$(agents secrets export prod --plaintext)\"\n\n      # Push the bundle to remote machine(s) over SSH (lands as a native bundle there)\n      agents secrets export prod --device yosemite-s0 --device yosemite-s1 --force\n\n      # Run a one-off command with secrets injected\n      agents secrets exec prod -- ./deploy.sh",
+      "examples": "# Create a bundle\n      agents secrets create prod --description \"Production keys for the api stack\"\n\n      # Add a keychain-backed secret (prompts for the value)\n      agents secrets add prod STRIPE_API_KEY\n\n      # Add a non-sensitive literal\n      agents secrets add prod LOG_LEVEL --value info\n\n      # Inject the bundle into an agent run\n      agents run claude \"deploy the worker\" --secrets prod\n\n      # See what's in the bundle (values masked); shows its policy, held state, and usage\n      agents secrets view prod\n\n      # Order the list by how recently / how often each bundle is used\n      agents secrets list --sort used\n      agents secrets list --sort uses\n\n      # Stop a noisy automation bundle from prompting every run: ask once a week\n      agents secrets policy prod hold\n\n      # Run a one-off command with secrets injected (values ride the child env, never stdout)\n      agents secrets exec prod -- ./deploy.sh\n\n      # Need one value inside a script? Read it under injection, not with a printer\n      agents secrets exec prod -- printenv STRIPE_API_KEY\n\n      # Deliberately reveal values at your terminal (interactive only)\n      agents secrets view prod --reveal\n\n      # Push the bundle to remote machine(s) over SSH (lands as a native bundle there)\n      agents secrets export prod --device yosemite-s0 --device yosemite-s1 --force",
       "notes": "Bundles are containers; secrets are the variables inside them. Keychain values\n      never touch disk in plaintext. Every item is device-local and gated by Touch ID\n      or device passcode; cross-machine sync is handled by 'agents secrets push/pull'.\n\n      Naming: name a bundle after the thing it holds credentials for, so an agent can\n      guess it without listing. For a website, use its domain WITH the real suffix —\n      'stripe.com', 'openai.ai', 'github.com'. For a desktop app, use the app's binary\n      suffix — 'slack.app' (macOS) or 'photoshop.exe' (Windows). Always pass\n      '--description' so 'list' / 'view' explain the bundle without opening it; an\n      undescribed bundle prints a \"No description found\" nudge. 'view' also shows\n      whether the bundle is currently unlocked (held by the agent) and how often / how\n      recently it has been created, imported, exported, viewed, and accessed;\n      'list --sort used|uses' orders by recency / frequency, and\n      'agents secrets activity [bundle]' prints the recent value-free event timeline.\n\n      Touch ID noise: macOS pops a prompt per bundle per process. Each bundle has\n      a prompt policy, shown in the POLICY column of 'agents secrets list':\n        hold (default)    ask once, then serve it silently from the local agent\n                          for the hold window ('secrets.agent.holdMs', 7d by\n                          default), until sleep / logout or 'lock' (a bare\n                          screen-lock does NOT drop it). Accepts the older names\n                          'daily' and 'session'.\n        always            ask for Touch ID every time — never auto-held.\n        never             no biometry ACL at all — reads are silent forever, even\n                          if the agent is down. Automation credentials only.\n      The default is 'hold' (one Touch ID per hold window); change it globally with\n      'secrets.policy' in agents.yaml, or per bundle with 'agents secrets policy\n      <bundle> always'. 'agents secrets unlock <bundle>' holds any bundle after one\n      prompt regardless of policy. Nothing on disk.\n\n      See also:\n        agents secrets policy <bundle> hold            ask once per hold window (7d by default), not every run\n        agents secrets unlock <bundle>                 hold a bundle after one Touch ID\n        agents secrets lock                            wipe held bundles (re-prompt next read)\n        agents secrets status                          show held bundles + when they lock\n        agents secrets rotate <bundle> <key>           rotate value, preserve metadata\n        agents secrets import <bundle> --from .env     bulk import from .env\n        agents secrets import <bundle> --from 1password:<vault>\n        agents secrets import --from icloud            recover legacy iCloud Keychain bundles\n        agents secrets generate [length]               generate a random password / PIN / hex\n        agents secrets migrate-acl                     upgrade legacy items to the biometry ACL",
       "subcommands": [
         {
@@ -20060,7 +20060,7 @@
           "name": "export",
           "path": "secrets export",
           "aliases": [],
-          "description": "Resolve a bundle and print KEY=VALUE lines, push it to a 1Password vault with --to-1password, or push it to remote machine(s) over SSH with --device.",
+          "description": "Move a bundle without exposing it: push to remote machine(s) over SSH with --device, to a 1Password vault with --to-1password, or to an encrypted file with --to-file.",
           "args": [
             {
               "name": "bundle",
@@ -20070,15 +20070,6 @@
             }
           ],
           "options": [
-            {
-              "flags": "--plaintext",
-              "description": "Acknowledge that the resolved values will be printed in the clear (shell export mode)",
-              "long": "--plaintext",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
             {
               "flags": "--to-1password",
               "description": "Push every key in the bundle as a PASSWORD item in a 1Password vault",
@@ -20124,16 +20115,6 @@
               "optional": false,
               "variadic": false,
               "negate": false
-            },
-            {
-              "flags": "--format <shell|json>",
-              "description": "Output for --plaintext export: shell (default) or json (lossless, machine-readable; used by remote resolve)",
-              "long": "--format",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "shell"
             },
             {
               "flags": "--to-file <path>",
@@ -20301,7 +20282,7 @@
           "name": "get",
           "path": "secrets get",
           "aliases": [],
-          "description": "Print one secret value for shell hooks/automation. One arg = a raw keychain item by name; two args = one KEY out of a bundle (`get <bundle> <KEY>`). Cross-platform.",
+          "description": "Print one raw keychain item by name, for shell hooks/automation. Cross-platform. Bundle values are never printed — run commands under `agents secrets exec` instead.",
           "args": [
             {
               "name": "item",
@@ -21617,17 +21598,8 @@
           "options": [
             {
               "flags": "--reveal",
-              "description": "Print keychain-backed values in the clear (TTY only unless --plaintext)",
+              "description": "Print keychain-backed values in the clear (interactive terminal only)",
               "long": "--reveal",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--plaintext",
-              "description": "Allow --reveal in non-interactive shells (use with care)",
-              "long": "--plaintext",
               "required": false,
               "optional": false,
               "variadic": false,

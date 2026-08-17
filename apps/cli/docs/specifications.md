@@ -1349,12 +1349,31 @@ access control (that is 1Password/Vault; this tool is device-local first).
   construction rather than by remembering to list it. (RUSH-2100. Observed: six
   live processes on one fleet box carrying `AGENTS_SECRETS_PASSPHRASE`, which
   decrypts every file-backed bundle on that machine.)
-- **SEC-9 (MUST).** Materializing commands (`export --plaintext`, `view --reveal`,
-  `get`) are the ONLY commands that print a plaintext value, and each MUST require
-  an explicit opt-in flag or be a declared automation primitive: `export` refuses
-  without `--plaintext` (`commands/secrets.ts:1921-1924`); `--reveal` in a
-  non-TTY refuses without `--plaintext` (`commands/secrets.ts:1069-1072`); `get`
-  is the deliberately-ungated scripting primitive (`commands/secrets.ts:1156,1172-1181`).
+- **SEC-9 (MUST).** Materializing commands (`view --reveal`, the raw-item
+  `get <item>`, and the marker-gated remote-resolve transport) are the ONLY
+  commands that print a plaintext value. The former public printers are gone
+  (RUSH-2774): `export`'s shell-eval mode (`eval "$(agents secrets export …
+  --plaintext)"`) is deleted outright — `export` without a destination flag
+  refuses and names `secrets exec` / `view --reveal` — and the bundle-key
+  `get <bundle> <KEY>` refuses unconditionally, naming
+  `agents secrets exec <bundle> -- printenv <KEY>` (`commands/secrets.ts`,
+  export action tail + `get` action).
+- **SEC-9b (MUST).** A materializing command MUST refuse under an **agent
+  invocation context** — `isAgentInvocationContext()`
+  (`lib/secrets/headless.ts`): `AGENTS_RUNTIME`, `AGENT_SESSION_ID`,
+  `AGENTS_SESSION_ID`, or `CLAUDECODE` present — regardless of TTY (an agent
+  inside tmux has one). Anything printed by an agent's shell tool lands in the
+  model's context and the session `.jsonl`; the agent path to values is
+  injection only (`secrets exec`, `run --secrets`). This gate covers
+  `view --reveal`, the raw-item `get <item>`, and the transport shape below.
+- **SEC-9c (MUST).** The machine-to-machine SSH resolve (`remoteResolveEnv`,
+  `verifyRemoteKeychainPush`, `lib/secrets/remote.ts`) is the sole surviving
+  JSON emitter: `export <b> --plaintext --format json` emits ONLY when
+  `AGENTS_SECRETS_REMOTE_TRANSPORT=1` is present AND SEC-9b's agent gate is
+  clear. Both flags are hidden from help. The marker rides the legacy argv so a
+  newer driver keeps resolving from an older remote during a fleet rollout; an
+  older driver against a newer remote fails loud through the transport's
+  existing "remote agents-cli new enough" error path.
 - **SEC-10 (MUST).** `exec:` refs MUST be gated by the bundle's `allow_exec` at
   both write and resolve time (`commands/secrets.ts:1388-1390`;
   `lib/secrets/index.ts:1398-1403`) and MUST run argv-only (`shell:false`,
@@ -1403,16 +1422,19 @@ access control (that is 1Password/Vault; this tool is device-local first).
   exactly three commands: `agents secrets view --reveal`, `agents secrets exec`, and
   `agents secrets export --device` — all three gate `agentOnly` on
   `isHeadlessSecretsContext() || !isInteractiveTerminal()`
-  (`commands/secrets.ts:1433`, `:1549`, `:2334`, `:2473`), the push forwarding it
+  (`commands/secrets.ts`), the push forwarding it
   through `resolveBundleForPush` (`lib/secrets/push.ts:117`, which defaults to
-  `true` so an automated caller that says nothing stays broker-only). Conversely,
-  the **automation primitives** `agents secrets get` and the
-  remaining `agents secrets export` variants (`--plaintext`, `--to-file`,
-  `--to-1password`) MUST stay `agentOnly: true` **unconditionally** and MUST NOT
-  prompt even at an interactive terminal (`commands/secrets.ts:1642`, `:2293`,
-  `:2360`, `:2402`) — prompting there would either dump plaintext onto a visible
-  screen (`export --plaintext`, which prints) or block a `$(…)` capture
-  mid-pipeline (`get`). `export --device` is on the human side because neither hazard
+  `true` so an automated caller that says nothing stays broker-only), and
+  `view --reveal` additionally refusing under SEC-9b's agent gate before any
+  resolve. Conversely, the **automation primitives** — the raw-item
+  `agents secrets get <item>`, the `export` destination variants (`--to-file`,
+  `--to-1password`), and the marker-gated remote-resolve transport (SEC-9c) —
+  MUST stay `agentOnly: true` **unconditionally** and MUST NOT prompt even at an
+  interactive terminal: prompting there would either dump plaintext onto a
+  visible screen or block a `$(…)` capture mid-pipeline. (The former
+  ungated bundle printers, `export --plaintext` shell mode and
+  `get <bundle> <KEY>`, were removed by RUSH-2774 — see SEC-9.)
+  `export --device` is on the human side because neither hazard
   applies: it prints a key COUNT, never a value, and nothing captures its stdout,
   so it is strictly less exposed than the `view --reveal` that already prompts.
   Under an agent (`AGENTS_RUNTIME`) or
@@ -1421,8 +1443,8 @@ access control (that is 1Password/Vault; this tool is device-local first).
   `agents secrets exec <locked> -- <cmd>`, or `agents secrets export <locked> --device
   <target>` **When** the bundle is not
   broker-held **Then** exactly one Touch ID sheet is raised and the value is
-  revealed / command run / bundle pushed; whereas `get` or an automation-primitive
-  `export` on the same locked bundle
+  revealed / command run / bundle pushed; whereas a raw-item `get` or a
+  destination `export` on the same locked bundle
   fails fast naming `agents secrets unlock <bundle>`, no sheet. This is the
   reveal-vs-automation split — `view --reveal`/`exec`/`export --device` are the only
   interactive
@@ -1641,30 +1663,35 @@ flags and examples; this spec governs the **guarantees** behind them.
 Two orthogonal axes: **Boundary side** (does a plaintext value cross into the
 agent's process / a child / stdout?) and **Prompts (locked)?** (can this raise a
 Touch ID sheet on a *locked* bundle — see SEC-13b). They are independent: `exec`
-and `export --device` inject yet CAN prompt interactively, while `export
---plaintext` materializes yet NEVER prompts.
+and `export --device` inject yet CAN prompt interactively, while the raw-item
+`get` materializes yet NEVER prompts.
 
 | Command | Boundary side | Prompts (locked)? | Evidence |
 |---|---|---|---|
-| `secrets exec <b> -- <cmd>` | **Inject** (child env) | **interactive TTY only** (SEC-13b) | `commands/secrets.ts:2463,2473` |
+| `secrets exec <b> -- <cmd>` | **Inject** (child env) | **interactive TTY only** (SEC-13b) | `commands/secrets.ts` exec action |
 | `run --secrets <b>` | **Inject** (run child env) | never (SEC-13a) | `commands/exec.ts` secrets injection |
-| `secrets export --device` (SSH push) | **Inject** (over ssh stdin) | **interactive TTY only** (SEC-13b) | `commands/secrets.ts:2334`, `lib/secrets/push.ts:117` |
-| `secrets export --to-1password` / `--to-file` | **Neither** (to `op` argv / AES file) | never | `commands/secrets.ts:2360,2293` |
+| `secrets export --device` (SSH push) | **Inject** (over ssh stdin) | **interactive TTY only** (SEC-13b) | `commands/secrets.ts`, `lib/secrets/push.ts:117` |
+| `secrets export --to-1password` / `--to-file` | **Neither** (to `op` argv / AES file) | never | `commands/secrets.ts` export action |
 | `secrets mcp` (`get_secret`) | **JIT, per-request** — never `process.env`, names-only in `tools/list` | never | `lib/secrets/mcp.ts` |
-| `secrets export --plaintext` | **Materialize** | never (automation primitive) | `commands/secrets.ts:2399,2402` |
-| `secrets view --reveal` | **Materialize** | **interactive TTY only** (SEC-13b) | `commands/secrets.ts:1546,1549` |
-| `secrets get [b] [KEY]` | **Materialize** (automation primitive, ungated) | never | `commands/secrets.ts:1642` |
+| `secrets export` shell mode / `secrets get <b> <KEY>` | **REMOVED** (RUSH-2774) — refuse, naming `secrets exec` | n/a | `commands/secrets.ts` export/get actions |
+| remote-resolve transport (`export --plaintext --format json` + marker) | **Materialize** (json, SSH transport only; SEC-9c) | never | `commands/secrets.ts`, `lib/secrets/remote.ts` |
+| `secrets view --reveal` | **Materialize** | **interactive TTY only, non-agent** (SEC-9b, SEC-13b) | `commands/secrets.ts` view action |
+| `secrets get <item>` (raw item) | **Materialize** (human shells only; SEC-9b) | never | `commands/secrets.ts` get action |
 | `list` / `view` (default) / all CRUD / `unlock` / `lock` / `status` / `push` / `pull` | **Neither** (metadata/status/counts only) | only `unlock` prompts | e.g. `commands/secrets.ts` list/view/unlock |
 
-Rule of thumb (normative): **if `--plaintext`, `--reveal`, or `get` appears in an
-agent's transcript, a key entered the agent's context there.** Injection and MCP
-do not (`secrets-trust-boundaries.md:110-111`).
+Rule of thumb (normative): **no `agents secrets` command materializes a value
+inside an agent session** (SEC-9b) — if a value appears in an agent's transcript
+it traveled through `secrets exec`'s child choosing to print (e.g.
+`exec <b> -- env`), a deliberate composition the value-free audit stream records.
+Injection and MCP never materialize (`secrets-trust-boundaries.md`).
 
 #### 4.3 stdout / stderr / exit discipline
 
 - **SEC-IF-1 (MUST).** Machine-readable value output goes to **stdout** only
-  (`get`, `export --plaintext`, `--format json`); human/advisory/warning output
-  goes to **stderr** (dangerous-key drops, rc-hygiene notices) so a piped value
+  (the raw-item `get <item>`, the marker-gated remote-resolve transport);
+  human/advisory/warning output
+  goes to **stderr** (dangerous-key drops, rc-hygiene notices, the SEC-9
+  refusals) so a piped value or captured payload
   is never polluted (`lib/secrets/remote.ts:214-219`; `rc-hygiene` advisories).
 - **SEC-IF-2 (MUST).** A masked marker (`redact()` emits `'*'` × min(len,8)) MUST be
   shown wherever a value would otherwise appear but reveal was not requested
@@ -1786,6 +1813,16 @@ normative — a change that widens or narrows a cell is a spec change.
   prompt), and a new `share` bundle defaults to the `never` tier (the write token is
   low-sensitivity automation infra), so auto-share is silent with no unlock. An
   existing `share` bundle keeps its tier (no silent downgrade).
+- **SEC-GAP-10 (closed by RUSH-2774).** The spec previously declared the ungated
+  bundle printers — `export --plaintext` shell mode and `get <bundle> <KEY>` —
+  intentional "automation primitives" whose appearance in a transcript was "the
+  audit signal, not a bug" (old GWT-S2). In practice agents copied the
+  `eval "$(agents secrets export … --plaintext)"` one-liner from first-party
+  scripts/help/docs and exfiltrated whole bundles into session transcripts
+  reflexively. That call is reversed: the two printers are removed (SEC-9), the
+  survivors refuse under agent context (SEC-9b), the SSH transport is
+  marker-gated (SEC-9c), and every first-party script/doc teaches the injection
+  path instead.
 
 ---
 
@@ -1798,14 +1835,23 @@ Then the value is placed only in the child env (`commands/secrets.ts:2009`), is
 never written to this process's stdout, and does not appear in the agent's
 tool-call output or the session `.jsonl`.
 
-**GWT-S2 — `get` always materializes, by design.**
-Given the same bundle; When an agent runs `agents secrets get prod STRIPE_API_KEY`;
-Then the plaintext is written to stdout with no TTY gate
-(`commands/secrets.ts:1593`) and lands in the agent's context + transcript — this
-is the automation primitive, and its appearance in a transcript is the audit
-signal, not a bug. It never raises a Touch ID sheet, even run directly at a
-terminal on a locked bundle (`agentOnly: true` unconditionally) — a locked bundle
-fails fast to `agents secrets unlock`.
+**GWT-S2 — bundle materializers refuse, naming the injection path (SEC-9, RUSH-2774).**
+Given the same bundle; When an agent (or anyone) runs
+`agents secrets get prod STRIPE_API_KEY` or
+`eval "$(agents secrets export prod --plaintext)"`;
+Then no value is printed: `get <bundle> <KEY>` refuses unconditionally naming
+`agents secrets exec prod -- printenv STRIPE_API_KEY`, and `export` without a
+destination refuses naming `--device`/`--to-1password`/`--to-file`, `secrets
+exec`, and `view --reveal`. (This reverses the pre-RUSH-2774 contract that
+called ungated materialization "the audit signal, not a bug" — see SEC-GAP-10.)
+
+**GWT-S2a — the remote-resolve transport still emits, for machines only (SEC-9c).**
+Given `AGENTS_SECRETS_REMOTE_TRANSPORT=1` in the environment of an SSH login
+shell with no agent markers; When `remoteResolveEnv` drives
+`agents secrets export prod --plaintext --format json` on that remote;
+Then a single JSON object of resolved values crosses ssh stdout (encrypted in
+transit), and the same invocation without the marker — or with any SEC-9b agent
+marker present — exits 1 with the refusal.
 
 **GWT-S2b — `view --reveal` / `exec` prompt once, interactively, by design (SEC-13b).**
 Given a locked `hold` bundle `prod` not held by the broker; When a **human** at a
@@ -1813,11 +1859,10 @@ real terminal (no `AGENTS_RUNTIME`) runs `agents secrets view --reveal prod` or
 `agents secrets exec prod -- ./deploy.sh`; Then exactly **one** Touch ID sheet is
 raised and the value is revealed / the command runs
 (`agentOnly: isHeadlessSecretsContext() || !isInteractiveTerminal()` →
-`false` for a TTY human, `commands/secrets.ts:1500,2463`). Whereas the same command
+`false` for a TTY human). Whereas the same command
 under an agent runtime or with no TTY resolves broker-only and fails fast naming
-`agents secrets unlock prod`, no sheet — so release/CI scripts never prompt. This
-is the sole difference between the two deliberate reveal/run commands and the
-`get`/`export` automation primitives (GWT-S2).
+`agents secrets unlock prod`, no sheet — so release/CI scripts never prompt; and
+`view --reveal` under any SEC-9b agent marker refuses before resolving at all.
 
 **GWT-S3 — `list` is silent and value-free.**
 Given several `hold`/`always` bundles; When the human runs `agents secrets list`;

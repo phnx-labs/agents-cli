@@ -17,12 +17,12 @@ The sheet is raised only by a deliberate human request on a **locked** bundle:
 `agents secrets unlock`, or an `agents secrets view --reveal` / `agents secrets
 exec`, or an `agents secrets export --device` you run **at a real interactive
 terminal** (a TTY, outside any agent runtime) — one sheet, then the value is
-revealed / the command runs / the bundle is pushed. `agents secrets get` and the
-automation-primitive `agents secrets export` variants (`--plaintext`, `--to-file`,
-`--to-1password`) **never raise the sheet at all**, in any shell: they are
-automation primitives (`$(agents secrets get …)`, `eval "$(agents secrets export …
---plaintext)"`), so a locked bundle fails fast toward `agents secrets unlock
-<bundle>` instead of blocking a pipeline on Keychain UI. Beneath an agent
+revealed / the command runs / the bundle is pushed. The `export` destination
+variants (`--to-file`, `--to-1password`) **never raise the sheet at all**, in any
+shell: they are automation primitives, so a locked bundle fails fast toward
+`agents secrets unlock <bundle>` instead of blocking a pipeline on Keychain UI.
+`agents secrets get <item>` never raises the sheet either, and additionally
+refuses outright inside an agent session before it would try. Beneath an agent
 (`AGENTS_RUNTIME` set) or with no TTY, **all** of these
 resolve broker-only — there the agent is the caller, not you. See the
 [Touch-ID contract](#touch-id-contract) below for the full per-command matrix. The
@@ -36,14 +36,14 @@ Which `agents secrets` commands can raise a biometric sheet, and when:
 | Command | On a locked keychain bundle |
 |---|---|
 | `list`, `view` (no `--reveal`) | never prompts — metadata / masked values only |
-| `view --reveal`, `exec`, `export --device` | **at an interactive terminal:** one Touch ID, then reveals / runs / pushes. Under an agent (`AGENTS_RUNTIME`) or no TTY: broker-only, fail-closed, no sheet |
-| `get`, `export` (`--plaintext` / `--to-file` / `--to-1password`) | **never prompts, in any shell** — automation primitives; fail-closed to `agents secrets unlock` |
+| `view --reveal`, `exec`, `export --device` | **at an interactive terminal, outside an agent session:** one Touch ID, then reveals / runs / pushes. Under an agent (`AGENTS_RUNTIME`) or no TTY: broker-only, fail-closed, no sheet |
+| `get <item>`, `export` (`--to-file` / `--to-1password`) | **never prompts, in any shell** — automation primitives; fail-closed to `agents secrets unlock`. `get` additionally refuses outright inside an agent session |
 | `unlock` | the one deliberate biometric entry point |
 | any command on an already-unlocked bundle | never prompts — the broker fast-path returns before Keychain is touched |
 
 The rule: a **deliberate human reveal/run/push** (`view --reveal`, `exec`,
 `export --device`) at a terminal gets one sheet; the **automation
-primitives** (`get`, `export --plaintext` / `--to-file` / `--to-1password`) never
+primitives** (`get`, `export --to-file` / `--to-1password`) never
 do, because prompting would either dump plaintext onto a visible screen or block a
 `$(…)` capture mid-pipeline. Everything an **agent** launches stays broker-only.
 
@@ -243,7 +243,7 @@ resolve through the `agents hosts` registry, an ssh-config alias, or `user@host`
 # Browse one host, or several at once (grouped by host)
 agents secrets list --device yosemite-s1
 agents secrets list --devices yosemite-s0,yosemite-s1
-agents secrets view --device yosemite-s1 r2.backups --reveal --plaintext
+agents secrets view --device yosemite-s1 r2.backups --reveal   # forces a TTY on your side
 
 # Use a remote bundle ephemerally — values are injected, never stored locally
 agents secrets exec --device yosemite-s1 r2.backups -- ./deploy.sh
@@ -271,9 +271,9 @@ agents run claude "ship it" --secrets r2.backups@yosemite-s1   # bundle@host suf
   touched secrets on. This covers the `export --device` / `accounts sync` push and
   its read-back / policy follow-ups; a remote **resolve** (`exec --device`,
   `run --secrets b@host`); a **`view --reveal --device`** (the plaintext value
-  returns over ssh stdout — on the interactive prompt path and the `--plaintext`
-  non-interactive path alike); and **`unlock --device`** (you type the remote
-  bundle's passphrase over the channel). Read-only `list --device` and a masked
+  returns over ssh stdout, always over a forced TTY on your side); and
+  **`unlock --device`** (you type the remote bundle's passphrase over the
+  channel). Read-only `list --device` and a masked
   `view --device` (no `--reveal`) carry no secret bytes and keep the fast
   shared-connection baseline.
 
@@ -346,7 +346,10 @@ swallows the positional bundle name: `unlock <bundle> --device <machine>`.
 Source: `src/lib/secrets/remote.ts` (transport + resolve), wired into `list` /
 `view` / `exec` in `src/commands/secrets.ts` and the `--secrets` loop in
 `src/commands/exec.ts`. The machine-readable wire format is
-`secrets export --format json`.
+`secrets export --plaintext --format json`, gated behind the
+`AGENTS_SECRETS_REMOTE_TRANSPORT=1` marker that `remoteResolveEnv` /
+`verifyRemoteKeychainPush` set internally — both the flag and the marker are
+hidden from `--help`; this is not a form you run by hand.
 The Windows push bridge is `buildWindowsStdinImportCommand` in
 `src/lib/hosts/remote-cmd.ts`.
 
@@ -368,8 +371,7 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | `secrets list --unused <duration>` | Not read since this far back; never-used bundles always match | `agents secrets list --unused 3mo` |
 | `secrets list --sort <field>` · `-n` | Sort by `name`/`used`/`uses`/`created`/`updated`/`expiry`, and cap the count. `used` = most recently used, `uses` = most frequently accessed (both from the usage read-model) | `agents secrets list --sort uses -n 10` |
 | `secrets view [name]` | Show keys in a bundle (values masked); also shows held state + a value-free usage summary | `agents secrets view prod` |
-| `secrets view [name] --reveal` | Print keychain values in the clear (TTY only) | `agents secrets view prod --reveal` |
-| `secrets view [name] --reveal --plaintext` | Allow `--reveal` in non-interactive shells | `agents secrets view prod --reveal --plaintext` |
+| `secrets view [name] --reveal` | Print keychain values in the clear — interactive terminal only, refuses inside an agent session | `agents secrets view prod --reveal` |
 | `secrets activity [name]` · `-n` · `--json` | Recent value-free usage timeline (create/import/export/view/access/unlock), one bundle or all | `agents secrets activity prod --limit 20` |
 | `secrets create [name]` | Create an empty bundle (name it after what it holds; pass `--description`) | `agents secrets create stripe.com` |
 | `secrets create [name] --description <text>` | Create with a description | `agents secrets create prod --description "Live API keys"` |
@@ -412,7 +414,7 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | `secrets import [bundle] --from-ssh --device <peer>` | Pull a bundle from a fleet peer over SSH and import it locally (no dependency on api.prix.dev) | `agents secrets import prod --from-ssh --device mac-mini` |
 | `secrets import ... --all-plaintext` | Store imported values as literals, skip keychain | `agents secrets import prod --from .env --all-plaintext` |
 | `secrets import ... --force` | Overwrite existing keys | `agents secrets import prod --from .env --force` |
-| `secrets export [bundle]` | Print `KEY=VALUE` lines for shell eval | `eval "$(agents secrets export prod --plaintext)"` |
+| `secrets export [bundle]` | Transfer-only — refuses without a destination flag (`--device` / `--to-1password` / `--to-file`) and points at `secrets exec` / `view --reveal` | `agents secrets export prod --device mac-mini` |
 | `secrets export [bundle] --to-1password --vault <name>` | Push bundle to a 1Password vault | `agents secrets export prod --to-1password --vault Team` |
 | `secrets export ... --force` | Overwrite existing 1Password items | `agents secrets export prod --to-1password --vault Team --force` |
 | `secrets export [bundle] --to-file <path>` | Write the bundle as an AES-256-GCM encrypted offline file (needs `AGENTS_SYNC_PASSPHRASE`; symmetric counterpart of `import --from-file`) | `agents secrets export prod --to-file prod.enc` |
@@ -608,9 +610,6 @@ Headless (CI, a worker box with no TTY), set `AGENTS_SYNC_PASSPHRASE` instead of
 ```bash
 # Run a deploy script with the prod bundle injected (no agents run needed)
 agents secrets exec prod -- ./scripts/deploy.sh
-
-# Eval into your current shell
-eval "$(agents secrets export prod --plaintext)"
 ```
 
 ### 7. Website logins with multiple accounts
