@@ -909,6 +909,86 @@ describe('startWebhookServer', () => {
       fs.rmSync(webhookDir, { recursive: true, force: true });
     }
   });
+
+  // RUSH-2722: a `run.command` handler shells out via `exec()`, which only
+  // resolves once the child process exits. Before this fix, the "fired" log
+  // rode `onDelivery` — settled only after that exit — so verifying a delivery
+  // fired meant waiting out however long the shelled-out command (a real agent
+  // run in production) took to finish. `onMatch` must fire immediately after
+  // the ack, well before the slow command settles.
+  it.skipIf(process.platform === 'win32')('reports onMatch immediately, before a slow run.command handler settles', async () => {
+    const secret = 'linear-secret';
+    const webhookDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webhook-onmatch-'));
+    process.env.AGENTS_WEBHOOKS_DIR = webhookDir;
+    try {
+      fs.writeFileSync(
+        path.join(webhookDir, 'slow-handler.yml'),
+        yaml.stringify({
+          name: 'slow-handler',
+          source: 'linear',
+          event: 'Issue',
+          action: 'update',
+          run: { command: 'sleep 0.3' },
+        }),
+        'utf-8',
+      );
+
+      const waiter = settleWaiter();
+      let matchedAt: number | null = null;
+      let settledAt: number | null = null;
+      const server = startWebhookServer({
+        secrets: { linear: secret },
+        onMatch: (_webhook, _matchedJobNames, matchedHandlerNames) => {
+          if (matchedHandlerNames.includes('slow-handler')) matchedAt = Date.now();
+        },
+        onDelivery: () => {
+          settledAt = Date.now();
+          waiter.hit();
+        },
+        onDeliveryError: waiter.hit,
+        fire: { jobs: [], dispatch: async (): Promise<RunMeta> => { throw new Error('should not dispatch routine'); } },
+      });
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address !== 'object') throw new Error('server did not bind');
+      try {
+        const payload = Buffer.from(JSON.stringify(linearIssueWebhook(['agent']).payload));
+        const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+        const ackedAt = await new Promise<number>((resolve, reject) => {
+          const req = http.request({
+            host: '127.0.0.1',
+            port: address.port,
+            path: '/hooks/linear',
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'content-length': String(payload.length),
+              'linear-signature': sig,
+              'linear-delivery': 'delivery-onmatch-1',
+            },
+          }, (res) => {
+            res.resume();
+            res.on('end', () => resolve(Date.now()));
+          });
+          req.on('error', reject);
+          req.end(payload);
+        });
+
+        await waiter.until(1);
+        expect(matchedAt).not.toBeNull();
+        expect(settledAt).not.toBeNull();
+        // onMatch trails the ack by a scheduling tick, not the 300ms sleep.
+        expect(matchedAt! - ackedAt).toBeLessThan(150);
+        // onDelivery only fires once the shelled-out `sleep 0.3` has exited.
+        expect(settledAt! - matchedAt!).toBeGreaterThanOrEqual(250);
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    } finally {
+      delete process.env.AGENTS_WEBHOOKS_DIR;
+      fs.rmSync(webhookDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('createFileDeliveryStore', () => {

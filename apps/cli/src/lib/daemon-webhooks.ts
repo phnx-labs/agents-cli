@@ -221,10 +221,13 @@ export async function startHostedWebhookReceivers(opts: {
         deliveryStore: createFileDeliveryStore(
           path.join(getRuntimeStateDir(), 'webhook', `deliveries-${port}.json`),
         ),
-        onDelivery: (webhook, fired, handlers) => {
+        // Logged at MATCH time, before dispatch — a `run.command` handler can
+        // block on a shelled-out agent run for minutes, and that must never
+        // delay the log that says a delivery fired (RUSH-2722).
+        onMatch: (webhook, matchedJobNames, matchedHandlerNames) => {
           const parts: string[] = [];
-          if (fired.length) parts.push(`routines ${fired.map((f) => f.jobName).join(', ')}`);
-          if (handlers.length) parts.push(`handlers ${handlers.map((h) => h.handlerName).join(', ')}`);
+          if (matchedJobNames.length) parts.push(`routines ${matchedJobNames.join(', ')}`);
+          if (matchedHandlerNames.length) parts.push(`handlers ${matchedHandlerNames.join(', ')}`);
           log('INFO', `webhook ${webhook.source}:${webhook.event} ${parts.length ? `fired ${parts.join('; ')}` : 'no match'}`);
         },
         // The 202 ack means no HTTP status carries a settle failure — the daemon

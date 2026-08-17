@@ -546,10 +546,24 @@ export interface WebhookServerOptions {
   /** Override the fire options (mainly for tests). */
   fire?: FireWebhookOptions;
   /**
+   * Called the moment a delivery's matches are known — BEFORE any routine or
+   * handler is dispatched. Matching is a pure, synchronous lookup (no I/O), so
+   * this fires immediately after the ack, regardless of how long the matched
+   * work then takes to run. This is the right hook for a "webhook X fired Y"
+   * log line: a `run.command` handler that shells out a long agent session
+   * (`exec()`, which only resolves on process exit) used to hold that log back
+   * for as long as the session ran — `ps` would show the agent already running
+   * while the log still implied nothing had matched (RUSH-2722). Names only
+   * (no runId/exitCode yet — those aren't known until dispatch settles).
+   */
+  onMatch?: (webhook: IncomingWebhook, matchedJobNames: string[], matchedHandlerNames: string[]) => void;
+  /**
    * Called after a delivery has fully settled — every matched routine and
-   * handler dispatched. Because the receiver acks the HTTP response BEFORE
-   * dispatch (see `startWebhookServer`), this fires strictly after the response
-   * has been written, and is the only way a caller observes the outcome.
+   * handler dispatched (and, for `run.command` handlers, exited). Because the
+   * receiver acks the HTTP response BEFORE dispatch (see `startWebhookServer`),
+   * this fires strictly after the response has been written, and is the only
+   * way a caller observes the dispatch outcome (runId/exitCode/output). It is
+   * NOT the right hook for "did this webhook match" logging — use `onMatch`.
    */
   onDelivery?: (webhook: IncomingWebhook, fired: FiredJob[], handlers: FiredHandler[]) => void;
   /**
@@ -589,6 +603,11 @@ export interface WebhookServerOptions {
  * duplicate from an in-flight set, since `deliveryStore.seen` only reports
  * completed deliveries and would otherwise let a mid-flight retry double-fire.
  *
+ * `onMatch` fires as soon as matching is known, before any dispatch; `onDelivery`
+ * fires only once every matched routine/handler has settled — see their docs on
+ * `WebhookServerOptions`. A caller that wants a prompt "this fired" log uses
+ * `onMatch`, not `onDelivery` (RUSH-2722).
+ *
  * Returns the underlying server so callers can `close()` it.
  */
 export function startWebhookServer(options: WebhookServerOptions): http.Server {
@@ -611,8 +630,19 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
     try {
       const context = buildWebhookContext(webhook);
       const fireOptions = options.fire ?? {};
+
+      // Match FIRST, before any dispatch — matching is a pure in-memory lookup,
+      // so this is the earliest point the receiver knows what fired, and the
+      // right time to log it (RUSH-2722). Dispatching a `run.command` handler
+      // can then block on the shelled-out process for minutes; that must never
+      // hold the "fired" log back with it.
+      const matchedJobs = matchJobsToWebhook(fireOptions.jobs ?? listJobs(), webhook);
+      const matchedHandlers = listHandlers().filter((handler) => handlerMatchesWebhook(handler, webhook));
+      options.onMatch?.(webhook, matchedJobs.map((job) => job.name), matchedHandlers.map((handler) => handler.name));
+
       const firedJobs = await fireWebhookJobs(webhook, {
         ...fireOptions,
+        jobs: matchedJobs,
         context,
         skipJobNames: deliveryStore.completedJobs(id),
         onJobFired: (job, firedJob) => {
@@ -622,7 +652,6 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
         },
       });
 
-      const matchedHandlers = listHandlers().filter((handler) => handlerMatchesWebhook(handler, webhook));
       const firedHandlers: FiredHandler[] = [];
       const handlerErrors: { handlerName: string; error: string }[] = [];
       await Promise.allSettled(
