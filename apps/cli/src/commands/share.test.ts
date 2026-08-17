@@ -490,9 +490,36 @@ describe('parseShareListing', () => {
     expect(result.count).toBe(2);
     expect(result.objects[0]).toEqual({
       slug: 'a', url: 'https://s/octocat/a', size: 10, contentType: 'text/html; charset=utf-8', publishedAt: '2026-08-08T00:00:00.000Z', expiresAt: null,
+      label: null, agent: null, session: null, host: null, repo: null, revisionCount: 0, meta: {},
     });
     expect(result.objects[1].contentType).toBeNull();
     expect(result.objects[1].expiresAt).toBe('2099-01-01T00:00:00.000Z');
+  });
+
+  it('surfaces arbitrary --meta entries under objects[].meta (RUSH-2683 review fix)', async () => {
+    // --meta kind=plan --meta ticket=RUSH-2683 was previously write-only: stored
+    // in customMetadata but never returned by any read route, so it couldn't be
+    // seen again via `share list --json`.
+    const { share } = await freshShareModules();
+    const body = JSON.stringify({
+      user: 'octocat',
+      count: 1,
+      objects: [
+        { slug: 'a', url: 'https://s/octocat/a', size: 10, contentType: 'text/html', publishedAt: '2026-08-08T00:00:00.000Z', expiresAt: null, meta: { kind: 'plan', ticket: 'RUSH-2683' } },
+      ],
+    });
+    const result = share.parseShareListing('octocat', body);
+    expect(result.objects[0].meta).toEqual({ kind: 'plan', ticket: 'RUSH-2683' });
+  });
+
+  it('defaults meta to {} when the Worker response has none (predates the field)', async () => {
+    const { share } = await freshShareModules();
+    const body = JSON.stringify({
+      user: 'octocat', count: 1,
+      objects: [{ slug: 'a', url: 'https://s/octocat/a', size: 10, contentType: null, publishedAt: '2026-08-08T00:00:00.000Z', expiresAt: null }],
+    });
+    const result = share.parseShareListing('octocat', body);
+    expect(result.objects[0].meta).toEqual({});
   });
 
   it('fails loud with the outdated-template hint when the body is HTML (old Worker gallery)', async () => {
@@ -511,8 +538,8 @@ describe('formatShareList', () => {
     user: 'octocat',
     count: 2,
     objects: [
-      { slug: 'plan-a', url: 'https://s/octocat/plan-a', size: 2048, contentType: 'text/html; charset=utf-8', publishedAt: '2026-08-08T12:00:00.000Z', expiresAt: null },
-      { slug: 'report-b', url: 'https://s/octocat/report-b', size: 640, contentType: 'text/html; charset=utf-8', publishedAt: '2026-08-07T12:00:00.000Z', expiresAt: '2026-09-01T00:00:00.000Z' },
+      { slug: 'plan-a', url: 'https://s/octocat/plan-a', size: 2048, contentType: 'text/html; charset=utf-8', publishedAt: '2026-08-08T12:00:00.000Z', expiresAt: null, label: null, agent: null, session: null, host: null, repo: null, revisionCount: 0 },
+      { slug: 'report-b', url: 'https://s/octocat/report-b', size: 640, contentType: 'text/html; charset=utf-8', publishedAt: '2026-08-07T12:00:00.000Z', expiresAt: '2026-09-01T00:00:00.000Z', label: null, agent: null, session: null, host: null, repo: null, revisionCount: 0 },
     ],
   };
 
@@ -537,6 +564,35 @@ describe('formatShareList', () => {
   it('says nothing is published for an empty namespace', async () => {
     const { share } = await freshShareModules();
     expect(share.formatShareList({ user: 'octocat', count: 0, objects: [] })).toMatch(/No active pages/i);
+  });
+
+  it('shows label, agent, and revision count when present (RUSH-2683)', async () => {
+    const { share } = await freshShareModules();
+    const withMeta = {
+      user: 'octocat',
+      count: 1,
+      objects: [
+        { slug: 'plan-a', url: 'https://s/octocat/plan-a', size: 2048, contentType: 'text/html', publishedAt: '2026-08-08T12:00:00.000Z', expiresAt: null, label: 'Fleet Plan', agent: 'claude', session: 'sess-1', host: 'zion', repo: 'agents-cli', revisionCount: 3 },
+      ],
+    };
+    const text = share.formatShareList(withMeta);
+    expect(text).toContain('Fleet Plan');
+    expect(text).toContain('claude');
+    expect(text).toContain('3 revisions');
+  });
+
+  it('shows arbitrary --meta key=value pairs in the human table (RUSH-2683 review fix)', async () => {
+    const { share } = await freshShareModules();
+    const withCustomMeta = {
+      user: 'octocat',
+      count: 1,
+      objects: [
+        { slug: 'plan-a', url: 'https://s/octocat/plan-a', size: 2048, contentType: 'text/html', publishedAt: '2026-08-08T12:00:00.000Z', expiresAt: null, label: null, agent: null, session: null, host: null, repo: null, revisionCount: 0, meta: { kind: 'plan', ticket: 'RUSH-2683' } },
+      ],
+    };
+    const text = share.formatShareList(withCustomMeta);
+    expect(text).toContain('kind=plan');
+    expect(text).toContain('ticket=RUSH-2683');
   });
 });
 
@@ -621,15 +677,330 @@ describe('runShareList', () => {
     const { share } = await freshShareModules();
     await expect(share.runShareList({ githubUser: 'octocat' })).rejects.toThrow(/Not set up yet/);
   });
+
+  it('filters by --agent (case-insensitive, exact) and reflects it in count', async () => {
+    const { share } = await freshShareModules();
+    const config = await currentConfig(share);
+    const objects = [
+      { slug: 'a', url: 'https://s/octocat/a', size: 1, contentType: null, publishedAt: '2026-08-08T00:00:00.000Z', expiresAt: null, label: null, agent: 'Claude', session: null, host: null, repo: null, revisionCount: 0 },
+      { slug: 'b', url: 'https://s/octocat/b', size: 1, contentType: null, publishedAt: '2026-08-07T00:00:00.000Z', expiresAt: null, label: null, agent: 'codex', session: null, host: null, repo: null, revisionCount: 0 },
+    ];
+    const result = await share.runShareList({
+      githubUser: 'octocat',
+      config,
+      agent: 'claude',
+      fetchListing: async () => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ user: 'octocat', count: 2, objects }) }),
+    });
+    expect(result.count).toBe(1);
+    expect(result.objects.map((o) => o.slug)).toEqual(['a']);
+  });
+
+  it('filters by --session (exact)', async () => {
+    const { share } = await freshShareModules();
+    const config = await currentConfig(share);
+    const objects = [
+      { slug: 'a', url: 'https://s/octocat/a', size: 1, contentType: null, publishedAt: '2026-08-08T00:00:00.000Z', expiresAt: null, label: null, agent: null, session: 'sess-1', host: null, repo: null, revisionCount: 0 },
+      { slug: 'b', url: 'https://s/octocat/b', size: 1, contentType: null, publishedAt: '2026-08-07T00:00:00.000Z', expiresAt: null, label: null, agent: null, session: 'sess-2', host: null, repo: null, revisionCount: 0 },
+    ];
+    const result = await share.runShareList({
+      githubUser: 'octocat',
+      config,
+      session: 'sess-2',
+      fetchListing: async () => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ user: 'octocat', count: 2, objects }) }),
+    });
+    expect(result.objects.map((o) => o.slug)).toEqual(['b']);
+  });
+
+  it('filters by --label (case-insensitive substring)', async () => {
+    const { share } = await freshShareModules();
+    const config = await currentConfig(share);
+    const objects = [
+      { slug: 'a', url: 'https://s/octocat/a', size: 1, contentType: null, publishedAt: '2026-08-08T00:00:00.000Z', expiresAt: null, label: 'Fleet Plan', agent: null, session: null, host: null, repo: null, revisionCount: 0 },
+      { slug: 'b', url: 'https://s/octocat/b', size: 1, contentType: null, publishedAt: '2026-08-07T00:00:00.000Z', expiresAt: null, label: 'Q3 report', agent: null, session: null, host: null, repo: null, revisionCount: 0 },
+    ];
+    const result = await share.runShareList({
+      githubUser: 'octocat',
+      config,
+      label: 'fleet',
+      fetchListing: async () => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ user: 'octocat', count: 2, objects }) }),
+    });
+    expect(result.objects.map((o) => o.slug)).toEqual(['a']);
+  });
 });
 
 describe('agents artifacts share list (CLI)', () => {
-  it('registers the list command with --json and --github-user', async () => {
+  it('registers the list command with --json, --github-user, --agent, --session, --label-contains', async () => {
     const { artifacts, share } = await freshShareModules();
     const program = programWithArtifacts(artifacts);
     const listCmd = shareGroup(program)?.commands.find((c) => c.name() === 'list');
     expect(listCmd).toBeDefined();
-    expect(listCmd?.options.map((o) => o.long)).toEqual(expect.arrayContaining(['--json', '--github-user']));
+    expect(listCmd?.options.map((o) => o.long)).toEqual(
+      expect.arrayContaining(['--json', '--github-user', '--agent', '--session', '--label-contains']),
+    );
+  });
+
+  it('a real parse actually delivers --agent/--session/--label-contains through to runShareList (not just registration)', async () => {
+    // Regression guard: commander resolves an option's long name against the
+    // WHOLE ancestor chain, not per-command — a `list` option that happens to
+    // share a name with the parent `share` command (e.g. the old `--label`,
+    // which collided with the parent's `--label`/`--title`) is silently
+    // dropped at parse time even though `--help` and `.options` show it
+    // registered correctly. Renamed to `--label-contains` to avoid the
+    // collision (see the comment on the option registration). This test
+    // exercises the REAL commander parse, not the `runShareList` unit tests
+    // above, which call it directly and would never have caught this.
+    //
+    // Deliberately does NOT pass --json: that flag DOES collide with the
+    // parent `share` command's own --json and is silently dropped even alone
+    // (verified; tracked as RUSH-2687, not fixed here) — asserting on the
+    // human-readable output sidesteps that pre-existing, separate bug.
+    const { artifacts, share, config } = await freshShareModules();
+    const { renderWorkerScript } = await import('../lib/share/worker-template.js');
+    const { hashWorkerScript } = await import('../lib/share/provision.js');
+    config.writeShareConfig({
+      baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b',
+      templateHash: hashWorkerScript(renderWorkerScript()),
+    });
+    installFakeGh('octocat');
+
+    const objects = [
+      { slug: 'a', url: 'https://s/octocat/a', size: 1, contentType: null, publishedAt: '2026-08-08T00:00:00.000Z', expiresAt: null, label: 'Fleet Plan', agent: 'claude', session: 'sess-1', host: null, repo: null, revisionCount: 0 },
+      { slug: 'b', url: 'https://s/octocat/b', size: 1, contentType: null, publishedAt: '2026-08-07T00:00:00.000Z', expiresAt: null, label: 'Other', agent: 'codex', session: 'sess-2', host: null, repo: null, revisionCount: 0 },
+    ];
+    const seenUrls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string) => {
+      seenUrls.push(String(url));
+      return new Response(JSON.stringify({ user: 'octocat', count: 2, objects }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const program = programWithArtifacts(artifacts);
+      await program.parseAsync([
+        'node', 'agents', 'artifacts', 'share', 'list',
+        '--agent', 'claude', '--label-contains', 'fleet',
+      ]);
+      const out = loggedOutput();
+      expect(seenUrls.length).toBe(1);
+      expect(out).toContain('Fleet Plan');
+      expect(out).toContain('/octocat/a');
+      expect(out).not.toContain('/octocat/b');
+      expect(out).not.toContain('Other');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe('parseShareRevisions', () => {
+  it('validates and normalizes the Worker revisions payload', async () => {
+    const { share } = await freshShareModules();
+    const body = JSON.stringify({
+      key: 'octocat/plan',
+      count: 1,
+      revisions: [
+        { key: 'octocat/plan/rev-1-abc', url: 'https://s/octocat/plan/rev-1-abc', size: 5, contentType: 'text/html', uploadedAt: '2026-08-08T00:00:00.000Z', expiresAt: null, label: 'v1', agent: 'claude', session: 's1', host: 'zion', repo: 'agents-cli' },
+      ],
+    });
+    const result = share.parseShareRevisions('octocat/plan', body);
+    expect(result.count).toBe(1);
+    expect(result.revisions[0]).toEqual({
+      key: 'octocat/plan/rev-1-abc', url: 'https://s/octocat/plan/rev-1-abc', size: 5, contentType: 'text/html',
+      uploadedAt: '2026-08-08T00:00:00.000Z', expiresAt: null, label: 'v1', agent: 'claude', session: 's1', host: 'zion', repo: 'agents-cli', meta: {},
+    });
+  });
+
+  it('surfaces arbitrary --meta entries under revisions[].meta (RUSH-2683 review fix)', async () => {
+    const { share } = await freshShareModules();
+    const body = JSON.stringify({
+      key: 'octocat/plan',
+      count: 1,
+      revisions: [
+        { key: 'octocat/plan/rev-1-abc', url: 'https://s/octocat/plan/rev-1-abc', size: 5, contentType: 'text/html', uploadedAt: '2026-08-08T00:00:00.000Z', expiresAt: null, meta: { kind: 'plan', ticket: 'RUSH-2683' } },
+      ],
+    });
+    const result = share.parseShareRevisions('octocat/plan', body);
+    expect(result.revisions[0].meta).toEqual({ kind: 'plan', ticket: 'RUSH-2683' });
+  });
+
+  it('fails loud with the outdated-template hint on a non-JSON body', async () => {
+    const { share } = await freshShareModules();
+    expect(() => share.parseShareRevisions('octocat/plan', '<h1>not json</h1>')).toThrow(/agents artifacts share update/);
+  });
+
+  it('fails loud when the JSON has no revisions array', async () => {
+    const { share } = await freshShareModules();
+    expect(() => share.parseShareRevisions('octocat/plan', JSON.stringify({ key: 'octocat/plan' }))).toThrow(/agents artifacts share update/);
+  });
+});
+
+describe('runShareRevisions', () => {
+  async function currentConfig(share: typeof import('./share.js')): Promise<{ baseUrl: string; accountId: string; workerName: string; bucketName: string; templateHash: string }> {
+    const { renderWorkerScript } = await import('../lib/share/worker-template.js');
+    const { hashWorkerScript } = await import('../lib/share/provision.js');
+    return {
+      baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b',
+      templateHash: hashWorkerScript(renderWorkerScript()),
+    };
+  }
+
+  it('resolves a bare slug against the caller namespace and fetches ?revisions=json', async () => {
+    const { share } = await freshShareModules();
+    const config = await currentConfig(share);
+    const seen: string[] = [];
+    const result = await share.runShareRevisions('q3-report', {
+      githubUser: 'octocat',
+      config,
+      fetchListing: async (url: string) => {
+        seen.push(url);
+        return { status: 200, contentType: 'application/json', body: JSON.stringify({ key: 'octocat/q3-report', count: 0, revisions: [] }) };
+      },
+    });
+    expect(seen).toEqual(['https://share.test/octocat/q3-report?revisions=json']);
+    expect(result.count).toBe(0);
+  });
+
+  it('accepts a full URL target, same as agents unshare', async () => {
+    const { share } = await freshShareModules();
+    const config = await currentConfig(share);
+    const seen: string[] = [];
+    await share.runShareRevisions('https://share.test/octocat/q3-report', {
+      config,
+      fetchListing: async (url: string) => {
+        seen.push(url);
+        return { status: 200, contentType: 'application/json', body: JSON.stringify({ key: 'octocat/q3-report', count: 0, revisions: [] }) };
+      },
+    });
+    expect(seen).toEqual(['https://share.test/octocat/q3-report?revisions=json']);
+  });
+
+  it('throws the outdated-template hint up front when the recorded hash is stale', async () => {
+    const { share } = await freshShareModules();
+    let fetched = false;
+    await expect(
+      share.runShareRevisions('q3-report', {
+        githubUser: 'octocat',
+        config: { baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b', templateHash: 'stale-hash' },
+        fetchListing: async () => { fetched = true; return { status: 200, contentType: 'application/json', body: '{}' }; },
+      }),
+    ).rejects.toThrow(/agents artifacts share update/);
+    expect(fetched).toBe(false);
+  });
+
+  it('refuses when share was never configured', async () => {
+    const { share } = await freshShareModules();
+    await expect(share.runShareRevisions('q3-report', { githubUser: 'octocat' })).rejects.toThrow(/Not set up yet/);
+  });
+});
+
+describe('formatShareRevisions', () => {
+  it('--json emits the raw stable result', async () => {
+    const { share } = await freshShareModules();
+    const result = { key: 'octocat/plan', count: 1, revisions: [{ key: 'octocat/plan/rev-1', url: 'https://s/octocat/plan/rev-1', size: 10, contentType: null, uploadedAt: '2026-08-08T00:00:00.000Z', expiresAt: null, label: 'v1', agent: 'claude', session: null, host: null, repo: null }] };
+    expect(JSON.parse(share.formatShareRevisions(result, true))).toEqual(result);
+  });
+
+  it('renders a human table with date, size, agent, label, and url', async () => {
+    const { share } = await freshShareModules();
+    const result = {
+      key: 'octocat/plan', count: 1,
+      revisions: [{ key: 'octocat/plan/rev-1', url: 'https://s/octocat/plan/rev-1', size: 2048, contentType: null, uploadedAt: '2026-08-08T00:00:00.000Z', expiresAt: null, label: 'v1', agent: 'claude', session: null, host: null, repo: null }],
+    };
+    const text = share.formatShareRevisions(result);
+    expect(text).toContain('octocat/plan');
+    expect(text).toContain('1 retained revision');
+    expect(text).toContain('2026-08-08');
+    expect(text).toContain('2.0 KB');
+    expect(text).toContain('claude');
+    expect(text).toContain('v1');
+    expect(text).toContain('https://s/octocat/plan/rev-1');
+  });
+
+  it('says there are no retained revisions for an empty result', async () => {
+    const { share } = await freshShareModules();
+    expect(share.formatShareRevisions({ key: 'octocat/plan', count: 0, revisions: [] })).toMatch(/No retained revisions/i);
+  });
+
+  it('shows arbitrary --meta key=value pairs in the human table (RUSH-2683 review fix)', async () => {
+    const { share } = await freshShareModules();
+    const result = {
+      key: 'octocat/plan', count: 1,
+      revisions: [{ key: 'octocat/plan/rev-1', url: 'https://s/octocat/plan/rev-1', size: 2048, contentType: null, uploadedAt: '2026-08-08T00:00:00.000Z', expiresAt: null, label: 'v1', agent: 'claude', session: null, host: null, repo: null, meta: { kind: 'plan', ticket: 'RUSH-2683' } }],
+    };
+    const text = share.formatShareRevisions(result);
+    expect(text).toContain('kind=plan');
+    expect(text).toContain('ticket=RUSH-2683');
+  });
+});
+
+describe('agents artifacts share revisions (CLI)', () => {
+  it('registers the revisions command with a target argument and --revisions-json/--for-user (not --json/--github-user, which collide with the parent)', async () => {
+    const { artifacts } = await freshShareModules();
+    const program = programWithArtifacts(artifacts);
+    const revCmd = shareGroup(program)?.commands.find((c) => c.name() === 'revisions');
+    expect(revCmd).toBeDefined();
+    expect(revCmd?.registeredArguments.map((a) => a.name())).toEqual(['target']);
+    expect(revCmd?.options.map((o) => o.long)).toEqual(expect.arrayContaining(['--revisions-json', '--for-user']));
+    // The parent `share` command owns these two names; a same-named child
+    // option is silently dropped at parse time (see the real-parse test
+    // below), so `revisions` must never re-declare them.
+    expect(revCmd?.options.map((o) => o.long)).not.toEqual(expect.arrayContaining(['--json', '--github-user']));
+  });
+
+  it('a real parse actually delivers --revisions-json/--for-user through to runShareRevisions (not just registration)', async () => {
+    // Regression guard: commander resolves an option's long name against the
+    // WHOLE ancestor chain, not per-command — a `revisions` option that
+    // happens to share a name with the parent `share` command (--json,
+    // --github-user) is silently dropped at parse time even though `--help`
+    // and `.options` show it registered correctly, and even when the flag is
+    // passed ALONE with no other conflicting flags. This exercises the REAL
+    // commander parse, not the `runShareRevisions`/`formatShareRevisions` unit
+    // tests above, which call those functions directly and would never have
+    // caught this (verified with a bare commander repro against both
+    // `--github-user`/`--json` colliding names before the rename).
+    const { artifacts, config } = await freshShareModules();
+    const { renderWorkerScript } = await import('../lib/share/worker-template.js');
+    const { hashWorkerScript } = await import('../lib/share/provision.js');
+    config.writeShareConfig({
+      baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b',
+      templateHash: hashWorkerScript(renderWorkerScript()),
+    });
+
+    const seenUrls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string) => {
+      seenUrls.push(String(url));
+      return new Response(
+        JSON.stringify({ key: 'octocat/q3-report', count: 1, revisions: [
+          { key: 'octocat/q3-report/rev-1', url: 'https://s/octocat/q3-report/rev-1', size: 10, contentType: null, uploadedAt: '2026-08-08T00:00:00.000Z', expiresAt: null, label: 'v1', agent: 'claude', session: null, host: null, repo: null },
+        ] }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    try {
+      const program = programWithArtifacts(artifacts);
+      await program.parseAsync([
+        'node', 'agents', 'artifacts', 'share', 'revisions', 'q3-report',
+        '--for-user', 'octocat', '--revisions-json',
+      ]);
+      // --for-user reached resolveDeleteTarget-equivalent resolution: the
+      // fetched URL is scoped to octocat's namespace, not the caller's own
+      // (no `gh`/`git` config faked here, so a dropped --for-user would
+      // throw "could not resolve a GitHub username" instead of fetching).
+      expect(seenUrls).toEqual(['https://share.test/octocat/q3-report?revisions=json']);
+      // --revisions-json reached formatShareRevisions: JSON output, not the
+      // human table (which would print "1 retained revision").
+      const out = loggedOutput();
+      expect(() => JSON.parse(out)).not.toThrow();
+      expect(JSON.parse(out)).toMatchObject({ key: 'octocat/q3-report', count: 1 });
+      expect(out).not.toContain('retained revision');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
@@ -655,6 +1026,18 @@ describe('formatSharePublishResult', () => {
     const text = formatSharePublishResult({ url: 'https://share.example/plan' });
 
     expect(text.split('\n')[0]).toBe('https://share.example/plan');
+  });
+
+  it('shows an explicit label plainly, with no derived hint', () => {
+    const text = formatSharePublishResult({ url: 'https://share.example/plan', label: 'Fleet Plan', labelSource: 'explicit' });
+    expect(text).toContain('Fleet Plan');
+    expect(text).not.toContain('derived');
+  });
+
+  it('nudges toward --label when the title was auto-derived (never blocks)', () => {
+    const text = formatSharePublishResult({ url: 'https://share.example/plan', label: 'plan', labelSource: 'derived' });
+    expect(text).toContain('plan');
+    expect(text).toMatch(/derived.*--label/);
   });
 });
 

@@ -14,8 +14,8 @@ import * as yaml from 'yaml';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
 import { buildRunsJson, groupRoutineJobsByProject } from './routines.js';
-import type { JobConfig } from '../lib/routines.js';
-import type { RunMeta } from '../lib/routines.js';
+import type { JobConfig } from '../lib/scheduling/routines.js';
+import type { RunMeta } from '../lib/scheduling/routines.js';
 
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -135,8 +135,10 @@ describeRoutines('routines add help', () => {
       const result = run(home, ['add', '--help']);
       expect(result.status).toBe(0);
       expect(result.stdout).toMatch(
-        /Which agent runs this routine: claude, codex, gemini,\s+cursor, kimi, droid/,
+        /Which agent runs this routine: claude, codex,\s+cursor,\s+kimi, droid/,
       );
+      // gemini is hard-deprecated and must never be advertised as a routine target.
+      expect(result.stdout).not.toMatch(/routine: [^.]*gemini/);
       const agentLine = result.stdout.split('\n').find((line) => line.includes('--agent')) ?? '';
       expect(agentLine).not.toContain('antigravity');
       expect(agentLine).not.toContain('opencode');
@@ -1234,12 +1236,12 @@ describeRoutines('routines devices no-flags nonTTY names --set/--clear', () => {
   });
 });
 
-describeRoutines('routines list --host self runs locally', () => {
-  it('exits 0 and lists when --host matches AGENTS_SYNC_MACHINE_ID', () => {
+describeRoutines('routines list --device self runs locally', () => {
+  it('exits 0 and lists when --device matches AGENTS_SYNC_MACHINE_ID', () => {
     const job = { ...baseJob, devices: ['zion'] };
     const home = makeHome({ jobs: [job], registry });
     try {
-      const res = run(home, ['list', '--host', 'zion'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
+      const res = run(home, ['list', '--device', 'zion'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
       expect(res.status).toBe(0);
       expect(res.stdout).toContain('test-job');
     } finally {
@@ -1248,13 +1250,12 @@ describeRoutines('routines list --host self runs locally', () => {
   });
 });
 
-describeRoutines('routines --help documents --host and --device', () => {
-  it('help output contains --host and --device', () => {
+describeRoutines('routines --help documents --device', () => {
+  it('help output contains --device', () => {
     const home = makeHome();
     try {
       const res = run(home, ['--help']);
       const output = res.stdout + res.stderr;
-      expect(output).toContain('--host');
       expect(output).toContain('--device');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
@@ -1395,25 +1396,22 @@ describeRoutines('routines run wrong-host exact output', () => {
       // The suggested host is the OWNER (lowest normalized name), not the first
       // entry as written — the old suggestion pointed at a box that would refuse
       // the run for exactly the same reason.
-      expect(output).toContain('  agents routines run test-job --host mac-mini');
+      expect(output).toContain('  agents routines run test-job --device mac-mini');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
 });
 
-describeRoutines('routines list --help documents --host and --device once each', () => {
-  it('lists each routing flag exactly once', () => {
+describeRoutines('routines list --help documents --device once', () => {
+  it('lists the routing flag exactly once', () => {
     const home = makeHome();
     try {
       const res = run(home, ['list', '--help']);
       expect(res.status).toBe(0);
       const output = res.stdout + res.stderr;
-      expect(output).toContain('--host');
       expect(output).toContain('--device');
-      const hostMatches = output.match(/^\s+-H, --host /gm) ?? [];
-      const deviceMatches = output.match(/^\s+--device /gm) ?? [];
-      expect(hostMatches.length).toBe(1);
+      const deviceMatches = output.match(/^\s+-D, --device /gm) ?? [];
       expect(deviceMatches.length).toBe(1);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
@@ -1434,7 +1432,7 @@ function directSubcommandNames(home: string): string[] {
     .filter((name): name is string => Boolean(name));
 }
 
-describeRoutines('routines subcommand --help documents --host and --device once each', () => {
+describeRoutines('routines subcommand --help documents --device once each', () => {
   it('derives every direct command from routines --help and checks local help', () => {
     const home = makeHome();
     try {
@@ -1444,9 +1442,7 @@ describeRoutines('routines subcommand --help documents --host and --device once 
         const res = run(home, [name, '--help']);
         expect(res.status).toBe(0);
         const output = res.stdout + res.stderr;
-        const hostMatches = output.match(/^\s+-H, --host /gm) ?? [];
-        const deviceMatches = output.match(/^\s+--device /gm) ?? [];
-        expect(hostMatches.length).toBe(1);
+        const deviceMatches = output.match(/^\s+-D, --device /gm) ?? [];
         expect(deviceMatches.length).toBe(1);
       }
     } finally {
@@ -1457,12 +1453,12 @@ describeRoutines('routines subcommand --help documents --host and --device once 
   }, 90_000);
 });
 
-describeRoutines('routines run --host SELF follows the normal local eligibility path', () => {
+describeRoutines('routines run --device SELF follows the normal local eligibility path', () => {
   it('passes device eligibility when self is in the allowlist', () => {
     const job = { ...baseJob, devices: ['zion'] };
     const home = makeHome({ jobs: [job], registry });
     try {
-      const res = run(home, ['run', 'test-job', '--host', 'zion'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
+      const res = run(home, ['run', 'test-job', '--device', 'zion'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
       // Eligibility passes; the run then fails because no claude version is
       // configured in the isolated HOME. The important thing is it did not fail
       // with the device-mismatch message.
@@ -2139,6 +2135,114 @@ describeRoutines('daemon env isolation — AGENTS_HISTORY_DIR must not leak (RUS
     } finally {
       if (daemon) await stopIsolatedDaemon(daemon.child);
       if (pid !== null) expect(isProcessAlive(pid)).toBe(false);
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('routines add/edit — launch-target parity flags (RUSH-2719)', () => {
+  it('persists --agent claude@2.1.207 as separate agent + version fields', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, [
+        'add', 'pin-job',
+        '--schedule', '*/5 * * * *',
+        '--agent', 'claude@2.1.207',
+        '--prompt', 'Reply OK',
+      ]);
+      expect(res.status, res.stderr).toBe(0);
+      const job = readRoutineYaml(home, 'pin-job');
+      expect(job?.agent).toBe('claude');
+      expect(job?.version).toBe('2.1.207');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a malformed agent spec (two @ segments) and writes no file', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, ['add', 'bad-spec', '--schedule', '0 9 * * *', '--agent', 'claude@1@2', '--prompt', 'hi']);
+      expect(res.status).not.toBe(0);
+      expect(res.stderr).toContain("at most one '@version'");
+      expect(fs.existsSync(path.join(home, '.agents', 'routines', 'bad-spec.yml'))).toBe(false);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects --strategy combined with an @version pin, with agents-run wording', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, ['add', 'conflict-job', '--schedule', '0 9 * * *', '--agent', 'claude@2.1.207', '--strategy', 'balanced', '--prompt', 'hi']);
+      expect(res.status).not.toBe(0);
+      expect(res.stderr).toContain('conflicts with the @2.1.207 pin');
+      expect(fs.existsSync(path.join(home, '.agents', 'routines', 'conflict-job.yml'))).toBe(false);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects --balanced together with --strategy', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, ['add', 'double-strategy', '--schedule', '0 9 * * *', '--agent', 'claude', '--strategy', 'pinned', '--balanced', '--prompt', 'hi']);
+      expect(res.status).not.toBe(0);
+      expect(res.stderr).toContain('--balanced conflicts with --strategy');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('--balanced persists strategy: balanced', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, ['add', 'balanced-job', '--schedule', '0 9 * * *', '--agent', 'claude', '--balanced', '--prompt', 'hi']);
+      expect(res.status, res.stderr).toBe(0);
+      expect(readRoutineYaml(home, 'balanced-job')?.strategy).toBe('balanced');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('--run-on auto persists host: auto + hostStrategy: fleet', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, ['add', 'auto-place', '--schedule', '0 9 * * *', '--agent', 'claude', '--run-on', 'auto', '--prompt', 'hi']);
+      expect(res.status, res.stderr).toBe(0);
+      const job = readRoutineYaml(home, 'auto-place');
+      expect(job?.host).toBe('auto');
+      expect(job?.hostStrategy).toBe('fleet');
+      // No devices field in the definition: activation is per-device manifest
+      // membership (§8), so only the creating machine fires it by default —
+      // the double-fire guard is structural, not a persisted allowlist.
+      expect(job?.devices).toBeUndefined();
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('--run-on auto rejects a conflicting explicit --placement host', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, ['add', 'auto-vs-host', '--schedule', '0 9 * * *', '--agent', 'claude', '--run-on', 'auto', '--placement', 'host', '--prompt', 'hi']);
+      expect(res.status).not.toBe(0);
+      expect(res.stderr).toContain('--run-on auto is fleet placement');
+      expect(fs.existsSync(path.join(home, '.agents', 'routines', 'auto-vs-host.yml'))).toBe(false);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('edit --strategy validates the conflict against the persisted version pin', () => {
+    const home = makeHome({ registry });
+    try {
+      const add = run(home, ['add', 'edit-target', '--schedule', '*/5 * * * *', '--agent', 'claude@2.1.207', '--prompt', 'hi']);
+      expect(add.status, add.stderr).toBe(0);
+      const res = run(home, ['edit', 'edit-target', '--strategy', 'balanced']);
+      expect(res.status).not.toBe(0);
+      expect(res.stderr).toContain('conflicts with version 2.1.207');
+    } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });

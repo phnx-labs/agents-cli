@@ -15,7 +15,7 @@ import { spawnSync } from 'child_process';
 import { sha256 } from '../staleness/fingerprint.js';
 import { getHistoryDir } from '../state.js';
 import { ensureLockTarget, withFileLock } from '../fs-atomic.js';
-import { emit } from '../events.js';
+import { emit } from '../feed/events.js';
 
 /** First record's `prevHash` — a fixed anchor so the chain has a root. */
 export const GENESIS_HASH = 'GENESIS';

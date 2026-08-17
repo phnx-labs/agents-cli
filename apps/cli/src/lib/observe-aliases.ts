@@ -5,23 +5,27 @@
  * remain the stores; these are doors that point at the right reader.
  *
  *   inbox    → feed                  (needs-you default)
- *   roster   → sessions --active     (live agent roster)
  *
+ * `roster` was removed — use `agents sessions --active`.
+ * `timeline` was removed — use `agents feed --filter updates` (RUSH-2692).
  * `audit` is NOT an alias here — `agents audit` is already the tamper-evident
- * run-dispatch log. Ops trail = `agents events` (optionally `--audit`). The
- * agent progress stream is `agents feed --filter updates` directly (the former
- * `timeline` alias was removed in RUSH-2692 as a duplicated surface).
+ * run-dispatch log. Ops trail = `agents events` (optionally `--audit`).
  */
 
-export type ObserveAlias = 'inbox' | 'roster';
+export type ObserveAlias = 'inbox';
 
-export const OBSERVE_ALIASES: readonly ObserveAlias[] = ['inbox', 'roster'] as const;
+export const OBSERVE_ALIASES: readonly ObserveAlias[] = ['inbox'] as const;
 
 export interface ObserveExpandResult {
   /** argv for the real command (no program name): e.g. ['feed', '--filter', 'updates'] */
   argv: string[];
   /** One-line note for stderr (optional); empty when silent. */
   note: string;
+}
+
+/** True when `rest` already carries a `--filter` / `--filter=…` flag. */
+export function hasFilterFlag(rest: readonly string[]): boolean {
+  return rest.some((a) => a === '--filter' || a.startsWith('--filter='));
 }
 
 /** True when `rest` already carries `--active`. */
@@ -44,15 +48,6 @@ export function expandObserveAlias(
         argv: ['feed', ...tail],
         note: 'agents inbox → agents feed (needs-you inbox)',
       };
-    case 'roster': {
-      const argv = hasActiveFlag(tail)
-        ? ['sessions', ...tail]
-        : ['sessions', '--active', ...tail];
-      return {
-        argv,
-        note: 'agents roster → agents sessions --active',
-      };
-    }
     default:
       return null;
   }

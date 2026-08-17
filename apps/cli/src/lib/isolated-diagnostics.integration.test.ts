@@ -44,8 +44,15 @@ describe.skipIf(process.platform === 'win32')('isolated installs report themselv
       return execFileSync('bun', [path.resolve(process.cwd(), 'src/index.ts'), ...args], {
         cwd: process.cwd(),
         env: {
-          ...process.env, HOME: home, AGENTS_REAL_HOME: home, SHELL: '/bin/bash',
-          AGENTS_NO_NUDGE: '1', FORCE_COLOR: '0',
+          ...process.env,
+          HOME: home,
+          AGENTS_REAL_HOME: home,
+          SHELL: '/bin/bash',
+          AGENTS_NO_NUDGE: '1',
+          FORCE_COLOR: '0',
+          // Own pins dir — vitest setup.ts pins AGENTS_DEVICES_DIR fork-wide.
+          AGENTS_DEVICES_DIR: path.join(home, '.agents', '.history', 'devices'),
+          AGENTS_SYNC_MACHINE_ID: 'iso-diag',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       }).toString('utf-8');
@@ -54,7 +61,10 @@ describe.skipIf(process.platform === 'win32')('isolated installs report themselv
       return `${err.stdout ?? ''}${err.stderr ?? ''}`;
     }
   }
-  const json = (...args: string[]) => JSON.parse(run(...args).slice(run(...args).indexOf('{')));
+  const json = (...args: string[]) => {
+    const out = run(...args);
+    return JSON.parse(out.slice(out.indexOf('{')));
+  };
 
   beforeEach(() => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-diag-'));

@@ -43,11 +43,12 @@ function seed(
   upsertSession(meta, '');
 }
 
-/** Run `agents cost <args>` capturing stdout (JSON path) and console.log (TTY path). */
+/** Run `agents insights cost <args>` capturing stdout (JSON path) and console.log (TTY path). */
 async function runCost(args: string[]): Promise<string> {
   const program = new Command();
   program.exitOverride();
-  registerCostCommand(program);
+  const insights = program.command('insights');
+  registerCostCommand(insights);
 
   const chunks: string[] = [];
   const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation((c: any) => {
@@ -58,7 +59,7 @@ async function runCost(args: string[]): Promise<string> {
     chunks.push(a.join(' '));
   });
   try {
-    await program.parseAsync(['node', 'agents', 'cost', ...args]);
+    await program.parseAsync(['node', 'agents', 'insights', 'cost', ...args]);
   } finally {
     writeSpy.mockRestore();
     logSpy.mockRestore();
@@ -66,7 +67,7 @@ async function runCost(args: string[]): Promise<string> {
   return chunks.join('\n');
 }
 
-describe('agents cost', () => {
+describe('agents insights cost', () => {
   beforeAll(() => {
     // Two priced opus sessions and one haiku, spread over two days / projects.
     const big = costOfUsage({ model: 'claude-opus-4', inputTokens: 2_000_000, outputTokens: 1_000_000 });   // ~$35

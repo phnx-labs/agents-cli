@@ -21,7 +21,7 @@ function fakeRegistry(devices: DeviceProfile[]): DeviceRegistry {
   return Object.fromEntries(devices.map((d) => [d.name, d]));
 }
 
-it('pins the configured identity for --host passthrough streams', () => {
+it('pins the configured identity for --device passthrough streams', () => {
   expect(passthroughSshOptions({ name: 'win-mini', target: 'muqsit@win-mini', identityFile: '/keys/fleet' }, true)).toEqual({
     tty: true,
     multiplex: true,
@@ -31,20 +31,20 @@ it('pins the configured identity for --host passthrough streams', () => {
 
 describe('flagValue', () => {
   it('reads the space-separated long form', () => {
-    expect(flagValue(['view', '--host', 'mac'], 'host', 'H')).toBe('mac');
+    expect(flagValue(['view', '--device', 'mac'], 'device', 'D')).toBe('mac');
   });
-  it('reads the --host=value form', () => {
-    expect(flagValue(['view', '--host=mac'], 'host', 'H')).toBe('mac');
+  it('reads the --device=value form', () => {
+    expect(flagValue(['view', '--device=mac'], 'device', 'D')).toBe('mac');
   });
-  it('reads the -H value and glued -Hmac forms', () => {
-    expect(flagValue(['view', '-H', 'mac'], 'host', 'H')).toBe('mac');
-    expect(flagValue(['view', '-Hmac'], 'host', 'H')).toBe('mac');
+  it('reads the -D value and glued -Dmac forms', () => {
+    expect(flagValue(['view', '-D', 'mac'], 'device', 'D')).toBe('mac');
+    expect(flagValue(['view', '-Dmac'], 'device', 'D')).toBe('mac');
   });
   it('reads --remote-cwd (long-only, no short)', () => {
     expect(flagValue(['sync', '--remote-cwd', '/srv'], 'remote-cwd')).toBe('/srv');
   });
   it('returns undefined when absent', () => {
-    expect(flagValue(['view', '--json'], 'host', 'H')).toBeUndefined();
+    expect(flagValue(['view', '--json'], 'device', 'D')).toBeUndefined();
   });
 });
 
@@ -57,67 +57,65 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
     process.exitCode = 0;
   });
 
-  it('falls through for OWN_HOST commands (secrets owns its --host)', async () => {
-    expect(await maybeRunOnHost('secrets', ['secrets', 'list', '--host', 'mac'])).toBe(false);
-    expect(await maybeRunOnHost('accounts', ['accounts', 'sync', 'work', '--device', 'mac'])).toBe(false);
+  it('falls through for OWN_HOST commands (secrets owns its --device)', async () => {
+    expect(await maybeRunOnHost('secrets', ['secrets', 'list', '--device', 'mac'])).toBe(false);
   });
 
   it('leaves feed host lists to the command-level fleet aggregator', async () => {
-    expect(await maybeRunOnHost('feed', ['feed', '--host', 'mac', '--json'])).toBe(false);
+    expect(await maybeRunOnHost('feed', ['feed', '--device', 'mac', '--json'])).toBe(false);
   });
 
-  it('rejects --host on a non-routable, non-OWN_HOST group with a clear error (not unknown option)', async () => {
+  it('rejects --device on a non-routable, non-OWN_HOST group with a clear error (not unknown option)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    // setup has no remote semantics and no own-host handler — must not fall
-    // through to commander (which would print "unknown option '--host'").
-    expect(await maybeRunOnHost('setup', ['setup', '--host', 'mac'])).toBe(true);
+    // setup has no remote semantics and no own-device handler — must not fall
+    // through to commander (which would print "unknown option '--device'").
+    expect(await maybeRunOnHost('setup', ['setup', '--device', 'mac'])).toBe(true);
     expect(process.exitCode).toBe(1);
   });
 
   it('falls through for an UNKNOWN command so commander reports it (RUSH-2022)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    // `session` is a typo for the very much host-routable `sessions`. The router
-    // runs before commander parses, so claiming "does not support --host" here
+    // `session` is a typo for the very much device-routable `sessions`. The router
+    // runs before commander parses, so claiming "does not support --device" here
     // both invents a command and states the opposite of the truth for the one
     // the user meant. It must decline and let `unknown command 'session'` win.
-    expect(await maybeRunOnHost('session', ['session', 'resume', '--host', 'mac'])).toBe(false);
+    expect(await maybeRunOnHost('session', ['session', 'resume', '--device', 'mac'])).toBe(false);
     expect(process.exitCode).toBe(0);
     expect(await maybeRunOnHost('zzzznotacommand', ['zzzznotacommand', '--device', 'mac'])).toBe(false);
     expect(process.exitCode).toBe(0);
   });
 
-  it('still rejects --host on a REAL command that has no remote semantics', async () => {
+  it('still rejects --device on a REAL command that has no remote semantics', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    // The unknown-command gate above must not weaken this: `login` exists, so
+    // The unknown-command gate above must not weaken this: `menubar` exists, so
     // the flag-support error is the correct, honest answer.
-    expect(await maybeRunOnHost('login', ['login', '--host', 'mac'])).toBe(true);
+    expect(await maybeRunOnHost('menubar', ['menubar', '--device', 'mac'])).toBe(true);
     expect(process.exitCode).toBe(1);
   });
 
-  it('returns false when no --host is given', async () => {
+  it('returns false when no --device is given', async () => {
     expect(await maybeRunOnHost('view', ['view', 'claude'])).toBe(false);
   });
 
-  it('returns false when neither --host nor its --device alias is given', async () => {
+  it('returns false when no routing flag is given', async () => {
     expect(await maybeRunOnHost('message', ['message', 'abc', 'hi'])).toBe(false);
   });
 
-  it('returns false when --host names this very machine (runs locally instead)', async () => {
+  it('returns false when --device names this very machine (runs locally instead)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
     expect(machineId()).toBe('mybox');
-    process.argv = ['node', 'agents', 'view', '--host', 'mybox'];
-    expect(await maybeRunOnHost('view', ['view', '--host', 'mybox'])).toBe(false);
-    // Self-host strips routing flags so local commander never sees them.
+    process.argv = ['node', 'agents', 'view', '--device', 'mybox'];
+    expect(await maybeRunOnHost('view', ['view', '--device', 'mybox'])).toBe(false);
+    // Self-device strips routing flags so local commander never sees them.
     expect(process.argv).toEqual(['node', 'agents', 'view']);
     // case-insensitive: the self-check must not SSH to `MyBox` either
-    process.argv = ['node', 'agents', 'view', '--host', 'MyBox'];
-    expect(await maybeRunOnHost('view', ['view', '--host', 'MyBox'])).toBe(false);
+    process.argv = ['node', 'agents', 'view', '--device', 'MyBox'];
+    expect(await maybeRunOnHost('view', ['view', '--device', 'MyBox'])).toBe(false);
   });
 
-  it('treats --device as an alias of --host for the self-machine short-circuit', async () => {
+  it('short-circuits to a local run when --device names this machine (no SSH to itself)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    // --device naming this machine must short-circuit to a local run, exactly
-    // like --host would — otherwise the alias would SSH to itself.
+    // --device naming this machine must short-circuit to a local run — must not SSH to itself.
     process.argv = ['node', 'agents', 'message', 'abc', 'hi', '--device', 'mybox'];
     expect(await maybeRunOnHost('message', ['message', 'abc', 'hi', '--device', 'mybox'])).toBe(false);
     expect(process.argv).toEqual(['node', 'agents', 'message', 'abc', 'hi']);
@@ -131,53 +129,43 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
     // eligible candidate is this machine — a deterministic "picked local"
     // outcome without needing to inject the resolver.
     process.env.AGENTS_SYNC_MACHINE_ID = 'auto-passthrough-test-box';
-    process.argv = ['node', 'agents', 'view', '--host', 'auto'];
-    expect(await maybeRunOnHost('view', ['view', '--host', 'auto'])).toBe(false);
-    // Routing flags stripped exactly like the explicit self-host short-circuit —
-    // proves the command runs locally rather than resolving to a real Host and
+    process.argv = ['node', 'agents', 'view', '--device', 'auto'];
+    expect(await maybeRunOnHost('view', ['view', '--device', 'auto'])).toBe(false);
+    // Routing flags stripped exactly like the explicit self-device short-circuit —
+    // proves the command runs locally rather than resolving to a real device and
     // SSHing to itself (the bug this test guards: `auto` used to reach
     // resolveTargetHost('auto', ...) unresolved, either self-SSHing when this
-    // box happened to be a registered device, or dialing a literal host named
+    // box happened to be a registered device, or dialing a literal device named
     // "auto" when it wasn't).
     expect(process.argv).toEqual(['node', 'agents', 'view']);
   });
 
-  it('routes repos/repo --host to a non-self target (the RUSH-1691 repro path)', async () => {
+  it('routes repos/repo --device to a non-self target (the RUSH-1691 repro path)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
     // Invalid target rejected by assertValidSshTarget before SSH — proves
     // repos is in REMOTE_PASSTHROUGH (previously fell through → unknown option).
     for (const cmd of ['repos', 'repo'] as const) {
-      const result = await maybeRunOnHost(cmd, [cmd, 'list', '--host', '--evil']);
+      const result = await maybeRunOnHost(cmd, [cmd, 'list', '--device', '--evil']);
       expect(result).toBe(true);
       expect(process.exitCode).toBeGreaterThan(0);
       process.exitCode = 0;
     }
   });
 
-  it('rejects a conflicting --host/--device pair without attempting SSH', async () => {
+  it('falls through for OWN_HOST multi-host aggregators (sessions/feed handle --device themselves)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    // Single-target remote path: handled (returns true) but as an error —
-    // never guesses which host wins.
-    expect(await maybeRunOnHost('message', ['message', 'abc', 'hi', '--host', 'a', '--device', 'b'])).toBe(true);
-    expect(process.exitCode).toBe(1);
-    process.exitCode = 0;
-  });
-
-  it('falls through for OWN_HOST multi-host aggregators with both --host and --device', async () => {
-    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    // sessions/feed merge --host and --device into one list — the conflict gate
-    // must not fire for them (regression: pre-OWN_HOST ordering broke this).
-    expect(await maybeRunOnHost('sessions', ['sessions', '--active', '--host', 'a', '--device', 'b'])).toBe(false);
-    expect(await maybeRunOnHost('feed', ['feed', '--host', 'a', '--device', 'b', '--json'])).toBe(false);
+    // sessions/feed handle --device internally — must not be intercepted here.
+    expect(await maybeRunOnHost('sessions', ['sessions', '--active', '--device', 'a'])).toBe(false);
+    expect(await maybeRunOnHost('feed', ['feed', '--device', 'a', '--json'])).toBe(false);
     expect(process.exitCode ?? 0).toBe(0);
   });
 
-  it('routes routines --host to a non-self target (rejected by assertValidSshTarget)', async () => {
+  it('routes routines --device to a non-self target (rejected by assertValidSshTarget)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
     // --evil starts with '-' so assertValidSshTarget rejects it before any
     // SSH connection is attempted. Returning true with exitCode > 0 proves
     // the routing path was entered, not short-circuited.
-    const result = await maybeRunOnHost('routines', ['routines', 'list', '--host', '--evil']);
+    const result = await maybeRunOnHost('routines', ['routines', 'list', '--device', '--evil']);
     expect(result).toBe(true);
     expect(process.exitCode).toBeGreaterThan(0);
     process.exitCode = 0;
@@ -191,12 +179,12 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
     process.exitCode = 0;
   });
 
-  it('does NOT bail on --devices for routines with --host (placement, not fan-out)', async () => {
+  it('does NOT bail on --devices for routines with --device (placement, not fan-out)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    // --devices on routines is placement; --host should still route remotely.
+    // --devices on routines is placement; --device should still route remotely.
     // The invalid target is rejected by assertValidSshTarget (returns true,
     // exitCode > 0), proving --devices did not bail.
-    const result = await maybeRunOnHost('routines', ['routines', 'add', 'x', '--host', '--evil', '--devices', 'a,b']);
+    const result = await maybeRunOnHost('routines', ['routines', 'add', 'x', '--device', '--evil', '--devices', 'a,b']);
     expect(result).toBe(true);
     expect(process.exitCode).toBeGreaterThan(0);
     process.exitCode = 0;
@@ -205,18 +193,18 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
   it('bails on --devices for non-routines commands (fan-out)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
     // --devices on a non-routines command triggers the fleet-flag bailout,
-    // returning false even with a non-self --host.
-    expect(await maybeRunOnHost('list', ['list', '--host', '--evil', '--devices'])).toBe(false);
+    // returning false even with a non-self --device.
+    expect(await maybeRunOnHost('list', ['list', '--device', '--evil', '--devices'])).toBe(false);
   });
 
   it('bails on --hosts for non-routines commands (fan-out)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    expect(await maybeRunOnHost('list', ['list', '--host', '--evil', '--hosts'])).toBe(false);
+    expect(await maybeRunOnHost('list', ['list', '--device', '--evil', '--hosts'])).toBe(false);
   });
 
   it('bails on --hosts for routines too (generic fleet flag, not placement)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    expect(await maybeRunOnHost('routines', ['routines', 'list', '--host', '--evil', '--hosts'])).toBe(false);
+    expect(await maybeRunOnHost('routines', ['routines', 'list', '--device', '--evil', '--hosts'])).toBe(false);
   });
 
   it('rejects --device all on a non-routable command with a clear error', async () => {
@@ -292,13 +280,13 @@ describe('maybeRunOnHost — fleet `all` sentinel (injected runners)', () => {
     expect(output).toContain('← this machine');
   });
 
-  it('fans out with --host all and --devices all too', async () => {
+  it('fans out with --devices all and --hosts all too', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
     captureLogs();
     const registry = fakeRegistry([fakeDevice('mac-mini', 'macos')]);
     const runner = makeRunner({ 'mac-mini:agents view': { code: 0, stdout: '[]', stderr: '' } });
 
-    for (const flag of ['--host all', '--devices all', '--hosts all']) {
+    for (const flag of ['--devices all', '--hosts all']) {
       logs.length = 0;
       const [f, v] = flag.split(' ');
       const result = await maybeRunOnHost('view', ['view', f, v], {
@@ -378,12 +366,6 @@ describe('maybeRunOnHost — fleet `all` sentinel (injected runners)', () => {
     expect(logs.join('\n')).toContain('mac-mini');
   });
 
-  it('rejects a conflicting --host with --device all', async () => {
-    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    const result = await maybeRunOnHost('view', ['view', '--device', 'all', '--host', 'other']);
-    expect(result).toBe(true);
-    expect(process.exitCode).toBe(1);
-  });
 });
 
 describe('runFleetPassthrough — direct unit tests', () => {
@@ -397,11 +379,11 @@ describe('runFleetPassthrough — direct unit tests', () => {
     delete process.env.AGENTS_SYNC_MACHINE_ID;
   });
 
-  it('uses the output summarizer for output command', async () => {
+  it('uses the output summarizer for insights output command', async () => {
     console.log = (...args: unknown[]) => logs.push(args.join(' '));
     const registry = fakeRegistry([fakeDevice('mac-mini', 'macos')]);
     const runner = (_device: DeviceProfile, cmd: string[]) => {
-      if (cmd[1] === 'output') {
+      if (cmd[1] === 'insights' && cmd[2] === 'output') {
         return {
           code: 0,
           stdout: JSON.stringify({
@@ -420,8 +402,8 @@ describe('runFleetPassthrough — direct unit tests', () => {
     };
 
     await runFleetPassthrough(
-      'output',
-      ['output', '--device', 'all'],
+      'insights',
+      ['insights', 'output', '--device', 'all'],
       {},
       {
         self: 'zion',
@@ -435,6 +417,48 @@ describe('runFleetPassthrough — direct unit tests', () => {
     expect(output).toContain('mac-mini');
     expect(output).toContain('$12.50 burned');
     expect(output).toContain('3.4K output tokens');
+  });
+
+  it('uses the sync summarizer for sync command', async () => {
+    // RUSH-2700: this is the WIRING test. An earlier revision called
+    // summarizeSyncResult directly, so deleting the `command === 'sync'` line in
+    // summarizeResult restored the exact bug (every box rendering a flat `ok`)
+    // with no test failing. This drives the real fan-out instead, so the roster
+    // must actually dispatch to the summarizer; the describe block below was
+    // rewritten the same way for the same reason.
+    console.log = (...args: unknown[]) => logs.push(args.join(' '));
+    const registry = fakeRegistry([fakeDevice('mac-mini', 'macos')]);
+    const runner = (_device: DeviceProfile, cmd: string[]) => {
+      if (cmd[1] === 'sync') {
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            ok: false,
+            mode: 'umbrella',
+            reconciled: true,
+            declined: ['Copilot@1.0.0: mcp: github: cannot write MCP config: copilot: schema not verified'],
+          }),
+          stderr: '',
+        };
+      }
+      return { code: 1, stdout: '', stderr: 'unexpected' };
+    };
+
+    await runFleetPassthrough(
+      'sync',
+      ['sync', '--device', 'all'],
+      {},
+      {
+        self: 'zion',
+        loadDevices: async () => registry,
+        runner,
+        localRunner: () => ({ code: 0, stdout: '{}', stderr: '' }),
+      },
+    );
+
+    const output = logs.join('\n');
+    expect(output).toContain('mac-mini');
+    expect(output).toContain('1 not written');
   });
 
   it('marks a remote fan-out target with AGENTS_FLEET_REMOTE, but never the self target', async () => {
@@ -451,7 +475,7 @@ describe('runFleetPassthrough — direct unit tests', () => {
       return { code: 0, stdout: '{}', stderr: '' };
     };
 
-    await runFleetPassthrough('browser', ['browser', 'start', '--host', 'all'], {}, {
+    await runFleetPassthrough('browser', ['browser', 'start', '--device', 'all'], {}, {
       self: 'zion',
       loadDevices: async () => registry,
       runner,
@@ -469,9 +493,9 @@ describe('runFleetPassthrough — direct unit tests', () => {
 });
 
 // The standalone `browser` binary (dist/browser.js) never enters index.ts, so it
-// wires --host routing itself via maybeRunStandaloneOnHost. These prove it routes
-// exactly like `agents browser … --host <box>` while leaving pure-local runs alone.
-describe('maybeRunStandaloneOnHost — standalone binary --host routing (RUSH-2214)', () => {
+// wires --device routing itself via maybeRunStandaloneOnHost. These prove it routes
+// exactly like `agents browser … --device <box>` while leaving pure-local runs alone.
+describe('maybeRunStandaloneOnHost — standalone binary --device routing (RUSH-2214)', () => {
   const originalArgv = process.argv.slice();
 
   afterEach(() => {
@@ -488,28 +512,28 @@ describe('maybeRunStandaloneOnHost — standalone binary --host routing (RUSH-22
     expect(process.argv).toEqual(['node', 'browser', 'screenshot', '--json']);
   });
 
-  it('routes --host to a non-self target (rejected by assertValidSshTarget before SSH)', async () => {
+  it('routes --device to a non-self target (rejected by assertValidSshTarget before SSH)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
     // `--evil` starts with '-', so assertValidSshTarget rejects it before any SSH
     // connection. Returning true with exitCode > 0 proves the remote route was
     // entered — i.e. `browser` reached REMOTE_PASSTHROUGH via the synthesized
     // command token, the exact path the standalone binary previously lacked.
-    process.argv = ['node', 'browser', 'start', '--host', '--evil'];
+    process.argv = ['node', 'browser', 'start', '--device', '--evil'];
     expect(await maybeRunStandaloneOnHost('browser')).toBe(true);
     expect(process.exitCode).toBeGreaterThan(0);
   });
 
-  it('treats --device as an alias of --host for the remote route', async () => {
+  it('routes --device to a non-self target (the `get-text` subcommand)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
     process.argv = ['node', 'browser', 'get-text', '--device', '--evil'];
     expect(await maybeRunStandaloneOnHost('browser')).toBe(true);
     expect(process.exitCode).toBeGreaterThan(0);
   });
 
-  it('runs locally and strips routing flags (no synthetic token) when --host names this machine', async () => {
+  it('runs locally and strips routing flags (no synthetic token) when --device names this machine', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
     expect(machineId()).toBe('mybox');
-    process.argv = ['node', 'browser', 'screenshot', '--host', 'mybox'];
+    process.argv = ['node', 'browser', 'screenshot', '--device', 'mybox'];
     expect(await maybeRunStandaloneOnHost('browser')).toBe(false);
     // Argv is the ORIGINAL args minus routing flags — never the synthetic
     // 'browser' token maybeRunOnHost prepends for its remote build.
@@ -518,7 +542,7 @@ describe('maybeRunStandaloneOnHost — standalone binary --host routing (RUSH-22
 
   it('keeps --help local but strips the routing flags so commander parses', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    process.argv = ['node', 'browser', '--host', 'otherbox', '--help'];
+    process.argv = ['node', 'browser', '--device', 'otherbox', '--help'];
     expect(await maybeRunStandaloneOnHost('browser')).toBe(false);
     expect(process.argv).toEqual(['node', 'browser', '--help']);
   });
@@ -528,7 +552,7 @@ describe('maybeRunStandaloneOnHost — standalone binary --host routing (RUSH-22
     const remoteCmds: string[][] = [];
     const originalLog = console.log;
     console.log = () => {};
-    process.argv = ['node', 'browser', 'start', '--host', 'all'];
+    process.argv = ['node', 'browser', 'start', '--device', 'all'];
     const handled = await maybeRunStandaloneOnHost('browser', {
       self: 'zion',
       loadDevices: async () => registry,
@@ -545,5 +569,72 @@ describe('maybeRunStandaloneOnHost — standalone binary --host routing (RUSH-22
     expect(remoteCmds).toHaveLength(1);
     expect(remoteCmds[0]).toContain('browser');
     expect(remoteCmds[0]).toContain('start');
+  });
+});
+
+/**
+ * RUSH-2700: `agents sync --device all` injects `--json` per peer and gets back
+ * the corrected `ok` / `declined`, but the roster rendered a flat `ok`
+ * regardless — so every box showed green even where a harness's config was
+ * never written. That is the fleet-wide silent success the ticket exists to
+ * remove, one layer above where the payload was fixed.
+ */
+describe('sync fan-out roster surfaces a refused write', () => {
+  // Driven through the real fan-out, never by calling the summarizer directly:
+  // a direct call cannot tell whether `summarizeResult` actually dispatches to
+  // it, which is how the first version of these tests stayed green with the
+  // wiring deleted.
+  async function syncRoster(payload: unknown): Promise<string> {
+    const captured: string[] = [];
+    console.log = (...args: unknown[]) => captured.push(args.join(' '));
+    const registry = fakeRegistry([fakeDevice('mac-mini', 'macos')]);
+    await runFleetPassthrough(
+      'sync',
+      ['sync', '--device', 'all'],
+      {},
+      {
+        self: 'zion',
+        loadDevices: async () => registry,
+        runner: (_d: DeviceProfile, cmd: string[]) =>
+          cmd[1] === 'sync'
+            ? { code: 0, stdout: JSON.stringify(payload), stderr: '' }
+            : { code: 1, stdout: '', stderr: 'unexpected' },
+        localRunner: () => ({ code: 0, stdout: '{}', stderr: '' }),
+      },
+    );
+    return captured.join('\n');
+  }
+
+  it('reports the count for an umbrella payload', async () => {
+    const out = await syncRoster({
+      mode: 'umbrella',
+      ok: false,
+      declined: ['Copilot@1.0.0: mcp: github: cannot write MCP config: copilot: ...'],
+    });
+    expect(out).toContain('1 not written');
+  });
+
+  it('reports the count across versions for an agent-all payload', async () => {
+    const out = await syncRoster({
+      mode: 'agent-all',
+      ok: false,
+      versions: [
+        { version: '1.0.0', declined: ['mcp: a: cannot write MCP config: copilot: ...'] },
+        { version: '1.1.0', declined: ['mcp: b: cannot write MCP config: copilot: ...'] },
+      ],
+    });
+    expect(out).toContain('2 not written');
+  });
+
+  it('stays ok when nothing was refused', async () => {
+    expect(await syncRoster({ mode: 'umbrella', ok: true, declined: [] })).not.toContain('not written');
+    expect(await syncRoster({ mode: 'agent-all', ok: true, versions: [{ declined: [] }] })).not.toContain('not written');
+  });
+
+  it('stays ok for a peer whose payload predates the field', async () => {
+    // An older agents-cli on the far side sends no `declined`; the roster must
+    // render as before rather than throw.
+    expect(await syncRoster({ mode: 'umbrella', ok: true })).not.toContain('not written');
+    expect(await syncRoster(null)).not.toContain('not written');
   });
 });

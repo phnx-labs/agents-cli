@@ -13,7 +13,7 @@ import ora from 'ora';
 import { checkbox } from '@inquirer/prompts';
 
 import { capableAgents, isCapable } from '../lib/capabilities.js';
-import { emit } from '../lib/events.js';
+import { emit } from '../lib/feed/events.js';
 import {
   AGENTS,
   ALL_AGENT_IDS,
@@ -49,7 +49,7 @@ import {
   resolveInstalledAgentTargets,
   resolveConfiguredAgentTargets,
   syncResourcesToVersion,
-} from '../lib/versions.js';
+} from '../lib/installations/versions.js';
 import { getUserAgentsDir } from '../lib/state.js';
 import {
   isPromptCancelled,

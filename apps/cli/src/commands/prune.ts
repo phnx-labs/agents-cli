@@ -36,7 +36,7 @@ import {
   diffVersionSkills,
   iterSkillsCapableVersions,
   removeSkillFromVersion,
-} from '../lib/skills.js';
+} from '../lib/plugins/skills.js';
 import {
   listUnmanagedHooksInVersionHome,
   iterHooksCapableVersions,
@@ -46,18 +46,18 @@ import {
   diffVersionPlugins,
   iterPluginsCapableVersions,
   removePluginSkillFromVersion,
-} from '../lib/plugins.js';
+} from '../lib/plugins/plugins.js';
 import {
   diffVersionSubagents,
   iterSubagentsCapableVersions,
   removeSubagentFromVersion,
 } from '../lib/subagents.js';
-import { getGlobalDefault } from '../lib/versions.js';
+import { getGlobalDefault } from '../lib/installations/versions.js';
 import { resolveAgentName, formatAgentError } from '../lib/agents.js';
 import { pruneDuplicates } from './view.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { getTrashDir } from '../lib/state.js';
-import { previewRunsPrune, pruneRuns, countAllRuns } from '../lib/routines.js';
+import { previewRunsPrune, pruneRuns, countAllRuns } from '../lib/scheduling/routines.js';
 
 type ResourceType = 'commands' | 'skills' | 'hooks' | 'plugins' | 'subagents';
 type StateType = 'trash' | 'sessions' | 'runs';

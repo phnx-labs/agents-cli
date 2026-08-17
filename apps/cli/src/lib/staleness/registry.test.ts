@@ -180,7 +180,7 @@ describe('staleness/registry', () => {
         import * as path from 'path';
         import { AGENTS } from './src/lib/agents.ts';
         import { supports } from './src/lib/capabilities.ts';
-        import { getVersionHomePath, syncResourcesToVersion } from './src/lib/versions.ts';
+        import { getVersionHomePath, syncResourcesToVersion } from './src/lib/installations/versions.ts';
         import { buildManifest, isStale } from './src/lib/staleness/index.ts';
         import {
           ALL_RESOURCE_KINDS,

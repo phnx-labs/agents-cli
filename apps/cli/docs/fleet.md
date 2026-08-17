@@ -7,7 +7,7 @@ authentication. Native logins are never copied.
 `agents apply` (alias `ag apply`) is the fleet-wide counterpart to
 [resource sync](resource-sync.md): resource sync reconciles resources within
 one machine's version homes; `apply` reconciles *machines* against a profile,
-over the same [SSH transport](ssh-transport.md) every `--host` command uses.
+over the same [SSH transport](ssh-transport.md) every `--device` command uses.
 
 Source: `src/commands/apply.ts` (command + plan render),
 `src/lib/fleet/{types,manifest,apply,auth-sync}.ts` (schema, reconcile engine,
@@ -64,7 +64,7 @@ Hand-authoring `fleet:` is optional — `agents fleet capture` (alias of
 ```
 agents fleet capture              # write agents.yaml → fleet:
 agents fleet capture --dry-run    # print the block, write nothing
-agents fleet capture --from-pins  # record per-device agents from devices/<name>/agents.yaml
+agents fleet capture --from-pins  # also record THIS machine's pinned agents (pins are machine-local, never synced)
 ```
 
 It records device **names** (the roster), the source machine's own agents as

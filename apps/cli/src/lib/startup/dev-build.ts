@@ -18,10 +18,22 @@ import * as path from 'path';
  *     git repo** (Homebrew). So every Homebrew-node user looked like a dev build
  *     and had migrations + the menu-bar self-heal silently disabled.
  *
- * Fix: resolve the symlink with realpath, then require the `.git`'s repo root to
- * actually be the agents-cli package (its package.json `name`), not some
- * unrelated ancestor that happens to be version-controlled.
+ * Fix: resolve the symlink with realpath and require the resolved package root's
+ * own package.json `name` to actually be the agents-cli package, before ever
+ * looking for `.git`.
+ *
+ * That package root does not always hold `.git` itself, though — this repo is a
+ * monorepo where the package lives at `apps/cli` and `.git` sits one level
+ * higher, at the true repo root. `.git` is therefore searched for in a SMALL,
+ * bounded set of ancestors above the package root (see
+ * `DEV_BUILD_GIT_ANCESTOR_DEPTH`), not just the package root itself — a source
+ * checkout run via tsx/ts-node from `apps/cli/src/` or built to
+ * `apps/cli/dist/` must still be recognized. The bound keeps this well short of
+ * an unrelated ancestor repo: a real Homebrew npm-global install's package root
+ * sits 3 directories below `/opt/homebrew` (`lib/node_modules/@phnx-labs/…`),
+ * so a depth of 2 finds this repo's `.git` while staying short of Homebrew's.
  */
+const DEV_BUILD_GIT_ANCESTOR_DEPTH = 2;
 /**
  * Whether a version string is the `0.0.0-dev.<sha>[-dirty]` stamp
  * `scripts/install.sh` writes for a side-by-side dev install (`install.sh:61`).
@@ -39,12 +51,20 @@ export function detectDevBuild(argv1: string, version: string): boolean {
   if (isDevVersionStamp(version)) return true;
   try {
     const cliPath = fs.realpathSync(argv1 || '');
-    const repoRoot = path.dirname(path.dirname(cliPath));
-    if (!fs.existsSync(path.join(repoRoot, '.git'))) return false;
-    const pkgPath = path.join(repoRoot, 'package.json');
+    const packageRoot = path.dirname(path.dirname(cliPath));
+    const pkgPath = path.join(packageRoot, 'package.json');
     if (!fs.existsSync(pkgPath)) return false;
     const name = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'))?.name;
-    return name === '@phnx-labs/agents-cli';
+    if (name !== '@phnx-labs/agents-cli') return false;
+
+    let dir = packageRoot;
+    for (let depth = 0; depth <= DEV_BUILD_GIT_ANCESTOR_DEPTH; depth++) {
+      if (fs.existsSync(path.join(dir, '.git'))) return true;
+      const parent = path.dirname(dir);
+      if (parent === dir) return false; // reached the filesystem root
+      dir = parent;
+    }
+    return false;
   } catch {
     return false;
   }

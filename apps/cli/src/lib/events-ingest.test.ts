@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ingestBatch, routeFor } from './events-ingest.js';
-import { query, _resetForTest } from './events.js';
+import { query, _resetForTest } from './feed/events.js';
 
 const tempDirs: string[] = [];
 

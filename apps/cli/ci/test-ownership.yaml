@@ -1,0 +1,154 @@
+# Reviewed non-static test ownership for the required Linux impact gate.
+# Policy version is part of the exact-tree proof identity (RUSH-2666).
+#
+# Selection (ordered):
+#   1. A changed test file selects itself.
+#   2. A changed source file selects companion tests + static importers.
+#   3. Groups add subprocess / filesystem / generated-doc / global-state owners.
+#   4. An explicit group named here is the only way to select a broad suite.
+#   5. Executable source with zero tests/checks fails unless listed in testless.
+#   6. A path that matches no area, group, or testless entry is unmapped and fails.
+#
+# There is no silent skip and no implicit full-suite fallback.
+
+policy_version: impact-v1
+
+areas:
+  - prefix: apps/cli/src/
+    companion: true
+    related: true
+    checks: [typecheck]
+  - prefix: apps/cli/scripts/
+    companion: true
+  - prefix: apps/cli/
+    companion: true
+    related: true
+  - prefix: apps/ext/
+    companion: true
+    checks: [ext]
+  - prefix: packages/session-tracker/
+    checks: [session-tracker]
+  - prefix: scripts/
+    companion: true
+  - prefix: .github/
+    checks: [workflow-policy]
+
+groups:
+  - id: cli-bootstrap
+    when:
+      - apps/cli/src/bootstrap.ts
+      - apps/cli/src/index.ts
+      - apps/cli/src/browser.ts
+      - apps/cli/src/computer.ts
+      - apps/cli/scripts/build.sh
+      - apps/cli/scripts/build-bin.sh
+      - apps/cli/scripts/build-win.sh
+    tests:
+      - apps/cli/tests/non-interactive.test.ts
+      - apps/cli/src/index.command-star-routing.test.ts
+      - apps/cli/src/index.spellcheck.test.ts
+      - apps/cli/src/index.tombstones.test.ts
+    checks: [typecheck, binary-smoke]
+
+  - id: command-surface
+    when:
+      - apps/cli/src/commands/**
+      - apps/cli/src/cli/**
+      - apps/cli/scripts/gen-command-index.ts
+      - apps/cli/scripts/gen-command-index.test.ts
+      - apps/cli/scripts/verify-command-index.sh
+      - apps/cli/scripts/verify-docs.sh
+      - apps/cli/docs/command-index.md
+      - apps/cli/docs/command-index.json
+    checks: [command-index, docs, typecheck]
+
+  - id: cli-docs
+    when:
+      - apps/cli/docs/**
+      - apps/cli/AGENTS.md
+      - apps/cli/CHANGELOG.md
+    checks: [docs]
+
+  - id: sessions
+    when:
+      - apps/cli/src/lib/session/**
+      - apps/cli/src/commands/sessions.ts
+      - apps/cli/bench/sessions-active-perf.ts
+    checks: [typecheck, sessions-bench]
+
+  - id: daemon
+    when:
+      - apps/cli/src/lib/daemon/**
+      - apps/cli/src/lib/daemon-ticks.ts
+    checks: [typecheck]
+
+  - id: toolchain
+    when:
+      - apps/cli/bun.lock
+      - apps/cli/package.json
+      - apps/cli/vitest.config.ts
+      - apps/cli/tsconfig.json
+      - apps/cli/tests/setup.ts
+      - apps/cli/tests/global-setup.ts
+    suite: cli-full
+    checks: [typecheck]
+
+  - id: impact-policy
+    when:
+      - scripts/ci-scope.ts
+      - scripts/ci-scope.test.ts
+      - scripts/ci-impact-bench.ts
+      - scripts/ci-bench/**
+      - apps/cli/ci/test-ownership.yaml
+      - .github/workflows/tests.yml
+      - .github/workflows/tests-gate.test.ts
+    checks: [impact-tests, workflow-policy]
+
+  - id: ext
+    when:
+      - apps/ext/**
+    checks: [ext]
+
+  - id: session-tracker
+    when:
+      - packages/session-tracker/**
+    checks: [session-tracker]
+
+# Explicit reviewed exemptions. These paths do not select tests on this Linux
+# gate; native helpers and iOS have their own workflows.
+testless:
+  - .agents/**
+  - assets/**
+  - demo/**
+  - skills/**
+  - openspec/**
+  - native/**
+  - apps/ios/**
+  - apps/cli/.changelog/**
+  - apps/cli/menubar/**
+  - apps/cli/bin/**
+  - apps/cli/schema/**
+  - apps/cli/routines/**
+  - apps/cli/bench/**
+  - packages/agi-cli/**
+  - packages/swarmify-mirror/**
+  - website/**
+  - LICENSE
+  - README.md
+  - CHANGELOG.md
+  - SECURITY.md
+  - DESIGN.md
+  - CONTRIBUTING.md
+  - NPM_CONSOLIDATION.md
+  - AGENTS.md
+  - CLAUDE.md
+  - GEMINI.md
+  - .gitignore
+  - .gitleaks.toml
+  - agents.yaml
+  - apps/cli/.crabbox.yaml
+  - apps/cli/.gitignore
+  - apps/cli/.npmignore
+  - apps/cli/LICENSE
+  - apps/cli/CLAUDE.md
+  - apps/cli/GEMINI.md

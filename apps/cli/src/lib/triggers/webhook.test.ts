@@ -5,7 +5,7 @@ import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import type { JobConfig, RunMeta, WebhookContext } from '../routines.js';
+import type { JobConfig, RunMeta, WebhookContext } from '../scheduling/routines.js';
 import {
   matchJobsToWebhook,
   jobMatchesWebhook,

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   expandObserveAlias,
+  hasFilterFlag,
   hasActiveFlag,
   OBSERVE_ALIASES,
 } from './observe-aliases.js';
@@ -18,19 +19,13 @@ describe('expandObserveAlias', () => {
     });
   });
 
-  it('maps roster → sessions --active unless --active already set', () => {
-    expect(expandObserveAlias('roster')).toEqual({
-      argv: ['sessions', '--active'],
-      note: expect.stringContaining('sessions --active'),
-    });
-    expect(expandObserveAlias('roster', ['--json', '--local'])).toEqual({
-      argv: ['sessions', '--active', '--json', '--local'],
-      note: expect.stringContaining('roster'),
-    });
-    expect(expandObserveAlias('roster', ['--active', '--waiting'])).toEqual({
-      argv: ['sessions', '--active', '--waiting'],
-      note: expect.stringContaining('roster'),
-    });
+  it('does not expand retired roster (use sessions --active)', () => {
+    expect(expandObserveAlias('roster')).toBeNull();
+  });
+
+  it('does not expand the retired timeline alias (use feed --filter updates, RUSH-2692)', () => {
+    expect(expandObserveAlias('timeline')).toBeNull();
+    expect(expandObserveAlias('timeline', ['--json'])).toBeNull();
   });
 
   it('returns null for unknown names', () => {
@@ -38,20 +33,18 @@ describe('expandObserveAlias', () => {
     expect(expandObserveAlias('audit')).toBeNull();
     expect(expandObserveAlias('')).toBeNull();
   });
-
-  it('returns null for the removed timeline alias (RUSH-2692)', () => {
-    expect(expandObserveAlias('timeline')).toBeNull();
-    expect(expandObserveAlias('timeline', ['--json'])).toBeNull();
-  });
 });
 
 describe('flag helpers / alias list', () => {
-  it('detects the --active form', () => {
+  it('detects --filter and --active forms', () => {
+    expect(hasFilterFlag(['--filter', 'x'])).toBe(true);
+    expect(hasFilterFlag(['--filter=x'])).toBe(true);
+    expect(hasFilterFlag(['--json'])).toBe(false);
     expect(hasActiveFlag(['--active'])).toBe(true);
     expect(hasActiveFlag(['--json'])).toBe(false);
   });
 
-  it('lists the two public observe aliases', () => {
-    expect([...OBSERVE_ALIASES].sort()).toEqual(['inbox', 'roster']);
+  it('lists the public observe aliases (roster + timeline retired)', () => {
+    expect([...OBSERVE_ALIASES].sort()).toEqual(['inbox']);
   });
 });

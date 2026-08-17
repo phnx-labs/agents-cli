@@ -80,3 +80,40 @@ describe('SessionStart hook launch metadata', () => {
     expect(fs.existsSync(path.join(history, 'by-session'))).toBe(false);
   });
 });
+
+
+describe('SessionStart hook state-dir hygiene', () => {
+  it('writes the live session file and prunes dead records in the same run', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'session-tracker-hygiene-'));
+    dirs.push(root);
+    const home = path.join(root, 'home');
+    fs.mkdirSync(home);
+    const stateDir = path.join(home, '.agents', '.cache', 'terminals', 'sessions');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    // Create a genuinely dead pid to seed stale files with.
+    const dead = spawnSync(process.execPath, ['-e', 'process.exit(0)']);
+    expect(dead.status).toBe(0);
+    const deadPid = dead.pid!;
+
+    // Pre-seed stale files that the hook should reap.
+    fs.writeFileSync(path.join(stateDir, `${deadPid}.json`), JSON.stringify({ session_id: 'x', cwd: '/', pid: deadPid, ts: 1 }), 'utf8');
+    fs.writeFileSync(path.join(stateDir, '999999.json'), '', 'utf8');
+    fs.writeFileSync(path.join(stateDir, `.${deadPid}.abcdef`), 'orphan', 'utf8');
+
+    const result = spawnSync(hookPath, ['codex'], {
+      input: JSON.stringify({ session_id: '019fd0c8-b3e9-77a2-a1a4-444698c4d897', cwd: '/repo' }),
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const remaining = new Set(fs.readdirSync(stateDir));
+    // The hook runs as a child of this process, so it records THIS pid.
+    expect(remaining.has(`${process.pid}.json`)).toBe(true);
+    // Stale entries are gone.
+    expect(remaining.has(`${deadPid}.json`)).toBe(false);
+    expect(remaining.has('999999.json')).toBe(false);
+    expect([...remaining].some((f) => /^\.\d+\./.test(f))).toBe(false);
+  });
+});

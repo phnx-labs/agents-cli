@@ -1,0 +1,20 @@
+name: Tests
+on:
+  pull_request:
+    branches: ['main']
+jobs:
+  scope:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo scope
+  windows:
+    runs-on: windows-latest
+    steps:
+      - run: echo smoke
+  test:
+    needs: [scope, cli-preflight, cli-test-shard, cli-docs, ext, session-tracker, windows]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate every affected component
+        run: echo gate

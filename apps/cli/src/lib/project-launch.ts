@@ -49,11 +49,11 @@ import {
   getProjectPluginsDir,
   getSystemPluginsDir,
 } from './state.js';
-import { getVersionHomePath } from './versions.js';
+import { getVersionHomePath } from './installations/versions.js';
 import { toPortableKey } from './platform/index.js';
 import { compileRulesForProject } from './rules/compile.js';
 import { syncProjectResourcesToAgent } from './project-resources.js';
-import { discoverPluginsInDir, hasPluginExecSurfaces, inspectPluginCapabilities } from './plugins.js';
+import { discoverPluginsInDir, hasPluginExecSurfaces, inspectPluginCapabilities } from './plugins/plugins.js';
 import type { DiscoveredPlugin } from './types.js';
 import {
   MARKETPLACE_NAME,
@@ -67,7 +67,7 @@ import {
   registerMarketplace,
   removePluginFromSettings,
   syncMarketplaceManifest,
-} from './plugin-marketplace.js';
+} from './plugins/plugin-marketplace.js';
 
 export interface LaunchSyncOptions {
   agent: AgentId;

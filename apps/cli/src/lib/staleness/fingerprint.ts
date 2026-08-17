@@ -34,7 +34,7 @@ export function fingerprintFile(filePath: string): Fingerprint | null {
 /**
  * Names we never fingerprint: OS metadata, VCS bookkeeping, dep caches,
  * build outputs. Matches the SKILL_COPY_IGNORE set used by the sync writer
- * in `src/lib/versions.ts`.
+ * in `src/lib/installations/versions.ts`.
  *
  * Important: this is an allowlist of noise, NOT a blanket "skip every
  * dot-prefixed entry". Plugins keep their manifest at

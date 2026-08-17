@@ -210,15 +210,15 @@ describe('exitSequenceFor (per-harness table)', () => {
 // --- pure: launch command + replay text ---------------------------------------
 
 describe('buildRotateLaunchCommand', () => {
-  it('local terminal: run auto + session id, no --host', () => {
+  it('local terminal: run auto + session id, no --device', () => {
     expect(buildRotateLaunchCommand({ sessionId: 'abc' }))
       .toBe('agents run auto --interactive --session-id abc');
   });
   it('remote terminal: single-quotes the device name', () => {
     expect(buildRotateLaunchCommand({ host: 'mac mini', sessionId: 'abc' }))
-      .toBe("agents run auto --interactive --host 'mac mini' --session-id abc");
+      .toBe("agents run auto --interactive --device 'mac mini' --session-id abc");
     expect(buildRotateLaunchCommand({ host: "o'brien", sessionId: 'abc' }))
-      .toBe("agents run auto --interactive --host 'o'\\''brien' --session-id abc");
+      .toBe("agents run auto --interactive --device 'o'\\''brien' --session-id abc");
   });
 });
 

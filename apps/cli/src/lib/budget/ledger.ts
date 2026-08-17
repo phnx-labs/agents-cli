@@ -3,7 +3,7 @@
  *
  * Every dispatched run that produces token usage records one JSONL line under
  * `<history>/spend/ledger.jsonl`. The ledger is the shared artifact #323's
- * `agents cost` can later read for $ rollups, so the entry shape stays clean
+ * `agents insights cost` can later read for $ rollups, so the entry shape stays clean
  * and stable: one record = one usage observation attributed to a run.
  *
  * `costUsd` is computed at write time via the canonical pricing module

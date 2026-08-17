@@ -23,34 +23,34 @@ function runRelease(...args: string[]): { status: number | null; out: string } {
   return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
 
-describeRelease('release.sh PR-head synchronization', () => {
-  it('pins CI to the exact release commit instead of GitHub\'s eventually consistent PR head', () => {
+describeRelease('release.sh attestation promotion (RUSH-2666)', () => {
+  it('requires the exact release-commit tree and never waits on a full-suite matrix', () => {
     const waitFunction = RELEASE_SH.match(
-      /wait_for_ci_green\(\) \{(?<body>[\s\S]*?)\n\}/,
+      /wait_for_attestation\(\) \{(?<body>[\s\S]*?)\n\}/,
     )?.groups?.body;
 
     expect(waitFunction).toBeDefined();
-    expect(waitFunction).toContain('local pr="$1" head_sha="${2:-}"');
-    expect(waitFunction).not.toContain('gh pr view');
-    expect(RELEASE_SH).toContain('RELEASE_CI_HEAD="$EXISTING_HEAD"');
-    expect(RELEASE_SH.match(/RELEASE_CI_HEAD="\$RELEASE_COMMIT"/g)).toHaveLength(2);
-    expect(RELEASE_SH).toContain('wait_for_ci_green "$PR_NUMBER" "$RELEASE_CI_HEAD"');
-    expect(RELEASE_SH).not.toContain('wait_for_ci_green "$PR_NUMBER" "$RELEASE_COMMIT"');
-    expect(RELEASE_SH).toContain(
-      'wait_for_ci_green "$MERGED_RELEASE_PR" "$CI_TESTED_HEAD"',
-    );
+    expect(waitFunction).toContain('release-attestation.sh require');
+    expect(waitFunction).toContain('+ 90');
+    expect(RELEASE_SH).not.toContain('wait_for_ci_green');
+    expect(RELEASE_SH).not.toContain('run_crabbox_tests');
+    expect(RELEASE_SH).not.toContain('EXPECTED_CHECKS');
+    expect(RELEASE_SH).toContain('wait_for_attestation "$(git rev-parse "$RELEASE_CI_HEAD^{tree}")"');
+    expect(RELEASE_SH).toContain('refusing parent/nearby evidence');
   });
 
-  it('waits on the stable aggregate test context, not internal CLI job names', () => {
-    const expectedChecks = RELEASE_SH.match(
-      /EXPECTED_CHECKS=\((?<checks>[\s\S]*?)\)\n# The Windows/,
-    )?.groups?.checks;
-
-    expect(expectedChecks).toBeDefined();
-    expect(expectedChecks).toContain('test gitleaks');
-    expect(expectedChecks).not.toContain('test-shard');
-    expect(expectedChecks).not.toContain('typecheck');
-    expect(expectedChecks).not.toContain('compiled-smoke');
+  it('promotes the attested tarball and does not rebuild or notarize on the ordinary path', () => {
+    expect(RELEASE_SH).toContain('release-attestation.sh promote');
+    expect(RELEASE_SH).toContain('release-install-smoke.sh');
+    expect(RELEASE_SH).toContain('release-manifest.sh require');
+    expect(RELEASE_SH).toContain('npm publish "$tgz"');
+    expect(RELEASE_SH).toContain('upload_release_proof');
+    expect(RELEASE_SH).toContain('gh release download "v$TARGET"');
+    expect(RELEASE_SH).toContain('ComputerHelper.app.zip');
+    expect(RELEASE_SH).not.toContain('sign-cli-binary.sh');
+    expect(RELEASE_SH).not.toContain('publish-computer-helper-mac.sh');
+    expect(RELEASE_SH).not.toContain('menubar/scripts/build.sh release');
+    expect(RELEASE_SH).toContain('rebuild/notarization is outside the ordinary release path');
   });
 });
 

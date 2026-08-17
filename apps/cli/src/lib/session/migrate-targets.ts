@@ -20,7 +20,7 @@ import type { CrabboxBox } from '../crabbox/cli.js';
 
 /** A machine the current session could be relocated onto. */
 export interface MigrateTarget {
-  /** The `--host` value: a host/device name, or a warm box slug for ephemeral. */
+  /** The `--device` value: a host/device name, or a warm box slug for ephemeral. */
   name: string;
   /** Where the target comes from — a fleet host/device, or a warm crabbox box. */
   kind: 'fleet' | 'ephemeral';

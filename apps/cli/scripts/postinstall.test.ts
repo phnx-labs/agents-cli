@@ -225,8 +225,9 @@ function stageDaemonHealStubs(
       '',
     ].join('\n'),
   );
+  fs.mkdirSync(path.join(lib, 'daemon'), { recursive: true });
   fs.writeFileSync(
-    path.join(lib, 'daemon.js'),
+    path.join(lib, 'daemon', 'daemon.js'),
     [
       "import * as fs from 'fs';",
       'let stopped = false;',

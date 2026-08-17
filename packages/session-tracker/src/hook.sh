@@ -6,7 +6,7 @@
 #   - claude/codex/cursor: JSON on stdin with session_id (+conversation_id for cursor)
 #   - grok: GROK_SESSION_ID and GROK_WORKSPACE_ROOT env vars
 #   - hermes: JSON on stdin (on_session_start payload); best-effort field probe
-#   - gemini/antigravity: TBD — add branches below as upstream payloads land
+#   - gemini/antigravity: best-effort stdin-JSON probe
 #
 # Writes ~/.agents/.cache/terminals/sessions/<PPID>.json with the canonical
 # SessionState schema from src/types.ts. Atomic via mktemp + mv.
@@ -17,6 +17,17 @@
 # Silent on success (SessionStart stdout leaks into the model context).
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+TMP=""
+SID_TMP=""
+cleanup() {
+  [ -n "$TMP" ] && rm -f "$TMP"
+  [ -n "$SID_TMP" ] && rm -f "$SID_TMP"
+  return 0
+}
+trap cleanup EXIT
 
 AGENT="${1:-${AGENT_HINT:-}}"
 if [ -z "$AGENT" ]; then
@@ -116,6 +127,13 @@ json.dump(out, sys.stdout)
 PY
 
 mv -f "$TMP" "$STATE_DIR/$PPID.json"
+
+# Prune dead-pid records, zero-byte files, and orphaned temp files left by
+# crashed atomic writes. Keep stdout/stderr silent — it leaks into the model.
+PRUNE_SCRIPT="$SCRIPT_DIR/../dist/prune-state.js"
+if [ -f "$PRUNE_SCRIPT" ]; then
+  node "$PRUNE_SCRIPT" >/dev/null 2>&1 || true
+fi
 
 # Persist launch metadata under the harness's real session id. `agents run`
 # exports the EFFECTIVE mode after capability/headless resolution, plus the

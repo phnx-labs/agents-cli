@@ -32,7 +32,7 @@ import {
   findSurvivingStateDirDaemons,
   getDaemonLogPath,
   isDaemonAutostartCircuitOpen,
-} from '../lib/daemon.js';
+} from '../lib/daemon/daemon.js';
 import { getConfigValue, setConfigValue, isDaemonEnabled } from '../lib/device-config.js';
 import {
   readSubsystemHealth,
@@ -48,7 +48,7 @@ import {
   setDaemonServiceEnabled,
   getDaemonServicesConfigPath,
 } from '../lib/daemon-services.js';
-import { listJobs, getLatestRun } from '../lib/routines.js';
+import { listJobs, getLatestRun } from '../lib/scheduling/routines.js';
 import { JobScheduler } from '../lib/scheduler.js';
 import { followFile } from '../lib/log-follow.js';
 import { parseDuration } from '../lib/hooks/cache.js';
@@ -152,7 +152,7 @@ function entryIsGone(p: DaemonProcess): boolean {
  *
  * That split is not academic. The incident this feature exists to catch was
  * neither the tracked pid nor in the registry: it ran under an ephemeral `/tmp`
- * cwd from a deleted worktree, and `lib/daemon.ts` documents that such a process
+ * cwd from a deleted worktree, and `lib/daemon/daemon.ts` documents that such a process
  * "registers under its own state dir and is invisible here" BY DESIGN. Gating
  * the display on the registry too would have made this command silent on the
  * exact 4h14m ghost that motivated it.

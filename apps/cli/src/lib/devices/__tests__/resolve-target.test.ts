@@ -1,8 +1,8 @@
 /**
  * The fan-out (`resolveExplicitTargets`) and `agents ssh` (`resolveDeviceTarget`)
- * adapters now share ONE core with `run --host` (RUSH-1967). These tests pin,
+ * adapters now share ONE core with `run --device` (RUSH-1967). These tests pin,
  * against a REAL registry / overlay / ssh_config (no mocks — repo convention):
- *   - a `--host` token dials the device's live Tailscale route, not the literal;
+ *   - a `--device` token dials the device's live Tailscale route, not the literal;
  *   - the same token resolves to the SAME target string through `resolveHost`
  *     (dispatch) and `resolveExplicitTargets` (fan-out) — one row per divergence
  *     in the ticket table;
@@ -129,7 +129,7 @@ describe('resolveExplicitTargets — fan-out through the unified core', () => {
   });
 });
 
-describe('run --host and sessions --host resolve to the SAME target (divergence table)', () => {
+describe('run --device and sessions --device resolve to the SAME target (divergence table)', () => {
   async function bothTargets(token: string): Promise<{ dispatch?: string; fanout?: string }> {
     const host = await resolveHost(token);
     const dispatch = host ? sshTargetFor(host) : undefined;

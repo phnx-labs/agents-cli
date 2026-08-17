@@ -27,11 +27,22 @@ export interface InstallResult {
 export interface InstallOptions {
   dryRun?: boolean;
   hookPathOverride?: string;
+  /** Home directory whose harness-native config should be written. Defaults to
+   *  `os.homedir()` so the live config (usually a symlink into the active
+   *  version home) is updated. */
+  home?: string;
 }
 
 function hookCommand(agent: AgentId, opts: InstallOptions): string {
   const hook = opts.hookPathOverride ?? HOOK_PATH;
   return `${hook} ${agent}`;
+}
+
+/** True when a stored command string is a prior registration of this package's
+ *  `hook.sh` (src or dist). Used for idempotency when stripping old entries. */
+function isOwnHookCommand(command: string): boolean {
+  const first = command.trim().split(/\s+/)[0];
+  return first.endsWith('hook.sh') && first.includes('session-tracker');
 }
 
 async function readJson(p: string): Promise<any> {
@@ -47,12 +58,17 @@ async function readJson(p: string): Promise<any> {
 async function writeJsonAtomic(p: string, data: any): Promise<void> {
   await fs.promises.mkdir(path.dirname(p), { recursive: true });
   const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
-  await fs.promises.writeFile(tmp, JSON.stringify(data, null, 2), 'utf8');
-  await fs.promises.rename(tmp, p);
+  try {
+    await fs.promises.writeFile(tmp, JSON.stringify(data, null, 2), 'utf8');
+    await fs.promises.rename(tmp, p);
+  } catch (err) {
+    try { await fs.promises.unlink(tmp); } catch { /* best-effort */ }
+    throw err;
+  }
 }
 
 async function installClaude(opts: InstallOptions): Promise<InstallResult> {
-  const configPath = path.join(os.homedir(), '.claude', 'settings.json');
+  const configPath = path.join(opts.home ?? os.homedir(), '.claude', 'settings.json');
   const command = hookCommand('claude', opts);
   if (opts.dryRun) {
     return { agent: 'claude', installed: false, configPath };
@@ -64,7 +80,7 @@ async function installClaude(opts: InstallOptions): Promise<InstallResult> {
   for (const entry of cfg.hooks.SessionStart) {
     if (!entry || !Array.isArray(entry.hooks)) continue;
     entry.hooks = entry.hooks.filter(
-      (h: any) => !(h && h.command && String(h.command).includes('packages/session-tracker/src/hook.sh')),
+      (h: any) => !(h && h.command && isOwnHookCommand(h.command)),
     );
   }
   // Find or create the empty-matcher group and add our hook.
@@ -79,7 +95,7 @@ async function installClaude(opts: InstallOptions): Promise<InstallResult> {
 }
 
 async function installCodex(opts: InstallOptions): Promise<InstallResult> {
-  const configPath = path.join(os.homedir(), '.codex', 'hooks.json');
+  const configPath = path.join(opts.home ?? os.homedir(), '.codex', 'hooks.json');
   const command = hookCommand('codex', opts);
   if (opts.dryRun) {
     return { agent: 'codex', installed: false, configPath };
@@ -90,7 +106,7 @@ async function installCodex(opts: InstallOptions): Promise<InstallResult> {
   for (const entry of cfg.hooks.SessionStart) {
     if (!entry || !Array.isArray(entry.hooks)) continue;
     entry.hooks = entry.hooks.filter(
-      (h: any) => !(h && h.command && String(h.command).includes('packages/session-tracker/src/hook.sh')),
+      (h: any) => !(h && h.command && isOwnHookCommand(h.command)),
     );
   }
   let group = cfg.hooks.SessionStart.find((e: any) => e && (e.matcher === '' || e.matcher === 'startup|resume'));
@@ -104,7 +120,7 @@ async function installCodex(opts: InstallOptions): Promise<InstallResult> {
 }
 
 async function installCursor(opts: InstallOptions): Promise<InstallResult> {
-  const configPath = path.join(os.homedir(), '.cursor', 'hooks.json');
+  const configPath = path.join(opts.home ?? os.homedir(), '.cursor', 'hooks.json');
   const command = hookCommand('cursor', opts);
   if (opts.dryRun) {
     return { agent: 'cursor', installed: false, configPath };
@@ -113,7 +129,7 @@ async function installCursor(opts: InstallOptions): Promise<InstallResult> {
   cfg.hooks = cfg.hooks ?? {};
   cfg.hooks.sessionStart = cfg.hooks.sessionStart ?? [];
   cfg.hooks.sessionStart = cfg.hooks.sessionStart.filter(
-    (h: any) => !(h && h.command && String(h.command).includes('packages/session-tracker/src/hook.sh')),
+    (h: any) => !(h && h.command && isOwnHookCommand(h.command)),
   );
   cfg.hooks.sessionStart.push({ type: 'command', command, timeout: 5 });
   await writeJsonAtomic(configPath, cfg);
@@ -121,7 +137,7 @@ async function installCursor(opts: InstallOptions): Promise<InstallResult> {
 }
 
 async function installGrok(opts: InstallOptions): Promise<InstallResult> {
-  const configPath = path.join(os.homedir(), '.grok', 'hooks', 'session-start.json');
+  const configPath = path.join(opts.home ?? os.homedir(), '.grok', 'hooks', 'session-start.json');
   const command = hookCommand('grok', opts);
   if (opts.dryRun) {
     return { agent: 'grok', installed: false, configPath };
@@ -131,7 +147,7 @@ async function installGrok(opts: InstallOptions): Promise<InstallResult> {
 }
 
 async function installDroid(opts: InstallOptions): Promise<InstallResult> {
-  const configPath = path.join(os.homedir(), '.factory', 'settings.json');
+  const configPath = path.join(opts.home ?? os.homedir(), '.factory', 'settings.json');
   const command = hookCommand('droid', opts);
   if (opts.dryRun) return { agent: 'droid', installed: false, configPath };
   const cfg = await readJson(configPath);
@@ -154,7 +170,7 @@ async function installDroid(opts: InstallOptions): Promise<InstallResult> {
 }
 
 async function installKimi(opts: InstallOptions): Promise<InstallResult> {
-  const configPath = path.join(os.homedir(), '.kimi-code', 'config.toml');
+  const configPath = path.join(opts.home ?? os.homedir(), '.kimi-code', 'config.toml');
   const command = hookCommand('kimi', opts);
   if (opts.dryRun) return { agent: 'kimi', installed: false, configPath };
   let cfg: Record<string, unknown> = {};
@@ -165,7 +181,7 @@ async function installKimi(opts: InstallOptions): Promise<InstallResult> {
   }
   const hooks = (Array.isArray(cfg.hooks) ? cfg.hooks : []) as Array<Record<string, unknown>>;
   cfg.hooks = [
-    ...hooks.filter((hook) => !(typeof hook.command === 'string' && hook.command.includes('packages/session-tracker/src/hook.sh'))),
+    ...hooks.filter((hook) => !(typeof hook.command === 'string' && isOwnHookCommand(hook.command))),
     { event: 'SessionStart', command, timeout: 5 },
   ];
   await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
@@ -174,7 +190,7 @@ async function installKimi(opts: InstallOptions): Promise<InstallResult> {
 }
 
 async function installHermes(opts: InstallOptions): Promise<InstallResult> {
-  const configPath = path.join(os.homedir(), '.hermes', 'config.yaml');
+  const configPath = path.join(opts.home ?? os.homedir(), '.hermes', 'config.yaml');
   const command = hookCommand('hermes', opts);
   if (opts.dryRun) return { agent: 'hermes', installed: false, configPath };
   // Read-modify-write the YAML, preserving every sibling key (mcp_servers, …) —
@@ -194,7 +210,7 @@ async function installHermes(opts: InstallOptions): Promise<InstallResult> {
   const existing = Array.isArray(hooks.on_session_start) ? hooks.on_session_start : [];
   hooks.on_session_start = [
     ...existing.filter(
-      (h) => !(typeof h?.command === 'string' && h.command.includes('packages/session-tracker/src/hook.sh')),
+      (h) => !(typeof h?.command === 'string' && isOwnHookCommand(h.command)),
     ),
     { command, timeout: 5 },
   ];

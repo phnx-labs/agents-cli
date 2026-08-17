@@ -13,34 +13,48 @@ const {
   isAutoLaunchEnabled,
   isAutoLaunchPreferred,
   readDeviceMaxConcurrent,
+  FLEET_DEFAULTS_KEY,
 } = await import('./deviceAutoLaunch');
 
 function centralPath(): string {
   return path.join(process.env.AGENTS_USER_AGENTS_DIR!, 'agents.yaml');
 }
 
-/** Seed the central agents.yaml with a fleet.devices map. */
 function writeCentral(text: string): void {
   fs.mkdirSync(path.dirname(centralPath()), { recursive: true });
   fs.writeFileSync(centralPath(), text);
 }
 
-describe('deviceAutoLaunch (central fleet.devices.<name>.config)', () => {
-  beforeEach(() => {
-    fs.rmSync(centralPath(), { force: true });
-  });
+function deviceDocPath(name: string): string {
+  return path.join(process.env.AGENTS_USER_AGENTS_DIR!, 'devices', name, 'agents.yaml');
+}
 
-  test('missing file defaults every device to enabled and not preferred', () => {
+function writeDeviceDoc(name: string, text: string): void {
+  fs.mkdirSync(path.dirname(deviceDocPath(name)), { recursive: true });
+  fs.writeFileSync(deviceDocPath(name), text);
+}
+
+beforeEach(() => {
+  fs.rmSync(centralPath(), { force: true });
+  fs.rmSync(path.join(process.env.AGENTS_USER_AGENTS_DIR!, 'devices'), { recursive: true, force: true });
+});
+
+afterAll(() => {
+  process.env.AGENTS_USER_AGENTS_DIR = ORIGINAL_USER_DIR;
+  fs.rmSync(TEST_HOME, { recursive: true, force: true });
+});
+
+describe('deviceAutoLaunch (per-device docs + fleet.defaults.config)', () => {
+  test('missing files default every device to enabled and not preferred', () => {
     const prefs = loadAutoLaunchPreferences();
     expect(prefs).toEqual({});
     expect(isAutoLaunchEnabled(prefs, 'zion')).toBe(true);
     expect(isAutoLaunchPreferred(prefs, 'zion')).toBe(false);
   });
 
-  test('reads enabled and preferred flags from the central config block', () => {
-    writeCentral(
-      'fleet:\n  devices:\n    box-a:\n      config:\n        autoLaunchEnabled: false\n    box-b:\n      config:\n        autoLaunchPreferred: true\n',
-    );
+  test('reads enabled and preferred flags from per-device docs', () => {
+    writeDeviceDoc('box-a', 'config:\n  autoLaunchEnabled: false\n');
+    writeDeviceDoc('box-b', 'config:\n  autoLaunchPreferred: true\n');
 
     const prefs = loadAutoLaunchPreferences();
     expect(isAutoLaunchEnabled(prefs, 'box-a')).toBe(false);
@@ -48,70 +62,75 @@ describe('deviceAutoLaunch (central fleet.devices.<name>.config)', () => {
   });
 
   test('an unlisted device defaults to enabled and not preferred', () => {
-    writeCentral('fleet:\n  devices: {}\n');
+    writeDeviceDoc('box-a', 'config:\n  autoLaunchEnabled: false\n');
     const prefs = loadAutoLaunchPreferences();
     expect(isAutoLaunchEnabled(prefs, 'never-seen')).toBe(true);
     expect(isAutoLaunchPreferred(prefs, 'never-seen')).toBe(false);
   });
 
-  test('a `devices: all` manifest carries no per-device flags', () => {
-    writeCentral('fleet:\n  devices: all\n');
-    expect(loadAutoLaunchPreferences()).toEqual({});
+  test('the fleet-defaults layer applies to every device; a device entry wins', () => {
+    writeCentral('fleet:\n  devices: {}\n  defaults:\n    config:\n      autoLaunchEnabled: false\n');
+    writeDeviceDoc('box-a', 'config:\n  autoLaunchEnabled: true\n');
+
+    const prefs = loadAutoLaunchPreferences();
+    expect(prefs[FLEET_DEFAULTS_KEY]).toEqual({ enabled: false });
+    // A device with no own flag inherits the fleet default…
+    expect(isAutoLaunchEnabled(prefs, 'zion')).toBe(false);
+    // …and a device entry wins over it.
+    expect(isAutoLaunchEnabled(prefs, 'box-a')).toBe(true);
   });
 
   // Counterpart to the CLI-side corruption contract (which throws on a corrupt
   // store). The extension must keep launching; see the module doc for why they
   // differ.
   test('a corrupted file degrades to defaults rather than throwing', () => {
-    writeCentral('fleet:\n  devices: [unclosed\n');
+    writeDeviceDoc('broken', 'config:\n  autoLaunchEnabled: [unclosed\n');
     const prefs = loadAutoLaunchPreferences();
-    expect(prefs).toEqual({});
-    expect(isAutoLaunchEnabled(prefs, 'anything')).toBe(true);
+    expect(isAutoLaunchEnabled(prefs, 'broken')).toBe(true);
+    writeCentral('fleet: [unclosed\n');
+    expect(loadAutoLaunchPreferences()).toEqual({});
   });
 
   test('a non-map config block is ignored', () => {
-    writeCentral('fleet:\n  devices:\n    box:\n      config: just-a-string\n');
+    writeDeviceDoc('box', 'config: just-a-string\n');
     expect(loadAutoLaunchPreferences()).toEqual({});
   });
 });
 
-describe('readDeviceMaxConcurrent (agents.max-concurrent from the central block)', () => {
-  beforeEach(() => {
-    fs.rmSync(centralPath(), { force: true });
-  });
-
-  test('missing file means uncapped (undefined)', () => {
+describe('readDeviceMaxConcurrent (agents.max-concurrent, device doc over fleet default)', () => {
+  test('missing files mean uncapped (undefined)', () => {
     expect(readDeviceMaxConcurrent('never-configured')).toBeUndefined();
   });
 
-  test('reads config.maxAgents from the central block', () => {
-    writeCentral(
-      'fleet:\n  devices:\n    mac-mini:\n      config:\n        maxAgents: 4\n        schedulerEnabled: false\n',
-    );
+  test('reads config.maxAgents from the device doc', () => {
+    writeDeviceDoc('mac-mini', 'config:\n  maxAgents: 4\n  schedulerEnabled: false\n');
     expect(readDeviceMaxConcurrent('mac-mini')).toBe(4);
   });
 
+  test('the fleet default applies when the device has no own cap; the device doc wins', () => {
+    writeCentral('fleet:\n  devices: {}\n  defaults:\n    config:\n      maxAgents: 2\n');
+    expect(readDeviceMaxConcurrent('zion')).toBe(2);
+
+    writeDeviceDoc('mac-mini', 'config:\n  maxAgents: 8\n');
+    expect(readDeviceMaxConcurrent('mac-mini')).toBe(8);
+  });
+
   test('a device without maxAgents is uncapped', () => {
-    writeCentral('fleet:\n  devices:\n    zion:\n      config:\n        schedulerEnabled: true\n');
+    writeDeviceDoc('zion', 'config:\n  schedulerEnabled: true\n');
     expect(readDeviceMaxConcurrent('zion')).toBeUndefined();
   });
 
   test('invalid cap values are ignored (uncapped), not trusted', () => {
-    writeCentral(
-      'fleet:\n  devices:\n    bad-zero:\n      config:\n        maxAgents: 0\n    bad-string:\n      config:\n        maxAgents: four\n    bad-float:\n      config:\n        maxAgents: 2.5\n',
-    );
+    writeDeviceDoc('bad-zero', 'config:\n  maxAgents: 0\n');
+    writeDeviceDoc('bad-string', 'config:\n  maxAgents: four\n');
+    writeDeviceDoc('bad-float', 'config:\n  maxAgents: 2.5\n');
     expect(readDeviceMaxConcurrent('bad-zero')).toBeUndefined();
     expect(readDeviceMaxConcurrent('bad-string')).toBeUndefined();
     expect(readDeviceMaxConcurrent('bad-float')).toBeUndefined();
   });
 
-  test('a malformed file degrades to uncapped rather than throwing', () => {
-    writeCentral('fleet:\n  devices: [unclosed\n');
+  test('a malformed doc degrades to uncapped rather than throwing', () => {
+    writeDeviceDoc('broken', 'config:\n  maxAgents: [unclosed\n');
     expect(readDeviceMaxConcurrent('broken')).toBeUndefined();
   });
-});
-
-afterAll(() => {
-  process.env.AGENTS_USER_AGENTS_DIR = ORIGINAL_USER_DIR;
-  fs.rmSync(TEST_HOME, { recursive: true, force: true });
 });

@@ -110,7 +110,7 @@ detail: [Projects](projects.md#a-project-is-a-set-of-directories).
 *The part people get wrong* — the trap that turns one team into a teardown-and-rebuild.
 
 **`--remote-cwd` does NOT place a teammate or set its repo.** It rides the shared
-`--host` option family but is ignored on `teams add` (now **rejected** with
+`--device` option family but is ignored on `teams add` (now **rejected** with
 guidance, so you find out at once instead of after building a whole team on the
 wrong model). A teammate's directory is the team's repo plus its `--worktree` —
 there is no per-teammate repo/path override. Place with `--device <host>`; set
@@ -127,7 +127,7 @@ agents teams create wave-mono --repo ~/src/.../monorepo   --enable-worktrees
 agents teams add  wave-cli claude "…" --name mcp --device yosemite-s0 --worktree mcp
 ```
 
-For a **raw `--host` run** (not teams), `--remote-cwd` resolves on the host and is
+For a **raw `--device` run** (not teams), `--remote-cwd` resolves on the host and is
 used verbatim: pass a single-quoted `'$HOME/…'` path (an unquoted `~` expands
 *locally* — `/Users/you` won't exist on a Linux worker) or a valid remote absolute
 path. `--cwd` is the friendlier option — it re-roots a local-home path onto the
@@ -144,7 +144,7 @@ remote home for you.
 | `--env <key=value>` | Set an env var for this teammate (repeatable) |
 | `--cwd <dir>` | Working directory (default: current directory) |
 | `--worktree <name>` | Run in a dedicated git worktree (requires `--enable-worktrees` on the team) |
-| `--device <host>` | Distributed teams: run THIS teammate on `<host>` (alias `--host`). Works with or without a team pool. `<host>` may also be `auto` (RUSH-2185) to affinity-pick a device the same way `agents run --device auto` does — a pick that lands on this machine just runs the teammate locally, same as omitting `--device`. See [Distributed teams](#distributed-teams). |
+| `--device <host>` | Distributed teams: run THIS teammate on `<host>`. Works with or without a team pool. `<host>` may also be `auto` (RUSH-2185) to affinity-pick a device the same way `agents run --device auto` does — a pick that lands on this machine just runs the teammate locally, same as omitting `--device`. See [Distributed teams](#distributed-teams). |
 | `--after <names>` | Comma-separated teammate names to wait for before starting |
 | `--task-type <type>` | Factory label: `plan` \| `implement` \| `test` \| `review` \| `bugfix` \| `docs` |
 | `--cloud <provider>` | Dispatch to cloud backend: `rush` \| `codex` \| `factory` |
@@ -369,9 +369,8 @@ running `teams start`. One orchestrator still drives the DAG, polls status, and
 cleans up — teammates just execute over SSH on their assigned host (via the same
 device registry as `agents devices` / `agents ssh`).
 
-There is one vocabulary — `--device` / `--devices` (aliases `--host` / `--hosts`) —
-and everything is optional; omit it all and teams behave exactly as before (every
-teammate local).
+There is one vocabulary — `--device` / `--devices` — and everything is optional;
+omit it all and teams behave exactly as before (every teammate local).
 
 **Send one teammate elsewhere** — no pool needed:
 

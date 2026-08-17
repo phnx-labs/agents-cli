@@ -22,7 +22,7 @@ import type {
 } from './types.js';
 import { resolveDispatchRepos, normalizeProviderStatus, MAX_IMAGES_PER_DISPATCH } from './types.js';
 import { parseSSE } from './stream.js';
-import { listInstalledVersions, getVersionHomePath } from '../versions.js';
+import { listInstalledVersions, getVersionHomePath } from '../installations/versions.js';
 import { getAccountInfo } from '../agents.js';
 import { loadClaudeOauth } from '../accounting/usage.js';
 import { selectBalancedVersion } from '../accounting/rotate.js';

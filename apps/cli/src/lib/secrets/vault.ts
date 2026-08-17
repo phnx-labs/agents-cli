@@ -292,7 +292,7 @@ export function getVaultSession(): { loggedIn: true; key: VaultKey; expiresAt: n
 function requireVaultKey(): VaultKey {
   const session = getVaultSession();
   if (!session.loggedIn) {
-    throw new Error('Not logged in. Run: agents login');
+    throw new Error('Synced secrets locked. Run: agents secrets vault unlock');
   }
   return session.key;
 }
@@ -316,7 +316,7 @@ function vaultMissingError(file: string): Error {
   return new Error(
     `Vault file is missing: ${file}. A vault was created but the file is gone` +
       ' (a sync conflict, an undownloaded placeholder, or an accidental move/delete).' +
-      ' Restore it before writing, or run: agents login --create --force to start over.',
+      ' Restore it before writing, or run: agents secrets vault unlock --create --force to start over.',
   );
 }
 

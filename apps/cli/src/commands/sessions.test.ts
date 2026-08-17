@@ -39,7 +39,7 @@ import {
   serializeSessionPickerRows,
   type RoutineDrilldown,
 } from './sessions.js';
-import type { RunMeta } from '../lib/routines.js';
+import type { RunMeta } from '../lib/scheduling/routines.js';
 import { remoteAgentsJsonCommand } from '../lib/remote-agents-json.js';
 import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
 import { parseRemoteList } from '../lib/session/remote-list.js';
@@ -1395,7 +1395,7 @@ describe('agents sessions --resolve local-peer critical path', () => {
       peer = await startSessionResolverSshPeer('old-peer', tempHome);
 
       const result = runAgents(
-        ['sessions', '--resolve', 'abcd7777', '--json', '--host', peer.target],
+        ['sessions', '--resolve', 'abcd7777', '--json', '--device', peer.target],
         repoDir,
         tempHome,
       );
@@ -1426,7 +1426,7 @@ describe('agents sessions --resolve local-peer critical path', () => {
       peer = await startSessionResolverSshPeer('malformed', tempHome);
 
       const result = runAgents(
-        ['sessions', '--resolve', 'abcd7777', '--json', '--host', peer.target],
+        ['sessions', '--resolve', 'abcd7777', '--json', '--device', peer.target],
         repoDir,
         tempHome,
       );

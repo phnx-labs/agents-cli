@@ -61,6 +61,18 @@ describe('readMeta merges agents.yaml from both repos', () => {
   let userDir: string;
   let systemDir: string;
   const modulePath = path.resolve(process.cwd(), 'src/lib/state.ts');
+  // pins + registry live under AGENTS_DEVICES_DIR (vitest setup.ts pins a
+  // fork-wide dir). Point every child at THIS test home so a sibling test's
+  // pins-<host>.json cannot shadow the central agents.yaml under test.
+  const MACHINE = 'state-testbox';
+  function hermeticEnv(home: string): NodeJS.ProcessEnv {
+    return {
+      ...process.env,
+      HOME: home,
+      AGENTS_SYNC_MACHINE_ID: MACHINE,
+      AGENTS_DEVICES_DIR: path.join(home, '.agents', '.history', 'devices'),
+    };
+  }
 
   function runReadMeta(home: string): Record<string, unknown> {
     const result = execFileSync(
@@ -71,7 +83,7 @@ describe('readMeta merges agents.yaml from both repos', () => {
       ],
       {
         cwd: process.cwd(),
-        env: { ...process.env, HOME: home },
+        env: hermeticEnv(home),
         stdio: 'pipe',
         encoding: 'utf8',
       },
@@ -82,7 +94,7 @@ describe('readMeta merges agents.yaml from both repos', () => {
   function runStateScript(home: string, script: string): string {
     return execFileSync('bun', ['-e', script], {
       cwd: process.cwd(),
-      env: { ...process.env, HOME: home },
+      env: hermeticEnv(home),
       stdio: 'pipe',
       encoding: 'utf8',
     }).trim();
@@ -94,7 +106,7 @@ describe('readMeta merges agents.yaml from both repos', () => {
   function runStateScriptWithNode(home: string, script: string): string {
     return execFileSync('node', ['--import', 'tsx', '--input-type=module', '-e', script], {
       cwd: process.cwd(),
-      env: { ...process.env, HOME: home },
+      env: hermeticEnv(home),
       stdio: 'pipe',
       encoding: 'utf8',
     }).trim();
@@ -104,7 +116,7 @@ describe('readMeta merges agents.yaml from both repos', () => {
     return new Promise((resolve, reject) => {
       const child = spawn('bun', ['-e', script], {
         cwd: process.cwd(),
-        env: { ...process.env, HOME: home },
+        env: hermeticEnv(home),
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let stdout = '';
@@ -366,9 +378,9 @@ describe('readMeta merges agents.yaml from both repos', () => {
 
   it('refreshes the cache when the device pin file is modified out-of-band', () => {
     const moduleUrl = pathToFileURL(modulePath).href;
-    // A central pin is transitional; the first readMeta lifts it into the
-    // per-device file (which is authoritative). Out-of-band edits to that file
-    // must invalidate the cache.
+    // A central pin is transitional (still overlays until a write routes it).
+    // Out-of-band edits to the untracked pins JSON must invalidate the cache —
+    // that file is the authoritative machine-local pin source.
     fs.writeFileSync(
       path.join(userDir, 'agents.yaml'),
       'agents:\n  claude: "1.0.0"\n',
@@ -378,15 +390,15 @@ describe('readMeta merges agents.yaml from both repos', () => {
     const output = runStateScriptWithNode(testDir, `
       import fs from 'fs';
       import path from 'path';
-      import { readMeta, getDeviceMetaPath } from ${JSON.stringify(moduleUrl)};
+      import { readMeta, getDevicePinsPath } from ${JSON.stringify(moduleUrl)};
 
-      const before = readMeta(); // reads the central pin, lifting it into the device file
-      const devicePath = getDeviceMetaPath();
+      const before = readMeta(); // central pin overlays while no pins file exists
+      const pinsPath = getDevicePinsPath();
 
       // Wait long enough for the mtime to definitely advance (HFS+ mtime is per-second).
       await new Promise((r) => setTimeout(r, 1100));
-      fs.mkdirSync(path.dirname(devicePath), { recursive: true });
-      fs.writeFileSync(devicePath, 'agents:\\n  claude: "2.0.0"\\n', 'utf-8');
+      fs.mkdirSync(path.dirname(pinsPath), { recursive: true });
+      fs.writeFileSync(pinsPath, JSON.stringify({ agents: { claude: '2.0.0' } }, null, 2) + '\\n');
 
       const after = readMeta();
       console.log(JSON.stringify({ before: before.agents?.claude, after: after.agents?.claude }));
@@ -415,41 +427,46 @@ describe('agents.yaml device-local split (routing + read overlay)', () => {
   function run(script: string): string {
     return execFileSync('bun', ['-e', script], {
       cwd: process.cwd(),
-      env: { ...process.env, HOME: home, AGENTS_SYNC_MACHINE_ID: MACHINE },
+      env: {
+        ...process.env,
+        HOME: home,
+        AGENTS_SYNC_MACHINE_ID: MACHINE,
+        AGENTS_DEVICES_DIR: path.join(home, '.agents', '.history', 'devices'),
+      },
       stdio: 'pipe',
       encoding: 'utf8',
     }).trim();
   }
 
-  it('routes agents: -> per-device file, versions: -> history json, rest -> central', () => {
+  it('routes agents: -> pins JSON, versions: -> history json, rest -> central', () => {
     const out = run(`
       import * as fs from 'fs';
       import * as yaml from 'yaml';
-      import { writeMeta, getDeviceMetaPath, getVersionResourcesPath } from ${JSON.stringify(moduleUrl)};
+      import { writeMeta, getDevicePinsPath, getVersionResourcesPath } from ${JSON.stringify(moduleUrl)};
       writeMeta({
         agents: { claude: '2.1.0' },
         versions: { claude: { '2.1.0': { rulesPreset: 'default' } } },
         run: { claude: { strategy: 'balanced' } },
       });
       const central = yaml.parse(fs.readFileSync(process.env.HOME + '/.agents/agents.yaml', 'utf8')) || {};
-      const device = yaml.parse(fs.readFileSync(getDeviceMetaPath(), 'utf8'));
+      const pins = JSON.parse(fs.readFileSync(getDevicePinsPath(), 'utf8'));
       const history = JSON.parse(fs.readFileSync(getVersionResourcesPath(), 'utf8'));
       console.log(JSON.stringify({
         centralHasAgents: 'agents' in central,
         centralHasVersions: 'versions' in central,
         centralRun: central.run && central.run.claude && central.run.claude.strategy,
-        deviceAgents: device.agents,
+        pinAgents: pins.agents,
         history,
-        devicePath: getDeviceMetaPath(),
+        pinsPath: getDevicePinsPath(),
       }));
     `);
     const r = JSON.parse(out);
     expect(r.centralHasAgents).toBe(false);
     expect(r.centralHasVersions).toBe(false);
     expect(r.centralRun).toBe('balanced');
-    expect(r.deviceAgents).toEqual({ claude: '2.1.0' });
+    expect(r.pinAgents).toEqual({ claude: '2.1.0' });
     expect(r.history).toEqual({ claude: { '2.1.0': { rulesPreset: 'default' } } });
-    expect(r.devicePath).toContain(path.join('devices', MACHINE, 'agents.yaml'));
+    expect(r.pinsPath).toContain(path.join('.history', 'devices', `pins-${MACHINE}.json`));
   });
 
   it('readMeta re-assembles agents: and versions: from the split files', () => {
@@ -548,7 +565,12 @@ describe('agents.yaml device-local split (routing + read overlay)', () => {
       console.log(JSON.stringify({ before, after }));
     `], {
       cwd: process.cwd(),
-      env: { ...process.env, HOME: home, AGENTS_SYNC_MACHINE_ID: MACHINE },
+      env: {
+        ...process.env,
+        HOME: home,
+        AGENTS_SYNC_MACHINE_ID: MACHINE,
+        AGENTS_DEVICES_DIR: path.join(home, '.agents', '.history', 'devices'),
+      },
       stdio: 'pipe',
       encoding: 'utf8',
     }).trim();

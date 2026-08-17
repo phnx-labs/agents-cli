@@ -14,7 +14,7 @@
  *    bytes land. A file-backed bundle is discovered by the presence of its
  *    metadata item in the file store.
  *  - `vault`: a single age-encrypted ~/.agents/vault.age file unlocked by
- *    `agents login`; intended for user-managed cross-machine file sync.
+ *    `agents secrets vault unlock`; intended for user-managed cross-machine file sync.
  *
  * Server-backed cross-machine sync is handled by src/lib/secrets/sync.ts via
  * an explicit encrypted export/import flow; the bundle layer also supports the
@@ -54,7 +54,7 @@ import {
   vaultSetItems,
   vaultSetItem,
 } from './vault.js';
-import { emit } from '../events.js';
+import { emit } from '../feed/events.js';
 import { emitSecretAudit } from './audit.js';
 import { readMeta, getHelpersDir } from '../state.js';
 import { assertNameActiveInResourceProfile, filterNamesForActiveResourceProfile } from '../resource-profiles.js';
@@ -159,7 +159,7 @@ export function bundleBackend(name: string): SecretsBackend {
 
 function assertVaultBackendUsable(name: string): void {
   if (getVaultSession().loggedIn) return;
-  throw new Error(`Synced bundle '${name}' needs an active login. Run: agents login`);
+  throw new Error(`Synced bundle '${name}' needs an active login. Run: agents secrets vault unlock`);
 }
 
 /** Allowed values for a secret's `type` metadata field. */
@@ -407,7 +407,7 @@ export function readBundle(name: string): SecretsBundle {
       );
     }
     if (vaultExists() && !getVaultSession().loggedIn) {
-      throw new Error(`Synced secrets are locked. Run: agents login`);
+      throw new Error(`Synced secrets are locked. Run: agents secrets vault unlock`);
     }
     // Distinguish a genuinely-absent bundle from a present-but-unreadable one
     // (a locked login keychain, or a legacy ACL'd metadata item before first
@@ -1268,13 +1268,13 @@ export function filterAgentHitBySubsetAndExpiry(
 }
 
 /**
- * Guard for remote-bundle callers (`bundle@host` / `--host`) — the SSH
+ * Guard for remote-bundle callers (`bundle@host` / `--device`) — the SSH
  * resolver in `remoteResolveEnv` does not thread --keys or --allow-expired
  * yet. Silently applying them would inject the full remote env or an expired
  * value, defeating the least-privilege intent, so we fail loud.
  *
  * Exported so `agents run --secrets bundle@host` and `agents secrets exec
- * --host` share the exact same error text; the tests exercise this helper
+ * --device` share the exact same error text; the tests exercise this helper
  * directly instead of driving the whole CLI.
  */
 export function assertRemoteBundleFlagsUnsupported(
@@ -1614,7 +1614,7 @@ export function readAndResolveBundleEnv(
   const json = metaFetched.get(metaItem);
   if (json === undefined) {
     if (vaultExists() && !getVaultSession().loggedIn) {
-      throw new Error(`Synced secrets are locked. Run: agents login`);
+      throw new Error(`Synced secrets are locked. Run: agents secrets vault unlock`);
     }
     throw new Error(`Secrets bundle '${name}' not found.`);
   }

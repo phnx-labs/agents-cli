@@ -26,7 +26,7 @@ const SHELL_WRAPPERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
 const PROGRAM_WRAPPERS = new Set(['command', 'builtin', 'env', 'nohup', 'sudo']);
 const MAX_NESTED_DEPTH = 3;
 const SUDO_OPTIONS_WITH_VALUE = new Set([
-  '-C', '--close-from', '-D', '--chdir', '-g', '--group', '-h', '--host',
+  '-C', '--close-from', '-D', '--chdir', '-g', '--group', '-h', '--device',
   '-p', '--prompt', '-R', '--chroot', '-r', '--role', '-t', '--type',
   '-T', '--command-timeout', '-u', '--user',
 ]);

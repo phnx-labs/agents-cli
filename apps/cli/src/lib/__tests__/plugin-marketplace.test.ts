@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { copyPluginToMarketplace } from '../plugin-marketplace.js';
+import { copyPluginToMarketplace } from '../plugins/plugin-marketplace.js';
 import type { DiscoveredPlugin } from '../types.js';
 
 /**

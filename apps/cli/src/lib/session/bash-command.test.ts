@@ -255,7 +255,7 @@ describe('classifyBashCommand', () => {
 
   // #1830: the repo's own toolchain now buckets by subcommand instead of `other`.
   it('recognizes agents/linear as two-level tools and rmdir as shell', () => {
-    expect(classifyBashCommand('agents -H box sessions --active')).toMatchObject({ tool: 'agents', subcommand: 'sessions' });
+    expect(classifyBashCommand('agents -D box sessions --active')).toMatchObject({ tool: 'agents', subcommand: 'sessions' });
     expect(classifyBashCommand('rmdir /tmp/x')).toMatchObject({ tool: 'rmdir', category: 'shell' });
   });
 

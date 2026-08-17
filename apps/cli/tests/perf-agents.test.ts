@@ -14,7 +14,7 @@ import {
   AGENTS,
   ALL_AGENT_IDS,
 } from '../src/lib/agents.js';
-import { listInstalledVersions, getVersionHomePath } from '../src/lib/versions.js';
+import { listInstalledVersions, getVersionHomePath } from '../src/lib/installations/versions.js';
 
 const execAsync = promisify(exec);
 
@@ -62,7 +62,7 @@ describePerf('agents perf (manual; run with PERF=1)', () => {
 
   it('getCliState per agent (sequential)', async () => {
     let total = 0;
-    const versions = await import('../src/lib/versions.js');
+    const versions = await import('../src/lib/installations/versions.js');
     for (const agentId of ALL_AGENT_IDS) {
       const managed = versions.listInstalledVersions(agentId).length > 0;
       const start = process.hrtime();

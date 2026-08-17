@@ -544,6 +544,32 @@ parse_agents_default() {
   ' "$meta"
 }
 
+# Parse the pins JSON (~/.agents/.history/devices/pins-<machine>.json) for this
+# AGENT's pinned version. The file is JSON.stringify(…, 2) output, so the
+# "agents" map sits at 2-space indent and its entries at 4 — a stable shape the
+# awk below scrapes without a JSON parser (shims must stay dependency-free).
+parse_pins_default() {
+  local pins="$1"
+  [ -f "$pins" ] || return 0
+  # Scope carefully: enter ONLY on a line that opens the agents block
+  # (  "agents": {) — an inline-empty map ("agents": {}) must NOT enter,
+  # or the needle would leak into a following "isolatedAgents" block and an
+  # isolated pin would masquerade as the global default. Exit at the block's
+  # closing brace (a trailing comma is fine). Entries sit at exactly 4 spaces.
+  awk -v agent="$AGENT" '
+    /^  "agents": [{]$/ { in_agents=1; next }
+    in_agents && /^  }/ { exit }
+    in_agents && /^    "/ {
+      needle = "\\"" agent "\\":"
+      if (index($0, needle) > 0) {
+        line = substr($0, index($0, needle) + length(needle))
+        gsub(/[[:space:],"]/, "", line)
+        print line; exit
+      }
+    }
+  ' "$pins"
+}
+
 # This machine's device id — mirrors machineId()/normalizeHost() in
 # src/lib/machine-id.ts: first hostname label, lowercased, non-[a-z0-9_-] -> '-'.
 # MUST stay in sync or the shim reads the wrong device folder.
@@ -554,15 +580,17 @@ machine_id() {
   [ -n "$raw" ] && printf '%s' "$raw" || printf 'unknown'
 }
 
-# Resolve the default version. The agents: version pins are stored PER-DEVICE at
-# devices/<machine>/agents.yaml (moved there so multi-machine syncs never
-# conflict); read that first, then fall back to the central agents.yaml for
-# pre-split installs. Must match readMeta()'s central+device merge in state.ts --
-# reading only the central file (the old behavior) missed every device pin and
-# made the shim re-prompt "no default set" on every launch.
+# Resolve the default version. The agents: version pins are MACHINE-LOCAL runtime
+# state at .history/devices/pins-<machine>.json (untracked — auto-written pins in
+# the tracked device doc caused commit churn); read that first, then fall back to
+# the tracked device doc (installs not yet migrated) and finally the central
+# agents.yaml (pre-split installs). Must match readMeta()'s central+pins merge in
+# state.ts -- reading only the central file (the old behavior) missed every device
+# pin and made the shim re-prompt "no default set" on every launch.
 resolve_default_version() {
   local v
-  v=$(parse_agents_default "$AGENTS_USER_DIR/devices/$(machine_id)/agents.yaml")
+  v=$(parse_pins_default "$AGENTS_USER_DIR/.history/devices/pins-$(machine_id).json")
+  [ -n "$v" ] || v=$(parse_agents_default "$AGENTS_USER_DIR/devices/$(machine_id)/agents.yaml")
   [ -n "$v" ] || v=$(parse_agents_default "$AGENTS_USER_DIR/agents.yaml")
   printf '%s' "$v"
 }

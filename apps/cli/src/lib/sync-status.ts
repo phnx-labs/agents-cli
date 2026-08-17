@@ -29,7 +29,7 @@ import {
   type DoctorKind,
   type DiffStatus,
 } from './doctor-diff.js';
-import { listInstalledVersions, getGlobalDefault } from './versions.js';
+import { listInstalledVersions, getGlobalDefault } from './installations/versions.js';
 import { loadManifest } from './staleness/index.js';
 import { getSystemAgentsDir } from './state.js';
 import { isGitRepo } from './git.js';

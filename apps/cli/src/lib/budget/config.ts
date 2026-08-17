@@ -8,7 +8,7 @@
  * `per_day`/`per_project`/`per_agent` rather than wiping them.
  *
  * This is the single resolver the pre-flight gate, the live watcher, and the
- * `agents budget` command all route through, so the effective cap set is
+ * `agents config budget` command all route through, so the effective cap set is
  * computed in exactly one place.
  */
 import * as fs from 'fs';

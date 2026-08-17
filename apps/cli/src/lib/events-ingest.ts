@@ -22,12 +22,12 @@ import {
   isEventType,
   type EventPayload,
   type EventType,
-} from './events.js';
+} from './feed/events.js';
 import {
   appendActivityEvent,
   tierForEvent,
   type ActivityEvent,
-} from './activity.js';
+} from './feed/activity.js';
 
 /** Envelope keys an incoming line may set directly; everything else is payload. */
 const ENVELOPE_KEYS = [

@@ -5,7 +5,7 @@ import {
   compareVersions,
   getVersionHomePath,
   listInstalledVersions,
-} from './versions.js';
+} from './installations/versions.js';
 import {
   buildCanonicalUsageContext,
   getUsageLookupKey,

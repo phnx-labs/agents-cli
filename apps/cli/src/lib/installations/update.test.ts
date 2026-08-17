@@ -25,7 +25,7 @@ async function load() {
     update: await import('./update.js'),
     store: await import('./store.js'),
     strategies: await import('./strategies.js'),
-    versions: await import('../versions.js'),
+    versions: await import('./versions.js'),
   };
 }
 

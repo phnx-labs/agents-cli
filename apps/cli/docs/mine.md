@@ -35,10 +35,10 @@ across your fleet like every other user setting.
 | Command | What it does |
 |---|---|
 | `agents setup mine` | Interactive wizard — pick a name, check off features to disable, mint it. |
-| `agents mine init <name> [--disable <cmds...>] [--force]` | Create a brand non-interactively. |
-| `agents mine list` | Show your brands and what each has turned off. |
-| `agents mine toggle <name> [flags]` | Enable/disable features for a brand (see below). |
-| `agents mine remove <name> [--purge]` | Remove a brand's shim + config (`--purge` also deletes its resource preset). |
+| `agents setup mine init <name> [--disable <cmds...>] [--force]` | Create a brand non-interactively. |
+| `agents setup mine list` | Show your brands and what each has turned off. |
+| `agents setup mine toggle <name> [flags]` | Enable/disable features for a brand (see below). |
+| `agents setup mine remove <name> [--purge]` | Remove a brand's shim + config (`--purge` also deletes its resource preset). |
 
 ### `toggle` flags
 
@@ -56,11 +56,11 @@ Plugin/skill toggles are written to the brand's resource-profile preset as
 
 ```bash
 # A locked-down CLI for a teammate: no teams/cloud, no rush plugin.
-agents mine init jack --disable teams cloud
-agents mine toggle jack --disable-plugin rush
+agents setup mine init jack --disable teams cloud
+agents setup mine toggle jack --disable-plugin rush
 
 # A second, fully independent brand.
-agents mine init pranjal --disable wallet
+agents setup mine init pranjal --disable wallet
 
 jack --help          # lists neither teams nor cloud
 agents --help        # unchanged — every command still there

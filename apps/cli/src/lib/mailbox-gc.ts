@@ -15,7 +15,7 @@ import {
   readMessage,
   sweepExpired,
 } from './mailbox.js';
-import { listBlocks, removeBlock, recordMessageReceipt } from './feed.js';
+import { listBlocks, removeBlock, recordMessageReceipt } from './feed/feed.js';
 
 export interface GcResult {
   boxesScanned: number;

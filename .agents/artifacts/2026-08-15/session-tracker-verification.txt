@@ -1,0 +1,49 @@
+Verification: bare harness launches write SessionStart state files
+
+1) claude -p 'say hi'
+--- output ---
+Hi. Session is healthy — this is the tracker2 worktree of agents-cli on yosemite-s0, with the session-tracker changes (state-file, hook, prune-state) sitting uncommitted on branch agents/tracker2. No task was given, so I took no action on them; nothing needs you.
+--- session file (3279517.json) ---
+{
+  "session_id": "de72f51d-71cf-48ad-81c5-912c7ca323fa",
+  "agent": "claude",
+  "cwd": "/home/muqsit/.agents/repos/browser-identity/.agents/worktrees/tracker2",
+  "pid": 3279517,
+  "ts": 1786791852183,
+  "method": "hook-stdin",
+  "launch_id": "41b75d8d-b8af-4e07-8556-6a1f02f6d285"
+}
+
+2) codex exec 'say hi'
+--- output (head) ---
+Reading additional input from stdin...
+OpenAI Codex v0.145.0
+...
+session id: 01a0051a-3e7d-7072-ae66-75ea6e1962f2
+--- session file (3579725.json) ---
+{
+  "session_id": "01a0051a-3e7d-7072-ae66-75ea6e1962f2",
+  "agent": "codex",
+  "cwd": "/home/muqsit/.agents/repos/browser-identity/.agents/worktrees/tracker2",
+  "pid": 3579725,
+  "ts": 1786792002363,
+  "method": "hook-stdin",
+  "launch_id": "41b75d8d-b8af-4e07-8556-6a1f02f6d285"
+}
+
+3) kimi -p 'say hi'
+--- output ---
+To resume this session: kimi -r session_8ff67ca7-7b9a-4d77-bb68-287c2b429d4e
+--- session file (3910714.json) ---
+{
+  "session_id": "session_8ff67ca7-7b9a-4d77-bb68-287c2b429d4e",
+  "agent": "kimi",
+  "cwd": "/home/muqsit/.agents/repos/browser-identity/.agents/worktrees/tracker2",
+  "pid": 3910714,
+  "ts": 1786792178467,
+  "method": "hook-stdin",
+  "launch_id": "41b75d8d-b8af-4e07-8556-6a1f02f6d285"
+}
+
+Tests: 17 source-level session-tracker tests pass.
+Build: apps/cli/scripts/build.sh --skip-tests succeeds; dist/session-tracker/dist/hook.sh present.

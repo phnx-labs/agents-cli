@@ -111,7 +111,7 @@ describe('installVersion npm install argv', () => {
     process.env.HOME = home;
     try {
       vi.resetModules();
-      const { installVersion } = await import('./versions.js');
+      const { installVersion } = await import('./installations/versions.js');
       // installVersion verifies the installed binary actually launches (an
       // integrity gate against gutted installs). The mocked `npm install` writes
       // no files, so stub the binary a real install would drop into
@@ -140,7 +140,7 @@ describe('installVersion latest-alias resolution', () => {
     try {
       vi.resetModules();
       npmView.version = '2.1.187';
-      const { installVersion } = await import('./versions.js');
+      const { installVersion } = await import('./installations/versions.js');
       // Stage the on-disk shape npm would leave — but under the CONCRETE version
       // dir, since the fix installs straight into it (no post-install rename).
       stageInstall(home, 'claude', '@anthropic-ai/claude-code', '2.1.187');
@@ -171,7 +171,7 @@ describe('installVersion latest-alias resolution', () => {
     try {
       vi.resetModules();
       npmView.version = '';
-      const { installVersion } = await import('./versions.js');
+      const { installVersion } = await import('./installations/versions.js');
       const result = await installVersion('claude', 'latest');
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/Could not resolve the latest/);
@@ -193,7 +193,7 @@ describe('installVersion first-party postinstall', () => {
     process.env.HOME = home;
     try {
       vi.resetModules();
-      const { installVersion } = await import('./versions.js');
+      const { installVersion } = await import('./installations/versions.js');
       const pkgRoot = stageInstall(home, 'claude', '@anthropic-ai/claude-code', '2.1.186', {
         postinstall: 'node install.cjs',
         // prepare is an unconditional publish guard that exits 1 — must never run.
@@ -219,7 +219,7 @@ describe('installVersion first-party postinstall', () => {
     process.env.HOME = home;
     try {
       vi.resetModules();
-      const { installVersion } = await import('./versions.js');
+      const { installVersion } = await import('./installations/versions.js');
       stageInstall(home, 'claude', '@anthropic-ai/claude-code', '2.1.186', { build: 'tsc' });
       const result = await installVersion('claude', '2.1.186');
       expect(result.success).toBe(true);
@@ -236,7 +236,7 @@ describe('installVersion first-party postinstall', () => {
     try {
       vi.resetModules();
       behavior.failPostinstall = true;
-      const { installVersion } = await import('./versions.js');
+      const { installVersion } = await import('./installations/versions.js');
       stageInstall(home, 'claude', '@anthropic-ai/claude-code', '2.1.186', { postinstall: 'node install.cjs' });
       // The postinstall is attempted (and fails), but the binary stub still lets
       // the integrity gate pass — so the overall result reflects the gate, not
@@ -253,7 +253,7 @@ describe('installVersion first-party postinstall', () => {
 describe('isMissingBinarySignature', () => {
   it('matches the claude gutted-stub phrases and the generic ENOENT signatures', async () => {
     vi.resetModules();
-    const { isMissingBinarySignature } = await import('./versions.js');
+    const { isMissingBinarySignature } = await import('./installations/versions.js');
     // Generic (pre-existing) signatures.
     expect(isMissingBinarySignature('spawn /x/claude ENOENT')).toBe(true);
     expect(isMissingBinarySignature("'…claude.exe' is not recognized")).toBe(true);
@@ -265,7 +265,7 @@ describe('isMissingBinarySignature', () => {
 
   it('never matches a healthy --version banner', async () => {
     vi.resetModules();
-    const { isMissingBinarySignature } = await import('./versions.js');
+    const { isMissingBinarySignature } = await import('./installations/versions.js');
     expect(isMissingBinarySignature('2.1.186 (Claude Code)')).toBe(false);
     expect(isMissingBinarySignature('codex-cli 0.116.0')).toBe(false);
   });

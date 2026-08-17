@@ -1,11 +1,11 @@
 /**
- * `agents budget` — view and set spend caps (issue #346).
+ * `agents config budget` — view and set spend caps (issue #346).
  *
- *   agents budget                show effective caps + spend-to-cap (today + project)
- *   agents budget --json         machine-readable snapshot
- *   agents budget set <cap> <n>  write a cap to the user agents.yaml budget: block
+ *   agents config budget                show effective caps + spend-to-cap (today + project)
+ *   agents config budget --json         machine-readable snapshot
+ *   agents config budget set <cap> <n>  write a cap to the user agents.yaml budget: block
  *
- * Caps resolve project > user (see lib/budget/config.ts); `agents budget`
+ * Caps resolve project > user (see lib/budget/config.ts); `agents config budget`
  * reports the EFFECTIVE merged config for the current directory, and `set`
  * writes the user-global layer (the project layer is hand-edited in the repo's
  * agents.yaml, like every other project override).
@@ -22,8 +22,9 @@ import { formatUsd } from '../lib/pricing/index.js';
 
 const TOP_CAPS = ['per_run', 'per_day', 'per_project'] as const;
 
-export function registerBudgetCommand(program: Command): void {
-  const budgetCmd = program
+/** Register `agents config budget` under the config parent. */
+export function registerBudgetCommand(configCmd: Command): void {
+  const budgetCmd = configCmd
     .command('budget')
     .description('Show spend caps and current spend-to-cap (issue #346)')
     .option('--json', 'Emit the budget + spend snapshot as JSON')
@@ -73,10 +74,10 @@ export function registerBudgetCommand(program: Command): void {
     .description(`Set a user-global cap. <cap> = ${TOP_CAPS.join(' | ')} | per_agent.<agent> | on_exceed | require_confirm_over`)
     .addHelpText('after', `
 Examples:
-  agents budget set per_run 5            Cap any single run at $5
-  agents budget set per_day 50           Cap total spend per day at $50
-  agents budget set per_agent.claude 30  Cap Claude's daily spend at $30
-  agents budget set on_exceed warn       Switch to warn-only (do not block)
+  agents config budget set per_run 5            Cap any single run at $5
+  agents config budget set per_day 50           Cap total spend per day at $50
+  agents config budget set per_agent.claude 30  Cap Claude's daily spend at $30
+  agents config budget set on_exceed warn       Switch to warn-only (do not block)
 `)
     .action((cap: string, amount: string) => {
       const meta = readMeta();
@@ -148,7 +149,7 @@ function renderBudget(cfg: BudgetConfig, snap: SpendSnapshot): string {
   lines.push('');
 
   if (!hasAnyCap(cfg)) {
-    lines.push(chalk.dim('  No caps configured. Set one with: agents budget set per_run 5'));
+    lines.push(chalk.dim('  No caps configured. Set one with: agents config budget set per_run 5'));
     return lines.join('\n');
   }
 

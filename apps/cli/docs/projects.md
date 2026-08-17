@@ -87,7 +87,7 @@ dispatch:
 `<root>/<slug>` convention. A defined project resolves to its `defaultPath` (or
 `root`); a `@worktree` suffix lands under the repo root's `.agents/worktrees/`. An
 **undefined** slug falls through to the unchanged convention. Home-relative paths mean
-`--project rush --host <box>` re-roots on the remote's home automatically.
+`--project rush --device <box>` re-roots on the remote's home automatically.
 
 Resolution is intentionally **not** beta-gated — only the `agents projects` command
 tree is. A definition exists solely by explicit user action (`projects add`,
@@ -131,7 +131,7 @@ agents run claude --project agents-cli
 agents teams create feat --project agents-cli   # same, for every teammate
 ```
 
-This holds for `agents run` (local and `--host`) and for `agents teams`. In a
+This holds for `agents run` (local and `--device`) and for `agents teams`. In a
 team, the project's directory sits **below** `--cwd` and a `--worktree` in the cwd
 precedence chain — an explicit one still wins — but the grants are attached either
 way, since the siblings are what the project binds, not where the teammate sits.
@@ -146,7 +146,7 @@ sees the cwd alone. That is a harness limitation, not a configuration mistake.
 
 **A directory missing on this box is skipped, not an error.** A definition binding
 a checkout that only exists on some machines still loads, and the primary cwd still
-resolves. For a `--host` run the paths stay `~/…` and are **not** filtered against
+resolves. For a `--device` run the paths stay `~/…` and are **not** filtered against
 this machine's filesystem — the target host has its own checkouts, and the `agents
 run` on that host expands `~` against its own `$HOME` before the harness sees it.
 

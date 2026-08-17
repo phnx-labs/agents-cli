@@ -1,7 +1,9 @@
 /**
  * The YAML keys of every machine-visibility config key — the ones that live in
- * the owning box's own `devices/<machine>/agents.yaml` and must never reach the
- * fleet-shared `agents.yaml`.
+ * the owning box's own `devices/<machine>/agents.yaml` and cannot be read or
+ * set for a peer. A fleet default may still live under
+ * `fleet.defaults.config` (the shared default layer); the peer restriction
+ * is about targeting another device, not about fleet policy.
  *
  * This is a ZERO-DEPENDENCY leaf on purpose. The authority is `CONFIG_KEYS` in
  * `lib/device-config.ts`, but that module imports `devices/config-migration.ts`,

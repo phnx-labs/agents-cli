@@ -70,7 +70,7 @@ import { withFileLock, atomicWriteFileSync, ensureLockTarget } from '../fs-atomi
 import { resolveAnswerRoute, isOpenQuestionBlock } from '../answer-router.js';
 import { enqueue, mailboxDir } from '../mailbox.js';
 import { mailboxIdForActiveSession } from '../mailbox-target.js';
-import { readBlock, blockIdForSession, buildDeclaredBlock, publishBlock, type OpenBlock } from '../feed.js';
+import { readBlock, blockIdForSession, buildDeclaredBlock, publishBlock, type OpenBlock } from '../feed/feed.js';
 import { summarizeWatchdogTail } from './watchdogTail.js';
 import { appendWatchdogEvents, type WatchdogEvent } from './log.js';
 import {
@@ -511,7 +511,7 @@ async function deliverViaResume(session: ActiveSession, text: string): Promise<{
   if (!sid) return { ok: false, error: 'no session id to resume' };
   try {
     const [{ getAgentsInvocation }, { spawn }] = await Promise.all([
-      import('../daemon.js'),
+      import('../daemon/daemon.js'),
       import('child_process'),
     ]);
     const inv = getAgentsInvocation(['run', session.kind, '--resume', sid, '--', text]);

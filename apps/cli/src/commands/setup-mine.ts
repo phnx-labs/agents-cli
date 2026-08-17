@@ -2,16 +2,17 @@
  * `agents setup mine` — interactive wizard to white-label the CLI under your own
  * name. Pick a name, choose which features to turn off, and get a personally-
  * named binary (e.g. `jack`) that runs every agents verb as yours. Delegates the
- * actual minting to `initBrand` (see mine.ts); the `agents mine` group manages
- * brands afterward.
+ * actual minting to `initBrand` (see mine.ts). Manage verbs (init/list/toggle/
+ * remove) live under the same `setup mine` command.
  *
  * Idempotent: re-running for an existing brand offers to re-mint it.
+ * Bare `agents setup mine` (no subcommand) runs the wizard.
  */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
 
-import { initBrand } from './mine.js';
+import { initBrand, registerMineManageCommands } from './mine.js';
 import { validateBrandName, getBrandConfig } from '../lib/brand.js';
 import { isShimsInPath } from '../lib/shims.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
@@ -19,7 +20,7 @@ import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 /**
  * Optional/heavier top-level commands a brand commonly turns off. Kept short so
  * the checkbox is scannable — anything can still be toggled later with
- * `agents mine toggle <name> --disable <cmd>`.
+ * `agents setup mine toggle <name> --disable <cmd>`.
  */
 const DISABLEABLE_FEATURES: Array<{ name: string; hint: string }> = [
   { name: 'teams', hint: 'coordinate multiple agents on shared work' },
@@ -40,7 +41,7 @@ export async function runMineWizard(): Promise<boolean> {
   if (!isInteractiveTerminal()) {
     console.log(
       chalk.dim('Non-interactive shell. Create a brand directly, e.g.:\n') +
-        chalk.cyan('  agents mine init jack --disable teams cloud'),
+        chalk.cyan('  agents setup mine init jack --disable teams cloud'),
     );
     return false;
   }
@@ -96,7 +97,7 @@ function printNextSteps(name: string, pathWarning: boolean): void {
   console.log(chalk.bold('\nTry it:'));
   console.log('  ' + chalk.cyan(`${name} --help`) + chalk.dim(`         # your CLI, your name`));
   console.log('  ' + chalk.cyan(`${name} run claude "hello"`));
-  console.log(chalk.dim(`  Manage it later:  agents mine toggle ${name} --disable <cmd>   ·   agents mine list`));
+  console.log(chalk.dim(`  Manage it later:  agents setup mine toggle ${name} --disable <cmd>   ·   agents setup mine list`));
   if (pathWarning) {
     console.log(
       chalk.yellow(`\n  note: the shims dir isn't on your PATH yet — run 'agents setup' or open a new shell.`),
@@ -104,9 +105,12 @@ function printNextSteps(name: string, pathWarning: boolean): void {
   }
 }
 
-/** Register `agents setup mine` under the parent `setup` command. */
+/**
+ * Register `agents setup mine` under the parent `setup` command.
+ * Bare invocation runs the wizard; init/list/toggle/remove manage brands.
+ */
 export function registerSetupMineCommand(setupCmd: Command): void {
-  setupCmd
+  const mineCmd = setupCmd
     .command('mine')
     .description('White-label the CLI — mint your own personally-named binary (e.g. `jack`).')
     .action(async () => {
@@ -121,4 +125,6 @@ export function registerSetupMineCommand(setupCmd: Command): void {
         process.exitCode = 1;
       }
     });
+
+  registerMineManageCommands(mineCmd);
 }

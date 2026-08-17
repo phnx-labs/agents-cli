@@ -251,14 +251,29 @@ describe.skipIf(process.platform === 'win32')('install.sh dev bin naming', () =>
     const home = makeTempHome();
     const root = stagePackageTree();
 
-    // The real PATH minus every directory that provides an `agents` -- keeps
-    // node/npm/git/coreutils available while reproducing the state a box is left
-    // in when the dev shadow was the only thing answering to that name
-    // (postinstall.js:311 skips writing its own link when `agents` resolves).
-    const pathWithoutAgents = (process.env.PATH ?? '')
-      .split(path.delimiter)
-      .filter((dir) => dir && !fs.existsSync(path.join(dir, 'agents')))
-      .join(path.delimiter);
+    // The real PATH minus every directory that provides an `agents` -- reproduces
+    // the state a box is left in when the dev shadow was the only thing
+    // answering to that name (postinstall.js:311 skips writing its own link when
+    // `agents` resolves). On a box where npm/node share a bin dir with `agents`
+    // (e.g. a Homebrew install, where `agents`, `npm`, and `node` all live in
+    // `/opt/homebrew/bin`), filtering by directory would strip npm/node too and
+    // fail the script for an unrelated reason ("npm not found") -- so instead of
+    // relying on directory-level exclusion, symlink node/npm/git into their own
+    // shim dir and prepend it, keeping them reachable independent of where
+    // `agents` happens to live on this host.
+    const shimDir = makeTempDir('agents-install-shim-');
+    for (const bin of ['node', 'npm', 'git']) {
+      const resolved = spawnSync('/bin/sh', ['-c', `command -v ${bin}`], {
+        encoding: 'utf-8',
+      }).stdout.trim();
+      if (resolved) fs.symlinkSync(resolved, path.join(shimDir, bin));
+    }
+    const pathWithoutAgents = [
+      shimDir,
+      ...(process.env.PATH ?? '')
+        .split(path.delimiter)
+        .filter((dir) => dir && !fs.existsSync(path.join(dir, 'agents'))),
+    ].join(path.delimiter);
     expect(
       spawnSync('/bin/sh', ['-c', 'command -v agents'], {
         env: { PATH: pathWithoutAgents },

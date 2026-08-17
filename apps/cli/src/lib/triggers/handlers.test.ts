@@ -3,8 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import type { JobConfig, RunMeta } from '../routines.js';
-import { assertShellSubstitutionSupported, substituteWebhookPrompt } from '../routines.js';
+import type { JobConfig, RunMeta } from '../scheduling/routines.js';
+import { assertShellSubstitutionSupported, substituteWebhookPrompt } from '../scheduling/routines.js';
 import type { IncomingWebhook } from './webhook.js';
 
 describe('handler config layer', () => {
@@ -29,7 +29,7 @@ describe('handler config layer', () => {
     process.env.AGENTS_SYSTEM_ROUTINES_DIR = path.join(tmpHome, '.agents', '.system', 'routines');
     eventsFile = path.join(tmpHome, 'events.jsonl');
     process.env.AGENTS_EVENTS_PATH = eventsFile;
-    const events = await import('../events.js');
+    const events = await import('../feed/events.js');
     events._resetForTest(eventsFile);
     handlerMod = await import('./handlers.js');
   });

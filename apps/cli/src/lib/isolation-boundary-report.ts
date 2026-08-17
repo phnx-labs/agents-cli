@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { IsolationBoundaryError } from './shims.js';
-import { listInstalledVersions } from './versions.js';
+import { listInstalledVersions } from './installations/versions.js';
 
 /**
  * Turn an {@link IsolationBoundaryError} into guidance. The boundary is enforced by a

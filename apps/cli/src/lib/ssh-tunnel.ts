@@ -5,7 +5,7 @@
  *
  *  1. `startSSHTunnel` — the generic `ssh -L localPort:127.0.0.1:remotePort -N`
  *     spawn, extracted verbatim from the browser CDP driver so both the browser
- *     and `agents computer --host` reach a remote loopback service through one
+ *     and `agents computer --device` reach a remote loopback service through one
  *     hardened tunnel. Behavior for the browser caller is unchanged (default,
  *     foreground, stderr-captured).
  *
@@ -42,8 +42,8 @@ import { openComputerClient, resolveTcpEndpoint, type ComputerClient } from './c
 export interface StartTunnelOptions {
   /**
    * Detach the tunnel so it OUTLIVES this CLI process. Used by
-   * `agents computer start --host` — the tunnel must persist across separate
-   * verb invocations (`apps`, `click`, …) until `stop --host` tears it down.
+   * `agents computer start --device` — the tunnel must persist across separate
+   * verb invocations (`apps`, `click`, …) until `stop --device` tears it down.
    * The browser driver leaves this false: it holds the tunnel for the lifetime
    * of one CDP session and kills it on cleanup.
    */
@@ -248,7 +248,7 @@ export async function downloadWinHelperExe(version: string): Promise<string> {
 }
 
 /**
- * Resolve the helper exe for `setup --host`: local build outputs first (repo
+ * Resolve the helper exe for `setup --device`: local build outputs first (repo
  * checkout / bundled), then the checksum-verified release-asset download for
  * the running CLI version. Throws with the tag it checked when neither exists.
  */
@@ -258,7 +258,7 @@ export async function ensureWinHelperExe(version = getCliVersion()): Promise<str
   return downloadWinHelperExe(version);
 }
 
-/** Persisted per-device tunnel state so verbs can reconnect after `start --host`. */
+/** Persisted per-device tunnel state so verbs can reconnect after `start --device`. */
 export interface RemoteTunnelState {
   device: string;
   target: string;
@@ -303,7 +303,7 @@ export function clearRemoteState(device: string): void {
 
 /**
  * Local file holding the shared-secret token for a device's helper daemon.
- * Written at `setup --host` (0600), read at `start --host` so the RPC client
+ * Written at `setup --device` (0600), read at `start --device` so the RPC client
  * authenticates. The remote daemon reads the same value from its own
  * `--token-file`; the CLI is the source of truth and never round-trips it back.
  */
@@ -343,7 +343,7 @@ export async function resolveRemoteDevice(
     throw new Error(`Unknown device '${name}'. Register it with \`agents devices add\` / \`agents devices sync\`, then retry.`);
   }
   if (device.platform !== 'windows') {
-    throw new Error(`Device '${name}' is ${device.platform}, not windows. \`agents computer --host\` drives the Windows computer-helper daemon.`);
+    throw new Error(`Device '${name}' is ${device.platform}, not windows. \`agents computer --device\` drives the Windows computer-helper daemon.`);
   }
   const target = sshTargetFor(device); // validates address + injection guard
   const host = hostNameFor(device)!; // sshTargetFor already threw if absent
@@ -476,7 +476,7 @@ function copyFileOverScp(
 }
 
 /**
- * `setup --host`: push the exe, then register + start the LOGON task. Remote
+ * `setup --device`: push the exe, then register + start the LOGON task. Remote
  * PowerShell hops go through `sshExec` (BatchMode key auth — the same hardening
  * the browser driver and `agents ssh` use), and the large exe rides a binary
  * scp transfer. Throws with the remote stderr on any failure.
@@ -533,7 +533,7 @@ export async function setupRemoteHelper(name: string): Promise<{ target: string;
     throw new Error(`registering scheduled task on '${name}' failed (exit ${reg.code ?? 'null'}): ${reg.stderr.trim() || reg.stdout.trim()}`);
   }
 
-  // Persist the token locally so `start --host` authenticates to the daemon.
+  // Persist the token locally so `start --device` authenticates to the daemon.
   writeHelperToken(name, token);
 
   return { target, taskName: REMOTE_TASK_NAME };
@@ -553,7 +553,7 @@ export function pickFreePort(): Promise<number> {
 }
 
 /**
- * `start --host`: open a detached ssh -L tunnel to the remote daemon, verify it
+ * `start --device`: open a detached ssh -L tunnel to the remote daemon, verify it
  * answers over TCP, and persist the tunnel state so verbs can reconnect. Returns
  * the state (and leaves the tunnel running in the background).
  */
@@ -598,8 +598,8 @@ export async function startRemoteTunnel(name: string): Promise<RemoteTunnelState
   if (!ok) {
     try { if (tunnelPid) process.kill(tunnelPid); } catch { /* gone */ }
     const hint = token
-      ? `Is it installed? Run: agents computer setup --host ${name}`
-      : `No auth token on record for '${name}' — re-run: agents computer setup --host ${name}`;
+      ? `Is it installed? Run: agents computer setup --device ${name}`
+      : `No auth token on record for '${name}' — re-run: agents computer setup --device ${name}`;
     throw new Error(
       `tunnel to '${name}' opened but the daemon did not answer (${probeErr}). ${hint}`,
     );
@@ -620,7 +620,7 @@ export async function startRemoteTunnel(name: string): Promise<RemoteTunnelState
 }
 
 /**
- * `stop --host`: kill the local tunnel, unregister the remote task (best-effort
+ * `stop --device`: kill the local tunnel, unregister the remote task (best-effort
  * — the box may be offline), and clear the persisted state.
  */
 export async function stopRemoteHelper(name: string): Promise<{ tunnelKilled: boolean; taskRemoved: boolean }> {
@@ -655,7 +655,7 @@ export async function stopRemoteHelper(name: string): Promise<{ tunnelKilled: bo
 /**
  * Point this process's RPC client at a device's live tunnel by setting
  * COMPUTER_HELPER_TCP / COMPUTER_HELPER_TOKEN from persisted state. Called for
- * remote verbs (`apps --host`, `click --host`, …) so the shared
+ * remote verbs (`apps --device`, `click --device`, …) so the shared
  * openComputerClient() transparently selects the TcpClient transport — no
  * per-verb wiring. Exits with guidance when there is no active tunnel.
  */
@@ -663,7 +663,7 @@ export function hydrateRemoteEnvFromState(name: string): void {
   const state = readRemoteState(name);
   if (!state) {
     console.error(`No active remote tunnel for '${name}'.`);
-    console.error(`Run:  agents computer start --host ${name}`);
+    console.error(`Run:  agents computer start --device ${name}`);
     process.exit(1);
   }
   process.env.COMPUTER_HELPER_TCP = `127.0.0.1:${state.localPort}`;

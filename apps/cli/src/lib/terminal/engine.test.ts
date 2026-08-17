@@ -47,7 +47,7 @@ describe('specForRequest', () => {
 });
 
 describe('openSurface never throws', () => {
-  it('an invalid --host target degrades to a failed result, not a throw', async () => {
+  it('an invalid --device target degrades to a failed result, not a throw', async () => {
     // 'bad;host' is rejected by the SSH transport's target guard (throws
     // synchronously before any ssh spawn); openSurface must catch it.
     const res = await openSurface({

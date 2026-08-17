@@ -55,7 +55,7 @@ elsewhere; route through `supports()`.
 
 ### 4. No fallback logic for legacy layouts
 
-[`src/lib/migrate.ts`](src/lib/migrate.ts) folds legacy paths ONCE at install time.
+[`src/lib/installations/migrate.ts`](src/lib/installations/migrate.ts) folds legacy paths ONCE at install time.
 The bootstrap gate that invokes `runMigration()` then writes the `.migrated` sentinel
 (`MIGRATED_SENTINEL_FILE`, [`src/lib/state.ts`](src/lib/state.ts)), keyed to the
 migration SCHEMA version, so the scan short-circuits next run — `runMigration()` itself
@@ -76,7 +76,7 @@ agents register a hook.
 
 DAG-style, boundary contracts, `--watch` supervisor, `--worktree` isolation, optional
 `--cloud` dispatch. The old `mcp__Swarm__*` surface was folded into teams
-(`migrateLegacySwarmToTeams()` in `src/lib/migrate.ts`). Don't reach for Swarm — gone.
+(`migrateLegacySwarmToTeams()` in `src/lib/installations/migrate.ts`). Don't reach for Swarm — gone.
 
 ### 7. Every agent conversation is a session; execution ledgers link to it
 
@@ -90,7 +90,7 @@ when the harness and launch path provide one:
 
 | Launch surface | Session relationship | Separate execution state |
 |---|---|---|
-| `agents run`, including headless and `--host` | Ordinary indexed session for a session-capable harness; when its SessionStart hook records an id, the launch id joins a remotely coined session back to the dispatch. A hookless run remains unmapped rather than receiving a fabricated id. | Dispatch/audit events |
+| `agents run`, including headless and `--device` | Ordinary indexed session for a session-capable harness; when its SessionStart hook records an id, the launch id joins a remotely coined session back to the dispatch. A hookless run remains unmapped rather than receiving a fabricated id. | Dispatch/audit events |
 | `agents teams` teammate | Its **own** session id plus `teamOrigin`; `parentSessionId` links the orchestrator when the teammate was spawned inside an identified agent session | Team registry + teammate `meta.json` own DAG/task/process state |
 | Agent/workflow routine | The transcript is archived under the run; supported archive readers index it with `origin: routine`, `routineName`, and `routineRunId` | `.history/runs/<routine>/<run>/meta.json` owns the attempt outcome |
 | Command-only, `missed`, `blocked`, or `skipped` routine | No session is synthesized because no agent conversation occurred | The routine run record is the complete canonical record |
@@ -159,7 +159,7 @@ the installer only ever fetches the *current* release and the binary self-update
 place. `isSelfUpdatingAgent()` ([`src/lib/agents.ts`](src/lib/agents.ts)) is the single
 predicate for "no pinnable semver"; route every such decision through it, never a
 scattered `=== 'droid'`. Its narrower cousin `isGlobalBinaryAgent()`
-([`src/lib/versions.ts`](src/lib/versions.ts)) — computed by probing whether
+([`src/lib/installations/versions.ts`](src/lib/installations/versions.ts)) — computed by probing whether
 `getBinaryPath` ignores the version arg — is true only when the agent resolves to ONE
 global binary (droid). For those, `listInstalledVersions` collapses the phantom
 per-version dirs to a single canonical entry, `reconcileStaleLatestForAgent` folds the
@@ -179,7 +179,7 @@ question, and a new health check goes in the one whose scope it matches.
 | `agents inspect <agent>[@version]` | Deep **single-harness** diagnosis | Per-resource diff between one version home and its resolved sources; manifest staleness; orphans. One harness, one machine. |
 | `agents doctor` | **Umbrella** — overall fleet + harness health | Local diagnostics (CLI presence, per-version sign-in, per-version sync, orphans) **and** cross-device divergence, rendered as the prioritized critical-at-top + per-computer hybrid below. The single command a user runs to discover problems before runtime. |
 
-**`agents doctor <agent>[@qualifier]` accepts symbolic qualifiers** — `@latest`, `@oldest`, `@default`/`@pinned`, `@all`, or an exact version — resolved through the shared agent-spec engine (`lib/agent-spec/index.ts`, `resolveAgentTargets`). Bare `agents doctor <agent>` (no qualifier) sweeps every installed version without setting `versionExplicit`; `--fix` then excludes isolated copies. Any explicit qualifier sets `versionExplicit: true`, scoping `--fix` to the resolved version set (including isolated copies for `@all`). `AgentSpecError` from the engine is surfaced as a user-facing error. Routing flags (`--host`/`--device`/`--remote-cwd`) are stripped via `stripRoutingFlags` before target parsing, so `agents doctor claude@latest --device remotebox` resolves correctly on the remote. (issue #2058, `src/commands/doctor.ts:parseTargetArg`)
+**`agents doctor <agent>[@qualifier]` accepts symbolic qualifiers** — `@latest`, `@oldest`, `@default`/`@pinned`, `@all`, or an exact version — resolved through the shared agent-spec engine (`lib/agent-spec/index.ts`, `resolveAgentTargets`). Bare `agents doctor <agent>` (no qualifier) sweeps every installed version without setting `versionExplicit`; `--fix` then excludes isolated copies. Any explicit qualifier sets `versionExplicit: true`, scoping `--fix` to the resolved version set (including isolated copies for `@all`). `AgentSpecError` from the engine is surfaced as a user-facing error. Routing flags (`--device`/`--remote-cwd`) are stripped via `stripRoutingFlags` before target parsing, so `agents doctor claude@latest --device remotebox` resolves correctly on the remote. (issue #2058, `src/commands/doctor.ts:parseTargetArg`)
 
 **`agents doctor` is a prioritized, comprehensive-by-default hybrid (RUSH-2069).**
 There is no `--verbose`. A top `✗ CRITICAL — needs you now (N)` section lists every
@@ -339,7 +339,7 @@ coverage is `ALL_AGENT_IDS`-driven, so a new harness is included automatically.
 ### 11. Session recovery is one decision on the origin device
 
 `resolveSessionRecovery` in `src/lib/session/recovery.ts` is the only place that
-chooses native resume versus `/continue`. `sessions resume`, `agents resume`, and
+chooses native resume versus `/continue`. `sessions resume` and
 `run --resume` route through it — as do the retired `focus`/`attach`/`reconnect`
 spellings, which are hidden aliases that still run the same bodies. Native resume is valid only for the exact healthy
 origin version when that active isolated home still owns the indexed transcript;
@@ -400,7 +400,7 @@ re-attach its sessions. The gate is `shouldWrapInTmux`
 `agents devices role <name> <role>` is the task-shaped spelling. Marking any
 device `worker` turns automatic placement into an allowlist: `--device auto` then
 picks only from the marked workers, in every caller (`run`, `teams`, `ssh auto`,
-the generic `--host auto` passthrough, and the AGI EXT launch commands, which
+the generic `--device auto` passthrough, and the AGI EXT launch commands, which
 resolve placement through the CLI rather than scoring devices themselves); a
 `personal` box is never picked automatically. The rule is one function —
 `filterAutoPool` in [`src/lib/devices/pool.ts`](src/lib/devices/pool.ts) — read by
@@ -408,8 +408,9 @@ resolve placement through the CLI rather than scoring devices themselves); a
 the allowlist off. When roles leave the pool empty, **both** resolvers throw
 (`formatEmptyAutoPoolError`): a `null` host means "run locally", which on a
 `personal` box is the outcome the mark exists to prevent. Unlike the machine-local
-keys, `role` is **shared**: it lives in the central `fleet.devices.<name>.config`
-block and syncs, because every box has to agree on where agents may land.
+keys, `role` is **shared**: it lives in that device's tracked
+`devices/<name>/agents.yaml` `config.role` and syncs with `agents repo
+push/pull`, because every box has to agree on where agents may land.
 
 The vocabulary stops at `worker | personal` on purpose. A paired cockpit's
 `control` role is the pre-existing `DeviceRole` in
@@ -500,12 +501,12 @@ src/
     project-pull.ts    # `agents projects pull` — fleet fan-out logic: pullProjectTargets (sequential local fast-forward + per-target repo-slug verification), pullLocalArgs/encodePullTargets/decodePullTargets (the {path, expectedSlug} CLI-arg hop to each peer's hidden `pull-local` — bare paths would disable slug verification remotely AND break the fingerprint), buildPullEnvelope/parseProjectPullEnvelope (fail-closed AND fail-loud: a rejected envelope returns valid:false so the peer lands in parseFailed and exits non-zero, never a silent empty result set), printProjectPullSummary. Strict safe contract: dirty trees and non-default branches are blocked; missing checkouts are skipped, never cloned. See docs/projects.md §Pulling every reachable checkout
     migrate.ts         # One-shot idempotent migrations
     session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents sessions stats` + `sessions backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger); `claude-accounts.ts` attributes each Claude transcript to the account that produced it (account_key) and `insights.ts` extracts the cached multi-harness friction/correction/automation facets behind `agents sessions insights` (`agents insights` alias)
-    terminal/          # Terminal launch engine — tab/split in iTerm/Ghostty/tmux/Terminal.app, local or --host;
+    terminal/          # Terminal launch engine — tab/split in iTerm/Ghostty/tmux/Terminal.app, local or --device;
                        #   preferred.ts resolves WHICH terminal for a GUI caller (from live sessions' host app)
     cloud/             # Provider registry (Rush / Codex / Factory / Antigravity)
     teams/             # `agents teams` orchestration
     computer-rpc.ts    # `agents computer` client → native/computer-mac (Unix socket)
-    ssh-tunnel.ts      # `agents computer --host` → native/computer-win over ssh -L
+    ssh-tunnel.ts      # `agents computer --device` → native/computer-win over ssh -L
     menubar/           # Menu-bar helper installer (source in ../menubar)
     profiles.ts        # Host CLI + endpoint + model bundles
 ```
@@ -566,12 +567,12 @@ fallback then quietly resumed in `process.cwd()` (RUSH-2022).
 `sessionOwnerDevice`
 ([`src/lib/session/resume-owner.ts`](src/lib/session/resume-owner.ts)) is the one
 answer to "may this resume run here?". Every path that starts a harness from a picked
-row consults it first: `agents resume` and the `agents sessions` picker hop to the
-owner, and the attach path hops as an **attach** (its detach record and the
+row consults it first: `agents sessions resume` and the `agents sessions` picker hop to the
+owner, and `sessions attach` hops as an **attach** (its detach record and the
 headless process it stops are both on the owner — hopping as a bare resume would
 skip the stop and leave two processes on one transcript). The batch
 `sessions resume` mostly inherits it for free: every TAB it opens runs the
-canonical `agents resume <id>` (`lib/session/resume-command.ts`), whose docblock
+canonical `agents sessions resume <id>` (`lib/session/resume-command.ts`), whose docblock
 already promised source-device routing — this is what makes that true. Its
 no-tab-backend path (`inplace`, which any Linux box in a plain ssh shell lands on)
 never runs that command, so it routes explicitly via `resumeOnOwnerIfRemote`.
@@ -580,7 +581,7 @@ peer-owned session, since reaching it with one means a caller skipped its routin
 step.
 
 The hop uses `runOnPeer` ([`src/lib/session/remote-list.ts`](src/lib/session/remote-list.ts)),
-not the `--host` passthrough. Two reasons: the passthrough re-discovers locally and
+not the `--device` passthrough. Two reasons: the passthrough re-discovers locally and
 dead-ends for a session that exists only on the peer, and it marks the run
 `AGENTS_FLEET_REMOTE` — a one-shot command may carry that consent marker, but a
 resumed session would inherit it for its whole life and `agents browser start` inside
@@ -624,7 +625,7 @@ branch pushes/PRs and manual `workflow_dispatch` — not `v*` tags (the tag poin
 at the commit already gated on the release branch). CI runs from `apps/cli` via
 `defaults.run.working-directory`.
 
-**Live Windows `--host` e2e (opt-in):** `src/lib/ssh-tunnel.e2e.test.ts` and
+**Live Windows `--device` e2e (opt-in):** `src/lib/ssh-tunnel.e2e.test.ts` and
 `src/lib/browser/drivers/ssh.e2e.test.ts` drive a real Windows box end-to-end
 (exe push + LOGON task, tunnel + RPC, screenshot, type/get-text round-trip,
 remote browser launch/stop). Gated on `AGENTS_TEST_WIN_HOST=<registered device>`;
@@ -677,8 +678,8 @@ each phase labeled with the box it runs on and a ✓/✗ result:
 | Build, sign+notarize, npm publish, computer-helper | a **Mac home base** | `--device <name>` in `release.sh`, defaulting to `mac-mini`; the script detects if it's already there (`scutil --get LocalHostName` / `hostname -s`), else reaches it over `ssh` |
 
 The home base is a Mac that holds the Developer ID cert + npm publish rights.
-It defaults to `mac-mini` and is overridable with **`--device <name>`** (alias
-`--host`) to drive the release from another Mac when mac-mini is down. Not an env
+It defaults to `mac-mini` and is overridable with **`--device <name>`** to drive
+the release from another Mac when mac-mini is down. Not an env
 var: a flag with a default. The macOS-only sign/notarize + the npm tarball's
 signed binaries mean the home base must be a Mac; a Linux worker can *drive* the
 release but not be the home base. The crabbox is **not** hardcoded.
@@ -844,15 +845,15 @@ another Mac (no publish); it takes the same `--device <name>` flag as `release.s
 **Provisioning the `apple.com` bundle on a headless sign host.** A Linux-driven
 release offloads macOS signing to a sign host over SSH, which needs the `apple.com`
 secrets bundle *on that host*. Push it with the **file backend** —
-`agents secrets export apple.com --host <signer> --remote-backend file` (**no
+`agents secrets export apple.com --device <signer> --remote-backend file` (**no
 passphrase required** — the remote keys it under a machine-local key it
 auto-provisions and reads it headlessly; set `AGENTS_SECRETS_PASSPHRASE` locally only
 to opt into a shared off-disk key, forwarded over ssh stdin) — **not** the default
 keychain backend: a
 macOS login keychain is locked under headless SSH, so a keychain-backed push lands
-the bundle metadata but no readable secret items (`secrets export --host` now
+the bundle metadata but no readable secret items (`secrets export --device` now
 read-back-verifies a keychain push and fails loudly if it didn't persist, pointing
-at this fix). `--device` is accepted as an alias for `--host` on the secrets remote
+at this fix). `--device` / `-D` is the fleet routing flag (legacy `--host` is stripped but not registered) on the secrets remote
 commands. See [`docs/secrets.md`](docs/secrets.md) → *Pushing to a headless sign host*.
 
 **Why not CI?** The tarball bundles `dist/lib/secrets/Agents CLI.app` — a native

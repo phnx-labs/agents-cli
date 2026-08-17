@@ -1,13 +1,12 @@
 /**
- * `agents mine` — white-label the CLI under your own name.
+ * `agents mine` helpers — white-label the CLI under your own name.
  *
- * `agents mine init <name>` mints a personally-named binary (e.g. `jack`) that
+ * `agents setup mine init <name>` mints a personally-named binary (e.g. `jack`) that
  * IS agents-cli: a pure pass-through shim on PATH that runs every `agents` verb
  * under the brand's name, with the brand's disabled commands and curated
- * resource profile applied. `list` / `toggle` / `remove` manage brands.
- *
- * The discoverable entry point is the `agents setup mine` wizard
- * (see setup-mine.ts), which delegates to `initBrand` here.
+ * resource profile applied. Manage verbs live under `agents setup mine`
+ * (`list` / `toggle` / `remove`); the bare `agents setup mine` wizard is the
+ * discoverable entry point (see setup-mine.ts).
  *
  * Storage: brand config in `meta.brands` (agents.yaml); the curated resource set
  * reuses the resource-profile engine — each brand owns a preset named
@@ -95,7 +94,7 @@ function editPreset(name: string, fn: (preset: ResourceProfilePreset) => void): 
 }
 
 /**
- * Create (or re-mint) a brand. Shared by `mine init` and the `setup mine`
+ * Create (or re-mint) a brand. Shared by `setup mine init` and the `setup mine`
  * wizard. Writes the shim, the brand config, and an empty resource preset.
  */
 export function initBrand(
@@ -108,7 +107,7 @@ export function initBrand(
     process.exit(1);
   }
   if (getBrandConfig(name) && !opts.force) {
-    console.error(chalk.red(`Brand "${name}" already exists. Use --force to re-mint, or 'agents mine toggle ${name}'.`));
+    console.error(chalk.red(`Brand "${name}" already exists. Use --force to re-mint, or 'agents setup mine toggle ${name}'.`));
     process.exit(1);
   }
 
@@ -143,11 +142,11 @@ function printMinted(name: string, pathWarning: boolean): void {
   }
 }
 
-export function registerMineCommand(program: Command): void {
-  const cmd = program
-    .command('mine')
-    .description('White-label the CLI: your own personally-named binary (e.g. `jack`)');
-
+/**
+ * Register brand manage verbs (`init`/`list`/`toggle`/`remove`) under a parent
+ * Command — used by `agents setup mine`.
+ */
+export function registerMineManageCommands(cmd: Command): void {
   cmd
     .command('init <name>')
     .description('Mint your own branded CLI that runs every agents verb under <name>')
@@ -169,7 +168,7 @@ export function registerMineCommand(program: Command): void {
       const brands = listBrands();
       const entries = Object.entries(brands);
       if (entries.length === 0) {
-        console.log(chalk.gray("No brands yet. Try: agents setup mine   (or: agents mine init jack)"));
+        console.log(chalk.gray("No brands yet. Try: agents setup mine   (or: agents setup mine init jack)"));
         return;
       }
       const width = entries.reduce((m, [n]) => Math.max(m, n.length), 0);
@@ -196,7 +195,7 @@ export function registerMineCommand(program: Command): void {
     }) => {
       const cfg = getBrandConfig(name);
       if (!cfg) {
-        console.error(chalk.red(`No brand named "${name}". Create it with 'agents mine init ${name}'.`));
+        console.error(chalk.red(`No brand named "${name}". Create it with 'agents setup mine init ${name}'.`));
         process.exit(1);
       }
 

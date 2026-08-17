@@ -14,6 +14,7 @@ let tmpDir: string;
 const keychain = new Map<string, string>();
 let originalHome: string | undefined;
 let originalNoAgent: string | undefined;
+let originalShareWriteToken: string | undefined;
 let restoreKeychain: KeychainBackend | null;
 
 beforeAll(async () => {
@@ -24,6 +25,15 @@ beforeAll(async () => {
   originalNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
   process.env.HOME = tmpHome;
   process.env.AGENTS_SECRETS_NO_AGENT = '1';
+  cfg = await import('./config.js');
+  // readWriteToken() prefers SHARE_WRITE_TOKEN over the keychain-backed bundle
+  // (config.ts:126-127) so a fleet/cloud agent can inject the token ephemerally.
+  // This box's own real `agents artifacts share` setup exports that same var, so
+  // an un-isolated run picks up the real token instead of the fixture's fake one
+  // (RUSH-2749). Clear it for the suite; storeWriteToken below seeds the fake.
+  originalShareWriteToken = process.env[cfg.SHARE_TOKEN_ENV_KEY];
+  delete process.env[cfg.SHARE_TOKEN_ENV_KEY];
+
   // The token is read from an in-memory keychain backend installed below.
   const secrets = await import('../secrets/index.js');
   const bundles = await import('../secrets/bundles.js');
@@ -39,7 +49,6 @@ beforeAll(async () => {
     delete: (item) => keychain.delete(item),
     list: (prefix) => Array.from(keychain.keys()).filter((key) => key.startsWith(prefix)),
   });
-  cfg = await import('./config.js');
   publish = await import('./publish.js');
   cfg.writeShareConfig({
     baseUrl: 'https://share.example.com',
@@ -59,6 +68,8 @@ afterAll(async () => {
   else process.env.HOME = originalHome;
   if (originalNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
   else process.env.AGENTS_SECRETS_NO_AGENT = originalNoAgent;
+  if (originalShareWriteToken === undefined) delete process.env[cfg.SHARE_TOKEN_ENV_KEY];
+  else process.env[cfg.SHARE_TOKEN_ENV_KEY] = originalShareWriteToken;
   vi.resetModules();
   fs.rmSync(tmpHome, { recursive: true, force: true });
   fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -75,6 +86,9 @@ describe('publishFile with injected uploader', () => {
       githubUser: 'octocat',
       expire: '2030-01-01',
       cover: false,
+      // Suppress auto-captured provenance so this is deterministic regardless
+      // of the ambient env (this repo's own agent sessions set AGENTS_SESSION_ID).
+      provenance: {},
       uploader: async (url, body, headers) => {
         uploads.push({ url, body: body.toString('utf8'), headers });
         return { ok: true, status: 200, url };
@@ -85,6 +99,8 @@ describe('publishFile with injected uploader', () => {
       url: 'https://share.example.com/octocat/rush-1800-report',
       expiresAt: new Date('2030-01-01').toISOString(),
       coverUrl: undefined,
+      label: 'Report',
+      labelSource: 'derived',
     });
     expect(uploads).toEqual([
       {
@@ -94,6 +110,8 @@ describe('publishFile with injected uploader', () => {
           authorization: 'Bearer write-token-1',
           'content-type': 'text/html; charset=utf-8',
           'x-share-expires-at': new Date('2030-01-01').toISOString(),
+          'x-share-label': 'Report',
+          'x-share-label-source': 'derived',
         },
       },
     ]);

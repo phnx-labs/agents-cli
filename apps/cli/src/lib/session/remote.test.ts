@@ -38,59 +38,8 @@ function decodeRemoteArgv(forwarded: string[]): string[] {
 const argv = (...userArgs: string[]) => ['/usr/bin/bun', '/path/agents', ...userArgs];
 
 describe('buildForwardedArgs', () => {
-  it('drops --host with a separate value but keeps everything else in order', () => {
-    expect(buildForwardedArgs(argv('sessions', 'auth bug', '--last', '3', '--host', 'yosemite-s1')))
-      .toEqual(['sessions', 'auth bug', '--last', '3']);
-  });
-
-  it('drops the --host=value form', () => {
-    expect(buildForwardedArgs(argv('sessions', '--host=yosemite-s1', '--json', 'query')))
-      .toEqual(['sessions', '--json', 'query']);
-  });
-
-  it('drops the -H short flag and its value', () => {
-    expect(buildForwardedArgs(argv('sessions', '-H', 'box', '--since', '2h')))
-      .toEqual(['sessions', '--since', '2h']);
-  });
-
-  it('drops the glued -Hvalue short form', () => {
-    expect(buildForwardedArgs(argv('sessions', '-Hyosemite-s1', 'query')))
-      .toEqual(['sessions', 'query']);
-  });
-
-  it('keeps a query that legitimately contains the word host', () => {
-    expect(buildForwardedArgs(argv('sessions', 'fix the host header bug', '--host', 'box')))
-      .toEqual(['sessions', 'fix the host header bug']);
-  });
-
-  it('forwards subcommands like tail verbatim', () => {
-    expect(buildForwardedArgs(argv('sessions', 'tail', '--latest', '--host', 'box')))
-      .toEqual(['sessions', 'tail', '--latest']);
-  });
-
-  it('strips every host in the variadic --host a b form (not just the first)', () => {
-    // Commander's `<target...>` lets `--host box1 box2` set host=['box1','box2'].
-    // Without the known-host set the scan would only drop box1 and leak box2
-    // into the remote query. Passing the set strips both.
-    expect(
-      buildForwardedArgs(
-        argv('sessions', 'auth bug', '--host', 'box1', 'box2', '--json'),
-        new Set(['box1', 'box2']),
-      ),
-    ).toEqual(['sessions', 'auth bug', '--json']);
-  });
-
-  it('strips repeated --host flags when given the host set', () => {
-    expect(
-      buildForwardedArgs(
-        argv('sessions', 'auth bug', '--host', 'box1', '--host', 'box2'),
-        new Set(['box1', 'box2']),
-      ),
-    ).toEqual(['sessions', 'auth bug']);
-  });
-
-  it('drops --device (the --host alias) and its value, keeping the rest', () => {
-    // --device merges into the host set in the handler, so its tokens must be
+  it('drops --device and its value, keeping the rest', () => {
+    // --device merges into the device set in the handler, so its tokens must be
     // stripped too — else the peer would try to re-fan-out to that device.
     expect(
       buildForwardedArgs(argv('sessions', 'auth bug', '--device', 'yosemite-s0', '--json'), new Set(['yosemite-s0'])),
@@ -120,7 +69,7 @@ describe('buildForwardedArgs', () => {
     // trailing non-host token ('auth') is preserved rather than over-consumed.
     expect(
       buildForwardedArgs(
-        argv('sessions', '--host', 'box1', 'box2', 'auth'),
+        argv('sessions', '--device', 'box1', 'box2', 'auth'),
         new Set(['box1', 'box2']),
       ),
     ).toEqual(['sessions', 'auth']);
@@ -173,7 +122,7 @@ describe('buildRemoteCommand', () => {
       .toEqual(['sessions', '$(whoami); rm -rf /', '--json']);
   });
 
-  it('pins the peer local so --host does not re-sweep its fleet', () => {
+  it('pins the peer local so --device does not re-sweep its fleet', () => {
     // Without AGENTS_SESSIONS_LOCAL=1 the remote `agents sessions` fans back out
     // to every device it knows (incl. us) and prints a spurious "unreachable".
     expect(buildRemoteCommand(['sessions', '--agent', 'codex'])).toContain('AGENTS_SESSIONS_LOCAL=1');

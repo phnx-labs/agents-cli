@@ -4,15 +4,15 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { activeRunSkipStreak, archiveRoutineTranscripts, assertRoutineAccountLocalForPlacement, buildHostDispatchOptions, buildJobCommand, dispatchPlacedJob, executeJob, executeJobDetached, launcherClaimPid, monitorRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd, snapshotRoutineTranscriptBase } from './runner.js';
-import { getRunDir, readRunMeta, writeRunMeta } from './routines.js';
-import { getVersionHomePath } from './versions.js';
-import type { JobConfig, RunMeta } from './routines.js';
+import { getRunDir, readRunMeta, writeRunMeta } from './scheduling/routines.js';
+import { getVersionHomePath } from './installations/versions.js';
+import type { JobConfig, RunMeta } from './scheduling/routines.js';
 import { hardDeprecationError } from './agents.js';
 import type { RotateCandidate, RotateResult } from './accounting/rotate.js';
 import { saveTask, hostsCacheDir } from './hosts/tasks.js';
 import { _resetPerfDbForTest, aggregateSamples } from './perf/db.js';
 import * as activation from './routine-activation.js';
-import { query, _resetForTest } from './events.js';
+import { query, _resetForTest } from './feed/events.js';
 
 // RUSH-2215: only process-group / real-spawn holder suites are POSIX-oriented.
 // Pure command construction and path helpers must still run on Windows.
@@ -839,6 +839,33 @@ describeSpawn('detached routine fires record a perf.timing sample (agent.run)', 
     await executeJobDetached(commandConfig('cmd-perf-fail', 'exit 5'));
     const rows = await waitForPerfSample('agent.run');
     expect(rows.length).toBeGreaterThan(0);
+  });
+});
+
+describeSpawn('resolveRoutineLaunch — per-routine strategy override (RUSH-2719)', () => {
+  it('config.strategy is what resolveRunVersion receives, beating the firing box config', async () => {
+    let seenStrategy: string | undefined;
+    const plan = await resolveRoutineLaunch({ ...baseConfig(), strategy: 'available' }, process.cwd(), {
+      resolveRunVersion: async (_agent, strategy) => {
+        seenStrategy = strategy;
+        return { version: '2.1.219', rotation: null };
+      },
+    });
+    expect(seenStrategy).toBe('available');
+    expect(plan.chain[0]).toEqual({ agent: 'claude', version: '2.1.219' });
+  });
+
+  it('an explicit version pin still short-circuits before any strategy resolution', async () => {
+    let called = false;
+    const plan = await resolveRoutineLaunch({ ...baseConfig(), version: '2.1.207' }, process.cwd(), {
+      resolveRunVersion: async () => {
+        called = true;
+        return { version: 'x', rotation: null };
+      },
+    });
+    expect(called).toBe(false);
+    expect(plan.pinned).toBe(true);
+    expect(plan.chain[0]).toEqual({ agent: 'claude', version: '2.1.207' });
   });
 });
 

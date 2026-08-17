@@ -43,33 +43,51 @@ agent process
 The daemon auto-starts on the first command that needs it. Commands that only
 inspect local state (`ps`, `profiles list`) do not start it.
 
-Task names are auto-generated as `<adjective>-<noun>-<noun>-<hex8>` (e.g.,
-`swift-crab-falcon-a3f92b1c`). Set `AGENTS_BROWSER_TASK` once at the start of
-an agent run; every subsequent command in that process reads it without
-`--task`.
+Tasks are addressed by a short machine id (8 hex chars). `browser status`
+shows a human **label** (`--title` if given, else the first navigated host,
+else `untitled`). In the common case you never type a handle: the CLI stamps
+the caller's session/launch identity and the daemon resolves the single live
+task for that caller. Pass `--task` only when deliberately running two tasks
+at once. `$AGENTS_BROWSER_TASK` is still accepted as an explicit override.
+Page verbs (`navigate`, `screenshot`, …) create a task when none resolves;
+`done`/`stop` never create.
 
 ## Setup
 
 ### 1. Create a profile
 
-A profile names a browser + CDP endpoint pair. The profile definition lives in
-the central `~/.agents/agents.yaml` (the `browser:` map) and syncs across the
-fleet with `agents repo push/pull`, so the same name resolves on every machine.
+A profile names a browser + CDP endpoint pair. **A new profile is machine-local
+by default** (RUSH-2716): it is written to this machine's own
+`~/.agents/devices/<machine>/agents.yaml` under `browser:`, and no other machine
+sees it. That is the right default because a profile pins an OS-specific
+`binary:` path and a locally chosen CDP port, so a synced copy is wrong on every
+other box — and because agents create throwaway profiles freely, syncing each one
+filled the shared file with junk.
+
+Pass `--fleet` for a profile that really is fleet config — a remote `ssh://`
+endpoint, or a shape you want on every machine. That writes it to the central
+`~/.agents/agents.yaml` `browser:` map, which syncs with `agents repo push/pull`
+so the same name resolves everywhere.
+
 Runtime state — the Chrome `chrome-data` cookie jar — lives separately under
 `~/.agents/.cache/browser/<profile>@<endpoint>/`, which is gitignored and
 per-machine, so each machine logs in once.
 
 ```bash
-# Minimal: let agents pick a free port and auto-detect the binary
+# Minimal: let agents pick a free port and auto-detect the binary (machine-local)
 agents browser profiles create work --browser chrome
 
 # Pin an endpoint explicitly
 agents browser profiles create work --browser chrome --endpoint "cdp://127.0.0.1:9222"
 
-# Remote host via SSH
-agents browser profiles create staging --browser chrome \
+# Remote host via SSH, shared with every machine
+agents browser profiles create staging --browser chrome --fleet \
   --endpoint "ssh://deploy@staging.example.com?port=9222"
 ```
+
+Existing profiles are **not** migrated: `--fleet` only decides where a NEW entry
+is written, so a profile created before this change keeps syncing. `agents
+browser profiles list` shows a `SCOPE` column (`local` / `fleet`) for each one.
 
 If you skip `--profile` on `agents browser start`, the profile is resolved in
 this order:
@@ -94,9 +112,10 @@ this order:
    (`ssh://`) defaults skip this check: their browser lives on the far host.
 
 The configured default is a **per-device setting**: it lives in this machine's
-`browser.profile` config key (centrally, under `fleet.devices.<machine>.config`
-in `~/.agents/agents.yaml`), so each machine keeps its own choice — the profile
-it points at may hold machine-local logins. Set it once per machine.
+`browser.profile` config key (`devices/<machine>/agents.yaml` `config:`), so
+each machine keeps its own choice — the profile it points at may hold
+machine-local logins. It is machine-local: only this box can set it. Set it
+once per machine.
 
 Safari and Firefox are not supported. They do not implement the Chrome
 DevTools Protocol.
@@ -108,15 +127,20 @@ cookies or saved state. Complete any first-run screens (agree to terms,
 sign in) before automating. Run `agents browser profiles doctor <name>` to
 check if onboarding is complete.
 
-### 3. Export the task name
+### 3. Drive the page (no export required)
 
 ```bash
-export AGENTS_BROWSER_TASK=$(agents browser start --profile work)
-# stdout = task name only; stderr = human commentary
+# Implicit task create + navigate — identity tracks the rest of the session
+agents browser navigate https://example.com
+agents browser screenshot
+
+# Explicit start still useful for --profile / --url / --record / --title
+agents browser start --profile work --title "login check"
+agents browser screenshot   # resolves from caller identity
 ```
 
-Every subsequent command in that shell reads `$AGENTS_BROWSER_TASK`
-automatically.
+Pass `--task <id>` only when running two tasks at once. `$AGENTS_BROWSER_TASK`
+remains a valid explicit override.
 
 ### Keep the action loop warm
 
@@ -148,8 +172,9 @@ the same device-local `browser remote-control` consent gate as the ordinary
 
 | Command | Description |
 |---------|-------------|
-| `agents browser profiles list` | List all configured profiles (marks the machine's default) |
-| `agents browser profiles create <name>` | Create a new profile (see flags below) |
+| `agents browser profiles list` | List all configured profiles with their `SCOPE` (`local` / `fleet`). A `*` marks this machine's configured default — which is NOT the same thing as the profile named `default`. `--json` adds `scope` + `isConfiguredDefault` |
+| `agents browser profiles create <name>` | Create a new profile, machine-local unless `--fleet` (see flags below) |
+| `agents browser profiles prune` | Remove dead machine-local profiles — browser not installed here, or never started (see below) |
 | `agents browser profiles show <name>` | Show profile details |
 | `agents browser profiles set-default [name]` | Set the profile a bare `start` (and `--profile default`) uses; `--unset` to clear; no name prints the current value. Device-local. |
 | `agents browser profiles logins` | Per profile: `SERVICE \| ACCOUNT \| CREDS` — live session, the signed-in account (plaintext username, never decrypts), and whether login creds are in the profile's secrets bundle |
@@ -161,6 +186,7 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | Flag | Description |
 |------|-------------|
 | `-b, --browser <type>` | Required. One of: `chrome`, `comet`, `chromium`, `brave`, `edge`, `custom` |
+| `--fleet` | Store in the synced `agents.yaml` so every machine sees it. Default is machine-local |
 | `-e, --endpoint <url>` | CDP endpoint URL (repeatable). Auto-assigned if omitted |
 | `-s, --secrets <bundle>` | Secrets bundle for this profile: injected as env vars at launch, AND the credential store for `browser type --secret` (keys `<PREFIX>_USERNAME`/`<PREFIX>_PASSWORD`). Warns if the bundle doesn't exist yet |
 | `-d, --description <text>` | Human-readable description |
@@ -170,6 +196,39 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | `--binary <path>` | Absolute path to browser binary (required for `--browser custom`) |
 | `--electron` | Treat as an Electron desktop app; never creates new targets |
 | `--target-filter <expr>` | Pick the visible CDP page target. Format: `url:<substring>` or `title:<substring>`. Requires `--electron` |
+
+### Cleaning up dead profiles (`prune`)
+
+Profiles accumulate — an agent mints one for a task and never removes it.
+`agents browser profiles prune` removes the ones that are provably dead:
+
+| Reason | Meaning |
+|--------|---------|
+| `binary-missing` | The profile's browser/binary is not installed on this machine, so it cannot launch here at all |
+| `never-used` | No runtime dir has ever been created for it (`~/.agents/.cache/browser/<name>*` is absent) |
+
+```bash
+agents browser profiles prune --dry-run   # preview; changes nothing
+agents browser profiles prune             # apply
+agents browser profiles prune --json      # machine-readable plan
+```
+
+Four guards, each because removing that profile would be wrong rather than untidy:
+
+- **In use** — a live browser, an SSH tunnel, or an open task on *any* of its
+  runtime dirs, composite (`<name>@<endpoint>`) dirs included.
+- **This machine's configured default** — a bare `agents browser start` resolves
+  to it.
+- **The auto `default`** — regenerated on demand, so pruning it is pure churn.
+- **Fleet-synced profiles** — skipped unless you pass `--fleet`, because deleting
+  one removes it from **every** machine.
+
+Removing a profile drops its config entry and wipes its cache dirs, exactly like
+`profiles delete`.
+
+> A profile config records no creation time, so one you created seconds ago and
+> have not started yet is indistinguishable from an abandoned one and reports
+> `never-used`. Preview with `--dry-run` first.
 
 ### Session lifecycle
 
@@ -237,12 +296,12 @@ agents browser gc             # actually close it
 agents browser gc --idle-minutes 5   # override the idle window for this run
 ```
 
-### Driving another machine's browser (`--host`) and consent
+### Driving another machine's browser (`--device`) and consent
 
-Any `agents browser` command takes the fleet `--host <device>` flag (same as
+Any `agents browser` command takes the fleet `--device <name>` flag (same as
 `agents sessions`/`teams`/`run`): it runs the command on that device over SSH and
 drives *its* browser, streaming the output back. No hand-built `ssh://` profile
-needed — `agents browser start --host zion` starts a task on `zion`'s own daemon.
+needed — `agents browser start --device zion` starts a task on `zion`'s own daemon.
 
 Because that lets one machine open a browser on another, the **target decides**
 whether it allows it:
@@ -254,16 +313,17 @@ whether it allows it:
 | `agents browser remote-control off` | Refuse remote drives (the default) |
 
 Consent is a **per-device setting** (the `browser.remote-control` config key,
-stored centrally under `fleet.devices.<machine>.config` in `~/.agents/agents.yaml`)
-and **off by default**: a `browser --host <this-machine> start` from
-elsewhere is refused with a message naming how to enable it, until the owner runs
-`agents browser remote-control on` here. Local starts (no `--host`) are never gated.
+in this machine's `devices/<machine>/agents.yaml` `config:`) and **off by
+default**: a `browser --device <this-machine> start` from elsewhere is refused
+with a message naming how to enable it, until the owner runs
+`agents browser remote-control on` here. The key is machine-local — only this
+box can set it. Local starts (no `--device`) are never gated.
 
 ### Navigation
 
 | Command | Description |
 |---------|-------------|
-| `agents browser navigate --url <url>` | Navigate current tab to URL |
+| `agents browser navigate [url]` | Navigate current tab (positional or `--url`; alias `goto`). Creates a task when none resolves for this caller |
 | `agents browser tabs` | List open tabs |
 | `agents browser tab add --url <url>` | Open URL in a new tab |
 | `agents browser tab focus <tabId>` | Switch to tab by ID, prefix, or URL substring |
@@ -303,12 +363,12 @@ elsewhere is refused with a message naming how to enable it, until the owner run
 | Command | Description |
 |---------|-------------|
 | `agents browser screenshot` | Capture current tab; path printed to stdout |
-| `agents browser evaluate --expression <js>` | Run JavaScript; `--file <path>` to read from file |
+| `agents browser evaluate [expr]` | Run JavaScript (positional, `-e`, or `--file`; alias `eval`) |
 | `agents browser console` | Read console logs; `--level` (log/info/warn/error), `--clear` |
 | `agents browser errors` | Read uncaught page errors; `--clear` |
 | `agents browser requests` | Captured network requests; `--filter <text>` |
 | `agents browser responsebody <url-pattern>` | Wait for and read a response body |
-| `agents browser logs <task>` | Read app JSONL logs; `--source`, `--lines`, `--since`, `--until`, `--level`, `--message`, `--filter` |
+| `agents browser logs` | Read app JSONL logs; `--task` (or identity), `--source`, `--lines`, `--since`, `--until`, `--level`, `--message`, `--filter` |
 
 `screenshot` flags:
 
@@ -363,7 +423,7 @@ disk under `~/.agents/.cache/browser/<profile>/sessions/<task>/`; nothing copies
 them into the database, and the listing counts captures by reading that
 directory rather than trusting a stored tally.
 
-**Known gap — `--host` drives record no session.** `agents browser start --host
+**Known gap — `--device` drives record no session.** `agents browser start --device
 <device>` runs the CLI on the remote box, and the SSH dispatch forwards only
 `AGENTS_ACTOR*` and `AGENT_TERMINAL_ID` — not `AGENT_SESSION_ID`. A task started
 that way therefore records no session and lists as `unlinked`. Local drives are
@@ -376,8 +436,12 @@ instead — the stable, scriptable surface `--json` also uses.
 
 ## Profile Schema
 
-Profiles are stored in the agents metadata layer, not as standalone YAML files.
-Use `agents browser profiles show <name> --json` to inspect the full config.
+Profiles are stored in the agents metadata layer, not as standalone YAML files —
+in the `browser:` map of either this machine's `~/.agents/devices/<machine>/agents.yaml`
+(the default) or the fleet-synced `~/.agents/agents.yaml` (`--fleet`). Both maps
+use the identical schema below, and a machine-local entry wins a name collision.
+Use `agents browser profiles show <name> --json` to inspect the full config, or
+`agents browser profiles list --json` to see which store each one is in.
 The fields map to:
 
 | Field | Type | Description |

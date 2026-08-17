@@ -45,7 +45,7 @@ import {
   SYSTEM_MARKETPLACE_NAME,
   marketplaceManifestPath,
   marketplaceRoot,
-} from './plugin-marketplace.js';
+} from './plugins/plugin-marketplace.js';
 
 function writeFile(abs: string, content: string): void {
   fs.mkdirSync(path.dirname(abs), { recursive: true });

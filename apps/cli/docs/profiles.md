@@ -1,5 +1,10 @@
 # Profiles
 
+> **Surface note:** the top-level `agents profiles` command was removed.
+> Use `agents harness add|fork|edit|list|view|remove` and `agents harness login|logout <provider>`.
+> Profile YAML under `~/.agents/profiles/` is unchanged.
+
+
 Named bundles of host CLI, endpoint, model, and a durable account reference — run alternative providers through a standard agent interface without a local proxy.
 
 ## Overview
@@ -30,7 +35,7 @@ The model is written to the host's model env var — `OPENCODE_MODEL` for openco
 
 `agents harness list` shows three groups: your custom harnesses, the addable built-in presets, and the native harness registry. `agents harness view <name>` and `agents harness remove <name>` round it out.
 
-A harness *is* a profile — same `~/.agents/profiles/<name>.yml`, same `agents run` resolution, same device sync via `agents repo push user`. The difference from `agents profiles add`: `harness add` takes the host+model one-shot (no preset needed) and owns its own `--host` flag, whereas `agents profiles --host <device>` is reserved for running the profiles command on a remote device.
+A harness *is* a profile — same `~/.agents/profiles/<name>.yml`, same `agents run` resolution, same device sync via `agents repo push user`. The difference from `agents harness add`: `harness add` takes the host+model one-shot (no preset needed) and owns its own `--host` flag, whereas `agents harness --host <device>` is reserved for running the profiles command on a remote device.
 
 ### Forking a harness (`agents harness fork`)
 
@@ -132,18 +137,18 @@ Profile YAML `host.agent` selects which binary is spawned. Env vars override def
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `profiles list` / `ls` | List configured profiles (name, host, provider, model) | `agents profiles list` |
-| `profiles presets` | List built-in presets with descriptions | `agents profiles presets` |
-| `profiles view <name>` / `show` | Inspect a profile (env vars, auth status, preset link) | `agents profiles view kimi` |
-| `profiles add <name>` | Add a profile from a preset. Prompts for API key once per provider. | `agents profiles add kimi` |
-| `profiles add <name> --preset <preset>` | Add a profile using an explicit preset name | `agents profiles add k2 --preset kimi` |
-| `profiles add <name> --version <v>` | Pin the host CLI version | `agents profiles add kimi --version 2.1.113` |
-| `profiles add <name> --key-stdin` | Read API key from stdin (CI-safe) | `echo $KEY \| agents profiles add kimi --key-stdin` |
-| `profiles add <name> --force` | Overwrite an existing profile | `agents profiles add kimi --force` |
-| `profiles remove <name>` / `rm` | Delete a profile (keychain token is kept) | `agents profiles remove kimi` |
-| `profiles login <provider>` | Store or rotate the API key for a provider | `agents profiles login openrouter` |
-| `profiles login <provider> --key-stdin` | Read key from stdin | `echo $KEY \| agents profiles login openrouter --key-stdin` |
-| `profiles logout <provider>` | Remove a stored provider key from Keychain | `agents profiles logout openrouter` |
+| `harness list` / `ls` | List configured profiles (name, host, provider, model) | `agents harness list` |
+| `harness list` | List custom harnesses and the built-in presets | `agents harness list` |
+| `harness view <name>` / `show` | Inspect a profile (env vars, auth status, preset link) | `agents harness view kimi` |
+| `harness add <name>` | Add a profile from a preset. Prompts for API key once per provider. | `agents harness add kimi` |
+| `harness add <name> --preset <preset>` | Add a profile using an explicit preset name | `agents harness add k2 --preset kimi` |
+| `harness add <name> --version <v>` | Pin the host CLI version | `agents harness add kimi --version 2.1.113` |
+| `harness add <name> --key-stdin` | Read API key from stdin (CI-safe) | `echo $KEY \| agents harness add kimi --key-stdin` |
+| `harness add <name> --force` | Overwrite an existing profile | `agents harness add kimi --force` |
+| `harness remove <name>` / `rm` | Delete a profile (keychain token is kept) | `agents harness remove kimi` |
+| `harness login <provider>` | Store or rotate the API key for a provider | `agents harness login openrouter` |
+| `harness login <provider> --key-stdin` | Read key from stdin | `echo $KEY \| agents harness login openrouter --key-stdin` |
+| `harness logout <provider>` | Remove a stored provider key from Keychain | `agents harness logout openrouter` |
 
 ## Built-in Presets
 
@@ -188,7 +193,7 @@ Source: `src/lib/profiles-presets.ts`.
 name: local-llama              # string, required — must match filename stem
                                # Pattern: [a-z0-9][a-z0-9-_]{0,48} (case-insensitive)
 
-description: Local Llama 3.3  # string, optional — shown in `profiles list` and `view`
+description: Local Llama 3.3  # string, optional — shown in `harness list` and `view`
 
 host:
   agent: claude                # AgentId, required — which CLI binary to spawn
@@ -206,10 +211,10 @@ auth:                          # optional — omit if no token is needed
   keychainItem: agents-cli.ollama.token  # string — keychain item that holds the key
 
 preset: kimi                   # string, optional — preset this profile was created from
-                               # Set automatically by `profiles add`; informational only.
+                               # Set automatically by `harness add`; informational only.
 
 provider: openrouter           # string, optional — provider name for display
-                               # Set automatically by `profiles add`; informational only.
+                               # Set automatically by `harness add`; informational only.
 
 models:                        # Partial<Record<ModelTier, string>>, optional
   cheap: deepseek/deepseek-chat-v3        # per-tier model ids for THIS harness's
@@ -231,14 +236,14 @@ Fields sourced from `Profile` interface at `src/lib/profiles.ts:19-73`.
 
 ```bash
 # Store the OpenRouter key once (all openrouter presets reuse it)
-agents profiles login openrouter
+agents harness login openrouter
 
 # Add Kimi (interactive use — reasoning model)
-agents profiles add kimi
+agents harness add kimi
 agents run kimi "refactor the auth handler"
 
 # Add a print-safe preset for scripted use
-agents profiles add deepseek
+agents harness add deepseek
 agents run deepseek --print "summarize the diff"
 ```
 
@@ -262,8 +267,8 @@ auth:
 Then store the key and verify:
 
 ```bash
-agents profiles login ollama    # or: echo "your-key" | agents profiles add local-llama --key-stdin
-agents profiles view local-llama
+agents harness login ollama    # or: echo "your-key" | agents harness add local-llama --key-stdin
+agents harness view local-llama
 agents run local-llama "hello"
 ```
 
@@ -272,40 +277,40 @@ agents run local-llama "hello"
 Rotation applies to all profiles that share the same provider key:
 
 ```bash
-agents profiles login openrouter   # prompts for new key, overwrites the old one
+agents harness login openrouter   # prompts for new key, overwrites the old one
 # All kimi, kimi-chat, minimax, glm, qwen, deepseek profiles pick it up immediately
 ```
 
 To rotate via stdin (CI):
 
 ```bash
-echo "$NEW_KEY" | agents profiles login openrouter --key-stdin
+echo "$NEW_KEY" | agents harness login openrouter --key-stdin
 ```
 
 ### 4. List and inspect configured profiles
 
 ```bash
-agents profiles list              # table: NAME HOST PROVIDER MODEL
-agents profiles view kimi         # env vars, auth status, signup URL
-agents profiles presets           # full preset catalog with descriptions
+agents harness list              # table: NAME HOST PROVIDER MODEL
+agents harness view kimi         # env vars, auth status, signup URL
+agents harness presets           # full preset catalog with descriptions
 ```
 
 ### 5. Pin a specific host version
 
 ```bash
-agents profiles add kimi --version 2.1.113
+agents harness add kimi --version 2.1.113
 # spawns claude@2.1.113 for this profile only
 ```
 
 ### 6. Remove a profile without losing the key
 
 ```bash
-agents profiles remove kimi
+agents harness remove kimi
 # YAML deleted; agents-cli.openrouter.token stays in Keychain
 # Other openrouter profiles are unaffected
 
 # To fully remove the key too:
-agents profiles logout openrouter
+agents harness logout openrouter
 ```
 
 ### 7. Run a profile on a leased box
@@ -347,7 +352,7 @@ tears it down after the run.
 
 <video autoplay loop muted playsinline width="100%" src="../assets/videos/profiles.mp4"></video>
 
-`agents profiles add kimi` stores the OpenRouter key once; `agents run kimi` spawns Claude Code with Kimi K2.5 responding.
+`agents harness add kimi` stores the OpenRouter key once; `agents run kimi` spawns Claude Code with Kimi K2.5 responding.
 
 ## See Also
 
@@ -357,7 +362,7 @@ tears it down after the run.
 
 ## Per-provider guides
 
-For non-preset providers (gateways, self-hosted), the wizard at `agents profiles create` walks you through the env vars. Per-provider gotchas are in:
+For non-preset providers (gateways, self-hosted), the wizard at `agents harness add` walks you through the env vars. Per-provider gotchas are in:
 
 - [TrueFoundry](profiles/truefoundry.md) — LLM Gateway, Bedrock-backed
 - [AWS Bedrock](profiles/bedrock.md) — direct

@@ -211,7 +211,7 @@ describe('teamRowKind', () => {
   });
 
   it('a source-less origin carrying meta fields is a teammate — version-skew peer safety (RUSH-1997)', () => {
-    // A pre-`source` peer sends a teamOrigin over the --host fan-out with no
+    // A pre-`source` peer sends a teamOrigin over the --device fan-out with no
     // `source` but real meta fields. It must stay a teammate, not fall into the
     // no-team bucket and lose its team name.
     expect(teamRowKind({ handle: 'x', team: 'redesign' })).toBe('teammate');

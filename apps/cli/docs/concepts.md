@@ -53,7 +53,7 @@ A **resource** is any named item inside a DotAgents repo. Resources are typed by
 
 Resources are installed once in `~/.agents/` and synced to every supported agent's native format automatically. Sync happens when you run `agents use`, `agents repos pull`, or explicitly via `agents sync`.
 
-To inspect what's installed, use the per-kind listers — `agents commands list`, `agents skills list`, `agents hooks list`, `agents mcp list`, `agents permissions list`, `agents subagents list`, `agents profiles list`, `agents route list`. For a single merged cross-kind table — every resource with its winning layer resolved across project → user → extras → system — run `agents view --merged`.
+To inspect what's installed, use the per-kind listers — `agents commands list`, `agents skills list`, `agents hooks list`, `agents mcp list`, `agents permissions list`, `agents subagents list`, `agents harness list`, `agents route list`. For a single merged cross-kind table — every resource with its winning layer resolved across project → user → extras → system — run `agents view --merged`.
 
 To inspect a single repo on its own — its git state plus per-kind resource counts — use `agents repos view <repo>` (`system`, `user`, `project`, or an extra-repo alias). Omit the name for an interactive picker. It renders without opening anything; add `--brief` for the header only or `--json` for machine-readable output.
 
@@ -208,41 +208,53 @@ reconciles them into each machine's local registry and ignore-list. Approved
 devices resolve their address live from Tailscale; addresses, SSH auth, and
 reachability never enter Git.
 
-**Per-device and fleet-wide settings** live in the central agents.yaml. ONE
-command owns them: `agents devices config <name> [key] [value] [--unset]
-[--json]` — bare opens an interactive settings menu on a TTY (and prints the
-resolved config when piped), `key` reads one value back, `key value` sets it
-with validation, `key --unset` restores the default, and `notes <text>`
-appends a free-form operator note. Device-scope keys split by **who reads
-them**. The ones a PEER reads (`agents.max-concurrent`, `watchdog.enabled`,
-`notes`, the `ssh.*` profile overrides, `platform`, `auto-launch.*`) land in
-`fleet.devices.<name>.config` in `~/.agents/agents.yaml` — central, so any box
-can configure any device and the settings sync + back up with the repo (a
-`fleet.devices: all` declaration upgrades to an explicit roster map on the
-first config write). The ones only the OWNING box reads (`scheduler.enabled`,
-`daemon.enabled`, `tmux.enabled`, `browser.remote-control`,
-`browser.task-idle-minutes`, `browser.profile`)
-stay in that machine's own doc, never sync, and are refused for a peer —
-`browser.remote-control` is a consent flag, and a broken tmux or a paused
-daemon is one machine's state, not fleet policy. The device
-registry stays the **discovery cache** (address, tailscale snapshot,
-reachability); the config's `ssh.*` / `platform` / user values overlay the
-registry profile at dial time (`src/lib/devices/resolve-profile.ts`), so
-`agents ssh`, the ssh_config render, host dispatch, and the `devices list`
-table all honor them. The user-scope key `interactive.host`
-(`config.interactiveHost`), names the device agents show YOU artifacts on
-(browser opens, dashboards), so skills stop guessing "the online macOS box".
-Usage collection has a separate user-scope pin, `usage.primary-host`
-(`config.usagePrimaryHost`), operated only through `agents config set|get|unset|list`.
-`resolveUsagePrimaryHost()` resolves the explicit usage pin first, then falls back to
-`interactive.host`, then to no primary host. The interactive host answers where the
-user sees artifacts; it does not by itself declare that device authoritative for usage.
-The interactive host is marked `★ interactive` in `agents devices list`;
-`list --json` carries each row's effective profile plus its `config` block and
-an `interactive` flag. The retired subcommands (`configure`, `note`, `set`,
-`set-interactive`, `enable`/`disable`/`prefer`/`unprefer`) still work as hidden
-tombstones that forward into `devices config` with a stderr notice. Unset keys
-always mean today's behavior. The key registry is `src/lib/device-config.ts`.
+**Per-device and fleet-wide settings** live in a three-layer store, read in
+order — built-in default < fleet default < per-device value:
+
+| Layer | Home | Tracked | Written by |
+|---|---|---|---|
+| Per-device operator config | `~/.agents/devices/<name>/agents.yaml` → `config:` | yes (syncs via repo push/pull) | `agents devices config <name> …` |
+| Fleet-wide defaults | central `~/.agents/agents.yaml` → `fleet.defaults.config` | yes | `agents devices config --fleet <key> <value>` |
+| Agent pins / machine state | `~/.agents/.history/devices/pins-<host>.json` | no (runtime, like version-resources.json) | auto-pin code paths |
+
+Per-device docs are conflict-free by construction: each machine writes only
+its own folder, and the churny auto-written agent pins no longer share the
+file (they moved to the untracked pins JSON — the root-cause fix that let
+`devices/` be tracked again). ONE command owns the settings: `agents devices
+config <name> [key] [value] [--unset] [--json]` — bare opens an interactive
+settings menu on a TTY (and prints the resolved config when piped), `key`
+reads the effective value back, `key value` sets it with validation,
+`key --unset` removes the device value so the fleet default applies, `notes
+<text>` appends a free-form operator note, and `--fleet` targets the
+fleet-wide defaults layer. `--json` reports each key's `source` (`device` |
+`fleet` | `default`). Device-scope keys: `role` (`worker` \| `personal`; also
+`agents devices role`), `agents.max-concurrent`, `scheduler.enabled`,
+`daemon.enabled`, `watchdog.enabled`, `tmux.enabled`,
+`browser.remote-control`, `browser.profile`, `notes`, the `ssh.*` profile
+overrides, `platform`, `auto-launch.*`. Keys only the owning box reads
+(`scheduler.enabled`, `daemon.enabled`, `tmux.enabled`,
+`browser.remote-control`, `browser.task-idle-minutes`, `browser.profile`) are
+refused for a peer — run them on that box. The device registry stays the **discovery cache** (address,
+tailscale snapshot, reachability); the config's `ssh.*` / `platform` / user
+values overlay the registry profile at dial time
+(`src/lib/devices/resolve-profile.ts`), so `agents ssh`, the ssh_config
+render, host dispatch, and the `devices list` table all honor them. User-scope
+keys live in the central file: `interactive.host` (`config.interactiveHost`)
+names the device agents show YOU artifacts on (browser opens, dashboards), so
+skills stop guessing "the online macOS box"; `auto.pool` (`config.autoPool`)
+selects which devices `--device auto` may pick (`workers` or `all`). Usage
+collection has a separate user-scope pin, `usage.primary-host`
+(`config.usagePrimaryHost`), operated only through `agents config
+set|get|unset|list`. `resolveUsagePrimaryHost()` resolves the explicit usage
+pin first, then falls back to `interactive.host`, then to no primary host. The
+interactive host answers where the user sees artifacts; it does not by itself
+declare that device authoritative for usage. The interactive host is marked
+`★ interactive` in `agents devices list`; `list --json` carries each row's
+effective profile plus its device-layer `config` block and an `interactive`
+flag. The retired subcommands (`configure`, `note`, `set`, `set-interactive`,
+`enable`/`disable`/`prefer`/`unprefer`) still work as hidden tombstones that
+forward into `devices config` with a stderr notice. Unset keys always mean
+today's behavior. The key registry is `src/lib/device-config.ts`.
 
 The keys are consumed, not just stored. `scheduler.enabled=false` keeps the
 routines scheduler from starting on that device — `routines add` skips the
@@ -266,18 +278,17 @@ target either from an existing `~/.ssh/config` stanza (connection details stay i
 ssh config; agents-cli stores only a caps/os overlay) or *inline* (with its own
 `user@address`). The host registry lives in `agents.yaml` under `hosts:` and **is**
 git-synced with `agents repo push`/`pull`, so a fleet definition travels between
-machines. The `-H, --host <name>` (alias `--device`) flag routes a command over
+machines. The `-D, --device <name>` flag routes a command over
 SSH to that machine — supported on virtually every first-class group (`repos`,
 `view`, `inspect`, `usage`, `cost`, `doctor`, `list`, `sync`, `plugins`, `skills`,
 `status`, `teams`, `routines`, …), plus commands with their own richer host
 handling (`run`, `sessions`, `feed`, `computer`, `secrets`, `logs`). Groups with
 no remote semantics reject the flag with a clear message rather than commander's
 raw `unknown option`. The target may be a registered host name, a capability tag
-(`--host gpu --any`), a raw `user@host`, or the special value `auto`
-(`--device auto` / `--host auto`) to pick the least-loaded reachable host where
-the requested agent has an eligible account. The local device is evaluated by
-the same rule; an unreachable, overloaded, signed-out, rate-limited, or
-out-of-credits pool fails loud instead of silently launching locally. `agents run` and `agents teams add` use this live harness-aware
+(`--device gpu --any`), a raw `user@host`, or the special value `auto`
+(`--device auto`) to pick the least-loaded reachable host where
+the requested agent is installed and signed in, keeping execution local when no
+remote is better. `agents run` and `agents teams add` use this live harness-aware
 pick. Generic host-only callers such as `agents ssh auto`, which have no requested
 harness to validate, retain the 14-day `sessions.db` affinity resolver; `agents
 ssh` also refuses a pick that lands on the current machine because its purpose is
@@ -295,7 +306,7 @@ The two registries feed **one host pool** behind the `HostProvider` seam:
 `local` (agents.yaml overlay ∪ ssh-config) registers first, `devices` (the
 Tailscale registry) second, so an enrolled host shadows a same-name device.
 A device registered once with `agents devices sync` therefore shows up in
-`agents hosts list` (SOURCE `devices`), resolves as a `--host` target, and
+`agents hosts list` (SOURCE `devices`), resolves as a `--device` target, and
 participates in capability routing — password-auth devices are listed but
 marked non-dispatchable (offload rides `BatchMode=yes` ssh). To tag a device
 with capabilities, `agents hosts add <device> --cap gpu` enrolls it inline,
@@ -303,10 +314,10 @@ sourcing the address from its device profile. `agents devices render --write`
 still bridges to plain `ssh`/`scp` via ssh_config.
 
 Hosts are execution targets everywhere runs and tasks dispatch: `agents run
---host`, `agents teams` placement, `agents cloud run --host <name>` (the `host`
+--device`, `agents teams` placement, `agents cloud run --device <name>` (the `host`
 cloud provider — tasks visible in both `agents cloud ps` and `agents hosts
 ps`), and routines placement (`agents routines add … --run-on <name>`). See
-[hosts.md](hosts.md) for the `--host` execution model and the option-forwarding
+[hosts.md](hosts.md) for the `--device` execution model and the option-forwarding
 contract.
 
 ## Placement
@@ -326,7 +337,7 @@ one door:
 | Intent | Placement | Flag / path (aliases still work) |
 |---|---|---|
 | This machine | `kind: local` | (default) · `--where local` |
-| Named fleet / host box | `kind: device, target: <name>` | `--where device:<name>` · `--host` / `--device` |
+| Named fleet / host box | `kind: device, target: <name>` | `--where device:<name>` · `--device` |
 | Live healthy/load-aware pick | `kind: device, target: auto` | `--where auto` · `--device auto` |
 | Disposable crabbox | `kind: lease` | `--where lease` · `--lease` |
 | Warm crabbox reuse | `kind: lease, target: <slug>` | `--box <slug>` |
@@ -351,7 +362,7 @@ fires* (exactly-once owner). `--run-on` is where the *action body* runs. Same
 word `--device`, opposite jobs — always say "owner" vs "body placement" in
 docs and help.
 
-Mixing doors fails loud (`--where` + `--host`, `--host` + `--lease`, …). Source
+Mixing doors fails loud (`--where` + `--device`, `--device` + `--lease`, …). Source
 of truth: [`src/lib/placement.ts`](../src/lib/placement.ts).
 
 ---

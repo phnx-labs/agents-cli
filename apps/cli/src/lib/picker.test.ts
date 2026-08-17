@@ -163,6 +163,52 @@ describe('itemPicker preview at default height (RUSH-2198 regression)', () => {
   });
 });
 
+describe('itemPicker numbered rows', () => {
+  it('prefixes each row with its aligned 1-based position when numbered is set', async () => {
+    const pickerUrl = pathToFileURL(path.resolve('src/lib/picker.ts')).href;
+    const program = `
+      import { itemPicker } from ${JSON.stringify(pickerUrl)};
+      const items = Array.from({ length: 12 }, (_, i) => ({ name: 'cmd-' + String.fromCharCode(97 + i) }));
+      await itemPicker({
+        message: 'Search commands:',
+        items,
+        filter: () => items,
+        labelFor: (it) => it.name,
+        numbered: true,
+        pageSize: 12,
+      });
+    `;
+    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', program], {
+      cols: 120,
+      rows: 40,
+      cwd: process.cwd(),
+      env: { ...process.env, TERM: 'xterm-256color' },
+    });
+
+    const output = await new Promise<string>((resolve, reject) => {
+      let captured = '';
+      const timeout = setTimeout(() => {
+        child.kill();
+        reject(new Error(`numbered picker did not render:\n${stripVTControlCharacters(captured)}`));
+      }, 10_000);
+      child.onData((data) => {
+        captured += data;
+        if (!stripVTControlCharacters(captured).includes('12. cmd-l')) return;
+        clearTimeout(timeout);
+        child.kill();
+        resolve(captured);
+      });
+    });
+
+    const clean = stripVTControlCharacters(output);
+    // Right-aligned to the widest index: " 1." for single digits, "12." plain.
+    expect(clean).toContain(' 1. cmd-a');
+    expect(clean).toContain(' 9. cmd-i');
+    expect(clean).toContain('10. cmd-j');
+    expect(clean).toContain('12. cmd-l');
+  });
+});
+
 describe('multiItemPicker', () => {
   it('renders a supplied preview in its initial terminal frame', async () => {
     const pickerUrl = pathToFileURL(path.resolve('src/lib/picker.ts')).href;

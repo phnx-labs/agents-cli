@@ -213,7 +213,7 @@ describe('applyDeviceAutoToOptions', () => {
     expect(options.device).toBe('mac-mini');
   });
 
-  it('maps local pick to undefined host (no --host)', async () => {
+  it('maps local pick to undefined host (no --device)', async () => {
     const options = { device: 'auto' as string | undefined };
     const result = await applyDeviceAutoToOptions(options, {
       resolve: () => ({
@@ -326,7 +326,7 @@ describe('device roles narrow automatic placement', () => {
   });
 
   it('resolveDeviceAffinity fails loud instead of degrading to a personal local box', async () => {
-    // The generic `auto` sentinel (agents ssh auto, the --host auto passthrough,
+    // The generic `auto` sentinel (agents ssh auto, the --device auto passthrough,
     // matchHost) resolves through resolveDeviceAffinity, and a null host there
     // means "run locally" — on the very box the personal mark exists to protect.
     const mod = await fresh();

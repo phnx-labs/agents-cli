@@ -10,7 +10,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { JobConfig } from './routines.js';
+import type { JobConfig } from './scheduling/routines.js';
 import { getRoutinesDir, getUserAgentsDir } from './state.js';
 import { safeJoin } from './paths.js';
 import { createLink } from './platform/index.js';

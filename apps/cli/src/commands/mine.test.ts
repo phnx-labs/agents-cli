@@ -48,7 +48,7 @@ describe('mine command (white-label)', () => {
   });
 
   it('init mints a 755 pass-through shim + brand config + resource preset', () => {
-    const { out } = run(home, ['mine', 'init', 'jack', '--disable', 'teams']);
+    const { out } = run(home, ['setup', 'mine', 'init', 'jack', '--disable', 'teams']);
     expect(out).toContain('Minted');
 
     // createBrandShim mints per shimTargetsFor(): a 755 bash shim on POSIX, a
@@ -79,13 +79,13 @@ describe('mine command (white-label)', () => {
   });
 
   it('rejects reserved and invalid names', () => {
-    expect(run(home, ['mine', 'init', 'agents']).code).toBe(1);
-    expect(run(home, ['mine', 'init', 'claude']).code).toBe(1);
-    expect(run(home, ['mine', 'init', '1bad']).code).toBe(1);
+    expect(run(home, ['setup', 'mine', 'init', 'agents']).code).toBe(1);
+    expect(run(home, ['setup', 'mine', 'init', 'claude']).code).toBe(1);
+    expect(run(home, ['setup', 'mine', 'init', '1bad']).code).toBe(1);
   });
 
   it('renders the brand name in help and hides disabled commands under the brand only', () => {
-    run(home, ['mine', 'init', 'jack', '--disable', 'teams']);
+    run(home, ['setup', 'mine', 'init', 'jack', '--disable', 'teams']);
 
     const branded = run(home, ['--help'], 'jack').out;
     expect(branded).toContain('Usage: jack');
@@ -100,7 +100,7 @@ describe('mine command (white-label)', () => {
   });
 
   it('a disabled command resolves as unknown under the brand but works under agents', () => {
-    run(home, ['mine', 'init', 'jack', '--disable', 'teams']);
+    run(home, ['setup', 'mine', 'init', 'jack', '--disable', 'teams']);
 
     const branded = run(home, ['teams'], 'jack');
     expect(branded.code).toBe(1);
@@ -113,8 +113,8 @@ describe('mine command (white-label)', () => {
   });
 
   it('toggle enables/disables commands and writes plugin/skill excludes to the preset', () => {
-    run(home, ['mine', 'init', 'jack', '--disable', 'teams']);
-    run(home, ['mine', 'toggle', 'jack', '--enable', 'teams', '--disable-plugin', 'rush', '--disable-skill', 'deploy']);
+    run(home, ['setup', 'mine', 'init', 'jack', '--disable', 'teams']);
+    run(home, ['setup', 'mine', 'toggle', 'jack', '--enable', 'teams', '--disable-plugin', 'rush', '--disable-skill', 'deploy']);
 
     const yaml = readYaml(home);
     // Command re-enabled → no disabledCommands list.
@@ -130,10 +130,10 @@ describe('mine command (white-label)', () => {
   });
 
   it('keeps brands isolated and removes cleanly', () => {
-    run(home, ['mine', 'init', 'jack']);
-    run(home, ['mine', 'init', 'pranjal', '--disable', 'cloud']);
+    run(home, ['setup', 'mine', 'init', 'jack']);
+    run(home, ['setup', 'mine', 'init', 'pranjal', '--disable', 'cloud']);
 
-    const list = run(home, ['mine', 'list']).out;
+    const list = run(home, ['setup', 'mine', 'list']).out;
     expect(list).toContain('jack');
     expect(list).toContain('pranjal');
 
@@ -141,10 +141,10 @@ describe('mine command (white-label)', () => {
     expect(run(home, ['cloud'], 'jack').out).not.toContain("unknown command 'cloud'");
     expect(run(home, ['cloud'], 'pranjal').out).toContain("unknown command 'cloud'");
 
-    run(home, ['mine', 'remove', 'jack', '--purge']);
+    run(home, ['setup', 'mine', 'remove', 'jack', '--purge']);
     expect(fs.existsSync(path.join(home, '.agents', '.cache', 'shims', 'jack'))).toBe(false);
     expect(readYaml(home)).not.toContain('mine-jack');
     // pranjal survives.
-    expect(run(home, ['mine', 'list']).out).toContain('pranjal');
+    expect(run(home, ['setup', 'mine', 'list']).out).toContain('pranjal');
   });
 });

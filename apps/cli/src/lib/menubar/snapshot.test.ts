@@ -43,10 +43,11 @@ describe('menubar snapshot', () => {
     expect(readLastWatchdogTick(dir)).toBeNull();
   });
 
-  it('emits preferred state from the central device config block', async () => {
-    // Auto-launch flags live in central ~/.agents/agents.yaml under
-    // fleet.devices.<name>.config — so this test needs a redirected HOME, which
-    // state.ts captures at import time: fresh modules, dynamic import.
+  it('emits preferred state layered from the device doc over the fleet default', async () => {
+    // Auto-launch flags live in the tracked per-device doc
+    // (devices/<name>/agents.yaml config:) — so this test needs a redirected
+    // HOME, which state.ts captures at import time: fresh modules, dynamic
+    // import.
     //
     // computeMenubarSnapshot also opens the sessions index (querySessions). On
     // Windows better-sqlite3 keeps sessions.db locked across rmSync. Pin the
@@ -79,20 +80,30 @@ describe('menubar snapshot', () => {
     fs.mkdirSync(devicesDir, { recursive: true });
     fs.writeFileSync(
       path.join(devicesDir, 'registry.json'),
-      JSON.stringify({ alpha: device('alpha'), zion: device('zion') }),
+      JSON.stringify({ alpha: device('alpha'), zion: device('zion'), bravo: device('bravo') }),
     );
+    const docDir = path.join(home, '.agents', 'devices', 'zion');
+    fs.mkdirSync(docDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(docDir, 'agents.yaml'),
+      'config:\n  autoLaunchPreferred: true\n',
+    );
+    // The fleet-defaults layer: bravo has no doc and inherits it; zion's doc
+    // wins over it either way; an explicit device-level false would beat a
+    // fleet true (covered in lib/device-config.test.ts).
     fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
     fs.writeFileSync(
       path.join(home, '.agents', 'agents.yaml'),
-      'fleet:\n  devices:\n    zion:\n      config:\n        autoLaunchPreferred: true\n',
+      'fleet:\n  devices: {}\n  defaults:\n    config:\n      autoLaunchPreferred: true\n',
     );
 
     try {
       const { computeMenubarSnapshot: compute } = await import('./snapshot.js');
       const snapshot = await compute();
       expect(snapshot.devices.map(({ name, preferred }) => ({ name, preferred }))).toEqual([
-        { name: 'alpha', preferred: false },
-        { name: 'zion', preferred: true },
+        { name: 'alpha', preferred: true },  // inherited from the fleet default
+        { name: 'bravo', preferred: true },  // inherited from the fleet default
+        { name: 'zion', preferred: true },   // device doc
       ]);
     } finally {
       // Close the post-resetModules db singleton first (the one compute opened).

@@ -154,20 +154,19 @@ describe('repoSlug', () => {
 });
 
 describe('resolveDeviceIntent', () => {
-  it('reads --devices-all / --hosts-all as a full-fleet sweep', () => {
+  it('reads --devices-all as a full-fleet sweep', () => {
     expect(resolveDeviceIntent({ devicesAll: true })).toEqual({ all: true });
-    expect(resolveDeviceIntent({ hostsAll: true })).toEqual({ all: true });
   });
 
-  it('treats --devices/--hosts "all" (any case) as a full-fleet sweep', () => {
+  it('treats --devices "all" (any case) as a full-fleet sweep', () => {
     expect(resolveDeviceIntent({ devices: 'all' })).toEqual({ all: true });
-    expect(resolveDeviceIntent({ hosts: 'ALL' })).toEqual({ all: true });
+    expect(resolveDeviceIntent({ devices: 'ALL' })).toEqual({ all: true });
     expect(resolveDeviceIntent({ devices: '' })).toEqual({ all: true });
   });
 
-  it('parses an explicit comma list into trimmed device names (--devices/--hosts alias)', () => {
+  it('parses an explicit comma list into trimmed device names (--devices)', () => {
     expect(resolveDeviceIntent({ devices: 'a, b ,c' })).toEqual({ hosts: ['a', 'b', 'c'] });
-    expect(resolveDeviceIntent({ hosts: 'box' })).toEqual({ hosts: ['box'] });
+    expect(resolveDeviceIntent({ devices: 'box' })).toEqual({ hosts: ['box'] });
   });
 
   it('returns null (local-only) when no device flag is passed', () => {

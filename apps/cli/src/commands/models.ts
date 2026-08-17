@@ -17,7 +17,7 @@ import {
   agentLabel,
 } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
-import { listInstalledVersions, getGlobalDefault, resolveVersion, resolveVersionAlias } from '../lib/versions.js';
+import { listInstalledVersions, getGlobalDefault, resolveVersion, resolveVersionAlias } from '../lib/installations/versions.js';
 import { getModelCatalog, locateModelSource } from '../lib/models.js';
 import { resolveTierMap, MODEL_TIERS } from '../lib/model-tiers.js';
 import { setTierOverride, clearTierOverride, listTierOverrides } from '../lib/model-tier-overrides.js';

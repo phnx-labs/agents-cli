@@ -31,7 +31,7 @@ describe('assertRemoteControlAllowed', () => {
         env: { [FLEET_REMOTE_ENV]: '1', AGENTS_ACTOR_HOST: 'yosemite-s0' },
         enabled: false,
       }),
-    ).toThrow(/yosemite-s0.*browser --host.*agents browser remote-control on/s);
+    ).toThrow(/yosemite-s0.*browser --device.*agents browser remote-control on/s);
   });
 
   it('falls back to a generic actor label when none is forwarded', () => {

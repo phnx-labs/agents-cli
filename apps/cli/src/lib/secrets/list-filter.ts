@@ -1,7 +1,7 @@
 /**
  * Filters for `agents secrets list`.
  *
- * The listing had no filtering at all: `--host`/`--device` pick a machine and
+ * The listing had no filtering at all: `--device`/`--device` pick a machine and
  * `--json` picks a format, but nothing selected over the bundles themselves. On
  * a fleet with fifty-odd bundles the answerable questions — which ones read with
  * no Touch ID at all, which hold a raw literal, which have already expired, what

@@ -53,11 +53,10 @@ import {
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
 
-/** Options for `sessions focus` — device/host scope + the `--active` live-state filters. */
+/** Options for `sessions focus` — device scope + the `--active` live-state filters. */
 export interface FocusOptions {
   local?: boolean;
   attachOnly?: boolean;
-  host?: string[];
   device?: string[];
   active?: boolean;
   agent?: string;
@@ -93,7 +92,7 @@ export interface FocusOptions {
 }
 
 const INHERITED_FOCUS_OPTIONS: Array<keyof FocusOptions> = [
-  'local', 'host', 'device', 'active', 'agent',
+  'local', 'device', 'active', 'agent',
   'claude', 'codex', 'kimi', 'antigravity', 'grok', 'opencode',
   'all', 'teams', 'inTeam', 'routine', 'project', 'skill', 'plugin',
   'since', 'until', 'limit', 'bookmarks', 'unmanaged', 'sort',
@@ -116,9 +115,9 @@ export function inheritFocusOptions(child: FocusOptions, parent?: Command): Focu
   return merged;
 }
 
-/** `--device` is an alias of `--host`; both are repeatable. Merge into one host list. */
+/** Collect device targets from `--device`; repeatable. Returns a host list. */
 export function mergeFocusHosts(opts: FocusOptions): string[] {
-  return [...(opts.host ?? []), ...(opts.device ?? [])];
+  return [...(opts.device ?? [])];
 }
 
 /** Picker header that reflects the active filter + device, e.g. "Focus orphaned sessions on yosemite-s0:". */
@@ -145,8 +144,7 @@ export function registerFocusCommand(program: Command): void {
     .argument('[selector]', 'Session id/prefix, agent@version, or topic/path search')
     .option('--local', 'Only this machine (skip the cross-host sweep)')
     .option('--attach-only', 'Attach only — never open a new tab / resume a copy (the old `go` behavior)')
-    .option('-H, --host <target...>', 'Scope the picker to live sessions on these devices (host alias or user@host; repeatable)')
-    .option('--device <target...>', 'Alias for --host (device alias from `agents devices`; repeatable)')
+    .option('-D, --device <target...>', 'Scope the picker to live sessions on these devices (device alias from `agents devices`, user@host; repeatable)')
     .option('--active', 'Only sessions present in the live roster')
     .option('-a, --agent <agent>', 'Filter by harness and recorded version (for example claude@latest)')
     .option('--claude', 'Shorthand for --agent claude')
@@ -208,7 +206,7 @@ export function registerFocusCommand(program: Command): void {
       - With no selector/filter, the picker shows the live fleet. An id focuses directly; agent@version and text selectors always show the preview picker.
       - A living tmux pane is JOINED (a second client, no fork). Dead/missing panes recover on the origin device: exact healthy origin uses native resume; otherwise a healthy version of the same harness receives /continue <id>.
       - An id/identity selector resolves across the whole reachable fleet on its own — you do NOT need --device to focus a session that lives on another box (same as resume/preview). --device only narrows the browsable picker and the agent/version resolution.
-      - --host/--device and the sessions-browser filters compose. latest/oldest resolve against each selected device's installed versions.
+      - --device and the sessions-browser filters compose. latest/oldest resolve against each selected device's installed versions.
       Lifecycle siblings (not synonyms):
         focus              attach if alive, otherwise recover (default "take me there")
         focus --attach-only  attach only; never fork (replaces go)
@@ -569,7 +567,7 @@ async function attachLiveTmuxAlias(selector: string): Promise<boolean> {
 
 function hasFocusFilters(opts: FocusOptions, statuses: LiveStatusFilter[]): boolean {
   return statuses.length > 0 || !!(
-    opts.active || opts.local || opts.host?.length || opts.device?.length || focusOptionAgent(opts) ||
+    opts.active || opts.local || opts.device?.length || focusOptionAgent(opts) ||
     opts.all || opts.teams || opts.inTeam || opts.routine || opts.project || opts.skill || opts.plugin ||
     opts.since || opts.until || opts.bookmarks || opts.unmanaged || (opts.sort && opts.sort !== 'recent')
   );

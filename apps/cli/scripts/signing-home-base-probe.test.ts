@@ -167,22 +167,13 @@ describe('signing home-base probe: it cannot advance a release', () => {
 });
 
 describe('release.sh: the preflight gates the mutating phases', () => {
-  it('calls assert_signing_home_base before the crabbox, PR, merge, and tag push', () => {
+  it('does not call assert_signing_home_base on the ordinary promote path', () => {
     const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
-    const lineOf = (needle: RegExp) => {
-      const i = lines.findIndex((l) => needle.test(l));
-      expect(i, `expected to find ${needle} in release.sh`).toBeGreaterThanOrEqual(0);
-      return i;
-    };
-    // The bare CALL (`assert_signing_home_base` on its own line), not the
-    // definition (`assert_signing_home_base() {`), must precede every mutation.
     const call = lines.findIndex((l) => l.trim() === 'assert_signing_home_base');
-    expect(call, 'expected a bare assert_signing_home_base call').toBeGreaterThanOrEqual(0);
-    // Anchored patterns pin the mutation SITES (not the earlier function
-    // definitions / the already-published missing-tag push at column 0 vs indent).
-    expect(call).toBeLessThan(lineOf(/^\s*phase "Linux tests" "a crabbox"/)); // crabbox phase
-    expect(call).toBeLessThan(lineOf(/^\s*gh pr merge "\$PR_NUMBER" --squash/)); // the merge
-    expect(call).toBeLessThan(lineOf(/^git push origin "v\$TARGET"$/)); // the primary tag push
+    expect(call, 'ordinary release must not preflight signing/notarization').toBe(-1);
+    expect(lines.some((l) => /wait_for_attestation/.test(l))).toBe(true);
+    expect(lines.some((l) => /^\s*gh pr merge "\$PR_NUMBER" --squash/.test(l))).toBe(true);
+    expect(lines.some((l) => /^git push origin "v\$TARGET"$/.test(l))).toBe(true);
   });
 });
 

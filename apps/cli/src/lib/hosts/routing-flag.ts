@@ -11,7 +11,7 @@
  * and the function body that later reads flag values share one implementation.
  */
 
-/** Pull the value of `--host`/`-H`/`--remote-cwd` (any form) out of an argv. */
+/** Pull the value of `--device`/`-D`/`--remote-cwd` (any form) out of an argv. */
 export function flagValue(args: string[], long: string, short?: string): string | undefined {
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -24,8 +24,8 @@ export function flagValue(args: string[], long: string, short?: string): string 
 }
 
 /**
- * True when argv carries any host/device routing flag that {@link maybeRunOnHost}
- * inspects: `--host`/`-H`, `--device`, `--hosts`, `--devices` (space, `=`, or
+ * True when argv carries any device routing flag that {@link maybeRunOnHost}
+ * inspects: `--device`/`-D`, `--hosts`, `--devices` (space, `=`, or
  * glued short form).
  *
  * Presence-only — does not validate values. Used by bootstrap before loading
@@ -33,8 +33,7 @@ export function flagValue(args: string[], long: string, short?: string): string 
  */
 export function hasHostRoutingFlag(args: string[]): boolean {
   return (
-    flagValue(args, 'host', 'H') !== undefined ||
-    flagValue(args, 'device') !== undefined ||
+    flagValue(args, 'device', 'D') !== undefined ||
     flagValue(args, 'hosts') !== undefined ||
     flagValue(args, 'devices') !== undefined
   );

@@ -17,6 +17,9 @@ export type DeleteFn = (url: string, headers: Record<string, string>) => Promise
 /** DI seam for tests — override the real HTTP existence check (HEAD). */
 export type CheckFn = (url: string) => Promise<{ status: number }>;
 
+/** DI seam for tests — override the real HTTP GET of the revisions listing route. */
+export type RevisionsFetchFn = (url: string) => Promise<{ status: number; contentType: string; body: string }>;
+
 export interface DeleteEndpoint {
   baseUrl: string;
   token: string;
@@ -86,6 +89,36 @@ async function defaultDelete(url: string, headers: Record<string, string>): Prom
   return { ok: res.ok, status: res.status };
 }
 
+async function defaultRevisionsFetch(url: string): Promise<{ status: number; contentType: string; body: string }> {
+  const res = await fetch(url, { headers: { accept: 'application/json' } });
+  return { status: res.status, contentType: res.headers.get('content-type') ?? '', body: await res.text() };
+}
+
+/**
+ * List the R2 keys of a slug's retained revisions via the Worker's
+ * `?revisions=json` route (worker-template.ts `renderRevisions`). Best-effort:
+ * any failure to reach or parse the route (an endpoint provisioned before
+ * revisions existed, a network blip) yields an empty list rather than
+ * throwing — purging revisions is a safety improvement on top of the primary
+ * delete contract (take the canonical page down), never a reason to fail it.
+ */
+async function listRevisionKeys(
+  endpoint: DeleteEndpoint,
+  key: string,
+  fetchRevisions: RevisionsFetchFn,
+): Promise<string[]> {
+  try {
+    const url = `${endpoint.baseUrl.replace(/\/+$/, '')}/${key}?revisions=json`;
+    const res = await fetchRevisions(url);
+    if (res.status !== 200 || !/application\/json/i.test(res.contentType)) return [];
+    const data = JSON.parse(res.body) as { revisions?: Array<{ key?: unknown }> };
+    if (!Array.isArray(data.revisions)) return [];
+    return data.revisions.map((r) => String(r.key ?? '')).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 export interface DeleteObjectResult {
   key: string;
   url: string;
@@ -130,6 +163,11 @@ export async function deleteObject(
 export interface DeleteShareOptions {
   /** Skip deleting the sibling `<slug>.png` OG cover (default: delete it too). */
   keepCover?: boolean;
+  /** Skip deleting the target's retained revisions (`<key>/rev-*`, RUSH-2683
+   * revision retention) — default: delete them too. A republished-then-deleted
+   * share would otherwise leave its prior world-readable versions live for up
+   * to the bucket's lifecycle max-age (see docs/share.md §Revisions). */
+  keepRevisions?: boolean;
   /** Treat an already-missing target as a no-op success instead of an error
    * (mirrors SQL's `DROP ... IF EXISTS`). Default: missing target is an error. */
   ifExists?: boolean;
@@ -143,6 +181,8 @@ export interface DeleteShareOptions {
   deleter?: DeleteFn;
   /** DI seam for tests — override the real HTTP existence check. */
   checker?: CheckFn;
+  /** DI seam for tests — override the real HTTP GET of the revisions listing route. */
+  fetchRevisions?: RevisionsFetchFn;
 }
 
 export interface DeleteShareResult {
@@ -158,6 +198,14 @@ export interface DeleteShareResult {
     existedBefore: boolean;
     verified404: boolean;
   };
+  /** Retained revisions of this target that were also deleted (omitted when
+   * there were none, or `keepRevisions` was passed). */
+  revisions?: Array<{
+    key: string;
+    url: string;
+    existedBefore: boolean;
+    verified404: boolean;
+  }>;
 }
 
 /** Delete one share target (page + by default its OG cover) and verify both
@@ -212,6 +260,24 @@ export async function deleteShare(target: string, opts: DeleteShareOptions = {})
       throw new Error(
         `Cover delete reported success but ${cover.url} still resolves — takedown NOT verified. Retry, or pass --keep-cover and delete it manually.`,
       );
+    }
+  }
+
+  if (!opts.keepRevisions) {
+    const revisionKeys = await listRevisionKeys(endpoint, resolved.key, opts.fetchRevisions ?? defaultRevisionsFetch);
+    if (revisionKeys.length > 0) {
+      const revisions: NonNullable<DeleteShareResult['revisions']> = [];
+      for (const revisionKey of revisionKeys) {
+        const rev = await deleteObject(endpoint, revisionKey, { deleter: opts.deleter, checker: opts.checker });
+        revisions.push({ key: rev.key, url: rev.url, existedBefore: rev.existedBefore, verified404: rev.verified404 });
+      }
+      result.revisions = revisions;
+      const stillUp = revisions.filter((r) => r.existedBefore && !r.verified404);
+      if (stillUp.length > 0) {
+        throw new Error(
+          `Delete reported success but ${stillUp.length} retained revision(s) still resolve — takedown NOT verified. Retry, or pass --keep-revisions and delete them manually.`,
+        );
+      }
     }
   }
 

@@ -12,14 +12,14 @@
 #
 # Usage:
 #   scripts/release.sh <x.y.z> [--pre <tag>] [--confirm] [--skip-build]
-#                              [--skip-tests] [--host <name>] [--here]
+#                              [--skip-tests] [--device <name>] [--here]
 #
 # Examples:
 #   scripts/release.sh 0.9.206                            # dry-run
 #   scripts/release.sh 0.9.206 --confirm                  # real release
 #   scripts/release.sh 0.9.206 --pre rc.1 --confirm       # 0.9.206-rc.1
 #   scripts/release.sh 0.9.206 --confirm --skip-tests     # hotfix
-#   scripts/release.sh 0.9.206 --confirm --host zion      # pin the publish box
+#   scripts/release.sh 0.9.206 --confirm --device zion    # pin the publish box
 #   scripts/release.sh 0.9.206 --confirm --here           # never route off-box
 #
 # Pre-flight order: changelog -> publish-host routing -> marketplace
@@ -60,9 +60,9 @@ while [ $# -gt 0 ]; do
         --confirm)     CONFIRM=1; shift ;;
         --skip-build)  SKIP_BUILD=1; shift ;;
         --skip-tests)  SKIP_TESTS=1; shift ;;
-        --host)
+        --device)
             PUBLISH_HOST="${2:-}"
-            if [ -z "$PUBLISH_HOST" ]; then echo "Error: --host requires a device name" >&2; exit 1; fi
+            if [ -z "$PUBLISH_HOST" ]; then echo "Error: --device requires a device name" >&2; exit 1; fi
             shift 2
             ;;
         --here)          STAY_HERE=1; shift ;;
@@ -141,7 +141,7 @@ echo
 # which machine is "the release box".
 
 readonly PUBLISH_BUNDLE="vs-marketplace"
-# Tried in order when this box cannot publish and --host was not given. These
+# Tried in order when this box cannot publish and --device was not given. These
 # are the long-lived personal machines; a worker box is never a publish target.
 PUBLISH_HOST_CANDIDATES=(zion mac-mini)
 
@@ -245,7 +245,7 @@ else
     TARGET_HOST=""
     if [ -n "$PUBLISH_HOST" ]; then
         if [ -z "$(host_has_publish_bundle "$PUBLISH_HOST")" ]; then
-            echo "Error: --host $PUBLISH_HOST does not hold the '$PUBLISH_BUNDLE' bundle." >&2
+            echo "Error: --device $PUBLISH_HOST does not hold the '$PUBLISH_BUNDLE' bundle." >&2
             exit 1
         fi
         TARGET_HOST="$PUBLISH_HOST"

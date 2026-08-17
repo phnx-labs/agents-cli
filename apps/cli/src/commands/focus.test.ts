@@ -147,9 +147,9 @@ describe('isAttachableLiveSession', () => {
   });
 });
 
-describe('mergeFocusHosts — --device is an alias of --host, both repeatable', () => {
-  it('unions --host and --device into one list', () => {
-    expect(mergeFocusHosts({ host: ['a'], device: ['b', 'c'] })).toEqual(['a', 'b', 'c']);
+describe('mergeFocusHosts — --device selects the fleet scope, repeatable', () => {
+  it('collects repeated --device values into one list', () => {
+    expect(mergeFocusHosts({ device: ['a', 'b', 'c'] })).toEqual(['a', 'b', 'c']);
   });
   it('empty when neither is set (bare focus)', () => {
     expect(mergeFocusHosts({})).toEqual([]);

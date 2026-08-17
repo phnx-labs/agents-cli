@@ -194,14 +194,14 @@ agents run codex@ "review this branch"
 # Picks the host (14d usage affinity), the harness (installed CLIs weighted by
 # best-account headroom), and the account (balanced) -- all three layers.
 agents run auto "summarize recent commits"
-agents run auto --host yosemite-s0 "fix the flaky test"   # pin the host layer
+agents run auto --device yosemite-s0 "fix the flaky test"   # pin the host layer
 ```
 
 `run auto` excludes any harness whose accounts are all rate-limited or signed out, and exits nonzero with the earliest reset time when nothing anywhere is healthy.
 
 A trailing `@` opens an account picker before either an interactive or prompt-based run. Each installed version shows its account identity, exact version, login state, plan, and every available session, weekly, or monthly limit. Logged-out, rate-limited, and out-of-credit accounts remain visible with the reason they cannot be selected; signed-in accounts whose provider does not expose quota data stay selectable and say `limits unavailable`. The choice pins only that run and does not change your default version.
 
-Account selection is available for Claude, Codex, Gemini, Cursor, Antigravity, Grok, Kimi, Droid, and OpenCode. It requires a terminal and cannot be combined with `--resume`, `--strategy`/`--balanced`, `--lease`, or `--host`/`--device`; profiles and workflows must use their concrete host agent instead.
+Account selection is available for Claude, Codex, Gemini, Cursor, Antigravity, Grok, Kimi, Droid, and OpenCode. It requires a terminal and cannot be combined with `--resume`, `--strategy`/`--balanced`, `--lease`, or `--device`; profiles and workflows must use their concrete host agent instead.
 
 ### Chain agents
 
@@ -377,12 +377,12 @@ Pick up any past conversation and drop it back into a terminal:
 agents sessions resume                     # multi-select; packs two sessions per tab
 agents sessions resume "auth middleware"   # pre-filter the pool, then choose
 agents sessions resume --tmux              # into persistent tmux — survives editor restarts
-agents sessions resume --host zion --tmux  # resume on another machine over SSH
-agents resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # original harness/version/device/mode
+agents sessions resume --device zion --tmux  # resume on another machine over SSH
+agents sessions resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # original harness/version/device/mode
 agents run auto --resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # adapt if its account is unavailable
 ```
 
-`agents sessions resume` reopens several sessions in whatever terminal you're in -- auto-detected across iTerm, Ghostty, tmux, and the VSCodium agent-terminal, or forced with `--iterm` / `--ghostty` / `--tmux` / `--vscodium`. `agents resume <id>` resumes one session without requiring you to name its harness: exact IDs take a local SQLite fast path, then resolve fleet-wide and recover on the source device. If the origin version is installed, signed in, healthy, and still owns the indexed transcript, its isolated home performs native resume. Claude launches that native resume from the original project directory recorded before the first turn, so its `projects/<cwd-key>` lookup reaches the conversation even when the session later changed directories. Otherwise a healthy version of the **same harness** starts with `/continue <id>`, which reads the indexed transcript even when the old version home is retained under version trash or the same version number was reinstalled into a new home. It never native-resumes from a different isolated home. Back them with **tmux** and the runs turn durable: detach, close your editor, reboot the GUI -- the session is still alive to `agents tmux attach`. The whole `agents tmux` subsystem (persistent multiplexer sessions that survive editor restarts and can be shared with other tools) sits underneath.
+`agents sessions resume` reopens several sessions in whatever terminal you're in -- auto-detected across iTerm, Ghostty, tmux, and the VSCodium agent-terminal, or forced with `--iterm` / `--ghostty` / `--tmux` / `--vscodium`. `agents sessions resume <id>` resumes one session without requiring you to name its harness: exact IDs take a local SQLite fast path, then resolve fleet-wide and recover on the source device. If the origin version is installed, signed in, healthy, and still owns the indexed transcript, its isolated home performs native resume. Claude launches that native resume from the original project directory recorded before the first turn, so its `projects/<cwd-key>` lookup reaches the conversation even when the session later changed directories. Otherwise a healthy version of the **same harness** starts with `/continue <id>`, which reads the indexed transcript even when the old version home is retained under version trash or the same version number was reinstalled into a new home. It never native-resumes from a different isolated home. Back them with **tmux** and the runs turn durable: detach, close your editor, reboot the GUI -- the session is still alive to `agents tmux attach`. The whole `agents tmux` subsystem (persistent multiplexer sessions that survive editor restarts and can be shared with other tools) sits underneath.
 
 ### Send an agent to the background — and bring it back
 
@@ -419,7 +419,7 @@ agents message tester "also cover the null case"
 ```bash
 agents feed                         # grouped by outcome (ticket/PR/worktree) across the fleet
 agents feed --flat                  # one row per agent (legacy)
-agents feed --host mac-mini         # scope the view to one or more hosts
+agents feed --device mac-mini         # scope the view to one or more hosts
 agents feed --local                 # skip the SSH fan-out
 agents feed --json                  # blocks stamped with their outcome key
 agents feed post --title "Halfway done" "CI green, watching merge"  # title + body
@@ -516,7 +516,7 @@ Multiple provider accounts to juggle? See [Accounts](#accounts) below.
 ```bash
 # Kimi K2.5 responding inside Claude Code's UI, tools, and skills.
 # No proxy server. No LiteLLM. One OpenRouter key, stored in Keychain.
-agents profiles add kimi
+agents harness add kimi
 agents run kimi "refactor this file"
 ```
 
@@ -545,7 +545,7 @@ auth:
   keychainItem: agents-cli.ollama.token
 ```
 
-Profile YAML has no secrets -- safe to `agents repo push` to a shared repo. `agents profiles presets` lists the full catalog.
+Profile YAML has no secrets -- safe to `agents repo push` to a shared repo. `agents harness list` lists the full catalog.
 
 ---
 
@@ -587,21 +587,21 @@ agents hosts add gpu-box
 agents hosts check gpu-box              # reachable? which agi-cli version?
 
 # Run there instead of locally
-agents run claude --host gpu-box "profile this build"   # headless: follows live by default
-agents run claude --host gpu-box                         # no prompt → interactive TTY over SSH (tmux-backed)
+agents run claude --device gpu-box "profile this build"   # headless: follows live by default
+agents run claude --device gpu-box                         # no prompt → interactive TTY over SSH (tmux-backed)
 agents accounts sync work --device gpu-box               # portable provider account only; native OAuth stays local
 agents run claude --device auto "…"                      # affinity-pick host from 14d usage (harness stays claude)
-agents run claude --host auto "…"                        # same — auto is a host value, not a harness name
+agents run claude --device auto "…"                        # same — auto is a host value, not a harness name
 agents view kimi --device all                            # fan out across every registered device (grouped-by-OS roster)
-agents output --device all                               # per-device burn vs shipped output across the fleet
+agents insights output --device all                      # per-device burn vs shipped output across the fleet
 agents view --device all --json                          # machine-readable fleet inventory
 agents hosts ps                         # list dispatched runs + terminal status
 agents hosts stop <id>                  # terminate a hung/detached run (alias: kill)
-agents logs --host gpu-box              # pick a dispatched run — concise summary by default
+agents logs --device gpu-box              # pick a dispatched run — concise summary by default
 agents logs <id> --full                 # the full raw transcript / stdout (token-heavy)
 agents logs <id> -f                     # re-attach to a running one and follow
-agents view claude --host gpu-box       # inspect the remote install
-agents sync --host gpu-box              # make the remote machine current
+agents view claude --device gpu-box       # inspect the remote install
+agents sync --device gpu-box              # make the remote machine current
 agents doctor claude                    # diagnose every installed claude version
 agents doctor claude@latest             # diagnose only the newest installed version
 agents doctor claude@oldest             # diagnose only the oldest installed version
@@ -631,20 +631,21 @@ agents devices list --live              # force a live probe of every device (al
 agents devices list --full              # add per-device cores and free/total RAM
 agents devices list --no-stats          # instant: names/addresses only, skip the probe
 agents devices config zion interactive.host zion   # the device agents show YOU artifacts on (★ in the list)
-agents devices config mac-mini agents.max-concurrent 4   # per-device settings (central fleet.devices.<name>.config)
+agents devices config mac-mini agents.max-concurrent 4   # per-device settings (tracked devices/<name>/agents.yaml)
 agents devices config mac-mini scheduler.enabled off     # bare `devices config <name>` opens a settings menu (TTY)
+agents devices config --fleet agents.max-concurrent 2    # fleet-wide default every device inherits
 agents devices config mac-mini notes "runs the releases — don't reboot"   # operator notes, repeat to append
 agents ssh mac-mini                     # hardened SSH: fails fast if offline,
                                         # PowerShell on Windows, password-from-Keychain,
                                         # auto-syncs your terminfo (Ghostty/kitty/…) so
                                         # backspace, colors & clear work on the remote
-agents cp mac-mini:/abs/log.json /tmp/  # fleet file transfer; host:path or abs local
-agents cp -r /tmp/src/ yosemite-s0:~/dst/  # ~ and $HOME expand on the REMOTE, never locally
+scp mac-mini:/abs/log.json /tmp/        # fleet file transfer; host:path or abs local
+scp -r /tmp/src/ yosemite-s0:~/dst/     # ~ and $HOME expand on the REMOTE, never locally
 agents hosts list                       # devices show up here too (one host pool)
-agents hosts add mac-mini --cap gpu     # tag a device for capability routing (--host gpu)
+agents hosts add mac-mini --cap gpu     # tag a device for capability routing (`--device` + `--cap gpu`)
 
 # Hosts as a task backend + scheduled placement
-agents cloud run "nightly benchmark" --host gpu-box --agent claude   # task in cloud ps AND hosts ps
+agents cloud run "nightly benchmark" --device gpu-box --agent claude   # task in cloud ps AND hosts ps
 agents routines add nightly -s "0 2 * * *" -a claude -p "run the sweep" --run-on gpu-box
 ```
 
@@ -685,9 +686,9 @@ email) and naming which harnesses use it — the fast way to see which accounts 
 and healthy across every machine. Scope either with `--agents <csv>` / `--device <csv>`, and
 add `--json` for the machine-readable per-host rows.
 
-**Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH and feed one host pool: devices appear in `agents hosts list` and capability routing without a second enrollment. On `--host` runs every `agents run` option is either forwarded (`--effort --env --timeout --loop …`), rejected loud (`--secrets` never crosses SSH implicitly), or consumed locally — nothing silently drops. See [docs/concepts.md](apps/cli/docs/concepts.md#devices--hosts).
+**Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH and feed one host pool: devices appear in `agents hosts list` and capability routing without a second enrollment. On `--device` runs every `agents run` option is either forwarded (`--effort --env --timeout --loop …`), rejected loud (`--secrets` never crosses SSH implicitly), or consumed locally — nothing silently drops. See [docs/concepts.md](apps/cli/docs/concepts.md#devices--hosts).
 
-Every `--host` command rides one multiplexed SSH engine, tuned for driving a fleet from a small laptop: the first call to a machine opens a control socket and every later call reuses it (no repeat TCP+auth handshake), connections carry keepalive so a dropped link dies in ~45 s instead of zombying, and following a remote run polls in a single round-trip per cycle. Measured against a Tailscale-relayed host: repeated calls **~6–7× faster**, dispatch readiness **~2×**, and the follow loop **~21× faster with 50% fewer local ssh spawns**. Design: [docs/ssh-transport.md](apps/cli/docs/ssh-transport.md) · reproduce: `node scripts/bench-ssh.mjs <host>`.
+Every `--device` command rides one multiplexed SSH engine, tuned for driving a fleet from a small laptop: the first call to a machine opens a control socket and every later call reuses it (no repeat TCP+auth handshake), connections carry keepalive so a dropped link dies in ~45 s instead of zombying, and following a remote run polls in a single round-trip per cycle. Measured against a Tailscale-relayed host: repeated calls **~6–7× faster**, dispatch readiness **~2×**, and the follow loop **~21× faster with 50% fewer local ssh spawns**. Design: [docs/ssh-transport.md](apps/cli/docs/ssh-transport.md) · reproduce: `node scripts/bench-ssh.mjs <host>`.
 
 ---
 
@@ -718,7 +719,7 @@ Team state is observable via `agents teams list --json` / `agents teams status -
 
 ## Cloud
 
-Some work shouldn't tie up your laptop. `agents cloud run` hands a task to a managed provider that clones the repo, plans, implements, tests, and opens a PR -- while your terminal stays free. The `host` provider dispatches the same way onto machines you own: `agents cloud run "…" --host gpu-box` (tasks track in `agents cloud ps` and `agents hosts ps` alike).
+Some work shouldn't tie up your laptop. `agents cloud run` hands a task to a managed provider that clones the repo, plans, implements, tests, and opens a PR -- while your terminal stays free. The `host` provider dispatches the same way onto machines you own: `agents cloud run "…" --device gpu-box` (tasks track in `agents cloud ps` and `agents hosts ps` alike).
 
 <p align="center">
   <img src="assets/cloud.svg" alt="agents cloud run dispatches one prompt to a managed provider (Rush, Codex, Cursor, Factory, or Antigravity) that runs while you keep working" width="100%" />
@@ -747,7 +748,7 @@ Five managed backends behind one interface (`agents cloud providers`):
 
 Auto-routes each `--agent` to its native cloud, or pin the backend with `--provider`. Instead of dispatching now, register a run as an **event trigger** with `--on pull_request` (also `push`, `issue_comment`, `workflow_run`) -- it persists as a trigger-bound routine that fires on the event. `--json` on every subcommand for scripting.
 
-The same dispatch is a placement on `agents run`: `agents run claude "fix the flaky e2e" --cloud --repo acme/api` routes through the identical provider registry and tracks in `agents cloud list/status/logs` alike. `--cloud` sits alongside `--host`/`--device`/`--lease` as one of three placements (local, machine, cloud) and is mutually exclusive with them; `--where cloud[:provider]` is the one-door spelling. Agents without a native cloud fail loud unless `--provider` is given.
+The same dispatch is a placement on `agents run`: `agents run claude "fix the flaky e2e" --cloud --repo acme/api` routes through the identical provider registry and tracks in `agents cloud list/status/logs` alike. `--cloud` sits alongside `--device`/`--lease` as one of three placements (local, machine, cloud) and is mutually exclusive with them; `--where cloud[:provider]` is the one-door spelling. Agents without a native cloud fail loud unless `--provider` is given.
 
 ---
 
@@ -869,18 +870,18 @@ White-label the CLI. `agents setup mine` mints a **personally-named binary** —
 
 ```bash
 agents setup mine                      # wizard: pick a name, check off what to disable
-agents mine init jack --disable teams cloud   # or non-interactively
+agents setup mine init jack --disable teams cloud   # or non-interactively
 
 jack run claude "hello"                # every agents verb, under your name
 jack --help                            # help, version, and errors all read "jack"
 ```
 
-Manage brands with `agents mine list | toggle | remove`:
+Manage brands with `agents setup mine list | toggle | remove`:
 
 ```bash
-agents mine toggle jack --disable-plugin rush --disable-skill deploy
-agents mine toggle jack --enable teams
-agents mine remove jack --purge
+agents setup mine toggle jack --disable-plugin rush --disable-skill deploy
+agents setup mine toggle jack --enable teams
+agents setup mine remove jack --purge
 ```
 
 Under the hood, `init` drops a pure pass-through shim in `~/.agents/.cache/shims/<name>` (already on `PATH`) that sets `AGENTS_BRAND` and forwards every argument to the same binary — nothing is copied or forked. The brand's config lives in `~/.agents/agents.yaml` (`brands.<name>`), so it rides `agents repo push/pull` across your fleet. Disabling a command hides it **only** under that brand; plain `agents` / `ag` keep every command. Curated skills/plugins/MCP ride a per-brand [resource profile](apps/cli/docs/profiles.md). Full reference: [Make it yours](apps/cli/docs/mine.md).
@@ -1003,7 +1004,7 @@ agents accounts add deepinfra --provider deepinfra --auth api-key
 agents accounts set-default claude work   # claude uses `work` when --account is omitted
 agents accounts sync work --device yosemite-s0   # explicitly copy the bundle to a worker device
 agents run claude --account work
-agents profiles add deepinfra --account deepinfra
+agents harness add deepinfra --account deepinfra
 ```
 
 One provider account **is** one `agents secrets` bundle -- `agents accounts add` creates it with secrets policy `never`, so a background agent launch on that account never raises Touch ID. `agents accounts` (no subcommand) lists provider bundles next to harness-native signed-in identities so you see both kinds of credential together; `accounts list` / `inspect <name>` / `set-key <name>` (rotate) / `rename` / `remove` manage a bundle by its stable id, independent of its current label.
@@ -1087,7 +1088,7 @@ agents routines add nightly-drain --schedule "0 3 * * *" --agent claude \
   --prompt "Drain the local work queue"
 
 agents routines devices nightly-drain --set yosemite-s0           # one schedule owner
-agents routines list --host yosemite-s0                            # query another device
+agents routines list --device yosemite-s0                            # query another device
 
 # Signed webhook trigger: Linear issue labeled "agent" fires a routine
 agents routines add agent-labeled-issue --on linear:Issue --action update \
@@ -1186,7 +1187,10 @@ Sources: a command's stdout (`--watch` / `--poll`), an HTTP endpoint (`--poll-ht
 # Publish an HTML artifact to a public link on your own Cloudflare R2 (~$0).
 agents artifacts setup                                      # once: provision bucket + Worker on your CF
 agents artifacts share plan.html --slug fleet --expire 30d  # → https://<base>/fleet
+agents artifacts share plan.html --label "Q3 fleet plan" --meta kind=plan   # human title + structured metadata
 agents artifacts share plan.html --json                     # URL object for plan-render hooks
+agents artifacts share list --agent claude                  # everything published, filterable
+agents artifacts share revisions fleet                      # prior versions kept under a slug
 agents artifacts share status                               # show the endpoint
 agents unshare fleet                                        # take a published link (+ its OG cover) down
 ```
@@ -1203,8 +1207,19 @@ this is effectively free.
 **Fleet mode:** provision one endpoint, then every fleet / cloud / ephemeral agent
 publishes through it with a shared write token — `agents artifacts share join <baseUrl>` uses an
 existing endpoint with no provisioning. `--expire 30d|12h|<date>` auto-expires a link.
-`--json` emits `{ url, coverUrl, expiresAt }` so plan-render automation can publish the
-rendered HTML and post the returned link without scraping terminal text.
+`--json` emits `{ url, coverUrl, expiresAt, label, labelSource }` so plan-render automation can
+publish the rendered HTML and post the returned link without scraping terminal text.
+
+**Every share carries provenance and a title.** Agent/session/host/repo/date are
+captured automatically from the exec env and git — never invented, only sent when
+present. `--label`/`--title` names a share (else one is derived from the HTML
+`<title>`, frontmatter, or filename, with a nudge — never a blocking prompt); `--meta
+key=value` attaches structured metadata (`kind`, `project`, `ticket`, `status`, ...).
+`agents artifacts share list --agent <name> | --session <id> | --label-contains <substr>` filters
+by any of it, so the listing is a real "what have I shared" gallery, not just slugs.
+Republishing an existing slug keeps the prior version as a revision by default
+(`--no-revision` to skip); `agents artifacts share revisions <slug>` shows the retained
+history, newest first.
 
 `agents artifacts share delete <targets...>` (alias `agents unshare`) takes a page down — pass a
 full URL, `<user>/<slug>`, or a bare slug (resolved against your own namespace); several
@@ -1262,7 +1277,7 @@ Two repos with the same shape, different roles:
 
 See [docs/concepts.md](apps/cli/docs/concepts.md) for the full mental model: DotAgents repos, resource kinds, and how resolution works end-to-end.
 
-Other useful commands: `agents doctor` checks CLI availability and resource sync drift, `agents usage` shows available quota/rate-limit data for installed agents, `agents budget` shows cross-vendor spend caps and current spend-to-cap (and enforces pre-flight estimates + a hard-cap kill-switch on every run — see [docs/observability.md](apps/cli/docs/observability.md#budget-guardrails-agents-budget)), `agents import` adopts an existing unmanaged install, `agents trash` lists and restores soft-deleted version directories, and `agents subagents` installs reusable subagent definitions for parent-agent workflows.
+Other useful commands: `agents doctor` checks CLI availability and resource sync drift, `agents usage` shows available quota/rate-limit data for installed agents, `agents config budget` shows cross-vendor spend caps and current spend-to-cap (and enforces pre-flight estimates + a hard-cap kill-switch on every run — see [docs/observability.md](apps/cli/docs/observability.md#budget-guardrails-agents-budget)), `agents import` adopts an existing unmanaged install, `agents trash` lists and restores soft-deleted version directories, and `agents subagents` installs reusable subagent definitions for parent-agent workflows.
 
 ---
 
@@ -1479,7 +1494,7 @@ For full transparency: `agi-cli` keeps a local event log at `~/.agents/.cache/lo
 
 macOS and Linux. Windows via WSL works but isn't first-class yet.
 
-**macOS-only features:** Keychain-based secrets (`agents secrets`, `agents profiles login`) require macOS. Default iCloud sync for bundles requires macOS + iCloud Keychain enabled; use `--no-icloud-sync` for device-local bundles. On Linux, use environment variables or `.env` files for API keys. Native Linux credential store support is planned.
+**macOS-only features:** Keychain-based secrets (`agents secrets`, `agents harness login`) require macOS. Default iCloud sync for bundles requires macOS + iCloud Keychain enabled; use `--no-icloud-sync` for device-local bundles. On Linux, use environment variables or `.env` files for API keys. Native Linux credential store support is planned.
 
 Interactive tmux-backed runs require tmux 3.2 or newer.
 

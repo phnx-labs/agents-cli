@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { isTierToken, tierizeModels, resolveTierMap, resolveTier, MODEL_TIERS, applyTierOverrides, type TierResolution } from './model-tiers.js';
 import { getModelCatalog, dropBareLegacyIds, scanClaudeCatalogIds, type ModelInfo } from './models.js';
-import { listInstalledVersions } from './versions.js';
+import { listInstalledVersions } from './installations/versions.js';
 import { buildExecCommand } from './exec.js';
 
 describe('curated Kimi ladder (gated on a Kimi install)', () => {

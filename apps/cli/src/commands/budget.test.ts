@@ -20,11 +20,12 @@ function writeBudget(yamlBody: string): void {
   fs.writeFileSync(userYaml, yamlBody);
 }
 
-/** Run `agents budget <args>` from cwd=PROJECT, capturing stdout + console.log. */
+/** Run `agents config budget <args>` from cwd=PROJECT, capturing stdout + console.log. */
 async function runBudget(args: string[]): Promise<string> {
   const program = new Command();
   program.exitOverride();
-  registerBudgetCommand(program);
+  const config = program.command('config');
+  registerBudgetCommand(config);
 
   const chunks: string[] = [];
   const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation((c: any) => {
@@ -36,7 +37,7 @@ async function runBudget(args: string[]): Promise<string> {
   });
   const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(PROJECT);
   try {
-    await program.parseAsync(['node', 'agents', 'budget', ...args]);
+    await program.parseAsync(['node', 'agents', 'config', 'budget', ...args]);
   } finally {
     writeSpy.mockRestore();
     logSpy.mockRestore();
@@ -47,7 +48,7 @@ async function runBudget(args: string[]): Promise<string> {
 
 const ledgerPath = () => path.join(getHistoryDir(), 'spend', 'ledger.jsonl');
 
-describe('agents budget', () => {
+describe('agents config budget', () => {
   beforeAll(() => {
     writeBudget('budget:\n  per_run: 5\n  per_day: 50\n  per_project: 100\n  on_exceed: block\n');
     // Cross-vendor spend today against the same project: claude $5 + codex $1.25.

@@ -63,10 +63,10 @@ describe('remoteHostsToDial', () => {
 });
 
 describe('hasNoBrowserDisqualifyingFlags (bare interactive --host routing)', () => {
-  // The bug this pins: a bare `agents sessions --host/--device <box>` used to
+  // The bug this pins: a bare `agents sessions --device/--device <box>` used to
   // short-circuit into the legacy per-host raw stream (non-interactive, no
   // previews) instead of the fleet browser. The browser handles an explicit
-  // host scope; the gate below is what lets `--host` reach it — but only for a
+  // host scope; the gate below is what lets `--device` reach it — but only for a
   // bare listing the picker can represent (no query / render / filter flag).
   it('allows a bare --host listing (no query, no flags) into the browser', () => {
     expect(hasNoBrowserDisqualifyingFlags({ host: ['yosemite-s0'] } as any, undefined)).toBe(true);

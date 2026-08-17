@@ -29,18 +29,19 @@ interface CostOptions {
   by?: string;
 }
 
-export function registerCostCommand(program: Command): void {
-  addHostOption(program.command('cost'))
+/** Register `agents insights cost` under the insights parent. */
+export function registerCostCommand(insightsCmd: Command): void {
+  addHostOption(insightsCmd.command('cost'))
     .description('Roll up $ cost and duration across local agent sessions')
     .option('--json', 'Output the rollup as JSON')
     .option('--since <time>', 'Only sessions newer than this (e.g., 7d, 4w, or ISO date)')
     .option('--by <dimension>', 'Group the breakdown by: agent (default), project, day, or account (the Claude org that produced each session)')
     .addHelpText('after', `
 Examples:
-  agents cost                   Daily histogram + top sessions + per-agent breakdown
-  agents cost --since 30d       Last 30 days only
-  agents cost --by project      Break down by project instead of agent
-  agents cost --by day --json   Machine-readable daily rollup
+  agents insights cost                   Daily histogram + top sessions + per-agent breakdown
+  agents insights cost --since 30d       Last 30 days only
+  agents insights cost --by project      Break down by project instead of agent
+  agents insights cost --by day --json   Machine-readable daily rollup
 
 Cost is computed offline from a versioned per-model price table (${PRICING_VERSION}).
 `)

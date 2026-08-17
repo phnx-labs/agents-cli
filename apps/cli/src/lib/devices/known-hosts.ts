@@ -12,7 +12,7 @@
  *
  * The learn-then-pin flow: the first `agents ssh`/fleet connection to a host is
  * still `accept-new`, but it writes the learned key into THIS store, which pins
- * it for every subsequent connect. Credential copies (`run --host --copy-creds`)
+ * it for every subsequent connect. Credential copies (`run --device --copy-creds`)
  * refuse to run against a host that isn't pinned here — see
  * `commands/exec.ts` — so tokens never ride an unverified first connect.
  */

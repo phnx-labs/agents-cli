@@ -23,9 +23,10 @@ import { execFileShellSpec } from './platform/index.js';
 import { latestFileMtimeMs } from './fs-walk.js';
 import { damerauLevenshtein } from './fuzzy.js';
 import { getCacheDir, getVersionsDir, getShimsDir, getHistoryDir, getCliVersionCachePath } from './state.js';
-import { resolveVersion, getVersionHomePath, getBinaryPath } from './versions.js';
+import { resolveVersion, getVersionHomePath, getBinaryPath } from './installations/versions.js';
 import { supports } from './capabilities.js';
 import { MCP_TARGETS } from './mcp-registry.js';
+import { VERSION_RE } from './agent-spec/primitives.js';
 
 /** Represents the installation state of an agent's CLI binary. */
 export interface CliState {
@@ -1177,7 +1178,9 @@ export const ALL_AGENT_IDS: AgentId[] = Object.keys(AGENTS) as AgentId[];
 export const ROUTINE_AGENT_COMMANDS: Record<string, string[]> = {
   claude: ['claude', '-p', '--verbose', '{prompt}', '--output-format', 'stream-json', '--permission-mode', 'plan'],
   codex: ['codex', 'exec', '{prompt}', '--json'],
-  gemini: ['gemini', '{prompt}', '--output-format', 'stream-json'],
+  // gemini is hard-deprecated (Antigravity replaced it) — no routine target. A
+  // legacy gemini routine now fails validateJob loud instead of firing a
+  // retired backend; the id survives only for reading old sessions/config.
   cursor: ['cursor-agent', '-p', '{prompt}', '--output-format', 'stream-json'],
   kimi: ['kimi', '--prompt', '{prompt}', '--output-format', 'stream-json'],
   droid: ['droid', 'exec', '{prompt}', '-o', 'stream-json'],
@@ -1221,7 +1224,9 @@ export function isSelfUpdatingAgent(agent: AgentId): boolean {
 }
 
 export function isAgentHardDeprecated(agent: AgentId): boolean {
-  return AGENTS[agent].deprecated?.hard === true;
+  // Tolerate ids outside the registry (legacy YAML, test fixtures): an unknown
+  // agent is not hard-deprecated — its own validation rejects it elsewhere.
+  return AGENTS[agent]?.deprecated?.hard === true;
 }
 
 // Capability-filtered agent lists used to live here as `*_CAPABLE_AGENTS`
@@ -3371,6 +3376,32 @@ export function resolveAgentName(input: string): AgentId | null {
 /** Check whether the input string matches any known agent name or alias. */
 export function isAgentName(input: string): boolean {
   return resolveAgentName(input) !== null;
+}
+
+/**
+ * Split a CLI-provided `<agent>[@<version>]` spec into its bare agent id and
+ * optional exact version token, the same way `agents run` does
+ * (commands/exec.ts parses its positional with a plain `split('@')`) — NOT the
+ * agent-spec qualifier engine (`@latest`/`@all`), which enumerates installed
+ * versions for read/diagnostic commands, not a single launch target. Returns an
+ * error message rather than throwing so callers decide exit-vs-continue.
+ */
+export function parseAgentVersionSpec(
+  raw: string,
+): { agent: AgentId; version?: string } | { error: string } {
+  const parts = raw.split('@');
+  if (parts.length > 2) {
+    return { error: `Invalid agent spec '${raw}': at most one '@version' is allowed` };
+  }
+  const [rawAgent, rawVersion] = parts;
+  const agent = resolveAgentName(rawAgent);
+  if (!agent) {
+    return { error: `Unknown agent, profile, or workflow: ${rawAgent}. See \`agents list\` for the installed harnesses.` };
+  }
+  if (rawVersion !== undefined && (rawVersion === '' || !VERSION_RE.test(rawVersion))) {
+    return { error: `Invalid version '${rawVersion}' in '${raw}'` };
+  }
+  return { agent, ...(rawVersion ? { version: rawVersion } : {}) };
 }
 
 /**

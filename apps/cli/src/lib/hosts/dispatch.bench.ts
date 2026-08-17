@@ -1,8 +1,8 @@
 /**
- * Benchmark for the `--host`/`--device` dispatch hot path: host resolution
+ * Benchmark for the `--device`/`--device` dispatch hot path: host resolution
  * (registry.ts:196 matchHost, registry.ts:296 resolveHost) and the pure SSH
  * command-building functions (dispatch.ts, remote-cmd.ts) every offload
- * caller (`run --host`, `agents ssh`, `agents teams start --host`) runs
+ * caller (`run --device`, `agents ssh`, `agents teams start --device`) runs
  * before the actual SSH round-trip.
  *
  * No mocking. `tests/setup.ts` (a vitest setupFile, so it also applies to
@@ -128,7 +128,7 @@ describe('readMeta vs isSshConfigHost — the CACHED overlay lookup next to the 
   });
 });
 
-describe('matchHost fan-out — resolving every device in a 14-host fleet sequentially (agents fleet status / doctor --devices / teams --host shape)', () => {
+describe('matchHost fan-out — resolving every device in a 14-host fleet sequentially (agents fleet status / doctor --devices / teams --device shape)', () => {
   bench(`matchHost across all ${DEVICE_COUNT} seeded devices, one call per host — each pays a fresh loadDevices() with no cache`, async () => {
     for (const name of ALL_DEVICE_NAMES) {
       await matchHost(name);
@@ -136,7 +136,7 @@ describe('matchHost fan-out — resolving every device in a 14-host fleet sequen
   });
 });
 
-describe('dispatch.ts — pure command-building (runs on every --host/--device dispatch before the ssh round-trip)', () => {
+describe('dispatch.ts — pure command-building (runs on every --device dispatch before the ssh round-trip)', () => {
   const opts: DispatchOptions = {
     agent: 'claude',
     prompt: 'benchmark prompt for the host dispatch path',

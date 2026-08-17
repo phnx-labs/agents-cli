@@ -39,14 +39,14 @@ vi.mock('../src/lib/agents.js', () => ({
   ensureSkillsDir: () => {},
 }));
 
-vi.mock('../src/lib/versions.js', () => ({
+vi.mock('../src/lib/installations/versions.js', () => ({
   getEffectiveHome: () => '',
   getVersionHomePath: () => '',
   listInstalledVersions: () => [],
 }));
 
 async function importSkillsLib() {
-  return await import('../src/lib/skills.js');
+  return await import('../src/lib/plugins/skills.js');
 }
 
 function writeSkill(baseSkillsDir: string, name: string, description: string): void {

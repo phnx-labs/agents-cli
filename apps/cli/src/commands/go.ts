@@ -187,10 +187,15 @@ export async function buildLivePool(activeById: Map<string, ActiveSession>, self
 
 function synthMeta(s: ActiveSession, self: string): SessionMeta {
   const remote = !sessionProcessIsLocal(s, self);
-  // For a local session, locate the real transcript on disk so the picker's
-  // buildPreview parses it directly (rich Prompt/Changes/Tools/Last response) —
-  // independent of the sessions DB. Remote transcripts live on the peer, so leave
-  // filePath empty and the preview shows a clean "not indexed here" note.
+  // For a local session, locate the real transcript so the picker's buildPreview
+  // parses it directly (rich Prompt/Changes/Tools/Last response) rather than
+  // rendering from the indexed digest. For Claude that resolves off disk; every
+  // other harness resolves the id THROUGH the session index (RUSH-2691), so a
+  // local non-Claude session the index has not reached yet yields '' here and
+  // gets the same clean "not indexed here" note as a remote one — which is the
+  // honest answer, since the pre-RUSH-2691 alternative was a co-located
+  // stranger's transcript. Remote transcripts live on the peer, so leave
+  // filePath empty there too.
   const filePath = remote ? '' : (findSessionFileForKind(s.kind, s.cwd, s.sessionId) ?? '');
   return {
     id: s.sessionId!,

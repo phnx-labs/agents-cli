@@ -4,7 +4,7 @@
  */
 import type { AgentId } from '../../types.js';
 import { capableAgents } from '../../capabilities.js';
-import { discoverPlugins, syncPluginToVersion, pluginSupportsAgent, cleanOrphanedPluginSkills } from '../../plugins.js';
+import { discoverPlugins, syncPluginToVersion, pluginSupportsAgent, cleanOrphanedPluginSkills } from '../../plugins/plugins.js';
 import type { ResourceWriter, WriteArgs, WriteResult } from './types.js';
 import { lazyAgentMap } from './lazy-map.js';
 

@@ -31,7 +31,7 @@ import {
   type SourceAuth,
   type DeviceApplyResult,
 } from '../lib/fleet/apply.js';
-import { listInstalledVersions } from '../lib/versions.js';
+import { listInstalledVersions } from '../lib/installations/versions.js';
 import type { AgentId } from '../lib/types.js';
 import type { DeviceDesired, DeviceProbe, DeviceDiff, FleetPlan } from '../lib/fleet/types.js';
 

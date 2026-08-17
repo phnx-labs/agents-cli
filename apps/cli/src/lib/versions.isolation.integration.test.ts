@@ -50,7 +50,7 @@ describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation
     probeIsolationOf: string,
     opts?: { allowDefaultSwitch?: boolean },
   ): Outcome {
-    const versionsPath = path.resolve(process.cwd(), 'src/lib/versions.ts');
+    const versionsPath = path.resolve(process.cwd(), 'src/lib/installations/versions.ts');
     const optsArg = opts ? `, undefined, ${JSON.stringify(opts)}` : '';
     const script = `
       import {
@@ -66,7 +66,14 @@ describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation
     `;
     const out = execFileSync('bun', ['-e', script], {
       cwd: process.cwd(),
-      env: { ...process.env, HOME: home },
+      env: {
+        ...process.env,
+        HOME: home,
+        // Pins write through getDevicesDir(); pin under this HOME so the vitest
+        // hermetic AGENTS_DEVICES_DIR does not swallow (or leak) agent pins.
+        AGENTS_DEVICES_DIR: path.join(home, '.agents', '.history', 'devices'),
+        AGENTS_SYNC_MACHINE_ID: 'testbox',
+      },
       stdio: ['ignore', 'pipe', 'inherit'],
     }).toString('utf-8');
     return JSON.parse(out.split('__RESULT__')[1]);
@@ -157,7 +164,7 @@ describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation
   // isolated install the global default — the leak the candidate filter above
   // blocks, arriving through a different door.
   it('refuses to pin `latest` when the user holds that exact version as an isolated copy', () => {
-    const versionsPath = path.resolve(process.cwd(), 'src/lib/versions.ts');
+    const versionsPath = path.resolve(process.cwd(), 'src/lib/installations/versions.ts');
     const latest = execFileSync('npm', ['view', '@openai/codex', 'version'], { encoding: 'utf-8' }).trim();
     expect(latest).toMatch(/^\d+\.\d+\.\d+/);
 

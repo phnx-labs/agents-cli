@@ -161,7 +161,7 @@ writer gates on.
 
 ### Across the SSH hop: `AGENT_LAUNCH_ID` is the one correlation key
 
-`agents run --host` runs `agents run` on a remote box, so the "who names the session"
+`agents run --device` runs `agents run` on a remote box, so the "who names the session"
 split above still holds — Claude forwards a `--session-id` the launcher controls, every
 other agent coins its own id on the peer. The launcher recovers that remote-coined id
 through **one stable correlation key it controls end-to-end**: `AGENT_LAUNCH_ID`.
@@ -192,7 +192,7 @@ long it must live and how it's read back:
 | Transcripts | `~/.claude/projects/…`, `~/.codex/sessions/…`, … | agent-native files (read-only) | the raw truth; parsed on demand |
 | CLI pid-registry | `~/.agents/.cache/terminals/by-pid/<pid>.json` | ephemeral file | `ag run`/shim write; CLI reads (§3) |
 | Live-session state | `~/.agents/.cache/terminals/sessions/<pid>.json` | ephemeral file | hook writes; extension reads (§3) |
-| Audit log | `~/.agents/.history/events/YYYY-MM-DD/events.jsonl` | dated, locked shared log | `emit()` in [`src/lib/events.ts`](../src/lib/events.ts); `agents events` reads; `agents audit` / `agents logs` are aliases |
+| Audit log | `~/.agents/.history/events/YYYY-MM-DD/events.jsonl` | dated, locked shared log | `emit()` in [`src/lib/feed/events.ts`](../src/lib/feed/events.ts); `agents events` reads; `agents audit` / `agents logs` are aliases |
 | Teams sentinels | `…/agents/<uuid>/exit_code`, `hosts/<id>.log` + `.exit` | ephemeral files | teammate writes exit code; supervisor reads (§6) |
 | Mailbox spool | `~/.agents/.history/mailbox/<id>/…` | append-only dirs | `agents message` / feed; `agents mailboxes` reads |
 
@@ -264,8 +264,14 @@ byte-tail (`readSessionTailWithRaw`, which also yields tokens/sec), and every ot
 tracked kind (grok, droid, rush, gemini, kimi, hermes, opencode, antigravity, cursor) is
 parsed by its own parser and run through the same `inferSessionState`
 (`computeLiveSignals` → `parseSession`). `findSessionFileForKind` locates the
-transcript for all of them — Claude off disk by cwd, the rest via the session index
-(`latestSessionFileForCwd`). Only an **opaque/untracked** kind or an
+transcript for all of them, and a KNOWN session id always selects that session's
+own file: Claude off disk (`findClaudeSessionFile`), every other tracked kind by
+id against the session index (`indexedSessionFileForId`). `latestSessionFileForCwd`
+— newest indexed transcript in the cwd — is only the fallback for a process whose
+id we do not know; using it with an id in hand handed every co-located
+same-harness agent one stranger's transcript (RUSH-2691). One consequence: a
+non-Claude session has no transcript until the index reaches it, which the
+daemon's warm tick keeps to seconds. Only an **opaque/untracked** kind or an
 unreadable/empty transcript has no rich state, and then one canonical function,
 `resolveFallbackStatus(sessionFile, pidAlive)`, decides the status:
 

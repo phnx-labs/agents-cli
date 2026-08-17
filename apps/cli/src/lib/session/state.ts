@@ -320,15 +320,15 @@ const GH_ISSUE_URL_RE = /https:\/\/github\.com\/[^\s"'()<>]+\/issues\/(\d+)/;
  * Flags of `teams create` / `teams add` that take a value, so the value is not
  * mistaken for the positional team name. Mirrors their value-taking flags in
  * `commands/teams.ts` — most are `.option('… <x>')` registrations, but
- * `--device`/`--host` come from `addHostOption`, so auditing this list against
- * `.option(` alone would wrongly drop them. A flag missing here degrades to "no
+ * `--device` comes from `addHostOption`, so auditing this list against
+ * `.option(` alone would wrongly drop it. A flag missing here degrades to "no
  * team detected", never to a wrong one.
  */
 const TEAM_VALUE_FLAGS = [
   '-d', '--description', '--use-worktree', '--devices', '--hosts', '--repo',
   '-n', '--name', '-m', '--mode', '-e', '--effort', '--model', '--env',
   '--cwd', '--worktree', '--after', '--task-type', '--cloud', '--branch',
-  '--device', '--host',
+  '--device',
 ];
 
 /**
@@ -433,11 +433,11 @@ export function detectSpawnedTeam(command?: string): string | undefined {
   const m = command.match(TEAMS_SPAWN_RE);
   if (!m) return undefined;
   const name = m[1];
-  // A single character is a doc placeholder (`agents teams create t --host <box>`)
+  // A single character is a doc placeholder (`agents teams create t --device <box>`)
   // far more often than a real team, and an English article is prose. Both used to
   // land in the index as a team name, and now that the name is rendered on the row
   // a wrong one is worse than none.
-  // A single character is a doc placeholder (`agents teams create t --host <name>`)
+  // A single character is a doc placeholder (`agents teams create t --device <name>`)
   // far more often than a real team; an all-digits token is a flag value or a list
   // index that leaked through, never a name someone typed. Both had reached the
   // index, and now that the name is rendered a wrong one is worse than none.

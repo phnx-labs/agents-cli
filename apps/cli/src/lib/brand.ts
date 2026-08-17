@@ -3,7 +3,7 @@
  * personally-named binary (e.g. `jack` instead of `agents`), skinned with their
  * name and pinned to the exact feature set they enable.
  *
- * A brand is minted by `agents setup mine` / `agents mine init <name>`, which
+ * A brand is minted by `agents setup mine` / `agents setup mine init <name>`, which
  * writes a pure pass-through shim (`~/.agents/.cache/shims/<name>`) that sets
  * `AGENTS_BRAND=<name>` then execs the real agents-cli entrypoint. The entrypoint
  * reads `AGENTS_BRAND` to (a) present its own name/help/errors as the brand, and

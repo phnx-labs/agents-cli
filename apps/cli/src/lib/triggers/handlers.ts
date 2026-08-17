@@ -10,18 +10,18 @@ import { exec } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { emit } from '../events.js';
+import { emit } from '../feed/events.js';
 import { machineId, normalizeHost } from '../machine-id.js';
 import { safeJoin } from '../paths.js';
 import { pickFleetDevice } from '../routines-placement.js';
 import type { DevicePlatform } from '../devices/registry.js';
-import type { JobConfig, RunMeta, WebhookContext } from '../routines.js';
+import type { JobConfig, RunMeta, WebhookContext } from '../scheduling/routines.js';
 import {
   assertShellSubstitutionSupported,
   readJob,
   substituteWebhookCommand,
   substituteWebhookPrompt,
-} from '../routines.js';
+} from '../scheduling/routines.js';
 import { ensureAgentsDir, getProjectWebhooksDir, getSystemWebhooksDir, getWebhooksDir } from '../state.js';
 import type { AgentId } from '../types.js';
 import type { IncomingWebhook, WebhookSource } from './webhook.js';

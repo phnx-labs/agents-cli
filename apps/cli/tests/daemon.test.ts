@@ -18,7 +18,7 @@ import {
   getDaemonStatus,
   generateLaunchdPlist,
   generateSystemdUnit,
-} from '../src/lib/daemon.js';
+} from '../src/lib/daemon/daemon.js';
 
 beforeEach(() => {
   TEST_ROOT = mkdtempSync(join(tmpdir(), 'agents-cli-daemon-'));

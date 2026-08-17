@@ -4,10 +4,11 @@ import * as os from 'os';
 import * as path from 'path';
 
 /**
- * The profile resolver: central `fleet.devices.<name>.config` ssh.* / platform /
- * user keys overlay the registry's discovery record. Exercises the REAL read path —
- * temp HOME + registry fixtures, fresh modules per test (state.ts captures HOME
- * at import time), and the real buildSshInvocation argv builder.
+ * The profile resolver: the config layers (per-device doc `config:` over
+ * central `fleet.defaults.config`) overlay the registry's discovery record.
+ * Exercises the REAL read path — temp HOME + registry fixtures, fresh modules
+ * per test (state.ts captures HOME at import time), and the real
+ * buildSshInvocation argv builder.
  */
 let TMP = '';
 
@@ -24,10 +25,10 @@ function writeCentral(yamlText: string) {
   fs.writeFileSync(path.join(TMP, '.agents', 'agents.yaml'), yamlText);
 }
 
-function seedRegistry(profiles: Record<string, unknown>) {
-  const dir = path.join(TMP, '.agents', '.history', 'devices');
+function writeDeviceDoc(name: string, yamlText: string) {
+  const dir = path.join(TMP, '.agents', 'devices', name);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'registry.json'), JSON.stringify(profiles));
+  fs.writeFileSync(path.join(dir, 'agents.yaml'), yamlText);
 }
 
 const NOW = new Date().toISOString();
@@ -64,10 +65,8 @@ describe('resolveDeviceProfile', () => {
     expect(resolveDeviceProfile(p)).toBe(p);
   });
 
-  it('overlays central ssh.* / platform / user values onto the registry profile', async () => {
-    writeCentral(
-      'fleet:\n  devices:\n    worker:\n      config:\n        sshUser: ops\n        sshIdentityFile: /keys/fleet\n        platform: windows\n',
-    );
+  it('overlays per-device doc ssh.* / platform / user values onto the registry profile', async () => {
+    writeDeviceDoc('worker', 'config:\n  sshUser: ops\n  sshIdentityFile: /keys/fleet\n  platform: windows\n');
     const { resolveDeviceProfile } = await freshModules();
 
     const resolved = resolveDeviceProfile(profile());
@@ -81,10 +80,18 @@ describe('resolveDeviceProfile', () => {
     expect(resolved.address.dnsName).toBe('worker.example.ts.net');
   });
 
-  it('central ssh.identity-file wins in the real buildSshInvocation argv', async () => {
-    writeCentral(
-      'fleet:\n  devices:\n    worker:\n      config:\n        sshIdentityFile: /keys/central\n',
-    );
+  it('fleet defaults apply fleet-wide; the device doc wins on conflict', async () => {
+    writeCentral('fleet:\n  devices: {}\n  defaults:\n    config:\n      sshUser: fleetops\n      platform: windows\n');
+    writeDeviceDoc('worker', 'config:\n  platform: linux\n');
+    const { resolveDeviceProfile } = await freshModules();
+
+    const resolved = resolveDeviceProfile(profile());
+    expect(resolved.user).toBe('fleetops'); // inherited from the fleet default
+    expect(resolved.platform).toBe('linux'); // device layer wins
+  });
+
+  it('a doc ssh.identity-file wins in the real buildSshInvocation argv', async () => {
+    writeDeviceDoc('worker', 'config:\n  sshIdentityFile: /keys/central\n');
     const { buildSshInvocation } = await freshModules();
 
     const { args } = buildSshInvocation(profile({ auth: { method: 'key', identityFile: '/keys/registry' } }), ['uptime'], '/tmp/askpass.sh');
@@ -97,16 +104,16 @@ describe('resolveDeviceProfile', () => {
     expect(args).toContain('discovered@worker.example.ts.net');
   });
 
-  it('central ssh.user overrides the dial user', async () => {
-    writeCentral('fleet:\n  devices:\n    worker:\n      config:\n        sshUser: ops\n');
+  it('a doc ssh.user overrides the dial user', async () => {
+    writeDeviceDoc('worker', 'config:\n  sshUser: ops\n');
     const { buildSshInvocation } = await freshModules();
 
     const { args } = buildSshInvocation(profile(), ['uptime'], '/tmp/askpass.sh');
     expect(args).toContain('ops@worker.example.ts.net');
   });
 
-  it('central platform=windows switches the remote command wrap to PowerShell', async () => {
-    writeCentral('fleet:\n  devices:\n    worker:\n      config:\n        platform: windows\n');
+  it('a doc platform=windows switches the remote command wrap to PowerShell', async () => {
+    writeDeviceDoc('worker', 'config:\n  platform: windows\n');
     const { buildSshInvocation } = await freshModules();
 
     const { args } = buildSshInvocation(profile(), ['uptime'], '/tmp/askpass.sh');
@@ -114,10 +121,8 @@ describe('resolveDeviceProfile', () => {
     expect(remote).toMatch(/^powershell -NoProfile -EncodedCommand /);
   });
 
-  it('central ssh.auth=password drives the askpass auth path', async () => {
-    writeCentral(
-      'fleet:\n  devices:\n    worker:\n      config:\n        sshAuth: password\n        sshBundle: fleet\n        sshBundleKey: password.work\n',
-    );
+  it('a doc ssh.auth=password drives the askpass auth path', async () => {
+    writeDeviceDoc('worker', 'config:\n  sshAuth: password\n  sshBundle: fleet\n  sshBundleKey: password.work\n');
     const { buildSshInvocation, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV } = await freshModules();
 
     const { args, env } = buildSshInvocation(profile(), ['uptime'], '/tmp/askpass.sh');

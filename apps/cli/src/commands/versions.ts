@@ -66,7 +66,7 @@ import {
   hasNewResources,
   printTrashFooter,
   type ResourceSelection,
-} from '../lib/versions.js';
+} from '../lib/installations/versions.js';
 import { carryForwardSettings } from '../lib/settings-manifest.js';
 import {
   createShim,

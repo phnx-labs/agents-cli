@@ -5,7 +5,7 @@ import * as path from 'path';
 import * as state from '../state.js';
 import * as activation from '../routine-activation.js';
 import { JobScheduler } from '../scheduler.js';
-import { writeJob, readJob, type JobConfig } from '../routines.js';
+import { writeJob, readJob, type JobConfig } from '../scheduling/routines.js';
 
 let tmpDir = '';
 let userRoutinesDir = '';

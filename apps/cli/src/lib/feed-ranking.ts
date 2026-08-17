@@ -1,4 +1,4 @@
-import type { OpenBlock, FeedAskStats } from './feed.js';
+import type { OpenBlock, FeedAskStats } from './feed/feed.js';
 import type { Classification } from './ask-classifier.js';
 import { classifyBlock } from './ask-classifier.js';
 import { outcomeForBlock } from './feed-outcome.js';

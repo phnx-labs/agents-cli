@@ -71,9 +71,53 @@ if (mode === 'old-peer') {
 }
 fs.chmodSync(shimBin, 0o755);
 
+// RUSH-2750: `bash -lc` is a LOGIN shell, and on macOS every login bash sources
+// `/etc/profile`, which runs `/usr/libexec/path_helper` -- that rebuilds PATH
+// from `/etc/paths` + `/etc/paths.d/*` and appends whatever PATH was already
+// set (this shimDir) at the very END, after `/opt/homebrew/bin` (Homebrew's own
+// `/etc/paths.d` entry). On a box with a real `agents` install there, the real
+// binary silently wins over this shim and the fixture never sees the CLI it
+// asked for. `/etc/profile` sources `~/.bash_profile` next (HOME is `peerHome`
+// here), so writing one there runs strictly after path_helper and can safely
+// re-prepend the shim -- effective only for this fixture's throwaway peerHome,
+// never the real user's shell.
+fs.writeFileSync(
+  path.join(peerHome, '.bash_profile'),
+  `export PATH="${shimDir}:$PATH"\n`,
+);
+
+// RUSH-2639: this exec channel is exactly the "child process launched through
+// a login-shell-like boundary" class the fork-private AGENTS_* isolation vars
+// exist for (see tests/setup.ts). The env below used to start from scratch
+// with only HOME/USERPROFILE/PATH/NODE_NO_WARNINGS, silently dropping every
+// hermeticity escape hatch (AGENTS_DEVICES_DIR, AGENTS_STATE_DIR,
+// AGENTS_SECRETS_AGENT_DIR, AGENTS_EVENTS_PATH, AGENTS_HOOK_SHIMS_DIR,
+// AGENTS_HOOK_CACHE_DIR, AGENTS_LOGS_DIR, AGENTS_PERF_DIR, AGENTS_REAL_HOME)
+// the parent vitest fork set — the one spawn path in sessions.test.ts that
+// did not carry them through, unlike every other subprocess helper in this
+// file. Forward them so the exec'd CLI resolves everything under peerHome
+// instead of falling back to a real-HOME-derived default.
+const FORWARDED_ISOLATION_VARS = [
+  'AGENTS_DEVICES_DIR',
+  'AGENTS_STATE_DIR',
+  'AGENTS_SECRETS_AGENT_DIR',
+  'AGENTS_SECRETS_NO_AGENT',
+  'AGENTS_NO_USAGE_TRACK',
+  'AGENTS_EVENTS_PATH',
+  'AGENTS_HOOK_SHIMS_DIR',
+  'AGENTS_HOOK_CACHE_DIR',
+  'AGENTS_LOGS_DIR',
+  'AGENTS_PERF_DIR',
+  'AGENTS_REAL_HOME',
+];
+
 function runExecCommand(command) {
   return new Promise((resolve) => {
     const inherited = process.env;
+    const forwarded = {};
+    for (const key of FORWARDED_ISOLATION_VARS) {
+      if (inherited[key] !== undefined) forwarded[key] = inherited[key];
+    }
     const child = spawn('bash', ['-c', command], {
       cwd: peerHome,
       env: {
@@ -81,6 +125,8 @@ function runExecCommand(command) {
         USERPROFILE: peerHome,
         PATH: `${shimDir}${path.delimiter}${inherited.PATH || ''}`,
         NODE_NO_WARNINGS: '1',
+        AGENTS_SKIP_MIGRATION: '1',
+        ...forwarded,
         ...(inherited.HTTP_PROXY ? { HTTP_PROXY: inherited.HTTP_PROXY } : {}),
         ...(inherited.HTTPS_PROXY ? { HTTPS_PROXY: inherited.HTTPS_PROXY } : {}),
         ...(inherited.NO_PROXY ? { NO_PROXY: inherited.NO_PROXY } : {}),

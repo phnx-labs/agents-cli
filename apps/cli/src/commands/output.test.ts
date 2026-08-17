@@ -52,11 +52,12 @@ function seed(
   upsertSession(meta, '');
 }
 
-/** Run `agents output <args>` capturing stdout (JSON) and console.log (TTY). */
+/** Run `agents insights output <args>` capturing stdout (JSON) and console.log (TTY). */
 async function runOutput(args: string[]): Promise<string> {
   const program = new Command();
   program.exitOverride();
-  registerOutputCommand(program);
+  const insights = program.command('insights');
+  registerOutputCommand(insights);
 
   const chunks: string[] = [];
   const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation((c: any) => {
@@ -67,7 +68,7 @@ async function runOutput(args: string[]): Promise<string> {
     chunks.push(a.join(' '));
   });
   try {
-    await program.parseAsync(['node', 'agents', 'output', ...args]);
+    await program.parseAsync(['node', 'agents', 'insights', 'output', ...args]);
   } finally {
     writeSpy.mockRestore();
     logSpy.mockRestore();
@@ -79,7 +80,7 @@ async function runOutput(args: string[]): Promise<string> {
 // tests offline (real gh is not mocked — that path is exercised manually).
 const BASE = ['--since', '2020-01-01', '--no-prs'];
 
-describe('agents output', () => {
+describe('agents insights output', () => {
   beforeAll(() => {
     // token_count is deliberately >> outputTokens to model cache-read inflation.
     // The split (input/cache-read/cache-write) and cost_usd_nocache are seeded so

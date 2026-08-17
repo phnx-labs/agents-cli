@@ -76,7 +76,7 @@ function writeFakeNpmInstaller(home: string, version: string): string {
       '#!/bin/sh',
       // Production install probes `npm --version` before `npm install` —
       // respond so the install path proceeds instead of bailing with
-      // "npm is not installed". See src/lib/versions.ts:1124.
+      // "npm is not installed". See src/lib/installations/versions.ts:1124.
       'if [ "$1" = "--version" ]; then',
       '  echo "10.0.0"',
       '  exit 0',
@@ -106,10 +106,13 @@ function writeLocalPackageRepo(): string {
   return repo;
 }
 
-/** Version pins now live in this machine's per-device file, not central agents.yaml. */
+/** Version pins live in untracked JSON under .history/devices (not the tracked device doc). */
 const DEVICE_ID = 'testdev';
+function devicesRuntimeDir(home: string): string {
+  return path.join(home, '.agents', '.history', 'devices');
+}
 function devicePinsPath(home: string): string {
-  return path.join(home, '.agents', 'devices', DEVICE_ID, 'agents.yaml');
+  return path.join(devicesRuntimeDir(home), `pins-${DEVICE_ID}.json`);
 }
 
 function runAgents(home: string, args: string[], extraEnv: Record<string, string> = {}) {
@@ -122,6 +125,20 @@ function runAgents(home: string, args: string[], extraEnv: Record<string, string
       AGENTS_REAL_HOME: home,
       SHELL: '/bin/zsh',
       AGENTS_SYNC_MACHINE_ID: DEVICE_ID,
+      // Own pins dir — vitest setup.ts pins AGENTS_DEVICES_DIR fork-wide.
+      AGENTS_DEVICES_DIR: devicesRuntimeDir(home),
+      // This suite exercises real CLI usage against on-disk fixtures, including
+      // legacy pre-migration `agents.yaml` layouts (`versions:`/`agents:` still
+      // central rather than split into the machine-local history/device files) --
+      // migration running is part of what a real non-dev install does on first
+      // touch, and some fixtures below depend on it actually running. Dev builds
+      // (this repo's own tsx/dist invocations, detectDevBuild()) default
+      // AGENTS_SKIP_MIGRATION on to protect a real developer's ~/.agents/ while
+      // iterating; override that default here since these are throwaway temp
+      // homes, not a real developer's, and the whole point is exercising the
+      // real non-dev-build behavior (RUSH-2749). A specific test can still force
+      // it off via extraEnv.
+      AGENTS_SKIP_MIGRATION: '0',
       ...extraEnv,
     },
     encoding: 'utf-8',
@@ -465,7 +482,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Set Codex@0.1.0 as global default');
-    expect(agentsYaml).toContain('codex: 0.1.0');
+    expect(agentsYaml).toContain('"codex": "0.1.0"');
     expect(fs.lstatSync(codexSymlink).isSymbolicLink()).toBe(true);
   });
 
@@ -495,7 +512,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     // an isolated version.
     const pins = fs.readFileSync(devicePinsPath(home), 'utf-8');
     expect(pins).toContain('isolatedAgents');
-    expect(pins).not.toMatch(/^agents:\s*\n\s+codex:/m);
+    expect(pins).not.toMatch(/"agents"\s*:\s*\{[^}]*"codex"/);
   });
 
   it('blocks `agents add gemini` before installation or resource sync', () => {
@@ -536,7 +553,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     expect(fs.existsSync(installedBinary)).toBe(true);
-    expect(agentsYaml).toContain('codex: 0.1.0');
+    expect(agentsYaml).toContain('"codex": "0.1.0"');
     expect(agentsYaml).not.toContain('codex: 0.2.0');
     expect(result.stdout).toContain("Default remains Codex@0.1.0. Run 'agents use codex@0.2.0' to switch.");
   });
@@ -831,7 +848,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
       }
     }
     fs.mkdirSync(path.dirname(devicePinsPath(home)), { recursive: true });
-    fs.writeFileSync(devicePinsPath(home), 'agents:\n  claude: 2.1.100\n');
+    fs.writeFileSync(devicePinsPath(home), JSON.stringify({ agents: { claude: '2.1.100' } }, null, 2) + '\n');
 
     const human = runAgents(home, ['view', 'claude'], {
       AGENTS_CLI_DISABLE_AUTO_UPDATE: '1',

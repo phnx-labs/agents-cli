@@ -1,7 +1,7 @@
 /**
- * Git / GitHub "output" collector — the shipped-work half of `agents output`.
+ * Git / GitHub "output" collector — the shipped-work half of `agents insights output`.
  *
- * `agents cost` answers "what did we burn?"; this answers "what did we ship?".
+ * `agents insights cost` answers "what did we burn?"; this answers "what did we ship?".
  * It counts commits (across every author identity, so multi-account totals stay
  * correct regardless of which `gh` login is active) and PRs opened / merged in a
  * time window. Pure `git`/`gh` over child_process — no server, no telemetry,

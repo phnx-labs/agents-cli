@@ -45,7 +45,7 @@ interface InventoryReport {
 
 function runInventory(agent: string, version: string, opts: { register?: boolean } = {}): InventoryReport {
   const modulePath = path.resolve(process.cwd(), 'src/lib/resource-inventory.ts');
-  const versionsPath = path.resolve(process.cwd(), 'src/lib/versions.ts');
+  const versionsPath = path.resolve(process.cwd(), 'src/lib/installations/versions.ts');
   const hooksPath = path.resolve(process.cwd(), 'src/lib/hooks.ts');
   const register = opts.register
     ? `

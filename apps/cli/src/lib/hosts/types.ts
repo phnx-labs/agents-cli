@@ -23,7 +23,7 @@ export interface Host extends HostEntry {
   enrolled?: boolean;
   status?: HostStatus;
   /**
-   * False when the host is listed for honesty but can't carry a `--host` run
+   * False when the host is listed for honesty but can't carry a `--device` run
    * (today: password-auth devices — offload rides BatchMode=yes ssh). Absent
    * means dispatchable. Cap routing and target pickers filter on this.
    */
@@ -34,14 +34,14 @@ export interface Host extends HostEntry {
  * Thrown when a device resolves but can't be used as an offload target because
  * it authenticates with a password. The offload path runs over `sshExec`, whose
  * `SSH_OPTS` force `BatchMode=yes` (no password prompts), so only key / ssh-config
- * auth can carry a `--host` run. Named so the top-level catch prints the message
+ * auth can carry a `--device` run. Named so the top-level catch prints the message
  * cleanly instead of a stack trace. (Lives here, not registry.ts, so providers
  * can throw it without a circular import; registry.ts re-exports it.)
  */
 export class DeviceOffloadUnsupportedError extends Error {
   constructor(name: string) {
     super(
-      `Device "${name}" uses password auth, which --host offload can't use yet ` +
+      `Device "${name}" uses password auth, which --device offload can't use yet ` +
         `(runs go over ssh with BatchMode=yes). Switch it to key auth with ` +
         `\`agents devices config ${name} ssh.auth key\`.`,
     );

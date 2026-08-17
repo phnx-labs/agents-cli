@@ -4,7 +4,7 @@
  * `String.length` is the wrong ruler for a terminal: it over-counts ANSI colour
  * escapes (chalk output) and under-counts wide glyphs (CJK, emoji) which occupy
  * two cells. The result is the drifting, wrapping session-table line users see
- * under tmux and over `--host` SSH. Every renderer that sizes a session-table
+ * under tmux and over `--device` SSH. Every renderer that sizes a session-table
  * cell measures and truncates through this module so alignment is computed once,
  * correctly, from the same source of truth.
  */
@@ -92,7 +92,7 @@ export function padToWidth(s: string, width: number): string {
 
 /**
  * Effective terminal width. Reads `$COLUMNS` first so it survives tmux and
- * `--host` SSH (where `process.stdout.columns` is unset or wrong), falls back to
+ * `--device` SSH (where `process.stdout.columns` is unset or wrong), falls back to
  * the TTY's reported width, then to `fallback`. Clamped to a sane band so a
  * bogus value can't produce a 0-wide or absurdly long table.
  */

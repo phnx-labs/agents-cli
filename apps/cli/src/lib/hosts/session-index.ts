@@ -1,5 +1,5 @@
 /**
- * Register host-dispatched runs (`agents run --host <h>`) into the LOCAL session
+ * Register host-dispatched runs (`agents run --device <h>`) into the LOCAL session
  * index so they show up in `agents sessions` and are resolvable by id — even
  * though the transcript itself lives on the remote host.
  *
@@ -27,7 +27,7 @@ import { deriveShortId } from '../session/short-id.js';
 import { normalizeHost } from '../machine-id.js';
 
 export interface HostSessionContext {
-  /** Local directory the `agents run --host` was invoked from. */
+  /** Local directory the `agents run --device` was invoked from. */
   cwd: string;
   /** Prompt the run was launched with, used for the session topic. */
   prompt: string;

@@ -133,7 +133,7 @@ this:
 
 See [`concepts.md`](concepts.md#devices--hosts) for the full model,
 [`fleet.md`](fleet.md) for the reconcile profile, and [`hosts.md`](hosts.md)
-for the `--host`/`--device` dispatch flags.
+for the `--device` dispatch flag.
 
 Set up the fleet:
 

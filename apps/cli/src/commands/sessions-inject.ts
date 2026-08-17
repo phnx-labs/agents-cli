@@ -23,7 +23,7 @@ interface InjectOptions {
   pane?: string;
   socket?: string;
   pty?: string;
-  host?: string;
+  device?: string;
   enter?: boolean;
   combined?: boolean;
   json?: boolean;
@@ -67,7 +67,7 @@ async function runInject(sessionId: string, text: string, options: InjectOptions
     enter: options.enter !== false,
     combined: options.combined,
     socket: options.socket,
-    host: options.host,
+    host: options.device,
   });
 
   if (options.json) {
@@ -88,7 +88,7 @@ export function registerSessionsInjectCommand(sessionsCmd: Command): void {
     .option('--pane <id>', 'Target a tmux pane id directly (e.g. %3), skipping session lookup')
     .option('--pty <id>', 'Target an agents-pty session id directly, skipping session lookup')
     .option('--socket <path>', 'tmux socket path (defaults to the session/shared socket)')
-    .option('--host <target>', 'Deliver on a remote host over SSH (tmux/AppleScript backends)')
+    .option('--device <target>', 'Deliver on a remote device over SSH (tmux/AppleScript backends)')
     .option('--no-enter', 'Send only the text, without a trailing Enter')
     .option('--combined', 'Fuse text + Enter into ONE write (default: two writes, Ink-TUI safe)')
     .option('--json', 'Output the InjectResult as JSON');
@@ -110,7 +110,7 @@ export function registerSessionsInjectCommand(sessionsCmd: Command): void {
       - A session is addressable by id when it resolves to a precise split —
         tmux, iTerm, a VSCodium/Cursor/VS Code integrated terminal, or a pty
         (resolveInjectTargetForSession). Use --pane/--pty for direct targeting.
-      - Built on the Terminal Engine (src/lib/terminal): --host runs the tmux /
+      - Built on the Terminal Engine (src/lib/terminal): --device runs the tmux /
         AppleScript spec over the same SSH transport the launch engine uses.
     `,
   });

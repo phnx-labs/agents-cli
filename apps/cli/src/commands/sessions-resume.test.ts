@@ -4,6 +4,7 @@ import {
   isDirectResumeSelector,
   resolveResumePacking,
   resumeHostMismatch,
+  resumeUsesLifecycleDispatch,
 } from './sessions-resume.js';
 import { sessionMatchesQuery } from './sessions-browser.js';
 import type { SessionMeta } from '../lib/session/types.js';
@@ -33,7 +34,7 @@ describe('isDirectResumeSelector', () => {
 describe('buildSessionLifecycleArgs', () => {
   it('routes an identity through focus and preserves source-device scope', () => {
     expect(buildSessionLifecycleArgs('ag-codex-c1f3d813', ['yosemite-s0'])).toEqual([
-      'sessions', 'focus', 'ag-codex-c1f3d813', '--host', 'yosemite-s0',
+      'sessions', 'focus', 'ag-codex-c1f3d813', '--device', 'yosemite-s0',
     ]);
   });
 
@@ -53,6 +54,14 @@ describe('buildSessionLifecycleArgs', () => {
 
   // apps/ext's remote path shells `agents sessions resume <id> --local` on the
   // peer; without the flag that call dies on an unknown option.
+  it('routes resume <id> --attach-only / --local through focus, not strict resume', () => {
+    expect(resumeUsesLifecycleDispatch('019fd114', undefined, { attachOnly: true })).toBe(true);
+    expect(resumeUsesLifecycleDispatch('019fd114', undefined, { local: true })).toBe(true);
+    expect(resumeUsesLifecycleDispatch('019fd114', undefined, {})).toBe(false);
+    expect(resumeUsesLifecycleDispatch('019fd114', 'finish the tests', { attachOnly: true })).toBe(false);
+    expect(resumeUsesLifecycleDispatch('auth middleware', undefined, { attachOnly: true })).toBe(false);
+  });
+
   it('forwards --local so the extension remote path keeps working', () => {
     expect(buildSessionLifecycleArgs('019fd114', [], false, true)).toEqual([
       'sessions', 'focus', '019fd114', '--local',
@@ -61,7 +70,7 @@ describe('buildSessionLifecycleArgs', () => {
 
   it('keeps both the host scope and the flag together', () => {
     expect(buildSessionLifecycleArgs('019fd114', ['zion'], true)).toEqual([
-      'sessions', 'focus', '019fd114', '--host', 'zion', '--attach-only',
+      'sessions', 'focus', '019fd114', '--device', 'zion', '--attach-only',
     ]);
   });
 });

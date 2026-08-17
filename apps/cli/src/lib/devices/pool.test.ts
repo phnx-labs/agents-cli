@@ -63,7 +63,7 @@ describe('filterAutoPool (the allowlist rule)', () => {
   });
 });
 
-describe('roles read from the stored fleet block', () => {
+describe('roles read from the per-device docs', () => {
   let TMP = '';
 
   beforeEach(() => {
@@ -96,9 +96,8 @@ describe('roles read from the stored fleet block', () => {
     });
     expect(mod.filterAutoPool(FLEET)).toEqual(['yosemite-s0', 'yosemite-s1']);
 
-    // It lands in the fleet-SHARED block — the only device store that syncs.
-    const yaml = fs.readFileSync(path.join(TMP, '.agents', 'agents.yaml'), 'utf-8');
-    expect(yaml).toContain('yosemite-s0');
+    // It lands in the per-device tracked doc — conflict-free, syncs via repo push/pull.
+    const yaml = fs.readFileSync(path.join(TMP, '.agents', 'devices', 'yosemite-s0', 'agents.yaml'), 'utf-8');
     expect(yaml).toContain('role: worker');
   });
 
@@ -109,6 +108,46 @@ describe('roles read from the stored fleet block', () => {
     mod.setConfiguredDeviceRole('yosemite-s0', undefined);
     expect(mod.configuredDeviceRole('yosemite-s0')).toBeUndefined();
     expect(mod.filterAutoPool(FLEET)).toEqual(FLEET);
+  });
+
+  it('a fleet-default role reaches every device in the pool, doc-less devices included', async () => {
+    const mod = await freshPool();
+    // A write creates the peer doc; keep another key so unsetting the
+    // device-layer role does not delete the folder.
+    mod.setConfiguredDeviceRole('yosemite-s0', 'worker');
+    mod.setConfigValue('notes', ['keep the doc'], { device: 'yosemite-s0' });
+    mod.unsetConfigValue('role', { device: 'yosemite-s0' });
+    mod.setConfigValue('role', 'personal', { fleet: true });
+    // The bare, doc-scan-only read still sees only the device with a doc.
+    expect(mod.listConfiguredDeviceRoles()).toEqual({ 'yosemite-s0': 'personal' });
+    // filterAutoPool passes its own candidate pool as the roster, so the
+    // fleet default reaches every device in FLEET — including 'zion',
+    // 'yosemite-s1', 'mac-mini', 'iphone', none of which have a doc — and
+    // the whole fleet is excluded as personal.
+    expect(mod.filterAutoPool(FLEET)).toEqual([]);
+  });
+
+  it('a fleet-default worker role reaches a device with no per-device doc at all', async () => {
+    const mod = await freshPool();
+    mod.setConfigValue('role', 'worker', { fleet: true });
+    // No device in FLEET has ever had a doc written.
+    expect(mod.listConfiguredDeviceRoles()).toEqual({});
+    // filterAutoPool must still narrow to the whole fleet as workers — the
+    // exact gap #2622's non-author review flagged as a blocker: a fleet-wide
+    // worker default silently dropped a doc-less device from the allowlist.
+    expect(mod.filterAutoPool(FLEET)).toEqual(FLEET);
+  });
+
+  it('describeAutoPool and listWorkerDevices reach a doc-less device via an explicit roster', async () => {
+    const mod = await freshPool();
+    mod.setConfigValue('role', 'worker', { fleet: true });
+    // No device has ever had a doc written — the bare (no-roster) reads must
+    // stay blind to the fleet default, mirroring filterAutoPool's own gap.
+    expect(mod.describeAutoPool()).toBe('');
+    expect(mod.listWorkerDevices()).toEqual([]);
+    // Callers with a real candidate list (formatNoHealthyDeviceError has its
+    // own `pool` param) pass it as the roster and the fleet default resolves.
+    expect(mod.describeAutoPool({ roster: FLEET })).toBe(`workers: ${FLEET.join(', ')}`);
   });
 
   it('auto.pool=all widens past the worker marks', async () => {

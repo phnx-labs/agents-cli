@@ -13,10 +13,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as TOML from 'smol-toml';
-import type { JobConfig } from './routines.js';
-import { resolveJobExecutionContext, resolveHostStrategy } from './routines.js';
+import type { JobConfig } from './scheduling/routines.js';
+import { resolveJobExecutionContext, resolveHostStrategy } from './scheduling/routines.js';
 import { evaluateRoutineReadiness, type RoutineReadinessResult, type PlacementMode } from './routine-context.js';
-import { getVersionHomePath, resolveVersion } from './versions.js';
+import { getVersionHomePath, isVersionInstalled, resolveVersion } from './installations/versions.js';
 import { probeLocalFleetAuth } from './auth-health.js';
 import { resolveHostRunTarget } from './hosts/run-target.js';
 import { hostIdentityArgs, sshTargetFor } from './hosts/types.js';
@@ -43,7 +43,15 @@ export function evaluateActivationReadiness(
     probe: mode === 'local' ? undefined : null,
   });
 
-  const probeAgent = deps.probeAgent ?? ((agent: string) => resolveVersion(agent as never) !== undefined);
+  // A pinned version on LOCAL placement must exist here — accepting a routine
+  // whose exact pin is absent just moves the failure to fire time (RUSH-2719).
+  // Remote host/fleet targets defer the check: their installs are unreachable
+  // from this box until the RUSH-2290 execution-context-on-target resolver.
+  const pinnedLocally = mode === 'local' ? config.version : undefined;
+  const probeAgent = deps.probeAgent ?? ((agent: string) =>
+    pinnedLocally
+      ? isVersionInstalled(agent as never, pinnedLocally)
+      : resolveVersion(agent as never) !== undefined);
   return evaluateRoutineReadiness(
     context,
     {
@@ -53,7 +61,7 @@ export function evaluateActivationReadiness(
         ? () => probeAgent(config.agent!)
         : undefined,
     },
-    { agent: config.agent },
+    { agent: config.agent, version: pinnedLocally },
   );
 }
 

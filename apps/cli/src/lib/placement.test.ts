@@ -63,12 +63,12 @@ describe('placementFromRunFlags', () => {
     expect(placementFromRunFlags({ host: 'zion' })).toEqual({
       kind: 'device',
       target: 'zion',
-      source: '--host/--device',
+      source: '--device',
     });
     expect(placementFromRunFlags({ device: 'auto' })).toEqual({
       kind: 'device',
       target: 'auto',
-      source: '--host/--device',
+      source: '--device',
     });
     expect(placementFromRunFlags({ lease: true })).toEqual({
       kind: 'lease',
@@ -110,7 +110,7 @@ describe('placementFromRunFlags', () => {
     expect(() => placementFromRunFlags({ where: 'lease', lease: true })).toThrow(/Conflicting placement/);
     expect(() => placementFromRunFlags({ host: 'a', lease: true })).toThrow(/Conflicting placement/);
     // Placements are mutually exclusive by definition: --cloud with any
-    // machine placement (--host/--device family, --lease, --box) is an error.
+    // machine placement (--device family, --lease, --box) is an error.
     expect(() => placementFromRunFlags({ cloud: true, host: 'zion' })).toThrow(/Conflicting placement/);
     expect(() => placementFromRunFlags({ cloud: true, lease: true })).toThrow(/Conflicting placement/);
     expect(() => placementFromRunFlags({ cloud: true, box: 'warm-1' })).toThrow(/Conflicting placement/);

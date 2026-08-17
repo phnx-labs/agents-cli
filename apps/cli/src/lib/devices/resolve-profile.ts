@@ -1,7 +1,7 @@
 /**
  * The effective device profile: the registry's discovery record overlaid with
- * the operator's central config (`fleet.devices.<name>.config` in
- * `~/.agents/agents.yaml`).
+ * the operator's config (the per-device doc `devices/<name>/agents.yaml`
+ * `config:` block over central `fleet.defaults.config`).
  *
  * The registry (`~/.agents/.history/devices/registry.json`) stays the
  * discovery cache — address, Tailscale snapshot, reachability, createdAt. The

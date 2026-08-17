@@ -1,9 +1,9 @@
 /**
  * Push one bundle's values to a remote host over SSH — the provisioning
- * primitive behind `agents secrets export --host` and, from RUSH-1968, behind
+ * primitive behind `agents secrets export --device` and, from RUSH-1968, behind
  * `agents fleet apply --provision-secrets`.
  *
- * This logic used to live inline in the `export --host` command action. It moved
+ * This logic used to live inline in the `export --device` command action. It moved
  * here because `lib/fleet/apply.ts` needs it and a lib MUST NOT import a command
  * module — and because the absence of a callable primitive is part of why
  * `fleet apply` never provisioned secrets at all, leaving an operator to
@@ -17,7 +17,7 @@
  *   interleaving stray lines into it.
  * - **Resolve once, push N times.** `resolveBundleForPush` is separate because
  *   reading a bundle can prompt (Touch ID); doing it per host would prompt per
- *   host. `export --host a,b,c` resolves once and pushes three times.
+ *   host. `export --device a,b,c` resolves once and pushes three times.
  */
 import { sshExec, type SshExecResult } from '../ssh-exec.js';
 import { remoteShellFor, buildWindowsStdinImportCommand } from '../hosts/remote-cmd.js';
@@ -79,7 +79,7 @@ export interface PushBundleOptions {
    * what pushed operators toward exporting the master key fleet-wide (RUSH-1968).
    */
   passphrase?: string;
-  /** Label for the audit trail — `export --host` vs `fleet apply`. */
+  /** Label for the audit trail — `export --device` vs `fleet apply`. */
   operation: string;
   /** Preserve an automation account's permanent prompt-free policy remotely. */
   policyNever?: boolean;

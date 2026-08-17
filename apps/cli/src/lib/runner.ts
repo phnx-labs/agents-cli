@@ -19,7 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { getCliLaunch, getAgentsBinDir } from './cli-entry.js';
-import type { JobConfig, RunMeta } from './routines.js';
+import type { JobConfig, RunMeta } from './scheduling/routines.js';
 import {
   resolveJobPrompt,
   parseTimeout,
@@ -35,14 +35,14 @@ import {
   claimRunSlot,
   readRunMeta,
   resolveHostStrategy,
-} from './routines.js';
+} from './scheduling/routines.js';
 import type { ResolvedExecutionContext, PlacementMode } from './routine-context.js';
 import { getRunsDir, getUserAgentsDir, readMeta, getDaemonDir } from './state.js';
 import type { AgentId } from './types.js';
 import { shortCodexHome } from './codex-home.js';
 import { prepareJobHome, buildSpawnEnv, getJobHomePath } from './sandbox.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
-import { createTimer, redactPrompt, emitRoutineEnd } from './events.js';
+import { createTimer, redactPrompt, emitRoutineEnd } from './feed/events.js';
 import { codexEditWritableRoots, codexPolicyArgs } from './codex-policy.js';
 import { applyAddDirs } from './add-dir.js';
 import {
@@ -65,7 +65,7 @@ import { backgroundSpawnOptions, killTree } from './platform/process.js';
 import lockfile from 'proper-lockfile';
 import { ensureLockTarget } from './fs-atomic.js';
 import { walkForFiles } from './fs-walk.js';
-import { getBinaryPath, isVersionInstalled, resolveVersion, getVersionHomePath } from './versions.js';
+import { getBinaryPath, isVersionInstalled, resolveVersion, getVersionHomePath } from './installations/versions.js';
 import { resolveClaudeSetupToken } from './claude-account-token.js';
 import {
   getConfiguredRunStrategy,
@@ -371,7 +371,11 @@ function allocateRoutineAttempt(config: JobConfig, trigger: RoutineTrigger): Att
     };
   }
 
-  if (!config.workflow && config.agent && ROUTINE_AGENT_IDS.includes(config.agent) && isAgentHardDeprecated(config.agent)) {
+  // Gate on deprecation alone, not ROUTINE_AGENT_IDS membership — a retired
+  // harness leaves the command table (gemini did), and the legacy routine must
+  // still land a visible 'blocked' record, never a generic buildJobCommand
+  // failure (RUSH-2202).
+  if (!config.workflow && config.agent && isAgentHardDeprecated(config.agent)) {
     const reason = hardDeprecationError(config.agent);
     return {
       proceed: false,
@@ -491,8 +495,14 @@ function terminateRoutineTree(pid: number | null): void {
     killTree(pid);
     return;
   }
+  // Detached spawn makes the child a new process-group leader; kill the group.
+  // If setsid has not landed yet (or the pid is not a leader), -pid fails with
+  // ESRCH and the child stays up — also kill the pid itself.
   try {
     process.kill(-pid, 'SIGKILL');
+  } catch { /* not a group leader, or already exited */ }
+  try {
+    process.kill(pid, 'SIGKILL');
   } catch { /* already exited */ }
 }
 
@@ -607,16 +617,6 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
       return dir.replace(/^~/, os.homedir());
     });
     cmd.push(...codexPolicyArgs(policyMode, [...codexEditWritableRoots(), ...routineRoots]));
-
-    appendModelAndReasoning(cmd, config);
-  }
-
-  if (config.agent === 'gemini') {
-    if (mode === 'edit') {
-      cmd.push('--approval-mode', 'auto_edit');
-    } else if (mode === 'skip') {
-      cmd.push('--yolo');
-    }
 
     appendModelAndReasoning(cmd, config);
   }
@@ -1046,7 +1046,10 @@ export async function resolveRoutineLaunch(
     };
   }
 
-  const strategy = getConfiguredRunStrategy(agent, cwd);
+  // A per-routine strategy travels with the definition and beats the firing
+  // box's ambient run.<agent>.strategy — otherwise selection policy silently
+  // depends on whichever device fires the job (RUSH-2719).
+  const strategy = config.strategy ?? getConfiguredRunStrategy(agent, cwd);
   let version: string | undefined;
   let rotation: RotateResult | null = null;
   let exhausted: RotateCandidate[] | undefined;
@@ -1429,7 +1432,7 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   // remote run to completion when possible.
   {
     const { resolvePlacementTarget } = await import('./routines-placement.js');
-    const target = resolvePlacementTarget(config);
+    const target = await resolvePlacementTarget(config);
     const placed = await dispatchPlacedJob(config, target, attempt);
     if (placed) return placed;
   }
@@ -2007,7 +2010,7 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
   // sends the finish notification only for local detached runs below (RUSH-2030).
   {
     const { resolvePlacementTarget } = await import('./routines-placement.js');
-    const target = resolvePlacementTarget(config);
+    const target = await resolvePlacementTarget(config);
     if (target.mode === 'host' || target.mode === 'cloud') {
       await assertRoutineAccountLocalForPlacement(config, target.mode);
     }

@@ -18,7 +18,7 @@ import {
   isDaemonRunning,
   signalDaemonReload,
   startDaemon,
-} from '../lib/daemon.js';
+} from '../lib/daemon/daemon.js';
 import { findDuplicateMonitor, monitorFingerprint } from '../lib/monitors/fingerprint.js';
 import { gatherFleetMonitors, NO_MONITOR_FANOUT_ENV } from '../lib/monitors/remote.js';
 import {
@@ -40,8 +40,8 @@ import {
 } from '../lib/monitors/config.js';
 import { formatRelativeTime } from '../lib/session/relative-time.js';
 import { evaluateMonitorOnce, POLL_SOURCE_TYPES } from '../lib/monitors/engine.js';
-import { listFires, readState, readLiveness, type MonitorLiveness } from '../lib/monitors/state.js';
-import { listRuns, getLatestRun, getRunDir } from '../lib/routines.js';
+import { listFires, readState, readLiveness, resolveFireOutcome, type MonitorLiveness } from '../lib/monitors/state.js';
+import { listRuns, getLatestRun, getRunDir } from '../lib/scheduling/routines.js';
 import { getMonitorsDir } from '../lib/state.js';
 import { IS_WINDOWS } from '../lib/platform/index.js';
 import { safeJoin } from '../lib/paths.js';
@@ -691,7 +691,9 @@ export function registerMonitorsCommands(program: Command): void {
       if (recentFires.length > 0) {
         console.log(chalk.bold('\nRecent fires'));
         for (const f of recentFires) {
-          console.log(`  ${chalk.gray(f.firedAt)}  ${f.action ?? '?'}  ${f.ok === false ? chalk.red('failed') : chalk.green('ok')}`);
+          // Reconciled against the run's real status — see `runs`, above (RUSH-2690).
+          const { ok } = resolveFireOutcome(name, f);
+          console.log(`  ${chalk.gray(f.firedAt)}  ${f.action ?? '?'}  ${ok ? chalk.green('ok') : chalk.red('failed')}`);
         }
       }
     });
@@ -858,9 +860,22 @@ export function registerMonitorsCommands(program: Command): void {
       }
       console.log(chalk.bold(`Fire history: ${name}\n`));
       for (const f of fires.slice(-20)) {
-        const outcome = f.ok === false ? chalk.red('failed') : chalk.green('ok');
+        // Reconcile against the run's REAL, current status (RUSH-2690) rather
+        // than trusting the frozen `ok` written at fire time — `dispatchAction`
+        // only sees a synchronous 'running' snapshot before the run has
+        // actually settled, so a run that later fails/times out/never produces
+        // output would otherwise read `ok` here forever while `agents monitors
+        // logs` (which reads the run record fresh) already shows the truth.
+        const { ok, runStatus } = resolveFireOutcome(name, f);
+        const outcome = ok ? chalk.green('ok') : chalk.red('failed');
+        // Surface the divergence explicitly when the frozen write disagreed
+        // with the reconciled read — the exact "fire says ok, run says
+        // otherwise" symptom RUSH-2690 reported.
+        const corrected = f.ok !== false && !ok && runStatus
+          ? chalk.yellow(` (run ${runStatus})`)
+          : '';
         const runRef = f.runId ? chalk.gray(`  run ${f.runId}`) : '';
-        console.log(`  ${f.firedAt}  ${(f.action ?? '?').padEnd(12)} ${outcome}${runRef}`);
+        console.log(`  ${f.firedAt}  ${(f.action ?? '?').padEnd(12)} ${outcome}${corrected}${runRef}`);
         console.log(chalk.gray(`    ${f.summary.slice(0, 100)}`));
       }
     });

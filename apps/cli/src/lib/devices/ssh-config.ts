@@ -3,7 +3,7 @@
  *
  * Writing a managed include (e.g. `~/.ssh/config.d/agents`) makes every tool
  * that speaks ssh — plain `ssh`/`scp`/`rsync`/`git`, and `agents sessions
- * --host` — resolve the registry's logical device names transparently, without
+ * --device` — resolve the registry's logical device names transparently, without
  * each of them learning about the registry. `agents ssh` stays the value-add
  * layer (preflight, password-from-bundle auth, platform-aware exec) on top.
  *

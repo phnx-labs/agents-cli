@@ -58,7 +58,7 @@ import {
   getLiveVersion,
   isVersionIsolated,
   getIsolatedDefault,
-} from '../lib/versions.js';
+} from '../lib/installations/versions.js';
 import {
   getShimsDir,
   isShimsInPath,
@@ -70,7 +70,7 @@ import { renderMergedResources } from '../lib/merged-resources.js';
 import { resolveVersionFilter, AgentSpecError } from '../lib/agent-spec/index.js';
 import { listCliStatus } from '../lib/cli-resources.js';
 import { isCapable } from '../lib/capabilities.js';
-import { discoverPlugins, pluginSupportsAgent } from '../lib/plugins.js';
+import { discoverPlugins, pluginSupportsAgent } from '../lib/plugins/plugins.js';
 import { getAgentsDir, getUserAgentsDir, getEffectivePromptcutsPath, readMergedPromptcuts, readMeta } from '../lib/state.js';
 import { listNativeAccounts } from '../lib/account-registry.js';
 import { isGitRepo, getGitSyncStatus } from '../lib/git.js';
@@ -1963,7 +1963,7 @@ Examples:
 
   # One call: full inventory + what's synced on a host (installed agents,
   # versions, accounts, usage, and per-version resource sync-state)
-  agents view claude --host yosemite-s0 --json --resources all
+  agents view claude --device yosemite-s0 --json --resources all
   agents view claude --json --resources skills,plugins   # just those sections
 
   # Prune older versions that duplicate an account already used by a newer version

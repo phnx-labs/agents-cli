@@ -8,7 +8,7 @@
  * multiple permission modes (plan, edit, full).
  */
 import { spawn, execSync, execFileSync, ChildProcess } from 'child_process';
-import { getAgentsInvocation } from '../daemon.js';
+import { getAgentsInvocation } from '../daemon/daemon.js';
 import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
@@ -21,7 +21,7 @@ import { debug } from './debug.js';
 import type { AgentId } from '../types.js';
 import { getAgentsDir as getSystemAgentsDir, getShimsDir } from '../state.js';
 import { AGENTS, getAccountInfo } from '../agents.js';
-import { resolveVersion, isVersionInstalled, verifyInstalledBinaryLaunches } from '../versions.js';
+import { resolveVersion, isVersionInstalled, verifyInstalledBinaryLaunches } from '../installations/versions.js';
 import { sanitizeProcessEnv } from '../secrets/bundles.js';
 import { resolveActor, actorEnv } from '../actor.js';
 import { recordRunName } from '../session/run-names.js';

@@ -6,7 +6,7 @@
  * the dispatch pipeline.
  */
 
-import type { JobTrigger } from '../routines.js';
+import type { JobTrigger } from '../scheduling/routines.js';
 
 /**
  * Identifier for a supported cloud dispatch backend.
@@ -21,7 +21,7 @@ import type { JobTrigger } from '../routines.js';
  *
  * Agents route to their native cloud automatically (see `cloudProvider` in the
  * agent registry); `--provider` overrides. Nothing auto-routes to `host` — it
- * is always an explicit `--provider host` (or `--host <name>`) choice.
+ * is always an explicit `--provider host` (or `--device <name>`) choice.
  */
 export type CloudProviderId = 'rush' | 'codex' | 'factory' | 'antigravity' | 'cursor' | 'host';
 

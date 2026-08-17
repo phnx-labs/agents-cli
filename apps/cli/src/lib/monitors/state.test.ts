@@ -12,14 +12,21 @@ import {
   recordCheck,
   markDroughtNotified,
   getMonitorHistoryDir,
+  resolveFireOutcome,
 } from './state.js';
 import type { MonitorEvent } from './config.js';
+import { writeRunMeta, getJobRunsDir, type RunMeta } from '../scheduling/routines.js';
 
 const NAME = `test-state-${process.pid}-${Date.now()}`;
 
 afterEach(() => {
   try {
     fs.rmSync(getMonitorHistoryDir(NAME), { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
+  try {
+    fs.rmSync(getJobRunsDir(NAME), { recursive: true, force: true });
   } catch {
     /* ignore */
   }
@@ -167,5 +174,101 @@ describe('fire history', () => {
     expect(fires[0].summary).toBe('CI failed on #1');
     expect(fires[0].runId).toBe('run-1');
     expect(fires[0].ok).toBe(true);
+  });
+});
+
+/**
+ * RUSH-2690: a `run` action fires, `dispatchAction` (lib/monitors/dispatch.ts)
+ * records `ok: true` from a SYNCHRONOUS 'running' snapshot, and then the
+ * dispatched process spawns, fails, and exits with no output — asynchronously,
+ * after the fire record is already frozen on disk. `agents monitors runs`
+ * showed a healthy `ok` forever because nothing ever revisited it, while
+ * `agents monitors logs` (which reads the run record fresh) already told the
+ * truth. `resolveFireOutcome` is the render-time fix: it re-reads the run's
+ * CURRENT status by runId on every call, so the displayed outcome tracks
+ * reality even though the on-disk fire record never changes.
+ *
+ * Real disk I/O, no mocking: writes an actual RunMeta via `writeRunMeta`
+ * (the same writer `settle()` in lib/runner.ts uses) and an actual fire
+ * record via `writeFireRecord`, then reads both back through the real
+ * `resolveFireOutcome`.
+ */
+describe('resolveFireOutcome (RUSH-2690 — reconcile the frozen ok against the run\'s real status)', () => {
+  function baseMeta(runId: string, status: RunMeta['status']): RunMeta {
+    return {
+      jobName: NAME,
+      runId,
+      agent: 'claude',
+      pid: null,
+      spawnedAt: Date.now(),
+      timeoutMs: 600_000,
+      status,
+      startedAt: '2026-08-15T08:00:41.400Z',
+      completedAt: status === 'running' ? null : '2026-08-15T08:00:41.414Z',
+      exitCode: status === 'running' ? null : 1,
+    } as RunMeta;
+  }
+
+  const event: MonitorEvent = {
+    monitorName: NAME,
+    firedAt: '2026-08-15T08:00:41.411Z',
+    summary: 'FIRE-NOW',
+    payload: {},
+  };
+
+  it('the async-race case: fire recorded ok:true off a "running" snapshot, run later failed with no output — reconciled read says failed', () => {
+    const runId = 'run-async-fail';
+    // The fire, as `writeFireRecord` persisted it at dispatch time: ok:true,
+    // because `runMeta.status` was 'running' (not yet in dispatchAction's
+    // skipped/blocked/failed negative list) when dispatchAction returned.
+    const fire = { ...event, runId, action: 'run', ok: true, runStatusAtFire: 'running' as const };
+    // The run then finished asynchronously — no output, exit code 1 — a few
+    // ms later, exactly like the ticket's reproduction (fire ok, run skipped
+    // 3ms later). `failed` stands in for that class of async-settled outcome.
+    writeRunMeta(baseMeta(runId, 'failed'));
+
+    const outcome = resolveFireOutcome(NAME, fire);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.runStatus).toBe('failed');
+  });
+
+  it('a run still genuinely in flight (status: running) still reads ok — not everything running is a bug', () => {
+    const runId = 'run-still-running';
+    const fire = { ...event, runId, action: 'run', ok: true };
+    writeRunMeta(baseMeta(runId, 'running'));
+
+    const outcome = resolveFireOutcome(NAME, fire);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.runStatus).toBe('running');
+  });
+
+  it('a run that settled clean (completed) reads ok', () => {
+    const runId = 'run-completed';
+    const fire = { ...event, runId, action: 'run', ok: true };
+    writeRunMeta(baseMeta(runId, 'completed'));
+
+    const outcome = resolveFireOutcome(NAME, fire);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.runStatus).toBe('completed');
+  });
+
+  it('a run that was skipped/blocked/timeout at settle time still reads failed, not just the async-failed case', () => {
+    for (const status of ['skipped', 'blocked', 'timeout'] as const) {
+      const runId = `run-${status}`;
+      const fire = { ...event, runId, action: 'run', ok: true };
+      writeRunMeta(baseMeta(runId, status));
+      expect(resolveFireOutcome(NAME, fire).runStatus, status).toBe(status);
+      expect(resolveFireOutcome(NAME, fire).ok, status).toBe(false);
+    }
+  });
+
+  it('a fire with no runId (notify/webhook-out) has nothing to reconcile against — the frozen ok is returned as-is', () => {
+    expect(resolveFireOutcome(NAME, { ...event, action: 'notify', ok: true })).toEqual({ ok: true });
+    expect(resolveFireOutcome(NAME, { ...event, action: 'notify', ok: false, error: 'no channel' })).toEqual({ ok: false });
+  });
+
+  it('a runId whose run record is missing/unreadable falls back to the frozen ok rather than throwing', () => {
+    const fire = { ...event, runId: 'run-does-not-exist-on-disk', action: 'run', ok: true };
+    expect(resolveFireOutcome(NAME, fire)).toEqual({ ok: true });
   });
 });

@@ -548,7 +548,7 @@ lime `a`).
 
 **A run notifies for itself.** `agents run --notify` arms the finish notification
 on the run process's own `exit`, so it covers every dispatch path — local spawn,
-`--host`, `--lease`, the error path — and, more importantly, does not depend on
+`--device`, `--lease`, the error path — and, more importantly, does not depend on
 whatever launched the run still being alive. That is the whole point: the menu
 bar's quick dispatch used to post from its own process-termination callback and
 lost it whenever the helper restarted. A run killed with SIGKILL never reaches an

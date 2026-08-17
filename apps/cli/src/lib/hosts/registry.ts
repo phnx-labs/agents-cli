@@ -186,7 +186,7 @@ export interface MatchHostOptions {
 }
 
 /**
- * The one place a `--host` / `--device` token becomes a resolved host. Reads the
+ * The one place a `--device` / `--device` token becomes a resolved host. Reads the
  * devices registry, the agents.yaml overlay, and ssh_config, and merges them
  * per-field (see {@link deviceHost}). One grammar for every caller: `name`,
  * `user@name`, a tailnet FQDN, an ssh_config alias, and a literal `user@host`
@@ -285,8 +285,8 @@ export async function listAllHosts(): Promise<Host[]> {
 }
 
 /**
- * Resolve a `--host`/`--device` token for DISPATCH — the shape every offload
- * caller consumes (`run --host`, the generic passthrough, teams placement, the
+ * Resolve a `--device`/`--device` token for DISPATCH — the shape every offload
+ * caller consumes (`run --device`, the generic passthrough, teams placement, the
  * cloud host provider, doctor, funnel, remote secrets). Grammar and merge come
  * from {@link matchHost}; on top, this layer applies the device-only dispatch
  * refusals so they hold even when an inline overlay shadows the device:
@@ -296,7 +296,7 @@ export async function listAllHosts(): Promise<Host[]> {
  *   - an addressless device has nothing to dial.
  *
  * A bare unknown name returns null so capability-tag routing (`resolveHostByCap`,
- * e.g. `--host gpu`) stays reachable, and an ad-hoc `user@host` still resolves.
+ * e.g. `--device gpu`) stays reachable, and an ad-hoc `user@host` still resolves.
  */
 export async function resolveHost(name: string): Promise<Host | null> {
   const host = await matchHost(name);
@@ -318,7 +318,7 @@ export async function resolveHost(name: string): Promise<Host | null> {
 }
 
 /**
- * Resolve a host by capability tag (e.g. `--host gpu`). Returns the single
+ * Resolve a host by capability tag (e.g. `--device gpu`). Returns the single
  * matching host, or throws on 0 or >1 matches unless `any` is set (then first).
  */
 export async function resolveHostByCap(cap: string, any = false): Promise<Host> {

@@ -63,10 +63,10 @@ describe('R2 backup gates (pure)', () => {
     expect(r2ExportGateError({ toR2: false, host: ['boxB'] }, false)).toBeNull();
   });
 
-  it('r2ExportGateError: --to-r2 + --host is rejected before anything runs', () => {
+  it('r2ExportGateError: --to-r2 + --device is rejected before anything runs', () => {
     const err = r2ExportGateError({ toR2: true, host: ['boxB'] }, true);
     expect(err).toBeTruthy();
-    expect(err).toContain('cannot be combined with --host');
+    expect(err).toContain('cannot be combined with --device');
   });
 
   it('r2ExportGateError: --to-r2 with an unconfigured bundle fails loud', () => {

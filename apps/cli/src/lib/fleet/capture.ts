@@ -49,12 +49,11 @@ export function captureFleet(prev: FleetManifest | undefined, inputs: CaptureInp
   // when the manifest didn't already pin one for that device.
   //
   // A device absent from `inputs.devices` drops OUT of the roster — that is the
-  // intended "live state is the source of truth for WHICH devices exist". But
-  // `fleet.devices.<name>.config` is also the operator-config store, and a
-  // capture run from a box whose registry has not seen a peer would silently
-  // erase that peer's settings. Observed for real: capturing on yosemite-s0
-  // deleted zion's whole config block from the shared agents.yaml. So carry a
-  // dropped device's `config:` forward — config only, never its roster fields.
+  // intended "live state is the source of truth for WHICH devices exist". A
+  // leftover `config:` on an override is the LEGACY #2458 store (folded into
+  // per-device docs by migrateDeviceConfigStores). Carry it forward so a
+  // capture from a box that has not seen a peer cannot re-strip a not-yet-
+  // migrated peer's settings. Config only, never its roster fields.
   const devices: Record<string, FleetDeviceOverride> = {};
   for (const [name, prevOverride] of Object.entries(prevDevices)) {
     if (inputs.devices.includes(name)) continue; // handled by the roster loop below

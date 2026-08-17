@@ -35,7 +35,7 @@ describe('agents artifacts group', () => {
     // The publish command still takes the file positionally.
     expect(share?.registeredArguments.map((a) => a.name())).toEqual(['file']);
     expect(share?.commands.map((c) => c.name()).sort()).toEqual(
-      ['analytics', 'delete', 'join', 'list', 'status', 'update'],
+      ['analytics', 'delete', 'join', 'list', 'revisions', 'status', 'update'],
     );
   });
 
@@ -51,6 +51,10 @@ describe('agents artifacts group', () => {
         '--force',
         '--no-cover',
         '--no-analytics',
+        '--label',
+        '--title',
+        '--meta',
+        '--no-revision',
         '--json',
       ]),
     );

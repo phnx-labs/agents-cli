@@ -31,6 +31,7 @@ import { spawnSync } from 'child_process';
 import { randomUUID } from 'crypto';
 import { isSessionTrackedAgent } from '../lib/session/types.js';
 import { applyActiveRulesPresetAtRun } from '../lib/rules/run-sync.js';
+import { handleBroadcast } from './run-broadcast.js';
 
 interface ExecCommandActionOptions {
   mode: ExecMode;
@@ -84,10 +85,10 @@ interface ExecCommandActionOptions {
   budget?: string;
   until?: string;
   interval?: string;
-  // Host dispatch: run on a registered agent host instead of locally.
-  // `--host` is canonical; `--on`/`--computer` are hidden aliases.
+  // Host dispatch: run on a registered agent device instead of locally.
+  // `--device` is canonical; `--on`/`--computer` are hidden aliases.
   // `--where` is the unified placement alias (lib/placement.ts) — expands into
-  // host/lease before dispatch; do not combine with those flags.
+  // device/lease before dispatch; do not combine with those flags.
   where?: string;
   host?: string;
   device?: string;
@@ -114,7 +115,17 @@ interface ExecCommandActionOptions {
   cloudEnv?: string; // --cloud-env <id>: Codex Cloud environment id (--env is taken by KEY=VAL passthrough)
   secretsKeys?: string; // --secrets-keys: comma-separated key subset for --secrets bundles
   allowExpired?: boolean; // --allow-expired: skip expiry pre-run abort for secrets
-  emitSessionId?: boolean; // internal: forwarded by --host dispatch so the remote run prints its session id (hosts/session-marker.ts)
+  emitSessionId?: boolean; // internal: forwarded by --device dispatch so the remote run prints its session id (hosts/session-marker.ts)
+  /** --broadcast: matrix-run the same prompt/task across agents × models. */
+  broadcast?: boolean;
+  /** --task <id>: house broadcast task (with --broadcast). */
+  task?: string;
+  /** --list-tasks: list broadcast tasks. */
+  listTasks?: boolean;
+  /** --results [run-id]: show saved broadcast runs. */
+  results?: string | true;
+  /** --concurrency <n>: broadcast cell parallelism. */
+  concurrency?: string;
 }
 
 export interface RunAccountPickerRequest {
@@ -136,8 +147,8 @@ export function parseRunAccountPickerRequest(agentSpec: string): RunAccountPicke
 
 /** Return every option whose routing semantics conflict with a local account choice. */
 /**
- * The `--host` alias family — the flags that mean "dispatch this run to another
- * machine over SSH". `--host` is canonical; `--device`/`--on`/`--computer` are
+ * The `--device` alias family — the flags that mean "dispatch this run to another
+ * machine over SSH". `--device` is canonical; `--on`/`--computer` are hidden
  * aliases. Returns the values actually given (so callers can both test presence
  * and read the target). Kept in ONE place because a guard that listed only a
  * subset silently let `--terminal --device` open a local tab and drop the remote
@@ -171,7 +182,7 @@ export function runAccountPickerConflicts(options: {
   if (options.balanced) conflicts.push('--balanced');
   if (options.lease) conflicts.push('--lease');
   if (options.box) conflicts.push('--box');
-  if (hostTargetGiven(options).length) conflicts.push('--host/--device');
+  if (hostTargetGiven(options).length) conflicts.push('--device');
   return conflicts;
 }
 
@@ -596,10 +607,10 @@ async function handleTerminalHandoff(
       process.exit(1);
     }
   }
-  // --host and its aliases (--device/--on/--computer) all mean "dispatch this
+  // --device and its aliases (--on/--computer) all mean "dispatch this
   // run to another machine over SSH", which is incompatible with opening a
   // terminal tab on THIS machine — so reject the whole alias family, not just
-  // the canonical flag. The rule and its wording live once, in the --host
+  // the canonical flag. The rule and its wording live once, in the --device
   // forwarding table, so the classification a reviewer reads and the error a
   // user sees can't drift.
   if (hostTargetGiven(options).length) {
@@ -608,7 +619,7 @@ async function handleTerminalHandoff(
     process.exit(1);
   }
   // Machine-readable output would land in the tab, where the caller that asked
-  // for it can never read it. Same class of failure as --host: refuse, don't
+  // for it can never read it. Same class of failure as --device: refuse, don't
   // hand back a stream that goes nowhere.
   const streamFlag = options.json ? '--json' : options.emitSessionId ? '--emit-session-id' : undefined;
   if (streamFlag) {
@@ -621,7 +632,7 @@ async function handleTerminalHandoff(
   // `--project` owns the working directory, but the main action resolves it far
   // below this handoff — so without this the tab would open in THIS process's
   // cwd (launchd's `/` for a menu-bar click) while the run inside it moved to
-  // the project. `forRemote: false` because --terminal is always local (--host
+  // the project. `forRemote: false` because --terminal is always local (--device
   // is rejected above).
   const cwd = await resolveRunCwd(options, { forRemote: false });
 
@@ -656,8 +667,8 @@ async function handleTerminalHandoff(
 /** Register the `agents run <agent> [prompt]` command. */
 export function registerRunCommand(program: Command): void {
   const runCmd = program
-    .command('run <agent> [prompt]')
-    .description('Execute an agent. Pass a prompt for headless runs; omit it to launch the agent interactively.')
+    .command('run [agent] [prompt]')
+    .description('Execute an agent. Pass a prompt for headless runs; omit it to launch the agent interactively. With --broadcast, run the same prompt/task across an agent × model matrix.')
     .option('-m, --mode <mode>', 'How much the agent can do: plan (read-only), edit (can write files), auto (smart classifier auto-approves safe ops, prompts for risky), skip (bypass all permission prompts). Omitted Codex mode defaults to safe writable edit; other harnesses default to plan. \'full\' accepted as alias for skip.', 'plan')
     .option('-e, --effort <effort>', 'Reasoning effort: low | medium | high | xhigh | max | auto (claude and codex only)', 'auto')
     .option('--model <model>', 'Cost tier (cheap|default|best|ultra) or a concrete model id; tiers resolve per harness+version to a supported model')
@@ -682,10 +693,10 @@ export function registerRunCommand(program: Command): void {
       'Inject only this comma-separated subset of keys from --secrets bundles (e.g. KEY1,KEY2). Missing keys are an error. Applies to all --secrets bundles on this run.',
     )
     .option('--allow-expired', 'Inject secrets even if their expiry date has passed (overrides the pre-run expiry abort).')
-    .option('--cwd <dir>', 'Working directory for the agent (defaults to current directory). With --host, the directory ON the host.')
+    .option('--cwd <dir>', 'Working directory for the agent (defaults to current directory). With --device, the directory ON the device.')
     .option(
       '-P, --project <ref>',
-      'Project shorthand <slug>[@worktree], resolved against your projects root (auto-inferred, cached). Sets the cwd locally or on --host.',
+      'Project shorthand <slug>[@worktree], resolved against your projects root (auto-inferred, cached). Sets the cwd locally or on --device.',
     )
     .option(
       '--add-dir <dir>',
@@ -698,9 +709,14 @@ export function registerRunCommand(program: Command): void {
     .option('--headless', 'Force headless mode. Auto-enabled when a prompt is provided; pass explicitly to stay headless with no prompt (reads the prompt from stdin).', false)
     .option('--no-auth-check', 'Skip the pre-launch "looks logged out" warning on an interactive run (advisory; never blocks anyway). Also silenced by AGENTS_NO_AUTH_CHECK=1.')
     .option('-i, --interactive', 'Force interactive mode even when a prompt is provided. Mutually exclusive with --headless.')
+    .option('--broadcast', 'Run the same prompt or --task across multiple agents (comma-separated [agent]) × --model cells. Replaces the former `agents bench` group.')
+    .option('--task <id>', 'With --broadcast: house benchmark task id under apps/cli/bench/tasks/')
+    .option('--list-tasks', 'With --broadcast: list available broadcast task ids')
+    .option('--results [run-id]', 'With --broadcast: show one saved matrix run, or list saved runs newest first')
+    .option('--concurrency <n>', 'With --broadcast: maximum cells running at once', '3')
     .option('--resume [id]', 'Recover a previous conversation on its origin device. The exact healthy origin uses native resume; otherwise a healthy version of the same harness replays via /continue. Pair with a prompt to continue headlessly.')
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.')
-    .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents logs <name>` for --host runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
+    .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents hosts logs <name>` for --device runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
     .option('--notify', 'Post a desktop notification when a headless run finishes. Fired by this process on exit, so it survives whatever launched the run (the menu bar dispatching it, a terminal you closed).')
     .option(
       '--terminal [backend]',
@@ -759,26 +775,22 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--where <spec>',
-      'Where this run\'s body executes (one placement door): local | device:<name> | auto | lease[:backend] | cloud[:provider]. Expands to --host/--lease/--cloud. Do not combine with those flags. See docs/concepts.md#placement.',
+      'Where this run\'s body executes (one placement door): local | device:<name> | auto | lease[:backend] | cloud[:provider]. Expands to --device/--lease/--cloud. Do not combine with those flags. See docs/00-concepts.md#placement.',
     )
     .option(
-      '--host <name>',
-      'Offload this run onto another machine over SSH — a device name, registered host, or user@host. Pass "auto" to pick the least-loaded reachable device with an eligible account; an unavailable or capped pool fails loud. Same as --where device:<name>. See `agents devices`.',
+      '-D, --device <name>',
+      'Offload this run onto another machine over SSH — a registered device, or user@host. Pass "auto" to pick the least-loaded reachable device where the requested agent is installed and signed in, keeping the run local when no remote is better. Same as --where device:<name>. See `agents devices`.',
     )
-    .option(
-      '--device <name>',
-      'Alias of --host. Pass "auto" for live health/account-aware device placement.',
-    )
-    .option('--remote-cwd <dir>', "Explicit host working directory for --host runs, used VERBATIM (overrides --cwd; usually --cwd suffices — it re-roots a local-home path onto the remote home). Pass a single-quoted '$HOME/…' or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you).")
-    .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents devices ps` and `agents logs`).')
-    .option('--any', 'With --host <cap> (a capability tag), pick any matching host instead of erroring when several match.')
+    .option('--remote-cwd <dir>', "Explicit device working directory for --device runs, used VERBATIM (overrides --cwd; usually --cwd suffices — it re-roots a local-home path onto the remote home). Pass a single-quoted '$HOME/…' or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you).")
+    .option('--no-follow', 'With --device, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
+    .option('--any', 'With --device <cap> (a capability tag), pick any matching device instead of erroring when several match.')
     .option(
       '--copy-creds',
       'Deprecated refusal: native OAuth/session credentials cannot be copied between devices. Use `agents accounts sync <account> --device <device>` for a portable provider credential.',
     )
     .option(
       '--lease [backend]',
-      "Run on a cloud box (via crabbox) and tear it down after — reuses a warm box from the repo's profile pool when one is ready (--fresh forces a new box). Optional backend selects the cloud (hetzner/aws/do). Same as --where lease[:backend]. Unlike --host, no machine is registered.",
+      "Run on a cloud box (via crabbox) and tear it down after — reuses a warm box from the repo's profile pool when one is ready (--fresh forces a new box). Optional backend selects the cloud (hetzner/aws/do). Same as --where lease[:backend]. Unlike --device, no machine is registered.",
     )
     .option(
       '--box <slug>',
@@ -798,7 +810,7 @@ export function registerRunCommand(program: Command): void {
     .option('--no-tailscale', 'Force a public-IP lease even when a reuse context would default to Tailscale.')
     .option(
       '--cloud',
-      'Vendor cloud placement: dispatch to the agent\'s native cloud (claude→rush, codex→codex, cursor→cursor, droid→factory, antigravity→antigravity) and stream the result. Same dispatch as `agents cloud run --agent <agent>`; tracked by `agents cloud list/status/logs`. Same as --where cloud. Mutually exclusive with --host/--lease and local-run flags.',
+      'Vendor cloud placement: dispatch to the agent\'s native cloud (claude→rush, codex→codex, cursor→cursor, droid→factory, antigravity→antigravity) and stream the result. Same dispatch as `agents cloud run --agent <agent>`; tracked by `agents cloud list/status/logs`. Same as --where cloud. Mutually exclusive with --device/--lease and local-run flags.',
     )
     .option('--provider <id>', 'With --cloud: override the agent\'s native cloud provider (rush | codex | cursor | factory | antigravity | host).')
     .option(
@@ -810,19 +822,19 @@ export function registerRunCommand(program: Command): void {
     .option('--branch <name>', 'With --cloud: target git branch.')
     .option('--cloud-env <id>', 'With --cloud: Codex Cloud environment ID (run\'s --env is the KEY=VAL passthrough, so the cloud env id gets its own flag).');
 
-  // `--on` and `--computer` are hidden aliases of `--host` — same behavior.
-  runCmd.addOption(new Option('--on <name>', 'Alias of --host.').hideHelp());
-  runCmd.addOption(new Option('--computer <name>', 'Alias of --host.').hideHelp());
+  // `--on` and `--computer` are hidden aliases of `--device` — same behavior.
+  runCmd.addOption(new Option('--on <name>', 'Alias of --device.').hideHelp());
+  runCmd.addOption(new Option('--computer <name>', 'Alias of --device.').hideHelp());
   // Deprecated one-release alias: `agents run … --smart` → treat as `--device auto`.
   runCmd.addOption(
     new Option('--smart', 'Deprecated: use --device auto (affinity host pick).').hideHelp(),
   );
 
-  // Internal: the `--host` dispatch forwards this so the REMOTE run prints its
+  // Internal: the `--device` dispatch forwards this so the REMOTE run prints its
   // resolved session id as a one-line stdout sentinel (hosts/session-marker.ts),
   // letting the launcher relate the remote-created session back to itself for
   // every agent — not just Claude, whose id it forces up front.
-  runCmd.addOption(new Option('--emit-session-id', 'internal: print the resolved session id for a --host launcher to capture').hideHelp());
+  runCmd.addOption(new Option('--emit-session-id', 'internal: print the resolved session id for a --device launcher to capture').hideHelp());
 
   // Required for the documented `agents run <agent> [prompt] -- <native flags>`
   // passthrough: commander >=13 rejects excess operands by default, so any
@@ -848,11 +860,11 @@ export function registerRunCommand(program: Command): void {
       # Full-auto: affinity-pick the host, then the harness with the most
       # account headroom, then a balanced account on it
       agents run auto "fix the flaky test" --mode edit
-      agents run auto --host yosemite-s0 "fix the flaky test"   # pin the host
+agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       agents run auto --interactive --device auto --strategy balanced --mode auto
 
       # Placement (one door — where the body runs). Old flags still work.
-      agents run claude "…" --where device:yosemite-s0   # = --host yosemite-s0
+      agents run claude "…" --where device:yosemite-s0   # = --device yosemite-s0
       agents run claude "…" --where auto                 # = --device auto
       agents run claude "fix CI" --where lease --mode edit
 
@@ -885,6 +897,12 @@ export function registerRunCommand(program: Command): void {
       agents run claude "fix the failing tests" --lease --fresh
       agents run claude "fix the failing tests" --box warm-one
 
+      # Broadcast one prompt (or --task) across agents × models
+      agents run --broadcast claude,codex "say hello" --model cheap,default
+      agents run --broadcast --task hello-repo --model cheap
+      agents run --broadcast --list-tasks
+      agents run --broadcast --results --json
+
       # Pass arbitrary native flags to the underlying CLI via -- separator
       agents run kimi -- --plan --some-kimi-option value
       agents run claude "fix the bug" -- --custom-flag
@@ -915,7 +933,7 @@ export function registerRunCommand(program: Command): void {
         excluded account and the earliest window reset — use --strategy pinned to force.
 
       'auto' harness (agents run auto): picks the host (14d usage affinity,
-      unless --host is given), the harness (installed CLIs weighted by
+      unless --device is given), the harness (installed CLIs weighted by
       best-account headroom), and the account (the strategy above). Zero
       healthy accounts on any harness exits nonzero with the earliest reset.
 
@@ -931,17 +949,17 @@ export function registerRunCommand(program: Command): void {
         cloud list/status/logs/cancel/message. --provider overrides the routing;
         --repo/--branch/--cloud-env refine the task. Agents without a native
         cloud (kimi, grok, cursor, opencode, …) fail loud unless --provider is
-        given. --cloud is mutually exclusive with --host/--lease and with
+        given. --cloud is mutually exclusive with --device/--lease and with
         local-run flags (--loop, --resume, --secrets, --terminal, …).
 
-      Resume: --resume <id> resolves full IDs locally first, then fleet-wide, and recovers on the source device with its cwd/mode. The exact healthy origin version uses native resume; otherwise a healthy version of the same harness replays via /continue. agents resume <id> infers the harness too.
+      Resume: --resume <id> resolves full IDs locally first, then fleet-wide, and recovers on the source device with its cwd/mode. The exact healthy origin version uses native resume; otherwise a healthy version of the same harness replays via /continue. agents sessions resume <id> infers the harness too.
 
       Passthrough: everything after -- is forwarded verbatim to the underlying agent CLI.
         agents run kimi -- --plan --some-native-flag value
     `,
   });
 
-  runCmd.action(async (agentSpec: string, prompt: string | undefined, options: ExecCommandActionOptions, command: Command) => {
+  runCmd.action(async (agentSpec: string | undefined, prompt: string | undefined, options: ExecCommandActionOptions, command: Command) => {
       // Capture everything after -- as passthrough args forwarded verbatim to the
       // underlying CLI. Commander strips the literal `--` and folds what follows
       // into the positional operands (so `agents run codex -- --yolo` would parse
@@ -962,6 +980,39 @@ export function registerRunCommand(program: Command): void {
         // The token commander assigned to [prompt] came from behind `--` — it is
         // a native flag, not a prompt. Run interactively.
         prompt = undefined;
+      }
+
+      // Broadcast matrix (formerly `agents bench`): list/results/run cells, then exit.
+      // --broadcast is local-only fan-out — it is mutually exclusive with --host/--device.
+      if (options.broadcast || options.listTasks || options.results !== undefined) {
+        const whereIsRemote =
+          typeof options.where === 'string' && options.where.trim().toLowerCase() !== 'local';
+        if (hostTargetGiven(options).length > 0 || whereIsRemote) {
+          console.error(chalk.red('--broadcast is local-only and cannot be combined with --host/--device/--where.'));
+          process.exit(1);
+        }
+        try {
+          await handleBroadcast({
+            listTasks: options.listTasks === true,
+            results: options.results,
+            task: options.task,
+            model: options.model,
+            concurrency: options.concurrency,
+            json: options.json,
+            agentsCsv: agentSpec,
+            prompt,
+            requireRun: options.broadcast === true && !options.listTasks && options.results === undefined,
+          });
+        } catch (err) {
+          console.error(chalk.red((err as Error).message));
+          process.exit(1);
+        }
+        return;
+      }
+
+      if (!agentSpec) {
+        console.error(chalk.red("Missing required argument 'agent'. Example: agents run claude \"hello\"."));
+        process.exit(1);
       }
 
       // --cloud: vendor cloud placement. Validate BEFORE the terminal handoff
@@ -988,7 +1039,7 @@ export function registerRunCommand(program: Command): void {
         return;
       }
 
-      // Placement: --where expands into --host / --lease / --cloud before any
+      // Placement: --where expands into --device / --lease / --cloud before any
       // dispatch. One door for "where does the body run?" — old flags remain
       // aliases. See lib/placement.ts and docs/concepts.md#placement.
       {
@@ -1036,7 +1087,7 @@ export function registerRunCommand(program: Command): void {
       }
 
       // --notify: post a desktop notification when this run finishes. Armed on
-      // process exit so it covers EVERY dispatch path below (local, --host,
+      // process exit so it covers EVERY dispatch path below (local, --device,
       // --lease, the error path) instead of one branch. Only for headless runs
       // — an interactive run ends in front of the person who started it.
       if (options.notify && prompt !== undefined) {
@@ -1140,7 +1191,7 @@ export function registerRunCommand(program: Command): void {
         if (!autoHarnessRequested && requestedAgent !== resolvedResumeSource.agent) {
           console.error(chalk.red(
             `Session ${resolvedResumeSource.shortId} belongs to ${resolvedResumeSource.agent}, not ${requestedAgent}. ` +
-            `Use: agents resume ${resolvedResumeSource.id}`,
+            `Use: agents sessions resume ${resolvedResumeSource.id}`,
           ));
           process.exit(1);
         }
@@ -1223,13 +1274,13 @@ export function registerRunCommand(program: Command): void {
           ));
           process.exit(1);
         }
-        // Host layer: with no explicit --host/--device, default to the
-        // affinity pick. Skipped on a host-dispatched run — its dispatcher
+        // Host layer: with no explicit --device, default to the
+        // affinity pick. Skipped on a device-dispatched run — its dispatcher
         // already resolved this layer (see runAutoDefaultsToAffinity).
         if (!resolvedResumeSource && runAutoDefaultsToAffinity(options)) options.device = 'auto';
       }
 
-      // --device auto / --host auto (and deprecated --smart): live fleet pick.
+      // --device auto (and deprecated --smart): live fleet pick.
       // Harness is always the agent the user typed — never auto-picked.
       // Placement failure propagates; an automatic request never becomes local.
       {
@@ -1595,7 +1646,7 @@ export function registerRunCommand(program: Command): void {
         }
       }
 
-      // --host/--on/--computer: offload this run onto a registered agent host
+      // --device/--on/--computer: offload this run onto a registered agent host
       // over SSH instead of running locally. The three flags are aliases.
       const hostGiven = hostTargetGiven(options);
 
@@ -1609,7 +1660,7 @@ export function registerRunCommand(program: Command): void {
 
       if (hostGiven.length > 0) {
         if (new Set(hostGiven).size > 1) {
-          console.error(chalk.red('Conflicting --host/--device values — pass just one.'));
+          console.error(chalk.red('Conflicting --device values values — pass just one.'));
           process.exit(1);
         }
         const hostName = hostGiven[0];
@@ -1843,7 +1894,7 @@ export function registerRunCommand(program: Command): void {
           // Headless host run: launch detached, tail the remote log, and follow
           // until the remote process exits.
           if (prompt === undefined) {
-            console.error(chalk.red('A prompt is required for headless host runs: agents run <agent> "<task>" --host <name>'));
+            console.error(chalk.red('A prompt is required for headless host runs: agents run <agent> "<task>" --device <name>'));
             process.exit(1);
           }
           // Session-id mint, detached dispatch, and local session-index
@@ -2027,8 +2078,8 @@ export function registerRunCommand(program: Command): void {
         import('../lib/secrets/bundles.js'),
         import('../lib/secrets/remote.js'),
         import('../lib/accounting/rotate.js'),
-        import('../lib/versions.js'),
-        import('../lib/plugins.js'),
+        import('../lib/installations/versions.js'),
+        import('../lib/plugins/plugins.js'),
         import('../lib/workflows.js'),
         import('../lib/run-defaults.js'),
         import('../lib/mcp.js'),
@@ -2714,7 +2765,7 @@ export function registerRunCommand(program: Command): void {
             // An isolated copy is never repaired by adopting another version, so
             // `add <agent>@latest` would build an unrelated NORMAL install rather
             // than fix what the user asked to run. Point at the isolated re-add.
-            const { isVersionIsolated } = await import('../lib/versions.js');
+            const { isVersionIsolated } = await import('../lib/installations/versions.js');
             const hint = isVersionIsolated(agent, launchTarget)
               ? `agents add ${agent}@${launchTarget} --isolated`
               : `agents add ${agent}@latest`;
@@ -2787,7 +2838,7 @@ export function registerRunCommand(program: Command): void {
       // home would false-negative. It can still false-negative for opaque
       // credentials, so this NEVER blocks — it warns and launches anyway. Skipped
       // for --json/--quiet, when a rotation already picked a signed-in account,
-      // and via --no-auth-check / AGENTS_NO_AUTH_CHECK=1. (--host/--lease return
+      // and via --no-auth-check / AGENTS_NO_AUTH_CHECK=1. (--device/--lease return
       // earlier.)
       {
         const { shouldCheckLoginBeforeLaunch, loginHint } = await import('../lib/signin-badge.js');
@@ -3016,7 +3067,7 @@ export function registerRunCommand(program: Command): void {
         toolsRestrict: workflowToolsRestrict,
         mcpConfigPath: workflowMcpConfigPath,
         passthroughArgs,
-        // Set only on the REMOTE side of a `--host` dispatch (the launcher
+        // Set only on the REMOTE side of a `--device` dispatch (the launcher
         // forwards `--emit-session-id`): print the resolved session id as a
         // stdout sentinel so the launcher captures the id this run coined.
         emitSessionId: options.emitSessionId === true,

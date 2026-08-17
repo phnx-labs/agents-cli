@@ -194,11 +194,11 @@ export interface SessionMeta {
   gitBranch?: string;
   messageCount?: number;
   tokenCount?: number;
-  /** Real generated (output) tokens — excludes cache-read/-write context (issue: `agents output`). */
+  /** Real generated (output) tokens — excludes cache-read/-write context (issue: `agents insights output`). */
   outputTokens?: number;
   /**
    * Uncached input tokens, cache-read tokens, and cache-write (cache-creation)
-   * tokens — the burn split `agents output` reports, kept only for harnesses that
+   * tokens — the burn split `agents insights output` reports, kept only for harnesses that
    * record a per-message cache split (Claude/Codex/Gemini/Droid). Undefined for
    * harnesses that expose no split (RUSH-2287).
    */
@@ -209,7 +209,7 @@ export interface SessionMeta {
   costUsd?: number;
   /**
    * USD cost priced as if caching were off — cache read/write billed at the full
-   * input rate. Backs `agents output --pricing no-cache` (RUSH-2287). Undefined
+   * input rate. Backs `agents insights output --pricing no-cache` (RUSH-2287). Undefined
    * when the harness records no cache split (then no-cache == actual by definition).
    */
   costUsdNoCache?: number;

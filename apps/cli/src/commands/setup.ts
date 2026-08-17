@@ -18,7 +18,7 @@ import { getAgentsDir, getVersionsDir, ensureAgentsDir } from '../lib/state.js';
 import { isGitRepo, cloneIntoExisting, pullRepo } from '../lib/git.js';
 import { isPromptCancelled, isInteractiveTerminal } from './utils.js';
 import { AGENTS, agentConfigDirName, getUnmanagedAgentInstalls, countSessionFiles, agentLabel } from '../lib/agents.js';
-import { setGlobalDefault } from '../lib/versions.js';
+import { setGlobalDefault } from '../lib/installations/versions.js';
 import { ensureShimCurrent, switchHomeFileSymlinks, isShimsInPath, addShimsToPath, getPathSetupInstructions, assertIsolationBoundary } from '../lib/shims.js';
 import { setHelpSections } from '../lib/help.js';
 import { registerSetupBrowserCommand, runBrowserWizard } from './setup-browser.js';
@@ -169,7 +169,7 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
       : (await import('../lib/device-config.js')).isDaemonEnabled();
     if (enabled) {
       const start = options.startDaemonFn
-        ?? (await import('../lib/daemon.js')).startDaemon;
+        ?? (await import('../lib/daemon/daemon.js')).startDaemon;
       const started = start();
       if (started.method !== 'already-running' && started.pid) {
         console.log(chalk.gray(`Started the always-on agents daemon (pid ${started.pid}).`));

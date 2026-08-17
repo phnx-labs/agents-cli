@@ -17,7 +17,7 @@
  * and any UI that collapses blocks under deliverables.
  */
 import { detectTicket, extractPrUrl } from './session/state.js';
-import type { OpenBlock } from './feed.js';
+import type { OpenBlock } from './feed/feed.js';
 
 export type OutcomeKind = 'ticket' | 'pr' | 'worktree' | 'unassigned';
 

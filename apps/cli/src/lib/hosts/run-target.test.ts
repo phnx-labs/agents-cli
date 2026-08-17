@@ -2,7 +2,7 @@
  * Shared host-run dispatch helper (run-target.ts) — resolution semantics.
  *
  * The real bugs this guards against:
- *   1. `resolveHostRunTarget` must preserve `agents run --host`'s exact
+ *   1. `resolveHostRunTarget` must preserve `agents run --device`'s exact
  *      fall-through: exact name first, then capability tag, and only
  *      "Multiple hosts tagged…" is a verdict — "no host tagged" must degrade to
  *      the generic unknown-host error, not leak the cap-lookup message.

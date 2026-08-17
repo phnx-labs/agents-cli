@@ -33,7 +33,7 @@ import {
   getActuallySyncedResources,
   compareVersions,
   type ResourceSelection,
-} from './versions.js';
+} from './installations/versions.js';
 import {
   diffVersionResources,
   type DoctorKind,
@@ -45,8 +45,8 @@ import {
   updatePlugin,
   readPluginSourceInfo,
   getUpstreamManifestVersion,
-} from './plugins.js';
-import { repairPluginManifestFile } from './plugin-marketplace.js';
+} from './plugins/plugins.js';
+import { repairPluginManifestFile } from './plugins/plugin-marketplace.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
