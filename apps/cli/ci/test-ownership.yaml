@@ -69,12 +69,19 @@ groups:
       - apps/cli/CHANGELOG.md
     checks: [docs]
 
+  # 180s, not the default 85s. Any edit to sessions.ts — a two-line subcommand
+  # registration included — selects the whole sessions* suite: 24 files, 92s of
+  # vitest inside a 122s run (PR #2771, run 32032566960), before the group's own
+  # typecheck + bench. It could never pass 85s, so no new `agents sessions <verb>`
+  # was mergeable; cli-full's 1200s would have been the opposite overcorrection.
+  # Raise this only against a measured run, and lower it when the suite is split.
   - id: sessions
     when:
       - apps/cli/src/lib/session/**
       - apps/cli/src/commands/sessions.ts
       - apps/cli/bench/sessions-active-perf.ts
     checks: [typecheck, sessions-bench]
+    budget_sec: 180
 
   - id: daemon
     when:

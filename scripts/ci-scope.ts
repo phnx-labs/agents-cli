@@ -35,6 +35,8 @@ export interface ImpactPlan {
   policy_digest: string;
   lockfile_digest: string;
   suite: 'selected' | 'cli-full';
+  /** Resolved seconds budget; absent means {@link IMPACT_BUDGET_SEC}. */
+  budget_sec?: number;
   tests: SelectedTest[];
   checks: string[];
   platforms: string[];
@@ -63,6 +65,22 @@ interface OwnershipGroup {
   tests?: string[];
   checks?: string[];
   suite?: 'selected' | 'cli-full' | 'metadata-gated';
+  /**
+   * Seconds this group's selection is allowed, overriding {@link IMPACT_BUDGET_SEC}.
+   *
+   * The gate had exactly two tiers — 85s for `selected`, 1200s for `cli-full` — and a
+   * legitimately medium selection had nowhere to sit. `sessions` is the case that
+   * forced it: ANY edit to `apps/cli/src/commands/sessions.ts`, a two-line subcommand
+   * registration included, pulls in the whole `sessions*` suite, measured at 92s of
+   * vitest inside a 122s run (PR #2771, run 32032566960). It could never pass 85s, so
+   * no new `agents sessions <verb>` could merge; `cli-full` would have handed a large
+   * and busy area a 20-minute allowance instead, which is the opposite of the point.
+   *
+   * Only ever RAISES the ceiling: groups that set nothing keep the 85s default, and
+   * the highest budget among the matched groups wins. Keep any value here justified
+   * by a measured run, not a round number.
+   */
+  budget_sec?: number;
 }
 
 interface OwnershipArea {
@@ -414,6 +432,7 @@ export function selectImpact(input: SelectImpactInput): ImpactPlan {
   const unmapped: string[] = [];
   const zeroSelection: string[] = [];
   let suite: ImpactPlan['suite'] = 'selected';
+  let budgetSec = 0;
 
   const relatedByDefault = input.related !== false;
   const relatedBySource = relatedByDefault
@@ -464,6 +483,7 @@ export function selectImpact(input: SelectImpactInput): ImpactPlan {
           : 'cli-full')
         : group.suite;
       if (groupSuite === 'cli-full') suite = 'cli-full';
+      if (group.budget_sec && group.budget_sec > budgetSec) budgetSec = group.budget_sec;
       for (const test of group.tests ?? []) {
         addTest(selected, mapping, file, test, `owner:${group.id}`);
         mark();
@@ -496,6 +516,7 @@ export function selectImpact(input: SelectImpactInput): ImpactPlan {
     policy_digest: existsSync(join(repoRoot, 'scripts/ci-scope.ts')) ? policyDigest(repoRoot) : '',
     lockfile_digest: lockfileDigest(repoRoot),
     suite,
+    ...(budgetSec > 0 ? { budget_sec: budgetSec } : {}),
     tests,
     checks: [...checks].sort(),
     platforms: ['linux'],
@@ -807,7 +828,7 @@ function main(): void {
     const elapsed = Math.round(Date.now() / 1000 - started);
     const deadline = plan.suite === 'cli-full'
       ? 1200
-      : (args.deadlineSec ?? IMPACT_BUDGET_SEC);
+      : (args.deadlineSec ?? plan.budget_sec ?? IMPACT_BUDGET_SEC);
     process.stdout.write(`impact ran in ${elapsed}s (budget ${deadline}s, suite ${plan.suite})\n`);
     if (elapsed > deadline) {
       process.stderr.write(`::error::impact exceeded ${deadline}s budget (${elapsed}s)\n`);

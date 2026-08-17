@@ -204,6 +204,40 @@ describe('selectImpact policy', () => {
     expect(plan.checks).toEqual(expect.arrayContaining(['typecheck', 'binary-smoke']));
   });
 
+  test('a sessions change carries the group budget, not the 85s default', () => {
+    // Registering a subcommand must touch sessions.ts, which selects the whole
+    // sessions* suite — 92s of vitest inside a 122s run. Under the flat 85s
+    // default no new `agents sessions <verb>` could ever merge (RUSH-2787).
+    const plan = selectImpact({
+      files: ['apps/cli/src/commands/sessions.ts'],
+      repoRoot: REPO,
+      related: false,
+    });
+    expect(plan.suite).toBe('selected');
+    expect(plan.budget_sec).toBe(180);
+    expect(plan.budget_sec).toBeGreaterThan(IMPACT_BUDGET_SEC);
+  });
+
+  test('a group with no budget keeps the default, so the ceiling only rises where declared', () => {
+    const plan = selectImpact({
+      files: ['apps/cli/src/commands/run.ts'],
+      repoRoot: REPO,
+      related: false,
+    });
+    expect(plan.budget_sec).toBeUndefined();
+  });
+
+  test('the highest budget among matched groups wins', () => {
+    // A change spanning a budgeted and an unbudgeted group must not be capped by
+    // the unbudgeted one — the run still has to execute the union of both.
+    const plan = selectImpact({
+      files: ['apps/cli/src/commands/sessions.ts', 'apps/cli/src/commands/run.ts'],
+      repoRoot: REPO,
+      related: false,
+    });
+    expect(plan.budget_sec).toBe(180);
+  });
+
   test('lockfile selects the explicit cli-full group', () => {
     const plan = selectImpact({
       files: ['apps/cli/bun.lock'],
