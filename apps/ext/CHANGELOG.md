@@ -6,6 +6,16 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [Unreleased]
 
+- **Offloaded tabs get auto-labels again (`--device auto` / Pick Host).** Default
+  `New Claude` emits `--device auto` and never records which box the CLI picked,
+  so the label poller scanned this laptop's `~/.claude` for a transcript that
+  lives on the worker. The fallback `agents sessions <id> --host` call has also
+  been dead since RUSH-2494 removed `--host` (commander rejects the lookup). The
+  watch stream already has `machine` + `topic`: we now stamp the host from that
+  row, title the tab from its topic, and talk to the CLI with `--device`.
+  Focusing a tab whose label arrived while it was unfocused also applies the
+  title instead of leaving the bare `CC` chip.
+
 ## [0.9.326] - 2026-08-17
 
 - **Device auto-launch reads the two-layer device-config store (PR #2622).**

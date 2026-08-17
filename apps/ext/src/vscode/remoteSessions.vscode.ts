@@ -153,7 +153,7 @@ export async function fetchRecentForHost(
   const fetchedAt = Date.now();
   const args = ['sessions', '--json', '--limit', String(limit)];
   if (isLocal) args.push('--local');
-  else args.push('--host', sshTarget);
+  else args.push('--device', sshTarget);
   try {
     const { stdout } = await execFileAsync(agentsBin, args, {
       timeout: isLocal ? HISTORY_TIMEOUT_LOCAL_MS : HISTORY_TIMEOUT_REMOTE_MS,
@@ -181,11 +181,16 @@ export async function fetchRecentForHost(
 /**
  * Label inputs for ONE session that lives on another machine.
  *
- * A tab spawned with `agents run --host` has its transcript on the host, so the
+ * A tab spawned with `agents run --device` has its transcript on the host, so the
  * local by-session-id lookups the label poller normally uses (the Claude
  * sessions/*.json scan, the jsonl preview read) find nothing and the tab keeps
- * the bare agent prefix forever. `agents sessions <id> --host <name> --json`
- * resolves both fields on the machine that owns the session.
+ * the bare agent prefix forever. `agents sessions <id> --device <name> --json`
+ * resolves both fields on the machine that owns the session. `--host` was
+ * removed in RUSH-2494; passing it makes commander reject the whole lookup.
+ *
+ * `host` is optional: omit it and the CLI fans the id out across the fleet
+ * (the default). A `--device auto` tab that never recorded which box the CLI
+ * picked still gets a title this way.
  *
  * Returns null when the host is unreachable or the session is not indexed there
  * yet — a fresh session has no first message for a second or two, and the poller
@@ -193,13 +198,15 @@ export async function fetchRecentForHost(
  */
 export async function fetchRemoteSessionLabelSource(
   sessionId: string,
-  host: string,
+  host?: string,
 ): Promise<SessionLabelSource | null> {
   const agentsBin = await findAgentsCli();
+  const args = ['sessions', sessionId, '--json'];
+  if (host) args.push('--device', host);
   try {
     const { stdout } = await execFileAsync(
       agentsBin,
-      ['sessions', sessionId, '--host', host, '--json'],
+      args,
       { timeout: DETAIL_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, env: pathAugmentedEnv() },
     );
     return parseSessionLabelSource(stdout, sessionId);
@@ -210,8 +217,8 @@ export async function fetchRemoteSessionLabelSource(
 
 /**
  * Resolve a running session's real `version` + `account` via
- * `agents sessions <id> [--host <device>] --json`. `host` is passed for an
- * offloaded (`--host`) tab whose session lives on another machine; omitted for a
+ * `agents sessions <id> [--device <device>] --json`. `host` is passed for an
+ * offloaded (`--device`) tab whose session lives on another machine; omitted for a
  * local session. This is the authoritative source for the status bar's
  * version/account — `agents view` reports only machine-default install metadata.
  *
@@ -224,7 +231,7 @@ export async function fetchSessionIdentity(
 ): Promise<SessionIdentity | null> {
   const agentsBin = await findAgentsCli();
   const args = host
-    ? ['sessions', sessionId, '--host', host, '--json']
+    ? ['sessions', sessionId, '--device', host, '--json']
     : ['sessions', sessionId, '--json'];
   try {
     const { stdout } = await execFileAsync(
@@ -271,7 +278,7 @@ export interface HostSessionDetail {
 
 /**
  * Tier-2: render one remote (or local) session as markdown on demand. Runs
- * `agents sessions <id> --markdown --include tools`, over SSH via --host for
+ * `agents sessions <id> --markdown --include tools`, over SSH via --device for
  * remote machines. Returns an error string rather than throwing.
  */
 export async function fetchHostSessionDetail(
@@ -281,7 +288,7 @@ export async function fetchHostSessionDetail(
   const agentsBin = await findAgentsCli();
   const isLocal = host === LOCAL_HOST || host === LOCAL_LABEL;
   const args = ['sessions', sessionId, '--markdown', '--include', 'tools'];
-  if (!isLocal) args.push('--host', host);
+  if (!isLocal) args.push('--device', host);
   try {
     const { stdout } = await execFileAsync(agentsBin, args, {
       timeout: DETAIL_TIMEOUT_MS,

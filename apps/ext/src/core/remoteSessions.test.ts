@@ -859,6 +859,31 @@ describe('parseSessionLabelSource', () => {
     expect(parseSessionLabelSource(record({ cwd: '/x', label: '   ', topic: '' }))).toEqual({ label: null, topic: null });
   });
 
+  test('reads the first real user event when session.topic is missing', () => {
+    const raw = JSON.stringify({
+      session: { id: 'abc', cwd: '/x' },
+      events: [
+        { type: 'hook', hookName: 'SessionStart' },
+        { type: 'message', role: 'user', content: 'Base directory for this skill: /tmp/continue', _synthetic: true },
+        { type: 'message', role: 'user', content: 'Compact the PageHeader across every page' },
+      ],
+    });
+    expect(parseSessionLabelSource(raw, 'abc')).toEqual({
+      label: null,
+      topic: 'Compact the PageHeader across every page',
+    });
+  });
+
+  test('does not treat a synthetic user event as a topic', () => {
+    const raw = JSON.stringify({
+      session: { id: 'abc', cwd: '/x' },
+      events: [
+        { type: 'message', role: 'user', content: '<command-name>/continue</command-name>', _synthetic: true },
+      ],
+    });
+    expect(parseSessionLabelSource(raw, 'abc')).toEqual({ label: null, topic: null });
+  });
+
   test('returns null for output that is not a session record', () => {
     expect(parseSessionLabelSource('not json')).toBeNull();
     expect(parseSessionLabelSource('{}')).toBeNull();

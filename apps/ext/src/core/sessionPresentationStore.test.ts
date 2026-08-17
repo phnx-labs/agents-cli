@@ -49,4 +49,29 @@ describe('SessionPresentationStore', () => {
     expect(store.apply({ version: 1, type: 'remove', streamId: 'a', sequence: 4, capturedAt: 2, scope: 'zion', rowKey: 'z' })).toBe(false);
     expect(store.sessions()).toEqual([{ rowKey: 'z', sourceDevice: 'zion' }, { rowKey: 'y', sourceDevice: 'yosemite-s1' }]);
   });
+
+  test('liveSession returns machine + topic for a --device auto tab that never recorded its host', () => {
+    const store = new SessionPresentationStore();
+    store.apply({
+      version: 1, type: 'reset', streamId: 's', sequence: 1, capturedAt: 1, scope: 'yosemite-s1',
+      rows: [{
+        rowKey: 'r',
+        sessionId: '022fe0a8-7674-402a-a5e0-248195894663',
+        kind: 'claude',
+        host: 'tmux',
+        machine: 'yosemite-s1',
+        topic: 'Compact the PageHeader across every page',
+        label: '',
+        sourceDevice: 'yosemite-s1',
+        status: 'running',
+        context: 'terminal',
+      }],
+    });
+    expect(store.liveSession('022fe0a8-7674-402a-a5e0-248195894663')).toEqual({
+      machine: 'yosemite-s1',
+      topic: 'Compact the PageHeader across every page',
+      label: '',
+    });
+    expect(store.liveSession('missing')).toBeUndefined();
+  });
 });

@@ -81,6 +81,43 @@ export class SessionPresentationStore {
     return result;
   }
 
+  /**
+   * Live stream row for one session id — machine + topic + label, no extra
+   * CLI subprocess. `--device auto` tabs never learn their host at launch;
+   * this is how they recover it (and a title) once the watch stream indexes
+   * the session.
+   */
+  liveSession(sessionId: string): { machine: string; topic: string; label: string } | undefined {
+    const wanted = sessionId.trim();
+    if (!wanted) return undefined;
+    for (const value of this.sessions()) {
+      if (!value || typeof value !== 'object') continue;
+      const row = value as {
+        sessionId?: unknown;
+        id?: unknown;
+        machine?: unknown;
+        sourceDevice?: unknown;
+        topic?: unknown;
+        prompt?: unknown;
+        firstUserMessage?: unknown;
+        label?: unknown;
+      };
+      const id = typeof row.sessionId === 'string' ? row.sessionId
+        : typeof row.id === 'string' ? row.id : '';
+      if (id !== wanted) continue;
+      const machine = typeof row.machine === 'string' ? row.machine
+        : typeof row.sourceDevice === 'string' ? row.sourceDevice
+        : '';
+      const topic = typeof row.topic === 'string' ? row.topic
+        : typeof row.prompt === 'string' ? row.prompt
+        : typeof row.firstUserMessage === 'string' ? row.firstUserMessage
+        : '';
+      const label = typeof row.label === 'string' ? row.label : '';
+      return { machine, topic, label };
+    }
+    return undefined;
+  }
+
   private rowKeyOf(value: unknown): string | undefined {
     if (!value || typeof value !== 'object') return undefined;
     const rowKey = (value as { rowKey?: unknown }).rowKey;

@@ -71,9 +71,17 @@ describe('RUSH-2411 auto-label-after-remote-hydration wiring', () => {
 
   test('the shared per-host active-map fetch is the id source (no per-tab SSH poll)', () => {
     // remoteAutoLabelHooks.fetchMap funnels through the coalesced per-host cache,
-    // and the host-aware `agents sessions <id> --host` stays the LABEL source.
+    // and the host-aware `agents sessions <id> --device` stays the LABEL source.
     expect(extensionSource).toMatch(/fetchMap:\s*\(host\)\s*=>\s*fetchTerminalIdSessionMap\(host\)/);
     expect(extensionSource).toMatch(/fetchLabel:[\s\S]*?fetchAndSetAutoLabel\(t\.terminal, t\)/);
+  });
+
+  test('session lookups use --device, never the retired --host flag', () => {
+    const vscodeSource = fs.readFileSync(path.join(import.meta.dir, 'remoteSessions.vscode.ts'), 'utf8');
+    expect(vscodeSource).toMatch(/\['sessions', sessionId, '--device', host, '--json'\]/);
+    expect(vscodeSource).toMatch(/args\.push\('--device', host\)/);
+    expect(vscodeSource).not.toMatch(/\['sessions', sessionId, '--host'/);
+    expect(extensionSource).toContain('sessionPresentationStore.liveSession');
   });
 });
 

@@ -3521,36 +3521,53 @@ interface FetchAutoLabelOpts {
   useFullConversation?: boolean;
 }
 
-/**
- * Auto-label for a tab whose agent runs on another machine.
- *
- * Same two-step shape as the local path — reuse a real persisted name, else
- * summarize the first user message — but both inputs come from the host over
- * `agents sessions <id> --host`. A ticket id in the first message is prefixed
- * exactly as locally, so a remote tab reads the same as a local one.
- */
-async function fetchRemoteAutoLabel(
-  terminal: vscode.Terminal,
-  entry: terminals.EditorTerminal,
-  host: string
-): Promise<string | undefined> {
-  if (!entry.sessionId) return undefined;
-  const source = await fetchRemoteSessionLabelSource(entry.sessionId, host);
-  if (!source) return undefined;
+function isLocalDeviceName(name: string): boolean {
+  return isLocalActiveMapKey(activeMapCacheKey(name));
+}
 
-  const ticket = source.topic ? extractLinearTicketId(source.topic) : null;
+function isScaffoldingTopic(text: string): boolean {
+  return /^Base directory for this skill:/i.test(text)
+    || /^<command-(?:name|message)>/i.test(text);
+}
+
+/** Stamp a {label, topic} pair onto the tab — persisted name, else LLM/5-word. */
+async function applyLabelSource(
+  terminal: vscode.Terminal,
+  source: { label: string | null; topic: string | null },
+): Promise<string | undefined> {
+  const topic = source.topic && !isScaffoldingTopic(source.topic) ? source.topic : null;
+  const ticket = topic ? extractLinearTicketId(topic) : null;
   if (source.label) {
     const label = ticket ? `${ticket} ${source.label}` : source.label;
     terminals.setAutoLabel(terminal, label);
     return label;
   }
-  if (!source.topic) return undefined;
-
-  const llmTitle = await generateLabelWithLLM(source.topic);
-  const base = llmTitle ?? extractFirstNWords(source.topic, 5);
+  if (!topic) return undefined;
+  const llmTitle = await generateLabelWithLLM(topic);
+  const base = llmTitle ?? extractFirstNWords(topic, 5);
   const autoLabel = ticket && base ? `${ticket} ${base}` : (ticket ?? base);
   if (autoLabel) terminals.setAutoLabel(terminal, autoLabel);
   return autoLabel ?? undefined;
+}
+
+/**
+ * Auto-label for a tab whose agent runs on another machine.
+ *
+ * Same two-step shape as the local path — reuse a real persisted name, else
+ * summarize the first user message — but both inputs come from
+ * `agents sessions <id> [--device <host>] --json`. A ticket id in the first
+ * message is prefixed exactly as locally, so a remote tab reads the same as a
+ * local one.
+ */
+async function fetchRemoteAutoLabel(
+  terminal: vscode.Terminal,
+  entry: terminals.EditorTerminal,
+  host?: string
+): Promise<string | undefined> {
+  if (!entry.sessionId) return undefined;
+  const source = await fetchRemoteSessionLabelSource(entry.sessionId, host);
+  if (!source) return undefined;
+  return applyLabelSource(terminal, source);
 }
 
 async function fetchAndSetAutoLabel(
@@ -3561,9 +3578,36 @@ async function fetchAndSetAutoLabel(
   if (!entry.sessionId) return entry.autoLabel;
   if (!opts.force && entry.autoLabel) return entry.autoLabel;
 
+  // `--device auto` never records which box the CLI picked. The watch stream
+  // does: stamp the machine so every later lookup (label, resume, identity)
+  // routes to the transcript's owner instead of scanning this laptop.
+  if (!entry.host && entry.sessionId) {
+    const live = sessionPresentationStore.liveSession(entry.sessionId);
+    if (live?.machine && !isLocalDeviceName(live.machine)) {
+      terminals.setHost(terminal, live.machine);
+      entry = terminals.getByTerminal(terminal) ?? entry;
+    }
+  }
+
+  // Prefer the live stream (already has topic/label, no extra subprocess).
+  // Falls through when the row is not indexed yet or carries only scaffolding.
+  if (!opts.useFullConversation) {
+    const live = sessionPresentationStore.liveSession(entry.sessionId);
+    if (live) {
+      const topic = live.topic.trim() && !isScaffoldingTopic(live.topic) ? live.topic.trim() : null;
+      // A real /rename title has a space ("Fix Fleet Login"). Claude's derived
+      // `<dirname>-<n>` placeholder does not — skip those so we summarize.
+      const label = live.label.trim() && live.label.includes(' ') ? live.label.trim() : null;
+      if (label || topic) {
+        const applied = await applyLabelSource(terminal, { label, topic });
+        if (applied) return applied;
+      }
+    }
+  }
+
   // Offloaded tab: the transcript is on the host, so the local session-file scan
-  // and jsonl preview below have nothing to read. Ask the host for the same two
-  // inputs instead — its persisted name, else its first message to summarize.
+  // and jsonl preview below have nothing to read. Ask the CLI (device-aware, or
+  // fleet-wide when the host is still unknown) for the same two inputs.
   if (entry.host) {
     return await fetchRemoteAutoLabel(terminal, entry, entry.host);
   }
@@ -3591,8 +3635,11 @@ async function fetchAndSetAutoLabel(
     }
 
     // 2) Otherwise summarize the session's activity into a short title. This
-    //    needs a first user message to summarize.
-    if (!firstUserMessage) return undefined;
+    //    needs a first user message to summarize. A `--device auto` tab has no
+    //    local transcript — ask the CLI (fleet-wide) instead of giving up.
+    if (!firstUserMessage) {
+      return await fetchRemoteAutoLabel(terminal, entry);
+    }
 
     const sourceText = opts.useFullConversation && previewInfo?.lastUserMessage
       ? `Initial task:\n${firstUserMessage}\n\nLatest activity:\n${previewInfo.lastUserMessage}`
@@ -3841,11 +3888,11 @@ async function tryFetchLabelOnFocus(
   // Heal a stuck derived-placeholder label so focusing the tab re-resolves it.
   await maybeHealDerivedLabel(terminal, entry, context);
 
-  // Skip if it already has a (real) label
-  if (entry.label || entry.autoLabel) return;
-
-  // Fetch the label from session file
-  const autoLabel = await fetchAndSetAutoLabel(terminal, entry);
+  // A label fetched while this tab was unfocused is already on the entry, but
+  // the title update is gated on `activeTerminal === terminal` — so focusing
+  // later used to no-op and leave the bare agent chip forever.
+  const existing = entry.label || entry.autoLabel;
+  const autoLabel = existing ?? await fetchAndSetAutoLabel(terminal, entry);
   if (!autoLabel) return;
 
   // Update status bar
@@ -3990,6 +4037,11 @@ function applyHydratedSessionId(
   if (!liveId) return;
   if (entry.sessionId !== liveId) {
     terminals.setSessionId(terminal, liveId);
+    // `--device auto` never knew the machine at launch. The watch stream does.
+    const live = sessionPresentationStore.liveSession(liveId);
+    if (!entry.host && live?.machine && !isLocalDeviceName(live.machine)) {
+      terminals.setHost(terminal, live.machine);
+    }
     // The tab just gained (or corrected to) its canonical id. Arm the auto-label
     // lifecycle now — the same transition the local SessionStart watcher performs
     // via onSessionChanged. Without this, a remote-hydrated tab (e.g. picked-host

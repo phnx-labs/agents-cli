@@ -952,9 +952,35 @@ export function parseSessionLabelSource(rawJson: string, sessionId?: string): Se
   const record = pickSessionRecord(data, sessionId);
   if (!record) return null;
   const label = typeof record.label === 'string' && record.label.trim() ? record.label.trim() : null;
-  const topic = typeof record.topic === 'string' && record.topic.trim() ? record.topic.trim() : null;
+  let topic = typeof record.topic === 'string' && record.topic.trim() ? record.topic.trim() : null;
+  // `agents sessions <id> --json` is `{ session, events }` and the session
+  // object often has no topic/label (those live on the list/active shapes).
+  // The events array still has the first real user turn — use it so an
+  // offloaded tab can be labelled without a second query.
+  if (!topic) {
+    const events = !Array.isArray(data) && data && typeof data === 'object'
+      ? (data as { events?: unknown }).events
+      : record.events;
+    topic = topicFromUserEvents(events);
+  }
   const cwd = typeof record.cwd === 'string' ? record.cwd : '';
   return { label: label && isDerivedSessionName(label, cwd) ? null : label, topic };
+}
+
+/** First non-synthetic user message in a `sessions <id> --json` events array. */
+export function topicFromUserEvents(events: unknown): string | null {
+  if (!Array.isArray(events)) return null;
+  for (const item of events) {
+    if (!item || typeof item !== 'object') continue;
+    const event = item as { type?: unknown; role?: unknown; content?: unknown; _synthetic?: unknown };
+    if (event.type !== 'message' || event.role !== 'user') continue;
+    if (event._synthetic === true) continue;
+    const content = typeof event.content === 'string' ? event.content.trim() : '';
+    if (!content) continue;
+    if (/^Base directory for this skill:/i.test(content)) continue;
+    return content;
+  }
+  return null;
 }
 
 export interface SessionIdentity {
