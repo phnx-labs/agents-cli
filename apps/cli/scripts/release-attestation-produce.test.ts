@@ -40,7 +40,29 @@ function git(cwd: string, ...args: string[]): string {
 // package.json, bun.lock, vitest.config.ts, ci/test-ownership.yaml } plus a
 // root-level scripts/ci-scope.ts. A fake bun/npm on PATH stand in for the
 // real toolchain; `failSuite` makes the fake `bun run test` exit non-zero.
-function buildFixture(root: string, opts: { failSuite?: boolean } = {}): { caller: string; fakebin: string; store: string; headCommit: string } {
+function fakeSuiteBody(opts: { failSuite?: boolean; suite?: 'greenWorkerCrash' | 'redWorkerCrash' }): string {
+  // Summary lines mirror real vitest output so the producer's
+  // suite_green_despite_worker_crash parser is exercised against the shape it
+  // sees in production (RUSH-2758).
+  if (opts.suite === 'greenWorkerCrash')
+    return [
+      '  echo " Test Files  861 passed | 8 skipped (870)"',
+      '  echo "      Tests  12200 passed | 105 skipped (12325)"',
+      '  echo "Error: Worker exited unexpectedly"',
+      '  exit 1',
+    ].join('\n');
+  if (opts.suite === 'redWorkerCrash')
+    return [
+      '  echo " Test Files  2 failed | 859 passed (870)"',
+      '  echo "      Tests  3 failed | 12197 passed (12325)"',
+      '  echo "Error: Worker exited unexpectedly"',
+      '  exit 1',
+    ].join('\n');
+  if (opts.failSuite) return '  echo "1 test failed" >&2; exit 1';
+  return '  echo "tests passed"; exit 0';
+}
+
+function buildFixture(root: string, opts: { failSuite?: boolean; suite?: 'greenWorkerCrash' | 'redWorkerCrash' } = {}): { caller: string; fakebin: string; store: string; headCommit: string } {
   const remote = path.join(root, 'remote.git');
   const caller = path.join(root, 'caller');
   git(root, 'init', '-q', '--bare', '-b', 'main', remote);
@@ -74,7 +96,7 @@ function buildFixture(root: string, opts: { failSuite?: boolean } = {}): { calle
       'if [[ "$1" == "--version" ]]; then echo "1.2.3"; exit 0; fi',
       'if [[ "$1" == "install" ]]; then exit 0; fi',
       'if [[ "$1" == "run" && "$2" == "test" ]]; then',
-      opts.failSuite ? '  echo "1 test failed" >&2; exit 1' : '  echo "tests passed"; exit 0',
+      fakeSuiteBody(opts),
       'fi',
       'if [[ "$1" == "run" && "$2" == "build" ]]; then mkdir -p dist; exit 0; fi',
       'echo "fake bun: unhandled args: $*" >&2; exit 1',
@@ -206,6 +228,26 @@ describe('release-attestation-produce.sh', () => {
   it('never writes an attestation for a red suite (fail closed)', () => {
     const root = tmp('attest-produce-red-');
     const fx = buildFixture(root, { failSuite: true });
+    const result = runProduce(fx);
+    expect(result.status).not.toBe(0);
+    expect(result.stdout + result.stderr).toContain('refusing to attest a red tree');
+    expect(fs.existsSync(fx.store) ? fs.readdirSync(fx.store).filter((f) => f.endsWith('.json')) : []).toEqual([]);
+  });
+
+  it('attests a green suite whose only failure is a teardown worker-exit (RUSH-2758)', () => {
+    const root = tmp('attest-produce-worker-crash-green-');
+    const fx = buildFixture(root, { suite: 'greenWorkerCrash' });
+    const result = runProduce(fx);
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(result.stdout + result.stderr).toContain('treating as pass');
+    const jsonFile = fs.readdirSync(fx.store).find((f) => f.endsWith('.json'));
+    expect(jsonFile).toBeTruthy();
+    expect(JSON.parse(fs.readFileSync(path.join(fx.store, jsonFile!), 'utf-8')).conclusion).toBe('pass');
+  });
+
+  it('stays fail-closed when a worker crash accompanies real test failures', () => {
+    const root = tmp('attest-produce-worker-crash-red-');
+    const fx = buildFixture(root, { suite: 'redWorkerCrash' });
     const result = runProduce(fx);
     expect(result.status).not.toBe(0);
     expect(result.stdout + result.stderr).toContain('refusing to attest a red tree');

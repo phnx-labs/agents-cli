@@ -106,10 +106,31 @@ cd "$WT/apps/cli"
 bun install --frozen-lockfile || die "bun install failed for ${SHA:0:12}"
 
 bold "Running the full suite..."
-if ! bun run test; then
-  die "suite failed for ${SHA:0:12} -- refusing to attest a red tree"
+# Mirrors isVitestWorkerCrashWithZeroFailures (scripts/ci-scope.ts): vitest can
+# exit 1 on an unhandled teardown "Worker exited unexpectedly" after every test
+# passed (RUSH-2215; hit by this producer on a fully green tree, RUSH-2758).
+# Only that exact shape is tolerated -- any 'failed' in the summary, or a
+# missing summary, stays fail-closed.
+suite_green_despite_worker_crash() {
+  local log="$1" files_line tests_line
+  grep -q 'Worker exited unexpectedly' "$log" || return 1
+  files_line="$(grep -E '^[[:space:]]*Test Files[[:space:]]' "$log" | tail -1)"
+  tests_line="$(grep -E '^[[:space:]]*Tests[[:space:]]' "$log" | tail -1)"
+  [[ -n "$files_line" && -n "$tests_line" ]] || return 1
+  grep -qE '(^|[^[:alnum:]])failed([^[:alnum:]]|$)' <<<"$files_line" && return 1
+  grep -qE '(^|[^[:alnum:]])failed([^[:alnum:]]|$)' <<<"$tests_line" && return 1
+  grep -qE '(^|[^[:alnum:]])passed([^[:alnum:]]|$)' <<<"$tests_line"
+}
+SUITE_LOG="$(mktemp "${TMPDIR:-/tmp}/agents-cli-attest-suite.XXXXXX")"
+if bun run test 2>&1 | tee "$SUITE_LOG"; then
+  green "Suite passed."
+elif suite_green_despite_worker_crash "$SUITE_LOG"; then
+  gray "vitest worker exited after zero test failures; treating as pass (RUSH-2215)."
+  green "Suite passed (teardown worker-exit tolerated on a green summary)."
+else
+  die "suite failed for ${SHA:0:12} -- refusing to attest a red tree (log: $SUITE_LOG)"
 fi
-green "Suite passed."
+rm -f "$SUITE_LOG"
 
 # Sign + notarize headlessly, matching what release.sh's privileged phase did
 # before RUSH-2666 moved build/sign to attestation time. Skipped off a macOS
