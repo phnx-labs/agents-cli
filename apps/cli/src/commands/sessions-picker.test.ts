@@ -669,13 +669,28 @@ describe('formatHeader — leads with the session title (RUSH-2757)', () => {
     expect(out.indexOf('Land the guard hardening')).toBeLessThan(out.indexOf('Claude'));
   });
 
-  it('falls back to the derived topic when there is no label', () => {
-    const out = stripVTControlCharacters(buildPreview(mk({ topic: 'Refactor the session picker' })));
+  it('does NOT lead with the topic — topic is the Prompt line, never duplicated as a title', () => {
+    // Regression: the title must not fall back to session.topic, because topic is
+    // already rendered as "Prompt: <topic>". Leading with it duplicated the text.
+    const topic = 'Refactor the session picker';
+    const out = stripVTControlCharacters(buildPreview(mk({ topic })));
     const lines = out.split('\n').filter(l => l.trim().length > 0);
-    expect(lines[0]).toBe('Refactor the session picker');
+    // The agent line leads, not the topic.
+    expect(lines[0].startsWith('Claude')).toBe(true);
+    // The topic appears exactly once (as the Prompt line), not twice.
+    const occurrences = out.split(topic).length - 1;
+    expect(occurrences).toBe(1);
+    expect(out).toContain('Prompt: ' + topic);
   });
 
-  it('renders no title line when neither label nor topic is set', () => {
+  it('shows both title and Prompt when a label AND a topic exist (they are different text)', () => {
+    const out = stripVTControlCharacters(buildPreview(mk({ label: 'Guard hardening', topic: 'harden the tree guard' })));
+    const lines = out.split('\n').filter(l => l.trim().length > 0);
+    expect(lines[0]).toBe('Guard hardening'); // label leads
+    expect(out).toContain('Prompt: harden the tree guard'); // topic still shown, not dropped
+  });
+
+  it('renders no title line when there is no label', () => {
     const out = stripVTControlCharacters(buildPreview(mk({})));
     const lines = out.split('\n').filter(l => l.trim().length > 0);
     // First content line is the agent line, not an empty/blank title.

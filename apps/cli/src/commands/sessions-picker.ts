@@ -503,12 +503,14 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
     line4.push(chalk.blue(linkUrl(session.prUrl, label)));
   }
 
-  // Lead with the session's human title — an agent-generated name / `/rename`,
-  // else the `--name` launch handle (both in `label`), falling back to the
-  // derived `topic`. Wrapped to the pane so a long title never overflows the
-  // edge; nothing renders when neither is set. The header sits at column 0, so
-  // it wraps to the full terminal width.
-  const title = (session.label || session.topic || '').trim();
+  // Lead with the session's human title: `session.label` — an agent-generated
+  // name / `/rename`, else the `--name` launch handle. NOT `session.topic`: the
+  // topic is the derived first-prompt, already shown on the `Prompt:` line, so
+  // using it here too would print the same text twice. Unlabelled sessions keep
+  // that `Prompt:` line as their topic indicator and simply lead with the agent
+  // line. Wrapped to the pane (the header sits at column 0, full terminal width);
+  // nothing renders when there is no label.
+  const title = (session.label || '').trim();
   const titleLines = title
     ? wrapToWidth(title, terminalWidth()).map(l => chalk.bold.white(l))
     : [];
