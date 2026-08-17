@@ -1358,14 +1358,19 @@ access control (that is 1Password/Vault; this tool is device-local first).
   `get <bundle> <KEY>` refuses unconditionally, naming
   `agents secrets exec <bundle> -- printenv <KEY>` (`commands/secrets.ts`,
   export action tail + `get` action).
-- **SEC-9b (MUST).** A materializing command MUST refuse under an **agent
+- **SEC-9b (MUST).** A bundle-materializing command MUST refuse under an **agent
   invocation context** — `isAgentInvocationContext()`
   (`lib/secrets/headless.ts`): `AGENTS_RUNTIME`, `AGENT_SESSION_ID`,
   `AGENTS_SESSION_ID`, or `CLAUDECODE` present — regardless of TTY (an agent
   inside tmux has one). Anything printed by an agent's shell tool lands in the
   model's context and the session `.jsonl`; the agent path to values is
   injection only (`secrets exec`, `run --secrets`). This gate covers
-  `view --reveal`, the raw-item `get <item>`, and the transport shape below.
+  `view --reveal` and the transport shape below. The raw-item `get <item>` is
+  **deliberately exempt**: fleet shell hooks run inside agent sessions (they
+  inherit the session env markers) and capture a single ad-hoc token into their
+  own variables, where it never reaches the transcript — a single raw item is
+  the accepted narrower residual, and its reads stay in the value-free audit
+  stream.
 - **SEC-9c (MUST).** The machine-to-machine SSH resolve (`remoteResolveEnv`,
   `verifyRemoteKeychainPush`, `lib/secrets/remote.ts`) is the sole surviving
   JSON emitter: `export <b> --plaintext --format json` emits ONLY when
@@ -1676,7 +1681,7 @@ and `export --device` inject yet CAN prompt interactively, while the raw-item
 | `secrets export` shell mode / `secrets get <b> <KEY>` | **REMOVED** (RUSH-2774) — refuse, naming `secrets exec` | n/a | `commands/secrets.ts` export/get actions |
 | remote-resolve transport (`export --plaintext --format json` + marker) | **Materialize** (json, SSH transport only; SEC-9c) | never | `commands/secrets.ts`, `lib/secrets/remote.ts` |
 | `secrets view --reveal` | **Materialize** | **interactive TTY only, non-agent** (SEC-9b, SEC-13b) | `commands/secrets.ts` view action |
-| `secrets get <item>` (raw item) | **Materialize** (human shells only; SEC-9b) | never | `commands/secrets.ts` get action |
+| `secrets get <item>` (raw item) | **Materialize** (ungated scripting primitive — deliberate SEC-9b exemption) | never | `commands/secrets.ts` get action |
 | `list` / `view` (default) / all CRUD / `unlock` / `lock` / `status` / `push` / `pull` | **Neither** (metadata/status/counts only) | only `unlock` prompts | e.g. `commands/secrets.ts` list/view/unlock |
 
 Rule of thumb (normative): **no `agents secrets` command materializes a value

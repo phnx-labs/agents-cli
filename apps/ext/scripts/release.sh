@@ -342,15 +342,19 @@ if { [ $PUBLISH_VSCE -eq 1 ] && [ -z "${VSCE_PAT:-}" ]; } || { [ $PUBLISH_OVSX -
     fi
     # Re-enter this script under `agents secrets exec` so VSCE_PAT/OVSX_PAT ride
     # the child process env and never touch stdout (RUSH-2774 — the plaintext
-    # export mode was removed). The sentinel stops a loop when the bundle lacks
-    # the keys; the checks below then fail with the create/add hint.
+    # export mode was removed). Probe resolvability FIRST: `exec cmd || handler`
+    # never runs the handler once cmd has started (exec replaces the process), so
+    # a missing/locked bundle must be caught before the exec. The sentinel stops
+    # a loop when the bundle exists but lacks the keys; the checks below then
+    # fail with the add-keys hint.
     if [ -z "${EXT_RELEASE_SECRETS_EXEC:-}" ]; then
-        EXT_RELEASE_SECRETS_EXEC=1 exec agents secrets exec vs-marketplace -- "$0" "$@" || {
+        if ! agents secrets exec vs-marketplace -- true >/dev/null 2>&1; then
             echo "Error: failed to resolve the 'vs-marketplace' bundle." >&2
             echo "       Create with: agents secrets create vs-marketplace" >&2
             echo "       Then add VSCE_PAT and OVSX_PAT keys." >&2
             exit 1
-        }
+        fi
+        EXT_RELEASE_SECRETS_EXEC=1 exec agents secrets exec vs-marketplace -- "$0" "$@"
     fi
 fi
 

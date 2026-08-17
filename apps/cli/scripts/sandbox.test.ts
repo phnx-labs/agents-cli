@@ -72,9 +72,22 @@ describeSandbox('sandbox.sh credential loading (RUSH-2774)', () => {
     expect(chain).toBeDefined();
   });
 
-  it('CI path: pre-set HCLOUD_TOKEN skips the secrets chain entirely', () => {
-    const { calls } = runSandbox({ HCLOUD_TOKEN: 'ci-token' });
+  it('CI path: all tokens pre-set in env skips the secrets chain entirely', () => {
+    const { calls } = runSandbox({
+      HCLOUD_TOKEN: 'ci-token',
+      GITHUB_TOKEN: 'ci-gh',
+      CLAUDE_CODE_OAUTH_TOKEN: 'ci-claude',
+    });
     expect(calls.filter((c) => c.includes('secrets'))).toEqual([]);
+  });
+
+  it('bundles load independently: HCLOUD_TOKEN pre-set still resolves the github.com creds', () => {
+    // The 2769 review's regression case: gating the whole chain on
+    // HCLOUD_TOKEN silently dropped GitHub App token minting for callers with
+    // only the Hetzner token in env.
+    const { calls } = runSandbox({ HCLOUD_TOKEN: 'ci-token', FAKE_AGENTS_MODE: 'ok' });
+    expect(calls.some((c) => c.startsWith('agents secrets exec github.com -- true'))).toBe(true);
+    expect(calls.some((c) => c.startsWith('agents secrets exec hetzner.com'))).toBe(false);
   });
 
   it('skips unreadable bundles instead of dying (the old per-bundle || true tolerance)', () => {

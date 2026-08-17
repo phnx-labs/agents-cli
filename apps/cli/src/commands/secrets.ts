@@ -1632,13 +1632,11 @@ export function registerSecretsCommands(program: Command): void {
         process.exit(1);
       }
       // Raw keychain item path — a single ad-hoc token, not a credential bundle.
-      // Still refused inside an agent session: whatever is printed here enters
-      // the agent's context and session transcript (RUSH-2774).
-      if (isAgentInvocationContext()) {
-        console.error(chalk.red('refusing to print a secret value inside an agent session — printed values land in the agent context and transcript.'));
-        console.error(chalk.dim('Run the consuming command under injection instead: agents secrets exec <bundle> -- <cmd>'));
-        process.exit(1);
-      }
+      // Deliberately NOT agent-gated (unlike the removed bundle-key form): shell
+      // hooks that run inside agent sessions inherit the session env markers and
+      // legitimately capture a raw item into their own variables (e.g. the
+      // posthog analytics hook), where the value never reaches the transcript.
+      // A single ad-hoc token is the accepted narrower residual (RUSH-2774).
       try {
         // Routes through the platform keychain layer: macOS reads bare items
         // via /usr/bin/security (no Touch ID), Linux via secret-tool with the

@@ -172,7 +172,7 @@ On a **locked** keychain bundle:
 |---|---|
 | `secrets list`, `secrets view` (no `--reveal`) | never — metadata / masked values only |
 | `secrets view --reveal`, `secrets exec` **at your terminal, outside an agent session** | one sheet, then reveals / runs (a deliberate human reveal/run) |
-| `secrets get <item>`, `secrets export` (`--to-file` / `--to-1password`) | **never** — automation primitives; fail fast to `agents secrets unlock` instead. `export` with no destination flag refuses outright and names `exec` / `view --reveal`; `get` also refuses outright inside an agent session |
+| `secrets get <item>`, `secrets export` (`--to-file` / `--to-1password`) | **never** — automation primitives; fail fast to `agents secrets unlock` instead. `export` with no destination flag refuses outright and names `exec` / `view --reveal`; the raw-item `get <item>` stays available everywhere (shell hooks inside agent sessions depend on it — a single ad-hoc token is the accepted narrower residual) |
 | `secrets unlock` | one sheet — the deliberate unlock |
 | anything an **agent** launches (`AGENTS_RUNTIME`) or any no-TTY context | never — resolves broker-only, fails fast if not held |
 | anything on an **already-unlocked** bundle | never — served from the broker |

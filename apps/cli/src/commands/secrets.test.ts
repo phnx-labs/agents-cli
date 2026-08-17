@@ -547,16 +547,18 @@ describe('secrets export (transport-only json; shell print mode removed, RUSH-27
     }
   });
 
-  it.skipIf(!keychainHelperAvailable)('raw-item get refuses inside an agent session', ({ skip }) => {
+  it.skipIf(!keychainHelperAvailable)('raw-item get stays available inside an agent session (shell hooks depend on it)', ({ skip }) => {
     if (!keychainHelperAvailable) {
       skip();
       return;
     }
     const home = seedGithubBundle();
     try {
+      // A missing item exits 1 QUIETLY (the hook-probe contract) — the point
+      // here is that no agent-session refusal fires for the raw-item form,
+      // unlike the removed bundle-key form. See the posthog analytics hook.
       const res = runSecrets(home, ['get', 'some-raw-item'], { CLAUDECODE: '1' });
-      expect(res.status).toBe(1);
-      expect(res.stderr).toMatch(/inside an agent session/);
+      expect(res.stderr).not.toMatch(/agent session/);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

@@ -21,8 +21,9 @@ revealed / the command runs / the bundle is pushed. The `export` destination
 variants (`--to-file`, `--to-1password`) **never raise the sheet at all**, in any
 shell: they are automation primitives, so a locked bundle fails fast toward
 `agents secrets unlock <bundle>` instead of blocking a pipeline on Keychain UI.
-`agents secrets get <item>` never raises the sheet either, and additionally
-refuses outright inside an agent session before it would try. Beneath an agent
+`agents secrets get <item>` never raises the sheet either — it stays available
+in every shell, agent sessions included (fleet hooks capture raw items into
+their own variables). Beneath an agent
 (`AGENTS_RUNTIME` set) or with no TTY, **all** of these
 resolve broker-only — there the agent is the caller, not you. See the
 [Touch-ID contract](#touch-id-contract) below for the full per-command matrix. The
@@ -37,7 +38,7 @@ Which `agents secrets` commands can raise a biometric sheet, and when:
 |---|---|
 | `list`, `view` (no `--reveal`) | never prompts — metadata / masked values only |
 | `view --reveal`, `exec`, `export --device` | **at an interactive terminal, outside an agent session:** one Touch ID, then reveals / runs / pushes. Under an agent (`AGENTS_RUNTIME`) or no TTY: broker-only, fail-closed, no sheet |
-| `get <item>`, `export` (`--to-file` / `--to-1password`) | **never prompts, in any shell** — automation primitives; fail-closed to `agents secrets unlock`. `get` additionally refuses outright inside an agent session |
+| `get <item>`, `export` (`--to-file` / `--to-1password`) | **never prompts, in any shell** — automation primitives; fail-closed to `agents secrets unlock`. The raw-item `get` stays available inside agent sessions too (shell hooks depend on it) |
 | `unlock` | the one deliberate biometric entry point |
 | any command on an already-unlocked bundle | never prompts — the broker fast-path returns before Keychain is touched |
 

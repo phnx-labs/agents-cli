@@ -40,10 +40,16 @@ command -v crabbox >/dev/null || die "crabbox not installed"
 # eval-a-plaintext-dump pattern put whole bundles into agent transcripts).
 # Each bundle is probed with a real resolve first, so a locked/absent bundle is
 # skipped exactly like the old per-bundle `|| true`.
-if [[ -z "${SANDBOX_SECRETS_EXEC:-}" && -z "${HCLOUD_TOKEN:-}" ]]; then
-  command -v agents >/dev/null || die "HCLOUD_TOKEN not set and agents-cli not installed"
+if [[ -z "${SANDBOX_SECRETS_EXEC:-}" ]] && command -v agents >/dev/null; then
+  # Each bundle loads independently, gated on its own target var being unset —
+  # a caller with HCLOUD_TOKEN pre-set but no GitHub App creds still gets the
+  # github.com link (matching the old per-bundle loads).
   chain=()
-  for b in hetzner.com github.com anthropic.com; do
+  want=()
+  [[ -z "${HCLOUD_TOKEN:-}" ]] && want+=(hetzner.com)
+  [[ -z "${GITHUB_TOKEN:-}" && -z "${APP_ID:-}" ]] && want+=(github.com)
+  [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && want+=(anthropic.com)
+  for b in ${want[@]+"${want[@]}"}; do
     if agents secrets exec "$b" -- true 2>/dev/null; then chain+=(agents secrets exec "$b" --); fi
   done
   if [[ ${#chain[@]} -gt 0 ]]; then

@@ -121,12 +121,12 @@ nobody types this form by hand.
 | `agents run --secrets <b>` | agent run's env | **No** | **No** |
 | `agents secrets list` / `view <b>` | masked (`••••`) | No (masked) | No |
 | `agents secrets view <b> --reveal` | **stdout** (human terminal only; refuses in an agent session) | **No** — refuses | **No** — refuses |
-| `agents secrets get <item>` | **stdout** (human shell only; refuses in an agent session) | **No** — refuses | **No** — refuses |
+| `agents secrets get <item>` | **stdout** (ungated scripting primitive — a single raw item, not a bundle) | Yes, if the agent runs it | Yes |
 | `agents secrets export <b> --plaintext` (shell-eval mode) | *removed* (RUSH-2774) | n/a | n/a |
 | `agents secrets get <bundle> <KEY>` (bundle-key form) | *removed* (RUSH-2774) | n/a | n/a |
 
 **Rule of thumb for agent-driven flows:** use `exec` / `--secrets`. `view
---reveal` and `get <item>` now refuse to run at all inside an agent session, so a
+--reveal` now refuses to run at all inside an agent session, so a
 key can no longer enter an agent's transcript through either of them — the
 former ungated printers (`export --plaintext`, `get <bundle> <KEY>`) are gone
 outright.
@@ -146,7 +146,7 @@ boundary seen from two sides.
 - **Agent-context refusal on every materializing command.** `isAgentInvocationContext()`
   (`src/lib/secrets/headless.ts`) checks for `AGENTS_RUNTIME`, `AGENT_SESSION_ID`,
   `AGENTS_SESSION_ID`, or `CLAUDECODE` — present regardless of TTY, since an agent
-  running inside tmux still has one. `view --reveal` and `get <item>` both consult
+  running inside tmux still has one. `view --reveal` consults
   it before resolving anything and refuse outright when it is set. This is what
   makes Path B a human-only path rather than an advisory one.
 - **Headless no-prompt.** In a non-interactive/agent context, resolution takes the
@@ -183,7 +183,7 @@ restated here because they bound *this* boundary too:
 
 Keep the two paths **structurally separate and named**: Path A (`exec` / `--secrets`)
 is the default for every agent-driven flow and never materializes; Path B
-(`view --reveal` / `get <item>`) exists only for deliberate human-at-a-TTY use, and
+(`view --reveal`, plus the deliberately-ungated raw-item `get <item>` that fleet shell hooks capture into their own variables) exists for deliberate use, and
 that restriction is now **enforced, not just advisory** — both refuse outright
 under an agent invocation context, and the two commands that used to materialize
 with no such gate (`export --plaintext` shell-eval, `get <bundle> <KEY>`) are
