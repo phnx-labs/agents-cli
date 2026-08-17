@@ -205,6 +205,46 @@ export function sanitizeLabel(text: string): string {
 }
 
 /**
+ * Typographic characters that reach a header constantly — a curly quote from a
+ * pasted prompt, an em dash from prose, the ellipsis a truncated title ends on —
+ * each mapped to the ASCII form a reader loses nothing by seeing.
+ */
+const HEADER_TRANSLITERATIONS: Array<[RegExp, string]> = [
+  [/[‘’‚‛]/g, "'"],
+  [/[“”„‟]/g, '"'],
+  [/[–—―]/g, '-'],
+  [/…/g, '...'],
+  [/[    ]/g, ' '],
+  [/[•·]/g, '-'],
+];
+
+/**
+ * Make a free-text value safe to put in an HTTP header.
+ *
+ * `fetch` encodes header values as a **ByteString**, so any code point above 255
+ * throws `TypeError: Cannot convert argument to a ByteString` — an unhandled
+ * crash with a stack trace, mid-publish, after the body has already been read.
+ * Reproduced by publishing a session whose title ended in `…` (U+2026), and
+ * reachable by any emoji, curly quote, accented name, or CJK text in a `--label`,
+ * a `--meta` value, or a repo name.
+ *
+ * The transliterations above cover what actually shows up; anything else outside
+ * latin1 is dropped, and a value that transliterates to nothing at all (a title
+ * written entirely in a non-latin script) degrades to a marker rather than an
+ * empty header. Lossy on purpose: carrying full Unicode needs percent-encoding
+ * here AND a matching decode in the Worker, which every already-deployed Worker
+ * would render as `%E2%80%A6` until its operator ran `agents artifacts share
+ * update` — tracked as RUSH-2786.
+ */
+export function toHeaderValue(text: string): string {
+  let safe = text;
+  for (const [pattern, replacement] of HEADER_TRANSLITERATIONS) safe = safe.replace(pattern, replacement);
+  // eslint-disable-next-line no-control-regex
+  safe = safe.replace(/[^\x20-\x7E\xA0-\xFF]/g, '').replace(/\s+/g, ' ').trim();
+  return safe || '(unnamed)';
+}
+
+/**
  * Best-effort human title when `--label` is omitted: the HTML `<title>`, else a
  * Markdown frontmatter `title:`, else the filename. Always returns something —
  * a headless publish must never hang waiting on a prompt for one.
@@ -566,14 +606,17 @@ export async function publishToEndpoint(
     const h: Record<string, string> = { authorization: `Bearer ${endpoint.token}`, 'content-type': contentType };
     if (expiresAt) h['x-share-expires-at'] = expiresAt;
     if (unlisted) h['x-share-visibility'] = 'unlisted';
-    if (provenance.agent) h['x-share-agent'] = provenance.agent;
-    if (provenance.session) h['x-share-session'] = provenance.session;
-    if (provenance.host) h['x-share-host'] = provenance.host;
-    if (provenance.repo) h['x-share-repo'] = provenance.repo;
-    if (provenance.date) h['x-share-date'] = provenance.date;
-    h['x-share-label'] = label;
+    // Every free-text header goes through toHeaderValue: a non-latin1 code point
+    // anywhere in a label, a repo name, or a --meta value throws inside fetch and
+    // crashes the publish outright.
+    if (provenance.agent) h['x-share-agent'] = toHeaderValue(provenance.agent);
+    if (provenance.session) h['x-share-session'] = toHeaderValue(provenance.session);
+    if (provenance.host) h['x-share-host'] = toHeaderValue(provenance.host);
+    if (provenance.repo) h['x-share-repo'] = toHeaderValue(provenance.repo);
+    if (provenance.date) h['x-share-date'] = toHeaderValue(provenance.date);
+    h['x-share-label'] = toHeaderValue(label);
     h['x-share-label-source'] = labelSource;
-    if (Object.keys(meta).length > 0) h['x-share-meta'] = JSON.stringify(meta);
+    if (Object.keys(meta).length > 0) h['x-share-meta'] = toHeaderValue(JSON.stringify(meta));
     if (opts.noRevision) h['x-share-no-revision'] = '1';
     return h;
   };

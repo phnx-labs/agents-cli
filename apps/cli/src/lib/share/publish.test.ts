@@ -22,6 +22,7 @@ import {
   assertMetadataSize,
   deriveLabel,
   sanitizeLabel,
+  toHeaderValue,
   RESERVED_META_KEYS,
 } from './publish.js';
 import { renderWorkerScript } from './worker-template.js';
@@ -1128,5 +1129,35 @@ describe('renderWorkerScript', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('toHeaderValue', () => {
+  it('keeps ordinary text untouched', () => {
+    expect(toHeaderValue('Q3 fleet plan')).toBe('Q3 fleet plan');
+  });
+
+  it('transliterates the punctuation that actually reaches a header', () => {
+    expect(toHeaderValue('the "plan" — it’s done…')).toBe('the "plan" - it\'s done...');
+  });
+
+  it('produces a value fetch can encode, for every input that used to crash', () => {
+    // fetch encodes header values as a ByteString: any code point > 255 throws
+    // `TypeError: Cannot convert argument to a ByteString`. Publishing a session
+    // whose title ended in U+2026 hit exactly this, mid-upload.
+    for (const input of ['title ending in …', 'ship it \u{1F680}', '会話の記録', 'Malmö café']) {
+      const value = toHeaderValue(input);
+      expect(() => new Headers({ 'x-share-label': value })).not.toThrow();
+      expect([...value].every((ch) => ch.codePointAt(0)! <= 255)).toBe(true);
+    }
+  });
+
+  it('degrades a value with nothing left to a marker, never an empty header', () => {
+    expect(toHeaderValue('会話の記録')).toBe('(unnamed)');
+    expect(toHeaderValue('')).toBe('(unnamed)');
+  });
+
+  it('keeps latin1 accents, which headers can carry', () => {
+    expect(toHeaderValue('Malmö café')).toBe('Malmö café');
   });
 });
