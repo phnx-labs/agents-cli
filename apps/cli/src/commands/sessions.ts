@@ -91,6 +91,7 @@ import { registerAttachCommand } from './attach.js';
 import { registerSessionsInjectCommand } from './sessions-inject.js';
 import { registerSessionsExportCommand } from './sessions-export.js';
 import { registerSessionsRenderCommand } from './sessions-render.js';
+import { registerSessionsShareCommand } from './sessions-share.js';
 import { registerSessionsImportCommand } from './sessions-import.js';
 import { registerSessionsMigrateCommand, registerSessionsMigrationsCommand } from './sessions-migrate.js';
 import { registerSessionsBackfillCommand } from './sessions-backfill.js';
@@ -5913,6 +5914,7 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsInjectCommand(sessionsCmd);
   registerSessionsExportCommand(sessionsCmd);
   registerSessionsRenderCommand(sessionsCmd);
+  registerSessionsShareCommand(sessionsCmd);
   registerSessionsImportCommand(sessionsCmd);
   registerSessionsMigrateCommand(sessionsCmd);
   registerSessionsMigrationsCommand(sessionsCmd);
