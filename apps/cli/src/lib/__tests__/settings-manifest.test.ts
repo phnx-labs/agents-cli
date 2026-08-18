@@ -120,6 +120,97 @@ describe('carryForwardSettings (claude)', () => {
     const target = JSON.parse(fs.readFileSync(path.join(toHome, '.claude/settings.json'), 'utf-8'));
     expect(target.env.SAFE).toBe('1');
   });
+
+  it('carries workspace trust from .claude.json without the credential or session stats', () => {
+    writeJson(path.join(fromHome, '.claude.json'), {
+      oauthAccount: { emailAddress: 'me@example.com' },
+      hasCompletedOnboarding: true,
+      projects: {
+        '/repos/trusted': {
+          hasTrustDialogAccepted: true,
+          lastSessionId: 'abc',
+          lastCost: 4.2,
+          allowedTools: ['Bash(git status)'],
+        },
+        '/repos/never-accepted': { hasTrustDialogAccepted: false },
+      },
+    });
+
+    const result = carryForwardSettings('claude', fromHome, toHome);
+    expect(result.applied).toContain('.claude.json');
+
+    const target = JSON.parse(fs.readFileSync(path.join(toHome, '.claude.json'), 'utf-8'));
+    expect(target.projects['/repos/trusted']).toEqual({ hasTrustDialogAccepted: true });
+    // A stamped-default false is not a decision — it must not be carried.
+    expect(target.projects['/repos/never-accepted']).toBeUndefined();
+    // The login and machine state stay per-version.
+    expect(target.oauthAccount).toBeUndefined();
+    expect(target.hasCompletedOnboarding).toBeUndefined();
+  });
+
+  it('promotes a stamped-default false in the target and preserves its other keys', () => {
+    writeJson(path.join(fromHome, '.claude.json'), {
+      projects: { '/repos/app': { hasTrustDialogAccepted: true } },
+    });
+    // Headless runs create the project entry with the flag defaulted to false
+    // without ever showing the dialog — trust granted elsewhere must win.
+    writeJson(path.join(toHome, '.claude.json'), {
+      hasCompletedOnboarding: true,
+      projects: {
+        '/repos/app': { hasTrustDialogAccepted: false, lastSessionId: 'mine', allowedTools: [] },
+        '/repos/other': { hasTrustDialogAccepted: false },
+      },
+    });
+
+    const result = carryForwardSettings('claude', fromHome, toHome);
+    expect(result.applied).toContain('.claude.json');
+    expect(result.backupDir).toBeDefined();
+    expect(fs.existsSync(path.join(result.backupDir!, '.claude.json'))).toBe(true);
+
+    const target = JSON.parse(fs.readFileSync(path.join(toHome, '.claude.json'), 'utf-8'));
+    expect(target.projects['/repos/app']).toEqual({
+      hasTrustDialogAccepted: true,
+      lastSessionId: 'mine',
+      allowedTools: [],
+    });
+    expect(target.projects['/repos/other']).toEqual({ hasTrustDialogAccepted: false });
+    expect(target.hasCompletedOnboarding).toBe(true);
+  });
+
+  it('trust carry is idempotent and skips a source with nothing trusted', () => {
+    writeJson(path.join(fromHome, '.claude.json'), {
+      projects: {
+        '/repos/app': { hasTrustDialogAccepted: true },
+        '/repos/pending': { hasTrustDialogAccepted: false },
+      },
+    });
+    carryForwardSettings('claude', fromHome, toHome);
+    const again = carryForwardSettings('claude', fromHome, toHome);
+    expect(again.applied).toEqual([]);
+    expect(again.backupDir).toBeUndefined();
+
+    // A source with no accepted projects must not create the target file at all.
+    const emptyTo = path.join(tmpDir, 'to-empty');
+    fs.mkdirSync(emptyTo, { recursive: true });
+    writeJson(path.join(fromHome, '.claude.json'), {
+      oauthAccount: { emailAddress: 'me@example.com' },
+      projects: { '/repos/pending': { hasTrustDialogAccepted: false } },
+    });
+    const nothing = carryForwardSettings('claude', fromHome, emptyTo);
+    expect(nothing.applied).toEqual([]);
+    expect(fs.existsSync(path.join(emptyTo, '.claude.json'))).toBe(false);
+  });
+
+  it('survives a malformed source .claude.json without touching the target', () => {
+    fs.writeFileSync(path.join(fromHome, '.claude.json'), '{not json');
+    writeJson(path.join(toHome, '.claude.json'), {
+      projects: { '/repos/app': { hasTrustDialogAccepted: false } },
+    });
+    const result = carryForwardSettings('claude', fromHome, toHome);
+    expect(result.applied).toEqual([]);
+    const target = JSON.parse(fs.readFileSync(path.join(toHome, '.claude.json'), 'utf-8'));
+    expect(target.projects['/repos/app'].hasTrustDialogAccepted).toBe(false);
+  });
 });
 
 describe('carryForwardSettings (codex)', () => {

@@ -13,6 +13,8 @@
  * version home. It never overwrites a value the target already has: scalars
  * keep the target's value, objects merge recursively, arrays union. That makes
  * the operation idempotent and safe to run on every `agents add` / `agents use`.
+ * (One scoped exception: the 'claude-trust' strategy promotes a stamped-default
+ * `hasTrustDialogAccepted: false` to `true` — see the note on that entry.)
  */
 
 import * as fs from 'fs';
@@ -22,7 +24,7 @@ import * as TOML from 'smol-toml';
 import type { AgentId } from './types.js';
 import { getBackupsDir } from './state.js';
 
-type MergeStrategy = 'json-merge' | 'toml-merge' | 'copy-if-absent' | 'dir-entries';
+type MergeStrategy = 'json-merge' | 'toml-merge' | 'copy-if-absent' | 'dir-entries' | 'claude-trust';
 
 interface ManifestEntry {
   /** Path relative to the version home (e.g. ".claude/settings.json"). */
@@ -43,6 +45,13 @@ const SETTINGS_MANIFEST: Partial<Record<AgentId, ManifestEntry[]>> = {
     { rel: '.claude/settings.json', strategy: 'json-merge' },
     { rel: '.claude/settings.local.json', strategy: 'copy-if-absent' },
     { rel: '.claude/keybindings.json', strategy: 'copy-if-absent' },
+    // `.claude.json` holds the login (oauthAccount) and per-session stats, so it
+    // must never merge wholesale — but it is also where Claude records workspace
+    // trust (`projects[<path>].hasTrustDialogAccepted`). Without carrying that,
+    // every newly pinned version re-shows the trust dialog once per project
+    // (issue #2776). The 'claude-trust' strategy projects ONLY the trust flags
+    // out of the source file; credentials and stats stay per-version.
+    { rel: '.claude.json', strategy: 'claude-trust' },
   ],
   codex: [
     {
@@ -53,9 +62,10 @@ const SETTINGS_MANIFEST: Partial<Record<AgentId, ManifestEntry[]>> = {
     // `.codex/auth.json` is deliberately NOT carried forward. Copying it seeded
     // every new Codex version with the current default's ChatGPT token, so two
     // installed versions always reported the same account and could never sign
-    // into separate accounts. Claude omits its credential (`.claude.json`) for
-    // the same reason — a version home holds its own login, keeping accounts
-    // per-version. A fresh Codex version installs signed-out; run `codex login`
+    // into separate accounts. Claude never merges `.claude.json` for the same
+    // reason (its 'claude-trust' entry extracts only the trust flags) — a
+    // version home holds its own login, keeping accounts per-version. A fresh
+    // Codex version installs signed-out; run `codex login`
     // (or `agents run codex --version <v>`) inside it to authenticate.
     { rel: '.codex/instructions.md', strategy: 'copy-if-absent' },
     { rel: '.codex/hooks.json', strategy: 'copy-if-absent' },
@@ -101,6 +111,19 @@ export function fillGaps(
     // scalar, array, or type mismatch: target wins
   }
   return out;
+}
+
+/**
+ * Project paths the source `.claude.json` records an accepted trust dialog for.
+ * Only an explicit `true` counts: Claude Code never persists a decline (the
+ * dialog exits without writing), so `false` is only ever the stamped default —
+ * not a user decision worth propagating.
+ */
+function trustedClaudeProjects(source: Record<string, unknown>): string[] {
+  const projects = isPlainObject(source.projects) ? source.projects : {};
+  return Object.entries(projects)
+    .filter(([, project]) => isPlainObject(project) && project.hasTrustDialogAccepted === true)
+    .map(([projectPath]) => projectPath);
 }
 
 function stripStateKeys(
@@ -167,6 +190,48 @@ export function carryForwardSettings(
             copied = true;
           }
           if (copied) result.applied.push(entry.rel);
+          break;
+        }
+        case 'claude-trust': {
+          // Projection, not a merge: pull ONLY `projects[<path>].hasTrustDialogAccepted`
+          // out of the source `.claude.json`. Everything else in that file
+          // (oauthAccount, onboarding state, per-session stats) stays per-version.
+          // Trust granted anywhere wins over the target's stamped-default `false`
+          // (headless runs create project entries with the flag unset-as-false
+          // without ever showing the dialog), but a target entry's other keys
+          // are preserved untouched.
+          const source = JSON.parse(fs.readFileSync(sourcePath, 'utf-8')) as Record<string, unknown>;
+          const trusted = trustedClaudeProjects(source);
+          if (trusted.length === 0) break;
+
+          const targetExists = fs.existsSync(targetPath);
+          const targetObj: Record<string, unknown> = targetExists
+            ? JSON.parse(fs.readFileSync(targetPath, 'utf-8')) as Record<string, unknown>
+            : {};
+          const targetProjects = isPlainObject(targetObj.projects) ? { ...targetObj.projects } : {};
+          let changed = false;
+          for (const projectPath of trusted) {
+            const existing = isPlainObject(targetProjects[projectPath])
+              ? targetProjects[projectPath] as Record<string, unknown>
+              : {};
+            if (existing.hasTrustDialogAccepted === true) continue;
+            targetProjects[projectPath] = { ...existing, hasTrustDialogAccepted: true };
+            changed = true;
+          }
+          if (!changed) break;
+
+          if (targetExists) {
+            backupFile(backupRoot, toHome, entry.rel);
+            result.backupDir = backupRoot;
+          } else {
+            fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+          }
+          fs.writeFileSync(
+            targetPath,
+            JSON.stringify({ ...targetObj, projects: targetProjects }, null, 2) + '\n',
+            'utf-8'
+          );
+          result.applied.push(entry.rel);
           break;
         }
         case 'json-merge':
