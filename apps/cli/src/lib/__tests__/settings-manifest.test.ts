@@ -211,6 +211,47 @@ describe('carryForwardSettings (claude)', () => {
     const target = JSON.parse(fs.readFileSync(path.join(toHome, '.claude.json'), 'utf-8'));
     expect(target.projects['/repos/app'].hasTrustDialogAccepted).toBe(false);
   });
+
+  it('never leaks source credentials into an EXISTING target .claude.json', () => {
+    writeJson(path.join(fromHome, '.claude.json'), {
+      oauthAccount: { emailAddress: 'source@example.com' },
+      hasCompletedOnboarding: true,
+      projects: { '/repos/app': { hasTrustDialogAccepted: true, lastSessionId: 'src' } },
+    });
+    writeJson(path.join(toHome, '.claude.json'), {
+      oauthAccount: { emailAddress: 'target@example.com' },
+      projects: {},
+    });
+
+    const result = carryForwardSettings('claude', fromHome, toHome);
+    expect(result.applied).toContain('.claude.json');
+
+    const target = JSON.parse(fs.readFileSync(path.join(toHome, '.claude.json'), 'utf-8'));
+    // The target keeps ITS login; nothing from the source but the flag arrives.
+    expect(target.oauthAccount).toEqual({ emailAddress: 'target@example.com' });
+    expect(target.hasCompletedOnboarding).toBeUndefined();
+    expect(target.projects['/repos/app']).toEqual({ hasTrustDialogAccepted: true });
+  });
+
+  it('leaves a malformed or non-object target .claude.json untouched', () => {
+    writeJson(path.join(fromHome, '.claude.json'), {
+      projects: { '/repos/app': { hasTrustDialogAccepted: true } },
+    });
+
+    for (const broken of ['{not json', '[1,2]', '"just a string"']) {
+      fs.writeFileSync(path.join(toHome, '.claude.json'), broken);
+      const result = carryForwardSettings('claude', fromHome, toHome);
+      expect(result.applied).toEqual([]);
+      expect(fs.readFileSync(path.join(toHome, '.claude.json'), 'utf-8')).toBe(broken);
+    }
+
+    // An object target whose `projects` is not an object is equally not ours to repair.
+    writeJson(path.join(toHome, '.claude.json'), { projects: 'corrupt' });
+    const result = carryForwardSettings('claude', fromHome, toHome);
+    expect(result.applied).toEqual([]);
+    const kept = JSON.parse(fs.readFileSync(path.join(toHome, '.claude.json'), 'utf-8'));
+    expect(kept.projects).toBe('corrupt');
+  });
 });
 
 describe('carryForwardSettings (codex)', () => {

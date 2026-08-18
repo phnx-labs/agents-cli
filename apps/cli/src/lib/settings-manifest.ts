@@ -22,6 +22,7 @@ import * as path from 'path';
 import * as TOML from 'smol-toml';
 
 import type { AgentId } from './types.js';
+import { atomicWriteFileSync } from './fs-atomic.js';
 import { getBackupsDir } from './state.js';
 
 type MergeStrategy = 'json-merge' | 'toml-merge' | 'copy-if-absent' | 'dir-entries' | 'claude-trust';
@@ -117,7 +118,10 @@ export function fillGaps(
  * Project paths the source `.claude.json` records an accepted trust dialog for.
  * Only an explicit `true` counts: Claude Code never persists a decline (the
  * dialog exits without writing), so `false` is only ever the stamped default —
- * not a user decision worth propagating.
+ * not a user decision worth propagating. Verified against Claude Code
+ * 2.1.219/2.1.220 (decline paths exit via code 1 / code 0 without a config
+ * write); if a future Claude Code starts persisting declines, this premise —
+ * and the false→true promotion in the 'claude-trust' case — must be revisited.
  */
 function trustedClaudeProjects(source: Record<string, unknown>): string[] {
   const projects = isPlainObject(source.projects) ? source.projects : {};
@@ -205,9 +209,14 @@ export function carryForwardSettings(
           if (trusted.length === 0) break;
 
           const targetExists = fs.existsSync(targetPath);
-          const targetObj: Record<string, unknown> = targetExists
-            ? JSON.parse(fs.readFileSync(targetPath, 'utf-8')) as Record<string, unknown>
+          const parsedTarget: unknown = targetExists
+            ? JSON.parse(fs.readFileSync(targetPath, 'utf-8'))
             : {};
+          // A target that isn't an object (or whose `projects` isn't) is not
+          // ours to repair — skip rather than clobber it with a rebuilt shape.
+          if (!isPlainObject(parsedTarget)) break;
+          const targetObj = parsedTarget;
+          if ('projects' in targetObj && !isPlainObject(targetObj.projects)) break;
           const targetProjects = isPlainObject(targetObj.projects) ? { ...targetObj.projects } : {};
           let changed = false;
           for (const projectPath of trusted) {
@@ -226,10 +235,14 @@ export function carryForwardSettings(
           } else {
             fs.mkdirSync(path.dirname(targetPath), { recursive: true });
           }
-          fs.writeFileSync(
+          // Atomic (tmp + rename): a running Claude session rewrites this exact
+          // file (it holds the login and session stats), so a plain write risks
+          // a reader seeing a partial file. The OUTSIDE `.claude.json` is the
+          // real file (the INSIDE `.claude/.claude.json` symlink resolves to it
+          // and survives the rename).
+          atomicWriteFileSync(
             targetPath,
-            JSON.stringify({ ...targetObj, projects: targetProjects }, null, 2) + '\n',
-            'utf-8'
+            JSON.stringify({ ...targetObj, projects: targetProjects }, null, 2) + '\n'
           );
           result.applied.push(entry.rel);
           break;
