@@ -148,6 +148,54 @@ browser profiles create canva --browser custom \
 
 Without `--target-filter`, a skip-invisible heuristic excludes `about:blank`, `file://`, and URLs matching `_desktop-background-service` / `_internal` / `_background`. That covers most apps; use the filter for the ones it doesn't.
 
+## "I want to show the user a review doc / plan / report — without piling up browser tabs"
+
+Show a local HTML artifact by navigating a **persistent browser task** at it, not by
+shelling `open <file>`. A raw `open` spawns a brand-new tab every call with no handle —
+re-showing an updated doc leaves a pile of duplicate tabs the user has to close. A
+browser task holds **one** tab and refreshes it in place, and `navigate` returns a
+stable tab id you can re-target:
+
+```bash
+# once: bind a task on the user's default browser profile
+export AGENTS_BROWSER_TASK=$(browser start --profile work)
+
+# show the doc — reuses the SAME tab every time (refresh in place), one tab total
+browser navigate --url "file:///abs/path/to/review.html"
+# ... regenerate the doc, then re-show it — no second tab:
+browser navigate --url "file:///abs/path/to/review.html"
+```
+
+On a remote interactive host, run the same commands over `agents ssh <host>` (copy the
+file there first) so the user's own browser shows it:
+
+```bash
+scp review.html <host>:/tmp/review.html
+agents ssh <host> "browser navigate --url file:///tmp/review.html"
+```
+
+Fall back to a single `open` (`agents ssh <host> 'open <file>'`) **only** when the host
+has no drivable browser profile (`browser profiles list` is empty and
+`browser start` can't auto-pick one) — a one-shot `open` beats no display, but it is the
+tab-spam path, so prefer `navigate` whenever a profile exists.
+
+## Which browser — Chromium-family only
+
+`browser` drives over the Chrome DevTools Protocol, so it supports the Chromium family
+only: **Chrome, Comet, Chromium, Brave, Edge**. Safari and Firefox are not supported.
+
+**Arc is a special case — installable but NOT drivable.** Arc answers
+`Browser.getVersion` (so a connection appears to succeed) but exposes **zero** CDP page
+targets via every discovery method, and it **crashes** the moment a new tab is requested
+(`Target.createTarget`). `browser` therefore refuses to drive an Arc profile with a clear
+error instead of crashing the user's Arc window — `agents browser profiles seed` still
+creates an `arc-local` profile for completeness, but pick a drivable browser to actually
+automate:
+
+```bash
+browser profiles create work --browser comet   # or chrome / chromium / brave
+```
+
 ## Common workflows
 
 ### Navigate and interact

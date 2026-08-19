@@ -46,7 +46,7 @@ vi.spyOn(profiles, 'listProfiles').mockImplementation(async () => {
 });
 vi.spyOn(profiles, 'getProfile').mockImplementation(async (name: string) => readProfileYaml(name));
 
-const { BrowserService, resolveScreenshotOutputPath, resolveTaskIdentity } = await import('./service.js');
+const { BrowserService, resolveScreenshotOutputPath, resolveTaskIdentity, arcNotDrivableError } = await import('./service.js');
 
 function reset() {
   try {
@@ -688,7 +688,10 @@ describe('navigate/screenshot — emit typed events (#11)', () => {
 // stopped a task whose agent had exited.
 
 /** A CDP double backed by a real target list that create/close actually mutate. */
-function makeTargetedConn(profile: string, opts: { pages?: Array<{ targetId: string; url: string }> } = {}) {
+function makeTargetedConn(
+  profile: string,
+  opts: { pages?: Array<{ targetId: string; url: string }>; browser?: string } = {},
+) {
   const targets: Array<{ targetId: string; type: string; url: string; title: string }> = (
     opts.pages ?? []
   ).map((p) => ({ targetId: p.targetId, type: 'page', url: p.url, title: p.url }));
@@ -730,6 +733,7 @@ function makeTargetedConn(profile: string, opts: { pages?: Array<{ targetId: str
     port: 9222,
     pid: 4242,
     profileName: profile,
+    browserType: opts.browser,
     tasks: new Map(),
     sessionCache: new Map(),
   };
@@ -785,6 +789,40 @@ describe('BrowserService.start — the startup about:blank is a task tab (RUSH-2
 
     await service.done(started.name);
     expect(targets.map((t) => t.targetId)).toEqual(['users-own-tab']);
+  });
+});
+
+describe('BrowserService — Arc is not CDP-drivable (never Target.createTarget)', () => {
+  // Arc answers Browser.getVersion (so the connection succeeds) but exposes zero
+  // page targets and CRASHES on Target.createTarget (verified, PR #2778). Every
+  // tab-creating path must refuse with a clear error instead of crashing Arc.
+  it('start with a url throws the clear error and never creates a target', async () => {
+    writeProfile('arcp', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, calls } = makeTargetedConn('arcp@endpoint-0', { browser: 'arc' });
+    attach(service, 'arcp', conn);
+
+    await expect(service.start('arcp', { url: 'https://example.com' })).rejects.toThrow(
+      /not drivable/,
+    );
+    // The whole point: not one Target.createTarget reached Arc.
+    expect(createTargetCount(calls)).toBe(0);
+  });
+
+  it('bare start (startup blank window) throws instead of createTarget', async () => {
+    writeProfile('arcp2', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, calls } = makeTargetedConn('arcp2@endpoint-0', { browser: 'arc' });
+    attach(service, 'arcp2', conn);
+
+    await expect(service.start('arcp2')).rejects.toThrow(/Comet, Chrome, Chromium, or Brave/);
+    expect(createTargetCount(calls)).toBe(0);
+  });
+
+  it('the error names the offending profile and points at a drivable browser', () => {
+    const msg = arcNotDrivableError('arc-local').message;
+    expect(msg).toContain('arc-local');
+    expect(msg).toContain('--browser comet');
   });
 });
 

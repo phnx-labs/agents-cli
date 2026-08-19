@@ -32,6 +32,7 @@ import {
   type ProfileStatus,
   type TaskStatus,
   type BrowserProfile,
+  type BrowserType,
   type HistoricalTask,
   type ReapResult,
 } from './types.js';
@@ -291,6 +292,13 @@ interface ProfileConnection {
   port: number;
   pid: number;
   electron?: boolean;
+  /**
+   * The profile's declared browser family. Load-bearing for Arc: Arc answers
+   * `Browser.getVersion` but exposes zero CDP page targets and CRASHES on
+   * `Target.createTarget` (verified live, PR #2778), so any tab-creating path
+   * must refuse rather than crash the user's Arc. See `createPageTarget`.
+   */
+  browserType?: BrowserType;
   /** Raw `url:<v>` / `title:<v>` filter copied from the profile config. */
   targetFilter?: string;
   /**
@@ -323,6 +331,25 @@ interface ProfileConnection {
 /** Join error lines so callers get a next command, not a dead-end message. */
 export function actionable(...lines: string[]): string {
   return lines.filter((l) => l != null && l !== '').join('\n');
+}
+
+/**
+ * Arc answers `Browser.getVersion` (so a connection succeeds) but exposes zero
+ * CDP page targets via every discovery method and CRASHES when a new tab is
+ * requested via `Target.createTarget` (verified live, PR #2778). It is therefore
+ * not drivable. This is the single clear, actionable error every tab-creating
+ * path throws instead of crashing the user's Arc window.
+ */
+export function arcNotDrivableError(profileName?: string): Error {
+  const scope = profileName ? ` (profile "${profileName}")` : '';
+  return new Error(
+    actionable(
+      `Browser "arc"${scope} is not drivable: Arc exposes no CDP page targets and`,
+      'crashes when a new tab is requested, so `agents browser` cannot control it.',
+      'Use a Chromium-family browser instead — Comet, Chrome, Chromium, or Brave:',
+      '  agents browser profiles create <name> --browser comet',
+    ),
+  );
 }
 
 /** Derive a human label from an explicit title or a navigated URL. */
@@ -524,9 +551,9 @@ export class BrowserService {
         targetInfos: Array<{ type: string }>;
       };
       if (!targetInfos.some((t) => t.type === 'page')) {
-        const created = (await conn.cdp.send('Target.createTarget', {
+        const created = await this.createPageTarget(conn, {
           url: 'about:blank',
-        })) as { targetId: string };
+        });
         startupBlankTargetId = created.targetId;
         this.invalidateTargetCache(conn);
       }
@@ -615,12 +642,7 @@ export class BrowserService {
     if (opts.url && !conn.electron) {
       const adopted = opts.fresh ? undefined : await this.adoptTabShowing(conn, opts.url);
       const targetId =
-        adopted ??
-        (
-          (await conn.cdp.send('Target.createTarget', {
-            url: opts.url,
-          })) as { targetId: string }
-        ).targetId;
+        adopted ?? (await this.createPageTarget(conn, { url: opts.url })).targetId;
       const shortId = generateShortId();
       task.tabs[shortId] = targetId;
       task.currentTabId = shortId;
@@ -910,9 +932,7 @@ export class BrowserService {
     }
 
     // Chrome: create new tab
-    const result = (await conn.cdp.send('Target.createTarget', {
-      url,
-    })) as { targetId: string };
+    const result = await this.createPageTarget(conn, { url });
 
     const shortId = generateShortId();
     task.tabs[shortId] = result.targetId;
@@ -935,9 +955,7 @@ export class BrowserService {
       throw new Error('Electron apps do not support opening additional tabs');
     }
 
-    const result = (await conn.cdp.send('Target.createTarget', {
-      url,
-    })) as { targetId: string };
+    const result = await this.createPageTarget(conn, { url });
 
     const shortId = generateShortId();
     task.tabs[shortId] = result.targetId;
@@ -2393,6 +2411,7 @@ export class BrowserService {
       port,
       pid,
       electron: true,
+      browserType: profile.browser,
       targetFilter: profile.targetFilter,
       profileName: forkName,
       forkedFrom: profile.name,
@@ -2439,6 +2458,7 @@ export class BrowserService {
           port: existingInfo.port,
           pid: existingInfo.pid,
           electron: effectiveProfile.electron,
+          browserType: effectiveProfile.browser,
           targetFilter: effectiveProfile.targetFilter,
           tasks,
           sessionCache: new Map(),
@@ -2475,6 +2495,7 @@ export class BrowserService {
         port: conn.port,
         pid: conn.pid,
         electron: profile.electron,
+        browserType: profile.browser,
         targetFilter: profile.targetFilter,
         tasks: conn.pid === 0 ? this.loadTaskState(profile.name) : new Map(),
         sessionCache: new Map(),
@@ -2489,6 +2510,7 @@ export class BrowserService {
         port: conn.port,
         pid: conn.pid,
         electron: profile.electron,
+        browserType: profile.browser,
         targetFilter: profile.targetFilter,
         tasks: new Map(),
         sessionCache: new Map(),
@@ -2510,6 +2532,7 @@ export class BrowserService {
         port: 0,
         pid: 0,
         electron: profile.electron,
+        browserType: profile.browser,
         targetFilter: profile.targetFilter,
         tasks: this.loadTaskState(profile.name),
         sessionCache: new Map(),
@@ -2528,6 +2551,7 @@ export class BrowserService {
         port,
         pid: 0,
         electron: profile.electron,
+        browserType: profile.browser,
         targetFilter: profile.targetFilter,
         tasks: this.loadTaskState(profile.name),
         sessionCache: new Map(),
@@ -2539,6 +2563,23 @@ export class BrowserService {
 
   private async enableDomains(cdp: CDPClient): Promise<void> {
     await cdp.send('Target.setDiscoverTargets', { discover: true });
+  }
+
+  /**
+   * The single path that opens a new CDP page/window target. It exists so the
+   * Arc guard lives in exactly one place: `Target.createTarget` crashes Arc
+   * (verified, PR #2778), so an Arc connection throws a clear, actionable error
+   * here instead of every call site re-checking. Every drivable Chromium-family
+   * browser goes straight through.
+   */
+  private async createPageTarget(
+    conn: ProfileConnection,
+    params: { url: string; newWindow?: boolean },
+  ): Promise<{ targetId: string }> {
+    if (conn.browserType === 'arc') {
+      throw arcNotDrivableError(conn.bareName ?? conn.profileName);
+    }
+    return (await conn.cdp.send('Target.createTarget', params)) as { targetId: string };
   }
 
   private async getOrCreateWindow(conn: ProfileConnection): Promise<string> {
@@ -2581,10 +2622,10 @@ export class BrowserService {
     }
 
     // First ever use - create window
-    const result = (await conn.cdp.send('Target.createTarget', {
+    const result = await this.createPageTarget(conn, {
       url: 'about:blank',
       newWindow: true,
-    })) as { targetId: string };
+    });
     conn.windowId = result.targetId;
     return result.targetId;
   }
@@ -2906,6 +2947,7 @@ export class BrowserService {
         port,
         pid: existingInfo?.pid ?? 0,
         electron: profile.electron,
+        browserType: profile.browser,
         targetFilter: resolved.targetFilter ?? profile.targetFilter,
         profileName: dirName,
         bareName: bare,
