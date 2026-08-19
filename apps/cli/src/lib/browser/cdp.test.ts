@@ -36,6 +36,13 @@ describe('verifyBrowserIdentity', () => {
     expect(() => verifyBrowserIdentity('comet', 'comet', 9222)).not.toThrow();
   });
 
+  it('accepts Arc, which reports itself as "Chrome/<version>"', () => {
+    // Verified live: Arc 1.15x serves "Chrome/151" on its CDP endpoint, so an
+    // arc-profiled attach must accept a reported "chrome" without a mismatch.
+    expect(() => verifyBrowserIdentity('arc', 'arc', 9222)).not.toThrow();
+    expect(() => verifyBrowserIdentity('chrome', 'arc', 9222)).not.toThrow();
+  });
+
   it('skips check when expected is "custom"', () => {
     expect(() => verifyBrowserIdentity('comet', 'custom', 9222)).not.toThrow();
     expect(() => verifyBrowserIdentity('whatever-electron', 'custom', 9222)).not.toThrow();
