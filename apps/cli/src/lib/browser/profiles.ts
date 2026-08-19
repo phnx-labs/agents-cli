@@ -225,9 +225,9 @@ export async function ensureDefaultBrowserProfile(): Promise<BrowserProfile> {
   const detected = findFirstInstalledBrowser();
   if (!detected) {
     throw new Error(
-      'No supported browser found. Install one of: Chrome, Brave, Edge, Chromium, or Comet, ' +
+      'No supported browser found. Install one of: Chrome, Brave, Edge, Chromium, Comet, or Arc, ' +
       'then re-run `agents browser start`. Or create a profile explicitly with ' +
-      '`agents browser profiles create <name> --browser <chrome|comet|chromium|brave|edge|custom>`. ' +
+      '`agents browser profiles create <name> --browser <chrome|comet|chromium|brave|edge|arc|custom>`. ' +
       'Note: Safari and Firefox are not supported — agents browser drives over the ' +
       'Chrome DevTools Protocol, which they don\'t implement.'
     );

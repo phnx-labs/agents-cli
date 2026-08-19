@@ -25,7 +25,7 @@ import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { defaultBrowserChoice } from './setup-preferences.js';
 
 const INSTALL_HINT =
-  'Install one of: Google Chrome, Brave, Microsoft Edge, Chromium, or Comet, then re-run `agents setup browser`.\n' +
+  'Install one of: Google Chrome, Brave, Microsoft Edge, Chromium, Comet, or Arc, then re-run `agents setup browser`.\n' +
   '(Safari and Firefox are not supported — agents browser drives over the Chrome DevTools Protocol.)';
 
 /**

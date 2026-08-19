@@ -29,6 +29,7 @@ const BROWSER_PATHS: Record<string, Record<BrowserType, string[]>> = {
     chromium: ['/Applications/Chromium.app/Contents/MacOS/Chromium'],
     brave: ['/Applications/Brave Browser.app/Contents/MacOS/Brave Browser'],
     edge: ['/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'],
+    arc: ['/Applications/Arc.app/Contents/MacOS/Arc'],
     custom: [],
   },
   linux: {
@@ -37,6 +38,8 @@ const BROWSER_PATHS: Record<string, Record<BrowserType, string[]>> = {
     chromium: ['/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium'],
     brave: ['/usr/bin/brave-browser', '/usr/bin/brave'],
     edge: ['/usr/bin/microsoft-edge'],
+    // Arc has no Linux build (macOS + Windows only).
+    arc: [],
     custom: [],
   },
   win32: {
@@ -63,6 +66,9 @@ const BROWSER_PATHS: Record<string, Record<BrowserType, string[]>> = {
       `${WIN_PROGRAMFILES_X86}\\Microsoft\\Edge\\Application\\msedge.exe`,
       `${WIN_LOCALAPPDATA}\\Microsoft\\Edge\\Application\\msedge.exe`,
     ],
+    // Arc ships a Windows build, but its install path is not yet verified here;
+    // leave unlisted (undetected) rather than guess a path that false-positives.
+    arc: [],
     custom: [],
   },
 };
@@ -171,6 +177,9 @@ export function findBrowserPath(browserType: BrowserType, customBinary?: string)
   if (browserType === 'comet' && platform === 'linux') {
     throw new Error('Browser "comet" is not available on Linux (Comet ships macOS and Windows builds only). Use chrome, chromium, brave, or edge on this platform.');
   }
+  if (browserType === 'arc' && platform === 'linux') {
+    throw new Error('Browser "arc" is not available on Linux (Arc ships macOS and Windows builds only). Use chrome, chromium, brave, or edge on this platform.');
+  }
   throw new Error(`Browser "${browserType}" not found. Install it first.`);
 }
 
@@ -180,7 +189,9 @@ export function findBrowserPath(browserType: BrowserType, customBinary?: string)
 // way cdp.ts expects, so they'd need separate drivers.
 const DEFAULT_BROWSER_PRIORITY: Record<string, BrowserType[]> = {
   // macOS: Chrome leads (>70% of dev machines), then the rest of the family.
-  darwin: ['chrome', 'brave', 'edge', 'chromium', 'comet'],
+  // Arc is last: it's in maintenance mode and needs a blank tab to drive, so it
+  // shouldn't win auto-pick over a mainstream browser.
+  darwin: ['chrome', 'brave', 'edge', 'chromium', 'comet', 'arc'],
   // Linux: Chrome/Chromium first (apt/snap), then Brave/Edge if present.
   linux: ['chrome', 'chromium', 'brave', 'edge'],
   // Windows: Edge is preinstalled on every supported build, so it's the

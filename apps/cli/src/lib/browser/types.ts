@@ -1,4 +1,4 @@
-export type BrowserType = 'chrome' | 'comet' | 'chromium' | 'brave' | 'edge' | 'custom';
+export type BrowserType = 'chrome' | 'comet' | 'chromium' | 'brave' | 'edge' | 'arc' | 'custom';
 
 /**
  * A single named endpoint preset within a profile. Lets one profile cover

@@ -286,6 +286,10 @@ export function verifyBrowserIdentity(
     // doesn't override the Chromium branding. Accept chrome here so attaching
     // to a Comet instance doesn't trip a false "identity mismatch".
     comet: ['comet', 'chrome'],
+    // Arc reports itself as plain "Chrome/<version>" in /json/version (verified
+    // live: Arc 1.15x → "Chrome/151"), so accept chrome to avoid a false
+    // identity mismatch when attaching to a real Arc.
+    arc: ['arc', 'chrome'],
     brave: ['brave', 'brave-browser', 'chrome'],
     // Windows/Chromium Edge reports its /json/version "Browser" field as
     // "Edg/<version>" (the `Edg` token, not `Edge`), which normalizeBrowserName

@@ -144,7 +144,7 @@ export function registerBrowserCommand(program: Command): void {
       Most agent workflows should use the 'browser' skill instead of raw subcommands.
       The skill wraps profile selection, snapshotting, and tunneling.
 
-      Browser support: Chromium-family only (Chrome, Comet, Chromium, Brave, Edge).
+      Browser support: Chromium-family only (Chrome, Comet, Chromium, Brave, Edge, Arc).
       Safari and Firefox are not supported — they don't speak the Chrome DevTools
       Protocol the way agents browser expects. On Windows, Edge is the default
       because it's preinstalled. On macOS and Linux, Chrome is preferred when
@@ -290,7 +290,7 @@ function registerProfilesCommands(browser: Command): void {
       }
     });
 
-  const VALID_BROWSERS = ['chrome', 'comet', 'chromium', 'brave', 'edge', 'custom'];
+  const VALID_BROWSERS = ['chrome', 'comet', 'chromium', 'brave', 'edge', 'arc', 'custom'];
 
   profiles
     .command('create <name>')
@@ -886,7 +886,7 @@ function registerTaskCommands(browser: Command): void {
           console.error(`Available profiles: ${all.map((p) => p.name).join(', ')}`);
         }
         console.error(
-          `Create one with: agents browser profiles create ${profileName} --browser <chrome|comet|chromium|brave|edge|custom>`
+          `Create one with: agents browser profiles create ${profileName} --browser <chrome|comet|chromium|brave|edge|arc|custom>`
         );
         process.exit(1);
       }

@@ -175,6 +175,7 @@ const POSIX_BROWSER_PATHS: Record<string, string> = {
   chromium: '/Applications/Chromium.app/Contents/MacOS/Chromium',
   brave: '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
   edge: '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  arc: '/Applications/Arc.app/Contents/MacOS/Arc',
 };
 
 // Windows App Paths registry keys per browser. CreateProcess (used by WMI
