@@ -174,6 +174,7 @@ the same device-local `browser remote-control` consent gate as the ordinary
 |---------|-------------|
 | `agents browser profiles list` | List all configured profiles with their `SCOPE` (`local` / `fleet`). A `*` marks this machine's configured default — which is NOT the same thing as the profile named `default`. `--json` adds `scope` + `isConfiguredDefault` |
 | `agents browser profiles create <name>` | Create a new profile, machine-local unless `--fleet` (see flags below) |
+| `agents browser profiles seed` | Create a machine-local profile for each installed browser (named `<browser>-local`), so you can pick or set-default one instead of hand-crafting each. Idempotent — existing profiles are left untouched |
 | `agents browser profiles prune` | Remove dead machine-local profiles — browser not installed here, or never started (see below) |
 | `agents browser profiles show <name>` | Show profile details |
 | `agents browser profiles set-default [name]` | Set the profile a bare `start` (and `--profile default`) uses; `--unset` to clear; no name prints the current value. Device-local. |
@@ -185,7 +186,7 @@ the same device-local `browser remote-control` consent gate as the ordinary
 
 | Flag | Description |
 |------|-------------|
-| `-b, --browser <type>` | Required. One of: `chrome`, `comet`, `chromium`, `brave`, `edge`, `custom` |
+| `-b, --browser <type>` | Required. One of: `chrome`, `comet`, `chromium`, `brave`, `edge`, `arc`, `custom`. `arc` is recognized but NOT drivable — Arc exposes no CDP page targets and crashes on tab creation, so `agents browser` refuses it with a clear error; pick a Chromium-family browser to automate |
 | `--fleet` | Store in the synced `agents.yaml` so every machine sees it. Default is machine-local |
 | `-e, --endpoint <url>` | CDP endpoint URL (repeatable). Auto-assigned if omitted |
 | `-s, --secrets <bundle>` | Secrets bundle for this profile: injected as env vars at launch, AND the credential store for `browser type --secret` (keys `<PREFIX>_USERNAME`/`<PREFIX>_PASSWORD`). Warns if the bundle doesn't exist yet |
@@ -447,7 +448,7 @@ The fields map to:
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | string | Lowercase alphanumeric with hyphens |
-| `browser` | string | `chrome`, `comet`, `chromium`, `brave`, `edge`, or `custom` |
+| `browser` | string | `chrome`, `comet`, `chromium`, `brave`, `edge`, `arc`, or `custom` (`arc` is recognized but not drivable — see the `--browser` flag note above) |
 | `endpoints` | string[] or map | CDP URLs: `cdp://host:port`, `ssh://host?port=N`, or `wss://...` |
 | `defaultEndpoint` | string | Key into `endpoints` map to use by default |
 | `binary` | string | Absolute path; required for `browser: custom` |

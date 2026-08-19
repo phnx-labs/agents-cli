@@ -191,7 +191,7 @@ export function isProfileLaunchableHere(profile: BrowserProfile): boolean {
  * set-default <name>`) when it names an existing profile that can launch here;
  * (2) an existing `default` profile that can launch here; (3) auto-pick the
  * first installed Chromium-family browser per the platform priority list in
- * chrome.ts (macOS: chrome > brave > edge > chromium > comet; Linux: chrome >
+ * chrome.ts (macOS: chrome > brave > edge > chromium > comet > arc; Linux: chrome >
  * chromium > brave > edge; Windows: edge > chrome > brave > comet) and pin a
  * `default` profile to it. Throws an actionable error if none of those binaries
  * are installed.
