@@ -30,7 +30,7 @@ import {
 } from '../lib/browser/login-detection.js';
 import { parseSecretRef } from '../lib/browser/secret-ref.js';
 import { readAndResolveBundleEnv, bundleExists, readBundle, describeBundle } from '../lib/secrets/bundles.js';
-import { findBrowserPath, getPortOccupant, isLauncherScript } from '../lib/browser/chrome.js';
+import { findBrowserPath, getPortOccupant, isLauncherScript, listInstalledBrowsers } from '../lib/browser/chrome.js';
 import {
   listProfileCacheDirs,
   removeProfileCache,
@@ -219,6 +219,35 @@ function registerProfilesCommands(browser: Command): void {
       // Rendering lives in lib/browser/profiles.ts so the column widths and the
       // default-marking rules are unit-tested rather than eyeballed (RUSH-2710).
       for (const line of formatProfilesTable(scoped, configuredDefault)) console.log(line);
+    });
+
+  profiles
+    .command('seed')
+    .description('Create a machine-local profile for each installed browser (named <browser>-local), so you can pick or set-default one instead of hand-crafting each. Idempotent — existing profiles are left untouched.')
+    .action(async () => {
+      const installed = listInstalledBrowsers();
+      if (installed.length === 0) {
+        console.error('No supported browser found to seed a profile for.');
+        process.exit(1);
+      }
+      for (const { browserType, binary } of installed) {
+        const name = `${browserType}-local`;
+        if (await getProfile(name)) {
+          console.log(`= ${name} (already exists)`);
+          continue;
+        }
+        const freePort = await findFreeProfilePort();
+        await createProfile({
+          name,
+          description: `Seeded ${browserType} profile`,
+          browser: browserType,
+          binary,
+          endpoints: [`cdp://127.0.0.1:${freePort}`],
+          viewport: { width: DEFAULT_VIEWPORT.width, height: DEFAULT_VIEWPORT.height },
+        });
+        console.log(`+ ${name} (${browserType})`);
+      }
+      console.log('Pick your default with: agents config set browser.profile <name>');
     });
 
   const browserProfileDeprecation = chalk.yellow(

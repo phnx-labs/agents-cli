@@ -1178,7 +1178,7 @@ export interface HostEntry {
 /** Browser profile definition stored in agents.yaml. */
 export interface BrowserProfileConfig {
   description?: string;
-  browser: 'chrome' | 'comet' | 'chromium' | 'brave' | 'edge' | 'custom';
+  browser: 'chrome' | 'comet' | 'chromium' | 'brave' | 'edge' | 'arc' | 'custom';
   binary?: string;
   electron?: boolean;
   /**
