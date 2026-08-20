@@ -7,9 +7,9 @@ import {
   getProfile,
   createProfile,
   deleteProfile,
-  ensureDefaultBrowserProfile,
   getConfiguredDefaultProfileName,
   resolveProfileRef,
+  resolveProfileRefForStart,
   getProfileRuntimeDir,
   extractConfiguredPort,
   findFreeProfilePort,
@@ -946,18 +946,19 @@ function registerTaskCommands(browser: Command): void {
         process.exit(1);
       }
 
-      // One resolver for every command (RUSH-2709): `--profile default` and a
-      // bare `start` mean the same profile here as they do in stop / status /
-      // navigate. Only `start` may CREATE one, hence the ensure* fallback.
-      let profileName = (await resolveProfileRef(opts.profile)) ?? '';
-      if (!profileName) {
-        try {
-          const detected = await ensureDefaultBrowserProfile();
-          profileName = detected.name;
-        } catch (err) {
-          console.error(err instanceof Error ? err.message : String(err));
-          process.exit(1);
-        }
+      // One resolution order for every command (RUSH-2709): `--profile default`
+      // means the same profile here as it does in stop / status / navigate.
+      // `start` is the one command that LAUNCHES, so its implicit path goes
+      // through ensureDefaultBrowserProfile, which additionally verifies the
+      // resolved default can launch on THIS machine and regenerates it when it
+      // can't (the "Custom binary not found" repair) — a filter-only command
+      // must not warn or rewrite a profile, so that check lives only here.
+      let profileName: string;
+      try {
+        profileName = await resolveProfileRefForStart(opts.profile);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
       }
 
       // Pre-check the profile locally so we fail fast with a helpful error
@@ -1199,7 +1200,7 @@ function registerTaskCommands(browser: Command): void {
         action: 'navigate',
         task,
         url,
-        profile: await resolveProfileRef(opts.profile),
+        profile: opts.profile ? await resolveProfileRef(opts.profile) : undefined,
       });
 
       if (!response.ok) {
@@ -1228,7 +1229,7 @@ function registerTaskCommands(browser: Command): void {
         action: 'tab-add',
         task,
         url: opts.url,
-        profile: await resolveProfileRef(opts.profile),
+        profile: opts.profile ? await resolveProfileRef(opts.profile) : undefined,
       });
 
       if (!response.ok) {
@@ -1523,7 +1524,7 @@ function registerTaskCommands(browser: Command): void {
       try {
         response = await sendIPCRequest({
           action: 'status',
-          profile: await resolveProfileRef(opts.profile),
+          profile: opts.profile ? await resolveProfileRef(opts.profile) : undefined,
         }, { autoStartDaemon: false });
       } catch (err) {
         if (err instanceof BrowserDaemonNotRunningError) {
@@ -1658,7 +1659,7 @@ function registerTaskCommands(browser: Command): void {
     .action(async (opts) => {
       const response = await sendIPCRequest({
         action: 'status',
-        profile: await resolveProfileRef(opts.profile),
+        profile: opts.profile ? await resolveProfileRef(opts.profile) : undefined,
       });
 
       if (!response.ok) {

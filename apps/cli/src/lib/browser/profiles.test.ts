@@ -36,6 +36,7 @@ import {
   createProfile,
   ensureDefaultBrowserProfile,
   resolveProfileRef,
+  resolveProfileRefForStart,
   getAutoDetectedProfile,
   DEFAULT_BROWSER_PROFILE_NAME,
   DEFAULT_PROFILE_ALIAS,
@@ -1005,6 +1006,22 @@ describe('resolveProfileRef — the one `default` rule (RUSH-2709)', () => {
     expect(await resolveProfileRef(undefined)).toBe('comet-local');
   });
 
+  it('an ABSENT ref stays absent for a filter — resolveProfileRef(undefined) is never forced', async () => {
+    // `--profile` is a FILTER on status / tasks / navigate: omitting it means
+    // "no filter". Those call sites therefore must not call this with
+    // `undefined` — it resolves to the configured default, which would silently
+    // turn `agents browser status` into `status --profile <default>` and hide
+    // every other running browser. Pinned here so the contract is explicit:
+    withStore({ 'comet-local': chrome, other: chrome });
+    writeDeviceDefaultProfile('comet-local');
+
+    expect(await resolveProfileRef(undefined)).toBe('comet-local');
+    // …hence the guard the callers use.
+    const asFilter = (ref?: string) => (ref ? resolveProfileRef(ref) : undefined);
+    expect(await asFilter(undefined)).toBeUndefined();
+    expect(await asFilter('other')).toBe('other');
+  });
+
   it('passes an ordinary name straight through, including an unknown one', async () => {
     withStore({ work: chrome });
     expect(await resolveProfileRef('work')).toBe('work');
@@ -1013,3 +1030,58 @@ describe('resolveProfileRef — the one `default` rule (RUSH-2709)', () => {
     expect(await resolveProfileRef('nope')).toBe('nope');
   });
 });
+
+/**
+ * `start` is the only command that launches, so it is the only one that may
+ * warn about or regenerate a default that cannot run on this machine. Routing
+ * it through the plain (filter) resolver skipped that repair entirely — the
+ * "Custom binary not found" regression this pins.
+ */
+describe('resolveProfileRefForStart — keeps the launchable repair (RUSH-2709)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fs.rmSync(path.join(TEST_ROOT, '.agents', 'devices'), { recursive: true, force: true });
+  });
+
+  it('regenerates for THIS machine when the configured default cannot launch here', async () => {
+    const store: ProfileStore = {
+      browser: {
+        'mac-chrome': {
+          browser: 'custom',
+          binary: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+          endpoints: ['cdp://127.0.0.1:9333'],
+        },
+      },
+    };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+    vi.mocked(writeMeta).mockImplementation((meta: any) => {
+      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
+    });
+    writeDeviceDefaultProfile('mac-chrome');
+    vi.mocked(isPortInUse).mockReturnValue(false);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.mocked(findBrowserPath).mockImplementationOnce(() => {
+      throw new Error('Custom binary not found');
+    });
+
+    // The filter resolver hands back the unlaunchable profile, by design.
+    expect(await resolveProfileRef(undefined)).toBe('mac-chrome');
+    // `start` must not: it warns and falls through to a re-detected profile.
+    expect(await resolveProfileRefForStart(undefined)).toBe('auto-chrome');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("can't launch on this"));
+    warn.mockRestore();
+  });
+
+  it('returns an explicit name unchanged, and honors a literal `default` profile', async () => {
+    const store: ProfileStore = { browser: { work: chromeCfg(), default: chromeCfg() } };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+
+    expect(await resolveProfileRefForStart('work')).toBe('work');
+    expect(await resolveProfileRefForStart('default')).toBe('default');
+  });
+});
+
+function chromeCfg(): BrowserProfileConfig {
+  return { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9222'] };
+}

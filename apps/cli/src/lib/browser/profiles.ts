@@ -231,26 +231,6 @@ export function isProfileLaunchableHere(profile: BrowserProfile): boolean {
  * hard fail.
  */
 /**
- * Resolve what a caller typed after `--profile` (or nothing at all) to a real,
- * BARE profile name. Every command — start, stop, status, navigate, tab, use —
- * routes through this one function, which is the whole point: before RUSH-2709
- * only `start` honored the reserved `default` alias, so `--profile default`
- * meant three different profiles across three commands.
- *
- * Order:
- *   1. A profile that literally bears the given name always wins — including
- *      one a user genuinely named `default`, which resolves to itself.
- *   2. `default` (the alias) or no argument at all → the configured
- *      `browser.profile` for this machine, if it names a profile that exists.
- *   3. → the auto-detected profile ({@link DEFAULT_BROWSER_PROFILE_NAME}), or
- *      its legacy `default`-named predecessor when that is what is on disk.
- *   4. Otherwise the input is returned unchanged (so the caller reports its own
- *      `Profile "x" not found`), or `undefined` when nothing was passed.
- *
- * It never creates a profile — `start` calls {@link ensureDefaultBrowserProfile}
- * for that.
- */
-/**
  * The auto-detected profile this machine already carries, under either name —
  * the current `auto-chrome` or the `default` an older build wrote. Callers that
  * ask "is a default profile set up here?" MUST use this rather than probing one
@@ -263,6 +243,32 @@ export async function getAutoDetectedProfile(): Promise<BrowserProfile | null> {
   );
 }
 
+/**
+ * Resolve what a caller typed after `--profile` to a real, BARE profile name.
+ * Every command — stop, status, navigate, tab, use, and (through
+ * {@link resolveProfileRefForStart}) start — routes through this one function,
+ * which is the whole point: before RUSH-2709 only `start` honored the reserved
+ * `default` alias, so `--profile default` meant three different profiles across
+ * three commands.
+ *
+ * Order:
+ *   1. A profile that literally bears the given name always wins — including
+ *      one a user genuinely named `default`, which resolves to itself.
+ *   2. `default` (the alias) or no argument at all → the configured
+ *      `browser.profile` for this machine, if it names a profile that exists.
+ *   3. → the auto-detected profile ({@link DEFAULT_BROWSER_PROFILE_NAME}), or
+ *      its legacy `default`-named predecessor when that is what is on disk.
+ *   4. Otherwise the input is returned unchanged (so the caller reports its own
+ *      `Profile "x" not found`), or `undefined` when nothing was passed.
+ *
+ * It never creates a profile, never warns, and never checks whether the profile
+ * can launch HERE. That is deliberate: for most callers `--profile` is a FILTER
+ * (`status`, `tasks`, `navigate --task`), where an absent flag means "no filter"
+ * and rewriting or warning about the user's config would be wrong. Note the
+ * corollary at those call sites — pass a ref only when the user gave one; do not
+ * resolve `undefined` into a concrete profile, or an unscoped listing silently
+ * becomes a scoped one.
+ */
 export async function resolveProfileRef(ref?: string): Promise<string | undefined> {
   if (ref && ref !== DEFAULT_PROFILE_ALIAS) {
     return ref;
@@ -281,6 +287,27 @@ export async function resolveProfileRef(ref?: string): Promise<string | undefine
     return LEGACY_DEFAULT_BROWSER_PROFILE_NAME;
   }
   return ref;
+}
+
+/**
+ * `start`'s resolver. Same order as {@link resolveProfileRef} for an explicit
+ * name, but the IMPLICIT path (no `--profile`, or the bare `default` alias with
+ * no profile of that name) goes through {@link ensureDefaultBrowserProfile} —
+ * which additionally verifies the resolved default can launch on THIS machine,
+ * warns and falls through when it can't, and regenerates or creates one.
+ *
+ * `start` is the only command that launches a browser, so it is the only one
+ * that may do those things; routing a filter-only command through this would
+ * warn about, and rewrite, config the user never asked it to touch.
+ *
+ * Throws when no profile exists and no supported browser is installed —
+ * `ensureDefaultBrowserProfile`'s actionable "install one of …" error.
+ */
+export async function resolveProfileRefForStart(ref?: string): Promise<string> {
+  if (ref && ref !== DEFAULT_PROFILE_ALIAS) return ref;
+  // A profile the user literally named `default` still outranks the alias.
+  if (ref === DEFAULT_PROFILE_ALIAS && (await getProfile(ref))) return ref;
+  return (await ensureDefaultBrowserProfile()).name;
 }
 
 export async function ensureDefaultBrowserProfile(): Promise<BrowserProfile> {
