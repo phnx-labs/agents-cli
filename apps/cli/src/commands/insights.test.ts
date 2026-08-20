@@ -69,9 +69,31 @@ function writeTranscript(home: string, id: string, version: string, opts: {
   fs.writeFileSync(path.join(home, '.claude', 'projects', '-proj', `${id}.jsonl`), lines.join('\n') + '\n');
 }
 
-beforeAll(() => {
+const RUSH_USER_YAML = path.join(TEST_HOME, '.rush', 'user.yaml');
+
+/** RUSH-2424: paid/admin fixture at entitlement.ts's own real read path, so the
+ * existing behavioural coverage below (predating the plan gate) keeps seeing
+ * the full, ungated report. The gate itself is covered by its own describe
+ * block further down, which flips this to free and back. */
+async function writeTierFixture(tierName: string, isPaid: boolean): Promise<void> {
+  const { entitlementCachePath } = await import('../lib/entitlement.js');
+  fs.mkdirSync(path.dirname(RUSH_USER_YAML), { recursive: true });
+  fs.writeFileSync(RUSH_USER_YAML, 'session:\n  access_token: test-token\n');
+  const cachePath = entitlementCachePath();
+  fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+  fs.writeFileSync(cachePath, JSON.stringify({ version: 1, tierName, isPaid, fetchedAt: Date.now() }));
+}
+
+async function clearTierFixture(): Promise<void> {
+  const { entitlementCachePath } = await import('../lib/entitlement.js');
+  fs.rmSync(RUSH_USER_YAML, { force: true });
+  fs.rmSync(entitlementCachePath(), { force: true });
+}
+
+beforeAll(async () => {
   fs.mkdirSync(path.join(TEST_HOME, '.agents', '.system', '.git'), { recursive: true });
   fs.writeFileSync(path.join(TEST_HOME, '.agents', 'agents.yaml'), 'agents: {}\n');
+  await writeTierFixture('admin', true);
 
   const alphaHome = writeHome('9.0.1', ALPHA);
   const betaHome = writeHome('9.0.2', BETA);
@@ -263,5 +285,96 @@ describe('agents insights', () => {
     expect(JSON.parse(row.facets)).toMatchObject({
       frictionSignals: {}, correctionSignals: {}, automationSignals: {},
     });
+  });
+});
+
+const PAID_PLAN_NOTICE = 'Friction and account-split analysis are on the paid plan.';
+
+describe('agents insights — plan-tier gate (RUSH-2424)', () => {
+  afterEach(async () => {
+    // Every other describe block in this file assumes the admin fixture.
+    await writeTierFixture('admin', true);
+  });
+
+  it('free plan (default --by account): top-line counts + harness mix stay, the account breakdown is gated', async () => {
+    await clearTierFixture();
+    const payload = JSON.parse(await runInsights(['--json', '--since', 'all']));
+    expect(payload.plan).toEqual({ tierName: 'free', isPaid: false });
+    expect(payload.by).toBe('account');
+    expect(payload.groups).toBeNull();
+    expect(payload.notice).toBe(PAID_PLAN_NOTICE);
+    // Top-line counts and harness mix are free — still present.
+    expect(payload.scanned).toBeGreaterThan(0);
+    expect(payload.analyzed).toBeGreaterThan(0);
+    expect(payload.harnesses.length).toBeGreaterThan(0);
+  });
+
+  it('free plan with --by agent (not account): groups render, but the friction/correction facets are stripped', async () => {
+    await clearTierFixture();
+    const payload = JSON.parse(await runInsights(['--json', '--since', 'all', '--by', 'agent']));
+    expect(payload.plan.isPaid).toBe(false);
+    expect(payload.groups).not.toBeNull();
+    expect(payload.groups.length).toBeGreaterThan(0);
+    for (const g of payload.groups) {
+      expect(g.frictionSignals).toBeUndefined();
+      expect(g.correctionSignals).toBeUndefined();
+      expect(g.silentStallsByModel).toBeUndefined();
+      expect(g.interruptions).toBeUndefined();
+      expect(g.errorCategories).toBeUndefined();
+      // Free facets survive: tool/language/model counts, and non-friction output stats.
+      expect(g.toolCounts).toBeDefined();
+      expect(g.languages).toBeDefined();
+      expect(g.gitCommits).toBeDefined();
+    }
+    expect(payload.notice).toBe(PAID_PLAN_NOTICE);
+  });
+
+  it('free plan: the text report omits the friction section and the account table, replaced by the one-line notice', async () => {
+    await clearTierFixture();
+    const out = await runInsights(['--since', 'all']);
+    expect(out).toContain(PAID_PLAN_NOTICE);
+    expect(out).not.toContain('Friction / thrash');
+    expect(out).not.toContain('Dissatisfaction / corrections');
+    expect(out).not.toContain('By account');
+    // Harness mix and top-line header stay.
+    expect(out).toContain('Harness split');
+    expect(out).toMatch(/Insights\s+.*sessions/);
+  });
+
+  it('free plan: --narrative is gated with the same notice, never shelling out to claude', async () => {
+    await clearTierFixture();
+    const out = await runInsights(['--since', 'all', '--narrative']);
+    expect(out).toContain(PAID_PLAN_NOTICE);
+    expect(out).not.toContain('Narrative');
+  });
+
+  it('insights mix stays fully free regardless of tier', async () => {
+    await clearTierFixture();
+    const { Command } = await import('commander');
+    const { registerInsightsCommand } = await import('./insights.js');
+    const program = new Command();
+    program.exitOverride();
+    registerInsightsCommand(program);
+    const chunks: string[] = [];
+    const origLog = console.log;
+    console.log = (...a: unknown[]) => { chunks.push(a.map(String).join(' ')); };
+    try {
+      await program.parseAsync(['node', 'agents', 'insights', 'harness-mix', '--json']);
+    } finally {
+      console.log = origLog;
+    }
+    // No refusal, no notice — mix is a separate, ungated data path.
+    expect(chunks.join('\n')).not.toContain(PAID_PLAN_NOTICE);
+  });
+
+  it('paid/admin plan: full report is unaffected — groups, friction, and by-account all present, no notice', async () => {
+    await writeTierFixture('admin', true);
+    const payload = JSON.parse(await runInsights(['--json', '--since', 'all']));
+    expect(payload.plan).toEqual({ tierName: 'admin', isPaid: true });
+    expect(payload.groups).not.toBeNull();
+    expect(payload.notice).toBeUndefined();
+    const alpha = payload.groups.find((g: { label: string }) => g.label.startsWith('Alpha Inc'));
+    expect(alpha.frictionSignals).toBeDefined();
+    expect(alpha.correctionSignals).toBeDefined();
   });
 });

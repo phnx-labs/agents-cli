@@ -71,8 +71,35 @@ import type { SessionMeta } from '../lib/session/types.js';
 import { registerMixCommands } from '../lib/analytics/mix-commands.js';
 import { registerCostCommand } from './cost.js';
 import { registerOutputCommand } from './output.js';
+import { getTier, type EntitlementTier } from '../lib/entitlement.js';
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Plan-tier gate for the behavioural report (RUSH-2424). Free keeps top-line
+ * counts and the harness mix (and `insights mix` / `agents perf`, which never
+ * enter this file's gating since they're separate command trees); the
+ * friction/correction-signal sections, grouping `--by account`, and
+ * `--narrative` are paid. `insights mix`/`cost`/`output` are unaffected — this
+ * gate applies only to the default behavioural report.
+ */
+const PAID_PLAN_NOTICE = 'Friction and account-split analysis are on the paid plan.';
+
+interface InsightsGate {
+  tier: EntitlementTier;
+  /** The per-`--by account` group breakdown is paid; other --by dimensions are not. */
+  groupGated: boolean;
+  /** The Friction / Friction-thrash / Dissatisfaction-corrections sections are paid. */
+  frictionGated: boolean;
+}
+
+function resolveInsightsGate(tier: EntitlementTier, dim: GroupDim): InsightsGate {
+  return {
+    tier,
+    groupGated: !tier.isPaid && dim === 'account',
+    frictionGated: !tier.isPaid,
+  };
+}
 
 interface InsightsOptions {
   json?: boolean;
@@ -267,7 +294,7 @@ function renderHours(hours: number[], out: string[]): void {
   out.push(`  ${chalk.gray('0h'.padEnd(6))}${chalk.gray('6h'.padEnd(6))}${chalk.gray('12h'.padEnd(6))}${chalk.gray('18h'.padEnd(5))}${chalk.gray('23h')}`);
 }
 
-function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, actions: InsightAction[], harnesses: Array<{ name: string; count: number }>): void {
+function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, actions: InsightAction[], harnesses: Array<{ name: string; count: number }>, gate: InsightsGate): void {
   const out: string[] = [];
   const scope = meta.since ? `last ${meta.since}` : 'all time';
   out.push(chalk.bold('Insights') + chalk.gray(`  ${scope} · ${meta.analyzed} of ${meta.scanned} sessions`));
@@ -279,8 +306,20 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
     return;
   }
 
+  let noticePrinted = false;
+  const printPlanNotice = (): void => {
+    if (noticePrinted) return;
+    noticePrinted = true;
+    out.push('');
+    out.push(chalk.gray(`  ${PAID_PLAN_NOTICE}`));
+  };
+
   // Per-group table — the headline, and the thing no sibling command produces.
   // Includes silent-stall counts so harness/account laziness is visible without --json.
+  // Gated on the free plan when grouped `--by account` (the default) — see resolveInsightsGate.
+  if (gate.groupGated) {
+    printPlanNotice();
+  } else {
   out.push('');
   out.push(chalk.bold(`By ${dim}`));
   const labelW = Math.min(
@@ -311,6 +350,7 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
       `${chalk.cyan(String(stalls).padStart(stallW))}  ${chalk.cyan(String(resumes))}`,
     );
   }
+  }
 
   // Everything below is the whole scope folded together; per-group detail is in --json.
   const all = newFacetAccumulator();
@@ -319,9 +359,13 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
   renderCounts('Top tools', topEntries(all.toolCounts, 8), out);
   renderCounts('Languages', topEntries(all.languages, 6), out);
   renderCounts('Models', topEntries(all.models, 6), out);
-  renderCounts('Silent stalls by model', topEntries(all.silentStallsByModel ?? {}, 8), out);
 
-  // Friction — the section that earns the command.
+  // Friction — the section that earns the command. Paid plan only (RUSH-2424);
+  // top-line counts and harness mix above/below stay free.
+  if (gate.frictionGated) {
+    printPlanNotice();
+  } else {
+  renderCounts('Silent stalls by model', topEntries(all.silentStallsByModel ?? {}, 8), out);
   const gaps = all.responseGaps;
   const silentStalls = Object.entries(all.frictionSignals)
     .filter(([k]) => k.startsWith('silent stall:'))
@@ -354,6 +398,7 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
 
   renderCounts('Friction / thrash', topEntries(all.frictionSignals, 10), out);
   renderCounts('Dissatisfaction / corrections', topEntries(all.correctionSignals, 10), out);
+  }
   renderCounts('Automatable repeats', topEntries(all.automationSignals, 10), out);
   renderCounts('Harness split', harnesses, out);
 
@@ -492,8 +537,24 @@ async function renderNarrative(payload: unknown): Promise<void> {
   }
 }
 
+/** Facet keys that belong to the paid friction/correction sections — stripped from `--json` on free (RUSH-2424). */
+const PAID_FACET_KEYS = new Set([
+  'frictionSignals', 'correctionSignals', 'silentStallsByModel',
+  'interruptions', 'errorCount', 'errorCategories', 'responseGaps', 'gapsOverCeiling',
+]);
+
+function freeFacetSubset(facets: InsightFacets): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(facets)) {
+    if (!PAID_FACET_KEYS.has(key)) out[key] = value;
+  }
+  return out;
+}
+
 async function insightsAction(options: InsightsOptions): Promise<void> {
   const dim = resolveGroup(options.by);
+  const tier = await getTier();
+  const gate = resolveInsightsGate(tier, dim);
   const minMessages = Number.parseInt(options.minMessages ?? '2', 10);
   if (!Number.isFinite(minMessages) || minMessages < 0) {
     console.error(chalk.red('error: --min-messages must be a non-negative integer'));
@@ -561,26 +622,33 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
       unreadable,
       minMessages,
       by: dim,
+      plan: { tierName: tier.tierName, isPaid: tier.isPaid },
+      ...(gate.groupGated || gate.frictionGated ? { notice: PAID_PLAN_NOTICE } : {}),
       overlap,
       actions,
       harnesses,
-      groups: groups.map((g) => ({
+      groups: gate.groupGated ? null : groups.map((g) => ({
         key: g.key,
         label: g.label,
         sessions: g.sessions,
         costUsd: g.costUsd,
         durationMs: g.durationMs,
         outputTokens: g.outputTokens,
-        ...g.facets,
-        responseGapP50: Math.round(percentile(g.facets.responseGaps, 50)),
-        responseGapP90: Math.round(percentile(g.facets.responseGaps, 90)),
-        responseGapBuckets: bucketGaps(g.facets.responseGaps),
-        // The raw sample is large and uninteresting once bucketed.
-        responseGaps: undefined,
+        ...(gate.frictionGated ? freeFacetSubset(g.facets) : {
+          ...g.facets,
+          responseGapP50: Math.round(percentile(g.facets.responseGaps, 50)),
+          responseGapP90: Math.round(percentile(g.facets.responseGaps, 90)),
+          responseGapBuckets: bucketGaps(g.facets.responseGaps),
+          // The raw sample is large and uninteresting once bucketed.
+          responseGaps: undefined,
+        }),
       })),
     };
     console.log(JSON.stringify(payload, null, 2));
-    if (options.narrative) await renderNarrative(payload);
+    if (options.narrative) {
+      if (!tier.isPaid) console.error(chalk.gray(`  ${PAID_PLAN_NOTICE}`));
+      else await renderNarrative(payload);
+    }
     return;
   }
 
@@ -592,19 +660,24 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
     unreadable,
     minMessages,
     overlap,
-  }, actions, harnesses);
+  }, actions, harnesses, gate);
 
   if (options.narrative) {
-    await renderNarrative(groups.map((g) => ({
-      account: g.label, sessions: g.sessions, costUsd: g.costUsd,
-      topTools: topEntries(g.facets.toolCounts, 8),
-      languages: topEntries(g.facets.languages, 6),
-      errorCategories: topEntries(g.facets.errorCategories, 6),
-      interruptions: g.facets.interruptions,
-      linesTouchedAfter: g.facets.linesTouchedAfter, linesTouchedBefore: g.facets.linesTouchedBefore,
-      gitCommits: g.facets.gitCommits,
-      replyP50s: Math.round(percentile(g.facets.responseGaps, 50)),
-    })));
+    if (!tier.isPaid) {
+      console.log('');
+      console.log(chalk.gray(`  ${PAID_PLAN_NOTICE}`));
+    } else {
+      await renderNarrative(groups.map((g) => ({
+        account: g.label, sessions: g.sessions, costUsd: g.costUsd,
+        topTools: topEntries(g.facets.toolCounts, 8),
+        languages: topEntries(g.facets.languages, 6),
+        errorCategories: topEntries(g.facets.errorCategories, 6),
+        interruptions: g.facets.interruptions,
+        linesTouchedAfter: g.facets.linesTouchedAfter, linesTouchedBefore: g.facets.linesTouchedBefore,
+        gitCommits: g.facets.gitCommits,
+        replyP50s: Math.round(percentile(g.facets.responseGaps, 50)),
+      })));
+    }
   }
 }
 
