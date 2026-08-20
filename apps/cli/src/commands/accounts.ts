@@ -77,8 +77,8 @@ function secretFromBundle(raw: string): string {
   return readAndResolveBundleEnv(bundle, { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'accounts import' }).env[key];
 }
 
-function publicAccount(account: ReturnType<typeof inspectAccount>) {
-  return { kind: 'provider' as const, id: account.id, name: account.name, provider: account.provider, auth: account.auth, baseUrl: account.baseUrl, policy: account.policy, secretPresent: account.secretPresent };
+function publicAccount(account: ReturnType<typeof inspectAccount>, dormant: boolean) {
+  return { kind: 'provider' as const, id: account.id, name: account.name, provider: account.provider, auth: account.auth, baseUrl: account.baseUrl, policy: account.policy, secretPresent: account.secretPresent, dormant };
 }
 
 async function printAccounts(json: boolean, fleet = false): Promise<void> {
@@ -93,14 +93,15 @@ async function printAccounts(json: boolean, fleet = false): Promise<void> {
     return { ...row, name: saved?.name, id: saved?.id ?? row.id, dormant: !!saved && dormantIds.has(saved.id) };
   });
   if (json) {
-    console.log(JSON.stringify([...records.map(account => publicAccount(inspectAccount(account.name))), ...native], null, 2));
+    console.log(JSON.stringify([...records.map(account => publicAccount(inspectAccount(account.name), dormantIds.has(account.id))), ...native], null, 2));
     return;
   }
   console.log(chalk.bold('Provider account bundles\n'));
   if (!records.length) console.log(chalk.gray("  None. Add one with 'agents accounts add <name> --provider <provider> --auth <type>'."));
   for (const account of records) {
     const present = inspectAccount(account.name).secretPresent ? chalk.green('ready') : chalk.red('missing on this device');
-    console.log(`  ${chalk.cyan(account.name)}  ${account.provider}  ${account.auth}  ${present}`);
+    const dormantSuffix = dormantIds.has(account.id) ? chalk.gray('  — dormant (upgrade to reactivate)') : '';
+    console.log(`  ${chalk.cyan(account.name)}  ${account.provider}  ${account.auth}  ${present}${dormantSuffix}`);
   }
   console.log(chalk.bold('\nNative harness logins\n'));
   if (!native.length) console.log(chalk.gray('  No signed-in native accounts found.'));
@@ -307,15 +308,22 @@ export function registerAccountsCommand(program: Command): void {
       console.log(chalk.green(`Updated credential for account '${name}'.`));
     });
 
-  accounts.command('view <name>').alias('inspect').description('Show safe account metadata, custody, and attachments').option('--json', 'Machine-readable output').action((name: string, o: { json?: boolean }, command: Command) => {
+  accounts.command('view <name>').alias('inspect').description('Show safe account metadata, custody, and attachments').option('--json', 'Machine-readable output').action(async (name: string, o: { json?: boolean }, command: Command) => {
     const meta = readMeta();
     const unified = findUnifiedAccount(name, meta);
     if (!unified) throw new Error(`Unknown account '${name}'.`);
+    const harnesses = unified.kind === 'provider'
+      ? ALL_AGENT_IDS.filter(h => providerAuthenticatesHarness(unified.provider, unified.auth, h))
+      : [unified.agent];
+    let dormant = false;
+    for (const harness of harnesses) {
+      if ((await dormantAccountsForHarness(harness)).some(a => a.id === unified.id)) { dormant = true; break; }
+    }
     const account = unified.kind === 'provider'
-      ? { ...publicAccount(inspectAccount(unified.name)), custody: 'agents secrets (policy never)', attached: accountBindings(unified.id, meta) }
-      : { ...unified, custody: `${unified.agent} (not stored by agents-cli)`, attached: accountBindings(unified.id, meta) };
+      ? { ...publicAccount(inspectAccount(unified.name), dormant), custody: 'agents secrets (policy never)', attached: accountBindings(unified.id, meta) }
+      : { ...unified, dormant, custody: `${unified.agent} (not stored by agents-cli)`, attached: accountBindings(unified.id, meta) };
     if (o.json || command.optsWithGlobals().json) return console.log(JSON.stringify(account, null, 2));
-    console.log(chalk.bold(account.name));
+    console.log(chalk.bold(account.name) + (account.dormant ? chalk.gray('  — dormant (upgrade to reactivate)') : ''));
     console.log(`  kind: ${account.kind}`);
     console.log(`  id: ${account.id}`);
     console.log(`  custody: ${account.custody}`);
