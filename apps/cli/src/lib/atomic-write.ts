@@ -7,11 +7,16 @@
  * the previous valid file or the new one, never a half-written one that a
  * downstream `JSON.parse` would reject (RUSH-2429).
  *
- * This consolidates five near-identical private copies that had already
- * started to drift (RUSH-2840): the named private `atomicWriteJson` in
- * `feed/feed.ts`, `devices/registry.ts`, `teams/registry.ts`, and
- * `teams/agents.ts`, plus a sixth, unnamed inline copy inside `feed/feed.ts`'s
- * own `publishBlock()` (the only one of the six that was actually called).
+ * This consolidates five near-identical copies that had already started to
+ * drift (RUSH-2840): the named private `atomicWriteJson` in `feed/feed.ts`,
+ * `devices/registry.ts`, `teams/registry.ts`, and `teams/agents.ts` (four),
+ * plus a fifth, unnamed inline copy inside `feed/feed.ts`'s own
+ * `publishBlock()` (the only one of the five that was actually called).
+ * Two further `writeFileSync`+`renameSync` pairs in `feed/feed.ts`
+ * (`ensureFeedPublishHook`, writing a shell script with a mode bit, and a
+ * YAML doc via `stringifyDoc`) are the same PATTERN but not the same
+ * primitive — neither writes JSON — and are deliberately left as their own
+ * inline atomic writes.
  *
  * All three real ASYNC call sites (`devices/registry.ts`, `teams/registry.ts`,
  * `teams/agents.ts`) already unlinked the tmp file on a failed rename — that
