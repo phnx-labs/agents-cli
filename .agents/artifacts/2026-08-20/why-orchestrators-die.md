@@ -325,7 +325,7 @@ could not be confirmed at all.
     <text x="16" y="356">No metered unit means the model that funded Vercel and Modal is unavailable by construction.</text>
   </g>
 </svg>
-<figcaption>This is the whole thesis in one picture. Vercel and Modal resell compute at a margin. An agent orchestrator on BYO-subscription resells nothing.</figcaption>
+<figcaption>Vercel and Modal resell compute at a margin. An agent orchestrator on BYO-subscription resells nothing — that is what "$0 passes through" describes, and it is the situation today. It is not a claim that no fee is collectable: OpenRouter charges 5% of routed value even in bring-your-own-key mode, without ever holding the payment. What the diagram forecloses is the inference margin, not metering.</figcaption>
 </figure>
 
 ### The escape route: meter what only exists when there is a team
