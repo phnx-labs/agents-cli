@@ -83,11 +83,17 @@ groups:
     checks: [typecheck, sessions-bench]
     budget_sec: 180
 
+  # 240s, not the default 85s. Moving runner.ts into daemon/ (PR #2803, run
+  # 32395701692) selected companion + importer tests including routines.test.ts
+  # (78 tests / 174s of vitest) inside a 213s impact run. Under the flat 85s
+  # default no runner.ts change that retargets commands/routines.ts can merge.
+  # Raise this only against a measured run, and lower it when the suite is split.
   - id: daemon
     when:
       - apps/cli/src/lib/daemon/**
       - apps/cli/src/lib/daemon-ticks.ts
     checks: [typecheck]
+    budget_sec: 240
 
   - id: toolchain
     when:

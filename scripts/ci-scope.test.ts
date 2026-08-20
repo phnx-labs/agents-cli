@@ -218,6 +218,20 @@ describe('selectImpact policy', () => {
     expect(plan.budget_sec).toBeGreaterThan(IMPACT_BUDGET_SEC);
   });
 
+  test('a daemon change carries the group budget, not the 85s default', () => {
+    // runner.ts lives in daemon/; retargeting commands/routines.ts onto it
+    // selects routines.test.ts (78 tests / 174s) inside a 213s impact run
+    // (PR #2803, run 32395701692). Under 85s the move cannot merge.
+    const plan = selectImpact({
+      files: ['apps/cli/src/lib/daemon/runner.ts'],
+      repoRoot: REPO,
+      related: false,
+    });
+    expect(plan.suite).toBe('selected');
+    expect(plan.budget_sec).toBe(240);
+    expect(plan.budget_sec).toBeGreaterThan(IMPACT_BUDGET_SEC);
+  });
+
   test('a group with no budget keeps the default, so the ceiling only rises where declared', () => {
     const plan = selectImpact({
       files: ['apps/cli/src/commands/run.ts'],
