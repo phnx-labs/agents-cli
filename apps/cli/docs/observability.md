@@ -1206,6 +1206,22 @@ agents insights --narrative                    # add a written read on the numbe
 | When you work | 24-slot local-time histogram of your messages |
 | Parallel sessions | overlapping pairs, and how many straddled two accounts |
 
+### Plan-tier gate (RUSH-2424)
+
+The By-account breakdown and Friction section above are **paid**. On the free
+plan (see `apps/cli/src/lib/entitlement.ts`), the default report — grouped
+`--by account` — replaces the account table and the Friction section with a
+one-line notice: `Friction and account-split analysis are on the paid plan.`
+Top-line counts (scanned/analyzed totals), Top tools / Languages / Models,
+"What you changed", "When you work", and the harness-mix split stay free on
+every tier, as does `agents insights mix`/`agents perf` (separate command
+trees, never gated). Grouping by anything other than account (`--by agent`,
+`--by project`, `--by day`) is not gated — only the friction/correction facets
+within each group are stripped. `--narrative` is paid on every path. `--json`
+carries a `plan: {tierName, isPaid}` field and, when gated, `groups: null` (or
+the friction/correction facet keys stripped per group) plus a `notice` field —
+never a silently smaller report with no signal that anything was withheld.
+
 ### Agent silent stalls (model goes quiet until you ping)
 
 A common failure mode: the assistant ends a turn while work remains, sits idle, and

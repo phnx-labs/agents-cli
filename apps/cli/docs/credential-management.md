@@ -131,6 +131,20 @@ The commands read like the task, object first:
 | `agents accounts switch <harness> [account]` | Fast picker (or direct name) that writes the per-harness default. `--json` lists or reports. Same binding as `set-default`. |
 | `agents accounts sync <account> <device>` | Copy a provider account bundle to a worker (native records have no bytes to copy) |
 
+**Plan-tier account cap (RUSH-2424).** `agents accounts add` / `name` / `attach`
+count the accounts (native + provider) already registered/usable for a harness
+and refuse to add another before the plan's cap: **3 per harness on free, 10 on
+paid/admin.** The tier comes from `apps/cli/src/lib/entitlement.ts`
+(`GET /api/v1/billing/subscription?agent=agi-cli`, cached 15 minutes,
+offline-tolerant — a stale cache is honored over a failed network call, and no
+`~/.rush/user.yaml` at all resolves straight to free). A refusal at 3/3 free
+reads `free plan is capped at 3 <harness> accounts (3/3). agents upgrade — up to
+10 per harness.`; the add that lands exactly at 3/3 prints a one-line notice
+instead of failing. **Downgrading never deletes a credential** — an account
+past the new, lower cap simply falls out of `listSwitchableAccounts` (so
+`accounts switch` / `set-default` never offer it) and is listed `dormant
+(upgrade to reactivate)` in `agents accounts` until the plan is upgraded again.
+
 `set-default` / `clear-default` remain the per-harness-default spelling and are
 consulted after an exact `agent@version` or device-scoped binding.
 `agents accounts switch <harness>` (optional `[account]`, `--json`) is the fast
