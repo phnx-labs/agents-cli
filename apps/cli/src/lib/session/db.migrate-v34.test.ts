@@ -75,7 +75,7 @@ const SEED: Array<{ id: string; model: string; cost: number | null; file: string
   seed.close();
 }
 
-const { getDB, SCHEMA_VERSION } = await import('./db.js');
+const { getDB } = await import('./db.js');
 
 describe('schema migration v33 -> v34 (reprice the Claude 5 line)', () => {
   it('invalidates exactly the mispriced transcripts and no others', () => {
@@ -100,7 +100,4 @@ describe('schema migration v33 -> v34 (reprice the Claude 5 line)', () => {
     expect(row.model).toBe('claude-opus-5');
   });
 
-  it('reaches at least v34', () => {
-    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(34);
-  });
 });

@@ -43,7 +43,7 @@ import { shortCodexHome } from '../codex-home.js';
 import { prepareJobHome, buildSpawnEnv, getJobHomePath } from '../sandbox.js';
 import { resolveModel, buildReasoningFlags } from '../models.js';
 import { createTimer, redactPrompt, emitRoutineEnd } from '../feed/events.js';
-import { codexEditWritableRoots, codexPolicyArgs } from '../codex-policy.js';
+import { resolveHarnessAdapter } from '../harness/index.js';
 import { applyAddDirs } from '../add-dir.js';
 import {
   normalizeMode,
@@ -603,87 +603,13 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
   // Canonicalize mode (accepts legacy `full` as alias for `skip`).
   const mode = normalizeMode(config.mode);
 
-  if (config.agent === 'claude') {
-    if (mode === 'edit') {
-      const planIndex = cmd.indexOf('plan');
-      if (planIndex !== -1) cmd[planIndex] = 'acceptEdits';
-    } else if (mode === 'auto') {
-      const planIndex = cmd.indexOf('plan');
-      if (planIndex !== -1) cmd[planIndex] = 'auto';
-    } else if (mode === 'skip') {
-      // Replace --permission-mode plan with --dangerously-skip-permissions
-      const pmIndex = cmd.indexOf('--permission-mode');
-      if (pmIndex !== -1) cmd.splice(pmIndex, 2, '--dangerously-skip-permissions');
-    }
-
-    appendModelAndReasoning(cmd, config);
-  }
-
-  if (config.agent === 'codex') {
-    const policyMode = mode === 'plan' || mode === 'skip' ? mode : 'edit';
-    const routineRoots = (config.allow?.dirs ?? []).map((dir) => {
-      if (dir.startsWith('-')) {
-        throw new Error(`allow.dirs entries must not start with '-': ${JSON.stringify(dir)}`);
-      }
-      return dir.replace(/^~/, os.homedir());
-    });
-    cmd.push(...codexPolicyArgs(policyMode, [...codexEditWritableRoots(), ...routineRoots]));
-
-    appendModelAndReasoning(cmd, config);
-  }
-
-  if (config.agent === 'cursor') {
-    if (mode === 'plan') {
-      cmd.push('--plan');
-    } else if (mode === 'skip') {
-      cmd.push('-f');
-    } else {
-      // The configured cwd is the user's workspace trust decision. --trust is
-      // narrower than --yolo/-f because it does not bypass tool permissions.
-      cmd.push('--trust');
-    }
-
-    appendModelAndReasoning(cmd, config);
-  }
-
-  if (config.agent === 'kimi') {
-    // kimi daemon jobs always run headless via `--prompt`, which cannot be
-    // combined with any startup-mode flag (--plan/--auto/--yolo all abort with
-    // "Cannot combine --prompt with --X"). edit/auto/skip reduce to kimi's default
-    // headless auto-run, so emit no flag. plan has no headless read-only
-    // equivalent, so resolveHeadlessMode downgrades a plan request to auto with a
-    // stderr warning (kimi's headlessPlan is false) — routines run headless, so
-    // interactive is always false here. The returned mode carries no flag either.
-    resolveHeadlessMode('kimi', mode, false);
-
-    appendModelAndReasoning(cmd, config);
-  }
-
-  if (config.agent === 'droid') {
-    // droid exec defaults to read-only (plan). Escalate autonomy per mode.
-    if (mode === 'edit') {
-      cmd.push('--auto', 'low');
-    } else if (mode === 'auto') {
-      cmd.push('--auto', 'high');
-    } else if (mode === 'skip') {
-      cmd.push('--skip-permissions-unsafe');
-    }
-
-    appendModelAndReasoning(cmd, config);
-  }
-
-  if (config.agent === 'muse') {
-    // muse exec: plan ≈ no non-shell writes; auto skips approval prompts but
-    // keeps the OS sandbox; skip is --yolo (no approval, no sandbox, trust).
-    if (mode === 'plan') {
-      cmd.push('--disable-write');
-    } else if (mode === 'auto') {
-      cmd.push('--disable-approval');
-    } else if (mode === 'skip') {
-      cmd.push('--yolo');
-    }
-    // edit: default on-request approval + sandbox
-
+  // Routine launch-arg quirks (the harness axis of Move 3): each per-agent arm
+  // moves to its harness adapter; runner appends model/reasoning flags after,
+  // exactly as every arm did. Agents with no routine quirk have no adapter
+  // override, so they skip both — the old behavior for an entry with no arm.
+  const routineAdapter = resolveHarnessAdapter(agent);
+  if (routineAdapter.routineModeArgs) {
+    routineAdapter.routineModeArgs(cmd, { mode, config, resolveHeadlessMode });
     appendModelAndReasoning(cmd, config);
   }
 

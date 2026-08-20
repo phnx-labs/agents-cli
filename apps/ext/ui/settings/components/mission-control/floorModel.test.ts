@@ -461,7 +461,10 @@ describe('groupAgents', () => {
 })
 
 describe('sortAgents', () => {
-  test("'needs' orders by PHASE_RANK (waiting < failed < stalled < running < done < idle)", () => {
+  // Root AGENTS.md "Purpose": rank by PROGRESS, not liveness. Every phase that has
+  // STOPPED progressing outranks `running`, and `done` is the terminal state below
+  // both — so idle-but-unfinished work is never the bottom of the list (RUSH-2838).
+  test("'needs' orders by PHASE_RANK (waiting < failed < stalled < idle < running < done)", () => {
     const agents = [
       makeAgent({ id: 'idle', phase: 'idle' }),
       makeAgent({ id: 'done', phase: 'done' }),
@@ -471,9 +474,22 @@ describe('sortAgents', () => {
       makeAgent({ id: 'waiting', phase: 'waiting' }),
     ]
     const ordered = sortAgents(agents, 'needs').map((a) => a.id)
-    expect(ordered).toEqual(['waiting', 'failed', 'stalled', 'running', 'done', 'idle'])
+    expect(ordered).toEqual(['waiting', 'failed', 'stalled', 'idle', 'running', 'done'])
     const ranks = sortAgents(agents, 'needs').map((a) => PHASE_RANK[a.phase])
     expect(ranks).toEqual([...ranks].sort((x, y) => x - y))
+  })
+
+  test('idle-but-unfinished outranks running, and done is terminal below both', () => {
+    // The invariant itself, independent of the exact permutation above: an idle agent
+    // is unfinished work that stopped progressing (derivePhase sends a FINISHED agent
+    // to 'done'), so it is the one to raise — a running agent needs nothing.
+    expect(PHASE_RANK.idle).toBeLessThan(PHASE_RANK.running)
+    expect(PHASE_RANK.running).toBeLessThan(PHASE_RANK.done)
+    for (const stopped of ['waiting', 'failed', 'stalled', 'idle'] as const) {
+      expect(PHASE_RANK[stopped]).toBeLessThan(PHASE_RANK.running)
+    }
+    expect(derivePhase({ status: 'completed', waitingForInput: false, active: false, prOpenUnreviewed: false })).toBe('done')
+    expect(derivePhase({ status: 'running', waitingForInput: false, active: false, prOpenUnreviewed: false })).toBe('idle')
   })
 
   test("'tok' orders by throughput descending", () => {
@@ -925,7 +941,7 @@ describe('floor visibility and section counts', () => {
     expect(visibleFloorAgents([foreground, background], true).map((a) => a.id)).toEqual(['foreground', 'background'])
   })
 
-  test('every rendered card belongs to exactly one counted section', () => {
+  test('every rendered card belongs to exactly one counted section, and idle is its own section above active', () => {
     const agents = [
       makeAgent({ id: 'needs', needs: true, phase: 'waiting' }),
       makeAgent({ id: 'running', phase: 'running' }),
@@ -934,9 +950,13 @@ describe('floor visibility and section counts', () => {
     ]
     const sections = partitionFloorAgents(agents)
     expect(sections.needs.map((a) => a.id)).toEqual(['needs'])
-    expect(sections.active.map((a) => a.id)).toEqual(['running', 'idle'])
+    // Idle is unfinished work that stopped progressing — the highest abandonment risk
+    // — so it gets its own bucket and is NOT mixed in with running under 'active'
+    // (root AGENTS.md "Purpose"; RUSH-2838).
+    expect(sections.idle.map((a) => a.id)).toEqual(['idle'])
+    expect(sections.active.map((a) => a.id)).toEqual(['running'])
     expect(sections.done.map((a) => a.id)).toEqual(['done'])
-    expect(sections.needs.length + sections.active.length + sections.done.length).toBe(agents.length)
+    expect(sections.needs.length + sections.idle.length + sections.active.length + sections.done.length).toBe(agents.length)
   })
 })
 

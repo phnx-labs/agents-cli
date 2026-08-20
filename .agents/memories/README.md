@@ -33,7 +33,7 @@ no shipped change or artifact could be cited, are marked as such rather than inv
 
 ## Index
 
-Coverage: **41 active days**, 2026-06-24 → 2026-08-10.
+Coverage: **42 active days**, 2026-06-24 → 2026-08-20 (gap 08-11 → 08-19 not yet backfilled).
 
 - **Jun 24 – Jul 06** — Swarmify → Agency.Li rename; reducing Touch ID prompts (secrets
   broker); native cloud providers; agents teams; routines; the `.agents` DotAgents repo;
@@ -51,3 +51,7 @@ Coverage: **41 active days**, 2026-06-24 → 2026-08-10.
   `--host`, `--device` sole target (RUSH-2494); CLI surface consolidation; DeepInfra;
   events-one-engine (PR #2550); daemon services + monitors ownership; browser sessions in
   DB; dev-install no-shadow (`agents-dev`); Factory → AGI EXT rename; this backfill.
+- **Aug 20** — sub-60s CI/release goal set; release train unwedged (repoRootForCwd home
+  bug, darwin-only escapes past the Linux-only gate); 1.22.41 shipped end-to-end;
+  headless npm token on mac-mini (file-backed); trusted-pool PR lane refused as
+  fork-unsafe (29s check proven, untrusted-executor lane pending owner decision).

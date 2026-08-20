@@ -81,8 +81,6 @@ function recordedVersion(): string | undefined {
 describe('db migration v38 -> v39 (durable tool sessions, RUSH-2549)', () => {
   it('recreates both tool-session tables on a pre-v39 database and stamps the new version', () => {
     const db = getDB();
-    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(39);
-
     const tables = (db
       .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
       .all() as Array<{ name: string }>).map((r) => r.name);

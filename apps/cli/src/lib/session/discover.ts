@@ -4163,7 +4163,7 @@ function freshClaudeParserState(): ClaudeParserState {
  *
  * `mode` is returned so the caller (and tests) can confirm which branch ran.
  */
-async function scanClaudeSessionResumable(
+export async function scanClaudeSessionResumable(
   filePath: string,
   prior: ClaudeParserState | null,
   currentFileMtimeMs: number,
@@ -4757,7 +4757,7 @@ async function codexSessionIdentityAt(filePath: string, maxBytes = 1_048_576): P
  * past the persisted offset AND its mtime did not go backwards; FULL (from byte
  * 0, fresh state) otherwise (cold start, truncation/rewrite, clock rewind).
  */
-async function scanCodexSessionResumable(
+export async function scanCodexSessionResumable(
   filePath: string,
   prior: CodexParserState | null,
   currentFileMtimeMs: number,

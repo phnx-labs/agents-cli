@@ -147,6 +147,8 @@ agents accounts
 agents accounts add work --provider anthropic --auth setup-token
 agents accounts add gateway --provider openrouter --auth api-key \
   --from-secrets openrouter.ai:OPENROUTER_API_KEY
+agents accounts switch claude
+agents accounts switch claude gateway
 agents accounts set-default claude gateway
 agents accounts sync gateway --device yosemite-s0
 agents run claude --account work
@@ -161,7 +163,7 @@ never argv. Sync is explicit and copies provider bundles only. It never copies
 harness-native auth files.
 
 Resolution order is explicit `--account`, then the compatible account selected by
-`accounts set-default`, then the harness's native/balanced behavior. An incompatible
+`accounts set-default` / `accounts switch`, then the harness's native/balanced behavior. An incompatible
 provider/host pair or a bundle absent from the destination fails before the agent
 process starts. A migrated v2 `accounts.yaml` becomes these bundles transactionally;
 the old registry is archived only after every bundle was written successfully.

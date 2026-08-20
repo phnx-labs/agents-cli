@@ -922,6 +922,183 @@ describe('BrowserService — Arc is not CDP-drivable (never Target.createTarget)
   });
 });
 
+describe('BrowserService.navigate — Arc reuses a tab rather than refusing (#2786)', () => {
+  // Arc crashes on Target.createTarget (#2778) but DOES expose page targets and
+  // honors Page.navigate on them -- measured against a live Arc: 33 targets,
+  // navigate reused one, tab count unchanged. Refusing every navigate left the
+  // doc unshown and callers back on raw `open`, i.e. the tab-spam #2779 was
+  // meant to end. Reuse is deliberately narrow: only a tab already showing the
+  // requested URL, or an empty new-tab page.
+  function arcConnWithEmptyTask(profile: string, pages: Array<{ targetId: string; url: string }>) {
+    const { conn, calls, targets } = makeTargetedConn(`${profile}@endpoint-0`, { browser: 'arc', pages });
+    (conn as unknown as { tasks: Map<string, unknown> }).tasks.set('arctask', {
+      id: 'arctask',
+      name: 'arctask',
+      profile,
+      tabs: {},
+      currentTabId: undefined,
+      createdAt: Date.now(),
+      pid: 4242,
+    });
+    return { conn, calls, targets };
+  }
+
+  it('navigates a tab already showing that url, and never calls createTarget', async () => {
+    writeProfile('arcnav', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, calls } = arcConnWithEmptyTask('arcnav', [
+      { targetId: 'doc-tab', url: 'file:///tmp/plan.html' },
+    ]);
+    attach(service, 'arcnav', conn);
+
+    const r = await service.navigate('arctask', 'file:///tmp/plan.html', 'arcnav');
+
+    expect(r.created).toBe(false);
+    expect(createTargetCount(calls)).toBe(0);
+    expect(calls.filter((c) => c.method === 'Page.navigate')).toHaveLength(1);
+  });
+
+  it('reuses an empty new-tab page when no tab shows the url yet', async () => {
+    writeProfile('arcblank', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, calls } = arcConnWithEmptyTask('arcblank', [
+      { targetId: 'blank-tab', url: 'about:blank' },
+    ]);
+    attach(service, 'arcblank', conn);
+
+    const r = await service.navigate('arctask', 'file:///tmp/plan.html', 'arcblank');
+
+    expect(r.created).toBe(false);
+    expect(createTargetCount(calls)).toBe(0);
+    expect(calls.filter((c) => c.method === 'Page.navigate')).toHaveLength(1);
+  });
+
+  it("reuses the user's own tab showing that url — but done() must NOT close it", async () => {
+    // The reviewer's scenario for the first attempt at this fix: a tab the USER
+    // opened, showing the url a task navigates to, was claimed and then closed by
+    // that task's done(). Reuse is still correct here (re-showing the same
+    // document in place is the whole point), but the tab must outlive the task.
+    writeProfile('arcborrow', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets, calls } = arcConnWithEmptyTask('arcborrow', [
+      { targetId: 'users-own-tab', url: 'file:///tmp/plan.html' },
+    ]);
+    attach(service, 'arcborrow', conn);
+
+    await service.navigate('arctask', 'file:///tmp/plan.html', 'arcborrow');
+    const task = (conn as unknown as { tasks: Map<string, any> }).tasks.get('arctask');
+    expect(Object.values(task.tabs)).toContain('users-own-tab');
+    expect(task.borrowedTabs).toHaveLength(1);
+
+    await service.done('arctask');
+
+    // The user's tab is still there — never closed, and no close was attempted.
+    expect(targets.map((t) => t.targetId)).toContain('users-own-tab');
+    expect(calls.filter((c) => c.method === 'Target.closeTarget')).toHaveLength(0);
+    expect(createTargetCount(calls)).toBe(0);
+  });
+
+  it('two concurrent navigates never both claim the same free target', async () => {
+    // Stall an await that runs BEFORE the claim check (Target.attachToTarget,
+    // inside getSessionId) -- not Page.navigate, which now runs after it. Only
+    // this ordering actually exercises targetIsClaimed: with the claim written
+    // before Page.navigate, a test that stalls Page.navigate passes even when
+    // targetIsClaimed is neutered, so it proves nothing (reviewer-demonstrated).
+    writeProfile('arcrace', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn } = arcConnWithEmptyTask('arcrace', [
+      { targetId: 'free-tab', url: 'about:blank' },
+    ]);
+    const tasks = (conn as unknown as { tasks: Map<string, any> }).tasks;
+    tasks.set('taskB', { ...tasks.get('arctask'), id: 'taskB', name: 'taskB', tabs: {} });
+    attach(service, 'arcrace', conn);
+
+    let releaseAttach: () => void = () => {};
+    const attachStalled = new Promise<void>((r) => { releaseAttach = r; });
+    let attachCalls = 0;
+    const inner = conn.cdp.send;
+    conn.cdp.send = (async (method: string, params: any = {}, sess?: string) => {
+      if (method === 'Target.attachToTarget' && ++attachCalls === 1) await attachStalled;
+      return inner(method, params, sess);
+    }) as typeof conn.cdp.send;
+
+    // A stalls before its claim check; B then runs start-to-finish and claims.
+    const a = service.navigate('arctask', 'file:///tmp/doc.html', 'arcrace').catch((e) => e);
+    await new Promise((r) => setTimeout(r, 5));
+    await service.navigate('taskB', 'file:///tmp/doc.html', 'arcrace');
+    releaseAttach();
+    const aResult = await a;
+
+    // A must lose the race and be refused, not share B's tab.
+    expect(aResult).toBeInstanceOf(Error);
+    expect(Object.values(tasks.get('arctask').tabs)).not.toContain('free-tab');
+    expect(Object.values(tasks.get('taskB').tabs)).toContain('free-tab');
+  });
+
+  it('a borrowed tab is never reclaimed into another task by adoptTabShowing', async () => {
+    // Round-3 defect: a borrowed tab whose owning task died was reclaimed by a
+    // NEW task with no borrow marking, so that task's done() closed a tab that
+    // existed before either task. hygiene.ts notes agents routinely never call
+    // done(), so abandoned tasks are the normal case, not the edge one.
+    writeProfile('arcreclaim', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets } = arcConnWithEmptyTask('arcreclaim', [
+      { targetId: 'pre-existing-tab', url: 'file:///tmp/doc.html' },
+    ]);
+    const tasks = (conn as unknown as { tasks: Map<string, any> }).tasks;
+    attach(service, 'arcreclaim', conn);
+
+    // A task borrows the pre-existing tab, then its owner goes away.
+    await service.navigate('arctask', 'file:///tmp/doc.html', 'arcreclaim');
+    const dead = tasks.get('arctask');
+    expect(dead.borrowedTabs).toHaveLength(1);
+    dead.sessionId = '33333333-3333-4333-8333-333333333333'; // a uuid no live process carries
+
+    // A later start() on the same url must NOT be handed that borrowed tab.
+    const live = await service.start('arcreclaim', { url: 'file:///tmp/doc.html' }).catch((e: Error) => e);
+
+    // Arc cannot create a tab, so with reclaim correctly refused this refuses too --
+    // the point is that the pre-existing tab was not silently transferred.
+    expect(live).toBeInstanceOf(Error);
+    expect(targets.map((t) => t.targetId)).toContain('pre-existing-tab');
+  });
+
+  it('tabClose drops the borrow record with the tab it names', async () => {
+    writeProfile('arcprune', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn } = arcConnWithEmptyTask('arcprune', [
+      { targetId: 'borrowed-tab', url: 'about:blank' },
+    ]);
+    attach(service, 'arcprune', conn);
+
+    await service.navigate('arctask', 'file:///tmp/doc.html', 'arcprune');
+    const task = (conn as unknown as { tasks: Map<string, any> }).tasks.get('arctask');
+    const shortId = Object.keys(task.tabs)[0];
+    expect(task.borrowedTabs).toEqual([shortId]);
+
+    await service.tabClose('arctask', shortId);
+
+    // Left behind, the shortId would name nothing and accumulate in tasks.json.
+    expect(task.borrowedTabs).toEqual([]);
+    expect(task.tabs[shortId]).toBeUndefined();
+  });
+
+  it('refuses rather than hijacking a page the user is reading', async () => {
+    writeProfile('arcsafe', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, calls } = arcConnWithEmptyTask('arcsafe', [
+      { targetId: 'users-article', url: 'https://news.example.com/story' },
+    ]);
+    attach(service, 'arcsafe', conn);
+
+    await expect(service.navigate('arctask', 'file:///tmp/plan.html', 'arcsafe')).rejects.toThrow(
+      /Comet, Chrome, Chromium, or Brave/,
+    );
+    expect(createTargetCount(calls)).toBe(0);
+    expect(calls.filter((c) => c.method === 'Page.navigate')).toHaveLength(0);
+  });
+});
+
 describe('BrowserService.start — URL reclaim (RUSH-2622)', () => {
   // A UUID no live process carries, so the real liveness predicate (registry +
   // process table) proves this task's owner gone without any injection.

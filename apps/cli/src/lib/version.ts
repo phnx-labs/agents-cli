@@ -102,13 +102,19 @@ export function resolveInstalledLayout(): InstallLayout | null {
  * binary can't read its own bundled package.json), fall back to the on-disk
  * install found via the launcher symlink so callers like the menu bar don't see
  * a bogus `unknown`.
+ *
+ * `pkgJsonPath` is an optional override of the shipping package.json path,
+ * accepted by both this function and {@link getCliVersionFresh}. Every
+ * production call site uses the zero-argument form and gets the real on-disk
+ * path below; the parameter exists only so a unit test can point both
+ * functions at a fixture package.json instead of the real one shared by every
+ * parallel test fork.
  */
-export function getCliVersion(): string {
+export function getCliVersion(
+  pkgJsonPath: string = path.join(__dirname, '..', '..', 'package.json')
+): string {
   if (cached) return cached;
-  cached =
-    readVersionAt(path.join(__dirname, '..', '..', 'package.json')) ??
-    readInstalledPackageVersion() ??
-    'unknown';
+  cached = readVersionAt(pkgJsonPath) ?? readInstalledPackageVersion() ?? 'unknown';
   return cached;
 }
 
@@ -128,10 +134,8 @@ function readInstalledPackageVersion(): string | null {
  * is now stale and should reload onto the new code (self-healing). Returns
  * 'unknown' on any error.
  */
-export function getCliVersionFresh(): string {
-  return (
-    readVersionAt(path.join(__dirname, '..', '..', 'package.json')) ??
-    readInstalledPackageVersion() ??
-    'unknown'
-  );
+export function getCliVersionFresh(
+  pkgJsonPath: string = path.join(__dirname, '..', '..', 'package.json')
+): string {
+  return readVersionAt(pkgJsonPath) ?? readInstalledPackageVersion() ?? 'unknown';
 }

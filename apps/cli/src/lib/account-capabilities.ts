@@ -68,6 +68,41 @@ export function nativeAccountNameable(agent: AgentId): boolean {
   return (cap.status === 'supported' || cap.status === 'conditional') && cap.scope !== 'unsupported';
 }
 
+/** Harnesses whose native login is fully nameable/attachable today. */
+export function supportedNativeHarnesses(): AgentId[] {
+  return (Object.entries(NATIVE_ACCOUNT_CAPABILITIES) as [AgentId, NativeAccountCapability][])
+    .filter(([, cap]) => cap.status === 'supported')
+    .map(([id]) => id)
+    .sort();
+}
+
+/**
+ * Named reason to refuse native name/attach, or null when the harness is
+ * nameable. Provider-credential `accounts add` is a different path and MUST
+ * not consult this — that surface is supported for every registered provider.
+ */
+export function nativeAccountNamingRefusal(agent: AgentId): string | null {
+  if (nativeAccountNameable(agent)) return null;
+  const cap = NATIVE_ACCOUNT_CAPABILITIES[agent];
+  const suffix = `Supported today: ${supportedNativeHarnesses().join(', ')}.`;
+  if (cap.scope === 'device') {
+    return `${agent} accounts can't be isolated by agents-cli yet (device-scoped login). ${suffix}`;
+  }
+  if (agent === 'cursor') {
+    return `${agent} accounts can't be isolated by agents-cli yet (multi-account isolation unresolved). ${suffix}`;
+  }
+  if (cap.status === 'discovery-only') {
+    return `${agent} native accounts are discovery-only; agents-cli cannot name or attach this login. ${suffix}`;
+  }
+  return `${agent} accounts can't be named by agents-cli yet. ${suffix}`;
+}
+
+/** Fail loud on the native name/attach path for an unsupported harness. */
+export function assertNativeAccountNameable(agent: AgentId): void {
+  const reason = nativeAccountNamingRefusal(agent);
+  if (reason) throw new Error(reason);
+}
+
 /**
  * The single identity key used at `accounts name`, attach, exec validation,
  * view, and inventory. Prefer the harness's stable `accountKey`. For an

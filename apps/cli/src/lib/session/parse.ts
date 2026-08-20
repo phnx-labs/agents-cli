@@ -167,6 +167,30 @@ function truncateNormalizedToolOutput(output: string, maxChars: number): string 
   return `${output.slice(0, maxChars)}\n\n[Output truncated: ${output.length - maxChars} characters omitted.]`;
 }
 
+/**
+ * Registry-dispatch table: each `SessionAgentId` to its offline transcript
+ * parser. Replaces the per-harness `switch` — the harness axis of Move 3. Kept
+ * as its own table (not on the HarnessAdapter registry) because its id domain is
+ * `SessionAgentId`: `rush` is a session agent with no `AgentId`, and the offline
+ * transcript reader is a deliberately separate concern from live team events.
+ * The `Record` is total, so a new session harness must add an entry here.
+ */
+const TRANSCRIPT_PARSERS: Record<SessionAgentId, (filePath: string, opts: ParseSessionOptions) => SessionEvent[]> = {
+  claude: (filePath, opts) => parseClaude(filePath, opts),
+  codex: (filePath) => parseCodex(filePath),
+  gemini: (filePath) => parseGemini(filePath),
+  antigravity: (filePath) => parseAntigravity(filePath),
+  opencode: (filePath) => parseOpenCode(filePath),
+  grok: (filePath) => parseGrok(filePath),
+  rush: (filePath) => parseRush(filePath),
+  openclaw: () => [], // OpenClaw sessions don't have parseable files yet
+  hermes: (filePath) => parseHermes(filePath),
+  kimi: (filePath) => parseKimi(filePath),
+  droid: (filePath) => parseDroid(filePath),
+  cursor: (filePath) => parseCursor(filePath),
+  muse: (filePath) => parseMuse(filePath),
+};
+
 export function parseSession(
   filePath: string,
   agent?: SessionAgentId,
@@ -177,22 +201,7 @@ export function parseSession(
     throw new Error(`Cannot detect agent type from path: ${filePath}`);
   }
 
-  let events: SessionEvent[];
-  switch (detected) {
-    case 'claude': events = parseClaude(filePath, opts); break;
-    case 'codex': events = parseCodex(filePath); break;
-    case 'gemini': events = parseGemini(filePath); break;
-    case 'antigravity': events = parseAntigravity(filePath); break;
-    case 'opencode': events = parseOpenCode(filePath); break;
-    case 'grok': events = parseGrok(filePath); break;
-    case 'rush': events = parseRush(filePath); break;
-    case 'openclaw': events = []; break; // OpenClaw sessions don't have parseable files yet
-    case 'hermes': events = parseHermes(filePath); break;
-    case 'kimi': events = parseKimi(filePath); break;
-    case 'droid': events = parseDroid(filePath); break;
-    case 'cursor': events = parseCursor(filePath); break;
-    case 'muse': events = parseMuse(filePath); break;
-  }
+  const events: SessionEvent[] = TRANSCRIPT_PARSERS[detected](filePath, opts);
 
   // Chokepoint: every string field that originated in an untrusted session
   // file gets stripped of terminal escapes here, so renderers downstream can

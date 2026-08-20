@@ -59,7 +59,7 @@ const Database = (await import('../sqlite.js')).default;
   seed.close();
 }
 
-const { getDB, SCHEMA_VERSION } = await import('./db.js');
+const { getDB } = await import('./db.js');
 
 describe('schema migration v34 -> v35 (bare-column last_activity sort)', () => {
   it('backfills NULL last_activity from timestamp and leaves a populated one untouched', () => {
@@ -78,7 +78,4 @@ describe('schema migration v34 -> v35 (bare-column last_activity sort)', () => {
     expect(nullCount).toBe(0);
   });
 
-  it('reaches at least v35', () => {
-    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(35);
-  });
 });

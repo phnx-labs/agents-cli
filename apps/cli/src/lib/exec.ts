@@ -20,7 +20,6 @@ import { sanitizeProcessEnv } from './secrets/bundles.js';
 import { resolveActor, actorEnv } from './actor.js';
 import { expandLocalHome } from './project-root.js';
 import { getShimsDir, getHistoryDir, getUserAgentsDir, getRuntimeStateDir } from './state.js';
-import { resolveCodexHome } from './codex-home.js';
 import { readCodexConfiguredModel } from './installations/shims.js';
 import { writePidSessionEntry, extractSessionIdArg } from './session/pid-registry.js';
 import { writeSessionActorRecord, writeSessionAliasRecord } from './session/actor-sidecar.js';
@@ -33,10 +32,12 @@ import { isTmuxInstalled } from './tmux/binary.js';
 import { isTmuxEnabled } from './device-config.js';
 import { machineId } from './machine-id.js';
 import { shellQuote } from './ssh-exec.js';
-import { resolveClaudeSetupToken } from './claude-account-token.js';
 import { codexEditWritableRoots, codexPolicyArgs } from './codex-policy.js';
+import { resolveClaudeSetupToken } from './claude-account-token.js';
 import { applyAddDirs } from './add-dir.js';
 import { applyActiveRulesPresetAtRun } from './rules/run-sync.js';
+import { resolveHarnessAdapter, stripForeignConfigDir } from './harness/index.js';
+import { resolveConfigVersion } from './harness/exec-config-version.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -414,172 +415,28 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
   // Config-dir env vars are agent-specific. When the caller is running inside
   // an agent-managed shell, process.env already carries one; spreading into a
   // different agent's env would leak a config pointer the target CLI doesn't
-  // understand. Strip foreign vars and pin the right one to the versioned home.
-  if (options.agent === 'claude') {
-    const cwd = options.cwd || process.cwd();
-    const resolvedVersion = options.version ?? resolveVersion('claude', cwd);
-    // Use an explicitly pinned version unconditionally; for auto-resolved versions
-    // only inject the path when the version is actually installed on disk.
-    const version = options.version
-      ? resolvedVersion
-      : (resolvedVersion && isVersionInstalled('claude', resolvedVersion) ? resolvedVersion : null);
-    // The per-account `claude setup-token` only resolves when there is a version
-    // home to key it to; version===null (claude unresolved / not installed) yields
-    // null, exactly as the routines path treats it (`runner.ts:1017-1021`). The
-    // token decision below runs even then, so an ambient inherited value is stripped
-    // on the routines/provisioned path regardless of whether a version resolved.
-    const versionHome = version ? getVersionHomePath('claude', version) : null;
-    const setupToken = versionHome ? resolveClaudeSetupToken(versionHome) : null;
-    if (versionHome) {
-      result.CLAUDE_CONFIG_DIR = path.join(versionHome, '.claude');
-      // A managed pin lives in a per-version dir; Claude Code's own background
-      // auto-updater would rewrite that pinned binary in place (and has left it
-      // half-swapped and broken). Disable it so a pin stays a pin. Honor an
-      // explicit user value — from process.env (already in result) or from
-      // options.env (spread over result below).
-      if (result.DISABLE_AUTOUPDATER === undefined) {
-        result.DISABLE_AUTOUPDATER = '1';
-      }
-    }
-    // The `auth` bundle's setup-token exists so a run with NO human present
-    // authenticates without the Touch-ID-gated login item — usage probes,
-    // routines, dispatched runs (claude-account-token.ts). An interactive run
-    // has a human at the TTY, and their own per-version login is the credential
-    // they established and expect; overriding it made `/status` report
-    // `Auth token: CLAUDE_CODE_OAUTH_TOKEN` on a personal machine and took every
-    // hand-driven session off that login. macOS cannot cheaply confirm a home's
-    // login first (probing the Keychain raises an authorization sheet per
-    // installed version on the `agents run` hot path — agents.ts
-    // `isClaudeCredentialFileBlank`), so interactive simply defers to Claude
-    // Code, which prompts a present human to log in if the login is missing.
-    if (resolveInteractive(options)) {
-      // Drop an INHERITED copy of OUR OWN setup-token: an interactive launch from
-      // inside a headless agent's shell inherits that agent's injected value via
-      // sanitizeProcessEnv(process.env) and would keep authenticating as it.
-      // Matched by VALUE, so a token the user exported deliberately is a different
-      // string and is left alone (#2383). This is NARROWER than the non-interactive
-      // path below, which overwrites-or-deletes unconditionally and never inspects
-      // the inherited value — a DIFFERENT account's inherited setup-token passing
-      // through this equality check is the adjacent hole RUSH-2360 leaves as
-      // follow-up (it does not silently run on a *shared, rotating* token, which is
-      // what caused the RUSH-1822 logout storm).
-      if (setupToken && result.CLAUDE_CODE_OAUTH_TOKEN === setupToken) {
-        delete result.CLAUDE_CODE_OAUTH_TOKEN;
-      }
-    } else {
-      // Non-interactive (routines, dispatched, provisioned box): mirror the routines
-      // path (`runner.ts:1017-1021`) UNCONDITIONALLY. Inject the per-account
-      // setup-token when one resolves — it replaces any ambient shared value
-      // inherited from the launcher. When NONE resolves, STRIP the ambient
-      // CLAUDE_CODE_OAUTH_TOKEN so a run on a provisioned box can never silently
-      // authenticate as the shared, rotating token an earlier version of this path
-      // let through — the RUSH-1822 fleet-wide-logout hazard, tracked by RUSH-2360.
-      // A missing login then fails loud (401) against this home's own credential
-      // instead of quietly borrowing another's. options.env still wins below for an
-      // explicit caller override.
-      if (setupToken) {
-        result.CLAUDE_CODE_OAUTH_TOKEN = setupToken;
-      } else {
-        delete result.CLAUDE_CODE_OAUTH_TOKEN;
-      }
-    }
-    delete result.CODEX_HOME;
-    delete result.COPILOT_HOME;
-    delete result.KIMI_CODE_HOME;
-  } else if (options.agent === 'codex') {
-    const cwd = options.cwd || process.cwd();
-    const resolvedVersion = options.version ?? resolveVersion('codex', cwd);
-    const version = options.version
-      ? resolvedVersion
-      : (resolvedVersion && isVersionInstalled('codex', resolvedVersion) ? resolvedVersion : null);
-    if (version) {
-      // On macOS the deep versioned home overflows the Unix-socket SUN_LEN
-      // limit for codex's app-server control socket; resolve to a short,
-      // SUN_LEN-safe home (migrating once if needed). See codex-home.ts.
-      const versionedHome = path.join(getVersionHomePath('codex', version), '.codex');
-      const agentsUserDir = path.dirname(getHistoryDir());
-      result.CODEX_HOME = resolveCodexHome(versionedHome, agentsUserDir, version);
-    }
-    delete result.CLAUDE_CONFIG_DIR;
-    delete result.COPILOT_HOME;
-    delete result.KIMI_CODE_HOME;
-  } else if (options.agent === 'copilot') {
-    // Copilot honors COPILOT_HOME (relocates ~/.copilot, including settings,
-    // mcp-config.json, sessions, logs). Pin it at the per-version home so
-    // version switches isolate MCP servers, auth, and session history.
-    const cwd = options.cwd || process.cwd();
-    const resolvedVersion = options.version ?? resolveVersion('copilot', cwd);
-    const version = options.version
-      ? resolvedVersion
-      : (resolvedVersion && isVersionInstalled('copilot', resolvedVersion) ? resolvedVersion : null);
-    if (version) {
-      result.COPILOT_HOME = path.join(getVersionHomePath('copilot', version), '.copilot');
-    }
-    delete result.CLAUDE_CONFIG_DIR;
-    delete result.CODEX_HOME;
-    delete result.KIMI_CODE_HOME;
-  } else if (options.agent === 'kimi') {
-    // Kimi honors KIMI_CODE_HOME (relocates ~/.kimi-code, including config,
-    // skills, hooks, sessions). Pin it at the per-version home.
-    const cwd = options.cwd || process.cwd();
-    const resolvedVersion = options.version ?? resolveVersion('kimi', cwd);
-    const version = options.version
-      ? resolvedVersion
-      : (resolvedVersion && isVersionInstalled('kimi', resolvedVersion) ? resolvedVersion : null);
-    if (version) {
-      result.KIMI_CODE_HOME = path.join(getVersionHomePath('kimi', version), '.kimi-code');
-    }
-    delete result.CLAUDE_CONFIG_DIR;
-    delete result.CODEX_HOME;
-    delete result.COPILOT_HOME;
-  } else if (options.agent === 'muse') {
-    // Muse has no MUSE_CONFIG_DIR. Config is XDG-based:
-    //   $XDG_CONFIG_HOME/muse  (settings, skills, hooks, auth)
-    //   $XDG_DATA_HOME/muse    (sessions, plugins)
-    // Pin both into the version home so multi-version isolation matches
-    // Claude's CLAUDE_CONFIG_DIR / Codex's CODEX_HOME, and so Muse never
-    // resolves through the adopt-time ~/.config/muse symlink (SymlinkOrReparse).
-    const cwd = options.cwd || process.cwd();
-    const resolvedVersion = options.version ?? resolveVersion('muse', cwd);
-    const version = options.version
-      ? resolvedVersion
-      : (resolvedVersion && isVersionInstalled('muse', resolvedVersion) ? resolvedVersion : null);
-    if (version) {
-      const versionHome = getVersionHomePath('muse', version);
-      result.XDG_CONFIG_HOME = path.join(versionHome, '.config');
-      result.XDG_DATA_HOME = path.join(versionHome, '.local', 'share');
-    }
-    delete result.CLAUDE_CONFIG_DIR;
-    delete result.CODEX_HOME;
-    delete result.COPILOT_HOME;
-    delete result.KIMI_CODE_HOME;
-  } else if (options.agent === 'cursor') {
-    // Cursor has no config-dir env var (only CURSOR_API_KEY / CURSOR_API_ENDPOINT).
-    // Its OAuth token — the login gate — lives at $XDG_CONFIG_HOME/cursor/auth.json
-    // (verified empirically: relocating XDG_CONFIG_HOME relocates the login;
-    // ~/.cursor/cli-config.json holds only account metadata, not the token). Pin
-    // XDG_CONFIG_HOME into the version home so each installed Cursor account
-    // authenticates from its own token, isolated per run — no global ~/.cursor
-    // symlink swap, so concurrent runs on different accounts never clobber one
-    // another. cli-config.json (HOME-relative) has no override and stays on the
-    // shared home; only the token is per-account, which is what gates the login.
-    const cwd = options.cwd || process.cwd();
-    const resolvedVersion = options.version ?? resolveVersion('cursor', cwd);
-    const version = options.version
-      ? resolvedVersion
-      : (resolvedVersion && isVersionInstalled('cursor', resolvedVersion) ? resolvedVersion : null);
-    if (version) {
-      result.XDG_CONFIG_HOME = path.join(getVersionHomePath('cursor', version), '.config');
-    }
-    delete result.CLAUDE_CONFIG_DIR;
-    delete result.CODEX_HOME;
-    delete result.COPILOT_HOME;
-    delete result.KIMI_CODE_HOME;
+  // understand. Each harness adapter pins its own config-dir var to the versioned
+  // home and strips the foreign ones; a harness with no config-dir env (the old
+  // `else`) has no adapter override, so all four are stripped here.
+  const configAdapter = resolveHarnessAdapter(options.agent);
+  if (configAdapter.applyExecConfigEnv) {
+    // Resolve version/versionHome here (this module already imports
+    // installations/versions); the adapters must not import it themselves or they
+    // close a versions -> shims -> harness -> adapter import cycle.
+    const { version, versionHome } = resolveConfigVersion(
+      options.agent,
+      options.cwd || process.cwd(),
+      options.version,
+    );
+    configAdapter.applyExecConfigEnv(result, {
+      agent: options.agent,
+      version,
+      versionHome,
+      interactive: resolveInteractive(options),
+      resolveClaudeSetupToken,
+    });
   } else {
-    delete result.CLAUDE_CONFIG_DIR;
-    delete result.CODEX_HOME;
-    delete result.COPILOT_HOME;
-    delete result.KIMI_CODE_HOME;
+    stripForeignConfigDir(result);
   }
 
   // Point the agent at its own mailbox so the PreToolUse `mailbox-inject` hook
@@ -1127,18 +984,24 @@ export function buildExecCommand(options: ExecOptions): string[] {
       `Internal error: ${options.agent} declares '${resolvedMode}' in capabilities.modes but has no entry in AGENT_COMMANDS.modeFlags.${resolvedMode}.`,
     );
   }
-  if (options.agent === 'cursor' && resolvedMode === 'edit' && !interactive) {
-    // A configured headless run is the workspace trust decision. Keep this
-    // narrower than --yolo/-f, which also bypasses permission checks.
-    cmd.push('--trust');
+  // Launch-arg quirks (the harness axis of Move 3): cursor's additive `--trust`
+  // and the codex/kimi mode-flag overrides move to the harness adapter, so the
+  // per-agent name-chain collapses to one dispatch. The generic resume-subcommand
+  // and modeFlags paths stay here — they are not per-harness.
+  const launchAdapter = resolveHarnessAdapter(options.agent);
+  const launchArgsCtx = {
+    resolvedMode,
+    interactive,
+    cwd: options.cwd ?? process.cwd(),
+    addDirs: (options.addDirs ?? []).map(expandLocalHome),
+  };
+  const preModeArgs = launchAdapter.execPreModeArgs?.(launchArgsCtx);
+  if (preModeArgs) {
+    cmd.push(...preModeArgs);
   }
-  if (options.agent === 'codex') {
-    const policyMode = resolvedMode === 'plan' || resolvedMode === 'skip' ? resolvedMode : 'edit';
-    const writableRoots = [
-      ...codexEditWritableRoots(options.cwd ?? process.cwd()),
-      ...(options.addDirs ?? []).map(expandLocalHome),
-    ];
-    cmd.push(...codexPolicyArgs(policyMode, writableRoots));
+  const modeArgsOverride = launchAdapter.execModeArgs?.(launchArgsCtx);
+  if (modeArgsOverride !== undefined) {
+    cmd.push(...modeArgsOverride);
   } else if (resumeSpec && 'subcommand' in resumeSpec) {
     if (resolvedMode === 'skip') {
       // skip = yolo on resume too; both `codex resume` (TUI) and
@@ -1153,22 +1016,6 @@ export function buildExecCommand(options: ExecOptions): string[] {
       // approval/sandbox bypass.
       cmd.push(...modeFlags);
     }
-  } else if (options.agent === 'kimi' && !interactive) {
-    // kimi's headless prompt mode (`-p`/`--prompt`) is self-contained and REFUSES
-    // to be combined with any startup-mode flag: `--plan`, `--auto`, and `--yolo`
-    // all abort with "Cannot combine --prompt with --X" (verified against the live
-    // kimi CLI). The write-capable modes (edit/auto/skip) all collapse to kimi's
-    // default `-p` behavior, which already auto-approves tool calls, so we emit no
-    // mode flag. Plan can't reach here headless — resolveHeadlessMode already
-    // downgraded it to auto (kimi's headlessPlan:false); this asserts that
-    // invariant so a plan-mode run can never silently mutate the workspace.
-    if (resolvedMode === 'plan') {
-      throw new Error(
-        `Internal error: kimi reached headless command build with resolved mode 'plan'; ` +
-          `resolveHeadlessMode should have downgraded it to auto (capabilities.headlessPlan is false).`,
-      );
-    }
-    // edit/auto/skip: emit no mode flag — `kimi -p` auto-runs.
   } else {
     cmd.push(...modeFlags);
   }
@@ -1413,7 +1260,7 @@ export async function execShimPassthrough(
   // not parse `rawArgs`, so a `-p "task"` passthrough is headless in fact and
   // interactive by this classification, and loses the token. Windows-only in
   // practice (POSIX uses the bash shim, which execs the binary and never reaches
-  // buildExecEnv — `shims.ts:749`, `shims.ts:761-764`).
+  // buildExecEnv — `installations/shims.ts` generateShimScript).
   const env = buildExecEnv({ agent, version, cwd, mode: defaultModeFor(agent), effort: 'auto', env: { AGENT_LAUNCH_ID: launchId } });
   const { command, args, shell } = resolveShimSpawn(process.platform, binary, [...launchArgs, ...rawArgs]);
 

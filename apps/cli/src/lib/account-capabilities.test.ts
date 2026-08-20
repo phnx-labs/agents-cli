@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ALL_AGENT_IDS } from './agents.js';
-import { NATIVE_ACCOUNT_CAPABILITIES, nativeAccountNameable, nativeIdentityKey } from './account-capabilities.js';
+import { NATIVE_ACCOUNT_CAPABILITIES, nativeAccountNameable, nativeAccountNamingRefusal, nativeIdentityKey, supportedNativeHarnesses } from './account-capabilities.js';
 
 describe('native account capability registry', () => {
   it('classifies every harness exactly once', () => {
@@ -53,6 +53,18 @@ describe('native account capability registry', () => {
     expect(nativeAccountNameable('muse')).toBe(true); // conditional
     expect(nativeAccountNameable('gemini')).toBe(false); // discovery-only
     expect(nativeAccountNameable('copilot')).toBe(false); // unsupported
+  });
+
+  it('names the supported native set as claude, codex, grok', () => {
+    expect(supportedNativeHarnesses()).toEqual(['claude', 'codex', 'grok']);
+  });
+
+  it('refuses native naming with a named reason for device-scoped logins', () => {
+    const reason = nativeAccountNamingRefusal('kimi');
+    expect(reason).toContain("kimi accounts can't be isolated by agents-cli yet (device-scoped login)");
+    expect(reason).toContain('Supported today: claude, codex, grok');
+    expect(nativeAccountNamingRefusal('claude')).toBeNull();
+    expect(nativeAccountNamingRefusal('muse')).toBeNull();
   });
 
   it('stores Muse (email-inspection) as accountKey, never the bare email', () => {

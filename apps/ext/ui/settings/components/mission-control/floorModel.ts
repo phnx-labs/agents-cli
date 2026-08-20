@@ -469,16 +469,25 @@ export type TicketSort = 'priority' | 'id'
 
 // ---------- stable rank constants (data — final, not stubs) ----------
 
-/** Needs-you first ordering. Prototype: factory-floor.html:364.
- *  'stalled' sits just below failed: a wedged agent needs you, but a hard failure or an
- *  explicit question outranks it. */
+/** Needs-you first ordering, ranked by PROGRESS rather than liveness (root AGENTS.md
+ *  "Purpose"). Every phase that has STOPPED progressing outranks `running` — a running
+ *  agent is making progress and needs nothing from the operator — and `done` is the
+ *  terminal state below both. Within the stopped set, an explicit question or a hard
+ *  failure outranks a wedged agent, which outranks a silently-idle one; but `idle`
+ *  still sits ABOVE `running` and `done`, because idle-but-unfinished work is the
+ *  highest-abandonment risk, not the lowest.
+ *
+ *  `idle` means unfinished by construction — `derivePhase` maps a finished agent to
+ *  'done' (status 'completed') and only a stopped/dead-process one to 'idle' — so no
+ *  extra signal is needed to tell a finished idle session from an abandoned one.
+ *  Prototype: factory-floor.html:364. */
 export const PHASE_RANK: Record<FloorPhase, number> = {
   waiting: 0,
   failed: 1,
   stalled: 2,
-  running: 3,
-  done: 4,
-  idle: 5,
+  idle: 3,
+  running: 4,
+  done: 5,
 }
 
 /** A running agent silent this long is treated as stalled (amber). 2x -> dead (red). */
@@ -546,22 +555,34 @@ export function visibleFloorAgents(agents: FloorAgent[], showBackground: boolean
   return showBackground ? agents : agents.filter((a) => a.context !== 'headless')
 }
 
-/** Partition every visible card exactly once so rendered sections and counts
- * consume the same collections. */
+/**
+ * Partition every visible card exactly once so rendered sections and counts consume
+ * the same collections. The buckets are in ATTENTION order — needs > idle > active >
+ * done — because the floor ranks by progress, not by liveness (root AGENTS.md
+ * "Purpose").
+ *
+ * `idle` is its own bucket and is never folded into `active`: an idle session is
+ * unfinished work that has stopped progressing, the state most likely to be silently
+ * abandoned, while a running one needs nothing from the operator. `derivePhase` maps a
+ * finished agent to 'done', so every agent landing in `idle` here is unfinished.
+ */
 export function partitionFloorAgents(agents: FloorAgent[]): {
   needs: FloorAgent[]
+  idle: FloorAgent[]
   active: FloorAgent[]
   done: FloorAgent[]
 } {
   const needs: FloorAgent[] = []
+  const idle: FloorAgent[] = []
   const active: FloorAgent[] = []
   const done: FloorAgent[] = []
   for (const agent of agents) {
     if (agent.needs) needs.push(agent)
     else if (agent.phase === 'done') done.push(agent)
+    else if (agent.phase === 'idle') idle.push(agent)
     else active.push(agent)
   }
-  return { needs, active, done }
+  return { needs, idle, active, done }
 }
 
 /**

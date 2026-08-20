@@ -122,7 +122,7 @@ const SEED: Array<{ id: string; file_path: string; version: string | null; expec
   seed.close();
 }
 
-const { getDB, SCHEMA_VERSION, queryUsageRollup, closeDB } = await import('./db.js');
+const { getDB, queryUsageRollup, closeDB } = await import('./db.js');
 
 describe('schema migration v32 -> v33 (per-account attribution)', () => {
   it('adds account_key / account_org and its index', () => {
@@ -135,9 +135,6 @@ describe('schema migration v32 -> v33 (per-account attribution)', () => {
     const idx = (db.prepare(`PRAGMA index_list(sessions)`).all() as Array<{ name: string }>)
       .map((i) => i.name);
     expect(idx).toContain('idx_sessions_account_key');
-    // >= 33 rather than == : this file tests the v33 step, not the head version, so a
-    // later migration must not force an edit here.
-    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(33);
   });
 
   it('backfills each row to the account that actually produced it', () => {

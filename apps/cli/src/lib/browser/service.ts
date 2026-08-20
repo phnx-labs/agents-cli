@@ -707,6 +707,55 @@ export class BrowserService {
    * page that has since redirected elsewhere simply does not match, and the
    * caller opens a tab as before.
    */
+  /** Is this CDP target already registered to any task on the connection? */
+  private targetIsClaimed(conn: ProfileConnection, targetId: string): boolean {
+    for (const t of conn.tasks.values()) {
+      if (Object.values(t.tabs).includes(targetId)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * The CDP targets a task may CLOSE — its own tabs minus any it merely
+   * borrowed. A borrowed tab existed before the task did (see `Task.borrowedTabs`),
+   * so closing it would remove something the task never opened.
+   */
+  private closeableTargetIds(task: Task): string[] {
+    const borrowed = new Set(task.borrowedTabs ?? []);
+    return Object.entries(task.tabs)
+      .filter(([shortId]) => !borrowed.has(shortId))
+      .map(([, cdpId]) => cdpId);
+  }
+
+  /**
+   * A page target that `navigate` may take over on a browser which cannot create
+   * tabs (Arc). Deliberately narrow: only a tab ALREADY showing the requested URL
+   * -- re-showing that document there is what the caller asked for -- or an empty
+   * new-tab page. A target any task already owns is left alone. Note the honest
+   * limit: reusing a matching tab still RELOADS it, discarding scroll position and
+   * unsaved form state. Arc cannot open a tab at all, so some intrusion is
+   * unavoidable to show the document; a reload is the smallest one, and the tab is
+   * borrowed rather than owned so it is never closed.
+   */
+  private async pickReusableTargetWithoutCreate(
+    conn: ProfileConnection,
+    url: string,
+  ): Promise<string | undefined> {
+    const { targetInfos } = (await conn.cdp.send('Target.getTargets')) as {
+      targetInfos: Array<{ targetId: string; type: string; url: string }>;
+    };
+    const owned = new Set<string>();
+    for (const t of conn.tasks.values()) {
+      for (const id of Object.values(t.tabs)) owned.add(id);
+    }
+    const free = targetInfos.filter((t) => t.type === 'page' && !owned.has(t.targetId));
+    const wanted = canonicalTabUrl(url);
+    const sameUrl = free.find((t) => canonicalTabUrl(t.url) === wanted);
+    if (sameUrl) return sameUrl.targetId;
+    const BLANK = new Set(['', 'about:blank', 'about:newtab', 'chrome://newtab/', 'chrome://new-tab-page/']);
+    return free.find((t) => BLANK.has(t.url))?.targetId;
+  }
+
   private async adoptTabShowing(
     conn: ProfileConnection,
     url: string
@@ -725,7 +774,14 @@ export class BrowserService {
 
     const candidates: Array<{ task: Task; shortId: string; targetId: string }> = [];
     for (const task of conn.tasks.values()) {
+      const borrowed = new Set(task.borrowedTabs ?? []);
       for (const [shortId, cdpId] of Object.entries(task.tabs)) {
+        // A BORROWED tab is not ours to hand on. The dead task never opened it
+        // (Task.borrowedTabs) -- reclaiming it would register a pre-existing tab
+        // as a fresh task's own, and that task's `done` would close it. Exactly
+        // the "adopting it would make this task's `done` close the user's tab"
+        // case above, arriving one hop later via reclaim instead of directly.
+        if (borrowed.has(shortId)) continue;
         if (matching.has(cdpId)) candidates.push({ task, shortId, targetId: cdpId });
       }
     }
@@ -824,9 +880,10 @@ export class BrowserService {
         // Save to history before closing
         await this.saveToHistory(task, Array.from(domains));
 
-        // Close task's tabs (not the window - it's shared)
+        // Close task's tabs (not the window - it's shared, and not a tab the
+        // task merely borrowed - that one was open before the task existed).
         await Promise.all(
-          Object.values(task.tabs).map((cdpId) =>
+          this.closeableTargetIds(task).map((cdpId) =>
             conn.cdp.send('Target.closeTarget', { targetId: cdpId }).catch(() => {
               // Tab already closed
             })
@@ -939,6 +996,57 @@ export class BrowserService {
       await this.saveTaskState(task.profile, conn.tasks);
       emit('browser.navigate', { profile: parseConnectionKey(task.profile).profile, task: task.name, url, tabId: shortId, created: true });
       return { tabId: shortId, url, created: true };
+    }
+
+    // Arc exposes page targets and honors Page.navigate on them; what it cannot
+    // survive is Target.createTarget (#2778). createPageTarget below therefore
+    // refuses outright, so the document never gets shown AT ALL and callers fall
+    // back to a raw `open` -- a new tab every call, which is the tab-spam #2779
+    // set out to end. Reuse in place instead, the same shape as the Electron
+    // branch above. Measured against a live Arc (#2786): 33 page targets,
+    // Page.navigate reused one, tab count unchanged, no crash.
+    if (conn.browserType === 'arc') {
+      const reusable = await this.pickReusableTargetWithoutCreate(conn, url);
+      if (reusable) {
+        const shortId = generateShortId();
+        const sessionId = await this.getSessionId(conn, reusable);
+        // Check and CLAIM in one synchronous tick, with no await between them --
+        // the ordering `adoptTabShowing` uses (service.ts: the `task.tabs[shortId]
+        // !== targetId` re-check sits immediately before its `delete`). Checking
+        // and then awaiting `Page.navigate` before writing leaves exactly the gap
+        // the check exists to close: a concurrent navigate passes its own check in
+        // that window and both tasks end up driving one tab.
+        if (this.targetIsClaimed(conn, reusable)) {
+          throw arcNotDrivableError(conn.bareName ?? conn.profileName);
+        }
+        task.tabs[shortId] = reusable;
+        // Borrowed, not opened: this tab was in the browser before the task and
+        // must survive `done`. See Task.borrowedTabs.
+        task.borrowedTabs = [...(task.borrowedTabs ?? []), shortId];
+        task.currentTabId = shortId;
+        try {
+          await conn.cdp.send('Page.navigate', { url }, sessionId);
+        } catch (err) {
+          // Release the claim we took optimistically, so a failed navigate does
+          // not leave the task holding a tab it never drove.
+          delete task.tabs[shortId];
+          task.borrowedTabs = (task.borrowedTabs ?? []).filter((id) => id !== shortId);
+          if (task.currentTabId === shortId) task.currentTabId = undefined;
+          throw err;
+        }
+        this.invalidateTargetCache(conn);
+        await this.saveTaskState(task.profile, conn.tasks);
+        emit('browser.navigate', {
+          profile: task.profile,
+          task: task.name,
+          url,
+          tabId: shortId,
+          created: false,
+        });
+        return { tabId: shortId, url, created: false };
+      }
+      // Nothing safe to reuse -- fall through to the actionable refusal rather
+      // than taking over a page the user is reading.
     }
 
     // Chrome: create new tab
@@ -1071,9 +1179,15 @@ export class BrowserService {
       const shortId = await this.resolveTabHint(conn, task, tabHint);
       const cdpId = task.tabs[shortId];
       if (cdpId) {
-        await conn.cdp.send('Target.closeTarget', { targetId: cdpId });
+        // A borrowed tab is released, not closed — it outlives this task.
+        if (!(task.borrowedTabs ?? []).includes(shortId)) {
+          await conn.cdp.send('Target.closeTarget', { targetId: cdpId });
+        }
         conn.sessionCache.delete(cdpId);
         delete task.tabs[shortId];
+        // Drop the borrow record with the tab it names, or it outlives every tab
+        // it ever described and grows unbounded in the persisted task state.
+        task.borrowedTabs = (task.borrowedTabs ?? []).filter((id) => id !== shortId);
         // Update currentTabId if we closed the current tab
         if (task.currentTabId === shortId) {
           const remaining = Object.keys(task.tabs);
@@ -1081,9 +1195,9 @@ export class BrowserService {
         }
       }
     } else {
-      // Close all tabs
+      // Close all tabs the task opened; borrowed ones are only released.
       await Promise.all(
-        Object.values(task.tabs).map((cdpId) =>
+        this.closeableTargetIds(task).map((cdpId) =>
           conn.cdp.send('Target.closeTarget', { targetId: cdpId }).catch(() => {})
         )
       );
@@ -1091,6 +1205,7 @@ export class BrowserService {
         conn.sessionCache.delete(cdpId);
       }
       task.tabs = {};
+      task.borrowedTabs = [];
       task.currentTabId = undefined;
     }
 

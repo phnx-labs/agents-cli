@@ -6,7 +6,10 @@ import { readMeta, updateMeta } from '../lib/state.js';
 import type { AgentId } from '../lib/types.js';
 import { ALL_AGENT_IDS, getAccountInfo, resolveAgentName } from '../lib/agents.js';
 import { getVersionHomePath, listInstalledVersions } from '../lib/installations/versions.js';
-import { nativeAccountCapability, nativeAccountNameable, nativeIdentityKey } from '../lib/account-capabilities.js';
+import { assertNativeAccountNameable, nativeAccountCapability, nativeIdentityKey } from '../lib/account-capabilities.js';
+import { collectRunCandidates } from '../lib/accounting/rotate.js';
+import { isInteractiveTerminal } from './utils.js';
+import { buildSwitchAccountChoices, formatAccountLimits, pickSwitchAccount, type SwitchAccountRow } from './run-account-picker.js';
 import { profileExists, readProfile, type Profile } from '../lib/profiles.js';
 import { pushBundleToHost } from '../lib/secrets/push.js';
 import { assertCredentialTransportHostPinned, resolveHostSshTarget } from '../lib/secrets/remote.js';
@@ -15,7 +18,7 @@ import { runDevicesAccounts } from './ssh.js';
 import { discoverNativeAccounts } from '../lib/account-catalog.js';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
 import { getAccountProvider, listAccountProviders, type AccountAuthKind } from '../lib/account-provider-registry.js';
-import { accountBindings, addAccount, addNativeAccount, bindAccount, findAccount, findUnifiedAccount, inspectAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, unbindAccount } from '../lib/account-registry.js';
+import { accountBindings, addAccount, addNativeAccount, bindAccount, findAccount, findUnifiedAccount, inspectAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, unbindAccount, type UnifiedAccount } from '../lib/account-registry.js';
 
 function parseInstallation(raw: string): { agent: AgentId; version: string } {
   const at = raw.lastIndexOf('@');
@@ -25,12 +28,10 @@ function parseInstallation(raw: string): { agent: AgentId; version: string } {
   return { agent, version: raw.slice(at + 1) };
 }
 
-async function nativeIdentityFromSource(raw: string): Promise<{ agent: AgentId; version: string; identityKey: string; identityLabel?: string; scope: 'version' | 'device' }> {
+export async function nativeIdentityFromSource(raw: string): Promise<{ agent: AgentId; version: string; identityKey: string; identityLabel?: string; scope: 'version' | 'device' }> {
   const parsed = parseInstallation(raw);
   const capability = nativeAccountCapability(parsed.agent);
-  if (!nativeAccountNameable(parsed.agent)) {
-    throw new Error(`${parsed.agent} native accounts are ${capability.status}; agents-cli cannot safely name or attach this login.`);
-  }
+  assertNativeAccountNameable(parsed.agent);
   if (!listInstalledVersions(parsed.agent).includes(parsed.version)) throw new Error(`${raw} is not installed.`);
   const info = await getAccountInfo(parsed.agent, getVersionHomePath(parsed.agent, parsed.version));
   const identityKey = nativeIdentityKey(info, capability);
@@ -108,6 +109,113 @@ function parseAuth(raw: string): AccountAuthKind {
   throw new Error(`Unsupported auth type '${raw}'. Use api-key, setup-token, or bearer-token.`);
 }
 
+function parseHarness(agentRaw: string): AgentId {
+  if (!ALL_AGENT_IDS.includes(agentRaw as AgentId)) throw new Error(`Unknown agent '${agentRaw}'.`);
+  return agentRaw as AgentId;
+}
+
+function providerAuthenticatesHarness(provider: string, auth: AccountAuthKind, agent: AgentId): boolean {
+  try {
+    getAccountProvider(provider).envFor(agent, auth);
+    return true;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('cannot authenticate')) return false;
+    throw err;
+  }
+}
+
+/** Named accounts that `set-default` / `switch` can pin for this harness. */
+export function listSwitchableAccounts(agent: AgentId): UnifiedAccount[] {
+  const meta = readMeta();
+  const native = listNativeAccounts(meta).filter(account => account.agent === agent);
+  const providers: UnifiedAccount[] = Object.values(readAccountRegistry().accounts)
+    .filter(account => providerAuthenticatesHarness(account.provider, account.auth, agent))
+    .map(account => ({ ...account, kind: 'provider' as const }));
+  return [...native, ...providers].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Pin the per-harness default. Shared by `accounts set-default` and `accounts switch`.
+ * Provider accounts must authenticate the harness; native accounts must belong to it.
+ */
+export function setDefaultAccount(agentRaw: string, name: string): { agent: AgentId; account: UnifiedAccount } {
+  const agent = parseHarness(agentRaw);
+  const account = findUnifiedAccount(name, readMeta());
+  if (!account) throw new Error(`Unknown account '${name}'.`);
+  if (account.kind === 'provider') {
+    getAccountProvider(account.provider).envFor(agent, account.auth);
+  } else {
+    if (account.agent !== agent) {
+      throw new Error(`Account '${account.name}' is a ${account.agent} login and cannot be the default for ${agent}.`);
+    }
+    assertNativeAccountNameable(account.agent);
+  }
+  updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, defaults: { ...meta.accounts?.defaults, [agent]: account.id } } }));
+  return { agent, account };
+}
+
+async function switchAccountRows(agent: AgentId): Promise<SwitchAccountRow[]> {
+  const accounts = listSwitchableAccounts(agent);
+  const candidates = await collectRunCandidates(agent);
+  const defaultId = readMeta().accounts?.defaults?.[agent];
+  return accounts.map(account => {
+    const candidate = account.kind === 'native'
+      ? candidates.find(row => row.accountKey === account.identityKey) ?? null
+      : null;
+    return {
+      accountName: account.name,
+      kind: account.kind,
+      detail: account.kind === 'provider' ? account.provider : (account.identityLabel ?? account.identityKey),
+      current: account.id === defaultId,
+      candidate,
+    };
+  });
+}
+
+export async function runAccountsSwitch(
+  harness: string,
+  accountName: string | undefined,
+  opts: { json: boolean },
+): Promise<void> {
+  const agent = parseHarness(harness);
+  const rows = await switchAccountRows(agent);
+  if (accountName) {
+    const { account } = setDefaultAccount(agent, accountName);
+    if (opts.json) {
+      console.log(JSON.stringify({ harness: agent, account: account.name, id: account.id }, null, 2));
+      return;
+    }
+    console.log(chalk.green(`${agent} now uses account '${account.name}' unless --account overrides it.`));
+    return;
+  }
+  if (opts.json) {
+    const choices = buildSwitchAccountChoices(rows);
+    console.log(JSON.stringify({
+      harness: agent,
+      default: rows.find(row => row.current)?.accountName ?? null,
+      accounts: rows.map((row, i) => ({
+        name: row.accountName,
+        kind: row.kind,
+        detail: row.detail,
+        current: row.current,
+        ready: choices[i].ready,
+        limits: row.candidate ? formatAccountLimits(row.candidate) : 'limits unavailable',
+      })),
+    }, null, 2));
+    return;
+  }
+  if (!isInteractiveTerminal()) {
+    throw new Error(
+      `Selecting a ${agent} account requires an interactive terminal.\nUse: agents accounts switch ${agent} <account>\nOr:  agents accounts set-default ${agent} <account>`,
+    );
+  }
+  const selected = await pickSwitchAccount(agent, rows);
+  if (!selected) return;
+  const { account } = setDefaultAccount(agent, selected);
+  console.log(chalk.green(`${agent} now uses account '${account.name}' unless --account overrides it.`));
+}
+
 export function registerAccountsCommand(program: Command): void {
   const accounts = program.command('accounts').description('Browse native logins and manage provider account bundles')
     .option('--json', 'Machine-readable account metadata')
@@ -180,6 +288,7 @@ export function registerAccountsCommand(program: Command): void {
       const meta = readMeta();
       const account = findUnifiedAccount(name, meta);
       if (!account) throw new Error(`Unknown account '${name}'.`);
+      if (account.kind === 'native') assertNativeAccountNameable(account.agent);
       // Validate the target exists before mutating any binding.
       const t = classifyAttachTarget(target);
       const targetAgent = t.kind === 'profile' ? t.profile.host.agent : t.agent;
@@ -216,23 +325,23 @@ export function registerAccountsCommand(program: Command): void {
   accounts.command('remove <name>').description('Remove an account and its device-local credential').action((name: string) => removeAccount(name));
 
   accounts.command('set-default <agent> <name>')
-    .description('Use a provider account for a harness when --account is omitted')
+    .description('Use this account for a harness when --account is omitted')
     .action((agentRaw: string, name: string) => {
-      if (!ALL_AGENT_IDS.includes(agentRaw as AgentId)) throw new Error(`Unknown agent '${agentRaw}'.`);
-      const agent = agentRaw as AgentId;
-      const account = findAccount(name);
-      if (!account) throw new Error(`Unknown provider account '${name}'.`);
-      getAccountProvider(account.provider).envFor(agent, account.auth);
-      // Defaults follow the stable account id, so renaming the bundle cannot
-      // strand bare runs on a deleted label. findAccount accepts ids and names.
-      updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, defaults: { ...meta.accounts?.defaults, [agent]: account.id } } }));
+      const { agent, account } = setDefaultAccount(agentRaw, name);
       console.log(chalk.green(`${agent} now uses account '${account.name}' unless --account overrides it.`));
+    });
+
+  const switchCmd = accounts.command('switch <harness> [account]')
+    .description('Pick the default account for a harness')
+    .option('--json', 'Machine-readable account list or the resulting default')
+    .action(async (harness: string, account: string | undefined, o: { json?: boolean }, command: Command) => {
+      await runAccountsSwitch(harness, account, { json: !!(o.json || command.optsWithGlobals().json) });
     });
 
   accounts.command('clear-default <agent>')
     .description('Return a harness to native login or balanced account selection')
     .action((agentRaw: string) => {
-      if (!ALL_AGENT_IDS.includes(agentRaw as AgentId)) throw new Error(`Unknown agent '${agentRaw}'.`);
+      parseHarness(agentRaw);
       updateMeta(meta => {
         const defaults = { ...meta.accounts?.defaults };
         delete defaults[agentRaw as AgentId];
@@ -307,6 +416,14 @@ export function registerAccountsCommand(program: Command): void {
       console.log(chalk.green(`${account.name} synced to ${device} (${result.keyCount} keys, ${remoteBackend} backend, policy never).`));
     });
 
+  setHelpSections(switchCmd, {
+    examples: `agents accounts switch claude
+agents accounts switch claude work
+agents accounts switch claude --json
+agents run claude`,
+    notes: 'Switch writes the existing per-harness default (same binding as set-default). Rotation already honors it. Pass an account name to skip the picker. Native name/attach is only for harnesses agents-cli can isolate (claude, codex, grok); provider add is unrestricted.',
+  });
+
   setHelpSections(accounts, {
     examples: `agents accounts add work --provider anthropic --auth setup-token
 agents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY
@@ -314,10 +431,12 @@ agents accounts set-key work
 agents accounts name claude@2.1.220 work
 agents accounts attach work claude@2.1.225
 agents accounts view work --json
+agents accounts switch claude
+agents accounts switch claude work
 agents accounts set-default claude work
 agents accounts sync openrouter-work yosemite-s0
 agents run claude --account work
 agents accounts logout claude`,
-    notes: 'Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`.',
+    notes: 'Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. `accounts switch` is the fast picker over the same default `set-default` writes. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`.',
   });
 }

@@ -109,25 +109,33 @@ whose identity can't be proven unique across synced metadata is marked
 | Cursor | **unsupported (blocked)** — multi-account isolation unresolved; use its API-key provider account instead |
 | everything else | **unsupported** / discovery-only |
 
-`agents accounts name`/`attach` refuse an unsupported harness. For a supported
-(version-scoped) login, `attach` validates the target is currently signed in to the
-same identity before binding, and injects no secret or env.
+`agents accounts name`/`attach` refuse an unsupported harness with a named
+reason (for example, `kimi accounts can't be isolated by agents-cli yet
+(device-scoped login). Supported today: claude, codex, grok.`). That gate
+applies only to native naming/attachment. Provider `accounts add <name>
+--provider <p>` stays unrestricted. For a supported (version-scoped) login,
+`attach` validates the target is currently signed in to the same identity
+before binding, and injects no secret or env.
 
 The commands read like the task, object first:
 
 | Command | Behavior |
 |---|---|
 | `agents accounts` / `list` | Unified list: provider account bundles + named native logins |
-| `agents accounts name <agent@version> <name>` | Name a signed-in native installation |
+| `agents accounts name <agent@version> <name>` | Name a signed-in native installation (refuses unsupported harnesses) |
 | `agents accounts add <name> --provider <p> --auth <t>` | Store a provider credential account |
 | `agents accounts view <account>` (alias `inspect`) | Show one account — kind, custody, and its attachments |
 | `agents accounts attach <account> <target>` | Bind an account to a target. A **native** account attaches only to a supported `agent@version` installation. A **provider** account attaches to an `agent@version`, a bare harness id, or an existing custom-harness profile. Typos and unsupported targets are rejected before binding. |
 | `agents accounts detach <account> <target>` | Remove one attachment |
 | `agents accounts rename <old> <new>` / `remove <name>` | Rename or remove either kind; `remove` refuses while a binding, a per-harness default, or a harness profile still references the account |
+| `agents accounts switch <harness> [account]` | Fast picker (or direct name) that writes the per-harness default. `--json` lists or reports. Same binding as `set-default`. |
 | `agents accounts sync <account> <device>` | Copy a provider account bundle to a worker (native records have no bytes to copy) |
 
 `set-default` / `clear-default` remain the per-harness-default spelling and are
 consulted after an exact `agent@version` or device-scoped binding.
+`agents accounts switch <harness>` (optional `[account]`, `--json`) is the fast
+picker over that same default: it lists named accounts with usage / headroom /
+signed-out state and writes `set-default`. No extra persistent state.
 `resolveAccountSelection` orders resolution: explicit `--account` → exact target
 binding → device-scoped binding → per-harness default. Runtime injection of the
 resolved account (live-fingerprint validation for native, env for provider) and

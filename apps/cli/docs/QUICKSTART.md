@@ -86,7 +86,8 @@ Need a credential that isn't a browser login — a setup-token, an API key for a
 BYOK gateway, a team's shared key? `agents accounts add <name> --provider <p>
 --auth <type>` stores it as a named, Touch-ID-free bundle you select with
 `agents run <agent> --account <name>` or make the default with `agents
-accounts set-default <agent> <name>`; `agents accounts sync <name> --device
+accounts switch <agent>` (picker) / `agents accounts set-default <agent> <name>`;
+`agents accounts sync <name> --device
 <device>` copies it to another machine. See [Accounts](../../../README.md#accounts)
 in the root README.
 

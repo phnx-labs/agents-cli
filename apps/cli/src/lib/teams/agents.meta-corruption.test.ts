@@ -72,7 +72,15 @@ describe('saveMeta() writes atomically, via tmp + rename (RUSH-2429)', () => {
     for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
   });
 
-  it('a write killed before the rename leaves the previous valid record untouched, never torn', async () => {
+  // Only a NEW-file create can be blocked by directory permissions; writing to
+  // an already-existing file is not. That asymmetry is what makes the test
+  // below discriminating — see its body. Skipped where it cannot hold: chmod is
+  // a no-op on Windows, and root bypasses the permission check entirely.
+  const canBlockFileCreate =
+    process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() !== 0;
+  const itBlocksCreate = canBlockFileCreate ? it : it.skip;
+
+  itBlocksCreate('a save that cannot complete leaves the previous valid record untouched, never torn', async () => {
     const base = tmpBase();
     dirs.push(base);
     const id = 'atomic-1';
@@ -81,25 +89,34 @@ describe('saveMeta() writes atomically, via tmp + rename (RUSH-2429)', () => {
       id, 'atomic-team', 'claude', 'v1', null, 'plan', null, AgentStatus.RUNNING, new Date(), null, base,
     );
     await agent.saveMeta();
-    const metaPath = path.join(base, id, 'meta.json');
+    const agentDir = path.join(base, id);
+    const metaPath = path.join(agentDir, 'meta.json');
     const before = fs.readFileSync(metaPath, 'utf-8');
     expect(JSON.parse(before).prompt).toBe('v1');
 
-    // Simulate the exact failure mode saveMeta() now closes off: a process
-    // that wrote the sibling tmp file for a NEW record but was killed before
-    // the rename that would have swapped it into place. The real writer's
-    // final step (fs.rename) never ran, so meta.json itself must be
-    // completely untouched by this half-finished write.
-    const staleTmp = `${metaPath}.tmp.${process.pid}.simulated-kill`;
-    fs.writeFileSync(staleTmp, '{ "prompt": "v2", "trunc'); // deliberately truncated, invalid JSON
+    // Drive the REAL writer into a failure instead of planting a decoy file it
+    // never touches. A read-only directory blocks creating the sibling tmp
+    // file, so atomicWriteJson's very first step fails and the rename never
+    // happens. This is what makes the test discriminating: a bare
+    // `writeFile(metaPath, ...)` would still SUCCEED here, because meta.json
+    // already exists and the file itself stays writable — so a non-atomic
+    // saveMeta() overwrites it with 'v2' and fails these assertions, which is
+    // precisely the regression RUSH-2429 closed.
+    agent.prompt = 'v2';
+    fs.chmodSync(agentDir, 0o555);
+    try {
+      await expect(agent.saveMeta()).rejects.toThrow();
 
-    const after = fs.readFileSync(metaPath, 'utf-8');
-    expect(after).toBe(before);
-    expect(() => JSON.parse(after)).not.toThrow();
-    expect(JSON.parse(after).prompt).toBe('v1');
+      const after = fs.readFileSync(metaPath, 'utf-8');
+      expect(after).toBe(before);
+      expect(() => JSON.parse(after)).not.toThrow();
+      expect(JSON.parse(after).prompt).toBe('v1');
+    } finally {
+      fs.chmodSync(agentDir, 0o755);
+    }
 
-    // Clean up the simulated leftover so it doesn't leak into other assertions.
-    fs.unlinkSync(staleTmp);
+    // And the failed attempt left no tmp file to be mistaken for a record.
+    expect(fs.readdirSync(agentDir)).toEqual(['meta.json']);
   });
 
   it('leaves no stray tmp file behind on a normal, uninterrupted save', async () => {

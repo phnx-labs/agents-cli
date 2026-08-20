@@ -4,6 +4,28 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
+## [0.9.328] - 2026-08-20
+
+- **The Fleet panel stops burying idle-but-unfinished work below running work
+  (RUSH-2838).** The root `AGENTS.md` "Purpose" section makes idle-but-unfinished
+  the highest-risk state — the one most likely to be silently abandoned — and says
+  no status surface may rank it below running. Three sites did exactly that, and
+  each had a passing test pinning the wrong order as correct. `PHASE_RANK` ranked
+  `idle` dead last, below `done`, so `Sort: Needs you` put an abandoned session at
+  the bottom of the list. `partitionFloorAgents` pushed idle sessions into the same
+  `active` bucket as running ones, so the feed rendered them interleaved with agents
+  that need nothing. And the Sessions surface's `Sort: Status` used a second,
+  hand-maintained rank table that had drifted into the opposite order from the
+  `Group: state` bands rendered fifty lines below it. Now: the feed grows an **IDLE**
+  section above **RUNNING**; `Sort: Needs you` orders
+  `waiting < failed < stalled < idle < running < done`; and `Sort: Status` defers to
+  that one shared `PHASE_RANK` instead of a copy, so the sort and the band grouping
+  can no longer disagree. No new field was needed to tell a finished idle session
+  from an abandoned one — `derivePhase` already maps a finished agent to `done` and
+  only an unfinished one to `idle`. Source:
+  `ui/settings/components/mission-control/floorModel.ts`,
+  `sessionsModel.ts`, `UnifiedAgentsPane.tsx`.
+
 ## [0.9.327] - 2026-08-17
 
 - **The markdown Reader renders again instead of a blank pane.** The reader
