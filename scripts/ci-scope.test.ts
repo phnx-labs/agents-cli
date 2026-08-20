@@ -70,11 +70,29 @@ describe('classifyCiScope', () => {
     });
   });
 
-  test('runs docs verification without the CLI suite for CLI docs', () => {
+  test('a .changelog edit brings the CLI job with it, for gen-changelog.test.ts', () => {
+    // `cli` is true because the changelog-sources group selects
+    // apps/cli/scripts/gen-changelog.test.ts, and scopeFromPlan's
+    // testUnder('apps/cli/') then has to spin the CLI job up to run it. Before
+    // that group existed this read `cli: false` -- and a hand-edited CHANGELOG.md
+    // that no source reproduces reached main three times in one day, each caught
+    // only by the full suite at release time.
     expect(classifyCiScope([
       'apps/cli/docs/architecture.md',
       'apps/cli/.changelog/next/ci.md',
     ], REPO)).toEqual({
+      cli: true,
+      cliDocs: true,
+      ext: false,
+      sessionTracker: false,
+      windows: false,
+    });
+  });
+
+  test('a docs-only diff with no .changelog file still skips the CLI suite', () => {
+    // The counterpart: widening must be scoped to the changelog sources, not to
+    // every docs edit.
+    expect(classifyCiScope(['apps/cli/docs/architecture.md'], REPO)).toEqual({
       cli: false,
       cliDocs: true,
       ext: false,
@@ -469,7 +487,14 @@ describe('metadata-class diffs stop selecting the full suite (RUSH-2666)', () =>
     expect(plan.suite).toBe('cli-full');
   });
 
-  test('a CHANGELOG-only diff selects nothing, never cli-full', () => {
+  test('a CHANGELOG-only diff selects its generator test, never cli-full', () => {
+    // CHANGELOG.md is GENERATED from .changelog/<version>.md, and
+    // gen-changelog.test.ts is what asserts the committed file still matches
+    // those sources. Selecting nothing here is what let three separate
+    // hand-edits reach main on 2026-08-20, each surfacing only when the full
+    // suite ran at release time and refused to attest a red tree. The point of
+    // the assertion is still that this stays `selected` -- one fast test, not
+    // cli-full.
     const plan = selectImpact({
       files: ['CHANGELOG.md', 'apps/cli/CHANGELOG.md'],
       repoRoot: REPO,
@@ -478,7 +503,7 @@ describe('metadata-class diffs stop selecting the full suite (RUSH-2666)', () =>
     });
     expect(plan.suite).toBe('selected');
     expect(plan.unmapped).toEqual([]);
-    expect(plan.tests).toEqual([]);
+    expect(plan.tests.map((t) => t.file)).toEqual(['apps/cli/scripts/gen-changelog.test.ts']);
     expect(plan.checks).toEqual(['docs']);
   });
 });
