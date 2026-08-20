@@ -47,9 +47,12 @@ A **resource** is any named item inside a DotAgents repo. Resources are typed by
 | `rules` | Persistent memory / instructions for the agent | `AGENTS.md` → `CLAUDE.md`, `GEMINI.md`, `.cursorrules`, … |
 | `mcp` | MCP server definitions (transport, command, args, env) | Merged into each agent's settings file |
 | `permissions` | Allow/deny tool permission groups | Converted to each agent's native format |
+| `clis` | Named host-CLI wrappers (`clis/<name>.yaml`) | YAML, listed by `agents clis` |
 | `profiles` | Model + endpoint + auth bundles | YAML, consumed by `agents run` and shims |
 | `routers` | Named, task-typed allowlists of harnesses x models/tiers x linked accounts (a router is a generalization of a profile) | YAML, consumed by the Agent Router |
 | `subagents` | Subagent workflow definitions | `.md` files |
+| `workflows` | Named workflow scripts (Rhai / harness-native) | Synced into each capable agent's workflow dir |
+| `secrets` | Named secret-bundle references (not the secret values) | YAML metadata; values live in `agents secrets` |
 
 Resources are installed once in `~/.agents/` and synced to every supported agent's native format automatically. Sync happens when you run `agents use`, `agents repos pull`, or explicitly via `agents sync`.
 

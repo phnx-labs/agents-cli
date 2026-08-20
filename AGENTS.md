@@ -84,11 +84,14 @@ other **machines**. Deep reference: [`apps/cli/docs/concepts.md`](apps/cli/docs/
 and [`architecture.md`](apps/cli/docs/architecture.md).
 
 - **Resources** — the typed things an agent needs, one kind per subdirectory of a
-  DotAgents repo: `rules` (this `AGENTS.md` → `CLAUDE.md`/`GEMINI.md`/…), `commands`,
-  `skills`, `hooks`, `mcp`, `permissions`, `profiles`, `subagents`. Installed once in
-  `~/.agents/` and synced into each agent's native format. Resolution is **layered** —
-  project → user → extra repos → system; the highest layer wins a name collision, the
-  rest union (`apps/cli/src/lib/resources.ts`: `resolveResource`, `listResources`).
+  DotAgents repo (`ResourceKind` in `apps/cli/src/lib/resources.ts`): `rules` (this
+  `AGENTS.md` → `CLAUDE.md`/`GEMINI.md`/…), `commands`, `skills`, `hooks`, `mcp`,
+  `clis`, `permissions`, `subagents`, `workflows`, `profiles`, `routers`, `secrets`.
+  Installed once in `~/.agents/` and synced into each agent's native format.
+  Resolution is **layered** — project → user → extra repos → system; the highest
+  layer wins a name collision, the rest union (`resolveResource`, `listResources`).
+  `plugins` is a capability/sync kind (staleness `ALL_RESOURCE_KINDS`), not a
+  `ResourceKind` subdirectory.
 - **One execution engine.** Every agent invocation goes through one path —
   `buildExecEnv` → `execAgent` / `runWithFallback` in
   [`apps/cli/src/lib/exec.ts`](apps/cli/src/lib/exec.ts), entered via `agents run`. Each
