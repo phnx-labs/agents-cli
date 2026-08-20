@@ -1,6 +1,93 @@
 export type BrowserType = 'chrome' | 'comet' | 'chromium' | 'brave' | 'edge' | 'arc' | 'custom';
 
 /**
+ * The user-facing name of a profile — what `agents browser profiles list`
+ * prints and what `--profile <name>` takes. ALWAYS bare: it never carries an
+ * `@<endpoint>` suffix or a `.<fork>` suffix. `BrowserProfile.name` is one.
+ */
+export type ProfileName = string;
+
+/**
+ * The key of an endpoint preset within a profile (`endpoint-0`, `local`, …) —
+ * see {@link EndpointPreset} and `getEndpointPresets`.
+ */
+export type EndpointName = string;
+
+/**
+ * The RUNTIME key a live browser is registered under: `<profile>@<endpoint>`,
+ * plus an optional `.<n>` fork suffix for Electron forks. It keys
+ * `BrowserService.connections`, the profile's runtime dir, its `tasks.json`,
+ * and its capture dirs — so one YAML profile can run at several endpoints
+ * concurrently without colliding on disk.
+ *
+ * It is BRANDED on purpose. Before RUSH-2709 both this and a {@link ProfileName}
+ * were bare `string`s and `start()` overwrote `BrowserProfile.name` with the
+ * composite, so a connection key leaked into every user-facing listing and six
+ * consumers each invented their own rule for turning one back into the other.
+ * The brand makes `connections.get(someProfileName)` — the exact miss behind
+ * `status --profile comet-local` returning EMPTY for a live
+ * `comet-local@endpoint-0` — a compile error. Build one ONLY with
+ * {@link connectionKey} (deriving) or {@link asConnectionKey} (adopting a name
+ * that is already a runtime key, e.g. a directory read off disk).
+ */
+export type ConnectionKey = string & { readonly __connectionKey: unique symbol };
+
+/** The single site that derives a {@link ConnectionKey} from its two parts. */
+export function connectionKey(profile: ProfileName, endpoint: EndpointName): ConnectionKey {
+  return `${profile}@${endpoint}` as ConnectionKey;
+}
+
+/**
+ * Adopt a string that IS already a runtime key — a runtime directory name, a
+ * `tasks.json` `profile` field, a fork key. Never use it to launder a bare
+ * profile name into a key; use {@link connectionKey} for that.
+ */
+export function asConnectionKey(raw: string): ConnectionKey {
+  return raw as ConnectionKey;
+}
+
+/**
+ * Split a {@link ConnectionKey} back into its parts. The inverse of
+ * {@link connectionKey}, and the ONE rule every consumer uses to decide whether
+ * a runtime key belongs to a profile.
+ *
+ * Tolerates the two legacy shapes still on disk: a pre-composite key that is
+ * just the bare profile name (`comet-local`), and a fork of one
+ * (`comet-local.2`) — a trailing all-digit segment is a fork, not part of the
+ * name.
+ */
+export function parseConnectionKey(key: string): {
+  profile: ProfileName;
+  endpoint?: EndpointName;
+  fork?: number;
+} {
+  const at = key.indexOf('@');
+  if (at === -1) {
+    const dot = key.lastIndexOf('.');
+    const tail = dot === -1 ? '' : key.slice(dot + 1);
+    if (dot > 0 && /^\d+$/.test(tail)) {
+      return { profile: key.slice(0, dot), fork: Number(tail) };
+    }
+    return { profile: key };
+  }
+  const profile = key.slice(0, at);
+  const rest = key.slice(at + 1);
+  const dot = rest.indexOf('.');
+  if (dot === -1) return { profile, endpoint: rest };
+  const fork = Number(rest.slice(dot + 1));
+  return {
+    profile,
+    endpoint: rest.slice(0, dot),
+    fork: Number.isFinite(fork) ? fork : undefined,
+  };
+}
+
+/** True when `key` is a runtime key of `profile`. The only reconciliation rule. */
+export function keyBelongsToProfile(key: string, profile: ProfileName): boolean {
+  return parseConnectionKey(key).profile === profile;
+}
+
+/**
  * A single named endpoint preset within a profile. Lets one profile cover
  * the local + remote variants of the same app (e.g. an Electron app on this
  * Mac vs. on a remote host) instead of forcing two parallel profiles.
@@ -26,7 +113,12 @@ export interface EndpointPreset {
 }
 
 export interface BrowserProfile {
-  name: string;
+  /**
+   * The user-facing profile name, ALWAYS bare — never `name@endpoint`. The
+   * runtime key that carries the endpoint is a separate value
+   * ({@link ConnectionKey}); nothing may write one here.
+   */
+  name: ProfileName;
   description?: string;
   browser: BrowserType;
   binary?: string;
@@ -79,7 +171,13 @@ export interface Task {
    * short machine id can stay addressable while status stays readable.
    */
   label?: string;
-  profile: string;
+  /**
+   * The RUNTIME key of the browser this task lives on (`<profile>@<endpoint>`),
+   * not the bare profile name — it addresses the runtime dir this task's
+   * `tasks.json` and captures are written under. Use
+   * {@link parseConnectionKey} to get the user-facing name out of it.
+   */
+  profile: ConnectionKey;
   tabs: Record<string, string>; // shortId (8 chars) -> CDP targetId
   currentTabId?: string; // shortId of current tab
   createdAt: number;
@@ -139,7 +237,16 @@ export interface TabInfo {
 }
 
 export interface ProfileStatus {
-  name: string;
+  /**
+   * The BARE profile name — what the user passed to `--profile` and what
+   * `status` prints. The endpoint is reported separately in {@link endpoint};
+   * the raw runtime key (if a caller genuinely needs it) is {@link key}.
+   */
+  name: ProfileName;
+  /** Endpoint preset this browser is running at, when the key carries one. */
+  endpoint?: EndpointName;
+  /** The runtime key backing this status: `<profile>@<endpoint>[.<fork>]`. */
+  key?: ConnectionKey;
   running: boolean;
   port?: number;
   pid?: number;
