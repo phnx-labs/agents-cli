@@ -1691,6 +1691,10 @@ export interface WebhookContext {
   updatedFrom?: unknown;
   pull_request?: unknown;
   repository?: unknown;
+  /** Slack deliveries expose the `{{slack.*}}` namespace (text/project/prompt/
+   *  channel/thread_ts/user/command) — see `buildWebhookContext` in
+   *  `triggers/handlers.ts`. */
+  slack?: unknown;
 }
 
 function getPath(obj: unknown, path: string): unknown {

@@ -24,7 +24,7 @@ import {
 } from '../scheduling/routines.js';
 import { ensureAgentsDir, getProjectWebhooksDir, getSystemWebhooksDir, getWebhooksDir } from '../state.js';
 import type { AgentId } from '../types.js';
-import type { IncomingWebhook, WebhookSource } from './webhook.js';
+import type { IncomingWebhook, SlackPayload, WebhookSource } from './webhook.js';
 
 export interface WebhookHandler {
   name: string;
@@ -39,6 +39,11 @@ export interface WebhookHandler {
   label?: string;
   repo?: string;
   branch?: string;
+  /** Slack (source: slack) only — match one slash command, e.g. `/agents`. */
+  command?: string;
+  /** Slack (source: slack) only — restrict to one channel id (`C0…`). Lets a
+   *  channel imply a project via a per-channel handler. */
+  channel?: string;
   /**
    * Where to run the action. A device name (`yosemite-s0`) runs there over SSH;
    * `fleet` picks any eligible online worker; `fleet/<platform>` (or
@@ -289,6 +294,16 @@ export function handlerMatchesWebhook(handler: WebhookHandler, webhook: Incoming
   if (handler.event && handler.event !== webhook.event) return false;
   if (!handlerRunsOnThisDevice(handler)) return false;
 
+  // Slack has no GitHub/Linear action/label/branch vocabulary; it matches on the
+  // slash command and (optionally) the channel. `event` already pinned the
+  // subtype (`app_mention`) or the slash command name above.
+  if (webhook.source === 'slack') {
+    const slack = webhook.payload as SlackPayload;
+    if (handler.command && slack.command !== handler.command) return false;
+    if (handler.channel && slack.channel !== handler.channel) return false;
+    return true;
+  }
+
   if (handler.action) {
     const action = webhook.source === 'github' ? githubAction(webhook.payload) : linearAction(webhook.payload);
     if (action !== handler.action) return false;
@@ -338,11 +353,64 @@ export function handlerMatchesWebhook(handler: WebhookHandler, webhook: Incoming
 }
 
 /**
+ * The `{{slack.*}}` substitution namespace: a Slack message split into an
+ * agent-actionable project + prompt, plus the coordinates a reply threads into.
+ */
+export interface SlackMessageContext {
+  /** The message with a leading bot mention stripped. */
+  text: string;
+  /** The `PROJECT:` token at the head of the message, or '' when absent. */
+  project: string;
+  /** The request — the text after `PROJECT:`, or the whole message. */
+  prompt: string;
+  /** Channel id to reply into (`C0…`). */
+  channel: string;
+  /** Thread ts to reply into (empty for a slash command → reply to the channel). */
+  thread_ts: string;
+  /** Invoking user id (`U0…`). */
+  user: string;
+  /** Slash command name (`/agents`), or '' for an event delivery. */
+  command: string;
+}
+
+const asString = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+/**
+ * Split a Slack message into a `{{slack.*}}` context. Strips a leading bot
+ * mention (`<@U0BOT> …`), then reads an optional `PROJECT:` prefix — a single
+ * bare token followed by a colon and a space — as the project, with the
+ * remainder the prompt. `AGI: rebase my PR` → project `AGI`, prompt
+ * `rebase my PR`; a message with no such prefix leaves `project` empty and the
+ * whole text as the prompt. The token pattern forbids slashes, so a project
+ * value can never carry a path into a `cwd`/`project` substitution.
+ */
+export function parseSlackMessage(payload: SlackPayload): SlackMessageContext {
+  const cleaned = asString(payload.text).replace(/^\s*<@[^>]+>\s*/, '').trim();
+  const m = /^([A-Za-z0-9][\w.-]*)\s*:\s+([\s\S]+)$/.exec(cleaned);
+  return {
+    text: cleaned,
+    project: m ? m[1] : '',
+    prompt: m ? m[2].trim() : cleaned,
+    channel: asString(payload.channel),
+    thread_ts: asString(payload.thread_ts),
+    user: asString(payload.user),
+    command: asString(payload.command),
+  };
+}
+
+/**
  * Build the variable-substitution context for a webhook. Linear events expose
  * `issue` and `updatedFrom`; GitHub events expose `repository`, `pull_request`,
- * and `issue`.
+ * and `issue`; Slack events expose the `{{slack.*}}` namespace above.
  */
 export function buildWebhookContext(webhook: IncomingWebhook): WebhookContext {
+  if (webhook.source === 'slack') {
+    return {
+      source: webhook.source,
+      event: webhook.event,
+      slack: parseSlackMessage(webhook.payload as SlackPayload),
+    };
+  }
   const action = webhook.source === 'github'
     ? githubAction(webhook.payload) ?? undefined
     : linearAction(webhook.payload) ?? undefined;
@@ -441,6 +509,11 @@ async function executeHandlerAction(
   opts: ExecuteHandlerOptions,
 ): Promise<Omit<FiredHandler, 'handlerName'>> {
   const substitutedPrompt = handler.run?.prompt ? substituteWebhookPrompt(handler.run.prompt, context) : '';
+  // Slack routes the project per-message (`AGI: …`), so a handler may template
+  // its project/cwd — e.g. `project: "{{slack.project}}"`. Substitute + trim; an
+  // empty result omits the field (falls back to the run's default cwd / $HOME).
+  const substitutedProject = handler.project ? substituteWebhookPrompt(handler.project, context).trim() : '';
+  const substitutedCwd = handler.cwd ? substituteWebhookPrompt(handler.cwd, context).trim() : '';
   // Resolved once so a fleet pick can't differ between the two dispatch paths.
   const hostFields = resolveHandlerHost(handler.host);
 
@@ -455,8 +528,8 @@ async function executeHandlerAction(
       ...(handler.run.agent ? { agent: handler.run.agent } : { workflow: handler.run.workflow! }),
       ...(handler.devices ? { devices: handler.devices } : {}),
       ...(handler.run.env ? { env: handler.run.env } : {}),
-      ...(handler.project ? { project: handler.project } : {}),
-      ...(handler.cwd ? { cwd: handler.cwd } : {}),
+      ...(substitutedProject ? { project: substitutedProject } : {}),
+      ...(substitutedCwd ? { cwd: substitutedCwd } : {}),
       ...(hostFields.host ? { host: hostFields.host } : {}),
       ...(hostFields.hostStrategy ? { hostStrategy: hostFields.hostStrategy } : {}),
     };
@@ -482,8 +555,8 @@ async function executeHandlerAction(
       ...routine,
       prompt: substituteWebhookPrompt(routine.prompt, context),
       ...(handler.devices ? { devices: handler.devices } : {}),
-      ...(handler.project ? { project: handler.project } : {}),
-      ...(handler.cwd ? { cwd: handler.cwd } : {}),
+      ...(substitutedProject ? { project: substitutedProject } : {}),
+      ...(substitutedCwd ? { cwd: substitutedCwd } : {}),
       ...(handler.mode ? { mode: handler.mode } : {}),
       ...(hostFields.host ? { host: hostFields.host } : {}),
       ...(hostFields.hostStrategy ? { hostStrategy: hostFields.hostStrategy } : {}),

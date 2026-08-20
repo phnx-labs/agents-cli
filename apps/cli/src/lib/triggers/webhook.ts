@@ -35,19 +35,22 @@ import {
   type FiredHandler,
 } from './handlers.js';
 
-export type WebhookSource = 'github' | 'linear';
+export type WebhookSource = 'github' | 'linear' | 'slack';
 
 export interface IncomingWebhook {
   /** Delivery source, derived from `/hooks/<source>` or one-shot command flags. */
   source: WebhookSource;
-  /** Source event name: GitHub header event or Linear payload `type`. */
+  /** Source event name: GitHub header event, Linear payload `type`, or the Slack
+   *  event subtype (`app_mention`) / slash command (`/agents`). */
   event: string;
-  /** Decoded JSON request body. */
+  /** Decoded request body (JSON for GitHub/Linear/Slack-events; the normalized
+   *  {@link SlackPayload} for a Slack slash command's form body). */
   payload: Record<string, unknown>;
 }
 
 export type GithubWebhook = IncomingWebhook & { source: 'github' };
 export type LinearWebhook = IncomingWebhook & { source: 'linear' };
+export type SlackWebhook = IncomingWebhook & { source: 'slack' };
 
 /** Read `repository.full_name` (`owner/name`) from a webhook payload, if present. */
 export function webhookRepo(payload: Record<string, unknown>): string | null {
@@ -331,9 +334,118 @@ export function verifyLinearTimestamp(payload: Record<string, unknown>, now = Da
   return typeof ts === 'number' && Math.abs(now - ts) <= toleranceMs;
 }
 
+/**
+ * Verify a Slack request signature (the `v0` scheme). Slack signs the base
+ * string `v0:${timestamp}:${rawBody}` with the app's signing secret and sends
+ * the hex digest as `X-Slack-Signature: v0=<hex>`, alongside the unix
+ * `X-Slack-Request-Timestamp`. The timestamp is BOTH part of the signed base
+ * string AND checked for freshness here — a request older than `toleranceSec`
+ * (default 5 min) is rejected, so a captured, correctly-signed body cannot be
+ * replayed later. Fails closed on any missing/malformed header.
+ */
+export function verifySlackSignature(
+  headers: IncomingHttpHeaders,
+  rawBody: Buffer,
+  secret: string,
+  now: number = Date.now(),
+  toleranceSec = 300,
+): boolean {
+  const ts = header(headers, 'x-slack-request-timestamp');
+  if (!ts || !/^\d+$/.test(ts)) return false;
+  if (Math.abs(Math.floor(now / 1000) - Number(ts)) > toleranceSec) return false;
+  const received = header(headers, 'x-slack-signature');
+  const signature = received?.startsWith('v0=') ? received.slice('v0='.length) : undefined;
+  // Concatenate the base-string prefix with the raw body bytes so a non-ASCII
+  // payload hashes identically to Slack's own `v0:${ts}:${body}` string.
+  const base = Buffer.concat([Buffer.from(`v0:${ts}:`, 'utf-8'), rawBody]);
+  const expected = crypto.createHmac('sha256', secret).update(base).digest('hex');
+  return timingSafeHexEqual(signature, expected);
+}
+
+/**
+ * Normalized fields extracted from a Slack slash-command or Events API delivery.
+ * This is the `payload` of a Slack {@link IncomingWebhook}: transport-level
+ * parsing lives here, message *semantics* (splitting the mention text into an
+ * agent / project / prompt) live in `handlers.ts` `buildWebhookContext`.
+ */
+export interface SlackPayload extends Record<string, unknown> {
+  /** `url_verification` | `event_callback` | `slash_command`. */
+  type: string;
+  /** Echoed back for the one-time Events API URL-verification handshake. */
+  challenge?: string;
+  /** Slack event id (Events API) — the dedup key when present. */
+  event_id?: string;
+  /** Event subtype, e.g. `app_mention` (Events API). */
+  event_type?: string;
+  /** Raw message text (the mention body, or the slash-command text). */
+  text?: string;
+  /** Channel id (`C0…`) the message arrived in. */
+  channel?: string;
+  /** Thread to reply into: an existing thread's parent ts, else the message ts. */
+  thread_ts?: string;
+  /** Invoking user id (`U0…`). */
+  user?: string;
+  /** Slash command name, e.g. `/agents`. */
+  command?: string;
+  /** Slash-command `response_url` (valid ~30 min, 5 uses). */
+  response_url?: string;
+  /** Slack team / workspace id. */
+  team?: string;
+}
+
+/**
+ * Parse a Slack delivery body into a normalized {@link SlackPayload}. Slack
+ * sends slash commands as `application/x-www-form-urlencoded` and Events API
+ * deliveries (including the `url_verification` handshake) as
+ * `application/json` — this is the one place that content-type branch lives.
+ */
+export function parseSlackBody(contentType: string | undefined, rawBody: Buffer): SlackPayload {
+  if ((contentType ?? '').includes('application/x-www-form-urlencoded')) {
+    const form = new URLSearchParams(rawBody.toString('utf-8'));
+    // A slash command carries no thread; its reply posts to the channel.
+    return {
+      type: 'slash_command',
+      command: form.get('command') ?? undefined,
+      text: form.get('text') ?? undefined,
+      channel: form.get('channel_id') ?? undefined,
+      user: form.get('user_id') ?? undefined,
+      response_url: form.get('response_url') ?? undefined,
+      team: form.get('team_id') ?? undefined,
+    };
+  }
+  const json = rawBody.length > 0 ? (JSON.parse(rawBody.toString('utf-8')) as Record<string, unknown>) : {};
+  const type = String(json.type ?? '');
+  if (type === 'url_verification') {
+    return { type, challenge: typeof json.challenge === 'string' ? json.challenge : '' };
+  }
+  const event = (json.event ?? {}) as Record<string, unknown>;
+  return {
+    type: type || 'event_callback',
+    event_id: typeof json.event_id === 'string' ? json.event_id : undefined,
+    event_type: typeof event.type === 'string' ? event.type : undefined,
+    text: typeof event.text === 'string' ? event.text : undefined,
+    channel: typeof event.channel === 'string' ? event.channel : undefined,
+    thread_ts:
+      typeof event.thread_ts === 'string'
+        ? event.thread_ts
+        : typeof event.ts === 'string'
+          ? event.ts
+          : undefined,
+    user: typeof event.user === 'string' ? event.user : undefined,
+    team: typeof json.team_id === 'string' ? json.team_id : undefined,
+  };
+}
+
+/** The `event` name a Slack delivery fires under: the slash command, or the event subtype. */
+export function slackEventName(payload: SlackPayload): string {
+  if (payload.type === 'slash_command') return payload.command ?? 'slash_command';
+  return payload.event_type ?? payload.type;
+}
+
 export interface WebhookSecrets {
   github?: string;
   linear?: string;
+  slack?: string;
 }
 
 export interface DeliveryStore {
@@ -499,7 +611,7 @@ function deliveryId(source: WebhookSource, headers: IncomingHttpHeaders, rawBody
 }
 
 function sourceFromPath(pathname: string | undefined): WebhookSource | null {
-  const match = /^\/hooks\/(github|linear)\/?$/.exec(pathname ?? '');
+  const match = /^\/hooks\/(github|linear|slack)\/?$/.exec(pathname ?? '');
   return match ? match[1] as WebhookSource : null;
 }
 
@@ -727,11 +839,58 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
         const rawBody = await readRawBody(req, maxBodyBytes);
         const valid = source === 'github'
           ? verifyGithubSignature(req.headers, rawBody, secret)
-          : verifyLinearSignature(req.headers, rawBody, secret);
+          : source === 'linear'
+            ? verifyLinearSignature(req.headers, rawBody, secret)
+            : verifySlackSignature(req.headers, rawBody, secret);
         if (!valid) {
           emit('webhook.rejected', { source, reason: 'invalid signature' });
           res.writeHead(401, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: 'invalid signature' }));
+          return;
+        }
+
+        // Slack diverges from the GitHub/Linear JSON path: two content-types
+        // (slash = form, events = JSON), a one-time url_verification handshake,
+        // a body-carried event id, and a 200 ack Slack shows to the caller.
+        if (source === 'slack') {
+          const slack = parseSlackBody(header(req.headers, 'content-type'), rawBody);
+          // One-time Events API URL handshake: echo the challenge, dispatch nothing.
+          if (slack.type === 'url_verification') {
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ challenge: slack.challenge ?? '' }));
+            return;
+          }
+          const slackEvent = slackEventName(slack);
+          // Slash commands carry no event_id, so fall back to a body hash for dedup.
+          const slackId = `slack:${slack.event_id ?? crypto.createHash('sha256').update(rawBody).digest('hex')}`;
+          emit('webhook.received', { source, event: slackEvent, deliveryId: slackId });
+
+          if (deliveryStore.seen(slackId) || inFlight.has(slackId)) {
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, duplicate: true }));
+            return;
+          }
+          if (!rateLimiter.take(source)) {
+            emit('webhook.rejected', { source, event: slackEvent, deliveryId: slackId, reason: 'rate limit exceeded' });
+            res.writeHead(429, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'rate limit exceeded' }));
+            return;
+          }
+
+          const slackWebhook: IncomingWebhook = { source, event: slackEvent, payload: slack };
+          emit('webhook.authorized', { source, event: slackEvent, deliveryId: slackId });
+
+          // ACK FIRST (RUSH-2548): a 200 inside Slack's 3s window. A slash
+          // command renders the ack text to the caller; an event delivery
+          // ignores the body. Dispatch outlives the ack, same as GitHub/Linear.
+          inFlight.add(slackId);
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(
+            slack.type === 'slash_command'
+              ? JSON.stringify({ response_type: 'ephemeral', text: 'On it — replying in this thread.' })
+              : '',
+          );
+          void settleDelivery(slackWebhook, slackId).finally(() => inFlight.delete(slackId));
           return;
         }
 

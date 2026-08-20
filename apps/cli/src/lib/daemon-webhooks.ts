@@ -35,7 +35,9 @@ export interface HostedReceiverFunnel {
 
 /** One receiver this box hosts. */
 export interface HostedReceiverConfig {
-  /** Secrets bundle holding GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET. */
+  /** Secrets bundle holding GITHUB_WEBHOOK_SECRET, LINEAR_WEBHOOK_SECRET, and/or
+   *  SLACK_SIGNING_SECRET (a Slack receiver also carries SLACK_BOT_TOKEN when the
+   *  agent replies with the Slack Web API rather than `agents send`). */
   bundle: string;
   /** Local bind port (default 8787). */
   port?: number;
@@ -137,8 +139,11 @@ export function resolveReceiverSecrets(bundle: string): WebhookSecrets {
   const secrets: WebhookSecrets = {};
   if (env.GITHUB_WEBHOOK_SECRET) secrets.github = env.GITHUB_WEBHOOK_SECRET;
   if (env.LINEAR_WEBHOOK_SECRET) secrets.linear = env.LINEAR_WEBHOOK_SECRET;
-  if (!secrets.github && !secrets.linear) {
-    throw new Error(`bundle '${bundle}' has neither GITHUB_WEBHOOK_SECRET nor LINEAR_WEBHOOK_SECRET`);
+  if (env.SLACK_SIGNING_SECRET) secrets.slack = env.SLACK_SIGNING_SECRET;
+  if (!secrets.github && !secrets.linear && !secrets.slack) {
+    throw new Error(
+      `bundle '${bundle}' has none of GITHUB_WEBHOOK_SECRET, LINEAR_WEBHOOK_SECRET, or SLACK_SIGNING_SECRET`,
+    );
   }
   return secrets;
 }
