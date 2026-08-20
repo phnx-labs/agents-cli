@@ -163,24 +163,19 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
     // So: if the OS showed us an argv that CARRIES this session id and the
     // recovery path still came back empty, the parse owed us that id and the
     // failure is real.
-    let sawIdInArgv = false;
+    // Reaching the skip below means every attempt returned falsy, so
+    // `missedWhileVisible` false is exactly "no attempt ever saw the id in the
+    // OS-visible argv" -- there is no third state to report.
     let missedWhileVisible = false;
     const hit = await waitFor(() => {
       const argv = holderArgv();
       const found = sessionIdFromLivePid(pid);
-      if (argv?.includes(UUID)) {
-        sawIdInArgv = true;
-        if (!found) missedWhileVisible = true;
-      }
+      if (argv?.includes(UUID) && !found) missedWhileVisible = true;
       return found;
     });
 
     if (!hit && !missedWhileVisible) {
-      ctx.skip(
-        sawIdInArgv
-          ? `holder argv carried the id but the scan never ran against it — see RUSH-2508`
-          : `the OS never exposed the holder's argv for pid ${pid} — see RUSH-2508`,
-      );
+      ctx.skip(`the OS never exposed the holder's argv for pid ${pid} — see RUSH-2508`);
       return;
     }
     expect(hit).toBe(UUID);
