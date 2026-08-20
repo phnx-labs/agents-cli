@@ -5,6 +5,8 @@ title: 'agi-cli GTM: the numbers, the graveyard, and the one bet worth making'
 summary: 'The 18,542 monthly npm downloads are the fleet installing itself — r=0.965 against our own release cadence. Roughly 19 humans visited the public repo landing page in 14 days, and the front door serves a bash script instead of the landing page. Meanwhile the best-funded OSS product in this exact category shut down at 27,867 stars for want of a business model. Pricing is not the question yet.'
 status: draft
 human: author
+host: fleet-worker
+session: n/a
 links:
   - label: 'RUSH-2834 — launch: freeze the name, run the 48-hour ignition'
     url: 'https://linear.app/phnx/issue/RUSH-2834'
@@ -63,14 +65,14 @@ Every number currently used as a traction signal measures our own infrastructure
 
 | Signal | Reported | What it actually is |
 | --- | --- | --- |
-| npm downloads, 30d | 18,542 | r=0.965 with our own releases; 62 versions shipped in the window |
+| npm downloads, 30d | 18,542 | r=0.965 with our own releases; 61 versions shipped in the window |
 | npm, top version last week | `1.20.88`, 470 dls | Published Aug 2 — a pinned CI version, not `latest` |
 | npm, distinct versions last week | 159 | A real user base does not spread across 159 versions |
 | GitHub clones, 14d | 18,015 / 1,076 "unique" | 315 "unique cloners" on a day with 23 human viewers |
 | GitHub top path, 14d | `/agents-cli/pulls` — 135 views, **1 unique** | Our own automation polling the PR list |
 | GitHub repo landing page, 14d | 50 views, **19 uniques** | The honest human number |
 | Referrals from `agi-cli.sh`, 14d | 34 views, **5 uniques** | The website sends five people a fortnight |
-| Stars, 194 days | 15 | 0.18/day; Trending starts near 50/day |
+| Stars since repo creation (2026-04-20, 122 days) | 15 | 0.12/day — 0.18/day counting from the first star on 2026-05-30; Trending starts near 50/day |
 
 The clone number deserves special mention because it is the most misleading. On
 2026-08-10 the repo logged 5,945 clones from 315 "unique" cloners — on a day when
@@ -78,7 +80,7 @@ The clone number deserves special mention because it is the most misleading. On
 does clean clones. The metric is counting our own release pipeline.
 
 **The load-bearing consequence is not embarrassment, it is blindness.** The CLI
-ships with no telemetry by design (`README.md:1345`, `README.md:1496`). Combined
+ships with no telemetry by design (`README.md:1345`, `README.md:1498`). Combined
 with download and clone counts that measure our own machines, there is currently
 **no mechanism by which a real user could be detected**. If fifty people adopted
 agi-cli tomorrow and loved it, nothing in the current stack would reveal it.
@@ -97,7 +99,7 @@ each independently fixable in hours.
   `pattern A: root=docs, /install.sh=script` — so the deployed state contradicts
   the deploy script's own description. Note also that `release.sh` still targets
   `CUSTOM_DOMAIN="agents-cli.sh"`, which now 301s to `agi-cli.sh`, and the local
-  `agents-cli-web` checkout is **27 commits behind** `origin/main`.
+  `agents-cli-web` checkout is **29 commits behind** `origin/main`.
 - **The hero demo renders as a blue link.** `README.md` points at
   `https://agi-cli.sh/demo.mp4`. GitHub only embeds video hosted on its own
   `user-attachments` domain; the rendered README contains zero `<video>`
@@ -111,7 +113,7 @@ each independently fixable in hours.
 ### 3. The positioning slot is genuine whitespace — inside a graveyard
 
 Across 21 researched tools, nothing combines all four of: CLI-first, genuinely
-multi-harness (17, not two), cross-device fleet dispatch over SSH, and one
+multi-harness (17 active ids, not two), cross-device fleet dispatch over SSH, and one
 surface spanning sessions, teams, secrets, browser and computer-use. The nearest
 neighbours each cover one or two legs — Uzi (CLI-native, worktrees, no fleet),
 Warp's Oz (multi-agent but cloud-hosted and closed), Omnara (steering layer, not
@@ -120,11 +122,13 @@ Crystal, the late Vibe Kanban — is a **single-machine desktop GUI** wrapping g
 worktrees around one or two harnesses.
 
 So the differentiation is real. The problem is what happened to everyone who
-occupied nearby ground:
+occupied nearby ground. Star counts and repo state below were pulled live from
+the GitHub API on 2026-08-20; funding, ARR and shutdown dates come from secondary
+web sources (company blogs and trade press) and are not independently verified:
 
 | Product | Peak traction | Model | Outcome |
 | --- | --- | --- | --- |
-| Vibe Kanban | 27,867 stars, $7.4M raised | Apache-2.0, free | **Shut down 2026-04-10** |
+| Vibe Kanban | 27,867 stars, $7.4M raised | Apache-2.0, free | **Shut down 2026-04-10** (repo not archived; last push 2026-04-24) |
 | Roo Code | 3M+ installs, $5M seed | Free / BYOK | **Shut down 2026-05-15** |
 | Terragon | 256 stars | Apache-2.0 | **Shut down 2026-02-09** |
 | Devin (Cognition) | $492M ARR | Hosted, $20–200/mo | Raising at reported $40B |
@@ -220,7 +224,7 @@ size is unknown.
 
     <rect x="16" y="282" width="20" height="30" rx="4" fill="#dc2626"/>
     <text x="46" y="302" font-size="12" font-weight="700" fill="#dc2626">$0 revenue</text>
-    <text x="140" y="302" font-size="11" fill="#8a8a8a">15 stars in 194 days · no telemetry, so no user is detectable</text>
+    <text x="140" y="302" font-size="11" fill="#8a8a8a">15 stars in 122 days · no telemetry, so no user is detectable</text>
   </g>
 </svg>
 <figcaption>Each step down is a different measurement artifact being stripped away. The bottom two rows are the only ones describing people.</figcaption>
@@ -294,11 +298,11 @@ curl -sIL https://agi-cli.sh/ | grep -iE '^HTTP|^content-type'         # 200, se
 
 Cloudflare zone analytics and PostHog were both unreachable from this session.
 The `cloudflare.com` API token authenticates but lacks
-`com.cloudflare.api.account.zone.analytics.read` on both the `agi-cli.sh` and
-`agents-cli.sh` zones, and returns 403 on the account RUM endpoint. The
-`cloudflare` and `posthog.com` bundles on `zion` are Touch-ID-locked, and no CDP
-port is listening on `zion`, so the browser could not attach to an authenticated
-dashboard without relaunching your running Chrome/Comet session.
+`com.cloudflare.api.account.zone.analytics.read` on either zone, and returns 403
+on the account RUM endpoint. The `cloudflare` and `posthog.com` secret bundles on
+the workstation that holds them are Touch-ID-locked, and no CDP port was
+listening there, so the browser could not attach to an authenticated dashboard
+without relaunching a live browser session.
 
 PostHog is genuinely wired into the site (`app/layout.tsx:107-120`, nine
 references in the deployed `/docs` HTML) and is the one source that would measure
@@ -321,7 +325,7 @@ growth work succeeded.
 | 4 | Re-upload the hero demo to GitHub `user-attachments` so it renders | The best asset above the fold reads as broken |
 | 5 | Point `release.sh` at `agi-cli.sh` and catch the web checkout up (27 behind) | The deploy script contradicts the deployed state |
 
-Item 2 is a real decision, not a task. `README.md:1496` promises "No CLI
+Item 2 is a real decision, not a task. `README.md:1498` promises "No CLI
 telemetry or phone-home," twice. Keeping that promise means permanently choosing
 to run this business blind. The defensible version is opt-out, anonymous, no
 prompt contents, documented in the README — the same shape PostHog and Vercel
@@ -361,10 +365,22 @@ architecture and every OSS success in the dataset:
   permissive-plus-goodwill outcome.
 
 Note that `RUSH-2581` already records the blocker: *"No human-identity substrate:
-SSO/SAML cannot attach because there is no principal model."* Everything in a
-team tier hangs off that one piece of work. It is the highest-leverage
-engineering item in the backlog for revenue purposes, and it is currently in
-Backlog.
+SSO/SAML cannot attach because there is no principal model."* Everything in a team
+tier hangs off that one piece of work.
+
+It sits in Backlog by an explicit decision, and that decision should be read
+before acting on this recommendation. The ticket's own comment states: *"Decision:
+not a current product goal ... the system is single-operator today. Building an
+SSO/OIDC identity substrate for one operator is speculative infrastructure."*
+That reasoning was correct on its own terms. It also names the exact condition
+that reverses it: *"if a second operator ever needs access, this is the ticket to
+reopen, and its analysis stands."*
+
+A paid team tier **is** that second operator. So this recommendation does not
+overturn the earlier call — it argues the trigger condition has become a product
+decision rather than an accident. But the sequencing matters: RUSH-2581 stays
+speculative infrastructure until Act 2 produces evidence that multi-seat demand
+exists. Build it after the retention bar is met, not before.
 
 The ICP that follows is narrow and answerable: **engineering teams of 5–50 already
 spending $150–250 per developer per month on agent subscriptions**, who have more
@@ -404,6 +420,6 @@ and this report's largest unknown closes:
 agents secrets unlock posthog.com
 ```
 
-Run that on `zion` and the actual human traffic to `agi-cli.sh` — sessions,
-sources, bounce, whether anyone reaches the install snippet — becomes readable in
-minutes.
+Run that on the workstation holding the bundle, and the actual human traffic to
+`agi-cli.sh` — sessions, sources, bounce, whether anyone reaches the install
+snippet — becomes readable in minutes.
