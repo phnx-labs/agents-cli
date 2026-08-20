@@ -63,11 +63,15 @@ describe('expandPatterns', () => {
     expect(expandPatterns(['rush:*'], available)).toEqual(['rush-cmd']);
   });
 
-  it('unions multiple wildcards', () => {
-    const result = expandPatterns(['system:* user:*'], available);
-    // "system:* user:*" is a single invalid token — test proper multi-element array
+  it('unions multiple wildcards, and treats a space-joined pair as one invalid token', () => {
     const proper = expandPatterns(['system:*', 'user:*'], available);
     expect(proper.sort()).toEqual(['brain-scan', 'browser-generate', 'creative', 'ragent']);
+
+    // "system:* user:*" is ONE token containing a space, not two patterns. The
+    // result used to be assigned and never asserted, so the invalid-token
+    // branch had no coverage at all — it must expand to nothing rather than
+    // silently behaving like the two-element form above.
+    expect(expandPatterns(['system:* user:*'], available)).toEqual([]);
   });
 
   it('subtracts negations', () => {

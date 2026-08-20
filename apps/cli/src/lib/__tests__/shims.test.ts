@@ -108,11 +108,16 @@ describe('generateShimScript — configDirName derivation', () => {
     expect(script).not.toContain('home/./.claude');
   });
 
-  it('produces the nested ".gemini/antigravity-cli" path for antigravity', () => {
-    // antigravity's configDir nests inside gemini's parent. The version-home
-    // path must carry the full subpath so per-version sync lands correctly.
+  it('points the antigravity alias at that version home, not a shared one', () => {
+    // The previous name claimed this checked a nested ".gemini/antigravity-cli"
+    // config path, but the only assertion was on "versions/antigravity/1.0.1"
+    // — the generated script contains no ".gemini" segment at all, so the
+    // regression it advertised was never guarded. Assert what the script
+    // actually has to get right: the binary resolves inside the requested
+    // version home, so per-version sync cannot land in a shared install.
     const script = generateVersionedAliasScript('antigravity', '1.0.1');
-    expect(script).toContain('versions/antigravity/1.0.1');
+    expect(script).toContain('versions/antigravity/1.0.1/');
+    expect(script).not.toContain('versions/antigravity/latest');
   });
 });
 
