@@ -19,6 +19,7 @@ import { discoverNativeAccounts } from '../lib/account-catalog.js';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
 import { getAccountProvider, listAccountProviders, type AccountAuthKind } from '../lib/account-provider-registry.js';
 import { accountBindings, addAccount, addNativeAccount, bindAccount, findAccount, findUnifiedAccount, inspectAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, unbindAccount, type UnifiedAccount } from '../lib/account-registry.js';
+import { accountCapForTier, getTier, type EntitlementTier } from '../lib/entitlement.js';
 
 function parseInstallation(raw: string): { agent: AgentId; version: string } {
   const at = raw.lastIndexOf('@');
@@ -85,9 +86,11 @@ async function printAccounts(json: boolean, fleet = false): Promise<void> {
   const records = Object.values(readAccountRegistry().accounts).sort((a, b) => a.name.localeCompare(b.name));
   const discovered = await discoverNativeAccounts();
   const savedNative = listNativeAccounts(readMeta());
+  const dormantIds = new Set<string>();
+  for (const agent of ALL_AGENT_IDS) for (const account of await dormantAccountsForHarness(agent)) dormantIds.add(account.id);
   const native = discovered.map(row => {
     const saved = savedNative.find(account => account.agent === row.agent && account.identityKey === row.id);
-    return { ...row, name: saved?.name, id: saved?.id ?? row.id };
+    return { ...row, name: saved?.name, id: saved?.id ?? row.id, dormant: !!saved && dormantIds.has(saved.id) };
   });
   if (json) {
     console.log(JSON.stringify([...records.map(account => publicAccount(inspectAccount(account.name))), ...native], null, 2));
@@ -101,7 +104,7 @@ async function printAccounts(json: boolean, fleet = false): Promise<void> {
   }
   console.log(chalk.bold('\nNative harness logins\n'));
   if (!native.length) console.log(chalk.gray('  No signed-in native accounts found.'));
-  for (const account of native) console.log(`  ${account.name ? `${chalk.cyan(account.name)} · ` : ''}${account.display}  ${account.agent}  ${account.versions.join(', ')}`);
+  for (const account of native) console.log(`  ${account.name ? `${chalk.cyan(account.name)} · ` : ''}${account.display}  ${account.agent}  ${account.versions.join(', ')}${account.dormant ? chalk.gray('  — dormant (upgrade to reactivate)') : ''}`);
 }
 
 function parseAuth(raw: string): AccountAuthKind {
@@ -125,14 +128,62 @@ function providerAuthenticatesHarness(provider: string, auth: AccountAuthKind, a
   }
 }
 
-/** Named accounts that `set-default` / `switch` can pin for this harness. */
-export function listSwitchableAccounts(agent: AgentId): UnifiedAccount[] {
+/** Every account (native + provider) registered/usable for this harness, oldest-first by name — the full set a plan-tier cap slices into active vs dormant. */
+function accountsForHarness(agent: AgentId): UnifiedAccount[] {
   const meta = readMeta();
   const native = listNativeAccounts(meta).filter(account => account.agent === agent);
   const providers: UnifiedAccount[] = Object.values(readAccountRegistry().accounts)
     .filter(account => providerAuthenticatesHarness(account.provider, account.auth, agent))
     .map(account => ({ ...account, kind: 'provider' as const }));
   return [...native, ...providers].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Named accounts that `set-default` / `switch` can pin for this harness —
+ * capped to the caller's plan tier (RUSH-2424). Downgrading never deletes a
+ * credential: an over-cap account simply falls out of this list (see
+ * {@link dormantAccountsForHarness}) and stops being a switch/rotation target
+ * until the plan is upgraded.
+ */
+export async function listSwitchableAccounts(agent: AgentId): Promise<UnifiedAccount[]> {
+  const cap = accountCapForTier(await getTier());
+  return accountsForHarness(agent).slice(0, cap);
+}
+
+/** Accounts registered for this harness beyond the plan's cap — kept, never deleted, excluded from switch/rotation, reactivated by an upgrade. */
+export async function dormantAccountsForHarness(agent: AgentId): Promise<UnifiedAccount[]> {
+  const cap = accountCapForTier(await getTier());
+  return accountsForHarness(agent).slice(cap);
+}
+
+function accountCapRefusalMessage(agent: AgentId, tier: EntitlementTier, cap: number): string {
+  if (!tier.isPaid) return `free plan is capped at 3 ${agent} accounts (3/3). agents upgrade — up to 10 per harness.`;
+  return `${tier.tierName} plan is capped at ${cap} ${agent} accounts (${cap}/${cap}).`;
+}
+
+/**
+ * Refuse BEFORE any write when adding a new account would push one of
+ * `harnesses` over the caller's plan cap. Returns the tier/cap/pre-add counts
+ * so the caller can print the exactly-at-cap notice after a successful write.
+ */
+async function assertAccountCapacityFor(harnesses: AgentId[]): Promise<{ tier: EntitlementTier; cap: number; existing: Map<AgentId, number> }> {
+  const tier = await getTier();
+  const cap = accountCapForTier(tier);
+  const existing = new Map<AgentId, number>();
+  for (const harness of harnesses) existing.set(harness, accountsForHarness(harness).length);
+  const capped = harnesses.find(harness => (existing.get(harness) ?? 0) >= cap);
+  if (capped) throw new Error(accountCapRefusalMessage(capped, tier, cap));
+  return { tier, cap, existing };
+}
+
+/** One-line, non-blocking notice for every harness a free-tier add just brought to exactly its cap. */
+function printCapNoticesFor(harnesses: AgentId[], tier: EntitlementTier, cap: number, existing: Map<AgentId, number>): void {
+  if (tier.isPaid) return;
+  for (const harness of harnesses) {
+    if ((existing.get(harness) ?? 0) + 1 === cap) {
+      console.log(chalk.yellow(`${cap}/${cap} ${harness} accounts on the free plan. agents upgrade — up to 10 per harness.`));
+    }
+  }
 }
 
 /**
@@ -156,7 +207,7 @@ export function setDefaultAccount(agentRaw: string, name: string): { agent: Agen
 }
 
 async function switchAccountRows(agent: AgentId): Promise<SwitchAccountRow[]> {
-  const accounts = listSwitchableAccounts(agent);
+  const accounts = await listSwitchableAccounts(agent);
   const candidates = await collectRunCandidates(agent);
   const defaultId = readMeta().accounts?.defaults?.[agent];
   return accounts.map(account => {
@@ -233,10 +284,16 @@ export function registerAccountsCommand(program: Command): void {
       const auth = parseAuth(o.auth);
       const provider = getAccountProvider(o.provider);
       if (!provider.authKinds.includes(auth)) throw new Error(`Provider '${provider.provider}' does not support ${auth}. Supported: ${provider.authKinds.join(', ')}.`);
+      // A provider account may authenticate more than one harness (e.g. openrouter);
+      // it counts toward every harness it can authenticate, so refuse before any
+      // write if adding it would push ANY of those harnesses over the plan cap.
+      const harnesses = ALL_AGENT_IDS.filter(h => providerAuthenticatesHarness(provider.provider, auth, h));
+      const { tier, cap, existing } = await assertAccountCapacityFor(harnesses);
       const secret = o.fromSecrets ? secretFromBundle(o.fromSecrets) : await password({ message: `Enter ${provider.provider} ${auth} for '${name}':` });
       const account = addAccount(name, provider.provider, auth, secret, undefined, { baseUrl: o.baseUrl });
       console.log(chalk.green(`Added ${account.provider} ${account.auth} account '${account.name}'.`));
       console.log(chalk.gray(`Secret bundle '${account.name}' is the account and uses policy never, so agent launches never request Touch ID.`));
+      printCapNoticesFor(harnesses, tier, cap, existing);
     });
 
   accounts.command('set-key <name>')
@@ -277,9 +334,11 @@ export function registerAccountsCommand(program: Command): void {
     .description('Name a signed-in native installation without copying its OAuth credentials')
     .action(async (source: string, name: string) => {
       const identity = await nativeIdentityFromSource(source);
+      const { tier, cap, existing } = await assertAccountCapacityFor([identity.agent]);
       const account = addNativeAccount(name, identity.agent, identity.identityKey, identity.identityLabel, identity.scope);
       console.log(chalk.green(`Named ${source} as ${account.name}.`));
       if (account.scope === 'device') console.log(chalk.gray(`${identity.agent} authentication is device-scoped; attach '${account.name}' to '${identity.agent}', not an individual version.`));
+      printCapNoticesFor([identity.agent], tier, cap, existing);
     });
 
   accounts.command('attach <account> <target>')
@@ -310,6 +369,16 @@ export function registerAccountsCommand(program: Command): void {
         // Provider account: it must be able to authenticate the target's harness.
         getAccountProvider(account.provider).envFor(targetAgent, account.auth);
       }
+      // Defense-in-depth cap check: by the point we get here `account` already
+      // authenticates/belongs to `targetAgent` (validated above), so it is
+      // already counted in accountsForHarness(targetAgent) from its `add`/`name`
+      // time — this can only refuse if that invariant is ever violated, never a
+      // normal re-attach of an account the harness is already at cap with.
+      const tier = await getTier();
+      const cap = accountCapForTier(tier);
+      const alreadyCounted = accountsForHarness(targetAgent).some(existing => existing.id === account.id);
+      const otherCount = accountsForHarness(targetAgent).length - (alreadyCounted ? 1 : 0);
+      if (otherCount >= cap) throw new Error(accountCapRefusalMessage(targetAgent, tier, cap));
       bindAccount(name, target);
       console.log(chalk.green(`Attached ${account.name} to ${target}.`));
     });
