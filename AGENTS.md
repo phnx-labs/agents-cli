@@ -124,7 +124,7 @@ and [`architecture.md`](apps/cli/docs/architecture.md).
   snapshots, the device registry). Where an action needs a UI-owned surface, the UI
   exposes a narrow endpoint the CLI drives (the `/inject` verb is the precedent) — the
   trigger stays in the CLI. Routines are covered by the same rule: `agents routines` +
-  the daemon's pid-claimed scheduler (`apps/cli/src/lib/daemon.ts`) are the only cron
+  the daemon's pid-claimed scheduler (`apps/cli/src/lib/daemon/daemon.ts`) are the only cron
   that fires them; a UI button may *request* a run, never *schedule* one. **Multiple
   devices are fine — shared queues are not.** Every device runs its own daemon, and
   an unrestricted routine MAY fire on all of them when its input is the firing

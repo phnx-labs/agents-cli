@@ -30,7 +30,7 @@ process that holds unlocked bundles in memory behind a `0700` Unix socket, so
 concurrent agents stop re-prompting Touch ID per process. It currently runs as
 its own launchd user service, `com.phnx-labs.agents-secrets-agent`.
 
-The **routines daemon** (`src/lib/daemon.ts`, `com.phnx-labs.agents-daemon`)
+The **routines daemon** (`src/lib/daemon/daemon.ts`, `com.phnx-labs.agents-daemon`)
 already hosts a socket IPC service of the same shape — `BrowserIPCServer` — which
 prompted the question: *isn't the broker a second daemon we don't need? Fold it
 into the routines daemon.*

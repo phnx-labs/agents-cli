@@ -65,7 +65,7 @@ guarantee, the reference for the mechanism.
 guarantee.** The CLI registers **100 top-level names** across **81 distinct
 loaders** — the difference is aliases and multi-command modules (`ssh`/`devices`/`fleet`
 share one; `add`/`use`/`remove`/`rm`/`purge` another) — in `COMMAND_LOADERS`
-(`lib/startup/command-registry.ts:146`, *"Parity is non-negotiable: the name -> loader
+(`cli/command-registry.ts:146`, *"Parity is non-negotiable: the name -> loader
 map below mirrors exactly which module registers which top-level command on `main`"*).
 Five subsystems have a normative contract. Before relying on a behavior, check which
 row its surface sits in.
@@ -2023,7 +2023,7 @@ schema (`--json` passes through each agent's native stream format).
   (`lib/exec.ts:211-294`).
 - **Version home** — the isolated config directory for one installed agent
   version, `getVersionHomePath(agent, version)` = `<versionDir>/home`
-  (`lib/versions.ts:1054-1056`).
+  (`lib/installations/versions.ts:1054-1056`).
 - **Chain / fallback entry** — one `{ agent, version?, envOverride? }` in a
   `--fallback` sequence tried in order on rate-limit failure
   (`lib/exec.ts:2272-2281`).
@@ -2133,7 +2133,7 @@ schema (`--json` passes through each agent's native stream format).
 
 - **EXEC-13 (MUST).** Every installed agent version has an isolated home
   directory: `getVersionHomePath(agent, version)` =
-  `<historyDir>/versions/<agent>/<version>/home` (`lib/versions.ts:1050-1056`,
+  `<historyDir>/versions/<agent>/<version>/home` (`lib/installations/versions.ts:1050-1056`,
   doc comment: *"Each version has its own config isolation (like jobs
   sandbox)."*).
 - **EXEC-14 (MUST, scoped).** `buildExecEnv` realizes that isolation ONLY for
@@ -2182,7 +2182,7 @@ schema (`--json` passes through each agent's native stream format).
   (no global `~/.cursor` symlink swap — concurrent runs on different accounts do
   not clobber one another). `CREDENTIAL_FILE_SEGMENTS.cursor`
   (`lib/agents.ts`) verifies signed-in per home against that token, and
-  `seedActiveCursorLoginPerVersion` (`lib/migrate.ts`) migrates the legacy
+  `seedActiveCursorLoginPerVersion` (`lib/installations/migrate.ts`) migrates the legacy
   global token into the active account's home on upgrade. The versioned-alias
   shim mirrors the same `XDG_CONFIG_HOME` export (`CONFIG_ENV_ISOLATED_AGENTS`
   includes cursor). Cursor's HOME-relative `~/.cursor` (cli-config.json,
@@ -2308,7 +2308,7 @@ schema (`--json` passes through each agent's native stream format).
   "the remote's own exit code, or 1 if unknown".
 
   **Known cost (accepted).** The daemon reaps any session whose panes are all
-  dead every `DEAD_PANE_REAP_TICK_MS` (5 min, `lib/daemon.ts`). A cleanly
+  dead every `DEAD_PANE_REAP_TICK_MS` (5 min, `lib/daemon/daemon.ts`). A cleanly
   exited run is in that state between its pane dying and `paneExitStatus`
   reading it, so a tick landing inside that one-tmux-round-trip window leaves
   the pane unreadable and a genuinely successful run resolves `1`. Once the
@@ -2485,7 +2485,7 @@ themselves are normative in [§Secrets](#secrets) — SEC-6..SEC-14 govern.)
   MUST NOT throw out of `applyActiveRulesPresetAtRun` — every failure mode
   is caught and the function returns `false` (no write attempted), mirroring
   `syncResourcesToVersion`'s own catch-and-skip for rules
-  (`lib/rules/run-sync.ts:95-98,108-112`; `lib/versions.ts:2952-2960`).
+  (`lib/rules/run-sync.ts:95-98,108-112`; `lib/installations/versions.ts:2952-2960`).
 - **EXEC-47 (scope, not a bug).** The auto-apply is VERSION-scoped only —
   keyed by `(agent, version)`, matching `getActiveRulesPreset`. Per-model
   preset scoping (a different active preset per `--model` within the same
@@ -2719,7 +2719,7 @@ nothing but its own view cache.
 
 - **SING-1 (MUST).** Every fleet-affecting capability MUST have exactly one scheduler
   and one executor: the agi-cli daemon (`agents __daemon-run`,
-  `apps/cli/src/lib/daemon.ts`) or a CLI command the daemon or the user drives.
+  `apps/cli/src/lib/daemon/daemon.ts`) or a CLI command the daemon or the user drives.
   Status: **Current** for routines (`lib/scheduler.ts`) and rotate
   (`lib/watchdog/rotate.ts`). `agents daemon` is the user-facing runtime
   surface for this singular process (`start`/`stop`/`restart`/`reload`/
@@ -2747,7 +2747,7 @@ nothing but its own view cache.
   hook once at startup, `ensureSessionHookRepaired` (`lib/tmux/session.ts`)
   repairs a single session right before each of `agents run
   --resume`/`focus`/`go`/`tmux attach` attaches to it, and `runMigration`
-  (`lib/migrate.ts`) repairs the fleet again at upgrade time as the
+  (`lib/installations/migrate.ts`) repairs the fleet again at upgrade time as the
   version-skew one-shot.
 - **SING-1a (MUST).** Ordinary usage/auth consumers MUST be cache-only. This
   includes routing (`agents run` and teams), `view`, `versions`, `usage`, device
@@ -2786,7 +2786,7 @@ nothing but its own view cache.
   gates only the UI's view of an action MUST NOT exist.
 - **SING-4a (MUST).** A device-local `daemon.enabled: false` (`lib/device-config.ts`,
   `agents daemon disable`) MUST prevent every AUTO-start surface from bringing the
-  daemon up — `ensureDaemonStarted` (`lib/daemon.ts`) and every `routines`
+  daemon up — `ensureDaemonStarted` (`lib/daemon/daemon.ts`) and every `routines`
   auto-start call site (`add`, `start`, `catchup`, webhook triggers,
   `commands/routines.ts`). It MUST NOT stop an already-running daemon and MUST NOT
   block the explicit override (`agents daemon start`), mirroring `systemctl
@@ -2796,7 +2796,7 @@ nothing but its own view cache.
   `daemon.enabled` gates whether the daemon itself may be auto-started at all
   (the secrets broker, browser IPC, and watchdog with it).
 - **SING-5 (MUST).** Routines MUST fire only from the daemon's pid-claimed
-  `JobScheduler` (`lib/daemon.ts` — the pid-file claim exists precisely so a second
+  `JobScheduler` (`lib/daemon/daemon.ts` — the pid-file claim exists precisely so a second
   scheduler cannot double-fire). A UI MAY request an immediate run
   (`agents routines run <name>` or equivalent) but MUST NOT hold its own cron,
   countdown, or "run every N" for a routine.
@@ -2927,7 +2927,7 @@ a machine-wide process sweep.)
   never defer to it. The takeover target is the live owner of THIS state dir's pid file
   (`resolveLiveDaemonPid`) and nothing else — a daemon serving a DIFFERENT state dir
   (its own `HOME`, a test fixture) MUST be left completely untouched.
-  `claimDaemonInstance` (`lib/daemon.ts`) SIGTERMs the live pid-file owner and MUST
+  `claimDaemonInstance` (`lib/daemon/daemon.ts`) SIGTERMs the live pid-file owner and MUST
   wait for it to be provably dead — its graceful `handleShutdown` releasing the
   browser IPC binding (`await browserIPC.stop()`) and the secrets broker socket
   (`hostedBroker?.close()`), or a `killTree` escalation (POSITIVE pid, so the kill never
@@ -2935,7 +2935,7 @@ a machine-wide process sweep.)
   **before binding any of its own resources**. Binding before the incumbent's
   release recreates the two-brokers-on-one-socket orphan (`daemon.ts` broker
   hosting), so the pid file MUST NOT be written until the prior owner is dead.
-  `reapStrayDaemons` (`lib/daemon.ts`) reaps only registrants of THIS state dir's
+  `reapStrayDaemons` (`lib/daemon/daemon.ts`) reaps only registrants of THIS state dir's
   instance registry (`<daemonDir>/instances/`) — because the registry lives inside the
   daemon dir, a different state dir's daemons register elsewhere and are invisible, so
   the reaper is state-dir-scoped by construction, never `process.argv[1]`-scoped and
@@ -2956,16 +2956,16 @@ a machine-wide process sweep.)
   still the intended live process and adopt it, or reap the dangling daemon, browser,
   tunnel, or keychain-helper process without targeting an unrelated or detached routine
   process. The recovery layers are the state-directory lifetime self-check
-  (`lib/daemon.ts:925-957`), the state-directory-scoped daemon registry and
-  `reapStrayDaemons` (`lib/daemon.ts:348-394`), browser/tunnel orphan reaping
-  (`lib/daemon.ts:800-815`), the keychain helper reaper's pid/start-time identity
+  (`lib/daemon/daemon.ts:925-957`), the state-directory-scoped daemon registry and
+  `reapStrayDaemons` (`lib/daemon/daemon.ts:348-394`), browser/tunnel orphan reaping
+  (`lib/daemon/daemon.ts:800-815`), the keychain helper reaper's pid/start-time identity
   checks (`lib/secrets/reaper.ts:20-40`, `lib/secrets/reaper.ts:68-101`), and the
   orphaned-`watch-lock` reaper (RUSH-2419) that recovers the one deliberately
   long-lived helper when its owning daemon is provably dead
-  (`lib/secrets/reaper.ts:156-180`, wired into the reap tick at `lib/daemon.ts:911`).
+  (`lib/secrets/reaper.ts:156-180`, wired into the reap tick at `lib/daemon/daemon.ts:911`).
   Every daemon-owned process class — daemon, browser, tunnel, and keychain helper
   including the `watch-lock` watcher — has a recovery layer.
-- **SING-12 (MUST).** `stopDaemon` (`lib/daemon.ts`) MUST assert its postcondition,
+- **SING-12 (MUST).** `stopDaemon` (`lib/daemon/daemon.ts`) MUST assert its postcondition,
   not assume it: after the SIGTERM → grace → `killTree` sequence it MUST verify the
   browser IPC binding was released, the secrets broker socket was released (a stale
   socket present on disk but unreachable is the orphan of SING-11 — a still-live
@@ -2982,9 +2982,9 @@ a machine-wide process sweep.)
   and the daemon's instance-registry entry. The shutdown postcondition MUST name any
   survivor and MUST NOT report success merely because the daemon process exited. The
   graceful path already attempts all six releases in `handleShutdown`
-  (`lib/daemon.ts:1033-1054`); `stopDaemon` independently verifies the full inventory
-  via `stopResidueArtifacts` (`lib/daemon.ts:1596-1640`), consumed at
-  `lib/daemon.ts:1825-1831` on both the graceful and escalated `killTree` paths, and
+  (`lib/daemon/daemon.ts:1033-1054`); `stopDaemon` independently verifies the full inventory
+  via `stopResidueArtifacts` (`lib/daemon/daemon.ts:1596-1640`), consumed at
+  `lib/daemon/daemon.ts:1825-1831` on both the graceful and escalated `killTree` paths, and
   distinguishes residue from a provably dead owner (reclaimed) from state belonging to
   a live successor (left untouched) the same way the broker-socket branch above does
   (RUSH-2421, SING-GAP-5 resolved).
@@ -2992,9 +2992,9 @@ a machine-wide process sweep.)
   daemon start MUST NOT cycle through unbounded rapid retries: the service manager MUST
   enforce a restart interval and burst limit, and `ensureDaemonStarted` MUST stop
   initiating starts after a bounded number of consecutive failures until the circuit
-  breaker resets. `generateLaunchdPlist` sets `ThrottleInterval` (`lib/daemon.ts:1117`)
+  breaker resets. `generateLaunchdPlist` sets `ThrottleInterval` (`lib/daemon/daemon.ts:1117`)
   and `generateSystemdUnit` sets `StartLimitIntervalSec`/`StartLimitBurst`
-  (`lib/daemon.ts:1154-1155`); `isDaemonAutostartCircuitOpen` (`lib/daemon.ts:1253-1261`)
+  (`lib/daemon/daemon.ts:1154-1155`); `isDaemonAutostartCircuitOpen` (`lib/daemon/daemon.ts:1253-1261`)
   is the `consecutiveFailures`-driven circuit breaker `ensureDaemonStarted` consults,
   and `index.ts:255-256` adds top-level `uncaughtException`/`unhandledRejection`
   handlers so a startup crash always reaches the now-throttled supervisor rather than
@@ -3007,7 +3007,7 @@ a machine-wide process sweep.)
   receiver's signing secret resolves headlessly through the broker
   (`resolveReceiverSecrets`, `agentOnly: true` per SEC-13) — no
   `AGENTS_SECRETS_PASSPHRASE` and no `nohup`. Every receiver MUST be torn down on
-  shutdown (`handleShutdown`, `lib/daemon.ts`). A box that declares no receiver
+  shutdown (`handleShutdown`, `lib/daemon/daemon.ts`). A box that declares no receiver
   MUST bind nothing. A receiver whose bundle is locked or carries neither
   `GITHUB_WEBHOOK_SECRET` nor `LINEAR_WEBHOOK_SECRET` MUST fail LOUD — logged and
   skipped, never bound with an unverifiable signature — and MUST NOT take the
@@ -3060,7 +3060,7 @@ a machine-wide process sweep.)
   makes the newcomer the survivor: `claimDaemonInstance` SIGTERMs the incumbent,
   waits for it to be provably dead (releasing its broker + browser IPC), then binds,
   so exactly one daemon is ever alive and no two `JobScheduler`s run concurrently
-  (`lib/daemon.ts`, SING-11). The first-wins path where the newcomer exited and left
+  (`lib/daemon/daemon.ts`, SING-11). The first-wins path where the newcomer exited and left
   the incumbent running is gone.
 - **GIVEN** the incumbent daemon has an in-flight detached routine child running,
   **WHEN** takeover evicts that daemon, **THEN** the child survives (a different
@@ -3140,7 +3140,7 @@ a machine-wide process sweep.)
   it from the periodic keychain reaper, so an OOM-kill, a raw SIGKILL, or the daemon's own
   `killTree` escalation of a wedged daemon left it orphaned with no automatic recovery. The
   daemon now runs a separate orphaned-`watch-lock` reaper path (`planKeychainReap`,
-  `lib/secrets/reaper.ts:156-180`, wired into the reap tick at `lib/daemon.ts:911`), gated
+  `lib/secrets/reaper.ts:156-180`, wired into the reap tick at `lib/daemon/daemon.ts:911`), gated
   by `isWatchLockHelperCommand` (`lib/secrets/reaper.ts:262`): it kills a `watch-lock` only
   when the owning daemon is provably absent from the `ps` snapshot (`ppid === 1`, or the
   parent pid missing), behind the `ORPHAN_GRACE_SEC` grace and a fail-closed start-time
@@ -3152,7 +3152,7 @@ a machine-wide process sweep.)
   lifetime marker, heartbeat file, or instance-registry entry, which `handleShutdown`'s
   graceful path releases but the escalated (`killTree`) path left stale with no
   postcondition check. `stopDaemon` now runs `stopResidueArtifacts`
-  (`lib/daemon.ts:1596-1640`) unconditionally on both paths, reclaiming residue from a
+  (`lib/daemon/daemon.ts:1596-1640`) unconditionally on both paths, reclaiming residue from a
   provably dead owner and leaving alone anything a live successor owns
   (`daemon.test.ts` covers both the escalated-reclaim case and the live-owner-protection
   case). Both socket teardowns now await the real `net.Server` `'close'` event instead of
@@ -3166,9 +3166,9 @@ a machine-wide process sweep.)
   `StartLimitBurst`, and `ensureDaemonStarted` had no circuit breaker reading
   `consecutiveFailures` — so a daemon that failed on every startup restarted in an
   unbounded ~10s cycle. `generateLaunchdPlist` now sets `ThrottleInterval`
-  (`lib/daemon.ts:1117`), `generateSystemdUnit` sets `StartLimitIntervalSec`/
-  `StartLimitBurst` (`lib/daemon.ts:1154-1155`), and `isDaemonAutostartCircuitOpen`
-  (`lib/daemon.ts:1253-1261`) gates further auto-starts once
+  (`lib/daemon/daemon.ts:1117`), `generateSystemdUnit` sets `StartLimitIntervalSec`/
+  `StartLimitBurst` (`lib/daemon/daemon.ts:1154-1155`), and `isDaemonAutostartCircuitOpen`
+  (`lib/daemon/daemon.ts:1253-1261`) gates further auto-starts once
   `DAEMON_AUTOSTART_FAILURE_LIMIT` consecutive claims have failed, reported by
   `agents daemon doctor`/`status`. `index.ts:255-256` adds top-level
   `uncaughtException`/`unhandledRejection` handlers so a crash during startup always

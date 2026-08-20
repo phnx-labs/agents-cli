@@ -483,7 +483,7 @@ sessions/config; `agents add gemini`, `agents import gemini`, and
 ```
 src/
   index.ts             # CLI entry (commander.js)
-  commands/            # User-facing subcommands (one file per `agents <cmd>`)
+  commands/            # User-facing subcommands (one file — or a `<cmd>-*.ts` family, e.g. the 14 `sessions*.ts` files — per `agents <cmd>`)
   lib/
     state.ts           # Path constants; agents.yaml read/write (serializeCentral preserves comments)
     manifest.ts        # Project/user agents.yaml Manifest read/write (comment-preserving Document round-trip; used by mcp add, etc.)
@@ -491,7 +491,7 @@ src/
     capabilities.ts    # supports() — the per-agent write gate
     agents.ts          # Per-agent capability table
     subagents-registry.ts  # SUBAGENT_TARGETS — declarative per-agent subagent shape (dir/layout/transform); generic install/list/remove engine
-    versions.ts        # Install, remove, syncResourcesToVersion
+    installations/     # versions.ts (install, remove, syncResourcesToVersion), migrate.ts (one-shot idempotent migrations), store/resolve/strategies
     shims.ts           # Shim generation, config symlink switching
     hooks.ts           # hooks.yaml parser + per-agent registrar
     hooks/match.ts     # `matches:` predicate evaluator
@@ -499,7 +499,6 @@ src/
     monitors/          # `agents monitors` — event-triggered watchers (source→condition→action); native state-diff store; MonitorEngine runs in the daemon beside the cron scheduler. See docs/monitors.md
     projects.ts        # `agents projects` — named multi-repo project defs (~/.agents/projects/*.yaml) layered above the --project convention (resolveProjectRef in project-root.ts); project-status.ts rolls live sessions + merged PRs + artifacts into the progress card. Beta-gated. See docs/projects.md
     project-pull.ts    # `agents projects pull` — fleet fan-out logic: pullProjectTargets (sequential local fast-forward + per-target repo-slug verification), pullLocalArgs/encodePullTargets/decodePullTargets (the {path, expectedSlug} CLI-arg hop to each peer's hidden `pull-local` — bare paths would disable slug verification remotely AND break the fingerprint), buildPullEnvelope/parseProjectPullEnvelope (fail-closed AND fail-loud: a rejected envelope returns valid:false so the peer lands in parseFailed and exits non-zero, never a silent empty result set), printProjectPullSummary. Strict safe contract: dirty trees and non-default branches are blocked; missing checkouts are skipped, never cloned. See docs/projects.md §Pulling every reachable checkout
-    migrate.ts         # One-shot idempotent migrations
     session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents sessions stats` + `sessions backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger); `claude-accounts.ts` attributes each Claude transcript to the account that produced it (account_key) and `insights.ts` extracts the cached multi-harness friction/correction/automation facets behind `agents sessions insights` (`agents insights` alias)
     terminal/          # Terminal launch engine — tab/split in iTerm/Ghostty/tmux/Terminal.app, local or --device;
                        #   preferred.ts resolves WHICH terminal for a GUI caller (from live sessions' host app)

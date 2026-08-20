@@ -164,7 +164,7 @@ persisted result and never executes a pass.
 
 | File | Role |
 |---|---|
-| `lib/daemon.ts` | Sole automatic scheduler: one non-overlapping pass every three minutes. |
+| `lib/daemon/daemon.ts` | Sole automatic scheduler: one non-overlapping pass every three minutes. |
 | `lib/watchdog/runner.ts` | One tick: enumerate → classify → decide (deterministic + smart) → deliver → log. |
 | `lib/watchdog/watchdog.ts` | `WATCHDOG_SYSTEM_PROMPT`, playbook composition, prompt render, response parse. |
 | `lib/watchdog/read.ts` | Locate a transcript and read its tail; stall thresholds. |

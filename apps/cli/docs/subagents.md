@@ -59,7 +59,7 @@ identically — the long tail should cost far less than the core.
 |------|--------|-------------------------------------|
 | **Tier 1 — core** | `claude`, `codex`, `cursor` | First-class. Full support; bespoke transform/format work where the native format demands it. New subagent capabilities land here first. |
 | **Tier 2 — established** | `openclaw`, `grok`, `droid`, `copilot`, `kiro`, `opencode` | Supported, ride the generic registry path. A bespoke `transform` only where the on-disk format differs — never bespoke install/list/remove logic. |
-| **Tier 3 — long-tail** | `goose`, `antigravity`, `kimi` | Config-only; spend the minimum. A new one is a single `SUBAGENT_TARGETS` entry. `kimi` is a plain `flatFile` writing Claude-shaped `<name>.md`; the pre-0.29.0 files agents-cli used to write there (a `<name>.yaml` + `<name>.system.md` pair and an `_agents-cli.yaml` index) are folded once by `migrateKimiSubagentsToMarkdown` in `lib/migrate.ts`, never by the target. |
+| **Tier 3 — long-tail** | `goose`, `antigravity`, `kimi` | Config-only; spend the minimum. A new one is a single `SUBAGENT_TARGETS` entry. `kimi` is a plain `flatFile` writing Claude-shaped `<name>.md`; the pre-0.29.0 files agents-cli used to write there (a `<name>.yaml` + `<name>.system.md` pair and an `_agents-cli.yaml` index) are folded once by `migrateKimiSubagentsToMarkdown` in `lib/installations/migrate.ts`, never by the target. |
 
 **Adding a standard integration (Tier 2/3) is one entry, not six edits.** Give the
 agent a `subagents` gate in `src/lib/agents.ts`, add one entry to `SUBAGENT_TARGETS`

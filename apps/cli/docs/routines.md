@@ -718,7 +718,7 @@ device manifest.
 ### Daemon-core housekeeping (not a routine you manage)
 
 The daemon's own housekeeping — session-cache warming, device probing, and the
-watchdog — runs as plain `setInterval` timers in `lib/daemon.ts`
+watchdog — runs as plain `setInterval` timers in `lib/daemon/daemon.ts`
 (`runActiveSessionsWarm`, `runDeviceProbeTick`, `runWatchdogTick`), not as
 entries under `agents routines`. This replaced an earlier `builtin-routines.ts`
 registry that surfaced them as `(built-in)`-tagged routines with
@@ -737,7 +737,7 @@ repairs every managed session's hook once at startup, and `agents run
 --resume`/`agents focus`/`agents go`/`agents tmux attach` each repair the ONE
 session they're about to attach to right before attaching
 (`ensureSessionHookRepaired`, `lib/tmux/session.ts`). A version-skew one-shot at
-upgrade time (`runMigration`, `lib/migrate.ts`) covers a machine that upgrades
+upgrade time (`runMigration`, `lib/installations/migrate.ts`) covers a machine that upgrades
 without immediately restarting its daemon.
 
 ### Legacy device allowlists

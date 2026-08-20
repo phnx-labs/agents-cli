@@ -663,7 +663,7 @@ efficiently — like the ssh/remote-browser pattern."
 ### 5. Scheduling — falls out of the existing daemon
 
 Scheduled fleet dispatch needs **no new machinery**: the routines scheduler
-(`src/lib/daemon.ts`) fires jobs on cron; a job whose command is `agents run …
+(`src/lib/daemon/daemon.ts`) fires jobs on cron; a job whose command is `agents run …
 --on <host>` is a scheduled remote dispatch. Online-gating is the same lazy SSH
 probe `ensureHostReady` already does (skip/retry if the one targeted host is
 unreachable) — no fleet poll. (We do **not** turn the scheduler into an RPC
@@ -889,7 +889,7 @@ just relocates the storm):
 | Incremental offset read | `src/lib/session/active.ts:200-248` |
 | Per-agent transcript dirs | `src/lib/session/discover.ts:getAgentSessionDirs` |
 | Cross-machine transcript transport | `src/commands/sessions-migrate.ts` (direct SSH, shipped) — the CRDT G-Set / R2 background-sync substrate this row originally named has been removed |
-| Scheduling | `src/lib/daemon.ts` (routines scheduler) |
+| Scheduling | `src/lib/daemon/daemon.ts` (routines scheduler) |
 | Task tracking store | `src/lib/cloud/store.ts` (free-text `provider`, reserved `provider_data`) |
 | Config schema | `src/lib/types.ts` (`Meta`) + `src/lib/state.ts` (`readMeta`) |
 | Config bootstrap on host | `agents repo pull user` (git-backed) + `scripts/sandbox.sh:218-239` |
