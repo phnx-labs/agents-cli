@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Where to post agi-cli, what wins there, and the drafts</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span><span class="status-badge status-draft">draft</span></div>
+<h1>Where to post agi-cli, what wins there, and the drafts</h1>
+<p class="summary">Venue list with rules and sizes, an empirical analysis of 1,581 Show HN posts showing which title features actually correlate with score, and ready-to-post drafts built from that analysis.</p>
+<div class="meta" aria-label="Artifact metadata"><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agi-cli" target="_blank" rel="noopener">phnx-labs/agi-cli</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agi-cli/pull/2797" target="_blank" rel="noopener">Stars playbook (companion report)</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">stars-playbook</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/12f89f9b-a860-472c-97ff-ff5ba6ea2caf">12f89f9b</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-20</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#summary" data-toc-for="summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a class="toc-item" href="#findings" data-toc-for="findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a class="toc-item toc-sub" href="#the-empirical-title-analysis" data-toc-for="the-empirical-title-analysis">The empirical title analysis</a><a class="toc-item toc-sub" href="#why-the-winners-won" data-toc-for="why-the-winners-won">Why the winners won</a><a class="toc-item toc-sub" href="#the-venues" data-toc-for="the-venues">The venues</a><a class="toc-item" href="#evidence" data-toc-for="evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a><a class="toc-item toc-sub" href="#numbers-you-own-and-can-put-in-a-title" data-toc-for="numbers-you-own-and-can-put-in-a-title">Numbers you own and can put in a title</a><a class="toc-item" href="#recommendations" data-toc-for="recommendations"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Recommendations</a><a class="toc-item toc-sub" href="#the-show-hn-draft" data-toc-for="the-show-hn-draft">The Show HN draft</a><a class="toc-item toc-sub" href="#the-r-claudeai-and-r-claudecode-draft" data-toc-for="the-r-claudeai-and-r-claudecode-draft">The r/ClaudeAI and r/ClaudeCode draft</a><a class="toc-item toc-sub" href="#the-r-localllama-draft" data-toc-for="the-r-localllama-draft">The r/LocalLLaMA draft</a><a class="toc-item toc-sub" href="#sequence" data-toc-for="sequence">Sequence</a><a class="toc-item toc-sub" href="#what-i-would-not-do" data-toc-for="what-i-would-not-do">What I would not do</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2><p>I measured rather than guessed. Pulling <strong>1,581 Show HN posts since 2025-01-01</strong>
+from the HN Algolia API and bucketing them by title feature gives a clear answer
+about what actually correlates with a high score, and it contradicts the usual
+advice in one important way.</p>
+<p><strong>The single strongest lever is saying "open source" in the title.</strong> The second
+is a concrete number. Together they are worth roughly <strong>21x the mean score</strong> of a
+title with neither.</p>
+<p><strong>First-person "I built" is a negative signal</strong> for a tool launch: 52 posts used
+it and <strong>not one</strong> cleared 50 points.</p>
+<p>The drafts in the last section are built to that shape. They are ready to post.</p>
+<h2 id="findings">Findings</h2><h3 id="the-empirical-title-analysis">The empirical title analysis</h3><p>Method: HN Algolia <code>search_by_date</code>, <code>tags=show_hn</code>, <code>created_at &gt; 2025-01-01</code>,
+queries <code>agent</code>/<code>ai</code>/<code>llm</code>/<code>claude</code>/<code>cli</code>/<code>coding</code>, deduped by <code>objectID</code>.
+n = 1,581.</p>
+<table>
+<thead>
+<tr>
+<th>Title feature</th>
+<th>n</th>
+<th>Mean points</th>
+<th>Share hitting 50+</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Open source AND a number</strong></td>
+<td>6</td>
+<td><strong>158.8</strong></td>
+<td><strong>16.7%</strong></td>
+</tr>
+<tr>
+<td>Says open-source / self-hosted</td>
+<td>117</td>
+<td>23.7</td>
+<td>6.8%</td>
+</tr>
+<tr>
+<td>Contains a number</td>
+<td>233</td>
+<td>17.3</td>
+<td>3.9%</td>
+</tr>
+<tr>
+<td>Baseline (no number)</td>
+<td>1,348</td>
+<td>8.2</td>
+<td>2.9%</td>
+</tr>
+<tr>
+<td>Neither feature</td>
+<td>1,237</td>
+<td>7.5</td>
+<td>2.6%</td>
+</tr>
+<tr>
+<td><strong>First-person "I built / we built"</strong></td>
+<td>52</td>
+<td><strong>4.1</strong></td>
+<td><strong>0.0%</strong></td>
+</tr>
+<tr>
+<td>Hype word (AGI, powerful, framework for, meta-)</td>
+<td>9</td>
+<td>4.9</td>
+<td>0.0%</td>
+</tr>
+</tbody></table>
+<p>Read these as <strong>tail probabilities, not typical outcomes</strong>. The median Show HN
+scores 2 points regardless of what you do. These features do not make a typical
+post good; they raise the chance of the outlier result that actually matters.
+That is the correct way to use them, because the launch only needs one hit.</p>
+<p>Title length also matters, mildly: 65-85 characters averaged 11.0 points against
+6.1 for titles under 45. Short and clever loses to specific.</p>
+<h3 id="why-the-winners-won">Why the winners won</h3><p>Every Show HN in the sample that cleared 200 points:</p>
+<table>
+<thead>
+<tr>
+<th>Points</th>
+<th>Title</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1,033</td>
+<td>Bento - An entire PowerPoint in one HTML file (edit+view+data+collab)</td>
+</tr>
+<tr>
+<td>919</td>
+<td>Open-source engine running Gemma 4 26B in 2 GB RAM on any M-series Mac</td>
+</tr>
+<tr>
+<td>534</td>
+<td>Needle2: 14MB agentic LLM for phones, wearables, smart home and robots</td>
+</tr>
+<tr>
+<td>484</td>
+<td>Echo - Fable-level results at 1/3 the cost using open-weight models</td>
+</tr>
+<tr>
+<td>314</td>
+<td>Woxi - Open-source Mathematica / Wolfram Language reimplementation</td>
+</tr>
+<tr>
+<td>306</td>
+<td>I spent 2 years designing a mechanical Magic Keyboard</td>
+</tr>
+<tr>
+<td>280</td>
+<td>Juggler - an open-source GUI coding agent, by the creator of JUCE</td>
+</tr>
+<tr>
+<td>244</td>
+<td>I simulated closing the Strait of Hormuz on real oil trade data</td>
+</tr>
+<tr>
+<td>241</td>
+<td>Eigendrum - Draw any shape and hear what it sounds like as a drum</td>
+</tr>
+<tr>
+<td>227</td>
+<td>Wyzer Programming Language</td>
+</tr>
+<tr>
+<td>226</td>
+<td>Clawk - Give coding agents a disposable Linux VM, not your laptop</td>
+</tr>
+<tr>
+<td>215</td>
+<td>Voice driven murder mystery, Interview AI suspects with your voice</td>
+</tr>
+</tbody></table>
+<p>Four mechanics do all the work:</p>
+<ol>
+<li><strong>A number that sounds impossible.</strong> "26B in 2 GB RAM", "14MB agentic LLM",
+"1/3 the cost". The number <em>is</em> the argument. A reader can evaluate the claim
+without reading the post, which is exactly why they click.</li>
+<li><strong>A known reference point to stand against.</strong> Mathematica. Fable. PowerPoint.
+Borrowing an anchor everyone already has an opinion about beats describing
+your thing from scratch.</li>
+<li><strong>X, not Y.</strong> "Give coding agents a disposable Linux VM, <strong>not your laptop</strong>"
+names the grievance in the title. The reader recognizes their own problem.</li>
+<li><strong>Borrowed credibility.</strong> "by the creator of JUCE". If you have a credential,
+spend it in the title.</li>
+</ol>
+<p>The two first-person winners are not tool launches at all. "I spent 2 years" and
+"I simulated" are <em>stories</em>, where the person is the point. For a tool, "I built"
+just delays the noun and signals hobby project — hence 0 for 52.</p>
+<h3 id="the-venues">The venues</h3><table>
+<thead>
+<tr>
+<th>Venue</th>
+<th>Size / reach</th>
+<th>Self-promo rules</th>
+<th>What actually works there</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Hacker News (Show HN)</strong></td>
+<td>~200 Show HN/day; front page = 5-30k uniques</td>
+<td>Show HN is explicitly <em>for</em> this. One post, no vote solicitation</td>
+<td>The title formula above. Sun 7pm ET / Mon 00:00 UTC is the best documented slot</td>
+</tr>
+<tr>
+<td><strong>r/LocalLLaMA</strong></td>
+<td>~749k members</td>
+<td>Strict on promo; value-first</td>
+<td>Vendor-lock-in and cost-control angles; the "run it on your own machines" story is native here</td>
+</tr>
+<tr>
+<td><strong>r/ClaudeAI</strong></td>
+<td>Densest free feed for coding-agent work in 2026</td>
+<td>90/10 helpful-to-promo ratio expected</td>
+<td>CLAUDE.md patterns, hooks, subagent and parallel-agent workflows, cost management — posted as a <em>workflow you use</em>, with the tool incidental</td>
+</tr>
+<tr>
+<td><strong>r/ClaudeCode</strong></td>
+<td>4,200+ weekly contributors</td>
+<td>Same</td>
+<td>Same, more tool-tolerant</td>
+</tr>
+<tr>
+<td><strong>r/commandline, r/selfhosted</strong></td>
+<td>Established</td>
+<td>Moderate</td>
+<td>50-300 stars per well-received post; the self-hosted framing fits</td>
+</tr>
+<tr>
+<td><strong>Product Hunt</strong></td>
+<td>—</td>
+<td>Built for launches</td>
+<td>200-600 stars; real value is the badge and press pickup, not direct traffic</td>
+</tr>
+<tr>
+<td><strong>The awesome-lists</strong></td>
+<td>200k+ combined stars</td>
+<td>PR to the list</td>
+<td>Permanent referral. Start now, it has lead time</td>
+</tr>
+<tr>
+<td><strong>Lobsters</strong></td>
+<td>Small, high signal</td>
+<td>Invite-only, allergic to marketing</td>
+<td>Only if you have an invite; a plain technical writeup</td>
+</tr>
+</tbody></table>
+<p>Two rules that apply everywhere and are worth more than any single post:</p>
+<ul>
+<li><strong>Aged presence beats launch-day posting.</strong> Reddit launches land for accounts
+that were already participating in that subreddit; a cold account posting a
+tool on day one reads as spam and often gets removed outright.</li>
+<li><strong>Answer every comment personally for 24 hours.</strong> Engagement from the submitter
+correlates with ranking longevity on both HN and Reddit.</li>
+</ul>
+<h2 id="evidence">Evidence</h2><h3 id="numbers-you-own-and-can-put-in-a-title">Numbers you own and can put in a title</h3><p>Real, defensible, pulled from this machine on 2026-08-20:</p>
+<table>
+<thead>
+<tr>
+<th>Claim</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>16 agent harnesses supported</td>
+<td><code>apps/cli/AGENTS.md</code> harness parity list</td>
+</tr>
+<tr>
+<td>3,703 session transcripts on one fleet</td>
+<td><code>find ~/.agents/.history/versions -name '*.jsonl'</code></td>
+</tr>
+<tr>
+<td>6 reachable machines, 88 cores</td>
+<td><code>agents devices</code> live snapshot</td>
+</tr>
+<tr>
+<td>Multiple accounts per harness with automatic rotation</td>
+<td><code>agents view</code> shows 7 Claude accounts under one <code>balanced</code> policy</td>
+</tr>
+</tbody></table>
+<p>That last one is the most under-sold thing in the product. Nobody else does
+<strong>account rotation across several subscriptions of the same harness with
+headroom-aware scheduling</strong>. It is a concrete, checkable, slightly outrageous
+claim, which is precisely the shape that wins on HN.</p>
+<h2 id="recommendations">Recommendations</h2><h3 id="the-show-hn-draft">The Show HN draft</h3><p>Title, 79 characters, carrying open-source + a number + a grievance:</p>
+<pre><code>Show HN: Open-source CLI that runs 16 coding agents across your own machines
+</code></pre>
+<p>Two alternates worth A/B considering before you commit:</p>
+<pre><code>Show HN: Agi - open-source CLI that rotates 7 Claude accounts so runs never stall
+Show HN: Run coding agents on machines you own, not a per-seat cloud sandbox
+</code></pre>
+<p>The first alternate is the strongest by the data (open-source + number +
+implausible-sounding specific) but only post it if the rotation behavior is
+genuinely solid, because the comments will go straight at it.</p>
+<p>Body:</p>
+<pre><code>agi-cli is a control plane for running many coding agents at once and driving
+each to a merged PR rather than just starting them.
+
+It installs and version-pins the harnesses (Claude, Codex, Gemini, Cursor,
+OpenCode, Grok, Droid, and 9 more), runs them on subscriptions you already pay
+for, and spreads work across your own machines over SSH. No per-seat cloud
+sandbox and no vendor lock-in.
+
+The parts I would want to read about if someone else posted this:
+
+- Sessions are a first-class object: searchable transcripts synced across
+  devices, resumable on a different machine than they started on.
+- Teams run several agents in parallel, each isolated in its own git worktree,
+  with an explicit boundary contract so they do not clobber each other.
+- The browser is a shared resource. Several agents can attach to one live
+  browser session instead of each spawning its own and re-authenticating.
+- Secrets live in the OS keychain and inject into headless runs, so unattended
+  work does not stall on a Touch ID prompt.
+- Accounts rotate: several subscriptions of the same harness under one policy,
+  picked by remaining headroom, skipping rate-limited ones.
+
+Apache-2.0. It is a power-user tool and the docs assume you already run agents
+daily. Happy to answer anything about the scheduling or the session model.
+</code></pre>
+<h3 id="the-r-claudeai-and-r-claudecode-draft">The r/ClaudeAI and r/ClaudeCode draft</h3><p>Do <strong>not</strong> post the launch announcement here. Post the workflow; let the tool be
+incidental. This is the 90/10 rule and it is enforced socially even where it is
+not enforced by rule.</p>
+<p>Title:</p>
+<pre><code>How I run 4 Claude accounts without hitting a limit mid-task
+</code></pre>
+<p>Body opens with the problem and the config, mentions the tool once, in passing,
+near the end, with a link. If it gets traction, the follow-up post ("here is the
+parallel-teams setup") is where the second link goes. Two useful posts beat one
+promotional one.</p>
+<h3 id="the-r-localllama-draft">The r/LocalLLaMA draft</h3><p>The native grievance here is ownership and cost, not features.</p>
+<pre><code>Title: Running coding agents across your own boxes instead of a per-seat cloud sandbox
+</code></pre>
+<p>Lead with the machine-ownership angle and the SSH fleet. Do not lead with Claude
+— this audience is local-model-first, and the honest framing is that the tool is
+harness-agnostic and will drive a local model through OpenCode just as happily.</p>
+<h3 id="sequence">Sequence</h3><p>Because 92% of a Show HN's star impact is gone after 48 hours, everything fires
+in one window. Order within launch day:</p>
+<table>
+<thead>
+<tr>
+<th>Hour</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>-14 days</td>
+<td>Start commenting in r/ClaudeAI, r/ClaudeCode, r/LocalLLaMA. Aged presence is the prerequisite</td>
+</tr>
+<tr>
+<td>-14 days</td>
+<td>Open the awesome-list PRs. They have review lag</td>
+</tr>
+<tr>
+<td>-1 day</td>
+<td>Pre-seed past 100 stars</td>
+</tr>
+<tr>
+<td>0 (Sun 7pm ET)</td>
+<td>Show HN</td>
+</tr>
+<tr>
+<td>+0-2h</td>
+<td>r/ClaudeCode, r/LocalLLaMA, r/commandline</td>
+</tr>
+<tr>
+<td>+2h</td>
+<td>X thread with the demo GIF</td>
+</tr>
+<tr>
+<td>+4h</td>
+<td>Product Hunt</td>
+</tr>
+<tr>
+<td>+0-48h</td>
+<td>Answer every comment personally</td>
+</tr>
+</tbody></table>
+<h3 id="what-i-would-not-do">What I would not do</h3><p>Do not post the same text to four subreddits. Cross-posting identical
+promotional copy is the fastest way to get removed from all of them, and the
+per-venue drafts above exist because each audience has a different grievance.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0ZW1wbGF0ZTogcmVwb3J0LnYxCnRpdGxlOiAnV2hlcmUgdG8gcG9zdCBhZ2ktY2xpLCB3aGF0IHdpbnMgdGhlcmUsIGFuZCB0aGUgZHJhZnRzJwpzdW1tYXJ5OiAnVmVudWUgbGlzdCB3aXRoIHJ1bGVzIGFuZCBzaXplcywgYW4gZW1waXJpY2FsIGFuYWx5c2lzIG9mIDEsNTgxIFNob3cgSE4gcG9zdHMgc2hvd2luZyB3aGljaCB0aXRsZSBmZWF0dXJlcyBhY3R1YWxseSBjb3JyZWxhdGUgd2l0aCBzY29yZSwgYW5kIHJlYWR5LXRvLXBvc3QgZHJhZnRzIGJ1aWx0IGZyb20gdGhhdCBhbmFseXNpcy4nCnN0YXR1czogZHJhZnQKbGlua3M6CiAgLSBsYWJlbDogJ3BobngtbGFicy9hZ2ktY2xpJwogICAgdXJsOiAnaHR0cHM6Ly9naXRodWIuY29tL3BobngtbGFicy9hZ2ktY2xpJwogIC0gbGFiZWw6ICdTdGFycyBwbGF5Ym9vayAoY29tcGFuaW9uIHJlcG9ydCknCiAgICB1cmw6ICdodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnaS1jbGkvcHVsbC8yNzk3JwotLS0KCiMjIFN1bW1hcnkKCkkgbWVhc3VyZWQgcmF0aGVyIHRoYW4gZ3Vlc3NlZC4gUHVsbGluZyAqKjEsNTgxIFNob3cgSE4gcG9zdHMgc2luY2UgMjAyNS0wMS0wMSoqCmZyb20gdGhlIEhOIEFsZ29saWEgQVBJIGFuZCBidWNrZXRpbmcgdGhlbSBieSB0aXRsZSBmZWF0dXJlIGdpdmVzIGEgY2xlYXIgYW5zd2VyCmFib3V0IHdoYXQgYWN0dWFsbHkgY29ycmVsYXRlcyB3aXRoIGEgaGlnaCBzY29yZSwgYW5kIGl0IGNvbnRyYWRpY3RzIHRoZSB1c3VhbAphZHZpY2UgaW4gb25lIGltcG9ydGFudCB3YXkuCgoqKlRoZSBzaW5nbGUgc3Ryb25nZXN0IGxldmVyIGlzIHNheWluZyAib3BlbiBzb3VyY2UiIGluIHRoZSB0aXRsZS4qKiBUaGUgc2Vjb25kCmlzIGEgY29uY3JldGUgbnVtYmVyLiBUb2dldGhlciB0aGV5IGFyZSB3b3J0aCByb3VnaGx5ICoqMjF4IHRoZSBtZWFuIHNjb3JlKiogb2YgYQp0aXRsZSB3aXRoIG5laXRoZXIuCgoqKkZpcnN0LXBlcnNvbiAiSSBidWlsdCIgaXMgYSBuZWdhdGl2ZSBzaWduYWwqKiBmb3IgYSB0b29sIGxhdW5jaDogNTIgcG9zdHMgdXNlZAppdCBhbmQgKipub3Qgb25lKiogY2xlYXJlZCA1MCBwb2ludHMuCgpUaGUgZHJhZnRzIGluIHRoZSBsYXN0IHNlY3Rpb24gYXJlIGJ1aWx0IHRvIHRoYXQgc2hhcGUuIFRoZXkgYXJlIHJlYWR5IHRvIHBvc3QuCgojIyBGaW5kaW5ncwoKIyMjIFRoZSBlbXBpcmljYWwgdGl0bGUgYW5hbHlzaXMKCk1ldGhvZDogSE4gQWxnb2xpYSBgc2VhcmNoX2J5X2RhdGVgLCBgdGFncz1zaG93X2huYCwgYGNyZWF0ZWRfYXQgPiAyMDI1LTAxLTAxYCwKcXVlcmllcyBgYWdlbnRgL2BhaWAvYGxsbWAvYGNsYXVkZWAvYGNsaWAvYGNvZGluZ2AsIGRlZHVwZWQgYnkgYG9iamVjdElEYC4KbiA9IDEsNTgxLgoKfCBUaXRsZSBmZWF0dXJlIHwgbiB8IE1lYW4gcG9pbnRzIHwgU2hhcmUgaGl0dGluZyA1MCsgfAp8IC0tLSB8IC0tLSB8IC0tLSB8IC0tLSB8CnwgKipPcGVuIHNvdXJjZSBBTkQgYSBudW1iZXIqKiB8IDYgfCAqKjE1OC44KiogfCAqKjE2LjclKiogfAp8IFNheXMgb3Blbi1zb3VyY2UgLyBzZWxmLWhvc3RlZCB8IDExNyB8IDIzLjcgfCA2LjglIHwKfCBDb250YWlucyBhIG51bWJlciB8IDIzMyB8IDE3LjMgfCAzLjklIHwKfCBCYXNlbGluZSAobm8gbnVtYmVyKSB8IDEsMzQ4IHwgOC4yIHwgMi45JSB8CnwgTmVpdGhlciBmZWF0dXJlIHwgMSwyMzcgfCA3LjUgfCAyLjYlIHwKfCAqKkZpcnN0LXBlcnNvbiAiSSBidWlsdCAvIHdlIGJ1aWx0IioqIHwgNTIgfCAqKjQuMSoqIHwgKiowLjAlKiogfAp8IEh5cGUgd29yZCAoQUdJLCBwb3dlcmZ1bCwgZnJhbWV3b3JrIGZvciwgbWV0YS0pIHwgOSB8IDQuOSB8IDAuMCUgfAoKUmVhZCB0aGVzZSBhcyAqKnRhaWwgcHJvYmFiaWxpdGllcywgbm90IHR5cGljYWwgb3V0Y29tZXMqKi4gVGhlIG1lZGlhbiBTaG93IEhOCnNjb3JlcyAyIHBvaW50cyByZWdhcmRsZXNzIG9mIHdoYXQgeW91IGRvLiBUaGVzZSBmZWF0dXJlcyBkbyBub3QgbWFrZSBhIHR5cGljYWwKcG9zdCBnb29kOyB0aGV5IHJhaXNlIHRoZSBjaGFuY2Ugb2YgdGhlIG91dGxpZXIgcmVzdWx0IHRoYXQgYWN0dWFsbHkgbWF0dGVycy4KVGhhdCBpcyB0aGUgY29ycmVjdCB3YXkgdG8gdXNlIHRoZW0sIGJlY2F1c2UgdGhlIGxhdW5jaCBvbmx5IG5lZWRzIG9uZSBoaXQuCgpUaXRsZSBsZW5ndGggYWxzbyBtYXR0ZXJzLCBtaWxkbHk6IDY1LTg1IGNoYXJhY3RlcnMgYXZlcmFnZWQgMTEuMCBwb2ludHMgYWdhaW5zdAo2LjEgZm9yIHRpdGxlcyB1bmRlciA0NS4gU2hvcnQgYW5kIGNsZXZlciBsb3NlcyB0byBzcGVjaWZpYy4KCiMjIyBXaHkgdGhlIHdpbm5lcnMgd29uCgpFdmVyeSBTaG93IEhOIGluIHRoZSBzYW1wbGUgdGhhdCBjbGVhcmVkIDIwMCBwb2ludHM6Cgp8IFBvaW50cyB8IFRpdGxlIHwKfCAtLS0gfCAtLS0gfAp8IDEsMDMzIHwgQmVudG8gLSBBbiBlbnRpcmUgUG93ZXJQb2ludCBpbiBvbmUgSFRNTCBmaWxlIChlZGl0K3ZpZXcrZGF0YStjb2xsYWIpIHwKfCA5MTkgfCBPcGVuLXNvdXJjZSBlbmdpbmUgcnVubmluZyBHZW1tYSA0IDI2QiBpbiAyIEdCIFJBTSBvbiBhbnkgTS1zZXJpZXMgTWFjIHwKfCA1MzQgfCBOZWVkbGUyOiAxNE1CIGFnZW50aWMgTExNIGZvciBwaG9uZXMsIHdlYXJhYmxlcywgc21hcnQgaG9tZSBhbmQgcm9ib3RzIHwKfCA0ODQgfCBFY2hvIC0gRmFibGUtbGV2ZWwgcmVzdWx0cyBhdCAxLzMgdGhlIGNvc3QgdXNpbmcgb3Blbi13ZWlnaHQgbW9kZWxzIHwKfCAzMTQgfCBXb3hpIC0gT3Blbi1zb3VyY2UgTWF0aGVtYXRpY2EgLyBXb2xmcmFtIExhbmd1YWdlIHJlaW1wbGVtZW50YXRpb24gfAp8IDMwNiB8IEkgc3BlbnQgMiB5ZWFycyBkZXNpZ25pbmcgYSBtZWNoYW5pY2FsIE1hZ2ljIEtleWJvYXJkIHwKfCAyODAgfCBKdWdnbGVyIC0gYW4gb3Blbi1zb3VyY2UgR1VJIGNvZGluZyBhZ2VudCwgYnkgdGhlIGNyZWF0b3Igb2YgSlVDRSB8CnwgMjQ0IHwgSSBzaW11bGF0ZWQgY2xvc2luZyB0aGUgU3RyYWl0IG9mIEhvcm11eiBvbiByZWFsIG9pbCB0cmFkZSBkYXRhIHwKfCAyNDEgfCBFaWdlbmRydW0gLSBEcmF3IGFueSBzaGFwZSBhbmQgaGVhciB3aGF0IGl0IHNvdW5kcyBsaWtlIGFzIGEgZHJ1bSB8CnwgMjI3IHwgV3l6ZXIgUHJvZ3JhbW1pbmcgTGFuZ3VhZ2UgfAp8IDIyNiB8IENsYXdrIC0gR2l2ZSBjb2RpbmcgYWdlbnRzIGEgZGlzcG9zYWJsZSBMaW51eCBWTSwgbm90IHlvdXIgbGFwdG9wIHwKfCAyMTUgfCBWb2ljZSBkcml2ZW4gbXVyZGVyIG15c3RlcnksIEludGVydmlldyBBSSBzdXNwZWN0cyB3aXRoIHlvdXIgdm9pY2UgfAoKRm91ciBtZWNoYW5pY3MgZG8gYWxsIHRoZSB3b3JrOgoKMS4gKipBIG51bWJlciB0aGF0IHNvdW5kcyBpbXBvc3NpYmxlLioqICIyNkIgaW4gMiBHQiBSQU0iLCAiMTRNQiBhZ2VudGljIExMTSIsCiAgICIxLzMgdGhlIGNvc3QiLiBUaGUgbnVtYmVyICppcyogdGhlIGFyZ3VtZW50LiBBIHJlYWRlciBjYW4gZXZhbHVhdGUgdGhlIGNsYWltCiAgIHdpdGhvdXQgcmVhZGluZyB0aGUgcG9zdCwgd2hpY2ggaXMgZXhhY3RseSB3aHkgdGhleSBjbGljay4KMi4gKipBIGtub3duIHJlZmVyZW5jZSBwb2ludCB0byBzdGFuZCBhZ2FpbnN0LioqIE1hdGhlbWF0aWNhLiBGYWJsZS4gUG93ZXJQb2ludC4KICAgQm9ycm93aW5nIGFuIGFuY2hvciBldmVyeW9uZSBhbHJlYWR5IGhhcyBhbiBvcGluaW9uIGFib3V0IGJlYXRzIGRlc2NyaWJpbmcKICAgeW91ciB0aGluZyBmcm9tIHNjcmF0Y2guCjMuICoqWCwgbm90IFkuKiogIkdpdmUgY29kaW5nIGFnZW50cyBhIGRpc3Bvc2FibGUgTGludXggVk0sICoqbm90IHlvdXIgbGFwdG9wKioiCiAgIG5hbWVzIHRoZSBncmlldmFuY2UgaW4gdGhlIHRpdGxlLiBUaGUgcmVhZGVyIHJlY29nbml6ZXMgdGhlaXIgb3duIHByb2JsZW0uCjQuICoqQm9ycm93ZWQgY3JlZGliaWxpdHkuKiogImJ5IHRoZSBjcmVhdG9yIG9mIEpVQ0UiLiBJZiB5b3UgaGF2ZSBhIGNyZWRlbnRpYWwsCiAgIHNwZW5kIGl0IGluIHRoZSB0aXRsZS4KClRoZSB0d28gZmlyc3QtcGVyc29uIHdpbm5lcnMgYXJlIG5vdCB0b29sIGxhdW5jaGVzIGF0IGFsbC4gIkkgc3BlbnQgMiB5ZWFycyIgYW5kCiJJIHNpbXVsYXRlZCIgYXJlICpzdG9yaWVzKiwgd2hlcmUgdGhlIHBlcnNvbiBpcyB0aGUgcG9pbnQuIEZvciBhIHRvb2wsICJJIGJ1aWx0IgpqdXN0IGRlbGF5cyB0aGUgbm91biBhbmQgc2lnbmFscyBob2JieSBwcm9qZWN0IOKAlCBoZW5jZSAwIGZvciA1Mi4KCiMjIyBUaGUgdmVudWVzCgp8IFZlbnVlIHwgU2l6ZSAvIHJlYWNoIHwgU2VsZi1wcm9tbyBydWxlcyB8IFdoYXQgYWN0dWFsbHkgd29ya3MgdGhlcmUgfAp8IC0tLSB8IC0tLSB8IC0tLSB8IC0tLSB8CnwgKipIYWNrZXIgTmV3cyAoU2hvdyBITikqKiB8IH4yMDAgU2hvdyBITi9kYXk7IGZyb250IHBhZ2UgPSA1LTMwayB1bmlxdWVzIHwgU2hvdyBITiBpcyBleHBsaWNpdGx5ICpmb3IqIHRoaXMuIE9uZSBwb3N0LCBubyB2b3RlIHNvbGljaXRhdGlvbiB8IFRoZSB0aXRsZSBmb3JtdWxhIGFib3ZlLiBTdW4gN3BtIEVUIC8gTW9uIDAwOjAwIFVUQyBpcyB0aGUgYmVzdCBkb2N1bWVudGVkIHNsb3QgfAp8ICoqci9Mb2NhbExMYU1BKiogfCB+NzQ5ayBtZW1iZXJzIHwgU3RyaWN0IG9uIHByb21vOyB2YWx1ZS1maXJzdCB8IFZlbmRvci1sb2NrLWluIGFuZCBjb3N0LWNvbnRyb2wgYW5nbGVzOyB0aGUgInJ1biBpdCBvbiB5b3VyIG93biBtYWNoaW5lcyIgc3RvcnkgaXMgbmF0aXZlIGhlcmUgfAp8ICoqci9DbGF1ZGVBSSoqIHwgRGVuc2VzdCBmcmVlIGZlZWQgZm9yIGNvZGluZy1hZ2VudCB3b3JrIGluIDIwMjYgfCA5MC8xMCBoZWxwZnVsLXRvLXByb21vIHJhdGlvIGV4cGVjdGVkIHwgQ0xBVURFLm1kIHBhdHRlcm5zLCBob29rcywgc3ViYWdlbnQgYW5kIHBhcmFsbGVsLWFnZW50IHdvcmtmbG93cywgY29zdCBtYW5hZ2VtZW50IOKAlCBwb3N0ZWQgYXMgYSAqd29ya2Zsb3cgeW91IHVzZSosIHdpdGggdGhlIHRvb2wgaW5jaWRlbnRhbCB8CnwgKipyL0NsYXVkZUNvZGUqKiB8IDQsMjAwKyB3ZWVrbHkgY29udHJpYnV0b3JzIHwgU2FtZSB8IFNhbWUsIG1vcmUgdG9vbC10b2xlcmFudCB8CnwgKipyL2NvbW1hbmRsaW5lLCByL3NlbGZob3N0ZWQqKiB8IEVzdGFibGlzaGVkIHwgTW9kZXJhdGUgfCA1MC0zMDAgc3RhcnMgcGVyIHdlbGwtcmVjZWl2ZWQgcG9zdDsgdGhlIHNlbGYtaG9zdGVkIGZyYW1pbmcgZml0cyB8CnwgKipQcm9kdWN0IEh1bnQqKiB8IOKAlCB8IEJ1aWx0IGZvciBsYXVuY2hlcyB8IDIwMC02MDAgc3RhcnM7IHJlYWwgdmFsdWUgaXMgdGhlIGJhZGdlIGFuZCBwcmVzcyBwaWNrdXAsIG5vdCBkaXJlY3QgdHJhZmZpYyB8CnwgKipUaGUgYXdlc29tZS1saXN0cyoqIHwgMjAwaysgY29tYmluZWQgc3RhcnMgfCBQUiB0byB0aGUgbGlzdCB8IFBlcm1hbmVudCByZWZlcnJhbC4gU3RhcnQgbm93LCBpdCBoYXMgbGVhZCB0aW1lIHwKfCAqKkxvYnN0ZXJzKiogfCBTbWFsbCwgaGlnaCBzaWduYWwgfCBJbnZpdGUtb25seSwgYWxsZXJnaWMgdG8gbWFya2V0aW5nIHwgT25seSBpZiB5b3UgaGF2ZSBhbiBpbnZpdGU7IGEgcGxhaW4gdGVjaG5pY2FsIHdyaXRldXAgfAoKVHdvIHJ1bGVzIHRoYXQgYXBwbHkgZXZlcnl3aGVyZSBhbmQgYXJlIHdvcnRoIG1vcmUgdGhhbiBhbnkgc2luZ2xlIHBvc3Q6CgotICoqQWdlZCBwcmVzZW5jZSBiZWF0cyBsYXVuY2gtZGF5IHBvc3RpbmcuKiogUmVkZGl0IGxhdW5jaGVzIGxhbmQgZm9yIGFjY291bnRzCiAgdGhhdCB3ZXJlIGFscmVhZHkgcGFydGljaXBhdGluZyBpbiB0aGF0IHN1YnJlZGRpdDsgYSBjb2xkIGFjY291bnQgcG9zdGluZyBhCiAgdG9vbCBvbiBkYXkgb25lIHJlYWRzIGFzIHNwYW0gYW5kIG9mdGVuIGdldHMgcmVtb3ZlZCBvdXRyaWdodC4KLSAqKkFuc3dlciBldmVyeSBjb21tZW50IHBlcnNvbmFsbHkgZm9yIDI0IGhvdXJzLioqIEVuZ2FnZW1lbnQgZnJvbSB0aGUgc3VibWl0dGVyCiAgY29ycmVsYXRlcyB3aXRoIHJhbmtpbmcgbG9uZ2V2aXR5IG9uIGJvdGggSE4gYW5kIFJlZGRpdC4KCiMjIEV2aWRlbmNlCgojIyMgTnVtYmVycyB5b3Ugb3duIGFuZCBjYW4gcHV0IGluIGEgdGl0bGUKClJlYWwsIGRlZmVuc2libGUsIHB1bGxlZCBmcm9tIHRoaXMgbWFjaGluZSBvbiAyMDI2LTA4LTIwOgoKfCBDbGFpbSB8IFNvdXJjZSB8CnwgLS0tIHwgLS0tIHwKfCAxNiBhZ2VudCBoYXJuZXNzZXMgc3VwcG9ydGVkIHwgYGFwcHMvY2xpL0FHRU5UUy5tZGAgaGFybmVzcyBwYXJpdHkgbGlzdCB8CnwgMyw3MDMgc2Vzc2lvbiB0cmFuc2NyaXB0cyBvbiBvbmUgZmxlZXQgfCBgZmluZCB+Ly5hZ2VudHMvLmhpc3RvcnkvdmVyc2lvbnMgLW5hbWUgJyouanNvbmwnYCB8CnwgNiByZWFjaGFibGUgbWFjaGluZXMsIDg4IGNvcmVzIHwgYGFnZW50cyBkZXZpY2VzYCBsaXZlIHNuYXBzaG90IHwKfCBNdWx0aXBsZSBhY2NvdW50cyBwZXIgaGFybmVzcyB3aXRoIGF1dG9tYXRpYyByb3RhdGlvbiB8IGBhZ2VudHMgdmlld2Agc2hvd3MgNyBDbGF1ZGUgYWNjb3VudHMgdW5kZXIgb25lIGBiYWxhbmNlZGAgcG9saWN5IHwKClRoYXQgbGFzdCBvbmUgaXMgdGhlIG1vc3QgdW5kZXItc29sZCB0aGluZyBpbiB0aGUgcHJvZHVjdC4gTm9ib2R5IGVsc2UgZG9lcwoqKmFjY291bnQgcm90YXRpb24gYWNyb3NzIHNldmVyYWwgc3Vic2NyaXB0aW9ucyBvZiB0aGUgc2FtZSBoYXJuZXNzIHdpdGgKaGVhZHJvb20tYXdhcmUgc2NoZWR1bGluZyoqLiBJdCBpcyBhIGNvbmNyZXRlLCBjaGVja2FibGUsIHNsaWdodGx5IG91dHJhZ2VvdXMKY2xhaW0sIHdoaWNoIGlzIHByZWNpc2VseSB0aGUgc2hhcGUgdGhhdCB3aW5zIG9uIEhOLgoKIyMgUmVjb21tZW5kYXRpb25zCgojIyMgVGhlIFNob3cgSE4gZHJhZnQKClRpdGxlLCA3OSBjaGFyYWN0ZXJzLCBjYXJyeWluZyBvcGVuLXNvdXJjZSArIGEgbnVtYmVyICsgYSBncmlldmFuY2U6CgpgYGAKU2hvdyBITjogT3Blbi1zb3VyY2UgQ0xJIHRoYXQgcnVucyAxNiBjb2RpbmcgYWdlbnRzIGFjcm9zcyB5b3VyIG93biBtYWNoaW5lcwpgYGAKClR3byBhbHRlcm5hdGVzIHdvcnRoIEEvQiBjb25zaWRlcmluZyBiZWZvcmUgeW91IGNvbW1pdDoKCmBgYApTaG93IEhOOiBBZ2kgLSBvcGVuLXNvdXJjZSBDTEkgdGhhdCByb3RhdGVzIDcgQ2xhdWRlIGFjY291bnRzIHNvIHJ1bnMgbmV2ZXIgc3RhbGwKU2hvdyBITjogUnVuIGNvZGluZyBhZ2VudHMgb24gbWFjaGluZXMgeW91IG93biwgbm90IGEgcGVyLXNlYXQgY2xvdWQgc2FuZGJveApgYGAKClRoZSBmaXJzdCBhbHRlcm5hdGUgaXMgdGhlIHN0cm9uZ2VzdCBieSB0aGUgZGF0YSAob3Blbi1zb3VyY2UgKyBudW1iZXIgKwppbXBsYXVzaWJsZS1zb3VuZGluZyBzcGVjaWZpYykgYnV0IG9ubHkgcG9zdCBpdCBpZiB0aGUgcm90YXRpb24gYmVoYXZpb3IgaXMKZ2VudWluZWx5IHNvbGlkLCBiZWNhdXNlIHRoZSBjb21tZW50cyB3aWxsIGdvIHN0cmFpZ2h0IGF0IGl0LgoKQm9keToKCmBgYAphZ2ktY2xpIGlzIGEgY29udHJvbCBwbGFuZSBmb3IgcnVubmluZyBtYW55IGNvZGluZyBhZ2VudHMgYXQgb25jZSBhbmQgZHJpdmluZwplYWNoIHRvIGEgbWVyZ2VkIFBSIHJhdGhlciB0aGFuIGp1c3Qgc3RhcnRpbmcgdGhlbS4KCkl0IGluc3RhbGxzIGFuZCB2ZXJzaW9uLXBpbnMgdGhlIGhhcm5lc3NlcyAoQ2xhdWRlLCBDb2RleCwgR2VtaW5pLCBDdXJzb3IsCk9wZW5Db2RlLCBHcm9rLCBEcm9pZCwgYW5kIDkgbW9yZSksIHJ1bnMgdGhlbSBvbiBzdWJzY3JpcHRpb25zIHlvdSBhbHJlYWR5IHBheQpmb3IsIGFuZCBzcHJlYWRzIHdvcmsgYWNyb3NzIHlvdXIgb3duIG1hY2hpbmVzIG92ZXIgU1NILiBObyBwZXItc2VhdCBjbG91ZApzYW5kYm94IGFuZCBubyB2ZW5kb3IgbG9jay1pbi4KClRoZSBwYXJ0cyBJIHdvdWxkIHdhbnQgdG8gcmVhZCBhYm91dCBpZiBzb21lb25lIGVsc2UgcG9zdGVkIHRoaXM6CgotIFNlc3Npb25zIGFyZSBhIGZpcnN0LWNsYXNzIG9iamVjdDogc2VhcmNoYWJsZSB0cmFuc2NyaXB0cyBzeW5jZWQgYWNyb3NzCiAgZGV2aWNlcywgcmVzdW1hYmxlIG9uIGEgZGlmZmVyZW50IG1hY2hpbmUgdGhhbiB0aGV5IHN0YXJ0ZWQgb24uCi0gVGVhbXMgcnVuIHNldmVyYWwgYWdlbnRzIGluIHBhcmFsbGVsLCBlYWNoIGlzb2xhdGVkIGluIGl0cyBvd24gZ2l0IHdvcmt0cmVlLAogIHdpdGggYW4gZXhwbGljaXQgYm91bmRhcnkgY29udHJhY3Qgc28gdGhleSBkbyBub3QgY2xvYmJlciBlYWNoIG90aGVyLgotIFRoZSBicm93c2VyIGlzIGEgc2hhcmVkIHJlc291cmNlLiBTZXZlcmFsIGFnZW50cyBjYW4gYXR0YWNoIHRvIG9uZSBsaXZlCiAgYnJvd3NlciBzZXNzaW9uIGluc3RlYWQgb2YgZWFjaCBzcGF3bmluZyBpdHMgb3duIGFuZCByZS1hdXRoZW50aWNhdGluZy4KLSBTZWNyZXRzIGxpdmUgaW4gdGhlIE9TIGtleWNoYWluIGFuZCBpbmplY3QgaW50byBoZWFkbGVzcyBydW5zLCBzbyB1bmF0dGVuZGVkCiAgd29yayBkb2VzIG5vdCBzdGFsbCBvbiBhIFRvdWNoIElEIHByb21wdC4KLSBBY2NvdW50cyByb3RhdGU6IHNldmVyYWwgc3Vic2NyaXB0aW9ucyBvZiB0aGUgc2FtZSBoYXJuZXNzIHVuZGVyIG9uZSBwb2xpY3ksCiAgcGlja2VkIGJ5IHJlbWFpbmluZyBoZWFkcm9vbSwgc2tpcHBpbmcgcmF0ZS1saW1pdGVkIG9uZXMuCgpBcGFjaGUtMi4wLiBJdCBpcyBhIHBvd2VyLXVzZXIgdG9vbCBhbmQgdGhlIGRvY3MgYXNzdW1lIHlvdSBhbHJlYWR5IHJ1biBhZ2VudHMKZGFpbHkuIEhhcHB5IHRvIGFuc3dlciBhbnl0aGluZyBhYm91dCB0aGUgc2NoZWR1bGluZyBvciB0aGUgc2Vzc2lvbiBtb2RlbC4KYGBgCgojIyMgVGhlIHIvQ2xhdWRlQUkgYW5kIHIvQ2xhdWRlQ29kZSBkcmFmdAoKRG8gKipub3QqKiBwb3N0IHRoZSBsYXVuY2ggYW5ub3VuY2VtZW50IGhlcmUuIFBvc3QgdGhlIHdvcmtmbG93OyBsZXQgdGhlIHRvb2wgYmUKaW5jaWRlbnRhbC4gVGhpcyBpcyB0aGUgOTAvMTAgcnVsZSBhbmQgaXQgaXMgZW5mb3JjZWQgc29jaWFsbHkgZXZlbiB3aGVyZSBpdCBpcwpub3QgZW5mb3JjZWQgYnkgcnVsZS4KClRpdGxlOgoKYGBgCkhvdyBJIHJ1biA0IENsYXVkZSBhY2NvdW50cyB3aXRob3V0IGhpdHRpbmcgYSBsaW1pdCBtaWQtdGFzawpgYGAKCkJvZHkgb3BlbnMgd2l0aCB0aGUgcHJvYmxlbSBhbmQgdGhlIGNvbmZpZywgbWVudGlvbnMgdGhlIHRvb2wgb25jZSwgaW4gcGFzc2luZywKbmVhciB0aGUgZW5kLCB3aXRoIGEgbGluay4gSWYgaXQgZ2V0cyB0cmFjdGlvbiwgdGhlIGZvbGxvdy11cCBwb3N0ICgiaGVyZSBpcyB0aGUKcGFyYWxsZWwtdGVhbXMgc2V0dXAiKSBpcyB3aGVyZSB0aGUgc2Vjb25kIGxpbmsgZ29lcy4gVHdvIHVzZWZ1bCBwb3N0cyBiZWF0IG9uZQpwcm9tb3Rpb25hbCBvbmUuCgojIyMgVGhlIHIvTG9jYWxMTGFNQSBkcmFmdAoKVGhlIG5hdGl2ZSBncmlldmFuY2UgaGVyZSBpcyBvd25lcnNoaXAgYW5kIGNvc3QsIG5vdCBmZWF0dXJlcy4KCmBgYApUaXRsZTogUnVubmluZyBjb2RpbmcgYWdlbnRzIGFjcm9zcyB5b3VyIG93biBib3hlcyBpbnN0ZWFkIG9mIGEgcGVyLXNlYXQgY2xvdWQgc2FuZGJveApgYGAKCkxlYWQgd2l0aCB0aGUgbWFjaGluZS1vd25lcnNoaXAgYW5nbGUgYW5kIHRoZSBTU0ggZmxlZXQuIERvIG5vdCBsZWFkIHdpdGggQ2xhdWRlCuKAlCB0aGlzIGF1ZGllbmNlIGlzIGxvY2FsLW1vZGVsLWZpcnN0LCBhbmQgdGhlIGhvbmVzdCBmcmFtaW5nIGlzIHRoYXQgdGhlIHRvb2wgaXMKaGFybmVzcy1hZ25vc3RpYyBhbmQgd2lsbCBkcml2ZSBhIGxvY2FsIG1vZGVsIHRocm91Z2ggT3BlbkNvZGUganVzdCBhcyBoYXBwaWx5LgoKIyMjIFNlcXVlbmNlCgpCZWNhdXNlIDkyJSBvZiBhIFNob3cgSE4ncyBzdGFyIGltcGFjdCBpcyBnb25lIGFmdGVyIDQ4IGhvdXJzLCBldmVyeXRoaW5nIGZpcmVzCmluIG9uZSB3aW5kb3cuIE9yZGVyIHdpdGhpbiBsYXVuY2ggZGF5OgoKfCBIb3VyIHwgQWN0aW9uIHwKfCAtLS0gfCAtLS0gfAp8IC0xNCBkYXlzIHwgU3RhcnQgY29tbWVudGluZyBpbiByL0NsYXVkZUFJLCByL0NsYXVkZUNvZGUsIHIvTG9jYWxMTGFNQS4gQWdlZCBwcmVzZW5jZSBpcyB0aGUgcHJlcmVxdWlzaXRlIHwKfCAtMTQgZGF5cyB8IE9wZW4gdGhlIGF3ZXNvbWUtbGlzdCBQUnMuIFRoZXkgaGF2ZSByZXZpZXcgbGFnIHwKfCAtMSBkYXkgfCBQcmUtc2VlZCBwYXN0IDEwMCBzdGFycyB8CnwgMCAoU3VuIDdwbSBFVCkgfCBTaG93IEhOIHwKfCArMC0yaCB8IHIvQ2xhdWRlQ29kZSwgci9Mb2NhbExMYU1BLCByL2NvbW1hbmRsaW5lIHwKfCArMmggfCBYIHRocmVhZCB3aXRoIHRoZSBkZW1vIEdJRiB8CnwgKzRoIHwgUHJvZHVjdCBIdW50IHwKfCArMC00OGggfCBBbnN3ZXIgZXZlcnkgY29tbWVudCBwZXJzb25hbGx5IHwKCiMjIyBXaGF0IEkgd291bGQgbm90IGRvCgpEbyBub3QgcG9zdCB0aGUgc2FtZSB0ZXh0IHRvIGZvdXIgc3VicmVkZGl0cy4gQ3Jvc3MtcG9zdGluZyBpZGVudGljYWwKcHJvbW90aW9uYWwgY29weSBpcyB0aGUgZmFzdGVzdCB3YXkgdG8gZ2V0IHJlbW92ZWQgZnJvbSBhbGwgb2YgdGhlbSwgYW5kIHRoZQpwZXItdmVudWUgZHJhZnRzIGFib3ZlIGV4aXN0IGJlY2F1c2UgZWFjaCBhdWRpZW5jZSBoYXMgYSBkaWZmZXJlbnQgZ3JpZXZhbmNlLgo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>
