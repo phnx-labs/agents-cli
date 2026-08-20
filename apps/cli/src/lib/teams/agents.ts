@@ -35,7 +35,7 @@ import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { pullRemoteLogDelta, REMOTE_MIRROR_MAX_BYTES } from '../hosts/progress.js';
 import { createRemoteWorktree, ensureRemoteRepo } from './remoteWorktree.js';
 import { getTeam, isTeamDisbanded } from './registry.js';
-import { atomicWriteJson } from '../atomic-write.js';
+import { atomicWriteJsonSync } from '../fs-atomic.js';
 import { resolvePlacement, classifyExclusions, NoViableDeviceError } from './scheduler.js';
 import { probePoolSignals } from './placement-probe.js';
 import { readMaxConcurrentCaps } from '../device-config.js';
@@ -1144,7 +1144,7 @@ export class AgentProcess {
       remote_log_offset: this.remoteLogOffset,
     };
     const metaPath = await this.getMetaPath();
-    await atomicWriteJson(metaPath, meta);
+    atomicWriteJsonSync(metaPath, meta);
   }
 
   /**
