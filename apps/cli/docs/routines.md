@@ -398,6 +398,14 @@ The reply reuses the existing outbound Slack channel — no bot code — so it n
 `agents send --channel slack`). Restrict a handler to one channel with
 `channel: C0…`, or drop the `command`/`channel` filters to match every mention.
 
+Route with `{{slack.project}}`, not `{{slack.prompt}}`. The project token is a
+single bare word (no slashes, never `..`), so it is safe in `project:`/`cwd:`;
+`{{slack.prompt}}` is free text from the sender and must stay in the prompt body,
+never in an execution path. And note the blast radius: anyone who can message the
+app triggers a `mode: auto` (write-capable) run on the host box — that authority
+is the point, but scope it with `channel:`/`command:` filters and a project the
+handler trusts.
+
 **Setup (once per workspace).** Create the app at
 [api.slack.com/apps](https://api.slack.com/apps) — the manifest and handler in
 [`docs/examples/slack/`](examples/slack/) are ready to paste — then:
