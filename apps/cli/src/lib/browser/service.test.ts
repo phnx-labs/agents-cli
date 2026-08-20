@@ -1015,16 +1015,35 @@ describe('BrowserService.navigate — Arc reuses a tab rather than refusing (#27
 
     let releaseAttach: () => void = () => {};
     const attachStalled = new Promise<void>((r) => { releaseAttach = r; });
+    // Signals that the FIRST attach has been entered. The test must wait on this
+    // event, not on a timer: whoever calls attachToTarget first stalls until
+    // `releaseAttach()`, which only runs after B's navigate returns — so if B
+    // wins that race the two await each other and the test hangs to its 30s
+    // timeout. It previously gave A a 5ms head start, but A alone does disk I/O
+    // on the way there (`findTask` -> `touchTask` -> `await saveTaskState`,
+    // service.ts:2984/2959; B's touch is coalesced by `lastTouchPersist`), and a
+    // >5ms write on a loaded CI runner is ordinary. Reproduced by shrinking that
+    // head start to 0: `Test timed out in 30000ms`, with no production change.
+    let firstAttachEntered: () => void = () => {};
+    const attachEntered = new Promise<void>((r) => { firstAttachEntered = r; });
     let attachCalls = 0;
     const inner = conn.cdp.send;
     conn.cdp.send = (async (method: string, params: any = {}, sess?: string) => {
-      if (method === 'Target.attachToTarget' && ++attachCalls === 1) await attachStalled;
+      if (method === 'Target.attachToTarget' && ++attachCalls === 1) {
+        firstAttachEntered();
+        await attachStalled;
+      }
       return inner(method, params, sess);
     }) as typeof conn.cdp.send;
 
     // A stalls before its claim check; B then runs start-to-finish and claims.
     const a = service.navigate('arctask', 'file:///tmp/doc.html', 'arcrace').catch((e) => e);
-    await new Promise((r) => setTimeout(r, 5));
+    // Race the signal against A itself: if A ever fails BEFORE reaching the
+    // attach, waiting on `attachEntered` alone would hang to the same 30s
+    // timeout this fix exists to remove. Losing that race is a real bug, so it
+    // fails loudly here instead.
+    const reached = await Promise.race([attachEntered.then(() => 'attached'), a.then(() => 'settled')]);
+    expect(reached, 'A settled before it reached the claim check').toBe('attached');
     await service.navigate('taskB', 'file:///tmp/doc.html', 'arcrace');
     releaseAttach();
     const aResult = await a;
