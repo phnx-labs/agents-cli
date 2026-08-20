@@ -1017,7 +1017,7 @@ export class BrowserService {
         // the check exists to close: a concurrent navigate passes its own check in
         // that window and both tasks end up driving one tab.
         if (this.targetIsClaimed(conn, reusable)) {
-          throw arcNotDrivableError(conn.bareName ?? conn.profileName);
+          throw arcNotDrivableError(conn.profile);
         }
         task.tabs[shortId] = reusable;
         // Borrowed, not opened: this tab was in the browser before the task and
