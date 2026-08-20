@@ -13,12 +13,12 @@
  * computer run has no on-disk artifact of its own to open (see
  * `lib/computer/sessions-list.ts`'s module docblock), so `enter` prints the
  * run's full action list rather than opening a file, and the picker keeps
- * browsing afterward instead of exiting.
+ * browsing afterward instead of exiting. Interactive routing and the browse
+ * loop live in `sessions-picker-factory.ts` (shared with the browser twin).
  */
 import chalk from 'chalk';
-import { itemPicker } from '../lib/picker.js';
-import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { buildPreview } from './sessions-picker.js';
+import { createSessionsPickerCommand } from './sessions-picker-factory.js';
 import {
   runComputerSessions,
   printComputerSessionRows,
@@ -40,33 +40,6 @@ export interface ComputerSessionsCommandOpts {
   interactive?: boolean;
   /** Pre-collected fleet rows. Omitted for the local ledger path. */
   rows?: ComputerRunRow[];
-}
-
-/** True when the interactive picker should open instead of the printed table:
- *  a real TTY, no `--json`, and `--no-interactive` not set. */
-export function shouldOpenInteractiveComputerSessions(opts: ComputerSessionsCommandOpts, isTTY: boolean): boolean {
-  return opts.interactive !== false && !opts.json && isTTY;
-}
-
-/**
- * Shared entry point for `agents computer sessions` and `agents sessions
- * --computer`. Mirrors `runBrowserSessionsCommand`'s interactive-routing
- * split so both call sites stay in lockstep.
- */
-export async function runComputerSessionsCommand(opts: ComputerSessionsCommandOpts): Promise<void> {
-  if (!shouldOpenInteractiveComputerSessions(opts, isInteractiveTerminal())) {
-    if (opts.rows) printComputerSessionRows(opts.rows, { limit: opts.limit, json: opts.json });
-    else runComputerSessions({ machine: opts.machine, limit: opts.limit, json: opts.json });
-    return;
-  }
-
-  const rows = opts.rows ?? buildComputerSessionRows({ machine: opts.machine });
-  if (rows.length === 0) {
-    console.log(`No computer actions recorded${opts.machine ? ` for machine "${opts.machine}"` : ''}.`);
-    return;
-  }
-
-  await browseComputerSessions(rows);
 }
 
 function rowLinkSummary(row: ComputerRunRow): string {
@@ -140,29 +113,33 @@ function printRunDetail(row: ComputerRunRow): void {
   console.log('');
 }
 
-/** Run-level picker with an action-list preview. Loops until the user quits
- *  (esc) so a session's whole run history can be browsed repeatedly in one
- *  sitting — mirroring `browseAndOpen`'s loop, minus the artifact drill-down
- *  a computer run has none of. */
-async function browseComputerSessions(rows: ComputerRunRow[]): Promise<void> {
-  for (;;) {
-    let picked;
-    try {
-      picked = await itemPicker<ComputerRunRow>({
-        message: 'Computer sessions:',
-        items: rows,
-        filter: (query) => (query.trim() ? rows.filter((r) => matchesComputerSessionRow(r, query)) : rows),
-        labelFor: (row) => formatRowLabel(row),
-        buildPreview: (row) => buildRowPreview(row),
-        emptyMessage: 'No computer sessions match.',
-        enterHint: 'view actions',
-      });
-    } catch (err) {
-      if (isPromptCancelled(err)) return;
-      throw err;
-    }
-    if (!picked) return;
+const computerSessionsPicker = createSessionsPickerCommand<ComputerRunRow, ComputerSessionsCommandOpts>({
+  runFlat: (opts) => {
+    if (opts.rows) printComputerSessionRows(opts.rows, { limit: opts.limit, json: opts.json });
+    else runComputerSessions({ machine: opts.machine, limit: opts.limit, json: opts.json });
+  },
+  buildRows: (opts) => opts.rows ?? buildComputerSessionRows({ machine: opts.machine }),
+  emptyMessage: (opts) => `No computer actions recorded${opts.machine ? ` for machine "${opts.machine}"` : ''}.`,
+  message: 'Computer sessions:',
+  matches: matchesComputerSessionRow,
+  labelFor: formatRowLabel,
+  buildPreview: buildRowPreview,
+  emptyFilterMessage: 'No computer sessions match.',
+  enterHint: 'view actions',
+  onOpen: printRunDetail,
+});
 
-    printRunDetail(picked.item);
-  }
+/** True when the interactive picker should open instead of the printed table:
+ *  a real TTY, no `--json`, and `--no-interactive` not set. */
+export function shouldOpenInteractiveComputerSessions(opts: ComputerSessionsCommandOpts, isTTY: boolean): boolean {
+  return computerSessionsPicker.shouldOpen(opts, isTTY);
+}
+
+/**
+ * Shared entry point for `agents computer sessions` and `agents sessions
+ * --computer`. Mirrors `runBrowserSessionsCommand`'s interactive-routing
+ * split so both call sites stay in lockstep.
+ */
+export async function runComputerSessionsCommand(opts: ComputerSessionsCommandOpts): Promise<void> {
+  await computerSessionsPicker.run(opts);
 }

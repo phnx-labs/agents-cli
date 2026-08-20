@@ -7,12 +7,14 @@
  * Reuses the same `itemPicker` + `buildPreview` primitives as the ordinary
  * session picker (`sessions-picker.ts`) — same search/filter/quit help, and the
  * preview pane for a linked task IS the canonical session digest, not a
- * second renderer.
+ * second renderer. Interactive routing and the browse loop live in
+ * `sessions-picker-factory.ts` (shared with the computer twin).
  */
 import chalk from 'chalk';
 import { itemPicker } from '../lib/picker.js';
-import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
+import { isPromptCancelled } from './utils.js';
 import { buildPreview } from './sessions-picker.js';
+import { createSessionsPickerCommand } from './sessions-picker-factory.js';
 import {
   runBrowserSessions,
   buildBrowserSessionRows,
@@ -31,32 +33,6 @@ export interface BrowserSessionsCommandOpts {
   json?: boolean;
   /** Commander's `--no-interactive` convention: `false` opts out. */
   interactive?: boolean;
-}
-
-/** True when the interactive picker should open instead of the printed table:
- *  a real TTY, no `--json`/`--open`, and `--no-interactive` not set. */
-export function shouldOpenInteractiveBrowserSessions(opts: BrowserSessionsCommandOpts, isTTY: boolean): boolean {
-  return opts.interactive !== false && !opts.json && opts.open === undefined && isTTY;
-}
-
-/**
- * Shared entry point for `agents browser sessions` and `agents sessions
- * --browser`. Replaces direct calls to `runBrowserSessions` at both call
- * sites so the interactive routing decision lives in one place.
- */
-export async function runBrowserSessionsCommand(opts: BrowserSessionsCommandOpts): Promise<void> {
-  if (!shouldOpenInteractiveBrowserSessions(opts, isInteractiveTerminal())) {
-    runBrowserSessions({ profile: opts.profile, open: opts.open, json: opts.json });
-    return;
-  }
-
-  const rows = buildBrowserSessionRows(opts.profile);
-  if (rows.length === 0) {
-    console.log(`No browser captures found${opts.profile ? ` for profile "${opts.profile}"` : ''}.`);
-    return;
-  }
-
-  await browseAndOpen(rows);
 }
 
 const KIND_LABEL: Record<ArtifactKind, string> = {
@@ -145,43 +121,6 @@ function openAndReport(a: BrowserArtifact): void {
   if (!openArtifact(a.path)) console.error(`Could not open ${a.path}`);
 }
 
-/** Task-level picker with a captures preview, then an artifact drill-down when
- *  a task holds more than one capture. Loops until the user quits (esc) so a
- *  capture-heavy task can be browsed and opened repeatedly in one session. */
-async function browseAndOpen(rows: BrowserSessionRow[]): Promise<void> {
-  for (;;) {
-    let picked;
-    try {
-      picked = await itemPicker<BrowserSessionRow>({
-        message: 'Browser sessions:',
-        items: rows,
-        filter: (query) => (query.trim() ? rows.filter((r) => matchesBrowserSessionRow(r, query)) : rows),
-        labelFor: (row) => formatRowLabel(row),
-        buildPreview: (row) => buildRowPreview(row),
-        emptyMessage: 'No browser sessions match.',
-        enterHint: 'open capture',
-      });
-    } catch (err) {
-      if (isPromptCancelled(err)) return;
-      throw err;
-    }
-    if (!picked) return;
-
-    const row = picked.item;
-    if (row.artifacts.length === 0) {
-      console.log('No captures in this task yet.');
-      continue;
-    }
-    if (row.artifacts.length === 1) {
-      openAndReport(row.artifacts[0]);
-      continue;
-    }
-
-    const artifact = await pickArtifact(row);
-    if (artifact) openAndReport(artifact);
-  }
-}
-
 /** Second-level picker over one row's captures, newest first. Enter opens the
  *  highlighted capture; esc returns to the task list. */
 async function pickArtifact(row: BrowserSessionRow): Promise<BrowserArtifact | null> {
@@ -202,4 +141,44 @@ async function pickArtifact(row: BrowserSessionRow): Promise<BrowserArtifact | n
     if (isPromptCancelled(err)) return null;
     throw err;
   }
+}
+
+const browserSessionsPicker = createSessionsPickerCommand<BrowserSessionRow, BrowserSessionsCommandOpts>({
+  requireOpenUndefined: true,
+  runFlat: (opts) => runBrowserSessions({ profile: opts.profile, open: opts.open, json: opts.json }),
+  buildRows: (opts) => buildBrowserSessionRows(opts.profile),
+  emptyMessage: (opts) => `No browser captures found${opts.profile ? ` for profile "${opts.profile}"` : ''}.`,
+  message: 'Browser sessions:',
+  matches: matchesBrowserSessionRow,
+  labelFor: formatRowLabel,
+  buildPreview: buildRowPreview,
+  emptyFilterMessage: 'No browser sessions match.',
+  enterHint: 'open capture',
+  onOpen: async (row) => {
+    if (row.artifacts.length === 0) {
+      console.log('No captures in this task yet.');
+      return;
+    }
+    if (row.artifacts.length === 1) {
+      openAndReport(row.artifacts[0]);
+      return;
+    }
+    const artifact = await pickArtifact(row);
+    if (artifact) openAndReport(artifact);
+  },
+});
+
+/** True when the interactive picker should open instead of the printed table:
+ *  a real TTY, no `--json`/`--open`, and `--no-interactive` not set. */
+export function shouldOpenInteractiveBrowserSessions(opts: BrowserSessionsCommandOpts, isTTY: boolean): boolean {
+  return browserSessionsPicker.shouldOpen(opts, isTTY);
+}
+
+/**
+ * Shared entry point for `agents browser sessions` and `agents sessions
+ * --browser`. Replaces direct calls to `runBrowserSessions` at both call
+ * sites so the interactive routing decision lives in one place.
+ */
+export async function runBrowserSessionsCommand(opts: BrowserSessionsCommandOpts): Promise<void> {
+  await browserSessionsPicker.run(opts);
 }
