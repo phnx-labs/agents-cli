@@ -81,6 +81,16 @@ export interface Task {
   label?: string;
   profile: string;
   tabs: Record<string, string>; // shortId (8 chars) -> CDP targetId
+  /**
+   * Tabs this task DRIVES but did not create, by shortId — a tab that already
+   * existed in the browser and was reused because the browser cannot open new
+   * ones (Arc: `Target.createTarget` crashes it, #2778/#2786). Every close path
+   * skips these: the task never opened the tab, so closing it on `done` would
+   * take away something that was there first. Same rule `adoptTabShowing`
+   * states for unowned pages, kept when reuse is unavoidable rather than
+   * optional.
+   */
+  borrowedTabs?: string[];
   currentTabId?: string; // shortId of current tab
   createdAt: number;
   /**

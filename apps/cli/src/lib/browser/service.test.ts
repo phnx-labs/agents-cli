@@ -834,7 +834,7 @@ describe('BrowserService.navigate — Arc reuses a tab rather than refusing (#27
   // meant to end. Reuse is deliberately narrow: only a tab already showing the
   // requested URL, or an empty new-tab page.
   function arcConnWithEmptyTask(profile: string, pages: Array<{ targetId: string; url: string }>) {
-    const { conn, calls } = makeTargetedConn(`${profile}@endpoint-0`, { browser: 'arc', pages });
+    const { conn, calls, targets } = makeTargetedConn(`${profile}@endpoint-0`, { browser: 'arc', pages });
     (conn as unknown as { tasks: Map<string, unknown> }).tasks.set('arctask', {
       id: 'arctask',
       name: 'arctask',
@@ -844,7 +844,7 @@ describe('BrowserService.navigate — Arc reuses a tab rather than refusing (#27
       createdAt: Date.now(),
       pid: 4242,
     });
-    return { conn, calls };
+    return { conn, calls, targets };
   }
 
   it('navigates a tab already showing that url, and never calls createTarget', async () => {
@@ -875,6 +875,31 @@ describe('BrowserService.navigate — Arc reuses a tab rather than refusing (#27
     expect(r.created).toBe(false);
     expect(createTargetCount(calls)).toBe(0);
     expect(calls.filter((c) => c.method === 'Page.navigate')).toHaveLength(1);
+  });
+
+  it("reuses the user's own tab showing that url — but done() must NOT close it", async () => {
+    // The reviewer's scenario for the first attempt at this fix: a tab the USER
+    // opened, showing the url a task navigates to, was claimed and then closed by
+    // that task's done(). Reuse is still correct here (re-showing the same
+    // document in place is the whole point), but the tab must outlive the task.
+    writeProfile('arcborrow', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets, calls } = arcConnWithEmptyTask('arcborrow', [
+      { targetId: 'users-own-tab', url: 'file:///tmp/plan.html' },
+    ]);
+    attach(service, 'arcborrow', conn);
+
+    await service.navigate('arctask', 'file:///tmp/plan.html', 'arcborrow');
+    const task = (conn as unknown as { tasks: Map<string, any> }).tasks.get('arctask');
+    expect(Object.values(task.tabs)).toContain('users-own-tab');
+    expect(task.borrowedTabs).toHaveLength(1);
+
+    await service.done('arctask');
+
+    // The user's tab is still there — never closed, and no close was attempted.
+    expect(targets.map((t) => t.targetId)).toContain('users-own-tab');
+    expect(calls.filter((c) => c.method === 'Target.closeTarget')).toHaveLength(0);
+    expect(createTargetCount(calls)).toBe(0);
   });
 
   it('refuses rather than hijacking a page the user is reading', async () => {

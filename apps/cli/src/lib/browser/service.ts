@@ -706,6 +706,26 @@ export class BrowserService {
    * and a page the user is actually reading is never hijacked, which is why this
    * returns undefined rather than falling back to "the active tab".
    */
+  /**
+   * The CDP targets a task may CLOSE — its own tabs minus any it merely
+   * borrowed. A borrowed tab existed before the task did (see `Task.borrowedTabs`),
+   * so closing it would remove something the task never opened.
+   */
+  /** Is this CDP target already registered to any task on the connection? */
+  private targetIsClaimed(conn: ProfileConnection, targetId: string): boolean {
+    for (const t of conn.tasks.values()) {
+      if (Object.values(t.tabs).includes(targetId)) return true;
+    }
+    return false;
+  }
+
+  private closeableTargetIds(task: Task): string[] {
+    const borrowed = new Set(task.borrowedTabs ?? []);
+    return Object.entries(task.tabs)
+      .filter(([shortId]) => !borrowed.has(shortId))
+      .map(([, cdpId]) => cdpId);
+  }
+
   private async pickReusableTargetWithoutCreate(
     conn: ProfileConnection,
     url: string,
@@ -842,9 +862,10 @@ export class BrowserService {
         // Save to history before closing
         await this.saveToHistory(task, Array.from(domains));
 
-        // Close task's tabs (not the window - it's shared)
+        // Close task's tabs (not the window - it's shared, and not a tab the
+        // task merely borrowed - that one was open before the task existed).
         await Promise.all(
-          Object.values(task.tabs).map((cdpId) =>
+          this.closeableTargetIds(task).map((cdpId) =>
             conn.cdp.send('Target.closeTarget', { targetId: cdpId }).catch(() => {
               // Tab already closed
             })
@@ -970,8 +991,18 @@ export class BrowserService {
       if (reusable) {
         const shortId = generateShortId();
         const sessionId = await this.getSessionId(conn, reusable);
+        // Re-check the claim after that await. Nothing serializes IPC — the same
+        // race `adoptTabShowing` documents — so a concurrent navigate can have
+        // claimed this target while we were attaching. Losing the race means
+        // falling through to the refusal, never two tasks on one tab.
+        if (this.targetIsClaimed(conn, reusable)) {
+          throw arcNotDrivableError(conn.bareName ?? conn.profileName);
+        }
         await conn.cdp.send('Page.navigate', { url }, sessionId);
         task.tabs[shortId] = reusable;
+        // Borrowed, not opened: this tab was in the browser before the task and
+        // must survive `done`. See Task.borrowedTabs.
+        task.borrowedTabs = [...(task.borrowedTabs ?? []), shortId];
         task.currentTabId = shortId;
         this.invalidateTargetCache(conn);
         await this.saveTaskState(task.profile, conn.tasks);
@@ -1118,7 +1149,10 @@ export class BrowserService {
       const shortId = await this.resolveTabHint(conn, task, tabHint);
       const cdpId = task.tabs[shortId];
       if (cdpId) {
-        await conn.cdp.send('Target.closeTarget', { targetId: cdpId });
+        // A borrowed tab is released, not closed — it outlives this task.
+        if (!(task.borrowedTabs ?? []).includes(shortId)) {
+          await conn.cdp.send('Target.closeTarget', { targetId: cdpId });
+        }
         conn.sessionCache.delete(cdpId);
         delete task.tabs[shortId];
         // Update currentTabId if we closed the current tab
@@ -1128,9 +1162,9 @@ export class BrowserService {
         }
       }
     } else {
-      // Close all tabs
+      // Close all tabs the task opened; borrowed ones are only released.
       await Promise.all(
-        Object.values(task.tabs).map((cdpId) =>
+        this.closeableTargetIds(task).map((cdpId) =>
           conn.cdp.send('Target.closeTarget', { targetId: cdpId }).catch(() => {})
         )
       );
