@@ -85,6 +85,27 @@ async function waitFor<T>(probe: () => T | Promise<T>, timeoutMs = 10_000): Prom
   }
 }
 
+/**
+ * The holder's `ps` comm, or undefined when ps cannot see the process at all.
+ * Shared by both real-process cases below: each reads the holder through
+ * `ps -p <pid>`, so each needs the same way to tell "ps has nothing to say
+ * about this pid" apart from "the scan owed us a row and missed it".
+ */
+function commOf(pid: number): string | undefined {
+  try {
+    return execFileSync('ps', ['-p', String(pid), '-o', 'comm='], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+function classifiable(comm: string | undefined): boolean {
+  return !!comm && /^claude/.test(path.basename(comm));
+}
+
 describe('isSessionIdLiveOnProcessTable', () => {
   it('rejects non-uuid targets so a short prefix never false-matches', async () => {
     expect(await isSessionIdLiveOnProcessTable('f0f6cb6b')).toBe(false);
@@ -115,10 +136,39 @@ describe('isSessionIdLiveOnProcessTable', () => {
 });
 
 describe('live --session-id recovery (RUSH-2384 real process)', () => {
-  posixOnly('sessionIdFromLivePid recovers the id from a claude-named process with empty by-pid', async () => {
+  posixOnly('sessionIdFromLivePid recovers the id from a claude-named process with empty by-pid', async (ctx) => {
     const child = spawnHoldingSessionId(UUID);
     const pid = child.pid!;
-    expect(await waitFor(() => sessionIdFromLivePid(pid))).toBe(UUID);
+
+    // RUSH-2508, the same lockstep bracket the sibling case below already uses,
+    // and for the same reason: sessionIdFromLivePid reads the holder through
+    // `ps -ww -p <pid> -o args=` (pid-registry.ts readProcessArgv), so when ps
+    // cannot see the holder AT ALL this case has nothing to judge either -- an
+    // unreadable holder makes the recovery path return undefined no matter how
+    // correct it is. Measured on mac-mini under a full-suite run: ps reported
+    // comm='<unreadable>' for the holder, the sibling case skipped on exactly
+    // that signal, and this one -- guarded by nothing -- failed instead. Same
+    // holder, same ps, same run; only the guard differed.
+    //
+    // Bracketing keeps the property 13e8ef5c1 insisted on: if the holder was
+    // classifiable immediately before AND after an attempt that still came back
+    // empty, the recovery path owed us that id and the failure is REAL, so this
+    // still fails on a regression rather than skipping past it.
+    let lastComm: string | undefined;
+    let missedWhileClassifiable = false;
+    const hit = await waitFor(() => {
+      const before = commOf(pid);
+      const found = sessionIdFromLivePid(pid);
+      lastComm = commOf(pid);
+      if (!found && classifiable(before) && classifiable(lastComm)) missedWhileClassifiable = true;
+      return found;
+    });
+
+    if (!hit && !missedWhileClassifiable) {
+      ctx.skip(`ps reports comm='${lastComm ?? '<unreadable>'}' for the holder, not an agent name — see RUSH-2508`);
+      return;
+    }
+    expect(hit).toBe(UUID);
   });
 
   posixOnly('listUnattributedActive attributes a worktree-cwd process by its live --session-id', async (ctx) => {
@@ -131,19 +181,6 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
 
     const child = spawnHoldingSessionId(UUID, { cwd: wt });
     const pid = child.pid!;
-
-    const commOf = (): string | undefined => {
-      try {
-        return execFileSync('ps', ['-p', String(pid), '-o', 'comm='], {
-          encoding: 'utf-8',
-          stdio: ['ignore', 'pipe', 'ignore'],
-        }).trim();
-      } catch {
-        return undefined;
-      }
-    };
-    const classifiable = (comm: string | undefined): boolean =>
-      !!comm && /^claude/.test(path.basename(comm));
 
     // RUSH-2508: sample the holder's comm in LOCKSTEP with each scan attempt, and
     // only skip when no attempt ever ran against a classifiable holder.
@@ -174,11 +211,11 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
     let lastComm: string | undefined;
     let missedWhileClassifiable = false;
     const hit = await waitFor(async () => {
-      const before = commOf();
+      const before = commOf(pid);
       clearActiveScanCachesForTest();
       rows = await listUnattributedActive(new Set());
       const found = rows.find((r) => r.sessionId === UUID || r.pid === pid);
-      lastComm = commOf();
+      lastComm = commOf(pid);
       if (!found && classifiable(before) && classifiable(lastComm)) missedWhileClassifiable = true;
       return found;
     });
