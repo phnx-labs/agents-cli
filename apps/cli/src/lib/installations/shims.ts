@@ -19,7 +19,7 @@ import { getShimsDir, getVersionsDir, getBackupsDir, getHistoryDir, ensureAgents
 export { getShimsDir };
 import { AGENTS, agentConfigDirName, readAuthAccountIdentity } from '../agents.js';
 import { codexHomeShimBash } from '../codex-home.js';
-import { codexPolicyArgs } from '../codex-policy.js';
+import { resolveHarnessAdapter } from '../harness/index.js';
 
 /**
  * Files and directories to always skip during conflict detection and migration.
@@ -329,50 +329,6 @@ const GROK_RESOLVE_BINARY_FN = `_resolve_grok_binary() {
   printf '%s\\n' "$best"
 }`;
 
-function codexShimLaunchArgs(): string {
-  return [
-    '-c',
-    'check_for_update_on_startup=false',
-    ...codexPolicyArgs('edit'),
-  ].map(shellQuote).join(' ');
-}
-
-/**
- * The `exec` tail for a generated shim. For most agents this is a plain
- * `exec "$BINARY"<launchArgs> "$@"`.
- *
- * Codex is special: its `workspace-write` sandbox hardcodes any `.agents/` (and
- * `.codex/`) directory read-only, but agents-cli keeps every worktree at
- * `<repo>/.agents/worktrees/<slug>`, so an in-repo build under a static
- * shim would hit `EROFS`. The `agents run codex` path fixes this by adding
- * `<repo>/.agents` to the profile's `workspace_roots` (see codexEditWritableRoots
- * / repoAgentsDirForCwd), but a static shim has no cwd at generation time. So the
- * shim resolves the repo's `.agents` from `$PWD` at RUN time — worktree-aware,
- * mirroring repoAgentsDirForCwd — and passes it via Codex's own `--add-dir`
- * (verified to compose with the `agents-edit` profile). The resolution is inline
- * bash because the shim is the launch hot path and must not spawn Node to compute
- * one directory. `--add-dir` is added only when the resolved `.agents` exists.
- */
-function shimExecTail(agent: AgentId, launchArgs: string): string {
-  if (agent !== 'codex') return `exec "$BINARY"${launchArgs} "$@"`;
-  return `_repo_agents=""
-case "$PWD" in
-  */.agents/worktrees/*) _repo_agents="\${PWD%%/.agents/worktrees/*}/.agents" ;;
-  *)
-    _d="$PWD"
-    # Stop before $HOME so a dotfiles repo at $HOME is not treated as the project
-    # root (mirrors repoRootForCwd's home exclusion in project-key.ts).
-    while [ -n "$_d" ] && [ "$_d" != "/" ] && [ "$_d" != "$HOME" ]; do
-      if [ -e "$_d/.git" ]; then _repo_agents="$_d/.agents"; break; fi
-      _d=$(dirname "$_d")
-    done
-    ;;
-esac
-if [ -n "$_repo_agents" ] && [ -d "$_repo_agents" ]; then
-  exec "$BINARY"${launchArgs} --add-dir "$_repo_agents" "$@"
-fi
-exec "$BINARY"${launchArgs} "$@"`;
-}
 
 function getAgentsBinForGeneratedShim(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'index.js');
@@ -391,70 +347,8 @@ export function generateShimScript(agent: AgentId): string {
   // subpath so per-version HOME symlinks reach the right place.
   const configDirName = path.relative(os.homedir(), agentConfig.configDir);
   const agentsBin = shellQuote(getAgentsBinForGeneratedShim());
-  const managedEnv = agent === 'claude'
-    ? `
-# Claude stores OAuth credentials in the macOS keychain. Scope them to the
-# selected version's config directory so switching versions also switches the
-# live Claude account.
-export CLAUDE_CONFIG_DIR="$VERSION_DIR/home/${configDirName}"
-# Managed installs are pinned in a per-version dir; Claude Code's background
-# auto-updater would rewrite the pinned binary in place. Disable it so a pin
-# stays a pin. An explicit user value always wins.
-export DISABLE_AUTOUPDATER="\${DISABLE_AUTOUPDATER:-1}"
-# On Linux sandboxes (no keychain), fall back to a per-version token file.
-# The env var always wins if already set; no-op on macOS.
-if [ "\$(uname -s)" = "Linux" ] && [ -z "\${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -f "\$CLAUDE_CONFIG_DIR/.oauth_token" ]; then
-  CLAUDE_CODE_OAUTH_TOKEN=\$(cat "\$CLAUDE_CONFIG_DIR/.oauth_token")
-  export CLAUDE_CODE_OAUTH_TOKEN
-fi
-`
-    : agent === 'codex'
-      ? codexHomeShimBash(
-          `$VERSION_DIR/home/${configDirName}`,
-          `$AGENTS_USER_DIR/.codex-homes/$VERSION`,
-        )
-      : agent === 'copilot'
-        ? `
-# GitHub Copilot CLI honors COPILOT_HOME to relocate its config and state
-# (settings.json, mcp-config.json, session-state/, logs/, plugins/). Point
-# it at the versioned home so MCP servers, custom agents, and session
-# history are isolated per copilot version.
-export COPILOT_HOME="$VERSION_DIR/home/${configDirName}"
-`
-        : agent === 'grok'
-          ? `
-# Grok Build uses GROK_HOME to isolate its entire configuration tree
-# (skills, hooks, plugins, agents, memory, sessions, config.toml, MCP, etc.).
-# This gives agents-cli full versioned isolation + resource sync for grok.
-export GROK_HOME="$VERSION_DIR/home/.grok"
-`
-          : agent === 'opencode'
-            ? `
-# OpenCode reads plugins, agents, commands, and other config-directory
-# resources from OPENCODE_CONFIG_DIR. Point it at the versioned global config
-# tree where agents-cli syncs OpenCode resources.
-export OPENCODE_CONFIG_DIR="$VERSION_DIR/home/.config/opencode"
-`
-          : agent === 'kimi'
-            ? `
-# Kimi Code CLI honors KIMI_CODE_HOME to relocate ~/.kimi-code (config.toml,
-# mcp.json, sessions, skills, hooks). Point it at the versioned home.
-export KIMI_CODE_HOME="$VERSION_DIR/home/${configDirName}"
-`
-            : agent === 'muse'
-              ? `
-# Muse Code has no MUSE_CONFIG_DIR. It resolves config via XDG:
-#   $XDG_CONFIG_HOME/muse  (settings, skills, hooks, auth)
-#   $XDG_DATA_HOME/muse    (sessions, plugins)
-# Pin XDG into the version home so managed runs never walk the adopt-time
-# ~/.config/muse -> version-home symlink — Muse refuses agent-definition
-# sources that are SymlinkOrReparse (exit 1). Same idea as CLAUDE_CONFIG_DIR.
-export XDG_CONFIG_HOME="$VERSION_DIR/home/.config"
-export XDG_DATA_HOME="$VERSION_DIR/home/.local/share"
-`
-              : '';
-
-  const launchArgs = agent === 'codex' ? ` ${codexShimLaunchArgs()}` : '';
+  const managedEnv = resolveHarnessAdapter(agent).shimConfigEnvBash?.({ configDirName }) ?? '';
+  const launchArgs = resolveHarnessAdapter(agent).shimLaunchArgs?.() ?? '';
 
   return `#!/bin/bash
 # Auto-generated by agents-cli - do not edit
@@ -871,7 +765,7 @@ if [ "\$LAUNCH_SKIP" = "0" ]; then
   "\$AGENTS_BIN" sync --agent "\$AGENT" --agent-version "\$VERSION" --launch --cwd "\$PWD" --quiet 2>/dev/null || true
 fi
 
-${shimExecTail(agent, launchArgs)}
+${resolveHarnessAdapter(agent).shimExecTail?.(launchArgs) ?? `exec "$BINARY"${launchArgs} "$@"`}
 `;
 }
 
@@ -1209,7 +1103,7 @@ export XDG_DATA_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/.
 export XDG_CONFIG_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/.config"
 `
                 : '';
-  const launchArgs = agent === 'codex' ? ` ${codexShimLaunchArgs()}` : '';
+  const launchArgs = resolveHarnessAdapter(agent).shimLaunchArgs?.() ?? '';
 
   // Resolve the binary the same way the main shim does (see generateShimScript).
   // Grok and Droid do NOT ship into node_modules/.bin — Grok downloads a native
@@ -1298,7 +1192,7 @@ if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
 fi
 ${managedEnv}
 
-${shimExecTail(agent, launchArgs)}
+${resolveHarnessAdapter(agent).shimExecTail?.(launchArgs) ?? `exec "$BINARY"${launchArgs} "$@"`}
 `;
 }
 

@@ -14,26 +14,29 @@ export type AgentType = 'codex' | 'gemini' | 'cursor' | 'claude' | 'opencode' | 
 const claudeToolUseMap = new Map<string, { tool: string; command?: string; path?: string }>();
 const droidToolUseMap = new Map<string, { tool: string; args: Record<string, any> }>();
 
+/**
+ * Registry-dispatch table: each teams `AgentType` to its live team-event
+ * normalizer. Replaces the per-type name-chain — the harness axis of Move 3.
+ * warp (and any unlisted type) is absent, so it falls through to the generic
+ * unknown-event shape below, exactly as the old `else` did.
+ */
+const TEAM_EVENT_NORMALIZERS: Partial<Record<AgentType, (raw: any) => any[]>> = {
+  codex: normalizeCodex,
+  cursor: normalizeCursor,
+  gemini: normalizeGemini,
+  claude: normalizeClaude,
+  opencode: normalizeOpencode,
+  grok: normalizeGrok,
+  antigravity: normalizeAntigravity,
+  kimi: normalizeKimi,
+  droid: normalizeDroid,
+};
+
 /** Normalize a raw JSON event from any agent type into an array of unified event objects. */
 export function normalizeEvents(agentType: AgentType, raw: any): any[] {
-  if (agentType === 'codex') {
-    return normalizeCodex(raw);
-  } else if (agentType === 'cursor') {
-    return normalizeCursor(raw);
-  } else if (agentType === 'gemini') {
-    return normalizeGemini(raw);
-  } else if (agentType === 'claude') {
-    return normalizeClaude(raw);
-  } else if (agentType === 'opencode') {
-    return normalizeOpencode(raw);
-  } else if (agentType === 'grok') {
-    return normalizeGrok(raw);
-  } else if (agentType === 'antigravity') {
-    return normalizeAntigravity(raw);
-  } else if (agentType === 'kimi') {
-    return normalizeKimi(raw);
-  } else if (agentType === 'droid') {
-    return normalizeDroid(raw);
+  const normalizer = TEAM_EVENT_NORMALIZERS[agentType];
+  if (normalizer) {
+    return normalizer(raw);
   }
 
   const timestamp = new Date().toISOString();
