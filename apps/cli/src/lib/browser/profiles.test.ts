@@ -35,6 +35,10 @@ import {
   findFreeProfilePort,
   createProfile,
   ensureDefaultBrowserProfile,
+  resolveProfileRef,
+  getAutoDetectedProfile,
+  DEFAULT_BROWSER_PROFILE_NAME,
+  DEFAULT_PROFILE_ALIAS,
   formatProfilesTable,
   padColumn,
 } from './profiles.js';
@@ -441,15 +445,17 @@ describe('ensureDefaultBrowserProfile', () => {
 
     const profile = await ensureDefaultBrowserProfile();
 
-    expect(profile.name).toBe('default');
+    // RUSH-2709: the auto-detected profile is `auto-chrome`; `default` is now
+    // only an alias resolved by resolveProfileRef.
+    expect(profile.name).toBe('auto-chrome');
     expect(profile.browser).toBe('chrome');
     expect(profile.binary).toBe('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
     expect(profile.endpoints).toEqual(['cdp://127.0.0.1:9222']);
     // The auto default is machine-specific — an absolute binary path plus a port
     // picked by probing THIS box — so it lands in the per-machine map and never
     // in the fleet-shared one.
-    expect(store.deviceBrowser!.default.browser).toBe('chrome');
-    expect(store.browser.default).toBeUndefined();
+    expect(store.deviceBrowser!['auto-chrome'].browser).toBe('chrome');
+    expect(store.browser['auto-chrome']).toBeUndefined();
   });
 
   it('reuses an existing default profile instead of overwriting it', async () => {
@@ -525,7 +531,7 @@ describe('ensureDefaultBrowserProfile', () => {
 
     const profile = await ensureDefaultBrowserProfile();
 
-    expect(profile.name).toBe('default');
+    expect(profile.name).toBe('auto-chrome');
     expect(profile.browser).toBe('chrome');
     expect(findFirstInstalledBrowser).toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("can't launch on this"));
@@ -601,7 +607,7 @@ describe('ensureDefaultBrowserProfile', () => {
 
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('ghost'));
     // Fell through to the installed-browser auto-detect (Chrome in this mock).
-    expect(profile.name).toBe('default');
+    expect(profile.name).toBe('auto-chrome');
     expect(profile.browser).toBe('chrome');
     warnSpy.mockRestore();
   });
@@ -936,5 +942,74 @@ describe('padColumn', () => {
     expect(padColumn('abcdefgh', 5)).toBe('abcd…');
     expect(padColumn('abcdefgh', 5)).toHaveLength(5);
     expect('abcdefgh'.padEnd(5)).toHaveLength(8); // the bug being fixed
+  });
+});
+
+/**
+ * RUSH-2709: `default` used to name BOTH the auto-detected profile and the
+ * "whatever the user configured" alias, and only `start` honored the alias — so
+ * `--profile default` meant a different profile in start / stop / status /
+ * navigate. `resolveProfileRef` is now the single resolver every command calls.
+ */
+describe('resolveProfileRef — the one `default` rule (RUSH-2709)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fs.rmSync(path.join(TEST_ROOT, '.agents', 'devices'), { recursive: true, force: true });
+  });
+
+  function withStore(profiles: Record<string, BrowserProfileConfig>): ProfileStore {
+    const store: ProfileStore = { browser: profiles };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+    return store;
+  }
+
+  const chrome: BrowserProfileConfig = { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9222'] };
+
+  it('resolves the `default` ALIAS to the configured profile', async () => {
+    withStore({ 'comet-local': chrome });
+    writeDeviceDefaultProfile('comet-local');
+
+    expect(await resolveProfileRef(DEFAULT_PROFILE_ALIAS)).toBe('comet-local');
+    // …and a bare invocation (no --profile) resolves identically. That identity
+    // is the whole fix: every command asks this one function.
+    expect(await resolveProfileRef(undefined)).toBe('comet-local');
+  });
+
+  it('back-compat: a `browser.profile` of `default` resolves to the auto-detected profile', async () => {
+    // An existing config written before the rename literally says `default`.
+    withStore({ [DEFAULT_BROWSER_PROFILE_NAME]: chrome });
+    writeDeviceDefaultProfile(DEFAULT_PROFILE_ALIAS);
+
+    expect(await resolveProfileRef(DEFAULT_PROFILE_ALIAS)).toBe(DEFAULT_BROWSER_PROFILE_NAME);
+    expect(await resolveProfileRef(undefined)).toBe(DEFAULT_BROWSER_PROFILE_NAME);
+  });
+
+  it('back-compat: a profile literally NAMED `default` resolves to itself', async () => {
+    // The pre-rename auto-detected profile, still on this machine. Resolving it
+    // to anything else would orphan its running browser and runtime dirs.
+    withStore({ default: { browser: 'brave', endpoints: ['cdp://127.0.0.1:9333'] } });
+
+    expect(await resolveProfileRef('default')).toBe('default');
+    expect(await resolveProfileRef(undefined)).toBe('default');
+    expect((await getAutoDetectedProfile())?.name).toBe('default');
+  });
+
+  it('a literal `default` profile outranks the configured default for `--profile default`', async () => {
+    // Precedence: a real profile named `default` wins the explicit reference, so
+    // a user who named one is never silently redirected somewhere else.
+    withStore({ default: chrome, 'comet-local': chrome });
+    writeDeviceDefaultProfile('comet-local');
+
+    expect(await resolveProfileRef('default')).toBe('default');
+    // No argument still means "the configured default".
+    expect(await resolveProfileRef(undefined)).toBe('comet-local');
+  });
+
+  it('passes an ordinary name straight through, including an unknown one', async () => {
+    withStore({ work: chrome });
+    expect(await resolveProfileRef('work')).toBe('work');
+    // Unknown names are returned unchanged so the caller reports its own
+    // `Profile "x" not found` with the name the user typed.
+    expect(await resolveProfileRef('nope')).toBe('nope');
   });
 });

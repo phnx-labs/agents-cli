@@ -13,7 +13,33 @@ import { DEFAULT_VIEWPORT } from './devices.js';
 
 export type { BrowserProfile } from './types.js';
 
-export const DEFAULT_BROWSER_PROFILE_NAME = 'default';
+/**
+ * Name of the profile `ensureDefaultBrowserProfile` auto-detects and pins.
+ *
+ * It is `auto-chrome`, NOT `default`, since RUSH-2709: `default` used to be
+ * both this concrete profile AND the alias meaning "whatever profile the user
+ * configured", so `--profile default` landed on a literal auto-detected Chrome
+ * on one command and on the user's configured Comet on another. The alias now
+ * lives alone in {@link DEFAULT_PROFILE_ALIAS} and resolves in exactly one
+ * place ({@link resolveProfileRef}).
+ */
+export const DEFAULT_BROWSER_PROFILE_NAME = 'auto-chrome';
+
+/**
+ * What older builds named the auto-detected profile. Still honored everywhere:
+ * a user whose machine already carries a `default` profile keeps using it (and
+ * its running browser + runtime dirs) rather than having a second one created
+ * beside it.
+ */
+export const LEGACY_DEFAULT_BROWSER_PROFILE_NAME = 'default';
+
+/**
+ * The reserved ALIAS. `--profile default` (and a `browser.profile` config value
+ * of `default`) means "the configured default profile", not a profile called
+ * `default` — unless a profile literally named `default` exists, which still
+ * wins, so no existing config breaks.
+ */
+export const DEFAULT_PROFILE_ALIAS = 'default';
 
 /**
  * True for a profile whose contents only make sense on THIS machine, so it must
@@ -32,7 +58,7 @@ export const DEFAULT_BROWSER_PROFILE_NAME = 'default';
  * into central from being written back there by {@link updateProfile}.
  */
 function isMachineLocalProfile(name: string): boolean {
-  return name === DEFAULT_BROWSER_PROFILE_NAME;
+  return name === DEFAULT_BROWSER_PROFILE_NAME || name === LEGACY_DEFAULT_BROWSER_PROFILE_NAME;
 }
 
 /**
@@ -204,9 +230,62 @@ export function isProfileLaunchableHere(profile: BrowserProfile): boolean {
  * that no longer exists, or can't launch here, warns and falls through — never a
  * hard fail.
  */
+/**
+ * Resolve what a caller typed after `--profile` (or nothing at all) to a real,
+ * BARE profile name. Every command — start, stop, status, navigate, tab, use —
+ * routes through this one function, which is the whole point: before RUSH-2709
+ * only `start` honored the reserved `default` alias, so `--profile default`
+ * meant three different profiles across three commands.
+ *
+ * Order:
+ *   1. A profile that literally bears the given name always wins — including
+ *      one a user genuinely named `default`, which resolves to itself.
+ *   2. `default` (the alias) or no argument at all → the configured
+ *      `browser.profile` for this machine, if it names a profile that exists.
+ *   3. → the auto-detected profile ({@link DEFAULT_BROWSER_PROFILE_NAME}), or
+ *      its legacy `default`-named predecessor when that is what is on disk.
+ *   4. Otherwise the input is returned unchanged (so the caller reports its own
+ *      `Profile "x" not found`), or `undefined` when nothing was passed.
+ *
+ * It never creates a profile — `start` calls {@link ensureDefaultBrowserProfile}
+ * for that.
+ */
+/**
+ * The auto-detected profile this machine already carries, under either name —
+ * the current `auto-chrome` or the `default` an older build wrote. Callers that
+ * ask "is a default profile set up here?" MUST use this rather than probing one
+ * name, or a machine that predates the RUSH-2709 rename grows a second one.
+ */
+export async function getAutoDetectedProfile(): Promise<BrowserProfile | null> {
+  return (
+    (await getProfile(DEFAULT_BROWSER_PROFILE_NAME)) ??
+    (await getProfile(LEGACY_DEFAULT_BROWSER_PROFILE_NAME))
+  );
+}
+
+export async function resolveProfileRef(ref?: string): Promise<string | undefined> {
+  if (ref && ref !== DEFAULT_PROFILE_ALIAS) {
+    return ref;
+  }
+  if (ref === DEFAULT_PROFILE_ALIAS && (await getProfile(ref))) {
+    // A profile the user literally named `default` outranks the alias.
+    return ref;
+  }
+
+  const configured = getConfiguredDefaultProfileName();
+  if (configured && configured !== DEFAULT_PROFILE_ALIAS && (await getProfile(configured))) {
+    return configured;
+  }
+  if (await getProfile(DEFAULT_BROWSER_PROFILE_NAME)) return DEFAULT_BROWSER_PROFILE_NAME;
+  if (await getProfile(LEGACY_DEFAULT_BROWSER_PROFILE_NAME)) {
+    return LEGACY_DEFAULT_BROWSER_PROFILE_NAME;
+  }
+  return ref;
+}
+
 export async function ensureDefaultBrowserProfile(): Promise<BrowserProfile> {
   const configured = getConfiguredDefaultProfileName();
-  if (configured) {
+  if (configured && configured !== DEFAULT_PROFILE_ALIAS) {
     const chosen = await getProfile(configured);
     if (chosen && isProfileLaunchableHere(chosen)) return chosen;
     console.warn(
@@ -219,7 +298,13 @@ export async function ensureDefaultBrowserProfile(): Promise<BrowserProfile> {
     );
   }
 
-  const existing = await getProfile(DEFAULT_BROWSER_PROFILE_NAME);
+  // Prefer whichever auto-detected profile this machine already carries: the
+  // current `auto-chrome`, else the `default` an older build wrote. Reusing the
+  // legacy one is what keeps a currently-running browser (and its runtime dirs,
+  // keyed `default@endpoint-0`) attached after the rename.
+  const existing =
+    (await getProfile(DEFAULT_BROWSER_PROFILE_NAME)) ??
+    (await getProfile(LEGACY_DEFAULT_BROWSER_PROFILE_NAME));
   if (existing && isProfileLaunchableHere(existing)) return existing;
 
   const detected = findFirstInstalledBrowser();
@@ -235,7 +320,10 @@ export async function ensureDefaultBrowserProfile(): Promise<BrowserProfile> {
 
   const freePort = await findFreeProfilePort();
   const profile: BrowserProfile = {
-    name: DEFAULT_BROWSER_PROFILE_NAME,
+    // Regenerate under the name that is already on disk when there is one, so a
+    // stale legacy `default` is repaired in place instead of leaving the user
+    // with two auto-detected profiles.
+    name: existing?.name ?? DEFAULT_BROWSER_PROFILE_NAME,
     description: `Auto-detected ${detected.browserType} profile`,
     browser: detected.browserType,
     binary: detected.binary,

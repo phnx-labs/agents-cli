@@ -9,7 +9,7 @@ import {
   deleteProfile,
   ensureDefaultBrowserProfile,
   getConfiguredDefaultProfileName,
-  DEFAULT_BROWSER_PROFILE_NAME,
+  resolveProfileRef,
   getProfileRuntimeDir,
   extractConfiguredPort,
   findFreeProfilePort,
@@ -670,12 +670,12 @@ function registerProfilesCommands(browser: Command): void {
       other machine — pass --fleet only when the profile really is fleet config.
 
       In \`list\`, the \`*\` marker means "this machine's configured default"
-      (\`agents browser start\` with no --profile). It is NOT the same thing as the
-      profile NAMED \`default\`, which is the auto-detected one; they are often
-      different profiles.
+      (\`agents browser start\` with no --profile). The auto-detected profile is
+      named \`auto-chrome\`; \`default\` is only an ALIAS for whichever profile
+      this machine is configured to use, resolved the same way by every command.
 
       \`prune\` never removes a profile that is in use, the configured default, the
-      auto \`default\`, or (without --fleet) a fleet-synced one.
+      auto-detected \`auto-chrome\`, or (without --fleet) a fleet-synced one.
     `,
   });
 
@@ -946,7 +946,10 @@ function registerTaskCommands(browser: Command): void {
         process.exit(1);
       }
 
-      let profileName: string = opts.profile;
+      // One resolver for every command (RUSH-2709): `--profile default` and a
+      // bare `start` mean the same profile here as they do in stop / status /
+      // navigate. Only `start` may CREATE one, hence the ensure* fallback.
+      let profileName = (await resolveProfileRef(opts.profile)) ?? '';
       if (!profileName) {
         try {
           const detected = await ensureDefaultBrowserProfile();
@@ -954,23 +957,6 @@ function registerTaskCommands(browser: Command): void {
         } catch (err) {
           console.error(err instanceof Error ? err.message : String(err));
           process.exit(1);
-        }
-      } else if (profileName === DEFAULT_BROWSER_PROFILE_NAME) {
-        // Explicit `--profile default` honors the configured default too, so an
-        // agent that hardcodes the reserved `default` name still lands on the
-        // user's chosen profile (e.g. their logged-in Comet) rather than a
-        // literal `default` (which auto-detects Chrome). Narrowly scoped: only
-        // the reserved name, only here in `start`.
-        const configured = getConfiguredDefaultProfileName();
-        if (configured && configured !== DEFAULT_BROWSER_PROFILE_NAME) {
-          const target = await getProfile(configured);
-          if (target) {
-            profileName = target.name;
-          } else {
-            console.error(
-              `warning: configured default profile "${configured}" not found; using "${DEFAULT_BROWSER_PROFILE_NAME}".`
-            );
-          }
         }
       }
 
@@ -1116,15 +1102,16 @@ function registerTaskCommands(browser: Command): void {
     .option('-p, --profile <name>', 'Detach the whole profile (incl. composite "name@endpoint") instead of stopping a single task')
     .action(async (opts) => {
       if (opts.profile) {
+        const profile = (await resolveProfileRef(opts.profile)) ?? opts.profile;
         const response = await sendIPCRequest({
           action: 'stop',
-          profile: opts.profile,
+          profile,
         });
         if (!response.ok) {
           console.error(response.error);
           process.exit(1);
         }
-        console.log(`Stopped profile: ${opts.profile}`);
+        console.log(`Stopped profile: ${profile}`);
         return;
       }
 
@@ -1212,7 +1199,7 @@ function registerTaskCommands(browser: Command): void {
         action: 'navigate',
         task,
         url,
-        profile: opts.profile,
+        profile: await resolveProfileRef(opts.profile),
       });
 
       if (!response.ok) {
@@ -1241,7 +1228,7 @@ function registerTaskCommands(browser: Command): void {
         action: 'tab-add',
         task,
         url: opts.url,
-        profile: opts.profile,
+        profile: await resolveProfileRef(opts.profile),
       });
 
       if (!response.ok) {
@@ -1536,7 +1523,7 @@ function registerTaskCommands(browser: Command): void {
       try {
         response = await sendIPCRequest({
           action: 'status',
-          profile: opts.profile,
+          profile: await resolveProfileRef(opts.profile),
         }, { autoStartDaemon: false });
       } catch (err) {
         if (err instanceof BrowserDaemonNotRunningError) {
@@ -1628,7 +1615,11 @@ function registerTaskCommands(browser: Command): void {
           // pid 0 means the daemon attached to a browser we didn't launch — no
           // tracked pid. Render it as "attached" rather than the literal 0.
           const pidLabel = profile.pid ? `pid ${profile.pid}` : 'attached';
-          console.log(`\n${profile.name} (${portLabel}, ${pidLabel})`);
+          // `profile.name` is the BARE profile; the endpoint is its own field,
+          // so the row reads `comet-local (endpoint: endpoint-0, port …)`
+          // instead of the raw `comet-local@endpoint-0` key (RUSH-2709).
+          const endpointLabel = profile.endpoint ? `endpoint: ${profile.endpoint}, ` : '';
+          console.log(`\n${profile.name} (${endpointLabel}${portLabel}, ${pidLabel})`);
           if (profile.tasks.length === 0) {
             console.log('  No active tasks');
           } else {
@@ -1667,7 +1658,7 @@ function registerTaskCommands(browser: Command): void {
     .action(async (opts) => {
       const response = await sendIPCRequest({
         action: 'status',
-        profile: opts.profile,
+        profile: await resolveProfileRef(opts.profile),
       });
 
       if (!response.ok) {

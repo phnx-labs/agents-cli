@@ -14,6 +14,7 @@ import { setConfigValue } from '../lib/device-config.js';
 import { findFirstInstalledBrowser, listInstalledBrowsers } from '../lib/browser/chrome.js';
 import {
   DEFAULT_BROWSER_PROFILE_NAME,
+  getAutoDetectedProfile,
   createProfile,
   findFreeProfilePort,
   getConfiguredDefaultProfileName,
@@ -41,9 +42,9 @@ export async function runBrowserWizard(): Promise<boolean> {
       console.error(chalk.red('No supported browser found.\n') + chalk.dim(INSTALL_HINT));
       return false;
     }
-    const existing = await getProfile(DEFAULT_BROWSER_PROFILE_NAME);
+    const existing = await getAutoDetectedProfile();
     if (existing) {
-      console.log(chalk.dim(`Browser profile "${DEFAULT_BROWSER_PROFILE_NAME}" already exists.`));
+      console.log(chalk.dim(`Browser profile "${existing.name}" already exists.`));
       return true;
     }
     const created = await createAutoDefault();
@@ -61,7 +62,7 @@ export async function runBrowserWizard(): Promise<boolean> {
   const { confirm, select } = await import('@inquirer/prompts');
 
   // If a default profile already exists, this is a reconfigure.
-  const existing = await getProfile(DEFAULT_BROWSER_PROFILE_NAME);
+  const existing = await getAutoDetectedProfile();
   if (existing) {
     console.log(
       chalk.dim(

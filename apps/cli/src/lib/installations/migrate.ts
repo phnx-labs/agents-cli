@@ -25,7 +25,7 @@ import { evaluateActivationReadiness } from '../routine-readiness.js';
 import { migrateDeviceConfigStores } from '../devices/config-migration.js';
 // Two constants only, never the read/write API — migrations still operate on raw
 // YAML so they never take the meta lock or prime the meta cache mid-migration.
-import { DEFAULT_BROWSER_PROFILE_NAME } from '../browser/profiles.js';
+import { LEGACY_DEFAULT_BROWSER_PROFILE_NAME } from '../browser/profiles.js';
 import { META_HEADER as DEVICE_META_HEADER } from '../state.js';
 import { COMPILED_HEADER_PROJECT } from '../rules/compile.js';
 
@@ -1633,7 +1633,7 @@ export function migrateMachineLocalBrowserProfileOutOfCentral(
   const central = (doc.toJSON() as Record<string, unknown> | null) ?? {};
   const browser = central.browser;
   if (!browser || typeof browser !== 'object' || Array.isArray(browser)) return;
-  const entry = (browser as Record<string, unknown>)[DEFAULT_BROWSER_PROFILE_NAME];
+  const entry = (browser as Record<string, unknown>)[LEGACY_DEFAULT_BROWSER_PROFILE_NAME];
   if (entry === undefined) return;
 
   // Device file first — a crash before central is rewritten leaves a harmless
@@ -1646,8 +1646,8 @@ export function migrateMachineLocalBrowserProfileOutOfCentral(
   const deviceBrowser = (deviceDoc.browser && typeof deviceDoc.browser === 'object' && !Array.isArray(deviceDoc.browser))
     ? deviceDoc.browser as Record<string, unknown>
     : {};
-  if (deviceBrowser[DEFAULT_BROWSER_PROFILE_NAME] === undefined) {
-    deviceBrowser[DEFAULT_BROWSER_PROFILE_NAME] = entry;
+  if (deviceBrowser[LEGACY_DEFAULT_BROWSER_PROFILE_NAME] === undefined) {
+    deviceBrowser[LEGACY_DEFAULT_BROWSER_PROFILE_NAME] = entry;
     deviceDoc.browser = deviceBrowser;
     fs.mkdirSync(path.dirname(devicePath), { recursive: true });
     atomicWriteFileSync(devicePath, DEVICE_META_HEADER + yaml.stringify(deviceDoc));
@@ -1655,7 +1655,7 @@ export function migrateMachineLocalBrowserProfileOutOfCentral(
 
   // Then strip it from the synced file, dropping `browser:` entirely when the
   // machine-local entry was its only member.
-  doc.deleteIn(['browser', DEFAULT_BROWSER_PROFILE_NAME]);
+  doc.deleteIn(['browser', LEGACY_DEFAULT_BROWSER_PROFILE_NAME]);
   if (Object.keys(browser as Record<string, unknown>).length === 1) {
     // A comment block sitting directly above `browser:` with no blank line is
     // attached to that pair's KEY node, so deleting the key takes those lines
@@ -1681,7 +1681,7 @@ export function migrateMachineLocalBrowserProfileOutOfCentral(
   // the identical case (state.ts, `isEmpty ? META_HEADER : stringifyDoc(doc)`).
   const remaining = Object.keys((doc.toJSON() as Record<string, unknown> | null) ?? {}).length;
   atomicWriteFileSync(metaFile, remaining === 0 ? DEVICE_META_HEADER : stringifyDoc(doc));
-  console.error(`Migrated agents.yaml: browser '${DEFAULT_BROWSER_PROFILE_NAME}' profile -> devices/${machine}/agents.yaml`);
+  console.error(`Migrated agents.yaml: browser '${LEGACY_DEFAULT_BROWSER_PROFILE_NAME}' profile -> devices/${machine}/agents.yaml`);
 }
 
 /**

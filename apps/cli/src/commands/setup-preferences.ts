@@ -17,6 +17,7 @@ import chalk from 'chalk';
 import { listInstalledBrowsers } from '../lib/browser/chrome.js';
 import {
   DEFAULT_BROWSER_PROFILE_NAME,
+  getAutoDetectedProfile,
   createProfile,
   findFreeProfilePort,
   getConfiguredDefaultProfileName,
@@ -96,7 +97,7 @@ export async function maybePickInteractiveHost(): Promise<boolean> {
 export async function maybePickBrowserProfile(): Promise<boolean> {
   if (!isInteractiveTerminal()) return false;
   if (getConfiguredDefaultProfileName()) return false;
-  if (await getProfile(DEFAULT_BROWSER_PROFILE_NAME)) return false;
+  if (await getAutoDetectedProfile()) return false;
   const installed = listInstalledBrowsers();
   if (installed.length === 0) return false;
 
