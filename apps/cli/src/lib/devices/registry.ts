@@ -16,9 +16,9 @@
 import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
-import { randomBytes } from 'crypto';
 import lockfile from 'proper-lockfile';
 import { getDevicesRegistryPath, getDevicesIgnoredPath } from '../state.js';
+import { atomicWriteJson } from '../atomic-write.js';
 
 /** Operating-system family of a device, used to pick the remote shell. */
 export type DevicePlatform = 'windows' | 'linux' | 'macos' | 'unknown';
@@ -202,24 +202,6 @@ export function platformFromOs(os: string | undefined): DevicePlatform {
 /** The remote shell a platform speaks. */
 export function shellForPlatform(platform: DevicePlatform): DeviceShell {
   return platform === 'windows' ? 'powershell' : 'posix';
-}
-
-/**
- * Atomic JSON write: write to a unique sibling tmp file then rename over the
- * target. rename(2) is atomic on POSIX, so a crashed write leaves the old file
- * untouched instead of producing a half-written registry that loadDevices()
- * would reject.
- */
-async function atomicWriteJson(p: string, data: unknown): Promise<void> {
-  await fs.mkdir(path.dirname(p), { recursive: true });
-  const tmp = `${p}.tmp.${process.pid}.${randomBytes(4).toString('hex')}`;
-  await fs.writeFile(tmp, JSON.stringify(data, null, 2));
-  try {
-    await fs.rename(tmp, p);
-  } catch (err) {
-    await fs.unlink(tmp).catch(() => {});
-    throw err;
-  }
 }
 
 /**
