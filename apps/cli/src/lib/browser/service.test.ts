@@ -903,11 +903,11 @@ describe('BrowserService.navigate — Arc reuses a tab rather than refusing (#27
   });
 
   it('two concurrent navigates never both claim the same free target', async () => {
-    // The claim must be taken in the SAME synchronous tick as the check. When the
-    // check was followed by `await Page.navigate` and only then the write, a
-    // second navigate slipped into that window and both tasks ended up driving
-    // one live tab (reviewer-reproduced). Gate the first Page.navigate open so
-    // the interleaving is deterministic rather than timing-dependent.
+    // Stall an await that runs BEFORE the claim check (Target.attachToTarget,
+    // inside getSessionId) -- not Page.navigate, which now runs after it. Only
+    // this ordering actually exercises targetIsClaimed: with the claim written
+    // before Page.navigate, a test that stalls Page.navigate passes even when
+    // targetIsClaimed is neutered, so it proves nothing (reviewer-demonstrated).
     writeProfile('arcrace', ['cdp://localhost:9222']);
     const service = new BrowserService();
     const { conn } = arcConnWithEmptyTask('arcrace', [
@@ -917,26 +917,54 @@ describe('BrowserService.navigate — Arc reuses a tab rather than refusing (#27
     tasks.set('taskB', { ...tasks.get('arctask'), id: 'taskB', name: 'taskB', tabs: {} });
     attach(service, 'arcrace', conn);
 
-    let releaseFirst: () => void = () => {};
-    const firstNavigateStalled = new Promise<void>((r) => { releaseFirst = r; });
-    let navigateCalls = 0;
+    let releaseAttach: () => void = () => {};
+    const attachStalled = new Promise<void>((r) => { releaseAttach = r; });
+    let attachCalls = 0;
     const inner = conn.cdp.send;
     conn.cdp.send = (async (method: string, params: any = {}, sess?: string) => {
-      if (method === 'Page.navigate' && ++navigateCalls === 1) await firstNavigateStalled;
+      if (method === 'Target.attachToTarget' && ++attachCalls === 1) await attachStalled;
       return inner(method, params, sess);
     }) as typeof conn.cdp.send;
 
-    const a = service.navigate('arctask', 'file:///tmp/doc.html', 'arcrace');
-    await new Promise((r) => setTimeout(r, 5)); // let A reach its stalled navigate
-    const b = service.navigate('taskB', 'file:///tmp/doc.html', 'arcrace').catch((e) => e);
-    const bResult = await b;
-    releaseFirst();
-    await a;
+    // A stalls before its claim check; B then runs start-to-finish and claims.
+    const a = service.navigate('arctask', 'file:///tmp/doc.html', 'arcrace').catch((e) => e);
+    await new Promise((r) => setTimeout(r, 5));
+    await service.navigate('taskB', 'file:///tmp/doc.html', 'arcrace');
+    releaseAttach();
+    const aResult = await a;
 
-    // B must have been refused, not handed the tab A already claimed.
-    expect(bResult).toBeInstanceOf(Error);
-    expect(Object.values(tasks.get('taskB').tabs)).not.toContain('free-tab');
-    expect(Object.values(tasks.get('arctask').tabs)).toContain('free-tab');
+    // A must lose the race and be refused, not share B's tab.
+    expect(aResult).toBeInstanceOf(Error);
+    expect(Object.values(tasks.get('arctask').tabs)).not.toContain('free-tab');
+    expect(Object.values(tasks.get('taskB').tabs)).toContain('free-tab');
+  });
+
+  it('a borrowed tab is never reclaimed into another task by adoptTabShowing', async () => {
+    // Round-3 defect: a borrowed tab whose owning task died was reclaimed by a
+    // NEW task with no borrow marking, so that task's done() closed a tab that
+    // existed before either task. hygiene.ts notes agents routinely never call
+    // done(), so abandoned tasks are the normal case, not the edge one.
+    writeProfile('arcreclaim', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, targets } = arcConnWithEmptyTask('arcreclaim', [
+      { targetId: 'pre-existing-tab', url: 'file:///tmp/doc.html' },
+    ]);
+    const tasks = (conn as unknown as { tasks: Map<string, any> }).tasks;
+    attach(service, 'arcreclaim', conn);
+
+    // A task borrows the pre-existing tab, then its owner goes away.
+    await service.navigate('arctask', 'file:///tmp/doc.html', 'arcreclaim');
+    const dead = tasks.get('arctask');
+    expect(dead.borrowedTabs).toHaveLength(1);
+    dead.sessionId = '33333333-3333-4333-8333-333333333333'; // a uuid no live process carries
+
+    // A later start() on the same url must NOT be handed that borrowed tab.
+    const live = await service.start('arcreclaim', { url: 'file:///tmp/doc.html' }).catch((e: Error) => e);
+
+    // Arc cannot create a tab, so with reclaim correctly refused this refuses too --
+    // the point is that the pre-existing tab was not silently transferred.
+    expect(live).toBeInstanceOf(Error);
+    expect(targets.map((t) => t.targetId)).toContain('pre-existing-tab');
   });
 
   it('tabClose drops the borrow record with the tab it names', async () => {

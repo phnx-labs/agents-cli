@@ -765,7 +765,14 @@ export class BrowserService {
 
     const candidates: Array<{ task: Task; shortId: string; targetId: string }> = [];
     for (const task of conn.tasks.values()) {
+      const borrowed = new Set(task.borrowedTabs ?? []);
       for (const [shortId, cdpId] of Object.entries(task.tabs)) {
+        // A BORROWED tab is not ours to hand on. The dead task never opened it
+        // (Task.borrowedTabs) -- reclaiming it would register a pre-existing tab
+        // as a fresh task's own, and that task's `done` would close it. Exactly
+        // the "adopting it would make this task's `done` close the user's tab"
+        // case above, arriving one hop later via reclaim instead of directly.
+        if (borrowed.has(shortId)) continue;
         if (matching.has(cdpId)) candidates.push({ task, shortId, targetId: cdpId });
       }
     }
@@ -993,10 +1000,6 @@ export class BrowserService {
       if (reusable) {
         const shortId = generateShortId();
         const sessionId = await this.getSessionId(conn, reusable);
-        // Re-check the claim after that await. Nothing serializes IPC — the same
-        // race `adoptTabShowing` documents — so a concurrent navigate can have
-        // claimed this target while we were attaching. Losing the race means
-        // falling through to the refusal, never two tasks on one tab.
         // Check and CLAIM in one synchronous tick, with no await between them --
         // the ordering `adoptTabShowing` uses (service.ts: the `task.tabs[shortId]
         // !== targetId` re-check sits immediately before its `delete`). Checking
