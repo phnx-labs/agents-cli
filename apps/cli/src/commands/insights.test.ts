@@ -343,6 +343,20 @@ describe('agents insights — plan-tier gate (RUSH-2424)', () => {
     expect(out).toContain(PAID_PLAN_NOTICE);
   });
 
+  it('free plan: a >1hr response gap does not leak the friction count or "silent stall" wording (regression, PR #2822 review round 3)', async () => {
+    await clearTierFixture();
+    const gapAcct = { org: 'org-gap', email: 'dev@gap.example', name: 'Gap Co' };
+    const gapHome = writeHome('9.0.3', gapAcct);
+    // Last assistant event at ~1s in; final user message 70 minutes later —
+    // well past the 3600s gapsOverCeiling threshold (src/lib/session/insights.ts).
+    writeTranscript(gapHome, 'gggggggg-0000-0000-0000-000000000001', '9.0.3',
+      { startIso: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), minutes: 70 });
+    const out = await runInsights(['--since', 'all']);
+    expect(out).not.toContain('gaps over an hour');
+    expect(out).not.toContain('silent stall');
+    expect(out).toContain(PAID_PLAN_NOTICE);
+  });
+
   it('free plan: the text report omits the friction section and the account table, replaced by the one-line notice', async () => {
     await clearTierFixture();
     const out = await runInsights(['--since', 'all']);

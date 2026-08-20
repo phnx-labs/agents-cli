@@ -475,7 +475,9 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
     if (meta.filteredOut === 0) out.push('');
     out.push(chalk.yellow(`  ${meta.unreadable} transcripts could not be read; their behaviour is missing from these totals.`));
   }
-  if (all.gapsOverCeiling > 0) {
+  // Friction-derived (gapsOverCeiling is a PAID_FACET_KEYS entry) and names
+  // "silent stall" outright — must not render on the free plan.
+  if (!gate.frictionGated && all.gapsOverCeiling > 0) {
     out.push(chalk.gray(
       `  ${all.gapsOverCeiling} gaps over an hour excluded from p50/p90 (still counted as silent stall: 1h+ when the assistant last spoke).`,
     ));
