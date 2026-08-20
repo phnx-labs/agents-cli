@@ -2,7 +2,7 @@
 kind: report
 template: report.v1
 title: 'How repos get stars in 2026, and why agi-cli has 15'
-summary: 'Case studies from AFFiNE, OpenCode, and a 188k-post Show HN dataset, applied to this repo. The blocker is not tactics: no launch has ever happened, the name changed twice, and the hero demo renders as a plain blue link.'
+summary: 'Case studies from AFFiNE, OpenCode, and a 188k-post Show HN dataset, applied to this repo. The blocker is not tactics: no launch has ever happened, the demos do not show what the tool is actually used for, and the hero demo rendered as a plain blue link.'
 status: draft
 links:
   - label: 'phnx-labs/agi-cli'
@@ -22,10 +22,12 @@ Three things are true at once, and only the third is a tactics problem:
 
 1. **The project has never launched.** No Show HN, no Product Hunt, no Reddit
    post, no awesome-list submission. Every star so far arrived by accident.
-2. **The name changed twice and the star equity split across five identities.**
-   `agents-cli` to `agi-cli`, two domains, an archive repo, a personal mirror
-   holding 3 more stars, and an npm package still called `@phnx-labs/agents-cli`.
-   Nobody can repeat a name that keeps moving.
+2. **The name is fragmented, though the rebrand itself was forced.**
+   `google/agents-cli` (5,693 stars) took the original name, so the move to
+   `agi-cli` was defensive and is settled. What is left is residual drift: an
+   npm package still called `@phnx-labs/agents-cli` (1,857/wk) against
+   `@phnx-labs/agi-cli` (7/wk), and two domains. The personal mirror was made
+   private on 2026-08-20.
 3. **The README's hero demo is invisible.** Line 42 is a bare
    `https://agi-cli.sh/demo.mp4`. GitHub renders it as a blue link. The rendered
    README contains **zero `<video>` elements**.
@@ -146,7 +148,7 @@ Every number below was pulled live from the GitHub and npm APIs on 2026-08-20.
 | --- | --- | --- |
 | Stars, `phnx-labs/agi-cli` | **15** | ~0.18/day since the first star |
 | First star to today | 2026-05-30 to 2026-08-20 (82 days) | 194 days since repo creation |
-| Stars, `muqsitnawaz/agents-cli` | **3** | Split equity, separate identity |
+| Stars, `muqsitnawaz/agents-cli` | **3** | Split equity; resolved 2026-08-20 by making it private |
 | Traffic on the mirror | **3 views / 3 uniques in 14 days** | No discovery surface at all |
 | Topics on `agi-cli` | 10, which is fine | `.agents-system`, `.agents-extras`, `homebrew-tap` have **0** |
 | Open issues | **18** | No `good first issue` label present |
@@ -211,7 +213,7 @@ visitors will read as a broken embed.
 | Identity | Where it points | Weight |
 | --- | --- | --- |
 | `phnx-labs/agi-cli` | canonical repo today | 15 stars |
-| `muqsitnawaz/agents-cli` | personal mirror, `agents-cli.sh` | 3 stars |
+| `muqsitnawaz/agents-cli` | personal mirror — **made private + archived 2026-08-20** | 3 stars, now 404 publicly |
 | `phnx-labs/agi-cli-jul2026-archive` | private, "rebrand of agents-cli" | dormant |
 | npm `@phnx-labs/agents-cli` | the package people install | 1,857/wk |
 | npm `@phnx-labs/agi-cli` | the name the README advertises | 7/wk |
@@ -233,21 +235,43 @@ Nobody repeats a twelve-item list.
 
 ## Recommendations
 
-### The one decision that is yours
+### The name is already settled, and the rebrand was correct
 
-**Pick one name and freeze it.** Everything below is blocked on this, because a
-launch on a name that moves again is a launch spent twice.
+An earlier draft of this report recommended renaming back to `agents-cli`. That
+was wrong, and the reason matters for the launch plan.
 
-| Option | Argument for | Cost |
+**`google/agents-cli` exists and has 5,693 stars.** Created 2026-04-08, described
+as "The CLI and skills that turn any coding assistant into an expert at creating,
+evaluating, and deploying AI agents on Google Cloud," with docs at
+`google.github.io/agents-cli`. This repo was created first (2026-02-08), but
+Google now holds roughly 380x the stars on that exact name.
+
+| Name | Owner | Stars | Created |
+| --- | --- | --- | --- |
+| `google/agents-cli` | Google | **5,693** | 2026-04-08 |
+| `phnx-labs/agi-cli` | this project | 15 | 2026-02-08 |
+
+So the rebrand to `agi-cli` was defensive and necessary, not brand churn. Renaming
+back would mean competing head-on for a query Google already owns, on a page with
+380x the authority, and losing it permanently. **Keep `agi-cli`. The name is
+decided; do not revisit it.**
+
+What remains is not a naming decision but a **cleanup of residual fragmentation**,
+and none of it requires renaming anything:
+
+| Loose end | State | Action |
 | --- | --- | --- |
-| **`agents-cli`** | The npm package (1,857/wk), the binary, and one domain already say it. Descriptive and searchable: people search "agents cli", not "agi cli". | Rename the repo back; discard the `agi-cli` brand work. |
-| **`agi-cli`** | Shorter, already the repo name and the advertised site. | Abandons the install base's name. "AGI" reads as a hype word to the HN audience and is unsearchable for the actual job. |
-| A third name | Fresh, ownable | A third rename. Do not. |
+| `muqsitnawaz/agents-cli` mirror | **resolved 2026-08-20** — set private + archived, now 404 to the public | done |
+| npm `@phnx-labs/agents-cli` (1,857/wk) vs `@phnx-labs/agi-cli` (7/wk) | install base is on the old name | keep publishing the canonical package; make the README name the package it actually installs, so the two stop disagreeing |
+| `agents-cli.sh` and `agi-cli.sh` | `agents-cli.sh` already 301s to `agi-cli.sh` | correct as-is; keep the redirect permanently so old links survive |
+| Binary `agents` vs repo `agi-cli` | intentional | leave it. `gh`/`rg`/`fd` all differ from their repo names; this is normal and costs nothing |
 
-The recommendation is **`agents-cli`**: the searchable descriptive name matches
-what the tool does, matches what 1,857 weekly installs already type, and the
-audience for this tool is exactly the audience that reacts badly to "AGI" in a
-product name.
+The one thing to avoid is a **third** rename. Two names in the wild is a cost
+already paid; a third would reset word of mouth again with no upside.
+
+Since "AGI" does read as a hype word to the HN audience, the fix is not the repo
+name but the **tagline** carrying the weight: lead with the concrete job, not the
+acronym. That is the Phase 1 rewrite below.
 
 ### Phase 1, before any launch: fix the page
 
@@ -257,12 +281,46 @@ product name.
 2. **Rewrite the first sentence** into one repeatable claim. Draft: *"Run Claude,
    Codex, and Gemini in parallel across your own machines, on the subscriptions
    you already pay for."* One grievance, one answer.
-3. **Add 5-7 functional GIFs** below the fold: `agents teams` running, the fleet
-   view, `agents run` across three harnesses, secrets behind Touch ID.
+3. **Add one demo per feature, ranked by what actually gets used.** A single
+   hero reel cannot carry twelve capabilities, and the current one tries. Below
+   the fold each major surface gets its own short GIF, in this order.
+
+   The order is not a guess. It is invocation counts pulled from 3,703 local
+   session transcripts on 2026-08-20 (`grep -rhoE '\bagents [a-z-]+'` across
+   `~/.agents/.history/versions`), so the demos lead with what the tool is
+   genuinely used for:
+
+   | Rank | Surface | Invocations | What the demo must show |
+   | --- | --- | --- | --- |
+   | 1 | `sessions` | **82,704** | `--active` (20,586) across the fleet, then `resume` (4,869) picking a session back up on a different machine, and `inject` (1,626) steering a running agent mid-flight |
+   | 2 | `run` | **63,236** | one prompt, three harnesses, on existing subscriptions |
+   | 3 | `secrets` | **43,927** | `exec` (8,303) injecting a credential into a headless run with no Touch ID sheet — the thing that makes unattended work possible |
+   | 4 | `teams` | **43,413** | `create` + `add` + `status`, with `--device` (1,564) putting teammates on different boxes in isolated worktrees |
+   | 5 | `ssh` / `devices` | **33,123** / **30,657** | the fleet as one address space |
+   | 6 | `browser` | **22,930** | see below — this one needs three beats, not one |
+   | 7 | `computer` | **19,207** | `describe` (1,677) element mode driving a native app without stealing the cursor |
+
+   **The browser demo specifically needs three beats**, because the interesting
+   claim is not "an agent can browse." It is that the browser is a shared,
+   addressable resource:
+
+   - **Local** — `start` (4,764) on your own configured profile (`profiles`,
+     2,518 invocations), logged into your real sessions.
+   - **Remote** — `start --device <box>` driving a browser on another machine,
+     with `remote-control` (210) when you need to watch or take over.
+   - **Shared** — several agents on **one** browser: `--attach` (1,391),
+     `sessions` (457), and `use` (276) hand the same live browser between agents
+     instead of each spawning its own and re-authenticating.
+
+   That third beat is the differentiated one and no competitor demo shows it.
+   Before cutting these, mine the transcripts for the real flows rather than
+   inventing them — the counts above came from the same source and the actual
+   commands are there verbatim.
 4. **Label 5-8 of the 18 open issues `good first issue`** and answer the rest.
    Unanswered issues read as abandonment to a first-time visitor.
 5. **Add topics** to `.agents-system`, `.agents-extras`, and `homebrew-tap`, all
-   at zero, and consolidate or archive the personal mirror.
+   at zero. (The personal mirror is already handled: private + archived as of
+   2026-08-20.)
 
 ### Phase 2, permanent placement: start immediately, it has lead time
 
