@@ -42,6 +42,7 @@ n = 1,581.
 | --- | --- | --- | --- |
 | **Open source AND a number** | 6 | **158.8** | **16.7%** |
 | Says open-source / self-hosted | 117 | 23.7 | 6.8% |
+| Does **not** say open-source | 1,464 | 8.4 | 2.7% |
 | Contains a number | 233 | 17.3 | 3.9% |
 | Baseline (no number) | 1,348 | 8.2 | 2.9% |
 | Neither feature | 1,237 | 7.5 | 2.6% |
