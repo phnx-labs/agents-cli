@@ -491,8 +491,7 @@ src/
     capabilities.ts    # supports() — the per-agent write gate
     agents.ts          # Per-agent capability table
     subagents-registry.ts  # SUBAGENT_TARGETS — declarative per-agent subagent shape (dir/layout/transform); generic install/list/remove engine
-    installations/     # versions.ts (install, remove, syncResourcesToVersion), migrate.ts (one-shot idempotent migrations), store/resolve/strategies
-    shims.ts           # Shim generation, config symlink switching
+    installations/     # versions.ts (install, remove, syncResourcesToVersion), migrate.ts (one-shot idempotent migrations), store/resolve/strategies, shims.ts (shim generation, config symlink switching)
     hooks/             # hooks.yaml parser + per-agent registrar (install.ts), `matches:` evaluator (match.ts), cache/profile adapters
     browser/           # browser daemon service + existing CDP connection pool; ipc.ts owns one-shot and persistent socket clients, stream.ts owns the NDJSON action loop; hygiene.ts is the abandoned-task reaper (session-dead + idle, RUSH-2622) the daemon's 5-min tick and `agents browser gc` both call
     monitors/          # `agents monitors` — event-triggered watchers (source→condition→action); native state-diff store; MonitorEngine runs in the daemon beside the cron scheduler. See docs/monitors.md

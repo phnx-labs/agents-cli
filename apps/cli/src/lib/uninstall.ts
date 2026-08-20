@@ -26,7 +26,7 @@ import {
   getConfigSymlinkVersion,
   stripShimPathLines,
   releaseAdoptedLauncher,
-} from './shims.js';
+} from './installations/shims.js';
 import { moveDirCrossDevice, copyDirStrippingAgentsSymlinks } from './config-transfer.js';
 import {
   getUserAgentsDir,

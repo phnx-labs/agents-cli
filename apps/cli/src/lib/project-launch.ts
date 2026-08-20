@@ -131,7 +131,7 @@ export function runLaunchSync(opts: LaunchSyncOptions): LaunchSyncResult {
 
 /**
  * Path of the shim's skip-fast sentinel for this (agent, version, cwd) tuple.
- * Must match the SHIM-SIDE format in src/lib/shims.ts (PROJECT_SLUG derivation),
+ * Must match the SHIM-SIDE format in src/lib/installations/shims.ts (PROJECT_SLUG derivation),
  * which is the canonical `toPortableKey` mapping: drop the Windows drive colon
  * and fold `\`, `/`, and ` ` → `_`. On POSIX this is byte-identical to the old
  * `/` and ` ` → `_` slug; on Windows it yields a legal filename (no `C:\`).

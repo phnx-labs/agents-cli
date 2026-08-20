@@ -14,7 +14,7 @@ import chalk from 'chalk';
 
 import { initBrand, registerMineManageCommands } from './mine.js';
 import { validateBrandName, getBrandConfig } from '../lib/brand.js';
-import { isShimsInPath } from '../lib/shims.js';
+import { isShimsInPath } from '../lib/installations/shims.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 
 /**

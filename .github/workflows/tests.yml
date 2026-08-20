@@ -96,4 +96,4 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run build
       # Best-effort post-merge smoke. Not required for merge or release.
-      - run: bun run test -- src/lib/platform src/lib/hooks src/lib/binary-shadow.test.ts src/lib/shims.test.ts src/lib/shims.device-pins.test.ts
+      - run: bun run test -- src/lib/platform src/lib/hooks src/lib/binary-shadow.test.ts src/lib/installations/shims.test.ts src/lib/installations/shims.device-pins.test.ts

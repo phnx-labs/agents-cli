@@ -10,7 +10,7 @@ import { VERSION_RE, compareVersions } from '../agent-spec/primitives.js';
 import type { AgentId } from '../types.js';
 import { AGENTS, findInPath } from '../agents.js';
 import { IS_WINDOWS } from '../platform/index.js';
-import { getConfigSymlinkVersion } from '../shims.js';
+import { getConfigSymlinkVersion } from './shims.js';
 import { INSTALLATION_RECORD_FILE, INSTALLATION_SCHEMA, type Installation } from './types.js';
 
 const execFileAsync = promisify(execFile);

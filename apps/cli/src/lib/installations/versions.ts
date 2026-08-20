@@ -43,7 +43,7 @@ import {
   getConfigSymlinkVersion,
   ensureClaudeInsideSymlink,
   assertIsolationBoundary,
-} from '../shims.js';
+} from './shims.js';
 import { importInstallScriptBinary } from '../import.js';
 import {
   createInstallation,

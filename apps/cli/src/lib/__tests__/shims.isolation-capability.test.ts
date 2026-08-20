@@ -4,7 +4,7 @@ import {
   CONFIG_ENV_ISOLATED_AGENTS,
   supportsIsolatedInstall,
   generateVersionedAliasScript,
-} from '../shims.js';
+} from '../installations/shims.js';
 import { ALL_AGENT_IDS } from '../agents.js';
 import type { AgentId } from '../types.js';
 

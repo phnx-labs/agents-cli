@@ -59,7 +59,7 @@ import {
   getPathSetupInstructions,
   switchConfigSymlink,
   switchHomeFileSymlinks,
-} from './shims.js';
+} from './installations/shims.js';
 import { parseHookManifest, registerHooksToSettings } from './hooks/install.js';
 import { isPromptCancelled } from './format.js';
 

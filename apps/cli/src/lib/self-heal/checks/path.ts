@@ -8,7 +8,7 @@
 
 import type { HealCheck, HealCtx, CheckResult } from '../types.js';
 import { resultOf } from '../types.js';
-import { isShimsInPath, addShimsToPath, listAgentsWithNonIsolatedInstalledVersions } from '../../shims.js';
+import { isShimsInPath, addShimsToPath, listAgentsWithNonIsolatedInstalledVersions } from '../../installations/shims.js';
 
 export const pathCheck: HealCheck = {
   id: 'path',

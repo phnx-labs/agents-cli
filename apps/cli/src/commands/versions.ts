@@ -84,7 +84,7 @@ import {
   addShimsToPath,
   switchConfigSymlink,
   switchHomeFileSymlinks,
-} from '../lib/shims.js';
+} from '../lib/installations/shims.js';
 import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
 import { tryAutoPull } from '../lib/git.js';
 import { getAgentsDir, getTrashVersionsDir } from '../lib/state.js';

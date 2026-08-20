@@ -160,7 +160,7 @@ import * as mcpModule from '../src/lib/mcp.js';
 vi.spyOn(mcpModule, 'installMcpServers').mockReturnValue({ applied: [] });
 vi.spyOn(mcpModule, 'listMcpServerConfigs').mockReturnValue([]);
 
-vi.mock('../src/lib/shims.js', () => ({
+vi.mock('../src/lib/installations/shims.js', () => ({
   createVersionedAlias: () => {},
   removeVersionedAlias: () => {},
   switchConfigSymlink: () => {},

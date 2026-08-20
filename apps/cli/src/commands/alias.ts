@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { getUserAgentsDir } from '../lib/state.js';
-import { getShimsDir } from '../lib/shims.js';
+import { getShimsDir } from '../lib/installations/shims.js';
 import { ALL_AGENT_IDS, AGENTS } from '../lib/agents.js';
 
 const ALIASES_FILE = path.join(getUserAgentsDir(), 'aliases.json');

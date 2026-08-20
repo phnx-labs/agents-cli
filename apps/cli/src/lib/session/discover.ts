@@ -26,7 +26,7 @@ import { AGENTS, agentConfigDirName, getCliVersion, resolveOpenCodeAccountId } f
 import { walkForFilesWithStat } from '../fs-walk.js';
 import { hasCommand } from '../cli-resources.js';
 import { execFileShellSpec } from '../platform/exec.js';
-import { getConfigSymlinkVersion } from '../shims.js';
+import { getConfigSymlinkVersion } from '../installations/shims.js';
 import { SESSION_AGENTS } from './types.js';
 import { deriveShortId } from './short-id.js';
 import { buildClaudeAccountIndex, resolveClaudeAccount, type ClaudeAccountIndex } from './claude-accounts.js';

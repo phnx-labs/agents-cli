@@ -20,10 +20,10 @@ describe('isolation boundary — the gate is on every adopting primitive', () =>
   // Every primitive that can carry an agent across the boundary, and the file it
   // lives in. Adding one here without a gate fails the assertion below.
   const GATED: Array<{ fn: string; file: string }> = [
-    { fn: 'createShim', file: 'src/lib/shims.ts' },
-    { fn: 'switchConfigSymlink', file: 'src/lib/shims.ts' },
-    { fn: 'switchHomeFileSymlinks', file: 'src/lib/shims.ts' },
-    { fn: 'adoptShadowingLauncher', file: 'src/lib/shims.ts' },
+    { fn: 'createShim', file: 'src/lib/installations/shims.ts' },
+    { fn: 'switchConfigSymlink', file: 'src/lib/installations/shims.ts' },
+    { fn: 'switchHomeFileSymlinks', file: 'src/lib/installations/shims.ts' },
+    { fn: 'adoptShadowingLauncher', file: 'src/lib/installations/shims.ts' },
     { fn: 'setGlobalDefault', file: 'src/lib/installations/versions.ts' },
   ];
 
@@ -39,7 +39,7 @@ describe('isolation boundary — the gate is on every adopting primitive', () =>
   });
 
   it('no OTHER exported function in shims.ts writes to the real config dir ungated', () => {
-    const src = read('src/lib/shims.ts');
+    const src = read('src/lib/installations/shims.ts');
     // getAgentConfigPath() resolves the user's real ~/.<agent>. Any exported function
     // that both resolves it and mutates the filesystem is a boundary crossing.
     const MUTATORS = /\b(symlinkSync|renameSync|rmSync|unlinkSync|cpSync|writeFileSync)\s*\(/;
@@ -98,7 +98,7 @@ describe('isolation boundary — the gate is on every adopting primitive', () =>
     // `<version>/home` before adopting would, if bare dirs counted, flip protection
     // off with its own first line and then sail through every gate. Counting only
     // real installs (node_modules/ or package.json present) closes that.
-    const src = read('src/lib/shims.ts');
+    const src = read('src/lib/installations/shims.ts');
     const start = src.indexOf('export function isIsolationProtected');
     const body = src.slice(start, src.indexOf('\n}', start));
     expect(body).toMatch(/node_modules|package\.json/);
@@ -107,7 +107,7 @@ describe('isolation boundary — the gate is on every adopting primitive', () =>
   it('the predicate is derived from the .isolated markers, not from stored config', () => {
     // Protection must not depend on a setting someone can leave in the wrong state —
     // it is computed from what is actually installed.
-    const src = read('src/lib/shims.ts');
+    const src = read('src/lib/installations/shims.ts');
     const start = src.indexOf('export function isIsolationProtected');
     const body = src.slice(start, src.indexOf('\n}', start));
     expect(body).toContain('isInstalledVersionIsolated');

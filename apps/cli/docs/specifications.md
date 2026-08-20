@@ -2146,9 +2146,9 @@ schema (`--json` passes through each agent's native stream format).
   EXEC-14. This is narrower than `docs/concepts.md:87`'s framing ("sets
   `HOME` to the matching version home before exec-ing the binary") — that
   claim describes the generated **bash shim** script's own inline exports
-  (`lib/shims.ts:280-330`), a separate code path from `buildExecEnv`, and even
+  (`lib/installations/shims.ts:280-330`), a separate code path from `buildExecEnv`, and even
   there no literal `HOME=` assignment exists (verified: no `HOME="` writer in
-  `lib/shims.ts` — only `AGENTS_USER_DIR`/`GROK_DOWNLOADS` etc. *read* `$HOME`).
+  `lib/installations/shims.ts` — only `AGENTS_USER_DIR`/`GROK_DOWNLOADS` etc. *read* `$HOME`).
 - **EXEC-16.** The remaining registered agents
   (gemini, opencode, openclaw, amp, kiro, goose, antigravity, grok,
   droid, hermes, pi — the 16 in `AgentId`, `lib/types.ts:13`, minus the
@@ -2156,10 +2156,10 @@ schema (`--json` passes through each agent's native stream format).
   `buildExecEnv` itself — its per-agent branch has no arm for them
   (`buildExecEnv`'s per-agent branch, `lib/exec.ts:407-564`; the `else` at `:559-564` only deletes the four known vars).
   A separate mechanism — the generated default-name bash shim
-  (`generateShimScript`, `lib/shims.ts:271-330`) and the generated
-  version-pinned alias shim (`lib/shims.ts:940-1010`) — additionally exports
-  `GROK_HOME` (grok, `lib/shims.ts:315,982`) and `OPENCODE_CONFIG_DIR`
-  (opencode, `lib/shims.ts:322,989`) inline in bash, but only when the spawn
+  (`generateShimScript`, `lib/installations/shims.ts:271-330`) and the generated
+  version-pinned alias shim (`lib/installations/shims.ts:940-1010`) — additionally exports
+  `GROK_HOME` (grok, `lib/installations/shims.ts:315,982`) and `OPENCODE_CONFIG_DIR`
+  (opencode, `lib/installations/shims.ts:322,989`) inline in bash, but only when the spawn
   target actually resolves to one of those shim scripts;
   `buildExecCommand`'s own version-resolution fallback
   (`lib/exec.ts:971-988`) can instead resolve straight to the real npm

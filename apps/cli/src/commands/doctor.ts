@@ -22,7 +22,7 @@
  * apply pending sync.
  */
 import type { Command } from 'commander';
-import { IsolationBoundaryError } from '../lib/shims.js';
+import { IsolationBoundaryError } from '../lib/installations/shims.js';
 import { explainIsolationBoundary } from '../lib/isolation-boundary-report.js';
 import { addHostOption } from '../lib/hosts/option.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
@@ -1775,7 +1775,7 @@ export function registerDoctorCommand(program: Command): void {
           console.error(chalk.red('--adopt and --release are mutually exclusive; pass only one.'));
           process.exit(1);
         }
-        const { adoptShadowingLauncher, releaseAdoptedLauncher } = await import('../lib/shims.js');
+        const { adoptShadowingLauncher, releaseAdoptedLauncher } = await import('../lib/installations/shims.js');
         const raw = (opts.adopt || opts.release) as string;
         const agent = resolveAgentName(raw);
         if (!agent) {

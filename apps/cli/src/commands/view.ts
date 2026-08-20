@@ -64,7 +64,7 @@ import {
   isShimsInPath,
   ensureVersionedAliasCurrent,
   removeShim,
-} from '../lib/shims.js';
+} from '../lib/installations/shims.js';
 import { getAgentResources, listResources } from '../lib/resources.js';
 import { renderMergedResources } from '../lib/merged-resources.js';
 import { resolveVersionFilter, AgentSpecError } from '../lib/agent-spec/index.js';

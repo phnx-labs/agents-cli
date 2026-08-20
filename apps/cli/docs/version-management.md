@@ -290,7 +290,7 @@ has to be evaluated against the state before the command mutates it.
 PATH is its entire purpose, and isolated copies are deliberately absent from PATH.
 It refuses and explains.
 
-`src/lib/isolation-boundary.test.ts` pins the primitive list and scans `shims.ts` for
+`src/lib/isolation-boundary.test.ts` pins the primitive list and scans `installations/shims.ts` for
 any other exported function that both resolves the real config dir and mutates the
 filesystem without the gate — so a sixth way in fails there rather than silently
 reopening the hole.
@@ -443,6 +443,6 @@ explicit alternative detection path for consumers.
 | `removeVersion()` | versions.ts | Remove installed version |
 | `resolveVersion()` | store.ts | Find version from project/global config |
 | `syncResourcesToVersion()` | versions.ts | Symlink resources into version home |
-| `switchConfigSymlink()` | shims.ts | Replace ~/.{agent} with symlink |
-| `createShim()` | shims.ts | Generate version-resolving wrapper |
+| `switchConfigSymlink()` | installations/shims.ts | Replace ~/.{agent} with symlink |
+| `createShim()` | installations/shims.ts | Generate version-resolving wrapper |
 | `setGlobalDefault()` | versions.ts | Set default in agents.yaml |

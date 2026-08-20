@@ -12,7 +12,7 @@ import {
   removeLegacyUserShim,
   SHIM_SCHEMA_VERSION,
   VERSIONED_ALIAS_SCHEMA_VERSION,
-} from '../shims.js';
+} from '../installations/shims.js';
 
 const originalHome = process.env.HOME;
 const originalShell = process.env.SHELL;
@@ -480,13 +480,13 @@ describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
   // getShimPath returns the logical (extensionless) launch path that isn't a real
   // file on Windows. Writing the fixture to getShimPath left Windows looking for a
   // `.cmd` that never existed, so ensureShimCurrent always returned 'created'.
-  function onDiskShimPath(mod: typeof import('../shims.js'), agent: 'claude'): string {
+  function onDiskShimPath(mod: typeof import('../installations/shims.js'), agent: 'claude'): string {
     const logical = mod.getShimPath(agent);
     return path.join(path.dirname(logical), mod.onDiskShimFile(path.basename(logical), process.platform));
   }
 
   it('does NOT downgrade a shim stamped by a newer install', async () => {
-    const mod = await import('../shims.js');
+    const mod = await import('../installations/shims.js');
     const shimPath = onDiskShimPath(mod, 'claude');
     const newer = mod.SHIM_SCHEMA_VERSION + 1;
     writeShim(shimPath, `agents-shim-version: ${newer}`);
@@ -497,7 +497,7 @@ describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
   });
 
   it('regenerates a shim from an older install (upgrade)', async () => {
-    const mod = await import('../shims.js');
+    const mod = await import('../installations/shims.js');
     const shimPath = onDiskShimPath(mod, 'claude');
     writeShim(shimPath, 'agents-shim-version: 1');
 
@@ -508,7 +508,7 @@ describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
   });
 
   it('regenerates an unversioned (pre-marker) shim', async () => {
-    const mod = await import('../shims.js');
+    const mod = await import('../installations/shims.js');
     const shimPath = onDiskShimPath(mod, 'claude');
     writeShim(shimPath, 'no marker here');
 
@@ -516,7 +516,7 @@ describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
   });
 
   it('leaves a current shim untouched', async () => {
-    const mod = await import('../shims.js');
+    const mod = await import('../installations/shims.js');
     mod.createShim('claude');
     expect(mod.ensureShimCurrent('claude')).toBe('current');
   });
@@ -547,7 +547,7 @@ describe('versioned alias — platform on-disk artifacts', () => {
   const onWindows = process.platform === 'win32';
 
   it('materializes only the platform target', async () => {
-    const mod = await import('../shims.js');
+    const mod = await import('../installations/shims.js');
     const aliasPath = mod.getVersionedAliasPath('claude', '2.1.201');
 
     mod.createVersionedAlias('claude', '2.1.201');
@@ -567,7 +567,7 @@ describe('versioned alias — platform on-disk artifacts', () => {
   });
 
   it('deletes a legacy bash alias that would shadow the .cmd on Windows', async () => {
-    const mod = await import('../shims.js');
+    const mod = await import('../installations/shims.js');
     const aliasPath = mod.getVersionedAliasPath('claude', '2.1.201');
     fs.mkdirSync(path.dirname(aliasPath), { recursive: true });
     fs.writeFileSync(aliasPath, '#!/bin/bash\n# agents-versioned-alias-version: 10\nexec true\n', { mode: 0o755 });
@@ -586,13 +586,13 @@ describe('versioned alias — platform on-disk artifacts', () => {
   });
 
   it('ensureVersionedAliasCurrent round-trips created -> current', async () => {
-    const mod = await import('../shims.js');
+    const mod = await import('../installations/shims.js');
     expect(mod.ensureVersionedAliasCurrent('claude', '2.1.201')).toBe('created');
     expect(mod.ensureVersionedAliasCurrent('claude', '2.1.201')).toBe('current');
   });
 
   it.runIf(onWindows)('ensureVersionedAliasCurrent clears a shadowing bash alias even when the .cmd is current', async () => {
-    const mod = await import('../shims.js');
+    const mod = await import('../installations/shims.js');
     const aliasPath = mod.getVersionedAliasPath('claude', '2.1.201');
     mod.createVersionedAlias('claude', '2.1.201');
     expect(mod.ensureVersionedAliasCurrent('claude', '2.1.201')).toBe('current');
@@ -606,7 +606,7 @@ describe('versioned alias — platform on-disk artifacts', () => {
   });
 
   it('removeVersionedAlias removes every companion on disk', async () => {
-    const mod = await import('../shims.js');
+    const mod = await import('../installations/shims.js');
     const aliasPath = mod.getVersionedAliasPath('claude', '2.1.201');
     mod.createVersionedAlias('claude', '2.1.201');
     // Legacy leftover from a pre-v12 Windows install alongside the .cmd.
@@ -620,7 +620,7 @@ describe('versioned alias — platform on-disk artifacts', () => {
   });
 
   it('versionedAliasOnDiskFile picks the runnable filename per platform', async () => {
-    const mod = await import('../shims.js');
+    const mod = await import('../installations/shims.js');
     expect(mod.versionedAliasOnDiskFile('claude', '2.1.201', 'win32')).toBe('claude@2.1.201.cmd');
     expect(mod.versionedAliasOnDiskFile('claude', '2.1.201', 'linux')).toBe('claude@2.1.201');
     expect(mod.versionedAliasOnDiskFile('codex', '0.125.0', 'darwin')).toBe('codex@0.125.0');

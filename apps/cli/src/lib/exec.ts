@@ -21,7 +21,7 @@ import { resolveActor, actorEnv } from './actor.js';
 import { expandLocalHome } from './project-root.js';
 import { getShimsDir, getHistoryDir, getUserAgentsDir, getRuntimeStateDir } from './state.js';
 import { resolveCodexHome } from './codex-home.js';
-import { readCodexConfiguredModel } from './shims.js';
+import { readCodexConfiguredModel } from './installations/shims.js';
 import { writePidSessionEntry, extractSessionIdArg } from './session/pid-registry.js';
 import { writeSessionActorRecord, writeSessionAliasRecord } from './session/actor-sidecar.js';
 import { loadHookSessionIndex, resolveHookSessionId } from './session/hook-sessions.js';

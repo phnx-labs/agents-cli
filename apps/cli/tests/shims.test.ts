@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { generateShimScript, generateVersionedAliasScript } from '../src/lib/shims.js';
+import { generateShimScript, generateVersionedAliasScript } from '../src/lib/installations/shims.js';
 
 // We need to mock the versions directory, so we'll test the logic directly
 // by creating temp directories that mimic the version structure

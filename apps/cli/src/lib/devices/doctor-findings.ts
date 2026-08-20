@@ -41,7 +41,7 @@ import chalk from 'chalk';
 import { AGENTS, ALL_AGENT_IDS, supportsAccountInspection } from '../agents.js';
 import { blocksLocalScripts } from '../platform/winpath.js';
 import { loginHint } from '../signin-badge.js';
-import { CONFIG_ENV_ISOLATED_AGENTS } from '../shims.js';
+import { CONFIG_ENV_ISOLATED_AGENTS } from '../installations/shims.js';
 import { padToWidth, stringWidth } from '../session/width.js';
 import type { AgentId } from '../types.js';
 import type { DuplicateVersionHook } from '../hooks/install.js';
@@ -64,7 +64,7 @@ const AGENT_NAMES: Record<string, string> = Object.fromEntries(
 
 /** Agents with NO per-version credential isolation: their login is shared across
  *  every installed version, so a "log into THIS version" remediation would be a
- *  lie. Derived from `CONFIG_ENV_ISOLATED_AGENTS` in `lib/shims.ts` — the shim
+ *  lie. Derived from `CONFIG_ENV_ISOLATED_AGENTS` in `lib/installations/shims.ts` — the shim
  *  generator is what actually exports the per-version isolation env var, so it is
  *  the source of truth. Do not hand-maintain a second copy: an agent gaining
  *  isolation there must not leave a stale "login is shared" hint here. */
@@ -248,7 +248,7 @@ export function remediationFor(finding: DoctorFinding): string {
       }
       // Isolated per-version home: the login must RUN INSIDE that home. A bare
       // `<cli> login` afterwards would NOT — the native shim resolves to the
-      // project/default version (`lib/shims.ts:471-474`), so it would log into
+      // project/default version (`lib/installations/shims.ts:471-474`), so it would log into
       // whichever version is default, not the one that is logged out.
       switch (loginShape(agent)) {
         case 'subcommand':

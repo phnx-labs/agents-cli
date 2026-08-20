@@ -24,7 +24,7 @@ import type { AgentId } from './types.js';
 import { AGENTS, resolveNativeBinaryPath } from './agents.js';
 import { getUserAgentsDir, getVersionsDir } from './state.js';
 import { setGlobalDefault } from './installations/versions.js';
-import { createShim, createVersionedAlias, ensureShimCurrent, switchHomeFileSymlinks, assertIsolationBoundary } from './shims.js';
+import { createShim, createVersionedAlias, ensureShimCurrent, switchHomeFileSymlinks, assertIsolationBoundary } from './installations/shims.js';
 
 export interface ImportConfigResult {
   success: boolean;

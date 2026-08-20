@@ -23,7 +23,7 @@
 
 import type { Command } from 'commander';
 import { withIsolationBoundary } from '../lib/isolation-boundary-report.js';
-import { assertIsolationBoundary, createVersionedAlias } from '../lib/shims.js';
+import { assertIsolationBoundary, createVersionedAlias } from '../lib/installations/shims.js';
 import { markVersionIsolated } from '../lib/installations/versions.js';
 import chalk from 'chalk';
 import ora from 'ora';

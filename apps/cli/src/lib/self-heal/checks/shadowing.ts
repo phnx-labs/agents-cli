@@ -11,7 +11,7 @@ import {
   getPathShadowingExecutable,
   adoptShadowingLauncher,
   listAgentsWithNonIsolatedInstalledVersions,
-} from '../../shims.js';
+} from '../../installations/shims.js';
 import { getGlobalDefault } from '../../installations/versions.js';
 
 export const shadowingCheck: HealCheck = {

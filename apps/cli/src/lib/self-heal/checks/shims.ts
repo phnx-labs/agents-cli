@@ -20,7 +20,7 @@ import {
   listAgentsWithNonIsolatedInstalledVersions,
   listShimFileNames,
   pruneOrphanedCommandShim,
-} from '../../shims.js';
+} from '../../installations/shims.js';
 import { listInstalledVersions } from '../../installations/versions.js';
 
 export const shimsCheck: HealCheck = {

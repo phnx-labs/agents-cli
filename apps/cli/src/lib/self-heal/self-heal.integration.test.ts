@@ -33,7 +33,7 @@ describe.skipIf(process.platform === 'win32')('runSelfHeal — shims/shadowing/p
     run1: Report; run2: Report; shimExists: boolean; launcherPointsAtShim: boolean;
   } {
     const modulePath = path.resolve(process.cwd(), 'src/lib/self-heal/registry.ts');
-    const shimsPath = path.resolve(process.cwd(), 'src/lib/shims.ts');
+    const shimsPath = path.resolve(process.cwd(), 'src/lib/installations/shims.ts');
     const script = `
       import { runSelfHeal } from ${JSON.stringify(modulePath)};
       import { getShimPath } from ${JSON.stringify(shimsPath)};

@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { IsolationBoundaryError } from './shims.js';
+import { IsolationBoundaryError } from './installations/shims.js';
 import { listInstalledVersions } from './installations/versions.js';
 
 /**

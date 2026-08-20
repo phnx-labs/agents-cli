@@ -23,7 +23,7 @@ import {
   removeBrand,
   brandPresetName,
 } from '../lib/brand.js';
-import { createBrandShim, removeBrandShim, isShimsInPath } from '../lib/shims.js';
+import { createBrandShim, removeBrandShim, isShimsInPath } from '../lib/installations/shims.js';
 import { updateMeta } from '../lib/state.js';
 import { KNOWN_TOP_LEVEL_COMMANDS } from '../lib/startup/command-registry.js';
 import type { BrandConfig, ResourceProfilePreset } from '../lib/types.js';
