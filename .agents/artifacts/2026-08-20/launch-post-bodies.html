@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>The launch posts, in full, and what each title costs you</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span><span class="status-badge status-draft">draft</span></div>
+<h1>The launch posts, in full, and what each title costs you</h1>
+<p class="summary">Complete copy-paste bodies for Show HN, r/ClaudeAI, and r/LocalLLaMA, plus the adversarial read on each candidate title: what the top comment will attack and how to answer it.</p>
+<div class="meta" aria-label="Artifact metadata"><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agi-cli" target="_blank" rel="noopener">phnx-labs/agi-cli</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/" target="_blank" rel="noopener">RUSH-2834 launch sequence</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">launch-posts</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fleet-worker</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/n%2Fa">n/a</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-20</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#summary" data-toc-for="summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a class="toc-item" href="#findings" data-toc-for="findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a class="toc-item toc-sub" href="#why-stress-tested-is-a-real-cost-not-a-caveat" data-toc-for="why-stress-tested-is-a-real-cost-not-a-caveat">Why &quot;stress tested&quot; is a real cost, not a caveat</a><a class="toc-item toc-sub" href="#what-the-thread-will-attack-regardless-of-title" data-toc-for="what-the-thread-will-attack-regardless-of-title">What the thread will attack regardless of title</a><a class="toc-item" href="#evidence" data-toc-for="evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a><a class="toc-item" href="#recommendations" data-toc-for="recommendations"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Recommendations</a><a class="toc-item toc-sub" href="#the-show-hn-title-ranked" data-toc-for="the-show-hn-title-ranked">The Show HN title, ranked</a><a class="toc-item toc-sub" href="#the-full-show-hn-body" data-toc-for="the-full-show-hn-body">The full Show HN body</a><a class="toc-item toc-sub" href="#the-first-comment-posted-by-you-immediately" data-toc-for="the-first-comment-posted-by-you-immediately">The first comment, posted by you, immediately</a><a class="toc-item toc-sub" href="#the-r-claudeai-and-r-claudecode-post" data-toc-for="the-r-claudeai-and-r-claudecode-post">The r/ClaudeAI and r/ClaudeCode post</a><a class="toc-item toc-sub" href="#the-r-localllama-post" data-toc-for="the-r-localllama-post">The r/LocalLLaMA post</a><a class="toc-item toc-sub" href="#sequence" data-toc-for="sequence">Sequence</a><a class="toc-item toc-sub" href="#what-not-to-do" data-toc-for="what-not-to-do">What not to do</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2><p>Three complete post bodies, ready to paste. Before them, the part that actually
+decides the launch: <strong>the title you pick determines what the thread argues
+about</strong>, and one of the three candidates hands HN a better argument than your
+product.</p>
+<p>The short version:</p>
+<table>
+<thead>
+<tr>
+<th>Title</th>
+<th>Expected reach</th>
+<th>What the top comment attacks</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>A. 16 agents / your own machines</strong></td>
+<td>Good</td>
+<td>"How is this different from just running them?" — answerable, on-topic</td>
+</tr>
+<tr>
+<td><strong>B. rotates 7 Claude accounts</strong></td>
+<td>Highest</td>
+<td><strong>"Is this a ToS violation?"</strong> — thread becomes about Anthropic, not you</td>
+</tr>
+<tr>
+<td><strong>C. machines you own, not a cloud sandbox</strong></td>
+<td>Moderate</td>
+<td>"Sandboxing exists for a reason" — on-topic, mild</td>
+</tr>
+</tbody></table>
+<p>Recommendation: <strong>A</strong>, with B's rotation detail moved into the body where it is
+context rather than the headline claim.</p>
+<h2 id="findings">Findings</h2><h3 id="why-stress-tested-is-a-real-cost-not-a-caveat">Why "stress tested" is a real cost, not a caveat</h3><p>A Show HN title is a promise the thread will try to falsify. That is the
+mechanic that makes a specific number valuable — a reader can evaluate the claim
+from the title alone, which is why they click. It is the same mechanic that makes
+the wrong number expensive.</p>
+<p>Candidate B is <code>Show HN: Agi - open-source CLI that rotates 7 Claude accounts so runs never stall</code>. It contains two separately attackable things:</p>
+<p><strong>1. "7 Claude accounts" invites a terms-of-service argument.</strong> HN has a
+well-established reflex for anything that looks like working around a vendor's
+rate limits. The likely top comment is some form of <em>"isn't this just circumventing
+per-seat pricing?"</em> You have a good answer — they are subscriptions you pay for,
+one human, and rotation picks by remaining headroom rather than evading a cap —
+but you will be <em>making</em> that answer instead of talking about the product. Worse,
+the answer is not fully yours to give: whether it is permitted is Anthropic's call,
+not yours, so you cannot close the argument, only participate in it.</p>
+<p><strong>2. "never stall" is an absolute.</strong> One commenter reporting a stall falsifies the
+title. Absolutes read as marketing to this audience, and the empirical analysis
+already showed hype-shaped titles score badly (n=9, none cleared 50 points).</p>
+<p>The cost is not that the launch fails. It is that a thread which should be about
+a control plane for coding agents becomes a referendum on multi-account usage,
+and the top-voted takeaway is "clever rate-limit workaround" rather than
+"infrastructure I want."</p>
+<h3 id="what-the-thread-will-attack-regardless-of-title">What the thread will attack regardless of title</h3><p>Prepare these four. Having a crisp answer ready is worth more than the title
+choice, because engagement from the submitter is what correlates with ranking
+longevity.</p>
+<table>
+<thead>
+<tr>
+<th>Objection</th>
+<th>The honest answer</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>"Why not just run the harnesses directly?"</strong></td>
+<td>Because the hard part is not starting agents, it is that they stall — they ask a question and idle, or stop mid-task. Sessions, resume, and the fleet view exist to notice a stopped agent and get it moving. Lead with this; it is the actual thesis.</td>
+</tr>
+<tr>
+<td><strong>"Isn't this what OpenCode / Claude Code already do?"</strong></td>
+<td>Those are harnesses. This runs <em>them</em>, plus 14 others, across machines you own. It is a layer up, not a competitor. Say so plainly — the distinction is real and easy to miss.</td>
+</tr>
+<tr>
+<td><strong>"Multiple accounts sounds like a ToS problem."</strong></td>
+<td>They are subscriptions you pay for; rotation picks by remaining headroom, and skips rate-limited accounts rather than evading limits. If it is in the body rather than the title, this stays a footnote.</td>
+</tr>
+<tr>
+<td><strong>"This is a lot of surface for one tool."</strong></td>
+<td>Fair. It is a power-user tool and the docs assume you already run agents daily. Concede it rather than defending; conceding a real weakness buys credibility for everything else.</td>
+</tr>
+</tbody></table>
+<h2 id="evidence">Evidence</h2><p>Numbers in the bodies below, and where each comes from:</p>
+<table>
+<thead>
+<tr>
+<th>Claim</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>16 harnesses</td>
+<td><code>apps/cli/AGENTS.md</code> harness parity list</td>
+</tr>
+<tr>
+<td>3,703 session transcripts</td>
+<td><code>find ~/.agents/.history/versions -name '*.jsonl'</code></td>
+</tr>
+<tr>
+<td>Several accounts per harness, headroom-scheduled</td>
+<td><code>agents view</code> output</td>
+</tr>
+<tr>
+<td>Apache-2.0</td>
+<td><code>LICENSE</code></td>
+</tr>
+</tbody></table>
+<p>Do not put a number in a post you have not run the command for that morning.
+The one certainty about HN is that someone will check.</p>
+<h2 id="recommendations">Recommendations</h2><h3 id="the-show-hn-title-ranked">The Show HN title, ranked</h3><pre><code>A.  Show HN: Open-source CLI that runs 16 coding agents across your own machines
+B.  Show HN: Agi - open-source CLI that rotates 7 Claude accounts so runs never stall
+C.  Show HN: Run coding agents on machines you own, not a per-seat cloud sandbox
+</code></pre>
+<p><strong>A is the pick.</strong> 76 characters, inside the 65-85 band that averaged 11.0 points
+against 6.1 for short titles. It carries "open-source" (the strongest single
+lever: mean 23.7 vs 8.4) and a number (17.3 vs 8.2), and the number it carries —
+16 — is checkable, defensible, and boring in the right way. Nobody starts a fight
+about how many harnesses you support.</p>
+<h3 id="the-full-show-hn-body">The full Show HN body</h3><p>Paste as-is. Roughly 190 words, which is the right length: enough to establish
+the thesis, short enough that the comments carry the rest.</p>
+<pre><code>agi-cli is a control plane for running many coding agents at once and driving
+each one to a merged PR rather than just starting it.
+
+Starting an agent is the easy part. The hard part is that agents stall: they
+ask a question and idle, stop mid-task, or hand work back instead of finishing
+it. Most of what is in here exists to notice an agent that stopped making
+progress and get it moving again.
+
+It installs and version-pins the harnesses (Claude, Codex, Gemini, Cursor,
+OpenCode, Grok, Droid and 9 more), runs them on subscriptions you already pay
+for, and spreads work across your own machines over SSH.
+
+Some specifics:
+
+- Sessions are first-class: searchable transcripts synced across devices, and
+  resumable on a different machine than they started on.
+- Teams run several agents in parallel, each isolated in its own git worktree
+  with an explicit boundary contract so they do not clobber each other.
+- The browser is a shared resource. Several agents can attach to one live
+  browser session instead of each spawning its own and re-authenticating.
+- Secrets sit in the OS keychain and inject into headless runs, so unattended
+  work does not stall on a Touch ID prompt.
+- Several accounts of the same harness rotate under one policy, picked by
+  remaining headroom.
+
+Apache-2.0. It is a power-user tool and the docs assume you already run agents
+daily. Happy to go into the scheduling or the session model.
+</code></pre>
+<p>Note the last bullet: the rotation detail is present, but as the fifth item in a
+list rather than the headline. It gets discovered by people who read, which is
+the audience you want it to reach.</p>
+<h3 id="the-first-comment-posted-by-you-immediately">The first comment, posted by you, immediately</h3><p>Post this yourself within a minute of submitting. It absorbs the "why does this
+exist" question before someone else frames it, and submitter engagement drives
+ranking longevity.</p>
+<pre><code>Some context on why this exists rather than what it does.
+
+I run a lot of coding agents concurrently across a handful of machines. The
+failure mode that actually costs time is not a bad diff, it is an agent that
+quietly stopped: waiting on a prompt nobody answered, or idle mid-task with the
+work half-done. Idle-but-unfinished is the worst state because it looks like
+nothing is wrong.
+
+So the design consequence is that every status surface ranks by progress rather
+than liveness. A running agent needs nothing from you. The ones that need you
+are the ones that stopped, and those get surfaced first instead of buried under
+the healthy ones.
+
+Happy to answer anything about the session model, the scheduler, or where it
+falls over.
+</code></pre>
+<h3 id="the-r-claudeai-and-r-claudecode-post">The r/ClaudeAI and r/ClaudeCode post</h3><p>Do <strong>not</strong> post the launch here. These subs expect roughly 90/10 helpful-to-promo,
+and a cold launch post reads as spam. Post a workflow; let the tool be incidental.</p>
+<pre><code>Title: How I stopped losing work to agents that stall mid-task
+</code></pre>
+<pre><code>The thing that costs me the most time with Claude Code is not a bad edit. It is
+a session that quietly stopped — waiting on a prompt I never saw, or idle
+halfway through with the work unfinished. It looks identical to a session that
+is thinking.
+
+Two things that helped more than any prompt change:
+
+1. Rank sessions by progress, not by whether they are running. A running agent
+   needs nothing from me. The ones worth my attention are the stopped ones, and
+   idle-but-unfinished is the highest risk state, not the lowest — that is the
+   one most likely to get silently abandoned.
+
+2. Make the completion contract explicit in CLAUDE.md. "Your task is done when
+   the PR is merged, or you have named who now owns it" removed most of the
+   hand-back-and-idle behavior for me. Agents stop at "PR opened" unless you
+   tell them that is not the finish line.
+
+[concrete config here]
+
+I ended up building tooling around this (link in profile / happy to share if
+useful) but the two ideas above work with plain Claude Code and cost nothing.
+</code></pre>
+<p>Mention the tool once, near the end, or not at all on the first post. If it
+lands, the follow-up post is where the link goes. Two useful posts beat one
+promotional one.</p>
+<h3 id="the-r-localllama-post">The r/LocalLLaMA post</h3><p>This audience is local-model-first. Do not lead with Claude, and do not lead with
+features. Lead with ownership.</p>
+<pre><code>Title: Running coding agents across your own boxes instead of a per-seat cloud sandbox
+</code></pre>
+<pre><code>Most agent tooling assumes the agent runs in someone else's sandbox, billed per
+seat. I wanted the opposite: agents running on hardware I already own, over SSH,
+against whatever model I point them at.
+
+What that ended up requiring:
+
+- A dispatch layer that treats a fleet of machines as one address space, so work
+  goes to a box with headroom rather than the one I am sitting at.
+- Session transcripts that sync across devices, so a run started on one machine
+  is searchable and resumable from another.
+- Parallel agents isolated per git worktree, because the moment two agents share
+  a checkout they clobber each other's index.
+
+It is harness-agnostic — it drives Claude, Codex, and Gemini, but it will drive a
+local model through OpenCode just as happily, which is the configuration I would
+actually recommend if you are trying to keep everything on your own metal.
+
+Apache-2.0. Genuinely interested in what breaks for people running fully local.
+</code></pre>
+<h3 id="sequence">Sequence</h3><p>92% of a Show HN's star impact is gone after 48 hours, so everything fires in one
+window.</p>
+<table>
+<thead>
+<tr>
+<th>When</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>-14 days</td>
+<td>Start commenting in r/ClaudeAI, r/ClaudeCode, r/LocalLLaMA. Aged presence is the prerequisite; a cold account gets removed</td>
+</tr>
+<tr>
+<td>-14 days</td>
+<td>Open the awesome-list PRs — they have review lag</td>
+</tr>
+<tr>
+<td>-1 day</td>
+<td>Pre-seed past 100 stars</td>
+</tr>
+<tr>
+<td>0 (Sun 7pm ET)</td>
+<td>Show HN, then your own first comment within a minute</td>
+</tr>
+<tr>
+<td>+0-2h</td>
+<td>r/ClaudeCode, r/LocalLLaMA, r/commandline</td>
+</tr>
+<tr>
+<td>+2h</td>
+<td>X thread with the hero GIF</td>
+</tr>
+<tr>
+<td>+4h</td>
+<td>Product Hunt</td>
+</tr>
+<tr>
+<td>+0-48h</td>
+<td>Answer every comment personally</td>
+</tr>
+</tbody></table>
+<h3 id="what-not-to-do">What not to do</h3><ul>
+<li>Do not run title B unless you are prepared for the thread to be about Anthropic's
+terms rather than your product.</li>
+<li>Do not post identical copy to several subreddits. That is the fastest route to
+removal from all of them, which is why the three bodies above are genuinely
+different rather than reskinned.</li>
+<li>Do not put a number in any post you have not re-run the command for that morning.</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0ZW1wbGF0ZTogcmVwb3J0LnYxCnRpdGxlOiAnVGhlIGxhdW5jaCBwb3N0cywgaW4gZnVsbCwgYW5kIHdoYXQgZWFjaCB0aXRsZSBjb3N0cyB5b3UnCnN1bW1hcnk6ICdDb21wbGV0ZSBjb3B5LXBhc3RlIGJvZGllcyBmb3IgU2hvdyBITiwgci9DbGF1ZGVBSSwgYW5kIHIvTG9jYWxMTGFNQSwgcGx1cyB0aGUgYWR2ZXJzYXJpYWwgcmVhZCBvbiBlYWNoIGNhbmRpZGF0ZSB0aXRsZTogd2hhdCB0aGUgdG9wIGNvbW1lbnQgd2lsbCBhdHRhY2sgYW5kIGhvdyB0byBhbnN3ZXIgaXQuJwpzdGF0dXM6IGRyYWZ0Cmh1bWFuOiBhdXRob3IKaG9zdDogZmxlZXQtd29ya2VyCnNlc3Npb246IG4vYQpsaW5rczoKICAtIGxhYmVsOiAncGhueC1sYWJzL2FnaS1jbGknCiAgICB1cmw6ICdodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnaS1jbGknCiAgLSBsYWJlbDogJ1JVU0gtMjgzNCBsYXVuY2ggc2VxdWVuY2UnCiAgICB1cmw6ICdodHRwczovL2xpbmVhci5hcHAvJwotLS0KCiMjIFN1bW1hcnkKClRocmVlIGNvbXBsZXRlIHBvc3QgYm9kaWVzLCByZWFkeSB0byBwYXN0ZS4gQmVmb3JlIHRoZW0sIHRoZSBwYXJ0IHRoYXQgYWN0dWFsbHkKZGVjaWRlcyB0aGUgbGF1bmNoOiAqKnRoZSB0aXRsZSB5b3UgcGljayBkZXRlcm1pbmVzIHdoYXQgdGhlIHRocmVhZCBhcmd1ZXMKYWJvdXQqKiwgYW5kIG9uZSBvZiB0aGUgdGhyZWUgY2FuZGlkYXRlcyBoYW5kcyBITiBhIGJldHRlciBhcmd1bWVudCB0aGFuIHlvdXIKcHJvZHVjdC4KClRoZSBzaG9ydCB2ZXJzaW9uOgoKfCBUaXRsZSB8IEV4cGVjdGVkIHJlYWNoIHwgV2hhdCB0aGUgdG9wIGNvbW1lbnQgYXR0YWNrcyB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCAqKkEuIDE2IGFnZW50cyAvIHlvdXIgb3duIG1hY2hpbmVzKiogfCBHb29kIHwgIkhvdyBpcyB0aGlzIGRpZmZlcmVudCBmcm9tIGp1c3QgcnVubmluZyB0aGVtPyIg4oCUIGFuc3dlcmFibGUsIG9uLXRvcGljIHwKfCAqKkIuIHJvdGF0ZXMgNyBDbGF1ZGUgYWNjb3VudHMqKiB8IEhpZ2hlc3QgfCAqKiJJcyB0aGlzIGEgVG9TIHZpb2xhdGlvbj8iKiog4oCUIHRocmVhZCBiZWNvbWVzIGFib3V0IEFudGhyb3BpYywgbm90IHlvdSB8CnwgKipDLiBtYWNoaW5lcyB5b3Ugb3duLCBub3QgYSBjbG91ZCBzYW5kYm94KiogfCBNb2RlcmF0ZSB8ICJTYW5kYm94aW5nIGV4aXN0cyBmb3IgYSByZWFzb24iIOKAlCBvbi10b3BpYywgbWlsZCB8CgpSZWNvbW1lbmRhdGlvbjogKipBKiosIHdpdGggQidzIHJvdGF0aW9uIGRldGFpbCBtb3ZlZCBpbnRvIHRoZSBib2R5IHdoZXJlIGl0IGlzCmNvbnRleHQgcmF0aGVyIHRoYW4gdGhlIGhlYWRsaW5lIGNsYWltLgoKIyMgRmluZGluZ3MKCiMjIyBXaHkgInN0cmVzcyB0ZXN0ZWQiIGlzIGEgcmVhbCBjb3N0LCBub3QgYSBjYXZlYXQKCkEgU2hvdyBITiB0aXRsZSBpcyBhIHByb21pc2UgdGhlIHRocmVhZCB3aWxsIHRyeSB0byBmYWxzaWZ5LiBUaGF0IGlzIHRoZQptZWNoYW5pYyB0aGF0IG1ha2VzIGEgc3BlY2lmaWMgbnVtYmVyIHZhbHVhYmxlIOKAlCBhIHJlYWRlciBjYW4gZXZhbHVhdGUgdGhlIGNsYWltCmZyb20gdGhlIHRpdGxlIGFsb25lLCB3aGljaCBpcyB3aHkgdGhleSBjbGljay4gSXQgaXMgdGhlIHNhbWUgbWVjaGFuaWMgdGhhdCBtYWtlcwp0aGUgd3JvbmcgbnVtYmVyIGV4cGVuc2l2ZS4KCkNhbmRpZGF0ZSBCIGlzIGBTaG93IEhOOiBBZ2kgLSBvcGVuLXNvdXJjZSBDTEkgdGhhdCByb3RhdGVzIDcgQ2xhdWRlIGFjY291bnRzIHNvCnJ1bnMgbmV2ZXIgc3RhbGxgLiBJdCBjb250YWlucyB0d28gc2VwYXJhdGVseSBhdHRhY2thYmxlIHRoaW5nczoKCioqMS4gIjcgQ2xhdWRlIGFjY291bnRzIiBpbnZpdGVzIGEgdGVybXMtb2Ytc2VydmljZSBhcmd1bWVudC4qKiBITiBoYXMgYQp3ZWxsLWVzdGFibGlzaGVkIHJlZmxleCBmb3IgYW55dGhpbmcgdGhhdCBsb29rcyBsaWtlIHdvcmtpbmcgYXJvdW5kIGEgdmVuZG9yJ3MKcmF0ZSBsaW1pdHMuIFRoZSBsaWtlbHkgdG9wIGNvbW1lbnQgaXMgc29tZSBmb3JtIG9mICoiaXNuJ3QgdGhpcyBqdXN0IGNpcmN1bXZlbnRpbmcKcGVyLXNlYXQgcHJpY2luZz8iKiBZb3UgaGF2ZSBhIGdvb2QgYW5zd2VyIOKAlCB0aGV5IGFyZSBzdWJzY3JpcHRpb25zIHlvdSBwYXkgZm9yLApvbmUgaHVtYW4sIGFuZCByb3RhdGlvbiBwaWNrcyBieSByZW1haW5pbmcgaGVhZHJvb20gcmF0aGVyIHRoYW4gZXZhZGluZyBhIGNhcCDigJQKYnV0IHlvdSB3aWxsIGJlICptYWtpbmcqIHRoYXQgYW5zd2VyIGluc3RlYWQgb2YgdGFsa2luZyBhYm91dCB0aGUgcHJvZHVjdC4gV29yc2UsCnRoZSBhbnN3ZXIgaXMgbm90IGZ1bGx5IHlvdXJzIHRvIGdpdmU6IHdoZXRoZXIgaXQgaXMgcGVybWl0dGVkIGlzIEFudGhyb3BpYydzIGNhbGwsCm5vdCB5b3Vycywgc28geW91IGNhbm5vdCBjbG9zZSB0aGUgYXJndW1lbnQsIG9ubHkgcGFydGljaXBhdGUgaW4gaXQuCgoqKjIuICJuZXZlciBzdGFsbCIgaXMgYW4gYWJzb2x1dGUuKiogT25lIGNvbW1lbnRlciByZXBvcnRpbmcgYSBzdGFsbCBmYWxzaWZpZXMgdGhlCnRpdGxlLiBBYnNvbHV0ZXMgcmVhZCBhcyBtYXJrZXRpbmcgdG8gdGhpcyBhdWRpZW5jZSwgYW5kIHRoZSBlbXBpcmljYWwgYW5hbHlzaXMKYWxyZWFkeSBzaG93ZWQgaHlwZS1zaGFwZWQgdGl0bGVzIHNjb3JlIGJhZGx5IChuPTksIG5vbmUgY2xlYXJlZCA1MCBwb2ludHMpLgoKVGhlIGNvc3QgaXMgbm90IHRoYXQgdGhlIGxhdW5jaCBmYWlscy4gSXQgaXMgdGhhdCBhIHRocmVhZCB3aGljaCBzaG91bGQgYmUgYWJvdXQKYSBjb250cm9sIHBsYW5lIGZvciBjb2RpbmcgYWdlbnRzIGJlY29tZXMgYSByZWZlcmVuZHVtIG9uIG11bHRpLWFjY291bnQgdXNhZ2UsCmFuZCB0aGUgdG9wLXZvdGVkIHRha2Vhd2F5IGlzICJjbGV2ZXIgcmF0ZS1saW1pdCB3b3JrYXJvdW5kIiByYXRoZXIgdGhhbgoiaW5mcmFzdHJ1Y3R1cmUgSSB3YW50LiIKCiMjIyBXaGF0IHRoZSB0aHJlYWQgd2lsbCBhdHRhY2sgcmVnYXJkbGVzcyBvZiB0aXRsZQoKUHJlcGFyZSB0aGVzZSBmb3VyLiBIYXZpbmcgYSBjcmlzcCBhbnN3ZXIgcmVhZHkgaXMgd29ydGggbW9yZSB0aGFuIHRoZSB0aXRsZQpjaG9pY2UsIGJlY2F1c2UgZW5nYWdlbWVudCBmcm9tIHRoZSBzdWJtaXR0ZXIgaXMgd2hhdCBjb3JyZWxhdGVzIHdpdGggcmFua2luZwpsb25nZXZpdHkuCgp8IE9iamVjdGlvbiB8IFRoZSBob25lc3QgYW5zd2VyIHwKfCAtLS0gfCAtLS0gfAp8ICoqIldoeSBub3QganVzdCBydW4gdGhlIGhhcm5lc3NlcyBkaXJlY3RseT8iKiogfCBCZWNhdXNlIHRoZSBoYXJkIHBhcnQgaXMgbm90IHN0YXJ0aW5nIGFnZW50cywgaXQgaXMgdGhhdCB0aGV5IHN0YWxsIOKAlCB0aGV5IGFzayBhIHF1ZXN0aW9uIGFuZCBpZGxlLCBvciBzdG9wIG1pZC10YXNrLiBTZXNzaW9ucywgcmVzdW1lLCBhbmQgdGhlIGZsZWV0IHZpZXcgZXhpc3QgdG8gbm90aWNlIGEgc3RvcHBlZCBhZ2VudCBhbmQgZ2V0IGl0IG1vdmluZy4gTGVhZCB3aXRoIHRoaXM7IGl0IGlzIHRoZSBhY3R1YWwgdGhlc2lzLiB8CnwgKioiSXNuJ3QgdGhpcyB3aGF0IE9wZW5Db2RlIC8gQ2xhdWRlIENvZGUgYWxyZWFkeSBkbz8iKiogfCBUaG9zZSBhcmUgaGFybmVzc2VzLiBUaGlzIHJ1bnMgKnRoZW0qLCBwbHVzIDE0IG90aGVycywgYWNyb3NzIG1hY2hpbmVzIHlvdSBvd24uIEl0IGlzIGEgbGF5ZXIgdXAsIG5vdCBhIGNvbXBldGl0b3IuIFNheSBzbyBwbGFpbmx5IOKAlCB0aGUgZGlzdGluY3Rpb24gaXMgcmVhbCBhbmQgZWFzeSB0byBtaXNzLiB8CnwgKioiTXVsdGlwbGUgYWNjb3VudHMgc291bmRzIGxpa2UgYSBUb1MgcHJvYmxlbS4iKiogfCBUaGV5IGFyZSBzdWJzY3JpcHRpb25zIHlvdSBwYXkgZm9yOyByb3RhdGlvbiBwaWNrcyBieSByZW1haW5pbmcgaGVhZHJvb20sIGFuZCBza2lwcyByYXRlLWxpbWl0ZWQgYWNjb3VudHMgcmF0aGVyIHRoYW4gZXZhZGluZyBsaW1pdHMuIElmIGl0IGlzIGluIHRoZSBib2R5IHJhdGhlciB0aGFuIHRoZSB0aXRsZSwgdGhpcyBzdGF5cyBhIGZvb3Rub3RlLiB8CnwgKioiVGhpcyBpcyBhIGxvdCBvZiBzdXJmYWNlIGZvciBvbmUgdG9vbC4iKiogfCBGYWlyLiBJdCBpcyBhIHBvd2VyLXVzZXIgdG9vbCBhbmQgdGhlIGRvY3MgYXNzdW1lIHlvdSBhbHJlYWR5IHJ1biBhZ2VudHMgZGFpbHkuIENvbmNlZGUgaXQgcmF0aGVyIHRoYW4gZGVmZW5kaW5nOyBjb25jZWRpbmcgYSByZWFsIHdlYWtuZXNzIGJ1eXMgY3JlZGliaWxpdHkgZm9yIGV2ZXJ5dGhpbmcgZWxzZS4gfAoKIyMgRXZpZGVuY2UKCk51bWJlcnMgaW4gdGhlIGJvZGllcyBiZWxvdywgYW5kIHdoZXJlIGVhY2ggY29tZXMgZnJvbToKCnwgQ2xhaW0gfCBTb3VyY2UgfAp8IC0tLSB8IC0tLSB8CnwgMTYgaGFybmVzc2VzIHwgYGFwcHMvY2xpL0FHRU5UUy5tZGAgaGFybmVzcyBwYXJpdHkgbGlzdCB8CnwgMyw3MDMgc2Vzc2lvbiB0cmFuc2NyaXB0cyB8IGBmaW5kIH4vLmFnZW50cy8uaGlzdG9yeS92ZXJzaW9ucyAtbmFtZSAnKi5qc29ubCdgIHwKfCBTZXZlcmFsIGFjY291bnRzIHBlciBoYXJuZXNzLCBoZWFkcm9vbS1zY2hlZHVsZWQgfCBgYWdlbnRzIHZpZXdgIG91dHB1dCB8CnwgQXBhY2hlLTIuMCB8IGBMSUNFTlNFYCB8CgpEbyBub3QgcHV0IGEgbnVtYmVyIGluIGEgcG9zdCB5b3UgaGF2ZSBub3QgcnVuIHRoZSBjb21tYW5kIGZvciB0aGF0IG1vcm5pbmcuClRoZSBvbmUgY2VydGFpbnR5IGFib3V0IEhOIGlzIHRoYXQgc29tZW9uZSB3aWxsIGNoZWNrLgoKIyMgUmVjb21tZW5kYXRpb25zCgojIyMgVGhlIFNob3cgSE4gdGl0bGUsIHJhbmtlZAoKYGBgCkEuICBTaG93IEhOOiBPcGVuLXNvdXJjZSBDTEkgdGhhdCBydW5zIDE2IGNvZGluZyBhZ2VudHMgYWNyb3NzIHlvdXIgb3duIG1hY2hpbmVzCkIuICBTaG93IEhOOiBBZ2kgLSBvcGVuLXNvdXJjZSBDTEkgdGhhdCByb3RhdGVzIDcgQ2xhdWRlIGFjY291bnRzIHNvIHJ1bnMgbmV2ZXIgc3RhbGwKQy4gIFNob3cgSE46IFJ1biBjb2RpbmcgYWdlbnRzIG9uIG1hY2hpbmVzIHlvdSBvd24sIG5vdCBhIHBlci1zZWF0IGNsb3VkIHNhbmRib3gKYGBgCgoqKkEgaXMgdGhlIHBpY2suKiogNzYgY2hhcmFjdGVycywgaW5zaWRlIHRoZSA2NS04NSBiYW5kIHRoYXQgYXZlcmFnZWQgMTEuMCBwb2ludHMKYWdhaW5zdCA2LjEgZm9yIHNob3J0IHRpdGxlcy4gSXQgY2FycmllcyAib3Blbi1zb3VyY2UiICh0aGUgc3Ryb25nZXN0IHNpbmdsZQpsZXZlcjogbWVhbiAyMy43IHZzIDguNCkgYW5kIGEgbnVtYmVyICgxNy4zIHZzIDguMiksIGFuZCB0aGUgbnVtYmVyIGl0IGNhcnJpZXMg4oCUCjE2IOKAlCBpcyBjaGVja2FibGUsIGRlZmVuc2libGUsIGFuZCBib3JpbmcgaW4gdGhlIHJpZ2h0IHdheS4gTm9ib2R5IHN0YXJ0cyBhIGZpZ2h0CmFib3V0IGhvdyBtYW55IGhhcm5lc3NlcyB5b3Ugc3VwcG9ydC4KCiMjIyBUaGUgZnVsbCBTaG93IEhOIGJvZHkKClBhc3RlIGFzLWlzLiBSb3VnaGx5IDE5MCB3b3Jkcywgd2hpY2ggaXMgdGhlIHJpZ2h0IGxlbmd0aDogZW5vdWdoIHRvIGVzdGFibGlzaAp0aGUgdGhlc2lzLCBzaG9ydCBlbm91Z2ggdGhhdCB0aGUgY29tbWVudHMgY2FycnkgdGhlIHJlc3QuCgpgYGAKYWdpLWNsaSBpcyBhIGNvbnRyb2wgcGxhbmUgZm9yIHJ1bm5pbmcgbWFueSBjb2RpbmcgYWdlbnRzIGF0IG9uY2UgYW5kIGRyaXZpbmcKZWFjaCBvbmUgdG8gYSBtZXJnZWQgUFIgcmF0aGVyIHRoYW4ganVzdCBzdGFydGluZyBpdC4KClN0YXJ0aW5nIGFuIGFnZW50IGlzIHRoZSBlYXN5IHBhcnQuIFRoZSBoYXJkIHBhcnQgaXMgdGhhdCBhZ2VudHMgc3RhbGw6IHRoZXkKYXNrIGEgcXVlc3Rpb24gYW5kIGlkbGUsIHN0b3AgbWlkLXRhc2ssIG9yIGhhbmQgd29yayBiYWNrIGluc3RlYWQgb2YgZmluaXNoaW5nCml0LiBNb3N0IG9mIHdoYXQgaXMgaW4gaGVyZSBleGlzdHMgdG8gbm90aWNlIGFuIGFnZW50IHRoYXQgc3RvcHBlZCBtYWtpbmcKcHJvZ3Jlc3MgYW5kIGdldCBpdCBtb3ZpbmcgYWdhaW4uCgpJdCBpbnN0YWxscyBhbmQgdmVyc2lvbi1waW5zIHRoZSBoYXJuZXNzZXMgKENsYXVkZSwgQ29kZXgsIEdlbWluaSwgQ3Vyc29yLApPcGVuQ29kZSwgR3JvaywgRHJvaWQgYW5kIDkgbW9yZSksIHJ1bnMgdGhlbSBvbiBzdWJzY3JpcHRpb25zIHlvdSBhbHJlYWR5IHBheQpmb3IsIGFuZCBzcHJlYWRzIHdvcmsgYWNyb3NzIHlvdXIgb3duIG1hY2hpbmVzIG92ZXIgU1NILgoKU29tZSBzcGVjaWZpY3M6CgotIFNlc3Npb25zIGFyZSBmaXJzdC1jbGFzczogc2VhcmNoYWJsZSB0cmFuc2NyaXB0cyBzeW5jZWQgYWNyb3NzIGRldmljZXMsIGFuZAogIHJlc3VtYWJsZSBvbiBhIGRpZmZlcmVudCBtYWNoaW5lIHRoYW4gdGhleSBzdGFydGVkIG9uLgotIFRlYW1zIHJ1biBzZXZlcmFsIGFnZW50cyBpbiBwYXJhbGxlbCwgZWFjaCBpc29sYXRlZCBpbiBpdHMgb3duIGdpdCB3b3JrdHJlZQogIHdpdGggYW4gZXhwbGljaXQgYm91bmRhcnkgY29udHJhY3Qgc28gdGhleSBkbyBub3QgY2xvYmJlciBlYWNoIG90aGVyLgotIFRoZSBicm93c2VyIGlzIGEgc2hhcmVkIHJlc291cmNlLiBTZXZlcmFsIGFnZW50cyBjYW4gYXR0YWNoIHRvIG9uZSBsaXZlCiAgYnJvd3NlciBzZXNzaW9uIGluc3RlYWQgb2YgZWFjaCBzcGF3bmluZyBpdHMgb3duIGFuZCByZS1hdXRoZW50aWNhdGluZy4KLSBTZWNyZXRzIHNpdCBpbiB0aGUgT1Mga2V5Y2hhaW4gYW5kIGluamVjdCBpbnRvIGhlYWRsZXNzIHJ1bnMsIHNvIHVuYXR0ZW5kZWQKICB3b3JrIGRvZXMgbm90IHN0YWxsIG9uIGEgVG91Y2ggSUQgcHJvbXB0LgotIFNldmVyYWwgYWNjb3VudHMgb2YgdGhlIHNhbWUgaGFybmVzcyByb3RhdGUgdW5kZXIgb25lIHBvbGljeSwgcGlja2VkIGJ5CiAgcmVtYWluaW5nIGhlYWRyb29tLgoKQXBhY2hlLTIuMC4gSXQgaXMgYSBwb3dlci11c2VyIHRvb2wgYW5kIHRoZSBkb2NzIGFzc3VtZSB5b3UgYWxyZWFkeSBydW4gYWdlbnRzCmRhaWx5LiBIYXBweSB0byBnbyBpbnRvIHRoZSBzY2hlZHVsaW5nIG9yIHRoZSBzZXNzaW9uIG1vZGVsLgpgYGAKCk5vdGUgdGhlIGxhc3QgYnVsbGV0OiB0aGUgcm90YXRpb24gZGV0YWlsIGlzIHByZXNlbnQsIGJ1dCBhcyB0aGUgZmlmdGggaXRlbSBpbiBhCmxpc3QgcmF0aGVyIHRoYW4gdGhlIGhlYWRsaW5lLiBJdCBnZXRzIGRpc2NvdmVyZWQgYnkgcGVvcGxlIHdobyByZWFkLCB3aGljaCBpcwp0aGUgYXVkaWVuY2UgeW91IHdhbnQgaXQgdG8gcmVhY2guCgojIyMgVGhlIGZpcnN0IGNvbW1lbnQsIHBvc3RlZCBieSB5b3UsIGltbWVkaWF0ZWx5CgpQb3N0IHRoaXMgeW91cnNlbGYgd2l0aGluIGEgbWludXRlIG9mIHN1Ym1pdHRpbmcuIEl0IGFic29yYnMgdGhlICJ3aHkgZG9lcyB0aGlzCmV4aXN0IiBxdWVzdGlvbiBiZWZvcmUgc29tZW9uZSBlbHNlIGZyYW1lcyBpdCwgYW5kIHN1Ym1pdHRlciBlbmdhZ2VtZW50IGRyaXZlcwpyYW5raW5nIGxvbmdldml0eS4KCmBgYApTb21lIGNvbnRleHQgb24gd2h5IHRoaXMgZXhpc3RzIHJhdGhlciB0aGFuIHdoYXQgaXQgZG9lcy4KCkkgcnVuIGEgbG90IG9mIGNvZGluZyBhZ2VudHMgY29uY3VycmVudGx5IGFjcm9zcyBhIGhhbmRmdWwgb2YgbWFjaGluZXMuIFRoZQpmYWlsdXJlIG1vZGUgdGhhdCBhY3R1YWxseSBjb3N0cyB0aW1lIGlzIG5vdCBhIGJhZCBkaWZmLCBpdCBpcyBhbiBhZ2VudCB0aGF0CnF1aWV0bHkgc3RvcHBlZDogd2FpdGluZyBvbiBhIHByb21wdCBub2JvZHkgYW5zd2VyZWQsIG9yIGlkbGUgbWlkLXRhc2sgd2l0aCB0aGUKd29yayBoYWxmLWRvbmUuIElkbGUtYnV0LXVuZmluaXNoZWQgaXMgdGhlIHdvcnN0IHN0YXRlIGJlY2F1c2UgaXQgbG9va3MgbGlrZQpub3RoaW5nIGlzIHdyb25nLgoKU28gdGhlIGRlc2lnbiBjb25zZXF1ZW5jZSBpcyB0aGF0IGV2ZXJ5IHN0YXR1cyBzdXJmYWNlIHJhbmtzIGJ5IHByb2dyZXNzIHJhdGhlcgp0aGFuIGxpdmVuZXNzLiBBIHJ1bm5pbmcgYWdlbnQgbmVlZHMgbm90aGluZyBmcm9tIHlvdS4gVGhlIG9uZXMgdGhhdCBuZWVkIHlvdQphcmUgdGhlIG9uZXMgdGhhdCBzdG9wcGVkLCBhbmQgdGhvc2UgZ2V0IHN1cmZhY2VkIGZpcnN0IGluc3RlYWQgb2YgYnVyaWVkIHVuZGVyCnRoZSBoZWFsdGh5IG9uZXMuCgpIYXBweSB0byBhbnN3ZXIgYW55dGhpbmcgYWJvdXQgdGhlIHNlc3Npb24gbW9kZWwsIHRoZSBzY2hlZHVsZXIsIG9yIHdoZXJlIGl0CmZhbGxzIG92ZXIuCmBgYAoKIyMjIFRoZSByL0NsYXVkZUFJIGFuZCByL0NsYXVkZUNvZGUgcG9zdAoKRG8gKipub3QqKiBwb3N0IHRoZSBsYXVuY2ggaGVyZS4gVGhlc2Ugc3VicyBleHBlY3Qgcm91Z2hseSA5MC8xMCBoZWxwZnVsLXRvLXByb21vLAphbmQgYSBjb2xkIGxhdW5jaCBwb3N0IHJlYWRzIGFzIHNwYW0uIFBvc3QgYSB3b3JrZmxvdzsgbGV0IHRoZSB0b29sIGJlIGluY2lkZW50YWwuCgpgYGAKVGl0bGU6IEhvdyBJIHN0b3BwZWQgbG9zaW5nIHdvcmsgdG8gYWdlbnRzIHRoYXQgc3RhbGwgbWlkLXRhc2sKYGBgCgpgYGAKVGhlIHRoaW5nIHRoYXQgY29zdHMgbWUgdGhlIG1vc3QgdGltZSB3aXRoIENsYXVkZSBDb2RlIGlzIG5vdCBhIGJhZCBlZGl0LiBJdCBpcwphIHNlc3Npb24gdGhhdCBxdWlldGx5IHN0b3BwZWQg4oCUIHdhaXRpbmcgb24gYSBwcm9tcHQgSSBuZXZlciBzYXcsIG9yIGlkbGUKaGFsZndheSB0aHJvdWdoIHdpdGggdGhlIHdvcmsgdW5maW5pc2hlZC4gSXQgbG9va3MgaWRlbnRpY2FsIHRvIGEgc2Vzc2lvbiB0aGF0CmlzIHRoaW5raW5nLgoKVHdvIHRoaW5ncyB0aGF0IGhlbHBlZCBtb3JlIHRoYW4gYW55IHByb21wdCBjaGFuZ2U6CgoxLiBSYW5rIHNlc3Npb25zIGJ5IHByb2dyZXNzLCBub3QgYnkgd2hldGhlciB0aGV5IGFyZSBydW5uaW5nLiBBIHJ1bm5pbmcgYWdlbnQKICAgbmVlZHMgbm90aGluZyBmcm9tIG1lLiBUaGUgb25lcyB3b3J0aCBteSBhdHRlbnRpb24gYXJlIHRoZSBzdG9wcGVkIG9uZXMsIGFuZAogICBpZGxlLWJ1dC11bmZpbmlzaGVkIGlzIHRoZSBoaWdoZXN0IHJpc2sgc3RhdGUsIG5vdCB0aGUgbG93ZXN0IOKAlCB0aGF0IGlzIHRoZQogICBvbmUgbW9zdCBsaWtlbHkgdG8gZ2V0IHNpbGVudGx5IGFiYW5kb25lZC4KCjIuIE1ha2UgdGhlIGNvbXBsZXRpb24gY29udHJhY3QgZXhwbGljaXQgaW4gQ0xBVURFLm1kLiAiWW91ciB0YXNrIGlzIGRvbmUgd2hlbgogICB0aGUgUFIgaXMgbWVyZ2VkLCBvciB5b3UgaGF2ZSBuYW1lZCB3aG8gbm93IG93bnMgaXQiIHJlbW92ZWQgbW9zdCBvZiB0aGUKICAgaGFuZC1iYWNrLWFuZC1pZGxlIGJlaGF2aW9yIGZvciBtZS4gQWdlbnRzIHN0b3AgYXQgIlBSIG9wZW5lZCIgdW5sZXNzIHlvdQogICB0ZWxsIHRoZW0gdGhhdCBpcyBub3QgdGhlIGZpbmlzaCBsaW5lLgoKW2NvbmNyZXRlIGNvbmZpZyBoZXJlXQoKSSBlbmRlZCB1cCBidWlsZGluZyB0b29saW5nIGFyb3VuZCB0aGlzIChsaW5rIGluIHByb2ZpbGUgLyBoYXBweSB0byBzaGFyZSBpZgp1c2VmdWwpIGJ1dCB0aGUgdHdvIGlkZWFzIGFib3ZlIHdvcmsgd2l0aCBwbGFpbiBDbGF1ZGUgQ29kZSBhbmQgY29zdCBub3RoaW5nLgpgYGAKCk1lbnRpb24gdGhlIHRvb2wgb25jZSwgbmVhciB0aGUgZW5kLCBvciBub3QgYXQgYWxsIG9uIHRoZSBmaXJzdCBwb3N0LiBJZiBpdApsYW5kcywgdGhlIGZvbGxvdy11cCBwb3N0IGlzIHdoZXJlIHRoZSBsaW5rIGdvZXMuIFR3byB1c2VmdWwgcG9zdHMgYmVhdCBvbmUKcHJvbW90aW9uYWwgb25lLgoKIyMjIFRoZSByL0xvY2FsTExhTUEgcG9zdAoKVGhpcyBhdWRpZW5jZSBpcyBsb2NhbC1tb2RlbC1maXJzdC4gRG8gbm90IGxlYWQgd2l0aCBDbGF1ZGUsIGFuZCBkbyBub3QgbGVhZCB3aXRoCmZlYXR1cmVzLiBMZWFkIHdpdGggb3duZXJzaGlwLgoKYGBgClRpdGxlOiBSdW5uaW5nIGNvZGluZyBhZ2VudHMgYWNyb3NzIHlvdXIgb3duIGJveGVzIGluc3RlYWQgb2YgYSBwZXItc2VhdCBjbG91ZCBzYW5kYm94CmBgYAoKYGBgCk1vc3QgYWdlbnQgdG9vbGluZyBhc3N1bWVzIHRoZSBhZ2VudCBydW5zIGluIHNvbWVvbmUgZWxzZSdzIHNhbmRib3gsIGJpbGxlZCBwZXIKc2VhdC4gSSB3YW50ZWQgdGhlIG9wcG9zaXRlOiBhZ2VudHMgcnVubmluZyBvbiBoYXJkd2FyZSBJIGFscmVhZHkgb3duLCBvdmVyIFNTSCwKYWdhaW5zdCB3aGF0ZXZlciBtb2RlbCBJIHBvaW50IHRoZW0gYXQuCgpXaGF0IHRoYXQgZW5kZWQgdXAgcmVxdWlyaW5nOgoKLSBBIGRpc3BhdGNoIGxheWVyIHRoYXQgdHJlYXRzIGEgZmxlZXQgb2YgbWFjaGluZXMgYXMgb25lIGFkZHJlc3Mgc3BhY2UsIHNvIHdvcmsKICBnb2VzIHRvIGEgYm94IHdpdGggaGVhZHJvb20gcmF0aGVyIHRoYW4gdGhlIG9uZSBJIGFtIHNpdHRpbmcgYXQuCi0gU2Vzc2lvbiB0cmFuc2NyaXB0cyB0aGF0IHN5bmMgYWNyb3NzIGRldmljZXMsIHNvIGEgcnVuIHN0YXJ0ZWQgb24gb25lIG1hY2hpbmUKICBpcyBzZWFyY2hhYmxlIGFuZCByZXN1bWFibGUgZnJvbSBhbm90aGVyLgotIFBhcmFsbGVsIGFnZW50cyBpc29sYXRlZCBwZXIgZ2l0IHdvcmt0cmVlLCBiZWNhdXNlIHRoZSBtb21lbnQgdHdvIGFnZW50cyBzaGFyZQogIGEgY2hlY2tvdXQgdGhleSBjbG9iYmVyIGVhY2ggb3RoZXIncyBpbmRleC4KCkl0IGlzIGhhcm5lc3MtYWdub3N0aWMg4oCUIGl0IGRyaXZlcyBDbGF1ZGUsIENvZGV4LCBhbmQgR2VtaW5pLCBidXQgaXQgd2lsbCBkcml2ZSBhCmxvY2FsIG1vZGVsIHRocm91Z2ggT3BlbkNvZGUganVzdCBhcyBoYXBwaWx5LCB3aGljaCBpcyB0aGUgY29uZmlndXJhdGlvbiBJIHdvdWxkCmFjdHVhbGx5IHJlY29tbWVuZCBpZiB5b3UgYXJlIHRyeWluZyB0byBrZWVwIGV2ZXJ5dGhpbmcgb24geW91ciBvd24gbWV0YWwuCgpBcGFjaGUtMi4wLiBHZW51aW5lbHkgaW50ZXJlc3RlZCBpbiB3aGF0IGJyZWFrcyBmb3IgcGVvcGxlIHJ1bm5pbmcgZnVsbHkgbG9jYWwuCmBgYAoKIyMjIFNlcXVlbmNlCgo5MiUgb2YgYSBTaG93IEhOJ3Mgc3RhciBpbXBhY3QgaXMgZ29uZSBhZnRlciA0OCBob3Vycywgc28gZXZlcnl0aGluZyBmaXJlcyBpbiBvbmUKd2luZG93LgoKfCBXaGVuIHwgQWN0aW9uIHwKfCAtLS0gfCAtLS0gfAp8IC0xNCBkYXlzIHwgU3RhcnQgY29tbWVudGluZyBpbiByL0NsYXVkZUFJLCByL0NsYXVkZUNvZGUsIHIvTG9jYWxMTGFNQS4gQWdlZCBwcmVzZW5jZSBpcyB0aGUgcHJlcmVxdWlzaXRlOyBhIGNvbGQgYWNjb3VudCBnZXRzIHJlbW92ZWQgfAp8IC0xNCBkYXlzIHwgT3BlbiB0aGUgYXdlc29tZS1saXN0IFBScyDigJQgdGhleSBoYXZlIHJldmlldyBsYWcgfAp8IC0xIGRheSB8IFByZS1zZWVkIHBhc3QgMTAwIHN0YXJzIHwKfCAwIChTdW4gN3BtIEVUKSB8IFNob3cgSE4sIHRoZW4geW91ciBvd24gZmlyc3QgY29tbWVudCB3aXRoaW4gYSBtaW51dGUgfAp8ICswLTJoIHwgci9DbGF1ZGVDb2RlLCByL0xvY2FsTExhTUEsIHIvY29tbWFuZGxpbmUgfAp8ICsyaCB8IFggdGhyZWFkIHdpdGggdGhlIGhlcm8gR0lGIHwKfCArNGggfCBQcm9kdWN0IEh1bnQgfAp8ICswLTQ4aCB8IEFuc3dlciBldmVyeSBjb21tZW50IHBlcnNvbmFsbHkgfAoKIyMjIFdoYXQgbm90IHRvIGRvCgotIERvIG5vdCBydW4gdGl0bGUgQiB1bmxlc3MgeW91IGFyZSBwcmVwYXJlZCBmb3IgdGhlIHRocmVhZCB0byBiZSBhYm91dCBBbnRocm9waWMncwogIHRlcm1zIHJhdGhlciB0aGFuIHlvdXIgcHJvZHVjdC4KLSBEbyBub3QgcG9zdCBpZGVudGljYWwgY29weSB0byBzZXZlcmFsIHN1YnJlZGRpdHMuIFRoYXQgaXMgdGhlIGZhc3Rlc3Qgcm91dGUgdG8KICByZW1vdmFsIGZyb20gYWxsIG9mIHRoZW0sIHdoaWNoIGlzIHdoeSB0aGUgdGhyZWUgYm9kaWVzIGFib3ZlIGFyZSBnZW51aW5lbHkKICBkaWZmZXJlbnQgcmF0aGVyIHRoYW4gcmVza2lubmVkLgotIERvIG5vdCBwdXQgYSBudW1iZXIgaW4gYW55IHBvc3QgeW91IGhhdmUgbm90IHJlLXJ1biB0aGUgY29tbWFuZCBmb3IgdGhhdCBtb3JuaW5nLgo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>
