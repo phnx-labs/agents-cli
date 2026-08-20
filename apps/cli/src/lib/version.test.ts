@@ -23,7 +23,7 @@ describe('version', () => {
   // A real test has to swap package.json under a running process. That needs an
   // injectable base path: the path is hardcoded, and the file is shared by every
   // parallel vitest fork, so mutating it here would corrupt other tests. Tracked
-  // as RUSH-2844. A test that cannot fail is worse than an absent one — it
+  // as RUSH-2862. A test that cannot fail is worse than an absent one — it
   // reports the contract as guarded when it is not.
 });
 
