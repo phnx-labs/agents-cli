@@ -18,7 +18,7 @@ import type { AgentId, DiscoveredPlugin, PluginManifest, MarketplaceSpec } from 
 import { getPluginsDir, getTrashPluginsDir, getExtraPluginsDir, getProjectPluginsDir, getSystemPluginsDir } from '../state.js';
 import { IS_WINDOWS, isWindowsAbsolutePath, homeDir } from '../platform/index.js';
 import { assertSafeGitTransport, resolveSnapshotSha } from '../git.js';
-import { listInstalledVersions, getVersionHomePath } from '../installations/versions.js';
+import { listInstalledVersions, getVersionHomePath } from '../installations/store.js';
 import { AGENTS, agentConfigDirName } from '../agents.js';
 import { capableAgents, isCapable } from '../capabilities.js';
 import { shouldInstallCommandAsSkill, installCommandSkillToVersion } from '../command-skills.js';

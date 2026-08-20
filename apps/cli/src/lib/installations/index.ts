@@ -9,8 +9,6 @@
  */
 
 export {
-  INSTALLATION_RECORD_FILE,
-  INSTALLATION_SCHEMA,
   type Installation,
   type InstallationRelease,
   type UpdateOutcome,
@@ -19,27 +17,17 @@ export {
 
 export {
   createInstallation,
-  ensureInstallation,
-  installationDir,
-  installationRecordPath,
-  listInstallationLabels,
   listInstallations,
-  mintInstallationId,
-  readInstallation,
   recordRelease,
-  writeInstallation,
 } from './store.js';
 
 export {
-  InstallationAmbiguousError,
-  InstallationNotFoundError,
   describeInstallation,
   resolveInstallation,
   type ResolveInstallationOptions,
 } from './resolve.js';
 
 export {
-  assertValidRelease,
   selectUpdateStrategy,
   supportsPinnedUpdate,
   type UpdateStrategy,
