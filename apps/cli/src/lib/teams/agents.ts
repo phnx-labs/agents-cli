@@ -35,6 +35,7 @@ import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { pullRemoteLogDelta, REMOTE_MIRROR_MAX_BYTES } from '../hosts/progress.js';
 import { createRemoteWorktree, ensureRemoteRepo } from './remoteWorktree.js';
 import { getTeam, isTeamDisbanded } from './registry.js';
+import { atomicWriteJson } from '../atomic-write.js';
 import { resolvePlacement, classifyExclusions, NoViableDeviceError } from './scheduler.js';
 import { probePoolSignals } from './placement-probe.js';
 import { readMaxConcurrentCaps } from '../device-config.js';
@@ -373,24 +374,6 @@ function extractTimestamp(raw: any): Date | null {
   }
 
   return null;
-}
-
-/**
- * Atomic JSON write: writes to a unique sibling tmp file then renames over the
- * target. rename(2) is atomic on POSIX, so a process killed mid-write leaves
- * either the previous valid meta.json or the new one, never a torn,
- * unparseable file (RUSH-2429). Mirrors the identical pattern already used by
- * `teams/registry.ts`'s `atomicWriteJson`.
- */
-async function atomicWriteJson(p: string, data: unknown): Promise<void> {
-  const tmp = `${p}.tmp.${process.pid}.${randomUUID()}`;
-  await fs.writeFile(tmp, JSON.stringify(data, null, 2));
-  try {
-    await fs.rename(tmp, p);
-  } catch (err) {
-    await fs.unlink(tmp).catch(() => {});
-    throw err;
-  }
 }
 
 /** Resolve a mode string to a validated Mode, falling back to the given default. */
