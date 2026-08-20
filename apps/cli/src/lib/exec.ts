@@ -33,9 +33,11 @@ import { isTmuxEnabled } from './device-config.js';
 import { machineId } from './machine-id.js';
 import { shellQuote } from './ssh-exec.js';
 import { codexEditWritableRoots, codexPolicyArgs } from './codex-policy.js';
+import { resolveClaudeSetupToken } from './claude-account-token.js';
 import { applyAddDirs } from './add-dir.js';
 import { applyActiveRulesPresetAtRun } from './rules/run-sync.js';
 import { resolveHarnessAdapter, stripForeignConfigDir } from './harness/index.js';
+import { resolveConfigVersion } from './harness/exec-config-version.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -418,11 +420,20 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
   // `else`) has no adapter override, so all four are stripped here.
   const configAdapter = resolveHarnessAdapter(options.agent);
   if (configAdapter.applyExecConfigEnv) {
+    // Resolve version/versionHome here (this module already imports
+    // installations/versions); the adapters must not import it themselves or they
+    // close a versions -> shims -> harness -> adapter import cycle.
+    const { version, versionHome } = resolveConfigVersion(
+      options.agent,
+      options.cwd || process.cwd(),
+      options.version,
+    );
     configAdapter.applyExecConfigEnv(result, {
       agent: options.agent,
-      cwd: options.cwd || process.cwd(),
-      optionsVersion: options.version,
+      version,
+      versionHome,
       interactive: resolveInteractive(options),
+      resolveClaudeSetupToken,
     });
   } else {
     stripForeignConfigDir(result);

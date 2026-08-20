@@ -1,7 +1,6 @@
 import * as path from 'path';
 import type { HarnessAdapter } from '../adapter.js';
 import { stripForeignConfigDir } from '../adapter.js';
-import { resolveConfigVersion } from '../exec-config-version.js';
 
 export const kimiAdapter: HarnessAdapter = {
   id: 'kimi',
@@ -9,9 +8,8 @@ export const kimiAdapter: HarnessAdapter = {
   // Kimi honors KIMI_CODE_HOME (relocates ~/.kimi-code, including config,
   // skills, hooks, sessions). Pin it at the per-version home.
   applyExecConfigEnv(result, ctx) {
-    const { versionHome } = resolveConfigVersion(ctx);
-    if (versionHome) {
-      result.KIMI_CODE_HOME = path.join(versionHome, '.kimi-code');
+    if (ctx.versionHome) {
+      result.KIMI_CODE_HOME = path.join(ctx.versionHome, '.kimi-code');
     }
     stripForeignConfigDir(result, ['KIMI_CODE_HOME']);
   },

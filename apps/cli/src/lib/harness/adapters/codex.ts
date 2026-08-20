@@ -1,12 +1,10 @@
 import * as os from 'os';
 import * as path from 'path';
-import { getVersionHomePath } from '../../installations/versions.js';
 import { getHistoryDir } from '../../state.js';
 import { resolveCodexHome, codexHomeShimBash } from '../../codex-home.js';
 import { codexEditWritableRoots, codexPolicyArgs } from '../../codex-policy.js';
 import type { HarnessAdapter } from '../adapter.js';
 import { stripForeignConfigDir } from '../adapter.js';
-import { resolveConfigVersion } from '../exec-config-version.js';
 
 /**
  * Shim-script single-quoting — identical to the local `shellQuote` in shims.ts
@@ -22,14 +20,13 @@ export const codexAdapter: HarnessAdapter = {
   id: 'codex',
 
   applyExecConfigEnv(result, ctx) {
-    const { version } = resolveConfigVersion(ctx);
-    if (version) {
+    if (ctx.version && ctx.versionHome) {
       // On macOS the deep versioned home overflows the Unix-socket SUN_LEN
       // limit for codex's app-server control socket; resolve to a short,
       // SUN_LEN-safe home (migrating once if needed). See codex-home.ts.
-      const versionedHome = path.join(getVersionHomePath('codex', version), '.codex');
+      const versionedHome = path.join(ctx.versionHome, '.codex');
       const agentsUserDir = path.dirname(getHistoryDir());
-      result.CODEX_HOME = resolveCodexHome(versionedHome, agentsUserDir, version);
+      result.CODEX_HOME = resolveCodexHome(versionedHome, agentsUserDir, ctx.version);
     }
     stripForeignConfigDir(result, ['CODEX_HOME']);
   },

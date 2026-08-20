@@ -1,7 +1,6 @@
 import * as path from 'path';
 import type { HarnessAdapter } from '../adapter.js';
 import { stripForeignConfigDir } from '../adapter.js';
-import { resolveConfigVersion } from '../exec-config-version.js';
 
 export const museAdapter: HarnessAdapter = {
   id: 'muse',
@@ -13,10 +12,9 @@ export const museAdapter: HarnessAdapter = {
   // Claude's CLAUDE_CONFIG_DIR / Codex's CODEX_HOME, and so Muse never
   // resolves through the adopt-time ~/.config/muse symlink (SymlinkOrReparse).
   applyExecConfigEnv(result, ctx) {
-    const { versionHome } = resolveConfigVersion(ctx);
-    if (versionHome) {
-      result.XDG_CONFIG_HOME = path.join(versionHome, '.config');
-      result.XDG_DATA_HOME = path.join(versionHome, '.local', 'share');
+    if (ctx.versionHome) {
+      result.XDG_CONFIG_HOME = path.join(ctx.versionHome, '.config');
+      result.XDG_DATA_HOME = path.join(ctx.versionHome, '.local', 'share');
     }
     stripForeignConfigDir(result);
   },

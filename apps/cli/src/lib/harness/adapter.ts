@@ -37,11 +37,21 @@ import type { JobConfig } from '../scheduling/routines.js';
  */
 export interface ExecConfigEnvCtx {
   agent: AgentId;
-  cwd: string;
-  /** The explicit `--version` if the caller pinned one, else undefined. */
-  optionsVersion?: string;
+  /** The version to pin, pre-resolved by the caller (null = unresolved/not installed). */
+  version: string | null;
+  /** That version's home, pre-resolved by the caller (null when version is null). */
+  versionHome: string | null;
   /** resolveInteractive(options) — computed once by the caller. */
   interactive: boolean;
+  /**
+   * claude-account-token's resolveClaudeSetupToken, injected. The adapters MUST
+   * stay import-leaf: claude-account-token pulls in the secrets stack, which
+   * transitively imports sqlite.ts (top-level await). Importing it inside an
+   * adapter drags that into shims.ts's module graph (shims imports the harness
+   * barrel), and subprocess-spawning tests that load shims via tsx then fail the
+   * cjs transform. Only claude uses it.
+   */
+  resolveClaudeSetupToken: (versionHome: string) => string | null;
 }
 
 /** Context for the shim-script config-env block (mapping A, shims.ts side). */

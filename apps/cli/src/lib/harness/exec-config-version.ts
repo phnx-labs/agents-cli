@@ -3,9 +3,16 @@
  * config-dir harness branch in the old buildExecEnv computed this identically:
  * an explicit `--version` is used unconditionally; an auto-resolved version is
  * only pinned when it is actually installed on disk.
+ *
+ * The caller (buildExecEnv) invokes this and passes the result into the adapter
+ * via ExecConfigEnvCtx — the adapters MUST NOT import installations/versions
+ * themselves, because that module imports shims.ts and shims.ts imports the
+ * harness barrel, which would close an import cycle (versions → shims → harness →
+ * adapter → versions). That cycle forced esbuild/tsx to emit CJS for part of the
+ * graph and broke sqlite.ts's top-level await in subprocess-spawning tests.
  */
 import { getVersionHomePath, isVersionInstalled, resolveVersion } from '../installations/versions.js';
-import type { ExecConfigEnvCtx } from './adapter.js';
+import type { AgentId } from '../types.js';
 
 export interface ResolvedConfigVersion {
   /** The version to pin, or null when unresolved / not installed. */
@@ -14,11 +21,11 @@ export interface ResolvedConfigVersion {
   versionHome: string | null;
 }
 
-export function resolveConfigVersion(ctx: ExecConfigEnvCtx): ResolvedConfigVersion {
-  const resolvedVersion = ctx.optionsVersion ?? resolveVersion(ctx.agent, ctx.cwd);
-  const version = ctx.optionsVersion
+export function resolveConfigVersion(agent: AgentId, cwd: string, optionsVersion?: string): ResolvedConfigVersion {
+  const resolvedVersion = optionsVersion ?? resolveVersion(agent, cwd);
+  const version = optionsVersion
     ? resolvedVersion
-    : (resolvedVersion && isVersionInstalled(ctx.agent, resolvedVersion) ? resolvedVersion : null);
-  const versionHome = version ? getVersionHomePath(ctx.agent, version) : null;
+    : (resolvedVersion && isVersionInstalled(agent, resolvedVersion) ? resolvedVersion : null);
+  const versionHome = version ? getVersionHomePath(agent, version) : null;
   return { version: version ?? null, versionHome };
 }

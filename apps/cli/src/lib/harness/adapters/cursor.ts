@@ -1,7 +1,6 @@
 import * as path from 'path';
 import type { HarnessAdapter } from '../adapter.js';
 import { stripForeignConfigDir } from '../adapter.js';
-import { resolveConfigVersion } from '../exec-config-version.js';
 
 export const cursorAdapter: HarnessAdapter = {
   id: 'cursor',
@@ -16,9 +15,8 @@ export const cursorAdapter: HarnessAdapter = {
   // another. cli-config.json (HOME-relative) has no override and stays on the
   // shared home; only the token is per-account, which is what gates the login.
   applyExecConfigEnv(result, ctx) {
-    const { versionHome } = resolveConfigVersion(ctx);
-    if (versionHome) {
-      result.XDG_CONFIG_HOME = path.join(versionHome, '.config');
+    if (ctx.versionHome) {
+      result.XDG_CONFIG_HOME = path.join(ctx.versionHome, '.config');
     }
     stripForeignConfigDir(result);
   },

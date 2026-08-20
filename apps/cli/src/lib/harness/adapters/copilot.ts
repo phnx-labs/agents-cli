@@ -1,7 +1,6 @@
 import * as path from 'path';
 import type { HarnessAdapter } from '../adapter.js';
 import { stripForeignConfigDir } from '../adapter.js';
-import { resolveConfigVersion } from '../exec-config-version.js';
 
 export const copilotAdapter: HarnessAdapter = {
   id: 'copilot',
@@ -10,9 +9,8 @@ export const copilotAdapter: HarnessAdapter = {
   // mcp-config.json, sessions, logs). Pin it at the per-version home so
   // version switches isolate MCP servers, auth, and session history.
   applyExecConfigEnv(result, ctx) {
-    const { versionHome } = resolveConfigVersion(ctx);
-    if (versionHome) {
-      result.COPILOT_HOME = path.join(versionHome, '.copilot');
+    if (ctx.versionHome) {
+      result.COPILOT_HOME = path.join(ctx.versionHome, '.copilot');
     }
     stripForeignConfigDir(result, ['COPILOT_HOME']);
   },

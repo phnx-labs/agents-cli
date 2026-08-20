@@ -1,20 +1,21 @@
 import * as path from 'path';
-import { resolveClaudeSetupToken } from '../../claude-account-token.js';
 import type { HarnessAdapter } from '../adapter.js';
 import { stripForeignConfigDir } from '../adapter.js';
-import { resolveConfigVersion } from '../exec-config-version.js';
 
 export const claudeAdapter: HarnessAdapter = {
   id: 'claude',
 
   applyExecConfigEnv(result, ctx) {
-    const { versionHome } = resolveConfigVersion(ctx);
+    const { versionHome } = ctx;
     // The per-account `claude setup-token` only resolves when there is a version
     // home to key it to; version===null (claude unresolved / not installed) yields
     // null, exactly as the routines path treats it (`runner.ts:1017-1021`). The
     // token decision below runs even then, so an ambient inherited value is stripped
     // on the routines/provisioned path regardless of whether a version resolved.
-    const setupToken = versionHome ? resolveClaudeSetupToken(versionHome) : null;
+    // resolveClaudeSetupToken is injected (see ExecConfigEnvCtx) to keep this
+    // adapter import-leaf — importing claude-account-token here would drag the
+    // secrets/sqlite graph into shims.ts.
+    const setupToken = versionHome ? ctx.resolveClaudeSetupToken(versionHome) : null;
     if (versionHome) {
       result.CLAUDE_CONFIG_DIR = path.join(versionHome, '.claude');
       // A managed pin lives in a per-version dir; Claude Code's own background
