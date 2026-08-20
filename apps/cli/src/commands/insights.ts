@@ -404,6 +404,11 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
   renderCounts('Automatable repeats', topEntries(all.automationSignals, 10), out);
   renderCounts('Harness split', harnesses, out);
 
+  // Actions are built from frictionSignals/correctionSignals/automationSignals
+  // together (buildInsightActions) — evidence counts, sample session ids, and
+  // the action text itself describe the same paid friction/correction
+  // categories gated above, so the whole section is paid too (RUSH-2424).
+  if (!gate.frictionGated) {
   out.push('');
   out.push(chalk.bold('Actions'));
   if (actions.length === 0) {
@@ -414,6 +419,7 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
       out.push(`  ${padToWidth(action.priority, 7)} ${padToWidth(action.category, 11)} ` +
         `${String(action.evidenceCount).padStart(8)}  ${padToWidth(action.sampleSessionIds.join(', '), 25)} ${action.action}`);
     }
+  }
   }
 
   // Output
@@ -627,7 +633,9 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
       plan: { tierName: tier.tierName, isPaid: tier.isPaid },
       ...(gate.groupGated || gate.frictionGated ? { notice: PAID_PLAN_NOTICE } : {}),
       overlap,
-      actions,
+      // Built from frictionSignals/correctionSignals/automationSignals together
+      // (buildInsightActions) — same paid friction/correction data as above.
+      actions: gate.frictionGated ? null : actions,
       harnesses,
       groups: gate.groupGated ? null : groups.map((g) => ({
         key: g.key,

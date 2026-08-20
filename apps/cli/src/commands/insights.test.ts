@@ -307,6 +307,9 @@ describe('agents insights — plan-tier gate (RUSH-2424)', () => {
     expect(payload.scanned).toBeGreaterThan(0);
     expect(payload.analyzed).toBeGreaterThan(0);
     expect(payload.harnesses.length).toBeGreaterThan(0);
+    // Actions are built from frictionSignals/correctionSignals/automationSignals
+    // together — same paid data, gated too (regression, PR #2822 review round 2).
+    expect(payload.actions).toBeNull();
   });
 
   it('free plan with --by agent (not account): groups render, but the friction/correction facets are stripped', async () => {
@@ -347,6 +350,7 @@ describe('agents insights — plan-tier gate (RUSH-2424)', () => {
     expect(out).not.toContain('Friction / thrash');
     expect(out).not.toContain('Dissatisfaction / corrections');
     expect(out).not.toContain('By account');
+    expect(out).not.toContain('Actions'); // built from friction/correction/automation evidence — paid too
     // Harness mix and top-line header stay.
     expect(out).toContain('Harness split');
     expect(out).toMatch(/Insights\s+.*sessions/);
@@ -387,5 +391,6 @@ describe('agents insights — plan-tier gate (RUSH-2424)', () => {
     const alpha = payload.groups.find((g: { label: string }) => g.label.startsWith('Alpha Inc'));
     expect(alpha.frictionSignals).toBeDefined();
     expect(alpha.correctionSignals).toBeDefined();
+    expect(payload.actions).toBeInstanceOf(Array);
   });
 });

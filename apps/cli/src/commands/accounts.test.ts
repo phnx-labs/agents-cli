@@ -266,4 +266,25 @@ describe('accounts plan-tier cap (RUSH-2424)', () => {
     const nativeIds = Object.values(readMeta().accounts?.native ?? {}).map(a => a.name);
     expect(nativeIds).toContain('claude-d'); // credential metadata never deleted by the cap
   });
+
+  it('dormant status is surfaced for a downgraded PROVIDER account too, not just native (regression, PR #2822 review round 2)', async () => {
+    addNativeAccount('claude-a', 'claude', 'id-a', undefined, 'version');
+    addNativeAccount('claude-b', 'claude', 'id-b', undefined, 'version');
+    addNativeAccount('claude-c', 'claude', 'id-c', undefined, 'version');
+    addAccount('zzz-provider', 'anthropic', 'api-key', 'sk-test-secret', getUserAgentsDir());
+
+    const dormant = await dormantAccountsForHarness('claude');
+    expect(dormant.map(a => a.name)).toEqual(['zzz-provider']);
+
+    const listedJson = await runAccounts(['--json']);
+    const entry = (JSON.parse(listedJson) as Array<{ name: string; dormant?: boolean }>)
+      .find(a => a.name === 'zzz-provider');
+    expect(entry?.dormant).toBe(true);
+
+    const viewJson = await runAccounts(['view', 'zzz-provider', '--json']);
+    expect(JSON.parse(viewJson).dormant).toBe(true);
+
+    const listedText = await runAccounts([]);
+    expect(listedText).toMatch(/zzz-provider.*dormant \(upgrade to reactivate\)/);
+  });
 });
