@@ -6,7 +6,7 @@
 // call, so the external-agent verb surface is untouched. The daemon stays the
 // single authority on permissions and targeting.
 
-import type { ComputerClient } from '../computer-rpc.js';
+import type { ComputerClient } from './computer-rpc.js';
 import { resolveTargetPidDecision, emitComputerAction, type AppInfo } from './actions.js';
 import type { VerbCall, VerbResult, VerbDispatcher } from './loop.js';
 

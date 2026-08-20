@@ -18,7 +18,7 @@ import {
   loadDefaultPeers,
   writeComputerPolicy,
   writeComputerPeers,
-} from '../lib/computer-rpc.js';
+} from '../lib/computer/computer-rpc.js';
 import {
   setupRemoteHelper,
   startRemoteTunnel,
@@ -28,7 +28,7 @@ import {
   resolveRemoteDevice,
   REMOTE_TASK_NAME,
   WIN_HELPER_EXE,
-} from '../lib/ssh-tunnel.js';
+} from '../lib/computer/ssh-tunnel.js';
 import { sshExec } from '../lib/ssh-exec.js';
 import { encodePowershell } from '../lib/hosts/remote-cmd.js';
 import { registerActionCommands, withClient, unwrap, pickTarget, emitComputerAction, type AppInfo } from './computer-actions.js';

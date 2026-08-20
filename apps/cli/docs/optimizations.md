@@ -309,4 +309,4 @@ Reproduce: `bun run build && node scripts/bench-ssh.mjs <host>`.
 | `src/commands/hosts.ts` | Thread the probe result through `maybeBootstrap` (drop duplicate probe) |
 | `src/lib/session/remote.ts` | Import canonical `SSH_OPTS` + `controlOpts` (drop private copy) |
 | `src/commands/secrets.ts` | Route the remote push through `sshExec` |
-| `src/lib/ssh-tunnel.ts` | `buildTunnelArgs` composes `SSH_OPTS` (inherits keepalive) |
+| `src/lib/computer/ssh-tunnel.ts` | `buildTunnelArgs` composes `SSH_OPTS` (inherits keepalive) |

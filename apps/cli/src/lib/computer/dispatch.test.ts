@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { rpcMethodFor, toRpcParams, makeVerbDispatcher } from './dispatch.js';
-import type { ComputerClient, RPCResponse } from '../computer-rpc.js';
+import type { ComputerClient, RPCResponse } from './computer-rpc.js';
 import { query, _resetForTest } from '../feed/events.js';
 
 // The verb -> RPC translation in dispatch.ts is the load-bearing seam behind

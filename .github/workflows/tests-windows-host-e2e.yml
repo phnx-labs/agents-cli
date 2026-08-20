@@ -1,7 +1,7 @@
 name: Windows-host e2e (tailnet)
 
 # Runs the live Windows-host integration suites (issue #864, split out of #561):
-# ssh-tunnel.e2e.test.ts and browser/drivers/ssh.e2e.test.ts drive the REAL
+# computer/ssh-tunnel.e2e.test.ts and browser/drivers/ssh.e2e.test.ts drive the REAL
 # remote runtime against win-mini over the tailnet — daemon push + scheduled
 # task + ssh -L tunnel + JSON-RPC roundtrip, and the Edge-over-CDP browser path.
 # They are env-gated on AGENTS_TEST_WIN_HOST and skip everywhere else.
@@ -29,10 +29,10 @@ on:
   push:
     branches: ['main']
     paths:
-      - 'apps/cli/src/lib/ssh-tunnel.ts'
-      - 'apps/cli/src/lib/ssh-tunnel.e2e.test.ts'
+      - 'apps/cli/src/lib/computer/ssh-tunnel.ts'
+      - 'apps/cli/src/lib/computer/ssh-tunnel.e2e.test.ts'
       - 'apps/cli/src/lib/ssh-exec.ts'
-      - 'apps/cli/src/lib/computer-rpc.ts'
+      - 'apps/cli/src/lib/computer/computer-rpc.ts'
       - 'apps/cli/src/lib/browser/drivers/ssh.ts'
       - 'apps/cli/src/lib/browser/drivers/ssh.e2e.test.ts'
       - 'native/computer-win/**'
@@ -85,10 +85,10 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      # ssh-tunnel.e2e.test.ts pushes this exe to win-mini via scp before it
+      # computer/ssh-tunnel.e2e.test.ts pushes this exe to win-mini via scp before it
       # registers + starts the LOGON scheduled task.
       - name: Build Windows helper exe
         run: bash scripts/build-win.sh
 
       - name: Windows-host e2e suites
-        run: bun run test -- src/lib/ssh-tunnel.e2e.test.ts src/lib/browser/drivers/ssh.e2e.test.ts
+        run: bun run test -- src/lib/computer/ssh-tunnel.e2e.test.ts src/lib/browser/drivers/ssh.e2e.test.ts

@@ -504,8 +504,7 @@ src/
                        #   preferred.ts resolves WHICH terminal for a GUI caller (from live sessions' host app)
     cloud/             # Provider registry (Rush / Codex / Factory / Antigravity)
     teams/             # `agents teams` orchestration
-    computer-rpc.ts    # `agents computer` client → native/computer-mac (Unix socket)
-    ssh-tunnel.ts      # `agents computer --device` → native/computer-win over ssh -L
+    computer/          # `agents computer` client (computer-rpc.ts → native/computer-mac Unix socket; ssh-tunnel.ts → native/computer-win over ssh -L) plus dispatch/download/loop
     menubar/           # Menu-bar helper installer (source in ../menubar)
     profiles.ts        # Host CLI + endpoint + model bundles
 ```
@@ -601,11 +600,12 @@ package's npm tarball; two more helpers are dev-only and live at repo-root `nati
 | Keychain broker | `src/lib/secrets/keychain-helper.swift` → `bin/Agents CLI.app` | **Yes** (signed + notarized) | `src/lib/secrets/` |
 | Menu-bar helper | [`menubar/`](menubar) (SwiftPM) → `bin/MenubarHelper.app` | **Yes** (signed + notarized) | `src/lib/menubar/install-menubar.ts` |
 | Standalone CLI binary | `src/` → `bun build --compile` → `bin/agents-macos` | **Yes** (signed + notarized, arm64 Mach-O at `dist/bin/agents`) | `scripts/postinstall.js` |
-| computer-mac | [`../../native/computer-mac`](../../native/computer-mac) | No — signed + notarized GitHub **release asset**, downloaded on demand | `src/lib/computer-rpc.ts`, `src/lib/computer/download.ts` |
-| computer-win | [`../../native/computer-win`](../../native/computer-win) | No (staged at release) | `src/lib/ssh-tunnel.ts` |
+| computer-mac | [`../../native/computer-mac`](../../native/computer-mac) | No — signed + notarized GitHub **release asset**, downloaded on demand | `src/lib/computer/computer-rpc.ts`, `src/lib/computer/download.ts` |
+| computer-win | [`../../native/computer-win`](../../native/computer-win) | No (staged at release) | `src/lib/computer/ssh-tunnel.ts` |
 
-Path math: compiled resolvers run from `apps/cli/dist/lib/…`. Repo-root `native/`
-is **4 hops up** (`../../../../native/…`); the co-located `menubar/` is **3 hops up**
+Path math: compiled resolvers run from `apps/cli/dist/lib/…`. Files still in `dist/lib/`
+reach repo-root `native/` in **4 hops** (`../../../../native/…`); files in
+`dist/lib/computer/` need **5 hops**. The co-located `menubar/` is **3 hops up**
 (`../../../menubar/dist/…`) because it moved into `apps/cli` with the CLI. Recompute
 depth if you move files — don't blind-replace.
 
@@ -624,7 +624,7 @@ branch pushes/PRs and manual `workflow_dispatch` — not `v*` tags (the tag poin
 at the commit already gated on the release branch). CI runs from `apps/cli` via
 `defaults.run.working-directory`.
 
-**Live Windows `--device` e2e (opt-in):** `src/lib/ssh-tunnel.e2e.test.ts` and
+**Live Windows `--device` e2e (opt-in):** `src/lib/computer/ssh-tunnel.e2e.test.ts` and
 `src/lib/browser/drivers/ssh.e2e.test.ts` drive a real Windows box end-to-end
 (exe push + LOGON task, tunnel + RPC, screenshot, type/get-text round-trip,
 remote browser launch/stop). Gated on `AGENTS_TEST_WIN_HOST=<registered device>`;

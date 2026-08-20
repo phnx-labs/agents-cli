@@ -4,7 +4,7 @@
  *
  * The helper is a signed + notarized universal `.app` bundle published as a
  * GitHub release asset per tagged CLI version — the same distribution model as
- * the Windows helper (see `lib/ssh-tunnel.ts`). A fresh `npm i -g` machine has
+ * the Windows helper (see `lib/computer/ssh-tunnel.ts`). A fresh `npm i -g` machine has
  * no local build, so `agents computer setup` / `agents setup computer` fetch the
  * asset for the running CLI version, verify its sha256 against the published
  * `.sha256`, then verify the code signature (Developer ID Team + notarization)
@@ -22,8 +22,8 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { getCacheDir } from '../state.js';
 import { getCliVersion } from '../version.js';
-import { parseSha256Asset, sha256File } from '../ssh-tunnel.js';
-import { resolveHelperApp } from '../computer-rpc.js';
+import { parseSha256Asset, sha256File } from './ssh-tunnel.js';
+import { resolveHelperApp } from './computer-rpc.js';
 
 /** GitHub repo whose `v<version>` releases carry the helper asset. */
 export const HELPER_RELEASE_REPO = 'phnx-labs/agents-cli';

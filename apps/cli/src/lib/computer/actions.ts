@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'node:crypto';
-import type { ComputerClient, RPCResponse } from '../computer-rpc.js';
-import { resolvePolicyPath } from '../computer-rpc.js';
+import type { ComputerClient, RPCResponse } from './computer-rpc.js';
+import { resolvePolicyPath } from './computer-rpc.js';
 import { COMPUTER_INPUT_GATED_VERBS, formatComputerPermissionGrantHint } from '../permissions.js';
 import { emit as emitEvent } from '../feed/events.js';
 import { recordComputerSession } from '../session/db.js';

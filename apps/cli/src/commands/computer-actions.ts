@@ -17,7 +17,7 @@ import {
   resolvePolicyPath,
   type ComputerClient,
   type RPCResponse,
-} from '../lib/computer-rpc.js';
+} from '../lib/computer/computer-rpc.js';
 import { emitComputerAction, pickTarget, resolveTargetPidDecision, type AppInfo } from '../lib/computer/actions.js';
 export { emitComputerAction, pickTarget, resolveTargetPidDecision, type AppInfo } from '../lib/computer/actions.js';
 

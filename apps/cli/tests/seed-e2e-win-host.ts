@@ -3,7 +3,7 @@
  *
  * `tests/setup.ts` (RUSH-2042) redirects `AGENTS_DEVICES_DIR` to a fork-private
  * empty directory so unit tests cannot leak fixtures into the real fleet
- * registry. The live Windows-host e2e suites (`ssh-tunnel.e2e.test.ts`,
+ * registry. The live Windows-host e2e suites (`computer/ssh-tunnel.e2e.test.ts`,
  * `browser/drivers/ssh.e2e.test.ts`) still need a real `DeviceProfile` for
  * `AGENTS_TEST_WIN_HOST` so `resolveRemoteDevice` can dial it. Without this
  * seed every e2e run fails immediately with `Unknown device 'win-mini'` —

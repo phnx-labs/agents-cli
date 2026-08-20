@@ -20,7 +20,7 @@ import {
   CHAR_DELAY_MAX_MS,
   type AppInfo,
 } from './computer-actions.js';
-import { resolveRpcTimeoutMs, RPC_TIMEOUT_MS, type ComputerClient, type RPCResponse } from '../lib/computer-rpc.js';
+import { resolveRpcTimeoutMs, RPC_TIMEOUT_MS, type ComputerClient, type RPCResponse } from '../lib/computer/computer-rpc.js';
 import { query, _resetForTest } from '../lib/feed/events.js';
 
 const tempDirs: string[] = [];
