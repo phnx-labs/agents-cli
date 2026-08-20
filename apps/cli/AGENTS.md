@@ -483,7 +483,7 @@ sessions/config; `agents add gemini`, `agents import gemini`, and
 ```
 src/
   index.ts             # CLI entry (commander.js)
-  commands/            # User-facing subcommands (one file — or a `<cmd>-*.ts` family, e.g. the 14 `sessions*.ts` files — per `agents <cmd>`)
+  commands/            # User-facing subcommands (one file — or a `<cmd>-*.ts` family, e.g. the `sessions*.ts` family — per `agents <cmd>`)
   lib/
     state.ts           # Path constants; agents.yaml read/write (serializeCentral preserves comments)
     manifest.ts        # Project/user agents.yaml Manifest read/write (comment-preserving Document round-trip; used by mcp add, etc.)
