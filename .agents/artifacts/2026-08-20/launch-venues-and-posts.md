@@ -4,6 +4,9 @@ template: report.v1
 title: 'Where to post agi-cli, what wins there, and the drafts'
 summary: 'Venue list with rules and sizes, an empirical analysis of 1,581 Show HN posts showing which title features actually correlate with score, and ready-to-post drafts built from that analysis.'
 status: draft
+human: author
+host: fleet-worker
+session: n/a
 links:
   - label: 'phnx-labs/agi-cli'
     url: 'https://github.com/phnx-labs/agi-cli'

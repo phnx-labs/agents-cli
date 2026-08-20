@@ -4,6 +4,9 @@ template: report.v1
 title: 'How repos get stars in 2026, and why agi-cli has 15'
 summary: 'Case studies from AFFiNE, OpenCode, and a 188k-post Show HN dataset, applied to this repo. The blocker is not tactics: no launch has ever happened, the demos do not show what the tool is actually used for, and the hero demo rendered as a plain blue link.'
 status: draft
+human: author
+host: fleet-worker
+session: n/a
 links:
   - label: 'phnx-labs/agi-cli'
     url: 'https://github.com/phnx-labs/agi-cli'
