@@ -1010,15 +1010,17 @@ agents accounts add gateway --provider openrouter --auth api-key \
   --from-secrets openrouter.ai:OPENROUTER_API_KEY  # import from an existing secrets bundle
 agents accounts add deepinfra --provider deepinfra --auth api-key
 
+agents accounts switch claude             # picker: usage %, headroom, signed-out / rate-limited
+agents accounts switch claude work        # skip the picker; same write as set-default
 agents accounts set-default claude work   # claude uses `work` when --account is omitted
 agents accounts sync work --device yosemite-s0   # explicitly copy the bundle to a worker device
 agents run claude --account work
 agents harness add deepinfra --account deepinfra
 ```
 
-One provider account **is** one `agents secrets` bundle -- `agents accounts add` creates it with secrets policy `never`, so a background agent launch on that account never raises Touch ID. `agents accounts` (no subcommand) lists provider bundles next to harness-native signed-in identities so you see both kinds of credential together; `accounts list` / `inspect <name>` / `set-key <name>` (rotate) / `rename` / `remove` manage a bundle by its stable id, independent of its current label.
+One provider account **is** one `agents secrets` bundle -- `agents accounts add` creates it with secrets policy `never`, so a background agent launch on that account never raises Touch ID. `agents accounts` (no subcommand) lists provider bundles next to harness-native signed-in identities so you see both kinds of credential together; `accounts list` / `inspect <name>` / `set-key <name>` (rotate) / `rename` / `remove` manage a bundle by its stable id, independent of its current label. `accounts switch <harness>` is the fast picker over that default -- it writes the same binding as `set-default`, and balanced rotation already honors it.
 
-Harness-native OAuth logins (Claude Code's own `/login`, `codex login`, and so on) stay exactly where the harness put them -- agi-cli discovers and displays them but never copies, renames, or converts them into a provider bundle. `accounts sync <name> --device <device>` is the only way a provider account crosses machines, and it's explicit: nothing syncs automatically. Selection order for a run is explicit `--account`, then `accounts set-default` for that harness, then the harness's native/balanced account behavior.
+Harness-native OAuth logins (Claude Code's own `/login`, `codex login`, and so on) stay exactly where the harness put them -- agi-cli discovers and displays them but never copies, renames, or converts them into a provider bundle. Native `accounts name` / `attach` is only for harnesses agents-cli can isolate today (claude, codex, grok; muse when an email is present). A device-scoped login (kimi, droid, …) is refused with a named reason; provider `accounts add --provider` is unrestricted. `accounts sync <name> --device <device>` is the only way a provider account crosses machines, and it's explicit: nothing syncs automatically. Selection order for a run is explicit `--account`, then `accounts set-default` / `switch` for that harness, then the harness's native/balanced account behavior.
 
 ---
 
