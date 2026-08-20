@@ -13,7 +13,7 @@ import * as path from 'path';
 import lockfile from 'proper-lockfile';
 import { getTeamsRegistryPath } from '../state.js';
 import { emit } from '../feed/events.js';
-import { atomicWriteJson } from '../atomic-write.js';
+import { atomicWriteJsonSync } from '../fs-atomic.js';
 
 /** Metadata for a registered team. */
 export interface TeamMeta {
@@ -103,7 +103,7 @@ export async function loadTeams(): Promise<TeamRegistry> {
 
 async function saveTeams(reg: TeamRegistry): Promise<void> {
   const p = await registryPath();
-  await atomicWriteJson(p, reg);
+  atomicWriteJsonSync(p, reg);
 }
 
 export interface CreateTeamOptions {
