@@ -902,6 +902,63 @@ describe('BrowserService.navigate — Arc reuses a tab rather than refusing (#27
     expect(createTargetCount(calls)).toBe(0);
   });
 
+  it('two concurrent navigates never both claim the same free target', async () => {
+    // The claim must be taken in the SAME synchronous tick as the check. When the
+    // check was followed by `await Page.navigate` and only then the write, a
+    // second navigate slipped into that window and both tasks ended up driving
+    // one live tab (reviewer-reproduced). Gate the first Page.navigate open so
+    // the interleaving is deterministic rather than timing-dependent.
+    writeProfile('arcrace', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn } = arcConnWithEmptyTask('arcrace', [
+      { targetId: 'free-tab', url: 'about:blank' },
+    ]);
+    const tasks = (conn as unknown as { tasks: Map<string, any> }).tasks;
+    tasks.set('taskB', { ...tasks.get('arctask'), id: 'taskB', name: 'taskB', tabs: {} });
+    attach(service, 'arcrace', conn);
+
+    let releaseFirst: () => void = () => {};
+    const firstNavigateStalled = new Promise<void>((r) => { releaseFirst = r; });
+    let navigateCalls = 0;
+    const inner = conn.cdp.send;
+    conn.cdp.send = (async (method: string, params: any = {}, sess?: string) => {
+      if (method === 'Page.navigate' && ++navigateCalls === 1) await firstNavigateStalled;
+      return inner(method, params, sess);
+    }) as typeof conn.cdp.send;
+
+    const a = service.navigate('arctask', 'file:///tmp/doc.html', 'arcrace');
+    await new Promise((r) => setTimeout(r, 5)); // let A reach its stalled navigate
+    const b = service.navigate('taskB', 'file:///tmp/doc.html', 'arcrace').catch((e) => e);
+    const bResult = await b;
+    releaseFirst();
+    await a;
+
+    // B must have been refused, not handed the tab A already claimed.
+    expect(bResult).toBeInstanceOf(Error);
+    expect(Object.values(tasks.get('taskB').tabs)).not.toContain('free-tab');
+    expect(Object.values(tasks.get('arctask').tabs)).toContain('free-tab');
+  });
+
+  it('tabClose drops the borrow record with the tab it names', async () => {
+    writeProfile('arcprune', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn } = arcConnWithEmptyTask('arcprune', [
+      { targetId: 'borrowed-tab', url: 'about:blank' },
+    ]);
+    attach(service, 'arcprune', conn);
+
+    await service.navigate('arctask', 'file:///tmp/doc.html', 'arcprune');
+    const task = (conn as unknown as { tasks: Map<string, any> }).tasks.get('arctask');
+    const shortId = Object.keys(task.tabs)[0];
+    expect(task.borrowedTabs).toEqual([shortId]);
+
+    await service.tabClose('arctask', shortId);
+
+    // Left behind, the shortId would name nothing and accumulate in tasks.json.
+    expect(task.borrowedTabs).toEqual([]);
+    expect(task.tabs[shortId]).toBeUndefined();
+  });
+
   it('refuses rather than hijacking a page the user is reading', async () => {
     writeProfile('arcsafe', ['cdp://localhost:9222']);
     const service = new BrowserService();
