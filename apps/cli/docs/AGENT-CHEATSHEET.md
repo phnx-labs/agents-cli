@@ -51,7 +51,7 @@ Every agent invocation goes through `buildExecEnv` → `execAgent` / `runWithFal
 
 ## 8. Self-updating vs pinnable agents
 
-Some harnesses (droid, grok, antigravity, cursor, hermes, kiro, goose) install via `curl | sh` / `brew` and the binary self-updates in place — no pinnable semver. Use `isSelfUpdatingAgent()` ([`src/lib/agents.ts`](../src/lib/agents.ts)) as the single predicate. `isGlobalBinaryAgent()` ([`src/lib/installations/versions.ts`](../src/lib/installations/versions.ts)) is narrower: true only for droid.
+Some harnesses (droid, grok, antigravity, cursor, hermes, kiro, goose) install via `curl | sh` / `brew` and the binary self-updates in place — no pinnable semver. Use `isSelfUpdatingAgent()` ([`src/lib/agents.ts`](../src/lib/agents.ts)) as the single predicate. `isGlobalBinaryAgent()` ([`src/lib/installations/store.ts`](../src/lib/installations/store.ts)) is narrower: true only for droid.
 
 ## 9. Work on a worktree, never `main`
 

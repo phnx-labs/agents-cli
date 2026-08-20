@@ -159,7 +159,7 @@ the installer only ever fetches the *current* release and the binary self-update
 place. `isSelfUpdatingAgent()` ([`src/lib/agents.ts`](src/lib/agents.ts)) is the single
 predicate for "no pinnable semver"; route every such decision through it, never a
 scattered `=== 'droid'`. Its narrower cousin `isGlobalBinaryAgent()`
-([`src/lib/installations/versions.ts`](src/lib/installations/versions.ts)) — computed by probing whether
+([`src/lib/installations/store.ts`](src/lib/installations/store.ts)) — computed by probing whether
 `getBinaryPath` ignores the version arg — is true only when the agent resolves to ONE
 global binary (droid). For those, `listInstalledVersions` collapses the phantom
 per-version dirs to a single canonical entry, `reconcileStaleLatestForAgent` folds the

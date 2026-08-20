@@ -441,7 +441,7 @@ explicit alternative detection path for consumers.
 |----------|------|---------|
 | `installVersion()` | versions.ts | Install agent CLI version |
 | `removeVersion()` | versions.ts | Remove installed version |
-| `resolveVersion()` | versions.ts | Find version from project/global config |
+| `resolveVersion()` | store.ts | Find version from project/global config |
 | `syncResourcesToVersion()` | versions.ts | Symlink resources into version home |
 | `switchConfigSymlink()` | shims.ts | Replace ~/.{agent} with symlink |
 | `createShim()` | shims.ts | Generate version-resolving wrapper |
