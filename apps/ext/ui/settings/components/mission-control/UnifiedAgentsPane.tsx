@@ -1623,10 +1623,15 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     () => sortAgents(needsAgents.filter((a) => a.phase !== 'waiting' && a.phase !== 'failed'), floorSort),
     [needsAgents, floorSort]
   )
-  // One attention-ordered stream: NEEDS YOU -> RUNNING -> READY -> DONE, where
-  // status is a position, not a filter. Running and idle agents are the live
-  // lane; done (without an unreviewed PR — those are NEEDS YOU) is the terminal
-  // lane. idle is no longer dropped from the feed.
+  // One attention-ordered stream: NEEDS YOU -> IDLE -> RUNNING -> DONE, where status
+  // is a position, not a filter. Idle leads the live lane because an idle session is
+  // unfinished work that has stopped progressing — the highest abandonment risk — while
+  // a running one needs nothing from the operator (root AGENTS.md "Purpose"). done
+  // (without an unreviewed PR — those are NEEDS YOU) is the terminal lane.
+  const idleFeed = useMemo(
+    () => sortAgents(feedPartition.idle, floorSort),
+    [feedPartition, floorSort]
+  )
   const runningFeed = useMemo(
     () => sortAgents(feedPartition.active, floorSort),
     [feedPartition, floorSort]
@@ -1635,7 +1640,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     () => sortAgents(feedPartition.done, floorSort),
     [feedPartition, floorSort]
   )
-  const groupedFeed = useMemo(() => [...runningFeed, ...doneFeed], [runningFeed, doneFeed])
+  const groupedFeed = useMemo(() => [...idleFeed, ...runningFeed, ...doneFeed], [idleFeed, runningFeed, doneFeed])
 
   const floorRunning = useMemo(() => floorAgents.filter((a) => a.phase === 'running').length, [floorAgents])
   const floorTok = useMemo(() => floorAgents.reduce((s, a) => s + a.tok, 0) + liveThroughput, [floorAgents, liveThroughput])
@@ -2214,6 +2219,30 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
             />
           ))}
           {reviewNeedsAgents.map((a) => (
+            <FeedRow onOpenTask={openTaskFromAgent}
+              key={a.id}
+              agent={a}
+              selected={selectedFloorAgent?.id === a.id}
+              plain={plain}
+              onSelect={selectFloorAgent}
+              onOption={onAgentOption}
+              onFreeText={replyToAgent}
+              onAttach={onAttachScreenshot}
+              onOpenPlan={openPlanPreview}
+              onOpenAttachment={openAttachmentPreview}
+              onOpenTerminal={openTerminalForAgent}
+            />
+          ))}
+        </>
+      )}
+
+      {/* Idle sits ABOVE running: unfinished work that stopped progressing is the
+          state most likely to be silently abandoned, so the floor never buries it
+          below the agents that are fine on their own (root AGENTS.md "Purpose"). */}
+      {floorGroup === 'none' && idleFeed.length > 0 && (
+        <>
+          <div className="feed-sec" title="Unfinished work that has stopped progressing — the highest abandonment risk">IDLE · {idleFeed.length}<span className="ln" /></div>
+          {idleFeed.map((a) => (
             <FeedRow onOpenTask={openTaskFromAgent}
               key={a.id}
               agent={a}

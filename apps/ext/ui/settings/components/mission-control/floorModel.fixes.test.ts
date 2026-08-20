@@ -70,7 +70,7 @@ describe('issue 2 — one task-line seam', () => {
     const background = agent({ id: 'bg', context: 'headless' })
     expect(visibleFloorAgents([foreground, background], false)).toEqual([foreground])
     const partition = partitionFloorAgents([foreground])
-    expect(partition.needs.length + partition.active.length + partition.done.length).toBe(1)
+    expect(partition.needs.length + partition.idle.length + partition.active.length + partition.done.length).toBe(1)
   })
 
   test('worktreeSlugOf extracts the slug under .agents/worktrees/', () => {
@@ -90,5 +90,16 @@ describe('wiring guard — infra must stay wired (issue 5 was dead code)', () =>
   })
   test('UnifiedAgentsPane wires sessionTaskLine (the detail rail)', () => {
     expect(pane).toContain('sessionTaskLine(')
+  })
+  // The idle section's POSITION is the whole point of RUSH-2838 and no unit test can
+  // reach it (rendering the pane needs React), so pin it at the source: the idle rows
+  // must be emitted before the running rows, or the Fleet panel is burying
+  // idle-but-unfinished work below running again (root AGENTS.md "Purpose").
+  test('UnifiedAgentsPane renders the IDLE section ABOVE the RUNNING section', () => {
+    const idleAt = pane.indexOf('idleFeed.map(')
+    const runningAt = pane.indexOf('runningFeed.map(')
+    expect(idleAt).toBeGreaterThan(-1)
+    expect(runningAt).toBeGreaterThan(-1)
+    expect(idleAt).toBeLessThan(runningAt)
   })
 })
