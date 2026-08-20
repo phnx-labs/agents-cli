@@ -237,14 +237,27 @@ Anthropic-provider documentation, or GitHub search, and a direct fetch of
 of a cutoff, block, or restriction. Those claims are withdrawn as unverified. They
 should not be repeated.
 
-What survives is stronger for resting entirely on primary sources. OpenClaw — a
-harness agi-cli supports (`AgentId` includes `openclaw`) — documents the risk in
-its own words: *"Anthropic can change Claude Code billing and rate-limit behavior
-without an OpenClaw release."* And its guidance points where this report does:
-for **"shared production automation"** and **"predictable production spend,"** it
-tells users to prefer API keys over reusing subscription credentials, because
-subscription behaviour is subject to unannounced change. That is the vendor of the
-subscription-reuse feature telling you not to build shared automation on it.
+What survives is stronger for resting entirely on primary sources — but the two
+surviving sources carry **different kinds of risk, and they should not be blended.**
+
+**Compliance risk** comes from the Consumer Terms quoted above. That is a question
+about what is permitted, and it is the one that needs a lawyer rather than an
+engineer.
+
+**Operational risk** comes from OpenClaw — a harness agi-cli supports (`AgentId`
+includes `openclaw`) — which documents it in its own words: *"Anthropic can change
+Claude Code billing and rate-limit behavior without an OpenClaw release."* For
+**"shared production automation"** and **"predictable production spend,"** its docs
+tell users to prefer API keys over reusing subscription credentials. Note the
+stated reason is cost and rate-limit predictability, **not** compliance — so this
+is the vendor of the subscription-reuse feature saying the feature is an unreliable
+foundation for shared automation, which is a different and weaker claim than saying
+it is disallowed.
+
+Both point the same direction for a paid product, for independent reasons: one
+says the ground may not be permitted, the other says it is not stable. Neither on
+its own is fatal; together they make it the least attractive foundation available
+when an alternative (API keys, Bedrock, Vertex) carries neither problem.
 
 Why this lands squarely on agi-cli: the subscription pitch is the product's
 headline (`README.md:1494`), and **balanced account rotation is a documented
