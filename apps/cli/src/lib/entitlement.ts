@@ -22,6 +22,11 @@ const SUBSCRIPTION_PATH = '/api/v1/billing/subscription?agent=agi-cli';
 /** How long a cached tier is trusted before the next call re-fetches. */
 export const ENTITLEMENT_CACHE_TTL_MS = 15 * 60_000;
 
+/** Same shape as bootstrap.ts's fetchNpmPackageMetadata — a hung connection
+ * (dead peer, a firewall dropping packets silently) must not block every
+ * `accounts add`/`insights` call indefinitely once the cache goes stale. */
+const FETCH_TIMEOUT_MS = 5000;
+
 export type EntitlementSource = 'live' | 'cache' | 'offline' | 'no-session';
 
 export interface EntitlementTier {
@@ -150,6 +155,7 @@ export async function getTier(): Promise<EntitlementTier> {
   try {
     const res = await fetchImpl(`${PROXY_BASE}${SUBSCRIPTION_PATH}`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`billing/subscription responded ${res.status}`);
     const sub = (await res.json()) as SubscriptionResponse;
