@@ -69,6 +69,22 @@ groups:
       - apps/cli/CHANGELOG.md
     checks: [docs]
 
+  # CHANGELOG.md is GENERATED from .changelog/<version>.md (gen-changelog.ts), and
+  # gen-changelog.test.ts asserts the committed file still matches its sources. That
+  # test was only ever selected by a change to its companion SOURCE, so a commit
+  # touching CHANGELOG.md or a .changelog/ fragment alone never ran it -- and a
+  # hand-edit that no source reproduces reached main three separate times on
+  # 2026-08-20, each time invisible until the FULL suite ran at release time and
+  # failed closed (release-attestation-produce.sh), blocking the release. Selecting
+  # the test from the files it actually guards moves that failure to the PR that
+  # causes it.
+  - id: changelog-sources
+    when:
+      - apps/cli/CHANGELOG.md
+      - apps/cli/.changelog/**
+    tests:
+      - apps/cli/scripts/gen-changelog.test.ts
+
   # 180s, not the default 85s. Any edit to sessions.ts — a two-line subcommand
   # registration included — selects the whole sessions* suite: 24 files, 92s of
   # vitest inside a 122s run (PR #2771, run 32032566960), before the group's own
