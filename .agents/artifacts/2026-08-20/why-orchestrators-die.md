@@ -100,9 +100,13 @@ substantially similar functionality as a competing commercial product."*
 ## Data
 
 Stars, archive flags and last-push dates were pulled live from the GitHub API on
-2026-08-20 — so "shut down" here means the repository says so, not that a blog
-post did. Pricing is quoted from each company's own live or Wayback-archived
-pricing page. Funding figures are the weakest link and are flagged inline where
+2026-08-20, so the licence, star count, archive flag and last-push date are
+first-hand reads. Shutdown *dates* are a different provenance: they come from each
+company's own announcement — Terragon's 2026-02-09 is the service-end date it
+published ("We'll keep Terragon running until February 9th, 2026"), recovered from
+the Wayback archive because the live site is gone, and does not correspond to any
+commit in its snapshot repo. Pricing is quoted from each company's own live or
+Wayback-archived pricing page. Funding figures are the weakest link and are flagged inline where
 they rest on aggregators rather than a primary source: Vibe Kanban's $7.4M comes
 from Tracxn, not from bloop; Roo Code's reported $5M names no investor and is
 **not** the Emergence Capital round (that is Cline's $32M); Terragon's investors

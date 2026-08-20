@@ -113,7 +113,7 @@ each independently fixable in hours.
 ### 3. The positioning slot is genuine whitespace — inside a graveyard
 
 Across 21 researched tools, nothing combines all four of: CLI-first, genuinely
-multi-harness (17 active ids, not two), cross-device fleet dispatch over SSH, and one
+multi-harness (18 harness ids, 17 of them active — `gemini` is hard-deprecated — not two), cross-device fleet dispatch over SSH, and one
 surface spanning sessions, teams, secrets, browser and computer-use. The nearest
 neighbours each cover one or two legs — Uzi (CLI-native, worktrees, no fleet),
 Warp's Oz (multi-agent but cloud-hosted and closed), Omnara (steering layer, not
@@ -152,6 +152,12 @@ So the plan cannot be "get the stars, then add a team seat" — that is precisel
 the plan that failed three times in seven months.
 
 ### 4. What actually converted OSS into revenue
+
+Revenue and funding figures in this section and the two that follow come from
+secondary web sources — company blogs, pricing pages and trade press — gathered
+2026-08-20. They were not independently audited and should be read as directional
+magnitudes, not precise accounting. Where a figure rests only on an aggregator it
+is called out inline.
 
 The pattern across every OSS devtool that made real money is a **hosted layer
 that is genuinely inconvenient to self-host**: Supabase ($170M ARR), PostHog
@@ -334,7 +340,7 @@ growth work succeeded.
 | 2 | Ship opt-out anonymous telemetry: install, first run, weekly-active, top commands | Today no real user is detectable by any mechanism |
 | 3 | Collapse the identity: one package name, one domain, one public repo | A visitor cannot tell what to type |
 | 4 | Re-upload the hero demo to GitHub `user-attachments` so it renders | The best asset above the fold reads as broken |
-| 5 | Point `release.sh` at `agi-cli.sh` and catch the web checkout up (27 behind) | The deploy script contradicts the deployed state |
+| 5 | Point `release.sh` at `agi-cli.sh` and catch the web checkout up (29 behind) | The deploy script contradicts the deployed state |
 
 Item 2 is a real decision, not a task. `README.md:1498` promises "No CLI
 telemetry or phone-home," twice. Keeping that promise means permanently choosing
