@@ -1,4 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { getCliVersion, installLayoutFromBin } from './version.js';
 
@@ -9,22 +11,42 @@ describe('version', () => {
     expect(v.length).toBeGreaterThan(0);
   });
 
-  // getCliVersionFresh's contract — "re-reads package.json, unlike the memoized
-  // getCliVersion" — has NO honest unit test today, so this file ships none.
-  //
-  // The first two attempts both claimed to test it and could not:
-  //   expect(getCliVersionFresh()).toBe(getCliVersion())   // two functions agreeing
-  //   expect(getCliVersionFresh()).toBe(<independent read>) // same thing, one hop
-  // Both hold for `getCliVersionFresh = () => getCliVersion()`, the exact
-  // regression the contract exists to prevent, because version.ts:109 and :133
-  // read the IDENTICAL hardcoded path — so with the file unchanged mid-test,
-  // cached and fresh are equal by construction. Priming the memo does not help.
-  //
-  // A real test has to swap package.json under a running process. That needs an
-  // injectable base path: the path is hardcoded, and the file is shared by every
-  // parallel vitest fork, so mutating it here would corrupt other tests. Tracked
-  // as RUSH-2862. A test that cannot fail is worse than an absent one — it
-  // reports the contract as guarded when it is not.
+  // getCliVersionFresh's contract — "re-reads package.json every call, unlike
+  // the memoized getCliVersion" — used to have NO honest unit test, because
+  // both functions read the same hardcoded path: with package.json unchanged
+  // mid-test, cached and fresh are equal by construction, including for the
+  // exact regression the contract exists to prevent
+  // (`getCliVersionFresh = () => getCliVersion()`). RUSH-2862 made the
+  // package.json path an optional parameter (production call sites still use
+  // the zero-arg form) so a test can swap the file a running module reads
+  // without touching the real, fork-shared apps/cli/package.json.
+  it('getCliVersionFresh follows an on-disk change; getCliVersion stays memoized (RUSH-2862)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-version-test-'));
+    const pkgJsonPath = path.join(dir, 'package.json');
+    fs.writeFileSync(pkgJsonPath, JSON.stringify({ version: '1.0.0-fixture-a' }));
+
+    try {
+      // cached is module-level state, so get an unshared module instance —
+      // otherwise the static import above (already exercised by the previous
+      // test) has already memoized the real repo version.
+      vi.resetModules();
+      const mod = await import('./version.js');
+
+      // Prime the memo from the fixture at version A.
+      expect(mod.getCliVersion(pkgJsonPath)).toBe('1.0.0-fixture-a');
+
+      // Mutate the fixture package.json on disk to version B.
+      fs.writeFileSync(pkgJsonPath, JSON.stringify({ version: '2.0.0-fixture-b' }));
+
+      // Fresh MUST re-read and follow the on-disk change...
+      expect(mod.getCliVersionFresh(pkgJsonPath)).toBe('2.0.0-fixture-b');
+      // ...while the memoized getter MUST stay at whatever it cached first,
+      // proving the two are genuinely distinct reads, not one hop apart.
+      expect(mod.getCliVersion(pkgJsonPath)).toBe('1.0.0-fixture-a');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // Regression guard for the Bun single-file binary: `import.meta.url` is a virtual
