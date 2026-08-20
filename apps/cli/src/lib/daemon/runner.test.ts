@@ -4,15 +4,15 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { activeRunSkipStreak, archiveRoutineTranscripts, assertRoutineAccountLocalForPlacement, buildHostDispatchOptions, buildJobCommand, dispatchPlacedJob, executeJob, executeJobDetached, launcherClaimPid, monitorRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd, snapshotRoutineTranscriptBase } from './runner.js';
-import { getRunDir, readRunMeta, writeRunMeta } from './scheduling/routines.js';
-import { getVersionHomePath } from './installations/versions.js';
-import type { JobConfig, RunMeta } from './scheduling/routines.js';
-import { hardDeprecationError } from './agents.js';
-import type { RotateCandidate, RotateResult } from './accounting/rotate.js';
-import { saveTask, hostsCacheDir } from './hosts/tasks.js';
-import { _resetPerfDbForTest, aggregateSamples } from './perf/db.js';
-import * as activation from './routine-activation.js';
-import { query, _resetForTest } from './feed/events.js';
+import { getRunDir, readRunMeta, writeRunMeta } from '../scheduling/routines.js';
+import { getVersionHomePath } from '../installations/versions.js';
+import type { JobConfig, RunMeta } from '../scheduling/routines.js';
+import { hardDeprecationError } from '../agents.js';
+import type { RotateCandidate, RotateResult } from '../accounting/rotate.js';
+import { saveTask, hostsCacheDir } from '../hosts/tasks.js';
+import { _resetPerfDbForTest, aggregateSamples } from '../perf/db.js';
+import * as activation from '../routine-activation.js';
+import { query, _resetForTest } from '../feed/events.js';
 
 // RUSH-2215: only process-group / real-spawn holder suites are POSIX-oriented.
 // Pure command construction and path helpers must still run on Windows.

@@ -1984,7 +1984,7 @@ Credential account selection adds three requirements to that funnel:
   owns it and fail before spawn when that identity is unavailable; it MUST NOT
   rotate or forward the native identity through the provider-account path
   (`lib/account-registry.ts`; `commands/exec.ts`; `lib/profiles.ts`;
-  `lib/runner.ts`). Explicit `--env` remains the final env override. Cloud and
+  `lib/daemon/runner.ts`). Explicit `--env` remains the final env override. Cloud and
   lease placement MUST reject device-local accounts.
 
 Requirement keywords **MUST / MUST NOT / SHOULD / MAY** are used per
@@ -2078,7 +2078,7 @@ schema (`--json` passes through each agent's native stream format).
   itself MUST survive, and `options.env` still overrides last (EXEC-5).
   Note this MUST NOT be read as "an interactive run never carries a token" — no
   requirement yet strips an ambient value when NO per-account token resolves,
-  which is the routines path's behavior (`lib/runner.ts:1018-1021`) and is
+  which is the routines path's behavior (`lib/daemon/runner.ts:1018-1021`) and is
   tracked as RUSH-2360.
 - **EXEC-3 (MUST).** `buildExecEnv` MUST set `AGENTS_MAILBOX_DIR` +
   `AGENT_SESSION_ID` + `AGENTS_SESSION_ID` when a valid session id is present

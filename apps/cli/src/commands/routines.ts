@@ -85,7 +85,7 @@ import { fireWebhookJobs, matchJobsToWebhook, type IncomingWebhook, type Webhook
 import { getRoutinesDir } from '../lib/state.js';
 import { IS_WINDOWS } from '../lib/platform/index.js';
 import { safeJoin } from '../lib/paths.js';
-import { executeJob, executeJobDetached, monitorRunningJobs } from '../lib/runner.js';
+import { executeJob, executeJobDetached, monitorRunningJobs } from '../lib/daemon/runner.js';
 import { JobScheduler } from '../lib/scheduler.js';
 import { detectOverdueJobs } from '../lib/overdue.js';
 import { runCatchup } from '../lib/catchup.js';

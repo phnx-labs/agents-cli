@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir, homedir } from 'os';
-import { buildJobCommand, extractReport, inferFinalStatusFromLog } from '../src/lib/runner.js';
+import { buildJobCommand, extractReport, inferFinalStatusFromLog } from '../src/lib/daemon/runner.js';
 import { toPosix } from '../src/lib/platform/index.js';
 import type { JobConfig } from '../src/lib/jobs.js';
 

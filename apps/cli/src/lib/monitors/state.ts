@@ -254,7 +254,7 @@ export interface FireRecord extends MonitorEvent {
    * snapshot: `executeJobDetached` writes `status: 'running'` before spawning
    * and returns immediately — the real outcome (`completed`/`failed`/`timeout`)
    * lands later, asynchronously, in `executeJobDetachedClaimed`'s own
-   * `settle()` on child exit/error (lib/runner.ts). So a fire recorded
+   * `settle()` on child exit/error (lib/daemon/runner.ts). So a fire recorded
    * `runStatusAtFire: 'running'` had its `ok` frozen before the run actually
    * finished — that is the signal a future reconciliation pass (a daemon tick
    * that revisits `running`-at-fire records and patches `ok` for real) would

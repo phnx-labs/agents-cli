@@ -25,7 +25,7 @@ import type {
   WebhookContext,
 } from '../scheduling/routines.js';
 import { jobRunsOnThisDevice, listJobs, substituteWebhookPrompt } from '../scheduling/routines.js';
-import { executeJobDetached } from '../runner.js';
+import { executeJobDetached } from '../daemon/runner.js';
 import { emit } from '../feed/events.js';
 import {
   listHandlers,

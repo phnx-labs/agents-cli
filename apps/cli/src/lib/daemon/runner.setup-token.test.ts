@@ -4,11 +4,11 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { buildRoutineSpawnEnv } from './runner.js';
-import { claudeAccountTokenKey } from './claude-account-token.js';
-import { bundleItemStore, keychainRef, writeBundle, type SecretsBundle } from './secrets/bundles.js';
-import { _resetFileStoreForTest } from './secrets/filestore.js';
-import { secretsKeychainItem } from './secrets/index.js';
-import { getVersionHomePath } from './installations/versions.js';
+import { claudeAccountTokenKey } from '../claude-account-token.js';
+import { bundleItemStore, keychainRef, writeBundle, type SecretsBundle } from '../secrets/bundles.js';
+import { _resetFileStoreForTest } from '../secrets/filestore.js';
+import { secretsKeychainItem } from '../secrets/index.js';
+import { getVersionHomePath } from '../installations/versions.js';
 
 // A routine authenticates through a per-account, non-rotating `claude setup-token`
 // (the mint-auth cure for the single-use-refresh-token revocation storm). The daemon

@@ -18,8 +18,8 @@ import { spawn, execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { getCliLaunch, getAgentsBinDir } from './cli-entry.js';
-import type { JobConfig, RunMeta } from './scheduling/routines.js';
+import { getCliLaunch, getAgentsBinDir } from '../cli-entry.js';
+import type { JobConfig, RunMeta } from '../scheduling/routines.js';
 import {
   resolveJobPrompt,
   parseTimeout,
@@ -35,16 +35,16 @@ import {
   claimRunSlot,
   readRunMeta,
   resolveHostStrategy,
-} from './scheduling/routines.js';
-import type { ResolvedExecutionContext, PlacementMode } from './routine-context.js';
-import { getRunsDir, getUserAgentsDir, readMeta, getDaemonDir } from './state.js';
-import type { AgentId } from './types.js';
-import { shortCodexHome } from './codex-home.js';
-import { prepareJobHome, buildSpawnEnv, getJobHomePath } from './sandbox.js';
-import { resolveModel, buildReasoningFlags } from './models.js';
-import { createTimer, redactPrompt, emitRoutineEnd } from './feed/events.js';
-import { codexEditWritableRoots, codexPolicyArgs } from './codex-policy.js';
-import { applyAddDirs } from './add-dir.js';
+} from '../scheduling/routines.js';
+import type { ResolvedExecutionContext, PlacementMode } from '../routine-context.js';
+import { getRunsDir, getUserAgentsDir, readMeta, getDaemonDir } from '../state.js';
+import type { AgentId } from '../types.js';
+import { shortCodexHome } from '../codex-home.js';
+import { prepareJobHome, buildSpawnEnv, getJobHomePath } from '../sandbox.js';
+import { resolveModel, buildReasoningFlags } from '../models.js';
+import { createTimer, redactPrompt, emitRoutineEnd } from '../feed/events.js';
+import { codexEditWritableRoots, codexPolicyArgs } from '../codex-policy.js';
+import { applyAddDirs } from '../add-dir.js';
 import {
   normalizeMode,
   resolveHeadlessMode,
@@ -57,17 +57,17 @@ import {
   type ExecEffort,
   type FallbackEntry,
   AGENT_COMMANDS,
-} from './exec.js';
-import { resolveActor } from './actor.js';
-import type { LoopDeps } from './loop.js';
-import { loadTask as loadHostTask } from './hosts/tasks.js';
-import { reconcileTask as reconcileHostTask } from './hosts/reconcile.js';
-import { backgroundSpawnOptions, killTree } from './platform/process.js';
+} from '../exec.js';
+import { resolveActor } from '../actor.js';
+import type { LoopDeps } from '../loop.js';
+import { loadTask as loadHostTask } from '../hosts/tasks.js';
+import { reconcileTask as reconcileHostTask } from '../hosts/reconcile.js';
+import { backgroundSpawnOptions, killTree } from '../platform/process.js';
 import lockfile from 'proper-lockfile';
-import { ensureLockTarget } from './fs-atomic.js';
-import { walkForFiles } from './fs-walk.js';
-import { getBinaryPath, isVersionInstalled, resolveVersion, getVersionHomePath } from './installations/versions.js';
-import { resolveClaudeSetupToken } from './claude-account-token.js';
+import { ensureLockTarget } from '../fs-atomic.js';
+import { walkForFiles } from '../fs-walk.js';
+import { getBinaryPath, isVersionInstalled, resolveVersion, getVersionHomePath } from '../installations/versions.js';
+import { resolveClaudeSetupToken } from '../claude-account-token.js';
 import {
   getConfiguredRunStrategy,
   resolveRunVersion,
@@ -77,10 +77,10 @@ import {
   formatNoHealthyAccountError,
   type RotateCandidate,
   type RotateResult,
-} from './accounting/rotate.js';
-import { readAuthHealth, isDeadVerdict } from './auth-health.js';
-import { machineId } from './machine-id.js';
-import { isSelfUpdatingAgent, ROUTINE_AGENT_COMMANDS, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from './agents.js';
+} from '../accounting/rotate.js';
+import { readAuthHealth, isDeadVerdict } from '../auth-health.js';
+import { machineId } from '../machine-id.js';
+import { isSelfUpdatingAgent, ROUTINE_AGENT_COMMANDS, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../agents.js';
 
 /** Result of a completed job execution, including metadata and optional report. */
 export interface RunResult {
@@ -1005,7 +1005,7 @@ export async function resolveRoutineLaunch(
   // resolveRoutineLaunch is only called for agent jobs (workflow returns above;
   // command jobs branch out of execute*Job before reaching this).
   const agent = config.agent!;
-  const { findAccount, findUnifiedAccount, resolveAccountSelection, resolveCredentialAccount } = await import('./account-registry.js');
+  const { findAccount, findUnifiedAccount, resolveAccountSelection, resolveCredentialAccount } = await import('../account-registry.js');
   const meta = (deps.readMeta ?? readMeta)();
   const explicitCredential = config.account
     ? (deps.findCredentialAccount?.(config.account) ?? (deps.resolveCredentialAccount !== undefined || findAccount(config.account) !== null))
@@ -1179,12 +1179,12 @@ export function pinJobBinary(cmd: string[], agent: AgentId, version: string | un
 export async function assertRoutineAccountLocalForPlacement(
   config: Pick<JobConfig, 'name' | 'account'>,
   mode: 'host' | 'cloud',
-  deps: { account?: import('./account-registry.js').UnifiedAccount | null; readMeta?: typeof readMeta } = {},
+  deps: { account?: import('../account-registry.js').UnifiedAccount | null; readMeta?: typeof readMeta } = {},
 ): Promise<void> {
   if (!config.account) return;
   let account = deps.account;
   if (account === undefined) {
-    const { findUnifiedAccount } = await import('./account-registry.js');
+    const { findUnifiedAccount } = await import('../account-registry.js');
     account = findUnifiedAccount(config.account, (deps.readMeta ?? readMeta)());
   }
   if (!account) {
@@ -1201,10 +1201,10 @@ export async function assertRoutineAccountLocalForPlacement(
 
 export async function dispatchPlacedJob(
   config: JobConfig,
-  target: import('./routines-placement.js').PlacementTarget,
+  target: import('../routines-placement.js').PlacementTarget,
   attempt: RoutineAttempt,
   deps: {
-    account?: import('./account-registry.js').UnifiedAccount | null;
+    account?: import('../account-registry.js').UnifiedAccount | null;
     host?: typeof executeJobOnHost;
     cloud?: typeof executeJobOnCloud;
   } = {},
@@ -1226,7 +1226,7 @@ export async function dispatchPlacedJob(
 export function buildHostDispatchOptions(
   config: JobConfig,
   ctx: { remoteCwd: string | undefined; runDir: string; detached: boolean },
-): import('./hosts/run-target.js').HostPromptRun {
+): import('../hosts/run-target.js').HostPromptRun {
   return {
     agent: config.agent!,
     prompt: resolveJobPrompt(config),
@@ -1446,7 +1446,7 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   // do not apply. Sync callers (manual `routines run`, catchup) follow the
   // remote run to completion when possible.
   {
-    const { resolvePlacementTarget } = await import('./routines-placement.js');
+    const { resolvePlacementTarget } = await import('../routines-placement.js');
     const target = await resolvePlacementTarget(config);
     const placed = await dispatchPlacedJob(config, target, attempt);
     if (placed) return placed;
@@ -1496,7 +1496,7 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   // (command jobs branched out earlier, so config.agent is set on the non-workflow path.)
   const effectiveAgent: AgentId = config.workflow ? 'claude' : config.agent!;
   if (!dispatchesViaAgentsRun(config)) {
-    const { findUnifiedAccount, resolveAccountSelection, resolveCredentialAccount } = await import('./account-registry.js');
+    const { findUnifiedAccount, resolveAccountSelection, resolveCredentialAccount } = await import('../account-registry.js');
     const meta = readMeta();
     const selectedAccount = resolveAccountSelection(config.account, effectiveAgent, meta);
     if (selectedAccount) {
@@ -1574,7 +1574,7 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
           .map((d) => d.replace(/^~/, os.homedir())),
       } : {}),
     };
-    const { runLoop } = await import('./loop.js');
+    const { runLoop } = await import('../loop.js');
     const loopResult = await runLoop(execOptions, config.loop, {
       runId,
       runDir,
@@ -1762,8 +1762,8 @@ async function executeJobOnCloud(config: JobConfig, opts: { detached: boolean },
     throw new Error(`Routine '${config.name}' hostStrategy: cloud requires an agent`);
   }
 
-  const { resolveProvider } = await import('./cloud/registry.js');
-  const { insertTask } = await import('./cloud/store.js');
+  const { resolveProvider } = await import('../cloud/registry.js');
+  const { insertTask } = await import('../cloud/store.js');
   const provider = resolveProvider(undefined, config.agent);
 
   const timer = createTimer('agent.run', {
@@ -1837,9 +1837,9 @@ async function executeJobOnHost(config: JobConfig, opts: { detached: boolean }, 
   if (config.command) {
     throw new Error(`Routine '${config.name}' uses 'command:', which can't execute on a host yet — remove 'host:' or 'command:'.`);
   }
-  const { resolveHostRunTarget, dispatchPromptToHost } = await import('./hosts/run-target.js');
+  const { resolveHostRunTarget, dispatchPromptToHost } = await import('../hosts/run-target.js');
   const host = await resolveHostRunTarget(config.host!);
-  const { evaluateHostActivationReadiness } = await import('./routine-readiness.js');
+  const { evaluateHostActivationReadiness } = await import('../routine-readiness.js');
   const readiness = await evaluateHostActivationReadiness(config);
   if (!readiness.ready) throw new Error(`${readiness.readiness?.code ?? 'not_ready'}: ${readiness.readiness?.message ?? 'target is not ready'}`);
   const remoteCwd = readiness.context.resolvedCwd;
@@ -2024,7 +2024,7 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
   // (the monitor tick observes an already-finalized record), so notify-desktop
   // sends the finish notification only for local detached runs below (RUSH-2030).
   {
-    const { resolvePlacementTarget } = await import('./routines-placement.js');
+    const { resolvePlacementTarget } = await import('../routines-placement.js');
     const target = await resolvePlacementTarget(config);
     if (target.mode === 'host' || target.mode === 'cloud') {
       await assertRoutineAccountLocalForPlacement(config, target.mode);
@@ -2092,7 +2092,7 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
     config,
   );
   if (!dispatchesViaAgentsRun(config)) {
-    const { findAccount, resolveAccountSelection, resolveCredentialAccount } = await import('./account-registry.js');
+    const { findAccount, resolveAccountSelection, resolveCredentialAccount } = await import('../account-registry.js');
     const selectedAccount = config.account && !findAccount(config.account)
       ? undefined
       : resolveAccountSelection(config.account, config.agent!, readMeta());

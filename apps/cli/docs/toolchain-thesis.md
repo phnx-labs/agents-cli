@@ -94,7 +94,7 @@ Every layer of the toolchain maps to a concrete implementation in the codebase.
 | 6. Secrets | macOS Keychain (`agents-cli.<provider>.token`, `agents-cli.secrets.<bundle>.<KEY>`); YAML on disk holds refs only; merge order profile < bundle < `--env K=V` | `src/lib/profiles-keychain.ts`, `src/commands/exec.ts:229-249` |
 | 7. Local run | `agents run <agent\|profile> <prompt>` with `--mode plan/edit/full`, `--effort low/.../max`, `--rotate` for LRU accounts, `--fallback codex,gemini` cascade on rate-limit with `/continue <id>` | `src/commands/exec.ts:61-145`, `src/lib/exec.ts:244-329` |
 | 8. Cloud dispatch | Unified `agents cloud run/list/status/logs/cancel/message` across Rush / Codex / Factory, shared SQLite task index, SSE streaming | `src/lib/cloud/*`, `src/commands/cloud.ts:57-100` |
-| 9. Scheduler | `agents routines add daily-digest --schedule "0 9 * * 1-5"`, sandboxed runner, daemon auto-start | `src/lib/scheduler.ts`, `src/lib/runner.ts`, `src/commands/routines.ts` |
+| 9. Scheduler | `agents routines add daily-digest --schedule "0 9 * * 1-5"`, sandboxed runner, daemon auto-start | `src/lib/scheduler.ts`, `src/lib/daemon/runner.ts`, `src/commands/routines.ts` |
 
 **Verdict:** yes -- agi-cli is the shape. Every one of the 9 layers is implemented, and every top-10 pain point from the research maps to an existing feature.
 

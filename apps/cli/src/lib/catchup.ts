@@ -45,7 +45,7 @@ import {
   type RunMeta,
 } from './scheduling/routines.js';
 import { detectOverdueJobs, type OverdueJob } from './overdue.js';
-import { executeJobDetached } from './runner.js';
+import { executeJobDetached } from './daemon/runner.js';
 
 /** What happened to one overdue routine on a catch-up pass. */
 export interface CatchupOutcome {

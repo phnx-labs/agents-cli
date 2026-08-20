@@ -3,7 +3,7 @@
  *
  * On a fire, the monitor feeds the event to an action. Every `run`/`routine`
  * action goes through the *same* detached spawn cron and webhook fires use
- * (executeJobDetached, lib/runner.ts) — a monitor never duplicates spawn logic,
+ * (executeJobDetached, lib/daemon/runner.ts) — a monitor never duplicates spawn logic,
  * it synthesizes a JobConfig and hands it to the one dispatch seam. `notify`
  * routes the owner through the one channel seam (sendToOwner → lookupTransport,
  * lib/notify.ts) — recipient from notify.owner, no hardcoded chat id, and an
@@ -11,7 +11,7 @@
  * `webhook-out` POSTs the event.
  */
 
-import { executeJobDetached } from '../runner.js';
+import { executeJobDetached } from '../daemon/runner.js';
 import { readJob, type JobConfig } from '../scheduling/routines.js';
 import { sendToOwner } from '../notify.js';
 import type { AgentId, Meta } from '../types.js';

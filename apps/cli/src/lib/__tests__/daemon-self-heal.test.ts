@@ -25,7 +25,7 @@ import {
 import { getDaemonDir } from '../state.js';
 import { writeRunMeta, type RunMeta } from '../scheduling/routines.js';
 import { getRunsDir } from '../state.js';
-import { monitorRunningJobs } from '../runner.js';
+import { monitorRunningJobs } from '../daemon/runner.js';
 
 // Redirect the daemon scratch dir (heartbeat.json / daemon.pid / the O_EXCL start
 // lock) to a file-private temp so these IN-PROCESS writes never touch a live

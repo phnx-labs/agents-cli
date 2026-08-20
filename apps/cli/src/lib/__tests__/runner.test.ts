@@ -9,7 +9,7 @@ import {
   executeJobDetached,
   pinJobBinary,
   resolveRoutineLaunch,
-} from '../runner.js';
+} from '../daemon/runner.js';
 import { readRunMeta } from '../scheduling/routines.js';
 import { getRunsDir } from '../state.js';
 import type { JobConfig } from '../scheduling/routines.js';

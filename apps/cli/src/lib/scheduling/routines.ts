@@ -41,7 +41,7 @@ import {
 import { humanizeCron, humanizeNextRun } from '../routines-format.js';
 import { discoverProjectRoutines } from '../routines-project.js';
 import { listProjectDefs } from '../projects.js';
-import { monitorRunningJobs } from '../runner.js';
+import { monitorRunningJobs } from '../daemon/runner.js';
 import { JobScheduler } from '../scheduler.js';
 import { detectOverdueJobs } from '../overdue.js';
 

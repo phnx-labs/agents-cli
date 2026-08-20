@@ -189,7 +189,7 @@ describe('fire history', () => {
  * reality even though the on-disk fire record never changes.
  *
  * Real disk I/O, no mocking: writes an actual RunMeta via `writeRunMeta`
- * (the same writer `settle()` in lib/runner.ts uses) and an actual fire
+ * (the same writer `settle()` in lib/daemon/runner.ts uses) and an actual fire
  * record via `writeFireRecord`, then reads both back through the real
  * `resolveFireOutcome`.
  */

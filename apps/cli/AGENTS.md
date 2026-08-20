@@ -98,11 +98,11 @@ when the harness and launch path provide one:
 Source of truth: `buildExecEnv` / `emitResolvedSessionId` in
 [`src/lib/exec.ts`](src/lib/exec.ts), `listTeamsActive` in
 [`src/lib/session/active.ts`](src/lib/session/active.ts),
-`archiveRoutineTranscripts` in [`src/lib/runner.ts`](src/lib/runner.ts), and
+`archiveRoutineTranscripts` in [`src/lib/daemon/runner.ts`](src/lib/daemon/runner.ts), and
 `decorateRoutineSession` in [`src/lib/session/discover.ts`](src/lib/session/discover.ts).
 Enforced by [`src/lib/session/team-filter.test.ts`](src/lib/session/team-filter.test.ts)
 (`--teams includes team sessions with teamOrigin populated`),
-[`src/lib/runner.test.ts`](src/lib/runner.test.ts) (routine transcript archival), and
+[`src/lib/daemon/runner.test.ts`](src/lib/daemon/runner.test.ts) (routine transcript archival), and
 [`src/commands/sessions.test.ts`](src/commands/sessions.test.ts) (routine run history
 plus linked sessions, with no fake session for command-only runs).
 

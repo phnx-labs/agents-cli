@@ -462,7 +462,7 @@ function dispatchDefault(config: JobConfig): Promise<RunMeta> {
   // Import lazily so the runner module (heavy) is only loaded when a handler
   // actually needs to spawn. Tests inject dispatch functions, so this path is
   // not exercised in unit tests.
-  return import('../runner.js').then((m) => m.executeJobDetached(config));
+  return import('../daemon/runner.js').then((m) => m.executeJobDetached(config));
 }
 
 /**

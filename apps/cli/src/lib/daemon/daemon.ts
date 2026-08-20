@@ -18,7 +18,7 @@ import { listJobs as listAllJobs, type JobConfig } from '../scheduling/routines.
 import { syncAllProjectRoutines } from '../routines-project.js';
 import { JobScheduler } from '../scheduler.js';
 import { MonitorEngine } from '../monitors/engine.js';
-import { executeJobDetached, monitorRunningJobs, listLiveRoutineChildren } from '../runner.js';
+import { executeJobDetached, monitorRunningJobs, listLiveRoutineChildren } from './runner.js';
 import { detectOverdueJobs, notifyOverdue } from '../overdue.js';
 import { runCatchup } from '../catchup.js';
 import { notifyRoutineStart, notifyRoutineFinish, notifyRoutineStartFailed } from '../routine-notify.js';

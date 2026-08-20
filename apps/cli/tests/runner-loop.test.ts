@@ -46,7 +46,7 @@ vi.mock('../src/lib/state.js', async (importOriginal) => {
   };
 });
 
-import { executeJob } from '../src/lib/runner.js';
+import { executeJob } from '../src/lib/daemon/runner.js';
 
 function makeConfig(overrides: Partial<JobConfig> = {}): JobConfig {
   return {
