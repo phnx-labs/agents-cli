@@ -179,6 +179,80 @@ sessions, secrets, spend and audit trails cannot do it over SSH into each other'
 laptops. That is the layer people pay for, and it is the layer that does not
 exist yet.
 
+### 4b. Correction: a BYO orchestrator *can* meter usage — OpenRouter does
+
+An earlier draft of this report claimed a BYO-subscription orchestrator has no
+metered unit and therefore cannot use usage pricing. That is too strong, and
+OpenRouter is the counterexample that breaks it.
+
+OpenRouter charges **5.5% on credit top-ups** ($0.80 minimum) and passes inference
+through at cost — *"We pass through the pricing of the underlying providers
+without any markup on inference pricing."* More importantly for this argument, it
+also charges in **bring-your-own-key mode**, where it never touches the money:
+*"The cost of using custom provider keys on OpenRouter is 5% of what the same
+model/provider would cost normally on OpenRouter."*
+
+That is a usage-scaled fee levied on the **value of traffic routed**, not on
+holding the payment. It is a real, available mechanism, and OpenRouter is at 8M
+users and ~100T tokens/month on it, reportedly being acquired by Stripe for $7B+.
+
+So the correct statement is narrower: the orchestrator gives up the *inference
+margin*, not metering as such. LangChain shows the other shape — LangSmith at
+$39/seat plus metered compute and storage units, sitting beside the customer's own
+model bill. Portkey meters log volume; LiteLLM sells a self-hosted enterprise
+licence *"never per token."*
+
+The mechanism exists. Whether agi-cli can use it is a different question, and the
+next section is why the answer may be no.
+
+### 4c. The risk that outranks pricing: the subscription pitch may not be monetizable at all
+
+This is the most consequential finding in the report and it was not in the
+original brief.
+
+**No commercially successful paid wrapper of a *subscription seat* was found to
+exist.** Every real example either is free and open source, or resells API-key
+usage instead — a different and permitted model. That is a negative result across
+a deliberate search, not an absence of looking.
+
+The reason is that the provider terms forbid it, and enforcement has already
+happened to a peer. Anthropic's Consumer Terms state: *"You may not share your
+Account login information, Anthropic API key, or Account credentials with anyone
+else. You also may not make your Account available to anyone else,"* and bar
+accessing the Services *"through automated or non-human means, whether through a
+bot, script, or otherwise"* outside the API.
+
+**OpenClaw — a harness agi-cli supports (`AgentId` includes `openclaw`) — was cut
+off by Anthropic on 2026-04-05** for precisely the pattern of spending a Pro/Max
+subscription across parallel third-party agents. Claude Code's head of product:
+*"our subscriptions weren't built for the usage patterns of these third-party
+tools. Capacity is a resource we manage thoughtfully."* It was partially reversed
+on 2026-06-15, and OpenClaw's own docs still warn that *"Anthropic can change
+Claude Code billing and rate-limit behavior without an OpenClaw release."* Google
+separately restricted AI Pro/Ultra subscribers using OpenClaw in February 2026, so
+this is a cross-provider pattern rather than one vendor's mood.
+
+Why this lands squarely on agi-cli: the subscription pitch is the product's
+headline (`README.md:1494`), and **balanced account rotation is a documented
+feature built for exactly this purpose** — `README.md:193` describes
+`--strategy balanced` as *"useful when you have multiple accounts and want to
+avoid burning through one."*
+
+Two consequences, and they point the same way:
+
+1. **The free tool is not the exposure; the paid product would be.** Running your
+   own subscriptions on your own machines is your business. *Charging money* for
+   software whose value proposition is spreading subscription seats across
+   parallel automation is what has no precedent and sits against explicit terms.
+2. **It reinforces the enterprise conclusion.** Enterprises do not run personal
+   Max seats — they use API keys, Bedrock, or Vertex, where metering and
+   automation are permitted and where OpenRouter's 5%-of-routed-value mechanism
+   is actually available. The buyer who can pay is also the buyer whose usage is
+   contractually clean.
+
+This deserves a real legal read before any paid tier is built on the rotation
+story, and it should be treated as a gating question rather than a footnote.
+
 ### 5. Pricing has already converged, so the number is not the hard part
 
 Solo tiers cluster at **$20/month** (Cursor Pro, Claude Pro, Devin Pro, Amp,

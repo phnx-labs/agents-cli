@@ -60,10 +60,14 @@ mechanisms that work.
 
 Four consequences follow:
 
-1. **No usage margin, so no usage pricing.** The pattern that monetized every
-   comparable OSS infrastructure company — Vercel ($340M ARR), Modal ($60M→$300M
-   annualized), Supabase ($170M ARR) — requires sitting in the request path and
-   marking it up. A BYO-subscription orchestrator has given that up on purpose.
+1. **No inference margin — though metering itself is still possible.** The
+   pattern that monetized every comparable OSS infrastructure company — Vercel
+   ($340M ARR), Modal ($60M→$300M annualized), Supabase ($170M ARR) — requires
+   sitting in the request path and marking it up, which a BYO-subscription
+   orchestrator has given up on purpose. But note the narrower truth: OpenRouter
+   charges 5% even in bring-your-own-key mode — *"5% of what the same
+   model/provider would cost normally"* — metering the **value of traffic routed**
+   without holding the payment. Metering survives; the margin does not.
 2. **The budget is already spent.** Users pay $20–200/month to the model vendor,
    and per Anthropic's own disclosed figures $150–250/dev/month in practice. An
    orchestrator asks for *incremental* budget on top of a bill the buyer already
