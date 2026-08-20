@@ -190,12 +190,6 @@ function safeReadJson<T>(file: string): T | undefined {
   }
 }
 
-function atomicWriteJson(file: string, value: unknown): void {
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(value, null, 2), 'utf-8');
-  fs.renameSync(tmp, file);
-}
-
 /** Read one block record. Returns undefined when missing or corrupt. */
 export function readBlock(blockId: string, root?: string): OpenBlock | undefined {
   const parsed = safeReadJson<Partial<OpenBlock>>(blockPath(root ?? getFeedDir(), blockId));
