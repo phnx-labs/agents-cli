@@ -648,10 +648,6 @@ describe('secrets list/view --json (agent discovery, RUSH-1834)', () => {
     }
   });
 
-  // RUSH-2839: 11066ms measured under load (16 CPU-bound background
-  // processes on a 20-core box) vs 5301ms idle — two real `agents view`
-  // subprocess boots. See tests/routines.test.ts:1453 for the established
-  // pattern of raising the timeout on a slow real-CLI test.
   it.skipIf(!keychainHelperAvailable)('view --json --reveal fails fast outside an interactive terminal — the old --plaintext escape is gone (RUSH-2774)', ({ skip }) => {
     if (!keychainHelperAvailable) {
       skip();
@@ -672,7 +668,7 @@ describe('secrets list/view --json (agent discovery, RUSH-1834)', () => {
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
-  }, 90_000);
+  });
 });
 
 describe('buildSecretsExecEnv', () => {
