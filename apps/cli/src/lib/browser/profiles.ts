@@ -213,9 +213,9 @@ export async function ensureDefaultBrowserProfile(): Promise<BrowserProfile> {
       chosen
         ? `warning: configured default browser profile "${configured}" can't launch on this ` +
           `machine (its browser/binary isn't installed here); falling back to auto-detect. ` +
-          `Fix with: agents browser profiles set-default <name>  (or --unset)`
+          `Fix with: agents browser use <name>  (or --unset)`
         : `warning: configured default browser profile "${configured}" no longer exists; ` +
-          `falling back to auto-detect. Fix with: agents browser profiles set-default <name>  (or --unset)`
+          `falling back to auto-detect. Fix with: agents browser use <name>  (or --unset)`
     );
   }
 
