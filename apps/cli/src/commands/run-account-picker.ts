@@ -28,6 +28,15 @@ export interface RunAccountChoice {
   signInRequired: boolean;
 }
 
+/** One named account row for `agents accounts switch` (reuses this picker's layout). */
+export interface SwitchAccountRow {
+  accountName: string;
+  kind: 'provider' | 'native';
+  detail: string;
+  current: boolean;
+  candidate: RotateCandidate | null;
+}
+
 const WINDOW_ORDER = ['session', 'week', 'sonnet_week', 'month'] as const;
 const WINDOW_LABELS = {
   session: 'Session',
@@ -152,6 +161,90 @@ export function buildRunAccountChoices(
     ready: row.ready,
     signInRequired: row.signInRequired,
   }));
+}
+
+function switchRowStatus(row: SwitchAccountRow): { status: string; limits: string; ready: boolean } {
+  if (!row.candidate) {
+    return {
+      status: row.kind === 'provider' ? 'credential' : 'named',
+      limits: 'limits unavailable',
+      ready: true,
+    };
+  }
+  const readiness = readinessFromCandidate(row.candidate);
+  const authReason = readiness.ready ? null : readiness.reason;
+  const status = authReason === 'revoked'
+    ? 'needs re-login'
+    : authReason === 'signed_out'
+      ? 'logged out'
+      : authReason === 'rate_limited'
+        ? 'rate limited'
+        : authReason === 'out_of_credits'
+          ? 'out of credits'
+          : 'logged in';
+  const limits = authReason === 'revoked'
+    ? 'needs re-authentication'
+    : authReason === 'signed_out'
+      ? 'signed out'
+      : formatAccountLimits(row.candidate);
+  return { status, limits, ready: readiness.ready };
+}
+
+/**
+ * Aligned picker rows for `accounts switch`. Same columns as the run picker
+ * (identity, status, limits) but the value is the named account to set-default.
+ * Rows stay selectable: setting a default is not a launch.
+ */
+export function buildSwitchAccountChoices(rows: SwitchAccountRow[]): RunAccountChoice[] {
+  const rendered = rows.map((row) => {
+    const { status, limits, ready } = switchRowStatus(row);
+    const account = row.current ? `${row.accountName} (default)` : row.accountName;
+    const kind = row.kind === 'provider' ? `provider · ${row.detail}` : `native · ${row.detail}`;
+    return { account, kind, status, limits, ready, value: row.accountName };
+  });
+  const accountWidth = Math.max(0, ...rendered.map((row) => row.account.length));
+  const kindWidth = Math.max(0, ...rendered.map((row) => row.kind.length));
+  const statusWidth = Math.max(0, ...rendered.map((row) => row.status.length));
+  return rendered.map((row) => ({
+    name: [
+      row.account.padEnd(accountWidth),
+      row.kind.padEnd(kindWidth),
+      row.status.padEnd(statusWidth),
+      row.limits,
+    ].join('  '),
+    value: row.value,
+    ready: row.ready,
+    signInRequired: false,
+  }));
+}
+
+/**
+ * Prompt for the named account that becomes this harness's default.
+ * A cancelled picker writes nothing.
+ */
+export async function pickSwitchAccount(agent: AgentId, rows: SwitchAccountRow[]): Promise<string | null> {
+  if (!isInteractiveTerminal()) {
+    requireInteractiveSelection(`Selecting a ${agentLabel(agent)} account`, [
+      `agents accounts switch ${agent} <account>`,
+      `agents accounts set-default ${agent} <account>`,
+    ]);
+  }
+  if (rows.length === 0) {
+    throw new Error(`No named accounts for ${agent}. Add one with 'agents accounts add <name> --provider <p>' or 'agents accounts name ${agent}@<version> <name>'.`);
+  }
+  const choices = buildSwitchAccountChoices(rows).map(
+    ({ ready: _ready, signInRequired: _signInRequired, ...choice }) => choice,
+  );
+  try {
+    return await select({
+      message: `Select the default ${agentLabel(agent)} account:`,
+      choices,
+      loop: false,
+    });
+  } catch (err) {
+    if (isPromptCancelled(err)) return null;
+    throw err;
+  }
 }
 
 /**

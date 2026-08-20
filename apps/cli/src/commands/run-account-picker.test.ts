@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RotateCandidate } from '../lib/accounting/rotate.js';
 import type { UsageSnapshot, UsageWindowKey } from '../lib/accounting/usage.js';
-import { buildRunAccountChoices, formatAccountLimits, pickSignInLaunchVersion, signInLaunchDecision } from './run-account-picker.js';
+import { buildRunAccountChoices, buildSwitchAccountChoices, formatAccountLimits, pickSignInLaunchVersion, signInLaunchDecision } from './run-account-picker.js';
 
 function snapshot(windows: Array<[UsageWindowKey, number]>, plan: string | null = null): UsageSnapshot {
   return {
@@ -141,6 +141,50 @@ describe('buildRunAccountChoices', () => {
       candidate({ plan: null, usageSnapshot: snapshot([['session', 10]], 'Team') }),
     ], null);
     expect(choice.name).toContain('Team');
+  });
+});
+
+describe('buildSwitchAccountChoices', () => {
+  it('marks the current default and shows native usage next to provider credentials', () => {
+    const choices = buildSwitchAccountChoices([
+      {
+        accountName: 'work',
+        kind: 'provider',
+        detail: 'anthropic',
+        current: true,
+        candidate: null,
+      },
+      {
+        accountName: 'personal',
+        kind: 'native',
+        detail: 'one@example.com',
+        current: false,
+        candidate: candidate({ usageSnapshot: snapshot([['session', 25], ['week', 60]]) }),
+      },
+    ]);
+    expect(choices[0]).toMatchObject({ value: 'work', ready: true });
+    expect(choices[0].name).toContain('work (default)');
+    expect(choices[0].name).toContain('provider · anthropic');
+    expect(choices[0].name).toContain('credential');
+    expect(choices[1].value).toBe('personal');
+    expect(choices[1].name).toContain('native · one@example.com');
+    expect(choices[1].name).toContain('Session 75% left');
+  });
+
+  it('keeps a rate-limited native account selectable — switch sets a default, it does not launch', () => {
+    const [choice] = buildSwitchAccountChoices([
+      {
+        accountName: 'maxed',
+        kind: 'native',
+        detail: 'one@example.com',
+        current: false,
+        candidate: candidate({ usageSnapshot: snapshot([['session', 100], ['week', 100]]) }),
+      },
+    ]);
+    expect(choice.disabled).toBeUndefined();
+    expect(choice.ready).toBe(false);
+    expect(choice.name).toContain('rate limited');
+    expect(choice.name).toContain('Session exhausted');
   });
 });
 
