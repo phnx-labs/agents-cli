@@ -55,6 +55,16 @@ export function atomicWriteFileSync(filePath: string, content: string, options: 
 }
 
 /**
+ * Convenience wrapper around {@link atomicWriteFileSync} for the common case of
+ * writing pretty-printed JSON (RUSH-2840). Same tmp-then-rename mechanics, same
+ * caller responsibility to ensure the parent directory exists first — this adds
+ * only the `JSON.stringify`.
+ */
+export function atomicWriteJsonSync(filePath: string, data: unknown): void {
+  atomicWriteFileSync(filePath, JSON.stringify(data, null, 2));
+}
+
+/**
  * Acquires an exclusive proper-lockfile lock on filePath, runs fn, then
  * releases the lock. Retries with capped linear back-off until either the lock
  * is acquired or LOCK_ACQUIRE_TIMEOUT_MS elapses. Breaks stale locks older than

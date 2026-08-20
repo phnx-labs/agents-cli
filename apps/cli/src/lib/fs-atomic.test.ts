@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import lockfile from 'proper-lockfile';
-import { withFileLock, ensureLockTarget, sleepSync } from './fs-atomic.js';
+import { withFileLock, ensureLockTarget, sleepSync, atomicWriteJsonSync } from './fs-atomic.js';
 
 /**
  * proper-lockfile silently raises any `stale` below this floor:
@@ -119,4 +119,85 @@ describe('withFileLock heartbeat', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+/**
+ * RUSH-2840: `atomicWriteJsonSync` is the JSON convenience wrapper around
+ * `atomicWriteFileSync` -- six independent private/inline copies of this
+ * write-tmp-then-rename-JSON pattern were consolidated to call it instead of
+ * reinventing the primitive. These tests pin its atomicity guarantee (which
+ * it inherits from `atomicWriteFileSync`) against the real filesystem, and
+ * are deliberately discriminating: they fail against a naive, non-atomic
+ * `writeFileSync(target, ...)` mutant.
+ */
+describe('atomicWriteJsonSync()', () => {
+  function tmpBase(): string {
+    return fs.mkdtempSync(path.join(os.tmpdir(), 'fs-atomic-json-'));
+  }
+
+  it('round-trips data as pretty-printed JSON', () => {
+    const dir = tmpBase();
+    try {
+      const target = path.join(dir, 'file.json');
+      atomicWriteJsonSync(target, { a: 1, b: [2, 3] });
+      expect(JSON.parse(fs.readFileSync(target, 'utf-8'))).toEqual({ a: 1, b: [2, 3] });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves no stray tmp file behind on a normal, uninterrupted write', () => {
+    const dir = tmpBase();
+    try {
+      atomicWriteJsonSync(path.join(dir, 'file.json'), { v: 1 });
+      expect(fs.readdirSync(dir)).toEqual(['file.json']);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Only a NEW-file create can be blocked by directory permissions; renaming
+  // over an already-existing file's directory entry is not (the rename needs
+  // write access in the DIRECTORY, not the target file, but making the tmp
+  // file impossible to CREATE blocks the write before rename is ever
+  // reached). chmod is a no-op on Windows and root bypasses the permission
+  // check entirely, so this is skipped where the mechanism cannot hold.
+  const canBlockFileCreate =
+    process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() !== 0;
+  const itBlocksCreate = canBlockFileCreate ? it : it.skip;
+
+  itBlocksCreate(
+    'a write that fails leaves the destination with its previous valid content, and no tmp file behind',
+    () => {
+      const dir = tmpBase();
+      try {
+        const target = path.join(dir, 'registry.json');
+        atomicWriteJsonSync(target, { version: 1 });
+        const before = fs.readFileSync(target, 'utf-8');
+        expect(JSON.parse(before)).toEqual({ version: 1 });
+
+        // Block creation of the sibling tmp file by making the directory
+        // read-only. This drives the REAL writer into a failure at its very
+        // first fs call (the tmp-file create) instead of planting a decoy
+        // file it never touches -- a bare `writeFileSync(target, ...)` would
+        // still SUCCEED here, since `target` already exists and stays
+        // writable regardless of the directory's permissions. That asymmetry
+        // is what makes this test discriminating against a non-atomic mutant.
+        fs.chmodSync(dir, 0o555);
+        try {
+          expect(() => atomicWriteJsonSync(target, { version: 2 })).toThrow();
+
+          const after = fs.readFileSync(target, 'utf-8');
+          expect(after).toBe(before);
+          expect(JSON.parse(after)).toEqual({ version: 1 });
+        } finally {
+          fs.chmodSync(dir, 0o755);
+        }
+
+        expect(fs.readdirSync(dir)).toEqual(['registry.json']);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });
