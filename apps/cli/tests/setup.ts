@@ -67,6 +67,18 @@ process.env.AGENTS_SECRETS_NO_AGENT = '1';
 // Usage stamping writes bundle metadata back to the secret store on reads.
 process.env.AGENTS_NO_USAGE_TRACK = '1';
 
+// A developer box that exports CLAUDE_CODE_OAUTH_TOKEN (mac-mini does, from
+// ~/.zshenv) changed what the CLI PRINTS for a version with no per-version
+// login: view.ts renders "(no per-version login - using ambient
+// CLAUDE_CODE_OAUTH_TOKEN)" instead of "(logged out - log in with: ...)",
+// because ambientClaudeToken() (signin-badge.ts) reads this variable. Any
+// test asserting the logged-out row then failed on that box alone and passed
+// in CI -- and the suite is the release gate, so the release home base could
+// never produce a green attestation. Clear it as the fork default; tests that
+// exercise ambient-token behavior set it themselves and restore the value
+// they saved, which is simply this hermetic default.
+delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
 // Events: redirect the sink to a fork-private file. Redirect, not disable —
 // events.test.ts / logs.test.ts assert on written content and re-point the
 // sink themselves via _resetForTest, which takes precedence over this env.
