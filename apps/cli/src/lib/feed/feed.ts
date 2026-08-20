@@ -28,7 +28,7 @@ import { stringifyDoc } from '../yaml-io.js';
 import { getFeedDir, getUserAgentsDir } from '../state.js';
 import { isAdmin, isHighConsequenceAllowed, isKnownOperator } from '../operator.js';
 import { projectKeyFromCwd } from '../project-key.js';
-import { atomicWriteJsonSync } from '../atomic-write.js';
+import { atomicWriteJsonSync } from '../fs-atomic.js';
 
 export interface BlockOption {
   label: string;
@@ -456,6 +456,7 @@ export function buildDeclaredBlock(agent: DeclaringAgent, input: DeclareBlockInp
 /** Atomic write a block record to the feed store. Clears stale lifecycle state. */
 export function publishBlock(block: OpenBlock, root?: string): void {
   const dir = root ?? getFeedDir();
+  fs.mkdirSync(dir, { recursive: true });
   const target = blockPath(dir, block.blockId);
   atomicWriteJsonSync(target, block);
 }
