@@ -174,7 +174,6 @@ testless:
   - openspec/**
   - native/**
   - apps/ios/**
-  - apps/cli/.changelog/**
   - apps/cli/menubar/**
   - apps/cli/bin/**
   - apps/cli/schema/**

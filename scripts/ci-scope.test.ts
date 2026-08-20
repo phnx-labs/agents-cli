@@ -73,10 +73,13 @@ describe('classifyCiScope', () => {
   test('a .changelog edit brings the CLI job with it, for gen-changelog.test.ts', () => {
     // `cli` is true because the changelog-sources group selects
     // apps/cli/scripts/gen-changelog.test.ts, and scopeFromPlan's
-    // testUnder('apps/cli/') then has to spin the CLI job up to run it. Before
-    // that group existed this read `cli: false` -- and a hand-edited CHANGELOG.md
-    // that no source reproduces reached main three times in one day, each caught
-    // only by the full suite at release time.
+    // testUnder('apps/cli/') reports "a test under apps/cli/ was selected" --
+    // the same generic derivation every other group gets. It costs nothing
+    // extra: tests.yml has ONE job, driven by plan.tests/plan.checks, and
+    // nothing in .github/ reads steps.plan.outputs.cli. Before this group
+    // existed the value read `cli: false` -- and a hand-edited CHANGELOG.md that
+    // no source reproduces reached main three times in one day, each caught only
+    // by the full suite at release time.
     expect(classifyCiScope([
       'apps/cli/docs/architecture.md',
       'apps/cli/.changelog/next/ci.md',
