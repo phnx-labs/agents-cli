@@ -26,7 +26,7 @@ The short version:
 | Title | Expected reach | What the top comment attacks |
 | --- | --- | --- |
 | **A. 16 agents / your own machines** | Good | "How is this different from just running them?" — answerable, on-topic |
-| **B. rotates 7 Claude accounts** | Highest | **"Is this a ToS violation?"** — thread becomes about Anthropic, not you |
+| **B. rotates 7 Claude accounts** | Highest | **"Is this a ToS violation?"** — and the claim is currently false (RUSH-2858). Do not run it |
 | **C. machines you own, not a cloud sandbox** | Moderate | "Sandboxing exists for a reason" — on-topic, mild |
 
 Recommendation: **A**, with B's rotation detail moved into the body where it is
@@ -72,7 +72,7 @@ longevity.
 | --- | --- |
 | **"Why not just run the harnesses directly?"** | Because the hard part is not starting agents, it is that they stall — they ask a question and idle, or stop mid-task. Sessions, resume, and the fleet view exist to notice a stopped agent and get it moving. Lead with this; it is the actual thesis. |
 | **"Isn't this what OpenCode / Claude Code already do?"** | Those are harnesses. This runs *them*, plus 14 others, across machines you own. It is a layer up, not a competitor. Say so plainly — the distinction is real and easy to miss. |
-| **"Multiple accounts sounds like a ToS problem."** | They are subscriptions you pay for; rotation picks by remaining headroom, and skips rate-limited accounts rather than evading limits. If it is in the body rather than the title, this stays a footnote. |
+| **"Multiple accounts sounds like a ToS problem."** | They are subscriptions you pay for, and rotation picks by remaining headroom rather than evading limits. Do **not** add "and skips rate-limited accounts" — see the correction below, it does not currently do that. Keeping this in the body rather than the title keeps it a footnote. |
 | **"This is a lot of surface for one tool."** | Fair. It is a power-user tool and the docs assume you already run agents daily. Concede it rather than defending; conceding a real weakness buys credibility for everything else. |
 
 ## Evidence
@@ -83,11 +83,45 @@ Numbers in the bodies below, and where each comes from:
 | --- | --- |
 | 16 harnesses | `apps/cli/AGENTS.md` harness parity list |
 | 3,703 session transcripts | `find ~/.agents/.history/versions -name '*.jsonl'` |
-| Several accounts per harness, headroom-scheduled | `agents view` output |
 | Apache-2.0 | `LICENSE` |
+| **Several accounts per harness, headroom-scheduled** | `agents view` output — **but see the correction below; this one does not currently hold** |
+
+Every Show HN statistic quoted in this document (title-feature means, the 65-85
+character band, the `n=9` hype-word bucket, the 92%-after-48h decay) is carried
+over from the companion report
+[`launch-venues-and-posts.md`](launch-venues-and-posts.md) §Findings, where the
+method and sample are stated: HN Algolia `search_by_date`, `tags=show_hn`,
+`created_at > 2025-01-01`, queries `agent`/`ai`/`llm`/`claude`/`cli`/`coding`,
+deduped by `objectID`, n = 1,581. They are not re-derived here.
 
 Do not put a number in a post you have not run the command for that morning.
 The one certainty about HN is that someone will check.
+
+### Correction: the rotation claim does not currently hold
+
+Recorded here because it changes a recommendation rather than merely informing
+one.
+
+While reviewing this very document, a dispatched agent was routed by the
+`balanced` strategy to a session-limited account and died instantly:
+
+```
+[agents] running claude@2.1.207 (session <redacted>)
+You've hit your session limit · resets 1:20pm
+```
+
+At that same moment `agents view claude` reported that account as `S: 0% W: 0%`
+— indistinguishable from idle. The usage snapshot appears to track the 5-hour
+and weekly windows but not the session limit, so the scheduler cannot skip a
+session-limited account and may actively prefer it for looking empty. Filed as
+RUSH-2858.
+
+The consequence for this document: **"rotation skips rate-limited accounts" is
+aspirational, not current behavior.** The objection table above says rotation
+"skips rate-limited accounts"; today it does not. Do not make that claim in a
+post, in a title, or in a reply to a comment until RUSH-2858 is fixed. The body
+copy below deliberately says only that accounts rotate "picked by remaining
+headroom," which remains true, and makes no stall-prevention promise.
 
 ## Recommendations
 
