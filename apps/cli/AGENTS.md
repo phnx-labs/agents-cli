@@ -489,7 +489,8 @@ src/
     manifest.ts        # Project/user agents.yaml Manifest read/write (comment-preserving Document round-trip; used by mcp add, etc.)
     resources.ts       # resolveResource() / listResources() — layered resolution
     capabilities.ts    # supports() — the per-agent write gate
-    agents.ts          # Per-agent capability table
+    agents.ts          # re-exports agent-spec/agents.ts (per-agent capability table)
+    agent-spec/        # version-resolution engine + AGENTS table
     subagents-registry.ts  # SUBAGENT_TARGETS — declarative per-agent subagent shape (dir/layout/transform); generic install/list/remove engine
     installations/     # versions.ts (install, remove, syncResourcesToVersion), migrate.ts (one-shot idempotent migrations), store/resolve/strategies
     shims.ts           # Shim generation, config symlink switching
