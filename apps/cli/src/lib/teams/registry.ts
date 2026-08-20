@@ -10,10 +10,10 @@
 import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
-import { randomBytes } from 'crypto';
 import lockfile from 'proper-lockfile';
 import { getTeamsRegistryPath } from '../state.js';
 import { emit } from '../feed/events.js';
+import { atomicWriteJson } from '../atomic-write.js';
 
 /** Metadata for a registered team. */
 export interface TeamMeta {
@@ -48,25 +48,6 @@ export type TeamRegistry = Record<string, TeamMeta>;
 
 async function registryPath(): Promise<string> {
   return getTeamsRegistryPath();
-}
-
-/**
- * Atomic JSON write: writes to a unique sibling tmp file then renames over
- * the target. rename(2) is atomic on POSIX, so a crashed write leaves the
- * old file untouched instead of producing a half-written registry that
- * loadTeams() would reject.
- */
-async function atomicWriteJson(p: string, data: unknown): Promise<void> {
-  await fs.mkdir(path.dirname(p), { recursive: true });
-  const tmp = `${p}.tmp.${process.pid}.${randomBytes(4).toString('hex')}`;
-  const body = JSON.stringify(data, null, 2);
-  await fs.writeFile(tmp, body);
-  try {
-    await fs.rename(tmp, p);
-  } catch (err) {
-    await fs.unlink(tmp).catch(() => {});
-    throw err;
-  }
 }
 
 /**
