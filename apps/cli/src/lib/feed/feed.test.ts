@@ -131,6 +131,43 @@ describe('feed store', () => {
     expect(files.filter(f => f.endsWith('.json'))).toHaveLength(1);
   });
 
+  // RUSH-2840: publishBlock() now routes through the shared atomicWriteJsonSync
+  // instead of hand-rolling its own tmp-then-rename. This pins the discriminating
+  // half of that guarantee that the "no partial reads" test above does not cover:
+  // a write that FAILS must leave the previous valid block untouched, with no
+  // stray tmp file. Only a NEW-file create can be blocked by directory
+  // permissions -- renaming over an existing directory entry is not -- so
+  // making the dir read-only forces atomicWriteJsonSync's first fs call (the
+  // tmp-file create) to fail before rename is ever reached. chmod is a no-op on
+  // Windows and root bypasses the permission check entirely, so this is skipped
+  // where the mechanism cannot hold.
+  const canBlockFileCreate =
+    process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() !== 0;
+  const itBlocksCreate = canBlockFileCreate ? it : it.skip;
+
+  itBlocksCreate('a publish that cannot complete leaves the previous block untouched, never torn', () => {
+    const dir = tmpFeedDir();
+    const block = makeBlock('atomic-fail', 'v1');
+    publishBlock(block, dir);
+    const target = path.join(dir, `${block.blockId}.json`);
+    const before = fs.readFileSync(target, 'utf-8');
+    expect(JSON.parse(before).questions[0].text).toBe('v1');
+
+    const v2 = makeBlock('atomic-fail', 'v2');
+    fs.chmodSync(dir, 0o555);
+    try {
+      expect(() => publishBlock(v2, dir)).toThrow();
+
+      const after = fs.readFileSync(target, 'utf-8');
+      expect(after).toBe(before);
+      expect(JSON.parse(after).questions[0].text).toBe('v1');
+    } finally {
+      fs.chmodSync(dir, 0o755);
+    }
+
+    expect(fs.readdirSync(dir)).toEqual([`${block.blockId}.json`]);
+  });
+
   it('blockIdForSession produces a deterministic id', () => {
     expect(blockIdForSession('abc-123')).toBe('block-abc-123');
     expect(blockIdForSession('abc-123')).toBe(blockIdForSession('abc-123'));
