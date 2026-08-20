@@ -43,7 +43,6 @@ import { shortCodexHome } from '../codex-home.js';
 import { prepareJobHome, buildSpawnEnv, getJobHomePath } from '../sandbox.js';
 import { resolveModel, buildReasoningFlags } from '../models.js';
 import { createTimer, redactPrompt, emitRoutineEnd } from '../feed/events.js';
-import { codexEditWritableRoots, codexPolicyArgs } from '../codex-policy.js';
 import { resolveHarnessAdapter } from '../harness/index.js';
 import { applyAddDirs } from '../add-dir.js';
 import {
