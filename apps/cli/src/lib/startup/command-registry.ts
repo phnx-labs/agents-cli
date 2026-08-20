@@ -1,5 +1,5 @@
 const LOADED_COMMAND_NAMES = [
-  'accounts', 'view', 'inspect', 'feedback', 'commands', 'hooks', 'skills', 'rules', 'memory',
+  'accounts', 'auth', 'org', 'view', 'inspect', 'feedback', 'commands', 'hooks', 'skills', 'rules', 'memory',
   'permissions', 'mcp', 'clis', 'subagents', 'plugins', 'workflows', 'add', 'use', 'list',
   'remove', 'rm', 'purge', 'update', 'prune', 'import', 'registry', 'search', 'install',
   'routines', 'monitors', 'projects', 'run', 'open', 'reconnect', 'fork', 'config',
