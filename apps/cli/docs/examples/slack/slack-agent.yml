@@ -1,0 +1,41 @@
+# Example Slack webhook handler.
+#
+# Copy to ~/.agents/webhooks/slack-agent.yml. A slash command (/agents AGI: …) or
+# an @mention of your Slack app reaches POST /hooks/slack, and this handler runs an
+# agent scoped to the project named in the message, on this machine. The agent then
+# replies in the same Slack thread with `agents send --channel slack`.
+#
+# See docs/routines.md → "Slack — tag an agent, it replies in your thread" for the
+# one-time setup (secrets bundle, Funnel, the Slack app manifest in this directory).
+
+name: slack-agent
+source: slack
+
+# Match one slash command. Omit `command` to also match plain @mentions
+# (source: slack + no command matches every Slack delivery on this box).
+command: /agents
+
+# Restrict to one channel with `channel: C0…`; omit to accept any channel.
+# channel: C0AGI
+
+# Route the run into the project named in the message ("AGI: …" → project AGI).
+# The value resolves against your `agents projects` names; an empty project
+# (a message with no `PROJECT:` prefix) runs at $HOME instead.
+project: "{{slack.project}}"
+
+# Write with the permission classifier. Use skip/full for fully unattended edits,
+# or plan for a read-only run.
+mode: auto
+
+run:
+  agent: claude
+  prompt: |
+    A Slack request came in from <@{{slack.user}}> in channel {{slack.channel}}.
+    Project: {{slack.project}}
+    Request: {{slack.prompt}}
+
+    You are running on the machine that holds this project's context. If prior
+    conversation would help, read it first: `agents sessions -p {{slack.project}}`.
+    Do the work, then reply in the Slack thread with your result:
+
+    agents send --channel slack --to {{slack.channel}} --thread {{slack.thread_ts}} --text "<one- or two-line result>"

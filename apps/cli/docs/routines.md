@@ -303,7 +303,9 @@ agents routines cleanup
 ### Webhook Triggers
 
 Routines can fire from signed GitHub or Linear webhooks instead of a cron
-schedule. The same detached runner path is used as scheduled jobs.
+schedule, and **Slack** deliveries fire webhook *handlers* (see
+[Slack — tag an agent](#slack--tag-an-agent-it-replies-in-your-thread) below).
+The same detached runner path is used as scheduled jobs.
 
 ```bash
 agents routines add agent-labeled-issue \
@@ -355,6 +357,64 @@ agents routines add ux-tests \
   --prompt "Run Playwright E2E and visual regression checks, then comment the results on the PR."
 ```
 
+#### Slack — tag an agent, it replies in your thread
+
+Slack is a third webhook source. A slash command (`/agents AGI: rebase my open PR
+and check CI`) or an `@mention` of your Slack app reaches `POST /hooks/slack`,
+runs the agent that holds that project's context **on your box**, and the agent
+replies in the same thread. Unlike GitHub/Linear (which fire routine `trigger`
+blocks), Slack matches a webhook **handler** in `~/.agents/webhooks/*.yml` — the
+handler is what routes the message to an agent.
+
+The receiver verifies Slack's `v0` request signature (with a 5-minute replay
+guard), answers the one-time `url_verification` handshake, and parses both slash
+commands and `app_mention` events. It exposes a `{{slack.*}}` substitution
+namespace — `prompt`, `project`, `channel`, `thread_ts`, `user`, `text`,
+`command` — where `project` and `prompt` come from a `PROJECT: rest` prefix in
+the message (`AGI: rebase …` → project `AGI`, prompt `rebase …`). A handler may
+template its `project`/`cwd` from that namespace, so one handler serves every
+project:
+
+```yaml
+# ~/.agents/webhooks/slack-agent.yml
+name: slack-agent
+source: slack
+command: /agents          # match this slash command (omit to also match @mentions)
+project: "{{slack.project}}"   # route to the project named in the message
+run:
+  agent: claude
+  prompt: |
+    A Slack request came in from <@{{slack.user}}> in channel {{slack.channel}}.
+    Project: {{slack.project}}
+    Request: {{slack.prompt}}
+
+    Read the project's prior context if useful (`agents sessions -p {{slack.project}}`),
+    do the work, then reply in the Slack thread with:
+    agents send --channel slack --to {{slack.channel}} --thread {{slack.thread_ts}} --text "<your result>"
+```
+
+The reply reuses the existing outbound Slack channel — no bot code — so it needs
+`rush` logged in with a live Slack gateway (the same requirement as any
+`agents send --channel slack`). Restrict a handler to one channel with
+`channel: C0…`, or drop the `command`/`channel` filters to match every mention.
+
+**Setup (once per workspace).** Create the app at
+[api.slack.com/apps](https://api.slack.com/apps) — the manifest and handler in
+[`docs/examples/slack/`](examples/slack/) are ready to paste — then:
+
+```bash
+# 1. Signing secret (verify inbound) + bot token (post the reply / real ts):
+agents secrets add slack SLACK_SIGNING_SECRET <from Slack "Basic Information">
+agents secrets add slack SLACK_BOT_TOKEN <xoxb-… from "OAuth & Permissions">
+
+# 2. Host the receiver publicly (Funnel) on the box that holds your context:
+agents daemon webhooks add --secrets-bundle slack --port 8787 --funnel-port 443
+agents daemon restart
+
+# 3. Point the Slack app's slash-command + Events "Request URL" at:
+#    https://<box>.<tailnet>.ts.net/hooks/slack
+```
+
 #### Hosting the receiver — supervised (recommended) or foreground
 
 **Supervised.** Declare the receiver on the ingress box and the daemon hosts it
@@ -387,12 +447,13 @@ HTTP surface, no supervision:
 agents webhooks serve --secrets-bundle webhooks --port 8787
 ```
 
-The bundle may contain `GITHUB_WEBHOOK_SECRET`, `LINEAR_WEBHOOK_SECRET`, or both.
-The receiver accepts `POST /hooks/github` and `POST /hooks/linear`, rejects
-unsigned deliveries, dedupes repeated delivery IDs, rate-limits each source, and
-binds `127.0.0.1` by default. Keep webhook signing keys in `agents secrets`; do
-not put keys in webhook URLs, path segments, query strings, routine YAML, or
-Funnel commands.
+The bundle may contain any of `GITHUB_WEBHOOK_SECRET`, `LINEAR_WEBHOOK_SECRET`,
+and `SLACK_SIGNING_SECRET` (a Slack app also uses `SLACK_BOT_TOKEN` for the
+reply). The receiver accepts `POST /hooks/github`, `POST /hooks/linear`, and
+`POST /hooks/slack`, rejects unsigned deliveries, dedupes repeated delivery IDs,
+rate-limits each source, and binds `127.0.0.1` by default. Keep webhook signing
+keys in `agents secrets`; do not put keys in webhook URLs, path segments, query
+strings, routine YAML, or Funnel commands.
 
 #### The ack is asynchronous
 
