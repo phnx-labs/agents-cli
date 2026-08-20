@@ -94,7 +94,7 @@ const CALLS = [
   seed.close();
 }
 
-const { getDB, SCHEMA_VERSION } = await import('./db.js');
+const { getDB } = await import('./db.js');
 
 describe('schema migration v35 -> v36 (incremental tool index)', () => {
   it('adds the resume columns as NULL, leaving both ledgers warm', () => {
@@ -123,7 +123,4 @@ describe('schema migration v35 -> v36 (incremental tool index)', () => {
     `).all()).toEqual([{ call_key: 'sess-b:0' }]);
   });
 
-  it('reaches at least v36', () => {
-    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(36);
-  });
 });

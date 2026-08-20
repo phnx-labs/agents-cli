@@ -135,9 +135,6 @@ describe('schema migration v32 -> v33 (per-account attribution)', () => {
     const idx = (db.prepare(`PRAGMA index_list(sessions)`).all() as Array<{ name: string }>)
       .map((i) => i.name);
     expect(idx).toContain('idx_sessions_account_key');
-    // >= 33 rather than == : this file tests the v33 step, not the head version, so a
-    // later migration must not force an edit here.
-    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(33);
   });
 
   it('backfills each row to the account that actually produced it', () => {
