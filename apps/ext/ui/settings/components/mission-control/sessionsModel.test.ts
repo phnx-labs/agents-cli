@@ -118,13 +118,45 @@ describe('sortSessions — recency vs creation are distinct', () => {
   test('started orders by startedAtMs (s2 first) — a different order than recent', () => {
     expect(sortSessions([s1, s2], 'started', true).map((a) => a.id)).toEqual(['s2', 's1'])
   })
-  test('status orders reconnect ahead of running ahead of idle', () => {
+  // Root AGENTS.md "Purpose": rank by PROGRESS, not liveness. Idle-but-unfinished is
+  // the highest-abandonment-risk state, so it surfaces ABOVE running, never below it,
+  // and `done` is a distinct terminal state at the bottom (RUSH-2838).
+  test('status never buries idle below running, and done is terminal', () => {
     const rows = [
+      mk({ id: 'done', phase: 'done' }),
+      mk({ id: 'run', phase: 'running' }),
       mk({ id: 'idle', phase: 'idle' }),
       mk({ id: 'orph', liveStatus: 'orphaned', phase: 'idle' }),
-      mk({ id: 'run', phase: 'running' }),
     ]
-    expect(sortSessions(rows, 'status', true).map((a) => a.id)).toEqual(['orph', 'run', 'idle'])
+    expect(sortSessions(rows, 'status', true).map((a) => a.id)).toEqual(['orph', 'idle', 'run', 'done'])
+  })
+  test('status puts every stopped phase above running, most acute first', () => {
+    const rows = [
+      mk({ id: 'done', phase: 'done' }),
+      mk({ id: 'run', phase: 'running' }),
+      mk({ id: 'idle', phase: 'idle' }),
+      mk({ id: 'stalled', phase: 'stalled' }),
+      mk({ id: 'failed', phase: 'failed' }),
+      mk({ id: 'waiting', phase: 'waiting' }),
+      mk({ id: 'orph', liveStatus: 'orphaned', phase: 'idle' }),
+    ]
+    expect(sortSessions(rows, 'status', true).map((a) => a.id))
+      .toEqual(['orph', 'waiting', 'failed', 'stalled', 'idle', 'run', 'done'])
+  })
+  test('the status sort agrees with the band grouping it sits next to', () => {
+    // `Sort: Status` and the default `Group: state` are two views of one ranking, so a
+    // row cannot lead under one and trail under the other. Both are driven off
+    // PHASE_RANK / BAND_ORDER; this pins them together.
+    const rows = [
+      mk({ id: 'run', phase: 'running' }),
+      mk({ id: 'idle', phase: 'idle' }),
+      mk({ id: 'orph', liveStatus: 'orphaned', phase: 'idle' }),
+      mk({ id: 'done', phase: 'done' }),
+    ]
+    const bySort = sortSessions(rows, 'status', true).map((a) => sessionBand(a))
+    const byBand = groupSessions(rows, 'state', 'status', true).map((s) => s.band)
+    expect(bySort).toEqual(['reconnect', 'attention', 'active', 'done'])
+    expect(byBand).toEqual(['reconnect', 'attention', 'active', 'done'])
   })
   test('name sorts A→Z when desc (the shared default direction)', () => {
     const rows = [mk({ id: 'z', topic: 'zebra' }), mk({ id: 'a', topic: 'apple' })]
