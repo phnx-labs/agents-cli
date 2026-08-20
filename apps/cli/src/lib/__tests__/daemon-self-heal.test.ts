@@ -240,7 +240,13 @@ describe('monitorRunningJobs — pid-reuse + max wall-clock', () => {
     expect(updated.completedAt).not.toBeNull();
   });
 
-  it('finalizes a run that exceeds the 24h max wall-clock', () => {
+  // The reaper must never SIGKILL the process doing the reaping. This case runs
+  // monitorRunningJobs() against a record whose pid IS this process and whose
+  // start time is past the 24h cap -- the exact shape that made the vitest
+  // worker kill itself (rc=137, "Worker exited unexpectedly") before
+  // terminateRoutineTree() guarded `pid === process.pid`. Reaching the
+  // assertions at all is the proof: a self-kill never gets here.
+  it('finalizes an over-cap run without killing the reaping process itself', () => {
     const meta: RunMeta = {
       jobName: '__selfheal-wallclock__',
       runId: 'test-wall-1',

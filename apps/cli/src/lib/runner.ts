@@ -492,6 +492,16 @@ async function runWithAttempt<T>(
 
 function terminateRoutineTree(pid: number | null): void {
   if (!pid) return;
+  // Never take THIS process down. Both kills below are unconditional SIGKILLs,
+  // so a RunMeta naming the reaper's own pid -- a reused pid, a record written
+  // by the process now doing the reaping, or a hand-written fixture -- makes the
+  // reaper SIGKILL itself, and via `-pid` its whole process group with it. There
+  // is no recovery from that: the run is never finalized, and on the daemon it
+  // takes the scheduler down mid-sweep. daemon.ts:457 already refuses to evict an
+  // incumbent whose pid is `process.pid` for exactly this reason; the reap path
+  // needs the same guard. Skipping the kill still lets the caller finalize the
+  // run record, which is the part that matters.
+  if (pid === process.pid) return;
   if (process.platform === 'win32') {
     killTree(pid);
     return;
