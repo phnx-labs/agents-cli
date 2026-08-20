@@ -135,13 +135,16 @@ describe('runFleetPing overall-deadline (RUSH-2041)', () => {
     const remote = await raceFleetPingDeadline(hangingFanOut, remoteTargets, OVERALL_TIMEOUT_MS);
     const elapsed = Date.now() - start;
 
-    // The bug this guards is "hangs forever", so the budget only has to be far
-    // below a hang — not a tight fit around the timer. A 50ms slack measured
-    // load, not correctness: this suite runs 12k tests across forked workers,
-    // and the timer routinely fires a few ms late (observed 104ms against a
-    // 100ms ceiling, the only red test in the suite). Two full seconds still
-    // fails instantly on a real hang, because the fanOut never settles.
-    expect(elapsed).toBeLessThan(2_000);
+    // The bug this guards is "hangs forever", so the budget only has to sit far
+    // below a hang — not a tight fit around the timer. The old `+ 50` gave 50ms
+    // of slack around a 50ms timer, which measured machine load rather than
+    // correctness: this suite runs 12k tests across forked workers and the timer
+    // fires a few ms late (observed 104ms against a 100ms ceiling — the only red
+    // test in the suite). Scaling the caller's own value keeps the assertion
+    // tied to raceFleetPingDeadline's argument instead of a flat wall-clock
+    // number, so it still verifies the deadline it was handed; 20x is 1s here,
+    // and a real hang never settles at all.
+    expect(elapsed).toBeLessThan(OVERALL_TIMEOUT_MS * 20);
 
     // Every remote target comes back as failed or skipped — none are missing.
     expect(remote).toHaveLength(3);

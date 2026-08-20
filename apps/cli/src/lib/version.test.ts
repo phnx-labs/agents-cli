@@ -1,10 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
-import { getCliVersion, getCliVersionFresh, installLayoutFromBin } from './version.js';
-
-const testDir = path.dirname(fileURLToPath(import.meta.url));
+import { getCliVersion, installLayoutFromBin } from './version.js';
 
 describe('version', () => {
   it('getCliVersion returns a non-empty version string', () => {
@@ -13,26 +9,22 @@ describe('version', () => {
     expect(v.length).toBeGreaterThan(0);
   });
 
-  it('getCliVersionFresh reads the version off disk, not a constant or a warm cache', () => {
-    // Compare against an INDEPENDENT read of the same package.json rather than
-    // against getCliVersion(). Asserting the two functions agree proves nothing
-    // — a getCliVersionFresh() that simply returned the memoized cache would
-    // satisfy it. Reading the file here is what pins it to disk: a stubbed or
-    // drifted return value fails, whatever the cache holds.
-    //
-    // A fully discriminating test (swap package.json mid-process and watch the
-    // fresh read follow while the cached one does not) needs an injectable base
-    // path — version.ts hardcodes it, and the file is shared by every parallel
-    // vitest fork, so mutating it here would corrupt other tests. Tracked as a
-    // follow-up; this is the strongest assertion available without that change.
-    const onDisk = JSON.parse(
-      fs.readFileSync(path.join(testDir, '..', '..', 'package.json'), 'utf-8'),
-    ).version;
-    expect(onDisk).toBeTruthy();
-
-    getCliVersion(); // prime the memo first, so a cache hit cannot be mistaken for a read
-    expect(getCliVersionFresh()).toBe(onDisk);
-  });
+  // getCliVersionFresh's contract — "re-reads package.json, unlike the memoized
+  // getCliVersion" — has NO honest unit test today, so this file ships none.
+  //
+  // The first two attempts both claimed to test it and could not:
+  //   expect(getCliVersionFresh()).toBe(getCliVersion())   // two functions agreeing
+  //   expect(getCliVersionFresh()).toBe(<independent read>) // same thing, one hop
+  // Both hold for `getCliVersionFresh = () => getCliVersion()`, the exact
+  // regression the contract exists to prevent, because version.ts:109 and :133
+  // read the IDENTICAL hardcoded path — so with the file unchanged mid-test,
+  // cached and fresh are equal by construction. Priming the memo does not help.
+  //
+  // A real test has to swap package.json under a running process. That needs an
+  // injectable base path: the path is hardcoded, and the file is shared by every
+  // parallel vitest fork, so mutating it here would corrupt other tests. Tracked
+  // as RUSH-2844. A test that cannot fail is worse than an absent one — it
+  // reports the contract as guarded when it is not.
 });
 
 // Regression guard for the Bun single-file binary: `import.meta.url` is a virtual

@@ -122,7 +122,7 @@ const SEED: Array<{ id: string; file_path: string; version: string | null; expec
   seed.close();
 }
 
-const { getDB, SCHEMA_VERSION, queryUsageRollup, closeDB } = await import('./db.js');
+const { getDB, queryUsageRollup, closeDB } = await import('./db.js');
 
 describe('schema migration v32 -> v33 (per-account attribution)', () => {
   it('adds account_key / account_org and its index', () => {

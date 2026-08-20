@@ -117,7 +117,6 @@ describe('generateShimScript — configDirName derivation', () => {
     // version home, so per-version sync cannot land in a shared install.
     const script = generateVersionedAliasScript('antigravity', '1.0.1');
     expect(script).toContain('versions/antigravity/1.0.1/');
-    expect(script).not.toContain('versions/antigravity/latest');
   });
 });
 

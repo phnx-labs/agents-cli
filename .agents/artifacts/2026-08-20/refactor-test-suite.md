@@ -27,8 +27,8 @@ assets: []
 You asked to delete the silly tests. I went looking for them and mostly did not find
 them — and that turns out to be the useful result.
 
-The dumb-assertion patterns are near-absent: **one** `expect(typeof x).toBe('function')`
-in 12,439 tests, zero snapshots, `toBeDefined()` at 286 uses against 16,126 `toBe`. Four
+The dumb-assertion patterns are near-absent: **two** `typeof … === 'function'`
+assertions in 12,439 tests, zero snapshots, `toBeDefined()` at 286 uses against 16,126 `toBe`. Four
 independent audits covering 413 test files and roughly 5,300 individual cases came back
 saying the same thing: most of this suite exercises real filesystem, subprocess, ssh and
 sqlite behaviour with no mocking, and pins named regressions. That is the bar, not the
@@ -36,7 +36,7 @@ problem.
 
 The problem is **fragmentation**. `src/lib/session/active.ts` is one module and it has
 **17 test files**, of which **11 independently declare their own `mkdtempSync` temp-home
-fixture**. `discover.ts` has 25. Nobody ever edits an existing test file here — each
+fixture**. `discover.ts` has 12. Nobody ever edits an existing test file here — each
 ticket adds `active.<its-own-topic>.test.ts` — because with three competing conventions
 and no shared fixture, starting a new file is cheaper than finding the right one. That is
 how a suite reaches 216,863 lines and 2,789 CPU-seconds, and it is also why adding a
@@ -62,7 +62,7 @@ a module one test home and one fixture, so the next scenario goes *into* an exis
 | Modules with tests split across two homes | 18 → 36 files, 16,278 LOC, 1,135 tests | stem match + subject check |
 | `__tests__/` files whose subject lives in the parent dir | 45 of 140 | subject resolution |
 | `apps/cli/tests/` files that spawn no subprocess | 29 of 52 | `rg spawnSync\|execSync` |
-| `mkdtempSync` call sites in tests | 1,062 across 509 files | `rg -o` |
+| `mkdtempSync` call sites in tests | 1,110 across 529 files | `rg -o`, repo-wide `*.test.ts(x)` |
 | Shared test-fixture modules in the whole repo | 1 (`staleness/__tests__/_fixtures.ts`) | `rg --files` |
 | Failing tests on `main` | 1 (a wall-clock assertion) | baseline run |
 
@@ -128,7 +128,7 @@ a file count or LOC read off the tree today.
       <text x="8" y="170" fill="currentColor" font-size="11" font-weight="bold">3 naming conventions, no rule picks one</text>
       <rect x="8" y="182" width="424" height="52" rx="4" stroke="currentColor" fill="none"/>
       <text x="20" y="202" fill="currentColor" font-size="10">11 of the 17 declare their OWN mkdtempSync temp-home fixture.</text>
-      <text x="20" y="220" fill="currentColor" font-size="10">Repo-wide: 1,062 mkdtempSync sites / 509 files / 1 shared fixture module.</text>
+      <text x="20" y="220" fill="currentColor" font-size="10">Repo-wide: 1,110 mkdtempSync sites / 529 files / 1 shared fixture module.</text>
 
       <text x="8" y="260" fill="currentColor" font-size="11">Adding a scenario costs: read 17 files to find the home,</text>
       <text x="8" y="276" fill="currentColor" font-size="11">or write file #18 with a 12th copy of the fixture.</text>
@@ -188,14 +188,14 @@ Merge the 18 split pairs into the colocated file; move the 29 non-spawning files
 </div>
 <div class="artifact-panel">
 <strong>2 · Extract the test fixture layer</strong><br/>
-One <code>tmpHome()</code> / session-fixture helper per subsystem, replacing 1,062
+One <code>tmpHome()</code> / session-fixture helper per subsystem, replacing 1,110
 hand-rolled <code>mkdtempSync</code> sites. This is the move that makes adding a scenario
 cheaper than adding a file — the actual cause of the growth.<br/>
 <em>Highest payoff, largest blast radius.</em>
 </div>
 <div class="artifact-panel">
 <strong>3 · Collapse the ticket-shaped scenario files</strong><br/>
-<code>active.ts</code> 17 files → about 4, <code>discover.ts</code> 25 → about 5, grouped
+<code>active.ts</code> 17 files → about 4, <code>discover.ts</code> 12 → about 4, grouped
 by behaviour rather than by the ticket that prompted them. Depends on move 2 landing
 first, or every merge re-conflicts on fixtures.
 </div>
