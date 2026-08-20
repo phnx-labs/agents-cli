@@ -122,11 +122,11 @@ export async function maybePickBrowserProfile(): Promise<boolean> {
     viewport: { width: DEFAULT_VIEWPORT.width, height: DEFAULT_VIEWPORT.height },
   };
   await createProfile(profile);
-  // The same key `agents browser profiles set-default` writes (device-local).
+  // The same key `agents browser use` writes (device-local).
   setConfigValue('browser.profile', profile.name);
   console.log(
     chalk.green(`Browser: '${chosen.browserType}'`) +
-      chalk.dim(` — profile "${profile.name}" is this machine's default (agents browser profiles set-default to change).`),
+      chalk.dim(` — profile "${profile.name}" is this machine's default (agents browser use to change).`),
   );
   return true;
 }

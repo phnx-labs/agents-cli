@@ -50,7 +50,7 @@ export interface ScopedBrowserProfile {
 
 /**
  * The device-local configured default profile name (set via
- * `agents browser profiles set-default`), or undefined when unset. When set, it
+ * `agents browser use`), or undefined when unset. When set, it
  * is the profile `agents browser start` resolves to for BOTH the no-`--profile`
  * path and an explicit `--profile default`. Stored as this machine's
  * `browser.profile` device-config key (the per-device doc's `config:` block —
@@ -472,7 +472,7 @@ export function padColumn(text: string, width: number): string {
  * Two things used to be called "default" in this listing with no way to tell
  * them apart (RUSH-2710): the profile literally NAMED `default` (the
  * auto-detected one), and whichever profile this machine resolves a bare
- * `agents browser start` to (`agents config set browser.profile <name>`). They
+ * `agents browser start` to (`agents browser use <name>`). They
  * are frequently different profiles. Now only the second is a marker — a `*` in
  * a leading column, explained by a legend line — so the name column carries just
  * the name and `default` in it always means the profile of that name.

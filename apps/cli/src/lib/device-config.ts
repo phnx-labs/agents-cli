@@ -162,7 +162,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     visibility: 'machine',
     type: 'string',
     description:
-      'Browser profile `agents browser start` resolves to without --profile (set via `agents browser profiles set-default`).',
+      'Browser profile `agents browser start` resolves to without --profile (set via `agents browser use`).',
   },
   {
     name: 'agents.max-concurrent',

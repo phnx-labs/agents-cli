@@ -373,7 +373,7 @@ agents config set run.claude@2.1.45.model claude-opus-4-8
 agents config set run.claude@*.mode auto
 agents config set run.claude@*.effort high
 agents config set interactive.host zion
-agents config set browser.profile work
+agents browser use work
 agents config set auto.pool workers
 agents config set devices.mac-mini.role worker
 agents config set devices.mac-mini.max-agents 4
@@ -433,7 +433,7 @@ The old commands still work but are deprecated and print a warning pointing to
 - `agents models tier` → `agents config set run.<agent@version>.tier.<tier>`
 - `agents devices set-interactive` → `agents config set interactive.host <name>`
 - `agents devices configure` → `agents config set devices.<name>.<key>`
-- `agents browser profiles set-default` → `agents config set browser.profile <name>`
+- `agents browser profiles set-default` → `agents browser use <name>`
 
 Implementation: [`src/commands/config.ts`](src/commands/config.ts) with key
 parsing in [`src/lib/config-keys.ts`](src/lib/config-keys.ts). Per-device config
