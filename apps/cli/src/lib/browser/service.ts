@@ -698,6 +698,33 @@ export class BrowserService {
    * page that has since redirected elsewhere simply does not match, and the
    * caller opens a tab as before.
    */
+  /**
+   * A page target that `navigate` may take over on a browser which cannot create
+   * tabs (Arc). Deliberately narrow: only a tab ALREADY showing the requested
+   * URL -- re-showing that document there is precisely what the caller asked for
+   * -- or an empty new-tab page. A target any task already owns is left alone,
+   * and a page the user is actually reading is never hijacked, which is why this
+   * returns undefined rather than falling back to "the active tab".
+   */
+  private async pickReusableTargetWithoutCreate(
+    conn: ProfileConnection,
+    url: string,
+  ): Promise<string | undefined> {
+    const { targetInfos } = (await conn.cdp.send('Target.getTargets')) as {
+      targetInfos: Array<{ targetId: string; type: string; url: string }>;
+    };
+    const owned = new Set<string>();
+    for (const t of conn.tasks.values()) {
+      for (const id of Object.values(t.tabs)) owned.add(id);
+    }
+    const free = targetInfos.filter((t) => t.type === 'page' && !owned.has(t.targetId));
+    const wanted = canonicalTabUrl(url);
+    const sameUrl = free.find((t) => canonicalTabUrl(t.url) === wanted);
+    if (sameUrl) return sameUrl.targetId;
+    const BLANK = new Set(['', 'about:blank', 'about:newtab', 'chrome://newtab/', 'chrome://new-tab-page/']);
+    return free.find((t) => BLANK.has(t.url))?.targetId;
+  }
+
   private async adoptTabShowing(
     conn: ProfileConnection,
     url: string
@@ -929,6 +956,36 @@ export class BrowserService {
       await this.saveTaskState(task.profile, conn.tasks);
       emit('browser.navigate', { profile: task.profile, task: task.name, url, tabId: shortId, created: true });
       return { tabId: shortId, url, created: true };
+    }
+
+    // Arc exposes page targets and honors Page.navigate on them; what it cannot
+    // survive is Target.createTarget (#2778). createPageTarget below therefore
+    // refuses outright, so the document never gets shown AT ALL and callers fall
+    // back to a raw `open` -- a new tab every call, which is the tab-spam #2779
+    // set out to end. Reuse in place instead, the same shape as the Electron
+    // branch above. Measured against a live Arc (#2786): 33 page targets,
+    // Page.navigate reused one, tab count unchanged, no crash.
+    if (conn.browserType === 'arc') {
+      const reusable = await this.pickReusableTargetWithoutCreate(conn, url);
+      if (reusable) {
+        const shortId = generateShortId();
+        const sessionId = await this.getSessionId(conn, reusable);
+        await conn.cdp.send('Page.navigate', { url }, sessionId);
+        task.tabs[shortId] = reusable;
+        task.currentTabId = shortId;
+        this.invalidateTargetCache(conn);
+        await this.saveTaskState(task.profile, conn.tasks);
+        emit('browser.navigate', {
+          profile: task.profile,
+          task: task.name,
+          url,
+          tabId: shortId,
+          created: false,
+        });
+        return { tabId: shortId, url, created: false };
+      }
+      // Nothing safe to reuse -- fall through to the actionable refusal rather
+      // than taking over a page the user is reading.
     }
 
     // Chrome: create new tab

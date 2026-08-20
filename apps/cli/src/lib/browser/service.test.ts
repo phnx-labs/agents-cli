@@ -826,6 +826,73 @@ describe('BrowserService — Arc is not CDP-drivable (never Target.createTarget)
   });
 });
 
+describe('BrowserService.navigate — Arc reuses a tab rather than refusing (#2786)', () => {
+  // Arc crashes on Target.createTarget (#2778) but DOES expose page targets and
+  // honors Page.navigate on them -- measured against a live Arc: 33 targets,
+  // navigate reused one, tab count unchanged. Refusing every navigate left the
+  // doc unshown and callers back on raw `open`, i.e. the tab-spam #2779 was
+  // meant to end. Reuse is deliberately narrow: only a tab already showing the
+  // requested URL, or an empty new-tab page.
+  function arcConnWithEmptyTask(profile: string, pages: Array<{ targetId: string; url: string }>) {
+    const { conn, calls } = makeTargetedConn(`${profile}@endpoint-0`, { browser: 'arc', pages });
+    (conn as unknown as { tasks: Map<string, unknown> }).tasks.set('arctask', {
+      id: 'arctask',
+      name: 'arctask',
+      profile,
+      tabs: {},
+      currentTabId: undefined,
+      createdAt: Date.now(),
+      pid: 4242,
+    });
+    return { conn, calls };
+  }
+
+  it('navigates a tab already showing that url, and never calls createTarget', async () => {
+    writeProfile('arcnav', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, calls } = arcConnWithEmptyTask('arcnav', [
+      { targetId: 'doc-tab', url: 'file:///tmp/plan.html' },
+    ]);
+    attach(service, 'arcnav', conn);
+
+    const r = await service.navigate('arctask', 'file:///tmp/plan.html', 'arcnav');
+
+    expect(r.created).toBe(false);
+    expect(createTargetCount(calls)).toBe(0);
+    expect(calls.filter((c) => c.method === 'Page.navigate')).toHaveLength(1);
+  });
+
+  it('reuses an empty new-tab page when no tab shows the url yet', async () => {
+    writeProfile('arcblank', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, calls } = arcConnWithEmptyTask('arcblank', [
+      { targetId: 'blank-tab', url: 'about:blank' },
+    ]);
+    attach(service, 'arcblank', conn);
+
+    const r = await service.navigate('arctask', 'file:///tmp/plan.html', 'arcblank');
+
+    expect(r.created).toBe(false);
+    expect(createTargetCount(calls)).toBe(0);
+    expect(calls.filter((c) => c.method === 'Page.navigate')).toHaveLength(1);
+  });
+
+  it('refuses rather than hijacking a page the user is reading', async () => {
+    writeProfile('arcsafe', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, calls } = arcConnWithEmptyTask('arcsafe', [
+      { targetId: 'users-article', url: 'https://news.example.com/story' },
+    ]);
+    attach(service, 'arcsafe', conn);
+
+    await expect(service.navigate('arctask', 'file:///tmp/plan.html', 'arcsafe')).rejects.toThrow(
+      /Comet, Chrome, Chromium, or Brave/,
+    );
+    expect(createTargetCount(calls)).toBe(0);
+    expect(calls.filter((c) => c.method === 'Page.navigate')).toHaveLength(0);
+  });
+});
+
 describe('BrowserService.start — URL reclaim (RUSH-2622)', () => {
   // A UUID no live process carries, so the real liveness predicate (registry +
   // process table) proves this task's owner gone without any injection.
