@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_77 command groups · 550 commands._
+_77 command groups · 551 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -113,9 +113,9 @@ agents browser profiles doctor <name>         Diagnose a browser profile: binary
 agents browser profiles list                  List all browser profiles, with the store each lives in (local / fleet)
 agents browser profiles logins                Show which login-gated services each profile has a live session for, the account signed in, and whether login creds are available in the profile's secrets bundle (reads cookie/username presence only, never decrypts).
 agents browser profiles prune                 Remove dead machine-local profiles: browser not installed here, or never started
-agents browser profiles seed                  Create a machine-local profile for each installed browser (named <browser>-local), so you can pick or set-default one instead of hand-crafting each. Idempotent — existing profiles are left untouched.
-agents browser profiles set-default [name]    Set the profile `agents browser start` uses when no --profile is passed (also re-points an explicit `--profile default`). Device-local — each machine has its own. No name prints the current value.
+agents browser profiles seed                  Create a machine-local profile for each installed browser (named <browser>-local), so you can pick or use one instead of hand-crafting each. Idempotent — existing profiles are left untouched.
 agents browser profiles show <name>           Show profile details
+agents browser profiles use [name]            Pick the profile `agents browser start` uses when no --profile is passed. No name opens a picker on a TTY or prints the current default headlessly.
 agents browser ps                             List every browser/electron/tunnel process agents has tracked (alive or stale) — works without the daemon
 agents browser record                         Record a video of the page
 agents browser record start                   Start recording — auto-saved under sessions/<task>/recordings/. Bounded by --fps, --duration, --max-mb.
@@ -130,7 +130,7 @@ agents browser sessions                       Browse a profile's captured screen
 agents browser set                            Set browser emulation options
 agents browser set device <device-name>       Emulate a device (iPhone 14, iPad, MacBook Pro)
 agents browser set viewport <width> <height>  Set viewport size
-agents browser start                          Start a browser task. Pass --profile <name>; omit to use your configured default (`agents config set browser.profile <name>`), else auto-pick an installed Chromium-family browser. Page verbs (navigate/screenshot/…) create a task implicitly when none exists — start is for --profile/--url/--record/--title.
+agents browser start                          Start a browser task. Pass --profile <name>; omit to use your configured default (`agents browser use <name>`), else auto-pick an installed Chromium-family browser. Page verbs (navigate/screenshot/…) create a task implicitly when none exists — start is for --profile/--url/--record/--title.
 agents browser status                         Show running browser tasks
 agents browser stop                           Stop a browser task and close its tabs; with --profile, detach the whole profile (close browser + drop cached connection)
 agents browser stream                         Keep one process and daemon IPC socket open; read NDJSON requests from stdin and write NDJSON responses
@@ -142,6 +142,7 @@ agents browser tabs                           List tabs open for the current tas
 agents browser tasks                          List all browser tasks
 agents browser type <ref>                     Type text into an element by ref
 agents browser upload                         Upload file(s) — supports hidden file inputs, drag-drop targets, and OS chooser interception
+agents browser use [name]                     Pick the profile `agents browser start` uses when no --profile is passed. No name opens a picker on a TTY or prints the current default headlessly.
 agents browser wait                           Wait for a condition
 agents browser waitdownload                   Wait for a download to complete
 ```

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 77,
-  "commands": 550,
+  "commands": 551,
   "root": {
     "name": "agents",
     "path": "",
@@ -2457,7 +2457,7 @@
               "negate": false
             }
           ],
-          "examples": "# What exists here, and whether each is this machine's or the whole fleet's\n      agents browser profiles list\n\n      # Create one — machine-local by default\n      agents browser profiles create work --browser chrome\n\n      # Create one every machine should see (e.g. a remote ssh:// endpoint)\n      agents browser profiles create shared-remote --browser chrome --fleet\n\n      # Clean up dead ones: check first, then apply\n      agents browser profiles prune --dry-run\n      agents browser profiles prune\n\n      # Make one the machine's default for a bare `agents browser start`\n      agents config set browser.profile work",
+          "examples": "# What exists here, and whether each is this machine's or the whole fleet's\n      agents browser profiles list\n\n      # Create one — machine-local by default\n      agents browser profiles create work --browser chrome\n\n      # Create one every machine should see (e.g. a remote ssh:// endpoint)\n      agents browser profiles create shared-remote --browser chrome --fleet\n\n      # Clean up dead ones: check first, then apply\n      agents browser profiles prune --dry-run\n      agents browser profiles prune\n\n      # Make one the machine's default for a bare `agents browser start`\n      agents browser use work",
           "notes": "Profiles are machine-local by default. A profile pins an OS-specific binary\n      path and a locally chosen CDP port, so a fleet-synced copy is wrong on every\n      other machine — pass --fleet only when the profile really is fleet config.\n\n      In `list`, the `*` marker means \"this machine's configured default\"\n      (`agents browser start` with no --profile). It is NOT the same thing as the\n      profile NAMED `default`, which is the auto-detected one; they are often\n      different profiles.\n\n      `prune` never removes a profile that is in use, the configured default, the\n      auto `default`, or (without --fleet) a fleet-synced one.",
           "subcommands": [
             {
@@ -2757,45 +2757,9 @@
               "name": "seed",
               "path": "browser profiles seed",
               "aliases": [],
-              "description": "Create a machine-local profile for each installed browser (named <browser>-local), so you can pick or set-default one instead of hand-crafting each. Idempotent — existing profiles are left untouched.",
+              "description": "Create a machine-local profile for each installed browser (named <browser>-local), so you can pick or use one instead of hand-crafting each. Idempotent — existing profiles are left untouched.",
               "args": [],
               "options": [
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
-            {
-              "name": "set-default",
-              "path": "browser profiles set-default",
-              "aliases": [],
-              "description": "Set the profile `agents browser start` uses when no --profile is passed (also re-points an explicit `--profile default`). Device-local — each machine has its own. No name prints the current value.",
-              "args": [
-                {
-                  "name": "name",
-                  "required": false,
-                  "variadic": false,
-                  "description": ""
-                }
-              ],
-              "options": [
-                {
-                  "flags": "--unset",
-                  "description": "Clear the configured default (revert to auto-detecting an installed browser)",
-                  "long": "--unset",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
                 {
                   "flags": "-h, --help",
                   "description": "Show help",
@@ -2827,6 +2791,42 @@
                   "flags": "--json",
                   "description": "Output machine-readable JSON",
                   "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "use",
+              "path": "browser profiles use",
+              "aliases": [],
+              "description": "Pick the profile `agents browser start` uses when no --profile is passed. No name opens a picker on a TTY or prints the current default headlessly.",
+              "args": [
+                {
+                  "name": "name",
+                  "required": false,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--unset",
+                  "description": "Clear the configured default (revert to auto-detecting an installed browser)",
+                  "long": "--unset",
                   "required": false,
                   "optional": false,
                   "variadic": false,
@@ -3566,7 +3566,7 @@
           "name": "start",
           "path": "browser start",
           "aliases": [],
-          "description": "Start a browser task. Pass --profile <name>; omit to use your configured default (`agents config set browser.profile <name>`), else auto-pick an installed Chromium-family browser. Page verbs (navigate/screenshot/…) create a task implicitly when none exists — start is for --profile/--url/--record/--title.",
+          "description": "Start a browser task. Pass --profile <name>; omit to use your configured default (`agents browser use <name>`), else auto-pick an installed Chromium-family browser. Page verbs (navigate/screenshot/…) create a task implicitly when none exists — start is for --profile/--url/--record/--title.",
           "args": [],
           "options": [
             {
@@ -4162,6 +4162,42 @@
               "description": "Timeout for chooser interception (Pattern C)",
               "long": "--timeout",
               "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "use",
+          "path": "browser use",
+          "aliases": [],
+          "description": "Pick the profile `agents browser start` uses when no --profile is passed. No name opens a picker on a TTY or prints the current default headlessly.",
+          "args": [
+            {
+              "name": "name",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--unset",
+              "description": "Clear the configured default (revert to auto-detecting an installed browser)",
+              "long": "--unset",
+              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
