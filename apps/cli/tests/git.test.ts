@@ -1,17 +1,27 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import simpleGit from 'simple-git';
 import { pullRepo } from '../src/lib/git.js';
 
-const TEST_DIR = join(tmpdir(), 'agents-cli-git-test');
-const REMOTE_DIR = join(TEST_DIR, 'remote');
-const LOCAL_DIR = join(TEST_DIR, 'local');
+// Per-run unique dir (RUSH-2839): a fixed shared path collided across
+// concurrent runs — or a run after a killed run left the dir behind — with
+// `local` half-cloned or `.git/config` wiped mid-test by the other run,
+// surfacing as "destination path already exists" or "Author identity
+// unknown" (the sandboxed test HOME from tests/setup.ts has no global git
+// identity to fall back on once the just-configured local config is gone).
+// mkdtempSync gives every beforeEach its own directory, matching the
+// established pattern in src/lib/git.test.ts (fs.mkdtempSync(...) per suite).
+let TEST_DIR: string;
+let REMOTE_DIR: string;
+let LOCAL_DIR: string;
 
 describe('pullRepo', () => {
   beforeEach(async () => {
-    rmSync(TEST_DIR, { recursive: true, force: true });
+    TEST_DIR = mkdtempSync(join(tmpdir(), 'agents-cli-git-test-'));
+    REMOTE_DIR = join(TEST_DIR, 'remote');
+    LOCAL_DIR = join(TEST_DIR, 'local');
 
     // Create a bare remote repo
     mkdirSync(REMOTE_DIR, { recursive: true });
