@@ -18,7 +18,7 @@ import * as fsSync from 'fs';
 import * as path from 'path';
 import lockfile from 'proper-lockfile';
 import { getDevicesRegistryPath, getDevicesIgnoredPath } from '../state.js';
-import { atomicWriteJson } from '../atomic-write.js';
+import { atomicWriteJsonSync } from '../fs-atomic.js';
 
 /** Operating-system family of a device, used to pick the remote shell. */
 export type DevicePlatform = 'windows' | 'linux' | 'macos' | 'unknown';
@@ -277,7 +277,7 @@ export function loadDevicesSync(): DeviceRegistry {
 }
 
 async function saveDevices(reg: DeviceRegistry): Promise<void> {
-  await atomicWriteJson(registryPath(), reg);
+  atomicWriteJsonSync(registryPath(), reg);
 }
 
 /** Get a single device profile, or null if it is not registered. */
@@ -430,7 +430,7 @@ export async function addIgnored(name: string): Promise<Set<string>> {
   return withRegistryLock(p, async () => {
     const set = await loadIgnored();
     set.add(name);
-    await atomicWriteJson(p, { ignored: [...set].sort(), updatedAt: new Date().toISOString() });
+    atomicWriteJsonSync(p, { ignored: [...set].sort(), updatedAt: new Date().toISOString() });
     return set;
   });
 }
@@ -442,7 +442,7 @@ export async function removeIgnored(name: string): Promise<boolean> {
   return withRegistryLock(p, async () => {
     const set = await loadIgnored();
     if (!set.delete(name)) return false;
-    await atomicWriteJson(p, { ignored: [...set].sort(), updatedAt: new Date().toISOString() });
+    atomicWriteJsonSync(p, { ignored: [...set].sort(), updatedAt: new Date().toISOString() });
     return true;
   });
 }
