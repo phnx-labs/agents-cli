@@ -41,7 +41,10 @@ the company down live with 30,000 monthly active users:
 > "Everyone who is making money is doing 2 things: selling to enterprise, and
 > reselling tokens. **We were doing neither.**"
 
-A secondary write-up of the same talk puts the mechanism plainly: it "was not a
+This quote is reported second-hand from a talk, via a tweet — it is not in the
+shutdown post linked above, and it is the weakest-sourced claim carrying the most
+weight in this document. A secondary write-up of the same talk puts the mechanism
+plainly: it "was not a
 coding agent itself — it was a button that helped users spend thousands of dollars
 on other agents like Codex while collecting a $30 subscription."
 

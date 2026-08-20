@@ -148,6 +148,12 @@ down live at 30,000 monthly actives:
 > "Everyone who is making money is doing 2 things: selling to enterprise, and
 > reselling tokens. **We were doing neither.**"
 
+Sourcing note: this quote is **not** in the shutdown blog post linked above. It is
+reported second-hand from a talk at AI Engineer Europe, via a tweet. It is the
+most load-bearing quote in this report and it rests on the weakest source in it —
+treat it as a strong signal of the founder's own reading, not as a company
+statement of record.
+
 So the plan cannot be "get the stars, then add a team seat" — that is precisely
 the plan that failed three times in seven months.
 
@@ -222,15 +228,23 @@ else. You also may not make your Account available to anyone else,"* and bar
 accessing the Services *"through automated or non-human means, whether through a
 bot, script, or otherwise"* outside the API.
 
-**OpenClaw — a harness agi-cli supports (`AgentId` includes `openclaw`) — was cut
-off by Anthropic on 2026-04-05** for precisely the pattern of spending a Pro/Max
-subscription across parallel third-party agents. Claude Code's head of product:
-*"our subscriptions weren't built for the usage patterns of these third-party
-tools. Capacity is a resource we manage thoughtfully."* It was partially reversed
-on 2026-06-15, and OpenClaw's own docs still warn that *"Anthropic can change
-Claude Code billing and rate-limit behavior without an OpenClaw release."* Google
-separately restricted AI Pro/Ultra subscribers using OpenClaw in February 2026, so
-this is a cross-provider pattern rather than one vendor's mood.
+**Retracted:** an earlier revision of this section asserted a specific Anthropic
+enforcement action against OpenClaw on 2026-04-05, a quote attributed to Claude
+Code's head of product, and a February 2026 Google restriction. A non-author
+reviewer could not corroborate any of the three against OpenClaw's blog index, its
+Anthropic-provider documentation, or GitHub search, and a direct fetch of
+`docs.openclaw.ai/providers/anthropic` confirms that page contains **no** mention
+of a cutoff, block, or restriction. Those claims are withdrawn as unverified. They
+should not be repeated.
+
+What survives is stronger for resting entirely on primary sources. OpenClaw — a
+harness agi-cli supports (`AgentId` includes `openclaw`) — documents the risk in
+its own words: *"Anthropic can change Claude Code billing and rate-limit behavior
+without an OpenClaw release."* And its guidance points where this report does:
+for **"shared production automation"** and **"predictable production spend,"** it
+tells users to prefer API keys over reusing subscription credentials, because
+subscription behaviour is subject to unannounced change. That is the vendor of the
+subscription-reuse feature telling you not to build shared automation on it.
 
 Why this lands squarely on agi-cli: the subscription pitch is the product's
 headline (`README.md:1494`), and **balanced account rotation is a documented
