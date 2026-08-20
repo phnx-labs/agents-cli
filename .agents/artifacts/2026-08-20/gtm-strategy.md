@@ -128,17 +128,28 @@ web sources (company blogs and trade press) and are not independently verified:
 
 | Product | Peak traction | Model | Outcome |
 | --- | --- | --- | --- |
-| Vibe Kanban | 27,867 stars, $7.4M raised | Apache-2.0, free | **Shut down 2026-04-10** (repo not archived; last push 2026-04-24) |
-| Roo Code | 3M+ installs, $5M seed | Free / BYOK | **Shut down 2026-05-15** |
-| Terragon | 256 stars | Apache-2.0 | **Shut down 2026-02-09** |
+| Vibe Kanban | 27,867 stars, 30k MAU | **$30/user/mo + Enterprise** | **Shut down 2026-04-10** (repo not archived) |
+| Roo Code | 3M+ installs, 24,332 stars | Free ext + **paid Cloud/Router** | **Shut down 2026-05-15** (repo archived) |
+| Terragon | 256 stars | **$25 / $50 per mo** | **Shut down 2026-02-09** |
 | Devin (Cognition) | $492M ARR | Hosted, $20–200/mo | Raising at reported $40B |
 | Cursor | $2B ARR | Paid, $20–200/mo | $29.3B valuation |
 | Factory (Droid) | "hundreds of thousands" of devs | Hosted, paid | $150M Series C at $1.5B |
 
-This is the central strategic fact. **Reaching 27,000 stars in this category is a
-demonstrated path to zero revenue.** The plan cannot be "get the stars, then
-figure out money," because that is precisely the plan that failed three times in
-the last seven months.
+This is the central strategic fact, and the primary sources sharpen it past what a
+star count shows. **All three casualties were already charging.** Vibe Kanban had a
+$30/user/month Pro tier and an Enterprise tier, and issued refunds to paying
+customers on the way out; Terragon sold $25 and $50/month plans; Roo Code ran paid
+Cloud and Router products. They did not fail to monetize — they monetized at the
+wrong altitude.
+
+Vibe Kanban's founder said why onstage at AI Engineer Europe, shutting the company
+down live at 30,000 monthly actives:
+
+> "Everyone who is making money is doing 2 things: selling to enterprise, and
+> reselling tokens. **We were doing neither.**"
+
+So the plan cannot be "get the stars, then add a team seat" — that is precisely
+the plan that failed three times in seven months.
 
 ### 4. What actually converted OSS into revenue
 
@@ -357,12 +368,29 @@ architecture and every OSS success in the dataset:
   harness, sessions, teams, worktrees, secrets, browser, computer, SSH fleet.
   This is the distribution asset and it should stay unambiguously free — it is
   also already licensed that way and cannot be recalled.
-- **Paid, hosted, ~$20–40/seat/month:** the layer a team cannot get over SSH into
-  each other's laptops — shared session history across people, cross-seat fleet
-  visibility, pooled agent spend and attribution, shared secrets with a real
-  principal model, audit trail, SSO. Built as new code under a source-available
-  licence, following MongoDB/Elastic/HashiCorp rather than repeating the
-  permissive-plus-goodwill outcome.
+- **Paid — and priced at the enterprise altitude, not a prosumer seat.** This is a
+  correction to an earlier draft of this report, forced by the primary sources: a
+  ~$20–40/seat team tier is *the exact price point that just failed*. Vibe Kanban's
+  $30/user/month is the closest comparable in the dataset and it did not sustain a
+  company; Nimbalyst's $20/user/month is still "free during beta" and has proven
+  nothing. The survivors skip that rung entirely — Cline goes free → Enterprise
+  custom with **no** middle tier, on the stated doctrine that *"inference cannot be
+  the business model,"* and sells inference at cost.
+
+  So the paid surface is the one an enterprise buyer requires and cannot fork
+  around: SSO/SAML, RBAC, audit trail of what agents did, centralized spend
+  attribution, admin control, data residency. Custom-priced, sales-led, sold to a
+  budget holder — not self-serve seats sold to developers who will otherwise fork
+  it.
+
+- **Licence the paid surface source-available, not Apache-2.0.** Roo Code's
+  post-mortem names the mechanism that removed its pricing power: *"forks
+  redistributed our work as fast as we shipped it"* — it had forked Cline, and was
+  then forked by Kilo Code and ZooCode. Its successor abandoned Apache-2.0 for a
+  Fair Core licence with a license-key-enforced user cap, explicitly so that *"you
+  can't offer Roomote or substantially similar functionality as a competing
+  commercial product."* The existing CLI stays Apache-2.0 and cannot be recalled;
+  new enterprise code should not repeat the experiment.
 
 Note that `RUSH-2581` already records the blocker: *"No human-identity substrate:
 SSO/SAML cannot attach because there is no principal model."* Everything in a team
@@ -382,11 +410,22 @@ decision rather than an accident. But the sequencing matters: RUSH-2581 stays
 speculative infrastructure until Act 2 produces evidence that multi-seat demand
 exists. Build it after the retention bar is met, not before.
 
-The ICP that follows is narrow and answerable: **engineering teams of 5–50 already
-spending $150–250 per developer per month on agent subscriptions**, who have more
-than one harness in play and no way to see or govern it. They are buying control
-over spend they already make, which is a budget displacement rather than a new
-line item.
+The ICP that follows is narrower than "teams of 5–50" and has a different buyer.
+It is an **engineering organization whose developers already spend $150–250 each
+per month across more than one harness, where someone above them is accountable
+for that spend and for what the agents touched.** The buyer is that accountable
+person, not the developer — developers are the ones who fork rather than pay. What
+is being sold is governance over spend already committed, which is budget
+displacement rather than a new line item.
+
+A second path exists and should be named rather than dismissed: **reselling
+tokens** is the other mechanism Knight-Webb identified, and it is how OpenRouter
+monetizes routing. agi-cli has the surface for it half-built already
+(`agents route`, RUSH-2555). But it collides head-on with the product's own value
+proposition — `README.md:1494` sells "use your existing subscription" precisely
+because subscription pricing beats API pricing for heavy users. Taking a token
+margin means asking users to pay more than they do today. That is a real strategic
+fork, not an obvious win, and it deserves its own decision rather than a default.
 
 ### The fork that is yours, not mine
 
