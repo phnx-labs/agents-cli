@@ -221,8 +221,8 @@ exist.** Every real example either is free and open source, or resells API-key
 usage instead — a different and permitted model. That is a negative result across
 a deliberate search, not an absence of looking.
 
-The reason is that the provider terms forbid it, and enforcement has already
-happened to a peer. Anthropic's Consumer Terms state: *"You may not share your
+The plainest reason is that the provider terms forbid it. Anthropic's Consumer
+Terms state: *"You may not share your
 Account login information, Anthropic API key, or Account credentials with anyone
 else. You also may not make your Account available to anyone else,"* and bar
 accessing the Services *"through automated or non-human means, whether through a
