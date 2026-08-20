@@ -942,7 +942,7 @@ agents watchdog status                       Show whether the daemon watchdog pa
 
 ```
 agents webhooks        Run a localhost signed webhook receiver for routine triggers.
-agents webhooks serve  Receive signed GitHub/Linear webhooks on /hooks/<source> and fire matching routines.
+agents webhooks serve  Receive signed GitHub/Linear/Slack webhooks on /hooks/<source> and fire matching routines and handlers.
 ```
 
 ## workflows — Manage multi-agent pipeline workflows (WORKFLOW.md bundles)

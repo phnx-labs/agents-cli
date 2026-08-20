@@ -29048,12 +29048,12 @@
           "name": "serve",
           "path": "webhooks serve",
           "aliases": [],
-          "description": "Receive signed GitHub/Linear webhooks on /hooks/<source> and fire matching routines.",
+          "description": "Receive signed GitHub/Linear/Slack webhooks on /hooks/<source> and fire matching routines and handlers.",
           "args": [],
           "options": [
             {
               "flags": "--secrets-bundle <name>",
-              "description": "agents secrets bundle containing GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET",
+              "description": "agents secrets bundle containing GITHUB_WEBHOOK_SECRET, LINEAR_WEBHOOK_SECRET, and/or SLACK_SIGNING_SECRET",
               "long": "--secrets-bundle",
               "required": true,
               "optional": false,
