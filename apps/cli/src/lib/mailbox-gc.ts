@@ -16,6 +16,7 @@ import {
   sweepExpired,
 } from './mailbox.js';
 import { listBlocks, removeBlock, recordMessageReceipt } from './feed/feed.js';
+import { atomicWriteJsonSync } from './fs-atomic.js';
 
 export interface GcResult {
   boxesScanned: number;
@@ -66,9 +67,7 @@ function archiveAllPending(boxDir: string, reason: string, feedRoot?: string): n
         const msg = readMessage(src);
         if (msg) {
           msg.dropped = reason;
-          const tmp = `${dest}.${process.pid}.tmp`;
-          fs.writeFileSync(tmp, JSON.stringify(msg, null, 2), 'utf-8');
-          fs.renameSync(tmp, dest);
+          atomicWriteJsonSync(dest, msg);
           fs.unlinkSync(src);
           if (msg.blockId) {
             try {

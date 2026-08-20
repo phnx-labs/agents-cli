@@ -138,6 +138,54 @@ describe('mailbox GC', () => {
     expect(archived.dropped).toBe('expired');
   });
 
+  // RUSH-2840: archiveAllPending() used to hand-roll its own write-tmp-then-
+  // rename inline; it now routes through the shared atomicWriteJsonSync. This
+  // pins that the archive write is still atomic: a write that cannot complete
+  // must leave both the not-yet-archived inbox message AND any pre-existing
+  // consumed record untouched, with no stray tmp file -- never a torn record
+  // silently swallowed by archiveAllPending's own best-effort catch. Only a
+  // NEW-file create can be blocked by directory permissions (renaming over an
+  // existing entry is not), so this pre-seeds a same-named consumed file and
+  // makes the consumed dir read-only, forcing the write's first fs call (the
+  // tmp-file create) to fail. Skipped where chmod cannot block a create
+  // (Windows / root).
+  const canBlockFileCreate =
+    process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() !== 0;
+  const itBlocksCreate = canBlockFileCreate ? it : it.skip;
+
+  itBlocksCreate('a dead-box archive write that cannot complete leaves the inbox message and the prior consumed record untouched', () => {
+    const root = tmpRoot();
+    const box = mailboxDir(BOX, root);
+    const msgId = enqueue(box, { to: BOX, text: 'to dead agent' });
+    const inboxFile = path.join(box, 'inbox', `${msgId}.json`);
+    const consumedDir = path.join(box, 'consumed');
+    const consumedFile = path.join(consumedDir, `${msgId}.json`);
+
+    fs.mkdirSync(consumedDir, { recursive: true });
+    const priorConsumed = JSON.stringify({ sentinel: 'prior-consumed-record' }, null, 2);
+    fs.writeFileSync(consumedFile, priorConsumed, 'utf-8');
+
+    fs.chmodSync(consumedDir, 0o555);
+    try {
+      const result = gcMailbox(new Set(), { root });
+
+      // The write into `consumed` failed (blocked create), so archiveAllPending's
+      // own catch swallowed it -- this message was NOT counted as archived.
+      expect(result.messagesDroppedDead).toBe(0);
+      // The inbox message was never deleted: unlinkSync(src) sits after the
+      // atomic write and never runs when that write throws.
+      expect(fs.existsSync(inboxFile)).toBe(true);
+      // The pre-existing consumed record is exactly as it was -- not
+      // overwritten, not torn.
+      expect(fs.readFileSync(consumedFile, 'utf-8')).toBe(priorConsumed);
+    } finally {
+      fs.chmodSync(consumedDir, 0o755);
+    }
+
+    // And no stray tmp file was left behind in consumed/.
+    expect(fs.readdirSync(consumedDir)).toEqual([`${msgId}.json`]);
+  });
+
   it('archives messages that expired under the 24h default TTL and surfaces an expired receipt', () => {
     const root = tmpRoot();
     const feedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mailbox-gc-expired-default-'));
