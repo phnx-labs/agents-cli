@@ -327,27 +327,29 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
     Math.max(16, terminalWidth() - 58),
   );
   const sessW = Math.max(...groups.map((g) => String(g.sessions).length), 3);
+  // Friction-derived — never shown on the free plan, even when grouping by
+  // something other than account (gate.groupGated only covers `--by account`).
   const stallOf = (g: GroupReport): number =>
     Object.entries(g.facets.frictionSignals)
       .filter(([k]) => k.startsWith('silent stall:'))
       .reduce((n, [, c]) => n + c, 0);
   const resumeOf = (g: GroupReport): number =>
     g.facets.correctionSignals['resume after silent stall'] ?? 0;
-  const stallW = Math.max(...groups.map((g) => String(stallOf(g)).length), 5);
+  const stallW = gate.frictionGated ? 6 : Math.max(...groups.map((g) => String(stallOf(g)).length), 5);
   out.push(chalk.gray(
     `  ${padToWidth('', labelW)}  ${''.padStart(sessW)}       ` +
-    `${''.padStart(9)}  ${''.padStart(8)}  ${'stalls'.padStart(stallW)}  resume`,
+    `${''.padStart(9)}  ${''.padStart(8)}  ${gate.frictionGated ? ''.padStart(stallW) : 'stalls'.padStart(stallW)}  ${gate.frictionGated ? '' : 'resume'}`,
   ));
   for (const g of groups) {
     const cost = g.costUsd > 0 ? formatUsd(g.costUsd) : '—';
     const dur = g.durationMs > 0 ? formatDuration(g.durationMs) : '—';
-    const stalls = stallOf(g);
-    const resumes = resumeOf(g);
+    const stalls = gate.frictionGated ? '—' : String(stallOf(g));
+    const resumes = gate.frictionGated ? '' : String(resumeOf(g));
     out.push(
       `  ${padToWidth(truncateToWidth(g.label, labelW), labelW)}  ` +
       `${chalk.gray(String(g.sessions).padStart(sessW))} ${chalk.gray('sess')}  ` +
       `${chalk.green(padToWidth(cost, 9))}  ${chalk.gray(padToWidth(dur, 8))}  ` +
-      `${chalk.cyan(String(stalls).padStart(stallW))}  ${chalk.cyan(String(resumes))}`,
+      `${chalk.cyan(stalls.padStart(stallW))}  ${chalk.cyan(resumes)}`,
     );
   }
   }

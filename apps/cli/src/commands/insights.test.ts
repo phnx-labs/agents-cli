@@ -329,6 +329,17 @@ describe('agents insights — plan-tier gate (RUSH-2424)', () => {
     expect(payload.notice).toBe(PAID_PLAN_NOTICE);
   });
 
+  it('free plan with --by agent: the TEXT report does not leak stall/resume counts in the By-agent table (regression, PR #2822 review)', async () => {
+    await clearTierFixture();
+    const out = await runInsights(['--since', 'all', '--by', 'agent']);
+    expect(out).toContain('By agent');
+    // The stalls/resume columns must not appear at all — not the header labels,
+    // and not any numeric value from frictionSignals/correctionSignals.
+    expect(out).not.toContain('stalls');
+    expect(out).not.toContain('resume');
+    expect(out).toContain(PAID_PLAN_NOTICE);
+  });
+
   it('free plan: the text report omits the friction section and the account table, replaced by the one-line notice', async () => {
     await clearTierFixture();
     const out = await runInsights(['--since', 'all']);
