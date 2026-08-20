@@ -85,27 +85,6 @@ async function waitFor<T>(probe: () => T | Promise<T>, timeoutMs = 10_000): Prom
   }
 }
 
-/**
- * The holder's `ps` comm, or undefined when ps cannot see the process at all.
- * Shared by both real-process cases below: each reads the holder through
- * `ps -p <pid>`, so each needs the same way to tell "ps has nothing to say
- * about this pid" apart from "the scan owed us a row and missed it".
- */
-function commOf(pid: number): string | undefined {
-  try {
-    return execFileSync('ps', ['-p', String(pid), '-o', 'comm='], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-  } catch {
-    return undefined;
-  }
-}
-
-function classifiable(comm: string | undefined): boolean {
-  return !!comm && /^claude/.test(path.basename(comm));
-}
-
 describe('isSessionIdLiveOnProcessTable', () => {
   it('rejects non-uuid targets so a short prefix never false-matches', async () => {
     expect(await isSessionIdLiveOnProcessTable('f0f6cb6b')).toBe(false);
@@ -140,32 +119,68 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
     const child = spawnHoldingSessionId(UUID);
     const pid = child.pid!;
 
-    // RUSH-2508, the same lockstep bracket the sibling case below already uses,
-    // and for the same reason: sessionIdFromLivePid reads the holder through
-    // `ps -ww -p <pid> -o args=` (pid-registry.ts readProcessArgv), so when ps
-    // cannot see the holder AT ALL this case has nothing to judge either -- an
-    // unreadable holder makes the recovery path return undefined no matter how
-    // correct it is. Measured on mac-mini under a full-suite run: ps reported
-    // comm='<unreadable>' for the holder, the sibling case skipped on exactly
-    // that signal, and this one -- guarded by nothing -- failed instead. Same
-    // holder, same ps, same run; only the guard differed.
+    /**
+     * Read the holder's argv the way the OS exposes it, INDEPENDENTLY of the
+     * code under test: `/proc/<pid>/cmdline` on linux, `ps -ww -o args=` on
+     * darwin -- the two channels readProcessArgv itself uses
+     * (pid-registry.ts:108-132). Deliberately not a call into
+     * readProcessArgv(): probing with the function under test would make a
+     * break in that function look like an absent process and skip the case
+     * that exists to catch it.
+     */
+    const holderArgv = (): string | undefined => {
+      try {
+        if (process.platform === 'linux') {
+          const raw = fs.readFileSync(`/proc/${pid}/cmdline`).toString('utf8');
+          const parts = raw.split('\0').filter(Boolean);
+          return parts.length > 0 ? parts.join(' ') : undefined;
+        }
+        const out = execFileSync('ps', ['-ww', '-p', String(pid), '-o', 'args='], {
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim();
+        return out || undefined;
+      } catch {
+        return undefined;
+      }
+    };
+
+    // RUSH-2508: the only condition this case genuinely cannot judge is a
+    // holder the OS will not show us at all -- measured on mac-mini during a
+    // full-suite release-attestation run, where `ps` reported the holder as
+    // unreadable for the whole 10s window and the recovery path therefore had
+    // no argv to parse. That is an environment limit, not a regression.
     //
-    // Bracketing keeps the property 13e8ef5c1 insisted on: if the holder was
-    // classifiable immediately before AND after an attempt that still came back
-    // empty, the recovery path owed us that id and the failure is REAL, so this
-    // still fails on a regression rather than skipping past it.
-    let lastComm: string | undefined;
-    let missedWhileClassifiable = false;
+    // The gate is the OS-visible argv, NOT `ps -o comm=`. comm is the sibling
+    // case's signal because listUnattributedActive classifies rows by comm;
+    // this case never looks at comm, and on linux `ps -o comm=` reports the
+    // THREAD name, which node renames to `MainThread` a beat after boot (see
+    // the sibling's note below). Gating this case on comm would make every
+    // real regression skip green on linux/node-24 -- verified: sabotaging
+    // sessionIdFromLivePid to return undefined under a comm gate produced
+    // "1 passed | 2 skipped" instead of a failure.
+    //
+    // So: if the OS showed us an argv that CARRIES this session id and the
+    // recovery path still came back empty, the parse owed us that id and the
+    // failure is real.
+    let sawIdInArgv = false;
+    let missedWhileVisible = false;
     const hit = await waitFor(() => {
-      const before = commOf(pid);
+      const argv = holderArgv();
       const found = sessionIdFromLivePid(pid);
-      lastComm = commOf(pid);
-      if (!found && classifiable(before) && classifiable(lastComm)) missedWhileClassifiable = true;
+      if (argv?.includes(UUID)) {
+        sawIdInArgv = true;
+        if (!found) missedWhileVisible = true;
+      }
       return found;
     });
 
-    if (!hit && !missedWhileClassifiable) {
-      ctx.skip(`ps reports comm='${lastComm ?? '<unreadable>'}' for the holder, not an agent name — see RUSH-2508`);
+    if (!hit && !missedWhileVisible) {
+      ctx.skip(
+        sawIdInArgv
+          ? `holder argv carried the id but the scan never ran against it — see RUSH-2508`
+          : `the OS never exposed the holder's argv for pid ${pid} — see RUSH-2508`,
+      );
       return;
     }
     expect(hit).toBe(UUID);
@@ -181,6 +196,19 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
 
     const child = spawnHoldingSessionId(UUID, { cwd: wt });
     const pid = child.pid!;
+
+    const commOf = (): string | undefined => {
+      try {
+        return execFileSync('ps', ['-p', String(pid), '-o', 'comm='], {
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim();
+      } catch {
+        return undefined;
+      }
+    };
+    const classifiable = (comm: string | undefined): boolean =>
+      !!comm && /^claude/.test(path.basename(comm));
 
     // RUSH-2508: sample the holder's comm in LOCKSTEP with each scan attempt, and
     // only skip when no attempt ever ran against a classifiable holder.
@@ -211,11 +239,11 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
     let lastComm: string | undefined;
     let missedWhileClassifiable = false;
     const hit = await waitFor(async () => {
-      const before = commOf(pid);
+      const before = commOf();
       clearActiveScanCachesForTest();
       rows = await listUnattributedActive(new Set());
       const found = rows.find((r) => r.sessionId === UUID || r.pid === pid);
-      lastComm = commOf(pid);
+      lastComm = commOf();
       if (!found && classifiable(before) && classifiable(lastComm)) missedWhileClassifiable = true;
       return found;
     });
