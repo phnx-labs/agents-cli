@@ -432,6 +432,11 @@ describeLive('live session status flags', () => {
     expect(isRunningLiveSession(row({ context: 'cloud', status: 'running', cloudProvider: 'rush' }))).toBe(false);
   });
 
+  // RUSH-2839: 21127ms measured under load (16 CPU-bound background
+  // processes on a 20-core box) vs 9699ms idle — several real `agents`
+  // subprocess boots. See tests/routines.test.ts:1453 for the established
+  // pattern of raising the timeout on a slow real-CLI test instead of the
+  // global testTimeout.
   it('routes aliases, unions, and the waiting exit gate through the real CLI', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-status-flags-'));
     const cwd = path.join(tempHome, 'work', 'status-fixture');
@@ -514,7 +519,7 @@ describeLive('live session status flags', () => {
       sleeper.kill('SIGTERM');
       fs.rmSync(tempHome, { recursive: true, force: true });
     }
-  });
+  }, 90_000);
 });
 
 describe('toolSearchForwardedArgs', () => {
@@ -1168,6 +1173,8 @@ describe('RUSH-2203 local full-UUID hit skips SSH', () => {
 });
 
 describe('agents sessions --resolve local-peer critical path', () => {
+  // RUSH-2839: 14973ms measured under load vs 8090ms idle — multiple real
+  // `agents` subprocess boots in the selector loop below.
   it('resolves a full id, unique prefix, and keywords through the metadata-only CLI contract', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-resolve-local-'));
     try {
@@ -1194,8 +1201,10 @@ describe('agents sessions --resolve local-peer critical path', () => {
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
     }
-  });
+  }, 90_000);
 
+  // RUSH-2839: 18089ms measured under load vs 9370ms idle — three real
+  // `agents` subprocess boots (indexed, ambiguous, missing, empty).
   it('fails ambiguity with every full-id candidate and keeps misses explicit', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-resolve-errors-'));
     try {
@@ -1226,7 +1235,7 @@ describe('agents sessions --resolve local-peer critical path', () => {
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
     }
-  });
+  }, 90_000);
 
   it('keeps a peer-owned content-only FTS hit, projects safe metadata, and dedupes synced copies', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-resolve-peer-'));
@@ -1600,6 +1609,8 @@ describe('agents sessions', () => {
     }
   }, 120_000);
 
+  // RUSH-2839: 10925ms measured under load vs 6531ms idle — three real
+  // `agents` subprocess boots.
   it('omits a synced mirror when answering a fleet evidence partition', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-tool-mirror-'));
     try {
@@ -1642,8 +1653,10 @@ describe('agents sessions', () => {
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
     }
-  });
+  }, 90_000);
 
+  // RUSH-2839: 13714ms measured under load vs 6463ms idle — several real
+  // `agents` subprocess boots.
   it('lists only sessions from the current directory by default and shows all with --all', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-list-'));
 
@@ -1688,7 +1701,7 @@ describe('agents sessions', () => {
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
     }
-  });
+  }, 90_000);
 
   it('shows message and token counts while skipping Claude local-command preambles in the topic', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-stats-'));
