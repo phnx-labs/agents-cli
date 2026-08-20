@@ -3,7 +3,7 @@ import * as net from 'net';
 import { CDPClient, discoverBrowserWsUrl, verifyBrowserIdentity } from '../cdp.js';
 import { launchBrowser, getPortOccupant } from '../chrome.js';
 import { parseEndpointUrl } from '../profiles.js';
-import type { BrowserProfile } from '../types.js';
+import type { BrowserProfile, ConnectionKey } from '../types.js';
 
 /**
  * Cheap TCP-level "is something bound here?" probe. Used as a fallback when
@@ -45,7 +45,13 @@ function isTunnelProcess(command: string): boolean {
 
 export async function connectLocal(
   endpoint: string,
-  profile: BrowserProfile
+  profile: BrowserProfile,
+  /**
+   * Runtime key (`<profile>@<endpoint>`) the launched browser's user-data-dir,
+   * pid, and port files are stored under. Separate from `profile.name`, which
+   * stays the bare user-facing name and appears only in messages (RUSH-2709).
+   */
+  key: ConnectionKey,
 ): Promise<LocalConnection> {
   const url = new URL(endpoint);
 
@@ -120,7 +126,7 @@ export async function connectLocal(
     let launched;
     try {
       launched = await launchBrowser(
-        profile.name,
+        key,
         profile.browser,
         newPort,
         chromeOpts,

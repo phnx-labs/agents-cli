@@ -252,6 +252,86 @@ describe('BrowserService.status — disk reconciliation (Issue #6)', () => {
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe('a');
   });
+
+  /**
+   * RUSH-2709. A live browser is keyed `<profile>@<endpoint>` on disk and in
+   * the connection map, but `--profile` takes the BARE name. These pin both
+   * halves of the contract: the scoped query finds the running browser, and
+   * what comes back never leaks the runtime key into a user-facing field.
+   */
+  describe('composite-keyed profiles (RUSH-2709)', () => {
+    it('status --profile <bare> reports the LIVE composite-keyed browser', async () => {
+      writeProfile('comet-local', ['cdp://localhost:9222']);
+      writeRunningChrome('comet-local@endpoint-0', 9222, process.pid);
+      writeTaskState('comet-local@endpoint-0', [
+        { id: 'live-task', tabIds: ['tab1'], createdAt: 100 },
+      ]);
+
+      const service = new BrowserService();
+      const result = await service.status('comet-local');
+
+      // The regression this replaces: an empty list for a running profile.
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({ running: true, port: 9222, pid: process.pid });
+      expect(result[0].tasks.map((t) => t.id)).toEqual(['live-task']);
+    });
+
+    it('surfaces the bare name and the endpoint as SEPARATE fields, never the raw key', async () => {
+      writeProfile('comet-local', ['cdp://localhost:9222']);
+      writeRunningChrome('comet-local@endpoint-0', 9222, process.pid);
+      writeTaskState('comet-local@endpoint-0', [{ id: 't', tabIds: ['x'], createdAt: 1 }]);
+
+      const service = new BrowserService();
+      const [scoped] = await service.status('comet-local');
+      const [unscoped] = await service.status();
+
+      for (const status of [scoped, unscoped]) {
+        expect(status.name).toBe('comet-local');
+        expect(status.name).not.toContain('@');
+        expect(status.endpoint).toBe('endpoint-0');
+        expect(status.key).toBe('comet-local@endpoint-0');
+      }
+    });
+
+    it('accepts a runtime key pasted from an older listing', async () => {
+      writeProfile('comet-local', ['cdp://localhost:9222']);
+      writeRunningChrome('comet-local@endpoint-0', 9222, process.pid);
+      writeTaskState('comet-local@endpoint-0', [{ id: 't', tabIds: ['x'], createdAt: 1 }]);
+
+      const service = new BrowserService();
+      const result = await service.status('comet-local@endpoint-0');
+
+      expect(result).toHaveLength(1);
+      expect(result[0].name).toBe('comet-local');
+    });
+
+    it('back-compat: finds a browser running under a LEGACY on-disk key', async () => {
+      // Two shapes older builds left behind: a pre-composite dir named exactly
+      // the profile, and a fork of one (`<name>.<n>`, no `@`). Both must still
+      // resolve, or the rename orphans a browser the user has running.
+      writeProfile('legacy', ['cdp://localhost:9222']);
+      writeRunningChrome('legacy.2', 9222, process.pid);
+      writeTaskState('legacy.2', [{ id: 'forked', tabIds: ['t1'], createdAt: 7 }]);
+
+      const service = new BrowserService();
+      const result = await service.status('legacy');
+
+      expect(result).toHaveLength(1);
+      expect(result[0].name).toBe('legacy');
+      expect(result[0].key).toBe('legacy.2');
+      expect(result[0].tasks.map((t) => t.id)).toEqual(['forked']);
+    });
+
+    it('does not claim another profile that merely shares a name prefix', async () => {
+      writeProfile('comet', ['cdp://localhost:9222']);
+      writeProfile('comet-local', ['cdp://localhost:9223']);
+      writeRunningChrome('comet-local@endpoint-0', 9223, process.pid);
+
+      const service = new BrowserService();
+      expect(await service.status('comet')).toHaveLength(0);
+      expect(await service.status('comet-local')).toHaveLength(1);
+    });
+  });
 });
 
 // -----------------------------------------------------------------------------
@@ -1068,7 +1148,9 @@ describe('BrowserService.reapAbandoned — abandoned-task reaper (RUSH-2622)', (
     const result = await service.reapAbandoned({ deps });
 
     expect(result.closed).toEqual([
-      { task: dead.name, profile: 'reap1@endpoint-0', reason: 'session-dead' },
+      // The reaper reports the BARE profile — its output is a user-facing
+      // `agents browser gc` line, not a runtime key (RUSH-2709).
+      { task: dead.name, profile: 'reap1', reason: 'session-dead' },
     ]);
     expect(result.skipped).toBe(1);
     expect(conn.tasks.has(dead.name)).toBe(false);
@@ -1179,7 +1261,7 @@ describe('BrowserService.reapAbandoned — abandoned-task reaper (RUSH-2622)', (
     const result = await service.reapAbandoned({ deps, now });
 
     expect(result.closed).toEqual([
-      { task: stale.name, profile: 'reap5@endpoint-0', reason: 'idle' },
+      { task: stale.name, profile: 'reap5', reason: 'idle' },
     ]);
     expect(result.skipped).toBe(1);
     expect(conn.tasks.has(recent.name)).toBe(true);

@@ -4,7 +4,7 @@ import { CDPClient, discoverBrowserWsUrl, verifyBrowserIdentity } from '../cdp.j
 import { getPortOccupant } from '../chrome.js';
 import { parseEndpointUrl } from '../profiles.js';
 import { writeProfileRuntime, clearProfileRuntime } from '../runtime-state.js';
-import type { BrowserProfile } from '../types.js';
+import type { BrowserProfile, ConnectionKey } from '../types.js';
 // shellQuote lives in the shared ssh-exec helper (single choke point); re-export
 // so existing importers of `shellQuote` from this module keep working.
 import { shellQuote, assertValidSshTarget, controlOpts, sshConnectOpts } from '../../ssh-exec.js';
@@ -33,7 +33,13 @@ export type RemoteOs = 'windows' | 'posix';
 
 export async function connectSSH(
   endpoint: string,
-  profile: BrowserProfile
+  profile: BrowserProfile,
+  /**
+   * Runtime key (`<profile>@<endpoint>`) this connection is stored under. It
+   * keys the tunnel's runtime record; `profile.name` is the bare, user-facing
+   * name and appears only in messages (RUSH-2709).
+   */
+  key: ConnectionKey,
 ): Promise<SSHConnection> {
   const url = new URL(endpoint);
 
@@ -116,7 +122,7 @@ export async function connectSSH(
   // browser process.
   const tunnelPid = tunnel.pid ?? 0;
   if (tunnelPid > 0) {
-    writeProfileRuntime(profile.name, {
+    writeProfileRuntime(key, {
       pid: 0,
       port: localPort,
       command: 'ssh',
@@ -137,7 +143,7 @@ export async function connectSSH(
       // stays synchronous, and killRemoteBrowser never rejects.
       killRemoteBrowser(user, host, remoteOs, remotePort).catch(() => {});
       tunnel.kill();
-      clearProfileRuntime(profile.name);
+      clearProfileRuntime(key);
     },
   };
 }

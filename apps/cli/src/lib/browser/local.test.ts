@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { asConnectionKey } from './types.js';
 
 // Mock dependencies before importing the module under test.
 // Use a regular function (not arrow) so vitest 4 can invoke it via `new`.
@@ -44,10 +45,12 @@ describe('connectLocal', () => {
     // Browser launches successfully
     vi.mocked(launchBrowser).mockResolvedValue({ pid: 1234, port: 9335, wsUrl: 'ws://localhost:9335/devtools/browser/abc' });
 
-    await connectLocal('cdp://127.0.0.1:9335', profile);
+    // The runtime key — NOT the bare profile name — is what keys the launched
+    // browser's user-data-dir and pid/port files (RUSH-2709).
+    await connectLocal('cdp://127.0.0.1:9335', profile, asConnectionKey('test-profile@endpoint-0'));
 
     expect(launchBrowser).toHaveBeenCalledWith(
-      'test-profile',
+      'test-profile@endpoint-0',
       'chrome',
       9335, // must be the endpoint port, not any other port
       expect.anything(),
@@ -66,7 +69,7 @@ describe('connectLocal', () => {
     });
     vi.mocked(verifyBrowserIdentity).mockReturnValue(undefined);
 
-    const result = await connectLocal('cdp://127.0.0.1:9335', profile);
+    const result = await connectLocal('cdp://127.0.0.1:9335', profile, asConnectionKey('test-profile@endpoint-0'));
 
     expect(result.pid).toBe(0);
     expect(result.port).toBe(9335);
@@ -84,7 +87,7 @@ describe('connectLocal', () => {
       throw new Error('Browser identity mismatch: profile expects "chrome" but port 9335 is serving "firefox".');
     });
 
-    await expect(connectLocal('cdp://127.0.0.1:9335', profile)).rejects.toThrow(
+    await expect(connectLocal('cdp://127.0.0.1:9335', profile, asConnectionKey('test-profile@endpoint-0'))).rejects.toThrow(
       'Browser identity mismatch'
     );
     expect(launchBrowser).not.toHaveBeenCalled();
@@ -96,7 +99,7 @@ describe('connectLocal', () => {
     vi.mocked(discoverBrowserWsUrl).mockRejectedValue(new Error('connection refused'));
     vi.mocked(getPortOccupant).mockReturnValue({ pid: 1234, command: 'node' });
 
-    await expect(connectLocal('cdp://127.0.0.1:9335', profile)).rejects.toThrow(
+    await expect(connectLocal('cdp://127.0.0.1:9335', profile, asConnectionKey('test-profile@endpoint-0'))).rejects.toThrow(
       /kill 1234/
     );
     expect(launchBrowser).not.toHaveBeenCalled();
@@ -117,10 +120,10 @@ describe('connectLocal', () => {
       browser: 'chrome',
     });
 
-    await expect(connectLocal('cdp://127.0.0.1:9200', profile)).rejects.toThrow(
+    await expect(connectLocal('cdp://127.0.0.1:9200', profile, asConnectionKey('test-profile@endpoint-0'))).rejects.toThrow(
       /forwarding to a remote host/
     );
-    await expect(connectLocal('cdp://127.0.0.1:9200', profile)).rejects.toThrow(
+    await expect(connectLocal('cdp://127.0.0.1:9200', profile, asConnectionKey('test-profile@endpoint-0'))).rejects.toThrow(
       /kill 40117/
     );
     expect(discoverBrowserWsUrl).not.toHaveBeenCalled();
@@ -131,12 +134,12 @@ describe('connectLocal', () => {
     const profile = makeProfile({ endpoints: ['cdp://127.0.0.1:9200'] });
 
     vi.mocked(getPortOccupant).mockReturnValue({ pid: 12, command: 'autossh' });
-    await expect(connectLocal('cdp://127.0.0.1:9200', profile)).rejects.toThrow(
+    await expect(connectLocal('cdp://127.0.0.1:9200', profile, asConnectionKey('test-profile@endpoint-0'))).rejects.toThrow(
       /autossh.*forwarding to a remote host/s
     );
 
     vi.mocked(getPortOccupant).mockReturnValue({ pid: 34, command: 'socat' });
-    await expect(connectLocal('cdp://127.0.0.1:9200', profile)).rejects.toThrow(
+    await expect(connectLocal('cdp://127.0.0.1:9200', profile, asConnectionKey('test-profile@endpoint-0'))).rejects.toThrow(
       /socat.*forwarding to a remote host/s
     );
   });
@@ -147,7 +150,7 @@ describe('connectLocal', () => {
     // Different platforms (or wrapped binaries) sometimes return "SSH" in
     // upper-case from lsof. The guard must still catch it.
     vi.mocked(getPortOccupant).mockReturnValue({ pid: 99, command: 'SSH' });
-    await expect(connectLocal('cdp://127.0.0.1:9200', profile)).rejects.toThrow(
+    await expect(connectLocal('cdp://127.0.0.1:9200', profile, asConnectionKey('test-profile@endpoint-0'))).rejects.toThrow(
       /forwarding to a remote host/
     );
   });

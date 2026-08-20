@@ -47,7 +47,6 @@ vi.spyOn(profiles, 'getProfile').mockImplementation(async (name: string) => read
 const {
   BrowserService,
   deriveTaskLabel,
-  connectionKeyMatchesProfile,
   actionable,
 } = await import('./service.js');
 
@@ -97,8 +96,8 @@ function stubConn(
     pid: 1,
     tasks: map,
     sessionCache: new Map(),
-    profileName: key,
-    bareName: bareName ?? key.split('@')[0],
+    key,
+    profile: bareName ?? key.split('@')[0],
   });
 }
 
@@ -126,15 +125,6 @@ describe('deriveTaskLabel', () => {
 
   it('keeps an existing non-untitled label', () => {
     expect(deriveTaskLabel({ existing: 'github.com', url: 'https://example.com' })).toBe('github.com');
-  });
-});
-
-describe('connectionKeyMatchesProfile', () => {
-  it('matches bare name to composite endpoint and fork keys', () => {
-    expect(connectionKeyMatchesProfile('comet-local', 'comet-local')).toBe(true);
-    expect(connectionKeyMatchesProfile('comet-local@endpoint-0', 'comet-local')).toBe(true);
-    expect(connectionKeyMatchesProfile('comet-local.2', 'comet-local')).toBe(true);
-    expect(connectionKeyMatchesProfile('comet-other@endpoint-0', 'comet-local')).toBe(false);
   });
 });
 

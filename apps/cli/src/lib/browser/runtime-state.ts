@@ -9,8 +9,10 @@ import {
   isProfileLaunchableHere,
   deleteProfile,
   DEFAULT_BROWSER_PROFILE_NAME,
+  LEGACY_DEFAULT_BROWSER_PROFILE_NAME,
   type ProfileScope,
 } from './profiles.js';
+import { keyBelongsToProfile, type ProfileName } from './types.js';
 
 /**
  * Per-profile runtime files we persist under
@@ -149,18 +151,21 @@ export function removeProfileCache(profileName: string): void {
 }
 
 /**
- * Find every cache directory belonging to a given profile. The composite
- * naming (`<name>@<endpoint>`) means a single agents-cli profile can have
- * multiple runtime dirs side by side; this finds them all plus the legacy
+ * Find every cache directory belonging to a given profile. A runtime dir name
+ * IS a connection key (`<name>@<endpoint>[.<fork>]`), so a single agents-cli
+ * profile can have several side by side; this finds them all, plus the legacy
  * non-composite dir from older builds.
+ *
+ * Membership is decided by {@link keyBelongsToProfile} — the same single rule
+ * `status`, `stopProfile`, and `findTask` use (RUSH-2709), so a fork dir is no
+ * longer missed here while being matched there.
  */
-export function listProfileCacheDirs(profileName: string): string[] {
+export function listProfileCacheDirs(profileName: ProfileName): string[] {
   const root = getBrowserRuntimeDir();
   if (!fs.existsSync(root)) return [];
   const matches: string[] = [];
   for (const entry of fs.readdirSync(root)) {
-    if (entry === profileName) matches.push(path.join(root, entry));
-    else if (entry.startsWith(`${profileName}@`)) matches.push(path.join(root, entry));
+    if (keyBelongsToProfile(entry, profileName)) matches.push(path.join(root, entry));
   }
   return matches;
 }
@@ -384,7 +389,7 @@ export function planProfilePrune(
       keep('fleet-synced (pass --fleet to include it)');
       continue;
     }
-    if (name === DEFAULT_BROWSER_PROFILE_NAME) {
+    if (name === DEFAULT_BROWSER_PROFILE_NAME || name === LEGACY_DEFAULT_BROWSER_PROFILE_NAME) {
       keep('the auto-detected default profile');
       continue;
     }
