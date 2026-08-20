@@ -405,11 +405,16 @@ export function parseSlackMessage(payload: SlackPayload): SlackMessageContext {
  */
 export function buildWebhookContext(webhook: IncomingWebhook): WebhookContext {
   if (webhook.source === 'slack') {
-    return {
+    // The `{{slack.*}}` namespace rides an intersection over WebhookContext (a
+    // subtype of it) rather than a field on the shared type, so a Slack-only
+    // addition never touches the scheduling hub every routine test depends on.
+    // `substituteWebhookPrompt`/`getPath` read it dynamically at runtime.
+    const ctx: WebhookContext & { slack: SlackMessageContext } = {
       source: webhook.source,
       event: webhook.event,
       slack: parseSlackMessage(webhook.payload as SlackPayload),
     };
+    return ctx;
   }
   const action = webhook.source === 'github'
     ? githubAction(webhook.payload) ?? undefined

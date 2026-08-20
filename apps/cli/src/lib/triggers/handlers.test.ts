@@ -716,7 +716,7 @@ describe('handler config layer', () => {
     }
 
     it('parses PROJECT: prefix, stripping a leading bot mention', () => {
-      const ctx = handlerMod.buildWebhookContext(slackWebhook());
+      const ctx = handlerMod.buildWebhookContext(slackWebhook()) as { slack: import('./handlers.js').SlackMessageContext };
       expect(ctx.slack).toMatchObject({
         project: 'AGI',
         prompt: 'rebase my open PR and check CI',
@@ -728,7 +728,7 @@ describe('handler config layer', () => {
     });
 
     it('leaves project empty and keeps the whole text when there is no PROJECT: prefix', () => {
-      const ctx = handlerMod.buildWebhookContext(slackWebhook({ text: 'just do it please' }));
+      const ctx = handlerMod.buildWebhookContext(slackWebhook({ text: 'just do it please' })) as { slack: import('./handlers.js').SlackMessageContext };
       expect(ctx.slack).toMatchObject({ project: '', prompt: 'just do it please' });
     });
 
