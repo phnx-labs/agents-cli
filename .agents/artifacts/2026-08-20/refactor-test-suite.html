@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Test suite: what to cut, and what the cutting is really about</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header"><div class="header-label">agents-cli · test-suite refactor</div><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">visual</span><span class="status-badge status-draft">draft</span></div>
+<h1>Test suite: what to cut, and what the cutting is really about</h1>
+<p class="summary">The bloat is not weak assertions — it is fragmentation. 13,945 tests, three test homes, one module with 17 test files and 11 copies of the same fixture.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">test-suite-hygiene</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s1</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/8662c823">8662c823</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-20</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#story" data-toc-for="story"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Story</a><a class="toc-item" href="#data" data-toc-for="data"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Data</a><a class="toc-item toc-sub" href="#scorecard" data-toc-for="scorecard">Scorecard</a><a class="toc-item toc-sub" href="#the-claim-the-docs-make-and-what-the-tree-does" data-toc-for="the-claim-the-docs-make-and-what-the-tree-does">The claim the docs make, and what the tree does</a><a class="toc-item toc-sub" href="#where-the-time-goes" data-toc-for="where-the-time-goes">Where the time goes</a><a class="toc-item" href="#figure" data-toc-for="figure"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Figure</a><a class="toc-item toc-sub" href="#the-moves-ranked" data-toc-for="the-moves-ranked">The moves, ranked</a><a class="toc-item toc-sub" href="#landed-already-reversible-tier-no-gate-each-one-verified" data-toc-for="landed-already-reversible-tier-no-gate-each-one-verified">Landed already — reversible tier, no gate, each one verified</a><a class="toc-item toc-sub" href="#found-not-fixed-filed-rather-than-folded-in" data-toc-for="found-not-fixed-filed-rather-than-folded-in">Found, not fixed — filed rather than folded in</a></nav><article class="artifact-body"><h2 id="story">Story</h2><p>You asked to delete the silly tests. I went looking for them and mostly did not find
+them — and that turns out to be the useful result.</p>
+<p>The dumb-assertion patterns are near-absent: <strong>one</strong> <code>expect(typeof x).toBe('function')</code>
+in 12,439 tests, zero snapshots, <code>toBeDefined()</code> at 286 uses against 16,126 <code>toBe</code>. Four
+independent audits covering 413 test files and roughly 5,300 individual cases came back
+saying the same thing: most of this suite exercises real filesystem, subprocess, ssh and
+sqlite behaviour with no mocking, and pins named regressions. That is the bar, not the
+problem.</p>
+<p>The problem is <strong>fragmentation</strong>. <code>src/lib/session/active.ts</code> is one module and it has
+<strong>17 test files</strong>, of which <strong>11 independently declare their own <code>mkdtempSync</code> temp-home
+fixture</strong>. <code>discover.ts</code> has 25. Nobody ever edits an existing test file here — each
+ticket adds <code>active.&lt;its-own-topic&gt;.test.ts</code> — because with three competing conventions
+and no shared fixture, starting a new file is cheaper than finding the right one. That is
+how a suite reaches 216,863 lines and 2,789 CPU-seconds, and it is also why adding a
+scenario to a core module feels expensive, which is the second half of what you asked for.</p>
+<p>So the deletions are the small tier, and they are already landed. The real work is giving
+a module one test home and one fixture, so the next scenario goes <em>into</em> an existing file.</p>
+<h2 id="data">Data</h2><h3 id="scorecard">Scorecard</h3><table>
+<thead>
+<tr>
+<th>Measure</th>
+<th>Value</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Test files (repo)</td>
+<td>1,037</td>
+<td><code>rg --files -g '*.test.ts'</code></td>
+</tr>
+<tr>
+<td>Test LOC / source LOC</td>
+<td>216,863 / 346,722</td>
+<td><code>wc -l</code></td>
+</tr>
+<tr>
+<td>CLI tests / suites</td>
+<td>12,439 / 4,012</td>
+<td>vitest json reporter</td>
+</tr>
+<tr>
+<td>CLI wall / CPU time</td>
+<td>254s / 2,789s</td>
+<td>vitest json reporter</td>
+</tr>
+<tr>
+<td>ext tests</td>
+<td>1,506 in 16s</td>
+<td><code>bun test</code> — <strong>degraded</strong>, see below</td>
+</tr>
+<tr>
+<td>Tests finishing under 1ms</td>
+<td>7,194 of 12,439 (58%)</td>
+<td>per-test durations</td>
+</tr>
+<tr>
+<td>Tests over 1s</td>
+<td>641 (5%)</td>
+<td>per-test durations</td>
+</tr>
+<tr>
+<td>Test homes in use</td>
+<td>3 (845 colocated · 140 <code>__tests__/</code> · 52 <code>tests/</code>)</td>
+<td>path census</td>
+</tr>
+<tr>
+<td>Modules with tests split across two homes</td>
+<td>18 → 36 files, 16,278 LOC, 1,135 tests</td>
+<td>stem match + subject check</td>
+</tr>
+<tr>
+<td><code>__tests__/</code> files whose subject lives in the parent dir</td>
+<td>45 of 140</td>
+<td>subject resolution</td>
+</tr>
+<tr>
+<td><code>apps/cli/tests/</code> files that spawn no subprocess</td>
+<td>29 of 52</td>
+<td><code>rg spawnSync|execSync</code></td>
+</tr>
+<tr>
+<td><code>mkdtempSync</code> call sites in tests</td>
+<td>1,062 across 509 files</td>
+<td><code>rg -o</code></td>
+</tr>
+<tr>
+<td>Shared test-fixture modules in the whole repo</td>
+<td>1 (<code>staleness/__tests__/_fixtures.ts</code>)</td>
+<td><code>rg --files</code></td>
+</tr>
+<tr>
+<td>Failing tests on <code>main</code></td>
+<td>1 (a wall-clock assertion)</td>
+<td>baseline run</td>
+</tr>
+</tbody></table>
+<div class="artifact-callout-warn">
+<strong>Degraded measurement.</strong> The <code>apps/ext</code> run reports 20 failures and
+19 errors in this checkout, all from <code>Cannot find package 'react'</code> — the
+<code>ui/settings</code> dependencies are not installed here. Its 1,506-test count is real;
+its pass/fail is not, and no finding below rests on an ext run result.
+</div><h3 id="the-claim-the-docs-make-and-what-the-tree-does">The claim the docs make, and what the tree does</h3><p><code>apps/cli/CLAUDE.md</code> states: <em>"Tests are <code>*.test.ts</code> next to source; integration in
+<code>tests/</code>."</em> Two homes, cleanly split by kind. The tree has three, and the third is not
+sorted by kind: <strong>29 of the 52 files in <code>apps/cli/tests/</code> spawn no subprocess at all</strong> —
+they are ordinary unit tests sitting in the integration directory. Meanwhile 45 of the 140
+<code>__tests__/</code> files test a module that lives one directory up, which the documented
+convention says should be colocated. The doc is not wrong about intent; the tree drifted
+away from it, and neither is load-bearing enough to win by itself.</p>
+<h3 id="where-the-time-goes">Where the time goes</h3><table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Cost</th>
+<th>What it asserts</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>commands/routines.test.ts:1436</code></td>
+<td><strong>36.0s</strong> — 14% of suite wall time</td>
+<td>that <code>-D, --device</code> appears exactly once in each of ~15 subcommand <code>--help</code> outputs, each a cold <code>node --import tsx</code> boot</td>
+</tr>
+<tr>
+<td><code>commands/sessions.test.ts</code></td>
+<td>243s CPU</td>
+<td>real CLI spawns across resolve/list/status paths</td>
+</tr>
+<tr>
+<td><code>commands/routines.test.ts</code> (file)</td>
+<td>227s CPU</td>
+<td>as above</td>
+</tr>
+<tr>
+<td><code>lib/self-heal/isolated-soak.integration.test.ts</code></td>
+<td>70.7s (one test)</td>
+<td>a genuine soak</td>
+</tr>
+</tbody></table>
+<p>The 641 tests over 1s are not the bloat — they are the end-to-end coverage the repo's
+no-mocking rule asks for. The <code>routines --help</code> loop is the one paying full subprocess
+price for a commander.js registration check.</p>
+<h2 id="figure">Figure</h2><p>The shape of the problem, on the module that shows it most clearly. Every number below is
+a file count or LOC read off the tree today.</p>
+<div class="artifact-behavior">
+  <div class="artifact-behavior-panel" data-state="current" data-evidence="rg --files -g 'active*.test.ts' src/lib/session; wc -l; rg -c mkdtempSync">
+    <svg viewBox="0 0 440 330" role="img" aria-label="Today: session/active.ts is covered by 17 test files across three naming conventions, 11 of which declare their own temp-home fixture">
+      <text x="8" y="18" fill="currentColor" font-size="13" font-weight="bold">CURRENT — one module, 17 test files</text>
+      <rect x="150" y="34" width="140" height="30" rx="4" stroke="currentColor" fill="none"></rect>
+      <text x="220" y="53" fill="currentColor" font-size="12" text-anchor="middle">session/active.ts</text>
+      <text x="220" y="78" fill="currentColor" font-size="10" text-anchor="middle">2,625 loc</text>
+
+      <rect x="8" y="98" width="130" height="24" rx="3" stroke="currentColor" fill="none"></rect>
+      <text x="73" y="114" fill="currentColor" font-size="10" text-anchor="middle">active.test.ts</text>
+      <text x="73" y="136" fill="currentColor" font-size="9" text-anchor="middle">376 loc · 41 tests</text>
+
+      <rect x="152" y="98" width="136" height="24" rx="3" stroke="currentColor" fill="none" stroke-dasharray="4 3"></rect>
+      <text x="220" y="114" fill="currentColor" font-size="10" text-anchor="middle">__tests__/active.test.ts</text>
+      <text x="220" y="136" fill="currentColor" font-size="9" text-anchor="middle">166 loc · 13 tests</text>
+
+      <rect x="302" y="98" width="130" height="24" rx="3" stroke="currentColor" fill="none" stroke-dasharray="1 3"></rect>
+      <text x="367" y="114" fill="currentColor" font-size="10" text-anchor="middle">active.&lt;topic&gt;.test.ts</text>
+      <text x="367" y="136" fill="currentColor" font-size="9" text-anchor="middle">15 files · 1,791 loc</text>
+
+      <path d="M180 64 L 90 96" stroke="currentColor" fill="none"></path>
+      <path d="M220 64 L 220 96" stroke="currentColor" fill="none"></path>
+      <path d="M262 64 L 350 96" stroke="currentColor" fill="none"></path>
+
+      <text x="8" y="170" fill="currentColor" font-size="11" font-weight="bold">3 naming conventions, no rule picks one</text>
+      <rect x="8" y="182" width="424" height="52" rx="4" stroke="currentColor" fill="none"></rect>
+      <text x="20" y="202" fill="currentColor" font-size="10">11 of the 17 declare their OWN mkdtempSync temp-home fixture.</text>
+      <text x="20" y="220" fill="currentColor" font-size="10">Repo-wide: 1,062 mkdtempSync sites / 509 files / 1 shared fixture module.</text>
+
+      <text x="8" y="260" fill="currentColor" font-size="11">Adding a scenario costs: read 17 files to find the home,</text>
+      <text x="8" y="276" fill="currentColor" font-size="11">or write file #18 with a 12th copy of the fixture.</text>
+      <text x="8" y="300" fill="currentColor" font-size="11" font-weight="bold">Total: 2,333 test loc · 160 tests</text>
+      <text x="8" y="318" fill="currentColor" font-size="9">(topic names are ticket subjects: registry-retention, live-session-id, tmux-identity, …)</text>
+    </svg>
+  </div>
+  <div class="artifact-behavior-panel" data-state="proposed" data-evidence="derived: one home per module + one shared fixture; scenario files kept, fixture bodies removed">
+    <svg viewBox="0 0 440 330" role="img" aria-label="Proposed: one colocated home per module plus a shared session fixture, so scenario files carry only scenarios">
+      <text x="8" y="18" fill="currentColor" font-size="13" font-weight="bold">PROPOSED — one home, one fixture</text>
+      <rect x="150" y="34" width="140" height="30" rx="4" stroke="currentColor" fill="none"></rect>
+      <text x="220" y="53" fill="currentColor" font-size="12" text-anchor="middle">session/active.ts</text>
+      <text x="220" y="78" fill="currentColor" font-size="10" text-anchor="middle">2,625 loc — unchanged</text>
+
+      <rect x="80" y="98" width="128" height="24" rx="3" stroke="currentColor" fill="none"></rect>
+      <text x="144" y="114" fill="currentColor" font-size="10" text-anchor="middle">active.test.ts</text>
+      <text x="144" y="136" fill="currentColor" font-size="9" text-anchor="middle">core behaviour</text>
+
+      <rect x="232" y="98" width="128" height="24" rx="3" stroke="currentColor" fill="none" stroke-dasharray="1 3"></rect>
+      <text x="296" y="114" fill="currentColor" font-size="10" text-anchor="middle">active.&lt;topic&gt;.test.ts</text>
+      <text x="296" y="136" fill="currentColor" font-size="9" text-anchor="middle">scenario clusters</text>
+
+      <path d="M196 64 L 150 96" stroke="currentColor" fill="none"></path>
+      <path d="M250 64 L 290 96" stroke="currentColor" fill="none"></path>
+
+      <text x="8" y="170" fill="currentColor" font-size="11" font-weight="bold">__tests__/active.test.ts — merged away, file removed</text>
+
+      <rect x="8" y="182" width="424" height="52" rx="4" stroke="currentColor" fill="none"></rect>
+      <text x="20" y="202" fill="currentColor" font-size="10" font-weight="bold">NEW: session/testing/fixture.ts — one tmpHome() helper</text>
+      <text x="20" y="220" fill="currentColor" font-size="10">every scenario file imports it; 11 hand-rolled copies deleted</text>
+      <path d="M144 180 L 144 124" stroke="currentColor" fill="none" stroke-dasharray="3 3"></path>
+      <path d="M296 180 L 296 124" stroke="currentColor" fill="none" stroke-dasharray="3 3"></path>
+
+      <text x="8" y="260" fill="currentColor" font-size="11">Adding a scenario costs: open the topic file that already</text>
+      <text x="8" y="276" fill="currentColor" font-size="11">covers it, import the fixture, write the assertion.</text>
+      <text x="8" y="300" fill="currentColor" font-size="11" font-weight="bold">Same 160 tests. Fewer files, no duplicated setup.</text>
+      <text x="8" y="318" fill="currentColor" font-size="9">Coverage preserved by construction — this move deletes fixtures, not cases.</text>
+    </svg>
+  </div>
+</div><div class="artifact-callout">
+<strong>Scale:</strong> the figure shows 1 of the 18 split-home modules.
+<code>active.ts</code> was picked because it is the worst case (17 files); the median split
+module has 2.
+</div><h3 id="the-moves-ranked">The moves, ranked</h3><div class="artifact-grid artifact-grid-3">
+<div class="artifact-panel">
+<strong>1 · One test home per module</strong><br />
+Merge the 18 split pairs into the colocated file; move the 29 non-spawning files out of
+<code>tests/</code>; retire <code>__tests__/</code> where the subject is one dir up (45 of
+140). Then correct <code>apps/cli/CLAUDE.md</code> to describe what is actually true.<br />
+<em>Pure file moves — no test bodies change.</em>
+</div>
+<div class="artifact-panel">
+<strong>2 · Extract the test fixture layer</strong><br />
+One <code>tmpHome()</code> / session-fixture helper per subsystem, replacing 1,062
+hand-rolled <code>mkdtempSync</code> sites. This is the move that makes adding a scenario
+cheaper than adding a file — the actual cause of the growth.<br />
+<em>Highest payoff, largest blast radius.</em>
+</div>
+<div class="artifact-panel">
+<strong>3 · Collapse the ticket-shaped scenario files</strong><br />
+<code>active.ts</code> 17 files → about 4, <code>discover.ts</code> 25 → about 5, grouped
+by behaviour rather than by the ticket that prompted them. Depends on move 2 landing
+first, or every merge re-conflicts on fixtures.
+</div>
+</div><h3 id="landed-already-reversible-tier-no-gate-each-one-verified">Landed already — reversible tier, no gate, each one verified</h3><table>
+<thead>
+<tr>
+<th>Change</th>
+<th>Evidence it was needed</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>teams/agents.meta-corruption.test.ts</code> rewritten</td>
+<td>wrote a decoy file <code>saveMeta()</code> never touches, then asserted <code>meta.json</code> unchanged — a bare <code>writeFileSync</code> passed it. <strong>Mutation-proven</strong>: the rewrite fails against a non-atomic <code>saveMeta</code>, the original did not.</td>
+</tr>
+<tr>
+<td><code>version.test.ts</code> — 2 tests to 1</td>
+<td><code>'getCliVersionFresh is not the memoized cache'</code> asserted <code>a === b</code> from two identical calls; a fresh-read that returned the cache passed.</td>
+</tr>
+<tr>
+<td><code>shims.test.ts</code> renamed and tightened</td>
+<td>named for a <code>.gemini/antigravity-cli</code> path the generated script does not contain; asserted something else entirely.</td>
+</tr>
+<tr>
+<td><code>resource-patterns.test.ts</code></td>
+<td><code>const result = …</code> assigned, never asserted — the invalid-token branch had zero coverage.</td>
+</tr>
+<tr>
+<td>5 data-mirror tests deleted</td>
+<td>grok and spark model ids and <code>authOptional</code> pinned as literals from the line above them; <code>unmanaged-installs.test.ts</code> fully subsumed by <code>agents.test.ts:402-405</code>, which asserts the derivation rule instead.</td>
+</tr>
+<tr>
+<td><code>ssh.test.ts</code> de-flaked</td>
+<td>50ms slack around a 50ms timer; <strong>the only failing test on <code>main</code></strong> (104ms against a 100ms ceiling).</td>
+</tr>
+</tbody></table>
+<p>Deliberately <strong>not</strong> deleted, though they match the ceremony shape: the <code>SSH_OPTS</code>
+hardening pins and <code>SHIM_SCHEMA_VERSION</code>. A dropped <code>BatchMode=yes</code> hangs every headless
+ssh — that is an invariant a human would weaken silently, which is exactly when a literal
+pin earns its place.</p>
+<h3 id="found-not-fixed-filed-rather-than-folded-in">Found, not fixed — filed rather than folded in</h3><div class="artifact-callout-danger">
+These are production defects, not test cleanup. A refactor PR that also fixed them would
+be unreviewable.
+</div><ul>
+<li><strong><code>atomicWriteJson</code> is implemented four times</strong> — <code>feed/feed.ts:193</code>,
+<code>devices/registry.ts:213</code>, <code>teams/registry.ts:59</code>, <code>teams/agents.ts:385</code>. The fourth
+carries a comment acknowledging it mirrors the third.</li>
+<li><strong>9 tests in <code>agents.test.ts</code> silently require a prior <code>bun run build</code></strong> — they spawn
+<code>node -e</code> against <code>dist/lib/agents.js</code> and fail with a raw <code>ERR_MODULE_NOT_FOUND</code> in a
+fresh checkout, with nothing saying so.</li>
+<li><strong>Untested safety-critical paths</strong>, each named by an audit with the function and line:
+<code>devices/registry.ts:writeReachability</code> (stale-write race, never called by any test),
+<code>devices/sync.ts:runDeviceSync</code> (soft-mode error path named in its own docblock),
+EACCES/EPERM anywhere in the encrypted secrets file store, and <code>withRegistryLock</code>'s
+stale-lock reclaim.</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHZpc3VhbAp0ZW1wbGF0ZTogdmlzdWFsLnYxCnRpdGxlOiAnVGVzdCBzdWl0ZTogd2hhdCB0byBjdXQsIGFuZCB3aGF0IHRoZSBjdXR0aW5nIGlzIHJlYWxseSBhYm91dCcKc3VtbWFyeTogJ1RoZSBibG9hdCBpcyBub3Qgd2VhayBhc3NlcnRpb25zIOKAlCBpdCBpcyBmcmFnbWVudGF0aW9uLiAxMyw5NDUgdGVzdHMsIHRocmVlIHRlc3QgaG9tZXMsIG9uZSBtb2R1bGUgd2l0aCAxNyB0ZXN0IGZpbGVzIGFuZCAxMSBjb3BpZXMgb2YgdGhlIHNhbWUgZml4dHVyZS4nCmhlYWRlcjogJ2FnZW50cy1jbGkgwrcgdGVzdC1zdWl0ZSByZWZhY3RvcicKZm9vdGVyOiAnJwpwcm9qZWN0OiBhZ2VudHMtY2xpCmNvbnRleHQ6ICdTY2FuIG9mIGFwcHMvY2xpICsgYXBwcy9leHQgdGVzdCBzdWl0ZXMsIDIwMjYtMDgtMjAnCnJlcG9zaXRvcnk6IHBobngtbGFicy9hZ2VudHMtY2xpCmJyYW5jaDogdGVzdC1zdWl0ZS1oeWdpZW5lCnRyYWNraW5nOiAnJwpzdGF0dXM6IGRyYWZ0Cmhhcm5lc3M6IGNsYXVkZQphZ2VudDogY2xhdWRlCmh1bWFuOiBNdXFzaXQKaG9zdDogeW9zZW1pdGUtczEKc2Vzc2lvbjogODY2MmM4MjMKZGF0ZTogJzIwMjYtMDgtMjAnCmZhY3RzOiBbXQpsaW5rczogW10KYXNzZXRzOiBbXQotLS0KCiMjIFN0b3J5CgpZb3UgYXNrZWQgdG8gZGVsZXRlIHRoZSBzaWxseSB0ZXN0cy4gSSB3ZW50IGxvb2tpbmcgZm9yIHRoZW0gYW5kIG1vc3RseSBkaWQgbm90IGZpbmQKdGhlbSDigJQgYW5kIHRoYXQgdHVybnMgb3V0IHRvIGJlIHRoZSB1c2VmdWwgcmVzdWx0LgoKVGhlIGR1bWItYXNzZXJ0aW9uIHBhdHRlcm5zIGFyZSBuZWFyLWFic2VudDogKipvbmUqKiBgZXhwZWN0KHR5cGVvZiB4KS50b0JlKCdmdW5jdGlvbicpYAppbiAxMiw0MzkgdGVzdHMsIHplcm8gc25hcHNob3RzLCBgdG9CZURlZmluZWQoKWAgYXQgMjg2IHVzZXMgYWdhaW5zdCAxNiwxMjYgYHRvQmVgLiBGb3VyCmluZGVwZW5kZW50IGF1ZGl0cyBjb3ZlcmluZyA0MTMgdGVzdCBmaWxlcyBhbmQgcm91Z2hseSA1LDMwMCBpbmRpdmlkdWFsIGNhc2VzIGNhbWUgYmFjawpzYXlpbmcgdGhlIHNhbWUgdGhpbmc6IG1vc3Qgb2YgdGhpcyBzdWl0ZSBleGVyY2lzZXMgcmVhbCBmaWxlc3lzdGVtLCBzdWJwcm9jZXNzLCBzc2ggYW5kCnNxbGl0ZSBiZWhhdmlvdXIgd2l0aCBubyBtb2NraW5nLCBhbmQgcGlucyBuYW1lZCByZWdyZXNzaW9ucy4gVGhhdCBpcyB0aGUgYmFyLCBub3QgdGhlCnByb2JsZW0uCgpUaGUgcHJvYmxlbSBpcyAqKmZyYWdtZW50YXRpb24qKi4gYHNyYy9saWIvc2Vzc2lvbi9hY3RpdmUudHNgIGlzIG9uZSBtb2R1bGUgYW5kIGl0IGhhcwoqKjE3IHRlc3QgZmlsZXMqKiwgb2Ygd2hpY2ggKioxMSBpbmRlcGVuZGVudGx5IGRlY2xhcmUgdGhlaXIgb3duIGBta2R0ZW1wU3luY2AgdGVtcC1ob21lCmZpeHR1cmUqKi4gYGRpc2NvdmVyLnRzYCBoYXMgMjUuIE5vYm9keSBldmVyIGVkaXRzIGFuIGV4aXN0aW5nIHRlc3QgZmlsZSBoZXJlIOKAlCBlYWNoCnRpY2tldCBhZGRzIGBhY3RpdmUuPGl0cy1vd24tdG9waWM+LnRlc3QudHNgIOKAlCBiZWNhdXNlIHdpdGggdGhyZWUgY29tcGV0aW5nIGNvbnZlbnRpb25zCmFuZCBubyBzaGFyZWQgZml4dHVyZSwgc3RhcnRpbmcgYSBuZXcgZmlsZSBpcyBjaGVhcGVyIHRoYW4gZmluZGluZyB0aGUgcmlnaHQgb25lLiBUaGF0IGlzCmhvdyBhIHN1aXRlIHJlYWNoZXMgMjE2LDg2MyBsaW5lcyBhbmQgMiw3ODkgQ1BVLXNlY29uZHMsIGFuZCBpdCBpcyBhbHNvIHdoeSBhZGRpbmcgYQpzY2VuYXJpbyB0byBhIGNvcmUgbW9kdWxlIGZlZWxzIGV4cGVuc2l2ZSwgd2hpY2ggaXMgdGhlIHNlY29uZCBoYWxmIG9mIHdoYXQgeW91IGFza2VkIGZvci4KClNvIHRoZSBkZWxldGlvbnMgYXJlIHRoZSBzbWFsbCB0aWVyLCBhbmQgdGhleSBhcmUgYWxyZWFkeSBsYW5kZWQuIFRoZSByZWFsIHdvcmsgaXMgZ2l2aW5nCmEgbW9kdWxlIG9uZSB0ZXN0IGhvbWUgYW5kIG9uZSBmaXh0dXJlLCBzbyB0aGUgbmV4dCBzY2VuYXJpbyBnb2VzICppbnRvKiBhbiBleGlzdGluZyBmaWxlLgoKIyMgRGF0YQoKIyMjIFNjb3JlY2FyZAoKfCBNZWFzdXJlIHwgVmFsdWUgfCBTb3VyY2UgfAp8LS0tfC0tLXwtLS18CnwgVGVzdCBmaWxlcyAocmVwbykgfCAxLDAzNyB8IGByZyAtLWZpbGVzIC1nICcqLnRlc3QudHMnYCB8CnwgVGVzdCBMT0MgLyBzb3VyY2UgTE9DIHwgMjE2LDg2MyAvIDM0Niw3MjIgfCBgd2MgLWxgIHwKfCBDTEkgdGVzdHMgLyBzdWl0ZXMgfCAxMiw0MzkgLyA0LDAxMiB8IHZpdGVzdCBqc29uIHJlcG9ydGVyIHwKfCBDTEkgd2FsbCAvIENQVSB0aW1lIHwgMjU0cyAvIDIsNzg5cyB8IHZpdGVzdCBqc29uIHJlcG9ydGVyIHwKfCBleHQgdGVzdHMgfCAxLDUwNiBpbiAxNnMgfCBgYnVuIHRlc3RgIOKAlCAqKmRlZ3JhZGVkKiosIHNlZSBiZWxvdyB8CnwgVGVzdHMgZmluaXNoaW5nIHVuZGVyIDFtcyB8IDcsMTk0IG9mIDEyLDQzOSAoNTglKSB8IHBlci10ZXN0IGR1cmF0aW9ucyB8CnwgVGVzdHMgb3ZlciAxcyB8IDY0MSAoNSUpIHwgcGVyLXRlc3QgZHVyYXRpb25zIHwKfCBUZXN0IGhvbWVzIGluIHVzZSB8IDMgKDg0NSBjb2xvY2F0ZWQgwrcgMTQwIGBfX3Rlc3RzX18vYCDCtyA1MiBgdGVzdHMvYCkgfCBwYXRoIGNlbnN1cyB8CnwgTW9kdWxlcyB3aXRoIHRlc3RzIHNwbGl0IGFjcm9zcyB0d28gaG9tZXMgfCAxOCDihpIgMzYgZmlsZXMsIDE2LDI3OCBMT0MsIDEsMTM1IHRlc3RzIHwgc3RlbSBtYXRjaCArIHN1YmplY3QgY2hlY2sgfAp8IGBfX3Rlc3RzX18vYCBmaWxlcyB3aG9zZSBzdWJqZWN0IGxpdmVzIGluIHRoZSBwYXJlbnQgZGlyIHwgNDUgb2YgMTQwIHwgc3ViamVjdCByZXNvbHV0aW9uIHwKfCBgYXBwcy9jbGkvdGVzdHMvYCBmaWxlcyB0aGF0IHNwYXduIG5vIHN1YnByb2Nlc3MgfCAyOSBvZiA1MiB8IGByZyBzcGF3blN5bmNcfGV4ZWNTeW5jYCB8CnwgYG1rZHRlbXBTeW5jYCBjYWxsIHNpdGVzIGluIHRlc3RzIHwgMSwwNjIgYWNyb3NzIDUwOSBmaWxlcyB8IGByZyAtb2AgfAp8IFNoYXJlZCB0ZXN0LWZpeHR1cmUgbW9kdWxlcyBpbiB0aGUgd2hvbGUgcmVwbyB8IDEgKGBzdGFsZW5lc3MvX190ZXN0c19fL19maXh0dXJlcy50c2ApIHwgYHJnIC0tZmlsZXNgIHwKfCBGYWlsaW5nIHRlc3RzIG9uIGBtYWluYCB8IDEgKGEgd2FsbC1jbG9jayBhc3NlcnRpb24pIHwgYmFzZWxpbmUgcnVuIHwKCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQtd2FybiI+CjxzdHJvbmc+RGVncmFkZWQgbWVhc3VyZW1lbnQuPC9zdHJvbmc+IFRoZSA8Y29kZT5hcHBzL2V4dDwvY29kZT4gcnVuIHJlcG9ydHMgMjAgZmFpbHVyZXMgYW5kCjE5IGVycm9ycyBpbiB0aGlzIGNoZWNrb3V0LCBhbGwgZnJvbSA8Y29kZT5DYW5ub3QgZmluZCBwYWNrYWdlICdyZWFjdCc8L2NvZGU+IOKAlCB0aGUKPGNvZGU+dWkvc2V0dGluZ3M8L2NvZGU+IGRlcGVuZGVuY2llcyBhcmUgbm90IGluc3RhbGxlZCBoZXJlLiBJdHMgMSw1MDYtdGVzdCBjb3VudCBpcyByZWFsOwppdHMgcGFzcy9mYWlsIGlzIG5vdCwgYW5kIG5vIGZpbmRpbmcgYmVsb3cgcmVzdHMgb24gYW4gZXh0IHJ1biByZXN1bHQuCjwvZGl2PgoKIyMjIFRoZSBjbGFpbSB0aGUgZG9jcyBtYWtlLCBhbmQgd2hhdCB0aGUgdHJlZSBkb2VzCgpgYXBwcy9jbGkvQ0xBVURFLm1kYCBzdGF0ZXM6ICoiVGVzdHMgYXJlIGAqLnRlc3QudHNgIG5leHQgdG8gc291cmNlOyBpbnRlZ3JhdGlvbiBpbgpgdGVzdHMvYC4iKiBUd28gaG9tZXMsIGNsZWFubHkgc3BsaXQgYnkga2luZC4gVGhlIHRyZWUgaGFzIHRocmVlLCBhbmQgdGhlIHRoaXJkIGlzIG5vdApzb3J0ZWQgYnkga2luZDogKioyOSBvZiB0aGUgNTIgZmlsZXMgaW4gYGFwcHMvY2xpL3Rlc3RzL2Agc3Bhd24gbm8gc3VicHJvY2VzcyBhdCBhbGwqKiDigJQKdGhleSBhcmUgb3JkaW5hcnkgdW5pdCB0ZXN0cyBzaXR0aW5nIGluIHRoZSBpbnRlZ3JhdGlvbiBkaXJlY3RvcnkuIE1lYW53aGlsZSA0NSBvZiB0aGUgMTQwCmBfX3Rlc3RzX18vYCBmaWxlcyB0ZXN0IGEgbW9kdWxlIHRoYXQgbGl2ZXMgb25lIGRpcmVjdG9yeSB1cCwgd2hpY2ggdGhlIGRvY3VtZW50ZWQKY29udmVudGlvbiBzYXlzIHNob3VsZCBiZSBjb2xvY2F0ZWQuIFRoZSBkb2MgaXMgbm90IHdyb25nIGFib3V0IGludGVudDsgdGhlIHRyZWUgZHJpZnRlZAphd2F5IGZyb20gaXQsIGFuZCBuZWl0aGVyIGlzIGxvYWQtYmVhcmluZyBlbm91Z2ggdG8gd2luIGJ5IGl0c2VsZi4KCiMjIyBXaGVyZSB0aGUgdGltZSBnb2VzCgp8IFRlc3QgfCBDb3N0IHwgV2hhdCBpdCBhc3NlcnRzIHwKfC0tLXwtLS18LS0tfAp8IGBjb21tYW5kcy9yb3V0aW5lcy50ZXN0LnRzOjE0MzZgIHwgKiozNi4wcyoqIOKAlCAxNCUgb2Ygc3VpdGUgd2FsbCB0aW1lIHwgdGhhdCBgLUQsIC0tZGV2aWNlYCBhcHBlYXJzIGV4YWN0bHkgb25jZSBpbiBlYWNoIG9mIH4xNSBzdWJjb21tYW5kIGAtLWhlbHBgIG91dHB1dHMsIGVhY2ggYSBjb2xkIGBub2RlIC0taW1wb3J0IHRzeGAgYm9vdCB8CnwgYGNvbW1hbmRzL3Nlc3Npb25zLnRlc3QudHNgIHwgMjQzcyBDUFUgfCByZWFsIENMSSBzcGF3bnMgYWNyb3NzIHJlc29sdmUvbGlzdC9zdGF0dXMgcGF0aHMgfAp8IGBjb21tYW5kcy9yb3V0aW5lcy50ZXN0LnRzYCAoZmlsZSkgfCAyMjdzIENQVSB8IGFzIGFib3ZlIHwKfCBgbGliL3NlbGYtaGVhbC9pc29sYXRlZC1zb2FrLmludGVncmF0aW9uLnRlc3QudHNgIHwgNzAuN3MgKG9uZSB0ZXN0KSB8IGEgZ2VudWluZSBzb2FrIHwKClRoZSA2NDEgdGVzdHMgb3ZlciAxcyBhcmUgbm90IHRoZSBibG9hdCDigJQgdGhleSBhcmUgdGhlIGVuZC10by1lbmQgY292ZXJhZ2UgdGhlIHJlcG8ncwpuby1tb2NraW5nIHJ1bGUgYXNrcyBmb3IuIFRoZSBgcm91dGluZXMgLS1oZWxwYCBsb29wIGlzIHRoZSBvbmUgcGF5aW5nIGZ1bGwgc3VicHJvY2VzcwpwcmljZSBmb3IgYSBjb21tYW5kZXIuanMgcmVnaXN0cmF0aW9uIGNoZWNrLgoKIyMgRmlndXJlCgpUaGUgc2hhcGUgb2YgdGhlIHByb2JsZW0sIG9uIHRoZSBtb2R1bGUgdGhhdCBzaG93cyBpdCBtb3N0IGNsZWFybHkuIEV2ZXJ5IG51bWJlciBiZWxvdyBpcwphIGZpbGUgY291bnQgb3IgTE9DIHJlYWQgb2ZmIHRoZSB0cmVlIHRvZGF5LgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtYmVoYXZpb3IiPgogIDxkaXYgY2xhc3M9ImFydGlmYWN0LWJlaGF2aW9yLXBhbmVsIiBkYXRhLXN0YXRlPSJjdXJyZW50IiBkYXRhLWV2aWRlbmNlPSJyZyAtLWZpbGVzIC1nICdhY3RpdmUqLnRlc3QudHMnIHNyYy9saWIvc2Vzc2lvbjsgd2MgLWw7IHJnIC1jIG1rZHRlbXBTeW5jIj4KICAgIDxzdmcgdmlld0JveD0iMCAwIDQ0MCAzMzAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iVG9kYXk6IHNlc3Npb24vYWN0aXZlLnRzIGlzIGNvdmVyZWQgYnkgMTcgdGVzdCBmaWxlcyBhY3Jvc3MgdGhyZWUgbmFtaW5nIGNvbnZlbnRpb25zLCAxMSBvZiB3aGljaCBkZWNsYXJlIHRoZWlyIG93biB0ZW1wLWhvbWUgZml4dHVyZSI+CiAgICAgIDx0ZXh0IHg9IjgiIHk9IjE4IiBmaWxsPSJjdXJyZW50Q29sb3IiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSJib2xkIj5DVVJSRU5UIOKAlCBvbmUgbW9kdWxlLCAxNyB0ZXN0IGZpbGVzPC90ZXh0PgogICAgICA8cmVjdCB4PSIxNTAiIHk9IjM0IiB3aWR0aD0iMTQwIiBoZWlnaHQ9IjMwIiByeD0iNCIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIGZpbGw9Im5vbmUiLz4KICAgICAgPHRleHQgeD0iMjIwIiB5PSI1MyIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjEyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5zZXNzaW9uL2FjdGl2ZS50czwvdGV4dD4KICAgICAgPHRleHQgeD0iMjIwIiB5PSI3OCIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjEwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj4yLDYyNSBsb2M8L3RleHQ+CgogICAgICA8cmVjdCB4PSI4IiB5PSI5OCIgd2lkdGg9IjEzMCIgaGVpZ2h0PSIyNCIgcng9IjMiIHN0cm9rZT0iY3VycmVudENvbG9yIiBmaWxsPSJub25lIi8+CiAgICAgIDx0ZXh0IHg9IjczIiB5PSIxMTQiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSIxMCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+YWN0aXZlLnRlc3QudHM8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjczIiB5PSIxMzYiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSI5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj4zNzYgbG9jIMK3IDQxIHRlc3RzPC90ZXh0PgoKICAgICAgPHJlY3QgeD0iMTUyIiB5PSI5OCIgd2lkdGg9IjEzNiIgaGVpZ2h0PSIyNCIgcng9IjMiIHN0cm9rZT0iY3VycmVudENvbG9yIiBmaWxsPSJub25lIiBzdHJva2UtZGFzaGFycmF5PSI0IDMiLz4KICAgICAgPHRleHQgeD0iMjIwIiB5PSIxMTQiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSIxMCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+X190ZXN0c19fL2FjdGl2ZS50ZXN0LnRzPC90ZXh0PgogICAgICA8dGV4dCB4PSIyMjAiIHk9IjEzNiIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjkiIHRleHQtYW5jaG9yPSJtaWRkbGUiPjE2NiBsb2MgwrcgMTMgdGVzdHM8L3RleHQ+CgogICAgICA8cmVjdCB4PSIzMDIiIHk9Ijk4IiB3aWR0aD0iMTMwIiBoZWlnaHQ9IjI0IiByeD0iMyIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIGZpbGw9Im5vbmUiIHN0cm9rZS1kYXNoYXJyYXk9IjEgMyIvPgogICAgICA8dGV4dCB4PSIzNjciIHk9IjExNCIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjEwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5hY3RpdmUuJmx0O3RvcGljJmd0Oy50ZXN0LnRzPC90ZXh0PgogICAgICA8dGV4dCB4PSIzNjciIHk9IjEzNiIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjkiIHRleHQtYW5jaG9yPSJtaWRkbGUiPjE1IGZpbGVzIMK3IDEsNzkxIGxvYzwvdGV4dD4KCiAgICAgIDxwYXRoIGQ9Ik0xODAgNjQgTCA5MCA5NiIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIGZpbGw9Im5vbmUiLz4KICAgICAgPHBhdGggZD0iTTIyMCA2NCBMIDIyMCA5NiIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIGZpbGw9Im5vbmUiLz4KICAgICAgPHBhdGggZD0iTTI2MiA2NCBMIDM1MCA5NiIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIGZpbGw9Im5vbmUiLz4KCiAgICAgIDx0ZXh0IHg9IjgiIHk9IjE3MCIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjExIiBmb250LXdlaWdodD0iYm9sZCI+MyBuYW1pbmcgY29udmVudGlvbnMsIG5vIHJ1bGUgcGlja3Mgb25lPC90ZXh0PgogICAgICA8cmVjdCB4PSI4IiB5PSIxODIiIHdpZHRoPSI0MjQiIGhlaWdodD0iNTIiIHJ4PSI0IiBzdHJva2U9ImN1cnJlbnRDb2xvciIgZmlsbD0ibm9uZSIvPgogICAgICA8dGV4dCB4PSIyMCIgeT0iMjAyIiBmaWxsPSJjdXJyZW50Q29sb3IiIGZvbnQtc2l6ZT0iMTAiPjExIG9mIHRoZSAxNyBkZWNsYXJlIHRoZWlyIE9XTiBta2R0ZW1wU3luYyB0ZW1wLWhvbWUgZml4dHVyZS48L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjIwIiB5PSIyMjAiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSIxMCI+UmVwby13aWRlOiAxLDA2MiBta2R0ZW1wU3luYyBzaXRlcyAvIDUwOSBmaWxlcyAvIDEgc2hhcmVkIGZpeHR1cmUgbW9kdWxlLjwvdGV4dD4KCiAgICAgIDx0ZXh0IHg9IjgiIHk9IjI2MCIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjExIj5BZGRpbmcgYSBzY2VuYXJpbyBjb3N0czogcmVhZCAxNyBmaWxlcyB0byBmaW5kIHRoZSBob21lLDwvdGV4dD4KICAgICAgPHRleHQgeD0iOCIgeT0iMjc2IiBmaWxsPSJjdXJyZW50Q29sb3IiIGZvbnQtc2l6ZT0iMTEiPm9yIHdyaXRlIGZpbGUgIzE4IHdpdGggYSAxMnRoIGNvcHkgb2YgdGhlIGZpeHR1cmUuPC90ZXh0PgogICAgICA8dGV4dCB4PSI4IiB5PSIzMDAiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSIxMSIgZm9udC13ZWlnaHQ9ImJvbGQiPlRvdGFsOiAyLDMzMyB0ZXN0IGxvYyDCtyAxNjAgdGVzdHM8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjgiIHk9IjMxOCIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjkiPih0b3BpYyBuYW1lcyBhcmUgdGlja2V0IHN1YmplY3RzOiByZWdpc3RyeS1yZXRlbnRpb24sIGxpdmUtc2Vzc2lvbi1pZCwgdG11eC1pZGVudGl0eSwg4oCmKTwvdGV4dD4KICAgIDwvc3ZnPgogIDwvZGl2PgogIDxkaXYgY2xhc3M9ImFydGlmYWN0LWJlaGF2aW9yLXBhbmVsIiBkYXRhLXN0YXRlPSJwcm9wb3NlZCIgZGF0YS1ldmlkZW5jZT0iZGVyaXZlZDogb25lIGhvbWUgcGVyIG1vZHVsZSArIG9uZSBzaGFyZWQgZml4dHVyZTsgc2NlbmFyaW8gZmlsZXMga2VwdCwgZml4dHVyZSBib2RpZXMgcmVtb3ZlZCI+CiAgICA8c3ZnIHZpZXdCb3g9IjAgMCA0NDAgMzMwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IlByb3Bvc2VkOiBvbmUgY29sb2NhdGVkIGhvbWUgcGVyIG1vZHVsZSBwbHVzIGEgc2hhcmVkIHNlc3Npb24gZml4dHVyZSwgc28gc2NlbmFyaW8gZmlsZXMgY2Fycnkgb25seSBzY2VuYXJpb3MiPgogICAgICA8dGV4dCB4PSI4IiB5PSIxOCIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iYm9sZCI+UFJPUE9TRUQg4oCUIG9uZSBob21lLCBvbmUgZml4dHVyZTwvdGV4dD4KICAgICAgPHJlY3QgeD0iMTUwIiB5PSIzNCIgd2lkdGg9IjE0MCIgaGVpZ2h0PSIzMCIgcng9IjQiIHN0cm9rZT0iY3VycmVudENvbG9yIiBmaWxsPSJub25lIi8+CiAgICAgIDx0ZXh0IHg9IjIyMCIgeT0iNTMiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSIxMiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+c2Vzc2lvbi9hY3RpdmUudHM8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjIyMCIgeT0iNzgiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSIxMCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+Miw2MjUgbG9jIOKAlCB1bmNoYW5nZWQ8L3RleHQ+CgogICAgICA8cmVjdCB4PSI4MCIgeT0iOTgiIHdpZHRoPSIxMjgiIGhlaWdodD0iMjQiIHJ4PSIzIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgZmlsbD0ibm9uZSIvPgogICAgICA8dGV4dCB4PSIxNDQiIHk9IjExNCIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjEwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5hY3RpdmUudGVzdC50czwvdGV4dD4KICAgICAgPHRleHQgeD0iMTQ0IiB5PSIxMzYiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSI5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5jb3JlIGJlaGF2aW91cjwvdGV4dD4KCiAgICAgIDxyZWN0IHg9IjIzMiIgeT0iOTgiIHdpZHRoPSIxMjgiIGhlaWdodD0iMjQiIHJ4PSIzIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgZmlsbD0ibm9uZSIgc3Ryb2tlLWRhc2hhcnJheT0iMSAzIi8+CiAgICAgIDx0ZXh0IHg9IjI5NiIgeT0iMTE0IiBmaWxsPSJjdXJyZW50Q29sb3IiIGZvbnQtc2l6ZT0iMTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiPmFjdGl2ZS4mbHQ7dG9waWMmZ3Q7LnRlc3QudHM8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjI5NiIgeT0iMTM2IiBmaWxsPSJjdXJyZW50Q29sb3IiIGZvbnQtc2l6ZT0iOSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+c2NlbmFyaW8gY2x1c3RlcnM8L3RleHQ+CgogICAgICA8cGF0aCBkPSJNMTk2IDY0IEwgMTUwIDk2IiBzdHJva2U9ImN1cnJlbnRDb2xvciIgZmlsbD0ibm9uZSIvPgogICAgICA8cGF0aCBkPSJNMjUwIDY0IEwgMjkwIDk2IiBzdHJva2U9ImN1cnJlbnRDb2xvciIgZmlsbD0ibm9uZSIvPgoKICAgICAgPHRleHQgeD0iOCIgeT0iMTcwIiBmaWxsPSJjdXJyZW50Q29sb3IiIGZvbnQtc2l6ZT0iMTEiIGZvbnQtd2VpZ2h0PSJib2xkIj5fX3Rlc3RzX18vYWN0aXZlLnRlc3QudHMg4oCUIG1lcmdlZCBhd2F5LCBmaWxlIHJlbW92ZWQ8L3RleHQ+CgogICAgICA8cmVjdCB4PSI4IiB5PSIxODIiIHdpZHRoPSI0MjQiIGhlaWdodD0iNTIiIHJ4PSI0IiBzdHJva2U9ImN1cnJlbnRDb2xvciIgZmlsbD0ibm9uZSIvPgogICAgICA8dGV4dCB4PSIyMCIgeT0iMjAyIiBmaWxsPSJjdXJyZW50Q29sb3IiIGZvbnQtc2l6ZT0iMTAiIGZvbnQtd2VpZ2h0PSJib2xkIj5ORVc6IHNlc3Npb24vdGVzdGluZy9maXh0dXJlLnRzIOKAlCBvbmUgdG1wSG9tZSgpIGhlbHBlcjwvdGV4dD4KICAgICAgPHRleHQgeD0iMjAiIHk9IjIyMCIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjEwIj5ldmVyeSBzY2VuYXJpbyBmaWxlIGltcG9ydHMgaXQ7IDExIGhhbmQtcm9sbGVkIGNvcGllcyBkZWxldGVkPC90ZXh0PgogICAgICA8cGF0aCBkPSJNMTQ0IDE4MCBMIDE0NCAxMjQiIHN0cm9rZT0iY3VycmVudENvbG9yIiBmaWxsPSJub25lIiBzdHJva2UtZGFzaGFycmF5PSIzIDMiLz4KICAgICAgPHBhdGggZD0iTTI5NiAxODAgTCAyOTYgMTI0IiBzdHJva2U9ImN1cnJlbnRDb2xvciIgZmlsbD0ibm9uZSIgc3Ryb2tlLWRhc2hhcnJheT0iMyAzIi8+CgogICAgICA8dGV4dCB4PSI4IiB5PSIyNjAiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSIxMSI+QWRkaW5nIGEgc2NlbmFyaW8gY29zdHM6IG9wZW4gdGhlIHRvcGljIGZpbGUgdGhhdCBhbHJlYWR5PC90ZXh0PgogICAgICA8dGV4dCB4PSI4IiB5PSIyNzYiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSIxMSI+Y292ZXJzIGl0LCBpbXBvcnQgdGhlIGZpeHR1cmUsIHdyaXRlIHRoZSBhc3NlcnRpb24uPC90ZXh0PgogICAgICA8dGV4dCB4PSI4IiB5PSIzMDAiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSIxMSIgZm9udC13ZWlnaHQ9ImJvbGQiPlNhbWUgMTYwIHRlc3RzLiBGZXdlciBmaWxlcywgbm8gZHVwbGljYXRlZCBzZXR1cC48L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjgiIHk9IjMxOCIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjkiPkNvdmVyYWdlIHByZXNlcnZlZCBieSBjb25zdHJ1Y3Rpb24g4oCUIHRoaXMgbW92ZSBkZWxldGVzIGZpeHR1cmVzLCBub3QgY2FzZXMuPC90ZXh0PgogICAgPC9zdmc+CiAgPC9kaXY+CjwvZGl2PgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+CjxzdHJvbmc+U2NhbGU6PC9zdHJvbmc+IHRoZSBmaWd1cmUgc2hvd3MgMSBvZiB0aGUgMTggc3BsaXQtaG9tZSBtb2R1bGVzLgo8Y29kZT5hY3RpdmUudHM8L2NvZGU+IHdhcyBwaWNrZWQgYmVjYXVzZSBpdCBpcyB0aGUgd29yc3QgY2FzZSAoMTcgZmlsZXMpOyB0aGUgbWVkaWFuIHNwbGl0Cm1vZHVsZSBoYXMgMi4KPC9kaXY+CgojIyMgVGhlIG1vdmVzLCByYW5rZWQKCjxkaXYgY2xhc3M9ImFydGlmYWN0LWdyaWQgYXJ0aWZhY3QtZ3JpZC0zIj4KPGRpdiBjbGFzcz0iYXJ0aWZhY3QtcGFuZWwiPgo8c3Ryb25nPjEgwrcgT25lIHRlc3QgaG9tZSBwZXIgbW9kdWxlPC9zdHJvbmc+PGJyLz4KTWVyZ2UgdGhlIDE4IHNwbGl0IHBhaXJzIGludG8gdGhlIGNvbG9jYXRlZCBmaWxlOyBtb3ZlIHRoZSAyOSBub24tc3Bhd25pbmcgZmlsZXMgb3V0IG9mCjxjb2RlPnRlc3RzLzwvY29kZT47IHJldGlyZSA8Y29kZT5fX3Rlc3RzX18vPC9jb2RlPiB3aGVyZSB0aGUgc3ViamVjdCBpcyBvbmUgZGlyIHVwICg0NSBvZgoxNDApLiBUaGVuIGNvcnJlY3QgPGNvZGU+YXBwcy9jbGkvQ0xBVURFLm1kPC9jb2RlPiB0byBkZXNjcmliZSB3aGF0IGlzIGFjdHVhbGx5IHRydWUuPGJyLz4KPGVtPlB1cmUgZmlsZSBtb3ZlcyDigJQgbm8gdGVzdCBib2RpZXMgY2hhbmdlLjwvZW0+CjwvZGl2Pgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1wYW5lbCI+CjxzdHJvbmc+MiDCtyBFeHRyYWN0IHRoZSB0ZXN0IGZpeHR1cmUgbGF5ZXI8L3N0cm9uZz48YnIvPgpPbmUgPGNvZGU+dG1wSG9tZSgpPC9jb2RlPiAvIHNlc3Npb24tZml4dHVyZSBoZWxwZXIgcGVyIHN1YnN5c3RlbSwgcmVwbGFjaW5nIDEsMDYyCmhhbmQtcm9sbGVkIDxjb2RlPm1rZHRlbXBTeW5jPC9jb2RlPiBzaXRlcy4gVGhpcyBpcyB0aGUgbW92ZSB0aGF0IG1ha2VzIGFkZGluZyBhIHNjZW5hcmlvCmNoZWFwZXIgdGhhbiBhZGRpbmcgYSBmaWxlIOKAlCB0aGUgYWN0dWFsIGNhdXNlIG9mIHRoZSBncm93dGguPGJyLz4KPGVtPkhpZ2hlc3QgcGF5b2ZmLCBsYXJnZXN0IGJsYXN0IHJhZGl1cy48L2VtPgo8L2Rpdj4KPGRpdiBjbGFzcz0iYXJ0aWZhY3QtcGFuZWwiPgo8c3Ryb25nPjMgwrcgQ29sbGFwc2UgdGhlIHRpY2tldC1zaGFwZWQgc2NlbmFyaW8gZmlsZXM8L3N0cm9uZz48YnIvPgo8Y29kZT5hY3RpdmUudHM8L2NvZGU+IDE3IGZpbGVzIOKGkiBhYm91dCA0LCA8Y29kZT5kaXNjb3Zlci50czwvY29kZT4gMjUg4oaSIGFib3V0IDUsIGdyb3VwZWQKYnkgYmVoYXZpb3VyIHJhdGhlciB0aGFuIGJ5IHRoZSB0aWNrZXQgdGhhdCBwcm9tcHRlZCB0aGVtLiBEZXBlbmRzIG9uIG1vdmUgMiBsYW5kaW5nCmZpcnN0LCBvciBldmVyeSBtZXJnZSByZS1jb25mbGljdHMgb24gZml4dHVyZXMuCjwvZGl2Pgo8L2Rpdj4KCiMjIyBMYW5kZWQgYWxyZWFkeSDigJQgcmV2ZXJzaWJsZSB0aWVyLCBubyBnYXRlLCBlYWNoIG9uZSB2ZXJpZmllZAoKfCBDaGFuZ2UgfCBFdmlkZW5jZSBpdCB3YXMgbmVlZGVkIHwKfC0tLXwtLS18CnwgYHRlYW1zL2FnZW50cy5tZXRhLWNvcnJ1cHRpb24udGVzdC50c2AgcmV3cml0dGVuIHwgd3JvdGUgYSBkZWNveSBmaWxlIGBzYXZlTWV0YSgpYCBuZXZlciB0b3VjaGVzLCB0aGVuIGFzc2VydGVkIGBtZXRhLmpzb25gIHVuY2hhbmdlZCDigJQgYSBiYXJlIGB3cml0ZUZpbGVTeW5jYCBwYXNzZWQgaXQuICoqTXV0YXRpb24tcHJvdmVuKio6IHRoZSByZXdyaXRlIGZhaWxzIGFnYWluc3QgYSBub24tYXRvbWljIGBzYXZlTWV0YWAsIHRoZSBvcmlnaW5hbCBkaWQgbm90LiB8CnwgYHZlcnNpb24udGVzdC50c2Ag4oCUIDIgdGVzdHMgdG8gMSB8IGAnZ2V0Q2xpVmVyc2lvbkZyZXNoIGlzIG5vdCB0aGUgbWVtb2l6ZWQgY2FjaGUnYCBhc3NlcnRlZCBgYSA9PT0gYmAgZnJvbSB0d28gaWRlbnRpY2FsIGNhbGxzOyBhIGZyZXNoLXJlYWQgdGhhdCByZXR1cm5lZCB0aGUgY2FjaGUgcGFzc2VkLiB8CnwgYHNoaW1zLnRlc3QudHNgIHJlbmFtZWQgYW5kIHRpZ2h0ZW5lZCB8IG5hbWVkIGZvciBhIGAuZ2VtaW5pL2FudGlncmF2aXR5LWNsaWAgcGF0aCB0aGUgZ2VuZXJhdGVkIHNjcmlwdCBkb2VzIG5vdCBjb250YWluOyBhc3NlcnRlZCBzb21ldGhpbmcgZWxzZSBlbnRpcmVseS4gfAp8IGByZXNvdXJjZS1wYXR0ZXJucy50ZXN0LnRzYCB8IGBjb25zdCByZXN1bHQgPSDigKZgIGFzc2lnbmVkLCBuZXZlciBhc3NlcnRlZCDigJQgdGhlIGludmFsaWQtdG9rZW4gYnJhbmNoIGhhZCB6ZXJvIGNvdmVyYWdlLiB8CnwgNSBkYXRhLW1pcnJvciB0ZXN0cyBkZWxldGVkIHwgZ3JvayBhbmQgc3BhcmsgbW9kZWwgaWRzIGFuZCBgYXV0aE9wdGlvbmFsYCBwaW5uZWQgYXMgbGl0ZXJhbHMgZnJvbSB0aGUgbGluZSBhYm92ZSB0aGVtOyBgdW5tYW5hZ2VkLWluc3RhbGxzLnRlc3QudHNgIGZ1bGx5IHN1YnN1bWVkIGJ5IGBhZ2VudHMudGVzdC50czo0MDItNDA1YCwgd2hpY2ggYXNzZXJ0cyB0aGUgZGVyaXZhdGlvbiBydWxlIGluc3RlYWQuIHwKfCBgc3NoLnRlc3QudHNgIGRlLWZsYWtlZCB8IDUwbXMgc2xhY2sgYXJvdW5kIGEgNTBtcyB0aW1lcjsgKip0aGUgb25seSBmYWlsaW5nIHRlc3Qgb24gYG1haW5gKiogKDEwNG1zIGFnYWluc3QgYSAxMDBtcyBjZWlsaW5nKS4gfAoKRGVsaWJlcmF0ZWx5ICoqbm90KiogZGVsZXRlZCwgdGhvdWdoIHRoZXkgbWF0Y2ggdGhlIGNlcmVtb255IHNoYXBlOiB0aGUgYFNTSF9PUFRTYApoYXJkZW5pbmcgcGlucyBhbmQgYFNISU1fU0NIRU1BX1ZFUlNJT05gLiBBIGRyb3BwZWQgYEJhdGNoTW9kZT15ZXNgIGhhbmdzIGV2ZXJ5IGhlYWRsZXNzCnNzaCDigJQgdGhhdCBpcyBhbiBpbnZhcmlhbnQgYSBodW1hbiB3b3VsZCB3ZWFrZW4gc2lsZW50bHksIHdoaWNoIGlzIGV4YWN0bHkgd2hlbiBhIGxpdGVyYWwKcGluIGVhcm5zIGl0cyBwbGFjZS4KCiMjIyBGb3VuZCwgbm90IGZpeGVkIOKAlCBmaWxlZCByYXRoZXIgdGhhbiBmb2xkZWQgaW4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQtZGFuZ2VyIj4KVGhlc2UgYXJlIHByb2R1Y3Rpb24gZGVmZWN0cywgbm90IHRlc3QgY2xlYW51cC4gQSByZWZhY3RvciBQUiB0aGF0IGFsc28gZml4ZWQgdGhlbSB3b3VsZApiZSB1bnJldmlld2FibGUuCjwvZGl2PgoKLSAqKmBhdG9taWNXcml0ZUpzb25gIGlzIGltcGxlbWVudGVkIGZvdXIgdGltZXMqKiDigJQgYGZlZWQvZmVlZC50czoxOTNgLAogIGBkZXZpY2VzL3JlZ2lzdHJ5LnRzOjIxM2AsIGB0ZWFtcy9yZWdpc3RyeS50czo1OWAsIGB0ZWFtcy9hZ2VudHMudHM6Mzg1YC4gVGhlIGZvdXJ0aAogIGNhcnJpZXMgYSBjb21tZW50IGFja25vd2xlZGdpbmcgaXQgbWlycm9ycyB0aGUgdGhpcmQuCi0gKio5IHRlc3RzIGluIGBhZ2VudHMudGVzdC50c2Agc2lsZW50bHkgcmVxdWlyZSBhIHByaW9yIGBidW4gcnVuIGJ1aWxkYCoqIOKAlCB0aGV5IHNwYXduCiAgYG5vZGUgLWVgIGFnYWluc3QgYGRpc3QvbGliL2FnZW50cy5qc2AgYW5kIGZhaWwgd2l0aCBhIHJhdyBgRVJSX01PRFVMRV9OT1RfRk9VTkRgIGluIGEKICBmcmVzaCBjaGVja291dCwgd2l0aCBub3RoaW5nIHNheWluZyBzby4KLSAqKlVudGVzdGVkIHNhZmV0eS1jcml0aWNhbCBwYXRocyoqLCBlYWNoIG5hbWVkIGJ5IGFuIGF1ZGl0IHdpdGggdGhlIGZ1bmN0aW9uIGFuZCBsaW5lOgogIGBkZXZpY2VzL3JlZ2lzdHJ5LnRzOndyaXRlUmVhY2hhYmlsaXR5YCAoc3RhbGUtd3JpdGUgcmFjZSwgbmV2ZXIgY2FsbGVkIGJ5IGFueSB0ZXN0KSwKICBgZGV2aWNlcy9zeW5jLnRzOnJ1bkRldmljZVN5bmNgIChzb2Z0LW1vZGUgZXJyb3IgcGF0aCBuYW1lZCBpbiBpdHMgb3duIGRvY2Jsb2NrKSwKICBFQUNDRVMvRVBFUk0gYW55d2hlcmUgaW4gdGhlIGVuY3J5cHRlZCBzZWNyZXRzIGZpbGUgc3RvcmUsIGFuZCBgd2l0aFJlZ2lzdHJ5TG9ja2AncwogIHN0YWxlLWxvY2sgcmVjbGFpbS4K"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>
