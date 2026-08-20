@@ -78,6 +78,10 @@ describe('agents sessions bookmark (real CLI parse)', () => {
   // SSH-fanout peer — the flag silently did nothing and `--active --bookmarks`
   // returned the whole fleet. That is the exact command the browser's own `y`
   // copy-cmd hands to an agent.
+  // `--active` discovers real local session state (tmux panes, live processes)
+  // in addition to the fixtures this test seeds — on a busy fleet box that scan
+  // is genuinely slow, and this test drives it through several real CLI spawns.
+  // The default 30s budget is tuned for a lightweight spawn, not this cost.
   it('narrows --active to bookmarked sessions, not just in the browser', () => {
     const registry = path.join(home, '.agents', '.cache', 'terminals', 'live-terminals.json');
     fs.mkdirSync(path.dirname(registry), { recursive: true });
@@ -111,8 +115,11 @@ describe('agents sessions bookmark (real CLI parse)', () => {
     // Leave the store clean for the other cases in this file.
     run(['sessions', 'bookmark', bookmarked, '--remove']);
     fs.rmSync(registry, { force: true });
-  });
+  }, 90_000);
 
+  // Same real-discovery cost as above, across four real CLI spawns (one to
+  // index the routine archive, three `--active` queries) — see the comment
+  // on the previous test.
   it('narrows real --active JSON output to all or one named routine', () => {
     const routineName = 'nightly-review';
     const routineId = 'dddddddd-0000-0000-0000-000000000004';
@@ -199,7 +206,7 @@ describe('agents sessions bookmark (real CLI parse)', () => {
     expect(named.map((row) => row.sessionId)).toEqual([routineId]);
 
     fs.rmSync(registry, { force: true });
-  });
+  }, 90_000);
 
   it('bookmarks a complete id with no transcript row — a live session may not be indexed yet', () => {
     const fresh = 'cccccccc-0000-0000-0000-000000000003';

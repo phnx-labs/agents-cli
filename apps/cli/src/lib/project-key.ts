@@ -55,6 +55,12 @@ export function repoRootForCwd(dir: string, home: string = os.homedir()): string
   let current = path.resolve(dir);
   for (;;) {
     if (fs.existsSync(path.join(current, '.git'))) return current === stop ? undefined : current;
+    // Never climb past $HOME: an ancestor of home (/tmp, /, ...) is not part of
+    // any project this cwd belongs to, and treating one as the repo root would
+    // let unrelated host state (e.g. a stray /tmp/.git) swallow every loose
+    // directory under home. Mirrors the shim's own home boundary — see
+    // shims.ts shimExecTail.
+    if (current === stop) return undefined;
     const parent = path.dirname(current);
     if (parent === current) return undefined;
     current = parent;
