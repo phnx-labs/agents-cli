@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>How repos get stars in 2026, and why agi-cli has 15</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span><span class="status-badge status-draft">draft</span></div>
+<h1>How repos get stars in 2026, and why agi-cli has 15</h1>
+<p class="summary">Case studies from AFFiNE, OpenCode, and a 188k-post Show HN dataset, applied to this repo. The blocker is not tactics: no launch has ever happened, the name changed twice, and the hero demo renders as a plain blue link.</p>
+<div class="meta" aria-label="Artifact metadata"><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agi-cli" target="_blank" rel="noopener">phnx-labs/agi-cli</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://danfking.github.io/blog/2026/04/23/show-hn-by-the-numbers/" target="_blank" rel="noopener">Show HN 188k-post dataset</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">stars-playbook</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/12f89f9b-a860-472c-97ff-ff5ba6ea2caf">12f89f9b</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-20</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#summary" data-toc-for="summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a class="toc-item" href="#findings" data-toc-for="findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a class="toc-item toc-sub" href="#the-2026-meta-in-one-line" data-toc-for="the-2026-meta-in-one-line">The 2026 meta, in one line</a><a class="toc-item toc-sub" href="#1-velocity-not-volume-is-what-the-algorithm-rewards" data-toc-for="1-velocity-not-volume-is-what-the-algorithm-rewards">1. Velocity, not volume, is what the algorithm rewards</a><a class="toc-item toc-sub" href="#2-show-hn-is-the-highest-leverage-single-event-and-the-data-is-unforgiving" data-toc-for="2-show-hn-is-the-highest-leverage-single-event-and-the-data-is-unforgiving">2. Show HN is the highest-leverage single event, and the data is unforgiving</a><a class="toc-item toc-sub" href="#3-the-readme-is-a-product-page-and-the-lift-is-measurable" data-toc-for="3-the-readme-is-a-product-page-and-the-lift-is-measurable">3. The README is a product page, and the lift is measurable</a><a class="toc-item toc-sub" href="#4-in-this-category-the-aggregator-lists-are-the-compounding-asset" data-toc-for="4-in-this-category-the-aggregator-lists-are-the-compounding-asset">4. In this category, the aggregator lists are the compounding asset</a><a class="toc-item toc-sub" href="#5-positioning-beats-the-feature-list" data-toc-for="5-positioning-beats-the-feature-list">5. Positioning beats the feature list</a><a class="toc-item toc-sub" href="#6-after-the-spike-cadence-is-what-holds-the-line" data-toc-for="6-after-the-spike-cadence-is-what-holds-the-line">6. After the spike, cadence is what holds the line</a><a class="toc-item toc-sub" href="#7-documented-failure-modes" data-toc-for="7-documented-failure-modes">7. Documented failure modes</a><a class="toc-item" href="#evidence" data-toc-for="evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a><a class="toc-item toc-sub" href="#the-repo-s-actual-position" data-toc-for="the-repo-s-actual-position">The repo's actual position</a><a class="toc-item toc-sub" href="#the-hero-demo-does-not-render" data-toc-for="the-hero-demo-does-not-render">The hero demo does not render</a><a class="toc-item toc-sub" href="#star-trajectory-against-a-launch-benchmark" data-toc-for="star-trajectory-against-a-launch-benchmark">Star trajectory against a launch benchmark</a><a class="toc-item toc-sub" href="#the-name-is-fragmented-across-five-identities" data-toc-for="the-name-is-fragmented-across-five-identities">The name is fragmented across five identities</a><a class="toc-item toc-sub" href="#the-value-proposition-is-a-100-word-run-on" data-toc-for="the-value-proposition-is-a-100-word-run-on">The value proposition is a 100-word run-on</a><a class="toc-item" href="#recommendations" data-toc-for="recommendations"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Recommendations</a><a class="toc-item toc-sub" href="#the-one-decision-that-is-yours" data-toc-for="the-one-decision-that-is-yours">The one decision that is yours</a><a class="toc-item toc-sub" href="#phase-1-before-any-launch-fix-the-page" data-toc-for="phase-1-before-any-launch-fix-the-page">Phase 1, before any launch: fix the page</a><a class="toc-item toc-sub" href="#phase-2-permanent-placement-start-immediately-it-has-lead-time" data-toc-for="phase-2-permanent-placement-start-immediately-it-has-lead-time">Phase 2, permanent placement: start immediately, it has lead time</a><a class="toc-item toc-sub" href="#phase-3-the-48-hour-ignition" data-toc-for="phase-3-the-48-hour-ignition">Phase 3, the 48-hour ignition</a><a class="toc-item toc-sub" href="#phase-4-cadence-from-day-3-onward" data-toc-for="phase-4-cadence-from-day-3-onward">Phase 4, cadence from day 3 onward</a><a class="toc-item toc-sub" href="#what-not-to-do" data-toc-for="what-not-to-do">What not to do</a><a class="toc-item" href="#sources" data-toc-for="sources"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Sources</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2><p>The repo has <strong>15 stars in 194 days</strong> (first star 2026-05-30, latest 2026-08-20).
+That is 0.18 stars/day. Language-specific GitHub Trending starts at roughly
+<strong>50 stars/day</strong>. Nothing in the current setup is within two orders of magnitude
+of the discovery threshold, and no coordinated launch has ever been run.</p>
+<p>Three things are true at once, and only the third is a tactics problem:</p>
+<ol>
+<li><strong>The project has never launched.</strong> No Show HN, no Product Hunt, no Reddit
+post, no awesome-list submission. Every star so far arrived by accident.</li>
+<li><strong>The name changed twice and the star equity split across five identities.</strong>
+<code>agents-cli</code> to <code>agi-cli</code>, two domains, an archive repo, a personal mirror
+holding 3 more stars, and an npm package still called <code>@phnx-labs/agents-cli</code>.
+Nobody can repeat a name that keeps moving.</li>
+<li><strong>The README's hero demo is invisible.</strong> Line 42 is a bare
+<code>https://agi-cli.sh/demo.mp4</code>. GitHub renders it as a blue link. The rendered
+README contains <strong>zero <code>&lt;video&gt;</code> elements</strong>.</li>
+</ol>
+<p>The opportunity is that the category is the hottest distribution surface on
+GitHub right now: the Claude Code ecosystem's curated lists hold <strong>200,000+
+combined stars</strong>, and this project appears in none of them.</p>
+<h2 id="findings">Findings</h2><h3 id="the-2026-meta-in-one-line">The 2026 meta, in one line</h3><p>Stars are won in a <strong>48-hour ignition window</strong> and compounded by <strong>permanent
+placement in aggregator lists</strong>. Everything else is preparation for those two.</p>
+<h3 id="1-velocity-not-volume-is-what-the-algorithm-rewards">1. Velocity, not volume, is what the algorithm rewards</h3><p>GitHub Trending ranks on <strong>star velocity</strong> measured against a repo's own
+baseline, not absolute count. A repo that normally gets 2 stars/day getting 10
+outranks one that normally gets 50 getting 60. That is why a coordinated
+multi-channel push works and a steady drip never does: the same 300 stars spread
+over three months produce zero trending appearances, while 300 in two days
+produce a listing that then does the marketing for free.</p>
+<p>AFFiNE recorded <strong>28 Trending appearances in 5 months</strong> off this mechanic. The
+practical floor cited is <strong>50 stars/day for language-specific Trending</strong>, which
+has far less competition than All Languages.</p>
+<h3 id="2-show-hn-is-the-highest-leverage-single-event-and-the-data-is-unforgiving">2. Show HN is the highest-leverage single event, and the data is unforgiving</h3><p>From a study of <strong>188,085 Show HN posts (2012 to April 2026)</strong>, 51,338 of which
+linked to a GitHub repo:</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Median Show HN score</td>
+<td><strong>2 points</strong></td>
+</tr>
+<tr>
+<td>Score to reach top 6%</td>
+<td>50 points</td>
+</tr>
+<tr>
+<td>Score to reach 99th percentile</td>
+<td>263+</td>
+</tr>
+<tr>
+<td>Front-page rate, Q1 2026</td>
+<td><strong>2.3% of submissions</strong></td>
+</tr>
+<tr>
+<td>Upvote to star conversion (48h)</td>
+<td><strong>~1.4 stars per upvote</strong></td>
+</tr>
+<tr>
+<td>Conversion at 258-350 points</td>
+<td>1.77 stars/point</td>
+</tr>
+<tr>
+<td>Conversion at 700+ points</td>
+<td>0.79 stars/point</td>
+</tr>
+<tr>
+<td>Star impact expired after 48h</td>
+<td><strong>~92%</strong></td>
+</tr>
+<tr>
+<td>Best slot</td>
+<td><strong>Mon 00:00 UTC (Sun 7pm ET)</strong>, 10.8% chance of 50+</td>
+</tr>
+<tr>
+<td>Worst slot</td>
+<td>Thu 06:00 UTC, 2.6%</td>
+</tr>
+<tr>
+<td>Daily competition</td>
+<td>~200 Show HN posts/day, up from ~30 a decade ago</td>
+</tr>
+</tbody></table>
+<p>Two things to internalize. <strong>HN score explains only 8% of the variance in stars</strong>
+(r = 0.29), and <strong>comment count predicts nothing</strong> (r = 0.10). The post is a
+trigger, not the strategy. And the window is short: day 1 is a 1,200x spike over
+baseline, day 2 collapses to roughly 40 stars. Every other channel has to fire
+inside that same window or its traffic is wasted.</p>
+<p>One more figure worth planning around: front-page Show HNs drive <strong>5,000-30,000
+unique visitors in 24 hours</strong>, with a search-driven long tail for 6-12 months.</p>
+<h3 id="3-the-readme-is-a-product-page-and-the-lift-is-measurable">3. The README is a product page, and the lift is measurable</h3><p>AFFiNE reports a <strong>2.3x star rate after README optimization</strong>. The structure that
+produced it:</p>
+<ul>
+<li>One hero image or video <strong>above the fold</strong></li>
+<li><strong>5-7 functional GIFs or screenshots</strong> showing the tool actually running</li>
+<li>A one-sentence value proposition, not a paragraph and not a feature list</li>
+<li>Quick start in <strong>under 5 steps</strong></li>
+<li>A visible star CTA</li>
+</ul>
+<h3 id="4-in-this-category-the-aggregator-lists-are-the-compounding-asset">4. In this category, the aggregator lists are the compounding asset</h3><p>This is the finding most specific to this repo. The Claude Code ecosystem's
+community lists have accumulated <strong>200,000+ combined stars across 11 curated
+lists</strong>, with the largest single aggregator (<code>affaan-m/everything-claude-code</code>)
+past <strong>163,000 stars</strong> on its own. <code>claude-flow</code> sits at 59.4k, <code>SuperClaude</code> at
+23k+, and the official Claude Code repo crossed 131,000 by June 2026.</p>
+<p>An accepted awesome-list entry is permanent referral traffic. It does not decay
+in 48 hours the way an HN post does. For a tool whose job is orchestrating
+Claude, Codex, and Gemini harnesses, absence from every one of those lists is the
+largest unclaimed lever here.</p>
+<h3 id="5-positioning-beats-the-feature-list">5. Positioning beats the feature list</h3><p>OpenCode went from launch in June 2025 to <strong>160,000+ stars</strong>, hitting #1 on
+Hacker News on 2026-03-20. The top-voted sentiment in that thread was not about a
+feature. It was relief at <strong>not being locked to one vendor</strong>: connect Claude,
+GPT, Gemini, or local models from the same interface.</p>
+<p>That is one sentence a stranger can repeat to another stranger. It compresses the
+product into a grievance the audience already had.</p>
+<h3 id="6-after-the-spike-cadence-is-what-holds-the-line">6. After the spike, cadence is what holds the line</h3><p>The post-launch requirements that separate a spike from a curve:</p>
+<ul>
+<li><strong>Weekly releases</strong>, which signal the project is alive</li>
+<li><strong>One content piece per week</strong> (blog, tutorial, follow-up Show HN)</li>
+<li><strong>Issue response inside 24 hours</strong>; unanswered issues read as abandonment</li>
+<li>Continuous awesome-list submissions</li>
+</ul>
+<h3 id="7-documented-failure-modes">7. Documented failure modes</h3><p>The case studies are explicit about what kills launches:</p>
+<ol>
+<li><strong>Launching from 0 stars.</strong> Cold repos convert at roughly 5%; pre-seeding past
+100 raises it materially. Social proof is a precondition, not a result.</li>
+<li><strong>Spreading the launch across several days</strong> instead of one 48-hour window.</li>
+<li><strong>Abandoning momentum</strong> after the first spike.</li>
+<li><strong>Ignoring open issues.</strong></li>
+<li><strong>A README with no visual hierarchy and no clear value proposition.</strong></li>
+</ol>
+<h2 id="evidence">Evidence</h2><h3 id="the-repo-s-actual-position">The repo's actual position</h3><p>Every number below was pulled live from the GitHub and npm APIs on 2026-08-20.</p>
+<table>
+<thead>
+<tr>
+<th>Signal</th>
+<th>Measured value</th>
+<th>What it implies</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Stars, <code>phnx-labs/agi-cli</code></td>
+<td><strong>15</strong></td>
+<td>~0.18/day since the first star</td>
+</tr>
+<tr>
+<td>First star to today</td>
+<td>2026-05-30 to 2026-08-20 (82 days)</td>
+<td>194 days since repo creation</td>
+</tr>
+<tr>
+<td>Stars, <code>muqsitnawaz/agents-cli</code></td>
+<td><strong>3</strong></td>
+<td>Split equity, separate identity</td>
+</tr>
+<tr>
+<td>Traffic on the mirror</td>
+<td><strong>3 views / 3 uniques in 14 days</strong></td>
+<td>No discovery surface at all</td>
+</tr>
+<tr>
+<td>Topics on <code>agi-cli</code></td>
+<td>10, which is fine</td>
+<td><code>.agents-system</code>, <code>.agents-extras</code>, <code>homebrew-tap</code> have <strong>0</strong></td>
+</tr>
+<tr>
+<td>Open issues</td>
+<td><strong>18</strong></td>
+<td>No <code>good first issue</code> label present</td>
+</tr>
+<tr>
+<td>npm <code>@phnx-labs/agents-cli</code></td>
+<td><strong>1,857/week</strong></td>
+<td>Likely dominated by fleet self-upgrades, worth verifying</td>
+</tr>
+<tr>
+<td>npm <code>@phnx-labs/agi-cli</code></td>
+<td><strong>7/week</strong></td>
+<td>The advertised name has no install base</td>
+</tr>
+<tr>
+<td><code>&lt;video&gt;</code> tags in rendered README</td>
+<td><strong>0</strong></td>
+<td>The hero demo is a dead-looking link</td>
+</tr>
+</tbody></table>
+<h3 id="the-hero-demo-does-not-render">The hero demo does not render</h3><p><code>README.md:42</code> is the line <code>https://agi-cli.sh/demo.mp4</code>. Fetching GitHub's own
+rendered HTML for that README returns:</p>
+<pre><code>&lt;p dir="auto"&gt;&lt;a href="https://agi-cli.sh/demo.mp4" rel="nofollow"&gt;https://agi-cli.sh/demo.mp4&lt;/a&gt;&lt;/p&gt;
+</code></pre>
+<p>GitHub only auto-embeds a player for video uploaded to its own
+<code>user-attachments</code> host. An external URL is a link. The most persuasive
+above-the-fold asset on the page is currently a line of blue text that most
+visitors will read as a broken embed.</p>
+<h3 id="star-trajectory-against-a-launch-benchmark">Star trajectory against a launch benchmark</h3><figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two panels comparing this repo's 15 stars over 194 days against a coordinated launch reaching 1000 stars in 72 hours">
+  <text x="20" y="24" font-family="system-ui, sans-serif" font-size="13" font-weight="600" fill="#8a8a8a">ACTUAL — agi-cli</text>
+  <text x="20" y="52" font-family="ui-monospace, monospace" font-size="22" font-weight="700" fill="#b45309">15 stars</text>
+  <text x="20" y="70" font-family="system-ui, sans-serif" font-size="11" fill="#7a7a7a">194 days · 0.18 per day</text>
+  <line x1="60" y1="250" x2="340" y2="250" stroke="#8a8a8a" stroke-width="1"></line>
+  <line x1="60" y1="100" x2="340" y2="100" stroke="#c9c9c9" stroke-width="1" stroke-dasharray="3 3"></line>
+  <line x1="60" y1="175" x2="340" y2="175" stroke="#c9c9c9" stroke-width="1" stroke-dasharray="3 3"></line>
+  <text x="30" y="104" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">20</text>
+  <text x="30" y="179" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">10</text>
+  <text x="36" y="254" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">0</text>
+  <path d="M60,250 L96,250 L120,242 L142,235 L168,227 L196,220 L214,212 L232,205 L268,197 L290,190 L306,182 L322,175 L330,167 L336,160 L340,152" fill="none" stroke="#b45309" stroke-width="2.5"></path>
+  <circle cx="340" cy="152" r="3.5" fill="#b45309"></circle>
+  <text x="62" y="268" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">Feb</text>
+  <text x="316" y="268" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">Aug</text>
+
+  <line x1="380" y1="20" x2="380" y2="280" stroke="#c9c9c9" stroke-width="1" stroke-dasharray="3 3"></line>
+
+  <text x="420" y="24" font-family="system-ui, sans-serif" font-size="13" font-weight="600" fill="#8a8a8a">BENCHMARK — 48h coordinated ignition</text>
+  <text x="420" y="52" font-family="ui-monospace, monospace" font-size="22" font-weight="700" fill="#4d7c0f">1,000 stars</text>
+  <text x="420" y="70" font-family="system-ui, sans-serif" font-size="11" fill="#7a7a7a">72 hours · about 14 per hour at peak</text>
+  <line x1="460" y1="250" x2="740" y2="250" stroke="#8a8a8a" stroke-width="1"></line>
+  <line x1="460" y1="100" x2="740" y2="100" stroke="#c9c9c9" stroke-width="1" stroke-dasharray="3 3"></line>
+  <line x1="460" y1="175" x2="740" y2="175" stroke="#c9c9c9" stroke-width="1" stroke-dasharray="3 3"></line>
+  <text x="424" y="104" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">1k</text>
+  <text x="418" y="179" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">500</text>
+  <text x="436" y="254" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">0</text>
+  <path d="M460,250 C482,248 496,200 520,150 C544,112 570,100 600,96 C640,92 700,90 740,89" fill="none" stroke="#4d7c0f" stroke-width="2.5"></path>
+  <text x="462" y="268" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">h0</text>
+  <text x="500" y="268" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">h24</text>
+  <text x="592" y="268" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">h48</text>
+  <text x="716" y="268" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">h72</text>
+</svg>
+<figcaption>Same visual footprint, different y-axis. The left curve is what a project with no launch looks like; the right is the documented result of firing every channel inside one 48-hour window. The gap is distribution, not product.</figcaption>
+</figure><h3 id="the-name-is-fragmented-across-five-identities">The name is fragmented across five identities</h3><table>
+<thead>
+<tr>
+<th>Identity</th>
+<th>Where it points</th>
+<th>Weight</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>phnx-labs/agi-cli</code></td>
+<td>canonical repo today</td>
+<td>15 stars</td>
+</tr>
+<tr>
+<td><code>muqsitnawaz/agents-cli</code></td>
+<td>personal mirror, <code>agents-cli.sh</code></td>
+<td>3 stars</td>
+</tr>
+<tr>
+<td><code>phnx-labs/agi-cli-jul2026-archive</code></td>
+<td>private, "rebrand of agents-cli"</td>
+<td>dormant</td>
+</tr>
+<tr>
+<td>npm <code>@phnx-labs/agents-cli</code></td>
+<td>the package people install</td>
+<td>1,857/wk</td>
+</tr>
+<tr>
+<td>npm <code>@phnx-labs/agi-cli</code></td>
+<td>the name the README advertises</td>
+<td>7/wk</td>
+</tr>
+</tbody></table>
+<p>Two live domains (<code>agents-cli.sh</code> and <code>agi-cli.sh</code>), a repo named <code>agi-cli</code>, a
+package named <code>agents-cli</code>, and a binary named <code>agents</code>. GitHub preserves stars
+across a rename, but it does not preserve <strong>word of mouth</strong>: external backlinks
+lose their SEO value, and a reader who hears the name once cannot find it twice.</p>
+<h3 id="the-value-proposition-is-a-100-word-run-on">The value proposition is a 100-word run-on</h3><p>The README's opening paragraph names twelve capabilities in a single sentence:
+dispatch, measure, fold back, schedule, spawn teams, dispatch to cloud, watch
+state, nudge, message mid-flight, store secrets, drive browsers, steer from a
+menu bar. The repo description is "a meta-harness for building Agent Factories."</p>
+<p>Compare OpenCode's one-liner: any model, one interface, no vendor lock-in.
+Nobody repeats a twelve-item list.</p>
+<h2 id="recommendations">Recommendations</h2><h3 id="the-one-decision-that-is-yours">The one decision that is yours</h3><p><strong>Pick one name and freeze it.</strong> Everything below is blocked on this, because a
+launch on a name that moves again is a launch spent twice.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Argument for</th>
+<th>Cost</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong><code>agents-cli</code></strong></td>
+<td>The npm package (1,857/wk), the binary, and one domain already say it. Descriptive and searchable: people search "agents cli", not "agi cli".</td>
+<td>Rename the repo back; discard the <code>agi-cli</code> brand work.</td>
+</tr>
+<tr>
+<td><strong><code>agi-cli</code></strong></td>
+<td>Shorter, already the repo name and the advertised site.</td>
+<td>Abandons the install base's name. "AGI" reads as a hype word to the HN audience and is unsearchable for the actual job.</td>
+</tr>
+<tr>
+<td>A third name</td>
+<td>Fresh, ownable</td>
+<td>A third rename. Do not.</td>
+</tr>
+</tbody></table>
+<p>The recommendation is <strong><code>agents-cli</code></strong>: the searchable descriptive name matches
+what the tool does, matches what 1,857 weekly installs already type, and the
+audience for this tool is exactly the audience that reacts badly to "AGI" in a
+product name.</p>
+<h3 id="phase-1-before-any-launch-fix-the-page">Phase 1, before any launch: fix the page</h3><ol>
+<li><strong>Make the demo render.</strong> Upload <code>demo.mp4</code> through a GitHub comment box to
+get a <code>user-attachments</code> URL, or commit a short GIF under <code>assets/</code>. Today the
+most persuasive asset on the page is a blue link.</li>
+<li><strong>Rewrite the first sentence</strong> into one repeatable claim. Draft: <em>"Run Claude,
+Codex, and Gemini in parallel across your own machines, on the subscriptions
+you already pay for."</em> One grievance, one answer.</li>
+<li><strong>Add 5-7 functional GIFs</strong> below the fold: <code>agents teams</code> running, the fleet
+view, <code>agents run</code> across three harnesses, secrets behind Touch ID.</li>
+<li><strong>Label 5-8 of the 18 open issues <code>good first issue</code></strong> and answer the rest.
+Unanswered issues read as abandonment to a first-time visitor.</li>
+<li><strong>Add topics</strong> to <code>.agents-system</code>, <code>.agents-extras</code>, and <code>homebrew-tap</code>, all
+at zero, and consolidate or archive the personal mirror.</li>
+</ol>
+<h3 id="phase-2-permanent-placement-start-immediately-it-has-lead-time">Phase 2, permanent placement: start immediately, it has lead time</h3><p>Submit to the Claude Code aggregators <strong>before</strong> the launch, so the launch lands
+on a page that already carries inbound:</p>
+<ul>
+<li><code>affaan-m/everything-claude-code</code> (163k stars)</li>
+<li><code>hesreallyhim/awesome-claude-code</code></li>
+<li>the <code>sst/opencode</code> adjacent-tool lists</li>
+<li><code>punkpeye/awesome-mcp-servers</code>, if an MCP surface qualifies</li>
+<li>the general <code>awesome-ai-agents-2026</code> lists</li>
+</ul>
+<p>This is the compounding asset. Unlike an HN post, an accepted entry does not
+expire in 48 hours.</p>
+<h3 id="phase-3-the-48-hour-ignition">Phase 3, the 48-hour ignition</h3><p>Pre-seed past 100 stars first, since launching from 15 converts at roughly 5%.
+Then fire every channel inside one window:</p>
+<table>
+<thead>
+<tr>
+<th>Hour</th>
+<th>Channel</th>
+<th>Expected yield</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>0 (Sun 7pm ET / Mon 00:00 UTC)</td>
+<td><strong>Show HN</strong>, the best documented slot at 10.8% chance of 50+</td>
+<td>~1.4 stars/upvote</td>
+</tr>
+<tr>
+<td>0-2</td>
+<td>r/ClaudeAI, r/LocalLLaMA, r/selfhosted, r/commandline</td>
+<td>50-300 each</td>
+</tr>
+<tr>
+<td>2</td>
+<td>X thread with the demo video and real numbers</td>
+<td>referral</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Product Hunt</td>
+<td>200-600</td>
+</tr>
+<tr>
+<td>0-48</td>
+<td>Answer every comment personally</td>
+<td>drives ranking longevity</td>
+</tr>
+</tbody></table>
+<p>Title the Show HN with the technical fact, not the claim. "Show HN: Run Claude,
+Codex, and Gemini in parallel across your own machines" beats anything carrying
+"AGI", "factory", or "meta-harness". Avoid Monday and Friday; the data favors
+Sunday evening ET and Tuesday through Thursday mornings.</p>
+<h3 id="phase-4-cadence-from-day-3-onward">Phase 4, cadence from day 3 onward</h3><p>Weekly release, which already happens (v1.22.41 shipped 2026-08-20), one written
+piece per week, 24-hour issue response, and a follow-up Show HN on a specific
+subsystem in 4-6 weeks. The 43-day mark is where the AFFiNE curve separates
+projects that kept pushing from those that took the spike and stopped.</p>
+<h3 id="what-not-to-do">What not to do</h3><p>Do not buy stars. The geography and velocity fingerprint is exactly what
+investors and serious contributors screen for, and it poisons the signal the
+launch exists to earn.</p>
+<h2 id="sources">Sources</h2><ul>
+<li><a class="link-pill" href="https://gingiris.github.io/growth-tools/blog/2026/03/25/how-to-get-more-github-stars-the-definitive-guide-33k-stars-case-study/" title="https://gingiris.github.io/growth-tools/blog/2026/03/25/how-to-get-more-github-stars-the-definitive-guide-33k-stars-case-study/" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="link-pill-text">How to Get GitHub Stars in 2026 (AFFiNE 33k to 60k case study)</span></a></li>
+<li><a class="link-pill" href="https://danfking.github.io/blog/2026/04/23/show-hn-by-the-numbers/" title="https://danfking.github.io/blog/2026/04/23/show-hn-by-the-numbers/" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="link-pill-text">Show HN by the Numbers: 188,000 Posts, 14 Years of Data</span></a></li>
+<li><a class="link-pill" href="https://essamamdani.com/blog/opencode-160k-stars-open-source-ai-coding-agent-2026" title="https://essamamdani.com/blog/opencode-160k-stars-open-source-ai-coding-agent-2026" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=essamamdani.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">OpenCode Hits 160K Stars</span></a></li>
+<li><a class="link-pill" href="https://agentconn.com/blog/opencode-open-source-ai-coding-agent-review-2026/" title="https://agentconn.com/blog/opencode-open-source-ai-coding-agent-review-2026/" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=agentconn.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">OpenCode Review: The Open-Source AI Coding Agent That Took #1 on Hacker News</span></a></li>
+<li><a class="link-pill" href="https://claudefa.st/blog/tools/resources/awesome-claude-code" title="https://claudefa.st/blog/tools/resources/awesome-claude-code" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=claudefa.st&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">Awesome Claude Code: 11 Curated Lists Worth Bookmarking</span></a></li>
+<li><a class="link-pill" href="https://www.flowjam.com/blog/how-to-get-on-the-front-page-of-hacker-news-in-2025-the-complete-up-to-date-playbook" title="https://www.flowjam.com/blog/how-to-get-on-the-front-page-of-hacker-news-in-2025-the-complete-up-to-date-playbook" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=flowjam.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">Hacker News Front Page in 2026: The Honest Playbook</span></a></li>
+<li><a class="link-pill" href="https://pagecrawl.io/blog/github-trending-repository-star-velocity-alerts" title="https://pagecrawl.io/blog/github-trending-repository-star-velocity-alerts" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=pagecrawl.io&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">GitHub Trending Repository and Star-Velocity Alerts</span></a></li>
+<li><a class="link-pill" href="https://business.daily.dev/resources/hacker-news-marketing-developer-tools-show-hn-launch-day-sustained-coverage/" title="https://business.daily.dev/resources/hacker-news-marketing-developer-tools-show-hn-launch-day-sustained-coverage/" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=business.daily.dev&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">Hacker News Marketing for Developer Tools</span></a></li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0ZW1wbGF0ZTogcmVwb3J0LnYxCnRpdGxlOiAnSG93IHJlcG9zIGdldCBzdGFycyBpbiAyMDI2LCBhbmQgd2h5IGFnaS1jbGkgaGFzIDE1JwpzdW1tYXJ5OiAnQ2FzZSBzdHVkaWVzIGZyb20gQUZGaU5FLCBPcGVuQ29kZSwgYW5kIGEgMTg4ay1wb3N0IFNob3cgSE4gZGF0YXNldCwgYXBwbGllZCB0byB0aGlzIHJlcG8uIFRoZSBibG9ja2VyIGlzIG5vdCB0YWN0aWNzOiBubyBsYXVuY2ggaGFzIGV2ZXIgaGFwcGVuZWQsIHRoZSBuYW1lIGNoYW5nZWQgdHdpY2UsIGFuZCB0aGUgaGVybyBkZW1vIHJlbmRlcnMgYXMgYSBwbGFpbiBibHVlIGxpbmsuJwpzdGF0dXM6IGRyYWZ0CmxpbmtzOgogIC0gbGFiZWw6ICdwaG54LWxhYnMvYWdpLWNsaScKICAgIHVybDogJ2h0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvYWdpLWNsaScKICAtIGxhYmVsOiAnU2hvdyBITiAxODhrLXBvc3QgZGF0YXNldCcKICAgIHVybDogJ2h0dHBzOi8vZGFuZmtpbmcuZ2l0aHViLmlvL2Jsb2cvMjAyNi8wNC8yMy9zaG93LWhuLWJ5LXRoZS1udW1iZXJzLycKLS0tCgojIyBTdW1tYXJ5CgpUaGUgcmVwbyBoYXMgKioxNSBzdGFycyBpbiAxOTQgZGF5cyoqIChmaXJzdCBzdGFyIDIwMjYtMDUtMzAsIGxhdGVzdCAyMDI2LTA4LTIwKS4KVGhhdCBpcyAwLjE4IHN0YXJzL2RheS4gTGFuZ3VhZ2Utc3BlY2lmaWMgR2l0SHViIFRyZW5kaW5nIHN0YXJ0cyBhdCByb3VnaGx5CioqNTAgc3RhcnMvZGF5KiouIE5vdGhpbmcgaW4gdGhlIGN1cnJlbnQgc2V0dXAgaXMgd2l0aGluIHR3byBvcmRlcnMgb2YgbWFnbml0dWRlCm9mIHRoZSBkaXNjb3ZlcnkgdGhyZXNob2xkLCBhbmQgbm8gY29vcmRpbmF0ZWQgbGF1bmNoIGhhcyBldmVyIGJlZW4gcnVuLgoKVGhyZWUgdGhpbmdzIGFyZSB0cnVlIGF0IG9uY2UsIGFuZCBvbmx5IHRoZSB0aGlyZCBpcyBhIHRhY3RpY3MgcHJvYmxlbToKCjEuICoqVGhlIHByb2plY3QgaGFzIG5ldmVyIGxhdW5jaGVkLioqIE5vIFNob3cgSE4sIG5vIFByb2R1Y3QgSHVudCwgbm8gUmVkZGl0CiAgIHBvc3QsIG5vIGF3ZXNvbWUtbGlzdCBzdWJtaXNzaW9uLiBFdmVyeSBzdGFyIHNvIGZhciBhcnJpdmVkIGJ5IGFjY2lkZW50LgoyLiAqKlRoZSBuYW1lIGNoYW5nZWQgdHdpY2UgYW5kIHRoZSBzdGFyIGVxdWl0eSBzcGxpdCBhY3Jvc3MgZml2ZSBpZGVudGl0aWVzLioqCiAgIGBhZ2VudHMtY2xpYCB0byBgYWdpLWNsaWAsIHR3byBkb21haW5zLCBhbiBhcmNoaXZlIHJlcG8sIGEgcGVyc29uYWwgbWlycm9yCiAgIGhvbGRpbmcgMyBtb3JlIHN0YXJzLCBhbmQgYW4gbnBtIHBhY2thZ2Ugc3RpbGwgY2FsbGVkIGBAcGhueC1sYWJzL2FnZW50cy1jbGlgLgogICBOb2JvZHkgY2FuIHJlcGVhdCBhIG5hbWUgdGhhdCBrZWVwcyBtb3ZpbmcuCjMuICoqVGhlIFJFQURNRSdzIGhlcm8gZGVtbyBpcyBpbnZpc2libGUuKiogTGluZSA0MiBpcyBhIGJhcmUKICAgYGh0dHBzOi8vYWdpLWNsaS5zaC9kZW1vLm1wNGAuIEdpdEh1YiByZW5kZXJzIGl0IGFzIGEgYmx1ZSBsaW5rLiBUaGUgcmVuZGVyZWQKICAgUkVBRE1FIGNvbnRhaW5zICoqemVybyBgPHZpZGVvPmAgZWxlbWVudHMqKi4KClRoZSBvcHBvcnR1bml0eSBpcyB0aGF0IHRoZSBjYXRlZ29yeSBpcyB0aGUgaG90dGVzdCBkaXN0cmlidXRpb24gc3VyZmFjZSBvbgpHaXRIdWIgcmlnaHQgbm93OiB0aGUgQ2xhdWRlIENvZGUgZWNvc3lzdGVtJ3MgY3VyYXRlZCBsaXN0cyBob2xkICoqMjAwLDAwMCsKY29tYmluZWQgc3RhcnMqKiwgYW5kIHRoaXMgcHJvamVjdCBhcHBlYXJzIGluIG5vbmUgb2YgdGhlbS4KCiMjIEZpbmRpbmdzCgojIyMgVGhlIDIwMjYgbWV0YSwgaW4gb25lIGxpbmUKClN0YXJzIGFyZSB3b24gaW4gYSAqKjQ4LWhvdXIgaWduaXRpb24gd2luZG93KiogYW5kIGNvbXBvdW5kZWQgYnkgKipwZXJtYW5lbnQKcGxhY2VtZW50IGluIGFnZ3JlZ2F0b3IgbGlzdHMqKi4gRXZlcnl0aGluZyBlbHNlIGlzIHByZXBhcmF0aW9uIGZvciB0aG9zZSB0d28uCgojIyMgMS4gVmVsb2NpdHksIG5vdCB2b2x1bWUsIGlzIHdoYXQgdGhlIGFsZ29yaXRobSByZXdhcmRzCgpHaXRIdWIgVHJlbmRpbmcgcmFua3Mgb24gKipzdGFyIHZlbG9jaXR5KiogbWVhc3VyZWQgYWdhaW5zdCBhIHJlcG8ncyBvd24KYmFzZWxpbmUsIG5vdCBhYnNvbHV0ZSBjb3VudC4gQSByZXBvIHRoYXQgbm9ybWFsbHkgZ2V0cyAyIHN0YXJzL2RheSBnZXR0aW5nIDEwCm91dHJhbmtzIG9uZSB0aGF0IG5vcm1hbGx5IGdldHMgNTAgZ2V0dGluZyA2MC4gVGhhdCBpcyB3aHkgYSBjb29yZGluYXRlZAptdWx0aS1jaGFubmVsIHB1c2ggd29ya3MgYW5kIGEgc3RlYWR5IGRyaXAgbmV2ZXIgZG9lczogdGhlIHNhbWUgMzAwIHN0YXJzIHNwcmVhZApvdmVyIHRocmVlIG1vbnRocyBwcm9kdWNlIHplcm8gdHJlbmRpbmcgYXBwZWFyYW5jZXMsIHdoaWxlIDMwMCBpbiB0d28gZGF5cwpwcm9kdWNlIGEgbGlzdGluZyB0aGF0IHRoZW4gZG9lcyB0aGUgbWFya2V0aW5nIGZvciBmcmVlLgoKQUZGaU5FIHJlY29yZGVkICoqMjggVHJlbmRpbmcgYXBwZWFyYW5jZXMgaW4gNSBtb250aHMqKiBvZmYgdGhpcyBtZWNoYW5pYy4gVGhlCnByYWN0aWNhbCBmbG9vciBjaXRlZCBpcyAqKjUwIHN0YXJzL2RheSBmb3IgbGFuZ3VhZ2Utc3BlY2lmaWMgVHJlbmRpbmcqKiwgd2hpY2gKaGFzIGZhciBsZXNzIGNvbXBldGl0aW9uIHRoYW4gQWxsIExhbmd1YWdlcy4KCiMjIyAyLiBTaG93IEhOIGlzIHRoZSBoaWdoZXN0LWxldmVyYWdlIHNpbmdsZSBldmVudCwgYW5kIHRoZSBkYXRhIGlzIHVuZm9yZ2l2aW5nCgpGcm9tIGEgc3R1ZHkgb2YgKioxODgsMDg1IFNob3cgSE4gcG9zdHMgKDIwMTIgdG8gQXByaWwgMjAyNikqKiwgNTEsMzM4IG9mIHdoaWNoCmxpbmtlZCB0byBhIEdpdEh1YiByZXBvOgoKfCBNZXRyaWMgfCBWYWx1ZSB8CnwgLS0tIHwgLS0tIHwKfCBNZWRpYW4gU2hvdyBITiBzY29yZSB8ICoqMiBwb2ludHMqKiB8CnwgU2NvcmUgdG8gcmVhY2ggdG9wIDYlIHwgNTAgcG9pbnRzIHwKfCBTY29yZSB0byByZWFjaCA5OXRoIHBlcmNlbnRpbGUgfCAyNjMrIHwKfCBGcm9udC1wYWdlIHJhdGUsIFExIDIwMjYgfCAqKjIuMyUgb2Ygc3VibWlzc2lvbnMqKiB8CnwgVXB2b3RlIHRvIHN0YXIgY29udmVyc2lvbiAoNDhoKSB8ICoqfjEuNCBzdGFycyBwZXIgdXB2b3RlKiogfAp8IENvbnZlcnNpb24gYXQgMjU4LTM1MCBwb2ludHMgfCAxLjc3IHN0YXJzL3BvaW50IHwKfCBDb252ZXJzaW9uIGF0IDcwMCsgcG9pbnRzIHwgMC43OSBzdGFycy9wb2ludCB8CnwgU3RhciBpbXBhY3QgZXhwaXJlZCBhZnRlciA0OGggfCAqKn45MiUqKiB8CnwgQmVzdCBzbG90IHwgKipNb24gMDA6MDAgVVRDIChTdW4gN3BtIEVUKSoqLCAxMC44JSBjaGFuY2Ugb2YgNTArIHwKfCBXb3JzdCBzbG90IHwgVGh1IDA2OjAwIFVUQywgMi42JSB8CnwgRGFpbHkgY29tcGV0aXRpb24gfCB+MjAwIFNob3cgSE4gcG9zdHMvZGF5LCB1cCBmcm9tIH4zMCBhIGRlY2FkZSBhZ28gfAoKVHdvIHRoaW5ncyB0byBpbnRlcm5hbGl6ZS4gKipITiBzY29yZSBleHBsYWlucyBvbmx5IDglIG9mIHRoZSB2YXJpYW5jZSBpbiBzdGFycyoqCihyID0gMC4yOSksIGFuZCAqKmNvbW1lbnQgY291bnQgcHJlZGljdHMgbm90aGluZyoqIChyID0gMC4xMCkuIFRoZSBwb3N0IGlzIGEKdHJpZ2dlciwgbm90IHRoZSBzdHJhdGVneS4gQW5kIHRoZSB3aW5kb3cgaXMgc2hvcnQ6IGRheSAxIGlzIGEgMSwyMDB4IHNwaWtlIG92ZXIKYmFzZWxpbmUsIGRheSAyIGNvbGxhcHNlcyB0byByb3VnaGx5IDQwIHN0YXJzLiBFdmVyeSBvdGhlciBjaGFubmVsIGhhcyB0byBmaXJlCmluc2lkZSB0aGF0IHNhbWUgd2luZG93IG9yIGl0cyB0cmFmZmljIGlzIHdhc3RlZC4KCk9uZSBtb3JlIGZpZ3VyZSB3b3J0aCBwbGFubmluZyBhcm91bmQ6IGZyb250LXBhZ2UgU2hvdyBITnMgZHJpdmUgKio1LDAwMC0zMCwwMDAKdW5pcXVlIHZpc2l0b3JzIGluIDI0IGhvdXJzKiosIHdpdGggYSBzZWFyY2gtZHJpdmVuIGxvbmcgdGFpbCBmb3IgNi0xMiBtb250aHMuCgojIyMgMy4gVGhlIFJFQURNRSBpcyBhIHByb2R1Y3QgcGFnZSwgYW5kIHRoZSBsaWZ0IGlzIG1lYXN1cmFibGUKCkFGRmlORSByZXBvcnRzIGEgKioyLjN4IHN0YXIgcmF0ZSBhZnRlciBSRUFETUUgb3B0aW1pemF0aW9uKiouIFRoZSBzdHJ1Y3R1cmUgdGhhdApwcm9kdWNlZCBpdDoKCi0gT25lIGhlcm8gaW1hZ2Ugb3IgdmlkZW8gKiphYm92ZSB0aGUgZm9sZCoqCi0gKio1LTcgZnVuY3Rpb25hbCBHSUZzIG9yIHNjcmVlbnNob3RzKiogc2hvd2luZyB0aGUgdG9vbCBhY3R1YWxseSBydW5uaW5nCi0gQSBvbmUtc2VudGVuY2UgdmFsdWUgcHJvcG9zaXRpb24sIG5vdCBhIHBhcmFncmFwaCBhbmQgbm90IGEgZmVhdHVyZSBsaXN0Ci0gUXVpY2sgc3RhcnQgaW4gKip1bmRlciA1IHN0ZXBzKioKLSBBIHZpc2libGUgc3RhciBDVEEKCiMjIyA0LiBJbiB0aGlzIGNhdGVnb3J5LCB0aGUgYWdncmVnYXRvciBsaXN0cyBhcmUgdGhlIGNvbXBvdW5kaW5nIGFzc2V0CgpUaGlzIGlzIHRoZSBmaW5kaW5nIG1vc3Qgc3BlY2lmaWMgdG8gdGhpcyByZXBvLiBUaGUgQ2xhdWRlIENvZGUgZWNvc3lzdGVtJ3MKY29tbXVuaXR5IGxpc3RzIGhhdmUgYWNjdW11bGF0ZWQgKioyMDAsMDAwKyBjb21iaW5lZCBzdGFycyBhY3Jvc3MgMTEgY3VyYXRlZApsaXN0cyoqLCB3aXRoIHRoZSBsYXJnZXN0IHNpbmdsZSBhZ2dyZWdhdG9yIChgYWZmYWFuLW0vZXZlcnl0aGluZy1jbGF1ZGUtY29kZWApCnBhc3QgKioxNjMsMDAwIHN0YXJzKiogb24gaXRzIG93bi4gYGNsYXVkZS1mbG93YCBzaXRzIGF0IDU5LjRrLCBgU3VwZXJDbGF1ZGVgIGF0CjIzayssIGFuZCB0aGUgb2ZmaWNpYWwgQ2xhdWRlIENvZGUgcmVwbyBjcm9zc2VkIDEzMSwwMDAgYnkgSnVuZSAyMDI2LgoKQW4gYWNjZXB0ZWQgYXdlc29tZS1saXN0IGVudHJ5IGlzIHBlcm1hbmVudCByZWZlcnJhbCB0cmFmZmljLiBJdCBkb2VzIG5vdCBkZWNheQppbiA0OCBob3VycyB0aGUgd2F5IGFuIEhOIHBvc3QgZG9lcy4gRm9yIGEgdG9vbCB3aG9zZSBqb2IgaXMgb3JjaGVzdHJhdGluZwpDbGF1ZGUsIENvZGV4LCBhbmQgR2VtaW5pIGhhcm5lc3NlcywgYWJzZW5jZSBmcm9tIGV2ZXJ5IG9uZSBvZiB0aG9zZSBsaXN0cyBpcyB0aGUKbGFyZ2VzdCB1bmNsYWltZWQgbGV2ZXIgaGVyZS4KCiMjIyA1LiBQb3NpdGlvbmluZyBiZWF0cyB0aGUgZmVhdHVyZSBsaXN0CgpPcGVuQ29kZSB3ZW50IGZyb20gbGF1bmNoIGluIEp1bmUgMjAyNSB0byAqKjE2MCwwMDArIHN0YXJzKiosIGhpdHRpbmcgIzEgb24KSGFja2VyIE5ld3Mgb24gMjAyNi0wMy0yMC4gVGhlIHRvcC12b3RlZCBzZW50aW1lbnQgaW4gdGhhdCB0aHJlYWQgd2FzIG5vdCBhYm91dCBhCmZlYXR1cmUuIEl0IHdhcyByZWxpZWYgYXQgKipub3QgYmVpbmcgbG9ja2VkIHRvIG9uZSB2ZW5kb3IqKjogY29ubmVjdCBDbGF1ZGUsCkdQVCwgR2VtaW5pLCBvciBsb2NhbCBtb2RlbHMgZnJvbSB0aGUgc2FtZSBpbnRlcmZhY2UuCgpUaGF0IGlzIG9uZSBzZW50ZW5jZSBhIHN0cmFuZ2VyIGNhbiByZXBlYXQgdG8gYW5vdGhlciBzdHJhbmdlci4gSXQgY29tcHJlc3NlcyB0aGUKcHJvZHVjdCBpbnRvIGEgZ3JpZXZhbmNlIHRoZSBhdWRpZW5jZSBhbHJlYWR5IGhhZC4KCiMjIyA2LiBBZnRlciB0aGUgc3Bpa2UsIGNhZGVuY2UgaXMgd2hhdCBob2xkcyB0aGUgbGluZQoKVGhlIHBvc3QtbGF1bmNoIHJlcXVpcmVtZW50cyB0aGF0IHNlcGFyYXRlIGEgc3Bpa2UgZnJvbSBhIGN1cnZlOgoKLSAqKldlZWtseSByZWxlYXNlcyoqLCB3aGljaCBzaWduYWwgdGhlIHByb2plY3QgaXMgYWxpdmUKLSAqKk9uZSBjb250ZW50IHBpZWNlIHBlciB3ZWVrKiogKGJsb2csIHR1dG9yaWFsLCBmb2xsb3ctdXAgU2hvdyBITikKLSAqKklzc3VlIHJlc3BvbnNlIGluc2lkZSAyNCBob3VycyoqOyB1bmFuc3dlcmVkIGlzc3VlcyByZWFkIGFzIGFiYW5kb25tZW50Ci0gQ29udGludW91cyBhd2Vzb21lLWxpc3Qgc3VibWlzc2lvbnMKCiMjIyA3LiBEb2N1bWVudGVkIGZhaWx1cmUgbW9kZXMKClRoZSBjYXNlIHN0dWRpZXMgYXJlIGV4cGxpY2l0IGFib3V0IHdoYXQga2lsbHMgbGF1bmNoZXM6CgoxLiAqKkxhdW5jaGluZyBmcm9tIDAgc3RhcnMuKiogQ29sZCByZXBvcyBjb252ZXJ0IGF0IHJvdWdobHkgNSU7IHByZS1zZWVkaW5nIHBhc3QKICAgMTAwIHJhaXNlcyBpdCBtYXRlcmlhbGx5LiBTb2NpYWwgcHJvb2YgaXMgYSBwcmVjb25kaXRpb24sIG5vdCBhIHJlc3VsdC4KMi4gKipTcHJlYWRpbmcgdGhlIGxhdW5jaCBhY3Jvc3Mgc2V2ZXJhbCBkYXlzKiogaW5zdGVhZCBvZiBvbmUgNDgtaG91ciB3aW5kb3cuCjMuICoqQWJhbmRvbmluZyBtb21lbnR1bSoqIGFmdGVyIHRoZSBmaXJzdCBzcGlrZS4KNC4gKipJZ25vcmluZyBvcGVuIGlzc3Vlcy4qKgo1LiAqKkEgUkVBRE1FIHdpdGggbm8gdmlzdWFsIGhpZXJhcmNoeSBhbmQgbm8gY2xlYXIgdmFsdWUgcHJvcG9zaXRpb24uKioKCiMjIEV2aWRlbmNlCgojIyMgVGhlIHJlcG8ncyBhY3R1YWwgcG9zaXRpb24KCkV2ZXJ5IG51bWJlciBiZWxvdyB3YXMgcHVsbGVkIGxpdmUgZnJvbSB0aGUgR2l0SHViIGFuZCBucG0gQVBJcyBvbiAyMDI2LTA4LTIwLgoKfCBTaWduYWwgfCBNZWFzdXJlZCB2YWx1ZSB8IFdoYXQgaXQgaW1wbGllcyB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCBTdGFycywgYHBobngtbGFicy9hZ2ktY2xpYCB8ICoqMTUqKiB8IH4wLjE4L2RheSBzaW5jZSB0aGUgZmlyc3Qgc3RhciB8CnwgRmlyc3Qgc3RhciB0byB0b2RheSB8IDIwMjYtMDUtMzAgdG8gMjAyNi0wOC0yMCAoODIgZGF5cykgfCAxOTQgZGF5cyBzaW5jZSByZXBvIGNyZWF0aW9uIHwKfCBTdGFycywgYG11cXNpdG5hd2F6L2FnZW50cy1jbGlgIHwgKiozKiogfCBTcGxpdCBlcXVpdHksIHNlcGFyYXRlIGlkZW50aXR5IHwKfCBUcmFmZmljIG9uIHRoZSBtaXJyb3IgfCAqKjMgdmlld3MgLyAzIHVuaXF1ZXMgaW4gMTQgZGF5cyoqIHwgTm8gZGlzY292ZXJ5IHN1cmZhY2UgYXQgYWxsIHwKfCBUb3BpY3Mgb24gYGFnaS1jbGlgIHwgMTAsIHdoaWNoIGlzIGZpbmUgfCBgLmFnZW50cy1zeXN0ZW1gLCBgLmFnZW50cy1leHRyYXNgLCBgaG9tZWJyZXctdGFwYCBoYXZlICoqMCoqIHwKfCBPcGVuIGlzc3VlcyB8ICoqMTgqKiB8IE5vIGBnb29kIGZpcnN0IGlzc3VlYCBsYWJlbCBwcmVzZW50IHwKfCBucG0gYEBwaG54LWxhYnMvYWdlbnRzLWNsaWAgfCAqKjEsODU3L3dlZWsqKiB8IExpa2VseSBkb21pbmF0ZWQgYnkgZmxlZXQgc2VsZi11cGdyYWRlcywgd29ydGggdmVyaWZ5aW5nIHwKfCBucG0gYEBwaG54LWxhYnMvYWdpLWNsaWAgfCAqKjcvd2VlayoqIHwgVGhlIGFkdmVydGlzZWQgbmFtZSBoYXMgbm8gaW5zdGFsbCBiYXNlIHwKfCBgPHZpZGVvPmAgdGFncyBpbiByZW5kZXJlZCBSRUFETUUgfCAqKjAqKiB8IFRoZSBoZXJvIGRlbW8gaXMgYSBkZWFkLWxvb2tpbmcgbGluayB8CgojIyMgVGhlIGhlcm8gZGVtbyBkb2VzIG5vdCByZW5kZXIKCmBSRUFETUUubWQ6NDJgIGlzIHRoZSBsaW5lIGBodHRwczovL2FnaS1jbGkuc2gvZGVtby5tcDRgLiBGZXRjaGluZyBHaXRIdWIncyBvd24KcmVuZGVyZWQgSFRNTCBmb3IgdGhhdCBSRUFETUUgcmV0dXJuczoKCmBgYGh0bWwKPHAgZGlyPSJhdXRvIj48YSBocmVmPSJodHRwczovL2FnaS1jbGkuc2gvZGVtby5tcDQiIHJlbD0ibm9mb2xsb3ciPmh0dHBzOi8vYWdpLWNsaS5zaC9kZW1vLm1wNDwvYT48L3A+CmBgYAoKR2l0SHViIG9ubHkgYXV0by1lbWJlZHMgYSBwbGF5ZXIgZm9yIHZpZGVvIHVwbG9hZGVkIHRvIGl0cyBvd24KYHVzZXItYXR0YWNobWVudHNgIGhvc3QuIEFuIGV4dGVybmFsIFVSTCBpcyBhIGxpbmsuIFRoZSBtb3N0IHBlcnN1YXNpdmUKYWJvdmUtdGhlLWZvbGQgYXNzZXQgb24gdGhlIHBhZ2UgaXMgY3VycmVudGx5IGEgbGluZSBvZiBibHVlIHRleHQgdGhhdCBtb3N0CnZpc2l0b3JzIHdpbGwgcmVhZCBhcyBhIGJyb2tlbiBlbWJlZC4KCiMjIyBTdGFyIHRyYWplY3RvcnkgYWdhaW5zdCBhIGxhdW5jaCBiZW5jaG1hcmsKCjxmaWd1cmU+Cjxzdmcgdmlld0JveD0iMCAwIDc2MCAzMDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJUd28gcGFuZWxzIGNvbXBhcmluZyB0aGlzIHJlcG8ncyAxNSBzdGFycyBvdmVyIDE5NCBkYXlzIGFnYWluc3QgYSBjb29yZGluYXRlZCBsYXVuY2ggcmVhY2hpbmcgMTAwMCBzdGFycyBpbiA3MiBob3VycyI+CiAgPHRleHQgeD0iMjAiIHk9IjI0IiBmb250LWZhbWlseT0ic3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iNjAwIiBmaWxsPSIjOGE4YThhIj5BQ1RVQUwg4oCUIGFnaS1jbGk8L3RleHQ+CiAgPHRleHQgeD0iMjAiIHk9IjUyIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMjIiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNiNDUzMDkiPjE1IHN0YXJzPC90ZXh0PgogIDx0ZXh0IHg9IjIwIiB5PSI3MCIgZm9udC1mYW1pbHk9InN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzdhN2E3YSI+MTk0IGRheXMgwrcgMC4xOCBwZXIgZGF5PC90ZXh0PgogIDxsaW5lIHgxPSI2MCIgeTE9IjI1MCIgeDI9IjM0MCIgeTI9IjI1MCIgc3Ryb2tlPSIjOGE4YThhIiBzdHJva2Utd2lkdGg9IjEiLz4KICA8bGluZSB4MT0iNjAiIHkxPSIxMDAiIHgyPSIzNDAiIHkyPSIxMDAiIHN0cm9rZT0iI2M5YzljOSIgc3Ryb2tlLXdpZHRoPSIxIiBzdHJva2UtZGFzaGFycmF5PSIzIDMiLz4KICA8bGluZSB4MT0iNjAiIHkxPSIxNzUiIHgyPSIzNDAiIHkyPSIxNzUiIHN0cm9rZT0iI2M5YzljOSIgc3Ryb2tlLXdpZHRoPSIxIiBzdHJva2UtZGFzaGFycmF5PSIzIDMiLz4KICA8dGV4dCB4PSIzMCIgeT0iMTA0IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM3YTdhN2EiPjIwPC90ZXh0PgogIDx0ZXh0IHg9IjMwIiB5PSIxNzkiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzdhN2E3YSI+MTA8L3RleHQ+CiAgPHRleHQgeD0iMzYiIHk9IjI1NCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjN2E3YTdhIj4wPC90ZXh0PgogIDxwYXRoIGQ9Ik02MCwyNTAgTDk2LDI1MCBMMTIwLDI0MiBMMTQyLDIzNSBMMTY4LDIyNyBMMTk2LDIyMCBMMjE0LDIxMiBMMjMyLDIwNSBMMjY4LDE5NyBMMjkwLDE5MCBMMzA2LDE4MiBMMzIyLDE3NSBMMzMwLDE2NyBMMzM2LDE2MCBMMzQwLDE1MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjYjQ1MzA5IiBzdHJva2Utd2lkdGg9IjIuNSIvPgogIDxjaXJjbGUgY3g9IjM0MCIgY3k9IjE1MiIgcj0iMy41IiBmaWxsPSIjYjQ1MzA5Ii8+CiAgPHRleHQgeD0iNjIiIHk9IjI2OCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjN2E3YTdhIj5GZWI8L3RleHQ+CiAgPHRleHQgeD0iMzE2IiB5PSIyNjgiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzdhN2E3YSI+QXVnPC90ZXh0PgoKICA8bGluZSB4MT0iMzgwIiB5MT0iMjAiIHgyPSIzODAiIHkyPSIyODAiIHN0cm9rZT0iI2M5YzljOSIgc3Ryb2tlLXdpZHRoPSIxIiBzdHJva2UtZGFzaGFycmF5PSIzIDMiLz4KCiAgPHRleHQgeD0iNDIwIiB5PSIyNCIgZm9udC1mYW1pbHk9InN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZm9udC13ZWlnaHQ9IjYwMCIgZmlsbD0iIzhhOGE4YSI+QkVOQ0hNQVJLIOKAlCA0OGggY29vcmRpbmF0ZWQgaWduaXRpb248L3RleHQ+CiAgPHRleHQgeD0iNDIwIiB5PSI1MiIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjIyIiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSIjNGQ3YzBmIj4xLDAwMCBzdGFyczwvdGV4dD4KICA8dGV4dCB4PSI0MjAiIHk9IjcwIiBmb250LWZhbWlseT0ic3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIiBmaWxsPSIjN2E3YTdhIj43MiBob3VycyDCtyBhYm91dCAxNCBwZXIgaG91ciBhdCBwZWFrPC90ZXh0PgogIDxsaW5lIHgxPSI0NjAiIHkxPSIyNTAiIHgyPSI3NDAiIHkyPSIyNTAiIHN0cm9rZT0iIzhhOGE4YSIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgPGxpbmUgeDE9IjQ2MCIgeTE9IjEwMCIgeDI9Ijc0MCIgeTI9IjEwMCIgc3Ryb2tlPSIjYzljOWM5IiBzdHJva2Utd2lkdGg9IjEiIHN0cm9rZS1kYXNoYXJyYXk9IjMgMyIvPgogIDxsaW5lIHgxPSI0NjAiIHkxPSIxNzUiIHgyPSI3NDAiIHkyPSIxNzUiIHN0cm9rZT0iI2M5YzljOSIgc3Ryb2tlLXdpZHRoPSIxIiBzdHJva2UtZGFzaGFycmF5PSIzIDMiLz4KICA8dGV4dCB4PSI0MjQiIHk9IjEwNCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjN2E3YTdhIj4xazwvdGV4dD4KICA8dGV4dCB4PSI0MTgiIHk9IjE3OSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjN2E3YTdhIj41MDA8L3RleHQ+CiAgPHRleHQgeD0iNDM2IiB5PSIyNTQiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzdhN2E3YSI+MDwvdGV4dD4KICA8cGF0aCBkPSJNNDYwLDI1MCBDNDgyLDI0OCA0OTYsMjAwIDUyMCwxNTAgQzU0NCwxMTIgNTcwLDEwMCA2MDAsOTYgQzY0MCw5MiA3MDAsOTAgNzQwLDg5IiBmaWxsPSJub25lIiBzdHJva2U9IiM0ZDdjMGYiIHN0cm9rZS13aWR0aD0iMi41Ii8+CiAgPHRleHQgeD0iNDYyIiB5PSIyNjgiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzdhN2E3YSI+aDA8L3RleHQ+CiAgPHRleHQgeD0iNTAwIiB5PSIyNjgiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzdhN2E3YSI+aDI0PC90ZXh0PgogIDx0ZXh0IHg9IjU5MiIgeT0iMjY4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM3YTdhN2EiPmg0ODwvdGV4dD4KICA8dGV4dCB4PSI3MTYiIHk9IjI2OCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjN2E3YTdhIj5oNzI8L3RleHQ+Cjwvc3ZnPgo8ZmlnY2FwdGlvbj5TYW1lIHZpc3VhbCBmb290cHJpbnQsIGRpZmZlcmVudCB5LWF4aXMuIFRoZSBsZWZ0IGN1cnZlIGlzIHdoYXQgYSBwcm9qZWN0IHdpdGggbm8gbGF1bmNoIGxvb2tzIGxpa2U7IHRoZSByaWdodCBpcyB0aGUgZG9jdW1lbnRlZCByZXN1bHQgb2YgZmlyaW5nIGV2ZXJ5IGNoYW5uZWwgaW5zaWRlIG9uZSA0OC1ob3VyIHdpbmRvdy4gVGhlIGdhcCBpcyBkaXN0cmlidXRpb24sIG5vdCBwcm9kdWN0LjwvZmlnY2FwdGlvbj4KPC9maWd1cmU+CgojIyMgVGhlIG5hbWUgaXMgZnJhZ21lbnRlZCBhY3Jvc3MgZml2ZSBpZGVudGl0aWVzCgp8IElkZW50aXR5IHwgV2hlcmUgaXQgcG9pbnRzIHwgV2VpZ2h0IHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IGBwaG54LWxhYnMvYWdpLWNsaWAgfCBjYW5vbmljYWwgcmVwbyB0b2RheSB8IDE1IHN0YXJzIHwKfCBgbXVxc2l0bmF3YXovYWdlbnRzLWNsaWAgfCBwZXJzb25hbCBtaXJyb3IsIGBhZ2VudHMtY2xpLnNoYCB8IDMgc3RhcnMgfAp8IGBwaG54LWxhYnMvYWdpLWNsaS1qdWwyMDI2LWFyY2hpdmVgIHwgcHJpdmF0ZSwgInJlYnJhbmQgb2YgYWdlbnRzLWNsaSIgfCBkb3JtYW50IHwKfCBucG0gYEBwaG54LWxhYnMvYWdlbnRzLWNsaWAgfCB0aGUgcGFja2FnZSBwZW9wbGUgaW5zdGFsbCB8IDEsODU3L3drIHwKfCBucG0gYEBwaG54LWxhYnMvYWdpLWNsaWAgfCB0aGUgbmFtZSB0aGUgUkVBRE1FIGFkdmVydGlzZXMgfCA3L3drIHwKClR3byBsaXZlIGRvbWFpbnMgKGBhZ2VudHMtY2xpLnNoYCBhbmQgYGFnaS1jbGkuc2hgKSwgYSByZXBvIG5hbWVkIGBhZ2ktY2xpYCwgYQpwYWNrYWdlIG5hbWVkIGBhZ2VudHMtY2xpYCwgYW5kIGEgYmluYXJ5IG5hbWVkIGBhZ2VudHNgLiBHaXRIdWIgcHJlc2VydmVzIHN0YXJzCmFjcm9zcyBhIHJlbmFtZSwgYnV0IGl0IGRvZXMgbm90IHByZXNlcnZlICoqd29yZCBvZiBtb3V0aCoqOiBleHRlcm5hbCBiYWNrbGlua3MKbG9zZSB0aGVpciBTRU8gdmFsdWUsIGFuZCBhIHJlYWRlciB3aG8gaGVhcnMgdGhlIG5hbWUgb25jZSBjYW5ub3QgZmluZCBpdCB0d2ljZS4KCiMjIyBUaGUgdmFsdWUgcHJvcG9zaXRpb24gaXMgYSAxMDAtd29yZCBydW4tb24KClRoZSBSRUFETUUncyBvcGVuaW5nIHBhcmFncmFwaCBuYW1lcyB0d2VsdmUgY2FwYWJpbGl0aWVzIGluIGEgc2luZ2xlIHNlbnRlbmNlOgpkaXNwYXRjaCwgbWVhc3VyZSwgZm9sZCBiYWNrLCBzY2hlZHVsZSwgc3Bhd24gdGVhbXMsIGRpc3BhdGNoIHRvIGNsb3VkLCB3YXRjaApzdGF0ZSwgbnVkZ2UsIG1lc3NhZ2UgbWlkLWZsaWdodCwgc3RvcmUgc2VjcmV0cywgZHJpdmUgYnJvd3NlcnMsIHN0ZWVyIGZyb20gYQptZW51IGJhci4gVGhlIHJlcG8gZGVzY3JpcHRpb24gaXMgImEgbWV0YS1oYXJuZXNzIGZvciBidWlsZGluZyBBZ2VudCBGYWN0b3JpZXMuIgoKQ29tcGFyZSBPcGVuQ29kZSdzIG9uZS1saW5lcjogYW55IG1vZGVsLCBvbmUgaW50ZXJmYWNlLCBubyB2ZW5kb3IgbG9jay1pbi4KTm9ib2R5IHJlcGVhdHMgYSB0d2VsdmUtaXRlbSBsaXN0LgoKIyMgUmVjb21tZW5kYXRpb25zCgojIyMgVGhlIG9uZSBkZWNpc2lvbiB0aGF0IGlzIHlvdXJzCgoqKlBpY2sgb25lIG5hbWUgYW5kIGZyZWV6ZSBpdC4qKiBFdmVyeXRoaW5nIGJlbG93IGlzIGJsb2NrZWQgb24gdGhpcywgYmVjYXVzZSBhCmxhdW5jaCBvbiBhIG5hbWUgdGhhdCBtb3ZlcyBhZ2FpbiBpcyBhIGxhdW5jaCBzcGVudCB0d2ljZS4KCnwgT3B0aW9uIHwgQXJndW1lbnQgZm9yIHwgQ29zdCB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCAqKmBhZ2VudHMtY2xpYCoqIHwgVGhlIG5wbSBwYWNrYWdlICgxLDg1Ny93ayksIHRoZSBiaW5hcnksIGFuZCBvbmUgZG9tYWluIGFscmVhZHkgc2F5IGl0LiBEZXNjcmlwdGl2ZSBhbmQgc2VhcmNoYWJsZTogcGVvcGxlIHNlYXJjaCAiYWdlbnRzIGNsaSIsIG5vdCAiYWdpIGNsaSIuIHwgUmVuYW1lIHRoZSByZXBvIGJhY2s7IGRpc2NhcmQgdGhlIGBhZ2ktY2xpYCBicmFuZCB3b3JrLiB8CnwgKipgYWdpLWNsaWAqKiB8IFNob3J0ZXIsIGFscmVhZHkgdGhlIHJlcG8gbmFtZSBhbmQgdGhlIGFkdmVydGlzZWQgc2l0ZS4gfCBBYmFuZG9ucyB0aGUgaW5zdGFsbCBiYXNlJ3MgbmFtZS4gIkFHSSIgcmVhZHMgYXMgYSBoeXBlIHdvcmQgdG8gdGhlIEhOIGF1ZGllbmNlIGFuZCBpcyB1bnNlYXJjaGFibGUgZm9yIHRoZSBhY3R1YWwgam9iLiB8CnwgQSB0aGlyZCBuYW1lIHwgRnJlc2gsIG93bmFibGUgfCBBIHRoaXJkIHJlbmFtZS4gRG8gbm90LiB8CgpUaGUgcmVjb21tZW5kYXRpb24gaXMgKipgYWdlbnRzLWNsaWAqKjogdGhlIHNlYXJjaGFibGUgZGVzY3JpcHRpdmUgbmFtZSBtYXRjaGVzCndoYXQgdGhlIHRvb2wgZG9lcywgbWF0Y2hlcyB3aGF0IDEsODU3IHdlZWtseSBpbnN0YWxscyBhbHJlYWR5IHR5cGUsIGFuZCB0aGUKYXVkaWVuY2UgZm9yIHRoaXMgdG9vbCBpcyBleGFjdGx5IHRoZSBhdWRpZW5jZSB0aGF0IHJlYWN0cyBiYWRseSB0byAiQUdJIiBpbiBhCnByb2R1Y3QgbmFtZS4KCiMjIyBQaGFzZSAxLCBiZWZvcmUgYW55IGxhdW5jaDogZml4IHRoZSBwYWdlCgoxLiAqKk1ha2UgdGhlIGRlbW8gcmVuZGVyLioqIFVwbG9hZCBgZGVtby5tcDRgIHRocm91Z2ggYSBHaXRIdWIgY29tbWVudCBib3ggdG8KICAgZ2V0IGEgYHVzZXItYXR0YWNobWVudHNgIFVSTCwgb3IgY29tbWl0IGEgc2hvcnQgR0lGIHVuZGVyIGBhc3NldHMvYC4gVG9kYXkgdGhlCiAgIG1vc3QgcGVyc3Vhc2l2ZSBhc3NldCBvbiB0aGUgcGFnZSBpcyBhIGJsdWUgbGluay4KMi4gKipSZXdyaXRlIHRoZSBmaXJzdCBzZW50ZW5jZSoqIGludG8gb25lIHJlcGVhdGFibGUgY2xhaW0uIERyYWZ0OiAqIlJ1biBDbGF1ZGUsCiAgIENvZGV4LCBhbmQgR2VtaW5pIGluIHBhcmFsbGVsIGFjcm9zcyB5b3VyIG93biBtYWNoaW5lcywgb24gdGhlIHN1YnNjcmlwdGlvbnMKICAgeW91IGFscmVhZHkgcGF5IGZvci4iKiBPbmUgZ3JpZXZhbmNlLCBvbmUgYW5zd2VyLgozLiAqKkFkZCA1LTcgZnVuY3Rpb25hbCBHSUZzKiogYmVsb3cgdGhlIGZvbGQ6IGBhZ2VudHMgdGVhbXNgIHJ1bm5pbmcsIHRoZSBmbGVldAogICB2aWV3LCBgYWdlbnRzIHJ1bmAgYWNyb3NzIHRocmVlIGhhcm5lc3Nlcywgc2VjcmV0cyBiZWhpbmQgVG91Y2ggSUQuCjQuICoqTGFiZWwgNS04IG9mIHRoZSAxOCBvcGVuIGlzc3VlcyBgZ29vZCBmaXJzdCBpc3N1ZWAqKiBhbmQgYW5zd2VyIHRoZSByZXN0LgogICBVbmFuc3dlcmVkIGlzc3VlcyByZWFkIGFzIGFiYW5kb25tZW50IHRvIGEgZmlyc3QtdGltZSB2aXNpdG9yLgo1LiAqKkFkZCB0b3BpY3MqKiB0byBgLmFnZW50cy1zeXN0ZW1gLCBgLmFnZW50cy1leHRyYXNgLCBhbmQgYGhvbWVicmV3LXRhcGAsIGFsbAogICBhdCB6ZXJvLCBhbmQgY29uc29saWRhdGUgb3IgYXJjaGl2ZSB0aGUgcGVyc29uYWwgbWlycm9yLgoKIyMjIFBoYXNlIDIsIHBlcm1hbmVudCBwbGFjZW1lbnQ6IHN0YXJ0IGltbWVkaWF0ZWx5LCBpdCBoYXMgbGVhZCB0aW1lCgpTdWJtaXQgdG8gdGhlIENsYXVkZSBDb2RlIGFnZ3JlZ2F0b3JzICoqYmVmb3JlKiogdGhlIGxhdW5jaCwgc28gdGhlIGxhdW5jaCBsYW5kcwpvbiBhIHBhZ2UgdGhhdCBhbHJlYWR5IGNhcnJpZXMgaW5ib3VuZDoKCi0gYGFmZmFhbi1tL2V2ZXJ5dGhpbmctY2xhdWRlLWNvZGVgICgxNjNrIHN0YXJzKQotIGBoZXNyZWFsbHloaW0vYXdlc29tZS1jbGF1ZGUtY29kZWAKLSB0aGUgYHNzdC9vcGVuY29kZWAgYWRqYWNlbnQtdG9vbCBsaXN0cwotIGBwdW5rcGV5ZS9hd2Vzb21lLW1jcC1zZXJ2ZXJzYCwgaWYgYW4gTUNQIHN1cmZhY2UgcXVhbGlmaWVzCi0gdGhlIGdlbmVyYWwgYGF3ZXNvbWUtYWktYWdlbnRzLTIwMjZgIGxpc3RzCgpUaGlzIGlzIHRoZSBjb21wb3VuZGluZyBhc3NldC4gVW5saWtlIGFuIEhOIHBvc3QsIGFuIGFjY2VwdGVkIGVudHJ5IGRvZXMgbm90CmV4cGlyZSBpbiA0OCBob3Vycy4KCiMjIyBQaGFzZSAzLCB0aGUgNDgtaG91ciBpZ25pdGlvbgoKUHJlLXNlZWQgcGFzdCAxMDAgc3RhcnMgZmlyc3QsIHNpbmNlIGxhdW5jaGluZyBmcm9tIDE1IGNvbnZlcnRzIGF0IHJvdWdobHkgNSUuClRoZW4gZmlyZSBldmVyeSBjaGFubmVsIGluc2lkZSBvbmUgd2luZG93OgoKfCBIb3VyIHwgQ2hhbm5lbCB8IEV4cGVjdGVkIHlpZWxkIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IDAgKFN1biA3cG0gRVQgLyBNb24gMDA6MDAgVVRDKSB8ICoqU2hvdyBITioqLCB0aGUgYmVzdCBkb2N1bWVudGVkIHNsb3QgYXQgMTAuOCUgY2hhbmNlIG9mIDUwKyB8IH4xLjQgc3RhcnMvdXB2b3RlIHwKfCAwLTIgfCByL0NsYXVkZUFJLCByL0xvY2FsTExhTUEsIHIvc2VsZmhvc3RlZCwgci9jb21tYW5kbGluZSB8IDUwLTMwMCBlYWNoIHwKfCAyIHwgWCB0aHJlYWQgd2l0aCB0aGUgZGVtbyB2aWRlbyBhbmQgcmVhbCBudW1iZXJzIHwgcmVmZXJyYWwgfAp8IDQgfCBQcm9kdWN0IEh1bnQgfCAyMDAtNjAwIHwKfCAwLTQ4IHwgQW5zd2VyIGV2ZXJ5IGNvbW1lbnQgcGVyc29uYWxseSB8IGRyaXZlcyByYW5raW5nIGxvbmdldml0eSB8CgpUaXRsZSB0aGUgU2hvdyBITiB3aXRoIHRoZSB0ZWNobmljYWwgZmFjdCwgbm90IHRoZSBjbGFpbS4gIlNob3cgSE46IFJ1biBDbGF1ZGUsCkNvZGV4LCBhbmQgR2VtaW5pIGluIHBhcmFsbGVsIGFjcm9zcyB5b3VyIG93biBtYWNoaW5lcyIgYmVhdHMgYW55dGhpbmcgY2FycnlpbmcKIkFHSSIsICJmYWN0b3J5Iiwgb3IgIm1ldGEtaGFybmVzcyIuIEF2b2lkIE1vbmRheSBhbmQgRnJpZGF5OyB0aGUgZGF0YSBmYXZvcnMKU3VuZGF5IGV2ZW5pbmcgRVQgYW5kIFR1ZXNkYXkgdGhyb3VnaCBUaHVyc2RheSBtb3JuaW5ncy4KCiMjIyBQaGFzZSA0LCBjYWRlbmNlIGZyb20gZGF5IDMgb253YXJkCgpXZWVrbHkgcmVsZWFzZSwgd2hpY2ggYWxyZWFkeSBoYXBwZW5zICh2MS4yMi40MSBzaGlwcGVkIDIwMjYtMDgtMjApLCBvbmUgd3JpdHRlbgpwaWVjZSBwZXIgd2VlaywgMjQtaG91ciBpc3N1ZSByZXNwb25zZSwgYW5kIGEgZm9sbG93LXVwIFNob3cgSE4gb24gYSBzcGVjaWZpYwpzdWJzeXN0ZW0gaW4gNC02IHdlZWtzLiBUaGUgNDMtZGF5IG1hcmsgaXMgd2hlcmUgdGhlIEFGRmlORSBjdXJ2ZSBzZXBhcmF0ZXMKcHJvamVjdHMgdGhhdCBrZXB0IHB1c2hpbmcgZnJvbSB0aG9zZSB0aGF0IHRvb2sgdGhlIHNwaWtlIGFuZCBzdG9wcGVkLgoKIyMjIFdoYXQgbm90IHRvIGRvCgpEbyBub3QgYnV5IHN0YXJzLiBUaGUgZ2VvZ3JhcGh5IGFuZCB2ZWxvY2l0eSBmaW5nZXJwcmludCBpcyBleGFjdGx5IHdoYXQKaW52ZXN0b3JzIGFuZCBzZXJpb3VzIGNvbnRyaWJ1dG9ycyBzY3JlZW4gZm9yLCBhbmQgaXQgcG9pc29ucyB0aGUgc2lnbmFsIHRoZQpsYXVuY2ggZXhpc3RzIHRvIGVhcm4uCgojIyBTb3VyY2VzCgotIFtIb3cgdG8gR2V0IEdpdEh1YiBTdGFycyBpbiAyMDI2IChBRkZpTkUgMzNrIHRvIDYwayBjYXNlIHN0dWR5KV0oaHR0cHM6Ly9naW5naXJpcy5naXRodWIuaW8vZ3Jvd3RoLXRvb2xzL2Jsb2cvMjAyNi8wMy8yNS9ob3ctdG8tZ2V0LW1vcmUtZ2l0aHViLXN0YXJzLXRoZS1kZWZpbml0aXZlLWd1aWRlLTMzay1zdGFycy1jYXNlLXN0dWR5LykKLSBbU2hvdyBITiBieSB0aGUgTnVtYmVyczogMTg4LDAwMCBQb3N0cywgMTQgWWVhcnMgb2YgRGF0YV0oaHR0cHM6Ly9kYW5ma2luZy5naXRodWIuaW8vYmxvZy8yMDI2LzA0LzIzL3Nob3ctaG4tYnktdGhlLW51bWJlcnMvKQotIFtPcGVuQ29kZSBIaXRzIDE2MEsgU3RhcnNdKGh0dHBzOi8vZXNzYW1hbWRhbmkuY29tL2Jsb2cvb3BlbmNvZGUtMTYway1zdGFycy1vcGVuLXNvdXJjZS1haS1jb2RpbmctYWdlbnQtMjAyNikKLSBbT3BlbkNvZGUgUmV2aWV3OiBUaGUgT3Blbi1Tb3VyY2UgQUkgQ29kaW5nIEFnZW50IFRoYXQgVG9vayAjMSBvbiBIYWNrZXIgTmV3c10oaHR0cHM6Ly9hZ2VudGNvbm4uY29tL2Jsb2cvb3BlbmNvZGUtb3Blbi1zb3VyY2UtYWktY29kaW5nLWFnZW50LXJldmlldy0yMDI2LykKLSBbQXdlc29tZSBDbGF1ZGUgQ29kZTogMTEgQ3VyYXRlZCBMaXN0cyBXb3J0aCBCb29rbWFya2luZ10oaHR0cHM6Ly9jbGF1ZGVmYS5zdC9ibG9nL3Rvb2xzL3Jlc291cmNlcy9hd2Vzb21lLWNsYXVkZS1jb2RlKQotIFtIYWNrZXIgTmV3cyBGcm9udCBQYWdlIGluIDIwMjY6IFRoZSBIb25lc3QgUGxheWJvb2tdKGh0dHBzOi8vd3d3LmZsb3dqYW0uY29tL2Jsb2cvaG93LXRvLWdldC1vbi10aGUtZnJvbnQtcGFnZS1vZi1oYWNrZXItbmV3cy1pbi0yMDI1LXRoZS1jb21wbGV0ZS11cC10by1kYXRlLXBsYXlib29rKQotIFtHaXRIdWIgVHJlbmRpbmcgUmVwb3NpdG9yeSBhbmQgU3Rhci1WZWxvY2l0eSBBbGVydHNdKGh0dHBzOi8vcGFnZWNyYXdsLmlvL2Jsb2cvZ2l0aHViLXRyZW5kaW5nLXJlcG9zaXRvcnktc3Rhci12ZWxvY2l0eS1hbGVydHMpCi0gW0hhY2tlciBOZXdzIE1hcmtldGluZyBmb3IgRGV2ZWxvcGVyIFRvb2xzXShodHRwczovL2J1c2luZXNzLmRhaWx5LmRldi9yZXNvdXJjZXMvaGFja2VyLW5ld3MtbWFya2V0aW5nLWRldmVsb3Blci10b29scy1zaG93LWhuLWxhdW5jaC1kYXktc3VzdGFpbmVkLWNvdmVyYWdlLykK"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>

@@ -39,7 +39,11 @@
   <a href="https://docs.warp.dev/reference/cli" title="Warp Agent CLI (Oz)"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/harnesses/warp.svg"><img src="assets/harnesses/warp-light.svg" height="32" alt="Warp Agent CLI" /></picture></a>
 </p>
 
-https://agi-cli.sh/demo.mp4
+<p align="center">
+  <img src="assets/demos/hero.gif" alt="agents CLI: sessions across every agent and project, chaining agents in a Unix pipeline, dispatching to the cloud, and one team spread across machines" width="860" />
+</p>
+
+<p align="center"><a href="https://agi-cli.sh/demo.mp4">Watch the full 56-second demo</a></p>
 
 ## Quickstart
 
