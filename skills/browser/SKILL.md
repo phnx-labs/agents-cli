@@ -157,8 +157,11 @@ browser task holds **one** tab and refreshes it in place, and `navigate` returns
 stable tab id you can re-target:
 
 ```bash
-# once: bind a task on the user's default browser profile
-export AGENTS_BROWSER_TASK=$(browser start --profile work)
+# The user picks their default once; agents do not pass --profile.
+agents browser use work
+
+# bind a task on the user's default browser profile
+export AGENTS_BROWSER_TASK=$(browser start)
 
 # show the doc — reuses the SAME tab every time (refresh in place), one tab total
 browser navigate --url "file:///abs/path/to/review.html"
@@ -201,7 +204,7 @@ browser profiles create work --browser comet   # or chrome / chromium / brave
 ### Navigate and interact
 
 ```bash
-export AGENTS_BROWSER_TASK=$(browser start --profile work --url https://example.com)
+export AGENTS_BROWSER_TASK=$(browser start --url https://example.com)
 browser refs                              # Get clickable elements
 browser click 3                           # Click element ref 3
 browser type 5 --text "search query"      # Type into element ref 5

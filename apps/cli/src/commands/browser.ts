@@ -86,7 +86,7 @@ const TASK_OPTION_DESC =
 // instead of an alphabetical dump. Everything not listed falls into a
 // trailing "Other commands" section automatically.
 const BROWSER_HELP_GROUPS = [
-  { title: 'Session lifecycle', names: ['start', 'done', 'status', 'gc'] },
+  { title: 'Session lifecycle', names: ['use', 'start', 'done', 'status', 'gc'] },
   { title: 'Fast action loop', names: ['stream'] },
   {
     title: 'Drive the page',
@@ -152,15 +152,119 @@ export function registerBrowserCommand(program: Command): void {
     `,
   });
 
+  registerBrowserUseCommand(browser);
   registerProfilesCommands(browser);
   registerTaskCommands(browser);
   registerCommandGroups(browser, BROWSER_HELP_GROUPS);
 }
 
 export function registerBrowserSubcommands(program: Command): void {
+  registerBrowserUseCommand(program);
   registerProfilesCommands(program);
   registerTaskCommands(program);
   registerCommandGroups(program, BROWSER_HELP_GROUPS);
+}
+
+interface BrowserUseOptions {
+  unset?: boolean;
+}
+
+interface BrowserUseChoice {
+  name: string;
+  value: { name: string; installed?: ReturnType<typeof listInstalledBrowsers>[number] };
+}
+
+export function buildBrowserUseChoices(
+  profiles: BrowserProfile[],
+  installed: ReturnType<typeof listInstalledBrowsers>,
+  current?: string,
+): BrowserUseChoice[] {
+  const choices: BrowserUseChoice[] = profiles.map((profile) => ({
+    name: `${profile.name}${profile.name === current ? ' (current)' : ''}`,
+    value: { name: profile.name },
+  }));
+  const known = new Set(profiles.map((profile) => profile.name));
+  for (const browser of installed) {
+    const name = `${browser.browserType}-local`;
+    if (!known.has(name)) {
+      choices.push({ name: `${name} (installed ${browser.browserType})`, value: { name, installed: browser } });
+    }
+  }
+  return choices;
+}
+
+export async function runBrowserUse(
+  name: string | undefined,
+  opts: BrowserUseOptions,
+  interactive = isInteractiveTerminal(),
+): Promise<boolean> {
+  if (opts.unset || name === 'auto') {
+    unsetConfigValue('browser.profile');
+    console.log('Default browser profile cleared. `agents browser start` will auto-detect an installed Chromium-family browser.');
+    return true;
+  }
+
+  let selectedName = name;
+  if (!selectedName) {
+    const current = getConfiguredDefaultProfileName();
+    if (!interactive) {
+      console.log(current
+        ? `Default browser profile (this machine): ${current}`
+        : 'Default browser profile (this machine): auto-detect');
+      console.log('Usage: agents browser use <name>  (or --unset)');
+      return true;
+    }
+
+    const choices = buildBrowserUseChoices(await listProfiles(), listInstalledBrowsers(), current);
+    if (choices.length === 0) {
+      console.error('No configured profiles or supported installed browsers found.');
+      console.error('Create one with: agents browser profiles create <name> --browser chrome');
+      return false;
+    }
+    const { select } = await import('@inquirer/prompts');
+    const selected = await select({ message: 'Select default browser profile:', choices });
+    selectedName = selected.name;
+    if (selected.installed) {
+      const freePort = await findFreeProfilePort();
+      await createProfile({
+        name: selected.name,
+        description: `Seeded ${selected.installed.browserType} profile`,
+        browser: selected.installed.browserType,
+        binary: selected.installed.binary,
+        endpoints: [`cdp://127.0.0.1:${freePort}`],
+        viewport: { width: DEFAULT_VIEWPORT.width, height: DEFAULT_VIEWPORT.height },
+      });
+    }
+  }
+
+  const target = await getProfile(selectedName);
+  if (!target) {
+    console.error(`Profile "${selectedName}" not found.`);
+    const all = await listProfiles();
+    if (all.length > 0) console.error(`Available profiles: ${all.map((profile) => profile.name).join(', ')}`);
+    return false;
+  }
+  setConfigValue('browser.profile', selectedName);
+  const endpoint = Object.values(getEndpointPresets(target))[0]?.target ?? '';
+  console.log(`Default browser profile (this machine) is now "${selectedName}" (${target.browser}${endpoint ? `, ${endpoint}` : ''}).`);
+  console.log('Bare `agents browser start` and `--profile default` will use it.');
+  return true;
+}
+
+function configureBrowserUseCommand(command: Command, deprecated = false): void {
+  command
+    .description('Pick the profile `agents browser start` uses when no --profile is passed. No name opens a picker on a TTY or prints the current default headlessly.')
+    .option('--unset', 'Clear the configured default (revert to auto-detecting an installed browser)')
+    .action(async (name: string | undefined, opts: BrowserUseOptions) => {
+      if (deprecated) {
+        console.warn(chalk.yellow('Deprecation: `agents browser profiles set-default` is replaced by `agents browser use`.'));
+      }
+      if (!await runBrowserUse(name, opts)) process.exitCode = 1;
+    });
+}
+
+function registerBrowserUseCommand(browser: Command): void {
+  configureBrowserUseCommand(browser.command('use [name]'));
 }
 
 /**
@@ -223,7 +327,7 @@ function registerProfilesCommands(browser: Command): void {
 
   profiles
     .command('seed')
-    .description('Create a machine-local profile for each installed browser (named <browser>-local), so you can pick or set-default one instead of hand-crafting each. Idempotent — existing profiles are left untouched.')
+    .description('Create a machine-local profile for each installed browser (named <browser>-local), so you can pick or use one instead of hand-crafting each. Idempotent — existing profiles are left untouched.')
     .action(async () => {
       const installed = listInstalledBrowsers();
       if (installed.length === 0) {
@@ -247,46 +351,11 @@ function registerProfilesCommands(browser: Command): void {
         });
         console.log(`+ ${name} (${browserType})`);
       }
-      console.log('Pick your default with: agents config set browser.profile <name>');
+      console.log('Pick your default with: agents browser use <name>');
     });
 
-  const browserProfileDeprecation = chalk.yellow(
-    'Deprecation: `agents browser profiles set-default` is replaced by `agents config set browser.profile <name>`.',
-  );
-  profiles
-    .command('set-default [name]')
-    .description('Set the profile `agents browser start` uses when no --profile is passed (also re-points an explicit `--profile default`). Device-local — each machine has its own. No name prints the current value.')
-    .option('--unset', 'Clear the configured default (revert to auto-detecting an installed browser)')
-    .action(async (name: string | undefined, opts: { unset?: boolean }) => {
-      console.warn(browserProfileDeprecation);
-      if (opts.unset) {
-        unsetConfigValue('browser.profile');
-        console.log('Default browser profile cleared. `agents browser start` will auto-detect an installed Chromium-family browser.');
-        return;
-      }
-      if (!name) {
-        const current = getConfiguredDefaultProfileName();
-        if (current) {
-          console.log(`Default browser profile (this machine): ${current}`);
-        } else {
-          console.log('No default browser profile set. `agents browser start` auto-detects an installed Chromium-family browser.');
-          console.log('Set one with: agents config set browser.profile <name>');
-        }
-        return;
-      }
-      const target = await getProfile(name);
-      if (!target) {
-        console.error(`Profile "${name}" not found.`);
-        const all = await listProfiles();
-        if (all.length > 0) console.error(`Available profiles: ${all.map((p) => p.name).join(', ')}`);
-        process.exit(1);
-      }
-      setConfigValue('browser.profile', name);
-      const eps = getEndpointPresets(target);
-      const epStr = Object.values(eps)[0]?.target ?? '';
-      console.log(`Default browser profile (this machine) is now "${name}" (${target.browser}${epStr ? `, ${epStr}` : ''}).`);
-      console.log('Bare `agents browser start` and `--profile default` will use it.');
-    });
+  configureBrowserUseCommand(profiles.command('use [name]'));
+  configureBrowserUseCommand(profiles.command('set-default [name]', { hidden: true }), true);
 
   profiles
     .command('logins')
@@ -534,7 +603,7 @@ function registerProfilesCommands(browser: Command): void {
       if (getConfiguredDefaultProfileName() === name) {
         console.error(
           `warning: "${name}" was this machine's default browser profile; ` +
-          `\`agents browser start\` will auto-detect until you run: agents config set browser.profile <name>`
+          `\`agents browser start\` will auto-detect until you run: agents browser use <name>`
         );
       }
     });
@@ -593,7 +662,7 @@ function registerProfilesCommands(browser: Command): void {
       agents browser profiles prune
 
       # Make one the machine's default for a bare \`agents browser start\`
-      agents config set browser.profile work
+      agents browser use work
     `,
     notes: `
       Profiles are machine-local by default. A profile pins an OS-specific binary
@@ -854,7 +923,7 @@ function registerTaskCommands(browser: Command): void {
 
   browser
     .command('start')
-    .description('Start a browser task. Pass --profile <name>; omit to use your configured default (`agents config set browser.profile <name>`), else auto-pick an installed Chromium-family browser. Page verbs (navigate/screenshot/…) create a task implicitly when none exists — start is for --profile/--url/--record/--title.')
+    .description('Start a browser task. Pass --profile <name>; omit to use your configured default (`agents browser use <name>`), else auto-pick an installed Chromium-family browser. Page verbs (navigate/screenshot/…) create a task implicitly when none exists — start is for --profile/--url/--record/--title.')
     .option('-p, --profile <name>', 'Browser profile to use (omit to use the configured default, else auto-pick an installed Chromium-family browser)')
     .option(TASK_OPTION_FLAG, 'Task name (auto-generated short id if omitted)')
     .option('--title <label>', 'Human label shown in `browser status` (defaults to first navigated host)')

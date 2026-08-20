@@ -93,7 +93,7 @@ If you skip `--profile` on `agents browser start`, the profile is resolved in
 this order:
 
 1. **Your configured default** — the profile set via
-   `agents browser profiles set-default <name>` on THIS machine, when it can
+   `agents browser use <name>` on THIS machine, when it can
    launch here. This also re-points an explicit `--profile default`, so an agent
    that hardcodes `default` still lands on your chosen profile (e.g. a logged-in
    Comet). If its browser/binary isn't installed on this machine, it warns and
@@ -172,12 +172,13 @@ the same device-local `browser remote-control` consent gate as the ordinary
 
 | Command | Description |
 |---------|-------------|
+| `agents browser use [name]` | Pick this machine's default profile. No name opens a picker on a TTY or prints the current default headlessly; `--unset` or `auto` restores auto-detect. |
 | `agents browser profiles list` | List all configured profiles with their `SCOPE` (`local` / `fleet`). A `*` marks this machine's configured default — which is NOT the same thing as the profile named `default`. `--json` adds `scope` + `isConfiguredDefault` |
 | `agents browser profiles create <name>` | Create a new profile, machine-local unless `--fleet` (see flags below) |
-| `agents browser profiles seed` | Create a machine-local profile for each installed browser (named `<browser>-local`), so you can pick or set-default one instead of hand-crafting each. Idempotent — existing profiles are left untouched |
+| `agents browser profiles seed` | Create a machine-local profile for each installed browser (named `<browser>-local`), so you can `browser use` one instead of hand-crafting each. Idempotent — existing profiles are left untouched |
 | `agents browser profiles prune` | Remove dead machine-local profiles — browser not installed here, or never started (see below) |
 | `agents browser profiles show <name>` | Show profile details |
-| `agents browser profiles set-default [name]` | Set the profile a bare `start` (and `--profile default`) uses; `--unset` to clear; no name prints the current value. Device-local. |
+| `agents browser profiles use <name>` | Compatibility spelling for `agents browser use <name>` |
 | `agents browser profiles logins` | Per profile: `SERVICE \| ACCOUNT \| CREDS` — live session, the signed-in account (plaintext username, never decrypts), and whether login creds are in the profile's secrets bundle |
 | `agents browser profiles delete <name>` | Delete profile config and chrome-data cache |
 | `agents browser profiles doctor <name>` | Diagnose binary, port, user-data-dir, onboarding state |
