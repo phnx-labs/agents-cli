@@ -89,27 +89,56 @@ Existing profiles are **not** migrated: `--fleet` only decides where a NEW entry
 is written, so a profile created before this change keeps syncing. `agents
 browser profiles list` shows a `SCOPE` column (`local` / `fleet`) for each one.
 
-If you skip `--profile` on `agents browser start`, the profile is resolved in
-this order:
+If you skip `--profile`, or pass the reserved name `--profile default`, the
+profile is resolved in this order — the same order in **every** command
+(`start`, `stop`, `status`, `navigate`, `tab add`), not just `start`:
 
-1. **Your configured default** — the profile set via
-   `agents browser use <name>` on THIS machine, when it can
-   launch here. This also re-points an explicit `--profile default`, so an agent
-   that hardcodes `default` still lands on your chosen profile (e.g. a logged-in
-   Comet). If its browser/binary isn't installed on this machine, it warns and
-   falls through to auto-detect.
-2. **An existing `default` profile**, if one exists and its browser is installed
-   on this machine.
-3. **Auto-detect** — the first installed Chromium-family browser, saved as the
-   `default` profile. Detection priority:
+1. **A profile that literally bears the name you typed.** A profile you named
+   `default` yourself resolves to itself and is never redirected.
+2. **Your configured default** — the profile set via `agents browser use <name>`
+   on THIS machine, when it can launch here. If its browser/binary isn't
+   installed on this machine, `start` warns and falls through to auto-detect.
+3. **The auto-detected profile, `auto-chrome`** — or the `default`-named
+   predecessor an older agents-cli wrote on this machine, which keeps working.
+4. **Auto-detect** (`start` only) — the first installed Chromium-family browser,
+   saved as the `auto-chrome` profile. Detection priority:
    - macOS: Chrome > Brave > Edge > Chromium > Comet
    - Linux: Chrome > Chromium > Brave > Edge
    - Windows: Edge > Chrome > Brave > Comet
 
-   A `default` profile that came from another OS whose binary is missing here — a
-   `/Applications/...` Chrome path resolved on Linux, say — is **regenerated for
-   this machine** rather than failing with "Custom binary not found". Remote
-   (`ssh://`) defaults skip this check: their browser lives on the far host.
+   An auto-detected profile that came from another OS whose binary is missing
+   here — a `/Applications/...` Chrome path resolved on Linux, say — is
+   **regenerated for this machine** rather than failing with "Custom binary not
+   found". Remote (`ssh://`) defaults skip this check: their browser lives on the
+   far host.
+
+`default` is an **alias**, not a profile: it means "whatever profile this machine
+is configured to use". The auto-detected profile is called `auto-chrome` so the
+two cannot be confused (before RUSH-2709, `default` meant both, and only `start`
+honored the alias — so `--profile default` reached a different profile in
+`navigate` than in `start`).
+
+### Profile names vs runtime keys
+
+`agents browser profiles list`, `status`, and `--profile` all use the **bare**
+profile name (`comet-local`). A running browser is *stored* under a runtime key
+that also names its endpoint (`comet-local@endpoint-0`), so one profile can run
+at several endpoints at once without colliding on disk — but that key is an
+implementation detail you never have to type or read. `status` renders the two
+separately:
+
+```
+comet-local (endpoint: endpoint-0, port 9222, pid 4183)
+```
+
+and `status --json` carries them as separate `profile`-side fields:
+
+```json
+{ "name": "comet-local", "endpoint": "endpoint-0", "key": "comet-local@endpoint-0" }
+```
+
+Passing a runtime key where a name is expected still works, so a key copied out
+of an older listing resolves to its profile.
 
 The configured default is a **per-device setting**: it lives in this machine's
 `browser.profile` config key (`devices/<machine>/agents.yaml` `config:`), so
@@ -218,10 +247,11 @@ agents browser profiles prune --json      # machine-readable plan
 Four guards, each because removing that profile would be wrong rather than untidy:
 
 - **In use** — a live browser, an SSH tunnel, or an open task on *any* of its
-  runtime dirs, composite (`<name>@<endpoint>`) dirs included.
+  runtime dirs, runtime-key (`<name>@<endpoint>`) dirs included.
 - **This machine's configured default** — a bare `agents browser start` resolves
   to it.
-- **The auto `default`** — regenerated on demand, so pruning it is pure churn.
+- **The auto-detected profile** (`auto-chrome`, or a legacy `default`) —
+  regenerated on demand, so pruning it is pure churn.
 - **Fleet-synced profiles** — skipped unless you pass `--fleet`, because deleting
   one removes it from **every** machine.
 
