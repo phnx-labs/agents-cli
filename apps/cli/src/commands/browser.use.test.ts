@@ -5,10 +5,13 @@ import * as path from 'path';
 import { Command } from 'commander';
 
 let testHome = '';
+// createProfile stats the custom binary, so it must exist on the test host —
+// /bin/true is Linux-only (macOS ships /usr/bin/true). process.execPath is a
+// real executable everywhere the suite runs.
 const TEST_PROFILE = {
   name: 'work',
   browser: 'custom' as const,
-  binary: '/bin/true',
+  binary: process.execPath,
   endpoints: ['cdp://127.0.0.1:9222'],
 };
 
