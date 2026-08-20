@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 77,
-  "commands": 552,
+  "groups": 79,
+  "commands": 565,
   "root": {
     "name": "agents",
     "path": "",
@@ -1634,6 +1634,98 @@
             {
               "flags": "--json",
               "description": "Output the result as JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        }
+      ]
+    },
+    {
+      "name": "auth",
+      "path": "auth",
+      "aliases": [],
+      "description": "Sign in to your Rush account (shared by `agents org` and paid tiers)",
+      "args": [],
+      "options": [
+        {
+          "flags": "-h, --help",
+          "description": "Show help",
+          "short": "-h",
+          "long": "--help",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        }
+      ],
+      "examples": "agents auth login\nagents auth whoami\nagents auth whoami --json\nagents auth logout",
+      "notes": "`agents auth login` writes its own session, separate from `rush login`'s `~/.rush/user.yaml` — `agents auth logout` never signs you out of `rush`. If you're already signed in via `rush login`, `agents auth whoami`/`agents org` use that session automatically; no separate login is required.",
+      "subcommands": [
+        {
+          "name": "login",
+          "path": "auth login",
+          "aliases": [],
+          "description": "Sign in via the device-code flow",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "logout",
+          "path": "auth logout",
+          "aliases": [],
+          "description": "Clear the local `agents auth login` session",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "whoami",
+          "path": "auth whoami",
+          "aliases": [],
+          "description": "Show the signed-in account",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Machine-readable output",
               "long": "--json",
               "required": false,
               "optional": false,
@@ -13883,6 +13975,371 @@
           "description": "Remove the agents:// URL scheme handler.",
           "args": [],
           "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        }
+      ]
+    },
+    {
+      "name": "org",
+      "path": "org",
+      "aliases": [],
+      "description": "Create and manage a team (a Rush \"space\") you can share with `agents auth login` collaborators",
+      "args": [],
+      "options": [
+        {
+          "flags": "-h, --help",
+          "description": "Show help",
+          "short": "-h",
+          "long": "--help",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        }
+      ],
+      "examples": "agents org create acme-team\nagents org list\nagents org view acme-team\nagents org invite dev@example.com --role admin\nagents org members\nagents org role dev@example.com admin\nagents org remove dev@example.com\nagents org leave acme-team",
+      "notes": "Maps to the Rush backend's /api/v1/spaces (the free-tier team primitive), not /api/v1/orgs. Free tier: 1 owned space, 3 members per space. Every command needs `agents auth login` (or a `rush login` session) first. `--space` is only needed once you belong to more than one space.",
+      "subcommands": [
+        {
+          "name": "create",
+          "path": "org create",
+          "aliases": [],
+          "description": "Create a space (free tier: 1 owned space)",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--slug <slug>",
+              "description": "Override the derived slug",
+              "long": "--slug",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--description <text>",
+              "description": "Optional description",
+              "long": "--description",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Machine-readable output",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "invite",
+          "path": "org invite",
+          "aliases": [],
+          "description": "Invite (or directly add) a member",
+          "args": [
+            {
+              "name": "email",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--role <role>",
+              "description": "admin | member",
+              "long": "--role",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "member"
+            },
+            {
+              "flags": "--space <id-or-slug>",
+              "description": "Space to invite into (defaults to your only space)",
+              "long": "--space",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Machine-readable output",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "leave",
+          "path": "org leave",
+          "aliases": [],
+          "description": "Leave a space you do not own",
+          "args": [
+            {
+              "name": "space",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Machine-readable output",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "list",
+          "path": "org list",
+          "aliases": [],
+          "description": "List spaces you own or belong to",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Machine-readable output",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "members",
+          "path": "org members",
+          "aliases": [],
+          "description": "List a space's members",
+          "args": [
+            {
+              "name": "space",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Machine-readable output",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "remove",
+          "path": "org remove",
+          "aliases": [],
+          "description": "Remove a member from a space",
+          "args": [
+            {
+              "name": "email",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--space <id-or-slug>",
+              "description": "Space to remove from (defaults to your only space)",
+              "long": "--space",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Machine-readable output",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "role",
+          "path": "org role",
+          "aliases": [],
+          "description": "Change a member's role (owner-only for admin)",
+          "args": [
+            {
+              "name": "email",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "role",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--space <id-or-slug>",
+              "description": "Space to change (defaults to your only space)",
+              "long": "--space",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Machine-readable output",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "view",
+          "path": "org view",
+          "aliases": [],
+          "description": "Show one space (defaults to your only space)",
+          "args": [
+            {
+              "name": "space",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Machine-readable output",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
             {
               "flags": "-h, --help",
               "description": "Show help",

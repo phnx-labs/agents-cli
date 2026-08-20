@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_77 command groups · 552 commands._
+_79 command groups · 565 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -78,6 +78,15 @@ agents artifacts share update               Re-deploy the Worker script to the c
 agents audit         Alias of `agents events --include runs` — dispatched-run outcomes
 agents audit list    Alias of `agents audit` / `agents events --include runs`
 agents audit verify  Walk the legacy hash-chain file (pre-unification history only)
+```
+
+## auth — Sign in to your Rush account (shared by `agents org` and paid tiers)
+
+```
+agents auth         Sign in to your Rush account (shared by `agents org` and paid tiers)
+agents auth login   Sign in via the device-code flow
+agents auth logout  Clear the local `agents auth login` session
+agents auth whoami  Show the signed-in account
 ```
 
 ## beta — Enable or disable preview features like factory.
@@ -487,6 +496,20 @@ agents open [url]       Resume a session from an agents:// deep link, or registe
 agents open register    Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).
 agents open status      Report whether the agents:// URL scheme handler is registered.
 agents open unregister  Remove the agents:// URL scheme handler.
+```
+
+## org — Create and manage a team (a Rush "space") you can share with `agents auth login` collaborators
+
+```
+agents org                      Create and manage a team (a Rush "space") you can share with `agents auth login` collaborators
+agents org create <name>        Create a space (free tier: 1 owned space)
+agents org invite <email>       Invite (or directly add) a member
+agents org leave [space]        Leave a space you do not own
+agents org list                 List spaces you own or belong to
+agents org members [space]      List a space's members
+agents org remove <email>       Remove a member from a space
+agents org role <email> <role>  Change a member's role (owner-only for admin)
+agents org view [space]         Show one space (defaults to your only space)
 ```
 
 ## perf — Latency rollups from the disposable perf warehouse (hooks, commands, runs)
