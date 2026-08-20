@@ -177,13 +177,25 @@ describe('scanClaudeSessionResumable — the full-vs-incremental decision', () =
   });
 
   it('a prior continuation with no recorded identity falls back to FULL', async () => {
+    // The file must yield NO identity either. An earlier version of this test
+    // only blanked prior.timestamp and left the file with a derivable one, so
+    // the *comparison* ('2026-06-28…' === undefined -> false) returned FULL and
+    // the `prior.timestamp !== undefined` clause was never the deciding factor —
+    // deleting that clause left the test green. With BOTH sides undefined,
+    // `undefined === undefined` is TRUE, so without the clause the scan resumes
+    // from a stale offset into a different session's bytes. That is reachable on
+    // real data: claudeSessionIdentityAt returns undefined when no user or
+    // assistant event appears within its 1 MiB budget (discover.ts:4209-4212).
     const fp = path.join(dir, 's.jsonl');
-    const seed = await seedClaude(fp, jsonl(claudeLines('2026-06-28T00:00:00.000Z', 'one')));
-    fs.appendFileSync(fp, jsonl(claudeLines('2026-06-29T00:00:00.000Z', 'two')));
-    const st = fs.statSync(fp);
+    const anonymous = (n: number) => [{ type: 'summary', summary: `preamble ${n}`, leafUuid: `u${n}` }];
+    const seed = await seedClaude(fp, jsonl(anonymous(1)));
+    expect(seed.prior.timestamp).toBeUndefined(); // the fixture really yields no identity
 
-    const noIdentity: ClaudeParserState = { ...seed.prior, timestamp: undefined };
-    const r = await scanClaudeSessionResumable(fp, noIdentity, st.mtimeMs, st.size, seed.mtimeMs);
+    fs.writeFileSync(fp, jsonl([...anonymous(1), ...anonymous(2), ...anonymous(3)]));
+    const st = fs.statSync(fp);
+    expect(st.size).toBeGreaterThan(seed.prior.offset); // grew: the metadata gate alone says "incremental"
+
+    const r = await scanClaudeSessionResumable(fp, seed.prior, st.mtimeMs, st.size, seed.mtimeMs);
     expect(r.mode).toBe('full');
   });
 });
@@ -280,15 +292,23 @@ describe('scanCodexSessionResumable — the full-vs-incremental decision', () =>
   });
 
   it('a prior continuation with no recorded rollout id falls back to FULL', async () => {
+    // Same reasoning as the Claude twin: the rollout must yield NO id either,
+    // or the id COMPARISON returns FULL and the `prior.sessionId !== undefined`
+    // clause is never load-bearing. A rollout with no session_meta line never
+    // sets state.sessionId (discover.ts:4399), so both sides are undefined and
+    // `undefined === undefined` would flip canIncrement true without the clause.
     const fp = path.join(dir, 'r.jsonl');
-    const seed = await seedCodex(fp, jsonl(codexLines('sess-1', 'one')));
-    fs.appendFileSync(fp, jsonl([
-      { type: 'response_item', timestamp: '2026-06-28T00:02:00.000Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'two' }] } },
-    ]));
-    const st = fs.statSync(fp);
+    const turn = (text: string) => [
+      { type: 'response_item', timestamp: '2026-06-28T00:00:30.000Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] } },
+    ];
+    const seed = await seedCodex(fp, jsonl(turn('one')));
+    expect(seed.prior.sessionId).toBeUndefined(); // no session_meta -> no identity
 
-    const noIdentity: CodexParserState = { ...seed.prior, sessionId: undefined };
-    const r = await scanCodexSessionResumable(fp, noIdentity, st.mtimeMs, st.size, seed.mtimeMs);
+    fs.writeFileSync(fp, jsonl([...turn('one'), ...turn('two'), ...turn('three')]));
+    const st = fs.statSync(fp);
+    expect(st.size).toBeGreaterThan(seed.prior.offset);
+
+    const r = await scanCodexSessionResumable(fp, seed.prior, st.mtimeMs, st.size, seed.mtimeMs);
     expect(r.mode).toBe('full');
   });
 });
