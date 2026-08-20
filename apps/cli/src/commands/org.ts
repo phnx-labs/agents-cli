@@ -60,9 +60,14 @@ async function runView(spaceArg: string | undefined, o: { json?: boolean }): Pro
   printSpace(space);
 }
 
+/** `--role` defaults to member when omitted; anything present must be a real role — never silently coerced. */
+export function resolveInviteRole(raw: string | undefined): 'admin' | 'member' {
+  return raw === undefined ? 'member' : parseRole(raw);
+}
+
 async function runInvite(email: string, o: { role?: string; space?: string; json?: boolean }): Promise<void> {
   requireToken();
-  const role = o.role === 'admin' ? 'admin' : 'member';
+  const role = resolveInviteRole(o.role);
   const space = await resolveSpace(o.space);
   const result = await createSpaceInvite(space.id, email, role);
   if (o.json) { console.log(JSON.stringify(result, null, 2)); return; }

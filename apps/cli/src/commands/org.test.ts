@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Command } from 'commander';
-import { parseRole, registerOrgCommand } from './org.js';
+import { parseRole, registerOrgCommand, resolveInviteRole } from './org.js';
 import { getHelpSections } from '../lib/help.js';
 
 describe('parseRole', () => {
@@ -12,6 +12,23 @@ describe('parseRole', () => {
   it('rejects anything else, naming the bad value', () => {
     expect(() => parseRole('owner')).toThrow(/owner/);
     expect(() => parseRole('')).toThrow(/role must be/);
+  });
+});
+
+describe('resolveInviteRole', () => {
+  it('defaults to member when --role is omitted', () => {
+    expect(resolveInviteRole(undefined)).toBe('member');
+  });
+
+  it('accepts an explicit admin or member', () => {
+    expect(resolveInviteRole('admin')).toBe('admin');
+    expect(resolveInviteRole('member')).toBe('member');
+  });
+
+  it('rejects an invalid --role instead of silently downgrading to member (regression: PR #2821 review)', () => {
+    expect(() => resolveInviteRole('owner')).toThrow(/role must be/);
+    expect(() => resolveInviteRole('Admin')).toThrow(/role must be/); // case-sensitive, matches the backend's literal check
+    expect(() => resolveInviteRole('')).toThrow(/role must be/);
   });
 });
 
