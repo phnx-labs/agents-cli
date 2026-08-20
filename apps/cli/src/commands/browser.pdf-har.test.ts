@@ -74,3 +74,37 @@ describe('agents browser requests --format', () => {
     expect(requests.description()).toMatch(/HAR/);
   });
 });
+
+/**
+ * RUSH-2709. On `status` / `tasks` / `navigate` / `tab add`, `--profile` is a
+ * FILTER: omitting it means "no filter". Resolving an absent flag through
+ * `resolveProfileRef` returns the configured default, which silently turns
+ * `agents browser status` into `status --profile <default>` and hides every
+ * other running browser. These drive the real command actions and assert on the
+ * request that reaches the IPC boundary, so deleting the guard at any one call
+ * site fails here.
+ */
+describe('an absent --profile stays absent on the filter commands (RUSH-2709)', () => {
+  async function runBrowser(argv: string[]): Promise<Record<string, unknown> | undefined> {
+    const { sendIPCRequest } = await import('../lib/browser/ipc.js');
+    vi.mocked(sendIPCRequest).mockReset();
+    vi.mocked(sendIPCRequest).mockResolvedValue({ ok: true, profiles: [], tabs: [] } as never);
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const program = programWithBrowser();
+    await program.parseAsync(['node', 'agents', 'browser', ...argv]);
+    const call = vi.mocked(sendIPCRequest).mock.calls[0];
+    return call?.[0] as Record<string, unknown> | undefined;
+  }
+
+  it.each([
+    ['status', ['status']],
+    ['tasks', ['tasks']],
+    ['navigate', ['navigate', 'https://example.com', '--task', 't1']],
+    ['tab add', ['tab', 'add', '--url', 'https://example.com', '--task', 't1']],
+  ])('%s sends profile: undefined when no -p is passed', async (_label, argv) => {
+    const request = await runBrowser(argv);
+    expect(request).toBeDefined();
+    expect(request!.profile).toBeUndefined();
+  });
+});
