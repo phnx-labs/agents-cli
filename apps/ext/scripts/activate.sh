@@ -2,7 +2,7 @@
 #
 # Activate a freshly-installed extension in already-running editors, then prove it.
 #
-#   activate.sh <publisher.name>
+#   activate.sh <publisher.name> [--reload-windows]
 #
 # Installing writes the new version to disk, but a running editor loaded its
 # extension host once at window-open and keeps the OLD code until the window
@@ -17,12 +17,25 @@
 #
 # Reload is best-effort; the on-disk-mtime vs activation-time comparison is the
 # source of truth. A failed reload is reported, never silently assumed.
+#
+# On the fleet's interactive host (the machine the owner sits at) the script
+# only REPORTS stale windows — a scripted reload there discards in-window state
+# and steals the screen while the owner is using it (RUSH-2781). Pass
+# --reload-windows to reload anyway.
 
 set -uo pipefail
 
-EXT_FQN="${1:-}"
+EXT_FQN=""
+RELOAD_WINDOWS=0
+for ARG in "$@"; do
+    case "$ARG" in
+        --reload-windows) RELOAD_WINDOWS=1 ;;
+        -*) echo "Unknown flag: $ARG" >&2; exit 1 ;;
+        *)  EXT_FQN="$ARG" ;;
+    esac
+done
 if [ -z "$EXT_FQN" ]; then
-    echo "Usage: $0 <publisher.name>" >&2
+    echo "Usage: $0 <publisher.name> [--reload-windows]" >&2
     exit 1
 fi
 
@@ -122,6 +135,35 @@ EOF
     return 0
 }
 
+# Is THIS machine the fleet's interactive host (the one the owner sits at)?
+# Source of truth: `agents devices list --json`, the row with interactive:true.
+# Unknown — no agents CLI, no python3, or bad JSON — counts as interactive: a
+# wrongly-skipped reload costs one manual Cmd+Shift+P; a wrong reload steals
+# the owner's screen mid-use.
+is_interactive_host() {
+    command -v agents >/dev/null 2>&1 || return 0
+    command -v python3 >/dev/null 2>&1 || return 0
+    local name host
+    name="$(agents devices list --json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    rows = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for r in rows:
+    if isinstance(r, dict) and r.get("interactive"):
+        print(r.get("name", ""))
+        break
+' 2>/dev/null)"
+    [ -z "$name" ] && return 0
+    if [ "$(uname -s)" = "Darwin" ]; then
+        host="$(scutil --get LocalHostName 2>/dev/null || hostname -s)"
+    else
+        host="$(hostname -s 2>/dev/null || hostname)"
+    fi
+    [ "$(printf %s "$host" | tr '[:upper:]' '[:lower:]')" = "$(printf %s "$name" | tr '[:upper:]' '[:lower:]')" ]
+}
+
 # Count windows whose host is stale (activated before INSTALL_EPOCH).
 stale_count() {
     local logdir="$1" install_ep="$2" eh ep n=0
@@ -136,6 +178,12 @@ stale_count() {
 echo
 echo "Activating $EXT_FQN in running editors..."
 OVERALL_STALE=0
+
+RELOAD_ALLOWED=1
+if [ "$RELOAD_WINDOWS" -eq 0 ] && is_interactive_host; then
+    RELOAD_ALLOWED=0
+    echo "  (interactive host — reporting only; pass --reload-windows to reload stale windows)"
+fi
 
 for CLI in code codium cursor; do
     command -v "$CLI" >/dev/null 2>&1 || continue
@@ -157,6 +205,8 @@ for CLI in code codium cursor; do
 
     if [ "$(stale_count "$LOGDIR" "$INSTALL_EP")" -eq 0 ]; then
         echo "  $CLI: already live (all windows activated after install)."
+    elif [ "$RELOAD_ALLOWED" -eq 0 ]; then
+        echo "  $CLI: stale window(s) — not reloading on the interactive host"
     else
         echo "  $CLI: stale window(s) -> reloading"
         if reload_editor_windows "$APP" "$PROC"; then

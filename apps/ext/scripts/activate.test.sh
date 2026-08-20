@@ -69,6 +69,60 @@ else
 fi
 rm -f "$FUNCS"
 
+# RUSH-2781: a scripted reload on the interactive host steals the owner's
+# screen. The reload must be gated on is_interactive_host() and overridable
+# only via --reload-windows.
+if grep -q 'RELOAD_ALLOWED' "$ACTIVATE_SH" && grep -q -- '--reload-windows' "$ACTIVATE_SH"; then
+    pass "activate.sh gates reloads behind RELOAD_ALLOWED / --reload-windows"
+else
+    fail "activate.sh can still reload windows unconditionally"
+fi
+
+IHFUNCS="$(mktemp)"
+sed -n '/^is_interactive_host() {/,/^}/p' "$ACTIVATE_SH" > "$IHFUNCS"
+if [ ! -s "$IHFUNCS" ]; then
+    fail "could not extract is_interactive_host() from activate.sh"
+else
+    # shellcheck disable=SC1090
+    . "$IHFUNCS"
+
+    if [ "$(uname -s)" = "Darwin" ]; then
+        THIS_HOST="$(scutil --get LocalHostName 2>/dev/null || hostname -s)"
+    else
+        THIS_HOST="$(hostname -s 2>/dev/null || hostname)"
+    fi
+
+    STUBS="$(mktemp -d)"
+    make_agents_stub() {
+        printf '#!/bin/bash\nprintf %%s '\''%s'\''\n' "$1" > "$STUBS/agents"
+        chmod +x "$STUBS/agents"
+    }
+
+    make_agents_stub "[{\"name\":\"$THIS_HOST\",\"interactive\":true}]"
+    if PATH="$STUBS:$PATH" is_interactive_host; then
+        pass "is_interactive_host: true when devices JSON marks this host interactive"
+    else
+        fail "is_interactive_host missed this host in the devices JSON"
+    fi
+
+    make_agents_stub '[{"name":"some-other-box","interactive":true},{"name":"x","interactive":false}]'
+    if PATH="$STUBS:$PATH" is_interactive_host; then
+        fail "is_interactive_host claimed interactive for another box's row"
+    else
+        pass "is_interactive_host: false when the interactive host is another box"
+    fi
+
+    make_agents_stub 'not json at all'
+    if PATH="$STUBS:$PATH" is_interactive_host; then
+        pass "is_interactive_host: unparseable devices JSON degrades to interactive (safe default)"
+    else
+        fail "is_interactive_host treated unparseable JSON as non-interactive"
+    fi
+
+    rm -rf "$STUBS"
+fi
+rm -f "$IHFUNCS"
+
 # A window loop that never runs must not be reported as live.
 if grep -q 'WINDOWS_SEEN' "$ACTIVATE_SH" \
    && grep -q 'UNVERIFIED' "$ACTIVATE_SH"; then
