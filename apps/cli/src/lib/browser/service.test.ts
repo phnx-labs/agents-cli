@@ -305,21 +305,37 @@ describe('BrowserService.status — disk reconciliation (Issue #6)', () => {
       expect(result[0].name).toBe('comet-local');
     });
 
-    it('back-compat: finds a browser running under a LEGACY on-disk key', async () => {
-      // Two shapes older builds left behind: a pre-composite dir named exactly
-      // the profile, and a fork of one (`<name>.<n>`, no `@`). Both must still
-      // resolve, or the rename orphans a browser the user has running.
+    it('back-compat: finds a browser running under a LEGACY pre-composite key', async () => {
+      // Older builds keyed the runtime dir by the bare profile name, with no
+      // `@endpoint`. That dir must still resolve, or a browser the user has
+      // running is orphaned.
       writeProfile('legacy', ['cdp://localhost:9222']);
-      writeRunningChrome('legacy.2', 9222, process.pid);
-      writeTaskState('legacy.2', [{ id: 'forked', tabIds: ['t1'], createdAt: 7 }]);
+      writeRunningChrome('legacy', 9222, process.pid);
+      writeTaskState('legacy', [{ id: 'old', tabIds: ['t1'], createdAt: 7 }]);
 
       const service = new BrowserService();
       const result = await service.status('legacy');
 
       expect(result).toHaveLength(1);
       expect(result[0].name).toBe('legacy');
-      expect(result[0].key).toBe('legacy.2');
-      expect(result[0].tasks.map((t) => t.id)).toEqual(['forked']);
+      expect(result[0].key).toBe('legacy');
+      expect(result[0].tasks.map((t) => t.id)).toEqual(['old']);
+    });
+
+    it('finds a fork of a composite key, and never a separate `<name>.<n>` profile', async () => {
+      writeProfile('forked', ['cdp://localhost:9222']);
+      writeRunningChrome('forked@endpoint-0.2', 9222, process.pid);
+      writeTaskState('forked@endpoint-0.2', [{ id: 'f', tabIds: ['t1'], createdAt: 7 }]);
+      // A DIFFERENT profile whose name merely ends in `.2`. Claiming its runtime
+      // dir would stop somebody else's browser.
+      writeProfile('forked.2', ['cdp://localhost:9223']);
+      writeRunningChrome('forked.2', 9223, process.pid);
+
+      const service = new BrowserService();
+      const result = await service.status('forked');
+
+      expect(result.map((s) => s.key)).toEqual(['forked@endpoint-0.2']);
+      expect(await service.status('forked.2')).toHaveLength(1);
     });
 
     it('does not claim another profile that merely shares a name prefix', async () => {
@@ -1302,7 +1318,8 @@ describe('BrowserService.reapAbandoned — abandoned-task reaper (RUSH-2622)', (
     const result = await service.reapAbandoned({ deps, now, dryRun: true });
 
     expect(result.closed).toEqual([
-      { task: stale.name, profile: 'reap7@endpoint-0', reason: 'idle' },
+      // Same bare shape the real (non-dry) run reports, so the two agree.
+      { task: stale.name, profile: 'reap7', reason: 'idle' },
     ]);
     expect(conn.tasks.has(stale.name)).toBe(true);
     expect(targets).toHaveLength(1);

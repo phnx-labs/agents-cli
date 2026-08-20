@@ -28,7 +28,7 @@
  */
 import { isPidAlive, isSessionIdLiveOnProcessTable } from '../session/active.js';
 import { listPidSessionEntries, sessionIdFromLivePid, type PidSessionEntry } from '../session/pid-registry.js';
-import type { ReapResult, ReapedTask, Task } from './types.js';
+import { parseConnectionKey, type ReapResult, type ReapedTask, type Task } from './types.js';
 
 /** Default idle window before an untouched task is reaped. */
 export const DEFAULT_IDLE_MS = 30 * 60_000;
@@ -191,7 +191,10 @@ export async function reapAbandonedTasks(
     }
 
     if (opts.dryRun) {
-      closed.push({ task: task.name, profile, reason });
+      // Report the BARE profile, exactly as the real run does below — `profile`
+      // here is the runtime key from `listTasks()`, and printing the two shapes
+      // in one column made `gc --dry-run` and `gc` disagree (RUSH-2709).
+      closed.push({ task: task.name, profile: parseConnectionKey(profile).profile, reason });
       continue;
     }
 

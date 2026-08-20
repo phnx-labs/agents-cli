@@ -21,7 +21,28 @@ describe('connectionKey / parseConnectionKey — the ONE derivation rule (RUSH-2
     });
     // Legacy pre-composite dirs still on disk.
     expect(parseConnectionKey('comet-local')).toEqual({ profile: 'comet-local' });
-    expect(parseConnectionKey('comet-local.2')).toEqual({ profile: 'comet-local', fork: 2 });
+  });
+
+  it('reads a key with no `@` as a whole profile name, never as `<name>.<fork>`', () => {
+    // Nothing constrains a profile's name, so `chrome.2` may BE a profile. If a
+    // trailing `.2` were read as a fork of `chrome`, `stop --profile chrome`
+    // would kill that other profile's browser.
+    expect(parseConnectionKey('chrome.2')).toEqual({ profile: 'chrome.2' });
+    expect(keyBelongsToProfile('chrome.2', 'chrome')).toBe(false);
+    expect(keyBelongsToProfile('chrome.2', 'chrome.2')).toBe(true);
+    // A real fork always hangs off a composite base, which still parses.
+    expect(parseConnectionKey('chrome@endpoint-0.2')).toEqual({
+      profile: 'chrome',
+      endpoint: 'endpoint-0',
+      fork: 2,
+    });
+  });
+
+  it('keeps an `@` inside a profile name (splits on the LAST one)', () => {
+    const key = connectionKey('me@work', 'endpoint-0');
+    expect(parseConnectionKey(key)).toEqual({ profile: 'me@work', endpoint: 'endpoint-0' });
+    expect(keyBelongsToProfile(key, 'me@work')).toBe(true);
+    expect(keyBelongsToProfile(key, 'me')).toBe(false);
   });
 
   it('matches a bare name to its endpoint and fork keys, and nothing else', () => {

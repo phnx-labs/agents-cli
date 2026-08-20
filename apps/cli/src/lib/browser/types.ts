@@ -51,25 +51,27 @@ export function asConnectionKey(raw: string): ConnectionKey {
  * {@link connectionKey}, and the ONE rule every consumer uses to decide whether
  * a runtime key belongs to a profile.
  *
- * Tolerates the two legacy shapes still on disk: a pre-composite key that is
- * just the bare profile name (`comet-local`), and a fork of one
- * (`comet-local.2`) — a trailing all-digit segment is a fork, not part of the
- * name.
+ * Tolerates the legacy shape still on disk: a pre-composite key that is just
+ * the bare profile name (`comet-local`).
+ *
+ * A key with no `@` is read as a WHOLE profile name, never as `<name>.<fork>`,
+ * because nothing constrains a profile's name (`createProfile` checks only for
+ * a duplicate name and a port collision). Reading the trailing digits as a fork
+ * would let `stop --profile chrome` claim the runtime dirs of a separate
+ * profile named `chrome.2` and kill its browser. A fork is only ever created
+ * from a composite base (`forkElectronProfile` appends to a `<p>@<e>` key), so
+ * the `@`-bearing branch below is the one that must understand forks.
  */
 export function parseConnectionKey(key: string): {
   profile: ProfileName;
   endpoint?: EndpointName;
   fork?: number;
 } {
-  const at = key.indexOf('@');
-  if (at === -1) {
-    const dot = key.lastIndexOf('.');
-    const tail = dot === -1 ? '' : key.slice(dot + 1);
-    if (dot > 0 && /^\d+$/.test(tail)) {
-      return { profile: key.slice(0, dot), fork: Number(tail) };
-    }
-    return { profile: key };
-  }
+  // LAST `@`, not the first: a profile name may itself contain one (`me@work`),
+  // and splitting on the first would report its profile as `me` — so
+  // `status --profile me@work` would find nothing for a running browser.
+  const at = key.lastIndexOf('@');
+  if (at === -1) return { profile: key };
   const profile = key.slice(0, at);
   const rest = key.slice(at + 1);
   const dot = rest.indexOf('.');
