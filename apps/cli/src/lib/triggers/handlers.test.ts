@@ -696,4 +696,97 @@ describe('handler config layer', () => {
       }
     });
   });
+
+  describe('slack handlers', () => {
+    function slackWebhook(overrides: Record<string, unknown> = {}): IncomingWebhook {
+      return {
+        source: 'slack',
+        event: 'app_mention',
+        payload: {
+          type: 'event_callback',
+          event_id: 'Ev123',
+          event_type: 'app_mention',
+          text: '<@U0BOT> AGI: rebase my open PR and check CI',
+          channel: 'C0AGI',
+          thread_ts: '1712345678.000100',
+          user: 'U9',
+          ...overrides,
+        },
+      };
+    }
+
+    it('parses PROJECT: prefix, stripping a leading bot mention', () => {
+      const ctx = handlerMod.buildWebhookContext(slackWebhook());
+      expect(ctx.slack).toMatchObject({
+        project: 'AGI',
+        prompt: 'rebase my open PR and check CI',
+        text: 'AGI: rebase my open PR and check CI',
+        channel: 'C0AGI',
+        thread_ts: '1712345678.000100',
+        user: 'U9',
+      });
+    });
+
+    it('leaves project empty and keeps the whole text when there is no PROJECT: prefix', () => {
+      const ctx = handlerMod.buildWebhookContext(slackWebhook({ text: 'just do it please' }));
+      expect(ctx.slack).toMatchObject({ project: '', prompt: 'just do it please' });
+    });
+
+    it('matches a slack handler by command and channel; rejects a mismatch', () => {
+      const handler: import('./handlers.js').WebhookHandler = {
+        name: 'slack-agents', source: 'slack', event: '/agents', command: '/agents', channel: 'C0AGI',
+        run: { agent: 'claude', prompt: '{{slack.prompt}}' },
+      };
+      const slash: IncomingWebhook = {
+        source: 'slack', event: '/agents',
+        payload: { type: 'slash_command', command: '/agents', channel: 'C0AGI', text: 'AGI: go' },
+      };
+      expect(handlerMod.handlerMatchesWebhook(handler, slash)).toBe(true);
+      // Wrong command, wrong channel, and wrong source each fail closed.
+      expect(handlerMod.handlerMatchesWebhook(handler, { ...slash, payload: { ...slash.payload, command: '/other' } })).toBe(false);
+      expect(handlerMod.handlerMatchesWebhook(handler, { ...slash, payload: { ...slash.payload, channel: 'C0OTHER' } })).toBe(false);
+      expect(handlerMod.handlerMatchesWebhook({ ...handler, source: 'github' }, slash)).toBe(false);
+    });
+
+    it('resolves a dynamic {{slack.project}} into the dispatched job config', async () => {
+      const handler: import('./handlers.js').WebhookHandler = {
+        name: 'slack-agent', source: 'slack',
+        project: '{{slack.project}}',
+        run: {
+          agent: 'claude',
+          prompt: 'Request from <@{{slack.user}}>: {{slack.prompt}}. Reply with agents send --channel slack --to {{slack.channel}} --thread {{slack.thread_ts}}.',
+        },
+      };
+      const dispatched: JobConfig[] = [];
+      const meta: RunMeta = {
+        jobName: handler.name, runId: 'run-slack', agent: 'claude', pid: 1,
+        status: 'running', startedAt: new Date().toISOString(), completedAt: null, exitCode: null,
+      };
+      const result = await handlerMod.executeHandler(handler, slackWebhook(), {
+        dispatchAgent: async (config) => { dispatched.push(config); return meta; },
+      });
+      expect(result.runId).toBe('run-slack');
+      // The per-message project routed into the run — this is what makes "give it
+      // a project name" work; a static handler.project would have ignored it.
+      expect(dispatched[0].project).toBe('AGI');
+      expect(dispatched[0].prompt).toContain('rebase my open PR and check CI');
+      expect(dispatched[0].prompt).toContain('--to C0AGI --thread 1712345678.000100');
+    });
+
+    it('omits project when the message carries no PROJECT: token', async () => {
+      const handler: import('./handlers.js').WebhookHandler = {
+        name: 'slack-agent', source: 'slack', project: '{{slack.project}}',
+        run: { agent: 'claude', prompt: '{{slack.prompt}}' },
+      };
+      const dispatched: JobConfig[] = [];
+      await handlerMod.executeHandler(handler, slackWebhook({ text: 'no project here' }), {
+        dispatchAgent: async (config) => {
+          dispatched.push(config);
+          return { jobName: handler.name, runId: 'r', agent: 'claude', pid: 1, status: 'running', startedAt: new Date().toISOString(), completedAt: null, exitCode: null };
+        },
+      });
+      // Empty substitution omits the field entirely (falls back to $HOME), not an empty-string project.
+      expect(dispatched[0].project).toBeUndefined();
+    });
+  });
 });

@@ -14,6 +14,9 @@ import {
   fireWebhookJobs,
   verifyGithubSignature,
   verifyLinearSignature,
+  verifySlackSignature,
+  parseSlackBody,
+  slackEventName,
   startWebhookServer,
   createFileDeliveryStore,
   type IncomingWebhook,
@@ -388,6 +391,127 @@ function settleWaiter() {
       : new Promise<void>((release) => { waiters.push({ target, release }); })),
   };
 }
+
+describe('slack signature verification', () => {
+  const secret = 'slack-signing-secret';
+  const sign = (ts: string, body: string) =>
+    'v0=' + crypto.createHmac('sha256', secret).update(`v0:${ts}:${body}`).digest('hex');
+
+  it('accepts a fresh v0 signature and rejects a forged one', () => {
+    const now = 1_700_000_000_000;
+    const ts = String(Math.floor(now / 1000));
+    const body = Buffer.from('payload=%7B%7D');
+    expect(verifySlackSignature({ 'x-slack-request-timestamp': ts, 'x-slack-signature': sign(ts, body.toString()) }, body, secret, now)).toBe(true);
+    expect(verifySlackSignature({ 'x-slack-request-timestamp': ts, 'x-slack-signature': 'v0=deadbeef' }, body, secret, now)).toBe(false);
+  });
+
+  it('fails closed on a stale timestamp (replay guard) and on missing/malformed headers', () => {
+    const now = 1_700_000_000_000;
+    const staleTs = String(Math.floor(now / 1000) - 600); // 10 minutes old
+    const body = Buffer.from('x');
+    // Correctly signed for the stale ts, but too old → still rejected.
+    expect(verifySlackSignature({ 'x-slack-request-timestamp': staleTs, 'x-slack-signature': sign(staleTs, 'x') }, body, secret, now)).toBe(false);
+    expect(verifySlackSignature({}, body, secret, now)).toBe(false);
+    expect(verifySlackSignature({ 'x-slack-request-timestamp': 'abc', 'x-slack-signature': 'v0=x' }, body, secret, now)).toBe(false);
+  });
+});
+
+describe('parseSlackBody + slackEventName', () => {
+  it('parses a slash command form body (no thread → reply to channel)', () => {
+    const body = Buffer.from(new URLSearchParams({
+      command: '/agents', text: 'AGI rebase', channel_id: 'C1', user_id: 'U1', response_url: 'https://x', team_id: 'T1',
+    }).toString());
+    const p = parseSlackBody('application/x-www-form-urlencoded', body);
+    expect(p).toMatchObject({ type: 'slash_command', command: '/agents', text: 'AGI rebase', channel: 'C1', user: 'U1', response_url: 'https://x', team: 'T1' });
+    expect(p.thread_ts).toBeUndefined();
+    expect(slackEventName(p)).toBe('/agents');
+  });
+
+  it('parses an app_mention event, threading on ts when no thread_ts', () => {
+    const body = Buffer.from(JSON.stringify({
+      type: 'event_callback', event_id: 'Ev1', team_id: 'T1',
+      event: { type: 'app_mention', text: '<@U0BOT> AGI: rebase', channel: 'C1', user: 'U9', ts: '1712.0001' },
+    }));
+    const p = parseSlackBody('application/json', body);
+    expect(p).toMatchObject({ type: 'event_callback', event_id: 'Ev1', event_type: 'app_mention', channel: 'C1', user: 'U9', thread_ts: '1712.0001' });
+    expect(slackEventName(p)).toBe('app_mention');
+  });
+
+  it('threads on thread_ts when the mention is already in a thread', () => {
+    const body = Buffer.from(JSON.stringify({ type: 'event_callback', event: { type: 'app_mention', text: 'hi', channel: 'C1', ts: '2.0', thread_ts: '1.0' } }));
+    expect(parseSlackBody('application/json', body).thread_ts).toBe('1.0');
+  });
+
+  it('returns the url_verification challenge', () => {
+    const body = Buffer.from(JSON.stringify({ type: 'url_verification', challenge: 'abc123' }));
+    expect(parseSlackBody('application/json', body)).toEqual({ type: 'url_verification', challenge: 'abc123' });
+  });
+});
+
+describe('startWebhookServer — slack', () => {
+  const secret = 'slack-signing-secret';
+  function slackSend(server: http.Server, body: Buffer, contentType: string, sigOverride?: string): Promise<{ status: number; body: string }> {
+    const address = server.address();
+    if (!address || typeof address !== 'object') throw new Error('server did not bind');
+    const ts = String(Math.floor(Date.now() / 1000));
+    const sig = sigOverride ?? 'v0=' + crypto.createHmac('sha256', secret).update(`v0:${ts}:${body.toString()}`).digest('hex');
+    return new Promise((resolve, reject) => {
+      const req = http.request({
+        host: '127.0.0.1', port: address.port, path: '/hooks/slack', method: 'POST',
+        headers: { 'content-type': contentType, 'content-length': String(body.length), 'x-slack-request-timestamp': ts, 'x-slack-signature': sig },
+      }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c) => chunks.push(c as Buffer));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf-8') }));
+      });
+      req.on('error', reject);
+      req.end(body);
+    });
+  }
+
+  it('echoes the url_verification challenge and dispatches nothing', async () => {
+    const server = startWebhookServer({
+      secrets: { slack: secret },
+      fire: { jobs: [], dispatch: async () => { throw new Error('url_verification must not dispatch'); } },
+    });
+    await new Promise<void>((r) => server.once('listening', r));
+    try {
+      const body = Buffer.from(JSON.stringify({ type: 'url_verification', challenge: 'abc123' }));
+      const res = await slackSend(server, body, 'application/json');
+      expect(res.status).toBe(200);
+      expect(JSON.parse(res.body)).toEqual({ challenge: 'abc123' });
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+
+  it('rejects a bad slack signature with 401 (fail closed)', async () => {
+    const server = startWebhookServer({ secrets: { slack: secret } });
+    await new Promise<void>((r) => server.once('listening', r));
+    try {
+      const body = Buffer.from(JSON.stringify({ type: 'url_verification', challenge: 'x' }));
+      const res = await slackSend(server, body, 'application/json', 'v0=bad');
+      expect(res.status).toBe(401);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+
+  it('acks a signed app_mention with 200 (before any dispatch)', async () => {
+    const server = startWebhookServer({ secrets: { slack: secret }, fire: { jobs: [] } });
+    await new Promise<void>((r) => server.once('listening', r));
+    try {
+      const body = Buffer.from(JSON.stringify({
+        type: 'event_callback', event_id: 'Ev-ack-1',
+        event: { type: 'app_mention', text: '<@U0BOT> hello there', channel: 'C1', user: 'U9', ts: '1.0' },
+      }));
+      const res = await slackSend(server, body, 'application/json');
+      expect(res.status).toBe(200);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+});
 
 describe('startWebhookServer', () => {
   it('acks a signed delivery before the agent dispatch completes', async () => {
