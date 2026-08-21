@@ -708,7 +708,7 @@ full last message, wrapped), and one width-capped `Details ▸` fold.
 A row another device owns (`_remote` — its transcript is on the peer's disk)
 gets the same full pane, not a metadata stub: the picker fetches that peer's
 already-computed digest over SSH (`fetchPeerPreviewDigest` in
-`src/lib/session/remote-list.ts` runs the peer's own `sessions preview <id>
+`src/lib/session/remote/remote-list.ts` runs the peer's own `sessions preview <id>
 --local --json`) the first time the row is previewed and repaints the pane in
 place when it lands. While the fetch is in flight the pane shows the metadata
 card plus a `fetching preview from <device> over SSH…` note; a peer that cannot
@@ -983,7 +983,7 @@ watchdog, and CLI share it instead of each re-running the full gather. Live stat
 stays inside that short window (`forceRefresh` / `AGENTS_SESSIONS_FORCE_REFRESH=1`
 re-gathers). Immutable identity fields are memoized by transcript mtime and never
 carry live status. `sessions --device` is likewise cache-first in
-`src/lib/session/remote.ts` (a reachable host skips SSH while the cache is fresh;
+`src/lib/session/remote/remote.ts` (a reachable host skips SSH while the cache is fresh;
 unreachable still falls back to any age).
 
 On a TTY it opens the interactive browser seeded to running-only; `--json`,
@@ -1103,7 +1103,7 @@ non-interactive caller (piped/`--no-interactive`).
 
 It works by invoking the **remote's own** `agents sessions` against its already-built
 index over SSH — `ssh -o BatchMode=yes <host> bash -lc 'agents sessions …'`
-(`src/lib/session/remote.ts`). `--device` is stripped before forwarding so there is no
+(`src/lib/session/remote/remote.ts`). `--device` is stripped before forwarding so there is no
 recursion; the target must be a host alias or `user@host` (validated against
 `SSH_TARGET_RE` to block argv-flag smuggling). SSH access is the only auth — if you
 can `ssh <host>`, you own the box; there is no identity layer.
@@ -1529,7 +1529,7 @@ dedup, no extra logic). Dedup is byte-exact: a bundle file identical to one alre
 disk is skipped; a file that differs is a conflict, kept local unless `--overwrite`.
 `--from-host` reuses the exact SSH transport as the cross-machine listing
 (`resolveExplicitTargets` + `ssh-exec`) — no second transport, no daemon.
-Source: `src/lib/session/bundle.ts`, `src/lib/session/remote-bundle.ts`,
+Source: `src/lib/session/bundle.ts`, `src/lib/session/remote/remote-bundle.ts`,
 `src/commands/sessions-export.ts`, `src/commands/sessions-import.ts`.
 
 ### Off-box backup to Cloudflare R2 (`--to-r2` / `--from-r2`)

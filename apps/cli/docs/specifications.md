@@ -481,7 +481,7 @@ SSH access (§7); rendering sessions that no harness produced.
 
 - **SES-22 (MUST).** `--device` MUST run the peer's **own**
   `agents sessions` over hardened SSH; transcripts stay on the origin machine and
-  there is no identity layer beyond SSH access (`lib/session/remote.ts:1-11`). A
+  there is no identity layer beyond SSH access (`lib/session/remote/remote.ts:1-11`). A
   recursion guard (`AGENTS_SESSIONS_LOCAL=1`) MUST prevent re-fan-out
   (`lib/session/remote-active.ts:20`) and MUST also suppress the interactive
   browser, so a peer answering a fan-out can never open a TUI
@@ -495,13 +495,13 @@ SSH access (§7); rendering sessions that no harness produced.
 - **SES-23 (MUST).** Remote fan-out MUST degrade, never throw or blank: an
   unreachable host (ssh 255) falls back to offline cache, a slow host is killed
   to `[]`, and overall `process.exitCode=1` signals partial failure
-  (`lib/session/remote.ts:141-146,220-261`; `remote-list.ts:88-108`; test
-  `remote.test.ts:167-181`).
+  (`lib/session/remote/remote.ts:141-146,220-261`; `lib/session/remote/remote-list.ts:88-108`; test
+  `lib/session/remote/remote.test.ts:167-181`).
   - **In the browser**, where the full-screen repaint hides the fan-out's stderr
     note and there is no exit code to read, the unreachable peers MUST be surfaced
     as data instead — `RemoteListResult.unreachable`, rendered in the browser
     header — so "that box is asleep" stays distinguishable from "that box has no
-    matching sessions" (`lib/session/remote-list.ts`; `commands/sessions-browser.ts`).
+    matching sessions" (`lib/session/remote/remote-list.ts`; `commands/sessions-browser.ts`).
   - **A host scope MUST NOT widen.** An explicit `--device` naming only
     this machine leaves nothing remote to dial; the fan-out MUST be skipped rather
     than passing an empty list to `gatherRemoteList`, which reads `[]` as "no hosts
@@ -599,19 +599,19 @@ SSH access (§7); rendering sessions that no harness produced.
   `capturedAt`. Version 1 defines `reset`, `upsert`, `remove`, `scope`, and
   `heartbeat`. A row's `rowKey` MUST be stable within its device
   scope and MUST be treated as opaque by consumers
-  (`lib/session/watch.ts:12-38,63-106`; `lib/session/watch.test.ts:10-18`).
+  (`lib/session/remote/watch.ts:12-38,63-106`; `lib/session/remote/watch.test.ts:10-18`).
 - **SES-42 (MUST).** The stream MUST include current sessions and retained recovery
   states. Each row MUST carry CLI-owned recovery/lifecycle metadata; an unavailable
   device scope MUST emit `scope: unavailable` without removing its retained rows,
   and a reconnect MUST replace only that scope through its next reset
-  (`lib/session/watch.ts:40-56,75-102,171-225`; `lib/session/watch.test.ts:20-26`).
+  (`lib/session/remote/watch.ts:40-56,75-102,171-225`; `lib/session/remote/watch.test.ts:20-26`).
 - **SES-43 (MUST).** The default stream MUST hold one long-lived local subscription
   and one long-lived SSH subscription per dialable compute device. `--local` MUST
   suppress peer subscriptions. Neither path may poll transcript history or invoke
   repeated live gathers: startup reads one reset snapshot, then steady state tails
   row deltas from the canonical snapshot writer's journal
-  (`lib/session/session-cache.ts:190-230`; `lib/session/watch.ts:141-211`;
-  `lib/session/watch.test.ts:30-61`; `commands/sessions-watch.ts:27-43`).
+  (`lib/session/session-cache.ts:190-230`; `lib/session/remote/watch.ts:141-211`;
+  `lib/session/remote/watch.test.ts:30-61`; `commands/sessions-watch.ts:27-43`).
 - **SES-44 (MUST).** A one-shot `agents sessions ... --json` listing is distinct
   from the incremental stream, but MUST expose the same picker-facing lifecycle,
   device, viewing, and recovery metadata in each durable row. Consumers MUST NOT
@@ -746,7 +746,7 @@ SSH access (§7); rendering sessions that no harness produced.
   the coordinator MUST deduplicate the same origin/session pair. Direct local
   queries MAY include mirrored rows under their recorded origin machines.
   An unreachable or incompatible peer MUST also mark aggregate coverage partial
-  (`lib/session/remote-list.ts:50-53,78-96,193-240,337-541`;
+  (`lib/session/remote/remote-list.ts:50-53,78-96,193-240,337-541`;
   `lib/devices/resolve-target.ts:120-133`;
   `lib/session/tool-index.ts:73-97`; `lib/session/tool-store.ts:40-85`;
   `commands/sessions.ts:1937-1984`).
@@ -911,7 +911,7 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
   `metadataResolveOutcome`, `fleetCandidatesByQuery`,
   `metadataResolveForwardedArgs`; tests
   `commands/sessions.resolve.test.ts`, `commands/sessions.resolve-errors.test.ts`,
-  `lib/session/remote-list.test.ts`).
+  `lib/session/remote/remote-list.test.ts`).
 
   *Amended 2026-08-10 (RUSH-2492).* This requirement previously mandated exit 2
   for an incomplete peer sweep, aborting `--resolve` outright whenever any peer
@@ -948,7 +948,7 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
   coverage, and per-machine totals; it MUST NOT replace ordinary list/detail or
   tool-search envelopes
   (`commands/sessions.ts:1432-1463,1551-1559,1824-1879,1937-1984,3929-3970,4006-4013`;
-  `lib/session/remote-list.ts:98-115,337-541`).
+  `lib/session/remote/remote-list.ts:98-115,337-541`).
 - **SES-IF-4b (MUST).** `sessions stats --json` MUST emit its own versioned
   `sessions-stats` envelope (`{ schemaVersion, kind: 'sessions-stats', filters,
   signal, coverage, totals, order, ranked[], zeroInvoked[] }`), never the
@@ -1179,7 +1179,7 @@ Given 3 fleet hosts, one unreachable (ssh 255) and one slow past budget; When
 `agents sessions --active` fans out; Then reachable hosts return, the unreachable
 host replays offline cache, the slow host is killed to `[]`, and overall
 `process.exitCode=1` — no throw, no empty result (`remote.ts:141-146,220-261`;
-`remote-list.ts:88-108`).
+`lib/session/remote/remote-list.ts:88-108`).
 
 **GWT-10 — Old DB auto-migrates without data loss.**
 Given a v9 `sessions.db` with a `name` column and rows; When `getDB()` opens it;
