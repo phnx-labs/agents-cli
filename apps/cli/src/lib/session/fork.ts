@@ -21,7 +21,7 @@ import * as path from 'path';
 import type { SessionMeta } from './types.js';
 import { upsertSession } from './db.js';
 import { recordRunName } from './run-names.js';
-import { deriveShortId } from './short-id.js';
+import { deriveShortId } from '../text/short-id.js';
 
 /** Agents that `fork` can branch today (see the module doc for why). */
 export const FORKABLE_AGENTS = ['claude'] as const;

@@ -15,7 +15,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'yaml';
 import type { SessionAgentId, SessionMeta } from './types.js';
-import { deriveShortId } from './short-id.js';
+import { deriveShortId } from '../text/short-id.js';
 import { getCacheDir } from '../state.js';
 
 const PROXY_BASE = process.env.RUSH_PROXY_BASE ?? 'https://api.prix.dev';

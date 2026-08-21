@@ -31,7 +31,7 @@ import {
   viewAgentSignedIn,
   viewHasAgent,
 } from '../hosts/ready.js';
-import { localMachineId } from '../session/origin-machine.js';
+import { localMachineId } from '../origin-machine.js';
 import { normalizeHost } from '../machine-id.js';
 import { checkCliAvailable, checkCliSignedIn, type AgentType } from './agents.js';
 import type { DevicePlacementSignal } from './scheduler.js';

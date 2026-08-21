@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { getPerfSpoolPath } from '../state.js';
-import { localMachineId } from '../session/origin-machine.js';
+import { localMachineId } from '../origin-machine.js';
 import type { PerfSample } from './types.js';
 
 export type { PerfSample } from './types.js';

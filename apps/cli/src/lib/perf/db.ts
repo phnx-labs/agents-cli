@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import Database from '../sqlite.js';
 import { getPerfDbPath, getPerfDir } from '../state.js';
-import { localMachineId } from '../session/origin-machine.js';
+import { localMachineId } from '../origin-machine.js';
 import { resolveProjectKey } from '../project-key.js';
 import { percentile } from '../percentile.js';
 import { resolveSpoolPath, shortSessionId, _resetPerfSpoolForTest } from './spool.js';

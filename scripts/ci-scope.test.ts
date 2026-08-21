@@ -241,15 +241,17 @@ describe('selectImpact policy', () => {
 
   test('a sessions change carries the group budget, not the 85s default', () => {
     // Registering a subcommand must touch sessions.ts, which selects the whole
-    // sessions* suite — 92s of vitest inside a 122s run. Under the flat 85s
-    // default no new `agents sessions <verb>` could ever merge (RUSH-2787).
+    // sessions* suite. Extracting width/short-id/relative-time (PR #2796, run
+    // 32392267349) still touches session/* re-export shims, so the sessions
+    // group is selected; impact was 198s and failed the previous 180s ceiling.
+    // Under the flat 85s default no new `agents sessions <verb>` could merge.
     const plan = selectImpact({
       files: ['apps/cli/src/commands/sessions.ts'],
       repoRoot: REPO,
       related: false,
     });
     expect(plan.suite).toBe('selected');
-    expect(plan.budget_sec).toBe(180);
+    expect(plan.budget_sec).toBe(240);
     expect(plan.budget_sec).toBeGreaterThan(IMPACT_BUDGET_SEC);
   });
 
@@ -295,7 +297,7 @@ describe('selectImpact policy', () => {
       repoRoot: REPO,
       related: false,
     });
-    expect(plan.budget_sec).toBe(180);
+    expect(plan.budget_sec).toBe(240);
   });
 
   test('a budget below the default cannot tighten the gate', () => {
