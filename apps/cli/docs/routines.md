@@ -1035,14 +1035,25 @@ The agent can only:
 - Use tools listed in `allow.tools`
 - Cannot access `~/.ssh`, `~/.gitconfig`, etc.
 
-**Host tool credentials the overlay would otherwise hide are forwarded**
-(RUSH-2860): `prepareJobHome` links this machine's `~/.config/gh` (or
-`$GH_CONFIG_DIR`) and `~/.agents` into the overlay, and `buildSpawnEnv` pins
-`GH_CONFIG_DIR` / forwards `GH_TOKEN`/`GITHUB_TOKEN` so a sandboxed monitor
-`--run` child sees the same GitHub CLI auth as interactive `agents run`. If
-this host holds gh auth but the spawn env would hide it, the runner refuses to
-launch (fail loud) rather than recording a hollow `ok` fire. Same-host only —
-credentials are never copied to another box.
+**GitHub CLI auth the overlay would otherwise hide is forwarded** (RUSH-2860):
+`prepareJobHome` links this machine's `~/.config/gh` (or `$GH_CONFIG_DIR`) into
+the overlay, and `buildSpawnEnv` pins `GH_CONFIG_DIR` and forwards
+`GH_TOKEN`/`GITHUB_TOKEN`, so a sandboxed monitor `--run` child sees the same
+GitHub CLI auth as interactive `agents run`. Same-host only — credentials are
+never copied to another box. Nothing else from the host home is linked in: the
+overlay still does not contain `~/.ssh`, `~/.gitconfig`, or `~/.agents` (which
+holds the secrets master key and the encrypted store).
+
+`assertSandboxForwardsHostGhAuth` is a **regression tripwire, not a runtime
+guarantee**. It trips only when a routine's own `env:` overrides
+`GH_CONFIG_DIR`; it checks that a `hosts.yml` exists, not that `gh` can
+authenticate, so a `hosts.yml` left behind by `gh auth logout` still satisfies
+it.
+
+**Windows is not covered.** `resolveHostGhConfigDir` checks `$XDG_CONFIG_HOME/gh`
+and `~/.config/gh` only; `gh` on Windows stores config under
+`%AppData%\GitHub CLI`, so the forwarding is a no-op there and the new tests
+skip on `win32`.
 
 When an agent routine finishes, agents-cli copies the agent transcript out of
 the overlay before the next run recreates it. The durable copy lives beside the

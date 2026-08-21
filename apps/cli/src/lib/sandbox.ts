@@ -162,12 +162,18 @@ export function prepareJobHome(config: JobConfig): string {
   }
 
   // Host tool credentials / setup the overlay HOME would otherwise hide.
-  // Cursor already links its own auth above; gh + ~/.agents are harness-agnostic
-  // and needed by every sandboxed `--run` that shells out to `gh` or `agents`
-  // (RUSH-2860 — monitor merge agents saw "not logged into any GitHub hosts"
-  // and "agents-cli is not set up" while the daemon user was fine).
+  // Cursor already links its own auth above; gh is harness-agnostic and needed
+  // by every sandboxed `--run` that shells out to `gh` (RUSH-2860 — monitor
+  // merge agents saw "not logged into any GitHub hosts" while the daemon user
+  // was fine).
+  //
+  // Deliberately NOT linking the real ~/.agents here. It would put the secrets
+  // master key (.secrets-key) and the encrypted store (.cache/secrets) together
+  // at a predictable path inside the overlay, through a writable symlink, in a
+  // child whose prompt can carry untrusted text from a watched source. The
+  // separate "agents-cli is not set up" defect (state.ts ignores AGENTS_USER_DIR)
+  // gets its own scoped change.
   linkHostGhConfig(overlayHome);
-  linkHostAgentsDir(overlayHome);
 
   if (config.allow?.dirs) {
     symlinkAllowedDirs(overlayHome, config.allow.dirs);
@@ -192,24 +198,6 @@ export function linkHostGhConfig(overlayHome: string): void {
     createLink(realGhDir, overlayGhDir);
   } catch {
     /* cross-volume or link creation refused: GH_CONFIG_DIR in buildSpawnEnv is the backup */
-  }
-}
-
-/**
- * Link the real `~/.agents` into the overlay so a nested `agents` CLI started
- * under the sandboxed HOME still finds the system repo / setup sentinel. Without
- * this, `ensureInitialized` reads `$HOME/.agents/.system` on the empty overlay
- * and prints "agents-cli is not set up" (RUSH-2860).
- */
-export function linkHostAgentsDir(overlayHome: string): void {
-  const realAgents = getUserAgentsDir();
-  if (!fs.existsSync(realAgents)) return;
-  const overlayAgents = path.join(overlayHome, '.agents');
-  if (fs.existsSync(overlayAgents)) return;
-  try {
-    createLink(realAgents, overlayAgents);
-  } catch {
-    /* link refused: AGENTS_USER_DIR is still set for shims; nested agents CLI may still fail closed */
   }
 }
 
