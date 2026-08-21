@@ -133,6 +133,17 @@ groups:
     checks: [typecheck]
     budget_sec: 180
 
+  # 120s, not the default 85s. versions.ts is the install/sync hub: any edit
+  # selects companion + importer tests including daemon/runner and the
+  # heal-dangling suite. PR #2840 run 32436359101 measured 97s of a passing
+  # vitest run (heal-dangling 7/7) and failed the 85s gate. Raise this only
+  # against a measured run, and lower it when the suite is split.
+  - id: installations
+    when:
+      - apps/cli/src/lib/installations/**
+    checks: [typecheck]
+    budget_sec: 120
+
   # 150s, not the default 85s. Moving hooks.ts into hooks/install.ts (PR #2804,
   # run 32397180788) selected companion + importer tests inside a 129s impact
   # run (48 files / 1099 tests, all passed). Under 85s the move cannot merge.

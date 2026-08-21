@@ -266,6 +266,19 @@ describe('selectImpact policy', () => {
     expect(plan.budget_sec).toBeGreaterThan(IMPACT_BUDGET_SEC);
   });
 
+  test('an installations change carries the group budget, not the 85s default', () => {
+    // versions.ts is the install/sync hub. PR #2840 run 32436359101 measured
+    // 97s of a passing vitest run and failed the 85s gate.
+    const plan = selectImpact({
+      files: ['apps/cli/src/lib/installations/versions.ts'],
+      repoRoot: REPO,
+      related: false,
+    });
+    expect(plan.suite).toBe('selected');
+    expect(plan.budget_sec).toBe(120);
+    expect(plan.budget_sec).toBeGreaterThan(IMPACT_BUDGET_SEC);
+  });
+
   test('a daemon change carries the group budget, not the 85s default', () => {
     // runner.ts lives in daemon/; retargeting commands/routines.ts onto it
     // selects routines.test.ts (78 tests / 174s) inside a 213s impact run
