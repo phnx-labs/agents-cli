@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>agi-cli launch worksheet</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span><span class="status-badge status-draft">draft</span></div>
+<h1>agi-cli launch worksheet</h1>
+<p class="summary">Every open item to take agi-cli from 15 stars to a launched project, with an owner and a status on each. Four decisions are yours; the rest is work I can do once they are made.</p>
+<div class="meta" aria-label="Artifact metadata"><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agi-cli" target="_blank" rel="noopener">phnx-labs/agi-cli</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agi-cli/pull/2797" target="_blank" rel="noopener">Stars research (merged)</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agi-cli/pull/2809" target="_blank" rel="noopener">Launch post drafts (merged)</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">launch-worksheet</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fleet-worker</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/n%2Fa">n/a</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-20</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#summary" data-toc-for="summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a class="toc-item" href="#findings" data-toc-for="findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a class="toc-item toc-sub" href="#decisions-only-you-can-make" data-toc-for="decisions-only-you-can-make">Decisions only you can make</a><a class="toc-item toc-sub" href="#owner-key" data-toc-for="owner-key">Owner key</a><a class="toc-item" href="#evidence" data-toc-for="evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a><a class="toc-item" href="#recommendations" data-toc-for="recommendations"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Recommendations</a><a class="toc-item toc-sub" href="#phase-0-unblock-the-claims-before-any-launch" data-toc-for="phase-0-unblock-the-claims-before-any-launch">Phase 0 — unblock the claims (before any launch)</a><a class="toc-item toc-sub" href="#phase-1-fix-the-page" data-toc-for="phase-1-fix-the-page">Phase 1 — fix the page</a><a class="toc-item toc-sub" href="#phase-2-permanent-placement-start-now-has-lead-time" data-toc-for="phase-2-permanent-placement-start-now-has-lead-time">Phase 2 — permanent placement (start now, has lead time)</a><a class="toc-item toc-sub" href="#phase-3-the-48-hour-ignition" data-toc-for="phase-3-the-48-hour-ignition">Phase 3 — the 48-hour ignition</a><a class="toc-item toc-sub" href="#phase-4-cadence-from-day-3" data-toc-for="phase-4-cadence-from-day-3">Phase 4 — cadence (from day 3)</a><a class="toc-item toc-sub" href="#how-you-will-know-it-worked" data-toc-for="how-you-will-know-it-worked">How you will know it worked</a><a class="toc-item toc-sub" href="#what-i-am-not-doing-without-a-decision" data-toc-for="what-i-am-not-doing-without-a-decision">What I am NOT doing without a decision</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2><p>State as of 2026-08-20: <strong>15 stars, 17 open issues, 0 labelled <code>good first issue</code>,
+0 topics on three sibling repos, nothing posted to any venue.</strong></p>
+<p>Four decisions are yours. Everything else is work I can execute once those land.</p>
+<figure>
+<svg viewBox="0 0 760 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Progress bar showing 1 of 18 launch tasks complete, 4 decisions pending">
+  <text x="20" y="24" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#8a8a8a">LAUNCH READINESS</text>
+
+  <text x="20" y="56" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">Decisions</text>
+  <rect x="120" y="45" width="600" height="14" rx="3" fill="#e8e8e8"></rect>
+  <rect x="120" y="45" width="0" height="14" rx="3" fill="#4d7c0f"></rect>
+  <text x="728" y="56" font-family="ui-monospace, monospace" font-size="11" fill="#b45309">0 / 4</text>
+
+  <text x="20" y="86" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">Page fixes</text>
+  <rect x="120" y="75" width="600" height="14" rx="3" fill="#e8e8e8"></rect>
+  <rect x="120" y="75" width="120" height="14" rx="3" fill="#4d7c0f"></rect>
+  <text x="728" y="86" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">1 / 5</text>
+
+  <text x="20" y="116" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">Placement</text>
+  <rect x="120" y="105" width="600" height="14" rx="3" fill="#e8e8e8"></rect>
+  <rect x="120" y="105" width="0" height="14" rx="3" fill="#4d7c0f"></rect>
+  <text x="728" y="116" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">0 / 5</text>
+
+  <text x="20" y="140" font-family="system-ui, sans-serif" font-size="11" fill="#7a7a7a">Research and drafting are done and merged. Execution has not started.</text>
+</svg>
+<figcaption>One of eighteen tasks complete. The research phase is finished; nothing has been executed against a venue.</figcaption>
+</figure><h2 id="findings">Findings</h2><h3 id="decisions-only-you-can-make">Decisions only you can make</h3><p>Nothing below Phase 1 moves until these are settled.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Decision</th>
+<th>Options</th>
+<th>My recommendation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>D1</strong></td>
+<td>Launch at all, and when?</td>
+<td>Now (HN + PH only) · In ~2 weeks (full multi-channel) · Hold</td>
+<td><strong>2 weeks.</strong> Reddit needs aged accounts or the posts get removed, and the multi-channel 48h window is the whole mechanic</td>
+</tr>
+<tr>
+<td><strong>D2</strong></td>
+<td>Which Show HN title?</td>
+<td>A · C (B is out)</td>
+<td><strong>A</strong> — <code>Show HN: Open-source CLI that runs 16 coding agents across your own machines</code></td>
+</tr>
+<tr>
+<td><strong>D3</strong></td>
+<td>Fix RUSH-2858 before launching?</td>
+<td>Fix first · Launch and stay quiet about rotation</td>
+<td><strong>Fix first.</strong> Rotation is a top differentiator and a commenter can falsify it today</td>
+</tr>
+<tr>
+<td><strong>D4</strong></td>
+<td>Do I open the awesome-list PRs now?</td>
+<td>Yes · Wait for D1</td>
+<td><strong>Yes.</strong> They have review lag, they compound, and they do not depend on a launch date</td>
+</tr>
+</tbody></table>
+<h3 id="owner-key">Owner key</h3><p><strong>You</strong> = only you can do it. <strong>Me</strong> = I execute on your go-ahead. <strong>Either</strong> = I can
+draft, you approve before it goes out.</p>
+<h2 id="evidence">Evidence</h2><p>Current measured state, so the worksheet is not aspirational:</p>
+<table>
+<thead>
+<tr>
+<th>Signal</th>
+<th>Value</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Stars</td>
+<td><strong>15</strong></td>
+<td><code>gh repo view phnx-labs/agi-cli</code></td>
+</tr>
+<tr>
+<td>Open issues</td>
+<td><strong>17</strong></td>
+<td><code>gh issue list --state open</code></td>
+</tr>
+<tr>
+<td>Issues labelled <code>good first issue</code></td>
+<td><strong>0</strong></td>
+<td><code>gh issue list --label 'good first issue'</code></td>
+</tr>
+<tr>
+<td>Topics on <code>agi-cli</code></td>
+<td>10 (fine)</td>
+<td><code>gh repo view</code></td>
+</tr>
+<tr>
+<td>Topics on <code>.agents-system</code> / <code>.agents-extras</code> / <code>homebrew-tap</code></td>
+<td><strong>0 / 0 / 0</strong></td>
+<td><code>gh repo view</code> each</td>
+</tr>
+<tr>
+<td>Posted to any venue</td>
+<td><strong>none</strong></td>
+<td>—</td>
+</tr>
+<tr>
+<td>npm published</td>
+<td>1.22.42, installed matches</td>
+<td><code>npm view</code> / <code>agents --version</code></td>
+</tr>
+</tbody></table>
+<h2 id="recommendations">Recommendations</h2><h3 id="phase-0-unblock-the-claims-before-any-launch">Phase 0 — unblock the claims (before any launch)</h3><table>
+<thead>
+<tr>
+<th>✓</th>
+<th>Task</th>
+<th>Owner</th>
+<th>Ticket</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>☐</td>
+<td>Fix balanced rotation dispatching to session-limited accounts</td>
+<td>Me</td>
+<td>RUSH-2858</td>
+<td>Gates D3. Makes the rotation claim safe to say out loud</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>Fix <code>artifacts render</code> leaking device/session names</td>
+<td>Me</td>
+<td>RUSH-2846</td>
+<td>Also sweep already-merged artifacts that leak</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>Fix <code>pr-merge-on-green</code> never firing</td>
+<td>Me</td>
+<td>RUSH-2848</td>
+<td>Not launch-blocking, but it silently strands PRs today</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>Fix monitor children having no <code>gh</code> auth</td>
+<td>Me</td>
+<td>RUSH-2860</td>
+<td>Same class; a monitor reports <code>ok</code> and does nothing</td>
+</tr>
+</tbody></table>
+<p>None of these are launch-blocking except RUSH-2858. The other three are here
+because they are live defects found while doing this work, and they will bite
+whoever runs the launch automation.</p>
+<h3 id="phase-1-fix-the-page">Phase 1 — fix the page</h3><table>
+<thead>
+<tr>
+<th>✓</th>
+<th>Task</th>
+<th>Owner</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>☑</td>
+<td><strong>Make the hero demo render</strong></td>
+<td>Me</td>
+<td><strong>Done.</strong> Was a bare mp4 URL GitHub showed as a blue link; now an 860px GIF. Merged in #2797</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>Rewrite the opening sentence to one repeatable claim</td>
+<td>Either</td>
+<td>Draft ready: <em>"Run Claude, Codex, and Gemini in parallel across your own machines, on the subscriptions you already pay for."</em> Replaces the 12-capability run-on</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>Add per-feature demo GIFs, ranked by real usage</td>
+<td>Me</td>
+<td>Order is measured, not guessed: sessions (82,704 invocations) → run (63,236) → secrets (43,927) → teams (43,413) → browser (22,930) → computer (19,207)</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>Label 5-8 issues <code>good first issue</code>, answer the rest</td>
+<td>Either</td>
+<td>17 open, 0 labelled. Unanswered issues read as abandonment to a first-time visitor</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>Add topics to the three sibling repos</td>
+<td>Me</td>
+<td><code>.agents-system</code>, <code>.agents-extras</code>, <code>homebrew-tap</code> are all at 0</td>
+</tr>
+</tbody></table>
+<p>The browser demo needs three beats, not one: <strong>local</strong> profile, <strong>remote</strong>
+<code>--device</code>, and <strong>several agents sharing one browser</strong> via <code>--attach</code>. The third
+is the differentiated one and no competitor demo shows it.</p>
+<h3 id="phase-2-permanent-placement-start-now-has-lead-time">Phase 2 — permanent placement (start now, has lead time)</h3><table>
+<thead>
+<tr>
+<th>✓</th>
+<th>Target</th>
+<th>Owner</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>☐</td>
+<td><code>affaan-m/everything-claude-code</code></td>
+<td>Me</td>
+<td>163k stars — the single biggest one</td>
+</tr>
+<tr>
+<td>☐</td>
+<td><code>hesreallyhim/awesome-claude-code</code></td>
+<td>Me</td>
+<td></td>
+</tr>
+<tr>
+<td>☐</td>
+<td><code>sst/opencode</code> adjacent-tool lists</td>
+<td>Me</td>
+<td></td>
+</tr>
+<tr>
+<td>☐</td>
+<td><code>punkpeye/awesome-mcp-servers</code></td>
+<td>Me</td>
+<td>Only if an MCP surface genuinely qualifies</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>General <code>awesome-ai-agents-2026</code> lists</td>
+<td>Me</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Unlike an HN post, an accepted entry does not expire in 48 hours. This is the
+compounding asset and it is gated only on <strong>D4</strong>.</p>
+<h3 id="phase-3-the-48-hour-ignition">Phase 3 — the 48-hour ignition</h3><table>
+<thead>
+<tr>
+<th>✓</th>
+<th>When</th>
+<th>Task</th>
+<th>Owner</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>☐</td>
+<td>-14 days</td>
+<td>Start commenting in r/ClaudeAI, r/ClaudeCode, r/LocalLLaMA</td>
+<td><strong>You</strong> — needs a real human account with history</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>-1 day</td>
+<td>Pre-seed past 100 stars</td>
+<td><strong>You</strong> — colleagues, existing users</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>Hour 0 (Sun 7pm ET)</td>
+<td>Post the Show HN</td>
+<td><strong>You</strong> — your identity, your account</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>Hour 0 +1min</td>
+<td>Post the prepared first comment</td>
+<td><strong>You</strong> — draft is written</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>Hour 0-2</td>
+<td>r/ClaudeCode, r/LocalLLaMA, r/commandline</td>
+<td><strong>You</strong></td>
+</tr>
+<tr>
+<td>☐</td>
+<td>Hour 2</td>
+<td>X thread with the hero GIF</td>
+<td>Either</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>Hour 4</td>
+<td>Product Hunt</td>
+<td>Either</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>Hour 0-48</td>
+<td>Answer every comment personally</td>
+<td><strong>You</strong> — this drives ranking longevity</td>
+</tr>
+</tbody></table>
+<p>Cold accounts get removed, so the -14 day item is a real prerequisite, not a
+nicety. Everything in this phase is yours because it runs under your identity.</p>
+<h3 id="phase-4-cadence-from-day-3">Phase 4 — cadence (from day 3)</h3><table>
+<thead>
+<tr>
+<th>✓</th>
+<th>Task</th>
+<th>Owner</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>☑</td>
+<td>Weekly releases</td>
+<td>—</td>
+<td>Already happening</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>One written piece per week</td>
+<td>Either</td>
+<td></td>
+</tr>
+<tr>
+<td>☐</td>
+<td>Issue response within 24 hours</td>
+<td>Either</td>
+<td></td>
+</tr>
+<tr>
+<td>☐</td>
+<td>Follow-up Show HN on one subsystem, 4-6 weeks out</td>
+<td>Either</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>The 43-day mark is where the curve separates projects that kept pushing from
+those that took the spike and stopped.</p>
+<h3 id="how-you-will-know-it-worked">How you will know it worked</h3><table>
+<thead>
+<tr>
+<th>Milestone</th>
+<th>Benchmark</th>
+<th>Current</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Trending eligibility</td>
+<td>~50 stars/day</td>
+<td>0.18/day</td>
+</tr>
+<tr>
+<td>A coordinated launch</td>
+<td>~1,000 stars in 72h</td>
+<td>never attempted</td>
+</tr>
+<tr>
+<td>Genuine traction</td>
+<td>~6,000 stars in 7 days</td>
+<td>—</td>
+</tr>
+</tbody></table>
+<h3 id="what-i-am-not-doing-without-a-decision">What I am NOT doing without a decision</h3><ul>
+<li>Posting anything to any venue.</li>
+<li>Opening PRs against other people's repositories.</li>
+<li>Rewriting the README's opening claim, since the voice is yours.</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0ZW1wbGF0ZTogcmVwb3J0LnYxCnRpdGxlOiAnYWdpLWNsaSBsYXVuY2ggd29ya3NoZWV0JwpzdW1tYXJ5OiAnRXZlcnkgb3BlbiBpdGVtIHRvIHRha2UgYWdpLWNsaSBmcm9tIDE1IHN0YXJzIHRvIGEgbGF1bmNoZWQgcHJvamVjdCwgd2l0aCBhbiBvd25lciBhbmQgYSBzdGF0dXMgb24gZWFjaC4gRm91ciBkZWNpc2lvbnMgYXJlIHlvdXJzOyB0aGUgcmVzdCBpcyB3b3JrIEkgY2FuIGRvIG9uY2UgdGhleSBhcmUgbWFkZS4nCnN0YXR1czogZHJhZnQKaHVtYW46IGF1dGhvcgpob3N0OiBmbGVldC13b3JrZXIKc2Vzc2lvbjogbi9hCmxpbmtzOgogIC0gbGFiZWw6ICdwaG54LWxhYnMvYWdpLWNsaScKICAgIHVybDogJ2h0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvYWdpLWNsaScKICAtIGxhYmVsOiAnU3RhcnMgcmVzZWFyY2ggKG1lcmdlZCknCiAgICB1cmw6ICdodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnaS1jbGkvcHVsbC8yNzk3JwogIC0gbGFiZWw6ICdMYXVuY2ggcG9zdCBkcmFmdHMgKG1lcmdlZCknCiAgICB1cmw6ICdodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnaS1jbGkvcHVsbC8yODA5JwotLS0KCiMjIFN1bW1hcnkKClN0YXRlIGFzIG9mIDIwMjYtMDgtMjA6ICoqMTUgc3RhcnMsIDE3IG9wZW4gaXNzdWVzLCAwIGxhYmVsbGVkIGBnb29kIGZpcnN0IGlzc3VlYCwKMCB0b3BpY3Mgb24gdGhyZWUgc2libGluZyByZXBvcywgbm90aGluZyBwb3N0ZWQgdG8gYW55IHZlbnVlLioqCgpGb3VyIGRlY2lzaW9ucyBhcmUgeW91cnMuIEV2ZXJ5dGhpbmcgZWxzZSBpcyB3b3JrIEkgY2FuIGV4ZWN1dGUgb25jZSB0aG9zZSBsYW5kLgoKPGZpZ3VyZT4KPHN2ZyB2aWV3Qm94PSIwIDAgNzYwIDE1MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IlByb2dyZXNzIGJhciBzaG93aW5nIDEgb2YgMTggbGF1bmNoIHRhc2tzIGNvbXBsZXRlLCA0IGRlY2lzaW9ucyBwZW5kaW5nIj4KICA8dGV4dCB4PSIyMCIgeT0iMjQiIGZvbnQtZmFtaWx5PSJzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZvbnQtd2VpZ2h0PSI2MDAiIGZpbGw9IiM4YThhOGEiPkxBVU5DSCBSRUFESU5FU1M8L3RleHQ+CgogIDx0ZXh0IHg9IjIwIiB5PSI1NiIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjN2E3YTdhIj5EZWNpc2lvbnM8L3RleHQ+CiAgPHJlY3QgeD0iMTIwIiB5PSI0NSIgd2lkdGg9IjYwMCIgaGVpZ2h0PSIxNCIgcng9IjMiIGZpbGw9IiNlOGU4ZTgiLz4KICA8cmVjdCB4PSIxMjAiIHk9IjQ1IiB3aWR0aD0iMCIgaGVpZ2h0PSIxNCIgcng9IjMiIGZpbGw9IiM0ZDdjMGYiLz4KICA8dGV4dCB4PSI3MjgiIHk9IjU2IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNiNDUzMDkiPjAgLyA0PC90ZXh0PgoKICA8dGV4dCB4PSIyMCIgeT0iODYiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzdhN2E3YSI+UGFnZSBmaXhlczwvdGV4dD4KICA8cmVjdCB4PSIxMjAiIHk9Ijc1IiB3aWR0aD0iNjAwIiBoZWlnaHQ9IjE0IiByeD0iMyIgZmlsbD0iI2U4ZThlOCIvPgogIDxyZWN0IHg9IjEyMCIgeT0iNzUiIHdpZHRoPSIxMjAiIGhlaWdodD0iMTQiIHJ4PSIzIiBmaWxsPSIjNGQ3YzBmIi8+CiAgPHRleHQgeD0iNzI4IiB5PSI4NiIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjN2E3YTdhIj4xIC8gNTwvdGV4dD4KCiAgPHRleHQgeD0iMjAiIHk9IjExNiIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjN2E3YTdhIj5QbGFjZW1lbnQ8L3RleHQ+CiAgPHJlY3QgeD0iMTIwIiB5PSIxMDUiIHdpZHRoPSI2MDAiIGhlaWdodD0iMTQiIHJ4PSIzIiBmaWxsPSIjZThlOGU4Ii8+CiAgPHJlY3QgeD0iMTIwIiB5PSIxMDUiIHdpZHRoPSIwIiBoZWlnaHQ9IjE0IiByeD0iMyIgZmlsbD0iIzRkN2MwZiIvPgogIDx0ZXh0IHg9IjcyOCIgeT0iMTE2IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM3YTdhN2EiPjAgLyA1PC90ZXh0PgoKICA8dGV4dCB4PSIyMCIgeT0iMTQwIiBmb250LWZhbWlseT0ic3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIiBmaWxsPSIjN2E3YTdhIj5SZXNlYXJjaCBhbmQgZHJhZnRpbmcgYXJlIGRvbmUgYW5kIG1lcmdlZC4gRXhlY3V0aW9uIGhhcyBub3Qgc3RhcnRlZC48L3RleHQ+Cjwvc3ZnPgo8ZmlnY2FwdGlvbj5PbmUgb2YgZWlnaHRlZW4gdGFza3MgY29tcGxldGUuIFRoZSByZXNlYXJjaCBwaGFzZSBpcyBmaW5pc2hlZDsgbm90aGluZyBoYXMgYmVlbiBleGVjdXRlZCBhZ2FpbnN0IGEgdmVudWUuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCiMjIEZpbmRpbmdzCgojIyMgRGVjaXNpb25zIG9ubHkgeW91IGNhbiBtYWtlCgpOb3RoaW5nIGJlbG93IFBoYXNlIDEgbW92ZXMgdW50aWwgdGhlc2UgYXJlIHNldHRsZWQuCgp8ICMgfCBEZWNpc2lvbiB8IE9wdGlvbnMgfCBNeSByZWNvbW1lbmRhdGlvbiB8CnwgLS0tIHwgLS0tIHwgLS0tIHwgLS0tIHwKfCAqKkQxKiogfCBMYXVuY2ggYXQgYWxsLCBhbmQgd2hlbj8gfCBOb3cgKEhOICsgUEggb25seSkgwrcgSW4gfjIgd2Vla3MgKGZ1bGwgbXVsdGktY2hhbm5lbCkgwrcgSG9sZCB8ICoqMiB3ZWVrcy4qKiBSZWRkaXQgbmVlZHMgYWdlZCBhY2NvdW50cyBvciB0aGUgcG9zdHMgZ2V0IHJlbW92ZWQsIGFuZCB0aGUgbXVsdGktY2hhbm5lbCA0OGggd2luZG93IGlzIHRoZSB3aG9sZSBtZWNoYW5pYyB8CnwgKipEMioqIHwgV2hpY2ggU2hvdyBITiB0aXRsZT8gfCBBIMK3IEMgKEIgaXMgb3V0KSB8ICoqQSoqIOKAlCBgU2hvdyBITjogT3Blbi1zb3VyY2UgQ0xJIHRoYXQgcnVucyAxNiBjb2RpbmcgYWdlbnRzIGFjcm9zcyB5b3VyIG93biBtYWNoaW5lc2AgfAp8ICoqRDMqKiB8IEZpeCBSVVNILTI4NTggYmVmb3JlIGxhdW5jaGluZz8gfCBGaXggZmlyc3QgwrcgTGF1bmNoIGFuZCBzdGF5IHF1aWV0IGFib3V0IHJvdGF0aW9uIHwgKipGaXggZmlyc3QuKiogUm90YXRpb24gaXMgYSB0b3AgZGlmZmVyZW50aWF0b3IgYW5kIGEgY29tbWVudGVyIGNhbiBmYWxzaWZ5IGl0IHRvZGF5IHwKfCAqKkQ0KiogfCBEbyBJIG9wZW4gdGhlIGF3ZXNvbWUtbGlzdCBQUnMgbm93PyB8IFllcyDCtyBXYWl0IGZvciBEMSB8ICoqWWVzLioqIFRoZXkgaGF2ZSByZXZpZXcgbGFnLCB0aGV5IGNvbXBvdW5kLCBhbmQgdGhleSBkbyBub3QgZGVwZW5kIG9uIGEgbGF1bmNoIGRhdGUgfAoKIyMjIE93bmVyIGtleQoKKipZb3UqKiA9IG9ubHkgeW91IGNhbiBkbyBpdC4gKipNZSoqID0gSSBleGVjdXRlIG9uIHlvdXIgZ28tYWhlYWQuICoqRWl0aGVyKiogPSBJIGNhbgpkcmFmdCwgeW91IGFwcHJvdmUgYmVmb3JlIGl0IGdvZXMgb3V0LgoKIyMgRXZpZGVuY2UKCkN1cnJlbnQgbWVhc3VyZWQgc3RhdGUsIHNvIHRoZSB3b3Jrc2hlZXQgaXMgbm90IGFzcGlyYXRpb25hbDoKCnwgU2lnbmFsIHwgVmFsdWUgfCBTb3VyY2UgfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgU3RhcnMgfCAqKjE1KiogfCBgZ2ggcmVwbyB2aWV3IHBobngtbGFicy9hZ2ktY2xpYCB8CnwgT3BlbiBpc3N1ZXMgfCAqKjE3KiogfCBgZ2ggaXNzdWUgbGlzdCAtLXN0YXRlIG9wZW5gIHwKfCBJc3N1ZXMgbGFiZWxsZWQgYGdvb2QgZmlyc3QgaXNzdWVgIHwgKiowKiogfCBgZ2ggaXNzdWUgbGlzdCAtLWxhYmVsICdnb29kIGZpcnN0IGlzc3VlJ2AgfAp8IFRvcGljcyBvbiBgYWdpLWNsaWAgfCAxMCAoZmluZSkgfCBgZ2ggcmVwbyB2aWV3YCB8CnwgVG9waWNzIG9uIGAuYWdlbnRzLXN5c3RlbWAgLyBgLmFnZW50cy1leHRyYXNgIC8gYGhvbWVicmV3LXRhcGAgfCAqKjAgLyAwIC8gMCoqIHwgYGdoIHJlcG8gdmlld2AgZWFjaCB8CnwgUG9zdGVkIHRvIGFueSB2ZW51ZSB8ICoqbm9uZSoqIHwg4oCUIHwKfCBucG0gcHVibGlzaGVkIHwgMS4yMi40MiwgaW5zdGFsbGVkIG1hdGNoZXMgfCBgbnBtIHZpZXdgIC8gYGFnZW50cyAtLXZlcnNpb25gIHwKCiMjIFJlY29tbWVuZGF0aW9ucwoKIyMjIFBoYXNlIDAg4oCUIHVuYmxvY2sgdGhlIGNsYWltcyAoYmVmb3JlIGFueSBsYXVuY2gpCgp8IOKckyB8IFRhc2sgfCBPd25lciB8IFRpY2tldCB8IE5vdGVzIHwKfCAtLS0gfCAtLS0gfCAtLS0gfCAtLS0gfCAtLS0gfAp8IOKYkCB8IEZpeCBiYWxhbmNlZCByb3RhdGlvbiBkaXNwYXRjaGluZyB0byBzZXNzaW9uLWxpbWl0ZWQgYWNjb3VudHMgfCBNZSB8IFJVU0gtMjg1OCB8IEdhdGVzIEQzLiBNYWtlcyB0aGUgcm90YXRpb24gY2xhaW0gc2FmZSB0byBzYXkgb3V0IGxvdWQgfAp8IOKYkCB8IEZpeCBgYXJ0aWZhY3RzIHJlbmRlcmAgbGVha2luZyBkZXZpY2Uvc2Vzc2lvbiBuYW1lcyB8IE1lIHwgUlVTSC0yODQ2IHwgQWxzbyBzd2VlcCBhbHJlYWR5LW1lcmdlZCBhcnRpZmFjdHMgdGhhdCBsZWFrIHwKfCDimJAgfCBGaXggYHByLW1lcmdlLW9uLWdyZWVuYCBuZXZlciBmaXJpbmcgfCBNZSB8IFJVU0gtMjg0OCB8IE5vdCBsYXVuY2gtYmxvY2tpbmcsIGJ1dCBpdCBzaWxlbnRseSBzdHJhbmRzIFBScyB0b2RheSB8Cnwg4piQIHwgRml4IG1vbml0b3IgY2hpbGRyZW4gaGF2aW5nIG5vIGBnaGAgYXV0aCB8IE1lIHwgUlVTSC0yODYwIHwgU2FtZSBjbGFzczsgYSBtb25pdG9yIHJlcG9ydHMgYG9rYCBhbmQgZG9lcyBub3RoaW5nIHwKCk5vbmUgb2YgdGhlc2UgYXJlIGxhdW5jaC1ibG9ja2luZyBleGNlcHQgUlVTSC0yODU4LiBUaGUgb3RoZXIgdGhyZWUgYXJlIGhlcmUKYmVjYXVzZSB0aGV5IGFyZSBsaXZlIGRlZmVjdHMgZm91bmQgd2hpbGUgZG9pbmcgdGhpcyB3b3JrLCBhbmQgdGhleSB3aWxsIGJpdGUKd2hvZXZlciBydW5zIHRoZSBsYXVuY2ggYXV0b21hdGlvbi4KCiMjIyBQaGFzZSAxIOKAlCBmaXggdGhlIHBhZ2UKCnwg4pyTIHwgVGFzayB8IE93bmVyIHwgTm90ZXMgfAp8IC0tLSB8IC0tLSB8IC0tLSB8IC0tLSB8Cnwg4piRIHwgKipNYWtlIHRoZSBoZXJvIGRlbW8gcmVuZGVyKiogfCBNZSB8ICoqRG9uZS4qKiBXYXMgYSBiYXJlIG1wNCBVUkwgR2l0SHViIHNob3dlZCBhcyBhIGJsdWUgbGluazsgbm93IGFuIDg2MHB4IEdJRi4gTWVyZ2VkIGluICMyNzk3IHwKfCDimJAgfCBSZXdyaXRlIHRoZSBvcGVuaW5nIHNlbnRlbmNlIHRvIG9uZSByZXBlYXRhYmxlIGNsYWltIHwgRWl0aGVyIHwgRHJhZnQgcmVhZHk6ICoiUnVuIENsYXVkZSwgQ29kZXgsIGFuZCBHZW1pbmkgaW4gcGFyYWxsZWwgYWNyb3NzIHlvdXIgb3duIG1hY2hpbmVzLCBvbiB0aGUgc3Vic2NyaXB0aW9ucyB5b3UgYWxyZWFkeSBwYXkgZm9yLiIqIFJlcGxhY2VzIHRoZSAxMi1jYXBhYmlsaXR5IHJ1bi1vbiB8Cnwg4piQIHwgQWRkIHBlci1mZWF0dXJlIGRlbW8gR0lGcywgcmFua2VkIGJ5IHJlYWwgdXNhZ2UgfCBNZSB8IE9yZGVyIGlzIG1lYXN1cmVkLCBub3QgZ3Vlc3NlZDogc2Vzc2lvbnMgKDgyLDcwNCBpbnZvY2F0aW9ucykg4oaSIHJ1biAoNjMsMjM2KSDihpIgc2VjcmV0cyAoNDMsOTI3KSDihpIgdGVhbXMgKDQzLDQxMykg4oaSIGJyb3dzZXIgKDIyLDkzMCkg4oaSIGNvbXB1dGVyICgxOSwyMDcpIHwKfCDimJAgfCBMYWJlbCA1LTggaXNzdWVzIGBnb29kIGZpcnN0IGlzc3VlYCwgYW5zd2VyIHRoZSByZXN0IHwgRWl0aGVyIHwgMTcgb3BlbiwgMCBsYWJlbGxlZC4gVW5hbnN3ZXJlZCBpc3N1ZXMgcmVhZCBhcyBhYmFuZG9ubWVudCB0byBhIGZpcnN0LXRpbWUgdmlzaXRvciB8Cnwg4piQIHwgQWRkIHRvcGljcyB0byB0aGUgdGhyZWUgc2libGluZyByZXBvcyB8IE1lIHwgYC5hZ2VudHMtc3lzdGVtYCwgYC5hZ2VudHMtZXh0cmFzYCwgYGhvbWVicmV3LXRhcGAgYXJlIGFsbCBhdCAwIHwKClRoZSBicm93c2VyIGRlbW8gbmVlZHMgdGhyZWUgYmVhdHMsIG5vdCBvbmU6ICoqbG9jYWwqKiBwcm9maWxlLCAqKnJlbW90ZSoqCmAtLWRldmljZWAsIGFuZCAqKnNldmVyYWwgYWdlbnRzIHNoYXJpbmcgb25lIGJyb3dzZXIqKiB2aWEgYC0tYXR0YWNoYC4gVGhlIHRoaXJkCmlzIHRoZSBkaWZmZXJlbnRpYXRlZCBvbmUgYW5kIG5vIGNvbXBldGl0b3IgZGVtbyBzaG93cyBpdC4KCiMjIyBQaGFzZSAyIOKAlCBwZXJtYW5lbnQgcGxhY2VtZW50IChzdGFydCBub3csIGhhcyBsZWFkIHRpbWUpCgp8IOKckyB8IFRhcmdldCB8IE93bmVyIHwgTm90ZXMgfAp8IC0tLSB8IC0tLSB8IC0tLSB8IC0tLSB8Cnwg4piQIHwgYGFmZmFhbi1tL2V2ZXJ5dGhpbmctY2xhdWRlLWNvZGVgIHwgTWUgfCAxNjNrIHN0YXJzIOKAlCB0aGUgc2luZ2xlIGJpZ2dlc3Qgb25lIHwKfCDimJAgfCBgaGVzcmVhbGx5aGltL2F3ZXNvbWUtY2xhdWRlLWNvZGVgIHwgTWUgfCB8Cnwg4piQIHwgYHNzdC9vcGVuY29kZWAgYWRqYWNlbnQtdG9vbCBsaXN0cyB8IE1lIHwgfAp8IOKYkCB8IGBwdW5rcGV5ZS9hd2Vzb21lLW1jcC1zZXJ2ZXJzYCB8IE1lIHwgT25seSBpZiBhbiBNQ1Agc3VyZmFjZSBnZW51aW5lbHkgcXVhbGlmaWVzIHwKfCDimJAgfCBHZW5lcmFsIGBhd2Vzb21lLWFpLWFnZW50cy0yMDI2YCBsaXN0cyB8IE1lIHwgfAoKVW5saWtlIGFuIEhOIHBvc3QsIGFuIGFjY2VwdGVkIGVudHJ5IGRvZXMgbm90IGV4cGlyZSBpbiA0OCBob3Vycy4gVGhpcyBpcyB0aGUKY29tcG91bmRpbmcgYXNzZXQgYW5kIGl0IGlzIGdhdGVkIG9ubHkgb24gKipENCoqLgoKIyMjIFBoYXNlIDMg4oCUIHRoZSA0OC1ob3VyIGlnbml0aW9uCgp8IOKckyB8IFdoZW4gfCBUYXNrIHwgT3duZXIgfAp8IC0tLSB8IC0tLSB8IC0tLSB8IC0tLSB8Cnwg4piQIHwgLTE0IGRheXMgfCBTdGFydCBjb21tZW50aW5nIGluIHIvQ2xhdWRlQUksIHIvQ2xhdWRlQ29kZSwgci9Mb2NhbExMYU1BIHwgKipZb3UqKiDigJQgbmVlZHMgYSByZWFsIGh1bWFuIGFjY291bnQgd2l0aCBoaXN0b3J5IHwKfCDimJAgfCAtMSBkYXkgfCBQcmUtc2VlZCBwYXN0IDEwMCBzdGFycyB8ICoqWW91Kiog4oCUIGNvbGxlYWd1ZXMsIGV4aXN0aW5nIHVzZXJzIHwKfCDimJAgfCBIb3VyIDAgKFN1biA3cG0gRVQpIHwgUG9zdCB0aGUgU2hvdyBITiB8ICoqWW91Kiog4oCUIHlvdXIgaWRlbnRpdHksIHlvdXIgYWNjb3VudCB8Cnwg4piQIHwgSG91ciAwICsxbWluIHwgUG9zdCB0aGUgcHJlcGFyZWQgZmlyc3QgY29tbWVudCB8ICoqWW91Kiog4oCUIGRyYWZ0IGlzIHdyaXR0ZW4gfAp8IOKYkCB8IEhvdXIgMC0yIHwgci9DbGF1ZGVDb2RlLCByL0xvY2FsTExhTUEsIHIvY29tbWFuZGxpbmUgfCAqKllvdSoqIHwKfCDimJAgfCBIb3VyIDIgfCBYIHRocmVhZCB3aXRoIHRoZSBoZXJvIEdJRiB8IEVpdGhlciB8Cnwg4piQIHwgSG91ciA0IHwgUHJvZHVjdCBIdW50IHwgRWl0aGVyIHwKfCDimJAgfCBIb3VyIDAtNDggfCBBbnN3ZXIgZXZlcnkgY29tbWVudCBwZXJzb25hbGx5IHwgKipZb3UqKiDigJQgdGhpcyBkcml2ZXMgcmFua2luZyBsb25nZXZpdHkgfAoKQ29sZCBhY2NvdW50cyBnZXQgcmVtb3ZlZCwgc28gdGhlIC0xNCBkYXkgaXRlbSBpcyBhIHJlYWwgcHJlcmVxdWlzaXRlLCBub3QgYQpuaWNldHkuIEV2ZXJ5dGhpbmcgaW4gdGhpcyBwaGFzZSBpcyB5b3VycyBiZWNhdXNlIGl0IHJ1bnMgdW5kZXIgeW91ciBpZGVudGl0eS4KCiMjIyBQaGFzZSA0IOKAlCBjYWRlbmNlIChmcm9tIGRheSAzKQoKfCDinJMgfCBUYXNrIHwgT3duZXIgfCBOb3RlcyB8CnwgLS0tIHwgLS0tIHwgLS0tIHwgLS0tIHwKfCDimJEgfCBXZWVrbHkgcmVsZWFzZXMgfCDigJQgfCBBbHJlYWR5IGhhcHBlbmluZyB8Cnwg4piQIHwgT25lIHdyaXR0ZW4gcGllY2UgcGVyIHdlZWsgfCBFaXRoZXIgfCB8Cnwg4piQIHwgSXNzdWUgcmVzcG9uc2Ugd2l0aGluIDI0IGhvdXJzIHwgRWl0aGVyIHwgfAp8IOKYkCB8IEZvbGxvdy11cCBTaG93IEhOIG9uIG9uZSBzdWJzeXN0ZW0sIDQtNiB3ZWVrcyBvdXQgfCBFaXRoZXIgfCB8CgpUaGUgNDMtZGF5IG1hcmsgaXMgd2hlcmUgdGhlIGN1cnZlIHNlcGFyYXRlcyBwcm9qZWN0cyB0aGF0IGtlcHQgcHVzaGluZyBmcm9tCnRob3NlIHRoYXQgdG9vayB0aGUgc3Bpa2UgYW5kIHN0b3BwZWQuCgojIyMgSG93IHlvdSB3aWxsIGtub3cgaXQgd29ya2VkCgp8IE1pbGVzdG9uZSB8IEJlbmNobWFyayB8IEN1cnJlbnQgfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgVHJlbmRpbmcgZWxpZ2liaWxpdHkgfCB+NTAgc3RhcnMvZGF5IHwgMC4xOC9kYXkgfAp8IEEgY29vcmRpbmF0ZWQgbGF1bmNoIHwgfjEsMDAwIHN0YXJzIGluIDcyaCB8IG5ldmVyIGF0dGVtcHRlZCB8CnwgR2VudWluZSB0cmFjdGlvbiB8IH42LDAwMCBzdGFycyBpbiA3IGRheXMgfCDigJQgfAoKIyMjIFdoYXQgSSBhbSBOT1QgZG9pbmcgd2l0aG91dCBhIGRlY2lzaW9uCgotIFBvc3RpbmcgYW55dGhpbmcgdG8gYW55IHZlbnVlLgotIE9wZW5pbmcgUFJzIGFnYWluc3Qgb3RoZXIgcGVvcGxlJ3MgcmVwb3NpdG9yaWVzLgotIFJld3JpdGluZyB0aGUgUkVBRE1FJ3Mgb3BlbmluZyBjbGFpbSwgc2luY2UgdGhlIHZvaWNlIGlzIHlvdXJzLgo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>
