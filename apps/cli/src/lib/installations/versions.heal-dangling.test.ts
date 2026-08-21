@@ -60,6 +60,7 @@ function runInHome(home: string, body: string): Record<string, unknown> {
       setGlobalDefault,
       getGlobalDefault,
       setIsolatedDefault,
+      getIsolatedDefault,
       resolveVersion,
       isVersionInstalled,
     } from ${JSON.stringify(moduleUrl)};
@@ -193,6 +194,20 @@ describe('healDanglingVersionPointers (RUSH-2471)', () => {
     expect(res.error).toBeNull();
     expect(res.healed).toEqual({ globalDefault: { from: '1.0.0', to: null } });
     expect(res.symlinkNow).toBe('1.0.0');
+  });
+
+  it('heals a dead isolated default onto the newest remaining isolated install', () => {
+    const home = makeTempHome();
+    const res = runInHome(home, `
+      leftoverGrok('0.2.0'); isolateGrok('0.2.0');
+      installGrok('0.3.0'); isolateGrok('0.3.0');
+      setIsolatedDefault('grok', '0.2.0');
+
+      const healed = await healDanglingVersionPointers('grok', process.cwd());
+      console.log(JSON.stringify({ healed, isolatedNow: getIsolatedDefault('grok') }));
+    `);
+    expect(res.healed).toEqual({ isolatedDefault: { from: '0.2.0', to: '0.3.0' } });
+    expect(res.isolatedNow).toBe('0.3.0');
   });
 
   it('leaves installed pointers untouched (a deliberate agents-use choice)', () => {
