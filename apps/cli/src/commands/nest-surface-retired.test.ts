@@ -79,6 +79,14 @@ describe('RUSH-2989 nested leftover aliases', () => {
     expect(RETIRED_TOP_LEVEL_COMMANDS.has('org')).toBe(false);
   });
 
+  it('`agents org list` still runs and prints the auth space deprecation on stderr', () => {
+    const home = guardedHome();
+    const r = run(home, 'org', 'list');
+    expect(r.stderr ?? '').toMatch(/agents org is deprecated — use `agents auth space`/);
+    expect(r.stderr ?? '').toMatch(/Not signed in/);
+    expect(r.status).not.toBe(0);
+  });
+
   it.each(['unshare', 'audit', 'trends'] as const)(
     'a bare `agents %s` is an unknown command, not an auto-correct',
     (name) => {

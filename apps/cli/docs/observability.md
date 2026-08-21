@@ -49,7 +49,7 @@ Second names for the product jobs were retired rather than kept as duplicated do
 | What did agents post? | `agents feed --filter updates` |
 | Who is live? | `agents sessions --active` |
 
-`agents inbox`, `agents timeline`, and `agents roster` are gone (unknown command). `agents audit` and `agents logs` **are** aliases of `events` (with default family filters). Do not re-introduce a second store or query path.
+`agents inbox`, `agents timeline`, `agents roster`, and `agents audit` are gone (unknown command). Dispatched-run outcomes are `agents events --include runs` / `agents events audit`. `agents logs` still aliases the events reader. Do not re-introduce a second store or query path.
 
 ### Delivery vs record vs control (RUSH-2123)
 
@@ -196,7 +196,7 @@ active file rotates losslessly to `events.1.jsonl.gz`; older segments shift to
 `events.2.jsonl.gz`, `events.3.jsonl.gz`, and so on. Automatic cleanup keeps at
 most seven days and 50 MiB per machine. `agents events rotate --days <n> --max-mb <n>` applies both limits immediately.
 
-`agents events` is the canonical reader. `agents logs` and `agents audit` are thin aliases (same handler, default family filters).
+`agents events` is the canonical reader. `agents logs` is a thin alias (same handler). `agents events audit` is the nested alias of `--include runs`. Top-level `agents audit` is gone.
 
 The recording is a single choke point — a commander `preAction`/`postAction`
 hook on the root program ([`src/index.ts`](../src/index.ts)) emits `command.start`
@@ -399,8 +399,8 @@ agents events -f                           # live tail
 agents events stats [--since 7d]
 agents events rotate [--days 7] [--max-mb 50]
 
-# Thin aliases (same engine)
-agents audit                               # ≡ events --include runs
+# Nested / remaining aliases (same engine)
+agents events audit                        # ≡ events --include runs
 agents logs                                # ≡ events
 agents logs audit                          # ≡ events --include ops
 agents logs stats                          # ≡ events stats

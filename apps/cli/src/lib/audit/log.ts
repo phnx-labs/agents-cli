@@ -6,7 +6,7 @@
  * NOT append there. Operators list run outcomes with:
  *
  *   agents events --include runs
- *   agents audit                 # alias of the above
+ *   agents events audit          # nested alias of the above
  */
 
 import * as fs from 'fs';
@@ -138,7 +138,7 @@ export function verifyAuditChain(logPath: string = getAuditLogPath()): { ok: boo
   return { ok: true };
 }
 
-/** Read the whole chain, oldest-first. Exposed for `agents audit list`. */
+/** Read the whole chain, oldest-first. Exposed for `agents events audit verify`. */
 export function readAuditLog(logPath: string = getAuditLogPath()): AuditRecord[] {
   return readRecords(logPath);
 }

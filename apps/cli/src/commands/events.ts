@@ -231,7 +231,7 @@ export function addEventsReadOptions(command: Command, includeAuditFlag: boolean
   return command;
 }
 
-/** Canonical reader used by `agents events`, `agents audit`, and `agents logs`. */
+/** Canonical reader used by `agents events`, `agents events audit`, and `agents logs`. */
 export async function runEventsCommand(options: EventsOptions, forceAudit: boolean = false): Promise<void> {
   if (options.follow) {
     await followLog();
