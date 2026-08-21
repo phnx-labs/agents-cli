@@ -44,6 +44,17 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
   keeps its own 1s leaf heartbeat and overrides `since` for running and stalled
   agents. Source: `ui/settings/components/mission-control/UnifiedAgentsPane.tsx`.
 
+- **Every compact Fleet row now says what its agent is DOING, not just what it is
+  called.** A compact row's title is the agent's name, and the one-line preview
+  under it was gated on the full-card layout — so a compact row only ever showed
+  prose if that agent happened to have produced a response. Every other row read
+  `heartbeat-lastactivity  agents-cli  running` and nothing else. The preview now
+  renders on compact rows too, falling back down `sessionTaskLine`'s existing chain
+  (prompt -> summary -> response -> worktree slug) so a row is never contextless.
+  It stays exactly one line: when the agent has produced a response, that response
+  is the line rather than a second one being added beneath it. Full cards are
+  unchanged. Source: `ui/settings/components/mission-control/FeedItem.tsx`.
+
 - **The Fleet panel stops burying idle-but-unfinished work below running work
   (RUSH-2838).** The root `AGENTS.md` "Purpose" section makes idle-but-unfinished
   the highest-risk state — the one most likely to be silently abandoned — and says

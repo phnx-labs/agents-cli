@@ -120,9 +120,20 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
   const showTask = !plain && !!prompt && prompt.trim().includes('\n')
   // Only show the rolling summary line when it adds signal beyond the task block, the
   // response body, and the now-line (it merely echoes the prompt when they match).
+  // Not gated on `plain`. A compact row whose agent has said nothing yet used to
+  // render a bare title — `heartbeat-lastactivity  agents-cli  running` — which
+  // says what the agent is CALLED and nothing about what it is DOING. The
+  // response block below (:218) only covers agents that have produced one, so
+  // every other compact row was contextless. sessionTaskLine's chain (prompt ->
+  // summary -> resp -> worktree) always yields something, and the three guards
+  // below already stop it echoing the response, the now-line, or the task block.
   const showSummary =
-    !plain && !!taskLine && taskLine !== a.resp.trim() && taskLine !== nowlineText &&
-    !(showTask && taskLine === prompt)
+    !!taskLine && taskLine !== a.resp.trim() && taskLine !== nowlineText &&
+    !(showTask && taskLine === prompt) &&
+    // A compact row gets exactly ONE preview line. When the agent has produced a
+    // response, that response is the line (:218) — adding the prompt beneath it
+    // makes the row a line taller for signal the operator already has.
+    !(plain && !!a.resp.trim())
   // The now-line is a LIVE-activity indicator — only meaningful while the agent is
   // actively working (running) or stuck mid-action (stalled). For an idle / needs-you /
   // done agent there's no live activity, and the verb is just the "Thinking..." fallback,

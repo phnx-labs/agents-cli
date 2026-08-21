@@ -18,6 +18,11 @@ import { FloorRail } from '../components/mission-control/FloorRail'
 import { FloorControls, floorControlsMode } from '../components/mission-control/FloorControls'
 import { FloorSubtabs, openTaskTab, closeTaskTab, type FixedTab, type TaskTab } from '../components/mission-control/FloorSubtabs'
 import { FeedItem, TicketStrip } from '../components/mission-control/FeedItem'
+
+// Compact ('plain') rows are a real display preference, so the harness has to be
+// able to render them; every FeedItem below reads this instead of hardcoding
+// plain={PREVIEW_PLAIN}, which made the compact layout uninspectable.
+const PREVIEW_PLAIN = new URLSearchParams(location.search).get('plain') === '1'
 import { SessionsPane } from '../components/mission-control/SessionsPane'
 import { SavedViews } from '../components/mission-control/SavedViewsBar'
 import { DispatchPanel } from '../components/mission-control/DispatchPanel'
@@ -307,7 +312,7 @@ function AgentsFeed(props: { stale?: boolean; showNeeds?: boolean } = {}) {
       <FloorControls
         mode="agents"
         needsCount={2}
-        sidebarOpen rightOpen plain={false}
+        sidebarOpen rightOpen plain={PREVIEW_PLAIN}
         onToggleSidebar={noop} onToggleRight={noop} onTogglePlain={noop}
         sort={srt} onSort={setSrt}
         ticketGroup="project" onTicketGroup={noop}
@@ -346,11 +351,11 @@ function AgentsFeed(props: { stale?: boolean; showNeeds?: boolean } = {}) {
             <Icon name="alert" size={11} /> NEEDS YOU · 5
             <span className="ln" />
           </div>
-          <FeedItem agent={idleThinkingAgent} selected={false} plain={false} {...feedHandlers} />
-          <FeedItem agent={twinA} selected={false} plain={false} {...feedHandlers} />
-          <FeedItem agent={twinB} selected={false} plain={false} {...feedHandlers} />
-          <FeedItem agent={askAgent} selected={false} plain={false} {...feedHandlers} />
-          <FeedItem agent={reviewAgent} selected={false} plain={false} {...feedHandlers} />
+          <FeedItem agent={idleThinkingAgent} selected={false} plain={PREVIEW_PLAIN} {...feedHandlers} />
+          <FeedItem agent={twinA} selected={false} plain={PREVIEW_PLAIN} {...feedHandlers} />
+          <FeedItem agent={twinB} selected={false} plain={PREVIEW_PLAIN} {...feedHandlers} />
+          <FeedItem agent={askAgent} selected={false} plain={PREVIEW_PLAIN} {...feedHandlers} />
+          <FeedItem agent={reviewAgent} selected={false} plain={PREVIEW_PLAIN} {...feedHandlers} />
         </>
       )}
 
@@ -380,7 +385,7 @@ function AgentsFeed(props: { stale?: boolean; showNeeds?: boolean } = {}) {
         ))}
       </div>
       {visibleRunning.map((a) => (
-        <FeedItem key={a.id} agent={a} selected={false} plain={false} {...feedHandlers} />
+        <FeedItem key={a.id} agent={a} selected={false} plain={PREVIEW_PLAIN} {...feedHandlers} />
       ))}
 
       <div className="backlog">
@@ -395,7 +400,7 @@ function AgentsFeed(props: { stale?: boolean; showNeeds?: boolean } = {}) {
 
       <div className="feed-sec">DONE TODAY · {done.length}<span className="ln" /></div>
       {done.map((a) => (
-        <FeedItem key={a.id} agent={a} selected={false} plain={false} {...feedHandlers} />
+        <FeedItem key={a.id} agent={a} selected={false} plain={PREVIEW_PLAIN} {...feedHandlers} />
       ))}
     </div>
   )
@@ -470,7 +475,7 @@ function Backlog() {
     <>
       <FloorControls
         mode="backlog"
-        sidebarOpen rightOpen plain={false}
+        sidebarOpen rightOpen plain={PREVIEW_PLAIN}
         onToggleSidebar={noop} onToggleRight={noop} onTogglePlain={noop}
         sort="needs" onSort={noop}
         ticketGroup={group} onTicketGroup={setGroup}
@@ -545,7 +550,7 @@ function Subtabs() {
         <FloorControls
           mode={controlsMode}
           needsCount={2}
-          sidebarOpen rightOpen plain={false}
+          sidebarOpen rightOpen plain={PREVIEW_PLAIN}
           onToggleSidebar={noop} onToggleRight={noop} onTogglePlain={noop}
           sort={srt} onSort={setSrt}
           ticketGroup={tg} onTicketGroup={setTg}
