@@ -3,12 +3,12 @@ const LOADED_COMMAND_NAMES = [
   'permissions', 'mcp', 'clis', 'subagents', 'plugins', 'workflows', 'add', 'use', 'list',
   'remove', 'rm', 'purge', 'update', 'prune', 'import', 'registry', 'search', 'install',
   'routines', 'monitors', 'projects', 'run', 'open', 'reconnect', 'fork', 'config',
-  'models', 'modes', 'trash', 'restore', 'doctor', 'apply', 'status',
+  'models', 'modes', 'trash', 'restore', 'doctor', 'apply',
   'route', 'harness', 'harnesses', 'secrets', 'menubar', 'beta', 'sync',
   'refresh-rules', 'factory', 'usage', 'insights', 'perf', 'trends',
   'alias', 'pty', 'tmux', 'watchdog', 'browser', 'computer', 'logs', 'events',
   'ssh', 'devices', 'fleet', 'repos', 'repo', 'setup', 'uninstall', 'upgrade', 'sessions',
-  'teams', 'tickets', 'cloud', 'message', 'send', 'notify', 'feed', 'inbox',
+  'teams', 'cloud', 'message', 'send', 'notify', 'feed', 'inbox',
   'mailboxes', 'mailbox', 'serve', 'artifacts', 'unshare', 'audit', 'webhooks',
   'humans', 'daemon',
 ] as const;
@@ -44,7 +44,9 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
  * under `agents artifacts share` (RUSH-2580). login/logout/budget/bench/mine/
  * cost/output/profiles/snapshot/cp/resume/roster moved under nested homes
  * (cli-surface-consolidate). `timeline` was removed as a duplicated surface —
- * use `agents feed --filter updates` (RUSH-2692).
+ * use `agents feed --filter updates` (RUSH-2692). `status` moved under
+ * `agents sync status` (RUSH-2864). `tickets` was removed — use `linear`
+ * (linear-cli) (RUSH-2932).
  */
 export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
   'webhook',
@@ -63,6 +65,8 @@ export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
   'set',
   'share',
   'timeline',
+  'status',
+  'tickets',
 ]);
 
 export function isKnownTopLevelCommand(name: string): boolean {

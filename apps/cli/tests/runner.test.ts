@@ -116,7 +116,7 @@ describe('buildJobCommand', () => {
   });
 
   describe('gemini (hard-deprecated — no longer a routine target, RUSH-2719)', () => {
-    it('buildJobCommand refuses gemini: it left ROUTINE_AGENT_COMMANDS', () => {
+    it('buildJobCommand refuses gemini: it is outside ROUTINE_AGENT_IDS', () => {
       expect(() => buildJobCommand(makeConfig({ agent: 'gemini' }), 'hello'))
         .toThrow('Unsupported agent for daemon jobs: gemini');
     });

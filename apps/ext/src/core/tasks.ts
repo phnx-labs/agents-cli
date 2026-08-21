@@ -17,17 +17,7 @@ export interface TaskDispatchPromptInput {
   extraComments?: string;
 }
 
-export function buildTicketsListArgs(
-  enabled: { linear: boolean; github: boolean; githubAssignedOnly: boolean },
-  cwd?: string,
-): string[] {
-  const args = ['tickets', 'list', '--json'];
-  if (!enabled.linear) args.push('--no-linear');
-  if (!enabled.github) args.push('--no-github');
-  if (enabled.githubAssignedOnly) args.push('--github-assigned-only');
-  if (cwd) args.push('--cwd', cwd);
-  return args;
-}
+
 
 function cleanPromptPart(value: string | undefined): string {
   return value?.trim() ?? '';
@@ -182,6 +172,18 @@ export function linearToUnifiedTask(
       images: images.length > 0 ? images : undefined,
     }
   };
+}
+
+/**
+ * linear-cli `tasks --json` issues have `identifier` and no GraphQL `id`.
+ * Pin the card id to `linear:<identifier>` so dropping that mapping cannot
+ * silently produce `linear:undefined` (RUSH-2932).
+ */
+export function linearCliIssueToUnifiedTask(
+  issue: Omit<Parameters<typeof linearToUnifiedTask>[0], 'id'> & { identifier: string },
+  repo: string | null = null,
+): UnifiedTask {
+  return linearToUnifiedTask({ ...issue, id: issue.identifier }, repo);
 }
 
 // Convert GitHub issue to UnifiedTask. `repo` is the detected "owner/name".

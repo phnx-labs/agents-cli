@@ -346,6 +346,40 @@ describe('handler config layer', () => {
       }
     });
 
+    // A handler is not a routine, so its name can never be a member of this
+    // device's routine activation manifest. Without the marker the gate answered
+    // "not activated here" and executeJobDetached recorded `skipped` with an empty
+    // allowlist ("can only run on: "), while the receiver logged the delivery as
+    // `fired` — a live Slack slash command reached the box and no agent ever ran.
+    it('marks an agent handler webhook-dispatched so the routine activation gate cannot skip it', async () => {
+      const handler: import('./handlers.js').WebhookHandler = {
+        name: 'slack-agent',
+        source: 'slack',
+        run: { agent: 'claude', prompt: 'go' },
+      };
+      const dispatched: JobConfig[] = [];
+      await handlerMod.executeHandler(handler, linearWebhook(), {
+        dispatchAgent: async (config) => {
+          dispatched.push(config);
+          return {
+            jobName: handler.name, runId: 'run-dispatchedby', agent: 'claude', pid: 1,
+            status: 'running', startedAt: new Date().toISOString(),
+            completedAt: null, exitCode: null,
+          };
+        },
+      });
+      expect(dispatched[0].dispatchedBy).toBe('webhook');
+
+      // Materialize a device activation manifest that does NOT list the handler —
+      // the state this box was in when a real signed slash command was skipped.
+      // Without the marker the gate reads false here and the run never starts.
+      const { replaceEnabledRoutines } = await import('../routine-activation.js');
+      const { jobRunsOnThisDevice } = await import('../scheduling/routines.js');
+      replaceEnabledRoutines(['some-other-routine']);
+      expect(jobRunsOnThisDevice({ name: 'slack-agent' })).toBe(false);
+      expect(jobRunsOnThisDevice(dispatched[0])).toBe(true);
+    });
+
     it('passes run.env through to the dispatched job config', async () => {
       const handler: import('./handlers.js').WebhookHandler = {
         name: 'env-handler',
@@ -725,6 +759,26 @@ describe('handler config layer', () => {
         thread_ts: '1712345678.000100',
         user: 'U9',
       });
+    });
+
+    // response_url is Slack's own reply channel for a slash command: it takes a
+    // POST for 30 minutes with no token and no channel membership, so it is the
+    // only reply that works before the app has been invited anywhere. It was
+    // parsed off the wire but never reached the {{slack.*}} namespace, so a
+    // handler prompt could not use it.
+    it('exposes {{slack.response_url}} so a slash-command reply needs no token or channel membership', () => {
+      const webhook: IncomingWebhook = {
+        source: 'slack', event: '/agents',
+        payload: {
+          type: 'slash_command', command: '/agents', channel: 'C0AGI', user: 'U9',
+          text: 'AGI: go', response_url: 'https://hooks.slack.com/commands/T1/123/abc',
+        },
+      };
+      const ctx = handlerMod.buildWebhookContext(webhook) as { slack: import('./handlers.js').SlackMessageContext };
+      expect(ctx.slack.response_url).toBe('https://hooks.slack.com/commands/T1/123/abc');
+      // An event delivery carries none — the field is present and empty, never undefined.
+      const mention = handlerMod.buildWebhookContext(slackWebhook()) as { slack: import('./handlers.js').SlackMessageContext };
+      expect(mention.slack.response_url).toBe('');
     });
 
     it('leaves project empty and keeps the whole text when there is no PROJECT: prefix', () => {

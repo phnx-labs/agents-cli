@@ -371,6 +371,13 @@ export interface SlackMessageContext {
   user: string;
   /** Slash command name (`/agents`), or '' for an event delivery. */
   command: string;
+  /**
+   * Slash-command reply URL (`https://hooks.slack.com/commands/…`), or '' for an
+   * event delivery. Slack accepts a POST here for 30 minutes with no token and no
+   * channel membership, so it is the only reply path that works before the app has
+   * been invited to a channel.
+   */
+  response_url: string;
 }
 
 const asString = (v: unknown): string => (typeof v === 'string' ? v : '');
@@ -395,6 +402,7 @@ export function parseSlackMessage(payload: SlackPayload): SlackMessageContext {
     thread_ts: asString(payload.thread_ts),
     user: asString(payload.user),
     command: asString(payload.command),
+    response_url: asString(payload.response_url),
   };
 }
 
@@ -537,6 +545,13 @@ async function executeHandlerAction(
       ...(substitutedCwd ? { cwd: substitutedCwd } : {}),
       ...(hostFields.host ? { host: hostFields.host } : {}),
       ...(hostFields.hostStrategy ? { hostStrategy: hostFields.hostStrategy } : {}),
+      // A handler is not a routine, so its name can never appear in this device's
+      // routine activation manifest — without this marker the gate answered "not
+      // activated here" and every delivery was skipped while the receiver logged
+      // `fired` (the same shape as RUSH-2681's monitor bug). The `routine:`
+      // delegate below deliberately omits it: that fires a REAL routine, which
+      // keeps its own activation gate.
+      dispatchedBy: 'webhook',
     };
     const dispatch = handler.run.agent
       ? (opts.dispatchAgent ?? dispatchDefault)

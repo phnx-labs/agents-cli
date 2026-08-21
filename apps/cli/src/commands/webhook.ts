@@ -103,7 +103,7 @@ export function registerWebhooksCommand(program: Command): void {
         const address = server.address();
         const bound = typeof address === 'object' && address ? address.port : port;
         console.log(`${chalk.green('agents webhooks')} ${chalk.dim('→')} ${chalk.cyan(`http://${opts.bind ?? DEFAULT_HOST}:${bound}`)}`);
-        console.log(chalk.dim('signed · localhost by default · endpoints: /hooks/github, /hooks/linear · acks 202 then dispatches · Ctrl-C to stop'));
+        console.log(chalk.dim('signed · localhost by default · endpoints: /hooks/github, /hooks/linear, /hooks/slack · acks 202 then dispatches · Ctrl-C to stop'));
         console.log(chalk.dim('for a supervised receiver that survives reboot: agents daemon webhooks add --secrets-bundle <name>'));
 
         const shutdown = () => {

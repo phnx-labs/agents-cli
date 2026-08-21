@@ -22,7 +22,7 @@ import { parseCommaSeparatedList } from '../format.js';
 // From the leaf module, NOT discover.js — the latter imports `../sqlite.js`, so
 // reaching through it for one parser would pull node:sqlite into every `agents
 // secrets` invocation and print Node's SQLite ExperimentalWarning on stderr.
-import { parseTimeFilter } from '../session/relative-time.js';
+import { parseTimeFilter } from '../text/relative-time.js';
 import {
   describeBundle,
   bundlePolicy,

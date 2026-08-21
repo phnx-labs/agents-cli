@@ -1,6 +1,6 @@
 /**
  * Interactive drift-sync flow — the single "we detected drift, want to fix it?"
- * action, shared by `agents status`, `agents doctor`, and the menu-bar "NEEDS
+ * action, shared by `agents sync status`, `agents doctor`, and the menu-bar "NEEDS
  * SYNC" row.
  *
  * It composes existing pieces, re-implementing nothing:
@@ -157,7 +157,7 @@ export async function promptDriftSync(opts: DriftSyncOptions = {}): Promise<Drif
   if (opts.yes || !isInteractiveTerminal()) {
     if (!opts.yes) {
       // Non-TTY without --yes: report, don't act, don't throw.
-      console.log(chalk.gray('\nRun `agents status --yes` to sync, or `agents status` in a terminal to choose.'));
+      console.log(chalk.gray('\nRun `agents sync status --yes` to sync, or `agents sync status` in a terminal to choose.'));
       return base;
     }
     const systemPulled = await pullSystem(status);

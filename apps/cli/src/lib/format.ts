@@ -60,6 +60,22 @@ export function die(msg: string, code = 1, opts: DieOptions = {}): never {
 }
 
 /**
+ * Await a command action and turn a thrown Error into a clean `die(message)`
+ * instead of Node's raw stack dump — bootstrap's parseAsync catch deliberately
+ * rethrows plain Errors as engineering bugs, so a command whose helpers throw
+ * user-actionable errors (auth, org) wraps its `.action(...)` call site with
+ * this. The helpers keep throwing so tests can assert on them. Pass `json`
+ * so a `--json` caller still gets the structured `{"error"}` payload.
+ */
+export async function runOrDie(fn: () => void | Promise<void>, opts: DieOptions = {}): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    die(err instanceof Error ? err.message : String(err), 1, opts);
+  }
+}
+
+/**
  * `die()` with a structured friction event attached. Use this at CLI error
  * chokepoints so the nightly routine can classify and rank recurring failures
  * without re-parsing transcripts. `surface` is the subsystem (teams, browser,

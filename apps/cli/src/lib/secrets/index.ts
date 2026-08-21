@@ -41,7 +41,7 @@ import type { NativeImportReport } from './fallback.js';
 
 export type { NativeImportReport, NativeImportResult, NativeImportStatus } from './fallback.js';
 import { getKeychainHelperPath } from './install-helper.js';
-import { deriveShortId } from '../session/short-id.js';
+import { deriveShortId } from '../text/short-id.js';
 
 const SERVICE_PREFIX = 'agents-cli';
 export const SECRETS_ITEM_PREFIX = `${SERVICE_PREFIX}.secrets.`;

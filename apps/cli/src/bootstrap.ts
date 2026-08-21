@@ -290,7 +290,7 @@ Observe (read the fleet — no store merge; aliases point at the real readers):
   sessions --active               Live agents (who is running right now)
   events                          Unified ops + activity event trail
   audit                           Tamper-evident run-dispatch log (not events)
-  status                          Sync/drift only (not the live fleet snapshot)
+  sync status                     Sync/drift only (not the live fleet snapshot)
   devices snapshot                One-process inventory + active sessions poll
 
 Credentials:

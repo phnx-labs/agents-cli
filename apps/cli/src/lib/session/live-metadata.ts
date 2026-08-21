@@ -17,7 +17,7 @@
 // synthesized row carries its path, so the downstream `buildPreview` renders the
 // real digest; otherwise it renders the header + a "not indexed here" note.
 
-import { deriveShortId } from './short-id.js';
+import { deriveShortId } from '../text/short-id.js';
 import { isSessionTrackedAgent, type SessionMeta } from './types.js';
 import type { ActiveSession } from './active.js';
 

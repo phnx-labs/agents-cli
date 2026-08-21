@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { padToWidth, stringWidth, terminalWidth, truncateToWidth } from '../session/width.js';
+import { padToWidth, stringWidth, terminalWidth, truncateToWidth } from '../text/width.js';
 import { fmtBytes, headroom, type DeviceStats } from './health.js';
 import { formatCheckedAge, type HostAuthSummary } from '../auth-health.js';
 import type { OnlineState } from './reachability.js';

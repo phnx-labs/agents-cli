@@ -286,7 +286,7 @@ git-synced with `agents repo push`/`pull`, so a fleet definition travels between
 machines. The `-D, --device <name>` flag routes a command over
 SSH to that machine — supported on virtually every first-class group (`repos`,
 `view`, `inspect`, `usage`, `cost`, `doctor`, `list`, `sync`, `plugins`, `skills`,
-`status`, `teams`, `routines`, …), plus commands with their own richer host
+`teams`, `routines`, …), plus commands with their own richer host
 handling (`run`, `sessions`, `feed`, `computer`, `secrets`, `logs`). Groups with
 no remote semantics reject the flag with a clear message rather than commander's
 raw `unknown option`. The target may be a registered host name, a capability tag

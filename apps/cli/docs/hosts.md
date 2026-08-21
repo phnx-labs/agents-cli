@@ -2,7 +2,7 @@
 
 > **Status:** Implemented. `agents hosts` and the `-D, --device` flag
 > ship today across virtually every first-class group (`repos`, `view`, `inspect`,
-> `usage`, `cost`, `doctor`, `list`, `sync`, `plugins`, `skills`, `status`,
+> `usage`, `cost`, `doctor`, `list`, `sync`, `plugins`, `skills`,
 > `teams`, `routines`, …), on `agents run`, and on multi-host aggregators
 > (`sessions`, `feed`, `logs`). Groups with no remote semantics reject the flag
 > with a clear message — never a raw commander `unknown option`.  Every `agents run` option is classified

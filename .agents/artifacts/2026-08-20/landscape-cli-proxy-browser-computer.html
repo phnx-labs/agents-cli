@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>The adjacent categories: CLI proxies, browser agents, computer use — and the combination nobody ships</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span><span class="status-badge status-draft">draft</span></div>
+<h1>The adjacent categories: CLI proxies, browser agents, computer use — and the combination nobody ships</h1>
+<p class="summary">Follow-up to the GTM report, answering "who else is doing this?" across the three categories agi-cli touches. The proxy category splits into a real API-gateway market (OpenRouter at $140M annualized revenue) and a subscription-arbitrage graveyard Anthropic actively enforces against. Browser and computer use are being commoditized by the incumbents into their own desktop apps, while no funded company sells the local, your-own-machine variant. And no product anywhere combines multi-harness orchestration with built-in browser and desktop control.</p>
+<div class="meta" aria-label="Artifact metadata"><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agents-cli/blob/main/.agents/artifacts/2026-08-20/gtm-strategy.md" target="_blank" rel="noopener">Companion: agi-cli GTM report (same date)</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agents-cli/blob/main/.agents/artifacts/2026-08-20/why-orchestrators-die.md" target="_blank" rel="noopener">Companion: why the biggest orchestrators died</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/phnx/issue/RUSH-2834" target="_blank" rel="noopener">RUSH-2834 — launch: freeze the name, run the 48-hour ignition</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">gtm-landscape</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fleet-worker</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/n%2Fa">n/a</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-20</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#summary" data-toc-for="summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a class="toc-item" href="#findings" data-toc-for="findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a class="toc-item toc-sub" href="#1-cli-proxies-and-model-routers-the-direct-answer" data-toc-for="1-cli-proxies-and-model-routers-the-direct-answer">1. CLI proxies and model routers — the direct answer</a><a class="toc-item toc-sub" href="#2-the-enforcement-timeline-is-the-proxy-category-s-ceiling" data-toc-for="2-the-enforcement-timeline-is-the-proxy-category-s-ceiling">2. The enforcement timeline is the proxy category's ceiling</a><a class="toc-item toc-sub" href="#3-browser-automation-cloud-infra-or-bundled-incumbent-nothing-local" data-toc-for="3-browser-automation-cloud-infra-or-bundled-incumbent-nothing-local">3. Browser automation — cloud infra or bundled incumbent, nothing local</a><a class="toc-item toc-sub" href="#4-computer-use-production-viable-since-february-and-the-local-a11y-lane-is-empty" data-toc-for="4-computer-use-production-viable-since-february-and-the-local-a11y-lane-is-empty">4. Computer use — production-viable since February, and the local a11y lane is empty</a><a class="toc-item toc-sub" href="#5-the-multi-harness-layer-everyone-stops-one-tier-below" data-toc-for="5-the-multi-harness-layer-everyone-stops-one-tier-below">5. The multi-harness layer — everyone stops one tier below</a><a class="toc-item toc-sub" href="#6-the-convergence-verdict" data-toc-for="6-the-convergence-verdict">6. The convergence verdict</a><a class="toc-item" href="#evidence" data-toc-for="evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a><a class="toc-item toc-sub" href="#how-the-numbers-were-gathered" data-toc-for="how-the-numbers-were-gathered">How the numbers were gathered</a><a class="toc-item toc-sub" href="#secondary-sources-that-carry-weight" data-toc-for="secondary-sources-that-carry-weight">Secondary sources that carry weight</a><a class="toc-item toc-sub" href="#what-could-not-be-verified" data-toc-for="what-could-not-be-verified">What could not be verified</a><a class="toc-item" href="#recommendations" data-toc-for="recommendations"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Recommendations</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2><p>This answers the question that closed the GTM session: <em>"can you dig deeper and
+find other products that are similar, like CLI proxy?"</em> — plus the two categories
+that ride along with it (browser automation and computer use), and whether anyone
+combines all three.</p>
+<p>Four findings, one per section:</p>
+<ol>
+<li><strong>"CLI proxy" is two categories wearing one name.</strong> API-key gateways
+(OpenRouter, LiteLLM, Portkey) are a real, monetized, acquired-at-a-premium
+market. Subscription-token proxies (claude-code-router's credential pools,
+relay services) are a donation-funded grey zone that Anthropic has been
+actively shutting down since February 2026. The tell is what flows through
+the proxy: API keys you pay for, or consumer OAuth tokens you multiplex.</li>
+<li><strong>Browser automation for agents consolidated into two survivable shapes</strong> —
+cloud infrastructure sold per browser-hour (Browserbase leads), and browser
+control bundled into the incumbents' own subscriptions (Claude for Chrome,
+ChatGPT agent mode). Nobody funded sells the third shape, the one <code>agents browser</code> ships: local automation of the user's own logged-in browser. The
+only serious analog is Vercel's open-source agent-browser, which is free.</li>
+<li><strong>Computer use hit its production inflection in 2026</strong> (Fable 5 at 85%
+OSWorld-Verified vs a ~72% human baseline), and the crowded lane is cloud
+screenshot loops. Local accessibility-tree control as a developer primitive
+is nearly empty: the closest projects are two small macOS apps (319 and 577
+stars) and a record-replay tool. Nothing is CLI-driven, cross-platform, and
+wired into a coding-agent workflow.</li>
+<li><strong>The three-legged combination does not exist anywhere else.</strong> Claude Code
+and Codex now bundle browser + desktop control, but desktop-app-only and
+single-model by construction. Manus and Devin run both legs in a cloud VM.
+Nothing else is multi-harness. The moat claim from the GTM report survives
+this deeper pass, sharpened: the moat is not any one leg — the incumbents
+are commoditizing legs 2 and 3 in real time — it is the combination, local,
+under one CLI, across 17 active harnesses.</li>
+</ol>
+<p>The strategic consequence is in Recommendations: this evidence strengthens the
+corpus thesis rather than replacing it, and it puts a date on how long the
+tool-surface lead lasts.</p>
+<h2 id="findings">Findings</h2><p>Every number marked ★ was read live from the GitHub or npm API on 2026-08-20;
+unmarked traction and revenue figures come from secondary sources (trade press,
+Sacra, Dealroom) and are not independently verified.</p>
+<h3 id="1-cli-proxies-and-model-routers-the-direct-answer">1. CLI proxies and model routers — the direct answer</h3><p><strong>The API-gateway side is a real market:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Product</th>
+<th>What it is</th>
+<th>Traction</th>
+<th>Money</th>
+<th>Outcome</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>OpenRouter</td>
+<td>One API over 374+ models, 5% markup</td>
+<td>8M developers, 8.4T tokens/mo</td>
+<td>$140M annualized rev (Jul 2026), $174M raised</td>
+<td>Stripe acquisition reported at $7B+ (unconfirmed by either party)</td>
+</tr>
+<tr>
+<td>Portkey</td>
+<td>AI gateway + observability</td>
+<td>24k+ orgs, 125M req/day</td>
+<td>$18M raised</td>
+<td><strong>Acquired by Palo Alto Networks, 2026-05-29</strong></td>
+</tr>
+<tr>
+<td>LiteLLM (BerriAI)</td>
+<td>OSS gateway, 100+ providers</td>
+<td>56,861★ GitHub</td>
+<td>$7M ARR, open-core ($250/mo → $30k/yr enterprise)</td>
+<td>Independent, YC-backed</td>
+</tr>
+</tbody></table>
+<p>The pattern across all three: the OSS or cheap tier is distribution; revenue is
+enterprise controls (SSO, audit, RBAC, SLAs) or a usage markup. Nobody here
+charges developers a seat fee — consistent with the graveyard finding in the
+companion report.</p>
+<p><strong>The subscription-proxy side has traction without a business:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Project</th>
+<th>What it is</th>
+<th>Traction</th>
+<th>Money</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>musistudio/claude-code-router</td>
+<td>Local proxy in front of Claude Code; per-scenario routing; credential pools</td>
+<td>36,773★, 470,355 npm downloads/mo ★</td>
+<td>Donations + AI-lab sponsors</td>
+</tr>
+<tr>
+<td>Wei-Shaw/claude-relay-service</td>
+<td>Relay pooling Claude/OpenAI/Gemini subscription tokens, explicit cost-splitting ("拼车")</td>
+<td>12,537★ ★</td>
+<td>None (operators resell)</td>
+</tr>
+<tr>
+<td>claude-swap</td>
+<td>Rotates between CLAUDE_CONFIG_DIR profiles on rate-limit</td>
+<td>1,861★ ★</td>
+<td>None</td>
+</tr>
+<tr>
+<td>teamclaude</td>
+<td>Multi-account quota-rotation proxy</td>
+<td>258★ ★</td>
+<td>None</td>
+</tr>
+<tr>
+<td>pal-mcp-server (ex zen-mcp)</td>
+<td>MCP server for cross-model calls mid-session, own API keys</td>
+<td>11,726★ ★</td>
+<td>None</td>
+</tr>
+</tbody></table>
+<p>A 36k-star router with 470k monthly downloads and a donations link is the
+category in one line: enormous demand, no monetization surface, because the
+value being captured is someone else's subscription pricing.</p>
+<h3 id="2-the-enforcement-timeline-is-the-proxy-category-s-ceiling">2. The enforcement timeline is the proxy category's ceiling</h3><p>Assembled from secondary sources (a policy explainer, a ToS analysis, and trade
+coverage — links in Evidence); the two dated policy events are corroborated
+across multiple independent writeups:</p>
+<ul>
+<li><strong>Sep 2025 – Feb 2026:</strong> progressive tightening — entity restrictions, phone
+verification, then a February ban wave against 24/7 multi-account use,
+account sharing, and resale, reportedly without warning.</li>
+<li><strong>2026-04-04:</strong> Anthropic blocks consumer OAuth tokens in third-party tools
+at the server. OpenClaw was the named casualty; Goose, Roo Code, and OpenCode
+clients were also cut off. Using the <em>official</em> <code>claude</code> binary anywhere
+(local, VPS, CI) remained permitted.</li>
+<li><strong>2026-06-15 (reported):</strong> billing bifurcation — headless/agentic usage
+(<code>claude -p</code>, Agent SDK, GitHub Actions) reportedly moved off subscription
+quota onto dollar-denominated credits at API list prices, with interactive
+terminal sessions staying on subscription. Sourced to one blog analysis;
+verify against Anthropic's own billing docs before relying on it.</li>
+</ul>
+<p>The architectural line Anthropic has drawn, per the analysis that named it: a
+<strong>relay server</strong> multiplexing extracted OAuth tokens gets banned; <strong>N separate
+official-client installs, each with its own documented <code>CLAUDE_CONFIG_DIR</code></strong>
+was acknowledged as legitimate in anthropics/claude-code#261. agi-cli's
+balanced rotation is the second architecture — owned accounts, official
+binaries, per-profile isolation, no relay. That is the defensible side of the
+line, but two exposures remain: automated rotation could be framed as limit
+evasion in a future ban wave, and if the June billing split is accurate, the
+fleet's headless workloads already pay API-equivalent prices — meaning
+rotation's remaining value is rate-limit smoothing on interactive sessions, not
+price arbitrage. The GTM report's advice not to build the business on rotation
+gets independent confirmation here.</p>
+<h3 id="3-browser-automation-cloud-infra-or-bundled-incumbent-nothing-local">3. Browser automation — cloud infra or bundled incumbent, nothing local</h3><figure>
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three shapes of browser automation in 2026">
+  <rect x="10" y="30" width="235" height="270" rx="8" fill="none" stroke="#888888" stroke-width="1" stroke-dasharray="4 3"></rect>
+  <rect x="262" y="30" width="235" height="270" rx="8" fill="none" stroke="#888888" stroke-width="1" stroke-dasharray="4 3"></rect>
+  <rect x="514" y="30" width="235" height="270" rx="8" fill="none" stroke="#888888" stroke-width="1" stroke-dasharray="4 3"></rect>
+  <text x="24" y="20" font-family="monospace" font-size="14" font-weight="600" fill="#84a929">CLOUD INFRA (funded)</text>
+  <text x="276" y="20" font-family="monospace" font-size="14" font-weight="600" fill="#84a929">BUNDLED (incumbents)</text>
+  <text x="528" y="20" font-family="monospace" font-size="14" font-weight="600" fill="#84a929">LOCAL CLI (unfunded)</text>
+  <text x="24" y="60" font-family="monospace" font-size="15" font-weight="700" fill="currentColor">Browserbase</text>
+  <text x="24" y="80" font-size="13" fill="currentColor">$300M val · $3M+ ARR</text>
+  <text x="24" y="98" font-size="13" fill="currentColor">50M sessions/yr</text>
+  <text x="24" y="126" font-family="monospace" font-size="15" font-weight="700" fill="currentColor">Steel.dev</text>
+  <text x="24" y="146" font-size="13" fill="currentColor">$17M raised · ~$3.5M ARR</text>
+  <text x="24" y="174" font-family="monospace" font-size="15" font-weight="700" fill="currentColor">Hyperbrowser · Anchor</text>
+  <text x="24" y="194" font-size="13" fill="currentColor">YC W25 · $6M seed</text>
+  <text x="24" y="222" font-size="12" fill="#888888">Sell browser-hours ($0.10/hr).</text>
+  <text x="24" y="240" font-size="12" fill="#888888">Moat: fingerprinting, CAPTCHA,</text>
+  <text x="24" y="258" font-size="12" fill="#888888">anti-bot. Cloud-only by design.</text>
+  <text x="276" y="60" font-family="monospace" font-size="15" font-weight="700" fill="currentColor">Claude for Chrome</text>
+  <text x="276" y="80" font-size="13" fill="currentColor">bundled in Max/Team</text>
+  <text x="276" y="108" font-family="monospace" font-size="15" font-weight="700" fill="currentColor">ChatGPT agent mode</text>
+  <text x="276" y="128" font-size="13" fill="currentColor">Atlas browser killed 2026-08,</text>
+  <text x="276" y="146" font-size="13" fill="currentColor">folded into ChatGPT Work</text>
+  <text x="276" y="174" font-family="monospace" font-size="15" font-weight="700" fill="currentColor">Perplexity Comet</text>
+  <text x="276" y="194" font-size="13" fill="currentColor">$200M raised, consumer bet</text>
+  <text x="276" y="222" font-size="12" fill="#888888">Browser control as a feature of</text>
+  <text x="276" y="240" font-size="12" fill="#888888">a subscription you already pay.</text>
+  <text x="276" y="258" font-size="12" fill="#888888">Standalone browsers are dying.</text>
+  <text x="528" y="60" font-family="monospace" font-size="15" font-weight="700" fill="currentColor">agent-browser (Vercel)</text>
+  <text x="528" y="80" font-size="13" fill="currentColor">~41k★ · Rust CLI · free</text>
+  <text x="528" y="98" font-size="13" fill="currentColor">a11y-tree refs, local Chrome</text>
+  <text x="528" y="126" font-family="monospace" font-size="15" font-weight="700" fill="currentColor">browser-use (the library)</text>
+  <text x="528" y="146" font-size="13" fill="currentColor">97k★ · local CDP path exists,</text>
+  <text x="528" y="164" font-size="13" fill="currentColor">commercial push is cloud</text>
+  <text x="528" y="192" font-family="monospace" font-size="15" font-weight="700" fill="currentColor">agents browser</text>
+  <text x="528" y="212" font-size="13" fill="currentColor">this repo — user's own</text>
+  <text x="528" y="230" font-size="13" fill="currentColor">logged-in profiles</text>
+  <text x="528" y="258" font-size="12" fill="#888888">No funded company here.</text>
+  <text x="528" y="276" font-size="12" fill="#888888">Open-source territory.</text>
+</svg>
+<figcaption>The 2026 browser-automation map: every funded startup sells cloud browser-hours; the incumbents bundle browser control into subscriptions; the local lane — automating the user's own logged-in browser from a CLI — has no commercial occupant.</figcaption>
+</figure><p>The category's 2026 story in three moves:</p>
+<ul>
+<li><strong>The standalone agent browser died.</strong> OpenAI's Atlas launched mid-2025 and
+was deprecated 2026-08-09, folded into ChatGPT Work. Browser control survives
+as a <em>feature</em> of an existing subscription, not a product.</li>
+<li><strong>Cloud infra survived but narrowed.</strong> Browserbase ($68M raised, $300M
+valuation, 1,000+ paying companies, 50M sessions in 2025, &gt;$3M ARR) leads;
+Steel and Hyperbrowser are real but smaller. Their differentiation is
+exactly what local automation doesn't need: stealth fingerprinting, CAPTCHA
+solving, IP rotation.</li>
+<li><strong>The local lane is open-source, not venture.</strong> Vercel's agent-browser (~41k
+stars) validates the exact design <code>agents browser</code> uses — accessibility-tree
+refs instead of raw DOM, local Chrome, CLI-first — and it is free. For
+logged-in SaaS work, internal tools, and coding workflows, local wins on
+cost, latency, and privacy; that is the segment agi-cli occupies, and it is
+a segment nobody monetizes directly.</li>
+</ul>
+<h3 id="4-computer-use-production-viable-since-february-and-the-local-a11y-lane-is-empty">4. Computer use — production-viable since February, and the local a11y lane is empty</h3><p>The a16z data report (2026-08-10) marks the inflection: models weren't
+production-viable for computer use until Opus 4.6 in February 2026; Fable 5 now
+scores 85% on OSWorld-Verified against a ~72% human baseline, and deployed
+agents benchmark at $6–8/hour against $10/hour offshore BPO. The market is
+real as of this year, not speculative.</p>
+<p>Who occupies it:</p>
+<table>
+<thead>
+<tr>
+<th>Cohort</th>
+<th>Who</th>
+<th>State</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Cloud screenshot loops</td>
+<td>Anthropic computer-use API, OpenAI Codex CU (desktop-app only), H Company Holo3 ($220M seed), Simular ($26.5M), e2b desktop</td>
+<td>Active, funded, all screenshot-first, all cloud-or-app</td>
+</tr>
+<tr>
+<td>Abandoned 2024 cohort</td>
+<td>Self-Operating-Computer (10,287★ ★, last push 2025-09-19), Open Interpreter (68k★ ★ but pivoted to a coding agent)</td>
+<td>Stalled or pivoted</td>
+</tr>
+<tr>
+<td>Alive OSS</td>
+<td>UI-TARS-desktop (38,659★ ★, ByteDance, screenshot+vision), OpenAdapt (1,690★ ★, record-replay, a11y-first, pushed 2026-08-20)</td>
+<td>Active</td>
+</tr>
+<tr>
+<td>Local accessibility-tree</td>
+<td>Fazm (319★ ★, macOS AXUIElement + ScreenCaptureKit fallback), macOS26/Agent (577★ ★, Swift), computer-use-linux (AT-SPI, niche)</td>
+<td>Tiny, single-platform</td>
+</tr>
+</tbody></table>
+<p>The structural read: the funded players all run screenshot loops server-side,
+because that is what scales to a cloud product. The accessibility-tree
+approach — structured element refs, deterministic targeting, no
+screenshot-per-step token bill — only exists in small local projects, and none
+of them is a cross-platform CLI primitive. <code>agents computer</code> (Swift/AXUIElement
+daemon on macOS, C#/UI Automation daemon on Windows, element-ref mode, driven
+from the same CLI as the agents) has no direct competitor in either the funded
+or the OSS cohort. The nearest things are a 319-star voice assistant and a
+record-replay compiler.</p>
+<h3 id="5-the-multi-harness-layer-everyone-stops-one-tier-below">5. The multi-harness layer — everyone stops one tier below</h3><p>The ecosystem around "many coding agents" resolves into two tiers, neither of
+which is what agi-cli does:</p>
+<ul>
+<li><strong>Tier 1, config sync:</strong> rulesync (1,330★ ★, active, syncs rules/MCP/commands
+into 20+ tools' native formats) and the AGENTS.md standard itself (Linux
+Foundation-stewarded, 60k+ repos claimed). These write config files. They
+cannot install, version, or run anything.</li>
+<li><strong>Tier 2, model-agnostic single harnesses:</strong> OpenCode (171k★, 75+ providers),
+Charm Crush (27,531★ ★), Pi. "Model-agnostic" here means one harness calling
+many model APIs — they <em>replace</em> Claude Code and Codex rather than manage
+them. Notably, Anthropic's OAuth enforcement cut these clients off from
+subscription accounts; they run on API keys.</li>
+<li>SuperClaude (23,836★ ★) is the largest config framework and is Claude
+Code-only. The "run several CLIs side by side" tools that show up in
+editorial roundups (Parallel Code, Worktrunk) either lack a verifiable
+primary source or manage worktrees, not agents.</li>
+</ul>
+<p>Install + version + config-sync + execute across 17 active harnesses through
+one engine — the thing <code>agents run</code> does — has no verified occupant besides
+this repo, same as the 21-tool sweep in the GTM report found at the
+orchestrator level.</p>
+<h3 id="6-the-convergence-verdict">6. The convergence verdict</h3><p>The question that motivated this pass: does anyone combine (1) multi-harness
+orchestration, (2) built-in browser automation, (3) native computer use?</p>
+<table>
+<thead>
+<tr>
+<th>Product</th>
+<th>Multi-harness</th>
+<th>Browser</th>
+<th>Computer use</th>
+<th>Local / CLI-first</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Claude Code</td>
+<td>No — Claude only</td>
+<td>Desktop app only (Jul 2026, sandboxed clean profile)</td>
+<td>Research preview, Pro/Max (Vercept tech)</td>
+<td>Partial — CLI gets neither leg</td>
+</tr>
+<tr>
+<td>OpenAI Codex</td>
+<td>No — OpenAI only</td>
+<td>Desktop app only</td>
+<td>Desktop app only (macOS Apr, Windows May 2026)</td>
+<td>No — CLI/Linux excluded</td>
+</tr>
+<tr>
+<td>Manus</td>
+<td>No (internal sub-agents)</td>
+<td>Cloud VM</td>
+<td>Partial ("My Computer", cloud-first)</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Devin (Cognition)</td>
+<td>No</td>
+<td>Cloud sandbox</td>
+<td>Cloud sandbox; CLI remote-controls the cloud agent</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Google Antigravity CLI</td>
+<td>No — Gemini only</td>
+<td>Model-level (Gemini 3.5 Flash native computer use)</td>
+<td>Model-level, desktop in testing</td>
+<td>Partial</td>
+</tr>
+<tr>
+<td><strong>agi-cli</strong></td>
+<td><strong>17 active harnesses</strong></td>
+<td><strong>CLI-native, user's own profiles</strong></td>
+<td><strong>Native a11y daemons, both desktops</strong></td>
+<td><strong>Yes</strong></td>
+</tr>
+</tbody></table>
+<p>Two honest readings of this table, and both matter:</p>
+<ul>
+<li><strong>The whitespace is real and survived a second, deeper look.</strong> Nothing —
+incumbent, funded startup, or OSS — ships all three legs, and nothing else
+ships <em>any</em> leg in the local, CLI-first, your-own-machine form.</li>
+<li><strong>Legs 2 and 3 are commoditizing fast, from above.</strong> In the four months from
+April to July 2026, both Anthropic and OpenAI shipped browser and desktop
+control inside their own apps. The incumbents will not do multi-harness —
+single-model is their business model — but they are absorbing the tool
+surfaces. A moat made only of "we have browser and computer use" has a
+measurable half-life. The durable leg is the one structurally closed to
+them: being the neutral layer over <em>all</em> the harnesses, and owning the
+cross-harness session corpus that accumulates there.</li>
+</ul>
+<h2 id="evidence">Evidence</h2><h3 id="how-the-numbers-were-gathered">How the numbers were gathered</h3><p>Primary reads (2026-08-20): GitHub REST API (<code>api.github.com/repos/...</code>) for
+every ★-marked star count, fork count, and last-push date; npm downloads API
+(<code>api.npmjs.org/downloads/point/last-month/@musistudio/claude-code-router</code> →
+470,355) for router adoption. Fifteen research passes across five parallel
+agents; each claim in Findings carries its source class inline.</p>
+<h3 id="secondary-sources-that-carry-weight">Secondary sources that carry weight</h3><ul>
+<li>Sacra (OpenRouter revenue, developer counts, acquisition report)</li>
+<li>Dealroom (LiteLLM ARR and seed), Yahoo Finance / Tracxn (Portkey raise and
+Palo Alto acquisition), Upstarts Media / AIM (Browserbase Series B, session
+volume), YC company pages (browser-use, Hyperbrowser)</li>
+<li>a16z, "Can agents use a computer yet? We've got the data" (2026-08-10) —
+OSWorld scores, production deployments, $/hour benchmarks</li>
+<li>dev.to/vainamoinen, "Two multi-account Claude Code architectures — one
+Anthropic accepts, one they ban" — the Architecture A/B distinction and
+anthropics/claude-code#261</li>
+<li>help.apiyi.com policy explainer and explainx.ai timeline (April 4 OAuth
+cutoff, February ban wave, KYC rollout)</li>
+<li>ppc.land and nerova.ai (Atlas deprecation into ChatGPT Work)</li>
+<li>apiscout.dev and TrueFoundry pricing guides (browser-hour and gateway tiers)</li>
+</ul>
+<h3 id="what-could-not-be-verified">What could not be verified</h3><ul>
+<li>OpenRouter's reported Stripe acquisition ($7B+): unconfirmed by either party.</li>
+<li>The 2026-06-15 subscription/API billing bifurcation: single secondary
+source; verify against Anthropic's billing docs before treating as fact.</li>
+<li>Star counts quoted without the ★ mark (browser-use ~97k, OpenCode 171k,
+agent-browser ~41k, UI-TARS research repo 27k) come from company pages or
+editorial coverage, not a live API read.</li>
+<li>Steel.dev ARR (~$3.5M) is a third-party estimate published at low confidence.</li>
+<li>"Parallel Code" as a multi-CLI runner: editorial mentions only; no repo or
+package was found. Treated as nonexistent for the tier analysis above.</li>
+<li>Claude Code's computer-use research preview and the Vercept attribution rest
+on trade coverage (devops.com), not an Anthropic changelog entry.</li>
+</ul>
+<h2 id="recommendations">Recommendations</h2><ol>
+<li><strong>Keep the moat claim, but restate it.</strong> The defensible sentence is not "we
+have browser and computer use" (the incumbents are shipping both) — it is
+"one CLI that runs every harness and gives all of them the same local
+browser and desktop hands, on your machines, with your logins." No product
+in either cohort can say that sentence, and the incumbents' business models
+prevent them from the first clause.</li>
+<li><strong>Do not build revenue on rotation or any proxy mechanics.</strong> The
+subscription-proxy side of the router category is enforcement-limited with
+a documented ban history, and the June billing split (if confirmed) removed
+the economics anyway. agi-cli's Architecture-B posture is the right side of
+the line; keep it a convenience feature, never the pitch.</li>
+<li><strong>The tool-surface lead has a half-life measured in months, not years.</strong>
+April → July 2026 took the incumbents from zero to bundled browser + desktop
+control in their own apps. Treat legs 2 and 3 as the demo that makes the
+launch impressive, and the cross-harness corpus (the companion report's Act<ol>
+<li>as the asset the lead is supposed to buy time for.</li>
+</ol>
+</li>
+<li><strong>Watch agent-browser.</strong> Vercel validating the local a11y-ref browser design
+at 41k stars is both confirmation and a warning: the nearest thing to
+<code>agents browser</code> is free, well-distributed, and one <code>vercel agents</code> launch
+away from being bundled into a bigger story. Differentiation stays at the
+combination level, not the single tool.</li>
+</ol>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0ZW1wbGF0ZTogcmVwb3J0LnYxCnRpdGxlOiAnVGhlIGFkamFjZW50IGNhdGVnb3JpZXM6IENMSSBwcm94aWVzLCBicm93c2VyIGFnZW50cywgY29tcHV0ZXIgdXNlIOKAlCBhbmQgdGhlIGNvbWJpbmF0aW9uIG5vYm9keSBzaGlwcycKc3VtbWFyeTogJ0ZvbGxvdy11cCB0byB0aGUgR1RNIHJlcG9ydCwgYW5zd2VyaW5nICJ3aG8gZWxzZSBpcyBkb2luZyB0aGlzPyIgYWNyb3NzIHRoZSB0aHJlZSBjYXRlZ29yaWVzIGFnaS1jbGkgdG91Y2hlcy4gVGhlIHByb3h5IGNhdGVnb3J5IHNwbGl0cyBpbnRvIGEgcmVhbCBBUEktZ2F0ZXdheSBtYXJrZXQgKE9wZW5Sb3V0ZXIgYXQgJDE0ME0gYW5udWFsaXplZCByZXZlbnVlKSBhbmQgYSBzdWJzY3JpcHRpb24tYXJiaXRyYWdlIGdyYXZleWFyZCBBbnRocm9waWMgYWN0aXZlbHkgZW5mb3JjZXMgYWdhaW5zdC4gQnJvd3NlciBhbmQgY29tcHV0ZXIgdXNlIGFyZSBiZWluZyBjb21tb2RpdGl6ZWQgYnkgdGhlIGluY3VtYmVudHMgaW50byB0aGVpciBvd24gZGVza3RvcCBhcHBzLCB3aGlsZSBubyBmdW5kZWQgY29tcGFueSBzZWxscyB0aGUgbG9jYWwsIHlvdXItb3duLW1hY2hpbmUgdmFyaWFudC4gQW5kIG5vIHByb2R1Y3QgYW55d2hlcmUgY29tYmluZXMgbXVsdGktaGFybmVzcyBvcmNoZXN0cmF0aW9uIHdpdGggYnVpbHQtaW4gYnJvd3NlciBhbmQgZGVza3RvcCBjb250cm9sLicKc3RhdHVzOiBkcmFmdApodW1hbjogYXV0aG9yCmhvc3Q6IGZsZWV0LXdvcmtlcgpzZXNzaW9uOiBuL2EKbGlua3M6CiAgLSBsYWJlbDogJ0NvbXBhbmlvbjogYWdpLWNsaSBHVE0gcmVwb3J0IChzYW1lIGRhdGUpJwogICAgdXJsOiAnaHR0cHM6Ly9naXRodWIuY29tL3BobngtbGFicy9hZ2VudHMtY2xpL2Jsb2IvbWFpbi8uYWdlbnRzL2FydGlmYWN0cy8yMDI2LTA4LTIwL2d0bS1zdHJhdGVneS5tZCcKICAtIGxhYmVsOiAnQ29tcGFuaW9uOiB3aHkgdGhlIGJpZ2dlc3Qgb3JjaGVzdHJhdG9ycyBkaWVkJwogICAgdXJsOiAnaHR0cHM6Ly9naXRodWIuY29tL3BobngtbGFicy9hZ2VudHMtY2xpL2Jsb2IvbWFpbi8uYWdlbnRzL2FydGlmYWN0cy8yMDI2LTA4LTIwL3doeS1vcmNoZXN0cmF0b3JzLWRpZS5tZCcKICAtIGxhYmVsOiAnUlVTSC0yODM0IOKAlCBsYXVuY2g6IGZyZWV6ZSB0aGUgbmFtZSwgcnVuIHRoZSA0OC1ob3VyIGlnbml0aW9uJwogICAgdXJsOiAnaHR0cHM6Ly9saW5lYXIuYXBwL3BobngvaXNzdWUvUlVTSC0yODM0JwotLS0KCiMjIFN1bW1hcnkKClRoaXMgYW5zd2VycyB0aGUgcXVlc3Rpb24gdGhhdCBjbG9zZWQgdGhlIEdUTSBzZXNzaW9uOiAqImNhbiB5b3UgZGlnIGRlZXBlciBhbmQKZmluZCBvdGhlciBwcm9kdWN0cyB0aGF0IGFyZSBzaW1pbGFyLCBsaWtlIENMSSBwcm94eT8iKiDigJQgcGx1cyB0aGUgdHdvIGNhdGVnb3JpZXMKdGhhdCByaWRlIGFsb25nIHdpdGggaXQgKGJyb3dzZXIgYXV0b21hdGlvbiBhbmQgY29tcHV0ZXIgdXNlKSwgYW5kIHdoZXRoZXIgYW55b25lCmNvbWJpbmVzIGFsbCB0aHJlZS4KCkZvdXIgZmluZGluZ3MsIG9uZSBwZXIgc2VjdGlvbjoKCjEuICoqIkNMSSBwcm94eSIgaXMgdHdvIGNhdGVnb3JpZXMgd2VhcmluZyBvbmUgbmFtZS4qKiBBUEkta2V5IGdhdGV3YXlzCiAgIChPcGVuUm91dGVyLCBMaXRlTExNLCBQb3J0a2V5KSBhcmUgYSByZWFsLCBtb25ldGl6ZWQsIGFjcXVpcmVkLWF0LWEtcHJlbWl1bQogICBtYXJrZXQuIFN1YnNjcmlwdGlvbi10b2tlbiBwcm94aWVzIChjbGF1ZGUtY29kZS1yb3V0ZXIncyBjcmVkZW50aWFsIHBvb2xzLAogICByZWxheSBzZXJ2aWNlcykgYXJlIGEgZG9uYXRpb24tZnVuZGVkIGdyZXkgem9uZSB0aGF0IEFudGhyb3BpYyBoYXMgYmVlbgogICBhY3RpdmVseSBzaHV0dGluZyBkb3duIHNpbmNlIEZlYnJ1YXJ5IDIwMjYuIFRoZSB0ZWxsIGlzIHdoYXQgZmxvd3MgdGhyb3VnaAogICB0aGUgcHJveHk6IEFQSSBrZXlzIHlvdSBwYXkgZm9yLCBvciBjb25zdW1lciBPQXV0aCB0b2tlbnMgeW91IG11bHRpcGxleC4KMi4gKipCcm93c2VyIGF1dG9tYXRpb24gZm9yIGFnZW50cyBjb25zb2xpZGF0ZWQgaW50byB0d28gc3Vydml2YWJsZSBzaGFwZXMqKiDigJQKICAgY2xvdWQgaW5mcmFzdHJ1Y3R1cmUgc29sZCBwZXIgYnJvd3Nlci1ob3VyIChCcm93c2VyYmFzZSBsZWFkcyksIGFuZCBicm93c2VyCiAgIGNvbnRyb2wgYnVuZGxlZCBpbnRvIHRoZSBpbmN1bWJlbnRzJyBvd24gc3Vic2NyaXB0aW9ucyAoQ2xhdWRlIGZvciBDaHJvbWUsCiAgIENoYXRHUFQgYWdlbnQgbW9kZSkuIE5vYm9keSBmdW5kZWQgc2VsbHMgdGhlIHRoaXJkIHNoYXBlLCB0aGUgb25lIGBhZ2VudHMKICAgYnJvd3NlcmAgc2hpcHM6IGxvY2FsIGF1dG9tYXRpb24gb2YgdGhlIHVzZXIncyBvd24gbG9nZ2VkLWluIGJyb3dzZXIuIFRoZQogICBvbmx5IHNlcmlvdXMgYW5hbG9nIGlzIFZlcmNlbCdzIG9wZW4tc291cmNlIGFnZW50LWJyb3dzZXIsIHdoaWNoIGlzIGZyZWUuCjMuICoqQ29tcHV0ZXIgdXNlIGhpdCBpdHMgcHJvZHVjdGlvbiBpbmZsZWN0aW9uIGluIDIwMjYqKiAoRmFibGUgNSBhdCA4NSUKICAgT1NXb3JsZC1WZXJpZmllZCB2cyBhIH43MiUgaHVtYW4gYmFzZWxpbmUpLCBhbmQgdGhlIGNyb3dkZWQgbGFuZSBpcyBjbG91ZAogICBzY3JlZW5zaG90IGxvb3BzLiBMb2NhbCBhY2Nlc3NpYmlsaXR5LXRyZWUgY29udHJvbCBhcyBhIGRldmVsb3BlciBwcmltaXRpdmUKICAgaXMgbmVhcmx5IGVtcHR5OiB0aGUgY2xvc2VzdCBwcm9qZWN0cyBhcmUgdHdvIHNtYWxsIG1hY09TIGFwcHMgKDMxOSBhbmQgNTc3CiAgIHN0YXJzKSBhbmQgYSByZWNvcmQtcmVwbGF5IHRvb2wuIE5vdGhpbmcgaXMgQ0xJLWRyaXZlbiwgY3Jvc3MtcGxhdGZvcm0sIGFuZAogICB3aXJlZCBpbnRvIGEgY29kaW5nLWFnZW50IHdvcmtmbG93Lgo0LiAqKlRoZSB0aHJlZS1sZWdnZWQgY29tYmluYXRpb24gZG9lcyBub3QgZXhpc3QgYW55d2hlcmUgZWxzZS4qKiBDbGF1ZGUgQ29kZQogICBhbmQgQ29kZXggbm93IGJ1bmRsZSBicm93c2VyICsgZGVza3RvcCBjb250cm9sLCBidXQgZGVza3RvcC1hcHAtb25seSBhbmQKICAgc2luZ2xlLW1vZGVsIGJ5IGNvbnN0cnVjdGlvbi4gTWFudXMgYW5kIERldmluIHJ1biBib3RoIGxlZ3MgaW4gYSBjbG91ZCBWTS4KICAgTm90aGluZyBlbHNlIGlzIG11bHRpLWhhcm5lc3MuIFRoZSBtb2F0IGNsYWltIGZyb20gdGhlIEdUTSByZXBvcnQgc3Vydml2ZXMKICAgdGhpcyBkZWVwZXIgcGFzcywgc2hhcnBlbmVkOiB0aGUgbW9hdCBpcyBub3QgYW55IG9uZSBsZWcg4oCUIHRoZSBpbmN1bWJlbnRzCiAgIGFyZSBjb21tb2RpdGl6aW5nIGxlZ3MgMiBhbmQgMyBpbiByZWFsIHRpbWUg4oCUIGl0IGlzIHRoZSBjb21iaW5hdGlvbiwgbG9jYWwsCiAgIHVuZGVyIG9uZSBDTEksIGFjcm9zcyAxNyBhY3RpdmUgaGFybmVzc2VzLgoKVGhlIHN0cmF0ZWdpYyBjb25zZXF1ZW5jZSBpcyBpbiBSZWNvbW1lbmRhdGlvbnM6IHRoaXMgZXZpZGVuY2Ugc3RyZW5ndGhlbnMgdGhlCmNvcnB1cyB0aGVzaXMgcmF0aGVyIHRoYW4gcmVwbGFjaW5nIGl0LCBhbmQgaXQgcHV0cyBhIGRhdGUgb24gaG93IGxvbmcgdGhlCnRvb2wtc3VyZmFjZSBsZWFkIGxhc3RzLgoKIyMgRmluZGluZ3MKCkV2ZXJ5IG51bWJlciBtYXJrZWQg4piFIHdhcyByZWFkIGxpdmUgZnJvbSB0aGUgR2l0SHViIG9yIG5wbSBBUEkgb24gMjAyNi0wOC0yMDsKdW5tYXJrZWQgdHJhY3Rpb24gYW5kIHJldmVudWUgZmlndXJlcyBjb21lIGZyb20gc2Vjb25kYXJ5IHNvdXJjZXMgKHRyYWRlIHByZXNzLApTYWNyYSwgRGVhbHJvb20pIGFuZCBhcmUgbm90IGluZGVwZW5kZW50bHkgdmVyaWZpZWQuCgojIyMgMS4gQ0xJIHByb3hpZXMgYW5kIG1vZGVsIHJvdXRlcnMg4oCUIHRoZSBkaXJlY3QgYW5zd2VyCgoqKlRoZSBBUEktZ2F0ZXdheSBzaWRlIGlzIGEgcmVhbCBtYXJrZXQ6KioKCnwgUHJvZHVjdCB8IFdoYXQgaXQgaXMgfCBUcmFjdGlvbiB8IE1vbmV5IHwgT3V0Y29tZSB8CnwgLS0tIHwgLS0tIHwgLS0tIHwgLS0tIHwgLS0tIHwKfCBPcGVuUm91dGVyIHwgT25lIEFQSSBvdmVyIDM3NCsgbW9kZWxzLCA1JSBtYXJrdXAgfCA4TSBkZXZlbG9wZXJzLCA4LjRUIHRva2Vucy9tbyB8ICQxNDBNIGFubnVhbGl6ZWQgcmV2IChKdWwgMjAyNiksICQxNzRNIHJhaXNlZCB8IFN0cmlwZSBhY3F1aXNpdGlvbiByZXBvcnRlZCBhdCAkN0IrICh1bmNvbmZpcm1lZCBieSBlaXRoZXIgcGFydHkpIHwKfCBQb3J0a2V5IHwgQUkgZ2F0ZXdheSArIG9ic2VydmFiaWxpdHkgfCAyNGsrIG9yZ3MsIDEyNU0gcmVxL2RheSB8ICQxOE0gcmFpc2VkIHwgKipBY3F1aXJlZCBieSBQYWxvIEFsdG8gTmV0d29ya3MsIDIwMjYtMDUtMjkqKiB8CnwgTGl0ZUxMTSAoQmVycmlBSSkgfCBPU1MgZ2F0ZXdheSwgMTAwKyBwcm92aWRlcnMgfCA1Niw4NjHimIUgR2l0SHViIHwgJDdNIEFSUiwgb3Blbi1jb3JlICgkMjUwL21vIOKGkiAkMzBrL3lyIGVudGVycHJpc2UpIHwgSW5kZXBlbmRlbnQsIFlDLWJhY2tlZCB8CgpUaGUgcGF0dGVybiBhY3Jvc3MgYWxsIHRocmVlOiB0aGUgT1NTIG9yIGNoZWFwIHRpZXIgaXMgZGlzdHJpYnV0aW9uOyByZXZlbnVlIGlzCmVudGVycHJpc2UgY29udHJvbHMgKFNTTywgYXVkaXQsIFJCQUMsIFNMQXMpIG9yIGEgdXNhZ2UgbWFya3VwLiBOb2JvZHkgaGVyZQpjaGFyZ2VzIGRldmVsb3BlcnMgYSBzZWF0IGZlZSDigJQgY29uc2lzdGVudCB3aXRoIHRoZSBncmF2ZXlhcmQgZmluZGluZyBpbiB0aGUKY29tcGFuaW9uIHJlcG9ydC4KCioqVGhlIHN1YnNjcmlwdGlvbi1wcm94eSBzaWRlIGhhcyB0cmFjdGlvbiB3aXRob3V0IGEgYnVzaW5lc3M6KioKCnwgUHJvamVjdCB8IFdoYXQgaXQgaXMgfCBUcmFjdGlvbiB8IE1vbmV5IHwKfCAtLS0gfCAtLS0gfCAtLS0gfCAtLS0gfAp8IG11c2lzdHVkaW8vY2xhdWRlLWNvZGUtcm91dGVyIHwgTG9jYWwgcHJveHkgaW4gZnJvbnQgb2YgQ2xhdWRlIENvZGU7IHBlci1zY2VuYXJpbyByb3V0aW5nOyBjcmVkZW50aWFsIHBvb2xzIHwgMzYsNzcz4piFLCA0NzAsMzU1IG5wbSBkb3dubG9hZHMvbW8g4piFIHwgRG9uYXRpb25zICsgQUktbGFiIHNwb25zb3JzIHwKfCBXZWktU2hhdy9jbGF1ZGUtcmVsYXktc2VydmljZSB8IFJlbGF5IHBvb2xpbmcgQ2xhdWRlL09wZW5BSS9HZW1pbmkgc3Vic2NyaXB0aW9uIHRva2VucywgZXhwbGljaXQgY29zdC1zcGxpdHRpbmcgKCLmi7zovaYiKSB8IDEyLDUzN+KYhSDimIUgfCBOb25lIChvcGVyYXRvcnMgcmVzZWxsKSB8CnwgY2xhdWRlLXN3YXAgfCBSb3RhdGVzIGJldHdlZW4gQ0xBVURFX0NPTkZJR19ESVIgcHJvZmlsZXMgb24gcmF0ZS1saW1pdCB8IDEsODYx4piFIOKYhSB8IE5vbmUgfAp8IHRlYW1jbGF1ZGUgfCBNdWx0aS1hY2NvdW50IHF1b3RhLXJvdGF0aW9uIHByb3h5IHwgMjU44piFIOKYhSB8IE5vbmUgfAp8IHBhbC1tY3Atc2VydmVyIChleCB6ZW4tbWNwKSB8IE1DUCBzZXJ2ZXIgZm9yIGNyb3NzLW1vZGVsIGNhbGxzIG1pZC1zZXNzaW9uLCBvd24gQVBJIGtleXMgfCAxMSw3MjbimIUg4piFIHwgTm9uZSB8CgpBIDM2ay1zdGFyIHJvdXRlciB3aXRoIDQ3MGsgbW9udGhseSBkb3dubG9hZHMgYW5kIGEgZG9uYXRpb25zIGxpbmsgaXMgdGhlCmNhdGVnb3J5IGluIG9uZSBsaW5lOiBlbm9ybW91cyBkZW1hbmQsIG5vIG1vbmV0aXphdGlvbiBzdXJmYWNlLCBiZWNhdXNlIHRoZQp2YWx1ZSBiZWluZyBjYXB0dXJlZCBpcyBzb21lb25lIGVsc2UncyBzdWJzY3JpcHRpb24gcHJpY2luZy4KCiMjIyAyLiBUaGUgZW5mb3JjZW1lbnQgdGltZWxpbmUgaXMgdGhlIHByb3h5IGNhdGVnb3J5J3MgY2VpbGluZwoKQXNzZW1ibGVkIGZyb20gc2Vjb25kYXJ5IHNvdXJjZXMgKGEgcG9saWN5IGV4cGxhaW5lciwgYSBUb1MgYW5hbHlzaXMsIGFuZCB0cmFkZQpjb3ZlcmFnZSDigJQgbGlua3MgaW4gRXZpZGVuY2UpOyB0aGUgdHdvIGRhdGVkIHBvbGljeSBldmVudHMgYXJlIGNvcnJvYm9yYXRlZAphY3Jvc3MgbXVsdGlwbGUgaW5kZXBlbmRlbnQgd3JpdGV1cHM6CgotICoqU2VwIDIwMjUg4oCTIEZlYiAyMDI2OioqIHByb2dyZXNzaXZlIHRpZ2h0ZW5pbmcg4oCUIGVudGl0eSByZXN0cmljdGlvbnMsIHBob25lCiAgdmVyaWZpY2F0aW9uLCB0aGVuIGEgRmVicnVhcnkgYmFuIHdhdmUgYWdhaW5zdCAyNC83IG11bHRpLWFjY291bnQgdXNlLAogIGFjY291bnQgc2hhcmluZywgYW5kIHJlc2FsZSwgcmVwb3J0ZWRseSB3aXRob3V0IHdhcm5pbmcuCi0gKioyMDI2LTA0LTA0OioqIEFudGhyb3BpYyBibG9ja3MgY29uc3VtZXIgT0F1dGggdG9rZW5zIGluIHRoaXJkLXBhcnR5IHRvb2xzCiAgYXQgdGhlIHNlcnZlci4gT3BlbkNsYXcgd2FzIHRoZSBuYW1lZCBjYXN1YWx0eTsgR29vc2UsIFJvbyBDb2RlLCBhbmQgT3BlbkNvZGUKICBjbGllbnRzIHdlcmUgYWxzbyBjdXQgb2ZmLiBVc2luZyB0aGUgKm9mZmljaWFsKiBgY2xhdWRlYCBiaW5hcnkgYW55d2hlcmUKICAobG9jYWwsIFZQUywgQ0kpIHJlbWFpbmVkIHBlcm1pdHRlZC4KLSAqKjIwMjYtMDYtMTUgKHJlcG9ydGVkKToqKiBiaWxsaW5nIGJpZnVyY2F0aW9uIOKAlCBoZWFkbGVzcy9hZ2VudGljIHVzYWdlCiAgKGBjbGF1ZGUgLXBgLCBBZ2VudCBTREssIEdpdEh1YiBBY3Rpb25zKSByZXBvcnRlZGx5IG1vdmVkIG9mZiBzdWJzY3JpcHRpb24KICBxdW90YSBvbnRvIGRvbGxhci1kZW5vbWluYXRlZCBjcmVkaXRzIGF0IEFQSSBsaXN0IHByaWNlcywgd2l0aCBpbnRlcmFjdGl2ZQogIHRlcm1pbmFsIHNlc3Npb25zIHN0YXlpbmcgb24gc3Vic2NyaXB0aW9uLiBTb3VyY2VkIHRvIG9uZSBibG9nIGFuYWx5c2lzOwogIHZlcmlmeSBhZ2FpbnN0IEFudGhyb3BpYydzIG93biBiaWxsaW5nIGRvY3MgYmVmb3JlIHJlbHlpbmcgb24gaXQuCgpUaGUgYXJjaGl0ZWN0dXJhbCBsaW5lIEFudGhyb3BpYyBoYXMgZHJhd24sIHBlciB0aGUgYW5hbHlzaXMgdGhhdCBuYW1lZCBpdDogYQoqKnJlbGF5IHNlcnZlcioqIG11bHRpcGxleGluZyBleHRyYWN0ZWQgT0F1dGggdG9rZW5zIGdldHMgYmFubmVkOyAqKk4gc2VwYXJhdGUKb2ZmaWNpYWwtY2xpZW50IGluc3RhbGxzLCBlYWNoIHdpdGggaXRzIG93biBkb2N1bWVudGVkIGBDTEFVREVfQ09ORklHX0RJUmAqKgp3YXMgYWNrbm93bGVkZ2VkIGFzIGxlZ2l0aW1hdGUgaW4gYW50aHJvcGljcy9jbGF1ZGUtY29kZSMyNjEuIGFnaS1jbGkncwpiYWxhbmNlZCByb3RhdGlvbiBpcyB0aGUgc2Vjb25kIGFyY2hpdGVjdHVyZSDigJQgb3duZWQgYWNjb3VudHMsIG9mZmljaWFsCmJpbmFyaWVzLCBwZXItcHJvZmlsZSBpc29sYXRpb24sIG5vIHJlbGF5LiBUaGF0IGlzIHRoZSBkZWZlbnNpYmxlIHNpZGUgb2YgdGhlCmxpbmUsIGJ1dCB0d28gZXhwb3N1cmVzIHJlbWFpbjogYXV0b21hdGVkIHJvdGF0aW9uIGNvdWxkIGJlIGZyYW1lZCBhcyBsaW1pdApldmFzaW9uIGluIGEgZnV0dXJlIGJhbiB3YXZlLCBhbmQgaWYgdGhlIEp1bmUgYmlsbGluZyBzcGxpdCBpcyBhY2N1cmF0ZSwgdGhlCmZsZWV0J3MgaGVhZGxlc3Mgd29ya2xvYWRzIGFscmVhZHkgcGF5IEFQSS1lcXVpdmFsZW50IHByaWNlcyDigJQgbWVhbmluZwpyb3RhdGlvbidzIHJlbWFpbmluZyB2YWx1ZSBpcyByYXRlLWxpbWl0IHNtb290aGluZyBvbiBpbnRlcmFjdGl2ZSBzZXNzaW9ucywgbm90CnByaWNlIGFyYml0cmFnZS4gVGhlIEdUTSByZXBvcnQncyBhZHZpY2Ugbm90IHRvIGJ1aWxkIHRoZSBidXNpbmVzcyBvbiByb3RhdGlvbgpnZXRzIGluZGVwZW5kZW50IGNvbmZpcm1hdGlvbiBoZXJlLgoKIyMjIDMuIEJyb3dzZXIgYXV0b21hdGlvbiDigJQgY2xvdWQgaW5mcmEgb3IgYnVuZGxlZCBpbmN1bWJlbnQsIG5vdGhpbmcgbG9jYWwKCjxmaWd1cmU+Cjxzdmcgdmlld0JveD0iMCAwIDc2MCAzMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJUaHJlZSBzaGFwZXMgb2YgYnJvd3NlciBhdXRvbWF0aW9uIGluIDIwMjYiPgogIDxyZWN0IHg9IjEwIiB5PSIzMCIgd2lkdGg9IjIzNSIgaGVpZ2h0PSIyNzAiIHJ4PSI4IiBmaWxsPSJub25lIiBzdHJva2U9IiM4ODg4ODgiIHN0cm9rZS13aWR0aD0iMSIgc3Ryb2tlLWRhc2hhcnJheT0iNCAzIi8+CiAgPHJlY3QgeD0iMjYyIiB5PSIzMCIgd2lkdGg9IjIzNSIgaGVpZ2h0PSIyNzAiIHJ4PSI4IiBmaWxsPSJub25lIiBzdHJva2U9IiM4ODg4ODgiIHN0cm9rZS13aWR0aD0iMSIgc3Ryb2tlLWRhc2hhcnJheT0iNCAzIi8+CiAgPHJlY3QgeD0iNTE0IiB5PSIzMCIgd2lkdGg9IjIzNSIgaGVpZ2h0PSIyNzAiIHJ4PSI4IiBmaWxsPSJub25lIiBzdHJva2U9IiM4ODg4ODgiIHN0cm9rZS13aWR0aD0iMSIgc3Ryb2tlLWRhc2hhcnJheT0iNCAzIi8+CiAgPHRleHQgeD0iMjQiIHk9IjIwIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjE0IiBmb250LXdlaWdodD0iNjAwIiBmaWxsPSIjODRhOTI5Ij5DTE9VRCBJTkZSQSAoZnVuZGVkKTwvdGV4dD4KICA8dGV4dCB4PSIyNzYiIHk9IjIwIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjE0IiBmb250LXdlaWdodD0iNjAwIiBmaWxsPSIjODRhOTI5Ij5CVU5ETEVEIChpbmN1bWJlbnRzKTwvdGV4dD4KICA8dGV4dCB4PSI1MjgiIHk9IjIwIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjE0IiBmb250LXdlaWdodD0iNjAwIiBmaWxsPSIjODRhOTI5Ij5MT0NBTCBDTEkgKHVuZnVuZGVkKTwvdGV4dD4KICA8dGV4dCB4PSIyNCIgeT0iNjAiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTUiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+QnJvd3NlcmJhc2U8L3RleHQ+CiAgPHRleHQgeD0iMjQiIHk9IjgwIiBmb250LXNpemU9IjEzIiBmaWxsPSJjdXJyZW50Q29sb3IiPiQzMDBNIHZhbCDCtyAkM00rIEFSUjwvdGV4dD4KICA8dGV4dCB4PSIyNCIgeT0iOTgiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9ImN1cnJlbnRDb2xvciI+NTBNIHNlc3Npb25zL3lyPC90ZXh0PgogIDx0ZXh0IHg9IjI0IiB5PSIxMjYiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTUiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+U3RlZWwuZGV2PC90ZXh0PgogIDx0ZXh0IHg9IjI0IiB5PSIxNDYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9ImN1cnJlbnRDb2xvciI+JDE3TSByYWlzZWQgwrcgfiQzLjVNIEFSUjwvdGV4dD4KICA8dGV4dCB4PSIyNCIgeT0iMTc0IiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSJjdXJyZW50Q29sb3IiPkh5cGVyYnJvd3NlciDCtyBBbmNob3I8L3RleHQ+CiAgPHRleHQgeD0iMjQiIHk9IjE5NCIgZm9udC1zaXplPSIxMyIgZmlsbD0iY3VycmVudENvbG9yIj5ZQyBXMjUgwrcgJDZNIHNlZWQ8L3RleHQ+CiAgPHRleHQgeD0iMjQiIHk9IjIyMiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzg4ODg4OCI+U2VsbCBicm93c2VyLWhvdXJzICgkMC4xMC9ocikuPC90ZXh0PgogIDx0ZXh0IHg9IjI0IiB5PSIyNDAiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM4ODg4ODgiPk1vYXQ6IGZpbmdlcnByaW50aW5nLCBDQVBUQ0hBLDwvdGV4dD4KICA8dGV4dCB4PSIyNCIgeT0iMjU4IiBmb250LXNpemU9IjEyIiBmaWxsPSIjODg4ODg4Ij5hbnRpLWJvdC4gQ2xvdWQtb25seSBieSBkZXNpZ24uPC90ZXh0PgogIDx0ZXh0IHg9IjI3NiIgeT0iNjAiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTUiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+Q2xhdWRlIGZvciBDaHJvbWU8L3RleHQ+CiAgPHRleHQgeD0iMjc2IiB5PSI4MCIgZm9udC1zaXplPSIxMyIgZmlsbD0iY3VycmVudENvbG9yIj5idW5kbGVkIGluIE1heC9UZWFtPC90ZXh0PgogIDx0ZXh0IHg9IjI3NiIgeT0iMTA4IiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSJjdXJyZW50Q29sb3IiPkNoYXRHUFQgYWdlbnQgbW9kZTwvdGV4dD4KICA8dGV4dCB4PSIyNzYiIHk9IjEyOCIgZm9udC1zaXplPSIxMyIgZmlsbD0iY3VycmVudENvbG9yIj5BdGxhcyBicm93c2VyIGtpbGxlZCAyMDI2LTA4LDwvdGV4dD4KICA8dGV4dCB4PSIyNzYiIHk9IjE0NiIgZm9udC1zaXplPSIxMyIgZmlsbD0iY3VycmVudENvbG9yIj5mb2xkZWQgaW50byBDaGF0R1BUIFdvcms8L3RleHQ+CiAgPHRleHQgeD0iMjc2IiB5PSIxNzQiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTUiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+UGVycGxleGl0eSBDb21ldDwvdGV4dD4KICA8dGV4dCB4PSIyNzYiIHk9IjE5NCIgZm9udC1zaXplPSIxMyIgZmlsbD0iY3VycmVudENvbG9yIj4kMjAwTSByYWlzZWQsIGNvbnN1bWVyIGJldDwvdGV4dD4KICA8dGV4dCB4PSIyNzYiIHk9IjIyMiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzg4ODg4OCI+QnJvd3NlciBjb250cm9sIGFzIGEgZmVhdHVyZSBvZjwvdGV4dD4KICA8dGV4dCB4PSIyNzYiIHk9IjI0MCIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzg4ODg4OCI+YSBzdWJzY3JpcHRpb24geW91IGFscmVhZHkgcGF5LjwvdGV4dD4KICA8dGV4dCB4PSIyNzYiIHk9IjI1OCIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzg4ODg4OCI+U3RhbmRhbG9uZSBicm93c2VycyBhcmUgZHlpbmcuPC90ZXh0PgogIDx0ZXh0IHg9IjUyOCIgeT0iNjAiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTUiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+YWdlbnQtYnJvd3NlciAoVmVyY2VsKTwvdGV4dD4KICA8dGV4dCB4PSI1MjgiIHk9IjgwIiBmb250LXNpemU9IjEzIiBmaWxsPSJjdXJyZW50Q29sb3IiPn40MWvimIUgwrcgUnVzdCBDTEkgwrcgZnJlZTwvdGV4dD4KICA8dGV4dCB4PSI1MjgiIHk9Ijk4IiBmb250LXNpemU9IjEzIiBmaWxsPSJjdXJyZW50Q29sb3IiPmExMXktdHJlZSByZWZzLCBsb2NhbCBDaHJvbWU8L3RleHQ+CiAgPHRleHQgeD0iNTI4IiB5PSIxMjYiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTUiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+YnJvd3Nlci11c2UgKHRoZSBsaWJyYXJ5KTwvdGV4dD4KICA8dGV4dCB4PSI1MjgiIHk9IjE0NiIgZm9udC1zaXplPSIxMyIgZmlsbD0iY3VycmVudENvbG9yIj45N2vimIUgwrcgbG9jYWwgQ0RQIHBhdGggZXhpc3RzLDwvdGV4dD4KICA8dGV4dCB4PSI1MjgiIHk9IjE2NCIgZm9udC1zaXplPSIxMyIgZmlsbD0iY3VycmVudENvbG9yIj5jb21tZXJjaWFsIHB1c2ggaXMgY2xvdWQ8L3RleHQ+CiAgPHRleHQgeD0iNTI4IiB5PSIxOTIiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTUiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+YWdlbnRzIGJyb3dzZXI8L3RleHQ+CiAgPHRleHQgeD0iNTI4IiB5PSIyMTIiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9ImN1cnJlbnRDb2xvciI+dGhpcyByZXBvIOKAlCB1c2VyJ3Mgb3duPC90ZXh0PgogIDx0ZXh0IHg9IjUyOCIgeT0iMjMwIiBmb250LXNpemU9IjEzIiBmaWxsPSJjdXJyZW50Q29sb3IiPmxvZ2dlZC1pbiBwcm9maWxlczwvdGV4dD4KICA8dGV4dCB4PSI1MjgiIHk9IjI1OCIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzg4ODg4OCI+Tm8gZnVuZGVkIGNvbXBhbnkgaGVyZS48L3RleHQ+CiAgPHRleHQgeD0iNTI4IiB5PSIyNzYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM4ODg4ODgiPk9wZW4tc291cmNlIHRlcnJpdG9yeS48L3RleHQ+Cjwvc3ZnPgo8ZmlnY2FwdGlvbj5UaGUgMjAyNiBicm93c2VyLWF1dG9tYXRpb24gbWFwOiBldmVyeSBmdW5kZWQgc3RhcnR1cCBzZWxscyBjbG91ZCBicm93c2VyLWhvdXJzOyB0aGUgaW5jdW1iZW50cyBidW5kbGUgYnJvd3NlciBjb250cm9sIGludG8gc3Vic2NyaXB0aW9uczsgdGhlIGxvY2FsIGxhbmUg4oCUIGF1dG9tYXRpbmcgdGhlIHVzZXIncyBvd24gbG9nZ2VkLWluIGJyb3dzZXIgZnJvbSBhIENMSSDigJQgaGFzIG5vIGNvbW1lcmNpYWwgb2NjdXBhbnQuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KClRoZSBjYXRlZ29yeSdzIDIwMjYgc3RvcnkgaW4gdGhyZWUgbW92ZXM6CgotICoqVGhlIHN0YW5kYWxvbmUgYWdlbnQgYnJvd3NlciBkaWVkLioqIE9wZW5BSSdzIEF0bGFzIGxhdW5jaGVkIG1pZC0yMDI1IGFuZAogIHdhcyBkZXByZWNhdGVkIDIwMjYtMDgtMDksIGZvbGRlZCBpbnRvIENoYXRHUFQgV29yay4gQnJvd3NlciBjb250cm9sIHN1cnZpdmVzCiAgYXMgYSAqZmVhdHVyZSogb2YgYW4gZXhpc3Rpbmcgc3Vic2NyaXB0aW9uLCBub3QgYSBwcm9kdWN0LgotICoqQ2xvdWQgaW5mcmEgc3Vydml2ZWQgYnV0IG5hcnJvd2VkLioqIEJyb3dzZXJiYXNlICgkNjhNIHJhaXNlZCwgJDMwME0KICB2YWx1YXRpb24sIDEsMDAwKyBwYXlpbmcgY29tcGFuaWVzLCA1ME0gc2Vzc2lvbnMgaW4gMjAyNSwgPiQzTSBBUlIpIGxlYWRzOwogIFN0ZWVsIGFuZCBIeXBlcmJyb3dzZXIgYXJlIHJlYWwgYnV0IHNtYWxsZXIuIFRoZWlyIGRpZmZlcmVudGlhdGlvbiBpcwogIGV4YWN0bHkgd2hhdCBsb2NhbCBhdXRvbWF0aW9uIGRvZXNuJ3QgbmVlZDogc3RlYWx0aCBmaW5nZXJwcmludGluZywgQ0FQVENIQQogIHNvbHZpbmcsIElQIHJvdGF0aW9uLgotICoqVGhlIGxvY2FsIGxhbmUgaXMgb3Blbi1zb3VyY2UsIG5vdCB2ZW50dXJlLioqIFZlcmNlbCdzIGFnZW50LWJyb3dzZXIgKH40MWsKICBzdGFycykgdmFsaWRhdGVzIHRoZSBleGFjdCBkZXNpZ24gYGFnZW50cyBicm93c2VyYCB1c2VzIOKAlCBhY2Nlc3NpYmlsaXR5LXRyZWUKICByZWZzIGluc3RlYWQgb2YgcmF3IERPTSwgbG9jYWwgQ2hyb21lLCBDTEktZmlyc3Qg4oCUIGFuZCBpdCBpcyBmcmVlLiBGb3IKICBsb2dnZWQtaW4gU2FhUyB3b3JrLCBpbnRlcm5hbCB0b29scywgYW5kIGNvZGluZyB3b3JrZmxvd3MsIGxvY2FsIHdpbnMgb24KICBjb3N0LCBsYXRlbmN5LCBhbmQgcHJpdmFjeTsgdGhhdCBpcyB0aGUgc2VnbWVudCBhZ2ktY2xpIG9jY3VwaWVzLCBhbmQgaXQgaXMKICBhIHNlZ21lbnQgbm9ib2R5IG1vbmV0aXplcyBkaXJlY3RseS4KCiMjIyA0LiBDb21wdXRlciB1c2Ug4oCUIHByb2R1Y3Rpb24tdmlhYmxlIHNpbmNlIEZlYnJ1YXJ5LCBhbmQgdGhlIGxvY2FsIGExMXkgbGFuZSBpcyBlbXB0eQoKVGhlIGExNnogZGF0YSByZXBvcnQgKDIwMjYtMDgtMTApIG1hcmtzIHRoZSBpbmZsZWN0aW9uOiBtb2RlbHMgd2VyZW4ndApwcm9kdWN0aW9uLXZpYWJsZSBmb3IgY29tcHV0ZXIgdXNlIHVudGlsIE9wdXMgNC42IGluIEZlYnJ1YXJ5IDIwMjY7IEZhYmxlIDUgbm93CnNjb3JlcyA4NSUgb24gT1NXb3JsZC1WZXJpZmllZCBhZ2FpbnN0IGEgfjcyJSBodW1hbiBiYXNlbGluZSwgYW5kIGRlcGxveWVkCmFnZW50cyBiZW5jaG1hcmsgYXQgJDbigJM4L2hvdXIgYWdhaW5zdCAkMTAvaG91ciBvZmZzaG9yZSBCUE8uIFRoZSBtYXJrZXQgaXMKcmVhbCBhcyBvZiB0aGlzIHllYXIsIG5vdCBzcGVjdWxhdGl2ZS4KCldobyBvY2N1cGllcyBpdDoKCnwgQ29ob3J0IHwgV2hvIHwgU3RhdGUgfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgQ2xvdWQgc2NyZWVuc2hvdCBsb29wcyB8IEFudGhyb3BpYyBjb21wdXRlci11c2UgQVBJLCBPcGVuQUkgQ29kZXggQ1UgKGRlc2t0b3AtYXBwIG9ubHkpLCBIIENvbXBhbnkgSG9sbzMgKCQyMjBNIHNlZWQpLCBTaW11bGFyICgkMjYuNU0pLCBlMmIgZGVza3RvcCB8IEFjdGl2ZSwgZnVuZGVkLCBhbGwgc2NyZWVuc2hvdC1maXJzdCwgYWxsIGNsb3VkLW9yLWFwcCB8CnwgQWJhbmRvbmVkIDIwMjQgY29ob3J0IHwgU2VsZi1PcGVyYXRpbmctQ29tcHV0ZXIgKDEwLDI4N+KYhSDimIUsIGxhc3QgcHVzaCAyMDI1LTA5LTE5KSwgT3BlbiBJbnRlcnByZXRlciAoNjhr4piFIOKYhSBidXQgcGl2b3RlZCB0byBhIGNvZGluZyBhZ2VudCkgfCBTdGFsbGVkIG9yIHBpdm90ZWQgfAp8IEFsaXZlIE9TUyB8IFVJLVRBUlMtZGVza3RvcCAoMzgsNjU54piFIOKYhSwgQnl0ZURhbmNlLCBzY3JlZW5zaG90K3Zpc2lvbiksIE9wZW5BZGFwdCAoMSw2OTDimIUg4piFLCByZWNvcmQtcmVwbGF5LCBhMTF5LWZpcnN0LCBwdXNoZWQgMjAyNi0wOC0yMCkgfCBBY3RpdmUgfAp8IExvY2FsIGFjY2Vzc2liaWxpdHktdHJlZSB8IEZhem0gKDMxOeKYhSDimIUsIG1hY09TIEFYVUlFbGVtZW50ICsgU2NyZWVuQ2FwdHVyZUtpdCBmYWxsYmFjayksIG1hY09TMjYvQWdlbnQgKDU3N+KYhSDimIUsIFN3aWZ0KSwgY29tcHV0ZXItdXNlLWxpbnV4IChBVC1TUEksIG5pY2hlKSB8IFRpbnksIHNpbmdsZS1wbGF0Zm9ybSB8CgpUaGUgc3RydWN0dXJhbCByZWFkOiB0aGUgZnVuZGVkIHBsYXllcnMgYWxsIHJ1biBzY3JlZW5zaG90IGxvb3BzIHNlcnZlci1zaWRlLApiZWNhdXNlIHRoYXQgaXMgd2hhdCBzY2FsZXMgdG8gYSBjbG91ZCBwcm9kdWN0LiBUaGUgYWNjZXNzaWJpbGl0eS10cmVlCmFwcHJvYWNoIOKAlCBzdHJ1Y3R1cmVkIGVsZW1lbnQgcmVmcywgZGV0ZXJtaW5pc3RpYyB0YXJnZXRpbmcsIG5vCnNjcmVlbnNob3QtcGVyLXN0ZXAgdG9rZW4gYmlsbCDigJQgb25seSBleGlzdHMgaW4gc21hbGwgbG9jYWwgcHJvamVjdHMsIGFuZCBub25lCm9mIHRoZW0gaXMgYSBjcm9zcy1wbGF0Zm9ybSBDTEkgcHJpbWl0aXZlLiBgYWdlbnRzIGNvbXB1dGVyYCAoU3dpZnQvQVhVSUVsZW1lbnQKZGFlbW9uIG9uIG1hY09TLCBDIy9VSSBBdXRvbWF0aW9uIGRhZW1vbiBvbiBXaW5kb3dzLCBlbGVtZW50LXJlZiBtb2RlLCBkcml2ZW4KZnJvbSB0aGUgc2FtZSBDTEkgYXMgdGhlIGFnZW50cykgaGFzIG5vIGRpcmVjdCBjb21wZXRpdG9yIGluIGVpdGhlciB0aGUgZnVuZGVkCm9yIHRoZSBPU1MgY29ob3J0LiBUaGUgbmVhcmVzdCB0aGluZ3MgYXJlIGEgMzE5LXN0YXIgdm9pY2UgYXNzaXN0YW50IGFuZCBhCnJlY29yZC1yZXBsYXkgY29tcGlsZXIuCgojIyMgNS4gVGhlIG11bHRpLWhhcm5lc3MgbGF5ZXIg4oCUIGV2ZXJ5b25lIHN0b3BzIG9uZSB0aWVyIGJlbG93CgpUaGUgZWNvc3lzdGVtIGFyb3VuZCAibWFueSBjb2RpbmcgYWdlbnRzIiByZXNvbHZlcyBpbnRvIHR3byB0aWVycywgbmVpdGhlciBvZgp3aGljaCBpcyB3aGF0IGFnaS1jbGkgZG9lczoKCi0gKipUaWVyIDEsIGNvbmZpZyBzeW5jOioqIHJ1bGVzeW5jICgxLDMzMOKYhSDimIUsIGFjdGl2ZSwgc3luY3MgcnVsZXMvTUNQL2NvbW1hbmRzCiAgaW50byAyMCsgdG9vbHMnIG5hdGl2ZSBmb3JtYXRzKSBhbmQgdGhlIEFHRU5UUy5tZCBzdGFuZGFyZCBpdHNlbGYgKExpbnV4CiAgRm91bmRhdGlvbi1zdGV3YXJkZWQsIDYwaysgcmVwb3MgY2xhaW1lZCkuIFRoZXNlIHdyaXRlIGNvbmZpZyBmaWxlcy4gVGhleQogIGNhbm5vdCBpbnN0YWxsLCB2ZXJzaW9uLCBvciBydW4gYW55dGhpbmcuCi0gKipUaWVyIDIsIG1vZGVsLWFnbm9zdGljIHNpbmdsZSBoYXJuZXNzZXM6KiogT3BlbkNvZGUgKDE3MWvimIUsIDc1KyBwcm92aWRlcnMpLAogIENoYXJtIENydXNoICgyNyw1MzHimIUg4piFKSwgUGkuICJNb2RlbC1hZ25vc3RpYyIgaGVyZSBtZWFucyBvbmUgaGFybmVzcyBjYWxsaW5nCiAgbWFueSBtb2RlbCBBUElzIOKAlCB0aGV5ICpyZXBsYWNlKiBDbGF1ZGUgQ29kZSBhbmQgQ29kZXggcmF0aGVyIHRoYW4gbWFuYWdlCiAgdGhlbS4gTm90YWJseSwgQW50aHJvcGljJ3MgT0F1dGggZW5mb3JjZW1lbnQgY3V0IHRoZXNlIGNsaWVudHMgb2ZmIGZyb20KICBzdWJzY3JpcHRpb24gYWNjb3VudHM7IHRoZXkgcnVuIG9uIEFQSSBrZXlzLgotIFN1cGVyQ2xhdWRlICgyMyw4MzbimIUg4piFKSBpcyB0aGUgbGFyZ2VzdCBjb25maWcgZnJhbWV3b3JrIGFuZCBpcyBDbGF1ZGUKICBDb2RlLW9ubHkuIFRoZSAicnVuIHNldmVyYWwgQ0xJcyBzaWRlIGJ5IHNpZGUiIHRvb2xzIHRoYXQgc2hvdyB1cCBpbgogIGVkaXRvcmlhbCByb3VuZHVwcyAoUGFyYWxsZWwgQ29kZSwgV29ya3RydW5rKSBlaXRoZXIgbGFjayBhIHZlcmlmaWFibGUKICBwcmltYXJ5IHNvdXJjZSBvciBtYW5hZ2Ugd29ya3RyZWVzLCBub3QgYWdlbnRzLgoKSW5zdGFsbCArIHZlcnNpb24gKyBjb25maWctc3luYyArIGV4ZWN1dGUgYWNyb3NzIDE3IGFjdGl2ZSBoYXJuZXNzZXMgdGhyb3VnaApvbmUgZW5naW5lIOKAlCB0aGUgdGhpbmcgYGFnZW50cyBydW5gIGRvZXMg4oCUIGhhcyBubyB2ZXJpZmllZCBvY2N1cGFudCBiZXNpZGVzCnRoaXMgcmVwbywgc2FtZSBhcyB0aGUgMjEtdG9vbCBzd2VlcCBpbiB0aGUgR1RNIHJlcG9ydCBmb3VuZCBhdCB0aGUKb3JjaGVzdHJhdG9yIGxldmVsLgoKIyMjIDYuIFRoZSBjb252ZXJnZW5jZSB2ZXJkaWN0CgpUaGUgcXVlc3Rpb24gdGhhdCBtb3RpdmF0ZWQgdGhpcyBwYXNzOiBkb2VzIGFueW9uZSBjb21iaW5lICgxKSBtdWx0aS1oYXJuZXNzCm9yY2hlc3RyYXRpb24sICgyKSBidWlsdC1pbiBicm93c2VyIGF1dG9tYXRpb24sICgzKSBuYXRpdmUgY29tcHV0ZXIgdXNlPwoKfCBQcm9kdWN0IHwgTXVsdGktaGFybmVzcyB8IEJyb3dzZXIgfCBDb21wdXRlciB1c2UgfCBMb2NhbCAvIENMSS1maXJzdCB8CnwgLS0tIHwgLS0tIHwgLS0tIHwgLS0tIHwgLS0tIHwKfCBDbGF1ZGUgQ29kZSB8IE5vIOKAlCBDbGF1ZGUgb25seSB8IERlc2t0b3AgYXBwIG9ubHkgKEp1bCAyMDI2LCBzYW5kYm94ZWQgY2xlYW4gcHJvZmlsZSkgfCBSZXNlYXJjaCBwcmV2aWV3LCBQcm8vTWF4IChWZXJjZXB0IHRlY2gpIHwgUGFydGlhbCDigJQgQ0xJIGdldHMgbmVpdGhlciBsZWcgfAp8IE9wZW5BSSBDb2RleCB8IE5vIOKAlCBPcGVuQUkgb25seSB8IERlc2t0b3AgYXBwIG9ubHkgfCBEZXNrdG9wIGFwcCBvbmx5IChtYWNPUyBBcHIsIFdpbmRvd3MgTWF5IDIwMjYpIHwgTm8g4oCUIENMSS9MaW51eCBleGNsdWRlZCB8CnwgTWFudXMgfCBObyAoaW50ZXJuYWwgc3ViLWFnZW50cykgfCBDbG91ZCBWTSB8IFBhcnRpYWwgKCJNeSBDb21wdXRlciIsIGNsb3VkLWZpcnN0KSB8IE5vIHwKfCBEZXZpbiAoQ29nbml0aW9uKSB8IE5vIHwgQ2xvdWQgc2FuZGJveCB8IENsb3VkIHNhbmRib3g7IENMSSByZW1vdGUtY29udHJvbHMgdGhlIGNsb3VkIGFnZW50IHwgTm8gfAp8IEdvb2dsZSBBbnRpZ3Jhdml0eSBDTEkgfCBObyDigJQgR2VtaW5pIG9ubHkgfCBNb2RlbC1sZXZlbCAoR2VtaW5pIDMuNSBGbGFzaCBuYXRpdmUgY29tcHV0ZXIgdXNlKSB8IE1vZGVsLWxldmVsLCBkZXNrdG9wIGluIHRlc3RpbmcgfCBQYXJ0aWFsIHwKfCAqKmFnaS1jbGkqKiB8ICoqMTcgYWN0aXZlIGhhcm5lc3NlcyoqIHwgKipDTEktbmF0aXZlLCB1c2VyJ3Mgb3duIHByb2ZpbGVzKiogfCAqKk5hdGl2ZSBhMTF5IGRhZW1vbnMsIGJvdGggZGVza3RvcHMqKiB8ICoqWWVzKiogfAoKVHdvIGhvbmVzdCByZWFkaW5ncyBvZiB0aGlzIHRhYmxlLCBhbmQgYm90aCBtYXR0ZXI6CgotICoqVGhlIHdoaXRlc3BhY2UgaXMgcmVhbCBhbmQgc3Vydml2ZWQgYSBzZWNvbmQsIGRlZXBlciBsb29rLioqIE5vdGhpbmcg4oCUCiAgaW5jdW1iZW50LCBmdW5kZWQgc3RhcnR1cCwgb3IgT1NTIOKAlCBzaGlwcyBhbGwgdGhyZWUgbGVncywgYW5kIG5vdGhpbmcgZWxzZQogIHNoaXBzICphbnkqIGxlZyBpbiB0aGUgbG9jYWwsIENMSS1maXJzdCwgeW91ci1vd24tbWFjaGluZSBmb3JtLgotICoqTGVncyAyIGFuZCAzIGFyZSBjb21tb2RpdGl6aW5nIGZhc3QsIGZyb20gYWJvdmUuKiogSW4gdGhlIGZvdXIgbW9udGhzIGZyb20KICBBcHJpbCB0byBKdWx5IDIwMjYsIGJvdGggQW50aHJvcGljIGFuZCBPcGVuQUkgc2hpcHBlZCBicm93c2VyIGFuZCBkZXNrdG9wCiAgY29udHJvbCBpbnNpZGUgdGhlaXIgb3duIGFwcHMuIFRoZSBpbmN1bWJlbnRzIHdpbGwgbm90IGRvIG11bHRpLWhhcm5lc3Mg4oCUCiAgc2luZ2xlLW1vZGVsIGlzIHRoZWlyIGJ1c2luZXNzIG1vZGVsIOKAlCBidXQgdGhleSBhcmUgYWJzb3JiaW5nIHRoZSB0b29sCiAgc3VyZmFjZXMuIEEgbW9hdCBtYWRlIG9ubHkgb2YgIndlIGhhdmUgYnJvd3NlciBhbmQgY29tcHV0ZXIgdXNlIiBoYXMgYQogIG1lYXN1cmFibGUgaGFsZi1saWZlLiBUaGUgZHVyYWJsZSBsZWcgaXMgdGhlIG9uZSBzdHJ1Y3R1cmFsbHkgY2xvc2VkIHRvCiAgdGhlbTogYmVpbmcgdGhlIG5ldXRyYWwgbGF5ZXIgb3ZlciAqYWxsKiB0aGUgaGFybmVzc2VzLCBhbmQgb3duaW5nIHRoZQogIGNyb3NzLWhhcm5lc3Mgc2Vzc2lvbiBjb3JwdXMgdGhhdCBhY2N1bXVsYXRlcyB0aGVyZS4KCiMjIEV2aWRlbmNlCgojIyMgSG93IHRoZSBudW1iZXJzIHdlcmUgZ2F0aGVyZWQKClByaW1hcnkgcmVhZHMgKDIwMjYtMDgtMjApOiBHaXRIdWIgUkVTVCBBUEkgKGBhcGkuZ2l0aHViLmNvbS9yZXBvcy8uLi5gKSBmb3IKZXZlcnkg4piFLW1hcmtlZCBzdGFyIGNvdW50LCBmb3JrIGNvdW50LCBhbmQgbGFzdC1wdXNoIGRhdGU7IG5wbSBkb3dubG9hZHMgQVBJCihgYXBpLm5wbWpzLm9yZy9kb3dubG9hZHMvcG9pbnQvbGFzdC1tb250aC9AbXVzaXN0dWRpby9jbGF1ZGUtY29kZS1yb3V0ZXJgIOKGkgo0NzAsMzU1KSBmb3Igcm91dGVyIGFkb3B0aW9uLiBGaWZ0ZWVuIHJlc2VhcmNoIHBhc3NlcyBhY3Jvc3MgZml2ZSBwYXJhbGxlbAphZ2VudHM7IGVhY2ggY2xhaW0gaW4gRmluZGluZ3MgY2FycmllcyBpdHMgc291cmNlIGNsYXNzIGlubGluZS4KCiMjIyBTZWNvbmRhcnkgc291cmNlcyB0aGF0IGNhcnJ5IHdlaWdodAoKLSBTYWNyYSAoT3BlblJvdXRlciByZXZlbnVlLCBkZXZlbG9wZXIgY291bnRzLCBhY3F1aXNpdGlvbiByZXBvcnQpCi0gRGVhbHJvb20gKExpdGVMTE0gQVJSIGFuZCBzZWVkKSwgWWFob28gRmluYW5jZSAvIFRyYWN4biAoUG9ydGtleSByYWlzZSBhbmQKICBQYWxvIEFsdG8gYWNxdWlzaXRpb24pLCBVcHN0YXJ0cyBNZWRpYSAvIEFJTSAoQnJvd3NlcmJhc2UgU2VyaWVzIEIsIHNlc3Npb24KICB2b2x1bWUpLCBZQyBjb21wYW55IHBhZ2VzIChicm93c2VyLXVzZSwgSHlwZXJicm93c2VyKQotIGExNnosICJDYW4gYWdlbnRzIHVzZSBhIGNvbXB1dGVyIHlldD8gV2UndmUgZ290IHRoZSBkYXRhIiAoMjAyNi0wOC0xMCkg4oCUCiAgT1NXb3JsZCBzY29yZXMsIHByb2R1Y3Rpb24gZGVwbG95bWVudHMsICQvaG91ciBiZW5jaG1hcmtzCi0gZGV2LnRvL3ZhaW5hbW9pbmVuLCAiVHdvIG11bHRpLWFjY291bnQgQ2xhdWRlIENvZGUgYXJjaGl0ZWN0dXJlcyDigJQgb25lCiAgQW50aHJvcGljIGFjY2VwdHMsIG9uZSB0aGV5IGJhbiIg4oCUIHRoZSBBcmNoaXRlY3R1cmUgQS9CIGRpc3RpbmN0aW9uIGFuZAogIGFudGhyb3BpY3MvY2xhdWRlLWNvZGUjMjYxCi0gaGVscC5hcGl5aS5jb20gcG9saWN5IGV4cGxhaW5lciBhbmQgZXhwbGFpbnguYWkgdGltZWxpbmUgKEFwcmlsIDQgT0F1dGgKICBjdXRvZmYsIEZlYnJ1YXJ5IGJhbiB3YXZlLCBLWUMgcm9sbG91dCkKLSBwcGMubGFuZCBhbmQgbmVyb3ZhLmFpIChBdGxhcyBkZXByZWNhdGlvbiBpbnRvIENoYXRHUFQgV29yaykKLSBhcGlzY291dC5kZXYgYW5kIFRydWVGb3VuZHJ5IHByaWNpbmcgZ3VpZGVzIChicm93c2VyLWhvdXIgYW5kIGdhdGV3YXkgdGllcnMpCgojIyMgV2hhdCBjb3VsZCBub3QgYmUgdmVyaWZpZWQKCi0gT3BlblJvdXRlcidzIHJlcG9ydGVkIFN0cmlwZSBhY3F1aXNpdGlvbiAoJDdCKyk6IHVuY29uZmlybWVkIGJ5IGVpdGhlciBwYXJ0eS4KLSBUaGUgMjAyNi0wNi0xNSBzdWJzY3JpcHRpb24vQVBJIGJpbGxpbmcgYmlmdXJjYXRpb246IHNpbmdsZSBzZWNvbmRhcnkKICBzb3VyY2U7IHZlcmlmeSBhZ2FpbnN0IEFudGhyb3BpYydzIGJpbGxpbmcgZG9jcyBiZWZvcmUgdHJlYXRpbmcgYXMgZmFjdC4KLSBTdGFyIGNvdW50cyBxdW90ZWQgd2l0aG91dCB0aGUg4piFIG1hcmsgKGJyb3dzZXItdXNlIH45N2ssIE9wZW5Db2RlIDE3MWssCiAgYWdlbnQtYnJvd3NlciB+NDFrLCBVSS1UQVJTIHJlc2VhcmNoIHJlcG8gMjdrKSBjb21lIGZyb20gY29tcGFueSBwYWdlcyBvcgogIGVkaXRvcmlhbCBjb3ZlcmFnZSwgbm90IGEgbGl2ZSBBUEkgcmVhZC4KLSBTdGVlbC5kZXYgQVJSICh+JDMuNU0pIGlzIGEgdGhpcmQtcGFydHkgZXN0aW1hdGUgcHVibGlzaGVkIGF0IGxvdyBjb25maWRlbmNlLgotICJQYXJhbGxlbCBDb2RlIiBhcyBhIG11bHRpLUNMSSBydW5uZXI6IGVkaXRvcmlhbCBtZW50aW9ucyBvbmx5OyBubyByZXBvIG9yCiAgcGFja2FnZSB3YXMgZm91bmQuIFRyZWF0ZWQgYXMgbm9uZXhpc3RlbnQgZm9yIHRoZSB0aWVyIGFuYWx5c2lzIGFib3ZlLgotIENsYXVkZSBDb2RlJ3MgY29tcHV0ZXItdXNlIHJlc2VhcmNoIHByZXZpZXcgYW5kIHRoZSBWZXJjZXB0IGF0dHJpYnV0aW9uIHJlc3QKICBvbiB0cmFkZSBjb3ZlcmFnZSAoZGV2b3BzLmNvbSksIG5vdCBhbiBBbnRocm9waWMgY2hhbmdlbG9nIGVudHJ5LgoKIyMgUmVjb21tZW5kYXRpb25zCgoxLiAqKktlZXAgdGhlIG1vYXQgY2xhaW0sIGJ1dCByZXN0YXRlIGl0LioqIFRoZSBkZWZlbnNpYmxlIHNlbnRlbmNlIGlzIG5vdCAid2UKICAgaGF2ZSBicm93c2VyIGFuZCBjb21wdXRlciB1c2UiICh0aGUgaW5jdW1iZW50cyBhcmUgc2hpcHBpbmcgYm90aCkg4oCUIGl0IGlzCiAgICJvbmUgQ0xJIHRoYXQgcnVucyBldmVyeSBoYXJuZXNzIGFuZCBnaXZlcyBhbGwgb2YgdGhlbSB0aGUgc2FtZSBsb2NhbAogICBicm93c2VyIGFuZCBkZXNrdG9wIGhhbmRzLCBvbiB5b3VyIG1hY2hpbmVzLCB3aXRoIHlvdXIgbG9naW5zLiIgTm8gcHJvZHVjdAogICBpbiBlaXRoZXIgY29ob3J0IGNhbiBzYXkgdGhhdCBzZW50ZW5jZSwgYW5kIHRoZSBpbmN1bWJlbnRzJyBidXNpbmVzcyBtb2RlbHMKICAgcHJldmVudCB0aGVtIGZyb20gdGhlIGZpcnN0IGNsYXVzZS4KMi4gKipEbyBub3QgYnVpbGQgcmV2ZW51ZSBvbiByb3RhdGlvbiBvciBhbnkgcHJveHkgbWVjaGFuaWNzLioqIFRoZQogICBzdWJzY3JpcHRpb24tcHJveHkgc2lkZSBvZiB0aGUgcm91dGVyIGNhdGVnb3J5IGlzIGVuZm9yY2VtZW50LWxpbWl0ZWQgd2l0aAogICBhIGRvY3VtZW50ZWQgYmFuIGhpc3RvcnksIGFuZCB0aGUgSnVuZSBiaWxsaW5nIHNwbGl0IChpZiBjb25maXJtZWQpIHJlbW92ZWQKICAgdGhlIGVjb25vbWljcyBhbnl3YXkuIGFnaS1jbGkncyBBcmNoaXRlY3R1cmUtQiBwb3N0dXJlIGlzIHRoZSByaWdodCBzaWRlIG9mCiAgIHRoZSBsaW5lOyBrZWVwIGl0IGEgY29udmVuaWVuY2UgZmVhdHVyZSwgbmV2ZXIgdGhlIHBpdGNoLgozLiAqKlRoZSB0b29sLXN1cmZhY2UgbGVhZCBoYXMgYSBoYWxmLWxpZmUgbWVhc3VyZWQgaW4gbW9udGhzLCBub3QgeWVhcnMuKioKICAgQXByaWwg4oaSIEp1bHkgMjAyNiB0b29rIHRoZSBpbmN1bWJlbnRzIGZyb20gemVybyB0byBidW5kbGVkIGJyb3dzZXIgKyBkZXNrdG9wCiAgIGNvbnRyb2wgaW4gdGhlaXIgb3duIGFwcHMuIFRyZWF0IGxlZ3MgMiBhbmQgMyBhcyB0aGUgZGVtbyB0aGF0IG1ha2VzIHRoZQogICBsYXVuY2ggaW1wcmVzc2l2ZSwgYW5kIHRoZSBjcm9zcy1oYXJuZXNzIGNvcnB1cyAodGhlIGNvbXBhbmlvbiByZXBvcnQncyBBY3QKICAgMykgYXMgdGhlIGFzc2V0IHRoZSBsZWFkIGlzIHN1cHBvc2VkIHRvIGJ1eSB0aW1lIGZvci4KNC4gKipXYXRjaCBhZ2VudC1icm93c2VyLioqIFZlcmNlbCB2YWxpZGF0aW5nIHRoZSBsb2NhbCBhMTF5LXJlZiBicm93c2VyIGRlc2lnbgogICBhdCA0MWsgc3RhcnMgaXMgYm90aCBjb25maXJtYXRpb24gYW5kIGEgd2FybmluZzogdGhlIG5lYXJlc3QgdGhpbmcgdG8KICAgYGFnZW50cyBicm93c2VyYCBpcyBmcmVlLCB3ZWxsLWRpc3RyaWJ1dGVkLCBhbmQgb25lIGB2ZXJjZWwgYWdlbnRzYCBsYXVuY2gKICAgYXdheSBmcm9tIGJlaW5nIGJ1bmRsZWQgaW50byBhIGJpZ2dlciBzdG9yeS4gRGlmZmVyZW50aWF0aW9uIHN0YXlzIGF0IHRoZQogICBjb21iaW5hdGlvbiBsZXZlbCwgbm90IHRoZSBzaW5nbGUgdG9vbC4K"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>

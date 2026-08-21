@@ -826,7 +826,7 @@ describe('Claude usage cache', () => {
     }
   });
 
-  it('resets expired cached windows to 0%', () => {
+  it('drops expired cached windows instead of resurrecting them as 0%', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-usage-cache-'));
     const cachePath = path.join(tempDir, 'claude-usage.json');
     const snapshot: UsageSnapshot = {
@@ -861,8 +861,11 @@ describe('Claude usage cache', () => {
         new Date('2026-04-17T14:00:00Z')
       );
 
-      expect(cached?.windows.map((window) => window.shortLabel)).toEqual(['S', 'W']);
-      expect(cached?.windows.find((w) => w.shortLabel === 'S')?.usedPercent).toBe(0);
+      // The session window reset two hours before the read: what burned since
+      // is unknown, and a zeroed bar reads as "0% used, fresh" (the two-week
+      // fleet freeze rendered every throttled account as an idle candidate,
+      // RUSH-2858). Only the still-valid week window survives.
+      expect(cached?.windows.map((window) => window.shortLabel)).toEqual(['W']);
       expect(cached?.windows.find((w) => w.shortLabel === 'W')?.usedPercent).toBe(80);
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });

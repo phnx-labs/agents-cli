@@ -23,7 +23,7 @@ import type { SessionMeta, SessionAgentId } from '../session/types.js';
 import { isSessionTrackedAgent } from '../session/types.js';
 import { localLogPath, updateTask, type HostTask } from './tasks.js';
 import { parseSessionIdMarker } from './session-marker.js';
-import { deriveShortId } from '../session/short-id.js';
+import { deriveShortId } from '../text/short-id.js';
 import { normalizeHost } from '../machine-id.js';
 
 export interface HostSessionContext {

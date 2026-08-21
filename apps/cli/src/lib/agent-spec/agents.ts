@@ -1170,27 +1170,26 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
 export const ALL_AGENT_IDS: AgentId[] = Object.keys(AGENTS) as AgentId[];
 
 /**
- * CLI command templates per agent for daemon-fired routine jobs, with
- * {prompt} as a placeholder. Lives here (not runner.ts) so routines.ts can
- * import ROUTINE_AGENT_IDS for schedule-time validation without a circular
+ * Agents the routine daemon can fire locally. Lives here (not runner.ts) so
+ * routines.ts can import it for schedule-time validation without a circular
  * import (runner.ts already imports from routines.ts).
+ *
+ * This is a curated subset of AGENT_COMMANDS, not "every harness that can run
+ * headlessly". Expanding it is a product change (gemini is hard-deprecated and
+ * is deliberately absent). Argv itself is baked from AGENT_COMMANDS in
+ * daemon/runner.ts bakeRoutineArgv — do not reintroduce a second token table.
  */
-export const ROUTINE_AGENT_COMMANDS: Record<string, string[]> = {
-  claude: ['claude', '-p', '--verbose', '{prompt}', '--output-format', 'stream-json', '--permission-mode', 'plan'],
-  codex: ['codex', 'exec', '{prompt}', '--json'],
+export const ROUTINE_AGENT_IDS: readonly string[] = Object.freeze([
+  'claude',
+  'codex',
   // gemini is hard-deprecated (Antigravity replaced it) — no routine target. A
   // legacy gemini routine now fails validateJob loud instead of firing a
   // retired backend; the id survives only for reading old sessions/config.
-  cursor: ['cursor-agent', '-p', '{prompt}', '--output-format', 'stream-json'],
-  kimi: ['kimi', '--prompt', '{prompt}', '--output-format', 'stream-json'],
-  droid: ['droid', 'exec', '{prompt}', '-o', 'stream-json'],
-  muse: ['muse', 'exec', '{prompt}', '--json'],
-};
-
-/** Agents the routine daemon can actually run when firing locally, derived
- * from the command table above so the `--agent` help and validateJob's
- * schedule-time check can never drift from it. */
-export const ROUTINE_AGENT_IDS = Object.freeze(Object.keys(ROUTINE_AGENT_COMMANDS));
+  'cursor',
+  'kimi',
+  'droid',
+  'muse',
+]);
 
 /** Agents retained only for legacy reads, not install/import/sync targets. */
 export const HARD_DEPRECATED_AGENT_IDS: AgentId[] = ALL_AGENT_IDS.filter((id) => AGENTS[id].deprecated?.hard);

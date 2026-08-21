@@ -1,6 +1,7 @@
 /**
- * `agents status` — the unified sync-status surface.
+ * `agents sync status` — the unified sync-status surface.
  *
+ * Nested under `sync` because this is sync drift, not a separate noun (RUSH-2864).
  * One command that answers "is my fleet in sync?" the same way every other
  * surface does, because it reads the same engine (computeSyncStatus). Human mode
  * renders the summary and, when a TTY finds drift, offers the interactive
@@ -14,6 +15,7 @@ import chalk from 'chalk';
 import { AGENTS } from '../lib/agents.js';
 import { AgentId } from '../lib/types.js';
 import { setHelpSections } from '../lib/help.js';
+import { addHostOption } from '../lib/hosts/option.js';
 import { computeSyncStatus, type AgentVersionStatus } from '../lib/sync-status.js';
 import { promptDriftSync } from '../lib/drift-sync.js';
 import { resolveConfiguredModel } from '../lib/models.js';
@@ -38,10 +40,13 @@ function versionSummary(v: AgentVersionStatus): string {
   return chalk.green('in sync');
 }
 
-export function registerStatusCommand(program: Command): void {
-  const cmd = program
-    .command('status')
-    .description('Unified sync status across the fleet — what is drifted, missing, or behind, with an option to sync it.')
+/** Attach `status` under the `sync` group. The former top-level `agents status` is retired. */
+export function registerStatusCommand(syncCmd: Command): void {
+  const cmd = addHostOption(
+    syncCmd
+      .command('status')
+      .description('Unified sync status across the fleet — what is drifted, missing, or behind, with an option to sync it.'),
+  )
     .option('--json', 'Output the machine-readable UnifiedSyncStatus contract')
     .option('--yes', 'Reconcile everything detected (pull .system if behind + sync drifted/missing resources) without prompting')
     .option('--cwd <path>', 'Resolution cwd for project layer detection (default: process.cwd())');
@@ -49,13 +54,13 @@ export function registerStatusCommand(program: Command): void {
   setHelpSections(cmd, {
     examples: `
       # Show what's out of sync; offer to fix it (interactive)
-      agents status
+      agents sync status
 
       # Machine-readable status for the menu-bar / Agency
-      agents status --json
+      agents sync status --json
 
       # Reconcile everything with no prompts (CI / scripts / the "kick it" path)
-      agents status --yes
+      agents sync status --yes
     `,
   });
 

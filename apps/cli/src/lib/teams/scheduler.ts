@@ -34,7 +34,7 @@
  * resolves to a null placement so the existing local spawn path runs unchanged,
  * letting the local machine participate in a pool as just another member.
  */
-import { machineId } from '../session/sync/config.js';
+import { machineId } from '../machine-id.js';
 import type { Headroom } from '../devices/health.js';
 
 /**

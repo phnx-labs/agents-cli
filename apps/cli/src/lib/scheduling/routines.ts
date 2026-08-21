@@ -482,16 +482,16 @@ export interface JobConfig {
    * `lib/monitors/config.ts`) — re-gating here was double-gating on the wrong
    * key.
    *
-   * Deliberately narrow: a monitor's `routine` action fires a REAL routine, which
-   * keeps its activation gate, so a routine defined but not activated on this
-   * device is still refused.
+   * Deliberately narrow: a monitor's or webhook handler's `routine` action fires a
+   * REAL routine, which keeps its activation gate, so a routine defined but not
+   * activated on this device is still refused.
    *
    * Runtime-only, enforced at both ends of the schema boundary: `writeJob`
    * strips it, and `readJobFileResult` refuses a definition that carries it
    * (a hand-authored one would otherwise fire on every box regardless of
    * activation, since the daemon's load path never calls `validateJob`).
    */
-  dispatchedBy?: 'monitor';
+  dispatchedBy?: 'monitor' | 'webhook';
 }
 
 /**
@@ -776,13 +776,16 @@ export function finalizeRunMeta(
  * `yosemite-s0` all agree. Every fire path (cron scheduler, webhook,
  * catchup/overdue, manual run) gates on this.
  *
- * A monitor-dispatched job ({@link JobConfig.dispatchedBy} `=== 'monitor'`) skips
+ * A monitor- or webhook-dispatched job ({@link JobConfig.dispatchedBy} set) skips
  * the routine activation manifest: it is not a routine, so its name can never be
  * a member and the lookup could only ever answer "not activated here"
- * (RUSH-2681). Its ownership was already decided by the monitor's `device:` pin.
+ * (RUSH-2681 for monitors; the same hole broke every `run.agent`/`run.workflow`
+ * webhook handler, which the receiver logged as `fired` while the run record read
+ * `skipped` with an empty allowlist). Ownership was already decided upstream — by
+ * the monitor's `device:` pin, or by the one box the webhook was delivered to.
  */
 export function jobRunsOnThisDevice(config: Pick<JobConfig, 'name' | 'devices' | 'dispatchedBy'>): boolean {
-  if (config.dispatchedBy !== 'monitor') {
+  if (config.dispatchedBy === undefined) {
     const activated = routineEnabledOnThisDevice(config.name);
     if (activated !== null) return activated;
   }
@@ -1094,7 +1097,7 @@ export function readJobFileResult(filePath: string): RoutineReadResult {
   // written back (writeJob deletes it), so its presence here means hand-authored
   // state, not drift.
   if (Object.prototype.hasOwnProperty.call(parsed, 'dispatchedBy')) {
-    return { config: null, problem: '`dispatchedBy:` is a runtime-only monitor marker, not a routine field — routine is inert' };
+    return { config: null, problem: '`dispatchedBy:` is a runtime-only monitor/webhook marker, not a routine field — routine is inert' };
   }
 
   return {
@@ -1315,7 +1318,7 @@ export function validateJob(config: Partial<JobConfig>): string[] {
     !isCustomHarnessName(config.agent)
   ) {
     // The local daemon only knows how to build a command for the agents in
-    // ROUTINE_AGENT_IDS (runner.ts's AGENT_COMMANDS table) — anything else is a
+    // ROUTINE_AGENT_IDS (baked from AGENT_COMMANDS in runner.ts) — anything else is a
     // real, installable agent (it passed the ALL_AGENT_IDS check above) but one
     // the daemon can't fire itself, so reject it now instead of accepting the
     // routine and failing at fire time (runner.ts buildJobCommand: "Unsupported

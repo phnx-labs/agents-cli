@@ -1,6 +1,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';
+import { runOrDie } from '../lib/format.js';
 import {
   clearPrixSession,
   fetchWhoAmI,
@@ -98,12 +99,15 @@ function runAuthLogout(): void {
 export function registerAuthCommand(program: Command): void {
   const auth = program.command('auth').description('Sign in to your Rush account (shared by `agents org` and paid tiers)');
 
-  auth.command('login').description('Sign in via the device-code flow').action(async () => runAuthLogin());
+  auth.command('login').description('Sign in via the device-code flow').action(() => runOrDie(() => runAuthLogin()));
 
   auth.command('whoami').description('Show the signed-in account').option('--json', 'Machine-readable output')
-    .action((o: { json?: boolean }, command: Command) => runAuthWhoami(!!(o.json || command.optsWithGlobals().json)));
+    .action((o: { json?: boolean }, command: Command) => {
+      const json = !!(o.json || command.optsWithGlobals().json);
+      return runOrDie(() => runAuthWhoami(json), { json });
+    });
 
-  auth.command('logout').description('Clear the local `agents auth login` session').action(() => runAuthLogout());
+  auth.command('logout').description('Clear the local `agents auth login` session').action(() => runOrDie(() => runAuthLogout()));
 
   setHelpSections(auth, {
     examples: `agents auth login

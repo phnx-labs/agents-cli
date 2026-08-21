@@ -497,6 +497,21 @@ describe('startWebhookServer — slack', () => {
     }
   });
 
+  // A slash command carries no thread_ts, so the reply lands in the channel, not
+  // a thread — the ephemeral ack Slack renders to the caller must say so.
+  it('acks a signed slash command with an ephemeral ack naming the channel', async () => {
+    const server = startWebhookServer({ secrets: { slack: secret }, fire: { jobs: [] } });
+    await new Promise<void>((r) => server.once('listening', r));
+    try {
+      const body = Buffer.from('command=%2Fagents&text=AGI%3A+rebase&channel_id=C1&user_id=U9&team_id=T1');
+      const res = await slackSend(server, body, 'application/x-www-form-urlencoded');
+      expect(res.status).toBe(200);
+      expect(JSON.parse(res.body)).toEqual({ response_type: 'ephemeral', text: 'On it — replying in this channel.' });
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+
   it('acks a signed app_mention with 200 (before any dispatch)', async () => {
     const server = startWebhookServer({ secrets: { slack: secret }, fire: { jobs: [] } });
     await new Promise<void>((r) => server.once('listening', r));

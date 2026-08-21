@@ -30,7 +30,7 @@ import { remoteShellFor, buildWindowsAgentsCommand, stripClixml } from '../hosts
 import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../remote-agents-json.js';
 import { machineId, normalizeHost } from './sync/config.js';
 import { NO_FANOUT_ENV } from './remote-active.js';
-import { terminalWidth } from './width.js';
+import { terminalWidth } from '../text/width.js';
 import { sanitizeForTerminal } from '../redact.js';
 import { mapBounded } from '../concurrency.js';
 import type { SessionMeta } from './types.js';

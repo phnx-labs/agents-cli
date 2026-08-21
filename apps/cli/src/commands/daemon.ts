@@ -852,7 +852,7 @@ function runWebhooksList(json: boolean): void {
     const port = hostedReceiverPort(r);
     const funnel = r.funnel ? chalk.cyan(` public :${r.funnel.publicPort}`) : chalk.gray(' localhost only');
     console.log(`  127.0.0.1:${String(port).padEnd(6)} ${chalk.gray(`bundle ${r.bundle}`)}${funnel}`);
-    console.log(chalk.gray(`    endpoints: /hooks/github, /hooks/linear · ${r.rateLimit ?? DEFAULT_WEBHOOK_RATE_LIMIT}/min per source`));
+    console.log(chalk.gray(`    endpoints: /hooks/github, /hooks/linear, /hooks/slack · ${r.rateLimit ?? DEFAULT_WEBHOOK_RATE_LIMIT}/min per source`));
   }
   console.log(chalk.gray(`\nConfig: ${getDaemonWebhooksConfigPath()}`));
   console.log(chalk.gray('Changes take effect on the next daemon restart.'));

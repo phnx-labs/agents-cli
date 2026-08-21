@@ -30,7 +30,7 @@ flowchart LR
   subgraph machine["one machine"]
     CLI["apps/cli — the agents CLI<br/><b>the framework</b><br/>sessions index · teams · run · cloud<br/>pid-registry · events.jsonl · SSH fan-out"]
     FAC["apps/ext — AGI EXT<br/><b>a consumer</b><br/>terminal tabs · Fleet<br/>presentation stores"]
-    CLI -- "streams: agents sessions watch --json<br/>commands: sessions · devices · teams · tickets · watchdog" --> FAC
+    CLI -- "streams: agents sessions watch --json<br/>commands: sessions · devices · teams · watchdog" --> FAC
   end
   CLI --> DB[("sessions.db<br/>SQLite + FTS5")]
   CLI --> BYPID["terminals/by-pid/&lt;pid&gt;.json<br/>CLI pid→id"]

@@ -1,6 +1,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';
+import { runOrDie } from '../lib/format.js';
 import {
   createSpace,
   createSpaceInvite,
@@ -132,35 +133,35 @@ export function registerOrgCommand(program: Command): void {
     .option('--slug <slug>', 'Override the derived slug')
     .option('--description <text>', 'Optional description')
     .option('--json', 'Machine-readable output')
-    .action((name: string, o: { slug?: string; description?: string; json?: boolean }, command: Command) => runCreate(name, { ...o, json: !!(o.json || command.optsWithGlobals().json) }));
+    .action((name: string, o: { slug?: string; description?: string; json?: boolean }, command: Command) => { const json = !!(o.json || command.optsWithGlobals().json); return runOrDie(() => runCreate(name, { ...o, json }), { json }); });
 
   org.command('list').description('List spaces you own or belong to').option('--json', 'Machine-readable output')
-    .action((o: { json?: boolean }, command: Command) => runList({ json: !!(o.json || command.optsWithGlobals().json) }));
+    .action((o: { json?: boolean }, command: Command) => { const json = !!(o.json || command.optsWithGlobals().json); return runOrDie(() => runList({ json }), { json }); });
 
   org.command('view [space]').description('Show one space (defaults to your only space)').option('--json', 'Machine-readable output')
-    .action((space: string | undefined, o: { json?: boolean }, command: Command) => runView(space, { json: !!(o.json || command.optsWithGlobals().json) }));
+    .action((space: string | undefined, o: { json?: boolean }, command: Command) => { const json = !!(o.json || command.optsWithGlobals().json); return runOrDie(() => runView(space, { json }), { json }); });
 
   org.command('invite <email>').description('Invite (or directly add) a member')
     .option('--role <role>', 'admin | member', 'member')
     .option('--space <id-or-slug>', 'Space to invite into (defaults to your only space)')
     .option('--json', 'Machine-readable output')
-    .action((email: string, o: { role?: string; space?: string; json?: boolean }, command: Command) => runInvite(email, { ...o, json: !!(o.json || command.optsWithGlobals().json) }));
+    .action((email: string, o: { role?: string; space?: string; json?: boolean }, command: Command) => { const json = !!(o.json || command.optsWithGlobals().json); return runOrDie(() => runInvite(email, { ...o, json }), { json }); });
 
   org.command('members [space]').description('List a space\'s members').option('--json', 'Machine-readable output')
-    .action((space: string | undefined, o: { json?: boolean }, command: Command) => runMembers(space, { json: !!(o.json || command.optsWithGlobals().json) }));
+    .action((space: string | undefined, o: { json?: boolean }, command: Command) => { const json = !!(o.json || command.optsWithGlobals().json); return runOrDie(() => runMembers(space, { json }), { json }); });
 
   org.command('role <email> <role>').description('Change a member\'s role (owner-only for admin)')
     .option('--space <id-or-slug>', 'Space to change (defaults to your only space)')
     .option('--json', 'Machine-readable output')
-    .action((email: string, role: string, o: { space?: string; json?: boolean }, command: Command) => runRole(email, role, { ...o, json: !!(o.json || command.optsWithGlobals().json) }));
+    .action((email: string, role: string, o: { space?: string; json?: boolean }, command: Command) => { const json = !!(o.json || command.optsWithGlobals().json); return runOrDie(() => runRole(email, role, { ...o, json }), { json }); });
 
   org.command('remove <email>').description('Remove a member from a space')
     .option('--space <id-or-slug>', 'Space to remove from (defaults to your only space)')
     .option('--json', 'Machine-readable output')
-    .action((email: string, o: { space?: string; json?: boolean }, command: Command) => runRemove(email, { ...o, json: !!(o.json || command.optsWithGlobals().json) }));
+    .action((email: string, o: { space?: string; json?: boolean }, command: Command) => { const json = !!(o.json || command.optsWithGlobals().json); return runOrDie(() => runRemove(email, { ...o, json }), { json }); });
 
   org.command('leave [space]').description('Leave a space you do not own').option('--json', 'Machine-readable output')
-    .action((space: string | undefined, o: { json?: boolean }, command: Command) => runLeave(space, { json: !!(o.json || command.optsWithGlobals().json) }));
+    .action((space: string | undefined, o: { json?: boolean }, command: Command) => { const json = !!(o.json || command.optsWithGlobals().json); return runOrDie(() => runLeave(space, { json }), { json }); });
 
   setHelpSections(org, {
     examples: `agents org create acme-team

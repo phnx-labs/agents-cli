@@ -1943,27 +1943,32 @@ function serializeClaudeUsageSnapshot(snapshot: UsageSnapshot): CachedUsageSnaps
   };
 }
 
-/** Deserialize a cached snapshot, zeroing out windows whose reset time has passed. */
+/**
+ * Deserialize a cached snapshot, dropping windows whose reset time has passed.
+ *
+ * An expired window is UNKNOWN, not 0%: the counter reset, and anything may
+ * have burned since. Zeroing-but-keeping it (the previous behavior) rendered a
+ * weeks-frozen cache as "S: 0% (now)" with `deriveUsageStatusFromSnapshot` →
+ * 'available', so a genuinely rate-limited account read as an idle dispatch
+ * candidate (RUSH-2858). Dropping mirrors the Grok collector, and an all-expired
+ * snapshot deserializes to null so `readClaudeUsageCache` deletes the entry and
+ * callers surface "usage unavailable" plus the recorded throttle reason.
+ */
 function deserializeClaudeUsageSnapshot(
   snapshot: CachedUsageSnapshot,
   now: Date
 ): UsageSnapshot | null {
   const capturedAt = parseDateValue(snapshot.capturedAt);
   const windows = snapshot.windows
-    .map((window) => {
-      const w = {
-        key: window.key,
-        label: window.label,
-        shortLabel: window.shortLabel,
-        usedPercent: window.usedPercent,
-        resetsAt: parseDateValue(window.resetsAt),
-        windowMinutes: window.windowMinutes,
-      };
-      if (!isCachedUsageWindowFresh(w, capturedAt, now)) {
-        w.usedPercent = 0;
-      }
-      return w;
-    });
+    .map((window) => ({
+      key: window.key,
+      label: window.label,
+      shortLabel: window.shortLabel,
+      usedPercent: window.usedPercent,
+      resetsAt: parseDateValue(window.resetsAt),
+      windowMinutes: window.windowMinutes,
+    }))
+    .filter((window) => isCachedUsageWindowFresh(window, capturedAt, now));
 
   if (windows.length === 0) {
     return null;

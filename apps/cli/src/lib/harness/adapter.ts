@@ -77,9 +77,10 @@ export interface ExecLaunchArgsCtx {
 
 /**
  * Context for the routine (daemon-job) launch-arg quirks (mapping B, runner.ts
- * side). This idiom mutates a pre-baked token array from ROUTINE_AGENT_COMMANDS,
- * distinct from buildExecCommand's declarative modeFlags — so it is a separate
- * method on the same adapter, one source of truth per harness across both.
+ * side). This idiom mutates a token array baked from AGENT_COMMANDS
+ * (bakeRoutineArgv), distinct from buildExecCommand's declarative modeFlags —
+ * so it is a separate method on the same adapter, one source of truth per
+ * harness across both.
  */
 export interface RoutineLaunchCtx {
   /** normalizeMode(config.mode) — the canonicalized mode. */
@@ -147,8 +148,8 @@ export interface HarnessAdapter {
 
   /**
    * This harness's routine (daemon-job) launch-arg quirks for buildJobCommand
-   * (runner.ts). Mutates the ROUTINE_AGENT_COMMANDS token array in place, exactly
-   * as the old per-agent arm did; runner appends model/reasoning flags after.
+   * (runner.ts). Mutates the bakeRoutineArgv token array in place, exactly as
+   * the old per-agent arm did; runner appends model/reasoning flags after.
    * Omitted for a harness with no routine launch quirks.
    */
   routineModeArgs?(cmd: string[], ctx: RoutineLaunchCtx): void;

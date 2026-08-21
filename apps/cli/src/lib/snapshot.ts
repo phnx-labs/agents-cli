@@ -8,7 +8,7 @@
  *
  * That is N+2 process starts per poll tick. This module gathers the same
  * shapes in one invocation so poll count drops to 1 without redefining
- * `agents status` (which stays the UnifiedSyncStatus sync contract).
+ * `agents sync status` (which stays the UnifiedSyncStatus sync contract).
  *
  * Stores are not merged — inventory still comes from view, active rows from
  * sessions, blocks from feed. Only the reader is consolidated.
@@ -69,7 +69,7 @@ export interface FleetSnapshot {
   agents: FleetAgentCounts;
   /** Present when --with-feed. */
   feed?: SnapshotFeedSummary;
-  /** Present when --with-sync (UnifiedSyncStatus; does not replace `agents status`). */
+  /** Present when --with-sync (UnifiedSyncStatus; does not replace `agents sync status`). */
   sync?: UnifiedSyncStatus;
 }
 
