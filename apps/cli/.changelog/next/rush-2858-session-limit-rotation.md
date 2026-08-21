@@ -1,0 +1,1 @@
+- Fixed balanced Claude account rotation recording session-limit refusals until their stated reset, skipping those accounts, and surfacing `session-limited` in `agents view` instead of idle usage.

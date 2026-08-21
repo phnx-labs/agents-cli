@@ -601,8 +601,12 @@ Claude@2.1.220
 Otherwise a severity-counted header is followed by one row per finding (icon ·
 severity · subject — impact, then the exact fix) and a heal footer when anything is
 `--fix`-able. `--json` carries a `verdict` field with
-`severity`/`category`/`subject`/`impact`/`fix` per issue. Source:
-`src/commands/doctor.ts` (`computeVerdict`, `healthBlockLines`).
+`severity`/`category`/`subject`/`impact`/`fix` per issue. A missing-resource
+finding's severity is read from `FINDING_SEVERITY` (the same rubric fleet mode
+uses, above) via `missingResourceSeverity(kind)`: `hooks`/`plugins` are critical,
+every other kind is warning — target mode does not maintain a second, independent
+rubric (RUSH-2947). Source: `src/commands/doctor.ts` (`computeVerdict`,
+`missingResourceSeverity`, `healthBlockLines`).
 
 ### `agents doctor --devices`
 

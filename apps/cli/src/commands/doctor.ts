@@ -815,9 +815,11 @@ export type IssueSeverity = 'critical' | 'warning' | 'info';
  *
  * Severity model (agent-agnostic — applies to every agent doctor inspects):
  *   - critical (silent breakage): an unwired hook, a missing/unparseable
- *     settings.json, a MISSING resource.
+ *     settings.json, a MISSING hook or plugin.
  *   - warning (stale / drift): a source layer behind origin, a DIVERGENT resource,
- *     a stale / never-synced version.
+ *     a stale / never-synced version, a MISSING resource of any other kind
+ *     (see `missingResourceSeverity`, which reads this split from
+ *     `FINDING_SEVERITY` — RUSH-2947).
  *   - info (orphan): an EXTRA resource → `agents prune cleanup`.
  */
 export interface VerdictIssue {
@@ -852,6 +854,18 @@ const AUTO_FIXABLE_CATEGORIES = new Set([
 
 export function verdictIsAutoFixable(v: DoctorVerdict): boolean {
   return v.issues.some((i) => AUTO_FIXABLE_CATEGORIES.has(i.category));
+}
+
+/**
+ * Missing-resource severity for one `DoctorKind`, read from `FINDING_SEVERITY`
+ * (the fleet-mode rubric) so target mode agrees with it kind by kind instead of
+ * re-hardcoding its own. Hooks and plugins map to their dedicated critical
+ * finding kinds; every other kind maps to the generic 'missing-resource' warning.
+ */
+function missingResourceSeverity(kind: DoctorKind): IssueSeverity {
+  if (kind === 'hooks') return FINDING_SEVERITY['missing-hook'];
+  if (kind === 'plugins') return FINDING_SEVERITY['missing-plugin'];
+  return FINDING_SEVERITY['missing-resource'];
 }
 
 /**
@@ -903,15 +917,17 @@ export function computeVerdict(report: VersionResourceReport): DoctorVerdict {
     }
   }
 
-  // ── critical: missing resources (declared in sources, absent from home) ──
+  // ── missing resources (declared in sources, absent from home) — severity
+  // follows FINDING_SEVERITY: hooks/plugins are critical, everything else warns ──
   for (const kind of DOCTOR_ALL_KINDS) {
     for (const r of report.kinds[kind]) {
       if (r.status !== 'missing') continue;
+      const severity = missingResourceSeverity(kind);
       issues.push({
-        severity: 'critical', category: 'missing', subject: r.name,
+        severity, category: 'missing', subject: r.name,
         impact: `declared in sources but absent from the version home (${kind})`,
         fix: fixCmd,
-        text: `${r.name} missing`, color: 'red',
+        text: `${r.name} missing`, color: severity === 'critical' ? 'red' : 'yellow',
       });
     }
   }

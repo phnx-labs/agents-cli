@@ -87,9 +87,11 @@ export interface RotateResult {
   /** Candidates excluded (not signed in, or out of credits). */
   excluded: RotateCandidate[];
   /**
-   * True when NO candidate on this machine had usage data fresh enough to decide
-   * on, so the pick was made from unverified snapshots. Callers surface it —
-   * routing blind is a fact the operator needs, not an internal detail.
+   * True when the PICKED candidate's usage could not be verified fresh, so the
+   * route was decided on an unverified snapshot. Callers surface it — routing
+   * blind is a fact the operator needs, not an internal detail. (Previously
+   * this only reported the all-stale case; a stale pick out of a mixed pool
+   * was silently reported as verified.)
    */
   usageUnverified?: boolean;
 }
@@ -203,7 +205,7 @@ export function isUsageVerified(candidate: RotateCandidate, nowMs: number = Date
 
 function hasUsageAvailable(candidate: RotateCandidate): boolean {
   const snapshot = candidate.usageSnapshot;
-  if (snapshot && snapshot.windows.length > 0) {
+  if (snapshot) {
     // Eligibility mirrors the `agents view` throttle badge exactly
     // (deriveUsageStatusFromSnapshot): an account maxed on ANY blocking window —
     // including the 5-hour session window — cannot serve the next request, so it
@@ -212,7 +214,8 @@ function hasUsageAvailable(candidate: RotateCandidate): boolean {
     // stayed "eligible" and the router kept launching into it while `ag view`
     // showed it rate-limited. Capacity *weighting* still ranks eligible accounts
     // by weekly headroom; this gate only decides can-it-run-right-now.
-    return deriveUsageStatusFromSnapshot(snapshot) !== 'rate_limited';
+    const status = deriveUsageStatusFromSnapshot(snapshot);
+    if (status !== null) return status !== 'rate_limited';
   }
 
   // No live snapshot: fall back to the coarse cached status.
@@ -406,18 +409,47 @@ export function pickBalancedCandidate(
     if (!deduped.has(c)) excluded.push(c);
   }
 
-  const { picked, usageUnverified } = preferVerified(sorted, nowMs, weightedRandomByCapacity);
+  const { picked, usageUnverified } = preferVerified(
+    sorted,
+    nowMs,
+    weightedRandomByCapacity,
+    'representative',
+  );
   return { picked, healthy: sorted, excluded, usageUnverified };
 }
 
 /**
- * Choose from the VERIFIED candidates when any exist, else from the whole pool.
+ * Choose from the VERIFIED candidates when they are a representative share of
+ * the pool (at least half), else from the whole pool.
  *
  * An eligible account whose usage we could not confirm is a guess, not a green
  * light: the snapshot reads "48% used" with equal confidence whether it was
  * captured a minute or three days ago, and a box whose refresh is failing stays
  * wrong indefinitely. Confirmed headroom therefore beats apparent headroom, even
  * when the unconfirmed number looks better.
+ *
+ * But narrowing to a verified MINORITY inverts the safety. When the usage
+ * endpoint 429-throttles a machine, each refresh cycle confirms roughly one
+ * account before backing off — so "verified" is a singleton, `choose` runs over
+ * a one-element list, and every launch lands on the same account. Launching
+ * into it refreshes that account's snapshot again, so it stays the only
+ * verified candidate while the rest are never picked and never probed: the
+ * rotation degrades to a fixed pin that burns one account to its weekly cap
+ * while its siblings idle (observed 2026-08-20 across yosemite-s0/s1 — the
+ * "same version every time under --strategy balanced" incident).
+ *
+ * The two failure modes belong to different CHOOSERS, so `narrowing` is picked
+ * per caller: `'representative'` (the weighted-random balanced path) narrows to
+ * verified only when they cover at least half the pool — below that the whole
+ * pool competes, fresh candidates keep their confirmed weights, stale/unknown
+ * ones get the full default weight `capacityWeight` assigns to "no signal", and
+ * the random roll spreads the load. `'any-verified'` (deterministic `from[0]`
+ * choosers: `--strategy available`, run-auto harness classification) keeps the
+ * original rule — narrow whenever ANY verified candidate exists — because a
+ * deterministic pick over the whole pool would hand the front slot back to an
+ * unconfirmed "48% used" over an accurate "90% used", the exact yosemite-s1
+ * inversion above, and a deterministic chooser cannot spread load anyway, so
+ * the singleton-collapse concern does not apply to it.
  *
  * `healthy` deliberately keeps every eligible candidate rather than just the
  * verified ones. Declining to *pick* an account on stale data and declining to
@@ -430,11 +462,16 @@ function preferVerified(
   pool: RotateCandidate[],
   nowMs: number,
   choose: (from: RotateCandidate[]) => RotateCandidate,
+  narrowing: 'any-verified' | 'representative' = 'any-verified',
 ): { picked: RotateCandidate; usageUnverified: boolean } {
   const verified = pool.filter((c) => isUsageVerified(c, nowMs));
+  const narrow =
+    verified.length > 0 &&
+    (narrowing === 'any-verified' || verified.length >= Math.ceil(pool.length / 2));
+  const picked = choose(narrow ? verified : pool);
   return {
-    picked: choose(verified.length > 0 ? verified : pool),
-    usageUnverified: verified.length === 0,
+    picked,
+    usageUnverified: !isUsageVerified(picked, nowMs),
   };
 }
 

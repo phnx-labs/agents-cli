@@ -23,6 +23,10 @@ export interface ViewJsonVersion {
     usedPercent: number;
     resetsAt: string | null;
   }>;
+  unavailable?: {
+    reason: 'session_limit';
+    resetsAt: string;
+  };
   lastActive: string | null;
   path: string;
   configuredModel?: { model: string; source: ConfiguredModelSource } | null;
