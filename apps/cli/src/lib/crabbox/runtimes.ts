@@ -232,10 +232,11 @@ function isClaudeCredentialsBlob(s: string): boolean {
  * then enumerate installed version homes (preferring the account whose email
  * matches `preferEmail`, so the token matches the `.claude.json` config we copy).
  * Off macOS the local Claude CLI stores the wrapped rotating blob in
- * `.credentials.json` already. Read that file here (do NOT call
- * `readClaudeCredentialsBlob`): that helper is now setup-token-only for Rush
- * Cloud dispatch (RUSH-2359) and must not be used to detect a native OAuth
- * login for the SING-1b lease refusal.
+ * `.credentials.json` already. Read that file here with a shape check
+ * (`claudeAiOauth.accessToken`). Do not reintroduce a shared helper that
+ * also serves Rush Cloud dispatch — dispatch is email-only (SING-1b) and
+ * the old `readClaudeCredentialsBlob` path was the #1767 TTY-banner leak
+ * (RUSH-2359).
  *
  * The reader/service/version helpers are injected so unit tests never touch the
  * real Keychain.

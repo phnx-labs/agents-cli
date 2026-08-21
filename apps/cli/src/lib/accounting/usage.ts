@@ -1691,7 +1691,6 @@ function deleteCachedClaudeOauth(service: string): void {
  *     the Claude CLI stores its OAuth token in this plaintext file instead. The
  *     keychain read above finds nothing on that platform, so we fall back to the
  *     file. Same wrapped `{ claudeAiOauth }` shape, so one parser handles both.
- *     Mirrors `readClaudeCredentialsBlob` (cloud/rush.ts), the proven pattern.
  *
  * Without step 2 the live usage fetch got no token on Linux, so `agents view`
  * (run remotely over SSH by `--device`) rendered no usage bars even though the
@@ -1704,9 +1703,9 @@ function deleteCachedClaudeOauth(service: string): void {
  * to Anthropic's API is what gets it revoked; see the branch body and
  * docs/credential-management.md). It is OFF by default so full-credential
  * callers that refresh (`isClaudeAuthValid` -> `getClaudeAccessToken`) still
- * read the interactive login. Rush Cloud dispatch (`readClaudeCredentialsBlob`)
- * now passes `{ accessTokenCache: true }` and never reads the interactive
- * login (RUSH-2359).
+ * read the interactive login. Rush Cloud dispatch does not call this helper
+ * at all (SING-1b: the account manifest is email-only; RUSH-2359 removed the
+ * leftover blob reader that used to send the interactive login).
  *
  * `opts.fileOnly` skips the ACL keychain read entirely — setup-token and
  * `.credentials.json` only. Used by the daemon usage refresher so a background
@@ -1744,9 +1743,10 @@ export async function loadClaudeOauth(
     return null;
   }
 
-  // Full-credential callers (isClaudeAuthValid -> getClaudeAccessToken; Rush
-  // Cloud dispatch) legitimately read the interactive login to run/refresh
-  // Claude. The OS keychain/keyring step is macOS/Linux-only; Windows and any
+  // Full-credential callers (isClaudeAuthValid -> getClaudeAccessToken)
+  // legitimately read the interactive login to run/refresh Claude. Rush Cloud
+  // dispatch does not (SING-1b / RUSH-2359). The OS keychain/keyring step is
+  // macOS/Linux-only; Windows and any
   // fileOnly caller skip to the .credentials.json read below (the Claude CLI
   // stores its OAuth token in that file too). An injected test backend makes the
   // keychain path exercisable anywhere, so the platform check yields to it.

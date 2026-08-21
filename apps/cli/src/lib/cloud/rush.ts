@@ -24,8 +24,6 @@ import { resolveDispatchRepos, normalizeProviderStatus, MAX_IMAGES_PER_DISPATCH 
 import { parseSSE } from './stream.js';
 import { listInstalledVersions, getVersionHomePath } from '../installations/versions.js';
 import { getAccountInfo } from '../agents.js';
-import { loadClaudeOauth } from '../accounting/usage.js';
-import { isValidClaudeSetupToken } from '../claude-account-token.js';
 import { selectBalancedVersion } from '../accounting/rotate.js';
 
 const PROXY_BASE = process.env.RUSH_PROXY_BASE ?? 'https://api.prix.dev';
@@ -170,25 +168,6 @@ function parsePromptCode(body: string): string | null {
   } catch {
     return null;
   }
-}
-
-/**
- * Read the file-based setup-token for one Claude version from the `agents secrets`
- * auth bundle and return it serialised as an OAuth blob for the Rush server.
- *
- * MUST read ONLY from the setup-token (`sk-ant-oat01-*`). Never reads the
- * interactive Keychain login or `.credentials.json`: those are rotating OAuth
- * tokens the Rush server must not hold. Reading them was the root cause of
- * RUSH-2359 / incident #1767 (the `claude setup-token` TTY stream was captured
- * as an Authorization header, crashing every webhook-dispatched run).
- *
- * Returns null when no valid setup-token is provisioned — caller treats as
- * "version is installed but not signed in" and skips it from the manifest.
- */
-export async function readClaudeCredentialsBlob(home: string): Promise<string | null> {
-  const oauth = await loadClaudeOauth(home, { accessTokenCache: true });
-  if (!oauth?.accessToken || !isValidClaudeSetupToken(oauth.accessToken)) return null;
-  return JSON.stringify(oauth);
 }
 
 /**

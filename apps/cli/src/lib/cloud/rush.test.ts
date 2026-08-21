@@ -266,9 +266,10 @@ describe('buildDispatchBody', () => {
     expect(mod.buildAccountTokensPayload).toBeUndefined();
     expect(mod.accountTokensFingerprint).toBeUndefined();
     expect(mod.RUSH_CONSENT_PATH).toBeUndefined();
-    // readClaudeCredentialsBlob still exists (Rush Cloud account-manifest dispatch
-    // uses it) but it is setup-token-only — the --lease SING-1b path reads the
-    // wrapped `.credentials.json` / Keychain blob itself and must not go through
-    // this helper (RUSH-2359).
+    expect(mod.readClaudeCredentialsBlob).toBeUndefined();
+    // readClaudeCredentialsBlob was deleted (RUSH-2359). Cloud dispatch never
+    // sent a token (SING-1b email-only manifest); the leftover helper still
+    // read Keychain / .credentials.json and was the #1767 shape. --lease SING-1b
+    // reads the wrapped blob itself in crabbox/runtimes.ts.
   });
 });

@@ -248,11 +248,12 @@ endpoint takes any `sk-ant-oat01-` bearer, `usage.ts:624,957`):
    or transmit the interactive OAuth login (the transitional fallback + its
    no-ACL cache are removed). An unprovisioned account reads as `unconfigured`
    (benign for rotation) and shows "usage pending"; seed a setup-token to
-   restore usage. Rush Cloud dispatch (`readClaudeCredentialsBlob`) uses the
-   same `accessTokenCache` path and additionally rejects anything that is not a
-   clean `sk-ant-oat01-*` setup-token, so a rotating OAuth blob, `.credentials.json`,
-   or a captured TTY/ANSI banner cannot reach the Rush server (RUSH-2359 /
-   incident #1767).
+   restore usage. Rush Cloud dispatch does not read a Claude credential at all
+   (SING-1b: the account manifest is version + email only). The leftover
+   `readClaudeCredentialsBlob` helper that still read Keychain / `.credentials.json`
+   — the #1767 shape — is deleted (RUSH-2359). `--lease` SING-1b detection reads
+   the wrapped rotating blob itself and rejects anything that is not
+   `{ claudeAiOauth.accessToken }`.
 3. `apply` stops copying rotating login files (Gap B).
 4. **Shipped (RUSH-2470):** `agents accounts add <name>` creates a named,
    policy-`never` bundle per account; `agents accounts sync <name> --device
