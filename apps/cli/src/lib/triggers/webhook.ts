@@ -700,6 +700,7 @@ export interface WebhookServerOptions {
  * Start a localhost-bound receiver. It accepts only:
  *   POST /hooks/github  with X-Hub-Signature-256
  *   POST /hooks/linear  with Linear-Signature + fresh webhookTimestamp
+ *   POST /hooks/slack   with X-Slack-Signature + fresh X-Slack-Request-Timestamp
  *
  * **The ack is asynchronous (RUSH-2548).** Once a delivery has passed signature
  * verification, freshness, dedup, and rate limiting, the receiver writes
@@ -887,7 +888,7 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
           res.writeHead(200, { 'content-type': 'application/json' });
           res.end(
             slack.type === 'slash_command'
-              ? JSON.stringify({ response_type: 'ephemeral', text: 'On it — replying in this thread.' })
+              ? JSON.stringify({ response_type: 'ephemeral', text: 'On it — replying in this channel.' })
               : '',
           );
           void settleDelivery(slackWebhook, slackId).finally(() => inFlight.delete(slackId));
