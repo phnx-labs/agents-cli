@@ -4,7 +4,7 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
-## [0.9.328] - 2026-08-20
+## [0.9.329] - 2026-08-20
 
 - **New Agent separates placement from account choice (RUSH-2961).**
   `Agents: New <Harness>` lets agents-cli resolve the configured device target,
@@ -12,6 +12,8 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
   asks for the device and then the account; `(Auto)` keeps choosing both.
   Source: `src/core/launchTarget.ts`, `src/core/agents.ts`,
   `src/vscode/extension.ts`.
+
+## [0.9.328] - 2026-08-20
 
 - **A "needs you" reply button on the Fleet feed no longer fails silently.**
   Clicking an option on a row whose agent has no reachable reply channel — a
