@@ -1,0 +1,4 @@
+# Applies when bun runs with this directory as cwd (the ui suite's own
+# invocation: `bun test` / `bun test <file>` from apps/ext/ui).
+[test]
+preload = ["./test-setup.ts"]

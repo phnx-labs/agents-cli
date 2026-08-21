@@ -27,6 +27,17 @@ Default to using Bun instead of Node.js.
 
 Use `bun test` to run tests.
 
+Run the ui suite from this directory (`apps/ext/ui`): `bunfig.toml` here
+preloads `test-setup.ts`, which registers happy-dom globals before any test
+file is imported. That is what lets tests render components whose dependencies
+bind to `window` at module-evaluation time — dompurify behind `renderMarkdown`
+(`settings/utils/markdown.ts`) — regardless of file ordering (RUSH-2974). Bun
+only reads `bunfig.toml` from the invocation cwd, so a run launched from
+`apps/ext` does not get the preload; a test that needs the DOM and must also
+survive such runs keeps the guarded registration idiom from `App.test.tsx`
+(register happy-dom only when `document` is undefined, before any component
+import).
+
 ```ts#index.test.ts
 import { test, expect } from "bun:test";
 
