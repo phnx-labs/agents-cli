@@ -999,7 +999,7 @@ normative — a change that widens/narrows a cell is a spec change.
 | cwd of a live process | `lsof` | `lsof`/`/proc` | pid-registry only (no `lsof`, `active.ts:856-858`) |
 | Codex home relocation (SUN_LEN socket) | yes (`lib/codex-home.ts` ~`:64-70`) | n/a | n/a |
 | Foreign-absolute-cwd drive rebase | n/a | n/a | **prohibited** (SES-6) |
-| Remote shell for `--device` | `bash -lc` | `bash -lc` | PowerShell (`remote.ts:117-121`) |
+| Remote shell for `--device` | `bash -lc` | `bash -lc` | PowerShell (`lib/session/remote/remote.ts:117-121`) |
 
 - **SES-CROSS-1 (MUST).** All three desktop platforms MUST be supported for discovery,
   parsing, listing, and `--device`. Windows-specific gaps (no provenance, no
@@ -1178,7 +1178,7 @@ A peer without that bundle must pass the printed ephemeral key explicitly
 Given 3 fleet hosts, one unreachable (ssh 255) and one slow past budget; When
 `agents sessions --active` fans out; Then reachable hosts return, the unreachable
 host replays offline cache, the slow host is killed to `[]`, and overall
-`process.exitCode=1` — no throw, no empty result (`remote.ts:141-146,220-261`;
+`process.exitCode=1` — no throw, no empty result (`lib/session/remote/remote.ts:141-146,220-261`;
 `lib/session/remote/remote-list.ts:88-108`).
 
 **GWT-10 — Old DB auto-migrates without data loss.**
