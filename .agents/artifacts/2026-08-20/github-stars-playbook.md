@@ -238,6 +238,101 @@ menu bar. The repo description is "a meta-harness for building Agent Factories."
 Compare OpenCode's one-liner: any model, one interface, no vendor lock-in.
 Nobody repeats a twelve-item list.
 
+## Case studies: what a 99th-percentile post actually shows
+
+The "263+ points" number is abstract on its own. Here is what posts in that tier
+actually did, pulled live from the HN Algolia API on 2026-08-20 (the same dataset
+the 188k-post study drew from). Three things worth seeing: the direct competitor's
+whole launch history, the category-definer's shape, and the anatomy shared by the
+comparable winners.
+
+### Herdr: the direct competitor, and the clearest lesson
+
+`herdrdev/herdr` is the closest thing agi-cli has to a mirror. Description: **"the
+runtime your coding agents live on."** Topics: `agent-orchestration`, `claude-code`,
+`codex`, `coding-agents`, `multiplexer`, `terminal`, `tmux`, `tui`. Created
+**2026-03-27**, roughly a month before this repo's public repo (2026-04-20). Today
+it has **31,101 stars**. Its launch history is the entire playbook compressed into
+one competitor:
+
+| Date | Show HN title | Score |
+| --- | --- | --- |
+| 2026-05-23 | Herdr: A tmux-like terminal multiplexer for AI coding agents | **5** |
+| 2026-06-29 | Herdr: Agent multiplexer that lives in your terminal | **166** |
+| 2026-06-30 | Herdr: One terminal for the whole herd | 3 |
+| 2026-07-02 | [Herdr: One terminal to rule them all](https://news.ycombinator.com/item?id=48756578) | **404** (178 comments) |
+| 2026-08-06 | [Herdr is joining Y Combinator. The runtime stays open](https://news.ycombinator.com/item?id=49201003) | **281** |
+
+Read the first row and the fourth. The **exact same product** scored **5 points**
+titled "a tmux-like terminal multiplexer for AI coding agents" and **404 points** —
+a 99th-percentile post — titled "One terminal to rule them all." Nothing about the
+software changed between May and July; the framing did. This is Finding 5
+("positioning beats the feature list") with a competitor's receipts: the flop led
+with the *mechanism* (multiplexer, tmux-like), the winner led with the *job* (one
+place for all your agents), and the repo description that carried it to 31k settled
+on naming the job outright — "the runtime your coding agents live on."
+
+Then the compounding asset (Finding 4) appeared on its own: a community built
+**satellites** around it — `herdrm` (567 stars, a native macOS console),
+`herdr-reviewr` (485, a code-review sidebar), `herdr-remote` (271, menu-bar/phone
+control), `herdr-mirror` (158, local+remote session unification), plus phone UIs and
+an achievements plugin. agi-cli already ships first-party equivalents (the AGI EXT
+Fleet panel, the iOS Cockpit) — but no *third party* has built one yet, and Herdr's
+star curve says that third-party ring is where the durable pull comes from.
+
+The takeaway is not "copy Herdr." It is that the nearest competitor launched from
+the same standing start, **flopped its first Show HN at 5 points**, relaunched with
+a job-first title, hit the 99th percentile, and rode a follow-up narrative ("joining
+YC, staying open") to a second 281-point post. First-launch failure was a step, not
+a verdict.
+
+### OpenClaw: the category-definer you do not replicate with one post
+
+`openclaw/openclaw` — **386,940 stars**, "Your own personal AI assistant. Any OS.
+Any Platform." — is the other name you raised, and it is a different lesson. You do
+not reach this with a Show HN; those stars came from being the reference
+implementation of a whole category, and then from an **ecosystem** forming on top:
+`awesome-openclaw-skills` (52,087 stars), `awesome-openclaw-usecases` (31,663), and
+a stream of Show HN derivatives that each launched *their own* product on top of it
+— [Klaus, "OpenClaw on a VM"](https://news.ycombinator.com/item?id=47337249) (160),
+[DenchClaw, "Local CRM on OpenClaw"](https://news.ycombinator.com/item?id=47309953)
+(147), [Eve, "Managed OpenClaw for work"](https://news.ycombinator.com/item?id=47721255) (72).
+
+The usable lesson for agi-cli: the **aggregator and skills lists** that form around a
+tool are themselves large star magnets, and being the thing those lists point at is a
+more durable position than any single launch. This is exactly Phase 2 of the plan
+(get into `awesome-claude-code`, the ECC list, the agent-tool indexes) — OpenClaw is
+the proof of how large that compounding gets.
+
+### The anatomy of a 99th-percentile post
+
+The comparable winners — self-hosted dev tools, agent CLIs, Claude-adjacent tools —
+share a shape. Each row is a real post; "what it showed" is the actual hook from the
+post body:
+
+| Post (Show HN) | Score | What it actually showed |
+| --- | --- | --- |
+| [Clippy – 90s UI for local LLMs](https://news.ycombinator.com/item?id=43905942) | 1122 | a visual/nostalgia hook — a screenshot did the whole pitch |
+| [Tabby – a self-hosted GitHub Copilot](https://news.ycombinator.com/item?id=35470915) | 627 | positioned as "self-hosted alternative to [the incumbent everyone knows]"; a privacy grievance + a live deployed demo |
+| [Browser MCP – automate your browser using Cursor, Claude, VS Code](https://news.ycombinator.com/item?id=43613194) | 616 | named the exact tools the audience already runs |
+| [NanoClaw – "Clawdbot" in 500 lines of TS](https://news.ycombinator.com/item?id=46850205) | 533 | the "X in N lines" minimalism hook — legible in one glance |
+| [OSS agent topped TerminalBench, 65.2% vs Google's 47.8%](https://news.ycombinator.com/item?id=47920787) | 393 | a benchmark number beating named incumbents, with an anti-cheating credibility defense; number-first title |
+| [Omnara – Run Claude Code from anywhere](https://news.ycombinator.com/item?id=44878650) | 310 | one grievance (Claude Code is trapped on your laptop), one install line (`pip install omnara && omnara`), the same session continued from web + mobile, a demo |
+
+The pattern is consistent and short: **one sentence, one grievance the reader already
+feels, one number or one install line, one demo.** Not one of these led with a
+capability list. Clippy and NanoClaw won on a single glanceable hook; Tabby and
+Omnara won by naming a grievance against a tool the audience already uses; the Dirac
+agent won on a number. The failure mode this rules out is the current README's
+twelve-capability run-on — that is the "tmux-like multiplexer" version of a title.
+
+**The nearest proven comparable to agi-cli is Omnara** (310 points): same "control
+your agents from anywhere" wedge, one install line, cross-surface continuity, a demo.
+The drafted Show HN title in the launch-posts report already follows the winning
+shape — it names the job ("Run Claude, Codex, and Gemini in parallel across your own
+machines"), not the mechanism. Herdr's arc is the template for what to do if the
+first post lands flat: change the framing, not the product, and relaunch.
+
 ## Recommendations
 
 ### The name is already settled, and the rebrand was correct
