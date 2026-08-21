@@ -1,10 +1,11 @@
 Gemini v0.29.5
 ~/src/github.com/example/agents · main · started 23d 18h ago · lasted 7m
-25 msgs · 180k tokens · d37d035f-f749-419b-afaf-3080f906df14
-  Prompt: # Bug Investigation: Go CLI process crash during agent delegation
-  Activity: 5 read · 23 tools
   
-  Last response:
+  Asked     "# Bug Investigation: Go CLI process crash during agent delegation"
+  Made      5 read
+  Cost      25 msgs · 180k tokens · 23 tools
+  
+  Latest
     I have identified the root cause of the Go CLI process crash during agent delegation and prepared the necessary fix.
     
     ### Root Cause Analysis
@@ -21,3 +22,4 @@ Gemini v0.29.5
     ### Recommended Fix
     
     … (42 more lines)
+  Details ▸ d37d035f

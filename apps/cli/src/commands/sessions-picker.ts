@@ -928,15 +928,17 @@ function formatCompactPreview(digest: SessionPreviewDigest, session: SessionMeta
   // Details ▸ — the folded long tail: session id, skills, plugins, hooks, links,
   // dirs, repos, capability tags. One width-capped line instead of seven labeled
   // rows (a long tail used to wrap and swamp the whole pane); links stay
-  // clickable (OSC 8), hook failures stay red.
+  // clickable (OSC 8), hook failures stay red. Full lists go to the cap — it is
+  // the ONLY bounding, so its `… +N more` tail accounts for every hidden item
+  // (pre-slicing here made overflow vanish with no trace).
   const details: string[] = [
     session.filePath ? chalk.gray(linkPath(session.filePath, session.id.slice(0, 8))) : chalk.gray(session.id.slice(0, 8)),
-    ...skills.slice(0, 3).map(s => chalk.white(s.name) + (s.count > 1 ? chalk.gray(` ×${s.count}`) : '')),
-    ...plugins.slice(0, 3).map(p => chalk.white(p)),
-    ...hooks.slice(0, 3).map(h => chalk.white(h.name) + (h.failed ? chalk.red(` (${h.failed} failed)`) : '')),
-    ...links.slice(0, 3).map(l => chalk.blue(linkUrl(l.url, l.label))),
+    ...skills.map(s => chalk.white(s.name) + (s.count > 1 ? chalk.gray(` ×${s.count}`) : '')),
+    ...plugins.map(p => chalk.white(p)),
+    ...hooks.map(h => chalk.white(h.name) + (h.failed ? chalk.red(` (${h.failed} failed)`) : '')),
+    ...links.map(l => chalk.blue(linkUrl(l.url, l.label))),
     ...dirs.map(d => chalk.gray(d)),
-    ...repos.slice(0, 2).map(r => chalk.gray(r)),
+    ...repos.map(r => chalk.gray(r)),
     ...toolTags.map(t => chalk.gray(t)),
   ];
   lines.push(verbLabel('Details ▸') + joinWidthCapped(details, valueWidth));

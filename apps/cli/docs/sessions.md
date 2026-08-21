@@ -697,10 +697,13 @@ detail-output only — the listing `--json` above does not compute it per row.)
 List and preview surfaces still show that progress when it is available on the
 row (live `--active` from the state engine, or `SessionMeta.todos` / transcript
 parse in the picker): compact `✓done/total · current step` in the picker
-preview (`Todos:` line), the flat listing's `doing` cell, and `--active` /
+preview (on the `Doing` row), the flat listing's `doing` cell, and `--active` /
 cross-machine rows (interactive, headless, teams, and sub-agent sessions share
-the same path). The picker preview also shows the originating user prompt and a
-width-capped `Dirs:` line of directories touched.
+the same path). The picker preview groups its body into verb-led rows
+(RUSH-2757): `Asked` (the originating prompt, quoted), `Doing` (checklist,
+team lineage, sub-agents), `Made` (file deltas, artifacts, plan, PR), `Health`
+(errors + last test verdict), `Cost` (msgs, tokens, tool mix), `Latest` (the
+full last message, wrapped), and one width-capped `Details ▸` fold.
 
 A row another device owns (`_remote` — its transcript is on the peer's disk)
 gets the same full pane, not a metadata stub: the picker fetches that peer's
@@ -717,18 +720,23 @@ Both renders of a session — the picker quick preview and the full summary —
 share one extraction module (`src/lib/session/highlights.ts`) for the "what did
 this session use and produce" lines, so they never disagree:
 
-- `Skills:` / `Skills (N)` — skills invoked (the `Skill` tool, plugin skills
-  included), repeat counts folded (`teams ×2`).
-- `Hooks:` / `Hooks (N)` — hooks that fired, from Claude's `hook_success` /
-  `hook_error` attachment records (other harnesses don't record firings, so the
-  section simply doesn't render for them).
-- `Links:` / `Links (N)` — URLs harvested from the conversation, classified
-  (Linear/Jira/GitHub/GitLab), deduped by label, clickable (OSC 8).
-- `Artifacts:` / `Artifacts (N)` — documents the session CREATED: anything under
+- Skills — skills invoked (the `Skill` tool, plugin skills included), repeat
+  counts folded (`teams ×2`). Full summary: its own `Skills (N)` section;
+  picker: folded into `Details ▸`.
+- Hooks — hooks that fired, from Claude's `hook_success` / `hook_error`
+  attachment records (other harnesses don't record firings, so nothing renders
+  for them). Full summary: `Hooks (N)`; picker: `Details ▸`.
+- Links — URLs harvested from the conversation, classified
+  (Linear/Jira/GitHub/GitLab), deduped by label, clickable (OSC 8). Full
+  summary: `Links (N)`; picker: `Details ▸`.
+- Artifacts — documents the session CREATED: anything under
   `.agents/artifacts|plans|reports/`, plus other `*.md`/`*.html` creations.
-- `Repos:` (picker only) — repos worked in, from a bounded `.git` walk-up over
-  the touched paths (relative paths resolve against the session cwd only).
-- `Errors:` (picker) — the same failure tally the full summary shows.
+  Full summary: `Artifacts (N)`; picker: on the `Made` row.
+- Repos (picker only) — repos worked in, from a bounded `.git` walk-up over
+  the touched paths (relative paths resolve against the session cwd only);
+  folded into `Details ▸`.
+- Errors — the failure tally; the picker shows it on the `Health` row, the
+  full summary in its Errors section.
 
 The full summary's `Plan` section renders the checklist with status markers
 (`[x]` / `[>]` / `[ ]`) alongside any ExitPlanMode plan text. Changes/Dirs

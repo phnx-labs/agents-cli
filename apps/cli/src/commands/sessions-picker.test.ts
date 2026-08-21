@@ -322,6 +322,39 @@ describe('buildPreview — highlight lines (skills, hooks, links, artifacts, err
     }
   });
 
+  it('Details ▸ fold accounts for every hidden item with `… +N more` — nothing vanishes silently', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-fold-'));
+    try {
+      const filePath = path.join(dir, 'session.jsonl');
+      const skillEvents = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel'].map((name, i) =>
+        JSON.stringify({ type: 'assistant', timestamp: `2026-08-01T14:00:${String(10 + i).padStart(2, '0')}.000Z`, message: { role: 'assistant', content: [{ type: 'tool_use', id: `s${i}`, name: 'Skill', input: { skill: name } }] } }));
+      fs.writeFileSync(filePath, [
+        JSON.stringify({ type: 'user', timestamp: '2026-08-01T14:00:00.000Z', message: { role: 'user', content: 'invoke every skill' } }),
+        ...skillEvents,
+      ].join('\n') + '\n');
+      const preview = stripVTControlCharacters(buildPreview(mk({
+        id: 'fold-session',
+        shortId: 'foldsess',
+        filePath,
+        cwd: dir,
+      })));
+      const detailsLine = preview.split('\n').find(l => l.includes('Details ▸'))!;
+      expect(detailsLine).toBeDefined();
+      // No file ops in this transcript, so the fold holds exactly the session id
+      // plus the 8 skills. Every skill is either visibly shown or counted in the
+      // `… +N more` tail — the cap may hide items, never disappear them.
+      const shown = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel']
+        .filter(n => detailsLine.includes(n)).length;
+      const tail = detailsLine.match(/… \+(\d+) more/);
+      const hidden = tail ? Number(tail[1]) : 0;
+      expect(shown + hidden).toBe(8);
+      expect(shown).toBeLessThan(8); // the 80-col cap genuinely folds some
+      expect(tail).not.toBeNull(); // and the fold is visible, not silent
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('omits highlight lines when the transcript has none', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-nohl-'));
     try {
