@@ -259,7 +259,7 @@ one competitor:
 | --- | --- | --- |
 | 2026-05-23 | Herdr: A tmux-like terminal multiplexer for AI coding agents | **5** |
 | 2026-06-29 | Herdr: Agent multiplexer that lives in your terminal | **166** |
-| 2026-06-30 | Herdr: One terminal for the whole herd | 3 |
+| 2026-06-30 | Herdr: One terminal for he whole herd [sic] | 3 |
 | 2026-07-02 | [Herdr: One terminal to rule them all](https://news.ycombinator.com/item?id=48756578) | **404** (178 comments) |
 | 2026-08-06 | [Herdr is joining Y Combinator. The runtime stays open](https://news.ycombinator.com/item?id=49201003) | **281** |
 
