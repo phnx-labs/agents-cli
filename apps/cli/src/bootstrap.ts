@@ -285,8 +285,8 @@ Run and dispatch:
   pty                             Drive interactive terminal programs (REPLs, TUIs) via a persistent PTY session
   artifacts                       Publish what an agent made (plans, reports, visuals) to a shareable link
 
-Observe (read the fleet — no store merge; aliases point at the real readers):
-  feed / inbox                    Needs-you inbox (open blocks waiting on you)
+Observe (read the fleet — no store merge):
+  feed                            Needs-you inbox (open blocks waiting on you); agent posts = feed --filter updates
   sessions --active               Live agents (who is running right now)
   events                          Unified ops + activity event trail
   audit                           Tamper-evident run-dispatch log (not events)

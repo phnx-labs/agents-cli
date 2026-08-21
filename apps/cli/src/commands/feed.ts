@@ -428,7 +428,7 @@ export function registerFeedCommand(program: Command): void {
   const feed = program
     .command('feed')
     .description(
-      'Operator inbox + agent status posts (alias: inbox = needs-you). Agent progress = --filter updates',
+      'Operator inbox + agent status posts. Default is needs-you; agent progress = --filter updates',
     )
     .option('--json', 'Output as JSON (each block stamped with its outcome + ask class)')
     .option('--filter <view>', 'What to show: needs (default) · updates · all', 'needs')
@@ -795,37 +795,6 @@ export function registerFeedCommand(program: Command): void {
       });
       for (const g of groups) renderOutcomeGroup(g, self);
       await renderTrailingActivity();
-    });
-
-  // Observe-umbrella aliases (Phase 3): intentional second names, not deprecations.
-  // Re-parse into `feed` so flags/help stay single-sourced. See lib/observe-aliases.ts.
-  registerFeedObserveAliases(program);
-}
-
-/**
- * `inbox` → feed. Loaded with the feed module so the lazy COMMAND_LOADERS entry
- * for `inbox` also gets the real `feed` command registered for re-parse.
- */
-function registerFeedObserveAliases(program: Command): void {
-  const reparse = async (alias: 'inbox'): Promise<void> => {
-    const { expandObserveAlias } = await import('../lib/observe-aliases.js');
-    const rest = process.argv.slice(3);
-    const expanded = expandObserveAlias(alias, rest);
-    if (!expanded) {
-      console.error(chalk.red(`Unknown observe alias: ${alias}`));
-      process.exit(1);
-    }
-    if (process.stderr.isTTY) process.stderr.write(chalk.gray(`${expanded.note}\n`));
-    await program.parseAsync(['node', 'agents', ...expanded.argv]);
-  };
-
-  program
-    .command('inbox')
-    .description('Needs-you inbox (alias of `agents feed`). Open blocks waiting on you.')
-    .allowUnknownOption()
-    .allowExcessArguments()
-    .action(async () => {
-      await reparse('inbox');
     });
 }
 

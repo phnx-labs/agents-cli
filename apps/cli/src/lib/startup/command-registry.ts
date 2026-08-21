@@ -8,7 +8,7 @@ const LOADED_COMMAND_NAMES = [
   'refresh-rules', 'factory', 'usage', 'insights', 'perf', 'trends',
   'pty', 'tmux', 'watchdog', 'browser', 'computer', 'logs', 'events',
   'ssh', 'devices', 'fleet', 'repos', 'repo', 'setup', 'uninstall', 'upgrade', 'sessions',
-  'teams', 'cloud', 'message', 'send', 'notify', 'feed', 'inbox',
+  'teams', 'cloud', 'message', 'send', 'notify', 'feed',
   'mailboxes', 'mailbox', 'serve', 'artifacts', 'unshare', 'audit', 'webhooks',
   'humans', 'daemon',
 ] as const;
@@ -47,6 +47,7 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
  * use `agents feed --filter updates` (RUSH-2692). `status` moved under
  * `agents sync status` (RUSH-2864). `tickets` was removed — use `linear`
  * (linear-cli) (RUSH-2932). `alias` moved under `agents setup alias` (RUSH-2965).
+ * `inbox` was a pure alias of `agents feed` (RUSH-2984).
  */
 export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
   'webhook',
@@ -68,6 +69,7 @@ export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
   'status',
   'tickets',
   'alias',
+  'inbox',
 ]);
 
 export function isKnownTopLevelCommand(name: string): boolean {

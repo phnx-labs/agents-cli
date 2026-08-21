@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_76 command groups · 563 commands._
+_75 command groups · 562 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -288,10 +288,10 @@ agents events rotate  Apply event retention and the storage ceiling immediately
 agents events stats   Show aggregate event statistics
 ```
 
-## feed — Operator inbox + agent status posts (alias: inbox = needs-you). Agent progress = --filter updates
+## feed — Operator inbox + agent status posts. Default is needs-you; agent progress = --filter updates
 
 ```
-agents feed                 Operator inbox + agent status posts (alias: inbox = needs-you). Agent progress = --filter updates
+agents feed                 Operator inbox + agent status posts. Default is needs-you; agent progress = --filter updates
 agents feed post <text...>  Post a status update to the fleet activity stream (for agents)
 ```
 
@@ -340,12 +340,6 @@ agents humans show owner  Show the configured owner identity and notification ch
 
 ```
 agents import <agent>  Import an existing unmanaged agent install into agents-cli
-```
-
-## inbox — Needs-you inbox (alias of `agents feed`). Open blocks waiting on you.
-
-```
-agents inbox  Needs-you inbox (alias of `agents feed`). Open blocks waiting on you.
 ```
 
 ## insights — How work looks — behavioural report (default) or counter mix (`mix`, recipes)

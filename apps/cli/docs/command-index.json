@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 76,
-  "commands": 563,
+  "groups": 75,
+  "commands": 562,
   "root": {
     "name": "agents",
     "path": "",
@@ -9232,7 +9232,7 @@
       "name": "feed",
       "path": "feed",
       "aliases": [],
-      "description": "Operator inbox + agent status posts (alias: inbox = needs-you). Agent progress = --filter updates",
+      "description": "Operator inbox + agent status posts. Default is needs-you; agent progress = --filter updates",
       "args": [],
       "options": [
         {
@@ -10453,26 +10453,6 @@
           "variadic": false,
           "negate": false
         },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": []
-    },
-    {
-      "name": "inbox",
-      "path": "inbox",
-      "aliases": [],
-      "description": "Needs-you inbox (alias of `agents feed`). Open blocks waiting on you.",
-      "args": [],
-      "options": [
         {
           "flags": "-h, --help",
           "description": "Show help",
