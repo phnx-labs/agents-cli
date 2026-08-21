@@ -926,10 +926,19 @@ function registerStopCommand(program: Command): void {
       }
       const domain = `gui/${uid}`;
 
-      try {
-        execFileSync('/bin/launchctl', ['bootout', domain, plistPath], { stdio: 'pipe' });
-      } catch {
-        // already gone — fine
+      // Same invariant as the start path: a redirected-HOME process must never
+      // talk to the real launchd (RUSH-2968). Stop has a local fallback — the
+      // plist/socket cleanup below — so skip the bootout with the reason
+      // rather than throwing like start does.
+      const reg = serviceManagerRegistrationAllowed();
+      if (!reg.allowed) {
+        console.warn(`skipping launchctl bootout: ${reg.reason}`);
+      } else {
+        try {
+          execFileSync('/bin/launchctl', ['bootout', domain, plistPath], { stdio: 'pipe' });
+        } catch {
+          // already gone — fine
+        }
       }
 
       // launchd unlinks the socket when the daemon exits; helper also has an

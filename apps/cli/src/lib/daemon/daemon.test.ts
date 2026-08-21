@@ -348,6 +348,57 @@ describe.skipIf(process.platform !== 'darwin')('startDaemon — launchd does not
     if (tmpHome) fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
+  // RUSH-2968: the originating leak site. launchctl is per-user-session and
+  // HOME-independent, so startDaemon under a redirected HOME must never touch
+  // the real launchd — without the test seam it falls back to a detached
+  // spawn, and the launchctl shim must record ZERO invocations.
+  it('never invokes launchctl under a redirected HOME (falls back to detached)', () => {
+    delete process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
+
+    const daemonDir = path.join(tmpHome, 'daemon-2968');
+    const shimDir = path.join(tmpHome, 'bin-2968');
+    fs.mkdirSync(daemonDir, { recursive: true });
+    fs.mkdirSync(shimDir, { recursive: true });
+
+    // Recording launchctl shim: ANY invocation writes the marker.
+    const markerPath = path.join(tmpHome, 'launchctl-invoked');
+    fs.writeFileSync(
+      path.join(shimDir, 'launchctl'),
+      `#!/bin/sh\necho "$@" >> "${markerPath}"\nexit 0\n`,
+      { mode: 0o755 },
+    );
+
+    // Stand-in daemon child: records its pid then exits shortly.
+    const childPath = path.join(tmpHome, 'fake-daemon-2968.mjs');
+    fs.writeFileSync(childPath, [
+      `import fs from 'fs';`,
+      `fs.writeFileSync(process.env.AGD_PID_2968, String(process.pid));`,
+      `setTimeout(() => {}, 1500);`,
+    ].join('\n'), 'utf-8');
+
+    const sandboxHome = path.join(tmpHome, 'sandbox-home-2968');
+    fs.mkdirSync(sandboxHome, { recursive: true });
+    process.env.HOME = sandboxHome;
+    process.env.AGENTS_REAL_HOME = sandboxHome;
+    process.env.AGENTS_DAEMON_DIR = daemonDir;
+    process.env.PATH = `${shimDir}${path.delimiter}${saved.PATH ?? ''}`;
+    process.env.AGD_PID_2968 = path.join(tmpHome, 'child-pid-2968');
+
+    try {
+      const res = startDaemon(childPath);
+      expect(res.method).not.toBe('launchd');
+      expect(fs.existsSync(markerPath)).toBe(false);
+    } finally {
+      delete process.env.AGD_PID_2968;
+      // Reap the detached stand-in child if it recorded a pid.
+      const pidFile = path.join(tmpHome, 'child-pid-2968');
+      if (fs.existsSync(pidFile)) {
+        const pid = parseInt(fs.readFileSync(pidFile, 'utf-8'), 10);
+        if (!isNaN(pid)) { try { process.kill(pid); } catch { /* already gone */ } }
+      }
+    }
+  });
+
   it('a launchd-started daemon resolves the SANDBOX HOME baked into the plist, never the login session default', () => {
     const daemonDir = path.join(tmpHome, 'daemon');
     const shimDir = path.join(tmpHome, 'bin');
