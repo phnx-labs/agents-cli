@@ -6,7 +6,7 @@ the `swarm-ext://` endpoint. It does not own fleet or agent policy.
 
 ## Thin-client contract
 
-- agents-cli owns sessions, devices, accounts, teams, tickets, watchdog,
+- agents-cli owns sessions, devices, accounts, teams, watchdog,
   routines, lifecycle, ranking, deduplication, and scheduling.
 - The elected extension monitor owns one `agents sessions watch --json` child
   across editor windows. It broadcasts versioned `reset`, `upsert`, `remove`,
@@ -30,11 +30,12 @@ the `swarm-ext://` endpoint. It does not own fleet or agent policy.
   invisible to Copy Session ID / Resume / Fork and is not restored after a
   window reload.
 - Other reads use their CLI noun: `devices list/status/accounts`, `teams ...
-  --json`, `tickets list --json`, `watchdog status/history`, and `routines ...
-  --json`. Missing nouns are upgrade errors, never filesystem/polling fallbacks.
+  --json`, `watchdog status/history`, and `routines ... --json`. Ticket reads
+  use `linear tasks --json` and `gh issue list` (the former `agents tickets`
+  command is gone, RUSH-2932). Missing nouns are upgrade errors, never
+  filesystem/polling fallbacks.
 - The extension must not add an action scheduler, transcript parser/watcher,
-  tracker client, lifecycle classifier, candidate cache, or raw agents config
-  reader.
+  lifecycle classifier, candidate cache, or raw agents config reader.
 
 ## Layout
 

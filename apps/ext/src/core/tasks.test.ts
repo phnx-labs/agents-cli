@@ -1,21 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildTaskDispatchPrompt,
-  buildTicketsListArgs,
   extractImageUrls,
   githubToUnifiedTask,
   linearToUnifiedTask,
 } from './tasks';
-
-test('tickets list keeps a shell-shaped workspace path in one argv element', () => {
-  expect(buildTicketsListArgs(
-    { linear: true, github: false, githubAssignedOnly: true },
-    '/repo/$(touch injected)/`whoami`/$HOME',
-  )).toEqual([
-    'tickets', 'list', '--json', '--no-github', '--github-assigned-only',
-    '--cwd', '/repo/$(touch injected)/`whoami`/$HOME',
-  ]);
-});
 
 describe('buildTaskDispatchPrompt', () => {
   test('builds the task prompt with optional reference, URL, and extra comments', () => {

@@ -95,7 +95,6 @@ export const loadUninstall: ModuleLoader = async () => (await import('../command
 export const loadUpgrade: ModuleLoader = async () => (await import('../commands/upgrade.js')).registerUpgradeCommand;
 export const loadSessions: ModuleLoader = async () => (await import('../commands/sessions.js')).registerSessionsCommands;
 export const loadTeams: ModuleLoader = async () => (await import('../commands/teams.js')).registerTeamsCommands;
-export const loadTickets: ModuleLoader = async () => (await import('../commands/tickets.js')).registerTicketsCommand;
 export const loadCloud: ModuleLoader = async () => (await import('../commands/cloud.js')).registerCloudCommands;
 export const loadMessage: ModuleLoader = async () => (await import('../commands/message.js')).registerMessageCommand;
 export const loadSend: ModuleLoader = async () => (await import('../commands/send.js')).registerSendCommand;
@@ -224,7 +223,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   upgrade: [loadUpgrade],
   sessions: [loadSessions],
   teams: [loadTeams],
-  tickets: [loadTickets],
   cloud: [loadCloud],
   message: [loadMessage],
   send: [loadSend],

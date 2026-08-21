@@ -8,7 +8,7 @@ const LOADED_COMMAND_NAMES = [
   'refresh-rules', 'factory', 'usage', 'insights', 'perf', 'trends',
   'alias', 'pty', 'tmux', 'watchdog', 'browser', 'computer', 'logs', 'events',
   'ssh', 'devices', 'fleet', 'repos', 'repo', 'setup', 'uninstall', 'upgrade', 'sessions',
-  'teams', 'tickets', 'cloud', 'message', 'send', 'notify', 'feed', 'inbox',
+  'teams', 'cloud', 'message', 'send', 'notify', 'feed', 'inbox',
   'mailboxes', 'mailbox', 'serve', 'artifacts', 'unshare', 'audit', 'webhooks',
   'humans', 'daemon',
 ] as const;
@@ -45,7 +45,8 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
  * cost/output/profiles/snapshot/cp/resume/roster moved under nested homes
  * (cli-surface-consolidate). `timeline` was removed as a duplicated surface —
  * use `agents feed --filter updates` (RUSH-2692). `status` moved under
- * `agents sync status` (RUSH-2864).
+ * `agents sync status` (RUSH-2864). `tickets` was removed — use `linear`
+ * (linear-cli) (RUSH-2932).
  */
 export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
   'webhook',
@@ -65,6 +66,7 @@ export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
   'share',
   'timeline',
   'status',
+  'tickets',
 ]);
 
 export function isKnownTopLevelCommand(name: string): boolean {

@@ -17,17 +17,7 @@ export interface TaskDispatchPromptInput {
   extraComments?: string;
 }
 
-export function buildTicketsListArgs(
-  enabled: { linear: boolean; github: boolean; githubAssignedOnly: boolean },
-  cwd?: string,
-): string[] {
-  const args = ['tickets', 'list', '--json'];
-  if (!enabled.linear) args.push('--no-linear');
-  if (!enabled.github) args.push('--no-github');
-  if (enabled.githubAssignedOnly) args.push('--github-assigned-only');
-  if (cwd) args.push('--cwd', cwd);
-  return args;
-}
+
 
 function cleanPromptPart(value: string | undefined): string {
   return value?.trim() ?? '';

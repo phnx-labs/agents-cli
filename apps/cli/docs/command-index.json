@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 78,
-  "commands": 565,
+  "groups": 77,
+  "commands": 563,
   "root": {
     "name": "agents",
     "path": "",
@@ -27388,94 +27388,6 @@
             {
               "flags": "--json",
               "description": "Output machine-readable JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
-    },
-    {
-      "name": "tickets",
-      "path": "tickets",
-      "aliases": [],
-      "description": "Read work items from the trackers linked to this workspace.",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "agents tickets list --json\n      agents tickets list --github-assigned-only --json",
-      "notes": "The response reports each source's availability explicitly. A failed tracker\n      never makes another tracker's rows disappear.",
-      "subcommands": [
-        {
-          "name": "list",
-          "path": "tickets list",
-          "aliases": [],
-          "description": "List workspace tickets from Linear and GitHub.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--cwd <path>",
-              "description": "Workspace used to resolve tracker context",
-              "long": "--cwd",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--no-linear",
-              "description": "Exclude Linear tickets",
-              "long": "--no-linear",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
-              "flags": "--no-github",
-              "description": "Exclude GitHub issues",
-              "long": "--no-github",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
-              "flags": "--github-assigned-only",
-              "description": "Only include GitHub issues assigned to the current user",
-              "long": "--github-assigned-only",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Output machine-readable tickets, cycle metadata, and source availability",
               "long": "--json",
               "required": false,
               "optional": false,
