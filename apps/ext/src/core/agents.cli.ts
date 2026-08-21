@@ -2,7 +2,7 @@
 //
 // Source of truth:
 //   apps/cli/src/lib/types.ts   (the AgentId union)
-//   apps/cli/src/lib/agents.ts  (the AGENTS table: name, cliCommand)
+//   apps/cli/src/lib/agent-spec/agents.ts  (the AGENTS table: name, cliCommand)
 //
 // The extension cannot import the CLI in-process (the repo has no JS
 // workspaces; the CLI is ESM, the extension CommonJS), so the registry is
@@ -45,7 +45,7 @@ export interface CliAgentMeta {
   cliCommand: string;
 }
 
-/** Canonical per-agent metadata (apps/cli/src/lib/agents.ts AGENTS table). */
+/** Canonical per-agent metadata (apps/cli/src/lib/agent-spec/agents.ts AGENTS table). */
 export const CLI_AGENT_META: Record<CliAgentId, CliAgentMeta> = {
   claude: { name: 'Claude', cliCommand: 'claude' },
   codex: { name: 'Codex', cliCommand: 'codex' },

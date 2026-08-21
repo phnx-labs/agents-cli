@@ -12,6 +12,7 @@ import * as path from 'path';
 import { CLI_AGENT_IDS, CLI_AGENT_META } from './agents.cli';
 
 const CLI_LIB = path.resolve(__dirname, '..', '..', '..', 'cli', 'src', 'lib');
+const CLI_AGENTS = path.join(CLI_LIB, 'agent-spec', 'agents.ts');
 
 // A packaged source tree without apps/cli (e.g. an extension-only checkout)
 // has nothing to diff against — the guard only runs inside the monorepo.
@@ -26,8 +27,8 @@ const inMonorepo = fs.existsSync(path.join(CLI_LIB, 'types.ts'));
     expect([...CLI_AGENT_IDS].sort()).toEqual([...ids].sort());
   });
 
-  test('CLI_AGENT_META name/cliCommand match the AGENTS table in apps/cli/src/lib/agents.ts', () => {
-    const src = fs.readFileSync(path.join(CLI_LIB, 'agents.ts'), 'utf-8');
+  test('CLI_AGENT_META name/cliCommand match the canonical AGENTS table', () => {
+    const src = fs.readFileSync(CLI_AGENTS, 'utf-8');
     for (const [id, meta] of Object.entries(CLI_AGENT_META)) {
       // Each entry opens at 2-space indent (`  claude: {`) and closes with the
       // first `  },` back at that indent; nested objects sit deeper.
