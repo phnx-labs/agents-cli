@@ -87,9 +87,11 @@ export interface RotateResult {
   /** Candidates excluded (not signed in, or out of credits). */
   excluded: RotateCandidate[];
   /**
-   * True when NO candidate on this machine had usage data fresh enough to decide
-   * on, so the pick was made from unverified snapshots. Callers surface it —
-   * routing blind is a fact the operator needs, not an internal detail.
+   * True when the PICKED candidate's usage could not be verified fresh, so the
+   * route was decided on an unverified snapshot. Callers surface it — routing
+   * blind is a fact the operator needs, not an internal detail. (Previously
+   * this only reported the all-stale case; a stale pick out of a mixed pool
+   * was silently reported as verified.)
    */
   usageUnverified?: boolean;
 }
@@ -406,7 +408,12 @@ export function pickBalancedCandidate(
     if (!deduped.has(c)) excluded.push(c);
   }
 
-  const { picked, usageUnverified } = preferVerified(sorted, nowMs, weightedRandomByCapacity);
+  const { picked, usageUnverified } = preferVerified(
+    sorted,
+    nowMs,
+    weightedRandomByCapacity,
+    'representative',
+  );
   return { picked, healthy: sorted, excluded, usageUnverified };
 }
 
@@ -428,11 +435,20 @@ export function pickBalancedCandidate(
  * verified candidate while the rest are never picked and never probed: the
  * rotation degrades to a fixed pin that burns one account to its weekly cap
  * while its siblings idle (observed 2026-08-20 across yosemite-s0/s1 — the
- * "same version every time under --strategy balanced" incident). Verified-only
- * choice is therefore applied only when the verified set covers at least half
- * the pool; below that the whole pool competes, with fresh candidates weighted
- * by their confirmed numbers and stale/unknown ones at the default full weight
- * `capacityWeight` already assigns to "no signal".
+ * "same version every time under --strategy balanced" incident).
+ *
+ * The two failure modes belong to different CHOOSERS, so `narrowing` is picked
+ * per caller: `'representative'` (the weighted-random balanced path) narrows to
+ * verified only when they cover at least half the pool — below that the whole
+ * pool competes, fresh candidates keep their confirmed weights, stale/unknown
+ * ones get the full default weight `capacityWeight` assigns to "no signal", and
+ * the random roll spreads the load. `'any-verified'` (deterministic `from[0]`
+ * choosers: `--strategy available`, run-auto harness classification) keeps the
+ * original rule — narrow whenever ANY verified candidate exists — because a
+ * deterministic pick over the whole pool would hand the front slot back to an
+ * unconfirmed "48% used" over an accurate "90% used", the exact yosemite-s1
+ * inversion above, and a deterministic chooser cannot spread load anyway, so
+ * the singleton-collapse concern does not apply to it.
  *
  * `healthy` deliberately keeps every eligible candidate rather than just the
  * verified ones. Declining to *pick* an account on stale data and declining to
@@ -445,12 +461,16 @@ function preferVerified(
   pool: RotateCandidate[],
   nowMs: number,
   choose: (from: RotateCandidate[]) => RotateCandidate,
+  narrowing: 'any-verified' | 'representative' = 'any-verified',
 ): { picked: RotateCandidate; usageUnverified: boolean } {
   const verified = pool.filter((c) => isUsageVerified(c, nowMs));
-  const representative = verified.length >= Math.ceil(pool.length / 2);
+  const narrow =
+    verified.length > 0 &&
+    (narrowing === 'any-verified' || verified.length >= Math.ceil(pool.length / 2));
+  const picked = choose(narrow ? verified : pool);
   return {
-    picked: choose(representative ? verified : pool),
-    usageUnverified: verified.length === 0,
+    picked,
+    usageUnverified: !isUsageVerified(picked, nowMs),
   };
 }
 

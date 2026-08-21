@@ -10,11 +10,16 @@
   draw ran over a one-element list and `--strategy balanced` launched the same
   account/version every time — and launching into it kept its snapshot fresh,
   locking the loop in while the other accounts were never picked or probed.
-  Verified-only narrowing now applies only when verified accounts cover at
-  least half the pool; below that, the whole pool competes, with fresh accounts
-  weighted by their confirmed numbers and stale/unknown ones at the default
-  full weight. Source: `apps/cli/src/lib/accounting/rotate.ts`
-  (`preferVerified`).
+  For the weighted-random balanced chooser, verified-only narrowing now applies
+  only when verified accounts cover at least half the pool; below that, the
+  whole pool competes, with fresh accounts weighted by their confirmed numbers
+  and stale/unknown ones at the default full weight. The deterministic choosers
+  (`--strategy available`, run-auto harness classification) keep strict
+  verified-first narrowing — a deterministic pick cannot spread load, so
+  relaxing it would only reintroduce the stale-snapshot inversion. The
+  `usageUnverified` flag now reports whether the PICKED account's usage was
+  verified, not merely whether the whole pool was stale. Source:
+  `apps/cli/src/lib/accounting/rotate.ts` (`preferVerified`).
 
 - **`agents doctor --fix` names the exact removal command for a duplicate install it will not purge, and the multi-install banner only advertises `--fix` when it can really resolve the peer (RUSH-2705).** A healthy `>=1.22.30` duplicate
   global (for example a second install under nvm) was detected and nagged about on

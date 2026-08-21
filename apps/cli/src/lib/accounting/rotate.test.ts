@@ -517,7 +517,11 @@ describe('routing refuses to decide on usage it cannot verify', () => {
 
     const picks = new Set<string>();
     for (let i = 0; i < 200; i++) {
-      picks.add(pickBalancedCandidate([fresh1, ...stale], NOW)!.picked.version);
+      const result = pickBalancedCandidate([fresh1, ...stale], NOW)!;
+      picks.add(result.picked.version);
+      // usageUnverified reports the PICK, not the pool: a stale pick out of a
+      // mixed pool must say so (the reviewer's truthfulness finding).
+      expect(result.usageUnverified).toBe(result.picked.version !== '2.1.219');
     }
 
     // Weighted-random over the whole pool: with near-equal weights, 200 draws
@@ -589,6 +593,24 @@ describe('--strategy available applies the same freshness rule as balanced', () 
 
     expect(result.usageUnverified).toBe(true);
     expect(result.picked.version).toBe('2.1.181'); // still the headroom sort
+  });
+
+  it('a verified MINORITY still wins the deterministic pick — no whole-pool relaxation here', () => {
+    // The reviewer's catch on the first cut of the RUSH-2858 fix: relaxing the
+    // verified-first narrowing for a verified minority is only safe for a
+    // WEIGHTED-RANDOM chooser (it spreads load). `available` picks the front of
+    // the headroom sort deterministically, so a whole-pool fallback would hand
+    // the slot to an unconfirmed stale "5% used" over an accurate 95% — the
+    // original yosemite-s1 inversion. One verified account among eight must
+    // still be the pick.
+    const verified = candidate({ version: '2.1.219', usageSnapshot: fresh(95) });
+    const stale = ['2.1.181', '2.1.207', '2.1.217', '2.1.218', '2.1.220', '2.1.221', '2.1.222']
+      .map((version) => candidate({ version, usageSnapshot: dayOld(5) }));
+
+    const result = pickAvailableCandidate([...stale, verified], null, NOW)!;
+
+    expect(result.picked.version).toBe('2.1.219');
+    expect(result.usageUnverified).toBe(false);
   });
 
   it('an explicit version preference is an instruction and still wins', () => {
@@ -710,6 +732,22 @@ describe('pickHarnessWeighted (run auto — the cross-harness layer, RUSH-2132)'
     ]);
     const [summary] = classifyHarnessCandidates(byHarness, NOW);
     // The day-old "5% used" is not evidence; the verified 80% account represents.
+    expect(summary.best!.version).toBe('2.1.219');
+  });
+
+  it('a verified minority of a large pool still represents the harness — deterministic, no relaxation', () => {
+    // Mirror of the `available` minority test: classify's `from[0]` chooser
+    // must keep verified-first narrowing even when verified accounts are a
+    // minority, or a stale-looking-empty account becomes the representative.
+    const stale = snapshotAt(new Date(NOW - 26 * 3600 * 1000), [{ key: 'week', usedPercent: 5 }]);
+    const byHarness = new Map<AgentId, RotateCandidate[]>([
+      ['claude', [
+        ...['2.1.181', '2.1.207', '2.1.217', '2.1.218', '2.1.220', '2.1.221', '2.1.222']
+          .map((version) => harnessAcct('claude', version, { usageSnapshot: stale })),
+        harnessAcct('claude', '2.1.219', { usageSnapshot: freshSnap(80) }),
+      ]],
+    ]);
+    const [summary] = classifyHarnessCandidates(byHarness, NOW);
     expect(summary.best!.version).toBe('2.1.219');
   });
 
