@@ -17,6 +17,7 @@ import {
   termLink,
   formatDie,
   dieFriction,
+  runOrDie,
 } from './format.js';
 import { _resetForTest } from './feed/events.js';
 
@@ -141,6 +142,40 @@ describe('formatDie (RUSH-1830 — machine-readable failures for --json callers)
   it('omits an absent hint from the json payload (no null/undefined key)', () => {
     const out = formatDie('nope', { json: true });
     expect(out.text).not.toContain('hint');
+  });
+});
+
+describe('runOrDie', () => {
+  it('turns a thrown Error into a clean die(message), not a rethrow (the auth/org stack-dump bug)', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: number) => {
+      throw new Error(`exit:${code}`);
+    });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(
+      runOrDie(() => { throw new Error("Not signed in. Run 'agents auth login' first."); }),
+    ).rejects.toThrow('exit:1');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    expect(String(errSpy.mock.calls[0][0])).toContain("Not signed in. Run 'agents auth login' first.");
+  });
+
+  it('keeps the structured {"error"} payload for a --json caller', async () => {
+    vi.spyOn(process, 'exit').mockImplementation((code?: number) => {
+      throw new Error(`exit:${code}`);
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await expect(
+      runOrDie(async () => { throw new Error('Signed-in token is no longer valid.'); }, { json: true }),
+    ).rejects.toThrow('exit:1');
+    expect(JSON.parse(String(logSpy.mock.calls[0][0]))).toEqual({ error: 'Signed-in token is no longer valid.' });
+  });
+
+  it('passes a successful action through untouched', async () => {
+    let ran = false;
+    await runOrDie(async () => { ran = true; });
+    expect(ran).toBe(true);
   });
 });
 
