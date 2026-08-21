@@ -103,8 +103,8 @@ produced it:
 
 This is the finding most specific to this repo. The Claude Code ecosystem's
 community lists have accumulated **200,000+ combined stars across 11 curated
-lists**, with the largest single aggregator (`affaan-m/everything-claude-code`)
-past **163,000 stars** on its own. `claude-flow` sits at 59.4k, `SuperClaude` at
+lists**, with the largest single aggregator (`affaan-m/ECC`, formerly
+`everything-claude-code`) past **241,000 stars** on its own. `claude-flow` sits at 59.4k, `SuperClaude` at
 23k+, and the official Claude Code repo crossed 131,000 by June 2026.
 
 An accepted awesome-list entry is permanent referral traffic. It does not decay
@@ -335,7 +335,7 @@ acronym. That is the Phase 1 rewrite below.
 Submit to the Claude Code aggregators **before** the launch, so the launch lands
 on a page that already carries inbound:
 
-- `affaan-m/everything-claude-code` (163k stars)
+- `affaan-m/ECC`, formerly `everything-claude-code` (241k stars)
 - `hesreallyhim/awesome-claude-code`
 - the `sst/opencode` adjacent-tool lists
 - `punkpeye/awesome-mcp-servers`, if an MCP surface qualifies
