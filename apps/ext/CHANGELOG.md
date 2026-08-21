@@ -6,6 +6,20 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [0.9.328] - 2026-08-20
 
+- **Agent prose renders as markdown on the Fleet feed, and a card stops restating
+  its own title.** `AgentDecision.tsx` imported no markdown renderer at all, so an
+  agent's response rendered raw — literal `**bold**` and backticks in an unbroken
+  wall of text; `StructuredReply.tsx` rendered its question the same way. Both now
+  go through the same `renderMarkdown` (marked + DOMPurify) every other surface
+  uses. Separately, a card's title IS the first line of its prompt, and the TASK
+  block below restated it: a single-line prompt rendered the identical string
+  twice and cost the card ~120px, so the first card ran ~500px and roughly one and
+  a half agents filled the pane. The block now renders only when the prompt has
+  more than that first line — compared by line count, not by text, because
+  `firstLine()` strips markdown and a text comparison leaves the duplicate in
+  place for exactly the cards that read worst. Source:
+  `ui/settings/components/mission-control/{FeedItem,AgentDecision,StructuredReply}.tsx`.
+
 - **The session detail panel stops stalling once a workspace has ~20 agents open.**
   Resolving a Claude transcript meant stat-ing one filename under every project dir
   of every Claude version root, with no cache, and the floor rebuild did that once

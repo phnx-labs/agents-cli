@@ -117,4 +117,19 @@ describe('compact (plain) row preview line', () => {
     expect(html).toContain('Merged the three surfaces into one BacklogCenter.')
     expect(html).toContain('Collapse the ticket surfaces')
   })
+
+  test('a single-line prompt does not render twice: title AND task block', () => {
+    // The title IS firstLine(prompt), so a TASK block under it restated the same
+    // string and cost the card ~120px. Compare LINE COUNT, not text: firstLine()
+    // strips markdown, so `prompt !== firstLine(prompt)` is true for ANY
+    // single-line prompt containing markup — the cards that read worst.
+    const html = render(agent({ prompt: 'Make **discovery** natural' }), false)
+    expect(html).not.toContain('class="task')
+  })
+
+  test('a multi-line prompt still gets its task block — it carries more than the title', () => {
+    const html = render(agent({ prompt: 'Make discovery natural\n\nKeep the legacy keyword path behind a flag.' }), false)
+    expect(html).toContain('class="task')
+    expect(html).toContain('Keep the legacy keyword path behind a flag.')
+  })
 })

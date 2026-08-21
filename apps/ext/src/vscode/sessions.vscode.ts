@@ -7,6 +7,7 @@ import type { Dirent, Stats } from 'fs';
 import { AgentSession } from '../core/sessions';
 import { runAgents } from '../core/agentsBin';
 import type { SqlJsStatic } from 'sql.js';
+import { cachedInFlight, createTimedCache } from '../core/cachedInFlight';
 
 // Cached SQL.js instance (lazy-loaded)
 let sqlJsPromise: Promise<SqlJsStatic | null> | null = null;
@@ -423,14 +424,30 @@ async function buildClaudeFileIndex(homeDir: string): Promise<Map<string, string
   return files;
 }
 
+// The floor rebuild starts one lookup per agent in a SINGLE tick
+// (terminals.vscode.ts:1063-1071 pushes each promise and only awaits the batch at
+// :1075). `claudeFileIndex` is assigned after its build resolves, so without
+// coalescing every one of those N callers sees a null-or-stale index and starts
+// its own walk: 20 agents built 20 identical indexes, ~6,920 readdir per refresh,
+// in steady state — trading the stat storm for a readdir storm.
+const claudeIndexBuilds = createTimedCache<Map<string, string>>();
+
 async function getClaudeFileIndex(homeDir: string, maxAgeMs: number): Promise<Map<string, string>> {
-  const now = Date.now();
-  if (claudeFileIndex && claudeFileIndex.homeDir === homeDir && now - claudeFileIndex.builtAt < maxAgeMs) {
+  const fresh = (at: number) => Date.now() - at < maxAgeMs;
+  if (claudeFileIndex && claudeFileIndex.homeDir === homeDir && fresh(claudeFileIndex.builtAt)) {
     return claudeFileIndex.files;
   }
-  const files = await buildClaudeFileIndex(homeDir);
-  claudeFileIndex = { homeDir, builtAt: now, files };
-  return files;
+  // ttl 0: never re-serve a stale build, but concurrent callers share one walk.
+  return cachedInFlight(claudeIndexBuilds, homeDir, 0, async () => {
+    // Re-check inside the coalesced section: a build that resolved between this
+    // caller's check above and its turn here is still fresh enough to reuse.
+    if (claudeFileIndex && claudeFileIndex.homeDir === homeDir && fresh(claudeFileIndex.builtAt)) {
+      return claudeFileIndex.files;
+    }
+    const files = await buildClaudeFileIndex(homeDir);
+    claudeFileIndex = { homeDir, builtAt: Date.now(), files };
+    return files;
+  });
 }
 
 /** Drop the Claude path caches. Exported so tests do not leak state between cases. */
@@ -466,8 +483,9 @@ export async function getSessionPathBySessionId(
       let indexed = await confirm((await getClaudeFileIndex(homeDir, CLAUDE_INDEX_TTL_MS)).get(filename));
       if (!indexed) {
         // Re-check against an index no older than the miss-authority window.
-        // Rebuilding once here is shared by every other unresolved session in
-        // the same refresh; re-walking per session is what made this function
+        // The rebuild is coalesced (getClaudeFileIndex), so every other
+        // unresolved session in the same refresh joins this one walk rather than
+        // starting its own — re-walking per session is what made this function
         // O(agents x projectDirs) in the first place.
         indexed = await confirm((await getClaudeFileIndex(homeDir, CLAUDE_INDEX_MISS_AUTHORITY_MS)).get(filename));
       }

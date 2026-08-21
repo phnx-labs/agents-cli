@@ -545,8 +545,12 @@ function firstNonEmpty(...values: Array<string | null | undefined>): string | un
  * prompt is preferred first so a card anchors to what the agent was ASKED to do, not
  * whatever it last said — the last message drifts as work progresses, the task doesn't.
  */
+/** Sentinel for a session with no prompt, summary, response, worktree or branch.
+ * Exported so callers can suppress it rather than render it as a topic. */
+export const NO_TOPIC = 'No topic'
+
 export function sessionTaskLine(a: FloorAgent): string {
-  return firstNonEmpty(a.prompt, a.summary, a.resp, a.worktreeSlug, a.branch) ?? 'No topic'
+  return firstNonEmpty(a.prompt, a.summary, a.resp, a.worktreeSlug, a.branch) ?? NO_TOPIC
 }
 
 /** Background/headless runs stay available through an explicit toggle, but do

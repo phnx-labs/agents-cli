@@ -3,7 +3,7 @@ import { Icon } from './icons'
 import { FileIcon, ImageIcon } from './dispatchIcons'
 import { AgentAvatar, agentIdFromPrefix } from './AgentAvatar'
 import { StructuredReply, type ReplyCallbacks } from './StructuredReply'
-import { heartbeatLevel, linearIssueLabel, linearIssueUrl, sessionTaskLine, todoProgress, type FloorAgent, type FloorAttachment, type FloorTicket } from './floorModel'
+import { heartbeatLevel, linearIssueLabel, linearIssueUrl, NO_TOPIC, sessionTaskLine, todoProgress, type FloorAgent, type FloorAttachment, type FloorTicket } from './floorModel'
 import { sinceFromMs } from './floorAdapter'
 import { useNow } from './useNow'
 import { CardChecklist } from './TodoChecklist'
@@ -130,10 +130,17 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
   const showSummary =
     !!taskLine && taskLine !== a.resp.trim() && taskLine !== nowlineText &&
     !(showTask && taskLine === prompt) &&
+    // sessionTaskLine falls back to the literal string 'No topic' when an agent
+    // has no prompt, summary, response, worktree or branch. A compact row
+    // rendered nothing there before; a line reading "No topic" is worse than the
+    // blank it replaces.
+    taskLine !== NO_TOPIC &&
     // A compact row gets exactly ONE preview line. When the agent has produced a
     // response, that response is the line (:218) — adding the prompt beneath it
-    // makes the row a line taller for signal the operator already has.
-    !(plain && !!a.resp.trim())
+    // makes the row a line taller for signal the operator already has. Same for a
+    // row that is asking something: StructuredReply below renders the question,
+    // and that question is the line that matters.
+    !(plain && (!!a.resp.trim() || (a.needs && !!a.question)))
   // The now-line is a LIVE-activity indicator — only meaningful while the agent is
   // actively working (running) or stuck mid-action (stalled). For an idle / needs-you /
   // done agent there's no live activity, and the verb is just the "Thinking..." fallback,
