@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -16,6 +16,7 @@ import {
 } from './config.js';
 import { machineId } from '../machine-id.js';
 import { getMonitorsDir, getSystemMonitorsDir } from '../state.js';
+import * as state from '../state.js';
 
 /** Minimal valid monitor: poll a command, on-change, notify. */
 function base(partial: Partial<MonitorConfig> = {}): Partial<MonitorConfig> {
@@ -32,6 +33,24 @@ function base(partial: Partial<MonitorConfig> = {}): Partial<MonitorConfig> {
 describe('validateMonitor — source/action requirements', () => {
   it('accepts a minimal valid monitor', () => {
     expect(validateMonitor(base())).toEqual([]);
+  });
+
+  it('accepts a custom harness (profile) name as the run action agent (RUSH-2930)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'monitors-harness-'));
+    fs.mkdirSync(path.join(dir, 'profiles'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'profiles', 'deepseek.yml'),
+      'name: deepseek\nhost:\n  agent: claude\nenv:\n  ANTHROPIC_MODEL: deepseek/deepseek-chat-v3-0324\n',
+    );
+    const spy = vi.spyOn(state, 'getUserAgentsDir').mockReturnValue(dir);
+    try {
+      expect(validateMonitor(base({ action: { type: 'run', agent: 'deepseek', prompt: 'go' } }))).toEqual([]);
+      const errors = validateMonitor(base({ action: { type: 'run', agent: 'no-such-harness', prompt: 'go' } }));
+      expect(errors.some((e) => e.startsWith('action.agent must be one of:'))).toBe(true);
+    } finally {
+      spy.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('rejects a monitor with no source', () => {

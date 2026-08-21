@@ -19,6 +19,7 @@ import { atomicWriteFileSync } from '../fs-atomic.js';
 import { machineId, normalizeHost } from '../machine-id.js';
 import type { AgentId } from '../types.js';
 import { ALL_AGENT_IDS } from '../agents.js';
+import { isCustomHarnessName } from '../profiles.js';
 
 /** Source types a monitor can watch. */
 export type MonitorSourceType =
@@ -91,8 +92,8 @@ export type MonitorActionType = 'run' | 'routine' | 'notify' | 'webhook-out';
  */
 export interface ActionConfig {
   type: MonitorActionType;
-  /** run: which agent to spawn. */
-  agent?: AgentId;
+  /** run: which agent to spawn — a native harness id or a custom harness name (agents harness list). */
+  agent?: AgentId | (string & {});
   /** run: the prompt; `{event}` is replaced with the fired event summary. */
   prompt?: string;
   /** run: execution mode (shared with routines). */
@@ -366,8 +367,8 @@ export function validateMonitor(config: Partial<MonitorConfig>): string[] {
       errors.push(`action has conflicting fields (${populatedAct.join(', ')}); specify exactly one action`);
     }
     if (action.type === 'run') {
-      if (action.agent && !ALL_AGENT_IDS.includes(action.agent as AgentId)) {
-        errors.push(`action.agent must be one of: ${ALL_AGENT_IDS.join(', ')}`);
+      if (action.agent && !ALL_AGENT_IDS.includes(action.agent as AgentId) && !isCustomHarnessName(action.agent)) {
+        errors.push(`action.agent must be one of: ${ALL_AGENT_IDS.join(', ')}, or a custom harness (agents harness list)`);
       }
       if (!action.prompt || typeof action.prompt !== 'string') {
         errors.push("action.type 'run' requires action.prompt");

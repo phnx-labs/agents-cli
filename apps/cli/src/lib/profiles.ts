@@ -11,6 +11,7 @@ import * as path from 'path';
 import * as crypto from 'node:crypto';
 import * as yaml from 'yaml';
 import type { AgentId } from './types.js';
+import { ALL_AGENT_IDS } from './agents.js';
 import { getUserAgentsDir } from './state.js';
 import { deleteKeychainToken, getKeychainToken, hasKeychainToken, keychainItemName } from './secrets/profiles.js';
 import { getPreset, type Preset } from './profiles-presets.js';
@@ -128,6 +129,17 @@ export function validateProfileName(name: string): void {
 /** Check whether a profile YAML file exists on disk. */
 export function profileExists(name: string): boolean {
   return fs.existsSync(profilePath(name));
+}
+
+/**
+ * True when `name` is a custom harness (a profile that is not shadowing a
+ * native agent id) — the predicate routines/monitors use to accept an
+ * `agent:` value that `agents run` will resolve as a profile. A native id
+ * always reads as native, matching exec's resolution order.
+ */
+export function isCustomHarnessName(name: string): boolean {
+  if (!PROFILE_NAME_PATTERN.test(name)) return false;
+  return !(ALL_AGENT_IDS as readonly string[]).includes(name) && profileExists(name);
 }
 
 /** Read and parse a profile from disk. Throws if not found or malformed. */

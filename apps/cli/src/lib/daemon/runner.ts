@@ -81,6 +81,7 @@ import {
 import { readAuthHealth, isDeadVerdict } from '../auth-health.js';
 import { machineId } from '../machine-id.js';
 import { isSelfUpdatingAgent, ROUTINE_AGENT_COMMANDS, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../agents.js';
+import { isCustomHarnessName, readProfile } from '../profiles.js';
 
 /** Result of a completed job execution, including metadata and optional report. */
 export interface RunResult {
@@ -376,8 +377,8 @@ function allocateRoutineAttempt(config: JobConfig, trigger: RoutineTrigger): Att
   // harness leaves the command table (gemini did), and the legacy routine must
   // still land a visible 'blocked' record, never a generic buildJobCommand
   // failure (RUSH-2202).
-  if (!config.workflow && config.agent && isAgentHardDeprecated(config.agent)) {
-    const reason = hardDeprecationError(config.agent);
+  if (!config.workflow && config.agent && !isCustomHarnessName(config.agent) && isAgentHardDeprecated(config.agent as AgentId)) {
+    const reason = hardDeprecationError(config.agent as AgentId);
     return {
       proceed: false,
       terminal: writeTerminalRecord(config, runId, 'blocked', trigger, {
@@ -593,6 +594,17 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
     return cmd;
   }
 
+  // Custom-harness branch: delegate to `agents run <name>`, which owns profile
+  // resolution (host binary, model env, provider auth) — the same delegation
+  // the workflow and resume branches use. The profile pins its own version and
+  // auth, so no command template, binary pinning, or account-env injection
+  // applies here.
+  if (isCustomHarnessName(agent)) {
+    const cmd = ['agents', 'run', agent, resolvedPrompt, '--mode', config.mode];
+    if (config.account && forwardAccount) cmd.push('--account', config.account);
+    return cmd;
+  }
+
   const template = ROUTINE_AGENT_COMMANDS[agent];
   if (!template) {
     throw new Error(`Unsupported agent for daemon jobs: ${agent}`);
@@ -607,7 +619,7 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
   // moves to its harness adapter; runner appends model/reasoning flags after,
   // exactly as every arm did. Agents with no routine quirk have no adapter
   // override, so they skip both — the old behavior for an entry with no arm.
-  const routineAdapter = resolveHarnessAdapter(agent);
+  const routineAdapter = resolveHarnessAdapter(agent as AgentId);
   if (routineAdapter.routineModeArgs) {
     routineAdapter.routineModeArgs(cmd, { mode, config, resolveHeadlessMode });
     appendModelAndReasoning(cmd, config);
@@ -623,7 +635,7 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
         throw new Error(`allow.dirs entries must not start with '-': ${JSON.stringify(dir)}`);
       }
     }
-    applyAddDirs(agent, cmd, config.allow.dirs, {
+    applyAddDirs(agent as AgentId, cmd, config.allow.dirs, {
       cwd: routineSpawnCwd(config),
     });
   }
@@ -639,8 +651,9 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
  * Reasoning level (config.config.reasoning) maps to per-agent flags via models.ts.
  */
 function appendModelAndReasoning(cmd: string[], config: JobConfig): void {
-  // Only called from buildJobCommand's agent path — config.agent is set.
-  const agent = config.agent!;
+  // Only called from buildJobCommand's agent path AFTER the custom-harness
+  // branch returned — config.agent is a native id here.
+  const agent = config.agent! as AgentId;
   const model = config.config?.model as string | undefined;
   if (model) {
     const modelFlag = AGENT_COMMANDS[agent].modelFlag;
@@ -734,13 +747,15 @@ export function snapshotRoutineTranscriptBase(
   overlayHome?: string,
 ): void {
   if (!meta.agent) return;
-  const specs = ROUTINE_TRANSCRIPT_SPECS[meta.agent];
+  // A host/cloud custom-harness run records the harness name, which has no
+  // transcript spec — the null-specs guard below skips it, as before.
+  const specs = ROUTINE_TRANSCRIPT_SPECS[meta.agent as AgentId];
   if (!specs) return;
 
   const home = overlayHome ?? getJobHomePath(meta.jobName);
   const preexisting = new Set<string>();
   for (const spec of specs) {
-    for (const root of routineTranscriptSourceRoots(meta.agent, meta.version, home, spec)) {
+    for (const root of routineTranscriptSourceRoots(meta.agent as AgentId, meta.version, home, spec)) {
       if (!fs.existsSync(root)) continue;
       for (const f of walkForFiles(root, spec.ext, 100_000)) preexisting.add(f);
     }
@@ -772,11 +787,13 @@ export function archiveRoutineTranscripts(
   overlayHome?: string,
 ): void {
   if (!meta.agent) return;
-  const specs = ROUTINE_TRANSCRIPT_SPECS[meta.agent];
+  // A host/cloud custom-harness run records the harness name, which has no
+  // transcript spec — the null-specs guard below skips it, as before.
+  const specs = ROUTINE_TRANSCRIPT_SPECS[meta.agent as AgentId];
   if (!specs) return;
 
   const home = overlayHome ?? getJobHomePath(meta.jobName);
-  const shared = usesSharedTranscriptHome(meta.agent, meta.version);
+  const shared = usesSharedTranscriptHome(meta.agent as AgentId, meta.version);
   const base = readTranscriptBase(runDir);
   // A shared per-version home holds every session that version+account ran, so without a
   // per-run baseline we cannot tell this run's transcript from a sibling's — copy nothing
@@ -785,7 +802,7 @@ export function archiveRoutineTranscripts(
 
   for (const spec of specs) {
     const destRoot = path.join(runDir, 'sessions', meta.agent, spec.root[spec.root.length - 1]);
-    for (const sourceRoot of routineTranscriptSourceRoots(meta.agent, meta.version, home, spec)) {
+    for (const sourceRoot of routineTranscriptSourceRoots(meta.agent as AgentId, meta.version, home, spec)) {
       if (!fs.existsSync(sourceRoot)) continue;
       for (const sourcePath of walkForFiles(sourceRoot, spec.ext, 100_000)) {
         // Skip files that predate this run (a sibling session in the shared home).
@@ -927,10 +944,17 @@ export async function resolveRoutineLaunch(
   if (config.workflow) {
     return { chain: [], rotation: null, pinned: false };
   }
+  if (config.agent && isCustomHarnessName(config.agent)) {
+    // A custom harness pins its own version/auth in the profile, so there is
+    // no version/account chain to resolve here — `agents run <name>` owns it
+    // (matching exec's "strategy ignored: custom harness pins its own
+    // version/auth").
+    return { chain: [], rotation: null, pinned: false };
+  }
 
   // resolveRoutineLaunch is only called for agent jobs (workflow returns above;
   // command jobs branch out of execute*Job before reaching this).
-  const agent = config.agent!;
+  const agent = config.agent! as AgentId;
   const { findAccount, findUnifiedAccount, resolveAccountSelection, resolveCredentialAccount } = await import('../account-registry.js');
   const meta = (deps.readMeta ?? readMeta)();
   const explicitCredential = config.account
@@ -1168,8 +1192,8 @@ export function buildHostDispatchOptions(
   };
 }
 
-export function dispatchesViaAgentsRun(config: Pick<JobConfig, 'workflow' | 'resume'>): boolean {
-  return Boolean(config.workflow || config.resume);
+export function dispatchesViaAgentsRun(config: Pick<JobConfig, 'workflow' | 'resume' | 'agent'>): boolean {
+  return Boolean(config.workflow || config.resume || (config.agent && isCustomHarnessName(config.agent)));
 }
 
 /**
@@ -1420,7 +1444,11 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   // Workflows run via `agents run <workflow>` which delegates to claude under the hood.
   // Use 'claude' as the effective agent for report extraction and metadata when workflow is set.
   // (command jobs branched out earlier, so config.agent is set on the non-workflow path.)
-  const effectiveAgent: AgentId = config.workflow ? 'claude' : config.agent!;
+  const effectiveAgent: AgentId = config.workflow
+    ? 'claude'
+    : isCustomHarnessName(config.agent!)
+      ? readProfile(config.agent!).host.agent
+      : config.agent! as AgentId;
   if (!dispatchesViaAgentsRun(config)) {
     const { findUnifiedAccount, resolveAccountSelection, resolveCredentialAccount } = await import('../account-registry.js');
     const meta = readMeta();
@@ -1994,7 +2022,7 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
   // workflow AND resume dispatch through `agents run` — never binary-pin them (pinning
   // rewrites cmd[0] to the agent binary → broken `<binary> run …`).
   if (!dispatchesViaAgentsRun(config) && version && config.agent) {
-    cmd = pinJobBinary(cmd, config.agent, version);
+    cmd = pinJobBinary(cmd, config.agent as AgentId, version);
   }
 
   // Resume must run against the REAL home: `--resume <id>` resolves the session from
@@ -2021,8 +2049,8 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
     const { findAccount, resolveAccountSelection, resolveCredentialAccount } = await import('../account-registry.js');
     const selectedAccount = config.account && !findAccount(config.account)
       ? undefined
-      : resolveAccountSelection(config.account, config.agent!, readMeta());
-    if (selectedAccount) Object.assign(baseEnv, resolveCredentialAccount(selectedAccount, config.agent!).env);
+      : resolveAccountSelection(config.account, config.agent! as AgentId, readMeta());
+    if (selectedAccount) Object.assign(baseEnv, resolveCredentialAccount(selectedAccount, config.agent! as AgentId).env);
   }
   const spawnEnv = dispatchesViaAgentsRun(config)
     ? (() => {
@@ -2031,9 +2059,13 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
         return e;
       })()
     // Non-command path only: config.agent is always set here (command/workflow branch earlier).
-    : buildRoutineSpawnEnv(baseEnv, config.agent!, version, config.timezone, overlayHome);
+    : buildRoutineSpawnEnv(baseEnv, config.agent! as AgentId, version, config.timezone, overlayHome);
 
-  const effectiveAgent: AgentId = config.workflow ? 'claude' : config.agent!;
+  const effectiveAgent: AgentId = config.workflow
+    ? 'claude'
+    : isCustomHarnessName(config.agent!)
+      ? readProfile(config.agent!).host.agent
+      : config.agent! as AgentId;
 
   const meta: RunMeta = {
     jobName: config.name,
@@ -2488,7 +2520,7 @@ export function monitorRunningJobs(): void {
           writeRunMeta(meta);
           emitRoutineEnd(meta);
           if (!isCommandRun) {
-            extractAndSaveReport(stdoutPath, meta.agent!, runDirPath);
+            extractAndSaveReport(stdoutPath, meta.agent! as AgentId, runDirPath);
             archiveRoutineTranscripts(meta, runDirPath);
           }
           continue;
@@ -2506,7 +2538,7 @@ export function monitorRunningJobs(): void {
             const ec = readCommandExitCode(runDirPath);
             finalizeRunMeta(meta, ec === 0 ? 'completed' : 'failed', ec);
           } else {
-            const inferred = inferFinalStatusFromLog(stdoutPath, meta.agent!);
+            const inferred = inferFinalStatusFromLog(stdoutPath, meta.agent! as AgentId);
             if (inferred) {
               finalizeRunMeta(meta, inferred.status, inferred.exitCode);
             } else {
@@ -2517,7 +2549,7 @@ export function monitorRunningJobs(): void {
           emitRoutineEnd(meta);
 
           if (!isCommandRun) {
-            extractAndSaveReport(stdoutPath, meta.agent!, runDirPath);
+            extractAndSaveReport(stdoutPath, meta.agent! as AgentId, runDirPath);
             archiveRoutineTranscripts(meta, runDirPath);
           }
         }

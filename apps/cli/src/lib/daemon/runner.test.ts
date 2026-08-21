@@ -7,6 +7,8 @@ import { activeRunSkipStreak, archiveRoutineTranscripts, assertRoutineAccountLoc
 import { getRunDir, readRunMeta, writeRunMeta } from '../scheduling/routines.js';
 import { getVersionHomePath } from '../installations/versions.js';
 import type { JobConfig, RunMeta } from '../scheduling/routines.js';
+import * as yaml from 'yaml';
+import * as state from '../state.js';
 import { hardDeprecationError } from '../agents.js';
 import type { RotateCandidate, RotateResult } from '../accounting/rotate.js';
 import { saveTask, hostsCacheDir } from '../hosts/tasks.js';
@@ -50,6 +52,38 @@ function baseConfig(partial: Partial<JobConfig> = {}): JobConfig {
     ...partial,
   } as JobConfig;
 }
+
+describe('custom-harness routine jobs delegate to agents run (RUSH-2930)', () => {
+  let harnessDir: string;
+  beforeEach(() => {
+    harnessDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-harness-'));
+    fs.mkdirSync(path.join(harnessDir, 'profiles'), { recursive: true });
+    fs.writeFileSync(
+      path.join(harnessDir, 'profiles', 'deepseek.yml'),
+      yaml.stringify({ name: 'deepseek', host: { agent: 'claude' }, env: { ANTHROPIC_MODEL: 'deepseek/deepseek-chat-v3-0324' } }),
+    );
+    vi.spyOn(state, 'getUserAgentsDir').mockReturnValue(harnessDir);
+  });
+  afterEach(() => {
+    fs.rmSync(harnessDir, { recursive: true, force: true });
+  });
+
+  it('buildJobCommand delegates a custom harness to `agents run <name>` with mode and account', () => {
+    const cmd = buildJobCommand(baseConfig({ agent: 'deepseek', mode: 'auto', account: 'openrouter-primary' }), 'do the thing');
+    expect(cmd).toEqual(['agents', 'run', 'deepseek', 'do the thing', '--mode', 'auto', '--account', 'openrouter-primary']);
+  });
+
+  it('classifies a custom-harness job as dispatching via agents run (no binary pin, no account env injection)', async () => {
+    const { dispatchesViaAgentsRun } = await import('./runner.js');
+    expect(dispatchesViaAgentsRun({ agent: 'deepseek' })).toBe(true);
+    expect(dispatchesViaAgentsRun({ agent: 'claude' })).toBe(false);
+  });
+
+  it('resolveRoutineLaunch resolves no version/account chain — the profile pins its own', async () => {
+    const plan = await resolveRoutineLaunch(baseConfig({ agent: 'deepseek' }));
+    expect(plan).toEqual({ chain: [], rotation: null, pinned: false });
+  });
+});
 
 describe('routine model flags', () => {
   it.each([

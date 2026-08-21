@@ -164,7 +164,9 @@ agents routines add cleanup --schedule "0 3 * * *" --agent claude \
 # ~/.agents/routines/daily-review.yml
 name: daily-review
 schedule: "0 9 * * *"         # 9am daily (cron syntax)
-agent: claude
+agent: claude                 # A native harness id, or a custom harness name (agents harness list) —
+                              # a custom harness is delegated to `agents run <name>` and pins its own
+                              # host version and auth (no version:/strategy: for those jobs)
 account: muqsit@trp.so        # Optional: pin to a signed-in account by identity (see "Pinning an account")
 version: 2.0.65               # Optional: pin to an exact version (or --agent claude@2.0.65); strategy-selected if omitted
 strategy: balanced            # Optional: per-routine selection policy (pinned | available | balanced) —

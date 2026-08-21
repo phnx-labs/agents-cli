@@ -454,7 +454,7 @@ export function registerMonitorsCommands(program: Command): void {
     .option('--dedupe-key <expr>', 'Regex whose first match is the "same event" signature (default: full output)')
     .option('--every', 'Fire on every observation (no dedupe) — rate-limit this')
     // ACTION
-    .option('--run <agent>', 'Spawn an agent (claude, codex, ...) with the prompt on fire')
+    .option('--run <agent>', 'Spawn an agent (claude, codex, ..., or a custom harness from agents harness list) with the prompt on fire')
     .option('--prompt <prompt>', 'Prompt for --run; {event} is replaced with the fired event')
     .option('--mode <mode>', 'Execution mode for --run: plan, edit, auto, or skip')
     .option('--effort <effort>', 'Reasoning effort for --run: low | medium | high | xhigh | max | auto')

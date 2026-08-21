@@ -176,6 +176,9 @@ agents monitors remove <name>
 
 - `--run <agent> --prompt '…'` — spawn an agent (shares `--mode`/`--effort`/
   `--action-timeout` with routines), dispatched through `executeJobDetached`.
+  Takes a native harness id or a custom harness name (`agents harness list`);
+  a custom harness is delegated to `agents run <name>` and pins its own host
+  version and auth.
 - `--routine <name>` — fire an existing routine (attach a monitor to a routine).
 - `--notify [channel]` — notify the owner through the one channel seam
   (`lookupTransport` → provider). The recipient and normal channel come from

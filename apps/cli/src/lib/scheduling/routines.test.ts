@@ -16,6 +16,7 @@ vi.mock('./routine-activation.js', async (importOriginal) => {
 });
 import { routineOwnerDevice, hasAmbiguousDevicePin, validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, getJobRunsDir, getRunDir, finalizeRunMeta, writeRunMeta, resolveJobPrompt, getLatestCompletedRun, routineStats, computeProjectGroup, computeProjectGroupKind, projectGroupKey, projectGroupTitle, normalizeProjects, serializeJob, type JobConfig, type RunMeta } from './routines.js';
 import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir } from '../state.js';
+import * as state from '../state.js';
 import { ROUTINE_AGENT_IDS } from '../agents.js';
 
 /** Minimal valid schedule-based job. */
@@ -123,6 +124,28 @@ describe('validateJob — schedule-time agent validation (RUSH-2102)', () => {
     const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'not-a-real-agent' }));
     expect(errors.some((e) => e.startsWith('agent must be one of:'))).toBe(true);
     expect(errors.some((e) => e.includes('not supported by the local routine daemon'))).toBe(false);
+  });
+
+  it('accepts a custom harness (profile) name for a local routine (RUSH-2930)', () => {
+    // A custom harness like `deepseek` is delegated to `agents run <name>` by
+    // the runner (the workflow-job path), so it needs neither ALL_AGENT_IDS
+    // membership nor a ROUTINE_AGENT_COMMANDS template.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'routines-harness-'));
+    fs.mkdirSync(path.join(dir, 'profiles'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'profiles', 'deepseek.yml'),
+      yaml.stringify({ name: 'deepseek', host: { agent: 'claude' }, env: { ANTHROPIC_MODEL: 'deepseek/deepseek-chat-v3-0324' } }),
+    );
+    const spy = vi.spyOn(state, 'getUserAgentsDir').mockReturnValue(dir);
+    try {
+      expect(validateJob(baseJob({ schedule: '0 3 * * *', agent: 'deepseek' }))).toEqual([]);
+      // Still rejects a name that is neither native nor an existing profile.
+      const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'no-such-harness' }));
+      expect(errors.some((e) => e.startsWith('agent must be one of:'))).toBe(true);
+    } finally {
+      spy.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('does not restrict a real agent outside ROUTINE_AGENT_IDS when explicitly host-placed', () => {

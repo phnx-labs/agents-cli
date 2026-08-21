@@ -26,6 +26,7 @@ import {
 } from '../lib/daemon/daemon.js';
 import { assertSchedulerEnabled, assertDaemonEnabled, isDaemonEnabled } from '../lib/device-config.js';
 import { resolveAgentName, parseAgentVersionSpec, isAgentHardDeprecated, hardDeprecationError, ROUTINE_AGENT_IDS } from '../lib/agents.js';
+import { isCustomHarnessName } from '../lib/profiles.js';
 import { RUN_STRATEGIES, normalizeRunStrategy } from '../lib/accounting/rotate.js';
 import type { AgentId, RunStrategy } from '../lib/types.js';
 import { humanizeCron, humanizeNextRun, formatRepoLink, REPO_DISPLAY_MAX } from '../lib/routines-format.js';
@@ -1041,7 +1042,7 @@ export function registerRoutinesCommands(program: Command): void {
     .command('add [nameOrPath]')
     .description('Create a new routine from a YAML file or inline flags. Starts the scheduler automatically if it is not already running.')
     .option('-s, --schedule <cron>', 'Cron schedule in standard format (5 fields: minute hour day month weekday)')
-    .option('-a, --agent <agent[@version]>', `Which agent runs this routine: ${ROUTINE_AGENT_IDS.join(', ')}. An @version pins that exact installed version (same syntax as agents run), persisted as separate agent + version fields.`)
+    .option('-a, --agent <agent[@version]>', `Which agent runs this routine: ${ROUTINE_AGENT_IDS.join(', ')}, or a custom harness name (agents harness list). An @version pins that exact installed version (same syntax as agents run), persisted as separate agent + version fields; a custom harness pins its own host version.`)
     .option('--strategy <strategy>', `Version/account selection strategy for this routine: ${RUN_STRATEGIES.join(' | ')}. Overrides run.<agent>.strategy from the firing device's config. Conflicts with an @version pin.`)
     .option('--balanced', 'Shortcut for --strategy balanced.')
     .option('--workflow <name>', 'Run an installed workflow (~/.agents/workflows/<name>) via `agents run`. Mutually exclusive with --agent.')
@@ -1134,19 +1135,27 @@ export function registerRoutinesCommands(program: Command): void {
         // compound string is the RUSH-2719 bug: validateJob compared
         // 'claude@2.1.207' against bare AgentIds, and the deprecation gate below
         // silently missed a hard-deprecated harness pinned with @version.
-        let parsedAgent: { agent: AgentId; version?: string } | undefined;
+        let parsedAgent: { agent: AgentId | (string & {}); version?: string } | undefined;
         if (options.agent) {
-          const parsed = parseAgentVersionSpec(options.agent);
-          if ('error' in parsed) {
-            console.error(chalk.red(parsed.error));
-            process.exit(1);
-          }
-          parsedAgent = parsed;
-          // Hard-deprecated harnesses cannot be scheduled — refuse at create time
-          // so no new recurring job silently fails against a retired backend.
-          if (isAgentHardDeprecated(parsed.agent)) {
-            console.error(chalk.red(hardDeprecationError(parsed.agent)));
-            process.exit(1);
+          // A custom harness (agents harness list) is a valid routine agent:
+          // the runner delegates it to `agents run <name>`. It pins its own
+          // host version, so no @version suffix applies (a suffixed name falls
+          // through to the parse error below).
+          if (isCustomHarnessName(options.agent)) {
+            parsedAgent = { agent: options.agent };
+          } else {
+            const parsed = parseAgentVersionSpec(options.agent);
+            if ('error' in parsed) {
+              console.error(chalk.red(parsed.error));
+              process.exit(1);
+            }
+            parsedAgent = parsed;
+            // Hard-deprecated harnesses cannot be scheduled — refuse at create time
+            // so no new recurring job silently fails against a retired backend.
+            if (isAgentHardDeprecated(parsed.agent)) {
+              console.error(chalk.red(hardDeprecationError(parsed.agent)));
+              process.exit(1);
+            }
           }
         }
 
@@ -1542,20 +1551,27 @@ export function registerRoutinesCommands(program: Command): void {
         if (options.cwd !== undefined) existing.cwd = options.cwd;
         if (options.projectAnchor !== undefined) existing.project = options.projectAnchor;
         if (options.agent !== undefined) {
-          const parsed = parseAgentVersionSpec(options.agent);
-          if ('error' in parsed) {
-            console.error(chalk.red(parsed.error));
-            process.exit(1);
+          if (isCustomHarnessName(options.agent)) {
+            // Custom harness: delegated to `agents run <name>`; the profile
+            // pins its own host version, so any prior pin is cleared.
+            existing.agent = options.agent;
+            delete existing.version;
+          } else {
+            const parsed = parseAgentVersionSpec(options.agent);
+            if ('error' in parsed) {
+              console.error(chalk.red(parsed.error));
+              process.exit(1);
+            }
+            if (isAgentHardDeprecated(parsed.agent)) {
+              console.error(chalk.red(hardDeprecationError(parsed.agent)));
+              process.exit(1);
+            }
+            existing.agent = parsed.agent;
+            // An @version pin replaces any previous pin; a bare agent clears it so
+            // the routine returns to strategy/balanced selection.
+            if (parsed.version) existing.version = parsed.version;
+            else delete existing.version;
           }
-          if (isAgentHardDeprecated(parsed.agent)) {
-            console.error(chalk.red(hardDeprecationError(parsed.agent)));
-            process.exit(1);
-          }
-          existing.agent = parsed.agent;
-          // An @version pin replaces any previous pin; a bare agent clears it so
-          // the routine returns to strategy/balanced selection.
-          if (parsed.version) existing.version = parsed.version;
-          else delete existing.version;
         }
         if (options.strategy !== undefined) {
           const normalized = normalizeRunStrategy(options.strategy);

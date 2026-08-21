@@ -15,6 +15,7 @@ import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir, getP
 import * as os from 'os';
 import { safeJoin, isSafeSegmentName } from '../paths.js';
 import { isSafeProjectName, loadProjectDef, projectBasePath } from '../projects.js';
+import { isCustomHarnessName } from '../profiles.js';
 import {
   resolveRoutineExecutionContext,
   type ResolvedExecutionContext,
@@ -282,8 +283,14 @@ export interface JobConfig {
   schedule?: string;
   /** Event/webhook fire condition. Optional when `schedule` is set. */
   trigger?: JobTrigger;
-  /** Which agent runs the routine. Optional — omitted for `workflow`/`command` routines. Exactly one of agent/workflow/command must be set. */
-  agent?: AgentId;
+  /**
+   * Which agent runs the routine — a native harness id, or the name of a
+   * custom harness (`agents harness list`), which the runner delegates to
+   * `agents run <name>` the same way workflow jobs are. Optional — omitted
+   * for `workflow`/`command` routines. Exactly one of agent/workflow/command
+   * must be set.
+   */
+  agent?: AgentId | (string & {});
   workflow?: string;
   /**
    * A plain shell command run directly instead of an agent/workflow — no LLM,
@@ -650,7 +657,7 @@ export function resolveJobExecutionContext(
 export interface RunMeta {
   jobName: string;
   runId: string;
-  agent?: AgentId;  // undefined at runtime for workflow and command jobs
+  agent?: AgentId | (string & {});  // undefined at runtime for workflow and command jobs; a custom-harness job records the harness name (host/cloud placement) or its resolved host agent (local placement)
   /**
    * Resolved agent version this run launched under. Re-pointed to each failover
    * attempt's version as the single-shot chain advances (runner.ts), so it names
@@ -1297,11 +1304,15 @@ export function validateJob(config: Partial<JobConfig>): string[] {
   if (config.command !== undefined && (typeof config.command !== 'string' || config.command.trim() === '')) {
     errors.push('command must be a non-empty shell command string');
   }
-  if (hasAgent && config.agent && !ALL_AGENT_IDS.includes(config.agent as AgentId)) {
-    errors.push(`agent must be one of: ${ALL_AGENT_IDS.join(', ')}`);
+  if (hasAgent && config.agent && !ALL_AGENT_IDS.includes(config.agent as AgentId) && !isCustomHarnessName(config.agent)) {
+    errors.push(`agent must be one of: ${ALL_AGENT_IDS.join(', ')}, or a custom harness (agents harness list)`);
   } else if (
     hasAgent && config.agent && strategy === 'local' &&
-    !ROUTINE_AGENT_IDS.includes(config.agent)
+    !ROUTINE_AGENT_IDS.includes(config.agent) &&
+    // A custom harness is exempt from the local-daemon command table: the
+    // runner delegates it to `agents run <name>`, the same path workflow
+    // jobs take, so no ROUTINE_AGENT_COMMANDS template is needed.
+    !isCustomHarnessName(config.agent)
   ) {
     // The local daemon only knows how to build a command for the agents in
     // ROUTINE_AGENT_IDS (runner.ts's AGENT_COMMANDS table) — anything else is a
