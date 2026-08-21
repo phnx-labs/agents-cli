@@ -18,7 +18,12 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { getProjectAgentsDir, getSystemAgentsDir, getUserAgentsDir } from '../state.js';
+import {
+  getEnabledExtraRepos,
+  getProjectAgentsDir,
+  getSystemAgentsDir,
+  getUserAgentsDir,
+} from '../state.js';
 
 /** Result of resolving a URL to a domain-skill. */
 export interface ResolvedDomainSkill {
@@ -33,9 +38,15 @@ export interface ResolvedDomainSkill {
 }
 
 /**
- * Where domain-skills live, in precedence order: project > user > system —
- * the same layering `resolveResource` applies. A layer whose root does not
- * exist is simply skipped at resolve time.
+ * Where domain-skills live, in precedence order: project > user > system >
+ * extra repos — the same layering `resolveResource` applies. A layer whose
+ * root does not exist is simply skipped at resolve time.
+ *
+ * The project layer resolves from `cwd` (default `process.cwd()`). The
+ * browser daemon is shared and long-lived, and its IPC request does not yet
+ * carry the calling CLI's cwd, so at that call site the project layer follows
+ * the daemon's own cwd until the caller's cwd is threaded through
+ * (RUSH-2996); user/system/extra-repo layers are cwd-independent.
  *
  * $AGENTS_BROWSER_DOMAIN_SKILLS_DIR overrides the whole list with a single
  * root, for tests.
@@ -49,6 +60,9 @@ export function domainSkillsRoots(cwd?: string): string[] {
   if (projectDir) roots.push(path.join(projectDir, ...sub));
   roots.push(path.join(getUserAgentsDir(), ...sub));
   roots.push(path.join(getSystemAgentsDir(), ...sub));
+  for (const extra of getEnabledExtraRepos()) {
+    roots.push(path.join(extra.dir, ...sub));
+  }
   return roots;
 }
 

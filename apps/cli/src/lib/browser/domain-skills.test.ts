@@ -189,6 +189,32 @@ describe('layered resolution (project > user > system) — RUSH-2497', () => {
     expect(r?.path).toBe(path.join(systemRoot(), 'higgsfield', 'SKILL.md'));
   });
 
+  it('searches enabled extra repos after the system layer', async () => {
+    const extraDir = path.join(home, 'extra-repo');
+    seedIn(path.join(extraDir, ...SUB), 'canva', '---\ndescription: extra canva\n---\n# Extra Canva');
+    fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.agents', 'agents.yaml'),
+      ['extraRepos:', '  extras:', '    enabled: true', '    url: "x://extras"', `    path: ${extraDir}`, ''].join('\n'),
+    );
+    const { resolveDomainSkill } = await freshModule();
+    const r = resolveDomainSkill('https://www.canva.com/design/x', home);
+    expect(r?.path).toBe(path.join(extraDir, ...SUB, 'canva', 'SKILL.md'));
+  });
+
+  it('system layer beats an extra repo for the same skill name', async () => {
+    const extraDir = path.join(home, 'extra-repo');
+    seedIn(path.join(extraDir, ...SUB), 'canva', '---\ndescription: extra\n---\n# Extra Canva');
+    seedIn(systemRoot(), 'canva', '---\ndescription: system\n---\n# System Canva');
+    fs.writeFileSync(
+      path.join(home, '.agents', 'agents.yaml'),
+      ['extraRepos:', '  extras:', '    enabled: true', '    url: "x://extras"', `    path: ${extraDir}`, ''].join('\n'),
+    );
+    const { resolveDomainSkill } = await freshModule();
+    const r = resolveDomainSkill('https://www.canva.com/design/x', home);
+    expect(r?.path).toBe(path.join(systemRoot(), 'canva', 'SKILL.md'));
+  });
+
   it('$AGENTS_BROWSER_DOMAIN_SKILLS_DIR remains a SINGLE-root override — the system layer is not searched', async () => {
     seedIn(systemRoot(), 'perplexity', '---\ndescription: system\n---\nbody');
     const override = fs.mkdtempSync(path.join(os.tmpdir(), 'domain-skills-override-'));
