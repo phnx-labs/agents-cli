@@ -137,7 +137,8 @@ run. Account selection cannot be combined with another account selector such as
 For `--device auto`, picker placement prefers a signed-in device but keeps a
 reachable device with the harness installed eligible when every account there
 is signed out or revoked. That fallback is what lets the device-local picker
-offer `launch to sign in`; ordinary automatic runs still require a healthy,
+offer `launch to sign in`. A device whose picker would contain only throttled
+rows remains excluded; ordinary automatic runs still require a healthy,
 signed-in account before placement.
 
 **One carve-out: a missing login is not an exhausted account.** When the only

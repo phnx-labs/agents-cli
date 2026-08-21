@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseReadyProbe,
   viewHasAgent,
+  viewAgentAccountEligibility,
   viewAgentSignedIn,
   viewAgentVersions,
   viewHasAgentVersion,
@@ -64,6 +65,25 @@ describe('viewAgentSignedIn', () => {
       { signedIn: true, usageStatus: 'out_of_credits' },
     ] }]);
     expect(viewAgentSignedIn(view, 'codex')).toBe(false);
+  });
+
+  it('keeps signed-out login targets picker-eligible but rejects throttled-only devices', () => {
+    const signedOut = JSON.stringify([{ agent: 'codex', versions: [
+      { signedIn: false, usageStatus: null },
+      { signedIn: true, usageStatus: 'rate_limited' },
+    ] }]);
+    const throttled = JSON.stringify([{ agent: 'codex', versions: [
+      { signedIn: true, usageStatus: 'rate_limited' },
+      { signedIn: true, usageStatus: 'out_of_credits' },
+    ] }]);
+    expect(viewAgentAccountEligibility(signedOut, 'codex')).toEqual({
+      signedIn: false,
+      pickerEligible: true,
+    });
+    expect(viewAgentAccountEligibility(throttled, 'codex')).toEqual({
+      signedIn: false,
+      pickerEligible: false,
+    });
   });
 });
 

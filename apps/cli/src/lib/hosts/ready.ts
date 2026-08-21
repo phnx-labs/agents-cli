@@ -234,12 +234,21 @@ export function missingPinnedVersionMessage(
   );
 }
 
+/** Account eligibility extracted from one device's `agents view --json`. */
+export interface ViewAgentAccountEligibility {
+  /** At least one account can launch immediately. */
+  signedIn: boolean | undefined;
+  /** At least one account can launch immediately or enter the harness login flow. */
+  pickerEligible: boolean | undefined;
+}
+
 /**
- * Read whether the requested harness has at least one launch-eligible account
- * from `agents view --json`. Signed-in accounts that are rate-limited or out of
- * credits are deliberately false so automatic placement cannot select them.
+ * Read the two account gates automatic placement needs from `agents view
+ * --json`. A picker may route to a signed-out version because launching it is
+ * the login flow, but it must not route to a device whose every signed-in
+ * account is throttled.
  */
-export function viewAgentSignedIn(view: string, agent: string): boolean | undefined {
+export function viewAgentAccountEligibility(view: string, agent: string): ViewAgentAccountEligibility {
   try {
     const rows = JSON.parse(view) as Array<{
       agent?: string;
@@ -249,16 +258,25 @@ export function viewAgentSignedIn(view: string, agent: string): boolean | undefi
       }>;
     }>;
     const row = rows.find((candidate) => candidate.agent?.toLowerCase() === agent.toLowerCase());
-    if (!row) return undefined;
-    const verdicts = (row.versions ?? [])
-      .map((version) => typeof version.signedIn === 'boolean'
-        ? version.signedIn && version.usageStatus !== 'rate_limited' && version.usageStatus !== 'out_of_credits'
-        : undefined)
-      .filter((value): value is boolean => typeof value === 'boolean');
-    return verdicts.length === 0 ? undefined : verdicts.some(Boolean);
+    if (!row) return { signedIn: undefined, pickerEligible: undefined };
+    const verdicts = (row.versions ?? []).flatMap((version) => {
+      if (typeof version.signedIn !== 'boolean') return [];
+      const throttled = version.usageStatus === 'rate_limited' || version.usageStatus === 'out_of_credits';
+      const ready = version.signedIn && !throttled;
+      return [{ ready, pickerEligible: ready || !version.signedIn }];
+    });
+    if (verdicts.length === 0) return { signedIn: undefined, pickerEligible: undefined };
+    return {
+      signedIn: verdicts.some((verdict) => verdict.ready),
+      pickerEligible: verdicts.some((verdict) => verdict.pickerEligible),
+    };
   } catch {
-    return undefined;
+    return { signedIn: undefined, pickerEligible: undefined };
   }
+}
+
+export function viewAgentSignedIn(view: string, agent: string): boolean | undefined {
+  return viewAgentAccountEligibility(view, agent).signedIn;
 }
 
 export interface EnsureReadyOptions {

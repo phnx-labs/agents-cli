@@ -7,9 +7,9 @@
  *
  *   - reachability + headroom + load  ← {@link probeFleetStats} (one parallel
  *     SSH fan-out over the pool; the local box is measured directly).
- *   - requested agent installed + signed in (when known) ← a one-shot readiness
- *     probe per remote device ({@link buildReadyProbeCommand} → `agents view`),
- *     the local box via {@link checkCliAvailable}/{@link checkCliSignedIn}.
+ *   - requested agent installed + account eligibility (when known) ← a one-shot
+ *     readiness probe per remote device ({@link buildReadyProbeCommand} →
+ *     `agents view`), with the same candidate-readiness gate evaluated locally.
  *
  * The result is cached briefly per (pool, agent-or-any) so a `teams start` wave that
  * places N teammates probes the pool ONCE, not N times — the roster-count part
@@ -28,12 +28,17 @@ import { buildSshInvocation, writeAskpassShim } from '../devices/connect.js';
 import {
   buildReadyProbeCommand,
   parseReadyProbe,
-  viewAgentSignedIn,
+  viewAgentAccountEligibility,
   viewHasAgent,
 } from '../hosts/ready.js';
+import {
+  collectRunCandidates,
+  isSignInRecoverable,
+  readinessFromCandidate,
+} from '../accounting/rotate.js';
 import { localMachineId } from '../origin-machine.js';
 import { normalizeHost } from '../machine-id.js';
-import { checkCliAvailable, checkCliSignedIn, type AgentType } from './agents.js';
+import { checkCliAvailable, type AgentType } from './agents.js';
 import type { DevicePlacementSignal } from './scheduler.js';
 
 /** Per-remote readiness probe budget — matches the health probe's short window
@@ -69,7 +74,11 @@ export function clearPlacementSignalCache(): void {
 function probeRemoteReadiness(
   device: DeviceProfile,
   agent: string,
-): Promise<{ installed: boolean | undefined; signedIn: boolean | undefined }> {
+): Promise<{
+  installed: boolean | undefined;
+  signedIn: boolean | undefined;
+  pickerEligible: boolean | undefined;
+}> {
   let args: string[];
   let env: Record<string, string>;
   try {
@@ -79,7 +88,7 @@ function probeRemoteReadiness(
     // on a password-auth device (mirrors probeDeviceStats in devices/health).
     ({ args, env } = buildSshInvocation(device, [cmd], shim, {}, { agentOnly: true }));
   } catch {
-    return Promise.resolve({ installed: undefined, signedIn: undefined });
+    return Promise.resolve({ installed: undefined, signedIn: undefined, pickerEligible: undefined });
   }
   return new Promise((resolve) => {
     execFile(
@@ -87,12 +96,15 @@ function probeRemoteReadiness(
       args,
       { encoding: 'utf-8', env: { ...process.env, ...env }, timeout: READY_PROBE_TIMEOUT_MS },
       (err, stdout) => {
-        if (err || !stdout) return resolve({ installed: undefined, signedIn: undefined });
+        if (err || !stdout) return resolve({ installed: undefined, signedIn: undefined, pickerEligible: undefined });
         const probe = parseReadyProbe(stdout);
-        if (!probe.reachable) return resolve({ installed: undefined, signedIn: undefined });
-        if (!probe.version) return resolve({ installed: false, signedIn: false });
+        if (!probe.reachable) return resolve({ installed: undefined, signedIn: undefined, pickerEligible: undefined });
+        if (!probe.version) return resolve({ installed: false, signedIn: false, pickerEligible: false });
         const installed = viewHasAgent(probe.view, agent);
-        resolve({ installed, signedIn: installed ? viewAgentSignedIn(probe.view, agent) : false });
+        const eligibility = installed
+          ? viewAgentAccountEligibility(probe.view, agent)
+          : { signedIn: false, pickerEligible: false };
+        resolve({ installed, ...eligibility });
       },
     );
   });
@@ -132,15 +144,28 @@ export async function probePoolSignals(
   const selfProfile = profiles.find((d) => normalizeHost(d.name) === self);
   const stats = await probeFleetStats(profiles, { selfName: selfProfile?.name });
 
-  type InstalledInfo = { installed: boolean | undefined; signedIn: boolean | undefined };
+  type InstalledInfo = {
+    installed: boolean | undefined;
+    signedIn: boolean | undefined;
+    pickerEligible: boolean | undefined;
+  };
   const installed = new Map<string, InstalledInfo>(agent
     ? await Promise.all(
       profiles.map(async (d): Promise<readonly [string, InstalledInfo]> => {
         const isSelf = normalizeHost(d.name) === self;
         if (isSelf) {
           const inst = checkCliAvailable(agent)[0];
-          const signedIn = inst ? await checkCliSignedIn(agent) : undefined;
-          return [d.name, { installed: inst, signedIn }];
+          if (!inst) return [d.name, { installed: false, signedIn: false, pickerEligible: false }];
+          const candidates = await collectRunCandidates(agent).catch(() => null);
+          if (!candidates) {
+            return [d.name, { installed: true, signedIn: undefined, pickerEligible: undefined }];
+          }
+          const readiness = candidates.map(readinessFromCandidate);
+          return [d.name, {
+            installed: true,
+            signedIn: readiness.some((candidate) => candidate.ready),
+            pickerEligible: readiness.some((candidate) => candidate.ready || isSignInRecoverable(candidate)),
+          }];
         }
         return [d.name, await probeRemoteReadiness(d, agent)];
       }),
@@ -161,6 +186,7 @@ export async function probePoolSignals(
       memPercent: s?.memPercent,
       installed: inst?.installed,
       signedIn: inst?.signedIn,
+      pickerEligible: inst?.pickerEligible,
     });
   }
 

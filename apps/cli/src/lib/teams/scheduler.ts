@@ -56,8 +56,10 @@ export interface DevicePlacementSignal {
   memPercent?: number;
   /** Requested agent installed on the device. `false` → excluded (can't run). */
   installed?: boolean;
-  /** Requested agent signed in (best-effort). Ranks a signed-in device first. */
+  /** Requested agent has at least one launch-ready account. Ranks a ready device first. */
   signedIn?: boolean;
+  /** Requested agent has at least one row the interactive account picker can launch. */
+  pickerEligible?: boolean;
 }
 
 /** Team fields the placement cascade reads (a subset of TeamMeta). */

@@ -160,12 +160,12 @@ describe('resolveDeviceAuto', () => {
 
   it('keeps installed signed-out devices eligible for an interactive account picker', async () => {
     const plan = await resolveDeviceAuto('claude', {
-      allowSignedOut: true,
+      accountPicker: true,
       localMachine: 'local',
       eligibleHosts: ['local', 'remote'],
       probe: async () => new Map([
-        ['local', { reachable: true, loadPercent: 35, headroom: 'light', installed: true, signedIn: false }],
-        ['remote', { reachable: true, loadPercent: 5, headroom: 'idle', installed: true, signedIn: false }],
+        ['local', { reachable: true, loadPercent: 35, headroom: 'light', installed: true, signedIn: false, pickerEligible: true }],
+        ['remote', { reachable: true, loadPercent: 5, headroom: 'idle', installed: true, signedIn: false, pickerEligible: true }],
       ]),
     });
     expect(plan.host).toBe('remote');
@@ -174,15 +174,40 @@ describe('resolveDeviceAuto', () => {
 
   it('still prefers a signed-in device when picker placement also admits signed-out devices', async () => {
     const plan = await resolveDeviceAuto('claude', {
-      allowSignedOut: true,
+      accountPicker: true,
       localMachine: 'local',
       eligibleHosts: ['signed-out-idle', 'signed-in-light'],
       probe: async () => new Map([
-        ['signed-out-idle', { reachable: true, loadPercent: 2, headroom: 'idle', installed: true, signedIn: false }],
-        ['signed-in-light', { reachable: true, loadPercent: 25, headroom: 'light', installed: true, signedIn: true }],
+        ['signed-out-idle', { reachable: true, loadPercent: 2, headroom: 'idle', installed: true, signedIn: false, pickerEligible: true }],
+        ['signed-in-light', { reachable: true, loadPercent: 25, headroom: 'light', installed: true, signedIn: true, pickerEligible: true }],
       ]),
     });
     expect(plan.host).toBe('signed-in-light');
+  });
+
+  it('excludes a lower-load device whose picker has only throttled accounts', async () => {
+    const plan = await resolveDeviceAuto('claude', {
+      accountPicker: true,
+      localMachine: 'local',
+      eligibleHosts: ['throttled-idle', 'signed-out-light'],
+      probe: async () => new Map([
+        ['throttled-idle', { reachable: true, loadPercent: 2, headroom: 'idle', installed: true, signedIn: false, pickerEligible: false }],
+        ['signed-out-light', { reachable: true, loadPercent: 25, headroom: 'light', installed: true, signedIn: false, pickerEligible: true }],
+      ]),
+    });
+    expect(plan.host).toBe('signed-out-light');
+  });
+
+  it('fails loud when every account picker would contain only throttled rows', async () => {
+    await expect(resolveDeviceAuto('claude', {
+      accountPicker: true,
+      localMachine: 'local',
+      eligibleHosts: ['local', 'remote'],
+      probe: async () => new Map([
+        ['local', { reachable: true, headroom: 'idle', installed: true, signedIn: false, pickerEligible: false }],
+        ['remote', { reachable: true, headroom: 'idle', installed: true, signedIn: false, pickerEligible: false }],
+      ]),
+    })).rejects.toThrow('no healthy device can run claude');
   });
 
 
@@ -295,8 +320,8 @@ describe('applyDeviceAutoToOptions', () => {
     };
     const result = await applyDeviceAutoToOptions(options, {
       accountPickerRequested: true,
-      resolve: (allowSignedOut) => {
-        expect(allowSignedOut).toBe(true);
+      resolve: (accountPicker) => {
+        expect(accountPicker).toBe(true);
         return {
           host: null,
           candidates: [],

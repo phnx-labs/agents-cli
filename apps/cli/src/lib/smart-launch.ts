@@ -14,7 +14,6 @@ import { normalizeHost } from './machine-id.js';
 import { probePoolSignals } from './teams/placement-probe.js';
 import { pickBestDevice, type DevicePlacementSignal } from './teams/scheduler.js';
 import type { AgentType } from './teams/agents.js';
-import { getAccountInfo } from './agents.js';
 
 /** Peakiness of usage weights; >1 amplifies the most-used option. */
 export const DEFAULT_AFFINITY_ALPHA = 1.3;
@@ -181,8 +180,8 @@ export async function resolveDeviceAuto(
   opts: {
     eligibleHosts?: string[];
     localMachine?: string;
-    /** Keep installed auth-blocked devices eligible so an interactive picker can launch their login flow. */
-    allowSignedOut?: boolean;
+    /** Route only to devices with a row the interactive account picker can launch. */
+    accountPicker?: boolean;
     probe?: (pool: string[], agent?: AgentType) => Promise<Map<string, DevicePlacementSignal>>;
   } = {},
 ): Promise<DeviceAutoPlan> {
@@ -206,16 +205,13 @@ export async function resolveDeviceAuto(
       if (current) signals.set(key, { ...current, installed: accountEligible, signedIn: accountEligible });
     }
   }
-  if (agent && !opts.probe && signals.has(local)) {
-    const info = await getAccountInfo(agent as import('./types.js').AgentId).catch(() => null);
-    const eligible = !!info?.signedIn && info.usageStatus !== 'rate_limited' && info.usageStatus !== 'out_of_credits';
-    signals.set(local, { ...signals.get(local)!, signedIn: eligible });
-  }
   const eligiblePool = pool.filter((key) => {
     const signal = signals.get(key);
     if (signal?.reachable !== true || signal.headroom === 'loaded') return false;
     if (!agent) return opts.probe ? true : signal.installed === true && signal.signedIn === true;
-    return signal.installed === true && (opts.allowSignedOut === true || signal.signedIn === true);
+    return signal.installed === true && (opts.accountPicker === true
+      ? signal.pickerEligible === true
+      : signal.signedIn === true);
   });
   if (eligiblePool.length === 0) {
     throw new Error(formatNoHealthyDeviceError(pool, signals, agent));
@@ -342,7 +338,7 @@ export type DeviceAutoApplyResult = {
 export async function applyDeviceAutoToOptions(
   options: DeviceAutoHostOptions,
   deps: {
-    resolve?: (allowSignedOut: boolean) => DeviceAutoPlan | Promise<DeviceAutoPlan>;
+    resolve?: (accountPicker: boolean) => DeviceAutoPlan | Promise<DeviceAutoPlan>;
     agent?: string;
     accountPickerRequested?: boolean;
   } = {},
@@ -363,8 +359,8 @@ export async function applyDeviceAutoToOptions(
   }
 
   const accountPickerRequested = deps.accountPickerRequested ?? false;
-  const resolve: (allowSignedOut: boolean) => DeviceAutoPlan | Promise<DeviceAutoPlan> =
-    deps.resolve ?? ((allowSignedOut) => resolveDeviceAuto(deps.agent, { allowSignedOut }));
+  const resolve: (accountPicker: boolean) => DeviceAutoPlan | Promise<DeviceAutoPlan> =
+    deps.resolve ?? ((accountPicker) => resolveDeviceAuto(deps.agent, { accountPicker }));
   const plan = await resolve(accountPickerRequested);
   const concrete = plan.host; // null = local
   for (const k of HOST_SLOTS) {
