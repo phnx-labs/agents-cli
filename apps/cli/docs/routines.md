@@ -411,7 +411,9 @@ handler trusts.
 [`docs/examples/slack/`](examples/slack/) are ready to paste — then:
 
 ```bash
-# 1. Signing secret (verify inbound) + bot token (post the reply / real ts):
+# 1. Signing secret (verify inbound). The bot token is only needed for an
+#    @mention reply, which posts through the Slack Web API into the thread —
+#    a slash command replies via `{{slack.response_url}}` and needs no token:
 agents secrets add slack SLACK_SIGNING_SECRET <from Slack "Basic Information">
 agents secrets add slack SLACK_BOT_TOKEN <xoxb-… from "OAuth & Permissions">
 
