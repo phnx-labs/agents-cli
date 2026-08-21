@@ -1,0 +1,163 @@
+/**
+ * Pipeline tests for listMergeableRefs / selectListedMergeable.
+ *
+ * The gh runner is a table of recorded payloads (the same JSON `gh api` and
+ * `gh pr list --repo` return), not a stub of the verdict itself. The live
+ * #2847 comment and empty #2849 comments were captured 2026-08-20 via REST.
+ */
+
+import { execFile } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { promisify } from 'util';
+import { describe, expect, it } from 'vitest';
+import {
+  canonicalizeRepo,
+  projectRepoSlugs,
+  selectListedMergeable,
+  type GhExec,
+} from './pr-mergeable.js';
+import type { ProjectDef } from '../projects.js';
+import type { StatusCheck } from './pr-verdict.js';
+
+const execFileAsync = promisify(execFile);
+
+const GREEN: StatusCheck[] = [
+  { conclusion: 'SUCCESS', status: 'COMPLETED' },
+  { conclusion: 'SKIPPED', status: 'COMPLETED' },
+];
+
+const APPROVE_2847 =
+  '**Non-author review verdict: APPROVE**\n\nIndependent subagent review.';
+
+function ghFromTable(table: Record<string, string>): GhExec {
+  return async (args: string[]) => {
+    const key = args.join(' ');
+    if (!(key in table)) throw new Error(`unexpected gh ${key}`);
+    return table[key];
+  };
+}
+
+describe('projectRepoSlugs', () => {
+  it('unions repo and repos[].slug, sorted unique', () => {
+    const defs: ProjectDef[] = [
+      {
+        name: 'agents-cli',
+        repo: 'phnx-labs/agents-cli',
+        repos: [
+          { slug: 'phnx-labs/agents-cli' },
+          { slug: 'phnx-labs/.agents-system' },
+        ],
+      },
+      { name: 'prix', repo: 'muqsitnawaz/agents' },
+    ];
+    expect(projectRepoSlugs(defs)).toEqual([
+      'muqsitnawaz/agents',
+      'phnx-labs/.agents-system',
+      'phnx-labs/agents-cli',
+    ]);
+  });
+});
+
+describe('canonicalizeRepo', () => {
+  it('uses gh repo view nameWithOwner so a renamed slug lists PRs', async () => {
+    const gh = ghFromTable({
+      'repo view phnx-labs/agents-cli --json nameWithOwner --jq .nameWithOwner':
+        'phnx-labs/agi-cli\n',
+    });
+    expect(await canonicalizeRepo('phnx-labs/agents-cli', gh)).toBe('phnx-labs/agi-cli');
+  });
+
+  it('keeps the input slug when gh repo view fails', async () => {
+    const gh: GhExec = async () => { throw new Error('nope'); };
+    expect(await canonicalizeRepo('acme/widgets', gh)).toBe('acme/widgets');
+  });
+});
+
+describe('selectListedMergeable', () => {
+  it('selects an approved+green PR and rejects an unapproved one', async () => {
+    const repo = 'phnx-labs/agi-cli';
+    const listed = [
+      { number: 2847, reviewDecision: '', statusCheckRollup: GREEN },
+      { number: 2849, reviewDecision: '', statusCheckRollup: GREEN },
+    ];
+    const gh = ghFromTable({
+      [`api repos/${repo}/pulls/2847/reviews --cache 60s`]: '[]',
+      [`api repos/${repo}/issues/2847/comments --cache 60s`]:
+        JSON.stringify([{ body: APPROVE_2847 }]),
+      [`api repos/${repo}/pulls/2849/reviews --cache 60s`]: '[]',
+      [`api repos/${repo}/issues/2849/comments --cache 60s`]: '[]',
+    });
+    const selected = await selectListedMergeable(repo, listed, gh);
+    expect(selected.map((p) => p.number)).toEqual([2847]);
+  });
+
+  it('does not fetch comments when reviewDecision is already APPROVED', async () => {
+    const repo = 'phnx-labs/agi-cli';
+    const listed = [
+      { number: 1, reviewDecision: 'APPROVED', statusCheckRollup: GREEN },
+    ];
+    const gh: GhExec = async () => {
+      throw new Error('must not call gh for an already-APPROVED PR');
+    };
+    const selected = await selectListedMergeable(repo, listed, gh);
+    expect(selected.map((p) => p.number)).toEqual([1]);
+  });
+
+  it('skips a green PR whose checks are still pending without probing verdict', async () => {
+    const repo = 'phnx-labs/agi-cli';
+    const listed = [
+      { number: 2, reviewDecision: '', statusCheckRollup: [{ conclusion: '', status: 'IN_PROGRESS' }] },
+    ];
+    const gh: GhExec = async () => {
+      throw new Error('must not probe verdict for a non-green PR');
+    };
+    expect(await selectListedMergeable(repo, listed, gh)).toEqual([]);
+  });
+});
+
+describe('ghExec color env', () => {
+  it('gh --json from this process is parseable even when FORCE_COLOR is set', async () => {
+    const { ghExec } = await import('./pr-mergeable.js');
+    try {
+      const raw = await ghExec([
+        'pr', 'list', '--repo', 'phnx-labs/agi-cli', '--author', '@me',
+        '--state', 'open', '--limit', '1', '--json', 'number',
+      ]);
+      expect(raw.charCodeAt(0)).not.toBe(0x1b); // no ESC
+      expect(Array.isArray(JSON.parse(raw))).toBe(true);
+    } catch (err) {
+      const msg = String((err as Error).message ?? err);
+      expect(msg).not.toMatch(/not a git repository/);
+      if (/gh|auth|rate limit|network/i.test(msg)) return;
+      throw err;
+    }
+  });
+});
+
+describe('live gh --repo from a non-repo cwd (RUSH-2848 defect 1)', () => {
+  it('returns JSON, not "fatal: not a git repository"', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-mergeable-cwd-'));
+    try {
+      const env = { ...process.env, CLICOLOR: '0', NO_COLOR: '1', GH_NO_COLOR: '1', GH_PAGER: 'cat' };
+      delete env.CLICOLOR_FORCE;
+      delete env.FORCE_COLOR;
+      delete env.GH_FORCE_TTY;
+      const { stdout } = await execFileAsync(
+        'gh',
+        ['pr', 'list', '--repo', 'phnx-labs/agi-cli', '--author', '@me', '--state', 'open', '--limit', '1', '--json', 'number'],
+        { cwd: tmp, timeout: 20_000, encoding: 'utf-8', env },
+      );
+      expect(Array.isArray(JSON.parse(String(stdout)))).toBe(true);
+    } catch (err) {
+      const msg = String((err as Error).message ?? err);
+      // This is the bug: without --repo, gh infers the repo from cwd and dies.
+      expect(msg).not.toMatch(/not a git repository/);
+      if (/gh|auth|rate limit|network/i.test(msg)) return; // unauthenticated CI
+      throw err;
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});

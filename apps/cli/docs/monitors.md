@@ -49,6 +49,25 @@ is due, applies the condition through the native state-diff store, and on a fire
 dispatches the action through the exact `executeJobDetached` path cron and webhook
 fires use.
 
+### Built-in: `pr-merge-on-green`
+
+Opt-in. Polls every 5 minutes for **this user's** open PRs that are CI-green and
+non-author-approved, then dispatches `claude` to rebase-merge them. The poll is
+`agents _internal mergeable-prs` (also the Python script next to the YAML in
+`.agents-system`): it passes `--repo` for every registered project slug so it
+works from the daemon's non-repo cwd, and it accepts either a GitHub `APPROVED`
+review or an APPROVE verdict comment on that PR — the same rule as
+`merge-guard.sh`. Observation is a line of `owner/repo#n` refs; empty is silent.
+
+```bash
+agents monitors enable pr-merge-on-green
+agents monitors test pr-merge-on-green    # dry-run: observation + would-fire
+```
+
+A user copy created by an older `enable` still has the broken `gh pr list`
+command (no `--repo`, `reviewDecision == APPROVED` only). Re-enable to pick up
+the new poll: `agents monitors remove pr-merge-on-green && agents monitors enable pr-merge-on-green`.
+
 ### The one genuinely new piece: native state-diff
 
 Routines persist per-*run* metadata but have no last-observed-*value* store.

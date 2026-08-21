@@ -800,10 +800,13 @@ function registerHqTombstoneCommand(p: Command): void {
 
 /**
  * Hidden `agents _internal <sub>` namespace for machine-to-machine calls that
- * are not user-facing. The first subcommand is `friction`, used by shell guard
- * hooks (git-guard, rm-guard, …) to self-report a block into the event log
- * before they exit 2 — they run before any `agents` process exists, so they
- * cannot emit in-process.
+ * are not user-facing. Subcommands:
+ *   - `friction` — shell guard hooks (git-guard, rm-guard, …) self-report a
+ *     block into the event log before they exit 2; they run before any
+ *     `agents` process exists, so they cannot emit in-process.
+ *   - `mergeable-prs` — the `pr-merge-on-green` built-in poll. Prints
+ *     `owner/repo#n` for this user's CI-green, non-author-approved open PRs
+ *     (cwd-independent `--repo`). Empty stdout is a silent observation.
  */
 function registerInternalCommand(p: Command): void {
   const internal = p.command('_internal', { hidden: true });
@@ -822,6 +825,19 @@ function registerInternalCommand(p: Command): void {
         ...(opts.command ? { command: opts.command } : {}),
       });
       process.exit(0);
+    });
+  internal
+    .command('mergeable-prs')
+    .description('Print owner/repo#n for CI-green, non-author-approved open PRs (pr-merge-on-green poll)')
+    .action(async () => {
+      try {
+        const { listMergeableRefs } = await import('./lib/github/pr-mergeable.js');
+        const refs = await listMergeableRefs();
+        if (refs) process.stdout.write(`${refs}\n`);
+      } catch {
+        // Empty observation — never write stderr (command.ts would treat it
+        // as the poll result and fire `mode: every` on the error text).
+      }
     });
 }
 
