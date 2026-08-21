@@ -1427,7 +1427,11 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   // the agent's config dir, and the sandbox overlay home has only a freshly-generated
   // config with no session store. So a resume job is never sandboxed, regardless of
   // `config.sandbox` (see the resume branch in buildJobCommand).
-  const useSandbox = config.sandbox !== false && !config.resume;
+  // Resume needs the REAL home (session store); a custom harness needs it too —
+  // the delegated `agents run <name>` resolves ~/.agents (profiles, setup
+  // sentinel, version homes) from HOME, which the overlay would hide. Exec
+  // still isolates the run in the host version home it swaps HOME into.
+  const useSandbox = config.sandbox !== false && !config.resume && !(config.agent && isCustomHarnessName(config.agent));
   const overlayHome = useSandbox ? prepareJobHome(config) : undefined;
 
   const runId = attempt.runId;
@@ -2029,7 +2033,11 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
   // the agent's config dir, and the sandbox overlay home has only a freshly-generated
   // config with no session store. So a resume job is never sandboxed, regardless of
   // `config.sandbox` (see the resume branch in buildJobCommand).
-  const useSandbox = config.sandbox !== false && !config.resume;
+  // Resume needs the REAL home (session store); a custom harness needs it too —
+  // the delegated `agents run <name>` resolves ~/.agents (profiles, setup
+  // sentinel, version homes) from HOME, which the overlay would hide. Exec
+  // still isolates the run in the host version home it swaps HOME into.
+  const useSandbox = config.sandbox !== false && !config.resume && !(config.agent && isCustomHarnessName(config.agent));
   const overlayHome = useSandbox ? prepareJobHome(config) : undefined;
 
   const runId = attempt.runId;
