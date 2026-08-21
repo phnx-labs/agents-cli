@@ -434,7 +434,7 @@ command — see *Recommendations*.
 **Update (2026-08-21): the command was run, and this unknown is now closed.** The
 `posthog.com` bundle was unlocked and PostHog project `299876` queried directly.
 The measured numbers — 145 human visitors in 30 days, not the ~19/fortnight this
-report estimated — are in the [Addendum](#addendum--the-command-was-run-measured-human-traffic-2026-08-21)
+report estimated — are in the [Addendum](#addendum-the-command-was-run-measured-human-traffic-2026-08-21)
 at the end. Cloudflare stays dark: its token still lacks `zone.analytics.read`.
 
 ## Recommendations
@@ -624,8 +624,8 @@ a bet on traffic that does not exist yet.
 | `/install` | **1** |
 | `signup_submitted` (event) | 3 |
 
-96 homepage humans yield **1** who reaches `/install` and **3** signups
-(~2% visitor → signup). This is the direct measurement behind RUSH-1937
+96 homepage humans yield **1** who reaches `/install`; across all 145 visitors, **3**
+signed up (`signup_submitted`), a ~2% visitor → signup rate. This is the direct measurement behind RUSH-1937
 (repo-surface conversion gap): the leak is real and it is at the top, not the
 bottom, of the funnel.
 
