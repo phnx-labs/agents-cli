@@ -635,7 +635,7 @@ The raw 145 is not 145 strangers. Segmenting it:
   browsers and `agents browser` is desktop-headless, so these are unambiguously
   real people on phones.
 - **Internal contamination is small and identifiable:** exactly **one**
-  identified person in the whole set (`muqsitnawaz@gmail.com`), just **2**
+  identified person in the whole set (the operator's own account), just **2**
   Brave/macOS visitors (the browser `agents browser` uses), and some
   Mountain-View / Council-Bluffs hits that are Google prefetch/datacenter rather
   than a person.
