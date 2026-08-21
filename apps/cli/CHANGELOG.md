@@ -1,24 +1,5 @@
 # Changelog
 
-## 1.22.43
-
-- **Block service-manager registration under a redirected HOME on macOS/Linux (RUSH-2968).**
-  `launchctl` and `systemctl --user` are per-user-session and ignore `$HOME`, so a CLI
-  running under a sandbox/redirected HOME (including every vitest fork) still talked to
-  the user's real service manager. `service-manifest.ts` already namespaces the job
-  label, but that only changes the identifier — the registration still lands in real
-  `launchd`/`systemd`. Every registration path now consults
-  `serviceManagerRegistrationAllowed()` (which is false when `isolatedHomeSuffix()` is
-  non-null) and skips with a stated reason rather than touching the real service
-  manager: daemon `startDaemon`/`stopDaemon`, menubar
-  `restartMenubarLaunchAgent`/`disableMenubarService`, secrets
-  `retireLegacySecretsAgentService`, and `agents computer start`. A test seam
-  `AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME=1` lets the existing shim-based tests
-  continue to exercise the registration code path. Source:
-  `apps/cli/src/lib/service-manifest.ts`, `apps/cli/src/lib/daemon/daemon.ts`,
-  `apps/cli/src/lib/menubar/install-menubar.ts`,
-  `apps/cli/src/lib/secrets/agent.ts`, `apps/cli/src/commands/computer.ts`.
-
 ## 1.22.42
 
 - **Plan-tier gates for `agents accounts` and `agents insights` (RUSH-2424).** A new `apps/cli/src/lib/entitlement.ts` reads the live subscription tier from `GET /api/v1/billing/subscription?agent=agi-cli` (the session token in `~/.rush/user.yaml`), caches it on disk for 15 minutes, and stays offline-tolerant: a stale cache is honored over a failed network call, and no session file at all resolves straight to the free tier. `agents accounts add` / `name` / `attach` now cap registered accounts at 3 per harness on free, 10 on paid/admin — a 4th add on free refuses before any write (`free plan is capped at 3 claude accounts (3/3). agents upgrade — up to 10 per harness.`) and the 3rd prints a one-line notice. Downgrading a plan never deletes a credential: over-cap accounts fall out of `accounts switch`/`set-default` (excluded from `listSwitchableAccounts`) and are listed `dormant (upgrade to reactivate)` in `agents accounts`. `agents insights` keeps top-line counts, harness mix, `insights mix`, and `agents perf` free on every tier; the Friction / Friction-thrash / Dissatisfaction-corrections sections, grouping `--by account` (the default), and `--narrative` are paid — a gated section is replaced by the in-voice notice `Friction and account-split analysis are on the paid plan.` in both the text report and `--json` (a new `plan: {tierName, isPaid}` field, `groups: null` when the account breakdown is gated, and the friction/correction facet keys stripped per group otherwise). Source: `apps/cli/src/lib/entitlement.ts`, `apps/cli/src/commands/accounts.ts`, `apps/cli/src/commands/insights.ts`.
