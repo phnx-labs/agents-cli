@@ -1510,13 +1510,18 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   }, [panelHosts])
 
   // ---------- Floor view-model derivation ----------
-  // A once-a-second ticker (local useNow) drives the sync chip's live age (below). It is
-  // deliberately NOT a dependency of the agent adapters: at 100+ agents, re-adapting the
-  // whole feed every second (derivePhase / splitActivity / a per-agent question regex)
-  // is the dominant idle cost. The adapter instead captures Date.now() at data-change
-  // time only; each FeedItem's own leaf heartbeat (useNow) ticks the visible "since"
-  // label, so nothing freezes while unchanged agents stop being re-derived every second.
-  const nowMs = useNow(1000)
+  // This ticker IS a dependency of the agent adapters below — it bakes each
+  // agent's `since` string (floorAdapter.ts: sinceFromIso). An earlier comment
+  // here claimed the opposite; the dependency array two lines down always said
+  // otherwise, so at 1s the whole feed was re-adapted every second (derivePhase,
+  // splitActivity and a per-agent question regex for every agent), cascading
+  // through the memos that consume it.
+  //
+  // 5s is the interval useNow's own docblock prescribes for exactly this case.
+  // The visible live age does not get coarser: FeedItem holds its own 1s leaf
+  // heartbeat and overrides `since` for running and stalled agents, so only an
+  // idle row's age text lags, by at most five seconds.
+  const nowMs = useNow(5000)
 
   // Local agents (drop the synthetic watchdog row) + genuinely-remote sessions
   // (host !== 'this-mac' so we don't double count this machine's own agents).

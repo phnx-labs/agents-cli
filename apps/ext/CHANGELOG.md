@@ -33,6 +33,17 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
   concurrent callers without ever re-serving a stale snapshot. Source:
   `src/vscode/settings.vscode.ts`, `src/core/cachedInFlight.ts`.
 
+- **The Fleet feed stops re-deriving every agent once a second.** The list memo
+  folded in a `useNow(1000)` ticker, so every second the whole feed was re-adapted
+  — `derivePhase`, `splitActivity` and a per-agent question regex for each agent —
+  cascading through the memos downstream. A comment above it claimed the ticker was
+  "deliberately NOT a dependency of the agent adapters" while the dependency array
+  two lines below always said otherwise. It now ticks at 5s, the interval
+  `useNow`'s own docblock prescribes for a value folded into a list memo, and the
+  comment states what the code does. The visible live age is unchanged: `FeedItem`
+  keeps its own 1s leaf heartbeat and overrides `since` for running and stalled
+  agents. Source: `ui/settings/components/mission-control/UnifiedAgentsPane.tsx`.
+
 - **The Fleet panel stops burying idle-but-unfinished work below running work
   (RUSH-2838).** The root `AGENTS.md` "Purpose" section makes idle-but-unfinished
   the highest-risk state — the one most likely to be silently abandoned — and says
