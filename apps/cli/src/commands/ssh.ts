@@ -94,7 +94,7 @@ import {
   renderFleetWarnings,
   type FleetHealthRow,
 } from '../lib/devices/health-report.js';
-import { loadFleetStats, readStatsCache } from '../lib/devices/stats-cache.js';
+import { isFreshDeviceStats, loadFleetStats, readStatsCache } from '../lib/devices/stats-cache.js';
 import { collectLocalFleetInventory } from '../lib/devices/fleet-inventory.js';
 import { checkSyncStatus, countOrphans } from '../lib/drift.js';
 import { checkAllClis } from '../lib/teams/agents.js';
@@ -1880,7 +1880,7 @@ function registerDevicesCommands(program: Command): void {
         .map((t) => t.device);
       // Only spin when we'll actually ssh (forced, or a cold/partial cache).
       const cache = readStatsCache();
-      const willSsh = forceRefresh || probeable.some((d) => d.name !== self && !cache[d.name]);
+      const willSsh = forceRefresh || probeable.some((d) => d.name !== self && (!cache[d.name] || !isFreshDeviceStats(cache[d.name])));
       const spinner = willSsh && isInteractiveTerminal()
         ? ora(`Probing ${probeable.length} device${probeable.length === 1 ? '' : 's'}…`).start()
         : undefined;

@@ -15,10 +15,14 @@
  * - **`--refresh` / `--live`:** skip the cache and live-probe every device,
  *   rewriting the cache.
  *
- * The daemon warms this cache (~every 3 min, see `lib/daemon/daemon.ts
- * runFleetCacheWarm`), so in steady state a default read has zero
- * remote ssh round-trips and returns immediately with data that is at most a
- * few minutes old — surfaced to the user as an "as of …" freshness note.
+ * Every cached row is bounded by {@link STATS_STALE_MS}: a row older than the
+ * window is treated exactly like a missing one — re-probed live this call and
+ * rewritten — so the default read is itself the cache's writer and a value can
+ * never fossilize at the last manual `--refresh`. (The daemon used to warm this
+ * cache every ~3 min; RUSH-2061 removed that N² fleet probe, which left the
+ * unbounded read serving multi-day-old rows as current fleet state — the
+ * scheduler, `--device auto`, and the session-start banner all read these
+ * numbers. See #2666.)
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -28,6 +32,20 @@ import { probeFleetStats, probeLocalStats, type DeviceStats } from './health.js'
 import type { DeviceProfile } from './registry.js';
 
 const CACHE_FILE = '.fleet-stats.json';
+
+/**
+ * Freshness bound for a cached row. Matches the agent-count mirror's window
+ * (`AGENT_STATUS_STALE_MS` in `commands/ssh.ts`) so both columns of
+ * `devices list` / `fleet status` share one staleness model. A row older than
+ * this is never served as current — it is re-probed live (and the probe result
+ * rewrites the cache, unreachable boxes included).
+ */
+export const STATS_STALE_MS = 3 * 60_000;
+
+/** True when a cached row is still within {@link STATS_STALE_MS}. */
+export function isFreshDeviceStats(stats: DeviceStats, now: number = Date.now()): boolean {
+  return now - stats.fetchedAt <= STATS_STALE_MS;
+}
 
 interface StatsCacheFile {
   version: 1;
@@ -88,6 +106,8 @@ export interface LoadFleetStatsOptions {
   probeLocal?: typeof probeLocalStats;
   readCache?: typeof readStatsCache;
   writeCache?: typeof writeStatsCache;
+  /** Clock override for tests (drives the {@link STATS_STALE_MS} bound). */
+  now?: number;
 }
 
 /**
@@ -104,6 +124,7 @@ export async function loadFleetStats(
   const readCache = opts.readCache ?? readStatsCache;
   const writeCache = opts.writeCache ?? writeStatsCache;
   const self = opts.selfName;
+  const now = opts.now ?? Date.now();
   const cache = opts.forceRefresh ? {} : readCache();
 
   const stats = new Map<string, DeviceStats>();
@@ -117,10 +138,12 @@ export async function loadFleetStats(
       continue;
     }
     const cached = cache[d.name];
-    if (cached) {
+    if (cached && isFreshDeviceStats(cached, now)) {
       stats.set(d.name, cached);
       servedFromCache = true;
     } else {
+      // Missing OR beyond the staleness bound: a stale number rendered as
+      // current is worse than the probe's cost, so re-probe live (#2666).
       toProbe.push(d);
     }
   }
