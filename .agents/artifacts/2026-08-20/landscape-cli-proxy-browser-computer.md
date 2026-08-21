@@ -9,9 +9,9 @@ host: fleet-worker
 session: n/a
 links:
   - label: 'Companion: agi-cli GTM report (same date)'
-    url: 'https://github.com/muqsitnawaz/agents-cli/blob/main/.agents/artifacts/2026-08-20/gtm-strategy.md'
+    url: 'https://github.com/phnx-labs/agents-cli/blob/main/.agents/artifacts/2026-08-20/gtm-strategy.md'
   - label: 'Companion: why the biggest orchestrators died'
-    url: 'https://github.com/muqsitnawaz/agents-cli/blob/main/.agents/artifacts/2026-08-20/why-orchestrators-die.md'
+    url: 'https://github.com/phnx-labs/agents-cli/blob/main/.agents/artifacts/2026-08-20/why-orchestrators-die.md'
   - label: 'RUSH-2834 — launch: freeze the name, run the 48-hour ignition'
     url: 'https://linear.app/phnx/issue/RUSH-2834'
 ---
