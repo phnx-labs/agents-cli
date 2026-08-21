@@ -1077,18 +1077,18 @@
                   "negate": false
                 },
                 {
-                  "flags": "--github-user <user>",
+                  "flags": "--for-user <user>",
                   "description": "GitHub username for resolving a bare-slug target (default: resolved from gh/git config)",
-                  "long": "--github-user",
+                  "long": "--for-user",
                   "required": true,
                   "optional": false,
                   "variadic": false,
                   "negate": false
                 },
                 {
-                  "flags": "--json",
+                  "flags": "--delete-json",
                   "description": "emit machine-readable results",
-                  "long": "--json",
+                  "long": "--delete-json",
                   "required": false,
                   "optional": false,
                   "variadic": false,
@@ -1149,13 +1149,13 @@
               "name": "list",
               "path": "artifacts share list",
               "aliases": [],
-              "description": "List the pages you've published to your share namespace (human table; --json for scripts).",
+              "description": "List the pages you've published to your share namespace (human table; --list-json for scripts).",
               "args": [],
               "options": [
                 {
-                  "flags": "--github-user <user>",
+                  "flags": "--for-user <user>",
                   "description": "GitHub username whose namespace to list (default: resolved from gh/git config)",
-                  "long": "--github-user",
+                  "long": "--for-user",
                   "required": true,
                   "optional": false,
                   "variadic": false,
@@ -1189,9 +1189,9 @@
                   "negate": false
                 },
                 {
-                  "flags": "--json",
+                  "flags": "--list-json",
                   "description": "emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt, label, agent, session, host, repo, revisionCount, meta)",
-                  "long": "--json",
+                  "long": "--list-json",
                   "required": false,
                   "optional": false,
                   "variadic": false,
@@ -1208,8 +1208,8 @@
                   "negate": false
                 }
               ],
-              "examples": "# Everything you've published, newest first\n      agents artifacts share list\n\n      # Machine-readable — e.g. pull every still-public URL with jq\n      agents artifacts share list --json | jq -r '.objects[].url'\n\n      # List another namespace\n      agents artifacts share list --github-user octocat\n\n      # Narrow by who/what published it\n      agents artifacts share list --agent claude\n      agents artifacts share list --label-contains \"fleet plan\"",
-              "notes": "Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG\n  covers are omitted (it mirrors the public gallery). It reads the endpoint's JSON\n  listing route, which ships with the current Worker template. If your deployed\n  Worker predates this feature the command says so and points you at 'agents\n  artifacts share update' (RUSH-2449) rather than returning a wrong or empty result\n  — see 'agents artifacts share status' for whether an update is due.\n\n  --agent/--session/--label-contains filter the fetched listing client-side; --json's\n  count reflects the filtered set.",
+              "examples": "# Everything you've published, newest first\n      agents artifacts share list\n\n      # Machine-readable — e.g. pull every still-public URL with jq\n      agents artifacts share list --list-json | jq -r '.objects[].url'\n\n      # List another namespace\n      agents artifacts share list --for-user octocat\n\n      # Narrow by who/what published it\n      agents artifacts share list --agent claude\n      agents artifacts share list --label-contains \"fleet plan\"",
+              "notes": "Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG\n  covers are omitted (it mirrors the public gallery). It reads the endpoint's JSON\n  listing route, which ships with the current Worker template. If your deployed\n  Worker predates this feature the command says so and points you at 'agents\n  artifacts share update' (RUSH-2449) rather than returning a wrong or empty result\n  — see 'agents artifacts share status' for whether an update is due.\n\n  --agent/--session/--label-contains filter the fetched listing client-side;\n  --list-json's count reflects the filtered set.",
               "subcommands": []
             },
             {
@@ -1324,9 +1324,9 @@
                   "negate": false
                 },
                 {
-                  "flags": "--json",
+                  "flags": "--update-json",
                   "description": "emit a machine-readable result",
-                  "long": "--json",
+                  "long": "--update-json",
                   "required": false,
                   "optional": false,
                   "variadic": false,
@@ -1391,18 +1391,18 @@
               "negate": false
             },
             {
-              "flags": "--github-user <user>",
+              "flags": "--for-user <user>",
               "description": "GitHub username for resolving a bare-slug target (default: resolved from gh/git config)",
-              "long": "--github-user",
+              "long": "--for-user",
               "required": true,
               "optional": false,
               "variadic": false,
               "negate": false
             },
             {
-              "flags": "--json",
+              "flags": "--delete-json",
               "description": "emit machine-readable results",
-              "long": "--json",
+              "long": "--delete-json",
               "required": false,
               "optional": false,
               "variadic": false,

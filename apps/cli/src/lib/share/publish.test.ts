@@ -400,7 +400,7 @@ describe('publishToEndpoint', () => {
 
   it('refuses a credential in --meta unless --force, even when the file body is clean (RUSH-2683 review fix)', async () => {
     // --label and --meta land in PUBLIC customMetadata (visible in the
-    // gallery, `share list --json`, `share revisions`) exactly like the file
+    // gallery, `share list --list-json`, `share revisions`) exactly like the file
     // body — the pre-publish scan previously ran on the body only, so a
     // credential-shaped --meta value or --label sailed straight through with
     // no --force gate at all.

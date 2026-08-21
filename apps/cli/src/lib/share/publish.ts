@@ -601,7 +601,7 @@ export async function publishToEndpoint(
   // strings unless --force. Runs on the raw file body AND on every piece of
   // free-text metadata that lands in public customMetadata — --label (explicit
   // or derived) and every --meta value. Metadata is visible in the gallery,
-  // `share list --json`, and `share revisions` just like the page itself, so a
+  // `share list --list-json`, and `share revisions` just like the page itself, so a
   // credential smuggled in there is exactly as exposed as one in the body; it
   // must not have a free pass around this gate. Runs before analytics/cover
   // mutation so a beacon injection never triggers a false positive on the body

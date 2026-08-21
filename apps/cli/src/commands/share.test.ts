@@ -371,7 +371,7 @@ describe('shareTemplateStatus', () => {
 });
 
 describe('agents artifacts share update (CLI)', () => {
-  it('--json reports skipped:false=>updated true with the new hash on first run', async () => {
+  it('--update-json reports skipped:false=>updated true with the new hash on first run', async () => {
     const { artifacts, share, config } = await freshShareModules();
     config.writeShareConfig({
       baseUrl: 'https://share.test',
@@ -388,8 +388,43 @@ describe('agents artifacts share update (CLI)', () => {
     const updateCmd = shareGroup(program)?.commands.find((c) => c.name() === 'update');
     expect(updateCmd).toBeDefined();
     expect(updateCmd?.options.map((o) => o.long)).toEqual(
-      expect.arrayContaining(['--bundle', '--account', '--token', '--force', '--json']),
+      expect.arrayContaining(['--bundle', '--account', '--token', '--force', '--update-json']),
     );
+  });
+
+  it('a real parse actually delivers --update-json through to the update result (RUSH-2687 — --json collides with the parent `share --json`)', async () => {
+    // Same collision class as `list`'s --for-user/--list-json above: `update`
+    // would have registered its own --json, which shares a name with the
+    // parent `share` command's publish-time --json — renamed to --update-json
+    // instead (RUSH-2687).
+    const { artifacts, share, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.test',
+      accountId: 'acct_1',
+      workerName: 'worker-one',
+      bucketName: 'bucket-one',
+    });
+    config.storeWriteToken('tok');
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ success: true, result: {} }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })) as typeof fetch;
+
+    try {
+      const program = programWithArtifacts(artifacts);
+      await program.parseAsync([
+        'node', 'agents', 'artifacts', 'share', 'update', '--token', 'cf-token', '--update-json',
+      ]);
+      const out = loggedOutput();
+      // A dropped --update-json would fall through to the human-readable line
+      // ("Worker '…' updated → template …"), never valid JSON.
+      expect(() => JSON.parse(out)).not.toThrow();
+      expect(JSON.parse(out)).toMatchObject({ updated: true, workerName: 'worker-one' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
@@ -499,7 +534,7 @@ describe('parseShareListing', () => {
   it('surfaces arbitrary --meta entries under objects[].meta (RUSH-2683 review fix)', async () => {
     // --meta kind=plan --meta ticket=RUSH-2683 was previously write-only: stored
     // in customMetadata but never returned by any read route, so it couldn't be
-    // seen again via `share list --json`.
+    // seen again via `share list --list-json`.
     const { share } = await freshShareModules();
     const body = JSON.stringify({
       user: 'octocat',
@@ -729,31 +764,30 @@ describe('runShareList', () => {
 });
 
 describe('agents artifacts share list (CLI)', () => {
-  it('registers the list command with --json, --github-user, --agent, --session, --label-contains', async () => {
+  it('registers the list command with --list-json, --for-user, --agent, --session, --label-contains', async () => {
     const { artifacts, share } = await freshShareModules();
     const program = programWithArtifacts(artifacts);
     const listCmd = shareGroup(program)?.commands.find((c) => c.name() === 'list');
     expect(listCmd).toBeDefined();
     expect(listCmd?.options.map((o) => o.long)).toEqual(
-      expect.arrayContaining(['--json', '--github-user', '--agent', '--session', '--label-contains']),
+      expect.arrayContaining(['--list-json', '--for-user', '--agent', '--session', '--label-contains']),
     );
+    // The parent `share` command owns --json/--github-user; a same-named child
+    // option is silently dropped at parse time (RUSH-2687), so `list` must
+    // never re-declare them.
+    expect(listCmd?.options.map((o) => o.long)).not.toEqual(expect.arrayContaining(['--json', '--github-user']));
   });
 
-  it('a real parse actually delivers --agent/--session/--label-contains through to runShareList (not just registration)', async () => {
+  it('a real parse actually delivers --agent/--session/--label-contains/--list-json/--for-user through to runShareList (not just registration)', async () => {
     // Regression guard: commander resolves an option's long name against the
     // WHOLE ancestor chain, not per-command — a `list` option that happens to
-    // share a name with the parent `share` command (e.g. the old `--label`,
-    // which collided with the parent's `--label`/`--title`) is silently
-    // dropped at parse time even though `--help` and `.options` show it
-    // registered correctly. Renamed to `--label-contains` to avoid the
-    // collision (see the comment on the option registration). This test
+    // share a name with the parent `share` command (--label/--title,
+    // --json, --github-user) is silently dropped at parse time even though
+    // `--help` and `.options` show it registered correctly. Renamed to
+    // `--label-contains`/`--list-json`/`--for-user` to avoid the collision
+    // (RUSH-2687; see the comment on the option registration). This test
     // exercises the REAL commander parse, not the `runShareList` unit tests
     // above, which call it directly and would never have caught this.
-    //
-    // Deliberately does NOT pass --json: that flag DOES collide with the
-    // parent `share` command's own --json and is silently dropped even alone
-    // (verified; tracked as RUSH-2687, not fixed here) — asserting on the
-    // human-readable output sidesteps that pre-existing, separate bug.
     const { artifacts, share, config } = await freshShareModules();
     const { renderWorkerScript } = await import('../lib/share/worker-template.js');
     const { hashWorkerScript } = await import('../lib/share/provision.js');
@@ -761,7 +795,10 @@ describe('agents artifacts share list (CLI)', () => {
       baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b',
       templateHash: hashWorkerScript(renderWorkerScript()),
     });
-    installFakeGh('octocat');
+    // `gh` resolves to a DIFFERENT user than the explicit --for-user below —
+    // if that flag were silently dropped, the request would go to
+    // /gh-default-user instead of /octocat, and the assertion below fails.
+    installFakeGh('gh-default-user');
 
     const objects = [
       { slug: 'a', url: 'https://s/octocat/a', size: 1, contentType: null, publishedAt: '2026-08-08T00:00:00.000Z', expiresAt: null, label: 'Fleet Plan', agent: 'claude', session: 'sess-1', host: null, repo: null, revisionCount: 0 },
@@ -781,14 +818,18 @@ describe('agents artifacts share list (CLI)', () => {
       const program = programWithArtifacts(artifacts);
       await program.parseAsync([
         'node', 'agents', 'artifacts', 'share', 'list',
-        '--agent', 'claude', '--label-contains', 'fleet',
+        '--agent', 'claude', '--label-contains', 'fleet', '--for-user', 'octocat', '--list-json',
       ]);
       const out = loggedOutput();
       expect(seenUrls.length).toBe(1);
-      expect(out).toContain('Fleet Plan');
-      expect(out).toContain('/octocat/a');
-      expect(out).not.toContain('/octocat/b');
-      expect(out).not.toContain('Other');
+      // --for-user reached resolveShareUsername: the fetched URL is scoped
+      // to the EXPLICIT namespace, not whatever `gh`/`git` config would resolve.
+      expect(seenUrls[0]).toContain('/octocat?');
+      // --list-json reached formatShareList: JSON output, not the human table
+      // (which would print "Fleet Plan" as a bare heading line, not JSON).
+      expect(() => JSON.parse(out)).not.toThrow();
+      const parsed = JSON.parse(out) as { objects: Array<{ label: string | null }> };
+      expect(parsed.objects.map((o) => o.label)).toEqual(['Fleet Plan']);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -1127,7 +1168,7 @@ describe('runShareDelete (CLI-layer multi-target handler)', () => {
     }
   });
 
-  it('--json emits one array covering every target, success and failure alike', async () => {
+  it('--delete-json emits one array covering every target, success and failure alike', async () => {
     const logs: string[] = [];
     const errors: string[] = [];
     const logSpy = vi.spyOn(console, 'log').mockImplementation((s: string) => { logs.push(s); });
@@ -1137,7 +1178,7 @@ describe('runShareDelete (CLI-layer multi-target handler)', () => {
         if (target === 'octocat/bad') throw new Error('takedown NOT verified');
         return okResult(target);
       };
-      await runShareDelete(['octocat/good', 'octocat/bad'], { json: true }, fakeDelete as never);
+      await runShareDelete(['octocat/good', 'octocat/bad'], { deleteJson: true }, fakeDelete as never);
       // JSON mode suppresses the per-target console lines — only the final array prints.
       expect(errors).toEqual([]);
       expect(logs.length).toBe(1);
@@ -1148,6 +1189,56 @@ describe('runShareDelete (CLI-layer multi-target handler)', () => {
     } finally {
       logSpy.mockRestore();
       errSpy.mockRestore();
+    }
+  });
+});
+
+describe('agents artifacts share delete (CLI)', () => {
+  it('a real parse actually delivers --for-user/--delete-json through to the delete result (RUSH-2687 — --github-user/--json collide with the parent `share`)', async () => {
+    // Same collision class as `list`/`update` above: `delete` would have
+    // registered its own --json and --github-user, both of which share a name
+    // with the parent `share` command's own --json/--github-user — renamed to
+    // --delete-json/--for-user instead (RUSH-2687).
+    const { artifacts, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b',
+    });
+    config.storeWriteToken('tok');
+    // `gh` resolves to a DIFFERENT user than the explicit --for-user below —
+    // if that flag were silently dropped, the request would target
+    // /gh-default-user/my-plan instead of /octocat/my-plan.
+    installFakeGh('gh-default-user');
+
+    const seenUrls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      seenUrls.push(`${init?.method ?? 'GET'} ${url}`);
+      // HEAD check before delete: exists (200). HEAD check after delete: gone (404).
+      const isCheck = !init?.method || init.method === 'HEAD';
+      const alreadyDeleted = seenUrls.filter((u) => u.includes('DELETE')).length > 0;
+      const status = isCheck && alreadyDeleted ? 404 : 200;
+      return new Response(isCheck ? null : JSON.stringify({ ok: true }), { status });
+    }) as typeof fetch;
+
+    try {
+      const program = programWithArtifacts(artifacts);
+      await program.parseAsync([
+        'node', 'agents', 'artifacts', 'share', 'delete', 'my-plan',
+        '--for-user', 'octocat', '--delete-json',
+      ]);
+      // --for-user reached resolveDeleteTarget: the HEAD/DELETE calls target
+      // the EXPLICIT namespace, not whatever `gh`/`git` config would resolve.
+      expect(seenUrls.some((u) => u.includes('/octocat/my-plan'))).toBe(true);
+      expect(seenUrls.some((u) => u.includes('/gh-default-user/'))).toBe(false);
+      // --delete-json reached formatShareDeleteResult / the results array:
+      // JSON output, not the human "deleted <url>" line.
+      const out = loggedOutput();
+      expect(() => JSON.parse(out)).not.toThrow();
+      const parsed = JSON.parse(out) as Array<{ target: string; result?: { key: string } }>;
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0]).toMatchObject({ target: 'my-plan', result: { key: 'octocat/my-plan' } });
+    } finally {
+      globalThis.fetch = originalFetch;
     }
   });
 });

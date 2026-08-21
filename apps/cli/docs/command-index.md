@@ -57,7 +57,7 @@ agents artifacts share [file]               Publish an HTML file to your own Clo
 agents artifacts share analytics            Show the Cloudflare Web Analytics status for this share endpoint.
 agents artifacts share delete <targets...>  Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Nested alias: agents artifacts unshare.
 agents artifacts share join [baseUrl]       Use an existing synced share endpoint and write token (no provisioning).
-agents artifacts share list                 List the pages you've published to your share namespace (human table; --json for scripts).
+agents artifacts share list                 List the pages you've published to your share namespace (human table; --list-json for scripts).
 agents artifacts share revisions <target>   Show the retained prior versions of a published slug, newest first (human table; --revisions-json for scripts).
 agents artifacts share status               Show the configured share endpoint and namespace.
 agents artifacts share update               Re-deploy the Worker script to the current template on an already-provisioned endpoint (idempotent).

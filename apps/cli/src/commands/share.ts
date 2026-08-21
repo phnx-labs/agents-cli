@@ -427,8 +427,8 @@ interface ShareDeleteCliOpts {
   keepCover?: boolean;
   keepRevisions?: boolean;
   ifExists?: boolean;
-  githubUser?: string;
-  json?: boolean;
+  forUser?: string;
+  deleteJson?: boolean;
 }
 
 /** Shared handler for `agents artifacts share delete <targets...>` and the
@@ -451,17 +451,17 @@ export async function runShareDelete(
         keepCover: opts.keepCover === true,
         keepRevisions: opts.keepRevisions === true,
         ifExists: opts.ifExists === true,
-        githubUser: opts.githubUser,
+        githubUser: opts.forUser,
       });
       results.push({ target, result });
-      if (!opts.json) console.log(formatShareDeleteResult(result));
+      if (!opts.deleteJson) console.log(formatShareDeleteResult(result));
     } catch (e) {
       results.push({ target, error: (e as Error).message });
-      if (!opts.json) console.error(chalk.red(`${target}: ${(e as Error).message}`));
+      if (!opts.deleteJson) console.error(chalk.red(`${target}: ${(e as Error).message}`));
     }
   }
 
-  if (opts.json) {
+  if (opts.deleteJson) {
     console.log(JSON.stringify(results, null, 2));
   }
 
@@ -475,8 +475,17 @@ function registerShareDeleteOptions(cmd: Command): Command {
     .option('--keep-cover', 'leave the sibling <slug>.png OG cover in place (default: delete it too)')
     .option('--keep-revisions', 'leave retained revisions (<slug>/rev-*) in place (default: delete them too)')
     .option('--if-exists', 'treat an already-missing target as a no-op success instead of an error')
-    .option('--github-user <user>', 'GitHub username for resolving a bare-slug target (default: resolved from gh/git config)')
-    .option('--json', 'emit machine-readable results');
+    // Named --for-user / --delete-json, not --github-user / --json: `share
+    // <file>` (the parent of the nested `share delete`) already owns both
+    // those long names, and commander resolves an option's long name against
+    // the WHOLE ancestor chain — a same-named child option is silently
+    // dropped at parse time even when it parses alone (RUSH-2687; verified
+    // with a real program.parseAsync(), see share.test.ts). Matches the
+    // `revisions` precedent (--for-user/--revisions-json) below, and applies
+    // equally to the top-level `unshare` alias so both spellings stay
+    // identical even though `unshare` itself has no ancestor collision.
+    .option('--for-user <user>', 'GitHub username for resolving a bare-slug target (default: resolved from gh/git config)')
+    .option('--delete-json', 'emit machine-readable results');
 }
 
 const SHARE_DELETE_EXAMPLES = `
@@ -664,11 +673,15 @@ ${SHARE_DELETE_NOTES}
     .option('--account <id>', 'Cloudflare account id override (default: the configured endpoint\'s account)')
     .option('--token <t>', 'Cloudflare API token (else read from --bundle)')
     .option('--force', 're-deploy even if the deployed template already matches')
-    .option('--json', 'emit a machine-readable result')
-    .action(async (opts: { bundle: string; account?: string; token?: string; force?: boolean; json?: boolean }) => {
+    // Named --update-json, not --json: `share <file>` (the parent) already
+    // owns --json for its own publish-time result. Commander resolves an
+    // option's long name against the WHOLE ancestor chain, so a same-named
+    // child option is silently dropped at parse time (RUSH-2687).
+    .option('--update-json', 'emit a machine-readable result')
+    .action(async (opts: { bundle: string; account?: string; token?: string; force?: boolean; updateJson?: boolean }) => {
       try {
         const result = await runShareUpdate(opts);
-        if (opts.json) {
+        if (opts.updateJson) {
           console.log(JSON.stringify(result, null, 2));
           return;
         }
@@ -724,28 +737,31 @@ ${SHARE_DELETE_NOTES}
 
   const shareListCmd = shareCmd
     .command('list')
-    .description("List the pages you've published to your share namespace (human table; --json for scripts).")
-    .option('--github-user <user>', 'GitHub username whose namespace to list (default: resolved from gh/git config)')
+    .description("List the pages you've published to your share namespace (human table; --list-json for scripts).")
+    // Named --for-user / --list-json, not --github-user / --json: `share
+    // <file>` (the parent) already owns both those long names, and commander
+    // resolves an option's long name against the WHOLE ancestor chain — a
+    // same-named child option is silently dropped at parse time even when it
+    // parses alone (RUSH-2687; verified with a real program.parseAsync(), see
+    // share.test.ts). Matches the `revisions` precedent (--for-user/
+    // --revisions-json) and the `delete`/`unshare` precedent (--for-user/
+    // --delete-json) below.
+    .option('--for-user <user>', 'GitHub username whose namespace to list (default: resolved from gh/git config)')
     .option('--agent <name>', 'filter to shares published by this agent/harness (case-insensitive)')
     .option('--session <id>', 'filter to shares published from this session id')
     // Named --label-contains, not --label: `share <file>` (the parent) already owns
-    // `--label`/`--title`, and commander's argv scanner resolves an option name
-    // against the WHOLE ancestor chain, not per-command — a same-named child option
-    // is silently dropped (verified; see RUSH-2683 PR notes). Fixing that properly
-    // needs `enablePositionalOptions()` on the root program, a CLI-wide change out
-    // of scope here (a pre-existing instance of it already affects --json/
-    // --github-user on list/update/delete — tracked as a follow-up).
+    // `--label`/`--title`, same collision class as --for-user/--list-json above.
     .option('--label-contains <substr>', 'filter to shares whose label contains this text (case-insensitive)')
-    .option('--json', 'emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt, label, agent, session, host, repo, revisionCount, meta)')
-    .action(async (opts: { githubUser?: string; agent?: string; session?: string; labelContains?: string; json?: boolean }) => {
+    .option('--list-json', 'emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt, label, agent, session, host, repo, revisionCount, meta)')
+    .action(async (opts: { forUser?: string; agent?: string; session?: string; labelContains?: string; listJson?: boolean }) => {
       try {
         const result = await runShareList({
-          githubUser: opts.githubUser,
+          githubUser: opts.forUser,
           agent: opts.agent,
           session: opts.session,
           label: opts.labelContains,
         });
-        console.log(formatShareList(result, Boolean(opts.json)));
+        console.log(formatShareList(result, Boolean(opts.listJson)));
       } catch (e) {
         console.error(chalk.red((e as Error).message));
         process.exitCode = 1;
@@ -758,10 +774,10 @@ ${SHARE_DELETE_NOTES}
       agents artifacts share list
 
       # Machine-readable — e.g. pull every still-public URL with jq
-      agents artifacts share list --json | jq -r '.objects[].url'
+      agents artifacts share list --list-json | jq -r '.objects[].url'
 
       # List another namespace
-      agents artifacts share list --github-user octocat
+      agents artifacts share list --for-user octocat
 
       # Narrow by who/what published it
       agents artifacts share list --agent claude
@@ -775,8 +791,8 @@ ${SHARE_DELETE_NOTES}
   artifacts share update' (RUSH-2449) rather than returning a wrong or empty result
   — see 'agents artifacts share status' for whether an update is due.
 
-  --agent/--session/--label-contains filter the fetched listing client-side; --json's
-  count reflects the filtered set.
+  --agent/--session/--label-contains filter the fetched listing client-side;
+  --list-json's count reflects the filtered set.
     `,
   });
 
@@ -784,14 +800,11 @@ ${SHARE_DELETE_NOTES}
     .command('revisions <target>')
     .description('Show the retained prior versions of a published slug, newest first (human table; --revisions-json for scripts).')
     // Named --for-user / --revisions-json, not --github-user / --json: `share
-    // <file>` (the parent) already owns both those long names, and commander's
-    // argv scanner resolves an option name against the WHOLE ancestor chain —
-    // a same-named child option is silently dropped even when it parses alone
-    // (verified with a real program.parseAsync(), see share.test.ts). Unlike
-    // `list`'s pre-existing --json/--github-user collision (RUSH-2687, left
-    // as a tracked follow-up because it predates this diff), `revisions` is
-    // brand-new here, so it gets non-colliding names from the start instead
-    // of shipping a silently-broken flag.
+    // <file>` (the parent) already owns both those long names, and commander
+    // resolves an option's long name against the WHOLE ancestor chain — a
+    // same-named child option is silently dropped at parse time even when it
+    // parses alone (RUSH-2687; verified with a real program.parseAsync(), see
+    // share.test.ts). Same collision class as `list`/`update`/`delete` above.
     .option('--for-user <user>', 'GitHub username for resolving a bare-slug target (default: resolved from gh/git config)')
     .option('--revisions-json', 'emit the machine-readable revision list')
     .action(async (target: string, opts: { forUser?: string; revisionsJson?: boolean }) => {

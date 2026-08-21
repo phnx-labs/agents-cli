@@ -275,7 +275,7 @@ describe('worker JSON listing route (GET /<user>?format=json)', () => {
   it('returns arbitrary --meta entries under objects[].meta, with reserved keys excluded (RUSH-2683 review fix)', async () => {
     // --meta was write-only before this fix: stored in customMetadata but never
     // returned by any read route, so a value published with `--meta kind=plan
-    // --meta ticket=RUSH-2683` couldn't be read back via `share list --json`.
+    // --meta ticket=RUSH-2683` couldn't be read back via `share list --list-json`.
     const worker = await loadWorker();
     const { env } = makeEnv();
     await put(worker, env, 'octocat/meta-visible', '<h1>meta</h1>', {

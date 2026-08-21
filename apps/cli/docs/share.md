@@ -176,13 +176,13 @@ you've shared, not just a bag of slugs:
   (provenance + label + `--meta`) is capped around 2KB, the same ceiling S3's
   `x-amz-meta` convention uses, so a share stays portable to an S3-compatible
   mirror even though R2 itself publishes no hard limit of its own. Every
-  `--meta` entry is readable again via `agents artifacts share list --json`
+  `--meta` entry is readable again via `agents artifacts share list --list-json`
   and `agents artifacts share revisions --revisions-json` (each item's `meta`
   field) and shown as `key=value` pairs in the human tables too — it isn't
   write-only.
 - **`--label` and every `--meta` value are scanned for emails/credentials**,
   same as the file body — they land in the same public `customMetadata` (the
-  gallery, `share list --json`, `share revisions`), so a credential in either
+  gallery, `share list --list-json`, `share revisions`), so a credential in either
   is exactly as exposed as one in the page. `--force` bypasses this the same
   way it bypasses the body scan.
 - **Storage:** R2 has neither mutable object tags (`PutObjectTagging` and
@@ -285,26 +285,21 @@ synced config exists and the token is already available.
 |---|---|
 | `agents artifacts share <file> [--slug s] [--github-user u] [--expire spec] [--unlisted\|--private] [--force] [--no-cover] [--no-analytics] [--label text] [--meta k=v ...] [--no-revision] [--json]` | Publish `<file>` under your GitHub-username namespace (default expiry **30d**); print the link, or emit `{ url, coverUrl, expiresAt, unlisted?, label, labelSource }` for plan-render hooks with `--json`. `--unlisted`/`--private` hides from the gallery; `--force` bypasses the email/credential scan. HTML pages get an auto OG cover unless `--no-cover` and a CF Web Analytics beacon unless `--no-analytics`. `--label`/`--title` sets a human title (else derived); `--meta` attaches structured metadata; republishing an existing slug keeps the prior version unless `--no-revision` (see [Provenance, labels, and metadata](#provenance-labels-and-metadata) and [Revisions](#revisions)). |
 | `agents sessions share <session> [--public] [--slug s] [--label text] [--expire spec] [--reasoning omit\|fold\|include] [--force] [--no-cover]` | Render one session as a redacted, self-contained page and publish it under `session-<shortId>`; print the link, or the full publish result with `--json`. **Unlisted unless `--public`**, and emails are masked before the scan runs (see [Sharing a session](#sharing-a-session)). |
-| `agents artifacts share list [--github-user u] [--agent name] [--session id] [--label-contains substr] [--json]` | List the ACTIVE pages in your namespace, newest first — human table, or the raw listing with `--json` (see [Listing your shares](#listing-your-shares) below). `--agent`/`--session`/`--label-contains` narrow the fetched list client-side. |
-| `agents artifacts share revisions <target> [--for-user u] [--revisions-json]` | Show the retained prior versions of one published slug, newest first (see [Revisions](#revisions)). Flags named `--for-user`/`--revisions-json`, not `--github-user`/`--json` — see the note below. |
-| `agents artifacts share delete <targets...>` / `agents artifacts unshare <targets...>` | Take a published page down (see [Deleting a share](#deleting-a-share) below). |
+| `agents artifacts share list [--for-user u] [--agent name] [--session id] [--label-contains substr] [--list-json]` | List the ACTIVE pages in your namespace, newest first — human table, or the raw listing with `--list-json` (see [Listing your shares](#listing-your-shares) below). `--agent`/`--session`/`--label-contains` narrow the fetched list client-side. |
+| `agents artifacts share revisions <target> [--for-user u] [--revisions-json]` | Show the retained prior versions of one published slug, newest first (see [Revisions](#revisions)). |
+| `agents artifacts share delete <targets...>` [--for-user u] [--delete-json] / `agents artifacts unshare <targets...>` | Take a published page down (see [Deleting a share](#deleting-a-share) below). |
 | `agents artifacts setup [--token t] [--account id] [--bundle b] [--worker w] [--bucket b] [--domain h] [--analytics-token token]` | Provision an R2 bucket + Worker on your Cloudflare, map `share.agents-cli.sh` when visible (or `--domain h`), optionally configure a CF Web Analytics token, and save the config. It runs the interactive wizard (provision, join, or update an existing endpoint) only when you type **no** endpoint flag on a TTY; type any of `--bundle`/`--worker`/`--bucket`/`--account`/`--token`/`--domain`/`--analytics-token`, or run non-interactively, and it provisions directly with what you named — matching what the retired `agents share setup` did. |
 | `agents artifacts share join [baseUrl] [--token t]` | Use an existing endpoint, no provisioning. With no URL, consumes synced `share:` config plus `SHARE_WRITE_TOKEN` / the local `share` bundle. |
 | `agents artifacts share status` | Show the configured endpoint, namespace, analytics state, and whether the deployed Worker matches the current template. |
 | `agents artifacts share analytics` | Show the Web Analytics status and dashboard link. |
-| `agents artifacts share update [--bundle b] [--account id] [--token t] [--force] [--json]` | Re-deploy the Worker script to your existing endpoint (same account/worker/bucket, same write token). No-op when the deployed template already matches unless `--force`. |
+| `agents artifacts share update [--bundle b] [--account id] [--token t] [--force] [--update-json]` | Re-deploy the Worker script to your existing endpoint (same account/worker/bucket, same write token). No-op when the deployed template already matches unless `--force`. |
 
-> **Known issue (pre-existing).** `--json` and `--github-user`, passed to `list`/`delete`/`update`,
-> are silently dropped — even used alone, with no other flags. The cause: commander resolves a long
-> option name against the WHOLE ancestor chain, not per-command, and `share <file>` (the parent)
-> already declares both names for its own use; the child's value never reaches its action. `--help`
-> shows the flag as registered, which makes this easy to miss. `list`'s own filters were named to
-> avoid the collision (`--label-contains`, plus the already-unique `--agent`/`--session`, which DO
-> work) — but its pre-existing `--json`/`--github-user` were left as-is, tracked as RUSH-2687. `revisions`
-> is new in RUSH-2683, so it ships with non-colliding names from the start instead — `--for-user` and
-> `--revisions-json` — rather than adding a fourth broken instance. The real generalized fix needs
-> `enablePositionalOptions()` audited across the whole CLI (a global parsing-behavior change, not a
-> share-only one) — still tracked as RUSH-2687 for `list`/`delete`/`update`.
+> **Naming note.** `list`/`revisions`/`delete`/`unshare`/`update` use `--for-user`/`--list-json`/
+> `--revisions-json`/`--delete-json`/`--update-json` instead of `--github-user`/`--json` — the
+> parent `share <file>` command already declares both those long names for its own publish-time
+> use, and commander resolves an option's long name against the WHOLE ancestor chain, not
+> per-command, so a same-named child option is silently dropped at parse time even when used
+> alone (`--help` shows it as registered, which makes this easy to miss — RUSH-2687).
 
 ## Listing your shares
 
@@ -319,16 +314,15 @@ agents artifacts share list                          # human table for your own 
 agents artifacts share list --agent claude            # only shares published by this harness
 agents artifacts share list --label-contains "fleet"  # only shares whose title contains this text
 
-# --json is affected by the Known issue above (silently ignored) — for scripts,
-# hit the Worker's JSON route directly instead:
-curl -s "https://share.agents-cli.sh/$(gh api user --jq .login)?format=json" | jq -r '.objects[].url'
+# Machine-readable — e.g. pull every still-public URL with jq
+agents artifacts share list --list-json | jq -r '.objects[].url'
 ```
 
 The listing shows the **active** pages only — expired links and the sibling `<slug>.png`
 OG covers are omitted, mirroring the public gallery. Each object carries its `slug`, full
 `url`, `size` (bytes), `contentType`, `publishedAt`, `expiresAt` (or `null`), `label`,
 `agent`, `session`, `host`, `repo` (each `null` when unset), and `revisionCount`. The
-`--json` shape is stable and additive-only:
+`--list-json` shape is stable and additive-only:
 
 ```json
 { "user": "octocat", "count": 1,
@@ -379,7 +373,7 @@ command always issues a follow-up check and only reports success once that resol
 for the page, the cover (unless `--keep-cover`), and every retained revision (unless
 `--keep-revisions`). Fetching the revisions list is best-effort — a network blip or an
 endpoint that predates revisions never blocks the primary page delete, it just means
-nothing was found to purge. `--json` emits an array of per-target results for scripting.
+nothing was found to purge. `--delete-json` emits an array of per-target results for scripting.
 
 ## Security
 
