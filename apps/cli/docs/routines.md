@@ -370,7 +370,7 @@ The receiver verifies Slack's `v0` request signature (with a 5-minute replay
 guard), answers the one-time `url_verification` handshake, and parses both slash
 commands and `app_mention` events. It exposes a `{{slack.*}}` substitution
 namespace — `prompt`, `project`, `channel`, `thread_ts`, `user`, `text`,
-`command` — where `project` and `prompt` come from a `PROJECT: rest` prefix in
+`command`, `response_url` — where `project` and `prompt` come from a `PROJECT: rest` prefix in
 the message (`AGI: rebase …` → project `AGI`, prompt `rebase …`). A handler may
 template its `project`/`cwd` from that namespace, so one handler serves every
 project:
@@ -389,14 +389,20 @@ run:
     Request: {{slack.prompt}}
 
     Read the project's prior context if useful (`agents sessions -p {{slack.project}}`),
-    do the work, then reply in the Slack thread with:
-    agents send --channel slack --to {{slack.channel}} --thread {{slack.thread_ts}} --text "<your result>"
+    do the work, then reply. A slash command carries a `response_url`, which Slack
+    accepts for 30 minutes with no token and no channel membership:
+    curl -s -X POST '{{slack.response_url}}' -H 'Content-type: application/json' \
+      -d '{"response_type":"in_channel","text":"<your result>"}'
 ```
 
-The reply reuses the existing outbound Slack channel — no bot code — so it needs
-`rush` logged in with a live Slack gateway (the same requirement as any
-`agents send --channel slack`). Restrict a handler to one channel with
-`channel: C0…`, or drop the `command`/`channel` filters to match every mention.
+`response_url` is empty on an `@mention` delivery — that reply goes into the thread
+through the Slack Web API (`chat.postMessage` with `SLACK_BOT_TOKEN`, which needs the
+bot in that channel), or through `agents send --channel slack`, which routes via the
+Rush daemon's Slack gateway rather than this app's token and so needs `rush` logged
+in there. The full example is in
+[`docs/examples/slack/slack-agent.yml`](examples/slack/slack-agent.yml). Restrict a
+handler to one channel with `channel: C0…`, or drop the `command`/`channel` filters
+to match every mention.
 
 Route with `{{slack.project}}`, not `{{slack.prompt}}`. The project token is a
 single bare word (no slashes, never `..`), so it is safe in `project:`/`cwd:`;

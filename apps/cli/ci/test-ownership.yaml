@@ -118,6 +118,17 @@ groups:
     checks: [typecheck]
     budget_sec: 240
 
+  # 180s, not the default 85s. scheduling/routines.ts is the JobConfig hub, so a
+  # change there selects the routines/runner/daemon/monitors companions and their
+  # importers (PR #2837, run 32434389380: 28 files / 715 tests, all passed, inside
+  # a 153s impact run). Under the flat 85s default no scheduling change can merge.
+  # Raise this only against a measured run, and lower it when the suite is split.
+  - id: scheduling
+    when:
+      - apps/cli/src/lib/scheduling/**
+    checks: [typecheck]
+    budget_sec: 180
+
   # 150s, not the default 85s. Moving hooks.ts into hooks/install.ts (PR #2804,
   # run 32397180788) selected companion + importer tests inside a 129s impact
   # run (48 files / 1099 tests, all passed). Under 85s the move cannot merge.
