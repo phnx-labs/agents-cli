@@ -2777,6 +2777,10 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   const commandsAlsoAsSkills = shouldAlsoInstallCommandAsSkill(agent, version);
   const commandsInstallAsSkills = commandsAsSkills || commandsAlsoAsSkills;
   let writtenCommands: string[] = [];
+  // Artifact paths the writers report (WriteResult.paths), persisted to the
+  // manifest as `writtenTargets` after a full sync so isStale can flag a
+  // deleted artifact as stale (#2398).
+  const writtenTargets: string[] = [];
 
   if (commandsToSync.length > 0 && commandsWriter) {
     // Agents that replace native command files with skills (codex >= 0.117.0,
@@ -2791,6 +2795,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
 
     const r = commandsWriter.write({ version, versionHome, selection: commandsToSync, cwd });
     writtenCommands = r.synced;
+    if (r.paths) writtenTargets.push(...r.paths);
     result.commands = r.synced.length > 0;
   }
 
@@ -2799,8 +2804,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // not pass an explicit `selection`. Callers that pass explicit selections
   // are using the incremental/additive API (sync exactly these; leave others
   // alone), so the sweep would be a contract violation there. The
-  // cross-project leak always comes from the no-selection shim auto-sync at
-  // launch.
+  // cross-project leak comes from no-selection full syncs run under different
+  // cwds (`agents sync` / `agents refresh`; the shim's `agents sync --launch`
+  // skips version-home reconciliation and never reaches this path).
   if (!userPassedSelection && commandsWriter && !shouldInstallCommandAsSkill(agent, version)) {
     const commandsTargetSweep = path.join(agentDir, agentConfig.commandsSubdir);
     if (fs.existsSync(commandsTargetSweep)) {
@@ -2858,6 +2864,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   } else if (skillsWriter) {
     if (skillsToSync.length > 0) {
       const r = skillsWriter.write({ version, versionHome, selection: skillsToSync, cwd });
+      if (r.paths) writtenTargets.push(...r.paths);
       result.skills = r.synced.length > 0;
     }
 
@@ -2912,6 +2919,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
             }
           }
         }
+        if (r.paths) writtenTargets.push(...r.paths);
         result.hooks = r.synced.length > 0;
         hookManifest = selectHookManifest(parseHookManifest(), hooksToSync);
       }
@@ -2939,6 +2947,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
         : null;
       const preset = overridePreset || activeRulesPreset() || getActiveRulesPreset(agent, version);
       const r = rulesWriter.write({ version, versionHome, selection: { preset }, cwd });
+      if (r.paths) writtenTargets.push(...r.paths);
       result.memory.push(...r.synced);
       // rulesPreset is tracked separately via setActiveRulesPreset.
     } catch (err) {
@@ -3019,6 +3028,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
 
   if (mcpToSync.length > 0 && mcpWriter) {
     const r = mcpWriter.write({ version, versionHome, selection: mcpToSync, cwd });
+    if (r.paths) writtenTargets.push(...r.paths);
     result.mcp = r.synced;
     if (r.errors?.length) result.declined.push(...r.errors.map((e) => `mcp: ${e}`));
     // mcp patterns already written via ensureVersionResourcePatterns above.
@@ -3042,6 +3052,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
 
   if (subagentsToSync.length > 0 && subagentsWriter) {
     const r = subagentsWriter.write({ version, versionHome, selection: subagentsToSync, cwd });
+    if (r.paths) writtenTargets.push(...r.paths);
     result.subagents.push(...r.synced);
 
     // Orphan-sweep for Claude only — see comment on commands/skills sweep
@@ -3152,6 +3163,8 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     const previous = loadManifest(agent, version);
     const manifest = buildSyncManifest(agent, version, cwd, previous);
     manifest.writtenCommands = writtenCommands;
+    // Deduped + sorted so repeated full syncs write byte-identical manifests.
+    manifest.writtenTargets = Array.from(new Set(writtenTargets)).sort();
     saveManifest(agent, version, manifest);
   }
 

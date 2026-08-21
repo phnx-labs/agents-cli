@@ -27,6 +27,7 @@ import { safeJoin } from '../../paths.js';
 import { markdownToToml } from '../../convert.js';
 import { commandAppliesTo, parseCommandMetadata } from '../../commands.js';
 import {
+  commandSkillName,
   installCommandSkillToVersion,
   listCommandSkillsInVersion,
   removeCommandSkillFromVersion,
@@ -66,6 +67,7 @@ function buildCommandsWriter(agent: AgentId): ResourceWriter<string[]> {
       }
 
       const synced: string[] = [];
+      const paths: string[] = [];
       for (const cmd of selection) {
         const srcFile = resolveCommandSource(cmd);
         if (!srcFile) continue;
@@ -78,22 +80,30 @@ function buildCommandsWriter(agent: AgentId): ResourceWriter<string[]> {
           // installed.skipped means a real skill source already owns this name,
           // which is a deliberate no-op, not a failure — the native file is still written.
           if (!installed.success) continue;
+          if (!installed.skipped) {
+            paths.push(safeJoin(path.join(agentDir, 'skills'), commandSkillName(cmd)));
+          }
         }
 
         if (supportsCommands && agent === 'goose') {
           // Goose: recipe YAML + config.yaml slash_commands entry, not a file copy.
+          // No artifact path recorded — the recipe layout lives in goose-commands.ts.
           const installed = installGooseCommandToVersion(versionHome, cmd, srcFile);
           if (!installed.success) continue;
         } else if (supportsCommands && agentConfig.format === 'toml') {
           const content = fs.readFileSync(srcFile, 'utf-8');
           const tomlContent = markdownToToml(cmd, content);
-          fs.writeFileSync(safeJoin(commandsTarget, `${cmd}.toml`), tomlContent);
+          const dest = safeJoin(commandsTarget, `${cmd}.toml`);
+          fs.writeFileSync(dest, tomlContent);
+          paths.push(dest);
         } else if (supportsCommands) {
-          fs.copyFileSync(srcFile, safeJoin(commandsTarget, `${cmd}.md`));
+          const dest = safeJoin(commandsTarget, `${cmd}.md`);
+          fs.copyFileSync(srcFile, dest);
+          paths.push(dest);
         }
         synced.push(cmd);
       }
-      return { synced };
+      return { synced, paths };
     },
     remove({ versionHome, name }: RemoveArgs): RemoveResult {
       const agentConfig = AGENTS[agent];

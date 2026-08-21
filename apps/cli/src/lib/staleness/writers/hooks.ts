@@ -77,12 +77,14 @@ function buildHooksWriter(agent: AgentId): ResourceWriter<string[]> {
       fs.mkdirSync(hooksTarget, { recursive: true });
 
       const synced: string[] = [];
+      const paths: string[] = [];
       for (const hook of selection) {
         const srcFile = resolveHookSource(hook);
         if (!srcFile) continue;
         const destFile = safeJoin(hooksTarget, hook);
         if (copyHookSource(srcFile, destFile)) {
           synced.push(hook);
+          paths.push(destFile);
         }
       }
 
@@ -95,7 +97,7 @@ function buildHooksWriter(agent: AgentId): ResourceWriter<string[]> {
       if (agent === 'claude' || agent === 'codex' || agent === 'antigravity' || agent === 'kimi' || agent === 'droid' || agent === 'copilot' || agent === 'kiro' || agent === 'goose' || agent === 'cursor' || agent === 'grok' || agent === 'hermes' || agent === 'muse') {
         registerHooksToSettings(agent, versionHome);
       }
-      return { synced };
+      return { synced, paths };
     },
     remove({ versionHome, name }: RemoveArgs): RemoveResult {
       // Delete the copied hook artifact from `{agentDir}/hooks/<name>`. Native

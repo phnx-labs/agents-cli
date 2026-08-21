@@ -31,6 +31,16 @@ export interface WriteResult {
   /** Names actually written. Empty array = write produced nothing (not an error). */
   synced: string[];
   /**
+   * Absolute on-disk paths of the artifacts this write materialized (a file or
+   * a dir root per resource, per the agent's layout). Recorded into the sync
+   * manifest as `writtenTargets` so `isStale` can flag a deleted artifact as
+   * stale with one existsSync per path (#2398) — no content reads, keeping the
+   * fast-guard budget (RUSH-2320). Optional: a writer whose artifact path is
+   * not cheaply known (goose recipe YAML, plugins) may omit entries; absence
+   * means "not verified", never a false stale.
+   */
+  paths?: string[];
+  /**
    * Per-item failures the writer could not complete, as user-facing sentences.
    *
    * `synced: []` alone cannot distinguish "nothing to do" from "refused to

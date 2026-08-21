@@ -62,4 +62,15 @@ export interface SyncManifest {
   subagents:  Record<string, DirEntry>;
   workflows?: Record<string, DirEntry>;
   plugins?:   Record<string, PluginEntry>;
+  /**
+   * Absolute paths of the artifacts the last full sync materialized in the
+   * version home (writer-reported — see `WriteResult.paths`). `isStale`
+   * treats a missing path as stale so a deleted resource is restored by a
+   * plain `agents sync`, not only `--force` (#2398). An absent field means a
+   * pre-upgrade manifest: it reads as stale once, and the resulting full sync
+   * establishes the baseline — same migration precedent as the optional
+   * `workflows`/`plugins` maps above. An empty array is a valid baseline
+   * ("nothing recorded to verify"), never a migration trigger.
+   */
+  writtenTargets?: string[];
 }

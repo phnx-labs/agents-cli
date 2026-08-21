@@ -49,7 +49,7 @@ function buildRulesWriter(agent: AgentId): ResourceWriter<RulesSelection> {
         if (st.isSymbolicLink() || st.isFile()) fs.unlinkSync(destFile);
       } catch { /* destination did not exist */ }
       fs.writeFileSync(destFile, composed.content);
-      return { synced: [targetName] };
+      return { synced: [targetName], paths: [destFile] };
     },
   };
 }

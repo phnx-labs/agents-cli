@@ -7,6 +7,7 @@
  * it reads user + system layers only (project layer excluded for the same
  * defense as commands/skills/hooks).
  */
+import * as fs from 'fs';
 import type { AgentId } from '../../types.js';
 import { capableAgents } from '../../capabilities.js';
 import { listInstalledSubagents } from '../../subagents.js';
@@ -26,6 +27,7 @@ function buildSubagentsWriter(agent: AgentId): ResourceWriter<string[]> {
       const map = new Map(all.map(s => [s.name, s]));
       const dir = target.dir(versionHome);
       const synced: string[] = [];
+      const paths: string[] = [];
 
       for (const name of selection) {
         const sub = map.get(name);
@@ -33,10 +35,15 @@ function buildSubagentsWriter(agent: AgentId): ResourceWriter<string[]> {
         try {
           target.write(dir, sub);
           synced.push(sub.name);
+          // The registry owns the layout — record the artifact paths this
+          // write occupies so a later deletion reads as stale (#2398).
+          for (const entry of target.occupied(dir, sub.name)) {
+            if (fs.existsSync(entry.path)) paths.push(entry.path);
+          }
         } catch { /* per-item sync failure: skip */ }
       }
 
-      return { synced };
+      return { synced, paths };
     },
   };
 }

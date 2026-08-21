@@ -4,7 +4,9 @@
  *
  *   - `buildManifest(agent, version, cwd)` — snapshot current state.
  *   - `isStale(manifest, agent, version, cwd)` — true when any tracked
- *     resource has drifted from its stored fingerprint.
+ *     resource has drifted from its stored fingerprint, or when an artifact
+ *     the last full sync wrote (`writtenTargets`) has been deleted from the
+ *     version home (#2398).
  *
  * `loadManifest` / `saveManifest` round-trip the on-disk JSON. The format
  * version stays at 1; new optional fields (workflows, plugins) on old files
@@ -113,6 +115,12 @@ export function buildManifest(
     subagents: {},
     workflows: {},
     plugins:   {},
+    // Empty baseline ("nothing recorded to verify"). The full-sync
+    // orchestrator (versions.ts) replaces this with the writer-reported
+    // artifact paths right before saving; a manifest built outside that path
+    // simply verifies nothing. Only an ABSENT field (a pre-upgrade manifest
+    // on disk) forces the one-time migration re-sync in isStale.
+    writtenTargets: [],
   };
 
   for (const { checker, field } of STANDARD_CHECKERS) {
@@ -165,6 +173,16 @@ export function isStale(
   }
   if (isPermissionsStale(manifest.permissions)) return true;
   if (isRulesStale(manifest.rules, agent, version, cwd)) return true;
+  // Home-side deletion check (#2398): every artifact the last full sync wrote
+  // must still exist, or the version home has rotted and needs a re-sync —
+  // regardless of source fingerprints. One existsSync per path, no content
+  // reads, so the fast-guard budget holds (RUSH-2320). A manifest that
+  // predates the field reads as stale once so the next full sync records the
+  // baseline (same precedent as the optional workflows/plugins maps).
+  if (manifest.writtenTargets === undefined) return true;
+  for (const target of manifest.writtenTargets) {
+    if (!fs.existsSync(target)) return true;
+  }
   return false;
 }
 

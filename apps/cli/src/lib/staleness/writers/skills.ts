@@ -56,6 +56,7 @@ function buildSkillsWriter(agent: AgentId): ResourceWriter<string[]> {
       fs.mkdirSync(skillsTarget, { recursive: true });
 
       const synced: string[] = [];
+      const paths: string[] = [];
       for (const skill of selection) {
         const srcDir = resolveSkillSource(skill, { agent });
         if (!srcDir) continue;
@@ -63,8 +64,9 @@ function buildSkillsWriter(agent: AgentId): ResourceWriter<string[]> {
         removePath(destDir);
         copyDir(srcDir, destDir);
         synced.push(skill);
+        paths.push(destDir);
       }
-      return { synced };
+      return { synced, paths };
     },
     remove({ versionHome, name }: RemoveArgs): RemoveResult {
       const agentDir = path.join(versionHome, agentConfigDirName(agent));
