@@ -183,7 +183,10 @@ export function buildPassthroughForwardedArgs(
 ): string[] {
   const spec = REMOTE_PASSTHROUGH[command];
   let forwarded = stripRoutingFlags(allArgs, STRIP_SPECS);
-  const skipInheritedYes = command === 'sync' && firstSubcommand(allArgs, 'sync') === 'status';
+  // Detect the subcommand on the *stripped* argv. On the raw argv,
+  // `sync --device peer status` would treat `peer` as the first non-flag
+  // token and inherit umbrella `--yes` (RUSH-2864 review).
+  const skipInheritedYes = command === 'sync' && firstSubcommand(forwarded, 'sync') === 'status';
   if (!interactive && spec?.nonInteractive && !skipInheritedYes) {
     forwarded = [...forwarded, ...spec.nonInteractive];
   }

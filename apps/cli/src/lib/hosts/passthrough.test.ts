@@ -37,6 +37,9 @@ describe('buildPassthroughForwardedArgs — sync status does not inherit --yes',
   it('does not append --yes to sync status when non-interactive (RUSH-2864)', () => {
     expect(buildPassthroughForwardedArgs('sync', ['sync', 'status', '--device', 'peer'], false)).toEqual(['sync', 'status']);
     expect(buildPassthroughForwardedArgs('sync', ['sync', 'status', '--no-tty', '--device', 'peer'], false)).toEqual(['sync', 'status']);
+    // Routing flags between group and subcommand must not hide `status`.
+    expect(buildPassthroughForwardedArgs('sync', ['sync', '--device', 'peer', 'status'], false)).toEqual(['sync', 'status']);
+    expect(buildPassthroughForwardedArgs('sync', ['sync', '-D', 'peer', 'status'], false)).toEqual(['sync', 'status']);
   });
 
   it('keeps an explicit --yes on sync status', () => {
