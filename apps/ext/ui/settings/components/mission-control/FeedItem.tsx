@@ -60,13 +60,20 @@ interface FeedItemProps {
   onOpenPlan: (agent: FloorAgent, plan: PlanFile) => void
   onOpenAttachment: (agent: FloorAgent, attachment: FloorAttachment) => void
   /**
+   * Inline delivery error for this agent's last reply attempt. StructuredReply
+   * has always accepted one; the feed never passed it, so clicking an option on
+   * an agent with no reachable channel (`reply.kind === 'none'`) set an error
+   * that only the detail pane could render — on the feed the button looked dead.
+   */
+  error?: string
+  /**
    * Open/resume this session in a live terminal (RUSH-1520). Present when the
    * agent carries a sessionId (or a local terminal id) the host can focus.
    */
   onOpenTerminal?: (agent: FloorAgent) => void
 }
 
-function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeText, onAttach, onOpenPlan, onOpenAttachment, onOpenTerminal }: FeedItemProps) {
+function FeedItemImpl({ agent: a, selected, plain, error, onSelect, onOption, onFreeText, onAttach, onOpenPlan, onOpenAttachment, onOpenTerminal }: FeedItemProps) {
   // Live heartbeat: only a running / stalled agent with a known last-activity stamp ticks.
   // The shared 1s ticker re-renders just this leaf, never the parent list.
   const now = useNow(1000)
@@ -296,6 +303,7 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
           <StructuredReply
             question={a.question}
             phase={a.phase}
+            error={error}
             onOption={(o) => onOption(a, o)}
             onFreeText={(t) => onFreeText(a, t)}
             onAttach={() => onAttach(a)}

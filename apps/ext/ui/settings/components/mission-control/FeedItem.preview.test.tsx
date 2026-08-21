@@ -133,3 +133,43 @@ describe('compact (plain) row preview line', () => {
     expect(html).toContain('Keep the legacy keyword path behind a flag.')
   })
 })
+
+// A "needs you" row whose reply cannot be delivered used to look identical to one
+// that worked: replyToAgent set an inline error, but the feed never passed it to
+// StructuredReply, so the click produced no visible change at all.
+describe('reply delivery failure is visible on the feed row', () => {
+  const asking = (over = {}) => agent({
+    phase: 'waiting',
+    needs: true,
+    question: { kind: 'choice', text: 'Drop the old table?', options: ['Drop it', 'Keep it'], clusterKey: 'k' },
+    reply: { kind: 'none', host: 'yosemite-s1', reason: 'Runs on yosemite-s1 — open it there to reply' },
+    ...over,
+  })
+
+  test('renders the delivery error when one is supplied', () => {
+    const html = render({ ...asking(), } as FloorAgent, false)
+    expect(html).toContain('Drop it')  // the options render
+    const withErr = renderToStaticMarkup(
+      <FeedItem
+        agent={asking() as FloorAgent}
+        selected={false}
+        plain={false}
+        error="Runs on yosemite-s1 — open it there to reply"
+        onSelect={noop} onOption={noop} onFreeText={noop} onAttach={noop}
+        onOpenPlan={noop} onOpenTerminal={noop}
+      />,
+    )
+    expect(withErr).toContain('Runs on yosemite-s1')
+  })
+
+  test('the same row without an error shows no error text', () => {
+    const html = render(asking() as FloorAgent, false)
+    expect(html).not.toContain('open it there to reply')
+  })
+
+  test('a compact asking row does not also render a prose preview line', () => {
+    // The question IS the row's line; a summary above it makes two prose blocks.
+    const html = render(asking({ prompt: 'Migrate the policy_v1 RLS rules' }) as FloorAgent, true)
+    expect(html).not.toContain('class="summary')
+  })
+})

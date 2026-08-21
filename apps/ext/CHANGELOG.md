@@ -6,6 +6,18 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [0.9.328] - 2026-08-20
 
+- **A "needs you" reply button on the Fleet feed no longer fails silently.**
+  Clicking an option on a row whose agent has no reachable reply channel — a
+  headless run with no terminal tab, or a session on a raw non-tmux TTY on another
+  box — called `replyToAgent`, which set an inline error and returned. But
+  `FeedItem` did not accept an `error` prop at all, so it rendered
+  `StructuredReply` without one: the error existed and only the detail pane could
+  show it. On the feed the click produced no visible change whatsoever, which
+  reads as a dead button. `FeedItem` now takes `error` and forwards it, and all
+  seven feed call sites pass it, so the row states why the reply could not be
+  delivered ("Runs on <host> — open it there to reply"). Source:
+  `ui/settings/components/mission-control/{FeedItem,UnifiedAgentsPane}.tsx`.
+
 - **Agent prose renders as markdown on the Fleet feed, and a card stops restating
   its own title.** `AgentDecision.tsx` imported no markdown renderer at all, so an
   agent's response rendered raw — literal `**bold**` and backticks in an unbroken

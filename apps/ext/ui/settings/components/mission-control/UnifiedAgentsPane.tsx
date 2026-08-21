@@ -2206,6 +2206,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               selected={selectedFloorAgent?.id === c[0].id}
               plain={plain}
               onSelect={selectFloorAgent}
+              error={replyErrors.get(a.id)}
               onOption={onAgentOption}
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
@@ -2230,6 +2231,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               selected={selectedFloorAgent?.id === a.id}
               plain={plain}
               onSelect={selectFloorAgent}
+              error={replyErrors.get(a.id)}
               onOption={onAgentOption}
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
@@ -2254,6 +2256,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               selected={selectedFloorAgent?.id === a.id}
               plain={plain}
               onSelect={selectFloorAgent}
+              error={replyErrors.get(a.id)}
               onOption={onAgentOption}
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
@@ -2322,6 +2325,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               selected={selectedFloorAgent?.id === a.id}
               plain={plain}
               onSelect={selectFloorAgent}
+              error={replyErrors.get(a.id)}
               onOption={onAgentOption}
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
@@ -2349,6 +2353,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
                 selected={selectedFloorAgent?.id === a.id}
                 plain={plain}
                 onSelect={selectFloorAgent}
+                error={replyErrors.get(a.id)}
                 onOption={onAgentOption}
                 onFreeText={replyToAgent}
                 onAttach={onAttachScreenshot}
@@ -2392,6 +2397,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               selected={selectedFloorAgent?.id === a.id}
               plain={plain}
               onSelect={selectFloorAgent}
+              error={replyErrors.get(a.id)}
               onOption={onAgentOption}
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
@@ -2415,6 +2421,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               selected={selectedFloorAgent?.id === a.id}
               plain={plain}
               onSelect={selectFloorAgent}
+              error={replyErrors.get(a.id)}
               onOption={onAgentOption}
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
