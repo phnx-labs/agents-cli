@@ -1,0 +1,747 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>What developers actually complain about: 389 threads from the coding-agent subreddits</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span><span class="status-badge status-draft">draft</span></div>
+<h1>What developers actually complain about: 389 threads from the coding-agent subreddits</h1>
+<p class="summary">Demand-side follow-up to the GTM report, harvested live from Reddit through the operator's own logged-in browser. The loudest pain is usage-limit volatility, not just scarcity. Multi-account stacking is the crude coping strategy — real, current, and served by a cottage industry of account switchers — but the power users have already moved to the ToS-clean version: a portfolio of providers, cheap-model offload, and cross-model review. That portfolio workflow is agi-cli's exact shape, and the threads supply the launch-post language verbatim.</p>
+<div class="meta" aria-label="Artifact metadata"><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agents-cli/blob/main/.agents/artifacts/2026-08-20/gtm-strategy.md" target="_blank" rel="noopener">Companion: agi-cli GTM report (same date)</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agents-cli/blob/main/.agents/artifacts/2026-08-20/landscape-cli-proxy-browser-computer.md" target="_blank" rel="noopener">Companion: adjacent-category landscape</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/phnx/issue/RUSH-2834" target="_blank" rel="noopener">RUSH-2834 — launch: freeze the name, run the 48-hour ignition</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">reddit-pain-points</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fleet-worker</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/n%2Fa">n/a</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-20</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#summary" data-toc-for="summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a class="toc-item" href="#findings" data-toc-for="findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a class="toc-item toc-sub" href="#1-limits-the-rage-moved-from-too-low-to-i-cannot-plan-around-this" data-toc-for="1-limits-the-rage-moved-from-too-low-to-i-cannot-plan-around-this">1. Limits: the rage moved from &quot;too low&quot; to &quot;I cannot plan around this&quot;</a><a class="toc-item toc-sub" href="#2-multi-account-current-demand-gray-zone-cottage-industry" data-toc-for="2-multi-account-current-demand-gray-zone-cottage-industry">2. Multi-account: current demand, gray zone, cottage industry</a><a class="toc-item toc-sub" href="#3-the-settled-power-user-workflow-is-a-provider-portfolio" data-toc-for="3-the-settled-power-user-workflow-is-a-provider-portfolio">3. The settled power-user workflow is a provider portfolio</a><a class="toc-item toc-sub" href="#4-cheap-model-offload-the-community-hand-builds-the-routing-layer" data-toc-for="4-cheap-model-offload-the-community-hand-builds-the-routing-layer">4. Cheap-model offload: the community hand-builds the routing layer</a><a class="toc-item toc-sub" href="#5-the-unsolved-seams-seeing-steering-and-continuity" data-toc-for="5-the-unsolved-seams-seeing-steering-and-continuity">5. The unsolved seams: seeing, steering, and continuity</a><a class="toc-item toc-sub" href="#6-what-this-buys-the-launch" data-toc-for="6-what-this-buys-the-launch">6. What this buys the launch</a><a class="toc-item" href="#evidence" data-toc-for="evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a><a class="toc-item toc-sub" href="#method" data-toc-for="method">Method</a><a class="toc-item toc-sub" href="#thread-index-all-cited-threads" data-toc-for="thread-index-all-cited-threads">Thread index (all cited threads)</a><a class="toc-item toc-sub" href="#what-could-not-be-verified" data-toc-for="what-could-not-be-verified">What could not be verified</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2><p>The prompt for this report was an anecdote: a founder said agi-cli would "save
+me so much money because I can connect multiple accounts." The question was
+whether that is the real pain developers have, or a proxy for something else.
+So this report goes to the demand side directly: what do working developers
+complain about, in their own words, in the places they complain?</p>
+<p><strong>Method in one line:</strong> 16 searches across r/ClaudeAI, r/ClaudeCode,
+r/ChatGPTCoding, r/cursor, r/LocalLLaMA, r/vibecoding and r/ExperiencedDevs,
+run 2026-08-20 through the operator's own logged-in browser session (datacenter
+IPs are blocked by Reddit; the fleet routed the harvest through the interactive
+machine), yielding <strong>389 unique posts</strong>, with the <strong>18 highest-signal threads
+comment-harvested (~800 comments)</strong>. Every quote below carries its score, date,
+and permalink. Recency is weighted deliberately: June–August 2026 threads are
+treated as current state; older threads as trajectory. Scores are as read on
+2026-08-20.</p>
+<p>Five findings:</p>
+<ol>
+<li><strong>The #1 pain by engagement is usage limits — and by August 2026 the acute
+form is volatility, not scarcity.</strong> The community's top rants are no longer
+only "limits too low" but "the rules change every week and I cannot plan."
+Anthropic's own goodwill gestures now get read as churn signals: the top
+comment on the Aug 18 limit-extension announcement (2,028 points) is
+<em>"They are losing customers — this is a clear tell"</em> (409 points).</li>
+<li><strong>Multi-account stacking is real, current demand — and the crude form of
+the pain.</strong> Fresh how-do-I threads appeared on Aug 1, 2, and 11; a cottage
+industry of open-source account switchers exists to serve it; Anthropic's
+own support bot reportedly allows up to three accounts per user. The
+February "multi-account ban" scare did not hold as stated — but sporadic
+suspensions are real (one heavy Max user was suspended in July after using
+Claude across several personal devices), and <strong>ban-fear is an explicit
+adoption blocker for third-party wrappers</strong>.</li>
+<li><strong>Power users have already migrated from multi-account to multi-provider.</strong>
+The settled workflow in the threads is a portfolio: Claude plus Codex plus
+a cheap executor (Kimi, GLM, DeepSeek), often split by role — <em>"Fable
+plans, Opus builds, GPT tries to break it"</em> — with cross-model review as
+the stated reason: <em>"one is always finding bugs the other overlooked."</em>
+This is the ToS-clean version of the founder's save-money instinct, and it
+is agi-cli's exact shape.</li>
+<li><strong>Cheap-model offload is a celebrated pattern people hand-build.</strong> The
+single most-upvoted workflow thread in the harvest (1,780 points) is a
+developer wiring CLI scripts so Claude delegates bulk work to a $0.02/call
+model to stop hitting Pro limits — with commenters porting it to DeepSeek,
+Ollama and Windows within hours. A 16-point reply names the product gap:
+<em>"a lot of teams are independently reinventing orchestration layers once
+usage scales."</em></li>
+<li><strong>The unsolved seams are continuity, observability, and remote control.</strong>
+Switching accounts or tools loses session context ("the second account
+never knows what the previous one did"); people build hardware usage
+meters, status lights and pixel-office dashboards to see what their agents
+are doing; the highest-engagement workflow posts are about driving agents
+from a phone.</li>
+</ol>
+<p><strong>Verdict on the founder anecdote:</strong> he is right about the pain and wrong about
+the durable shape. "Connect multiple accounts" is what the pain looks like on
+day one. What it becomes — visible in thread after thread — is <em>manage a
+portfolio of subscriptions, models and machines without losing context or
+getting banned</em>. The launch messaging should sell that, in the community's own
+words, which sections 1–5 supply verbatim.</p>
+<h2 id="findings">Findings</h2><p>Threads are cited as <code>score · date · subreddit</code>. All quotes are verbatim from
+post bodies or comments; scores are comment scores where the quote is a
+comment. Permalinks are in the Evidence section's thread index.</p>
+<h3 id="1-limits-the-rage-moved-from-too-low-to-i-cannot-plan-around-this">1. Limits: the rage moved from "too low" to "I cannot plan around this"</h3><p>The three loudest limit threads of the summer:</p>
+<table>
+<thead>
+<tr>
+<th>Thread</th>
+<th>Engagement</th>
+<th>What it actually says</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>"This is a message for Anthropic. Bring back the usual limit usage; reset them now."</td>
+<td>2,853 · Jun 29 · r/ClaudeCode</td>
+<td>518 comments of scarcity anger</td>
+</tr>
+<tr>
+<td>"Dear Anthropic, This Has to STOP."</td>
+<td>2,732 · Jul 13 · r/ClaudeCode</td>
+<td>The rant is about <em>churn of the rules</em>: "Every other day, it's something new… Credits here, credits there. Weekly credits. Sonnet usage. Opus usage. Fable credits. 5-hour limits. Weekly limits…"</td>
+</tr>
+<tr>
+<td>"Anthropic extends 50% limit increase to Aug 31"</td>
+<td>2,028 · Aug 18 · r/ClaudeAI</td>
+<td>Goodwill read as weakness: top comment (409) "They are losing customers — this is a clear tell"; (69) "this company is constantly f***ing around with terms and limits… which makes planning and prod[uction] impossible"</td>
+</tr>
+</tbody></table>
+<p>The most instructive comment in the whole cluster is on the Jul 13 thread,
+from a SaaS pricing consultant (1,205 points): <em>"Each and every change of
+pricing, free tiers, and extensions is designed to get datapoints that they can
+build a future revenue model against."</em> The community's sophisticated read is
+that limit volatility is permanent — an experiment being run on them — which
+is exactly why coping infrastructure (portfolios, offload, switchers) keeps
+compounding.</p>
+<p>Trajectory markers, same theme, earlier: a June 2026 lawsuit thread
+("Anthropic has been sued for allegedly misleading customers on usage limits",
+1,899 · Jun 15) and the March classic "It costs you around 2% session usage to
+say hello to claude!" (1,607 · Mar 27).</p>
+<h3 id="2-multi-account-current-demand-gray-zone-cottage-industry">2. Multi-account: current demand, gray zone, cottage industry</h3><p><strong>The demand is current.</strong> Fresh threads within three weeks of this report:
+"Whats the best way to use a second account on the same folder?" (Aug 1),
+"How do you use multiple Claude accounts?" (Aug 2), "How can I use two
+accounts for the same project so that when the tokens run out on one, I can
+continue?" (Aug 11). None are hypothetical; all are asking for mechanics.</p>
+<p><strong>The tooling already exists — as a cottage industry.</strong> A single March thread
+("How are you managing multiple accounts on Claude?", 69 · 91 comments)
+surfaces six independent open-source switchers: <code>claude-swap</code>,
+<code>cc-account-switcher</code>, <code>claude-multiprofile</code>, <code>Swivel</code>,
+<code>claude-multi-instance</code>, and Parall.app — plus the folk method (top comment,
+70 points): a second config directory so two Claude instances run
+side-by-side. <code>claude-swap</code> is still the recommendation being handed out in
+the Aug 2 thread. Six repos independently reinventing profile isolation is
+demand-side proof for a launcher that ships account/version isolation as a
+first-class feature.</p>
+<p><strong>The policy reality, recency-weighted.</strong> The February event — "Claude just
+banned having multiple Max accounts" (292 · 314 comments · Feb 18) — is six
+months old and did not hold as stated: replies in the same thread report
+<em>"two Max20 accounts, works fine"</em> on a then-current build, <em>"I personally
+know someone who uses 4 Max 20x accounts, running at the same time"</em>, and a
+June thread screenshots Anthropic's own support bot saying <strong>up to three
+accounts per user are allowed</strong>. But enforcement is not zero: a July thread
+("Heavy Claude Max user looking for a backup after account suspensions")
+reports repeated suspensions <em>"apparently after using Claude across several
+personal devices"</em> with slow appeals — and the OP's stated exit is a
+multi-provider portfolio. A legitimate work/personal split also exists
+un-served: <em>"My employment contract says I can't use company resources for
+personal projects… account switching is not a thing in any of the Claude
+apps"</em> (16 points, from the March thread).</p>
+<p><strong>Ban-fear gates wrapper adoption.</strong> On the most-upvoted third-party harness
+post of August (1,138 points), a top-level question: <em>"How does this wrap
+Claude code? Does it go against their terms of use at all? I'm just worried
+about my Claude code account getting somehow banned, otherwise I would use
+it."</em> A launcher that spawns the official CLIs unmodified — rather than
+proxying their tokens — has a straight answer to that question, and should
+give it prominently in its FAQ.</p>
+<h3 id="3-the-settled-power-user-workflow-is-a-provider-portfolio">3. The settled power-user workflow is a provider portfolio</h3><p>The strongest pattern in the harvest, repeated across independent threads:</p>
+<ul>
+<li><em>"I juggle back and forth between Codex and Claude, and one is always
+finding bugs the other overlooked."</em> (163 · top comment on the $20→$100
+pricing-gap thread, 624 · Jun 23)</li>
+<li><em>"I pay $200 codex and $100 claude. It might change tomorrow. But TODAY,
+I'd choose Codex."</em> (8 · Feb, multi-account thread)</li>
+<li><em>"Fable 5 plans, Opus 4.8 builds, GPT 5.6 Sol tries to break it. Best setup
+so far!"</em> (255 · Jul 23 · r/ClaudeCode, post title)</li>
+<li><em>"Claude + Codex + Opencode = God Mode"</em> (387 · Apr 28 · r/ClaudeCode);
+in-thread: <em>"I too do this and love the design (Gemini) plan (GPT5.5) build
+(Sonnet/Kimi) and validate/audit (GLM5.1/GPT5.5) loop."</em> (5)</li>
+<li><em>"I use Fable for planning and reviewing, GPT 5-6 to code, AGY to prototype
+in between… allows me to work on stages in parallel"</em> (7 · Jul, suspension
+thread — the portfolio as the <em>answer to</em> account risk)</li>
+<li>The trigger is usually a limit: <em>"I hit my CC limits Friday morning, so
+decided to try Codex over the weekend"</em> (OP of "Claude Code ~100 hours vs
+Codex ~20 hours", 2,230 · Apr 13 · 309 comments).</li>
+</ul>
+<p>Two frictions inside that workflow, stated in the same threads, are exactly
+the seams a multi-harness launcher owns: <strong>(a)</strong> coordination — <em>"it takes
+quite a bit to get them to not talk past each other"</em> (10 points, God-Mode
+thread), including the manual folk version: <em>"I just copy and paste their
+chat together until they both agree"</em>; <strong>(b)</strong> context loss on every switch —
+<em>"When I start using the second account, it never knows what the previous one
+did"</em> (Aug 11 thread, where the accepted answer is hand-written handoff
+documents).</p>
+<h3 id="4-cheap-model-offload-the-community-hand-builds-the-routing-layer">4. Cheap-model offload: the community hand-builds the routing layer</h3><p>"I gave Claude Code a $0.02/call coworker and stopped hitting Pro limits"
+(1,780 · May 2 · r/ClaudeAI, 199 comments) is the purest demand signal in the
+harvest: a developer wires CLI scripts so Claude delegates bulk file reading
+and boilerplate to Kimi K2.5, with routing rules in CLAUDE.md. The comments
+do the market's work for it: ports to DeepSeek/Ollama within a day, a Windows
+fork, an MCP-purist rewrite, and the thesis stated outright (16 points):
+<em>"a lot of teams are independently reinventing orchestration layers once usage
+scales. Cost routing solves one side… once multiple models start touching the
+same codebase, consistency becomes harder than cost."</em></p>
+<p>The same instinct at the model layer shows up as open-model hedging: "Claude
+Code will become unnecessary" (806 · Feb 24 · 560 comments) argues open
+models are almost good enough; its top comment (252) is more precise about
+where loyalty actually sits: <em>"I'm happy paying for Claude… but I'd welcome a
+different tool for using it. I feel that Claude Code is getting worse
+recently."</em> Loyalty attaches to the model; the harness is fungible. A
+harness-agnostic launcher is positioned exactly on that fault line.</p>
+<h3 id="5-the-unsolved-seams-seeing-steering-and-continuity">5. The unsolved seams: seeing, steering, and continuity</h3><p><strong>Observability is being built out of desperation, as hardware.</strong> An ESP32
+usage-limit meter (2,081 · May 12), a physical status light (3,647 · Jun 24),
+a pixel-office VS Code extension that animates live Claude sessions (1,255 ·
+Feb 22) and its predecessor (1,405 · Jan 30), plus "app to monitor your
+Claude usage limits in real-time" as a 2,704-point joke — the demand under
+the humor is: <em>I run multiple long-lived agents and cannot see their state.</em></p>
+<p><strong>Remote control has mainstream pull.</strong> "I vibe code all of my side projects
+from my phone" (2,230 · May 20) — the workflow post, not the tool post — and
+Anthropic's own "New in Claude Code: Remote Control" landing at 1,456 (Feb 25)
+show steering-from-anywhere is a first-class want, not a niche.</p>
+<p><strong>Continuity across accounts, tools and machines is the seam nobody owns.</strong>
+Quoted in §2 and §3: context does not survive an account switch, a tool
+switch, or a machine switch, and the community's state of the art is
+hand-written handoff documents. Cross-device session sync is the single
+agi-cli surface with no visible community workaround.</p>
+<figure>
+<svg viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The coping ladder: how developers respond to usage-limit pain, by sophistication, with engagement receipts">
+  <defs>
+    <marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6" fill="none" stroke="currentColor" stroke-opacity="0.5"></path>
+    </marker>
+  </defs>
+  <text x="16" y="26" font-family="monospace" font-size="14" font-weight="700" fill="currentColor">The coping ladder — what limit pain turns into</text>
+  <rect x="16" y="48" width="340" height="56" rx="6" fill="none" stroke="currentColor" stroke-opacity="0.35"></rect>
+  <text x="28" y="70" font-family="monospace" font-size="13" font-weight="600" fill="currentColor">PAIN: limit scarcity + weekly rule churn</text>
+  <text x="28" y="90" font-family="monospace" font-size="11" fill="currentColor">"Dear Anthropic, This Has to STOP" — 2,732 pts</text>
+  <line x1="186" y1="104" x2="186" y2="132" stroke="currentColor" stroke-opacity="0.5" stroke-width="1.5" marker-end="url(#ah)"></line>
+  <rect x="16" y="136" width="225" height="72" rx="6" fill="none" stroke="currentColor" stroke-opacity="0.35"></rect>
+  <text x="28" y="158" font-family="monospace" font-size="13" font-weight="600" fill="currentColor">Rung 1: stack accounts</text>
+  <text x="28" y="176" font-family="monospace" font-size="11" fill="currentColor">6 OSS switchers; gray zone;</text>
+  <text x="28" y="192" font-family="monospace" font-size="11" fill="currentColor">ban-fear blocks wrappers</text>
+  <rect x="265" y="136" width="225" height="72" rx="6" fill="none" stroke="currentColor" stroke-opacity="0.35"></rect>
+  <text x="277" y="158" font-family="monospace" font-size="13" font-weight="600" fill="currentColor">Rung 2: split providers</text>
+  <text x="277" y="176" font-family="monospace" font-size="11" fill="currentColor">"$100 Claude + $200 Codex";</text>
+  <text x="277" y="192" font-family="monospace" font-size="11" fill="currentColor">cross-model review</text>
+  <rect x="514" y="136" width="230" height="72" rx="6" fill="none" stroke="currentColor" stroke-opacity="0.35"></rect>
+  <text x="526" y="158" font-family="monospace" font-size="13" font-weight="600" fill="currentColor">Rung 3: route by cost</text>
+  <text x="526" y="176" font-family="monospace" font-size="11" fill="currentColor">"$0.02/call coworker" — 1,780</text>
+  <text x="526" y="192" font-family="monospace" font-size="11" fill="currentColor">pts; hand-built CLI routing</text>
+  <line x1="241" y1="172" x2="263" y2="172" stroke="currentColor" stroke-opacity="0.5" stroke-width="1.5" marker-end="url(#ah)"></line>
+  <line x1="490" y1="172" x2="512" y2="172" stroke="currentColor" stroke-opacity="0.5" stroke-width="1.5" marker-end="url(#ah)"></line>
+  <line x1="380" y1="208" x2="380" y2="240" stroke="currentColor" stroke-opacity="0.5" stroke-width="1.5" marker-end="url(#ah)"></line>
+  <rect x="16" y="244" width="728" height="72" rx="6" fill="none" stroke="#a3e635" stroke-opacity="0.9"></rect>
+  <text x="28" y="268" font-family="monospace" font-size="13" font-weight="600" fill="currentColor">What the ladder converges on: portfolio management with continuity</text>
+  <text x="28" y="288" font-family="monospace" font-size="11" fill="currentColor">accounts + harnesses + models + machines, sessions that survive the switch, fleet you can see —</text>
+  <text x="28" y="304" font-family="monospace" font-size="11" fill="currentColor">the seams named in-thread: "they talk past each other" · "the second account never knows what the first did"</text>
+</svg>
+<figcaption>Every rung is quoted demand from the harvest. The community built rungs 1–3 by hand; the converged layer at the bottom is what agi-cli ships and no thread found an existing answer for.</figcaption>
+</figure><h3 id="6-what-this-buys-the-launch">6. What this buys the launch</h3><p>Mapping pain → surface → receipt, for the launch copy in
+<code>launch-post-bodies.md</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Community pain (receipt)</th>
+<th>agi-cli surface</th>
+<th>Message that lands</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Limit volatility, "cannot plan" (2,732 · 2,028)</td>
+<td>balanced rotation across accounts, fallback chains</td>
+<td>"your work does not stop when one account does"</td>
+</tr>
+<tr>
+<td>Account switching by logout (6 OSS switchers)</td>
+<td>version homes + profiles, isolated per account</td>
+<td>"work/personal isolation without logging out"</td>
+</tr>
+<tr>
+<td>Wrapper ban-fear (1,138-pt thread question)</td>
+<td>spawns official CLIs unmodified, no token proxying</td>
+<td>answer the ToS question before it is asked</td>
+</tr>
+<tr>
+<td>Portfolio juggling, agents "talk past each other" (387 · 255)</td>
+<td><code>agents teams</code>, mixed rosters, one session store</td>
+<td>"Claude plans, Codex builds, Kimi executes — one command"</td>
+</tr>
+<tr>
+<td>Hand-built cheap-model routing (1,780)</td>
+<td><code>agents run</code> any harness, teams by role</td>
+<td>"the $0.02 coworker pattern, productized"</td>
+</tr>
+<tr>
+<td>Handoff docs between accounts (Aug 11)</td>
+<td>cross-device session sync, <code>agents sessions</code></td>
+<td>"context survives the switch"</td>
+</tr>
+<tr>
+<td>Hardware usage meters, status lights (3,647 · 2,081)</td>
+<td>Fleet dashboard, <code>sessions --active</code></td>
+<td>"see every agent, every machine"</td>
+</tr>
+<tr>
+<td>Phone-driven coding (2,230)</td>
+<td>Fleet Cockpit iOS, remote dispatch</td>
+<td>"steer the fleet from anywhere"</td>
+</tr>
+</tbody></table>
+<p>Two cautions the data also supports. First, most of these subreddits' top
+content is showcases and humor — pain threads are the minority lane, so
+launch posts that <em>solve</em> (workflow + receipts) will travel further than posts
+that <em>pitch</em>. Second, the multi-account rung specifically should be marketed
+as isolation and rotation across accounts you legitimately hold (work +
+personal + team), not as limit evasion — the gray zone is real, the
+suspensions are real, and the Feb scare shows how fast the community narrative
+can turn on anything that smells like evasion.</p>
+<h2 id="evidence">Evidence</h2><h3 id="method">Method</h3><ul>
+<li><strong>Access path:</strong> Reddit blocks datacenter IPs (both raw HTTPS and headless
+browsing returned 403 / "blocked by network security" from the worker). The
+harvest ran through the operator's interactive machine's logged-in browser
+session via the fleet's remote-browser path, reading Reddit's JSON listing
+endpoints, 2026-08-20 evening UTC−7.</li>
+<li><strong>Coverage:</strong> 16 listing/search queries (top-by-month and targeted searches:
+limits, multiple accounts, parallel/worktrees, orchestration, cost, remote,
+codex/switching) across r/ClaudeAI, r/ClaudeCode, r/ChatGPTCoding,
+r/cursor, r/LocalLLaMA, r/vibecoding, r/ExperiencedDevs → 400 rows, 389
+unique posts after dedup.</li>
+<li><strong>Depth:</strong> 18 threads comment-harvested (top-sorted, depth 1, 60–80
+comments each, ~800 comments total), selected for pain-signal density and
+recency.</li>
+<li><strong>Recency discipline:</strong> June–August 2026 threads are cited as current
+state. The February multi-account event is cited only as trajectory, with
+its own in-thread contradictions quoted — this correction was applied
+mid-research when the operator flagged the thread's age.</li>
+<li><strong>Limits of method:</strong> top-comment sampling over-weights consensus and wit;
+engagement measures attention, not prevalence; the subreddit mix
+over-represents the Claude ecosystem (where the maintainer community — and
+agi-cli's first audience — actually is); scores are point-in-time. Nothing
+here is a statistically representative survey; it is the voiced pain of the
+most engaged users, which is the correct population for launch messaging.</li>
+</ul>
+<h3 id="thread-index-all-cited-threads">Thread index (all cited threads)</h3><table>
+<thead>
+<tr>
+<th>Score</th>
+<th>Date</th>
+<th>Sub</th>
+<th>Thread</th>
+<th>Permalink</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>2,853</td>
+<td>2026-06-29</td>
+<td>ClaudeCode</td>
+<td>Bring back the usual limit usage</td>
+<td>reddit.com/r/ClaudeCode/comments/1uim4jb/</td>
+</tr>
+<tr>
+<td>2,732</td>
+<td>2026-07-13</td>
+<td>ClaudeCode</td>
+<td>Dear Anthropic, This Has to STOP.</td>
+<td>reddit.com/r/ClaudeCode/comments/1uv6ns4/</td>
+</tr>
+<tr>
+<td>2,230</td>
+<td>2026-04-13</td>
+<td>ClaudeCode</td>
+<td>Claude Code (100h) vs. Codex (20h)</td>
+<td>reddit.com/r/ClaudeCode/comments/1sk7e2k/</td>
+</tr>
+<tr>
+<td>2,230</td>
+<td>2026-05-20</td>
+<td>ClaudeAI</td>
+<td>I vibe code all my side projects from my phone</td>
+<td>reddit.com/r/ClaudeAI/comments/1tj2i90/</td>
+</tr>
+<tr>
+<td>2,081</td>
+<td>2026-05-12</td>
+<td>ClaudeCode</td>
+<td>Clawdmeter — ESP32 usage limit monitor</td>
+<td>reddit.com/r/ClaudeCode/comments/1takxpl/</td>
+</tr>
+<tr>
+<td>2,028</td>
+<td>2026-08-18</td>
+<td>ClaudeAI</td>
+<td>Anthropic extends 50% limit increase to Aug 31</td>
+<td>reddit.com/r/ClaudeAI/comments/1vrzmx9/</td>
+</tr>
+<tr>
+<td>1,899</td>
+<td>2026-06-15</td>
+<td>ClaudeAI</td>
+<td>Anthropic sued over usage limits</td>
+<td>reddit.com/r/ClaudeAI/comments/1u6kzsr/</td>
+</tr>
+<tr>
+<td>1,780</td>
+<td>2026-05-02</td>
+<td>ClaudeAI</td>
+<td>$0.02/call coworker, stopped hitting Pro limits</td>
+<td>reddit.com/r/ClaudeAI/comments/1t1o43w/</td>
+</tr>
+<tr>
+<td>1,607</td>
+<td>2026-03-27</td>
+<td>ClaudeCode</td>
+<td>2% session usage to say hello</td>
+<td>reddit.com/r/ClaudeCode/comments/1s54q0d/</td>
+</tr>
+<tr>
+<td>1,456</td>
+<td>2026-02-25</td>
+<td>ClaudeAI</td>
+<td>New in Claude Code: Remote Control</td>
+<td>reddit.com/r/ClaudeAI/comments/1rdyhk4/</td>
+</tr>
+<tr>
+<td>1,405</td>
+<td>2026-01-30</td>
+<td>ClaudeCode</td>
+<td>Pixel office animating live CC sessions</td>
+<td>reddit.com/r/ClaudeCode/comments/1qrbsfa/</td>
+</tr>
+<tr>
+<td>1,255</td>
+<td>2026-02-22</td>
+<td>ClaudeCode</td>
+<td>VS Code ext: agents as pixel-art characters</td>
+<td>reddit.com/r/ClaudeCode/comments/1rbs0gx/</td>
+</tr>
+<tr>
+<td>1,138</td>
+<td>2026-08-14</td>
+<td>ClaudeCode</td>
+<td>"Coolest claude code wrapper" (ban-fear Q)</td>
+<td>reddit.com/r/ClaudeCode/comments/1vo94xi/</td>
+</tr>
+<tr>
+<td>929</td>
+<td>2026-03-18</td>
+<td>ClaudeAI</td>
+<td>Pro feels amazing, limits are a joke</td>
+<td>reddit.com/r/ClaudeAI/comments/1rwpa4q/</td>
+</tr>
+<tr>
+<td>806</td>
+<td>2026-02-24</td>
+<td>ClaudeCode</td>
+<td>Claude Code will become unnecessary</td>
+<td>reddit.com/r/ClaudeCode/comments/1rd8erf/</td>
+</tr>
+<tr>
+<td>624</td>
+<td>2026-06-23</td>
+<td>ClaudeAI</td>
+<td>$20→$100 gap pushes users to split spend</td>
+<td>reddit.com/r/ClaudeAI/comments/1ud388h/</td>
+</tr>
+<tr>
+<td>387</td>
+<td>2026-04-28</td>
+<td>ClaudeCode</td>
+<td>Claude + Codex + Opencode = God Mode</td>
+<td>reddit.com/r/ClaudeCode/comments/1sxs8c0/</td>
+</tr>
+<tr>
+<td>292</td>
+<td>2026-02-18</td>
+<td>ClaudeCode</td>
+<td>"Claude just banned multiple Max accounts" (trajectory only)</td>
+<td>reddit.com/r/ClaudeCode/comments/1r7x2su/</td>
+</tr>
+<tr>
+<td>255</td>
+<td>2026-07-23</td>
+<td>ClaudeCode</td>
+<td>Fable plans, Opus builds, GPT breaks</td>
+<td>reddit.com/r/ClaudeCode/comments/1v4jwpj/</td>
+</tr>
+<tr>
+<td>69</td>
+<td>2026-03-04</td>
+<td>ClaudeAI</td>
+<td>How are you managing multiple accounts?</td>
+<td>reddit.com/r/ClaudeAI/comments/1rkdigx/</td>
+</tr>
+<tr>
+<td>9</td>
+<td>2026-06-25</td>
+<td>ClaudeCode</td>
+<td>Scared to have multiple Claude accounts?</td>
+<td>reddit.com/r/ClaudeCode/comments/1ufn6zm/</td>
+</tr>
+<tr>
+<td>7</td>
+<td>2026-08-15</td>
+<td>ClaudeCode</td>
+<td>7h window? (false alarm, mood real)</td>
+<td>reddit.com/r/ClaudeCode/comments/1vp65cs/</td>
+</tr>
+<tr>
+<td>5</td>
+<td>2026-06-17</td>
+<td>ClaudeCode</td>
+<td>Does Claude care about multiple accounts?</td>
+<td>reddit.com/r/ClaudeCode/comments/1u83gm4/</td>
+</tr>
+<tr>
+<td>3</td>
+<td>2026-07-17</td>
+<td>ClaudeCode</td>
+<td>Heavy Max user, backup after suspensions</td>
+<td>reddit.com/r/ClaudeCode/comments/1uzopqi/</td>
+</tr>
+<tr>
+<td>3</td>
+<td>2026-08-02</td>
+<td>ClaudeCode</td>
+<td>How do you use multiple Claude accounts?</td>
+<td>reddit.com/r/ClaudeCode/comments/1vdi2rj/</td>
+</tr>
+<tr>
+<td>3</td>
+<td>2026-08-11</td>
+<td>ClaudeCode</td>
+<td>Two accounts, same project, token handoff</td>
+<td>reddit.com/r/ClaudeCode/comments/1vlo6bl/</td>
+</tr>
+</tbody></table>
+<h3 id="what-could-not-be-verified">What could not be verified</h3><ul>
+<li>The "Anthropic support bot allows 3 accounts" claim is a community
+screenshot (June 2026 thread), not an Anthropic policy page; treat as
+reported, not confirmed.</li>
+<li>Suspension causes are self-reported by the suspended; Anthropic's side is
+never visible in these threads.</li>
+<li>The founder anecdote that prompted this report ("save money by connecting
+multiple accounts") is one conversation, quoted from memory; this report
+neither verifies nor depends on it.</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0ZW1wbGF0ZTogcmVwb3J0LnYxCnRpdGxlOiAnV2hhdCBkZXZlbG9wZXJzIGFjdHVhbGx5IGNvbXBsYWluIGFib3V0OiAzODkgdGhyZWFkcyBmcm9tIHRoZSBjb2RpbmctYWdlbnQgc3VicmVkZGl0cycKc3VtbWFyeTogJ0RlbWFuZC1zaWRlIGZvbGxvdy11cCB0byB0aGUgR1RNIHJlcG9ydCwgaGFydmVzdGVkIGxpdmUgZnJvbSBSZWRkaXQgdGhyb3VnaCB0aGUgb3BlcmF0b3InJ3Mgb3duIGxvZ2dlZC1pbiBicm93c2VyLiBUaGUgbG91ZGVzdCBwYWluIGlzIHVzYWdlLWxpbWl0IHZvbGF0aWxpdHksIG5vdCBqdXN0IHNjYXJjaXR5LiBNdWx0aS1hY2NvdW50IHN0YWNraW5nIGlzIHRoZSBjcnVkZSBjb3Bpbmcgc3RyYXRlZ3kg4oCUIHJlYWwsIGN1cnJlbnQsIGFuZCBzZXJ2ZWQgYnkgYSBjb3R0YWdlIGluZHVzdHJ5IG9mIGFjY291bnQgc3dpdGNoZXJzIOKAlCBidXQgdGhlIHBvd2VyIHVzZXJzIGhhdmUgYWxyZWFkeSBtb3ZlZCB0byB0aGUgVG9TLWNsZWFuIHZlcnNpb246IGEgcG9ydGZvbGlvIG9mIHByb3ZpZGVycywgY2hlYXAtbW9kZWwgb2ZmbG9hZCwgYW5kIGNyb3NzLW1vZGVsIHJldmlldy4gVGhhdCBwb3J0Zm9saW8gd29ya2Zsb3cgaXMgYWdpLWNsaScncyBleGFjdCBzaGFwZSwgYW5kIHRoZSB0aHJlYWRzIHN1cHBseSB0aGUgbGF1bmNoLXBvc3QgbGFuZ3VhZ2UgdmVyYmF0aW0uJwpzdGF0dXM6IGRyYWZ0Cmh1bWFuOiBhdXRob3IKaG9zdDogZmxlZXQtd29ya2VyCnNlc3Npb246IG4vYQpsaW5rczoKICAtIGxhYmVsOiAnQ29tcGFuaW9uOiBhZ2ktY2xpIEdUTSByZXBvcnQgKHNhbWUgZGF0ZSknCiAgICB1cmw6ICdodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnZW50cy1jbGkvYmxvYi9tYWluLy5hZ2VudHMvYXJ0aWZhY3RzLzIwMjYtMDgtMjAvZ3RtLXN0cmF0ZWd5Lm1kJwogIC0gbGFiZWw6ICdDb21wYW5pb246IGFkamFjZW50LWNhdGVnb3J5IGxhbmRzY2FwZScKICAgIHVybDogJ2h0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvYWdlbnRzLWNsaS9ibG9iL21haW4vLmFnZW50cy9hcnRpZmFjdHMvMjAyNi0wOC0yMC9sYW5kc2NhcGUtY2xpLXByb3h5LWJyb3dzZXItY29tcHV0ZXIubWQnCiAgLSBsYWJlbDogJ1JVU0gtMjgzNCDigJQgbGF1bmNoOiBmcmVlemUgdGhlIG5hbWUsIHJ1biB0aGUgNDgtaG91ciBpZ25pdGlvbicKICAgIHVybDogJ2h0dHBzOi8vbGluZWFyLmFwcC9waG54L2lzc3VlL1JVU0gtMjgzNCcKLS0tCgojIyBTdW1tYXJ5CgpUaGUgcHJvbXB0IGZvciB0aGlzIHJlcG9ydCB3YXMgYW4gYW5lY2RvdGU6IGEgZm91bmRlciBzYWlkIGFnaS1jbGkgd291bGQgInNhdmUKbWUgc28gbXVjaCBtb25leSBiZWNhdXNlIEkgY2FuIGNvbm5lY3QgbXVsdGlwbGUgYWNjb3VudHMuIiBUaGUgcXVlc3Rpb24gd2FzCndoZXRoZXIgdGhhdCBpcyB0aGUgcmVhbCBwYWluIGRldmVsb3BlcnMgaGF2ZSwgb3IgYSBwcm94eSBmb3Igc29tZXRoaW5nIGVsc2UuClNvIHRoaXMgcmVwb3J0IGdvZXMgdG8gdGhlIGRlbWFuZCBzaWRlIGRpcmVjdGx5OiB3aGF0IGRvIHdvcmtpbmcgZGV2ZWxvcGVycwpjb21wbGFpbiBhYm91dCwgaW4gdGhlaXIgb3duIHdvcmRzLCBpbiB0aGUgcGxhY2VzIHRoZXkgY29tcGxhaW4/CgoqKk1ldGhvZCBpbiBvbmUgbGluZToqKiAxNiBzZWFyY2hlcyBhY3Jvc3Mgci9DbGF1ZGVBSSwgci9DbGF1ZGVDb2RlLApyL0NoYXRHUFRDb2RpbmcsIHIvY3Vyc29yLCByL0xvY2FsTExhTUEsIHIvdmliZWNvZGluZyBhbmQgci9FeHBlcmllbmNlZERldnMsCnJ1biAyMDI2LTA4LTIwIHRocm91Z2ggdGhlIG9wZXJhdG9yJ3Mgb3duIGxvZ2dlZC1pbiBicm93c2VyIHNlc3Npb24gKGRhdGFjZW50ZXIKSVBzIGFyZSBibG9ja2VkIGJ5IFJlZGRpdDsgdGhlIGZsZWV0IHJvdXRlZCB0aGUgaGFydmVzdCB0aHJvdWdoIHRoZSBpbnRlcmFjdGl2ZQptYWNoaW5lKSwgeWllbGRpbmcgKiozODkgdW5pcXVlIHBvc3RzKiosIHdpdGggdGhlICoqMTggaGlnaGVzdC1zaWduYWwgdGhyZWFkcwpjb21tZW50LWhhcnZlc3RlZCAofjgwMCBjb21tZW50cykqKi4gRXZlcnkgcXVvdGUgYmVsb3cgY2FycmllcyBpdHMgc2NvcmUsIGRhdGUsCmFuZCBwZXJtYWxpbmsuIFJlY2VuY3kgaXMgd2VpZ2h0ZWQgZGVsaWJlcmF0ZWx5OiBKdW5l4oCTQXVndXN0IDIwMjYgdGhyZWFkcyBhcmUKdHJlYXRlZCBhcyBjdXJyZW50IHN0YXRlOyBvbGRlciB0aHJlYWRzIGFzIHRyYWplY3RvcnkuIFNjb3JlcyBhcmUgYXMgcmVhZCBvbgoyMDI2LTA4LTIwLgoKRml2ZSBmaW5kaW5nczoKCjEuICoqVGhlICMxIHBhaW4gYnkgZW5nYWdlbWVudCBpcyB1c2FnZSBsaW1pdHMg4oCUIGFuZCBieSBBdWd1c3QgMjAyNiB0aGUgYWN1dGUKICAgZm9ybSBpcyB2b2xhdGlsaXR5LCBub3Qgc2NhcmNpdHkuKiogVGhlIGNvbW11bml0eSdzIHRvcCByYW50cyBhcmUgbm8gbG9uZ2VyCiAgIG9ubHkgImxpbWl0cyB0b28gbG93IiBidXQgInRoZSBydWxlcyBjaGFuZ2UgZXZlcnkgd2VlayBhbmQgSSBjYW5ub3QgcGxhbi4iCiAgIEFudGhyb3BpYydzIG93biBnb29kd2lsbCBnZXN0dXJlcyBub3cgZ2V0IHJlYWQgYXMgY2h1cm4gc2lnbmFsczogdGhlIHRvcAogICBjb21tZW50IG9uIHRoZSBBdWcgMTggbGltaXQtZXh0ZW5zaW9uIGFubm91bmNlbWVudCAoMiwwMjggcG9pbnRzKSBpcwogICAqIlRoZXkgYXJlIGxvc2luZyBjdXN0b21lcnMg4oCUIHRoaXMgaXMgYSBjbGVhciB0ZWxsIiogKDQwOSBwb2ludHMpLgoyLiAqKk11bHRpLWFjY291bnQgc3RhY2tpbmcgaXMgcmVhbCwgY3VycmVudCBkZW1hbmQg4oCUIGFuZCB0aGUgY3J1ZGUgZm9ybSBvZgogICB0aGUgcGFpbi4qKiBGcmVzaCBob3ctZG8tSSB0aHJlYWRzIGFwcGVhcmVkIG9uIEF1ZyAxLCAyLCBhbmQgMTE7IGEgY290dGFnZQogICBpbmR1c3RyeSBvZiBvcGVuLXNvdXJjZSBhY2NvdW50IHN3aXRjaGVycyBleGlzdHMgdG8gc2VydmUgaXQ7IEFudGhyb3BpYydzCiAgIG93biBzdXBwb3J0IGJvdCByZXBvcnRlZGx5IGFsbG93cyB1cCB0byB0aHJlZSBhY2NvdW50cyBwZXIgdXNlci4gVGhlCiAgIEZlYnJ1YXJ5ICJtdWx0aS1hY2NvdW50IGJhbiIgc2NhcmUgZGlkIG5vdCBob2xkIGFzIHN0YXRlZCDigJQgYnV0IHNwb3JhZGljCiAgIHN1c3BlbnNpb25zIGFyZSByZWFsIChvbmUgaGVhdnkgTWF4IHVzZXIgd2FzIHN1c3BlbmRlZCBpbiBKdWx5IGFmdGVyIHVzaW5nCiAgIENsYXVkZSBhY3Jvc3Mgc2V2ZXJhbCBwZXJzb25hbCBkZXZpY2VzKSwgYW5kICoqYmFuLWZlYXIgaXMgYW4gZXhwbGljaXQKICAgYWRvcHRpb24gYmxvY2tlciBmb3IgdGhpcmQtcGFydHkgd3JhcHBlcnMqKi4KMy4gKipQb3dlciB1c2VycyBoYXZlIGFscmVhZHkgbWlncmF0ZWQgZnJvbSBtdWx0aS1hY2NvdW50IHRvIG11bHRpLXByb3ZpZGVyLioqCiAgIFRoZSBzZXR0bGVkIHdvcmtmbG93IGluIHRoZSB0aHJlYWRzIGlzIGEgcG9ydGZvbGlvOiBDbGF1ZGUgcGx1cyBDb2RleCBwbHVzCiAgIGEgY2hlYXAgZXhlY3V0b3IgKEtpbWksIEdMTSwgRGVlcFNlZWspLCBvZnRlbiBzcGxpdCBieSByb2xlIOKAlCAqIkZhYmxlCiAgIHBsYW5zLCBPcHVzIGJ1aWxkcywgR1BUIHRyaWVzIHRvIGJyZWFrIGl0Iiog4oCUIHdpdGggY3Jvc3MtbW9kZWwgcmV2aWV3IGFzCiAgIHRoZSBzdGF0ZWQgcmVhc29uOiAqIm9uZSBpcyBhbHdheXMgZmluZGluZyBidWdzIHRoZSBvdGhlciBvdmVybG9va2VkLiIqCiAgIFRoaXMgaXMgdGhlIFRvUy1jbGVhbiB2ZXJzaW9uIG9mIHRoZSBmb3VuZGVyJ3Mgc2F2ZS1tb25leSBpbnN0aW5jdCwgYW5kIGl0CiAgIGlzIGFnaS1jbGkncyBleGFjdCBzaGFwZS4KNC4gKipDaGVhcC1tb2RlbCBvZmZsb2FkIGlzIGEgY2VsZWJyYXRlZCBwYXR0ZXJuIHBlb3BsZSBoYW5kLWJ1aWxkLioqIFRoZQogICBzaW5nbGUgbW9zdC11cHZvdGVkIHdvcmtmbG93IHRocmVhZCBpbiB0aGUgaGFydmVzdCAoMSw3ODAgcG9pbnRzKSBpcyBhCiAgIGRldmVsb3BlciB3aXJpbmcgQ0xJIHNjcmlwdHMgc28gQ2xhdWRlIGRlbGVnYXRlcyBidWxrIHdvcmsgdG8gYSAkMC4wMi9jYWxsCiAgIG1vZGVsIHRvIHN0b3AgaGl0dGluZyBQcm8gbGltaXRzIOKAlCB3aXRoIGNvbW1lbnRlcnMgcG9ydGluZyBpdCB0byBEZWVwU2VlaywKICAgT2xsYW1hIGFuZCBXaW5kb3dzIHdpdGhpbiBob3Vycy4gQSAxNi1wb2ludCByZXBseSBuYW1lcyB0aGUgcHJvZHVjdCBnYXA6CiAgICoiYSBsb3Qgb2YgdGVhbXMgYXJlIGluZGVwZW5kZW50bHkgcmVpbnZlbnRpbmcgb3JjaGVzdHJhdGlvbiBsYXllcnMgb25jZQogICB1c2FnZSBzY2FsZXMuIioKNS4gKipUaGUgdW5zb2x2ZWQgc2VhbXMgYXJlIGNvbnRpbnVpdHksIG9ic2VydmFiaWxpdHksIGFuZCByZW1vdGUgY29udHJvbC4qKgogICBTd2l0Y2hpbmcgYWNjb3VudHMgb3IgdG9vbHMgbG9zZXMgc2Vzc2lvbiBjb250ZXh0ICgidGhlIHNlY29uZCBhY2NvdW50CiAgIG5ldmVyIGtub3dzIHdoYXQgdGhlIHByZXZpb3VzIG9uZSBkaWQiKTsgcGVvcGxlIGJ1aWxkIGhhcmR3YXJlIHVzYWdlCiAgIG1ldGVycywgc3RhdHVzIGxpZ2h0cyBhbmQgcGl4ZWwtb2ZmaWNlIGRhc2hib2FyZHMgdG8gc2VlIHdoYXQgdGhlaXIgYWdlbnRzCiAgIGFyZSBkb2luZzsgdGhlIGhpZ2hlc3QtZW5nYWdlbWVudCB3b3JrZmxvdyBwb3N0cyBhcmUgYWJvdXQgZHJpdmluZyBhZ2VudHMKICAgZnJvbSBhIHBob25lLgoKKipWZXJkaWN0IG9uIHRoZSBmb3VuZGVyIGFuZWNkb3RlOioqIGhlIGlzIHJpZ2h0IGFib3V0IHRoZSBwYWluIGFuZCB3cm9uZyBhYm91dAp0aGUgZHVyYWJsZSBzaGFwZS4gIkNvbm5lY3QgbXVsdGlwbGUgYWNjb3VudHMiIGlzIHdoYXQgdGhlIHBhaW4gbG9va3MgbGlrZSBvbgpkYXkgb25lLiBXaGF0IGl0IGJlY29tZXMg4oCUIHZpc2libGUgaW4gdGhyZWFkIGFmdGVyIHRocmVhZCDigJQgaXMgKm1hbmFnZSBhCnBvcnRmb2xpbyBvZiBzdWJzY3JpcHRpb25zLCBtb2RlbHMgYW5kIG1hY2hpbmVzIHdpdGhvdXQgbG9zaW5nIGNvbnRleHQgb3IKZ2V0dGluZyBiYW5uZWQqLiBUaGUgbGF1bmNoIG1lc3NhZ2luZyBzaG91bGQgc2VsbCB0aGF0LCBpbiB0aGUgY29tbXVuaXR5J3Mgb3duCndvcmRzLCB3aGljaCBzZWN0aW9ucyAx4oCTNSBzdXBwbHkgdmVyYmF0aW0uCgojIyBGaW5kaW5ncwoKVGhyZWFkcyBhcmUgY2l0ZWQgYXMgYHNjb3JlIMK3IGRhdGUgwrcgc3VicmVkZGl0YC4gQWxsIHF1b3RlcyBhcmUgdmVyYmF0aW0gZnJvbQpwb3N0IGJvZGllcyBvciBjb21tZW50czsgc2NvcmVzIGFyZSBjb21tZW50IHNjb3JlcyB3aGVyZSB0aGUgcXVvdGUgaXMgYQpjb21tZW50LiBQZXJtYWxpbmtzIGFyZSBpbiB0aGUgRXZpZGVuY2Ugc2VjdGlvbidzIHRocmVhZCBpbmRleC4KCiMjIyAxLiBMaW1pdHM6IHRoZSByYWdlIG1vdmVkIGZyb20gInRvbyBsb3ciIHRvICJJIGNhbm5vdCBwbGFuIGFyb3VuZCB0aGlzIgoKVGhlIHRocmVlIGxvdWRlc3QgbGltaXQgdGhyZWFkcyBvZiB0aGUgc3VtbWVyOgoKfCBUaHJlYWQgfCBFbmdhZ2VtZW50IHwgV2hhdCBpdCBhY3R1YWxseSBzYXlzIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8ICJUaGlzIGlzIGEgbWVzc2FnZSBmb3IgQW50aHJvcGljLiBCcmluZyBiYWNrIHRoZSB1c3VhbCBsaW1pdCB1c2FnZTsgcmVzZXQgdGhlbSBub3cuIiB8IDIsODUzIMK3IEp1biAyOSDCtyByL0NsYXVkZUNvZGUgfCA1MTggY29tbWVudHMgb2Ygc2NhcmNpdHkgYW5nZXIgfAp8ICJEZWFyIEFudGhyb3BpYywgVGhpcyBIYXMgdG8gU1RPUC4iIHwgMiw3MzIgwrcgSnVsIDEzIMK3IHIvQ2xhdWRlQ29kZSB8IFRoZSByYW50IGlzIGFib3V0ICpjaHVybiBvZiB0aGUgcnVsZXMqOiAiRXZlcnkgb3RoZXIgZGF5LCBpdCdzIHNvbWV0aGluZyBuZXfigKYgQ3JlZGl0cyBoZXJlLCBjcmVkaXRzIHRoZXJlLiBXZWVrbHkgY3JlZGl0cy4gU29ubmV0IHVzYWdlLiBPcHVzIHVzYWdlLiBGYWJsZSBjcmVkaXRzLiA1LWhvdXIgbGltaXRzLiBXZWVrbHkgbGltaXRz4oCmIiB8CnwgIkFudGhyb3BpYyBleHRlbmRzIDUwJSBsaW1pdCBpbmNyZWFzZSB0byBBdWcgMzEiIHwgMiwwMjggwrcgQXVnIDE4IMK3IHIvQ2xhdWRlQUkgfCBHb29kd2lsbCByZWFkIGFzIHdlYWtuZXNzOiB0b3AgY29tbWVudCAoNDA5KSAiVGhleSBhcmUgbG9zaW5nIGN1c3RvbWVycyDigJQgdGhpcyBpcyBhIGNsZWFyIHRlbGwiOyAoNjkpICJ0aGlzIGNvbXBhbnkgaXMgY29uc3RhbnRseSBmKioqaW5nIGFyb3VuZCB3aXRoIHRlcm1zIGFuZCBsaW1pdHPigKYgd2hpY2ggbWFrZXMgcGxhbm5pbmcgYW5kIHByb2RbdWN0aW9uXSBpbXBvc3NpYmxlIiB8CgpUaGUgbW9zdCBpbnN0cnVjdGl2ZSBjb21tZW50IGluIHRoZSB3aG9sZSBjbHVzdGVyIGlzIG9uIHRoZSBKdWwgMTMgdGhyZWFkLApmcm9tIGEgU2FhUyBwcmljaW5nIGNvbnN1bHRhbnQgKDEsMjA1IHBvaW50cyk6ICoiRWFjaCBhbmQgZXZlcnkgY2hhbmdlIG9mCnByaWNpbmcsIGZyZWUgdGllcnMsIGFuZCBleHRlbnNpb25zIGlzIGRlc2lnbmVkIHRvIGdldCBkYXRhcG9pbnRzIHRoYXQgdGhleSBjYW4KYnVpbGQgYSBmdXR1cmUgcmV2ZW51ZSBtb2RlbCBhZ2FpbnN0LiIqIFRoZSBjb21tdW5pdHkncyBzb3BoaXN0aWNhdGVkIHJlYWQgaXMKdGhhdCBsaW1pdCB2b2xhdGlsaXR5IGlzIHBlcm1hbmVudCDigJQgYW4gZXhwZXJpbWVudCBiZWluZyBydW4gb24gdGhlbSDigJQgd2hpY2gKaXMgZXhhY3RseSB3aHkgY29waW5nIGluZnJhc3RydWN0dXJlIChwb3J0Zm9saW9zLCBvZmZsb2FkLCBzd2l0Y2hlcnMpIGtlZXBzCmNvbXBvdW5kaW5nLgoKVHJhamVjdG9yeSBtYXJrZXJzLCBzYW1lIHRoZW1lLCBlYXJsaWVyOiBhIEp1bmUgMjAyNiBsYXdzdWl0IHRocmVhZAooIkFudGhyb3BpYyBoYXMgYmVlbiBzdWVkIGZvciBhbGxlZ2VkbHkgbWlzbGVhZGluZyBjdXN0b21lcnMgb24gdXNhZ2UgbGltaXRzIiwKMSw4OTkgwrcgSnVuIDE1KSBhbmQgdGhlIE1hcmNoIGNsYXNzaWMgIkl0IGNvc3RzIHlvdSBhcm91bmQgMiUgc2Vzc2lvbiB1c2FnZSB0bwpzYXkgaGVsbG8gdG8gY2xhdWRlISIgKDEsNjA3IMK3IE1hciAyNykuCgojIyMgMi4gTXVsdGktYWNjb3VudDogY3VycmVudCBkZW1hbmQsIGdyYXkgem9uZSwgY290dGFnZSBpbmR1c3RyeQoKKipUaGUgZGVtYW5kIGlzIGN1cnJlbnQuKiogRnJlc2ggdGhyZWFkcyB3aXRoaW4gdGhyZWUgd2Vla3Mgb2YgdGhpcyByZXBvcnQ6CiJXaGF0cyB0aGUgYmVzdCB3YXkgdG8gdXNlIGEgc2Vjb25kIGFjY291bnQgb24gdGhlIHNhbWUgZm9sZGVyPyIgKEF1ZyAxKSwKIkhvdyBkbyB5b3UgdXNlIG11bHRpcGxlIENsYXVkZSBhY2NvdW50cz8iIChBdWcgMiksICJIb3cgY2FuIEkgdXNlIHR3bwphY2NvdW50cyBmb3IgdGhlIHNhbWUgcHJvamVjdCBzbyB0aGF0IHdoZW4gdGhlIHRva2VucyBydW4gb3V0IG9uIG9uZSwgSSBjYW4KY29udGludWU/IiAoQXVnIDExKS4gTm9uZSBhcmUgaHlwb3RoZXRpY2FsOyBhbGwgYXJlIGFza2luZyBmb3IgbWVjaGFuaWNzLgoKKipUaGUgdG9vbGluZyBhbHJlYWR5IGV4aXN0cyDigJQgYXMgYSBjb3R0YWdlIGluZHVzdHJ5LioqIEEgc2luZ2xlIE1hcmNoIHRocmVhZAooIkhvdyBhcmUgeW91IG1hbmFnaW5nIG11bHRpcGxlIGFjY291bnRzIG9uIENsYXVkZT8iLCA2OSDCtyA5MSBjb21tZW50cykKc3VyZmFjZXMgc2l4IGluZGVwZW5kZW50IG9wZW4tc291cmNlIHN3aXRjaGVyczogYGNsYXVkZS1zd2FwYCwKYGNjLWFjY291bnQtc3dpdGNoZXJgLCBgY2xhdWRlLW11bHRpcHJvZmlsZWAsIGBTd2l2ZWxgLApgY2xhdWRlLW11bHRpLWluc3RhbmNlYCwgYW5kIFBhcmFsbC5hcHAg4oCUIHBsdXMgdGhlIGZvbGsgbWV0aG9kICh0b3AgY29tbWVudCwKNzAgcG9pbnRzKTogYSBzZWNvbmQgY29uZmlnIGRpcmVjdG9yeSBzbyB0d28gQ2xhdWRlIGluc3RhbmNlcyBydW4Kc2lkZS1ieS1zaWRlLiBgY2xhdWRlLXN3YXBgIGlzIHN0aWxsIHRoZSByZWNvbW1lbmRhdGlvbiBiZWluZyBoYW5kZWQgb3V0IGluCnRoZSBBdWcgMiB0aHJlYWQuIFNpeCByZXBvcyBpbmRlcGVuZGVudGx5IHJlaW52ZW50aW5nIHByb2ZpbGUgaXNvbGF0aW9uIGlzCmRlbWFuZC1zaWRlIHByb29mIGZvciBhIGxhdW5jaGVyIHRoYXQgc2hpcHMgYWNjb3VudC92ZXJzaW9uIGlzb2xhdGlvbiBhcyBhCmZpcnN0LWNsYXNzIGZlYXR1cmUuCgoqKlRoZSBwb2xpY3kgcmVhbGl0eSwgcmVjZW5jeS13ZWlnaHRlZC4qKiBUaGUgRmVicnVhcnkgZXZlbnQg4oCUICJDbGF1ZGUganVzdApiYW5uZWQgaGF2aW5nIG11bHRpcGxlIE1heCBhY2NvdW50cyIgKDI5MiDCtyAzMTQgY29tbWVudHMgwrcgRmViIDE4KSDigJQgaXMgc2l4Cm1vbnRocyBvbGQgYW5kIGRpZCBub3QgaG9sZCBhcyBzdGF0ZWQ6IHJlcGxpZXMgaW4gdGhlIHNhbWUgdGhyZWFkIHJlcG9ydAoqInR3byBNYXgyMCBhY2NvdW50cywgd29ya3MgZmluZSIqIG9uIGEgdGhlbi1jdXJyZW50IGJ1aWxkLCAqIkkgcGVyc29uYWxseQprbm93IHNvbWVvbmUgd2hvIHVzZXMgNCBNYXggMjB4IGFjY291bnRzLCBydW5uaW5nIGF0IHRoZSBzYW1lIHRpbWUiKiwgYW5kIGEKSnVuZSB0aHJlYWQgc2NyZWVuc2hvdHMgQW50aHJvcGljJ3Mgb3duIHN1cHBvcnQgYm90IHNheWluZyAqKnVwIHRvIHRocmVlCmFjY291bnRzIHBlciB1c2VyIGFyZSBhbGxvd2VkKiouIEJ1dCBlbmZvcmNlbWVudCBpcyBub3QgemVybzogYSBKdWx5IHRocmVhZAooIkhlYXZ5IENsYXVkZSBNYXggdXNlciBsb29raW5nIGZvciBhIGJhY2t1cCBhZnRlciBhY2NvdW50IHN1c3BlbnNpb25zIikKcmVwb3J0cyByZXBlYXRlZCBzdXNwZW5zaW9ucyAqImFwcGFyZW50bHkgYWZ0ZXIgdXNpbmcgQ2xhdWRlIGFjcm9zcyBzZXZlcmFsCnBlcnNvbmFsIGRldmljZXMiKiB3aXRoIHNsb3cgYXBwZWFscyDigJQgYW5kIHRoZSBPUCdzIHN0YXRlZCBleGl0IGlzIGEKbXVsdGktcHJvdmlkZXIgcG9ydGZvbGlvLiBBIGxlZ2l0aW1hdGUgd29yay9wZXJzb25hbCBzcGxpdCBhbHNvIGV4aXN0cwp1bi1zZXJ2ZWQ6ICoiTXkgZW1wbG95bWVudCBjb250cmFjdCBzYXlzIEkgY2FuJ3QgdXNlIGNvbXBhbnkgcmVzb3VyY2VzIGZvcgpwZXJzb25hbCBwcm9qZWN0c+KApiBhY2NvdW50IHN3aXRjaGluZyBpcyBub3QgYSB0aGluZyBpbiBhbnkgb2YgdGhlIENsYXVkZQphcHBzIiogKDE2IHBvaW50cywgZnJvbSB0aGUgTWFyY2ggdGhyZWFkKS4KCioqQmFuLWZlYXIgZ2F0ZXMgd3JhcHBlciBhZG9wdGlvbi4qKiBPbiB0aGUgbW9zdC11cHZvdGVkIHRoaXJkLXBhcnR5IGhhcm5lc3MKcG9zdCBvZiBBdWd1c3QgKDEsMTM4IHBvaW50cyksIGEgdG9wLWxldmVsIHF1ZXN0aW9uOiAqIkhvdyBkb2VzIHRoaXMgd3JhcApDbGF1ZGUgY29kZT8gRG9lcyBpdCBnbyBhZ2FpbnN0IHRoZWlyIHRlcm1zIG9mIHVzZSBhdCBhbGw/IEknbSBqdXN0IHdvcnJpZWQKYWJvdXQgbXkgQ2xhdWRlIGNvZGUgYWNjb3VudCBnZXR0aW5nIHNvbWVob3cgYmFubmVkLCBvdGhlcndpc2UgSSB3b3VsZCB1c2UKaXQuIiogQSBsYXVuY2hlciB0aGF0IHNwYXducyB0aGUgb2ZmaWNpYWwgQ0xJcyB1bm1vZGlmaWVkIOKAlCByYXRoZXIgdGhhbgpwcm94eWluZyB0aGVpciB0b2tlbnMg4oCUIGhhcyBhIHN0cmFpZ2h0IGFuc3dlciB0byB0aGF0IHF1ZXN0aW9uLCBhbmQgc2hvdWxkCmdpdmUgaXQgcHJvbWluZW50bHkgaW4gaXRzIEZBUS4KCiMjIyAzLiBUaGUgc2V0dGxlZCBwb3dlci11c2VyIHdvcmtmbG93IGlzIGEgcHJvdmlkZXIgcG9ydGZvbGlvCgpUaGUgc3Ryb25nZXN0IHBhdHRlcm4gaW4gdGhlIGhhcnZlc3QsIHJlcGVhdGVkIGFjcm9zcyBpbmRlcGVuZGVudCB0aHJlYWRzOgoKLSAqIkkganVnZ2xlIGJhY2sgYW5kIGZvcnRoIGJldHdlZW4gQ29kZXggYW5kIENsYXVkZSwgYW5kIG9uZSBpcyBhbHdheXMKICBmaW5kaW5nIGJ1Z3MgdGhlIG90aGVyIG92ZXJsb29rZWQuIiogKDE2MyDCtyB0b3AgY29tbWVudCBvbiB0aGUgJDIw4oaSJDEwMAogIHByaWNpbmctZ2FwIHRocmVhZCwgNjI0IMK3IEp1biAyMykKLSAqIkkgcGF5ICQyMDAgY29kZXggYW5kICQxMDAgY2xhdWRlLiBJdCBtaWdodCBjaGFuZ2UgdG9tb3Jyb3cuIEJ1dCBUT0RBWSwKICBJJ2QgY2hvb3NlIENvZGV4LiIqICg4IMK3IEZlYiwgbXVsdGktYWNjb3VudCB0aHJlYWQpCi0gKiJGYWJsZSA1IHBsYW5zLCBPcHVzIDQuOCBidWlsZHMsIEdQVCA1LjYgU29sIHRyaWVzIHRvIGJyZWFrIGl0LiBCZXN0IHNldHVwCiAgc28gZmFyISIqICgyNTUgwrcgSnVsIDIzIMK3IHIvQ2xhdWRlQ29kZSwgcG9zdCB0aXRsZSkKLSAqIkNsYXVkZSArIENvZGV4ICsgT3BlbmNvZGUgPSBHb2QgTW9kZSIqICgzODcgwrcgQXByIDI4IMK3IHIvQ2xhdWRlQ29kZSk7CiAgaW4tdGhyZWFkOiAqIkkgdG9vIGRvIHRoaXMgYW5kIGxvdmUgdGhlIGRlc2lnbiAoR2VtaW5pKSBwbGFuIChHUFQ1LjUpIGJ1aWxkCiAgKFNvbm5ldC9LaW1pKSBhbmQgdmFsaWRhdGUvYXVkaXQgKEdMTTUuMS9HUFQ1LjUpIGxvb3AuIiogKDUpCi0gKiJJIHVzZSBGYWJsZSBmb3IgcGxhbm5pbmcgYW5kIHJldmlld2luZywgR1BUIDUtNiB0byBjb2RlLCBBR1kgdG8gcHJvdG90eXBlCiAgaW4gYmV0d2VlbuKApiBhbGxvd3MgbWUgdG8gd29yayBvbiBzdGFnZXMgaW4gcGFyYWxsZWwiKiAoNyDCtyBKdWwsIHN1c3BlbnNpb24KICB0aHJlYWQg4oCUIHRoZSBwb3J0Zm9saW8gYXMgdGhlICphbnN3ZXIgdG8qIGFjY291bnQgcmlzaykKLSBUaGUgdHJpZ2dlciBpcyB1c3VhbGx5IGEgbGltaXQ6ICoiSSBoaXQgbXkgQ0MgbGltaXRzIEZyaWRheSBtb3JuaW5nLCBzbwogIGRlY2lkZWQgdG8gdHJ5IENvZGV4IG92ZXIgdGhlIHdlZWtlbmQiKiAoT1Agb2YgIkNsYXVkZSBDb2RlIH4xMDAgaG91cnMgdnMKICBDb2RleCB+MjAgaG91cnMiLCAyLDIzMCDCtyBBcHIgMTMgwrcgMzA5IGNvbW1lbnRzKS4KClR3byBmcmljdGlvbnMgaW5zaWRlIHRoYXQgd29ya2Zsb3csIHN0YXRlZCBpbiB0aGUgc2FtZSB0aHJlYWRzLCBhcmUgZXhhY3RseQp0aGUgc2VhbXMgYSBtdWx0aS1oYXJuZXNzIGxhdW5jaGVyIG93bnM6ICoqKGEpKiogY29vcmRpbmF0aW9uIOKAlCAqIml0IHRha2VzCnF1aXRlIGEgYml0IHRvIGdldCB0aGVtIHRvIG5vdCB0YWxrIHBhc3QgZWFjaCBvdGhlciIqICgxMCBwb2ludHMsIEdvZC1Nb2RlCnRocmVhZCksIGluY2x1ZGluZyB0aGUgbWFudWFsIGZvbGsgdmVyc2lvbjogKiJJIGp1c3QgY29weSBhbmQgcGFzdGUgdGhlaXIKY2hhdCB0b2dldGhlciB1bnRpbCB0aGV5IGJvdGggYWdyZWUiKjsgKiooYikqKiBjb250ZXh0IGxvc3Mgb24gZXZlcnkgc3dpdGNoIOKAlAoqIldoZW4gSSBzdGFydCB1c2luZyB0aGUgc2Vjb25kIGFjY291bnQsIGl0IG5ldmVyIGtub3dzIHdoYXQgdGhlIHByZXZpb3VzIG9uZQpkaWQiKiAoQXVnIDExIHRocmVhZCwgd2hlcmUgdGhlIGFjY2VwdGVkIGFuc3dlciBpcyBoYW5kLXdyaXR0ZW4gaGFuZG9mZgpkb2N1bWVudHMpLgoKIyMjIDQuIENoZWFwLW1vZGVsIG9mZmxvYWQ6IHRoZSBjb21tdW5pdHkgaGFuZC1idWlsZHMgdGhlIHJvdXRpbmcgbGF5ZXIKCiJJIGdhdmUgQ2xhdWRlIENvZGUgYSAkMC4wMi9jYWxsIGNvd29ya2VyIGFuZCBzdG9wcGVkIGhpdHRpbmcgUHJvIGxpbWl0cyIKKDEsNzgwIMK3IE1heSAyIMK3IHIvQ2xhdWRlQUksIDE5OSBjb21tZW50cykgaXMgdGhlIHB1cmVzdCBkZW1hbmQgc2lnbmFsIGluIHRoZQpoYXJ2ZXN0OiBhIGRldmVsb3BlciB3aXJlcyBDTEkgc2NyaXB0cyBzbyBDbGF1ZGUgZGVsZWdhdGVzIGJ1bGsgZmlsZSByZWFkaW5nCmFuZCBib2lsZXJwbGF0ZSB0byBLaW1pIEsyLjUsIHdpdGggcm91dGluZyBydWxlcyBpbiBDTEFVREUubWQuIFRoZSBjb21tZW50cwpkbyB0aGUgbWFya2V0J3Mgd29yayBmb3IgaXQ6IHBvcnRzIHRvIERlZXBTZWVrL09sbGFtYSB3aXRoaW4gYSBkYXksIGEgV2luZG93cwpmb3JrLCBhbiBNQ1AtcHVyaXN0IHJld3JpdGUsIGFuZCB0aGUgdGhlc2lzIHN0YXRlZCBvdXRyaWdodCAoMTYgcG9pbnRzKToKKiJhIGxvdCBvZiB0ZWFtcyBhcmUgaW5kZXBlbmRlbnRseSByZWludmVudGluZyBvcmNoZXN0cmF0aW9uIGxheWVycyBvbmNlIHVzYWdlCnNjYWxlcy4gQ29zdCByb3V0aW5nIHNvbHZlcyBvbmUgc2lkZeKApiBvbmNlIG11bHRpcGxlIG1vZGVscyBzdGFydCB0b3VjaGluZyB0aGUKc2FtZSBjb2RlYmFzZSwgY29uc2lzdGVuY3kgYmVjb21lcyBoYXJkZXIgdGhhbiBjb3N0LiIqCgpUaGUgc2FtZSBpbnN0aW5jdCBhdCB0aGUgbW9kZWwgbGF5ZXIgc2hvd3MgdXAgYXMgb3Blbi1tb2RlbCBoZWRnaW5nOiAiQ2xhdWRlCkNvZGUgd2lsbCBiZWNvbWUgdW5uZWNlc3NhcnkiICg4MDYgwrcgRmViIDI0IMK3IDU2MCBjb21tZW50cykgYXJndWVzIG9wZW4KbW9kZWxzIGFyZSBhbG1vc3QgZ29vZCBlbm91Z2g7IGl0cyB0b3AgY29tbWVudCAoMjUyKSBpcyBtb3JlIHByZWNpc2UgYWJvdXQKd2hlcmUgbG95YWx0eSBhY3R1YWxseSBzaXRzOiAqIkknbSBoYXBweSBwYXlpbmcgZm9yIENsYXVkZeKApiBidXQgSSdkIHdlbGNvbWUgYQpkaWZmZXJlbnQgdG9vbCBmb3IgdXNpbmcgaXQuIEkgZmVlbCB0aGF0IENsYXVkZSBDb2RlIGlzIGdldHRpbmcgd29yc2UKcmVjZW50bHkuIiogTG95YWx0eSBhdHRhY2hlcyB0byB0aGUgbW9kZWw7IHRoZSBoYXJuZXNzIGlzIGZ1bmdpYmxlLiBBCmhhcm5lc3MtYWdub3N0aWMgbGF1bmNoZXIgaXMgcG9zaXRpb25lZCBleGFjdGx5IG9uIHRoYXQgZmF1bHQgbGluZS4KCiMjIyA1LiBUaGUgdW5zb2x2ZWQgc2VhbXM6IHNlZWluZywgc3RlZXJpbmcsIGFuZCBjb250aW51aXR5CgoqKk9ic2VydmFiaWxpdHkgaXMgYmVpbmcgYnVpbHQgb3V0IG9mIGRlc3BlcmF0aW9uLCBhcyBoYXJkd2FyZS4qKiBBbiBFU1AzMgp1c2FnZS1saW1pdCBtZXRlciAoMiwwODEgwrcgTWF5IDEyKSwgYSBwaHlzaWNhbCBzdGF0dXMgbGlnaHQgKDMsNjQ3IMK3IEp1biAyNCksCmEgcGl4ZWwtb2ZmaWNlIFZTIENvZGUgZXh0ZW5zaW9uIHRoYXQgYW5pbWF0ZXMgbGl2ZSBDbGF1ZGUgc2Vzc2lvbnMgKDEsMjU1IMK3CkZlYiAyMikgYW5kIGl0cyBwcmVkZWNlc3NvciAoMSw0MDUgwrcgSmFuIDMwKSwgcGx1cyAiYXBwIHRvIG1vbml0b3IgeW91cgpDbGF1ZGUgdXNhZ2UgbGltaXRzIGluIHJlYWwtdGltZSIgYXMgYSAyLDcwNC1wb2ludCBqb2tlIOKAlCB0aGUgZGVtYW5kIHVuZGVyCnRoZSBodW1vciBpczogKkkgcnVuIG11bHRpcGxlIGxvbmctbGl2ZWQgYWdlbnRzIGFuZCBjYW5ub3Qgc2VlIHRoZWlyIHN0YXRlLioKCioqUmVtb3RlIGNvbnRyb2wgaGFzIG1haW5zdHJlYW0gcHVsbC4qKiAiSSB2aWJlIGNvZGUgYWxsIG9mIG15IHNpZGUgcHJvamVjdHMKZnJvbSBteSBwaG9uZSIgKDIsMjMwIMK3IE1heSAyMCkg4oCUIHRoZSB3b3JrZmxvdyBwb3N0LCBub3QgdGhlIHRvb2wgcG9zdCDigJQgYW5kCkFudGhyb3BpYydzIG93biAiTmV3IGluIENsYXVkZSBDb2RlOiBSZW1vdGUgQ29udHJvbCIgbGFuZGluZyBhdCAxLDQ1NiAoRmViIDI1KQpzaG93IHN0ZWVyaW5nLWZyb20tYW55d2hlcmUgaXMgYSBmaXJzdC1jbGFzcyB3YW50LCBub3QgYSBuaWNoZS4KCioqQ29udGludWl0eSBhY3Jvc3MgYWNjb3VudHMsIHRvb2xzIGFuZCBtYWNoaW5lcyBpcyB0aGUgc2VhbSBub2JvZHkgb3ducy4qKgpRdW90ZWQgaW4gwqcyIGFuZCDCpzM6IGNvbnRleHQgZG9lcyBub3Qgc3Vydml2ZSBhbiBhY2NvdW50IHN3aXRjaCwgYSB0b29sCnN3aXRjaCwgb3IgYSBtYWNoaW5lIHN3aXRjaCwgYW5kIHRoZSBjb21tdW5pdHkncyBzdGF0ZSBvZiB0aGUgYXJ0IGlzCmhhbmQtd3JpdHRlbiBoYW5kb2ZmIGRvY3VtZW50cy4gQ3Jvc3MtZGV2aWNlIHNlc3Npb24gc3luYyBpcyB0aGUgc2luZ2xlCmFnaS1jbGkgc3VyZmFjZSB3aXRoIG5vIHZpc2libGUgY29tbXVuaXR5IHdvcmthcm91bmQuCgo8ZmlndXJlPgo8c3ZnIHZpZXdCb3g9IjAgMCA3NjAgMzQwIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iVGhlIGNvcGluZyBsYWRkZXI6IGhvdyBkZXZlbG9wZXJzIHJlc3BvbmQgdG8gdXNhZ2UtbGltaXQgcGFpbiwgYnkgc29waGlzdGljYXRpb24sIHdpdGggZW5nYWdlbWVudCByZWNlaXB0cyI+CiAgPGRlZnM+CiAgICA8bWFya2VyIGlkPSJhaCIgbWFya2VyV2lkdGg9IjgiIG1hcmtlckhlaWdodD0iOCIgcmVmWD0iNiIgcmVmWT0iMyIgb3JpZW50PSJhdXRvIj4KICAgICAgPHBhdGggZD0iTTAsMCBMNiwzIEwwLDYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utb3BhY2l0eT0iMC41Ii8+CiAgICA8L21hcmtlcj4KICA8L2RlZnM+CiAgPHRleHQgeD0iMTYiIHk9IjI2IiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjE0IiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSJjdXJyZW50Q29sb3IiPlRoZSBjb3BpbmcgbGFkZGVyIOKAlCB3aGF0IGxpbWl0IHBhaW4gdHVybnMgaW50bzwvdGV4dD4KICA8cmVjdCB4PSIxNiIgeT0iNDgiIHdpZHRoPSIzNDAiIGhlaWdodD0iNTYiIHJ4PSI2IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLW9wYWNpdHk9IjAuMzUiLz4KICA8dGV4dCB4PSIyOCIgeT0iNzAiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSI2MDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+UEFJTjogbGltaXQgc2NhcmNpdHkgKyB3ZWVrbHkgcnVsZSBjaHVybjwvdGV4dD4KICA8dGV4dCB4PSIyOCIgeT0iOTAiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9ImN1cnJlbnRDb2xvciIgb3BhY2l0eT0iMC42NSI+IkRlYXIgQW50aHJvcGljLCBUaGlzIEhhcyB0byBTVE9QIiDigJQgMiw3MzIgcHRzPC90ZXh0PgogIDxsaW5lIHgxPSIxODYiIHkxPSIxMDQiIHgyPSIxODYiIHkyPSIxMzIiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utb3BhY2l0eT0iMC41IiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhaCkiLz4KICA8cmVjdCB4PSIxNiIgeT0iMTM2IiB3aWR0aD0iMjI1IiBoZWlnaHQ9IjcyIiByeD0iNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS1vcGFjaXR5PSIwLjM1Ii8+CiAgPHRleHQgeD0iMjgiIHk9IjE1OCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyIgZm9udC13ZWlnaHQ9IjYwMCIgZmlsbD0iY3VycmVudENvbG9yIj5SdW5nIDE6IHN0YWNrIGFjY291bnRzPC90ZXh0PgogIDx0ZXh0IHg9IjI4IiB5PSIxNzYiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9ImN1cnJlbnRDb2xvciIgb3BhY2l0eT0iMC42NSI+NiBPU1Mgc3dpdGNoZXJzOyBncmF5IHpvbmU7PC90ZXh0PgogIDx0ZXh0IHg9IjI4IiB5PSIxOTIiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9ImN1cnJlbnRDb2xvciIgb3BhY2l0eT0iMC42NSI+YmFuLWZlYXIgYmxvY2tzIHdyYXBwZXJzPC90ZXh0PgogIDxyZWN0IHg9IjI2NSIgeT0iMTM2IiB3aWR0aD0iMjI1IiBoZWlnaHQ9IjcyIiByeD0iNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS1vcGFjaXR5PSIwLjM1Ii8+CiAgPHRleHQgeD0iMjc3IiB5PSIxNTgiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSI2MDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+UnVuZyAyOiBzcGxpdCBwcm92aWRlcnM8L3RleHQ+CiAgPHRleHQgeD0iMjc3IiB5PSIxNzYiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9ImN1cnJlbnRDb2xvciIgb3BhY2l0eT0iMC42NSI+IiQxMDAgQ2xhdWRlICsgJDIwMCBDb2RleCI7PC90ZXh0PgogIDx0ZXh0IHg9IjI3NyIgeT0iMTkyIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSJjdXJyZW50Q29sb3IiIG9wYWNpdHk9IjAuNjUiPmNyb3NzLW1vZGVsIHJldmlldzwvdGV4dD4KICA8cmVjdCB4PSI1MTQiIHk9IjEzNiIgd2lkdGg9IjIzMCIgaGVpZ2h0PSI3MiIgcng9IjYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utb3BhY2l0eT0iMC4zNSIvPgogIDx0ZXh0IHg9IjUyNiIgeT0iMTU4IiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iNjAwIiBmaWxsPSJjdXJyZW50Q29sb3IiPlJ1bmcgMzogcm91dGUgYnkgY29zdDwvdGV4dD4KICA8dGV4dCB4PSI1MjYiIHk9IjE3NiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iY3VycmVudENvbG9yIiBvcGFjaXR5PSIwLjY1Ij4iJDAuMDIvY2FsbCBjb3dvcmtlciIg4oCUIDEsNzgwPC90ZXh0PgogIDx0ZXh0IHg9IjUyNiIgeT0iMTkyIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSJjdXJyZW50Q29sb3IiIG9wYWNpdHk9IjAuNjUiPnB0czsgaGFuZC1idWlsdCBDTEkgcm91dGluZzwvdGV4dD4KICA8bGluZSB4MT0iMjQxIiB5MT0iMTcyIiB4Mj0iMjYzIiB5Mj0iMTcyIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLW9wYWNpdHk9IjAuNSIgc3Ryb2tlLXdpZHRoPSIxLjUiIG1hcmtlci1lbmQ9InVybCgjYWgpIi8+CiAgPGxpbmUgeDE9IjQ5MCIgeTE9IjE3MiIgeDI9IjUxMiIgeTI9IjE3MiIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS1vcGFjaXR5PSIwLjUiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI2FoKSIvPgogIDxsaW5lIHgxPSIzODAiIHkxPSIyMDgiIHgyPSIzODAiIHkyPSIyNDAiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utb3BhY2l0eT0iMC41IiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhaCkiLz4KICA8cmVjdCB4PSIxNiIgeT0iMjQ0IiB3aWR0aD0iNzI4IiBoZWlnaHQ9IjcyIiByeD0iNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utb3BhY2l0eT0iMC45Ii8+CiAgPHRleHQgeD0iMjgiIHk9IjI2OCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyIgZm9udC13ZWlnaHQ9IjYwMCIgZmlsbD0iY3VycmVudENvbG9yIj5XaGF0IHRoZSBsYWRkZXIgY29udmVyZ2VzIG9uOiBwb3J0Zm9saW8gbWFuYWdlbWVudCB3aXRoIGNvbnRpbnVpdHk8L3RleHQ+CiAgPHRleHQgeD0iMjgiIHk9IjI4OCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iY3VycmVudENvbG9yIiBvcGFjaXR5PSIwLjY1Ij5hY2NvdW50cyArIGhhcm5lc3NlcyArIG1vZGVscyArIG1hY2hpbmVzLCBzZXNzaW9ucyB0aGF0IHN1cnZpdmUgdGhlIHN3aXRjaCwgZmxlZXQgeW91IGNhbiBzZWUg4oCUPC90ZXh0PgogIDx0ZXh0IHg9IjI4IiB5PSIzMDQiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9ImN1cnJlbnRDb2xvciIgb3BhY2l0eT0iMC42NSI+dGhlIHNlYW1zIG5hbWVkIGluLXRocmVhZDogInRoZXkgdGFsayBwYXN0IGVhY2ggb3RoZXIiIMK3ICJ0aGUgc2Vjb25kIGFjY291bnQgbmV2ZXIga25vd3Mgd2hhdCB0aGUgZmlyc3QgZGlkIjwvdGV4dD4KPC9zdmc+CjxmaWdjYXB0aW9uPkV2ZXJ5IHJ1bmcgaXMgcXVvdGVkIGRlbWFuZCBmcm9tIHRoZSBoYXJ2ZXN0LiBUaGUgY29tbXVuaXR5IGJ1aWx0IHJ1bmdzIDHigJMzIGJ5IGhhbmQ7IHRoZSBjb252ZXJnZWQgbGF5ZXIgYXQgdGhlIGJvdHRvbSBpcyB3aGF0IGFnaS1jbGkgc2hpcHMgYW5kIG5vIHRocmVhZCBmb3VuZCBhbiBleGlzdGluZyBhbnN3ZXIgZm9yLjwvZmlnY2FwdGlvbj4KPC9maWd1cmU+CgojIyMgNi4gV2hhdCB0aGlzIGJ1eXMgdGhlIGxhdW5jaAoKTWFwcGluZyBwYWluIOKGkiBzdXJmYWNlIOKGkiByZWNlaXB0LCBmb3IgdGhlIGxhdW5jaCBjb3B5IGluCmBsYXVuY2gtcG9zdC1ib2RpZXMubWRgOgoKfCBDb21tdW5pdHkgcGFpbiAocmVjZWlwdCkgfCBhZ2ktY2xpIHN1cmZhY2UgfCBNZXNzYWdlIHRoYXQgbGFuZHMgfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgTGltaXQgdm9sYXRpbGl0eSwgImNhbm5vdCBwbGFuIiAoMiw3MzIgwrcgMiwwMjgpIHwgYmFsYW5jZWQgcm90YXRpb24gYWNyb3NzIGFjY291bnRzLCBmYWxsYmFjayBjaGFpbnMgfCAieW91ciB3b3JrIGRvZXMgbm90IHN0b3Agd2hlbiBvbmUgYWNjb3VudCBkb2VzIiB8CnwgQWNjb3VudCBzd2l0Y2hpbmcgYnkgbG9nb3V0ICg2IE9TUyBzd2l0Y2hlcnMpIHwgdmVyc2lvbiBob21lcyArIHByb2ZpbGVzLCBpc29sYXRlZCBwZXIgYWNjb3VudCB8ICJ3b3JrL3BlcnNvbmFsIGlzb2xhdGlvbiB3aXRob3V0IGxvZ2dpbmcgb3V0IiB8CnwgV3JhcHBlciBiYW4tZmVhciAoMSwxMzgtcHQgdGhyZWFkIHF1ZXN0aW9uKSB8IHNwYXducyBvZmZpY2lhbCBDTElzIHVubW9kaWZpZWQsIG5vIHRva2VuIHByb3h5aW5nIHwgYW5zd2VyIHRoZSBUb1MgcXVlc3Rpb24gYmVmb3JlIGl0IGlzIGFza2VkIHwKfCBQb3J0Zm9saW8ganVnZ2xpbmcsIGFnZW50cyAidGFsayBwYXN0IGVhY2ggb3RoZXIiICgzODcgwrcgMjU1KSB8IGBhZ2VudHMgdGVhbXNgLCBtaXhlZCByb3N0ZXJzLCBvbmUgc2Vzc2lvbiBzdG9yZSB8ICJDbGF1ZGUgcGxhbnMsIENvZGV4IGJ1aWxkcywgS2ltaSBleGVjdXRlcyDigJQgb25lIGNvbW1hbmQiIHwKfCBIYW5kLWJ1aWx0IGNoZWFwLW1vZGVsIHJvdXRpbmcgKDEsNzgwKSB8IGBhZ2VudHMgcnVuYCBhbnkgaGFybmVzcywgdGVhbXMgYnkgcm9sZSB8ICJ0aGUgJDAuMDIgY293b3JrZXIgcGF0dGVybiwgcHJvZHVjdGl6ZWQiIHwKfCBIYW5kb2ZmIGRvY3MgYmV0d2VlbiBhY2NvdW50cyAoQXVnIDExKSB8IGNyb3NzLWRldmljZSBzZXNzaW9uIHN5bmMsIGBhZ2VudHMgc2Vzc2lvbnNgIHwgImNvbnRleHQgc3Vydml2ZXMgdGhlIHN3aXRjaCIgfAp8IEhhcmR3YXJlIHVzYWdlIG1ldGVycywgc3RhdHVzIGxpZ2h0cyAoMyw2NDcgwrcgMiwwODEpIHwgRmxlZXQgZGFzaGJvYXJkLCBgc2Vzc2lvbnMgLS1hY3RpdmVgIHwgInNlZSBldmVyeSBhZ2VudCwgZXZlcnkgbWFjaGluZSIgfAp8IFBob25lLWRyaXZlbiBjb2RpbmcgKDIsMjMwKSB8IEZsZWV0IENvY2twaXQgaU9TLCByZW1vdGUgZGlzcGF0Y2ggfCAic3RlZXIgdGhlIGZsZWV0IGZyb20gYW55d2hlcmUiIHwKClR3byBjYXV0aW9ucyB0aGUgZGF0YSBhbHNvIHN1cHBvcnRzLiBGaXJzdCwgbW9zdCBvZiB0aGVzZSBzdWJyZWRkaXRzJyB0b3AKY29udGVudCBpcyBzaG93Y2FzZXMgYW5kIGh1bW9yIOKAlCBwYWluIHRocmVhZHMgYXJlIHRoZSBtaW5vcml0eSBsYW5lLCBzbwpsYXVuY2ggcG9zdHMgdGhhdCAqc29sdmUqICh3b3JrZmxvdyArIHJlY2VpcHRzKSB3aWxsIHRyYXZlbCBmdXJ0aGVyIHRoYW4gcG9zdHMKdGhhdCAqcGl0Y2gqLiBTZWNvbmQsIHRoZSBtdWx0aS1hY2NvdW50IHJ1bmcgc3BlY2lmaWNhbGx5IHNob3VsZCBiZSBtYXJrZXRlZAphcyBpc29sYXRpb24gYW5kIHJvdGF0aW9uIGFjcm9zcyBhY2NvdW50cyB5b3UgbGVnaXRpbWF0ZWx5IGhvbGQgKHdvcmsgKwpwZXJzb25hbCArIHRlYW0pLCBub3QgYXMgbGltaXQgZXZhc2lvbiDigJQgdGhlIGdyYXkgem9uZSBpcyByZWFsLCB0aGUKc3VzcGVuc2lvbnMgYXJlIHJlYWwsIGFuZCB0aGUgRmViIHNjYXJlIHNob3dzIGhvdyBmYXN0IHRoZSBjb21tdW5pdHkgbmFycmF0aXZlCmNhbiB0dXJuIG9uIGFueXRoaW5nIHRoYXQgc21lbGxzIGxpa2UgZXZhc2lvbi4KCiMjIEV2aWRlbmNlCgojIyMgTWV0aG9kCgotICoqQWNjZXNzIHBhdGg6KiogUmVkZGl0IGJsb2NrcyBkYXRhY2VudGVyIElQcyAoYm90aCByYXcgSFRUUFMgYW5kIGhlYWRsZXNzCiAgYnJvd3NpbmcgcmV0dXJuZWQgNDAzIC8gImJsb2NrZWQgYnkgbmV0d29yayBzZWN1cml0eSIgZnJvbSB0aGUgd29ya2VyKS4gVGhlCiAgaGFydmVzdCByYW4gdGhyb3VnaCB0aGUgb3BlcmF0b3IncyBpbnRlcmFjdGl2ZSBtYWNoaW5lJ3MgbG9nZ2VkLWluIGJyb3dzZXIKICBzZXNzaW9uIHZpYSB0aGUgZmxlZXQncyByZW1vdGUtYnJvd3NlciBwYXRoLCByZWFkaW5nIFJlZGRpdCdzIEpTT04gbGlzdGluZwogIGVuZHBvaW50cywgMjAyNi0wOC0yMCBldmVuaW5nIFVUQ+KIkjcuCi0gKipDb3ZlcmFnZToqKiAxNiBsaXN0aW5nL3NlYXJjaCBxdWVyaWVzICh0b3AtYnktbW9udGggYW5kIHRhcmdldGVkIHNlYXJjaGVzOgogIGxpbWl0cywgbXVsdGlwbGUgYWNjb3VudHMsIHBhcmFsbGVsL3dvcmt0cmVlcywgb3JjaGVzdHJhdGlvbiwgY29zdCwgcmVtb3RlLAogIGNvZGV4L3N3aXRjaGluZykgYWNyb3NzIHIvQ2xhdWRlQUksIHIvQ2xhdWRlQ29kZSwgci9DaGF0R1BUQ29kaW5nLAogIHIvY3Vyc29yLCByL0xvY2FsTExhTUEsIHIvdmliZWNvZGluZywgci9FeHBlcmllbmNlZERldnMg4oaSIDQwMCByb3dzLCAzODkKICB1bmlxdWUgcG9zdHMgYWZ0ZXIgZGVkdXAuCi0gKipEZXB0aDoqKiAxOCB0aHJlYWRzIGNvbW1lbnQtaGFydmVzdGVkICh0b3Atc29ydGVkLCBkZXB0aCAxLCA2MOKAkzgwCiAgY29tbWVudHMgZWFjaCwgfjgwMCBjb21tZW50cyB0b3RhbCksIHNlbGVjdGVkIGZvciBwYWluLXNpZ25hbCBkZW5zaXR5IGFuZAogIHJlY2VuY3kuCi0gKipSZWNlbmN5IGRpc2NpcGxpbmU6KiogSnVuZeKAk0F1Z3VzdCAyMDI2IHRocmVhZHMgYXJlIGNpdGVkIGFzIGN1cnJlbnQKICBzdGF0ZS4gVGhlIEZlYnJ1YXJ5IG11bHRpLWFjY291bnQgZXZlbnQgaXMgY2l0ZWQgb25seSBhcyB0cmFqZWN0b3J5LCB3aXRoCiAgaXRzIG93biBpbi10aHJlYWQgY29udHJhZGljdGlvbnMgcXVvdGVkIOKAlCB0aGlzIGNvcnJlY3Rpb24gd2FzIGFwcGxpZWQKICBtaWQtcmVzZWFyY2ggd2hlbiB0aGUgb3BlcmF0b3IgZmxhZ2dlZCB0aGUgdGhyZWFkJ3MgYWdlLgotICoqTGltaXRzIG9mIG1ldGhvZDoqKiB0b3AtY29tbWVudCBzYW1wbGluZyBvdmVyLXdlaWdodHMgY29uc2Vuc3VzIGFuZCB3aXQ7CiAgZW5nYWdlbWVudCBtZWFzdXJlcyBhdHRlbnRpb24sIG5vdCBwcmV2YWxlbmNlOyB0aGUgc3VicmVkZGl0IG1peAogIG92ZXItcmVwcmVzZW50cyB0aGUgQ2xhdWRlIGVjb3N5c3RlbSAod2hlcmUgdGhlIG1haW50YWluZXIgY29tbXVuaXR5IOKAlCBhbmQKICBhZ2ktY2xpJ3MgZmlyc3QgYXVkaWVuY2Ug4oCUIGFjdHVhbGx5IGlzKTsgc2NvcmVzIGFyZSBwb2ludC1pbi10aW1lLiBOb3RoaW5nCiAgaGVyZSBpcyBhIHN0YXRpc3RpY2FsbHkgcmVwcmVzZW50YXRpdmUgc3VydmV5OyBpdCBpcyB0aGUgdm9pY2VkIHBhaW4gb2YgdGhlCiAgbW9zdCBlbmdhZ2VkIHVzZXJzLCB3aGljaCBpcyB0aGUgY29ycmVjdCBwb3B1bGF0aW9uIGZvciBsYXVuY2ggbWVzc2FnaW5nLgoKIyMjIFRocmVhZCBpbmRleCAoYWxsIGNpdGVkIHRocmVhZHMpCgp8IFNjb3JlIHwgRGF0ZSB8IFN1YiB8IFRocmVhZCB8IFBlcm1hbGluayB8CnwgLS0tIHwgLS0tIHwgLS0tIHwgLS0tIHwgLS0tIHwKfCAyLDg1MyB8IDIwMjYtMDYtMjkgfCBDbGF1ZGVDb2RlIHwgQnJpbmcgYmFjayB0aGUgdXN1YWwgbGltaXQgdXNhZ2UgfCByZWRkaXQuY29tL3IvQ2xhdWRlQ29kZS9jb21tZW50cy8xdWltNGpiLyB8CnwgMiw3MzIgfCAyMDI2LTA3LTEzIHwgQ2xhdWRlQ29kZSB8IERlYXIgQW50aHJvcGljLCBUaGlzIEhhcyB0byBTVE9QLiB8IHJlZGRpdC5jb20vci9DbGF1ZGVDb2RlL2NvbW1lbnRzLzF1djZuczQvIHwKfCAyLDIzMCB8IDIwMjYtMDQtMTMgfCBDbGF1ZGVDb2RlIHwgQ2xhdWRlIENvZGUgKH4xMDBoKSB2cy4gQ29kZXggKH4yMGgpIHwgcmVkZGl0LmNvbS9yL0NsYXVkZUNvZGUvY29tbWVudHMvMXNrN2Uyay8gfAp8IDIsMjMwIHwgMjAyNi0wNS0yMCB8IENsYXVkZUFJIHwgSSB2aWJlIGNvZGUgYWxsIG15IHNpZGUgcHJvamVjdHMgZnJvbSBteSBwaG9uZSB8IHJlZGRpdC5jb20vci9DbGF1ZGVBSS9jb21tZW50cy8xdGoyaTkwLyB8CnwgMiwwODEgfCAyMDI2LTA1LTEyIHwgQ2xhdWRlQ29kZSB8IENsYXdkbWV0ZXIg4oCUIEVTUDMyIHVzYWdlIGxpbWl0IG1vbml0b3IgfCByZWRkaXQuY29tL3IvQ2xhdWRlQ29kZS9jb21tZW50cy8xdGFreHBsLyB8CnwgMiwwMjggfCAyMDI2LTA4LTE4IHwgQ2xhdWRlQUkgfCBBbnRocm9waWMgZXh0ZW5kcyA1MCUgbGltaXQgaW5jcmVhc2UgdG8gQXVnIDMxIHwgcmVkZGl0LmNvbS9yL0NsYXVkZUFJL2NvbW1lbnRzLzF2cnpteDkvIHwKfCAxLDg5OSB8IDIwMjYtMDYtMTUgfCBDbGF1ZGVBSSB8IEFudGhyb3BpYyBzdWVkIG92ZXIgdXNhZ2UgbGltaXRzIHwgcmVkZGl0LmNvbS9yL0NsYXVkZUFJL2NvbW1lbnRzLzF1Nmt6c3IvIHwKfCAxLDc4MCB8IDIwMjYtMDUtMDIgfCBDbGF1ZGVBSSB8ICQwLjAyL2NhbGwgY293b3JrZXIsIHN0b3BwZWQgaGl0dGluZyBQcm8gbGltaXRzIHwgcmVkZGl0LmNvbS9yL0NsYXVkZUFJL2NvbW1lbnRzLzF0MW80M3cvIHwKfCAxLDYwNyB8IDIwMjYtMDMtMjcgfCBDbGF1ZGVDb2RlIHwgMiUgc2Vzc2lvbiB1c2FnZSB0byBzYXkgaGVsbG8gfCByZWRkaXQuY29tL3IvQ2xhdWRlQ29kZS9jb21tZW50cy8xczU0cTBkLyB8CnwgMSw0NTYgfCAyMDI2LTAyLTI1IHwgQ2xhdWRlQUkgfCBOZXcgaW4gQ2xhdWRlIENvZGU6IFJlbW90ZSBDb250cm9sIHwgcmVkZGl0LmNvbS9yL0NsYXVkZUFJL2NvbW1lbnRzLzFyZHloazQvIHwKfCAxLDQwNSB8IDIwMjYtMDEtMzAgfCBDbGF1ZGVDb2RlIHwgUGl4ZWwgb2ZmaWNlIGFuaW1hdGluZyBsaXZlIENDIHNlc3Npb25zIHwgcmVkZGl0LmNvbS9yL0NsYXVkZUNvZGUvY29tbWVudHMvMXFyYnNmYS8gfAp8IDEsMjU1IHwgMjAyNi0wMi0yMiB8IENsYXVkZUNvZGUgfCBWUyBDb2RlIGV4dDogYWdlbnRzIGFzIHBpeGVsLWFydCBjaGFyYWN0ZXJzIHwgcmVkZGl0LmNvbS9yL0NsYXVkZUNvZGUvY29tbWVudHMvMXJiczBneC8gfAp8IDEsMTM4IHwgMjAyNi0wOC0xNCB8IENsYXVkZUNvZGUgfCAiQ29vbGVzdCBjbGF1ZGUgY29kZSB3cmFwcGVyIiAoYmFuLWZlYXIgUSkgfCByZWRkaXQuY29tL3IvQ2xhdWRlQ29kZS9jb21tZW50cy8xdm85NHhpLyB8CnwgOTI5IHwgMjAyNi0wMy0xOCB8IENsYXVkZUFJIHwgUHJvIGZlZWxzIGFtYXppbmcsIGxpbWl0cyBhcmUgYSBqb2tlIHwgcmVkZGl0LmNvbS9yL0NsYXVkZUFJL2NvbW1lbnRzLzFyd3BhNHEvIHwKfCA4MDYgfCAyMDI2LTAyLTI0IHwgQ2xhdWRlQ29kZSB8IENsYXVkZSBDb2RlIHdpbGwgYmVjb21lIHVubmVjZXNzYXJ5IHwgcmVkZGl0LmNvbS9yL0NsYXVkZUNvZGUvY29tbWVudHMvMXJkOGVyZi8gfAp8IDYyNCB8IDIwMjYtMDYtMjMgfCBDbGF1ZGVBSSB8ICQyMOKGkiQxMDAgZ2FwIHB1c2hlcyB1c2VycyB0byBzcGxpdCBzcGVuZCB8IHJlZGRpdC5jb20vci9DbGF1ZGVBSS9jb21tZW50cy8xdWQzODhoLyB8CnwgMzg3IHwgMjAyNi0wNC0yOCB8IENsYXVkZUNvZGUgfCBDbGF1ZGUgKyBDb2RleCArIE9wZW5jb2RlID0gR29kIE1vZGUgfCByZWRkaXQuY29tL3IvQ2xhdWRlQ29kZS9jb21tZW50cy8xc3hzOGMwLyB8CnwgMjkyIHwgMjAyNi0wMi0xOCB8IENsYXVkZUNvZGUgfCAiQ2xhdWRlIGp1c3QgYmFubmVkIG11bHRpcGxlIE1heCBhY2NvdW50cyIgKHRyYWplY3Rvcnkgb25seSkgfCByZWRkaXQuY29tL3IvQ2xhdWRlQ29kZS9jb21tZW50cy8xcjd4MnN1LyB8CnwgMjU1IHwgMjAyNi0wNy0yMyB8IENsYXVkZUNvZGUgfCBGYWJsZSBwbGFucywgT3B1cyBidWlsZHMsIEdQVCBicmVha3MgfCByZWRkaXQuY29tL3IvQ2xhdWRlQ29kZS9jb21tZW50cy8xdjRqd3BqLyB8CnwgNjkgfCAyMDI2LTAzLTA0IHwgQ2xhdWRlQUkgfCBIb3cgYXJlIHlvdSBtYW5hZ2luZyBtdWx0aXBsZSBhY2NvdW50cz8gfCByZWRkaXQuY29tL3IvQ2xhdWRlQUkvY29tbWVudHMvMXJrZGlneC8gfAp8IDkgfCAyMDI2LTA2LTI1IHwgQ2xhdWRlQ29kZSB8IFNjYXJlZCB0byBoYXZlIG11bHRpcGxlIENsYXVkZSBhY2NvdW50cz8gfCByZWRkaXQuY29tL3IvQ2xhdWRlQ29kZS9jb21tZW50cy8xdWZuNnptLyB8CnwgNyB8IDIwMjYtMDgtMTUgfCBDbGF1ZGVDb2RlIHwgN2ggd2luZG93PyAoZmFsc2UgYWxhcm0sIG1vb2QgcmVhbCkgfCByZWRkaXQuY29tL3IvQ2xhdWRlQ29kZS9jb21tZW50cy8xdnA2NWNzLyB8CnwgNSB8IDIwMjYtMDYtMTcgfCBDbGF1ZGVDb2RlIHwgRG9lcyBDbGF1ZGUgY2FyZSBhYm91dCBtdWx0aXBsZSBhY2NvdW50cz8gfCByZWRkaXQuY29tL3IvQ2xhdWRlQ29kZS9jb21tZW50cy8xdTgzZ200LyB8CnwgMyB8IDIwMjYtMDctMTcgfCBDbGF1ZGVDb2RlIHwgSGVhdnkgTWF4IHVzZXIsIGJhY2t1cCBhZnRlciBzdXNwZW5zaW9ucyB8IHJlZGRpdC5jb20vci9DbGF1ZGVDb2RlL2NvbW1lbnRzLzF1em9wcWkvIHwKfCAzIHwgMjAyNi0wOC0wMiB8IENsYXVkZUNvZGUgfCBIb3cgZG8geW91IHVzZSBtdWx0aXBsZSBDbGF1ZGUgYWNjb3VudHM/IHwgcmVkZGl0LmNvbS9yL0NsYXVkZUNvZGUvY29tbWVudHMvMXZkaTJyai8gfAp8IDMgfCAyMDI2LTA4LTExIHwgQ2xhdWRlQ29kZSB8IFR3byBhY2NvdW50cywgc2FtZSBwcm9qZWN0LCB0b2tlbiBoYW5kb2ZmIHwgcmVkZGl0LmNvbS9yL0NsYXVkZUNvZGUvY29tbWVudHMvMXZsbzZibC8gfAoKIyMjIFdoYXQgY291bGQgbm90IGJlIHZlcmlmaWVkCgotIFRoZSAiQW50aHJvcGljIHN1cHBvcnQgYm90IGFsbG93cyAzIGFjY291bnRzIiBjbGFpbSBpcyBhIGNvbW11bml0eQogIHNjcmVlbnNob3QgKEp1bmUgMjAyNiB0aHJlYWQpLCBub3QgYW4gQW50aHJvcGljIHBvbGljeSBwYWdlOyB0cmVhdCBhcwogIHJlcG9ydGVkLCBub3QgY29uZmlybWVkLgotIFN1c3BlbnNpb24gY2F1c2VzIGFyZSBzZWxmLXJlcG9ydGVkIGJ5IHRoZSBzdXNwZW5kZWQ7IEFudGhyb3BpYydzIHNpZGUgaXMKICBuZXZlciB2aXNpYmxlIGluIHRoZXNlIHRocmVhZHMuCi0gVGhlIGZvdW5kZXIgYW5lY2RvdGUgdGhhdCBwcm9tcHRlZCB0aGlzIHJlcG9ydCAoInNhdmUgbW9uZXkgYnkgY29ubmVjdGluZwogIG11bHRpcGxlIGFjY291bnRzIikgaXMgb25lIGNvbnZlcnNhdGlvbiwgcXVvdGVkIGZyb20gbWVtb3J5OyB0aGlzIHJlcG9ydAogIG5laXRoZXIgdmVyaWZpZXMgbm9yIGRlcGVuZHMgb24gaXQuCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>
