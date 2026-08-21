@@ -336,6 +336,9 @@ can turn on anything that smells like evasion.
 | 5 | 2026-06-17 | ClaudeCode | Does Claude care about multiple accounts? | reddit.com/r/ClaudeCode/comments/1u83gm4/ |
 | 3 | 2026-07-17 | ClaudeCode | Heavy Max user, backup after suspensions | reddit.com/r/ClaudeCode/comments/1uzopqi/ |
 | 3 | 2026-08-02 | ClaudeCode | How do you use multiple Claude accounts? | reddit.com/r/ClaudeCode/comments/1vdi2rj/ |
+| 3,647 | 2026-06-24 | ClaudeCode | Physical status light for Claude Code | reddit.com/r/ClaudeCode/comments/1ue5inx/ |
+| 2,704 | 2026-02-23 | ClaudeAI | "App to monitor your Claude usage limits" (joke) | reddit.com/r/ClaudeAI/comments/1rc27sc/ |
+| 3 | 2026-08-01 | ClaudeCode | Second account on the same folder? | reddit.com/r/ClaudeCode/comments/1vc86hz/ |
 | 3 | 2026-08-11 | ClaudeCode | Two accounts, same project, token handoff | reddit.com/r/ClaudeCode/comments/1vlo6bl/ |
 
 ### What could not be verified
