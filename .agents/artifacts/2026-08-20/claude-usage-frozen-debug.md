@@ -12,15 +12,15 @@ Date: 2026-08-20 · Repo: agents-cli · Surface: `agents view` usage bars, rotat
 
 ### 1. Anthropic rate-limits the usage endpoint per account, and the bucket never drains
 
-Live probes from yosemite-s1 (2026-08-20):
+Live probes from a fleet worker box (2026-08-20):
 
 | Probe | Result |
 |---|---|
 | Valid setup-token (account A) → `GET /api/oauth/usage` | **HTTP 429**, `retry-after: 3600` |
 | Valid setup-token (account B) | **HTTP 429**, `retry-after: 3600` |
 | Garbage bearer token, same box | **HTTP 401** `authentication_error` |
-| Garbage bearer token, mark-1 (never probed before) | **HTTP 401** |
-| No auth header (any box, incl. mark-1) | HTTP 429 (endpoint default for unauthenticated) |
+| Garbage bearer token, a fleet box that never ran usage probes | **HTTP 401** |
+| No auth header (any box, incl. the never-probing box) | HTTP 429 (endpoint default for unauthenticated) |
 
 The 401s prove the machines/IPs are **not** throttled — the auth layer is reached and evaluated. The 429 keys on the **account/token**. Every Claude account's bucket is exhausted and stays exhausted: the aggregate fleet traffic against the same 8 accounts — per-box auth-health probes (`probeClaudeStatus`, ~3 min cadence per version home, 8 homes), the usage refresh tick (5 min per account on the resolved primary), hourly backoff retries from 6 desynchronized boxes, plus every live Claude Code session's own statusline polling — keeps each per-account window pinned.
 
@@ -49,4 +49,4 @@ The codebase already has the honest precedent: the Grok collector **filters** ex
 
 ## Attribution
 
-Not a CLI regression in the frozen-cache sense: the zeroing behavior predates the freeze, and the freeze began when Anthropic's per-account limiting on `/api/oauth/usage` tightened (~Aug 3-5; the 2026-08-03 `usage-backoff.ts` incident on yosemite-s1 was the first symptom). The CLI's contribution is the display lie (failure 2) and the non-escalating retry cadence.
+Not a CLI regression in the frozen-cache sense: the zeroing behavior predates the freeze, and the freeze began when Anthropic's per-account limiting on `/api/oauth/usage` tightened (~Aug 3-5; the 2026-08-03 `usage-backoff.ts` incident on a fleet worker was the first symptom). The CLI's contribution is the display lie (failure 2) and the non-escalating retry cadence.
