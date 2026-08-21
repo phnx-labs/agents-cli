@@ -131,7 +131,7 @@ export function buildFork(source: string, name: string, opts: ForkOptions): Prof
     if (opts.account) {
       const account = findAccount(opts.account);
       if (!account) throw new Error(`Unknown account '${opts.account}'.`);
-      profile.account = account.id;
+      profile.account = account.name;
       profile.provider = account.provider;
     }
     return profile;
@@ -157,7 +157,7 @@ export function buildFork(source: string, name: string, opts: ForkOptions): Prof
   if (opts.account) {
     const account = findAccount(opts.account);
     if (!account) throw new Error(`Unknown account '${opts.account}'.`);
-    profile.account = account.id;
+    profile.account = account.name;
     profile.provider = account.provider;
   }
   return profile;
@@ -223,7 +223,7 @@ export function buildEdit(name: string, opts: EditOptions): Profile {
   if (opts.account !== undefined) {
     const account = findAccount(opts.account);
     if (!account) throw new Error(`Unknown account '${opts.account}'.`);
-    edited.account = account.id;
+    edited.account = account.name;
     edited.provider = account.provider;
   }
   if (opts.version === '') delete edited.host.version;

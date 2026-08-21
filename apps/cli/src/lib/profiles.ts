@@ -167,7 +167,11 @@ function migrateLegacyProfileAuth(profile: Profile, file: string): void {
   }
   const migratedAccount = findAccount(accountName)!;
   const oldItem = profile.auth.keychainItem;
-  profile.account = migratedAccount.id;
+  // Reference by NAME, not id: profiles sync fleet-wide with `agents repo push`
+  // while account ids are minted per-device, so an id ref breaks on every other
+  // machine ("Unknown account '<uuid>'"). Names are the portable handle — the
+  // registry resolves both, and `accounts rename` already rewrites name refs.
+  profile.account = migratedAccount.name;
   profile.provider = provider;
   delete profile.auth;
   delete profile.authOptional;
@@ -609,6 +613,17 @@ export function renameProfile(oldName: string, newName: string): void {
 export function resolveProfileEnv(profile: Profile): Record<string, string> {
   const env: Record<string, string> = { ...profile.env };
   if (profile.account) {
+    if (!findAccount(profile.account)) {
+      // The commonest cause: the profile synced here via `agents repo push/pull`
+      // but its account ref was minted on another device (legacy id refs), so
+      // the bare "Unknown account" from the registry gives the user nothing to
+      // act on. Name the harness and the repair.
+      throw new Error(
+        `Harness '${profile.name}' references account '${profile.account}', which does not exist on this device. ` +
+        `Accounts are per-machine; pick one from 'agents accounts list' and repoint with ` +
+        `'agents harness edit ${profile.name} --account <name>', or add it with 'agents accounts add'.`,
+      );
+    }
     const account = resolveCredentialAccount(profile.account, profile.host.agent, profile.provider);
     Object.assign(env, account.env);
   }

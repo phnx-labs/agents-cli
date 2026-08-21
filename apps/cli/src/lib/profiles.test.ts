@@ -190,6 +190,24 @@ describe('resolveProfileEnv honors authOptional', () => {
   });
 });
 
+describe('resolveProfileEnv names the harness on a dangling account ref', () => {
+  it('tells the user which harness points at the missing account and how to repoint it', () => {
+    // The fleet-sync trap (RUSH-2930): profiles travel via `agents repo push`
+    // but accounts are per-device, so a synced profile can reference an account
+    // this machine has never seen. The bare registry "Unknown account" gave the
+    // user nothing to act on.
+    const p: Profile = {
+      name: 'deepseek',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'deepseek/deepseek-chat-v3-0324' },
+      account: '3afa8fbd-842f-4619-95e3-42938487cea3',
+      provider: 'openrouter',
+    };
+    expect(() => resolveProfileEnv(p)).toThrow(/Harness 'deepseek' references account '3afa8fbd/);
+    expect(() => resolveProfileEnv(p)).toThrow(/agents harness edit deepseek --account/);
+  });
+});
+
 describe('resolveProfileEnv fails fast in a headless context', () => {
   // The Touch ID storm fix: `agents run <profile>` beneath a headless/teams/
   // terminal runtime (or any TTY-less spawn) must throw the actionable error

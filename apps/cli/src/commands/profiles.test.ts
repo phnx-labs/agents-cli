@@ -102,7 +102,8 @@ describe('addProfile — --from-secrets threading (preset path)', () => {
     ).resolves.toBeUndefined();
 
     const profile = readProfile('kimi-account');
-    expect(profile.account).toBe(account.id);
+    // The NAME, not the id: profiles sync fleet-wide while ids are per-device.
+    expect(profile.account).toBe(account.name);
     expect(profile.provider).toBe('openrouter');
   });
 

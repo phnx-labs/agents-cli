@@ -246,7 +246,7 @@ export async function addProfile(name: string, opts: AddProfileOptions, label: '
       authEnvVar,
     });
     if (account) {
-      profile.account = account.id;
+      profile.account = account.name;
       profile.provider = account.provider;
     }
     if (opts.fromSecrets) await applyFromSecrets(profile, opts.fromSecrets, opts.authProvider);
@@ -270,7 +270,7 @@ export async function addProfile(name: string, opts: AddProfileOptions, label: '
   }
   const profile = profileFromPreset(name, preset, opts.version);
   if (account) {
-    profile.account = account.id;
+    profile.account = account.name;
     profile.provider = account.provider;
   }
   if (opts.fromSecrets) await applyFromSecrets(profile, opts.fromSecrets, opts.authProvider);

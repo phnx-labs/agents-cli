@@ -112,7 +112,9 @@ describe('buildFork — one verb over two kinds of source', () => {
     addAccount('corp-key', 'openrouter', 'api-key', 'test-key', USER_DIR);
     const forked = buildFork('claude', 'corp', { model: 'gpt-x', baseUrl: 'https://gw.corp/v1', account: 'corp-key' });
     expect(forked.env.ANTHROPIC_BASE_URL).toBe('https://gw.corp/v1');
-    expect(findAccount('corp-key')?.id).toBe(forked.account);
+    // The portable NAME is stored, not the per-device id — a profile synced to
+    // another machine must still resolve its account there (RUSH-2930).
+    expect(forked.account).toBe('corp-key');
     expect(forked.auth).toBeUndefined();
     setKeychainBackendForTest(null);
   });
