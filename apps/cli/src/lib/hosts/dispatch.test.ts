@@ -280,6 +280,23 @@ describe('buildInteractiveRunForwardedArgs', () => {
     expect(args).toEqual(['run', 'claude@2.1.207', '--strategy', 'balanced']);
   });
 
+  it('forwards the account picker marker so the execution host lists its own accounts', () => {
+    const args = buildInteractiveRunForwardedArgs({
+      agent: 'claude',
+      accountPicker: true,
+      forceInteractive: true,
+    });
+    expect(args).toEqual(['run', 'claude@', '--interactive']);
+  });
+
+  it('rejects an account picker combined with a concrete version pin', () => {
+    expect(() => buildInteractiveRunForwardedArgs({
+      agent: 'claude',
+      version: '2.1.207',
+      accountPicker: true,
+    })).toThrow('cannot combine an account picker with a version pin');
+  });
+
   it('forwards common behavioral flags interactively', () => {
     const args = buildInteractiveRunForwardedArgs({
       agent: 'claude',

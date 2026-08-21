@@ -6,6 +6,13 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [0.9.328] - 2026-08-20
 
+- **New Agent separates placement from account choice (RUSH-2961).**
+  `Agents: New <Harness>` lets agents-cli resolve the configured device target,
+  then opens the version/account picker populated by that device. `(Pick Host)`
+  asks for the device and then the account; `(Auto)` keeps choosing both.
+  Source: `src/core/launchTarget.ts`, `src/core/agents.ts`,
+  `src/vscode/extension.ts`.
+
 - **A "needs you" reply button on the Fleet feed no longer fails silently.**
   Clicking an option on a row whose agent has no reachable reply channel — a
   headless run with no terminal tab, or a session on a raw non-tmux TTY on another
@@ -83,7 +90,6 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
   It stays exactly one line: when the agent has produced a response, that response
   is the line rather than a second one being added beneath it. Full cards are
   unchanged. Source: `ui/settings/components/mission-control/FeedItem.tsx`.
-
 - **The Fleet panel stops burying idle-but-unfinished work below running work
   (RUSH-2838).** The root `AGENTS.md` "Purpose" section makes idle-but-unfinished
   the highest-risk state — the one most likely to be silently abandoned — and says

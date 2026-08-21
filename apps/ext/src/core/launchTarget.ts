@@ -33,6 +33,13 @@ export interface LaunchTargetOpts {
   pickHost?: boolean;
 }
 
+export type HarnessLaunchVariant = 'default' | 'pick-host' | 'auto';
+
+/** Launch choices layered on top of placement for per-harness palette commands. */
+export interface HarnessLaunchOpts extends LaunchTargetOpts {
+  accountPicker?: true;
+}
+
 /**
  * Launch options for a target. `auto` sets neither flag: that is what makes
  * buildAgentLaunchCommand emit `--device auto` (see launchAgent's `isLocal`).
@@ -43,6 +50,27 @@ export function launchOptsForTarget(target: LaunchTarget): LaunchTargetOpts {
       return { local: true };
     case 'ask':
       return { pickHost: true };
+    case 'auto':
+      return {};
+  }
+}
+
+/**
+ * Keep the three per-harness command variants distinct:
+ *
+ * - default: configured placement, then ask which device-local account to run;
+ * - pick-host: ask for the device, then ask which account on it to run;
+ * - auto: let agents-cli choose both the device and account without a prompt.
+ */
+export function launchOptsForHarnessCommand(
+  variant: HarnessLaunchVariant,
+  defaultTarget: LaunchTarget = DEFAULT_LAUNCH_TARGET,
+): HarnessLaunchOpts {
+  switch (variant) {
+    case 'default':
+      return { ...launchOptsForTarget(defaultTarget), accountPicker: true };
+    case 'pick-host':
+      return { pickHost: true, accountPicker: true };
     case 'auto':
       return {};
   }

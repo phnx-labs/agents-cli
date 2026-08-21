@@ -188,6 +188,8 @@ agents run claude "summarize recent commits" --strategy balanced
 # Or choose one account/version interactively for only this run.
 agents run claude@
 agents run codex@ "review this branch"
+agents run claude@ --device auto        # pick the device, then choose there
+agents run claude@ --device yosemite-s0 # choose from one device's accounts
 ```
 
 `--strategy balanced` spreads work across available versions of the same agent -- useful when you have multiple accounts and want to avoid burning through one. When a Claude run reports a session limit, agents-cli records the stated reset time, shows `session-limited` in `agents view`, and excludes that account until the reset. When every account is rate-limited, the run exits nonzero naming each excluded account and the earliest window reset (use `--strategy pinned` to force the default) -- it never launches into an exhausted account.
@@ -205,7 +207,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the host layer
 
 A trailing `@` opens an account picker before either an interactive or prompt-based run. Each installed version shows its account identity, exact version, login state, plan, and every available session, weekly, or monthly limit. Logged-out, rate-limited, and out-of-credit accounts remain visible with the reason they cannot be selected; signed-in accounts whose provider does not expose quota data stay selectable and say `limits unavailable`. The choice pins only that run and does not change your default version.
 
-Account selection is available for Claude, Codex, Gemini, Cursor, Antigravity, Grok, Kimi, Droid, and OpenCode. It requires a terminal and cannot be combined with `--resume`, `--strategy`/`--balanced`, `--lease`, or `--device`; profiles and workflows must use their concrete host agent instead.
+Account selection is available for Claude, Codex, Gemini, Cursor, Antigravity, Grok, Kimi, Droid, and OpenCode. It requires a terminal and cannot be combined with `--resume`, `--strategy`/`--balanced`, `--lease`, or a warm-box lease. Device routing is resolved first, then the picker is populated from the selected device. Profiles and workflows must use their concrete host agent instead.
 
 ### Chain agents
 

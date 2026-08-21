@@ -15,11 +15,16 @@ the `swarm-ext://` endpoint. It does not own fleet or agent policy.
 - Resume/Fork opens one on-demand listing with `agents sessions --all --json
   --no-interactive --limit 60`, then calls `agents sessions resume <id>
   --vscodium` or `agents sessions fork <id>`.
-- Automatic launch is `agents run auto --interactive --device auto --strategy
-  balanced --mode auto`, plus `--project <slug>` when the workspace resolves to
-  a defined project and `--model <name>` when that harness has a Default Model
-  set. Explicit harness/host controls pass the user's choice to agents-cli; the
-  extension never scores hosts, harnesses, versions, or accounts. Every launch
+- `Agents: New <Harness>` passes the configured target to
+  `agents run <harness>@ --interactive`, so agents-cli resolves the device first
+  and the picker shows that device's installed versions/accounts. `(Pick Host)`
+  asks for the device before using the same account picker. `(Auto)` uses
+  `agents run <harness> --strategy balanced`, so agents-cli chooses both. The
+  generic automatic launch stays `agents run auto --interactive --device auto
+  --strategy balanced --mode auto`. Launches also add `--project <slug>` when
+  the workspace resolves to a defined project and `--model <name>` when that
+  harness has a Default Model set. The extension never scores hosts, harnesses,
+  versions, or accounts. Every launch
   is built by `buildAgentLaunchCommand` (`src/core/agents.ts`) — the one place
   that owns flag construction. The two launch paths (`launchAgent` and
   `openSingleAgent`) register their tab through the shared

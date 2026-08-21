@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { resolveLaunchTarget, launchOptsForTarget, DEFAULT_LAUNCH_TARGET } from './launchTarget';
+import {
+  resolveLaunchTarget,
+  launchOptsForTarget,
+  launchOptsForHarnessCommand,
+  DEFAULT_LAUNCH_TARGET,
+} from './launchTarget';
 
 describe('resolveLaunchTarget', () => {
   it('defaults to auto when unset', () => {
@@ -31,5 +36,21 @@ describe('launchOptsForTarget', () => {
 
   it('ask prompts for the host', () => {
     expect(launchOptsForTarget('ask')).toEqual({ pickHost: true });
+  });
+});
+
+describe('launchOptsForHarnessCommand', () => {
+  it('default auto-picks the device and asks for its account/version', () => {
+    expect(launchOptsForHarnessCommand('default', 'auto')).toEqual({ accountPicker: true });
+  });
+
+  it('preserves explicit local or ask placement while still asking for the account/version', () => {
+    expect(launchOptsForHarnessCommand('default', 'local')).toEqual({ local: true, accountPicker: true });
+    expect(launchOptsForHarnessCommand('default', 'ask')).toEqual({ pickHost: true, accountPicker: true });
+  });
+
+  it('Pick Host asks for both layers while Auto asks for neither', () => {
+    expect(launchOptsForHarnessCommand('pick-host')).toEqual({ pickHost: true, accountPicker: true });
+    expect(launchOptsForHarnessCommand('auto')).toEqual({});
   });
 });

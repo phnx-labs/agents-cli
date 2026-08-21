@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, isAgentRunner, usesManagedAgentLaunch, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand, shquote } from '../core/agents';
 import { resolveProjectForCwd } from '../core/managedProjects';
 import { parseSpawnRequest, resolveSpawnSurface, SpawnRequest } from '../core/spawn';
-import { launchOptsForTarget, resolveLaunchTarget } from '../core/launchTarget';
+import { launchOptsForHarnessCommand, resolveLaunchTarget } from '../core/launchTarget';
 import {
   AgentConfig,
   buildIconPath,
@@ -377,10 +377,9 @@ async function pickLaunchHost(
 // --- The one launch engine --------------------------------------------------
 // Every "New agent" command routes through launchAgent. The command is just a
 // route: it fills in whichever of {agentKey, host} the user pinned, and the
-// engine resolves the rest — harness by availability/headroom, host by load,
-// and the version/account always by BALANCED rotation (token-usage-aware) unless
-// an explicit version is pinned. There is deliberately no manual version picker
-// and no per-strategy command trio anymore: balanced is the default, full stop.
+// engine resolves the rest. The per-harness default and Pick Host variants ask
+// agents-cli to show the chosen device's account/version picker; the explicit
+// (Auto) variant uses balanced rotation without a picker.
 interface LaunchAgentOpts {
   // Explicit harness key (e.g. 'claude'); omit to auto-pick by availability + usage.
   agentKey?: string;
@@ -390,8 +389,8 @@ interface LaunchAgentOpts {
   pickHost?: boolean;
   // Keep the launch local (this Mac) instead of auto-picking a fleet host.
   local?: boolean;
-  // Use only persisted launch history + cached fleet health to choose instantly.
-  autoHost?: boolean;
+  // Ask agents-cli to present the selected device's installed accounts/versions.
+  accountPicker?: boolean;
 }
 
 /**
@@ -483,18 +482,20 @@ async function launchAgent(context: vscode.ExtensionContext, opts: LaunchAgentOp
   // builder's `local = false` default fires `--device auto`, and a deliberate
   // This-Mac pick silently dispatches to another box.
   //
-  // Everything else — an automatic launch, and `opts.autoHost` (the `(Auto)`
-  // commands) — means "choose a machine for me", which is what `--device auto`
-  // is for, so it must NOT be treated as local. NOTE this changes `(Auto)`:
-  // `opts.autoHost` has never been read (it is declared and passed but dead on
-  // main too), and because those commands DO set an agentKey the old
-  // `automatic && !opts.local` test was false, so `(Auto)` emitted no device
-  // flag at all and silently ran on this Mac. Device choice stays with the CLI
-  // rather than being scored here, per the thin-client contract.
+  // Everything else means "choose a machine for me", which is what
+  // `--device auto` is for, so it must NOT be treated as local. Device choice
+  // stays with the CLI rather than being scored here, per the thin-client contract.
   const isLocal = opts.local === true || (opts.pickHost === true && !host);
   const command = buildAgentLaunchCommand(
-    agent, null, defaultModel, undefined, undefined, 'balanced', 'auto',
-    { host, local: isLocal, project: projectSlug, cwd: projectSlug ? undefined : cwd },
+    agent, null, defaultModel, undefined, undefined,
+    opts.accountPicker ? undefined : 'balanced', 'auto',
+    {
+      host,
+      local: isLocal,
+      accountPicker: opts.accountPicker,
+      project: projectSlug,
+      cwd: projectSlug ? undefined : cwd,
+    },
   );
 
   // Tab identity must be established AT createTerminal: iconPath and name are
@@ -1515,11 +1516,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Per-harness launch commands — every one is a thin route into launchAgent.
   // For each non-shell agent:
-  //   New <Harness>              -> balanced version, on agents.launch.defaultTarget
-  //   New <Harness> (Pick Host)  -> pick a device first, then balanced version
-  //   New <Harness> (Auto)       -> instant cached device pick, balanced version
-  // There is no version picker, no pinned/latest variant, no per-strategy trio:
-  // the version/account is ALWAYS chosen by balanced rotation (token-usage-aware).
+  //   New <Harness>              -> configured device target, then account/version picker
+  //   New <Harness> (Pick Host)  -> device picker, then account/version picker
+  //   New <Harness> (Auto)       -> automatic device + balanced account/version
   for (const def of BUILT_IN_AGENTS) {
     if (def.key === 'shell') {
       // Shell is a plain terminal — no balancing, no host offload.
@@ -1542,13 +1541,22 @@ export async function activate(context: vscode.ExtensionContext) {
       // (`auto`) hands placement to the CLI, which rotates over the devices
       // marked `agents devices role <name> worker`.
       vscode.commands.registerCommand(def.commandId, () =>
-        launchAgent(context, { agentKey: def.key, ...launchOptsForTarget(defaultLaunchTarget()) }))
+        launchAgent(context, {
+          agentKey: def.key,
+          ...launchOptsForHarnessCommand('default', defaultLaunchTarget()),
+        }))
     );
     context.subscriptions.push(
-      vscode.commands.registerCommand(`${def.commandId}PickHost`, () => launchAgent(context, { agentKey: def.key, pickHost: true }))
+      vscode.commands.registerCommand(`${def.commandId}PickHost`, () => launchAgent(context, {
+        agentKey: def.key,
+        ...launchOptsForHarnessCommand('pick-host'),
+      }))
     );
     context.subscriptions.push(
-      vscode.commands.registerCommand(`${def.commandId}Auto`, () => launchAgent(context, { agentKey: def.key, autoHost: true }))
+      vscode.commands.registerCommand(`${def.commandId}Auto`, () => launchAgent(context, {
+        agentKey: def.key,
+        ...launchOptsForHarnessCommand('auto'),
+      }))
     );
   }
 

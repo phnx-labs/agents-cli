@@ -2366,7 +2366,9 @@ schema (`--json` passes through each agent's native stream format).
   exit code written to a sidecar `.exit` file (`lib/hosts/dispatch.ts`:
   `launchDetached`/`buildDetachedLaunchCommand`); an interactive `--device`
   run streams the same style invocation live via `sshStream` instead
-  (`runInteractiveOnHost`).
+  (`runInteractiveOnHost`). A trailing account-picker marker (`<agent>@`) MUST
+  survive that interactive re-exec so the peer, not the launcher, lists and
+  selects from its device-local versions/accounts.
 - **EXEC-31 (MUST).** Actor-provenance env MUST cross the SSH hop:
   `withActorEnv()` prepends `actorEnv(resolveActor())` as shell exports
   ahead of the remote invocation, so the remote process is credited to the

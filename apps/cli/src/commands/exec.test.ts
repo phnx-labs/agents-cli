@@ -100,16 +100,15 @@ describe('trailing-@ account picker request', () => {
     });
   });
 
-  it('fails loud for every routing option that would override the selected account', () => {
+  it('rejects selectors that would override the selected account but allows device routing', () => {
     expect(runAccountPickerConflicts({
       resume: true,
       strategy: 'balanced',
       balanced: true,
       lease: true,
       box: 'warm-one',
-      device: 'yosemite-s0',
-    })).toEqual(['--resume', '--strategy', '--balanced', '--lease', '--box', '--device']);
-    expect(runAccountPickerConflicts({})).toEqual([]);
+    })).toEqual(['--resume', '--strategy', '--balanced', '--lease', '--box']);
+    expect(runAccountPickerConflicts({ device: 'yosemite-s0' })).toEqual([]);
   });
 });
 

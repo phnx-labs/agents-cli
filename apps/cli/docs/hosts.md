@@ -119,6 +119,21 @@ default.` (the daemon watchdog tail-detects this text for rotate cooldowns).
 `--session-id` keeps its claude-only semantics — honored when auto picks
 claude, ignored with a stderr note otherwise.
 
+### Choose an account after device placement
+
+A trailing `@` on a concrete harness composes with device routing. agents-cli
+resolves the device first, then renders the installed versions/accounts reported
+by that device:
+
+```bash
+agents run claude@ --device auto         # auto-place, then choose an account
+agents run claude@ --device yosemite-s0  # choose from yosemite-s0 only
+```
+
+The picker remains interactive, and the selected version applies only to that
+run. Account selection cannot be combined with another account selector such as
+`--strategy`, `--balanced`, `--resume`, `--lease`, or `--box`.
+
 **One carve-out: a missing login is not an exhausted account.** When the only
 thing wrong is that an account is signed out (or its token was revoked), a
 terminal run does NOT fail loud — it launches so you can authenticate, because

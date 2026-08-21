@@ -526,6 +526,8 @@ export interface InteractiveDispatchOptions {
   agent: string;
   /** Explicit agent version pin (e.g. "2.1.207") to forward as `agent@version`. */
   version?: string;
+  /** Preserve the trailing-@ account picker so selection happens on the execution host. */
+  accountPicker?: boolean;
   /** Explicit run strategy (e.g. "balanced") to forward as `--strategy <strategy>`. */
   strategy?: string;
   /** Named provider account to resolve on the remote host. */
@@ -574,7 +576,14 @@ export interface InteractiveDispatchOptions {
  * infer headless from the prompt).
  */
 export function buildInteractiveRunForwardedArgs(opts: InteractiveDispatchOptions): string[] {
-  const agentArg = opts.version ? `${opts.agent}@${opts.version}` : opts.agent;
+  if (opts.version && opts.accountPicker) {
+    throw new Error('Interactive host dispatch cannot combine an account picker with a version pin');
+  }
+  const agentArg = opts.accountPicker
+    ? `${opts.agent}@`
+    : opts.version
+      ? `${opts.agent}@${opts.version}`
+      : opts.agent;
   const args = ['run', agentArg];
   if (opts.prompt && opts.forceInteractive) args.push(opts.prompt);
   if (opts.forceInteractive) args.push('--interactive');

@@ -361,6 +361,31 @@ describe('launch contract — every runner is balanced', () => {
     )).toBe('agents run claude@1.2.3 --interactive --mode auto');
   });
 
+  test('account picker keeps automatic placement but omits balanced account selection', () => {
+    expect(buildAgentLaunchCommand(
+      'claude', null, undefined, undefined, undefined, undefined, undefined,
+      { accountPicker: true },
+    )).toBe('agents run claude@ --interactive --device auto --mode auto');
+  });
+
+  test('account picker follows an explicitly picked host', () => {
+    expect(buildAgentLaunchCommand(
+      'claude', null, undefined, undefined, undefined, undefined, undefined,
+      { host: 'yosemite-s0', accountPicker: true },
+    )).toBe("agents run claude@ --interactive --host 'yosemite-s0' --mode auto");
+  });
+
+  test('account picker rejects a version pin or automatic strategy', () => {
+    expect(() => buildAgentLaunchCommand(
+      'claude', null, undefined, undefined, '2.1.238', undefined, undefined,
+      { accountPicker: true },
+    )).toThrow('cannot combine an account picker with a pinned version');
+    expect(() => buildAgentLaunchCommand(
+      'claude', null, undefined, undefined, undefined, 'balanced', undefined,
+      { accountPicker: true },
+    )).toThrow('cannot combine an account picker with an automatic strategy');
+  });
+
   test('grok (Pick Host) never emits cursor-agent', () => {
     const cmd = buildAgentLaunchCommand(
       'grok', null, undefined, undefined, undefined, 'balanced', undefined, { host: 'yosemite-s1' },

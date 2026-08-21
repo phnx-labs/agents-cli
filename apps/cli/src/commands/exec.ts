@@ -145,7 +145,6 @@ export function parseRunAccountPickerRequest(agentSpec: string): RunAccountPicke
   };
 }
 
-/** Return every option whose routing semantics conflict with a local account choice. */
 /**
  * The `--device` alias family — the flags that mean "dispatch this run to another
  * machine over SSH". `--device` is canonical; `--on`/`--computer` are hidden
@@ -165,6 +164,7 @@ export function hostTargetGiven(options: {
   );
 }
 
+/** Return every option whose selection semantics conflict with an account choice. */
 export function runAccountPickerConflicts(options: {
   resume?: string | boolean;
   strategy?: string;
@@ -182,7 +182,6 @@ export function runAccountPickerConflicts(options: {
   if (options.balanced) conflicts.push('--balanced');
   if (options.lease) conflicts.push('--lease');
   if (options.box) conflicts.push('--box');
-  if (hostTargetGiven(options).length) conflicts.push('--device');
   return conflicts;
 }
 
@@ -1129,7 +1128,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         if (conflicts.length > 0) {
           console.error(chalk.red(
             `Account selection with ${agentSpec} cannot be combined with ${conflicts.join(', ')}. ` +
-            'Pick the account locally, or use an explicit agent@version target.',
+            'Remove the conflicting selector, or use an explicit agent@version target.',
           ));
           process.exit(1);
         }
@@ -1765,6 +1764,14 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           }
           const interactiveHost = options.interactive === true || (prompt === undefined && options.headless !== true);
 
+          if (accountPickerRequested && !interactiveHost) {
+            console.error(chalk.red(
+              `Account selection with ${agentSpec} requires an interactive host run. ` +
+              `Use agents run ${runAgent}@ --device ${host.name} --interactive.`,
+            ));
+            process.exit(1);
+          }
+
           if (interactiveHost) {
             // Interactive host run: forward the local TTY over SSH and let the
             // remote agent start its normal interactive UI (tmux on the host).
@@ -1814,6 +1821,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             const exitCode = await runInteractiveOnHost(host, {
               agent: runAgent,
               version: resumeId ? undefined : runVersion,
+              accountPicker: accountPickerRequested,
               strategy: resumeId ? undefined : runStrategy,
               account: resumeId ? undefined : options.account,
               fallback: options.fallback,

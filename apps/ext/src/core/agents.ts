@@ -173,6 +173,8 @@ export function buildAgentLaunchCommand(
   target: {
     host?: string;
     local?: boolean;
+    /** Emit the trailing-@ account picker after placement resolves. */
+    accountPicker?: boolean;
     /** Portable local path for CLI `--cwd`; agents-cli re-roots it on `host`. */
     cwd?: string;
     /** Exact path already resolved on `host`; emitted verbatim as `--remote-cwd`. */
@@ -181,7 +183,7 @@ export function buildAgentLaunchCommand(
     project?: string;
   } = {},
 ): string {
-  const { host, local = false, cwd, remoteCwd, project } = target;
+  const { host, local = false, accountPicker = false, cwd, remoteCwd, project } = target;
   if (cwd && remoteCwd) {
     throw new Error('Agent launch target cannot combine portable cwd with exact remoteCwd');
   }
@@ -191,7 +193,17 @@ export function buildAgentLaunchCommand(
   if (project && (cwd || remoteCwd)) {
     throw new Error('Agent launch target cannot combine project with cwd or remoteCwd');
   }
-  const agentSpec = pinnedVersion ? `${agentKey}@${pinnedVersion}` : agentKey;
+  if (accountPicker && pinnedVersion) {
+    throw new Error('Agent launch cannot combine an account picker with a pinned version');
+  }
+  if (accountPicker && strategy) {
+    throw new Error('Agent launch cannot combine an account picker with an automatic strategy');
+  }
+  const agentSpec = accountPicker
+    ? `${agentKey}@`
+    : pinnedVersion
+      ? `${agentKey}@${pinnedVersion}`
+      : agentKey;
   let command = `agents run ${agentSpec} --interactive`;
   // Offload onto another machine over SSH — the CLI resolves the device from
   // `agents devices` and runs interactive-on-host. Emitted for ANY agent so
