@@ -442,8 +442,9 @@ command — see *Recommendations*.
 
 **Update (2026-08-21): the command was run, and this unknown is now closed.** The
 `posthog.com` bundle was unlocked and PostHog project `299876` queried directly.
-The measured numbers — 145 human visitors in 30 days, not the ~19/fortnight this
-report estimated — are in the [Addendum](#addendum-the-command-was-run-measured-human-traffic-2026-08-21)
+The measured numbers — 145 distinct browser visitors in 30 days, of which ~61 are
+confirmed-external humans (search/social referred, 15+ countries), against the
+~19/fortnight this report estimated — are in the [Addendum](#addendum-the-command-was-run-measured-human-traffic-2026-08-21)
 at the end. Cloudflare stays dark: its token still lacks `zone.analytics.read`.
 
 ## Recommendations
@@ -593,22 +594,56 @@ snippet — becomes readable in minutes.
 `agents secrets unlock posthog.com` was run on 2026-08-21, and PostHog project
 `299876` (US) was queried directly with HogQL. This closes the report's single
 largest unknown. Window: 30 days, **2026-07-22 → 2026-08-21**. PostHog's
-JavaScript executes only in a real browser, so bots, CI runners, and `curl` are
-absent by construction — every number below is a human.
+JavaScript executes only in a real browser, so `curl`, CI runners, and non-JS
+bots are absent by construction. What it counts is a **distinct browser that
+loaded the page and ran the JS** — which excludes machines but does *not* by
+itself exclude the operator's own visits or a fleet agent driving a headless
+browser. So the raw count and the *confirmed-external* count are reported
+separately below, and the segmentation that separates them follows in the next
+section.
 
-### The traffic is ~5x this report's estimate — and still a trickle
+### The traffic is ~3x this report's estimate — and still a trickle
 
 | Metric | This report estimated | Measured |
 | --- | --- | --- |
-| Human visitors / 14 days | ~19 | **95** |
-| Human visitors / 30 days | (unmeasured) | **145** |
-| Human visitors / 7 days | (unmeasured) | **58** |
+| Distinct browser visitors / 30d | (unmeasured) | **145** |
+| Distinct browser visitors / 14d | ~19 | **95** |
+| **Confirmed-external humans / 30d** (search/social referred) | — | **61** |
 | Pageviews / 30 days | (unmeasured) | 240 |
 
-The *"there are approximately no users"* finding softens but does not reverse:
-145 humans/month is a real top of funnel where the report assumed near-zero, yet
-it is still a trickle, and the npm r=0.965 release-cadence correlation is
-untouched — that number is still the fleet installing itself.
+The *"there are approximately no users"* finding softens but does not reverse.
+The honest floor is **61 confirmed-external humans in 30 days** — visitors a
+search engine or social platform referred, which is neither the operator typing
+the URL nor a fleet agent. That is ~3x the report's ~19/fortnight estimate and,
+crucially, *real strangers* (see next section), but it is still a trickle, and
+the npm r=0.965 release-cadence correlation is untouched — that number is still
+the fleet installing itself.
+
+### Who these 145 browsers actually are — internal vs external
+
+The raw 145 is not 145 strangers. Segmenting it:
+
+- **Confirmed external — 61 unique visitors** arrived from a search or social
+  referrer (Google 40, ChatGPT 8, LinkedIn 6, Bing/DuckDuckGo/Yahoo the rest). A
+  referrer of `google.com` or `chatgpt.com` means a person searched and clicked;
+  the fleet does not do that and the operator does not need to.
+- **Genuinely global — 15+ countries.** US 70, then Japan 6, China 6, India 6,
+  Taiwan 6, UK 5, Bangladesh 3, Pakistan 3, Singapore 3, Vietnam 3, Israel 3,
+  Netherlands 3, Hong Kong 3, Canada 2. Every fleet box is US-based, so this
+  international tail cannot be self-traffic.
+- **27 on mobile** (18 iOS Safari + 9 Android Chrome). The fleet has no mobile
+  browsers and `agents browser` is desktop-headless, so these are unambiguously
+  real people on phones.
+- **Internal contamination is small and identifiable:** exactly **one**
+  identified person in the whole set (`muqsitnawaz@gmail.com`), just **2**
+  Brave/macOS visitors (the browser `agents browser` uses), and some
+  Mountain-View / Council-Bluffs hits that are Google prefetch/datacenter rather
+  than a person.
+
+So the defensible statement is: **~61 confirmed-external humans/month, spread
+across 15+ countries and including real mobile traffic**, inside a raw
+browser-visitor count of 145 that also contains the operator, ~2 fleet sessions,
+and some Google prefetch noise. Quote the 61, not the 145.
 
 ### Where the humans land
 
