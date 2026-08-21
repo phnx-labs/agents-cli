@@ -624,9 +624,12 @@ the fleet installing itself.
 The raw 145 is not 145 strangers. Segmenting it:
 
 - **Confirmed external — 61 unique visitors** arrived from a search or social
-  referrer (Google 40, ChatGPT 8, LinkedIn 6, Bing/DuckDuckGo/Yahoo the rest). A
-  referrer of `google.com` or `chatgpt.com` means a person searched and clicked;
-  the fleet does not do that and the operator does not need to.
+  referrer: Google 40, ChatGPT 8, LinkedIn 6, and the remaining 7 spread one or
+  two apiece across Bing, DuckDuckGo, Yahoo, Yandex, `t.co` (Twitter/X), and
+  GitHub (40 + 8 + 6 + 7 = 61, after de-duplicating people who arrived by more
+  than one path). A referrer of `google.com` or `chatgpt.com` means a person
+  searched and clicked; the fleet does not do that and the operator does not
+  need to.
 - **Genuinely global — 15+ countries.** US 70, then Japan 6, China 6, India 6,
   Taiwan 6, UK 5, Bangladesh 3, Pakistan 3, Singapore 3, Vietnam 3, Israel 3,
   Netherlands 3, Hong Kong 3, Canada 2. Every fleet box is US-based, so this
