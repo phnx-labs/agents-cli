@@ -1,1 +1,0 @@
-- `agents auth` and `agents org` now print a clean one-line error (and a structured `{"error"}` payload under `--json`) for signed-out, expired-token, and bad-input states, instead of dumping a raw Node stack trace.

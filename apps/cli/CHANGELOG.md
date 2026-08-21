@@ -1,5 +1,77 @@
 # Changelog
 
+## 1.22.43
+
+- **Rush Cloud no longer has a helper that reads the interactive Claude login (RUSH-2359 / incident #1767).** Dispatch already sends an email-only account manifest (SING-1b) and never uploaded a token; the leftover `readClaudeCredentialsBlob` still read Keychain / `.credentials.json` — the exact shape that captured a `claude setup-token` TTY banner as an Authorization header. That helper is deleted. `--lease` SING-1b detection now reads the wrapped rotating blob itself and ignores anything that is not `{ claudeAiOauth.accessToken }`. Source: `apps/cli/src/lib/cloud/rush.ts`, `apps/cli/src/lib/crabbox/runtimes.ts`.
+
+- **fix: `agents sync <agent>` self-heals version pointers left aimed at an uninstalled version (RUSH-2471).** `removeVersion` reassigns the default and clears the `~/.<agent>` config symlink only when it removes the pointed-at version, so a version-home whose launch binary vanished by any other route — grok self-updating its per-version binary out from under the old dir, a manual delete, a half-finished install that seeded the home but never landed the binary — left the global default and/or the symlink resolving to a dead version. Because `agents use <agent>@<v>` sets the default and the symlink together, both dangled in lockstep once `<v>`'s binary went away: `agents sync <agent>` would print `Repointed <agent> config symlink …` and then still fail `<agent>@<v> is not installed`, because the version to sync is resolved from the raw global default. `agents sync <agent>` now repoints the global default, the isolated default, and the config symlink off any not-installed version before resolving — the default to the newest non-isolated installed version (never auto-promoting an isolated install), the symlink to the resolved default else the newest non-isolated installed version (the user's real `~/.<agent>` is never repointed at an isolated install). A pointer already on an installed version (a deliberate `agents use` choice), a real config directory, and isolated-only agents are left untouched. Source: `apps/cli/src/lib/installations/versions.ts`, `apps/cli/src/commands/sync.ts`.
+
+- **Session preview groups metadata into verb-led rows (RUSH-2757, part 3).** `agents sessions preview` (and the picker pane) replaces the flat labeled block (`Prompt/Todos/Dirs/Repos/Changes/Artifacts/Skills/Plugins/Hooks/Links/Errors/Meta/Tools/Tests`) with five scannable verb rows in a fixed gutter — `Asked` (the originating prompt, quoted), `Doing` (checklist progress, team lineage, sub-agents), `Made` (file deltas, reads, artifacts, plan, PR), `Health` (errors + last test verdict, absent when clean), `Cost` (msgs, tokens, tool mix) — then `Latest` (the full wrapped last message, formerly `Last response:`) and one width-capped `Details ▸` fold (session id, skills, plugins, hooks, links, dirs, repos) that shows `… +N more` instead of wrapping and swamping the pane. Msgs/tokens/session-id move out of the header's third line into `Cost`/`Details`, so they render once. The metadata-only card (remote/unindexed sessions) uses the same rows. Source: `apps/cli/src/commands/sessions-picker.ts` (`formatCompactPreview`, `formatMetaOnlyBody`, `formatHeader`, `joinWidthCapped` — now ANSI-aware).
+
+- **`pr-merge-on-green` can actually select a PR (RUSH-2848).** The built-in's poll ran `gh pr list --author @me` with no `--repo`, so `gh` inferred the repository from cwd; the daemon's cwd is not a git repo and every poll returned empty. The poll now walks registered project slugs (`~/.agents/projects/*.yaml`), canonicalizes renamed repos (`phnx-labs/agents-cli` → `phnx-labs/agi-cli`), and lists with `--repo`. Verdict matches `merge-guard.sh`: a formal GitHub `APPROVED` review **or** an APPROVE comment on THIS PR (carried-from citations do not count). Hidden `agents _internal mergeable-prs` prints `owner/repo#n` (cwd-independent). Source: `apps/cli/src/lib/github/pr-verdict.ts`, `apps/cli/src/lib/github/pr-mergeable.ts`. Companion: phnx-labs/.agents-system#347.
+
+- **BREAKING: nest `agents status` under `agents sync status` (RUSH-2864).** `status` was the unified sync-drift report sitting as its own top-level command next to `sync`. It now lives as `agents sync status` (`--json` UnifiedSyncStatus contract and `--yes` reconcile unchanged). Top-level `agents status` is gone, not deprecated: it reports `unknown command`, and `status` is retired from distance-1 auto-correct. `agents sync <agent>` still treats the positional as an agent spec; `status` is reserved as the subcommand. `agents sync status --device` from a non-TTY does not inherit umbrella `--yes` (that flag is reconcile on this command, not "don't prompt"). Source: `apps/cli/src/commands/{status,sync}.ts`, `apps/cli/src/lib/hosts/passthrough.ts`, `apps/cli/src/lib/startup/command-registry.ts`.
+
+- **Custom harnesses (deepseek, kimi-chat, glm, …) now work in routines and monitors, and their profiles survive fleet sync (RUSH-2930).** `agents routines add --agent deepseek` and `agents monitors add --run deepseek` used to refuse any name outside the native registry; both now accept a custom harness (`agents harness list`), and the daemon delegates the job to `agents run <name>` — the same path workflow jobs take — so the profile's host binary, model env, and provider auth resolve exactly as an interactive run. The profile pins its own host version and auth, so `@version` pins, balanced rotation, and account-env injection don't apply to these jobs. Separately, `agents harness add/fork/edit` and the legacy-auth migration stored the account's per-device **id** in the profile, while profiles sync fleet-wide via `agents repo push` — every synced custom harness then died on other machines with `Unknown account '<uuid>'`. The portable account **name** is stored now, and a profile with a dangling ref reports which harness is broken and the exact `agents harness edit <name> --account <name>` repair instead of the bare registry error. Source: `apps/cli/src/lib/daemon/runner.ts`, `apps/cli/src/lib/scheduling/routines.ts`, `apps/cli/src/lib/monitors/config.ts`, `apps/cli/src/commands/{routines,harness,profiles}.ts`, `apps/cli/src/lib/profiles.ts`.
+
+- **BREAKING: remove the top-level `agents tickets` command (RUSH-2932).** Ticket reads go through `linear` (linear-cli) and `gh issue`. `agents tickets` reports `unknown command`, and `tickets` is retired from distance-1 auto-correct. AGI EXT now calls those CLIs directly. Source: `apps/cli/src/cli/command-registry.ts`, `apps/cli/src/lib/startup/command-registry.ts`, `apps/ext/src/vscode/tasks.vscode.ts`.
+
+- **Expired cached usage windows read as unknown, not 0% (RUSH-2936).** A cached Claude usage window whose reset time had passed was zeroed but kept, so a frozen cache (Anthropic has been 429-ing `/api/oauth/usage` per account since ~Aug 5) rendered every account as `S: 0% (now)  W: 0% (now)` with `usageStatus: "available"` — and balanced rotation kept dispatching into genuinely rate-limited accounts (RUSH-2858). `deserializeClaudeUsageSnapshot` now drops expired windows (the same rule the Grok collector already applied); an all-expired snapshot deserializes to null, the dead cache entry self-cleans, `agents view` renders `usage unavailable` plus the recorded throttle reason, and rotation falls back to the coarse cached status instead of trusting a fake 0%. Source: `apps/cli/src/lib/accounting/usage.ts`.
+
+- **`agents doctor <agent>@<version>` no longer marks every missing resource critical (RUSH-2947).** Target mode's `computeVerdict` hardcoded `severity: 'critical'` for any `status: 'missing'` resource of any kind, while fleet mode's `FINDING_SEVERITY` — whose own docblock calls it "the single source of truth" — rates the same fact `warning` for everything except `missing-hook`/`missing-plugin`. A missing command, skill, permission, subagent, rule, or MCP entry now reads `warning` in target mode too, matching fleet mode; a missing hook or plugin stays `critical` in both. `computeVerdict` reads severity from `FINDING_SEVERITY` via a new `missingResourceSeverity(kind)` helper instead of re-hardcoding it. Source: `apps/cli/src/commands/doctor.ts`.
+
+- **BREAKING: nest `agents alias` under `agents setup alias` (RUSH-2965).** Setting up a PATH shorthand is a setup action, not its own noun. `agents setup alias add/list/remove` keep the same shim behavior (`~/.agents/.cache/shims/` + `~/.agents/aliases.json`). Top-level `agents alias` is gone, not deprecated: it reports `unknown command`, and `alias` is retired from distance-1 auto-correct. Source: `apps/cli/src/commands/{alias,setup}.ts`, `apps/cli/src/lib/startup/command-registry.ts`.
+
+- **Block service-manager registration under a redirected HOME on macOS/Linux (RUSH-2968).**
+  `launchctl` and `systemctl --user` are per-user-session and ignore `$HOME`, so a CLI
+  running under a sandbox/redirected HOME (including every vitest fork) still talked to
+  the user's real service manager. `service-manifest.ts` already namespaces the job
+  label, but that only changes the identifier — the registration still lands in real
+  `launchd`/`systemd` (measured: 89 dead `…sandbox-<hash>` services accumulated in one
+  user's real launchd from test runs, KeepAlive-retrying torn-down executables). Every
+  registration path now consults `serviceManagerRegistrationAllowed()` (false when
+  `isolatedHomeSuffix()` is non-null) and skips with a stated reason rather than
+  touching the real service manager: daemon `startDaemon`/`stopDaemon`, menubar
+  `restartMenubarLaunchAgent`/`disableMenubarService`, secrets
+  `retireLegacySecretsAgentService`, and `agents computer start`. A test seam
+  `AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME=1` lets the existing shim-based tests
+  continue to exercise the registration code path. Source:
+  `apps/cli/src/lib/service-manifest.ts`, `apps/cli/src/lib/daemon/daemon.ts`,
+  `apps/cli/src/lib/menubar/install-menubar.ts`, `apps/cli/src/lib/secrets/agent.ts`,
+  `apps/cli/src/commands/computer.ts`.
+
+- **BREAKING: the top-level `agents inbox` command is removed — use `agents feed` (RUSH-2984).** `inbox` was a Phase-3 observe alias that re-parsed as `agents feed` (needs-you is already the feed default), the same leftover class as `timeline` (RUSH-2692). It is gone entirely, not deprecated: `agents inbox` now reports `unknown command`, and `inbox` is retired from distance-1 auto-correct. `agents feed` / `feed post` / `feed post --blocked` are unchanged. Source: `apps/cli/src/commands/feed.ts`, `apps/cli/src/lib/startup/command-registry.ts`, `apps/cli/src/bootstrap.ts`.
+
+- `agents auth` and `agents org` now print a clean one-line error (and a structured `{"error"}` payload under `--json`) for signed-out, expired-token, and bad-input states, instead of dumping a raw Node stack trace.
+
+- Fixed balanced Claude account rotation recording session-limit refusals until their stated reset, skipping those accounts, and surfacing `session-limited` in `agents view` instead of idle usage.
+
+- Sandboxed monitor `--run` and routine children now inherit this host's GitHub CLI auth (RUSH-2860). A monitor fire recorded `ok` while the spawned child had no `~/.config/gh`, so `gh auth status` reported "not logged into any GitHub hosts" and the PR it was meant to act on stayed open. The routine sandbox overlay replaces `HOME` with a disposable dir, and `gh` was never linked into it. `prepareJobHome` now links the host's `gh` config dir into the overlay (and only that — `~/.agents` is deliberately not linked, since it holds the secrets master key and the encrypted store), `buildSpawnEnv` pins `GH_CONFIG_DIR` and forwards `GH_TOKEN`/`GITHUB_TOKEN`, and the runner refuses to launch when a routine's own `env:` overrides `GH_CONFIG_DIR` such that this host's gh auth would still be hidden — a regression tripwire rather than a runtime guarantee. Not covered on Windows, where `gh` stores config under `%AppData%\GitHub CLI`.
+
+- **`agents webhooks` now advertises `/hooks/slack`.** The receiver has accepted signed
+  Slack deliveries since the Slack bridge landed, but `agents webhooks serve` and
+  `agents daemon webhooks list` still printed only `/hooks/github, /hooks/linear` — the
+  one URL you must paste into the Slack app was missing from the banner. The slash-command
+  ack now also says "replying in this channel", matching where the reply actually posts
+  (a slash command carries no thread). Source: `apps/cli/src/commands/webhook.ts`,
+  `apps/cli/src/commands/daemon.ts`, `apps/cli/src/lib/triggers/webhook.ts`.
+
+- **Slack/webhook handlers that run an agent actually dispatch now.** A `run.agent` or
+  `run.workflow` webhook handler was gated by the *routine* activation manifest
+  (`~/.agents/devices/<machine>/agents.yaml`). A handler is not a routine, so its name
+  could never be a member — on any box that had materialized that manifest, every
+  delivery was recorded `skipped` with an empty allowlist (`can only run on: `) while the
+  receiver logged it as `fired`, and `agents routines enable <handler>` refuses the name,
+  so there was no way out. Verified live: a real HMAC-signed `/agents` slash command
+  reached the public receiver, acked 200, and started no agent. The job now carries
+  `dispatchedBy: 'webhook'`, the same escape RUSH-2681 gave monitors; a handler's
+  `routine:` delegate still keeps its gate.
+- **`{{slack.response_url}}` is now available to handler prompts.** It was parsed off the
+  wire but never reached the `{{slack.*}}` namespace. Slack accepts a POST there for 30
+  minutes with no token and no channel membership, so it is the only reply that works
+  before the app has been invited to a channel — the shipped example handler now uses it.
+  Source: `apps/cli/src/lib/triggers/handlers.ts`, `apps/cli/src/lib/scheduling/routines.ts`.
+
 ## 1.22.42
 
 - **Plan-tier gates for `agents accounts` and `agents insights` (RUSH-2424).** A new `apps/cli/src/lib/entitlement.ts` reads the live subscription tier from `GET /api/v1/billing/subscription?agent=agi-cli` (the session token in `~/.rush/user.yaml`), caches it on disk for 15 minutes, and stays offline-tolerant: a stale cache is honored over a failed network call, and no session file at all resolves straight to the free tier. `agents accounts add` / `name` / `attach` now cap registered accounts at 3 per harness on free, 10 on paid/admin — a 4th add on free refuses before any write (`free plan is capped at 3 claude accounts (3/3). agents upgrade — up to 10 per harness.`) and the 3rd prints a one-line notice. Downgrading a plan never deletes a credential: over-cap accounts fall out of `accounts switch`/`set-default` (excluded from `listSwitchableAccounts`) and are listed `dormant (upgrade to reactivate)` in `agents accounts`. `agents insights` keeps top-line counts, harness mix, `insights mix`, and `agents perf` free on every tier; the Friction / Friction-thrash / Dissatisfaction-corrections sections, grouping `--by account` (the default), and `--narrative` are paid — a gated section is replaced by the in-voice notice `Friction and account-split analysis are on the paid plan.` in both the text report and `--json` (a new `plan: {tierName, isPaid}` field, `groups: null` when the account breakdown is gated, and the friction/correction facet keys stripped per group otherwise). Source: `apps/cli/src/lib/entitlement.ts`, `apps/cli/src/commands/accounts.ts`, `apps/cli/src/commands/insights.ts`.
