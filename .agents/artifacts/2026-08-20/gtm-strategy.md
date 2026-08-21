@@ -71,7 +71,7 @@ that fork rather than resolving it.
 ## This is the one page — the companion reports it pulls from
 
 This document is the single source of truth for the agi-cli GTM state. Everything
-below folds up from four companion reports; read this page for the decision, open a
+below folds up from three companion reports; read this page for the decision, open a
 companion only for the underlying receipts. All are committed under
 `.agents/artifacts/` and linked in the header.
 
