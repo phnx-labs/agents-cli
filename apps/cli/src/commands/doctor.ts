@@ -815,9 +815,11 @@ export type IssueSeverity = 'critical' | 'warning' | 'info';
  *
  * Severity model (agent-agnostic — applies to every agent doctor inspects):
  *   - critical (silent breakage): an unwired hook, a missing/unparseable
- *     settings.json, a MISSING resource.
+ *     settings.json, a MISSING hook or plugin.
  *   - warning (stale / drift): a source layer behind origin, a DIVERGENT resource,
- *     a stale / never-synced version.
+ *     a stale / never-synced version, a MISSING resource of any other kind
+ *     (see `missingResourceSeverity`, which reads this split from
+ *     `FINDING_SEVERITY` — RUSH-2947).
  *   - info (orphan): an EXTRA resource → `agents prune cleanup`.
  */
 export interface VerdictIssue {
