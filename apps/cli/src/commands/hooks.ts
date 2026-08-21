@@ -613,7 +613,7 @@ Examples:
         console.log(chalk.yellow('No hooks removed.'));
       } else {
         console.log(chalk.green(`\nRemoved ${removed} hook(s) from version homes.`));
-        console.log(chalk.gray('Central source unchanged. Hooks will re-sync on next agent launch.'));
+        console.log(chalk.gray("Central source unchanged. Restore any target with 'agents sync <agent>@<version> --yes'."));
       }
     });
 

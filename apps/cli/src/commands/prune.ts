@@ -12,10 +12,11 @@
  *     agents-cli.
  *   - Runs: routine execution logs, keeping only the last N per job.
  *
- * Sync (additive: copy missing/changed files into version homes) is no longer
- * a user-facing verb — `syncResourcesToVersion` runs at agent launch and
- * applies adds/updates automatically. Pruning, however, is destructive, so it
- * stays explicit.
+ * Sync (additive: copy missing/changed files into version homes) is the job
+ * of `agents sync` / `agents refresh` — the shim's launch hook
+ * (`agents sync --launch`) is project-scoped only and deliberately skips
+ * version-home reconciliation. Pruning, however, is destructive, so it stays
+ * explicit.
  *
  * Default scope: each agent's currently-pinned default version for orphan
  * cleanup, plus the standard cross-agent version-dedup pass. Pass `--all`

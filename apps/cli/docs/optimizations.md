@@ -204,9 +204,15 @@ syncResourcesToVersion(agent, version, selection?, options)
                                                      (zero file operations)
 ```
 
-The guard only engages for **full, unselected syncs** — the path taken on every
-agent launch. Explicit user interactions (`agents sync`, interactive add) bypass
-it so users always get exactly what they asked for.
+The guard only engages for **full, unselected syncs** — a plain `agents sync` /
+`agents refresh` with no explicit resource selection. (The shim's launch hook,
+`agents sync --launch`, is project-scoped only and skips version-home
+reconciliation entirely — see the v15 shim note in `shims.ts`.)
+Selection-carrying interactions (interactive add, `agents add`) bypass it so
+users always get exactly what they asked for, and `--force` skips it outright.
+The staleness check also verifies every artifact recorded by the last full sync
+(`writtenTargets`) still exists in the version home, so a deleted resource
+reads as stale and a plain `agents sync` restores it (#2398).
 
 ### Results
 

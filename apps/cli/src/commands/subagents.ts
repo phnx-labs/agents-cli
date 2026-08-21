@@ -361,7 +361,7 @@ Examples:
         console.log(chalk.yellow('No subagents removed.'));
       } else {
         console.log(chalk.green(`\nRemoved ${removed} subagent(s) from version homes.`));
-        console.log(chalk.gray('Central source unchanged. Subagents will re-sync on next agent launch.'));
+        console.log(chalk.gray("Central source unchanged. Restore any target with 'agents sync <agent>@<version> --yes'."));
       }
     });
 }

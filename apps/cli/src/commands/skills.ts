@@ -497,7 +497,7 @@ Examples:
         console.log(chalk.yellow('No skills removed.'));
       } else {
         console.log(chalk.green(`\nRemoved ${removed} skill(s) from version homes.`));
-        console.log(chalk.gray('Central source unchanged. Skills will re-sync on next agent launch.'));
+        console.log(chalk.gray("Central source unchanged. Restore any target with 'agents sync <agent>@<version> --yes'."));
       }
     });
 
