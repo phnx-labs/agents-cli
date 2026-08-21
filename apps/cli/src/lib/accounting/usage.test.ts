@@ -12,6 +12,7 @@ import {
   getUsageInfoForIdentity,
   writeClaudeUsageCache,
   readClaudeUsageCache,
+  pruneExpiredClaudeUsageCacheEntry,
   noteClaudeSessionLimit,
   parseClaudeSessionLimitReset,
   deriveUsageStatusFromSnapshot,
@@ -482,6 +483,20 @@ describe('observed Claude session limits', () => {
     const reset = new Date(NOW + 60_000);
     noteClaudeSessionLimit(usageKey, reset);
     expect(readClaudeUsageCache(usageKey, undefined, new Date(NOW + 60_001))).toBeNull();
+  });
+
+  it('stale expiry cleanup cannot erase a newer session-limit write', () => {
+    const reset = new Date(Date.now() + 60 * 60 * 1000);
+    noteClaudeSessionLimit(usageKey, reset);
+
+    // Models a reader that observed an expired row before the real-run writer
+    // replaced it: cleanup executes afterward and must re-read under its lock.
+    pruneExpiredClaudeUsageCacheEntry(usageKey, undefined, new Date());
+
+    expect(readClaudeUsageCache(usageKey)?.unavailable).toEqual({
+      reason: 'session_limit',
+      resetsAt: reset,
+    });
   });
 });
 

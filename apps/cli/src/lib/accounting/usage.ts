@@ -1891,10 +1891,31 @@ export function readClaudeUsageCache(
 
   const snapshot = deserializeClaudeUsageSnapshot(cached, now);
   if (!snapshot) {
-    delete cache[usageKey];
-    writeClaudeUsageCacheFile(cache, cachePath);
+    pruneExpiredClaudeUsageCacheEntry(usageKey, cachePath, now);
   }
   return snapshot;
+}
+
+/** Delete an expired cache row only if it is still expired under the write lock. */
+export function pruneExpiredClaudeUsageCacheEntry(
+  usageKey: string,
+  cachePath = getClaudeUsageCachePath(),
+  now = new Date(),
+): void {
+  try {
+    ensureLockTarget(cachePath, '{}');
+    withFileLock(cachePath, () => {
+      // The row may have been refreshed after readClaudeUsageCache observed it.
+      // Re-read under the lock so stale cleanup cannot erase that newer write.
+      const latest = readClaudeUsageCacheFile(cachePath);
+      const current = latest[usageKey];
+      if (!current || deserializeClaudeUsageSnapshot(current, now)) return;
+      delete latest[usageKey];
+      atomicWriteFileSync(cachePath, JSON.stringify(latest, null, 2), 'utf-8');
+    });
+  } catch {
+    /* best-effort cache cleanup — lock busy or disk full */
+  }
 }
 
 /** Write a usage snapshot to the on-disk cache. */
