@@ -158,6 +158,33 @@ describe('resolveDeviceAuto', () => {
     })).rejects.toThrow('no healthy device can run codex');
   });
 
+  it('keeps installed signed-out devices eligible for an interactive account picker', async () => {
+    const plan = await resolveDeviceAuto('claude', {
+      allowSignedOut: true,
+      localMachine: 'local',
+      eligibleHosts: ['local', 'remote'],
+      probe: async () => new Map([
+        ['local', { reachable: true, loadPercent: 35, headroom: 'light', installed: true, signedIn: false }],
+        ['remote', { reachable: true, loadPercent: 5, headroom: 'idle', installed: true, signedIn: false }],
+      ]),
+    });
+    expect(plan.host).toBe('remote');
+    expect(plan.pickedDeviceKey).toBe('remote');
+  });
+
+  it('still prefers a signed-in device when picker placement also admits signed-out devices', async () => {
+    const plan = await resolveDeviceAuto('claude', {
+      allowSignedOut: true,
+      localMachine: 'local',
+      eligibleHosts: ['signed-out-idle', 'signed-in-light'],
+      probe: async () => new Map([
+        ['signed-out-idle', { reachable: true, loadPercent: 2, headroom: 'idle', installed: true, signedIn: false }],
+        ['signed-in-light', { reachable: true, loadPercent: 25, headroom: 'light', installed: true, signedIn: true }],
+      ]),
+    });
+    expect(plan.host).toBe('signed-in-light');
+  });
+
 
   it('keeps live load placement when run auto has not selected a harness yet', async () => {
     const plan = await resolveDeviceAuto(undefined, {
@@ -268,11 +295,14 @@ describe('applyDeviceAutoToOptions', () => {
     };
     const result = await applyDeviceAutoToOptions(options, {
       accountPickerRequested: true,
-      resolve: () => ({
-        host: null,
-        candidates: [],
-        pickedDeviceKey: 'local',
-      }),
+      resolve: (allowSignedOut) => {
+        expect(allowSignedOut).toBe(true);
+        return {
+          host: null,
+          candidates: [],
+          pickedDeviceKey: 'local',
+        };
+      },
     });
     expect(options.strategy).toBe('round-robin');
     expect(options.balanced).toBeUndefined();

@@ -2368,7 +2368,11 @@ schema (`--json` passes through each agent's native stream format).
   run streams the same style invocation live via `sshStream` instead
   (`runInteractiveOnHost`). A trailing account-picker marker (`<agent>@`) MUST
   survive that interactive re-exec so the peer, not the launcher, lists and
-  selects from its device-local versions/accounts.
+  selects from its device-local versions/accounts. Picker-aware automatic
+  placement MUST prefer signed-in devices while retaining reachable devices
+  where the harness is installed but every account is signed out/revoked, so
+  the peer's selectable `launch to sign in` path remains reachable; non-picker
+  automatic placement MUST continue to require a healthy signed-in account.
 - **EXEC-31 (MUST).** Actor-provenance env MUST cross the SSH hop:
   `withActorEnv()` prepends `actorEnv(resolveActor())` as shell exports
   ahead of the remote invocation, so the remote process is credited to the

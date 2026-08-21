@@ -26,7 +26,7 @@ describe('BUILT_IN_AGENTS', () => {
     const packageJson = JSON.parse(readFileSync(resolve(import.meta.dir, '../../package.json'), 'utf8'));
     const contributed = new Set(packageJson.contributes.commands.map((entry: { command: string }) => entry.command));
     const extensionSource = readFileSync(resolve(import.meta.dir, '../vscode/extension.ts'), 'utf8');
-    expect(extensionSource).toContain('`${def.commandId}Auto`');
+    expect(extensionSource).toContain('harnessLaunchRegistrations(');
     for (const agent of BUILT_IN_AGENTS) {
       if (agent.key === 'shell') continue;
       // Gemini is deprecated and no longer gets launch commands in the palette.
@@ -312,11 +312,9 @@ describe('planTextToSteps', () => {
   });
 });
 
-// The launch contract (apps/ext/AGENTS.md § "Launch contract"): every agent
-// runner launches through `agents run <agent> --interactive --strategy balanced
-// --mode auto`, on local / auto-host / picked-host alike. Shell is the sole
-// non-runner. These tests pin that invariant — there is no per-harness allowlist.
-describe('launch contract — every runner is balanced', () => {
+// Base transport contract: every harness is managed by `agents run`; callers
+// explicitly choose either automatic balanced rotation or the account picker.
+describe('launch contract — every runner uses the managed launch builder', () => {
   // Every built-in that is an agent runner (i.e. not the Shell terminal).
   const RUNNERS = BUILT_IN_AGENTS.map(a => a.key).filter(k => k !== 'shell');
 
@@ -336,19 +334,17 @@ describe('launch contract — every runner is balanced', () => {
     expect(usesManagedAgentLaunch('shell', 'yosemite-s1')).toBe(false);
   });
 
-  test('every runner × {local, auto, pick-host} emits --strategy balanced --mode auto', () => {
+  test('every runner supports balanced selection on local, auto, and explicit-host targets', () => {
     for (const key of RUNNERS) {
-      // New X — local
+      // Automatic account selection, local target.
       expect(buildAgentLaunchCommand(
         key, null, undefined, undefined, undefined, 'balanced', undefined, { local: true },
       )).toBe(`agents run ${key} --interactive --strategy balanced --mode auto`);
-      // Unpinned, no host, not local (QuickLaunch balanced) — CLI affinity-picks
-      // the device via --device auto. (New X (Auto) resolves a concrete --host
-      // itself instead; see launchAgent + apps/ext/AGENTS.md launch contract.)
+      // Automatic account selection and automatic device placement.
       expect(buildAgentLaunchCommand(
         key, null, undefined, undefined, undefined, 'balanced', undefined, {},
       )).toBe(`agents run ${key} --interactive --device auto --strategy balanced --mode auto`);
-      // New X (Pick Host) — explicit device
+      // Automatic account selection on an explicit device.
       expect(buildAgentLaunchCommand(
         key, null, undefined, undefined, undefined, 'balanced', undefined, { host: 'yosemite-s1' },
       )).toBe(`agents run ${key} --interactive --host 'yosemite-s1' --strategy balanced --mode auto`);

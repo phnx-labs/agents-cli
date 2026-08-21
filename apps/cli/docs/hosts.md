@@ -134,6 +134,12 @@ The picker remains interactive, and the selected version applies only to that
 run. Account selection cannot be combined with another account selector such as
 `--strategy`, `--balanced`, `--resume`, `--lease`, or `--box`.
 
+For `--device auto`, picker placement prefers a signed-in device but keeps a
+reachable device with the harness installed eligible when every account there
+is signed out or revoked. That fallback is what lets the device-local picker
+offer `launch to sign in`; ordinary automatic runs still require a healthy,
+signed-in account before placement.
+
 **One carve-out: a missing login is not an exhausted account.** When the only
 thing wrong is that an account is signed out (or its token was revoked), a
 terminal run does NOT fail loud — it launches so you can authenticate, because

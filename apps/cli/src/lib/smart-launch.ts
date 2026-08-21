@@ -181,6 +181,8 @@ export async function resolveDeviceAuto(
   opts: {
     eligibleHosts?: string[];
     localMachine?: string;
+    /** Keep installed auth-blocked devices eligible so an interactive picker can launch their login flow. */
+    allowSignedOut?: boolean;
     probe?: (pool: string[], agent?: AgentType) => Promise<Map<string, DevicePlacementSignal>>;
   } = {},
 ): Promise<DeviceAutoPlan> {
@@ -213,7 +215,7 @@ export async function resolveDeviceAuto(
     const signal = signals.get(key);
     if (signal?.reachable !== true || signal.headroom === 'loaded') return false;
     if (!agent) return opts.probe ? true : signal.installed === true && signal.signedIn === true;
-    return signal.installed === true && signal.signedIn === true;
+    return signal.installed === true && (opts.allowSignedOut === true || signal.signedIn === true);
   });
   if (eligiblePool.length === 0) {
     throw new Error(formatNoHealthyDeviceError(pool, signals, agent));
@@ -340,7 +342,7 @@ export type DeviceAutoApplyResult = {
 export async function applyDeviceAutoToOptions(
   options: DeviceAutoHostOptions,
   deps: {
-    resolve?: () => DeviceAutoPlan | Promise<DeviceAutoPlan>;
+    resolve?: (allowSignedOut: boolean) => DeviceAutoPlan | Promise<DeviceAutoPlan>;
     agent?: string;
     accountPickerRequested?: boolean;
   } = {},
@@ -360,16 +362,16 @@ export async function applyDeviceAutoToOptions(
     return { attempted: false, deprecationSmart };
   }
 
-  const resolve: () => DeviceAutoPlan | Promise<DeviceAutoPlan> =
-    deps.resolve ?? (() => resolveDeviceAuto(deps.agent));
-  const plan = await resolve();
+  const accountPickerRequested = deps.accountPickerRequested ?? false;
+  const resolve: (allowSignedOut: boolean) => DeviceAutoPlan | Promise<DeviceAutoPlan> =
+    deps.resolve ?? ((allowSignedOut) => resolveDeviceAuto(deps.agent, { allowSignedOut }));
+  const plan = await resolve(accountPickerRequested);
   const concrete = plan.host; // null = local
   for (const k of HOST_SLOTS) {
     if (isDeviceAuto(options[k])) {
       options[k] = concrete ?? undefined;
     }
   }
-  const accountPickerRequested = deps.accountPickerRequested ?? false;
   if (!accountPickerRequested && !options.strategy && !options.balanced) {
     options.balanced = true;
   }

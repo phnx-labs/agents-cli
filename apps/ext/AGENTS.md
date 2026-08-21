@@ -25,9 +25,10 @@ the `swarm-ext://` endpoint. It does not own fleet or agent policy.
   the workspace resolves to a defined project and `--model <name>` when that
   harness has a Default Model set. The extension never scores hosts, harnesses,
   versions, or accounts. Every launch
-  is built by `buildAgentLaunchCommand` (`src/core/agents.ts`) — the one place
-  that owns flag construction. The two launch paths (`launchAgent` and
-  `openSingleAgent`) register their tab through the shared
+  is registered and assembled by `harnessLaunchRegistrations` and
+  `buildNewAgentLaunchCommand` (`src/core/launchTarget.ts`), which delegate flag
+  construction to `buildAgentLaunchCommand` (`src/core/agents.ts`). The two
+  launch paths (`launchAgent` and `openSingleAgent`) register their tab through the shared
   `registerAgentTerminal`; other creation sites still call `terminals.register`
   directly. An automatic launch registers against the `shell` def until adoption
   re-keys it to the harness the CLI picked — the `sh` prefix is load-bearing,

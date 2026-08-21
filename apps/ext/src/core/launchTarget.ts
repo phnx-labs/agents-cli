@@ -7,6 +7,8 @@
 // lib/devices/pool.ts). That keeps one placement rule for the whole fleet
 // instead of a second, drifting copy in the UI layer.
 
+import { buildAgentLaunchCommand } from './agents';
+
 /** The configured default target for the per-harness New commands. */
 export type LaunchTarget = 'auto' | 'local' | 'ask';
 
@@ -38,6 +40,19 @@ export type HarnessLaunchVariant = 'default' | 'pick-host' | 'auto';
 /** Launch choices layered on top of placement for per-harness palette commands. */
 export interface HarnessLaunchOpts extends LaunchTargetOpts {
   accountPicker?: true;
+}
+
+/** Inputs shared by every command that routes through the extension's one launch engine. */
+export interface NewAgentLaunchOpts extends LaunchTargetOpts {
+  agentKey?: string;
+  host?: string;
+  accountPicker?: boolean;
+}
+
+export interface HarnessLaunchRegistration {
+  commandId: string;
+  variant: HarnessLaunchVariant;
+  launchOptions: () => NewAgentLaunchOpts;
 }
 
 /**
@@ -74,4 +89,64 @@ export function launchOptsForHarnessCommand(
     case 'auto':
       return {};
   }
+}
+
+/**
+ * The three registered commands for one harness. The default target is read by
+ * the callback so a settings change applies without reloading the editor.
+ */
+export function harnessLaunchRegistrations(
+  agentKey: string,
+  commandId: string,
+  getDefaultTarget: () => LaunchTarget,
+): HarnessLaunchRegistration[] {
+  return [
+    {
+      commandId,
+      variant: 'default',
+      launchOptions: () => ({
+        agentKey,
+        ...launchOptsForHarnessCommand('default', getDefaultTarget()),
+      }),
+    },
+    {
+      commandId: `${commandId}PickHost`,
+      variant: 'pick-host',
+      launchOptions: () => ({ agentKey, ...launchOptsForHarnessCommand('pick-host') }),
+    },
+    {
+      commandId: `${commandId}Auto`,
+      variant: 'auto',
+      launchOptions: () => ({ agentKey, ...launchOptsForHarnessCommand('auto') }),
+    },
+  ];
+}
+
+/** Build the final shell command used by launchAgent after any host prompt resolves. */
+export function buildNewAgentLaunchCommand(
+  options: NewAgentLaunchOpts,
+  context: {
+    defaultModel?: string;
+    cwd?: string;
+    projectSlug?: string;
+  } = {},
+): string {
+  const agent = options.agentKey ?? 'auto';
+  const isLocal = options.local === true || (options.pickHost === true && !options.host);
+  return buildAgentLaunchCommand(
+    agent,
+    null,
+    context.defaultModel,
+    undefined,
+    undefined,
+    options.accountPicker ? undefined : 'balanced',
+    'auto',
+    {
+      host: options.host,
+      local: isLocal,
+      accountPicker: options.accountPicker,
+      project: context.projectSlug,
+      cwd: context.projectSlug ? undefined : context.cwd,
+    },
+  );
 }
