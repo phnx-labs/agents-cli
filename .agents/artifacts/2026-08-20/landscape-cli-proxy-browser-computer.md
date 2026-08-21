@@ -76,7 +76,7 @@ Sacra, Dealroom) and are not independently verified.
 | Product | What it is | Traction | Money | Outcome |
 | --- | --- | --- | --- | --- |
 | OpenRouter | One API over 374+ models; `no markup on inference pricing`, a `5.5% ($0.80 minimum)` fee on credit purchases | 8M developers, 8.4T tokens/mo | $140M annualized rev (Jul 2026), $174M raised | Stripe acquisition reported at $7B+ (unconfirmed by either party) |
-| Portkey | AI gateway + observability | 24k+ orgs, 125M req/day | $18M raised | **Acquired by Palo Alto Networks, 2026-05-29** |
+| Portkey | AI gateway + observability | 24k+ orgs, 125M req/day | $18M raised | Reported acquired by Palo Alto Networks (single aggregator source, uncorroborated — see Evidence) |
 | LiteLLM (BerriAI) | OSS gateway, 100+ providers | 56,861★ GitHub | $7M ARR, open-core ($250/mo → $30k/yr enterprise) | Independent, YC-backed |
 
 The pattern across all three: the OSS or cheap tier is distribution; revenue is
@@ -315,7 +315,7 @@ them, sandbox compute, has quietly converged on a single price.
 
   <rect x="10" y="178" width="566" height="30" rx="4" fill="none" stroke="#888888" stroke-width="1"/>
   <text x="22" y="197" font-family="monospace" font-size="12" font-weight="700" fill="currentColor">GATEWAYS</text>
-  <text x="200" y="197" font-size="12" fill="currentColor">OpenRouter · LiteLLM · Portkey (→ Palo Alto) · CF AI Gateway</text>
+  <text x="200" y="197" font-size="12" fill="currentColor">OpenRouter · LiteLLM · Portkey · Requesty · CF AI Gateway</text>
 
   <rect x="10" y="214" width="566" height="30" rx="4" fill="none" stroke="#888888" stroke-width="1"/>
   <text x="22" y="233" font-family="monospace" font-size="12" font-weight="700" fill="currentColor">MODELS</text>
@@ -361,18 +361,27 @@ is arithmetic on the quoted rate, not a vendor claim.
 | --- | --- | --- | --- | --- |
 | Maritime | Undisclosed (site says micro-VM, docs say containers) | — | **$1.00** | Sleeps; always-on add-on is `$20/agent/month` |
 | Northflank | Kata / gVisor | $0.033 | **$24.33** | Pause-stops-billing not published |
-| Fly Machines (`performance-1x`) | Firecracker | $0.045 | **$32.19** (vendor-published) | Stopped/suspended = storage only |
+| Fly Machines (`performance-1x`) | Firecracker | $0.045 | **$32.19**† | Stopped/suspended = storage only |
 | Morph | Undisclosed | $0.050 | **$36.50** | Scale-to-zero; `under 250ms` live-VM branch |
 | CodeSandbox SDK (Together) | microVM (secondary source) | $0.074 | **$54.31** | Hibernates; billing-stop unconfirmed |
 | Daytona | **Linux containers by default** | $0.083 | **$60.44** | Stopped/paused = reserved disk only |
 | Blaxel | Firecracker | $0.083 | **$60.44** | Suspend stops billing; `about 25ms` resume |
 | E2B | Firecracker | $0.083 | **$60.44** usage-only | Pause stops compute; 1-hr session cap off Pro pushes real cost to **~$210** |
-| LangSmith Deployment | Managed (n/a) | $0.086 | **$62.42** + `$39` seat | Standby billed per minute — not scale-to-zero |
-| Cloudflare Containers | VM, hypervisor undisclosed | $0.090 | **~$70** + `$5` plan | `Charges stop after the container instance goes to sleep` |
+| LangGraph Platform (LangSmith Deployment) | Managed (n/a) | $0.086 | **$62.42** + `$39` seat | Standby billed per minute — not scale-to-zero |
+| Cloudflare Containers | VM, hypervisor undisclosed | $0.090 | **$65.70**‡ + `$5` plan | `Charges stop after the container instance goes to sleep` |
 | Bedrock AgentCore | Firecracker | $0.108 | **$79.13** | `I/O wait and idle time is free` — memory still billed for the session |
 | Modal Sandbox | **gVisor** | $0.119–$0.190 | **$86.85–$138.65** | Scales to zero; no pause/resume for Sandboxes |
 | Vercel Sandbox | Firecracker | $0.042–$0.170 | **$30.95–$124.39** | Active-CPU only — LLM wait time is not metered |
 | Railway Sandboxes | Undisclosed | $0.208 | **$152.08** | `Idle sandboxes still consume resources that we bill for` |
+
+† Fly publishes this figure itself, on its own 720-hour billing month; at the
+730 hours every other row uses it is $32.85. ‡ The rate alone gives $65.70;
+Cloudflare's included allowances (375 vCPU-minutes and 25 GiB-hours a month)
+net some of that back, so a real bill lands slightly under it. Every other row
+is the quoted rate times 730, and the $/hour column is rounded to three
+decimals for reading — the monthly figures are computed from the unrounded
+rate, so re-multiplying the displayed hourly reproduces them only to within
+about half a percent.
 
 Modal and Vercel carry ranges for opposite reasons: Modal bills *physical cores*
 and never publishes the core-to-vCPU ratio, so the row is genuinely ambiguous;
@@ -389,8 +398,10 @@ Three things fall out of that table:
   Daytona's own docs say `Sandboxes run as Linux containers by default`. The
   price converged even though the technology did not, which is the clearest
   possible signal that the buyer is not choosing on isolation.
-- **The 150× spread is a product spread, not an efficiency one.** Nobody is
-  150× more efficient than anyone else. Northflank and Fly sell raw
+- **The 150× spread — $1 at Maritime to $152.08 at Railway — is a product
+  spread, not an efficiency one.** (Among the metered vendors alone, Northflank
+  to Railway is 6.25×; the rest of the gap is Maritime's flat sleep price.)
+  Nobody is 150× more efficient than anyone else. Northflank and Fly sell raw
   provisioned-VM hours with no agent premium; Railway prices its sandbox tier at
   2.5–5× its own standard compute; Vercel and AgentCore meter only active CPU;
   and Maritime sells the *sleep* rather than the compute.
@@ -437,7 +448,7 @@ sleep, and the real wake latency for a heavy agent is its own Python imports and
 graph construction, not the ~1s the platform advertises. Vendors that publish a
 sub-second wake are measuring the hypervisor, not your agent.
 
-#### 7e. The cross-cutting layers: one is being bought, one is still unsolved
+#### 7c. The cross-cutting layers: one is being bought, one is still unsolved
 
 Memory and observability attach at every tier of the figure, and in 2026 they
 are moving in opposite directions.
@@ -504,7 +515,7 @@ obituaries: it is empty because it is hard to charge for, not because nobody
 thought of it. A local-first, no-backend posture is what the survivors have in
 common, and it is the posture agi-cli already has.
 
-#### 7c. Where agi-cli sits
+#### 7e. Where agi-cli sits
 
 Two layers, and it sells neither of the seven beneath it. It occupies
 **orchestration** (running many harnesses at once, §5) and the local half of
@@ -595,11 +606,11 @@ agents; each claim in Findings carries its source class inline.
   Sandboxes is an inference that fits every observable (control plane measured
   on Railway, checkpoint primitive, SSH claim, the $150→$1 duty-cycle math) —
   it is not confirmed by either company.
-- **§7e's acquisitions vary in source strength.** Dynatrace/Arize (`$915
+- **§7c's acquisitions vary in source strength.** Dynatrace/Arize (`$915
   million`, 2026-08-13) is from Dynatrace's own press release and is primary.
   ClickHouse/Langfuse and Mintlify/Helicone come from trade coverage and were
   not re-confirmed against the acquirers' releases.
-- **§2's Portkey line overstates its source.** The Palo Alto Networks
+- **§1's Portkey line was overstated and is now hedged.** The Palo Alto Networks
   acquisition is carried by a single aggregator (Tracxn) and could not be
   corroborated on PANW's own press page in this pass; the date also differs
   between sources (2026-05-29 vs 2026-06-01). Treat it as reported, not
