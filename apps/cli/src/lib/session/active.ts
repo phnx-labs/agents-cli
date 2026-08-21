@@ -170,7 +170,7 @@ export function filterCachedUnattributed(
   });
 }
 
-export type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
+type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
 /** The SessionMeta fields the live-row backfill reads — the enrichment a running process cannot report. */
 export type BackfillMeta = Pick<SessionMeta,
@@ -532,7 +532,7 @@ export function activeStatusFromCloudStatus(status: CloudTaskStatus): ActiveStat
   }
 }
 
-export interface ActiveQueryOptions {
+interface ActiveQueryOptions {
   /** Skip the `ps` scan for ad-hoc headless agents. */
   skipHeadless?: boolean;
   /**
@@ -584,7 +584,7 @@ export class TmuxDiscoveryDegradedError extends Error {
  * be idle for longer than 2 minutes, but it must not attach to a weeks-old
  * transcript just because a GUI app service with the same basename is alive.
  */
-export const ACTIVE_SESSION_STALE_MS = 24 * 60 * 60_000;
+const ACTIVE_SESSION_STALE_MS = 24 * 60 * 60_000;
 
 /**
  * A session whose transcript hasn't been written in this long is ABANDONED /
@@ -877,11 +877,6 @@ function claudeProjectDirName(cwd: string): string {
  */
 const CLAUDE_SESSION_FILE_CACHE_MAX = 256;
 const claudeSessionFileCache = new Map<string, string>();
-
-/** Test seam: drop the Claude session-file path memo. */
-export function clearClaudeSessionFileCacheForTest(): void {
-  claudeSessionFileCache.clear();
-}
 
 /**
  * Locate the active Claude session file for a process. If we know the session
@@ -1452,7 +1447,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
 }
 
 /** Cloud tasks still in a non-terminal state. `tasks.db` may not exist; that's fine. */
-export function listCloudActive(): ActiveSession[] {
+function listCloudActive(): ActiveSession[] {
   let tasks;
   try {
     tasks = listActiveTasks();
@@ -1954,7 +1949,7 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<Acti
 }
 
 /** One tmux pane's resolved agent identity for the authoritative source. */
-export interface PaneIdentity {
+interface PaneIdentity {
   agent: string;
   /** Exact session id when resolvable (launch registry, or the hook join). */
   sessionId?: string;
@@ -2224,7 +2219,7 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
 }
 
 /** Local discovery sources probed by {@link describeActiveDiscoveryHealth}. */
-export interface ActiveDiscoveryHealth {
+interface ActiveDiscoveryHealth {
   /** Sources that failed on the probe (currently only `'tmux'`). Empty = nothing degraded locally. */
   degradedSources: string[];
 }

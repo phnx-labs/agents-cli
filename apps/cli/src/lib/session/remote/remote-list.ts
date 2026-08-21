@@ -22,18 +22,18 @@ import {
   shellQuote,
   REMOTE_STDOUT_MAX_BYTES,
   RemoteUtf8Accumulator,
-} from '../ssh-exec.js';
-import { sshTargetFor } from '../devices/connect.js';
-import { resolveExplicitTargetSet } from '../devices/resolve-target.js';
-import { loadDevices, isDialableDevice, type DeviceProfile } from '../devices/registry.js';
-import { remoteShellFor, buildWindowsAgentsCommand, stripClixml } from '../hosts/remote-cmd.js';
-import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../remote-agents-json.js';
-import { machineId, normalizeHost } from './sync/config.js';
-import { NO_FANOUT_ENV } from './remote-active.js';
-import { terminalWidth } from '../text/width.js';
-import { sanitizeForTerminal } from '../redact.js';
-import { mapBounded } from '../concurrency.js';
-import type { SessionMeta } from './types.js';
+} from '../../ssh-exec.js';
+import { sshTargetFor } from '../../devices/connect.js';
+import { resolveExplicitTargetSet } from '../../devices/resolve-target.js';
+import { loadDevices, isDialableDevice, type DeviceProfile } from '../../devices/registry.js';
+import { remoteShellFor, buildWindowsAgentsCommand, stripClixml } from '../../hosts/remote-cmd.js';
+import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../../remote-agents-json.js';
+import { machineId, normalizeHost } from '../sync/config.js';
+import { NO_FANOUT_ENV } from '../remote-active.js';
+import { terminalWidth } from '../../text/width.js';
+import { sanitizeForTerminal } from '../../redact.js';
+import { mapBounded } from '../../concurrency.js';
+import type { SessionMeta } from '../types.js';
 import {
   TOOL_QUERY_MAX_CLAUSE_BYTES,
   TOOL_QUERY_MAX_CALL_ROWS,
@@ -45,20 +45,20 @@ import {
   type ToolProgramCountEnvelope,
   type ToolSearchEnvelope,
   type ToolSessionEvidence,
-} from './tool-index.js';
+} from '../tool-index.js';
 import {
   TOOL_ERROR_OUTPUT_MAX_BYTES,
   TOOL_INPUT_MAX_BYTES,
   TOOL_SUCCESS_OUTPUT_MAX_BYTES,
   sanitizeToolEvidenceText,
-} from './tool-calls.js';
+} from '../tool-calls.js';
 
 const REMOTE_TOOL_TIMEOUT_MS = 60_000;
 // The per-peer stdout ceiling and the UTF-8-safe accumulator live in ssh-exec.ts
 // (the shared SSH transport both this reader and the top-level `remote-agents-json`
 // fan-out import), so the bound is defined once. Re-exported here for the existing
 // consumers/tests that reach them through this module.
-export { REMOTE_STDOUT_MAX_BYTES, RemoteUtf8Accumulator } from '../ssh-exec.js';
+export { REMOTE_STDOUT_MAX_BYTES, RemoteUtf8Accumulator } from '../../ssh-exec.js';
 export const REMOTE_TOOL_AGGREGATE_MAX_BYTES = TOOL_QUERY_MAX_SERIALIZED_BYTES;
 
 export interface RemoteToolByteBudget {

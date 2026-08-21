@@ -90,7 +90,7 @@ const MUSE_SESSIONS_DIR = path.join(HOME, '.local', 'share', 'muse', 'sessions')
 const OPENCLAW_TTL_MS = 60_000;
 const ACTIVE_APPEND_RESCAN_DEBOUNCE_MS = 5_000;
 /** One JSONL record may not force an unbounded string allocation. */
-export const SESSION_JSONL_LINE_MAX_BYTES = 1024 * 1024;
+const SESSION_JSONL_LINE_MAX_BYTES = 1024 * 1024;
 
 /**
  * Stream one appended JSONL range, applying only newline-terminated records.
@@ -389,7 +389,7 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
 }
 
 /** What one incremental scan actually did. */
-export interface IncrementalScanResult {
+interface IncrementalScanResult {
   /** True when this process won the single-flight claim and ran the scan. */
   claimed: boolean;
   /**
@@ -957,7 +957,7 @@ export function filterChangedFiles(
 }
 
 /** A path already stat'd by the walk — mtime is the raw (unfloored) fs value. */
-export interface PreStatEntry {
+interface PreStatEntry {
   filePath: string;
   fileMtimeMs: number;
   fileSize: number;
@@ -1009,7 +1009,7 @@ export function shouldDeferRecentAppend(
 // ---------------------------------------------------------------------------
 
 /** One leaf directory of transcripts to change-detect, plus its live-root flag. */
-export interface LeafDir {
+interface LeafDir {
   /** Absolute path to the directory that directly holds transcript files. */
   dirPath: string;
   /**
@@ -1021,7 +1021,7 @@ export interface LeafDir {
 }
 
 /** The changed files a leaf-dir walk surfaced, ready to parse + upsert. */
-export interface LeafDirScan {
+interface LeafDirScan {
   /** Files whose (mtime, size) changed vs the ledger — the parse set. */
   changed: Array<{ filePath: string; scan: ScanStamp }>;
   /**
@@ -1054,7 +1054,7 @@ export interface LeafDirScan {
  * The kill-switch (`AGENTS_SESSIONS_NO_DIR_LEDGER=1`) forces the full-walk branch
  * for every dir and never consults or records the dir_ledger.
  */
-export function collectChangedFilesInLeafDirs(
+function collectChangedFilesInLeafDirs(
   leafDirs: LeafDir[],
   ext: string,
 ): LeafDirScan {
@@ -1212,7 +1212,7 @@ function sessionRootSubdir(agent: SessionAgentId): string | null {
 }
 
 /** A session-agent's on-disk watch roots (every version home + backup mirror). */
-export interface SessionRoots {
+interface SessionRoots {
   agent: SessionAgentId;
   /** Absolute directories that hold this agent's transcripts, existing right now. */
   dirs: string[];
@@ -3526,7 +3526,7 @@ function extractDroidMessageText(content: any): string {
  * both a full parse and a resumable incremental parse (see
  * {@link scanClaudeSessionIncremental}).
  */
-export interface ClaudeParseState {
+interface ClaudeParseState {
   timestamp?: string;
   cwd?: string;
   gitBranch?: string;
@@ -4271,7 +4271,7 @@ export function __resetClaudeScanBranchCountsForTest(): void {
  * fold ({@link applyCodexLine}) runs for both a full parse and an incremental
  * resume. Mirrors {@link ClaudeParseState}.
  */
-export interface CodexParseState {
+interface CodexParseState {
   // First-wins session_meta fields.
   sessionId?: string;
   timestamp?: string;
@@ -4346,7 +4346,7 @@ export function initCodexParseState(): CodexParseState {
  * `state.*` in place. `parsed` is the already-`JSON.parse`d line (the
  * malformed-line skip happens in the caller, as before).
  */
-export function applyCodexLine(state: CodexParseState, parsed: any): void {
+function applyCodexLine(state: CodexParseState, parsed: any): void {
   collectCodexToolCalls(state.toolCollector, parsed);
   // PR signal, structurally: a Codex `function_call` whose command is
   // `gh pr create`, then the pull URL from a `function_call_output`.
@@ -4447,7 +4447,7 @@ export function applyCodexLine(state: CodexParseState, parsed: any): void {
  * Build the {@link CodexSessionScan} return object from an accumulator — the
  * exact return-building {@link scanCodexSession} used to run inline.
  */
-export function finalizeCodexScan(state: CodexParseState): CodexSessionScan {
+function finalizeCodexScan(state: CodexParseState): CodexSessionScan {
   // Codex reports one cumulative snapshot: uncached input, cached (cache-read)
   // input, and output+reasoning. It has no cache-write bucket. Derive the burn
   // split and both costs (actual + no-cache) from that final snapshot (RUSH-2287).
@@ -4639,7 +4639,7 @@ export function serializeCodexParserState(
  * holding the joined content. Topic is first-wins and already persisted, so a
  * collapsed userTexts never changes it.
  */
-export function hydrateCodexParseState(prior: CodexParserState): CodexParseState {
+function hydrateCodexParseState(prior: CodexParserState): CodexParseState {
   return {
     sessionId: prior.sessionId,
     timestamp: prior.timestamp,

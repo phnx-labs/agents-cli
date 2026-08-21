@@ -3,18 +3,18 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { loadDevices, isDialableDevice } from '../devices/registry.js';
-import { deviceIdentityArgs, sshTargetFor } from '../devices/connect.js';
-import { machineId, normalizeHost } from '../machine-id.js';
-import { SSH_OPTS, controlOpts, shellQuote } from '../ssh-exec.js';
-import { buildWindowsAgentsCommand, remoteShellFor } from '../hosts/remote-cmd.js';
-import type { ActiveSession } from './active.js';
+import { loadDevices, isDialableDevice } from '../../devices/registry.js';
+import { deviceIdentityArgs, sshTargetFor } from '../../devices/connect.js';
+import { machineId, normalizeHost } from '../../machine-id.js';
+import { SSH_OPTS, controlOpts, shellQuote } from '../../ssh-exec.js';
+import { buildWindowsAgentsCommand, remoteShellFor } from '../../hosts/remote-cmd.js';
+import type { ActiveSession } from '../active.js';
 import {
   activeSessionsJournalPath,
   activeSessionJournalIdentity,
   readActiveSessionsCache,
   type ActiveSessionsJournalRecord,
-} from './session-cache.js';
+} from '../session-cache.js';
 
 export const SESSION_WATCH_VERSION = 1 as const;
 export const SESSION_WATCH_HEARTBEAT_MS = 15_000;

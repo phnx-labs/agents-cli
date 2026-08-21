@@ -12,11 +12,11 @@
  * the one-shot wrapper around it.
  */
 import chalk from 'chalk';
-import { sshExec } from '../ssh-exec.js';
-import { shellQuote } from '../ssh-exec.js';
-import { resolveExplicitTargets } from '../devices/resolve-target.js';
-import { remoteShellFor, buildWindowsAgentsCommand } from '../hosts/remote-cmd.js';
-import { parseBundle, type ParsedBundle } from './bundle.js';
+import { sshExec } from '../../ssh-exec.js';
+import { shellQuote } from '../../ssh-exec.js';
+import { resolveExplicitTargets } from '../../devices/resolve-target.js';
+import { remoteShellFor, buildWindowsAgentsCommand } from '../../hosts/remote-cmd.js';
+import { parseBundle, type ParsedBundle } from '../bundle.js';
 
 /** Remote export can traverse many sessions; give it a generous ceiling. */
 const REMOTE_EXPORT_TIMEOUT_MS = 300_000;

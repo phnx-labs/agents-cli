@@ -27,13 +27,13 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from 'fs
 import { join } from 'path';
 import { createHash } from 'crypto';
 import chalk from 'chalk';
-import { getCacheDir } from '../state.js';
-import { SSH_OPTS, controlOpts, assertValidSshTarget } from '../ssh-exec.js';
-import { remoteShellFor, buildWindowsAgentsCommand } from '../hosts/remote-cmd.js';
-import { resolveRemoteOsSync } from '../hosts/remote-os.js';
-import { NO_FANOUT_ENV } from './remote-active.js';
-import { formatRelativeTime } from '../text/relative-time.js';
-import { terminalWidth } from '../text/width.js';
+import { getCacheDir } from '../../state.js';
+import { SSH_OPTS, controlOpts, assertValidSshTarget } from '../../ssh-exec.js';
+import { remoteShellFor, buildWindowsAgentsCommand } from '../../hosts/remote-cmd.js';
+import { resolveRemoteOsSync } from '../../hosts/remote-os.js';
+import { NO_FANOUT_ENV } from '../remote-active.js';
+import { formatRelativeTime } from '../relative-time.js';
+import { terminalWidth } from '../width.js';
 
 /**
  * POSIX single-quote a string for safe interpolation into a remote shell command.
