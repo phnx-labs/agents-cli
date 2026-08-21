@@ -46,7 +46,7 @@ Five findings, one per section:
 4. **The stack under all of this has nine layers, and the one directly
    beneath the tool surfaces has commoditized.** Three sandbox vendors — E2B,
    Daytona and Blaxel — quote the identical `$0.0828`/hour for 1 vCPU / 2 GB
-   while running three different isolation technologies, and the 150x spread
+   while running three different isolation technologies, and the 152x spread
    across the layer is a product spread, not an efficiency one: what separates
    a $1 agent from a $152 one is idle policy, not hardware. Section 7 maps
    every layer, normalizes fourteen vendors' published rates to one comparable
@@ -375,7 +375,7 @@ is arithmetic on the quoted rate, not a vendor claim.
 | Railway Sandboxes | Undisclosed | $0.208 | **$152.08** | `Idle sandboxes still consume resources that we bill for` |
 
 † Fly publishes this figure itself, on its own 720-hour billing month; at the
-730 hours every other row uses it is $32.85. ‡ The rate alone gives $65.70;
+730 hours every other row uses it is $32.64 ($32.19 / 720 x 730). ‡ The rate alone gives $65.70;
 Cloudflare's included allowances (375 vCPU-minutes and 25 GiB-hours a month)
 net some of that back, so a real bill lands slightly under it. Every other row
 is the quoted rate times 730, and the $/hour column is rounded to three
@@ -398,10 +398,10 @@ Three things fall out of that table:
   Daytona's own docs say `Sandboxes run as Linux containers by default`. The
   price converged even though the technology did not, which is the clearest
   possible signal that the buyer is not choosing on isolation.
-- **The 150× spread — $1 at Maritime to $152.08 at Railway — is a product
+- **The 152× spread — $1 at Maritime to $152.08 at Railway — is a product
   spread, not an efficiency one.** (Among the metered vendors alone, Northflank
   to Railway is 6.25×; the rest of the gap is Maritime's flat sleep price.)
-  Nobody is 150× more efficient than anyone else. Northflank and Fly sell raw
+  Nobody is 152× more efficient than anyone else. Northflank and Fly sell raw
   provisioned-VM hours with no agent premium; Railway prices its sandbox tier at
   2.5–5× its own standard compute; Vercel and AgentCore meter only active CPU;
   and Maritime sells the *sleep* rather than the compute.
