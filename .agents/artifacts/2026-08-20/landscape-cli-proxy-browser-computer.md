@@ -23,7 +23,7 @@ find other products that are similar, like CLI proxy?"* — plus the two categor
 that ride along with it (browser automation and computer use), and whether anyone
 combines all three.
 
-Four findings, one per section:
+Five findings, one per section:
 
 1. **"CLI proxy" is two categories wearing one name.** API-key gateways
    (OpenRouter, LiteLLM, Portkey) are a real, monetized, acquired-at-a-premium
@@ -43,7 +43,15 @@ Four findings, one per section:
    is nearly empty: the closest projects are two small macOS apps (319 and 577
    stars) and a record-replay tool. Nothing is CLI-driven, cross-platform, and
    wired into a coding-agent workflow.
-4. **The three-legged combination does not exist anywhere else.** Claude Code
+4. **The stack under all of this has nine layers, and the one directly
+   beneath the tool surfaces has commoditized.** Three sandbox vendors — E2B,
+   Daytona and Blaxel — quote the identical `$0.0828`/hour for 1 vCPU / 2 GB
+   while running three different isolation technologies, and the 150x spread
+   across the layer is a product spread, not an efficiency one: what separates
+   a $1 agent from a $152 one is idle policy, not hardware. Section 7 maps
+   every layer, normalizes fourteen vendors' published rates to one comparable
+   unit, and decomposes how a $1/mo agent price is actually constructed.
+5. **The three-legged combination does not exist anywhere else.** Claude Code
    and Codex now bundle browser + desktop control, but desktop-app-only and
    single-model by construction. Manus and Devin run both legs in a cloud VM.
    Nothing else is multi-harness. The moat claim from the GTM report survives
@@ -67,7 +75,7 @@ Sacra, Dealroom) and are not independently verified.
 
 | Product | What it is | Traction | Money | Outcome |
 | --- | --- | --- | --- | --- |
-| OpenRouter | One API over 374+ models, 5% markup | 8M developers, 8.4T tokens/mo | $140M annualized rev (Jul 2026), $174M raised | Stripe acquisition reported at $7B+ (unconfirmed by either party) |
+| OpenRouter | One API over 374+ models; `no markup on inference pricing`, a `5.5% ($0.80 minimum)` fee on credit purchases | 8M developers, 8.4T tokens/mo | $140M annualized rev (Jul 2026), $174M raised | Stripe acquisition reported at $7B+ (unconfirmed by either party) |
 | Portkey | AI gateway + observability | 24k+ orgs, 125M req/day | $18M raised | **Acquired by Palo Alto Networks, 2026-05-29** |
 | LiteLLM (BerriAI) | OSS gateway, 100+ providers | 56,861★ GitHub | $7M ARR, open-core ($250/mo → $30k/yr enterprise) | Independent, YC-backed |
 
@@ -263,9 +271,277 @@ Two honest readings of this table, and both matter:
   them: being the neutral layer over *all* the harnesses, and owning the
   cross-harness session corpus that accumulates there.
 
+### 7. The full stack — nine layers, and what each one actually sells
+
+The five sections above answer "who else does what we do?" one category at a
+time. This one zooms out to the whole stack, because two of the categories
+above (browser, computer use) only make sense as *tool surfaces* sitting on top
+of layers this report had not yet named — and because the layer directly under
+them, sandbox compute, has quietly converged on a single price.
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The nine-layer agent stack in 2026 and the key players occupying each layer">
+  <rect x="588" y="34" width="162" height="330" rx="8" fill="none" stroke="#888888" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="598" y="26" font-family="monospace" font-size="11" font-weight="600" fill="#84a929">CROSS-CUTTING</text>
+  <text x="598" y="62" font-family="monospace" font-size="12" font-weight="700" fill="currentColor">MEMORY</text>
+  <text x="598" y="80" font-size="11" fill="currentColor">Mem0 · Zep · Letta</text>
+  <text x="598" y="96" font-size="11" fill="currentColor">Supermemory</text>
+  <text x="598" y="132" font-family="monospace" font-size="12" font-weight="700" fill="currentColor">OBSERVABILITY</text>
+  <text x="598" y="150" font-size="11" fill="currentColor">LangSmith · Langfuse</text>
+  <text x="598" y="166" font-size="11" fill="currentColor">Braintrust · Helicone</text>
+  <text x="598" y="182" font-size="11" fill="currentColor">Arize · W&amp;B Weave</text>
+  <text x="598" y="222" font-size="11" fill="#888888">Both layers attach at</text>
+  <text x="598" y="238" font-size="11" fill="#888888">every tier, and both are</text>
+  <text x="598" y="254" font-size="11" fill="#888888">the most likely to be</text>
+  <text x="598" y="270" font-size="11" fill="#888888">absorbed into the model</text>
+  <text x="598" y="286" font-size="11" fill="#888888">providers' own platforms.</text>
+  <text x="20" y="26" font-family="monospace" font-size="11" font-weight="600" fill="#84a929">CLOSEST TO THE USER</text>
+
+  <rect x="10" y="34" width="566" height="30" rx="4" fill="none" stroke="#84a929" stroke-width="1.5"/>
+  <text x="22" y="53" font-family="monospace" font-size="12" font-weight="700" fill="#84a929">ORCHESTRATION</text>
+  <text x="200" y="53" font-size="12" fill="currentColor">agi-cli · Conductor · Terragon · Sculptor · (Vibe Kanban)</text>
+
+  <rect x="10" y="70" width="566" height="30" rx="4" fill="none" stroke="#84a929" stroke-width="1.5"/>
+  <text x="22" y="89" font-family="monospace" font-size="12" font-weight="700" fill="#84a929">TOOL SURFACES</text>
+  <text x="200" y="89" font-size="12" fill="currentColor">Browserbase · Steel · agent-browser · UI-TARS · H Company</text>
+
+  <rect x="10" y="106" width="566" height="30" rx="4" fill="none" stroke="#888888" stroke-width="1"/>
+  <text x="22" y="125" font-family="monospace" font-size="12" font-weight="700" fill="currentColor">HARNESSES</text>
+  <text x="200" y="125" font-size="12" fill="currentColor">Claude Code · Codex · Gemini CLI · Cursor · Droid</text>
+
+  <rect x="10" y="142" width="566" height="30" rx="4" fill="none" stroke="#888888" stroke-width="1"/>
+  <text x="22" y="161" font-family="monospace" font-size="12" font-weight="700" fill="currentColor">FRAMEWORKS</text>
+  <text x="200" y="161" font-size="12" fill="currentColor">LangGraph · CrewAI · OpenAI Agents SDK · Mastra</text>
+
+  <rect x="10" y="178" width="566" height="30" rx="4" fill="none" stroke="#888888" stroke-width="1"/>
+  <text x="22" y="197" font-family="monospace" font-size="12" font-weight="700" fill="currentColor">GATEWAYS</text>
+  <text x="200" y="197" font-size="12" fill="currentColor">OpenRouter · LiteLLM · Portkey (→ Palo Alto) · CF AI Gateway</text>
+
+  <rect x="10" y="214" width="566" height="30" rx="4" fill="none" stroke="#888888" stroke-width="1"/>
+  <text x="22" y="233" font-family="monospace" font-size="12" font-weight="700" fill="currentColor">MODELS</text>
+  <text x="200" y="233" font-size="12" fill="currentColor">Anthropic · OpenAI · Google · xAI · DeepSeek · Qwen</text>
+
+  <rect x="10" y="250" width="566" height="30" rx="4" fill="none" stroke="#888888" stroke-width="1"/>
+  <text x="22" y="269" font-family="monospace" font-size="12" font-weight="700" fill="currentColor">AGENT HOSTING</text>
+  <text x="200" y="269" font-size="12" fill="currentColor">Maritime · Bedrock AgentCore · CF Agents/DO · Blaxel</text>
+
+  <rect x="10" y="286" width="566" height="30" rx="4" fill="none" stroke="#888888" stroke-width="1"/>
+  <text x="22" y="305" font-family="monospace" font-size="12" font-weight="700" fill="currentColor">SANDBOX RUNTIME</text>
+  <text x="200" y="305" font-size="12" fill="currentColor">E2B · Daytona · Modal · Fly · Vercel · Northflank</text>
+
+  <rect x="10" y="322" width="566" height="30" rx="4" fill="none" stroke="#888888" stroke-width="1"/>
+  <text x="22" y="341" font-family="monospace" font-size="12" font-weight="700" fill="currentColor">CLOUD &amp; SILICON</text>
+  <text x="200" y="341" font-size="12" fill="currentColor">AWS · GCP · Azure · Hetzner · Railway Metal</text>
+
+  <text x="20" y="374" font-size="11" fill="#84a929">Lime border = the two layers agi-cli occupies. It consumes the seven below and sells none of them.</text>
+</svg>
+<figcaption>The 2026 agent stack. Value concentrates at the model layer and at the two ends; the middle layers are either commoditizing on price (sandbox), consolidating by acquisition (gateways), or unmonetized (frameworks, orchestration).</figcaption>
+</figure>
+
+| Layer | What it sells | How it's priced | State in 2026 |
+| --- | --- | --- | --- |
+| Orchestration | Running *many* agents at once | Mostly nothing — OSS | Thin, unmonetized, high mortality |
+| Tool surfaces | Browser-hours, desktop control | $/hour, or bundled free | Being absorbed by the incumbents (§3, §4) |
+| Harnesses | The coding agent itself | Seat subscription, `$20`/mo anchor | Incumbent-dominated, model-vendor-owned |
+| Frameworks | Authoring abstractions | Free (OSS) | Monetized one layer up, not here |
+| Gateways | One API + spend control | % markup or seat | **Consolidating by acquisition** (§1) |
+| Models | Tokens | $/M tokens | Oligopoly; the profit pool |
+| Agent hosting | "Your agent stays reachable" | Flat/agent or usage | Fragmenting; hyperscalers entering |
+| Sandbox runtime | Isolated execution | $/vCPU-hr + $/GB-hr | **Price-converged, commoditizing** |
+| Cloud & silicon | Raw capacity | $/instance-hr | Commodity |
+
+#### 7a. The sandbox layer has converged on one price
+
+Normalizing every published rate to the same unit — **1 vCPU / 2 GB RAM, run
+continuously for a 730-hour month** — makes the convergence visible. Rates were
+read from each vendor's own pricing page on 2026-08-20 and the monthly figure
+is arithmetic on the quoted rate, not a vendor claim.
+
+| Vendor | Isolation | $/hour | $/month | Idle behavior |
+| --- | --- | --- | --- | --- |
+| Maritime | Undisclosed (site says micro-VM, docs say containers) | — | **$1.00** | Sleeps; always-on add-on is `$20/agent/month` |
+| Northflank | Kata / gVisor | $0.033 | **$24.33** | Pause-stops-billing not published |
+| Fly Machines (`performance-1x`) | Firecracker | $0.045 | **$32.19** (vendor-published) | Stopped/suspended = storage only |
+| Morph | Undisclosed | $0.050 | **$36.50** | Scale-to-zero; `under 250ms` live-VM branch |
+| CodeSandbox SDK (Together) | microVM (secondary source) | $0.074 | **$54.31** | Hibernates; billing-stop unconfirmed |
+| Daytona | **Linux containers by default** | $0.083 | **$60.44** | Stopped/paused = reserved disk only |
+| Blaxel | Firecracker | $0.083 | **$60.44** | Suspend stops billing; `about 25ms` resume |
+| E2B | Firecracker | $0.083 | **$60.44** usage-only | Pause stops compute; 1-hr session cap off Pro pushes real cost to **~$210** |
+| LangSmith Deployment | Managed (n/a) | $0.086 | **$62.42** + `$39` seat | Standby billed per minute — not scale-to-zero |
+| Cloudflare Containers | VM, hypervisor undisclosed | $0.090 | **~$70** + `$5` plan | `Charges stop after the container instance goes to sleep` |
+| Bedrock AgentCore | Firecracker | $0.108 | **$79.13** | `I/O wait and idle time is free` — memory still billed for the session |
+| Modal Sandbox | **gVisor** | $0.119–$0.190 | **$86.85–$138.65** | Scales to zero; no pause/resume for Sandboxes |
+| Vercel Sandbox | Firecracker | $0.042–$0.170 | **$30.95–$124.39** | Active-CPU only — LLM wait time is not metered |
+| Railway Sandboxes | Undisclosed | $0.208 | **$152.08** | `Idle sandboxes still consume resources that we bill for` |
+
+Modal and Vercel carry ranges for opposite reasons: Modal bills *physical cores*
+and never publishes the core-to-vCPU ratio, so the row is genuinely ambiguous;
+Vercel bills only CPU cycles actually burned, so its floor is a memory-only
+charge and its ceiling assumes 100% CPU. For an agent that spends its life
+waiting on a model, Vercel's floor is the realistic number and its headline is
+not.
+
+Three things fall out of that table:
+
+- **Three vendors land on exactly $0.0828/hour** — E2B, Daytona, and Blaxel,
+  identical to the fourth decimal (`$0.0504`/vCPU-hr + `$0.0162`/GiB-hr). They
+  do not share an implementation: E2B and Blaxel run Firecracker microVMs,
+  Daytona's own docs say `Sandboxes run as Linux containers by default`. The
+  price converged even though the technology did not, which is the clearest
+  possible signal that the buyer is not choosing on isolation.
+- **The 150× spread is a product spread, not an efficiency one.** Nobody is
+  150× more efficient than anyone else. Northflank and Fly sell raw
+  provisioned-VM hours with no agent premium; Railway prices its sandbox tier at
+  2.5–5× its own standard compute; Vercel and AgentCore meter only active CPU;
+  and Maritime sells the *sleep* rather than the compute.
+- **Idle policy is the whole ballgame, and Railway is the outlier.** An agent
+  spends most of its wall-clock waiting on a model, so the vendors that don't
+  bill that wait are cheaper in practice than their headline. Railway is the
+  only one of the fourteen with **no pause primitive at all** — its idle timeout
+  *destroys* the sandbox rather than suspending it. That is not a footnote for
+  the next section: if Maritime runs on Railway Sandboxes, then
+  checkpoint-destroy-restore is not a clever optimization it chose, it is the
+  only shape Railway offers.
+
+#### 7b. How a $1 agent is actually constructed
+
+Maritime is the useful worked example, because its price looks impossible until
+you decompose it. Measured on 2026-08-20: `maritime.sh` and `api.maritime.sh`
+both resolve to `*.up.railway.app` and answer with `server: railway-hikari` and
+`x-railway-edge: lax1` on **AS400940 Railway** — its control plane is a Next.js
+app on Railway, not AWS. Its advertised agent is `1 vCPU, 2 GB RAM, 5 GB SSD`,
+which on Railway Sandboxes' own `$50/month per GB of memory or vCPU` is **$150 a
+month run continuously**. It sells for $1.
+
+The gap is closed by three things, and they generalize to the whole hosting
+layer:
+
+1. **You bring your own model key.** The expensive part of running an agent is
+   never on the hosting bill. Every vendor in this layer is selling a socket and
+   a filesystem, not inference.
+2. **Sleeping is nearly free, and Railway ships the primitive.** Railway
+   Sandboxes support *checkpoints* — `a named snapshot of a sandbox's disk,
+   stored server-side` — so the pattern is checkpoint, destroy, and boot from
+   the checkpoint on the next webhook. $150/mo × 0.7% duty cycle ≈ $1, and 0.7%
+   is about ten minutes a day: exactly a low-traffic webhook bot.
+3. **The flat price is an average, not a cost.** It is gym-membership pricing,
+   and the vendor prices the exception honestly: turning off sleep costs
+   `$20/agent/month`, a **20x** step up from the $1 headline. That ratio is the
+   duty-cycle assumption made visible. It is also why the tiers meter agent
+   count rather than compute.
+
+One correction this decomposition forces: a disk checkpoint is not a memory
+snapshot. Firecracker-style restore resumes a process mid-execution; booting
+from a disk image re-runs the framework's init. So nothing in RAM survives a
+sleep, and the real wake latency for a heavy agent is its own Python imports and
+graph construction, not the ~1s the platform advertises. Vendors that publish a
+sub-second wake are measuring the hypervisor, not your agent.
+
+#### 7e. The cross-cutting layers: one is being bought, one is still unsolved
+
+Memory and observability attach at every tier of the figure, and in 2026 they
+are moving in opposite directions.
+
+**Observability is being absorbed — by telemetry incumbents, not by the model
+labs.** Arize was acquired by Dynatrace on 2026-08-13 for `$915 million`
+(~`$815 million in cash` plus replacement equity, per Dynatrace's own release);
+Langfuse was acquired by ClickHouse in January 2026; Helicone went to Mintlify
+in March 2026. The buyers are data and APM platforms folding LLM traces into an
+existing one-pane-of-glass product — the same absorption that happened to APM a
+decade ago. Braintrust is the notable holdout, independent after an `$80M`
+Series B at a reported `$800 million` valuation.
+
+**Memory is the one layer nobody has consolidated**, and six incompatible
+architectures are alive simultaneously: an extraction-and-dedup layer above the
+vector store (Mem0, `$24M` raised, 63.7k stars), a bi-temporal knowledge graph
+(Zep/Graphiti), OS-style editable memory blocks (Letta, `$10 million seed`), a
+storage-agnostic SDK (LangMem), a hybrid memory graph (Supermemory), and a
+freshly funded three-layer unifier (Cognee, `$7.5 million seed`, February 2026).
+Fresh seed money still entering on genuinely different designs is the signal
+that the problem is unsettled rather than won.
+
+The ordering matters for anyone building here: **observability > gateways >
+memory**, most consolidated to least. Two of those three are being bought by
+incumbents who already own an adjacent platform — which is the same dynamic
+§7d describes at the orchestration layer, and §3 and §4 describe at the tool
+surfaces. The pattern repeats at every layer that lacks its own metered unit.
+
+#### 7d. The orchestration layer's mortality rate is the thesis, stated by the dead
+
+The top row of the figure is the thinnest, and 2026 supplied the obituaries.
+Vibe Kanban — a Kanban UI dispatching work to Claude Code, Codex, Gemini CLI and
+Copilot — shut down on 2026-04-10, and its own post names the cause without
+hedging: `the vast majority are free users and we couldn't find a business model
+that we could get excited about`. Terragon, the cloud equivalent, went earlier;
+its repo now carries the banner `This repository is an open-source snapshot of
+Terragon at the time of shutdown`, snapshot dated 2026-01-16, and describes
+itself in the past tense.
+
+| Product | Shape | Status |
+| --- | --- | --- |
+| Vibe Kanban | Hosted UI + cloud tier | **Sunset 2026-04-10**; survives as a community fork |
+| Terragon | Cloud orchestrator, sandboxes + auto-PR | **Sunset**, snapshot 2026-01-16 |
+| Windsurf | IDE | **Absorbed** — `windsurf.com/pricing` 308-redirects to `devin.ai/pricing` |
+| Conductor | Mac app, local worktrees, BYO subscription | Alive |
+| Sculptor (Imbue) | Mac app, local Docker containers | Alive, `free while in beta` |
+| Dagger container-use | OSS MCP server, per-agent containers | Alive |
+
+The survivors share one trait the casualties lacked: **they run no hosted
+backend**. Conductor, Sculptor, and container-use are thin local wrappers over
+agents the user already pays for somewhere else, so they carry no infrastructure
+cost to fund and offer nothing for a vendor to switch off. Everything in this
+layer that owned real cloud spend either died or was bought.
+
+Meanwhile the frontier labs are absorbing the function natively — Claude Code
+now ships its own subagents and parallel agent teams — which removes the reason
+to buy a third-party orchestrator at all. That is the same commoditization
+pressure §3 and §4 documented for browser and desktop control, arriving one
+layer higher.
+
+This is the honest counterweight to §6's whitespace finding. The orchestration
+layer is empty of funded competitors, and the reason is visible in the
+obituaries: it is empty because it is hard to charge for, not because nobody
+thought of it. A local-first, no-backend posture is what the survivors have in
+common, and it is the posture agi-cli already has.
+
+#### 7c. Where agi-cli sits
+
+Two layers, and it sells neither of the seven beneath it. It occupies
+**orchestration** (running many harnesses at once, §5) and the local half of
+**tool surfaces** (§3, §4). It does not sell sandbox compute, hosting, gateway
+routing, or memory — it consumes them, or runs on hardware the user already
+owns, which is the same thing from a cost perspective.
+
+The layer immediately below orchestration shows what happens when a layer has
+no unit to sell. CrewAI removed its `$25/month` Professional tier in spring 2026,
+leaving a free tier capped at `50 workflow executions/month` and an
+Enterprise contact-sales path with nothing in between; LangChain, on $260M
+raised and a $1.25B valuation, monetizes not the framework but the seats and
+compute units *around* it. Frameworks are distribution, not revenue.
+
+That is a deliberate position with one real consequence worth stating: the
+layers with money in them (models, gateways, sandbox compute) are all layers
+agi-cli routes *around* rather than taxes. The stack map does not change the
+whitespace finding in §6 — it explains why the whitespace was left open. Nobody
+funded builds at the orchestration layer because there is no metered unit to
+sell there, and the tool surfaces below it are being given away by companies
+that monetize elsewhere.
+
+
 ## Evidence
 
 ### How the numbers were gathered
+
+Section 7 addendum (2026-08-20): every rate in the normalized sandbox table
+was read from the vendor's own published pricing page that day — e2b.dev/pricing,
+modal.com/pricing, daytona.io/pricing, fly.io/docs/about/pricing,
+developers.cloudflare.com/containers/pricing, vercel.com/docs/sandbox/pricing,
+docs.railway.com/sandboxes, aws.amazon.com/bedrock/agentcore/pricing,
+langchain.com/pricing, maritime.sh/pricing. The $/hour and $/month columns are
+arithmetic on those quoted rates at 730 hours, not vendor claims. Maritime's
+infrastructure was measured directly by DNS and HTTP header probe
+(`up.railway.app` CNAMEs, `server: railway-hikari`, `x-railway-edge: lax1`,
+AS400940) rather than taken from any disclosure.
 
 Primary reads (2026-08-20): GitHub REST API (`api.github.com/repos/...`) for
 every ★-marked star count, fork count, and last-push date; npm downloads API
@@ -302,6 +578,48 @@ agents; each claim in Findings carries its source class inline.
   package was found. Treated as nonexistent for the tier analysis above.
 - Claude Code's computer-use research preview and the Vercept attribution rest
   on trade coverage (devops.com), not an Anthropic changelog entry.
+- **Section 7 gaps.** Morph's `$36.50` is computed from its published MCU
+  formula (`MCUs = max(vCPUs, ceil(RAM/4GiB), ceil(disk/16GiB))` at a
+  `standard MCU rate of $0.05`), not a vendor-published instance price. Modal's
+  row is the shakiest in the table: it bills physical cores and does not publish
+  a core-to-vCPU ratio. CodeSandbox SDK's isolation and cold-start profile rest
+  on one secondary source because codesandbox.io returned 403.
+- **Isolation columns are asymmetric in strength.** Firecracker is confirmed by
+  first-party docs for E2B, Fly, Vercel, Blaxel and AgentCore, and gVisor for
+  Modal. Daytona's `Linux containers by default` is its own docs. Railway,
+  Cloudflare and Morph name no hypervisor at all.
+- **Neither Railway nor Maritime discloses a hypervisor.** Railway documents a
+  "virtual machine primitive" with server-side disk checkpoints and names no
+  hypervisor; Maritime's marketing says micro-VM while its own docs say
+  "serverless containers." That Maritime runs agent compute on Railway
+  Sandboxes is an inference that fits every observable (control plane measured
+  on Railway, checkpoint primitive, SSH claim, the $150→$1 duty-cycle math) —
+  it is not confirmed by either company.
+- **§7e's acquisitions vary in source strength.** Dynatrace/Arize (`$915
+  million`, 2026-08-13) is from Dynatrace's own press release and is primary.
+  ClickHouse/Langfuse and Mintlify/Helicone come from trade coverage and were
+  not re-confirmed against the acquirers' releases.
+- **§2's Portkey line overstates its source.** The Palo Alto Networks
+  acquisition is carried by a single aggregator (Tracxn) and could not be
+  corroborated on PANW's own press page in this pass; the date also differs
+  between sources (2026-05-29 vs 2026-06-01). Treat it as reported, not
+  confirmed.
+- **OpenRouter's fee was restated in §1.** It publishes `there is no markup on
+  inference pricing` and charges `5.5% ($0.80 minimum)` on credit purchases —
+  a different mechanism from the inference markup the earlier draft implied.
+- **Orchestration acquisitions are reported, not primary.** OpenAI/Ona,
+  Cursor/Continue, and a reported SpaceX-Cursor transaction all come from trade
+  coverage in this pass and were not confirmed against either party; they are
+  omitted from §7d's table for that reason. The three status claims that *are*
+  primary — Vibe Kanban's shutdown post, Terragon's repo banner, and the live
+  `windsurf.com` 308 redirect — are the ones quoted.
+- Harness seat prices (`$20`/mo anchor) were read from vendor pricing pages,
+  but several second-tier figures in that sweep (Cursor Pro+/Ultra, Gemini Code
+  Assist paid tiers, Copilot Business) resolved only to aggregators; no
+  individual harness price is relied on in §7 beyond the anchor.
+- LangGraph Platform's per-node and per-minute standby rates circulate via a
+  third-party blog; `docs.langchain.com/langsmith/pricing` 404'd. The LCU/LSU
+  rates quoted in §7a are from langchain.com/pricing and are primary.
 
 ## Recommendations
 
