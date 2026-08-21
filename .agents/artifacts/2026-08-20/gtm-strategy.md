@@ -431,6 +431,12 @@ humans rather than machines, because bots and `curl` never execute its JavaScrip
 **It is the single highest-value unknown in this report.** Unlocking it is one
 command — see *Recommendations*.
 
+**Update (2026-08-21): the command was run, and this unknown is now closed.** The
+`posthog.com` bundle was unlocked and PostHog project `299876` queried directly.
+The measured numbers — 145 human visitors in 30 days, not the ~19/fortnight this
+report estimated — are in the [Addendum](#addendum--the-command-was-run-measured-human-traffic-2026-08-21)
+at the end. Cloudflare stays dark: its token still lacks `zone.analytics.read`.
+
 ## Recommendations
 
 ### Act 1 — Make users detectable, and open the front door (this week)
@@ -572,3 +578,86 @@ agents secrets unlock posthog.com
 Run that on the workstation holding the bundle, and the actual human traffic to
 `agi-cli.sh` — sessions, sources, bounce, whether anyone reaches the install
 snippet — becomes readable in minutes.
+
+## Addendum — the command was run: measured human traffic (2026-08-21)
+
+`agents secrets unlock posthog.com` was run on 2026-08-21, and PostHog project
+`299876` (US) was queried directly with HogQL. This closes the report's single
+largest unknown. Window: 30 days, **2026-07-22 → 2026-08-21**. PostHog's
+JavaScript executes only in a real browser, so bots, CI runners, and `curl` are
+absent by construction — every number below is a human.
+
+### The traffic is ~5x this report's estimate — and still a trickle
+
+| Metric | This report estimated | Measured |
+| --- | --- | --- |
+| Human visitors / 14 days | ~19 | **95** |
+| Human visitors / 30 days | (unmeasured) | **145** |
+| Human visitors / 7 days | (unmeasured) | **58** |
+| Pageviews / 30 days | (unmeasured) | 240 |
+
+The *"there are approximately no users"* finding softens but does not reverse:
+145 humans/month is a real top of funnel where the report assumed near-zero, yet
+it is still a trickle, and the npm r=0.965 release-cadence correlation is
+untouched — that number is still the fleet installing itself.
+
+### Where the humans land
+
+| Host | Unique visitors (30d) | Pageviews |
+| --- | --- | --- |
+| `agi-cli.sh` | **103** | 175 |
+| `getrush.ai` | 38 | 61 |
+| `*.pages.dev` (preview) | ~4 | 4 |
+
+`agi-cli.sh` draws **103 real humans in 30 days even though its root serves the
+797-byte installer** — the Next app renders on sub-paths, so the humans arrive and
+land on a page that is half-broken above the fold. Act 1, item 1 (serve the landing
+page at `/`) is therefore a fix to a page 103 humans already reach this month, not
+a bet on traffic that does not exist yet.
+
+### The conversion leak, now measured
+
+| Step (30d, unique visitors) | Count |
+| --- | --- |
+| `/` homepage | 96 |
+| `/download` | 10 |
+| `/install` | **1** |
+| `signup_submitted` (event) | 3 |
+
+96 homepage humans yield **1** who reaches `/install` and **3** signups
+(~2% visitor → signup). This is the direct measurement behind RUSH-1937
+(repo-surface conversion gap): the leak is real and it is at the top, not the
+bottom, of the funnel.
+
+### Retention — the metric that killed the competitors
+
+127 new versus **19 returning** visitors in 30 days — a **13% return rate**. This
+confirms the Act 2 thesis that retention, not stars, is the win condition. But the
+CLI-run retention bar this report set (*"20 people who ran agi-cli on two separate
+days"*) **cannot be scored today**: only **2** distinct users emit an
+`app_launched` event, because the CLI has no telemetry. Act 1, item 2 (ship opt-out
+telemetry) is thus not a nice-to-have — it is the precondition for measuring the
+one metric Act 2 is judged on.
+
+### Discovery channels the report did not know existed
+
+Top referring domains (30d, unique visitors): `(direct)` 78, `google.com` 40,
+**`getrush.ai` 11**, **`chatgpt.com` 8**, **`linkedin.com` 6**, `bing.com` 2,
+`duckduckgo.com` 1, `github.com` 1. Two live, unpaid surfaces the report never
+saw: **ChatGPT** (people asking an LLM and clicking through) and **LinkedIn**. The
+`getrush.ai` cross-referral shows the sister product already feeds this funnel.
+Autocapture also shows a non-trivial share of clicks in Chinese (`下载 Windows CLI`),
+i.e. real international traffic.
+
+### Still dark: Cloudflare
+
+Cloudflare zone analytics remains **403** — the `cloudflare.com` API token
+authenticates but lacks `com.cloudflare.api.account.zone.analytics.read` on zone
+`cb5b568d…`. So total requests (bots + humans + `curl | bash` install fetches) are
+still unmeasured server-side, which means the ratio of **install-script fetches to
+humans-on-the-page (103)** — the last missing number in the funnel — is unknown.
+Closing it is one dashboard action: add **Zone → Analytics → Read** to the token
+(or mint a token with that scope) and re-run the same GraphQL query.
+
+*Pulled 2026-08-21 via HogQL against PostHog project 299876; every query is
+reproducible with `agents secrets exec posthog.com -- <curl to /api/projects/@current/query/>`.*
