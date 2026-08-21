@@ -651,7 +651,14 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
 
   const template = bakeRoutineArgv(agent);
   if (!template) {
-    throw new Error(`Unsupported agent for daemon jobs: ${agent}`);
+    // A name outside both tables was either never valid or was a custom
+    // harness whose profile has since been deleted — validateJob accepted it
+    // against a profile that existed then. Name the repair, not just the miss.
+    throw new Error(
+      `Unsupported agent for daemon jobs: ${agent}. ` +
+      `If '${agent}' was a custom harness, its profile no longer exists on this device — ` +
+      `recreate it (agents harness add ${agent} ...) or point the routine at another agent.`,
+    );
   }
 
   let cmd = template.map((part) => part.replace('{prompt}', resolvedPrompt));
