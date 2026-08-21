@@ -13307,7 +13307,7 @@
             },
             {
               "flags": "--run <agent>",
-              "description": "Spawn an agent (claude, codex, ...) with the prompt on fire",
+              "description": "Spawn an agent (claude, codex, ..., or a custom harness from agents harness list) with the prompt on fire",
               "long": "--run",
               "required": true,
               "optional": false,
@@ -17400,7 +17400,7 @@
             },
             {
               "flags": "-a, --agent <agent[@version]>",
-              "description": "Which agent runs this routine: claude, codex, cursor, kimi, droid, muse. An @version pins that exact installed version (same syntax as agents run), persisted as separate agent + version fields.",
+              "description": "Which agent runs this routine: claude, codex, cursor, kimi, droid, muse, or a custom harness name (agents harness list). An @version pins that exact installed version (same syntax as agents run), persisted as separate agent + version fields; a custom harness pins its own host version.",
               "short": "-a",
               "long": "--agent",
               "required": true,
