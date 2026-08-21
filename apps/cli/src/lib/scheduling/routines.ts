@@ -1304,7 +1304,7 @@ export function validateJob(config: Partial<JobConfig>): string[] {
     !ROUTINE_AGENT_IDS.includes(config.agent)
   ) {
     // The local daemon only knows how to build a command for the agents in
-    // ROUTINE_AGENT_IDS (runner.ts's AGENT_COMMANDS table) — anything else is a
+    // ROUTINE_AGENT_IDS (baked from AGENT_COMMANDS in runner.ts) — anything else is a
     // real, installable agent (it passed the ALL_AGENT_IDS check above) but one
     // the daemon can't fire itself, so reject it now instead of accepting the
     // routine and failing at fire time (runner.ts buildJobCommand: "Unsupported

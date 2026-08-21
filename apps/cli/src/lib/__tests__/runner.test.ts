@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
+  bakeRoutineArgv,
   buildJobCommand,
   buildRoutineSpawnEnv,
   dispatchesViaAgentsRun,
@@ -10,13 +11,13 @@ import {
   pinJobBinary,
   resolveRoutineLaunch,
 } from '../daemon/runner.js';
+import { ROUTINE_AGENT_IDS } from '../agents.js';
 import { readRunMeta } from '../scheduling/routines.js';
 import { getRunsDir } from '../state.js';
 import type { JobConfig } from '../scheduling/routines.js';
 import { getBinaryPath, getVersionDir } from '../installations/versions.js';
 import { rotationFailoverChain, type RotateCandidate, type RotateResult } from '../accounting/rotate.js';
-import { detectRateLimit } from '../exec.js';
-import { buildExecCommand } from '../exec.js';
+import { AGENT_COMMANDS, detectRateLimit, buildExecCommand } from '../exec.js';
 import * as activation from '../routine-activation.js';
 
 beforeEach(() => {
@@ -40,6 +41,30 @@ function baseJob(overrides: Partial<JobConfig> = {}): JobConfig {
     ...overrides,
   } as JobConfig;
 }
+
+describe('bakeRoutineArgv', () => {
+  it('pins the six daemon skeletons that used to live in ROUTINE_AGENT_COMMANDS', () => {
+    expect(ROUTINE_AGENT_IDS).toEqual(['claude', 'codex', 'cursor', 'kimi', 'droid', 'muse']);
+    expect(bakeRoutineArgv('claude')).toEqual([
+      'claude', '-p', '--verbose', '{prompt}', '--output-format', 'stream-json', '--permission-mode', 'plan',
+    ]);
+    expect(bakeRoutineArgv('codex')).toEqual(['codex', 'exec', '{prompt}', '--json']);
+    expect(bakeRoutineArgv('cursor')).toEqual(['cursor-agent', '-p', '{prompt}', '--output-format', 'stream-json']);
+    expect(bakeRoutineArgv('kimi')).toEqual(['kimi', '--prompt', '{prompt}', '--output-format', 'stream-json']);
+    expect(bakeRoutineArgv('droid')).toEqual(['droid', 'exec', '{prompt}', '-o', 'stream-json']);
+    expect(bakeRoutineArgv('muse')).toEqual(['muse', 'exec', '{prompt}', '--json']);
+  });
+
+  it('kimi keeps --prompt; AGENT_COMMANDS.kimi.promptFlag stays -p (not a silent merge)', () => {
+    expect(AGENT_COMMANDS.kimi.promptFlag).toBe('-p');
+    expect(bakeRoutineArgv('kimi')![1]).toBe('--prompt');
+  });
+
+  it('refuses harnesses the daemon does not fire locally', () => {
+    expect(bakeRoutineArgv('gemini')).toBeUndefined();
+    expect(bakeRoutineArgv('grok')).toBeUndefined();
+  });
+});
 
 describe('buildJobCommand', () => {
   it('cursor default/write mode trusts the configured workspace without using --yolo', () => {

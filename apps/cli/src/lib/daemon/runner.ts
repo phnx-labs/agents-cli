@@ -80,7 +80,7 @@ import {
 } from '../accounting/rotate.js';
 import { readAuthHealth, isDeadVerdict } from '../auth-health.js';
 import { machineId } from '../machine-id.js';
-import { isSelfUpdatingAgent, ROUTINE_AGENT_COMMANDS, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../agents.js';
+import { isSelfUpdatingAgent, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../agents.js';
 
 /** Result of a completed job execution, including metadata and optional report. */
 export interface RunResult {
@@ -566,6 +566,50 @@ export function routineSpawnCwd(
   return ctx.absoluteCwd ?? os.homedir();
 }
 
+/**
+ * Bake the daemon-job argv skeleton from AGENT_COMMANDS.
+ *
+ * The two tables used to be independent copies of the same launch decision.
+ * Argv now comes from AGENT_COMMANDS.base / promptFlag / jsonFlags / modeFlags.
+ * Two documented exceptions, not a second table:
+ *   - kimi uses `--prompt` (long form). `-p` is the exec alias; combining
+ *     either with --plan/--auto/--yolo aborts, so routineModeArgs emits no
+ *     mode flag. The daemon has always spawned the long form.
+ *   - claude places `--verbose` (from jsonFlags) before the prompt and bakes
+ *     modeFlags.plan so claudeAdapter.routineModeArgs can splice
+ *     plan → acceptEdits / auto / skip.
+ *
+ * Returns undefined when `agent` is outside ROUTINE_AGENT_IDS (gemini, grok,
+ * and every other harness the daemon does not fire locally).
+ */
+export function bakeRoutineArgv(agent: string): string[] | undefined {
+  if (!ROUTINE_AGENT_IDS.includes(agent)) return undefined;
+  const template = AGENT_COMMANDS[agent as AgentId];
+  if (!template) return undefined;
+
+  const json = template.jsonFlags ?? [];
+  const cmd = [...template.base];
+
+  if (agent === 'kimi') {
+    cmd.push('--prompt', '{prompt}', ...json);
+    return cmd;
+  }
+
+  if (agent === 'claude') {
+    const verbose = json.includes('--verbose') ? ['--verbose'] : [];
+    const jsonRest = json.filter((flag) => flag !== '--verbose');
+    cmd.push(template.promptFlag as string, ...verbose, '{prompt}', ...jsonRest, ...(template.modeFlags.plan ?? []));
+    return cmd;
+  }
+
+  if (template.promptFlag === 'positional') {
+    cmd.push('{prompt}', ...json);
+  } else {
+    cmd.push(template.promptFlag, '{prompt}', ...json);
+  }
+  return cmd;
+}
+
 /** Build the full CLI argv for executing a job, applying mode, model, and permission flags. */
 export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwardAccount = true): string[] {
   // Workflow branch: delegate to `agents run <workflow>` which handles subagent
@@ -593,7 +637,7 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
     return cmd;
   }
 
-  const template = ROUTINE_AGENT_COMMANDS[agent];
+  const template = bakeRoutineArgv(agent);
   if (!template) {
     throw new Error(`Unsupported agent for daemon jobs: ${agent}`);
   }
